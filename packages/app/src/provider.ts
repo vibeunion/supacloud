@@ -112,6 +112,16 @@ export function provideAppInitializer(
 }
 
 /**
+ * Configures an environment/application initializer that executes during startup before accepting requests.
+ * Modeled directly after Angular 15+ provideEnvironmentInitializer.
+ */
+export function provideEnvironmentInitializer(
+  initializerFn: () => void | Promise<void>,
+): EnvironmentProviders {
+  return provideAppInitializer(initializerFn);
+}
+
+/**
  * Functional provider helper to register an InjectionToken with a static value or factory.
  * Modeled after Angular's provideToken pattern.
  */

@@ -11,6 +11,7 @@ export {
   isValueProvider,
   makeEnvironmentProviders,
   provideAppInitializer,
+  provideEnvironmentInitializer,
   provideToken,
 } from "./provider";
 export type {
@@ -25,6 +26,7 @@ export type {
 } from "./provider";
 export {
   Body,
+  CanDeactivate,
   Command,
   Controller,
   Data,
@@ -63,6 +65,7 @@ export {
   COMMAND_METADATA,
   CONTROLLER_METADATA,
   GUARDS_METADATA,
+  CAN_DEACTIVATE_METADATA,
   HOST_PARAMS_METADATA,
   INJECTABLE_METADATA,
   INJECT_PARAMS_METADATA,
@@ -76,6 +79,7 @@ export {
 } from "./decorators";
 export type {
   CanActivateFn,
+  CanDeactivateFn,
   CanMatchFn,
   CommandMeta,
   CommandOptions,
@@ -108,3 +112,5 @@ export {
 export type { InjectFlags, InjectorLike } from "./inject";
 export { forwardRef, isForwardRef, resolveForwardRef } from "./forward_ref";
 export type { ForwardRefFn } from "./forward_ref";
+export { matchRoute } from "./route_match";
+export type { RouteMatchResult } from "./route_match";

@@ -101,7 +101,7 @@ export function validateGraph(
   const modulesByName = new Map<string, ModuleNode>();
   const commandsByName = new Map<string, { module: ModuleNode; className: string }>();
   const routesByKey = new Map<string, { module: ModuleNode; controller: ControllerNode }>();
-  const declaredRoutes: Array<{ method: string; path: string; fullPath: string; rawFullPath: string; controller: ControllerNode; module: ModuleNode; handler: string }> = [];
+  const declaredRoutes: Array<{ method: string; path: string; fullPath: string; rawFullPath: string; controller: ControllerNode; module: ModuleNode; handler: string; redirectTo?: string }> = [];
 
   for (const module of graph.modules) {
     const previousModule = modulesByName.get(module.name);
@@ -161,7 +161,7 @@ export function validateGraph(
             );
           }
         }
-        declaredRoutes.push({ method: route.method, path: route.path, fullPath, rawFullPath, controller, module, handler: route.handler });
+        declaredRoutes.push({ method: route.method, path: route.path, fullPath, rawFullPath, controller, module, handler: route.handler, redirectTo: route.redirectTo });
 
         if (route.command && !module.commands.some((command) => command.className === route.command)) {
           error(
@@ -274,6 +274,31 @@ export function validateGraph(
               `Remove '${dep}' from module '${module.name}' providers or remove @SkipSelf().`,
             );
           }
+        }
+      }
+    }
+  }
+
+  // Unresolved route redirect target detection (Angular Router style)
+  const allTargetPaths = declaredRoutes.map((r) => r.rawFullPath);
+  for (const item of declaredRoutes) {
+    if (item.redirectTo) {
+      const target = item.redirectTo;
+      if (target.startsWith("/") && !target.startsWith("//")) {
+        const normalizedTarget = target.replace(/\/+$/, "") || "/";
+        const matchesTarget = declaredRoutes.some((candidate) => {
+          if (candidate.rawFullPath === normalizedTarget) return true;
+          return routeMatchesTarget(candidate.rawFullPath, normalizedTarget);
+        });
+        if (!matchesTarget) {
+          const suggestion = findClosestMatch(normalizedTarget, allTargetPaths);
+          warn(
+            "unresolved-route-redirect",
+            `Route ${item.method} ${item.rawFullPath} (${item.controller.className}.${item.handler}) redirects to '${target}', but no matching route was found in the application graph.`,
+            item.controller.file,
+            undefined,
+            suggestion ? `Did you mean '${suggestion}'?` : undefined,
+          );
         }
       }
     }
@@ -524,6 +549,17 @@ function isRouteShadowed(earlierPath: string, laterPath: string): boolean {
   }
 
   return hasParamShadowing;
+}
+
+function routeMatchesTarget(routePattern: string, targetPath: string): boolean {
+  const pSegs = routePattern.split("/").filter(Boolean);
+  const tSegs = targetPath.split("/").filter(Boolean);
+  if (pSegs.length !== tSegs.length) return false;
+  for (let i = 0; i < pSegs.length; i += 1) {
+    if (pSegs[i].startsWith(":")) continue;
+    if (pSegs[i] !== tSegs[i]) return false;
+  }
+  return true;
 }
 
 /** Provider-level circular dependency detection (DFS, reporting cycle path). */

@@ -66,6 +66,8 @@ export interface RouteNode {
   guards?: string[];
   /** Route matching guards executed before route activation (Angular CanMatchFn style). */
   canMatch?: string[];
+  /** Route deactivation guards executed before leaving route (Angular CanDeactivateFn style). */
+  canDeactivate?: string[];
   /** Route resolvers executed before handler (Angular ResolveFn style). */
   resolvers?: Record<string, string>;
   /** Route redirect target (Angular Router style). */

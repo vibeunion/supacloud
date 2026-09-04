@@ -534,4 +534,60 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     expect(rendered.clientCode).toContain('"title": "System Information"');
     expect(rendered.clientCode).toContain('"tier": "enterprise"');
   });
+
+  test("renderApplication and renderClient emit canDeactivate guards and tree-shakable token factory", () => {
+    const rendered = renderApplication(
+      {
+        modules: [
+          {
+            name: "guardModule",
+            className: "GuardModule",
+            file: "src/guard.module.ts",
+            line: 1,
+            imports: [],
+            providers: [
+              {
+                token: "API_URL",
+                tokenKind: "injection-token",
+                kind: "factory",
+                scope: "application",
+                deps: [],
+                importPath: "./tokens",
+                exported: true,
+                file: "src/tokens.ts",
+                line: 1,
+              },
+            ],
+            controllers: [
+              {
+                className: "GuardController",
+                path: "/guarded",
+                scope: "request",
+                deps: [],
+                routes: [
+                  {
+                    method: "POST",
+                    path: "/step",
+                    handler: "submitStep",
+                    canDeactivate: ["UnsavedGuard"],
+                  },
+                ],
+                file: "src/guard.controller.ts",
+                importPath: "./guard.controller",
+              },
+            ],
+            commands: [],
+            queries: [],
+            exports: [],
+          },
+        ],
+        externalTokens: [],
+      },
+      { rootDir: "/app", outDir: "/app/gen", generateClient: true },
+    );
+
+    expect(rendered.applicationCode).toContain('canDeactivate: ["UnsavedGuard"]');
+    expect(rendered.applicationCode).toContain('const apiUrl = typeof API_URL === "object" && API_URL && "factory" in API_URL');
+    expect(rendered.clientCode).toContain('"canDeactivate": [\n      "UnsavedGuard"\n    ]');
+  });
 });

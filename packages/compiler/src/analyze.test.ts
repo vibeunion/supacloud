@@ -353,4 +353,53 @@ describe("analyzeProject：command 与 externalTokens", () => {
     expect(prov?.skipSelfDeps).toContain("PARENT_SVC");
     expect(prov?.hostDeps).toContain("HOST_SVC");
   });
+
+  test("analyzes canDeactivate guards on controller routes from options and decorator", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-candeactivate-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": GOOD_PROJECT_FILES["tsconfig.json"],
+      "src/test.controller.ts": `
+        import { Controller, Get, CanDeactivate } from "@supacloud/app";
+
+        @Controller({ path: "/orders", standalone: true })
+        export class OrdersController {
+          @Get("/checkout", { canDeactivate: ["PendingPaymentGuard"] })
+          checkout() {}
+
+          @Get("/draft")
+          @CanDeactivate("UnsavedChangesGuard")
+          draft() {}
+        }
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    const rootMod = analyzed.modules.find((m) => m.name === "root");
+    const ctrl = rootMod?.controllers.find((c) => c.className === "OrdersController");
+    expect(ctrl).toBeDefined();
+    expect(ctrl?.routes[0].canDeactivate).toEqual(["PendingPaymentGuard"]);
+    expect(ctrl?.routes[1].canDeactivate).toEqual(["UnsavedChangesGuard"]);
+  });
+
+  test("synthesizes root factory provider with importPath for tree-shakable InjectionToken", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-token-factory-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": GOOD_PROJECT_FILES["tsconfig.json"],
+      "src/tokens.ts": `
+        import { InjectionToken } from "@supacloud/app";
+        export const API_ENDPOINT = new InjectionToken<string>("api-endpoint", {
+          providedIn: "root",
+          factory: () => "https://api.supacloud.local",
+        });
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    const rootMod = analyzed.modules.find((m) => m.name === "root");
+    const prov = rootMod?.providers.find((p) => p.token === "API_ENDPOINT");
+    expect(prov).toBeDefined();
+    expect(prov?.tokenKind).toBe("injection-token");
+    expect(prov?.kind).toBe("factory");
+    expect(prov?.importPath).toBe("src/tokens");
+  });
 });
