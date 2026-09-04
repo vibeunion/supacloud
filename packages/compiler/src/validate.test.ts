@@ -1751,4 +1751,356 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(invalidQueryDiags.some((d) => d.message.includes("illegal character"))).toBe(true);
     expect(invalidQueryDiags.some((d) => d.message.includes("empty @Query()"))).toBe(true);
   });
+
+  test("detects missing token factory for InjectionToken (SC2009)", () => {
+    const graph: ApplicationGraph = {
+      modules: [
+        {
+          name: "app",
+          className: "AppModule",
+          file: "src/app.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              token: "AppService",
+              tokenKind: "class",
+              kind: "class",
+              scope: "application",
+              deps: ["CUSTOM_API_TOKEN"],
+              file: "src/app.service.ts",
+              line: 1,
+              exported: true,
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graph);
+    const missingFactoryDiag = diags.find((d) => d.code === "missing-token-factory");
+    expect(missingFactoryDiag).toBeDefined();
+    expect(missingFactoryDiag?.errorCode).toBe("SC2009");
+    expect(missingFactoryDiag?.suggestion).toContain("factory: () => ...");
+  });
+
+  test("detects invalid path param decorator names (SC3014)", () => {
+    const graph: ApplicationGraph = {
+      modules: [
+        {
+          name: "app",
+          className: "AppModule",
+          file: "src/app.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "BadParamController",
+              path: "/items/:id",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/:id",
+                  handler: "getItem",
+                  pathParams: ["id"],
+                  paramBindings: ["", "id#bad"],
+                },
+              ],
+              file: "src/bad.controller.ts",
+              importPath: "./bad.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graph);
+    const badParamDiags = diags.filter((d) => d.code === "unmatched-path-param-decorator");
+    expect(badParamDiags.length).toBe(2);
+    expect(badParamDiags[0].errorCode).toBe("SC3014");
+  });
+
+  test("detects invalid query parameter default values contradicting transforms (SC3015)", () => {
+    const graph: ApplicationGraph = {
+      modules: [
+        {
+          name: "app",
+          className: "AppModule",
+          file: "src/app.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "QueryController",
+              path: "/search",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/",
+                  handler: "search",
+                  queryBindings: ["limit"],
+                  queryTransforms: { limit: "number" },
+                  queryDefaults: { limit: "not-a-number" },
+                },
+              ],
+              file: "src/query.controller.ts",
+              importPath: "./query.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graph);
+    const queryTypeDiag = diags.find((d) => d.code === "invalid-query-default-type");
+    expect(queryTypeDiag).toBeDefined();
+    expect(queryTypeDiag?.errorCode).toBe("SC3015");
+    expect(queryTypeDiag?.message).toContain("is not a number");
+  });
+
+  test("detects disallowed body bindings on safe methods and DELETE (SC3016)", () => {
+    const graph: ApplicationGraph = {
+      modules: [
+        {
+          name: "app",
+          className: "AppModule",
+          file: "src/app.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "DeleteController",
+              path: "/items",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "DELETE",
+                  path: "/:id",
+                  handler: "deleteItem",
+                  hasBodyBinding: true,
+                  body: "DeleteSchema",
+                },
+              ],
+              file: "src/delete.controller.ts",
+              importPath: "./delete.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graph);
+    const bodyDiag = diags.find((d) => d.code === "disallowed-body-on-get-delete");
+    expect(bodyDiag).toBeDefined();
+    expect(bodyDiag?.errorCode).toBe("SC3016");
+    expect(bodyDiag?.message).toContain("HTTP DELETE");
+  });
+
+  test("detects duplicate query parameter bindings in route handler (SC3017)", () => {
+    const graph: ApplicationGraph = {
+      modules: [
+        {
+          name: "app",
+          className: "AppModule",
+          file: "src/app.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "SearchController",
+              path: "/search",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/",
+                  handler: "search",
+                  queryBindings: ["filter", "filter"],
+                },
+              ],
+              file: "src/search.controller.ts",
+              importPath: "./search.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graph);
+    const dupQueryDiag = diags.find((d) => d.code === "duplicate-query-param-binding");
+    expect(dupQueryDiag).toBeDefined();
+    expect(dupQueryDiag?.errorCode).toBe("SC3017");
+    expect(dupQueryDiag?.message).toContain("duplicate @Query('filter')");
+  });
+
+  test("detects mutating commands bound to read-only GET routes (SC4006)", () => {
+    const graph: ApplicationGraph = {
+      modules: [
+        {
+          name: "order",
+          className: "OrderModule",
+          file: "src/order.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          commands: [
+            {
+              className: "CreateOrderCommand",
+              name: "order.create",
+              transaction: "required",
+              idempotency: "none",
+            },
+          ],
+          controllers: [
+            {
+              className: "OrderController",
+              path: "/orders",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/create",
+                  handler: "create",
+                  command: "CreateOrderCommand",
+                },
+              ],
+              file: "src/order.controller.ts",
+              importPath: "./order.controller",
+            },
+          ],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graph);
+    const mutatingCmdDiag = diags.find((d) => d.code === "command-transaction-readonly");
+    expect(mutatingCmdDiag).toBeDefined();
+    expect(mutatingCmdDiag?.errorCode).toBe("SC4006");
+    expect(mutatingCmdDiag?.message).toContain("Mutating transactions are not permitted");
+  });
+
+  test("detects OpenAPI-style {param} in route paths (SC3019)", () => {
+    const graph: ApplicationGraph = {
+      modules: [
+        {
+          name: "users",
+          className: "UsersModule",
+          file: "src/users.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "UsersController",
+              path: "/users",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/{id}",
+                  handler: "getUser",
+                },
+              ],
+              file: "src/users.controller.ts",
+              importPath: "./users.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graph);
+    const curlyDiag = diags.find((d) => d.code === "missing-param-colon");
+    expect(curlyDiag).toBeDefined();
+    expect(curlyDiag?.errorCode).toBe("SC3019");
+    expect(curlyDiag?.message).toContain("OpenAPI-style '{id}'");
+    expect(curlyDiag?.suggestion).toContain("Replace '{id}' with ':id'");
+  });
+
+  test("warns when handler is mapped to multiple distinct HTTP methods (SC3018)", () => {
+    const graph: ApplicationGraph = {
+      modules: [
+        {
+          name: "items",
+          className: "ItemsModule",
+          file: "src/items.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "ItemsController",
+              path: "/items",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/item",
+                  handler: "processItem",
+                },
+                {
+                  method: "POST",
+                  path: "/item",
+                  handler: "processItem",
+                },
+              ],
+              file: "src/items.controller.ts",
+              importPath: "./items.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graph);
+    const conflictDiag = diags.find((d) => d.code === "conflicting-route-method");
+    expect(conflictDiag).toBeDefined();
+    expect(conflictDiag?.errorCode).toBe("SC3018");
+    expect(conflictDiag?.message).toContain("mapped to multiple HTTP methods");
+  });
 });

@@ -119,3 +119,38 @@ function findProvider(graph: ApplicationGraph, subject: string): { module: Modul
   }
   return undefined;
 }
+
+/**
+ * Exports the application module architecture as a Mermaid graph diagram.
+ */
+export function exportGraphMermaid(graph: ApplicationGraph): string {
+  const lines: string[] = ["graph TD"];
+  for (const mod of graph.modules) {
+    const safeId = mod.name.replace(/[^a-zA-Z0-9_]/g, "_");
+    lines.push(`  ${safeId}["${mod.className ?? mod.name}"]`);
+    for (const imp of mod.imports) {
+      const safeImp = imp.replace(/[^a-zA-Z0-9_]/g, "_");
+      lines.push(`  ${safeId} --> ${safeImp}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+/**
+ * Exports the application module architecture as a Graphviz DOT script.
+ */
+export function exportGraphDot(graph: ApplicationGraph): string {
+  const lines: string[] = [
+    'digraph ApplicationGraph {',
+    '  rankdir=LR;',
+    '  node [shape=box, fontname="Helvetica"];',
+  ];
+  for (const mod of graph.modules) {
+    lines.push(`  "${mod.name}" [label="${mod.className ?? mod.name}"];`);
+    for (const imp of mod.imports) {
+      lines.push(`  "${mod.name}" -> "${imp}";`);
+    }
+  }
+  lines.push("}");
+  return lines.join("\n");
+}

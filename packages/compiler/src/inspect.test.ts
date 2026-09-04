@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { analyzeProject } from "./analyze";
 import { checkProject, compileProject } from "./compile";
-import { doctorProject, explainGraph, formatGraph } from "./inspect";
+import { doctorProject, explainGraph, exportGraphDot, exportGraphMermaid, formatGraph } from "./inspect";
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
 import { writeFixtureProject } from "./fixtures/helpers";
 import type { ApplicationGraph } from "./types";
@@ -44,5 +44,15 @@ describe("compiler inspection", () => {
     const doctor = doctorProject(rootDir, outDir, result.graph, result.upToDate, result.diagnostics);
     expect(doctor.errors).toBe(0);
     expect(doctor.checks.every((check) => check.ok)).toBe(true);
+  });
+
+  test("exportGraphMermaid 和 exportGraphDot 生成模块依赖图可视化脚本", () => {
+    const mermaid = exportGraphMermaid(graph);
+    expect(mermaid).toContain("graph TD");
+    expect(mermaid).toContain("case --> audit");
+
+    const dot = exportGraphDot(graph);
+    expect(dot).toContain("digraph ApplicationGraph");
+    expect(dot).toContain('"case" -> "audit"');
   });
 });

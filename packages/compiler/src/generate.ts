@@ -38,6 +38,16 @@ const INTERFACES = `export interface CompiledRoute {
   queryDefaults?: Record<string, unknown>;
   title?: string;
   data?: Record<string, unknown>;
+  invoker?: (
+    controller: unknown,
+    request: {
+      params?: Record<string, unknown>;
+      query?: Record<string, unknown>;
+      body?: unknown;
+      headers?: Record<string, unknown>;
+      context?: unknown;
+    },
+  ) => Promise<unknown> | unknown;
 }
 
 export interface CompiledCommand {
@@ -427,6 +437,42 @@ class ModuleGenerator {
         if (route.data && Object.keys(route.data).length > 0) {
           fields.push(`data: ${JSON.stringify(route.data)}`);
         }
+        const invokerArgs = (route.handlerParams ?? []).map((hp) => {
+          if (hp.kind === "param") {
+            const accessor = `req.params?.[${JSON.stringify(hp.bindingName ?? hp.name)}]`;
+            const fallback = hp.default !== undefined ? JSON.stringify(hp.default) : "undefined";
+            if (hp.transform === "number") {
+              return `(${accessor} !== undefined ? Number(${accessor}) : ${fallback})`;
+            }
+            if (hp.transform === "boolean") {
+              return `(${accessor} !== undefined ? Boolean(${accessor}) : ${fallback})`;
+            }
+            if (hp.transform === "string") {
+              return `(${accessor} !== undefined ? String(${accessor}) : ${fallback})`;
+            }
+            return `(${accessor} !== undefined ? ${accessor} : ${fallback})`;
+          }
+          if (hp.kind === "query") {
+            const accessor = `req.query?.[${JSON.stringify(hp.bindingName ?? hp.name)}]`;
+            const fallback = hp.default !== undefined ? JSON.stringify(hp.default) : "undefined";
+            if (hp.transform === "number") {
+              return `(${accessor} !== undefined ? Number(${accessor}) : ${fallback})`;
+            }
+            if (hp.transform === "boolean") {
+              return `(${accessor} !== undefined ? Boolean(${accessor}) : ${fallback})`;
+            }
+            if (hp.transform === "string") {
+              return `(${accessor} !== undefined ? String(${accessor}) : ${fallback})`;
+            }
+            return `(${accessor} !== undefined ? ${accessor} : ${fallback})`;
+          }
+          if (hp.kind === "body") return "req.body";
+          if (hp.kind === "headers") return "req.headers";
+          if (hp.kind === "context") return "(req.context ?? req)";
+          return "undefined";
+        });
+        const callArgs = invokerArgs.length > 0 ? invokerArgs.join(", ") : "req";
+        fields.push(`invoker: async (ctrl: any, req: any) => await (ctrl as any).${route.handler}(${callArgs})`);
         return `{ ${fields.join(", ")} }`;
       });
       return [

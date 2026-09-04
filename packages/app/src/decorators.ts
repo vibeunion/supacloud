@@ -108,9 +108,16 @@ export interface ControllerOptions {
   standalone?: boolean;
 }
 
-export type CanActivateFn<TContext = any> = (ctx: TContext) => boolean | Promise<boolean>;
-export type CanMatchFn<TContext = any> = (ctx: TContext) => boolean | Promise<boolean>;
-export type CanDeactivateFn<T = any, TContext = any> = (component: T, ctx: TContext) => boolean | Promise<boolean>;
+export type CanActivateFn<TContext = any> = (
+  ctx: TContext,
+) => boolean | Promise<boolean> | any;
+export type CanMatchFn<TContext = any> = (
+  ctx: TContext,
+) => boolean | Promise<boolean> | any;
+export type CanDeactivateFn<T = any, TContext = any> = (
+  component: T,
+  ctx: TContext,
+) => boolean | Promise<boolean> | any;
 export type ResolveFn<T = any, TContext = any> = (ctx: TContext) => T | Promise<T>;
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";

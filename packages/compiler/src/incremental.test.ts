@@ -121,4 +121,24 @@ describe("createIncrementalCompiler", () => {
     const affectedByDashboard = graph.getAffectedModules(["src/dashboard/dashboard.module.ts"]);
     expect(affectedByDashboard).toEqual(["dashboard"]);
   });
+
+  test("依赖拓扑传递缓存失效：修改底层依赖模块使上层消费者重析，而独立模块保持缓存命中", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "supacloud-compiler-dep-transitive-"));
+    await writeFixtureProject(rootDir, GOOD_PROJECT_FILES);
+    const outDir = join(rootDir, "generated");
+    const cache = createDependencyGraphCache();
+    const compiler = createIncrementalCompiler();
+
+    // 首次全量编译
+    const first = await compiler.compile({ rootDir, outDir, cache });
+    expect(first.stats.reanalyzedModules).toEqual(["audit", "case", "health"]);
+
+    // 修改 audit 模块（case 模块依赖 audit 模块，而 health 独立）
+    await appendFile(join(rootDir, "src/features/audit/audit.service.ts"), "\n// update audit\n", "utf8");
+    const second = await compiler.compile({ rootDir, outDir, cache });
+
+    expect(second.stats.reanalyzedModules).toContain("audit");
+    expect(second.stats.reanalyzedModules).toContain("case");
+    expect(second.stats.reusedModules).toContain("health");
+  });
 });
