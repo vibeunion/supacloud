@@ -9,6 +9,7 @@ export { generateApplication, renderApplication } from "./generate";
 export type { GenerateOptions, RenderedArtifacts } from "./generate";
 export type { DoctorResult } from "./inspect";
 export { validateGraph, COMPILER_DIAGNOSTIC_CODES } from "./validate";
+export { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
 export { camelName } from "./util";
 export {
   ANGULAR_ENTERPRISE_RULES,
@@ -30,6 +31,7 @@ export type {
   CompileStats,
   ControllerNode,
   DependencyGraphCache,
+  DependencyGraphIndex,
   Diagnostic,
   ModuleBoundaryPresetName,
   ModuleBoundaryProfile,
@@ -41,6 +43,7 @@ export type {
   RouteNode,
   Scope,
   TokenKind,
+  TypeSafetyOptions,
   ValidateOptions,
   WatchEvent,
   WatchHandle,

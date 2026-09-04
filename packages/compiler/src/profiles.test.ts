@@ -42,7 +42,7 @@ describe("Architecture governance presets (profiles.ts)", () => {
   });
 
   test("getModuleBoundaryProfile rejects unknown presets with a useful error", () => {
-    expect(() => getModuleBoundaryProfile("unknown-preset" as any)).toThrow(
+    expect(() => getModuleBoundaryProfile("unknown-preset" as never)).toThrow(
       "Unknown module boundary preset: 'unknown-preset'",
     );
   });

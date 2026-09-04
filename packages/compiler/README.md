@@ -20,7 +20,12 @@ const result = await compileProject({
   rootDir: "/path/to/app",            // 项目根（含 tsconfig）
   include: ["**/*.ts"],               // 可选，默认 ['**/*.module.ts', '**/*.ts']
   outDir: "/path/to/app/generated",   // 生成目录
-  strict: false,                      // true 时 warn 级诊断升级为 error
+  strict: true,                       // 同时启用类型安全门，并将 warn 升级为 error
+  typeSafety: {
+    noAnyInGenerated: true,           // 生成的 TS 产物禁止 any
+    scanProductionSource: true,       // 扫描生产源码的 any/断言/隐式宽化
+    exclude: ["src/legacy/**"],       // 额外排除的相对 glob
+  },
 });
 result.diagnostics; // Diagnostic[]
 result.graph;       // ApplicationGraph
@@ -62,6 +67,7 @@ interface ApplicationGraph {
 - 含 request 级 provider/controller 的模块额外生成 `create<Name>RequestScope(services, ctx)`：依赖 `REQUEST_CONTEXT`（或 token name `supacloud.request-context`）的参数传 `ctx`，其余经 `services` 解析（运行期负责把 imports 模块导出的 application 服务合并进 `services`）；job 级同理生成 `create<Name>JobScope`。
 - services 对象的 key 为 token 名的 camelCase：`CaseService → caseService`、`CASE_REPOSITORY → caseRepository`、`LOGGER → logger`。
 - controller 描述静态给出：`{ path, serviceKey, scope, routes: [{ method, path, handler, body?, params?, query?, response? }] }`，schema 直接引用 import 进来的对象。
+- 严格生成模式会对 `application.ts`、可选的 `client.ts` 和 `permissions.ts` 做 AST 扫描，禁止生成 `any`。
 
 `<outDir>/app.manifest.json`：`{ version: 1, modules, externalTokens }`，供 CLI graph/explain 使用。
 
@@ -80,8 +86,23 @@ interface ApplicationGraph {
 | `route-command-unresolved` | error | 路由绑定了本模块未声明的 command 类 |
 | `command-missing-permission` | error | `@Command` 未声明 permission |
 | `missing-deps` | warn（strict 时 error） | 构造/工厂依赖无法静态解析 |
+| `generated-any` | warn（strict 时 error） | 生成的 TypeScript 产物包含 `any` |
+| `source-any` | warn（strict 时 error） | 未被排除的生产源码包含显式 `any` |
+| `source-type-assertion` | warn（strict 时 error） | 生产源码使用 `as T` 或 `<T>value` 类型断言 |
+| `source-non-null-assertion` | warn（strict 时 error） | 生产源码使用非空断言 `value!` |
+| `source-implicit-widening` | warn（strict 时 error） | 可静态判定的字面量类型隐式宽化 |
 
 依赖的 token 全图都无 provider 时不报错，记入 `externalTokens`（平台注入）。
+
+## 类型安全扫描
+
+`strict: true` 默认开启两道类型安全门；也可以单独配置 `typeSafety`。生产源码扫描默认排除测试、fixture、声明文件、`generated` 和 `dist`，并支持 `typeSafety.exclude` 增加项目自定义排除规则。
+
+```bash
+supacloud-compiler check --root ./app --out ./app/generated --strict
+```
+
+程序化调用可直接使用 `scanGeneratedArtifacts()` 和 `scanProductionSource()` 获取结构化诊断。
 
 ## 开发模式
 

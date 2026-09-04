@@ -262,7 +262,7 @@ describe("analyzeProject：command 与 externalTokens", () => {
 
         @Injectable()
         export class FirstService {
-          constructor(@Inject(forwardRef(() => SecondService)) private second: any) {}
+          constructor(@Inject(forwardRef(() => SecondService)) private second: unknown) {}
         }
 
         @Injectable()
@@ -410,8 +410,8 @@ describe("analyzeProject：command 与 externalTokens", () => {
       "src/resolver.controller.ts": `
         import { Controller, Get, Resolve } from "@supacloud/app";
 
-        const UserResolver = (ctx: any) => ({ id: ctx.userId });
-        const OrgResolver = (ctx: any) => ({ id: ctx.orgId });
+        const UserResolver = (ctx: { userId: string }) => ({ id: ctx.userId });
+        const OrgResolver = (ctx: { orgId: string }) => ({ id: ctx.orgId });
 
         @Controller({ path: "/accounts", standalone: true })
         export class AccountsController {

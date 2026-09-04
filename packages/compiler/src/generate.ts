@@ -87,6 +87,19 @@ export interface CompiledModule {
   commands: CompiledCommand[];
 }`;
 
+const TYPE_GUARDS = `function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isFunction(value: unknown): value is (...args: unknown[]) => unknown {
+  return typeof value === "function";
+}
+
+function resolveFactoryValue(value: unknown): unknown {
+  if (!isRecord(value) || !isFunction(value.factory)) return undefined;
+  return value.factory();
+}`;
+
 export interface GenerateOptions {
   rootDir: string;
   outDir: string;
@@ -149,6 +162,8 @@ export function renderApplication(
     ...(imports.size > 0 ? [""] : []),
     INTERFACES,
     "",
+    TYPE_GUARDS,
+    "",
     "export function createCompiledModules(): CompiledModule[] {",
     "  return [",
     ...descriptorEntries.map((entry) => indent(entry, 4) + ","),
@@ -156,29 +171,29 @@ export function renderApplication(
     "}",
     "",
     "export async function initializeApplication(services: Record<string, unknown>): Promise<void> {",
-    '  const initializers = (services.appInitializer ?? (services as any)["supacloud.app-initializer"]) as unknown;',
+    '  const initializers = services.appInitializer ?? services["supacloud.app-initializer"];',
     "  if (Array.isArray(initializers)) {",
     "    for (const init of initializers) {",
     '      if (typeof init === "function") await init();',
     "    }",
-    '  } else if (typeof initializers === "function") {',
-    "    await (initializers as () => unknown)();",
+    '  } else if (isFunction(initializers)) {',
+    "    await initializers();",
     "  }",
     "}",
     "",
     "export async function destroyApplication(services: Record<string, unknown>): Promise<void> {",
-    '  const destroyRef = (services.destroyRef ?? (services as any)["supacloud.destroy-ref"]) as { destroy?: () => Promise<void>; _teardowns?: Array<() => void | Promise<void>> } | undefined;',
-    '  if (destroyRef && typeof destroyRef.destroy === "function") {',
+    '  const destroyRef = services.destroyRef ?? services["supacloud.destroy-ref"];',
+    '  if (isRecord(destroyRef) && isFunction(destroyRef.destroy)) {',
     "    await destroyRef.destroy();",
-    "  } else if (destroyRef && Array.isArray(destroyRef._teardowns)) {",
+    "  } else if (isRecord(destroyRef) && Array.isArray(destroyRef._teardowns)) {",
     "    for (const teardown of [...destroyRef._teardowns].reverse()) {",
-    '      if (typeof teardown === "function") await teardown();',
+    "      if (isFunction(teardown)) await teardown();",
     "    }",
     "  }",
     "  const instances = Object.values(services);",
     "  for (const inst of instances.reverse()) {",
-    '    if (inst && typeof (inst as any).onDestroy === "function") {',
-    "      await (inst as any).onDestroy();",
+    '    if (isRecord(inst) && isFunction(inst.onDestroy)) {',
+    "      await inst.onDestroy();",
     "    }",
     "  }",
     "}",
@@ -472,7 +487,13 @@ class ModuleGenerator {
           return "undefined";
         });
         const callArgs = invokerArgs.length > 0 ? invokerArgs.join(", ") : "req";
-        fields.push(`invoker: async (ctrl: any, req: any) => await (ctrl as any).${route.handler}(${callArgs})`);
+        fields.push(
+          `invoker: async (ctrl: unknown, req: { params?: Record<string, unknown>; query?: Record<string, unknown>; body?: unknown; headers?: Record<string, unknown>; context?: unknown }) => { ` +
+          `if (!isRecord(ctrl)) throw new TypeError("Route controller is not an object"); ` +
+          `const handler = ctrl[${JSON.stringify(route.handler)}]; ` +
+          `if (typeof handler !== "function") throw new TypeError("Route handler ${route.handler} is not callable"); ` +
+          `return await Reflect.apply(handler, ctrl, [${callArgs}]); }`,
+        );
         return `{ ${fields.join(", ")} }`;
       });
       return [
@@ -578,7 +599,7 @@ class ModuleGenerator {
         if (provider.tokenKind === "injection-token" && !provider.useFactoryName) {
           const tokenIdent = this.imports.add(provider.token, provider.importPath);
           const local = this.localVar(isMulti ? `${provider.token}Item` : provider.token, kind);
-          const constLine = `const ${local} = typeof ${tokenIdent} === "object" && ${tokenIdent} && "factory" in ${tokenIdent} && typeof (${tokenIdent} as any).factory === "function" ? (${tokenIdent} as any).factory() : undefined;`;
+          const constLine = `const ${local} = resolveFactoryValue(${tokenIdent});`;
           return { constLine, key, expr: local };
         }
         const factory = this.imports.add(provider.useFactoryName ?? "", provider.importPath);
