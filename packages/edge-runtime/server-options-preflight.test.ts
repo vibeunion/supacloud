@@ -52,6 +52,13 @@ export default (req) => {
 };
 `;
 
+const NO_CORS_SOURCE = `
+export default () => new Response(JSON.stringify({ ok: true }), {
+  status: 200,
+  headers: { "content-type": "application/json" },
+});
+`;
+
 function reserveEdgePort(): number {
   const reservation = Bun.serve({
     hostname: "127.0.0.1",
@@ -148,6 +155,7 @@ beforeAll(async () => {
   startEdgeRuntime(managementServer.port);
   await waitForEdgeRuntime();
   await writeFile(join(projectRoot, "cors-guard.ts"), CORS_GUARD_SOURCE);
+  await writeFile(join(projectRoot, "no-cors.ts"), NO_CORS_SOURCE);
 });
 
 afterAll(async () => {
@@ -179,6 +187,22 @@ describe("Edge Runtime OPTIONS preflight passthrough", () => {
     expect(response.headers.get("access-control-allow-methods")).toBe("GET, POST, OPTIONS");
   });
 
+  test("does not synthesize allow-origin for a function-rejected preflight", async () => {
+    const response = await fetch(`${edgeBaseUrl}/functions/v1/cors-guard/cases`, {
+      method: "OPTIONS",
+      headers: {
+        "x-project-ref": PROJECT_REF,
+        origin: "https://evil.example.com",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "authorization, x-fa-client",
+      },
+    });
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get("x-preflight-handler")).toBe("function");
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
   test("function responses keep their own allow-origin over the platform default", async () => {
     const response = await fetch(`${edgeBaseUrl}/functions/v1/cors-guard`, {
       headers: {
@@ -191,5 +215,19 @@ describe("Edge Runtime OPTIONS preflight passthrough", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
     expect(response.headers.get("access-control-allow-origin")).toBe(ALLOWED_ORIGIN);
+  });
+
+  test("does not add wildcard CORS to a function response without CORS headers", async () => {
+    const response = await fetch(`${edgeBaseUrl}/functions/v1/no-cors`, {
+      headers: {
+        "x-project-ref": PROJECT_REF,
+        apikey: SERVICE_ROLE_KEY,
+        origin: "https://other.example.com",
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
   });
 });
