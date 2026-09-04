@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/vibeunion/supacloud/compare/testing-v0.3.0...testing-v0.4.0) (2026-09-04)
+
+
+### Features
+
+* **compiler:** add checkProject drift detection, capabilities governance, and CLI ([#1134](https://github.com/vibeunion/supacloud/issues/1134)) ([831225a](https://github.com/vibeunion/supacloud/commit/831225a6d8d5c79392c4e261ddbffb092125c97f))
+
 ## [0.3.0](https://github.com/vibeunion/supacloud/compare/testing-v0.2.0...testing-v0.3.0) (2026-09-03)
 
 

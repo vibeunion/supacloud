@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.3.1...compiler-v0.4.0) (2026-09-04)
+
+
+### Features
+
+* **compiler:** add built-in module boundary governance presets and profiles ([#1132](https://github.com/vibeunion/supacloud/issues/1132)) ([ff75de8](https://github.com/vibeunion/supacloud/commit/ff75de882969f2b67cbbcebe8e72fe8df84489ad))
+* **compiler:** add checkProject drift detection, capabilities governance, and CLI ([#1134](https://github.com/vibeunion/supacloud/issues/1134)) ([831225a](https://github.com/vibeunion/supacloud/commit/831225a6d8d5c79392c4e261ddbffb092125c97f))
+
 ## [0.3.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.3.0...compiler-v0.3.1) (2026-09-04)
 
 
