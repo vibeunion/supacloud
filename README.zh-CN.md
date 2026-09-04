@@ -138,6 +138,13 @@ supacloud-cli frontend list --ref <project-ref>
 `supacloud-cli` 默认是项目级 CLI，会优先从当前目录 `.env` 自动绑定项目。
 项目 CLI 不再提供名为 `supacloud` 的兼容别名：该名称只保留给 `/usr/local/bin/supacloud` 服务端二进制。本地统一分发入口必须明确使用 `supacloudctl`。
 
+npm 风格入口默认使用 Node.js。Bun 用户可以显式指定 Bun 运行同一个包，
+包括在 Windows 终端中使用；不需要安装 Node.js，也不需要额外的包装器：
+
+```bash
+bunx --bun --package @supacloud/cli supacloud-cli status
+```
+
 - `SUPABASE_URL` 或 `SUPACLOUD_API_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` 或 `SUPACLOUD_API_TOKEN`
 

@@ -200,6 +200,12 @@ One-off execution without global install:
 npm exec --package @supacloud/cli -- supacloud-cli status
 ```
 
+Bun users can force the same package to run with Bun, including on Windows:
+
+```bash
+bunx --bun --package @supacloud/cli supacloud-cli status
+```
+
 ### Application framework commands
 
 Local commands for the application framework (`@supacloud/app` +
