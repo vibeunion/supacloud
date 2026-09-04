@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.5.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.4.1...compiler-v0.5.0) (2026-09-04)
+
+
+### Features
+
+* **compiler:** add CanDeactivate guards, tree-shakable token codegen, matchRoute helper, and redirect target validation ([#1147](https://github.com/vibeunion/supacloud/issues/1147)) ([ef0f551](https://github.com/vibeunion/supacloud/commit/ef0f551d1b93121b2cf607635170ade6407c11c8))
+* **compiler:** add DestroyRef teardown lifecycle, CanMatch guards, and parameter transforms ([#1145](https://github.com/vibeunion/supacloud/issues/1145)) ([bd6b4ab](https://github.com/vibeunion/supacloud/commit/bd6b4abae8e3cc37a3fc654f810d42a46deca88d))
+* **compiler:** add forwardRef, DestroyRef AbortSignal, Route title/data, and shadowed route detection ([#1146](https://github.com/vibeunion/supacloud/issues/1146)) ([2d9e488](https://github.com/vibeunion/supacloud/commit/2d9e48802683a349b00eb996a951f637cdeafa47))
+* **compiler:** culminate Angular architectural DX with TestBed, route pipeline, resource, and schema diagnostics ([#1149](https://github.com/vibeunion/supacloud/issues/1149)) ([c224d1f](https://github.com/vibeunion/supacloud/commit/c224d1fda08eaf221ca873d0ad94cf94f084e4ba))
+* **compiler:** culminate Angular DX with DOCUMENT, APP_BASE_HREF, TitleStrategy, Location, and SC2007/SC3012 diagnostics ([#1152](https://github.com/vibeunion/supacloud/issues/1152)) ([d561d9f](https://github.com/vibeunion/supacloud/commit/d561d9f0a322ed533a02cd2d0a6dd91b5b690232))
+* **compiler:** finalize Angular DX with linkedSignal, EnvironmentInjector, TransferState, and route input binding ([#1150](https://github.com/vibeunion/supacloud/issues/1150)) ([a93f906](https://github.com/vibeunion/supacloud/commit/a93f9064f9b5a68f7f09f259bbabede90e67a504))
+* **compiler:** heavy-compilation architecture with incremental cache and Angular-inspired DX ([#1144](https://github.com/vibeunion/supacloud/issues/1144)) ([ce3dc59](https://github.com/vibeunion/supacloud/commit/ce3dc59fbe42e3614ae156794951416eef5ab73e))
+* **compiler:** heavy-compilation DX with INJECTOR, PLATFORM_ID, router events, and Ivy diagnostics SC2006/SC3011 ([#1151](https://github.com/vibeunion/supacloud/issues/1151)) ([be7f607](https://github.com/vibeunion/supacloud/commit/be7f6072a1fda33524187a9b8b353e1e6e42139a))
+* **compiler:** heavy-compilation DX with provideHttpClient, UrlTree, ModuleDependencyGraph, and SC2008/SC3013 diagnostics ([#1153](https://github.com/vibeunion/supacloud/issues/1153)) ([68e9a8d](https://github.com/vibeunion/supacloud/commit/68e9a8d46d91a659ff225dbf4361849c784f3906))
+* **compiler:** heavy-compilation DX with typed invoker, forms, RedirectCommand, Pipes, and Ivy diagnostics SC3014-SC3019 ([#1154](https://github.com/vibeunion/supacloud/issues/1154)) ([cd06d4e](https://github.com/vibeunion/supacloud/commit/cd06d4ed962b92f95cf5ffed668948e7a8505c58))
+* **compiler:** heavy-compilation DX with typed routes, resolvers, Ivy diagnostics, and reactive signals ([#1148](https://github.com/vibeunion/supacloud/issues/1148)) ([4d5eb0b](https://github.com/vibeunion/supacloud/commit/4d5eb0bf34a73d44ddf6b694b708dfc57b6123a7))
+
 ## [0.4.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.4.0...compiler-v0.4.1) (2026-09-04)
 
 

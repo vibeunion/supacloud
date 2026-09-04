@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.4.0...pgredis-runtime-v0.5.0) (2026-09-04)
+
+
+### Features
+
+* **pgredis:** add extension policy and expired row cleanup ([#1141](https://github.com/vibeunion/supacloud/issues/1141)) ([6d0ea1d](https://github.com/vibeunion/supacloud/commit/6d0ea1de317bf1fee3f57771bee338fb7cff475d))
+
+
+### Bug Fixes
+
+* **pgredis:** consume namespace-scoped cleanup release ([#1143](https://github.com/vibeunion/supacloud/issues/1143)) ([62739a7](https://github.com/vibeunion/supacloud/commit/62739a79a57776c02e5ff9456acac149a246862f))
+
 ## [0.4.0](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.3.4...pgredis-runtime-v0.4.0) (2026-09-03)
 
 
