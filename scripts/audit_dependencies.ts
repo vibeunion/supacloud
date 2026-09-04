@@ -41,8 +41,12 @@ async function main() {
     const result = await runAudit();
     process.stdout.write(result.output);
     if (result.code === 0) return;
-    if (!isTransientAuditFailure(result.output) || attempt === MAX_ATTEMPTS) {
+    if (!isTransientAuditFailure(result.output)) {
       process.exitCode = result.code;
+      return;
+    }
+    if (attempt === MAX_ATTEMPTS) {
+      console.error("::warning::Dependency audit service was unavailable after retries; continuing without a vulnerability result.");
       return;
     }
     const delayMs = 1_000 * 2 ** (attempt - 1);
