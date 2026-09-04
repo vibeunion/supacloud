@@ -176,6 +176,36 @@ describe("GatewayService provider selection", () => {
         expect(origins).toContain("https://auth.dbbaby.top");
         expect(origins).toContain("https://sadmin.dbbaby.top");
     });
+
+    test("shared auth owner routes include dependent frontend origins", async () => {
+        const originalOwnerRef = config.authRuntimeOwnerRef;
+        config.authRuntimeOwnerRef = "auth-owner";
+        try {
+            const calls: Array<{ url: string; method: string; body: any }> = [];
+            const restore = captureFetch(calls);
+            try {
+                const provider = new CaddyGatewayProvider();
+                const result = await provider.setupUpstream("auth-owner", 3000, 9999);
+                expect(result.success).toBe(true);
+                await provider.configureFrontendRoute({
+                    projectRef: "dependent-project",
+                    deploymentId: "fa-web",
+                    hosts: ["fa.xai.xigu.team"],
+                    mode: "static",
+                    root: "/srv/fa-web",
+                });
+                const load = calls.filter((call) => call.method === "POST" && call.url.endsWith("/load")).at(-1);
+                const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+                const ownerAuthRoute = routes.find((route: any) => String(route?.match?.[0]?.path ?? "").includes("/auth/v1"));
+                const serialized = JSON.stringify(ownerAuthRoute);
+                expect(serialized).toContain("fa.xai.xigu.team");
+            } finally {
+                restore();
+            }
+        } finally {
+            config.authRuntimeOwnerRef = originalOwnerRef;
+        }
+    });
 });
 
 describe("CaddyGatewayProvider", () => {
