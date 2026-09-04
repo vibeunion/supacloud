@@ -13,7 +13,7 @@ bun add @supacloud/compiler
 ## API
 
 ```ts
-import { analyzeProject, compileProject, validateGraph } from "@supacloud/compiler";
+import { analyzeProject, compileProject, validateGraph, watchProject } from "@supacloud/compiler";
 
 // 完整流程：分析 → 校验 → 写出 application.ts 与 app.manifest.json
 const result = await compileProject({
@@ -25,6 +25,16 @@ const result = await compileProject({
 result.diagnostics; // Diagnostic[]
 result.graph;       // ApplicationGraph
 result.written;     // 写出的绝对路径
+
+// 开发模式：监听源码，防抖重编译；错误时保留最后一次成功产物
+const handle = watchProject({
+  rootDir: "/path/to/app",
+  outDir: "/path/to/app/generated",
+  onEvent: (event) => console.log(event.type, event.durationMs),
+});
+await handle.ready;
+// ...开发服务器运行...
+await handle.close();
 
 // 只做分析 / 只做校验
 const graph = await analyzeProject("/path/to/app");
@@ -72,6 +82,24 @@ interface ApplicationGraph {
 | `missing-deps` | warn（strict 时 error） | 构造/工厂依赖无法静态解析 |
 
 依赖的 token 全图都无 provider 时不报错，记入 `externalTokens`（平台注入）。
+
+## 开发模式
+
+```bash
+supacloud-compiler dev --root . --out ./generated
+```
+
+开发模式默认对源码变化做 100ms 防抖，并只监听 TypeScript 文件。编译器会复用进程内的源码快照：相同输入直接命中缓存；只改动普通实现文件时复用既有依赖图和生成物；只有 SupaCloud 元数据、模块声明或依赖相关文件变化时才重建图。编译失败时不会覆盖最后一次成功的 `application.ts` 和 `app.manifest.json`；修复错误后会自动生成新产物。`--debounce <ms>` 可调整防抖时间。
+
+## 图谱与诊断
+
+```bash
+supacloud-compiler graph ./app
+supacloud-compiler explain CaseService ./app
+supacloud-compiler doctor ./app
+```
+
+`graph` 输出模块拓扑和平台注入 token；`explain` 解释模块、provider 或 external token 的来源与依赖；`doctor` 检查项目结构、模块发现、生成物漂移和编译诊断。加 `--json` 可供 IDE、脚本和 CI 消费结构化结果。
 
 ## 开发
 

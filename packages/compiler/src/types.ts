@@ -130,6 +130,8 @@ export interface CompileOptions {
   disallowControllerDirectDb?: boolean;
   /** Detect modules declared in the project that are unreachable from any root module. */
   detectOrphanModules?: boolean;
+  /** Write generated artifacts even when error-level diagnostics exist (default: true). */
+  writeOnError?: boolean;
 }
 
 export interface ModuleBoundaryRule {
@@ -192,6 +194,13 @@ export interface CompileResult {
   diagnostics: Diagnostic[];
   graph: ApplicationGraph;
   written: string[];
+  stats?: CompileStats;
+}
+
+export interface CompileStats {
+  cacheHit: boolean;
+  changedFiles: string[];
+  affectedModules: string[];
 }
 
 export interface CheckProjectResult {
@@ -201,4 +210,25 @@ export interface CheckProjectResult {
   mismatches: string[];
   diagnostics: Diagnostic[];
   graph: ApplicationGraph;
+}
+
+export interface WatchEvent {
+  type: "compile-start" | "compiled" | "compile-error";
+  initial: boolean;
+  durationMs: number;
+  diagnostics: Diagnostic[];
+  written: string[];
+  stats?: CompileStats;
+}
+
+export interface WatchOptions extends CompileOptions {
+  /** Debounce source changes before starting a compile (default: 100ms). */
+  debounceMs?: number;
+  onEvent?: (event: WatchEvent) => void;
+}
+
+export interface WatchHandle {
+  /** Resolves after the initial compile has completed. */
+  ready: Promise<WatchEvent>;
+  close(): Promise<void>;
 }

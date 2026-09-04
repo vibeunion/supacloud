@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { checkProject, compileProject } from "./compile";
+import { BAD_PROJECT_FILES } from "./fixtures/bad-project";
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
 import { writeFixtureProject } from "./fixtures/helpers";
 import type { CompileResult } from "./types";
@@ -214,5 +215,20 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
     } finally {
       await writeFile(manifestPath, originalContent, "utf8");
     }
+  });
+
+  test("writeOnError=false 保留既有生成物，不写入错误版本", async () => {
+    const badRoot = await mkdtemp(join(tmpdir(), "supacloud-compiler-error-"));
+    const badOut = join(badRoot, "generated");
+    await writeFixtureProject(badRoot, GOOD_PROJECT_FILES);
+    const first = await compileProject({ rootDir: badRoot, outDir: badOut });
+    expect(first.diagnostics).toEqual([]);
+    const original = await readFile(join(badOut, "application.ts"), "utf8");
+
+    await writeFixtureProject(badRoot, BAD_PROJECT_FILES);
+    const failed = await compileProject({ rootDir: badRoot, outDir: badOut, writeOnError: false });
+    expect(failed.diagnostics.some((diagnostic) => diagnostic.severity === "error")).toBe(true);
+    expect(failed.written).toEqual([]);
+    expect(await readFile(join(badOut, "application.ts"), "utf8")).toBe(original);
   });
 });

@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   ApplicationGraph,
@@ -131,9 +131,20 @@ export async function generateApplication(
   await mkdir(options.outDir, { recursive: true });
   const applicationPath = join(options.outDir, "application.ts");
   const manifestPath = join(options.outDir, "app.manifest.json");
-  await writeFile(applicationPath, rendered.applicationCode, "utf8");
-  await writeFile(manifestPath, rendered.manifestJson, "utf8");
+  await writeFileAtomic(applicationPath, rendered.applicationCode);
+  await writeFileAtomic(manifestPath, rendered.manifestJson);
   return [applicationPath, manifestPath];
+}
+
+async function writeFileAtomic(path: string, content: string): Promise<void> {
+  const temporaryPath = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
+  try {
+    await writeFile(temporaryPath, content, "utf8");
+    await rename(temporaryPath, path);
+  } catch (error) {
+    await unlink(temporaryPath).catch(() => undefined);
+    throw error;
+  }
 }
 
 type FactoryKind = "services" | "request" | "job";

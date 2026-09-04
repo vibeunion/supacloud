@@ -28,10 +28,13 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
       if (diagnostic.severity === "warn") diagnostic.severity = "error";
     }
   }
-  const written = await generateApplication(graph, {
-    rootDir: options.rootDir,
-    outDir: options.outDir,
-  });
+  const hasErrors = diagnostics.some((diagnostic) => diagnostic.severity === "error");
+  const written = !hasErrors || options.writeOnError !== false
+    ? await generateApplication(graph, {
+        rootDir: options.rootDir,
+        outDir: options.outDir,
+      })
+    : [];
   return { diagnostics, graph, written };
 }
 
