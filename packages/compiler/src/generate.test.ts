@@ -8,7 +8,7 @@ import { renderApplication } from "./generate";
 import { BAD_PROJECT_FILES } from "./fixtures/bad-project";
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
 import { writeFixtureProject } from "./fixtures/helpers";
-import type { CompileResult } from "./types";
+import type { ApplicationGraph, CompileResult } from "./types";
 
 let rootDir: string;
 let outDir: string;
@@ -589,5 +589,126 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     expect(rendered.applicationCode).toContain('canDeactivate: ["UnsavedGuard"]');
     expect(rendered.applicationCode).toContain('const apiUrl = typeof API_URL === "object" && API_URL && "factory" in API_URL');
     expect(rendered.clientCode).toContain('"canDeactivate": [\n      "UnsavedGuard"\n    ]');
+  });
+
+  test("renderClient generates typed route parameter signatures and buildRouteUrl helper", () => {
+    const rendered = renderApplication(
+      {
+        modules: [
+          {
+            name: "RouteModule",
+            className: "RouteModule",
+            file: "src/route.module.ts",
+            line: 1,
+            imports: [],
+            providers: [],
+            controllers: [
+              {
+                className: "UsersController",
+                path: "/orgs/:orgId/users",
+                scope: "request",
+                deps: [],
+                routes: [
+                  {
+                    method: "GET",
+                    path: "/:userId",
+                    handler: "getUser",
+                    pathParams: ["orgId", "userId"],
+                  },
+                  {
+                    method: "GET",
+                    path: "/",
+                    handler: "listUsers",
+                    pathParams: ["orgId"],
+                  },
+                ],
+                file: "src/users.controller.ts",
+                importPath: "./users.controller",
+              },
+            ],
+            commands: [],
+            queries: [],
+            exports: [],
+          },
+        ],
+        externalTokens: [],
+      },
+      { rootDir: "/app", outDir: "/app/gen", generateClient: true },
+    );
+
+    expect(rendered.clientCode).toContain("params: { orgId: string | number; userId: string | number }");
+    expect(rendered.clientCode).toContain("params: { orgId: string | number }");
+    expect(rendered.clientCode).toContain("export function buildRouteUrl(");
+    expect(rendered.clientCode).toContain("export type AppRoutePath = typeof API_ROUTES[number]['path'];");
+    expect(rendered.clientCode).toContain("buildRouteUrl,");
+    expect(rendered.clientCode).toContain("routes: API_ROUTES,");
+  });
+
+  test("treeShakeUnusedProviders prunes unreferenced root providers from compiled modules", () => {
+    const graph: ApplicationGraph = {
+      modules: [
+        {
+          name: "TestModule",
+          className: "TestModule",
+          file: "src/test.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              token: "UsedService",
+              tokenKind: "class",
+              kind: "class",
+              scope: "application",
+              providedIn: "root",
+              deps: [],
+              exported: false,
+              file: "src/used.service.ts",
+              line: 5,
+            },
+            {
+              token: "DeadService",
+              tokenKind: "class",
+              kind: "class",
+              scope: "application",
+              providedIn: "root",
+              deps: [],
+              exported: false,
+              file: "src/dead.service.ts",
+              line: 10,
+            },
+          ],
+          controllers: [
+            {
+              className: "TestController",
+              path: "/test",
+              scope: "request",
+              deps: ["UsedService"],
+              routes: [],
+              file: "src/test.controller.ts",
+              importPath: "./test.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const withoutTreeShaking = renderApplication(graph, {
+      rootDir: "/app",
+      outDir: "/app/gen",
+      treeShakeUnusedProviders: false,
+    });
+    expect(withoutTreeShaking.applicationCode).toContain("DeadService");
+
+    const withTreeShaking = renderApplication(graph, {
+      rootDir: "/app",
+      outDir: "/app/gen",
+      treeShakeUnusedProviders: true,
+    });
+    expect(withTreeShaking.applicationCode).toContain("UsedService");
+    expect(withTreeShaking.applicationCode).not.toContain("DeadService");
   });
 });

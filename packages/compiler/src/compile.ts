@@ -35,6 +35,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
         outDir: options.outDir,
         generateClient: options.generateClient,
         generatePermissions: options.generatePermissions,
+        treeShakeUnusedProviders: options.treeShakeUnusedProviders,
       })
     : [];
   const stats = graph.cacheStats
@@ -78,6 +79,7 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
     outDir: options.outDir,
     generateClient: options.generateClient,
     generatePermissions: options.generatePermissions,
+    treeShakeUnusedProviders: options.treeShakeUnusedProviders,
   });
 
   const expectedFiles: Record<string, string> = {

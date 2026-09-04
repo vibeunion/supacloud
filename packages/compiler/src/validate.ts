@@ -17,6 +17,36 @@ const SCOPE_LIFETIME_RANK: Record<Scope, number> = {
   job: 1,
 };
 
+export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: string }> = {
+  "circular-dependency": { code: "SC1001", docsUrl: "https://supacloud.dev/errors/SC1001" },
+  "scope-violation": { code: "SC1002", docsUrl: "https://supacloud.dev/errors/SC1002" },
+  "module-boundary-violation": { code: "SC1003", docsUrl: "https://supacloud.dev/errors/SC1003" },
+  "module-boundary": { code: "SC1003", docsUrl: "https://supacloud.dev/errors/SC1003" },
+  "circular-module-import": { code: "SC1004", docsUrl: "https://supacloud.dev/errors/SC1004" },
+  "orphan-module": { code: "SC1005", docsUrl: "https://supacloud.dev/errors/SC1005" },
+  "invalid-boundary-preset": { code: "SC1006", docsUrl: "https://supacloud.dev/errors/SC1006" },
+  "missing-deps": { code: "SC2001", docsUrl: "https://supacloud.dev/errors/SC2001" },
+  "unresolved-token": { code: "SC2001", docsUrl: "https://supacloud.dev/errors/SC2001" },
+  "duplicate-token": { code: "SC2002", docsUrl: "https://supacloud.dev/errors/SC2002" },
+  "duplicate-module": { code: "SC2002", docsUrl: "https://supacloud.dev/errors/SC2002" },
+  "disallow-controller-direct-db": { code: "SC2003", docsUrl: "https://supacloud.dev/errors/SC2003" },
+  "self-dependency-violation": { code: "SC2004", docsUrl: "https://supacloud.dev/errors/SC2004" },
+  "skip-self-dependency-violation": { code: "SC2005", docsUrl: "https://supacloud.dev/errors/SC2005" },
+  "shadowed-route": { code: "SC3001", docsUrl: "https://supacloud.dev/errors/SC3001" },
+  "unresolved-route-redirect": { code: "SC3002", docsUrl: "https://supacloud.dev/errors/SC3002" },
+  "circular-route-redirect": { code: "SC3003", docsUrl: "https://supacloud.dev/errors/SC3003" },
+  "invalid-http-method-body": { code: "SC3004", docsUrl: "https://supacloud.dev/errors/SC3004" },
+  "unmatched-route-parameter": { code: "SC3005", docsUrl: "https://supacloud.dev/errors/SC3005" },
+  "missing-route-parameter-binding": { code: "SC3006", docsUrl: "https://supacloud.dev/errors/SC3006" },
+  "duplicate-route": { code: "SC3007", docsUrl: "https://supacloud.dev/errors/SC3007" },
+  "command-missing-permission": { code: "SC4001", docsUrl: "https://supacloud.dev/errors/SC4001" },
+  "duplicate-command": { code: "SC4002", docsUrl: "https://supacloud.dev/errors/SC4002" },
+  "route-command-unresolved": { code: "SC4003", docsUrl: "https://supacloud.dev/errors/SC4003" },
+  "command-governance-unsupported": { code: "SC4004", docsUrl: "https://supacloud.dev/errors/SC4004" },
+  "route-command-binding-disabled": { code: "SC4005", docsUrl: "https://supacloud.dev/errors/SC4005" },
+  "unused-root-provider": { code: "SC5001", docsUrl: "https://supacloud.dev/errors/SC5001" },
+};
+
 interface ProviderRef {
   module: ModuleNode;
   provider: ProviderNode;
@@ -41,12 +71,15 @@ export function validateGraph(
         rules: options.moduleBoundaries,
       });
     } catch (err) {
+      const meta = COMPILER_DIAGNOSTIC_CODES["invalid-boundary-preset"];
       diagnostics.push({
         severity: "error",
         code: "invalid-boundary-preset",
         message: err instanceof Error ? err.message : String(err),
         file: graph.modules[0]?.file,
         line: graph.modules[0]?.line,
+        errorCode: meta?.code,
+        docsUrl: meta?.docsUrl,
       });
     }
   }
@@ -86,7 +119,17 @@ export function validateGraph(
     line?: number,
     suggestion?: string,
   ): void => {
-    diagnostics.push({ severity: "error", code, message, file, line, suggestion });
+    const meta = COMPILER_DIAGNOSTIC_CODES[code];
+    diagnostics.push({
+      severity: "error",
+      code,
+      message,
+      file,
+      line,
+      suggestion,
+      errorCode: meta?.code,
+      docsUrl: meta?.docsUrl,
+    });
   };
   const warn = (
     code: string,
@@ -95,7 +138,17 @@ export function validateGraph(
     line?: number,
     suggestion?: string,
   ): void => {
-    diagnostics.push({ severity: strict ? "error" : "warn", code, message, file, line, suggestion });
+    const meta = COMPILER_DIAGNOSTIC_CODES[code];
+    diagnostics.push({
+      severity: strict ? "error" : "warn",
+      code,
+      message,
+      file,
+      line,
+      suggestion,
+      errorCode: meta?.code,
+      docsUrl: meta?.docsUrl,
+    });
   };
 
   const modulesByName = new Map<string, ModuleNode>();
@@ -501,6 +554,39 @@ export function validateGraph(
     }
   }
 
+  // Angular Ivy-style Tree-Shaking: Detect unreferenced root providers
+  const referencedTokens = new Set<string>();
+  for (const mod of graph.modules) {
+    for (const exp of mod.exports) referencedTokens.add(exp);
+    for (const ctrl of mod.controllers) {
+      for (const d of ctrl.deps) referencedTokens.add(d);
+      for (const d of ctrl.optionalDeps ?? []) referencedTokens.add(d);
+      for (const d of ctrl.selfDeps ?? []) referencedTokens.add(d);
+      for (const d of ctrl.skipSelfDeps ?? []) referencedTokens.add(d);
+    }
+    for (const p of mod.providers) {
+      for (const d of p.deps ?? []) referencedTokens.add(d);
+      for (const d of p.optionalDeps ?? []) referencedTokens.add(d);
+      for (const d of p.selfDeps ?? []) referencedTokens.add(d);
+      for (const d of p.skipSelfDeps ?? []) referencedTokens.add(d);
+      if (p.useExisting) referencedTokens.add(p.useExisting);
+    }
+  }
+
+  for (const mod of graph.modules) {
+    for (const provider of mod.providers) {
+      if (provider.providedIn === "root" && !provider.multi && !referencedTokens.has(provider.token) && !provider.exported) {
+        warn(
+          "unused-root-provider",
+          `Root provider "${provider.token}" is declared with providedIn: 'root' but is never injected or depended on by any module, controller, or command.`,
+          provider.file,
+          provider.line,
+          `Inject "${provider.token}" in a service or controller, export it, or remove providedIn: 'root' to enable tree-shaking.`,
+        );
+      }
+    }
+  }
+
   diagnostics.push(...detectCycles(graph, resolveDep));
   diagnostics.push(...detectModuleCycles(graph));
   if (typeof options === "object" && options.detectOrphanModules) {
@@ -590,6 +676,7 @@ function detectCycles(
         .join("|");
       if (!reported.has(cycleKey)) {
         reported.add(cycleKey);
+        const meta = COMPILER_DIAGNOSTIC_CODES["circular-dependency"];
         diagnostics.push({
           severity: "error",
           code: "circular-dependency",
@@ -597,6 +684,8 @@ function detectCycles(
           file: ref.provider.file,
           line: ref.provider.line,
           suggestion: "Break the cycle by extracting common dependencies into a separate service or injecting @Optional().",
+          errorCode: meta?.code,
+          docsUrl: meta?.docsUrl,
         });
       }
       return;
@@ -632,6 +721,7 @@ function detectModuleCycles(graph: ApplicationGraph): Diagnostic[] {
       if (!reported.has(cycleKey)) {
         reported.add(cycleKey);
         const mod = moduleMap.get(name);
+        const meta = COMPILER_DIAGNOSTIC_CODES["circular-module-import"];
         diagnostics.push({
           severity: "error",
           code: "circular-module-import",
@@ -639,6 +729,8 @@ function detectModuleCycles(graph: ApplicationGraph): Diagnostic[] {
           file: mod?.file,
           line: mod?.line,
           suggestion: "Refactor module imports into a unidirectional acyclic graph.",
+          errorCode: meta?.code,
+          docsUrl: meta?.docsUrl,
         });
       }
       return;
@@ -696,12 +788,15 @@ function detectOrphanModules(graph: ApplicationGraph): Diagnostic[] {
 
   for (const mod of graph.modules) {
     if (!reachable.has(mod.name)) {
+      const meta = COMPILER_DIAGNOSTIC_CODES["orphan-module"];
       diagnostics.push({
         severity: "warn",
         code: "orphan-module",
         message: `Module '${mod.name}' is declared but not reachable from any root module (${rootModules.map((r) => r.name).join(", ")})`,
         file: mod.file,
         line: mod.line,
+        errorCode: meta?.code,
+        docsUrl: meta?.docsUrl,
       });
     }
   }

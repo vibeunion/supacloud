@@ -22,6 +22,7 @@ export const SKIP_SELF_PARAMS_METADATA = "supacloud:skip-self-params";
 export const HOST_PARAMS_METADATA = "supacloud:host-params";
 export const GUARDS_METADATA = "supacloud:guards";
 export const CAN_DEACTIVATE_METADATA = "supacloud:guards:can-deactivate";
+export const RESOLVE_METADATA = "supacloud:resolvers";
 export const TITLE_METADATA = "supacloud:route:title";
 export const DATA_METADATA = "supacloud:route:data";
 export const ROUTE_PARAMS_METADATA = "supacloud:route-params";
@@ -426,6 +427,7 @@ function createRouteDecorator(method: HttpMethod) {
       const titleKey = `${TITLE_METADATA}:${String(propertyKey)}`;
       const dataKey = `${DATA_METADATA}:${String(propertyKey)}`;
       const deactKey = `${CAN_DEACTIVATE_METADATA}:${String(propertyKey)}`;
+      const resolveKey = `${RESOLVE_METADATA}:${String(propertyKey)}`;
       const title = options.title ?? readOwnOrInherited<string>(cls, titleKey);
       const data = {
         ...(readOwnOrInherited<Record<string, unknown>>(cls, dataKey) ?? {}),
@@ -435,6 +437,10 @@ function createRouteDecorator(method: HttpMethod) {
         ...(readOwnOrInherited<Array<CanDeactivateFn | string>>(cls, deactKey) ?? []),
         ...(options.canDeactivate ?? []),
       ];
+      const resolvers = {
+        ...(readOwnOrInherited<Record<string, ResolveFn | string>>(cls, resolveKey) ?? {}),
+        ...(options.resolvers ?? {}),
+      };
       const routes: RouteDefinition[] = [
         ...(readOwnOrInherited<RouteDefinition[]>(cls, ROUTES_METADATA) ?? []),
       ];
@@ -443,6 +449,7 @@ function createRouteDecorator(method: HttpMethod) {
         path,
         handler: String(propertyKey),
         ...options,
+        resolvers: Object.keys(resolvers).length > 0 ? resolvers : undefined,
         canDeactivate: canDeactivate.length > 0 ? canDeactivate : undefined,
         title: title || undefined,
         data: Object.keys(data).length > 0 ? data : undefined,
@@ -507,6 +514,44 @@ export function CanDeactivate(...guards: Array<CanDeactivateFn | string>): Metho
       route.canDeactivate = [...(route.canDeactivate ?? []), ...guards];
     }
   };
+}
+
+/**
+ * Attaches route pre-activation resolvers to a route method. Modeled after Angular Route.resolve.
+ * Resolvers run before the route handler, allowing prefetching and validation without controller boilerplate.
+ */
+export function Resolve(resolvers: Record<string, ResolveFn | string>): MethodDecorator {
+  return (target, propertyKey) => {
+    const cls = (target as { constructor: Type<unknown> }).constructor;
+    const key = `${RESOLVE_METADATA}:${String(propertyKey)}`;
+    const existing = readOwnOrInherited<Record<string, ResolveFn | string>>(cls, key) ?? {};
+    defineMetadata(cls, key, { ...existing, ...resolvers });
+    const routes = readOwnOrInherited<RouteDefinition[]>(cls, ROUTES_METADATA) ?? [];
+    const route = routes.find((r) => r.handler === String(propertyKey));
+    if (route) {
+      route.resolvers = { ...(route.resolvers ?? {}), ...resolvers };
+    }
+  };
+}
+
+/**
+ * Executes a dictionary of route resolvers concurrently.
+ */
+export async function executeResolvers<TContext = any>(
+  resolvers: Record<string, ResolveFn | string>,
+  ctx: TContext,
+): Promise<Record<string, unknown>> {
+  const entries = Object.entries(resolvers);
+  const resolved = await Promise.all(
+    entries.map(async ([key, resolver]) => {
+      if (typeof resolver === "function") {
+        const val = await resolver(ctx);
+        return [key, val] as const;
+      }
+      return [key, resolver] as const;
+    }),
+  );
+  return Object.fromEntries(resolved);
 }
 
 export function getRoutes(target: object): RouteDefinition[] {

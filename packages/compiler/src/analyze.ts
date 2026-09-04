@@ -847,6 +847,21 @@ function parseController(
           if (dArg && Node.isObjectLiteralExpression(dArg)) {
             route.data = { ...route.data, ...parseObjectLiteralValues(dArg) };
           }
+        } else if (dName === "Resolve") {
+          const rArg = mArgs[0];
+          if (rArg && Node.isObjectLiteralExpression(rArg)) {
+            const resolvers: Record<string, string> = route.resolvers ?? {};
+            for (const prop of rArg.getProperties()) {
+              if (Node.isPropertyAssignment(prop)) {
+                const rName = prop.getName();
+                const init = prop.getInitializer();
+                if (init) resolvers[rName] = tokenText(init);
+              }
+            }
+            if (Object.keys(resolvers).length > 0) {
+              route.resolvers = resolvers;
+            }
+          }
         }
       }
 
