@@ -73,7 +73,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Restore Bun package cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('packages/management-api/bun.lock') }}
@@ -241,7 +241,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Restore Bun package cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ matrix.working-directory }}-${{ hashFiles(format('{0}/bun.lock', matrix.working-directory)) }}
@@ -332,7 +332,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Restore Bun package cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('**/bun.lock') }}
@@ -419,7 +419,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Restore Bun package cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('**/bun.lock') }}
@@ -472,7 +472,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Restore Bun package cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('**/bun.lock') }}
@@ -671,7 +671,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Restore Bun package cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('**/bun.lock') }}
@@ -922,7 +922,7 @@ jobs:
           bun-version: ${{ env.BUN_VERSION }}
 
       - name: Restore Bun package cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.bun/install/cache
           key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('**/bun.lock') }}
