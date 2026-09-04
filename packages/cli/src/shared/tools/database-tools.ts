@@ -516,7 +516,7 @@ export function registerDatabaseTools(
         "list_migrations", "migration_inventory", "project_url", "generate_types",
         "database_lint", "db_lint", "rpc_catalog", "list_rpcs",
     ] as const;
-    const writeActions = ["apply_migration", "push_migrations", "baseline_migrations", "create_table_rls"] as const;
+    const writeActions = ["execute", "apply_migration", "push_migrations", "baseline_migrations", "create_table_rls"] as const;
     const remoteActions = [...readActions, ...localActions] as const;
     const allActions = localOnly
         ? localActions
@@ -531,9 +531,11 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
         {
             action: withDescription(stringEnum(allActions as unknown as [string, ...string[]]), "Action"),
             ref: projectRef ? Type.Optional(Type.String()) : optional(Type.String(), "Project ref"),
-            // query
-            sql: optional(Type.String(), "[query/apply_migration/lint_migrations/lint] SQL statement"),
-            file: optional(Type.String(), "[query/apply_migration/lint_migrations/lint] Read SQL from local file path (avoids shell escaping issues with $$ and multi-statement DDL)"),
+            // query / execute
+            sql: optional(Type.String(), "[query/execute/apply_migration/lint_migrations/lint] SQL statement"),
+            file: optional(Type.String(), "[query/execute/apply_migration/lint_migrations/lint] Read SQL from local file path (avoids shell escaping issues with $$ and multi-statement DDL)"),
+            mode: optional(stringEnum(["read", "migration", "admin"]), "[query/execute] SQL execution mode: read, migration, or admin. execute defaults to migration; query defaults to read/auto"),
+            admin: optional(Type.Boolean(), "[query/execute] Admin execution flag (required when mode=admin)"),
             dir: optional(Type.String(), "[push_migrations/baseline_migrations/lint_migrations/lint] Directory containing .sql migration files (default: supabase/migrations)"),
             dry_run: optional(Type.Boolean(), "[push_migrations/baseline_migrations] Preview changes without applying them"),
             strict: optional(Type.Boolean(), "[push_migrations/lint_migrations/lint/database_lint] Exit with error if high-risk issues or migrations are detected"),
@@ -576,20 +578,34 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                 }
             }
 
-            const execSql = async (sql: string, mode?: "read" | "migration" | "admin") =>
-                managementHttp().post(`/v1/projects/${ref}/database/sql`, mode ? { sql, mode } : { sql });
+            const execSql = async (sql: string, mode?: "read" | "migration" | "admin", admin?: boolean) =>
+                managementHttp().post(`/v1/projects/${ref}/database/sql`, {
+                    sql,
+                    ...(mode ? { mode } : {}),
+                    ...(admin !== undefined ? { admin } : {}),
+                });
 
             let text: string;
             switch (action) {
                 case "query": {
-                    if (!args.sql) throw new Error("'sql' required");
+                    if (!args.sql) throw new Error("'sql' or 'file' required");
                     if (readOnly) {
                         const upper = args.sql.trim().toUpperCase();
                         for (const kw of ["INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE"]) {
                             if (upper.startsWith(kw)) return { content: [{ type: "text" as const, text: `❌ Write blocked: ${kw} (read-only mode)` }] };
                         }
                     }
-                    const r = await execSql(args.sql);
+                    const r = await execSql(args.sql, args.mode, args.admin);
+                    text = r.ok ? formatSqlResult(r.data) : `❌ Failed (${r.status}): ${JSON.stringify(r.data)}`;
+                    break;
+                }
+                case "execute": {
+                    if (readOnly) {
+                        return { content: [{ type: "text" as const, text: "❌ Write blocked: execute (read-only mode)" }] };
+                    }
+                    if (!args.sql) throw new Error("'sql' or 'file' required");
+                    const mode = args.mode || "migration";
+                    const r = await execSql(args.sql, mode, args.admin);
                     text = r.ok ? formatSqlResult(r.data) : `❌ Failed (${r.status}): ${JSON.stringify(r.data)}`;
                     break;
                 }

@@ -148,6 +148,9 @@ describe("CLI execution policy", () => {
         expect(() => authorizeExecution("frontend", { action: "redeploy" }, {
             context: context({ production: false, environment: "test", readOnly: true }),
         })).toThrow("SUPACLOUD_READ_ONLY=true");
+        expect(() => authorizeExecution("database", { action: "execute", ref: "prod-ref" }, {
+            context: context({ production: false, environment: "test", readOnly: true }),
+        })).toThrow("SUPACLOUD_READ_ONLY=true");
         for (const action of ["pause", "restore"]) {
             expect(() => authorizeExecution("project", { action }, {
                 context: context({ production: false, environment: "test", readOnly: true }),
@@ -256,6 +259,7 @@ describe("CLI execution policy", () => {
     test("allows migration previews and local authoring without production confirmation", () => {
         expect(executionMode("database", "migration_inventory", {})).toBe("read");
         expect(executionMode("database", "push_migrations", { dry_run: true })).toBe("read");
+        expect(executionMode("database", "execute", {})).toBe("write");
         expect(executionMode("supabase", "push", { dry_run: true })).toBe("read");
         expect(() => authorizeExecution("supabase", { action: "db_dump" }, { context: context() }))
             .not.toThrow();
