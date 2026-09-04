@@ -11,7 +11,7 @@ interface CapturedCall {
   params?: unknown[];
 }
 
-/** 按 SQL 关键字路由返回固定行的 mock executor */
+/** Mock executor that routes by SQL keyword and returns fixed rows */
 function mockExecutor(routes: Array<{ match: string; rows: unknown[] }>): {
   executor: QueryExecutor;
   calls: CapturedCall[];

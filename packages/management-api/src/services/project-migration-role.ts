@@ -21,9 +21,9 @@ export function renderProjectMigrationRoleSql(dbName: string, dbUser: string): s
 
   return `
     GRANT CREATE ON DATABASE ${quotedDatabase} TO ${quotedUser};
-    -- 迁移 SQL 经 sql-policy 特权扫描后由服务端在受控事务 + ledger lease 中执行，
-    -- 不开放客户端直达面；平台表（如 storage.buckets）启用 RLS，迁移角色需要
-    -- BYPASSRLS 才能初始化项目私有的平台对象。ALTER ROLE 幂等，重复执行无副作用。
+    -- Migration SQL is privilege-scanned via sql-policy and executed server-side in controlled transactions + ledger lease,
+    -- with no direct client-facing access; platform tables (e.g. storage.buckets) have RLS enabled, so migration roles
+    -- require BYPASSRLS to initialize project-private platform objects. ALTER ROLE is idempotent with no side effects.
     ALTER ROLE ${quotedUser} BYPASSRLS;
     ALTER SCHEMA public OWNER TO ${quotedUser};
     GRANT USAGE ON SCHEMA supabase_migrations TO ${quotedUser};
@@ -68,8 +68,8 @@ export function renderProjectMigrationRoleSql(dbName: string, dbUser: string): s
       INSERT INTO supabase_migrations.schema_migrations
         (version, statements, name, checksum, inserted_at)
       VALUES
-        -- 线上台账表的 version 可能是 bigint（Supabase CLI 约定）或 text，
-        -- ::bigint 在两种列类型下均可写入（bigint→text 为赋值转换）。
+        -- Live ledger table version may be bigint (Supabase CLI convention) or text;
+        -- ::bigint is writable under both column types (bigint -> text is assignment cast).
         (migration_version::bigint, migration_statements, migration_name, migration_checksum, applied_at);
       INSERT INTO public.schema_migrations
         (version, statements, name, checksum, inserted_at)

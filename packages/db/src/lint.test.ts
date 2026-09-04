@@ -167,7 +167,7 @@ describe('lintModule', () => {
         },
       ],
     });
-    // 复用含 grant 的文件场景：直接注入含 to public 的文件
+    // Reuse file containing grant scenario: directly inject file with 'to public'
     const issues = await lintModule(module, (path) =>
       Promise.resolve(path.endsWith('.sql') ? 'grant select on public.cases to public;' : ''),
     );

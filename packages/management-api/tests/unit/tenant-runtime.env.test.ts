@@ -170,7 +170,7 @@ describe("TenantRuntimeService GoTrue auth env rendering", () => {
     });
     expect(env).toContain('GOTRUE_PASSWORD_REQUIRED_CHARACTERS="lower:upper:!@#$%"');
 
-    // 冒号转义与空格值必须原样传入 GoTrue 的 Decode 契约
+    // Escaped colons and space values must be passed as-is to GoTrue's Decode contract
     const escaped = renderGoTrueSessionPolicyEnv({
       password_required_characters: "abc\\:def:xy z",
     });
@@ -245,7 +245,7 @@ describe("TenantRuntimeService GoTrue auth env rendering", () => {
     expect(auth).toEqual({ password_required_characters: "lower:upper:digits" });
     expect(readAuthSessionPolicy(auth).password_required_characters).toBe("lower:upper:digits");
 
-    // null 与空字符串都恢复为无要求
+    // Both null and empty string reset requirement to none
     const reset = applyAuthSessionPolicyPatch(auth, normalizeAuthSessionPolicyPatch({
       password_required_characters: null,
     }));

@@ -113,7 +113,7 @@ const PGREDIS_RUNTIME_ENDPOINT: PgredisRuntimeEndpointConfig | undefined = PGRED
     }
   : undefined;
 
-// 空集群和 CI 环境可能尚未创建函数目录，启动时先落盘以避免健康检查前崩溃。
+// Empty clusters and CI environments might not have created the function directory yet; create on startup to prevent crashing before health checks.
 async function ensureDir(dir: string): Promise<string> {
   try {
     return await fs.realpath(dir);

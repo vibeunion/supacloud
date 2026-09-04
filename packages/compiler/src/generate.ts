@@ -142,7 +142,7 @@ function factoryOfScope(scope: Scope): FactoryKind {
   return scope === "application" ? "services" : scope;
 }
 
-/** 按 imports 拓扑排序模块（被依赖者在前），保持原有相对顺序。 */
+/** Topologically sorts modules by imports (dependees first), preserving original relative ordering. */
 function topoSortModules(modules: ModuleNode[]): ModuleNode[] {
   const byName = new Map(modules.map((m) => [m.name, m]));
   const visited = new Set<string>();
@@ -177,7 +177,7 @@ function indent(text: string, spaces: number): string {
     .join("\n");
 }
 
-/** 管理生成文件的 import：同名不同源符号自动取别名。 */
+/** Manages generated file imports: automatically aliases symbols with the same name from different sources. */
 class ImportManager {
   private readonly entries = new Map<string, { path: string; exported: string }>();
 
@@ -185,7 +185,7 @@ class ImportManager {
     return this.entries.size;
   }
 
-  /** 注册符号，返回生成代码中可用的本地名。importPath 为 rootDir 相对、无扩展名。 */
+  /** Registers a symbol and returns local identifier for generated code. importPath is relative to rootDir without extension. */
   add(exported: string, importPath?: string): string {
     if (!importPath) return exported;
     for (const [local, entry] of this.entries) {
@@ -221,10 +221,10 @@ class ImportManager {
   }
 }
 
-/** 单个模块的工厂函数 + CompiledModule 描述对象生成。 */
+/** Factory functions and CompiledModule descriptor generation for a single module. */
 class ModuleGenerator {
   private readonly pascal: string;
-  /** 每个工厂内 token → 局部变量名。 */
+  /** Token -> local variable name within each factory. */
   private readonly locals: Record<FactoryKind, Map<string, string>> = {
     services: new Map(),
     request: new Map(),
@@ -330,7 +330,7 @@ class ModuleGenerator {
     ].join("\n");
   }
 
-  /** 工厂函数体：按依赖拓扑序实例化该 scope 的 provider 与 controller。 */
+  /** Factory function body: instantiates providers and controllers for this scope in dependency topological order. */
   private renderFactoryBody(kind: FactoryKind): string {
     const providers = orderProviders(
       this.module.providers.filter((p) => factoryOfScope(p.scope) === kind),
@@ -384,7 +384,7 @@ class ModuleGenerator {
         return { constLine: `const ${local} = ${factory}(${args});`, key, expr: local };
       }
       case "existing": {
-        // 别名 provider：不产生新实例，直接引用目标表达式。
+        // Alias provider: does not create a new instance, directly references target expression.
         return { key, expr: this.depExpr(provider.useExisting ?? provider.token, kind) };
       }
     }
@@ -401,7 +401,7 @@ class ModuleGenerator {
     return { constLine: `const ${local} = new ${className}(${args});`, key, expr: local };
   }
 
-  /** token → 工厂内局部变量名（camelCase，冲突时加数字后缀）。 */
+  /** Token -> local variable name in factory (camelCase, suffixed with digits on conflict). */
   private localVar(token: string, kind: FactoryKind): string {
     const locals = this.locals[kind];
     const existing = locals.get(token);
@@ -418,10 +418,10 @@ class ModuleGenerator {
   }
 
   /**
-   * dep 解析顺序：
-   * 本工厂已实例化的 provider > 本模块 application services（services.<key>）>
-   * imports 模块导出的 services（imported.<module>.<key>，request/job 工厂内经
-   * services 参数访问）> 平台 deps（deps.<camelName>）。
+   * Dependency resolution order:
+   * Provider instantiated in current factory > Module application services (services.<key>) >
+   * Services exported by imported modules (imported.<module>.<key>, accessed via services param in
+   * request/job factories) > Platform deps (deps.<camelName>).
    */
   private depExpr(token: string, kind: FactoryKind): string {
     if (kind === "request" && isRequestContextToken(token, this.graph.tokenNames)) return "ctx";
@@ -436,7 +436,7 @@ class ModuleGenerator {
         return this.depExpr(own.useExisting ?? token, kind);
       }
       if (kind === "services") {
-        // application 工厂引用 request/job provider：scope-violation，校验已报错。
+        // Application factory referencing request/job provider: scope-violation, already flagged by validator.
         return `services.${camelName(token)}`;
       }
       return `services.${camelName(token)}`;
@@ -450,12 +450,12 @@ class ModuleGenerator {
     }
 
     if (kind === "services") return `deps.${camelName(token)}`;
-    // request/job 工厂无 deps 参数，平台/外部 token 也经 services 传入。
+    // request/job factories have no deps parameter; platform/external tokens are also passed via services.
     return `services.${camelName(token)}`;
   }
 }
 
-/** 工厂内 provider 稳定拓扑排序：依赖同工厂 provider 的排后面。 */
+/** Stable topological sort of providers within a factory: providers depending on peers in the same factory are placed after them. */
 function orderProviders(providers: ProviderNode[]): ProviderNode[] {
   const remaining = [...providers];
   const emitted = new Set<string>();
@@ -468,7 +468,7 @@ function orderProviders(providers: ProviderNode[]): ProviderNode[] {
       }),
     );
     if (index === -1) {
-      // 循环依赖：保持原序输出（validateGraph 已报 circular-dependency）。
+      // Circular dependency: output in original order (validateGraph already reported circular-dependency).
       result.push(...remaining.splice(0));
       break;
     }

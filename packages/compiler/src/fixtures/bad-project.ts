@@ -1,10 +1,10 @@
 import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./runtime-source";
 
 /**
- * 坏 fixture：循环依赖（CYCLE_A ↔ CYCLE_B）、scope 违规（application 依赖
- * request provider）、未 import 模块的 provider 引用、重复 token、
- * command 缺 permission、依赖无法静态解析。
- * marker:xxx 注释供测试定位诊断行号。
+ * Bad fixture: circular dependency (CYCLE_A <-> CYCLE_B), scope violation (application depends on
+ * request provider), provider reference from unimported module, duplicate token,
+ * command missing permission, dependency cannot be statically resolved.
+ * marker:xxx comments are used by tests to locate diagnostic line numbers.
  */
 export const BAD_PROJECT_FILES: Record<string, string> = {
   "tsconfig.json": FIXTURE_TSCONFIG,

@@ -158,7 +158,7 @@ async function refreshExpiringStudioSession(): Promise<void> {
     await refresh.promise;
   } catch (error) {
     if (!(error instanceof TypeError)) throw error;
-    // 网络瞬断不应直接触发登出；原请求与后续 401 会话校验仍是最终依据。
+    // Network hiccups should not directly trigger logout; the original request and subsequent 401 session checks remain authoritative.
   } finally {
     if (studioSessionRefresh === refresh) {
       studioSessionRefresh = null;

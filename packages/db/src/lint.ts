@@ -1,5 +1,5 @@
 /**
- * Lint：对 SQL 源文本做正则级静态分析，无需数据库连接。
+ * Lint: Regex-based static analysis of SQL source text without requiring database connection.
  */
 
 import type { DatabaseModule } from './module.js';
@@ -64,7 +64,7 @@ export function lintSql(sql: string, file: string): LintIssue[] {
     });
   }
 
-  // PostgreSQL CREATE POLICY 不支持 IF NOT EXISTS，不先 drop 就不可重复执行
+  // PostgreSQL CREATE POLICY does not support IF NOT EXISTS; non-repeatable without prior drop
   const createPolicy = CREATE_POLICY_RE.exec(sql);
   if (createPolicy) {
     const dropPolicy = DROP_POLICY_IF_EXISTS_RE.exec(sql);
@@ -88,7 +88,7 @@ export async function lintModule(
 ): Promise<LintIssue[]> {
   const issues: LintIssue[] = [];
 
-  // 收集全部声明的源文件并读取
+  // Collect and read all declared source files
   const sources = new Set<string>();
   for (const decl of [
     ...module.policies,
@@ -105,12 +105,12 @@ export async function lintModule(
     }),
   );
 
-  // 逐文件做 SQL 静态分析
+  // Perform SQL static analysis file by file
   for (const [file, sql] of contents) {
     issues.push(...lintSql(sql, file));
   }
 
-  // missing-rls-enable：声明了策略但没有任何源文件开启 RLS
+  // missing-rls-enable: Policies declared but no source file enables RLS
   if (module.policies.length > 0) {
     const anyEnable = module.policies.some((policy) =>
       ENABLE_RLS_RE.test(contents.get(policy.source) ?? ''),
@@ -125,7 +125,7 @@ export async function lintModule(
     }
   }
 
-  // policy-without-test：声明的策略/函数缺少测试条目
+  // policy-without-test: Declared policy/function lacks test entries
   for (const policy of module.policies) {
     if (!policy.tests || policy.tests.length === 0) {
       issues.push({

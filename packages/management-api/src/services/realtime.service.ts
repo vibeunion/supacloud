@@ -15,7 +15,7 @@ import { resolveProjectJwtVerificationMaterial } from "../utils/project-jwt";
  */
 import { logger } from "../utils/logger";
 
-// 判断是否为容器未就绪导致的连接级错误（可重试），区别于逻辑错误。
+// Determines whether error is a connection-level failure caused by container not ready (retryable), distinct from logic errors.
 function isConnectionError(msg: string): boolean {
     return /Unable to connect|ECONNREFUSED|ECONNRESET|ETIMEDOUT|ENOTFOUND|fetch failed|other side closed/i.test(msg);
 }
@@ -169,13 +169,14 @@ export class RealtimeService {
      * Register a new tenant with the Realtime server.
      * Called during project provisioning.
      *
-     * Realtime 容器（尤其 CI 冷启动）就绪较慢，provision_realtime 可能先于容器
-     * 就绪执行。对连接级失败（fetch 抛错）做有限重试，等容器拉起；对 HTTP
-     * 响应级错误（4xx/5xx，不含 409）不重试，那是逻辑错误需立即暴露。
+     * Realtime containers (especially during CI cold starts) can take longer to get ready, so
+     * provision_realtime may execute before the container is ready. Perform bounded retries on
+     * connection-level failures (fetch throws) while waiting for container startup; HTTP response-level
+     * errors (4xx/5xx, excluding 409) are not retried, as they are logic errors that must fail fast.
      */
     async registerTenant(config: RealtimeTenantConfig): Promise<boolean> {
         const tenantPayload = await this.authoritativeTenantPayload(config);
-        // CI 冷启动 Realtime 容器常需 ~20-40s 才接受连接；给足重试窗口。
+        // CI cold start Realtime containers often require ~20-40s before accepting connections; provide sufficient retry window.
         const MAX_ATTEMPTS = Number(process.env.REALTIME_REGISTER_MAX_ATTEMPTS || 12);
         const BACKOFF_MS = Number(process.env.REALTIME_REGISTER_BACKOFF_MS || 3000);
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -197,7 +198,7 @@ export class RealtimeService {
                 return false;
             } catch (err: unknown) {
                 const msg = err instanceof Error ? err.message : String(err);
-                // 连接级失败（容器未就绪）：重试而非立即放弃，避免 CI 时序竞态。
+                // Connection-level failure (container not ready): retry instead of immediately failing, avoiding CI race conditions.
                 if (attempt < MAX_ATTEMPTS && isConnectionError(msg)) {
                     logger.warn(`[Realtime] Registration deferred for ${config.projectRef} (container not ready, attempt ${attempt}/${MAX_ATTEMPTS}):`, { error: msg });
                     await new Promise((r) => setTimeout(r, BACKOFF_MS));

@@ -151,7 +151,7 @@ describe("delegated project authorization", () => {
     );
     expect(organizationWrite?.body.error).toContain("organizations.manage");
 
-    // viewer 不具备 operations.read/manage，frontend 部署读写均被拒绝
+    // Viewer lacks operations.read/manage; frontend deployment read/write are both denied
     const frontendRead = await requireProjectOrAdminAuth(
       delegatedRequest("/v1/projects/proj_1/frontend/deployments", "GET", "viewer-one"),
       "proj_1",

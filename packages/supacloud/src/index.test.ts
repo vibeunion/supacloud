@@ -44,7 +44,7 @@ describe("supacloud dispatcher", () => {
     });
 
     test("resolveSubpackageEntry returns a path for an installed package", () => {
-        // 自身模块必然可解析；验证 resolve 逻辑不抛错
+        // Own module is guaranteed to resolve; verify resolve logic does not throw
         const entry = resolveSubpackageEntry("bun");
         expect(typeof entry).toBe("string");
     });

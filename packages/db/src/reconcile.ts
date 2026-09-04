@@ -1,5 +1,5 @@
 /**
- * 对账：声明式 Manifest（DatabaseModule）与 PostgreSQL 真实 Catalog 比对。
+ * Reconciliation: Compares declarative Manifest (DatabaseModule) with PostgreSQL live Catalog.
  */
 
 import type { DatabaseCatalog } from './catalog.js';
@@ -9,18 +9,18 @@ export interface ReconcileIssue {
   severity: 'error' | 'warn';
   code: string;
   message: string;
-  /** 涉及对象名 */
+  /** Target object name */
   object: string;
 }
 
 export interface ReconcileReport {
   module: string;
   issues: ReconcileIssue[];
-  /** 无 error 级问题 */
+  /** True if no error-level issues */
   ok: boolean;
 }
 
-/** 'public.cases' → ['public', 'cases']；无 schema 前缀时默认 public */
+/** 'public.cases' -> ['public', 'cases']; defaults to public when schema prefix is absent */
 export function splitQualifiedName(name: string): [string, string] {
   const dot = name.indexOf('.');
   if (dot === -1) return ['public', name];
@@ -28,8 +28,8 @@ export function splitQualifiedName(name: string): [string, string] {
 }
 
 /**
- * search_path 是否固定安全：
- * 必须显式设置（非 null），且不含空元素或 pg_temp 等非固定 schema。
+ * Checks whether search_path is securely fixed:
+ * Must be explicitly set (non-null), containing no empty elements or dynamic schemas like pg_temp.
  */
 function isFixedSearchPath(searchPath: string | null): boolean {
   if (searchPath === null) return false;
@@ -51,7 +51,7 @@ export function reconcileModule(
     message: string,
   ) => issues.push({ severity, code, object, message });
 
-  // missing-policy：声明的策略在 catalog 中不存在
+  // missing-policy: Declared policy does not exist in catalog
   for (const policy of module.policies) {
     const [schema, table] = splitQualifiedName(policy.table);
     const found = catalog.policies.some(
@@ -67,7 +67,7 @@ export function reconcileModule(
     }
   }
 
-  // undeclared-policy：归属表上 catalog 有但 manifest 未声明的策略（漂移提示）
+  // undeclared-policy: Policy exists in catalog on owned table but is not declared in manifest (drift warning)
   const declaredPolicyKeys = new Set(module.policies.map((p) => `${p.table}::${p.name}`));
   for (const cp of catalog.policies) {
     const qualified = `${cp.schema}.${cp.table}`;
@@ -113,7 +113,7 @@ export function reconcileModule(
     }
   }
 
-  // missing-trigger：声明的触发器在 catalog 中不存在（按 schema.table + name 匹配）
+  // missing-trigger: Declared trigger does not exist in catalog (matched by schema.table + name)
   for (const trigger of module.triggers) {
     const [schema, table] = splitQualifiedName(trigger.table);
     const found = catalog.triggers.some(
@@ -129,8 +129,8 @@ export function reconcileModule(
     }
   }
 
-  // undeclared-trigger：归属表上 catalog 有但 manifest 未声明的触发器（含已禁用的，
-  // 禁用的触发器同样属于漂移，需要显式声明或清理）
+  // undeclared-trigger: Trigger exists in catalog on owned table but is not declared in manifest
+  // (including disabled ones, which are also drift requiring declaration or cleanup)
   const declaredTriggerKeys = new Set(module.triggers.map((t) => `${t.table}::${t.name}`));
   for (const ct of catalog.triggers) {
     const qualified = `${ct.schema}.${ct.table}`;
@@ -144,7 +144,7 @@ export function reconcileModule(
     }
   }
 
-  // rls-disabled：归属表未开启行级安全
+  // rls-disabled: Row Level Security is not enabled on owned table
   for (const table of module.tables) {
     const [schema, name] = splitQualifiedName(table);
     const ct = catalog.tables.find((t) => t.schema === schema && t.name === name);
@@ -158,7 +158,7 @@ export function reconcileModule(
     }
   }
 
-  // wildcard-grant：归属表上存在授予 PUBLIC 的权限
+  // wildcard-grant: Permissions granted to PUBLIC role exist on owned table
   for (const grant of catalog.grants) {
     const qualified = `${grant.objectSchema}.${grant.objectName}`;
     if (ownedTables.has(qualified) && grant.grantee.toUpperCase() === 'PUBLIC') {
@@ -171,7 +171,7 @@ export function reconcileModule(
     }
   }
 
-  // grant-drift：声明的授权在 catalog 中不存在
+  // grant-drift: Declared grant does not exist in catalog
   for (const grant of module.grants) {
     const [schema, name] = splitQualifiedName(grant.object);
     const found = catalog.grants.some(

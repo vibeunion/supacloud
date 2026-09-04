@@ -1,15 +1,15 @@
 import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./runtime-source";
 
 /**
- * 正常三层模块 fixture：
- * - tokens.ts：DB_CLIENT（平台注入）、AUDIT_CONFIG、LOGGER、AUDIT_SERVICE、
- *   CASE_REPOSITORY、CASE_SERVICE
- * - audit 模块：value provider + factory provider + class provider，导出 AUDIT_SERVICE
- * - case 模块：imports audit；CaseRepository class provider、CaseService deps
- *   [CASE_REPOSITORY, AUDIT_SERVICE]、CASE_SERVICE existing 别名、AcceptCaseCommand
- *   带 @Command 全元数据、CaseController @Controller("/cases") + @Post 带 schema，
- *   构造依赖 CASE_REPOSITORY 与 REQUEST_CONTEXT（request scope）
- * - health 模块：defineModule 形式
+ * Valid three-layer module fixture:
+ * - tokens.ts: DB_CLIENT (platform injection), AUDIT_CONFIG, LOGGER, AUDIT_SERVICE,
+ *   CASE_REPOSITORY, CASE_SERVICE
+ * - audit module: value provider + factory provider + class provider, exports AUDIT_SERVICE
+ * - case module: imports audit; CaseRepository class provider, CaseService deps
+ *   [CASE_REPOSITORY, AUDIT_SERVICE], CASE_SERVICE existing alias, AcceptCaseCommand
+ *   with full @Command metadata, CaseController @Controller("/cases") + @Post with schema,
+ *   constructor depends on CASE_REPOSITORY and REQUEST_CONTEXT (request scope)
+ * - health module: defineModule format
  */
 export const GOOD_PROJECT_FILES: Record<string, string> = {
   "tsconfig.json": FIXTURE_TSCONFIG,

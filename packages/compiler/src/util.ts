@@ -1,7 +1,7 @@
 /**
- * token 名 → services 对象的 key。
- * CASE_REPOSITORY → caseRepository、LOGGER → logger（常量命名转 camelCase），
- * CaseService → caseService（PascalCase 首字母小写）。
+ * Token name -> key in services object.
+ * CASE_REPOSITORY -> caseRepository, LOGGER -> logger (convert CONSTANT_CASE to camelCase),
+ * CaseService -> caseService (lowercase first letter of PascalCase).
  */
 export function camelName(token: string): string {
   const isConstantCase = token.includes("_") || !/[a-z]/.test(token);
@@ -18,7 +18,7 @@ export function camelName(token: string): string {
   return token.charAt(0).toLowerCase() + token.slice(1);
 }
 
-/** 计算 from 目录到 to 文件的相对 import 路径（去扩展名，保证 ./ 或 ../ 前缀）。 */
+/** Computes relative import path from fromDir to toFile (stripping extension, ensuring ./ or ../ prefix). */
 export function relativeImportPath(fromDir: string, toFile: string): string {
   const fromParts = fromDir.split("/").filter(Boolean);
   const toParts = toFile.split("/").filter(Boolean);
@@ -38,11 +38,11 @@ export function relativeImportPath(fromDir: string, toFile: string): string {
   return joined.startsWith("..") ? joined : `./${joined}`;
 }
 
-/** 内置上下文 token 的字符串 name（与 @supacloud/app 的 REQUEST_CONTEXT/JOB_CONTEXT 对齐）。 */
+/** String names of built-in context tokens (aligned with REQUEST_CONTEXT/JOB_CONTEXT in @supacloud/app). */
 export const REQUEST_CONTEXT_TOKEN_NAME = "supacloud.request-context";
 export const JOB_CONTEXT_TOKEN_NAME = "supacloud.job-context";
 
-/** 判断 token 是否为内置 request 上下文（变量名 REQUEST_CONTEXT 或 token name 匹配）。 */
+/** Determines whether token is built-in request context (variable name REQUEST_CONTEXT or matching token name). */
 export function isRequestContextToken(
   token: string,
   tokenNames?: Record<string, string>,
@@ -50,7 +50,7 @@ export function isRequestContextToken(
   return token === "REQUEST_CONTEXT" || tokenNames?.[token] === REQUEST_CONTEXT_TOKEN_NAME;
 }
 
-/** 判断 token 是否为内置 job 上下文。 */
+/** Determines whether token is built-in job context. */
 export function isJobContextToken(
   token: string,
   tokenNames?: Record<string, string>,

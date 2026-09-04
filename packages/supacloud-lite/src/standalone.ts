@@ -1,5 +1,5 @@
-// Bun 只会把显式导入的静态资源写入单文件可执行程序；standalone
-// 入口负责注入核心资源，并临时释放 PGlite 只能通过文件系统读取的扩展包。
+// Bun only embeds explicitly imported static assets into single-file executables; the standalone
+// entry point injects core assets and temporarily extracts extension packages that PGlite can only read from the filesystem.
 import pgliteWasm from '../node_modules/@electric-sql/pglite/dist/pglite.wasm' with { type: 'file' }
 import initdbWasm from '../node_modules/@electric-sql/pglite/dist/initdb.wasm' with { type: 'file' }
 import pgliteData from '../node_modules/@electric-sql/pglite/dist/pglite.data' with { type: 'file' }
@@ -54,7 +54,7 @@ const pgliteAssets: StandalonePgliteAssets = {
   },
 }
 
-// npm 入口不设置该符号，因此仍沿用 PGlite 包自身的资源定位逻辑。
+// The npm entry point does not set this symbol, so it retains PGlite package's own asset resolution logic.
 ;(globalThis as typeof globalThis & { [key: symbol]: unknown })[STANDALONE_PGLITE_ASSETS] = pgliteAssets
 
 await import('./cli.js')

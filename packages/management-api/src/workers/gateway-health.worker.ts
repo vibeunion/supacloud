@@ -14,7 +14,7 @@ const ROUTE_RECONCILE_INTERVAL_MS = Number(process.env.GATEWAY_ROUTE_RECONCILE_I
 
 let healthTimer: Timer | null = null;
 
-// 内部可达性状态：用于检测"不可达 -> 可达"的边沿跳变。export 仅用于测试重置。
+// Internal reachability state: detects "unreachable -> reachable" edge transitions. Exported only for test resets.
 let lastSeenReachable = false;
 let lastRouteReconcileAt = 0;
 
@@ -25,12 +25,12 @@ export function resetGatewayHealthState(): void {
 
 interface HealthCheckDeps {
     reconcileAll?: () => Promise<CanonicalGatewayReconcileState>;
-    // 测试可注入时钟和周期，生产环境使用环境变量配置。
+    // Tests may inject clock and interval; production uses environment configuration.
     now?: () => number;
     reconcileIntervalMs?: number;
 }
 
-// 执行一次健康探测。返回本轮是否完成了 canonical reconciliation。
+// Executes a health probe. Returns whether canonical reconciliation was performed in this round.
 export async function runGatewayHealthCheck(deps?: HealthCheckDeps): Promise<boolean> {
     const reconcileAll = deps?.reconcileAll ?? reconcileCanonicalGatewayRoutes;
     const now = deps?.now?.() ?? Date.now();
@@ -57,7 +57,7 @@ export async function runGatewayHealthCheck(deps?: HealthCheckDeps): Promise<boo
             return false;
         }
 
-        // 从不可达恢复可达（含首次启动）：触发全量重建让最新内存态接管。
+        // Recovered from unreachable (including initial startup): trigger full rebuild so latest in-memory state takes over.
         if (!lastSeenReachable) {
             logger.info("[GatewayHealth] Caddy reachable; reconciling the canonical gateway state");
             const reconciled = await reconcile("recovered");

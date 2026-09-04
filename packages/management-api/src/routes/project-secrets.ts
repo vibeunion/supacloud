@@ -45,8 +45,8 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
         .filter((secret: { name: string }) => isUserManagedProjectSecretName(secret.name))
         .map((secret: { name: string }) => ({
           name: secret.name,
-          // 明文只允许内部 runtime-env 通道读取；兼容旧的 reveal=true
-          // 查询参数，但永远不在项目管理 API 响应中回显。
+          // Plaintext values are only readable via internal runtime-env channels; accept legacy reveal=true
+          // query parameters for compatibility, but never echo plaintext in project management API responses.
           value: "********",
         }));
     },

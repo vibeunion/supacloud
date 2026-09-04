@@ -1105,8 +1105,8 @@ class TenantRuntimeService {
     }
 
     /**
-     * 优先使用已持久化端口，让网关路由和 systemd env 保持一致。
-     * 端口缺失或已被其他租户占用时，再回退到 hash 分配。
+     * Prefer persisted ports to keep gateway routes and systemd env consistent.
+     * When port is missing or occupied by another tenant, fall back to hash-based allocation.
      */
     private async getTenantPort(ref: string, type: "pgrst" | "gotrue"): Promise<number> {
         const basePort = type === "pgrst" ? this.PGRST_PORT_BASE : this.GOTRUE_PORT_BASE;
@@ -1117,12 +1117,12 @@ class TenantRuntimeService {
             logger.warn(`[TenantRuntime] Ignoring persisted ${type} port ${persistedPort} for ${ref}; already used by ${conflictingRef}`);
         }
 
-        // 使用 bun:hash 保持原有确定性分配逻辑。
+        // Use bun:hash to preserve deterministic allocation logic.
         const hash = Bun.hash(ref);
-        // BigInt modulo 避免大整数取模溢出。
+        // BigInt modulo to avoid large integer overflow.
         let port = basePort + Number(BigInt(hash) % BigInt(this.PORT_RANGE));
 
-        // 继续沿用最多 100 次的线性探测碰撞处理。
+        // Retain linear probing collision resolution up to 100 attempts.
         const maxTries = 100;
         for (let tryIdx = 0; tryIdx < maxTries; tryIdx++) {
             if (!(await this.findTenantPortConflict(ref, type, port))) return port;
@@ -1645,7 +1645,7 @@ class TenantRuntimeService {
         await this.writePgredisTenantConfig(ref, creds.dbName, creds.dbPassword);
 
         const pgrstConf = await this.desiredPostgrestConfig(ref, pgrstPort, creds);
-        // 共享认证模式下从项目只使用主项目 GoTrue，不再生成本地认证运行时。
+        // In shared auth mode, child projects only use primary project GoTrue and do not generate a local auth runtime.
         if (sharedAuthRuntime) {
             const sharedMarkerPath = path.join(this.TENANT_CONFIG_DIR, `${ref}_gotrue.shared`);
             await this.writeTenantSecretFile(

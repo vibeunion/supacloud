@@ -370,7 +370,7 @@ generate_config() {
 
     SUPABASE_STUDIO_DOMAIN="${SUPABASE_STUDIO_DOMAIN:-$(derive_studio_domain "$SUPABASE_PUBLIC_DOMAIN" "$INTERNAL_IP")}"
 
-    # 使用 Bash %q 序列化所有值，避免引号、命令替换或换行被配置文件重新解释。
+    # Use Bash %q to serialize all values, preventing quotes, command substitutions, or newlines from being reinterpreted by config files.
     supacloud_write_install_input_config "$CONFIG_FILE"
 
     log_info "Configuration ready: $CONFIG_FILE"

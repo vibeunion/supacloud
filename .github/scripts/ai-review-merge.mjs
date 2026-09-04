@@ -115,7 +115,7 @@ export function formatAiUnavailableComment({ model, sha, error, ciStatus }) {
 
 // --- Merge-bypass detection patterns (Layer 1 hard block) ---------------
 
-// 这些模式匹配中英文常见的合并绕过注入指令
+// These patterns match common merge-bypass injection commands in English and Chinese
 const BYPASS_PATTERNS = [
   // English
   /\b(?:skip|bypass|ignore)\s+(?:the\s+)?(?:review|ai\s+review|checks?|ci)/i,
@@ -133,7 +133,7 @@ const BYPASS_PATTERNS = [
   /\b(?:disregard|forget|override)\s+(?:previous|above|security|safety)\s+(?:instructions?|rules?|guidelines?)\b/i,
   /\b(?:you\s+(?:are|were)\s+(?:now\s+)?(?:authorized|permitted|allowed)\s+to\s+merge)\b/i,
   /\b(?:emergency\s+merge)\b/i,
-  // 中文
+  // Chinese
   /跳过(?:审核|审查|检查|AI审核)/,
   /直接合并/,
   /不用(?:审核|审查|检查)(?:就)?合并/,
@@ -144,7 +144,7 @@ const BYPASS_PATTERNS = [
   /这是安全的[，,]\s*(?:直接)?合并/,
 ];
 
-// 自修改检测：PR 改动了审查机制自身的文件
+// Self-modification detection: PR modifies files belonging to the review mechanism itself
 const SELF_MODIFY_PATHS = [
   '.github/ai-review-context.md',
 ];
@@ -157,10 +157,10 @@ const SELF_MODIFY_PREFIXES = [
 
 // --- Layer 5: Trusted author associations ------------------------------
 
-// 项目成员级别，允许自动合并
+// Project member associations allowed to auto-merge
 const TRUSTED_ASSOCIATIONS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
-// 已知的 bot 用户名（login），也允许自动合并
+// Known bot usernames (logins) also allowed to auto-merge
 const KNOWN_BOTS = new Set([
   "dependabot[bot]",
   "github-actions[bot]",
@@ -436,8 +436,8 @@ async function checkCIStatus(sha) {
 // --- Layer 1: Hard block — merge-bypass detection -----------------------
 
 /**
- * 扫描所有用户输入的文本，检测合并绕过注入指令。
- * 返回 { blocked: boolean, violations: string[] }
+ * Scan all user-supplied text to detect merge-bypass injection commands.
+ * Returns { blocked: boolean, violations: string[] }
  */
 function detectBypassAttempts({ prBody, comments, reviewComments, commitMessages }) {
   const violations = [];
@@ -461,7 +461,7 @@ function detectBypassAttempts({ prBody, comments, reviewComments, commitMessages
 }
 
 /**
- * 检测 PR 是否修改了审查机制自身的文件（Layer 4 — self-modification block）
+ * Detect whether the PR modifies the review mechanism files (Layer 4 - self-modification block)
  */
 export function detectSelfModification(changedFiles) {
   const modified = [];
@@ -482,8 +482,8 @@ export function detectSelfModification(changedFiles) {
 // --- Layer 5: Submitter identity gate ----------------------------------
 
 /**
- * 判断 PR 提交者是否为可信身份（项目成员或已知 bot）。
- * 可信身份才有资格自动合并；外部贡献者只做审查不合并。
+ * Determine whether the PR submitter is a trusted identity (project member or known bot).
+ * Only trusted identities are eligible for auto-merge; external contributors are review-only.
  */
 export function isTrustedSubmitter(prDetails) {
   const authorAssoc = prDetails.author_association || "";
@@ -501,7 +501,7 @@ export function isTrustedSubmitter(prDetails) {
     return { trusted: false, reason: `untrusted bot: ${userLogin} (type=${userType})` };
   }
 
-  // 项目成员
+  // Project member
   if (TRUSTED_ASSOCIATIONS.has(authorAssoc)) {
     return { trusted: true, reason: `author_association=${authorAssoc}` };
   }
@@ -726,7 +726,7 @@ async function main() {
 
   console.log(`Reviewing PR #${PR_NUM} in ${REPO} (${HEAD_REF} -> ${BASE_REF}, SHA: ${HEAD_SHA})`);
 
-  // 跳过 draft PR
+  // Skip draft PR
   const prDetails = await getPRDetails();
   const identity = isTrustedSubmitter(prDetails);
   if (prDetails.draft) {
@@ -737,7 +737,7 @@ async function main() {
     console.log('Release Please PR requires human merge approval. Skipping auto-merge.');
     return;
   }
-  // 补充 BASE_REF / HEAD_REF
+  // Populate BASE_REF / HEAD_REF
   const effectiveBaseRef = BASE_REF || prDetails.base?.ref || 'unknown';
   const effectiveHeadRef = HEAD_REF || prDetails.head?.ref || 'unknown';
   const sha = HEAD_SHA || prDetails.head?.sha;
@@ -747,13 +747,13 @@ async function main() {
     return;
   }
 
-  // 检查是否已有本次 commit 的 AI review
+  // Check if an AI review already exists for this commit SHA
   if (sha && await hasExistingAIReview()) {
     console.log('AI review already exists for this commit SHA. Skipping duplicate review.');
     return;
   }
 
-  // 获取变更文件
+  // Retrieve changed files
   const changedFiles = await getChangedFiles();
   console.log(`Changed files: ${changedFiles.length}`);
 
@@ -846,7 +846,7 @@ async function main() {
   const approved = firstLine === 'APPROVE';
 
   if (approved) {
-    // Layer 5: 外部贡献者只审查不合并
+    // Layer 5: External contributors are review-only, do not auto-merge
     if (!identity.trusted) {
       console.log("AI approved but submitter is not a trusted member/bot. Review-only — no auto-merge.");
       await postComment(

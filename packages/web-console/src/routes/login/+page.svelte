@@ -24,7 +24,7 @@
         }
       })
       .catch(() => {
-        // Session 探测失败时保留登录页，让用户仍可正常登录。
+        // Keep login page on session probe failure, allowing user to log in normally.
       });
 
     return () => {
@@ -32,10 +32,10 @@
     };
   });
 
-  // 触发物理卡片抖动反馈
+  // Trigger card shake animation feedback
   function triggerShake() {
     isShaking = false;
-    // 强制触发重绘以重启 CSS 动画
+    // Force reflow to restart CSS animation
     setTimeout(() => {
       isShaking = true;
     }, 10);
@@ -75,17 +75,17 @@
 </script>
 
 <div class="relative min-h-screen flex flex-col items-center justify-center bg-zinc-50 dark:bg-[#09090b] overflow-hidden select-none transition-colors duration-500">
-  <!-- 极致 Dot-Grid 科技微网格底图 -->
+  <!-- Tech dot-grid background -->
   <div class="absolute inset-0 bg-[radial-gradient(#00000003_1px,transparent_1px)] dark:bg-[radial-gradient(#ffffff05_1px,transparent_1px)] bg-zinc-50 dark:bg-[#09090b] [background-size:16px_16px] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)] pointer-events-none transition-colors duration-500">
   </div>
   
-  <!-- 朦胧流光渐变圆圈 (致敬极客冷光氛围) -->
+  <!-- Soft glowing gradient circle (geek ambient backlight) -->
   <div class="absolute -top-[30%] -left-[20%] w-[60%] h-[60%] rounded-full bg-brand/[0.04] dark:bg-brand/10 blur-[120px] pointer-events-none animate-pulse duration-[8s]"></div>
   <div class="absolute -bottom-[20%] -right-[10%] w-[50%] h-[50%] rounded-full bg-purple-500/[0.02] dark:bg-purple-500/5 blur-[120px] pointer-events-none animate-pulse duration-[10s]"></div>
 
-  <!-- 右上角多功能状态工具栏 -->
+  <!-- Top-right status toolbar -->
   <div class="absolute top-6 right-6 flex items-center gap-2">
-    <!-- 语言切换 (中 / EN) -->
+    <!-- Language switcher (ZH / EN) -->
     <button
       onclick={toggleLanguage}
       class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-zinc-100/80 dark:bg-zinc-900/60 hover:bg-zinc-200 dark:hover:bg-zinc-800/80 text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-800/80 backdrop-blur-md transition-all active:scale-[0.97] cursor-pointer"
@@ -94,7 +94,7 @@
       <span>{($locale ?? "zh-CN").toLowerCase().startsWith("zh") ? "EN" : "中文"}</span>
     </button>
 
-    <!-- 亮暗主题切换 -->
+    <!-- Dark/light theme toggle -->
     <button
       onclick={toggleMode}
       class="p-2 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-800/80 rounded-lg bg-zinc-100/80 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800/80 backdrop-blur-md transition-all active:scale-[0.97] cursor-pointer"
@@ -107,15 +107,15 @@
     </button>
   </div>
 
-  <!-- 页面主体容器 -->
+  <!-- Main page container -->
   <div class="relative w-full max-w-[400px] px-6 py-12 flex flex-col items-center">
     
-    <!-- Supa-Lightning Logo 与排版区 -->
+    <!-- Supa-Lightning logo and header area -->
     <div class="mb-6 flex flex-col items-center text-center">
       <div class="relative w-14 h-14 rounded-2xl bg-gradient-to-br from-brand/20 via-brand/10 to-emerald-500/5 flex items-center justify-center mb-4 border border-brand/30 shadow-[0_8px_30px_rgba(16,185,129,0.15)] group overflow-hidden">
-        <!-- 扫光流动动效 -->
+        <!-- Light sweep animation effect -->
         <div class="absolute inset-0 bg-gradient-to-tr from-transparent via-brand/20 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000 ease-out"></div>
-        <!-- 闪电几何线条 (向 Supabase 致敬，展现几何力量感) -->
+        <!-- Lightning bolt geometric icon -->
         <svg class="w-7 h-7 text-brand filter drop-shadow-[0_2px_8px_rgba(16,185,129,0.4)]" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
         </svg>
@@ -124,12 +124,12 @@
       <p class="text-[13px] text-zinc-500 dark:text-zinc-400 mt-1 font-medium">{$t("Login.title") || "请登录以访问管理控制台"}</p>
     </div>
 
-    <!-- 极致 Supabase 碳黑高对比卡片 -->
+    <!-- Carbon dark high-contrast card -->
     <div 
       class="w-full rounded-2xl border border-zinc-200 dark:border-zinc-850 bg-white dark:bg-[#161616] p-7 space-y-5 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.05),inset_0_1px_0_rgba(255,255,255,0.6)] dark:shadow-[0_30px_60px_-15px_rgba(0,0,0,0.8),inset_0_1px_0_rgba(255,255,255,0.03)] transition-all duration-300"
       class:animate-shake={isShaking}
     >
-      <!-- 情感化渐变报错条 -->
+      <!-- Gradient error alert banner -->
       {#if error}
         <div class="rounded-xl bg-red-500/5 border border-red-500/20 px-4 py-3 text-xs text-red-600 dark:text-red-400 font-semibold flex items-center gap-2.5 shadow-[inset_0_1px_0_rgba(239,68,68,0.05)] animate-fade-in">
           <span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping"></span>
@@ -137,7 +137,7 @@
         </div>
       {/if}
 
-      <!-- 用户名 (高对比度干练字段) -->
+      <!-- Username input field -->
       <div class="space-y-1.5">
         <label for="login-username" class="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">{$t("Login.username") || "用户名"}</label>
         <div class="relative group">
@@ -155,7 +155,7 @@
         </div>
       </div>
 
-      <!-- 密码 (高对比度干练字段) -->
+      <!-- Password input field -->
       <div class="space-y-1.5">
         <label for="login-password" class="text-[10px] font-bold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider block">{$t("Login.password") || "密码"}</label>
         <div class="relative group">
@@ -181,7 +181,7 @@
         </div>
       </div>
 
-      <!-- 翠绿物理弹性高对比按钮 -->
+      <!-- Brand action button -->
       <button
         onclick={handleLogin}
         disabled={isLoading}
@@ -197,7 +197,7 @@
       </button>
     </div>
 
-    <!-- 极度低调内敛的登录提示 -->
+    <!-- Login hints container -->
     <div class="w-full mt-7 bg-zinc-100/50 dark:bg-zinc-900/40 border border-dashed border-zinc-200 dark:border-zinc-800/80 rounded-2xl p-4 text-[11px] text-zinc-500 dark:text-zinc-400 flex items-start gap-3 text-left">
       <div class="mt-0.5 text-zinc-400 dark:text-zinc-500 shrink-0">
         <Info size={14} />

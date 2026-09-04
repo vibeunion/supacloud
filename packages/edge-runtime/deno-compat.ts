@@ -154,8 +154,8 @@ export function disableSubprocessApis(): void {
       return (runtimeBunWrite as unknown as (...writeArgs: unknown[]) => unknown)(...args);
     };
 
-    // bun:ffi 的命名导出在首次导入时会绑定 Bun.FFI 的底层入口。
-    // 必须在加载租户模块前禁用，否则可绕过 Bun.spawn 直接调用 libc system()。
+    // bun:ffi named exports bind to underlying Bun.FFI entries upon first import.
+    // Must disable before loading tenant modules, otherwise Bun.spawn can be bypassed to call libc system() directly.
     const ffi = bun.FFI as Record<string, unknown> | undefined;
     if (ffi) {
       for (const name of Object.getOwnPropertyNames(ffi)) {
@@ -180,8 +180,8 @@ export function disableSubprocessApis(): void {
     nativeFfi.callback = subprocessDisabled;
   }
 
-  // 新 Worker 有独立全局对象，不会继承本 worker 安装的 guard。
-  // 若允许租户创建 Worker，便可在子 worker 中重新调用未打补丁的 Bun.spawn。
+  // New Workers have separate global objects and will not inherit guards installed in this worker.
+  // If tenants are allowed to create Workers, they could invoke unpatched Bun.spawn in child workers.
   (globalThis as Record<string, unknown>).Worker = DisabledWorker;
   const workerThreads = require("node:worker_threads") as Record<string, unknown>;
   workerThreads.Worker = DisabledWorker;
@@ -204,7 +204,7 @@ export function disableSubprocessApis(): void {
   for (const name of ["dlopen", "_linkedBinding", "getBuiltinModule"]) {
     if (typeof processApi[name] === "function") processApi[name] = nativeLoaderDisabled;
   }
-  // node:net 和 node:tls 首次加载依赖 uv 的错误映射；其他原生 binding 仍保持关闭。
+  // node:net and node:tls initial load depends on uv error mapping; other native bindings remain disabled.
   processApi.binding = function (request: unknown, ...args: unknown[]) {
     if (request !== "uv" || args.length > 0 || !tenantUvBinding) return nativeLoaderDisabled();
     return tenantUvBinding;

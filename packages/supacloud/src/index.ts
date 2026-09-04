@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * supacloudctl — 统一入口（umbrella dispatcher）。
+ * supacloudctl — Unified entry point (umbrella dispatcher).
  *
- * 单一 `supacloudctl` 命令把子命令路由到对应的工作区包：
- *   supacloudctl cli   <args...>   → @supacloud/cli   （项目级开发工具）
- *   supacloudctl admin <args...>   → @supacloud/admin （平台运维工具）
+ * A single `supacloudctl` command routes subcommands to corresponding workspace packages:
+ *   supacloudctl cli   <args...>   → @supacloud/cli   (project-level developer tools)
+ *   supacloudctl admin <args...>   → @supacloud/admin (platform operations tools)
  *
- * 普通分发默认完全离线；仅在显式请求时检查 npm latest dist-tag。
+ * General distribution defaults to fully offline; checks npm latest dist-tag only when explicitly requested.
  */
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
@@ -56,7 +56,7 @@ export interface UpdateCheckResult {
 
 type FetchLike = (input: string, init?: RequestInit) => Promise<Pick<Response, "ok" | "status" | "json">>;
 
-/** 解析子包入口（package.json 的 main → dist/index.js）。未安装返回 null。 */
+/** Resolve subpackage entrypoint (package.json main -> dist/index.js). Returns null if uninstalled. */
 export function resolveSubpackageEntry(pkgName: string): string | null {
     try {
         return require.resolve(pkgName);
@@ -78,7 +78,7 @@ function readPackageVersion(packageJsonPath: string): string | null {
         const parsed: unknown = JSON.parse(readFileSync(packageJsonPath, "utf8"));
         if (isRecord(parsed) && typeof parsed.version === "string") return parsed.version;
     } catch {
-        // 元数据无效时保留未知版本；仍只执行本地已安装入口。
+        // Retain unknown version when metadata is invalid; still only execute locally installed entrypoint.
     }
     return null;
 }
@@ -385,7 +385,7 @@ export function isMainModule(moduleUrl: string, argvEntry = process.argv[1]): bo
     }
 }
 
-// 仅在作为脚本直接运行时执行分发，避免被 import（如测试）时的副作用退出
+// Only execute dispatch when run directly as a script, preventing side-effect exits when imported (e.g. in tests)
 if (isMainModule(import.meta.url)) {
     run(process.argv.slice(2)).catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);

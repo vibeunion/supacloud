@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-/** 把 fixture 文件表写入目录（自动建父目录）。 */
+/** Writes fixture files map to directory (auto-creates parent directories). */
 export async function writeFixtureProject(
   rootDir: string,
   files: Record<string, string>,
@@ -13,7 +13,7 @@ export async function writeFixtureProject(
   }
 }
 
-/** 源码中包含 marker 的行号（1 起），用于断言诊断位置。 */
+/** 1-based line number containing marker in source, used to assert diagnostic positions. */
 export function lineOf(source: string, marker: string): number {
   const index = source.split("\n").findIndex((line) => line.includes(marker));
   if (index === -1) throw new Error(`marker not found: ${marker}`);

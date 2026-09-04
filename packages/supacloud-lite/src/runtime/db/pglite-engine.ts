@@ -165,7 +165,7 @@ async function removePreparedBundles(cleanup: () => Promise<void>): Promise<void
   try {
     await cleanup()
   } catch (error) {
-    // 扩展已载入内存，清理失败不应让可用数据库变成启动失败，但必须留下诊断。
+    // Extensions are already loaded into memory; cleanup failure should not fail an otherwise operational database, but must log diagnostics.
     console.error('Unable to remove temporary PGlite extension bundles:', error)
   }
 }

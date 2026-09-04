@@ -209,7 +209,7 @@
         }
       }
     } catch {
-      // 服务状态是次要信息；请求失败时保留最近一次可用状态。
+      // Service status is secondary; retain last available status if request fails.
     }
     if (isCurrentLoad(loadToken)) servicesLoading = false;
   }

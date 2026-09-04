@@ -1,6 +1,6 @@
 /**
- * Catalog 读取：通过注入的 QueryExecutor 从 PostgreSQL 系统目录读取真实状态。
- * 所有 SQL 参数化（$1 = schemas 数组），默认只读 public schema。
+ * Catalog reading: Reads real state from PostgreSQL system catalogs via injected QueryExecutor.
+ * All SQL is parameterized ($1 = schemas array), defaulting to public schema.
  */
 
 import type { PolicyOperation } from './module.js';
@@ -8,8 +8,8 @@ import type { PolicyOperation } from './module.js';
 export interface QueryExecutor {
   query<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T[]>;
   /**
-   * 可选事务封装：提供时 apply 用它包裹 begin/commit/rollback；
-   * 缺省时退化为在 executor 上顺序执行 begin/commit/rollback 语句（mock 友好）。
+   * Optional transaction wrapper: When provided, apply wraps begin/commit/rollback with it;
+   * when omitted, falls back to sequential begin/commit/rollback on executor (mock-friendly).
    */
   transaction?<T>(fn: (executor: QueryExecutor) => Promise<T>): Promise<T>;
 }
@@ -43,7 +43,7 @@ export interface CatalogTrigger {
   schema: string;
   table: string;
   name: string;
-  /** tgenabled !== 'D'（未被 disable） */
+  /** tgenabled !== 'D' (not disabled) */
   enabled: boolean;
 }
 
@@ -173,7 +173,7 @@ interface GrantRow {
   grantee: string;
 }
 
-/** pg_policy.polcmd → 语义化操作名 */
+/** pg_policy.polcmd -> semantic operation name */
 const POLCMD_MAP: Record<string, PolicyOperation> = {
   r: 'select',
   a: 'insert',
@@ -182,7 +182,7 @@ const POLCMD_MAP: Record<string, PolicyOperation> = {
   '*': 'all',
 };
 
-/** 从 proconfig（text[]）中提取 search_path=... 配置，无则 null */
+/** Extracts search_path=... setting from proconfig (text[]), or null if unset */
 export function extractSearchPath(config: string[] | null): string | null {
   if (!config) return null;
   const entry = config.find((item) => item.startsWith('search_path='));

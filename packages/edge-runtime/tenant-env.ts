@@ -238,9 +238,9 @@ async function loadEnvFromApi(ref: string): Promise<ApiRuntimeEnv | null> {
     });
 
     if (res.status === 404) {
-      // 明文运行时环境只允许通过 master-only internal/runtime-env 获取。
-      // 旧的 /secrets?reveal=true 端点现在始终掩码，不能作为运行时回退，
-      // 否则混合版本部署会把“掩码值”误注入 GoTrue/Edge Function 环境。
+      // Plaintext runtime environment is only allowed via master-only internal/runtime-env.
+      // Legacy /secrets?reveal=true endpoint is now always masked and cannot serve as runtime fallback;
+      // otherwise mixed-version deployments would inject masked values into GoTrue/Edge Function environments.
       console.warn(`[tenant-env] runtime-env endpoint missing for ${ref}; refusing legacy masked secrets endpoint`);
       return null;
     }

@@ -6,8 +6,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * 完整编译流程：AST 分析 → 校验 → 生成静态工厂代码与 manifest。
- * 即使存在 error 级诊断也会照常写出文件，由调用方根据 diagnostics 决定是否采用。
+ * Complete compilation pipeline: AST analysis -> validation -> generate static factory code and manifest.
+ * Files are emitted even when error-level diagnostics exist; caller decides adoption based on diagnostics.
  */
 export async function compileProject(options: CompileOptions): Promise<CompileResult> {
   const graph = await analyzeProject(options.rootDir, options.include);

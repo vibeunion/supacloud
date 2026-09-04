@@ -2,21 +2,21 @@ import { describe, test, expect } from "bun:test";
 import { Elysia, t } from "elysia";
 import { config } from "../../src/config";
 
-// 简化测试 - 只测试认证中间件逻辑
+// Simplified test suite - tests authentication middleware and mock endpoints
 const AUTH_HEADER = { Authorization: `Bearer ${config.masterToken}` };
 const INVALID_TOKEN_HEADER = { Authorization: "Bearer invalid-token" };
 const BASIC_HEADER = { Authorization: "Basic dXNlcjpwYXNz" };
 
-// 模拟项目数据
+// Mock project data
 const mockProjects: Map<string, any> = new Map();
 let projectCounter = 0;
 
-// 创建完整模拟测试 app（无数据库依赖）
+// Create complete mock test app (no database dependency)
 const testApp = new Elysia()
-  // 健康检查
+  // Health check
   .get("/health", () => ({ status: "ok", timestamp: new Date().toISOString() }))
 
-  // 认证中间件
+  // Auth middleware
   .derive(({ headers, set }) => {
     const authorization = headers.authorization;
 
@@ -45,7 +45,7 @@ const testApp = new Elysia()
     }
   })
 
-  // 可用区域
+  // Available regions
   .get("/v1/projects/available-regions", () => [
     { code: "local", name: "Local", continent: "local" },
     { code: "us-east-1", name: "US East (N. Virginia)", continent: "americas" },
@@ -54,12 +54,12 @@ const testApp = new Elysia()
     { code: "ap-southeast-1", name: "Asia Pacific (Singapore)", continent: "apac" },
   ])
 
-  // 获取所有项目
+  // Get all projects
   .get("/v1/projects", () => {
     return Array.from(mockProjects.values()).filter((p) => !p.deleted_at);
   })
 
-  // 创建项目
+  // Create project
   .post(
     "/v1/projects",
     ({ body, set }) => {
@@ -90,7 +90,7 @@ const testApp = new Elysia()
     }
   )
 
-  // 获取项目详情
+  // Get project details
   .get(
     "/v1/projects/:ref",
     ({ params, set }) => {
@@ -104,7 +104,7 @@ const testApp = new Elysia()
     { params: t.Object({ ref: t.String() }) }
   )
 
-  // 更新项目
+  // Update project
   .patch(
     "/v1/projects/:ref",
     ({ params, body, set }) => {
@@ -123,7 +123,7 @@ const testApp = new Elysia()
     }
   )
 
-  // 删除项目
+  // Delete project
   .delete(
     "/v1/projects/:ref",
     ({ params, set }) => {
@@ -139,7 +139,7 @@ const testApp = new Elysia()
     { params: t.Object({ ref: t.String() }) }
   )
 
-  // 暂停项目
+  // Pause project
   .post(
     "/v1/projects/:ref/pause",
     ({ params, set }) => {
@@ -154,7 +154,7 @@ const testApp = new Elysia()
     { params: t.Object({ ref: t.String() }) }
   )
 
-  // 恢复项目
+  // Restore project
   .post(
     "/v1/projects/:ref/restore",
     ({ params, set }) => {
@@ -169,7 +169,7 @@ const testApp = new Elysia()
     { params: t.Object({ ref: t.String() }) }
   )
 
-  // 健康状态
+  // Health status
   .get(
     "/v1/projects/:ref/health",
     ({ params, set }) => {
@@ -191,7 +191,7 @@ const testApp = new Elysia()
     { params: t.Object({ ref: t.String() }) }
   )
 
-  // 项目状态
+  // Project status
   .get(
     "/v1/projects/:ref/status",
     ({ params, set }) => {
@@ -205,7 +205,7 @@ const testApp = new Elysia()
     { params: t.Object({ ref: t.String() }) }
   )
 
-  // 重启项目
+  // Restart project
   .post(
     "/v1/projects/:ref/restart",
     ({ params, set }) => {
@@ -219,7 +219,7 @@ const testApp = new Elysia()
     { params: t.Object({ ref: t.String() }) }
   )
 
-  // 项目设置
+  // Project settings
   .get(
     "/v1/projects/:ref/settings",
     ({ params, set }) => {
@@ -233,7 +233,7 @@ const testApp = new Elysia()
     { params: t.Object({ ref: t.String() }) }
   )
 
-  // 更新项目设置
+  // Update project settings
   .put(
     "/v1/projects/:ref/settings",
     ({ params, body, set }) => {
@@ -251,7 +251,7 @@ const testApp = new Elysia()
     }
   )
 
-  // API 密钥
+  // API keys
   .get(
     "/v1/projects/:ref/api-keys",
     ({ params, set }) => {
@@ -411,7 +411,7 @@ describe("Projects CRUD", () => {
   });
 
   test("GET /v1/projects/:ref should get project details", async () => {
-    // 先创建一个项目
+    // Create a project first
     const createRes = await testApp.handle(
       new Request(`${BASE}/v1/projects`, {
         method: "POST",
@@ -476,7 +476,7 @@ describe("Projects CRUD", () => {
     );
     expect(res.status).toBe(200);
 
-    // 验证已删除
+    // Verify deletion
     const getRes = await testApp.handle(
       new Request(`${BASE}/v1/projects/${created.ref}`, { headers: AUTH_HEADER })
     );

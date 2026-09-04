@@ -53,7 +53,7 @@ const POSTGRES_CDC_DEFAULTS = {
     poll_max_record_bytes: 1_048_576,
     publication: "supabase_realtime",
     db_pool: 1,
-    // Realtime 仍读取这个历史拼写；同时发送 canonical 字段保证升级兼容。
+    // Realtime still reads this legacy spelling; sending canonical field simultaneously guarantees upgrade compatibility.
     subcriber_pool_size: 1,
     subs_pool_size: 1,
 } as const;

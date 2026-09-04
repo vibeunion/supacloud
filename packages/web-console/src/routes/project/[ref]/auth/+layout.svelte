@@ -145,7 +145,7 @@
 <svelte:window onclick={closeMenusOnOutsideClick} />
 
 <div class="h-full flex flex-col space-y-4">
-  <!-- 按用户任务分组，避免十多个认证入口在窄屏横向溢出。 -->
+  <!-- Group by user tasks to prevent more than a dozen auth entries from overflowing horizontally on narrow screens. -->
   <div bind:this={menuBar} class="flex flex-wrap items-center gap-2 border-b border-border/30 px-1 pb-3">
     {#each visibleGroups as group (group.labelKey)}
       <div class="relative">

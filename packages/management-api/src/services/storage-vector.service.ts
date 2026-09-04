@@ -251,7 +251,7 @@ function normalizeSegment(input: SegmentInput): { count: number; index: number }
 }
 
 function stableKeyHash(value: string): number {
-  // 32 位 FNV-1a：跨进程稳定，适合把 key 确定性地分配到并行扫描分段。
+  // 32-bit FNV-1a: stable across processes, suitable for deterministically distributing keys into parallel scan segments.
   let hash = 0x811c9dc5;
   for (const byte of Buffer.from(value, "utf8")) {
     hash ^= byte;

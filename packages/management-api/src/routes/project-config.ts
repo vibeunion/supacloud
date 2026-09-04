@@ -898,8 +898,8 @@ async function buildProjectSettingsResponse(
 }
 
 export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
-  // 组级守卫：统一保护所有 project-scoped 路由（含 addConfigRoutes 工厂与各 .use 子路由），
-  // 避免逐接口手工遗漏导致委托 member/viewer 绕过 tenant.config.read / operations.read
+  // Group guard: uniformly protects all project-scoped routes (including addConfigRoutes factory and .use subroutes),
+  // preventing individual endpoint omissions that could allow delegated members/viewers to bypass tenant.config.read / operations.read
   .onBeforeHandle(async ({ params, request }) => {
     const ref = (params as { ref?: string }).ref;
     if (!ref) return;

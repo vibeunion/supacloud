@@ -2517,7 +2517,7 @@ describe("ssh admin tool", () => {
                 schemas,
             })).rejects.toThrow(/Invalid schema identifier/);
         }
-        // 注入载荷从未进入远程命令流
+        // Injected payload never reaches the remote command stream
         expect(ssh.commands.join("\n")).not.toContain("reboot");
     });
 

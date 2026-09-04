@@ -4,12 +4,12 @@ import path from 'node:path';
 const packagesDir = process.cwd();
 
 /**
- * 修复 libpg-query 的 WASM 加载
+ * Patches libpg-query WASM loading for inline single-binary execution
  */
 function patchLibPgQuery() {
     console.log('🔧 Patching libpg-query for inline WASM...');
     
-    // 找到 WASM 文件并转为 Base64
+    // Locate WASM file and convert to Base64
     const wasmPath = path.resolve(packagesDir, 'node_modules/libpg-query/wasm/libpg-query.wasm');
     if (!fs.existsSync(wasmPath)) {
         console.error('❌ Could not find libpg-query.wasm');
@@ -17,12 +17,12 @@ function patchLibPgQuery() {
     }
     const wasmBase64 = fs.readFileSync(wasmPath).toString('base64');
     
-    // 找到 JS 胶水代码
+    // Locate JS glue code
     const jsPath = path.resolve(packagesDir, 'node_modules/libpg-query/wasm/libpg-query.js');
     let content = fs.readFileSync(jsPath, 'utf8');
     
-    // 注入拦截逻辑：如果是请求 .wasm，直接返回 Base64 转出的 Buffer
-    // 查找 readBinary 的定义并修改
+    // Inject interception logic: if requesting .wasm, return Buffer converted from Base64
+    // Find readBinary definition and patch it
     const searchStr = 'readBinary=filename=>{filename=isFileURI(filename)?new URL(filename):filename;var ret=fs.readFileSync(filename);return ret};';
     const patchStr = `var __WASM_DATA__ = "${wasmBase64}";
     readBinary=filename=>{
@@ -42,7 +42,7 @@ function patchLibPgQuery() {
 }
 
 /**
- * 修复 pg-format 的保留字静态目录加载
+ * Patches pg-format static directory loading for reserved words
  */
 function patchPgFormat() {
     console.log('🔧 Patching pg-format for inline reserved.js...');
@@ -55,9 +55,9 @@ function patchPgFormat() {
         return;
     }
     
-    // 读取 reserved.js 内容（它是 CommonJS 格式：module.exports = { ... };）
+    // Read reserved.js content (CommonJS format: module.exports = { ... };)
     let reservedContent = fs.readFileSync(reservedPath, 'utf8');
-    // 去掉 module.exports = 部分，只保留对象体
+    // Strip module.exports = to retain object body only
     const jsonBody = reservedContent.replace(/module\.exports\s*=\s*/, '').trim();
     
     let indexContent = fs.readFileSync(indexPath, 'utf8');

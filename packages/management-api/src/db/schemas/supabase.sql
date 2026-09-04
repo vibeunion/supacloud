@@ -3,7 +3,7 @@
 -- Based on supabase/postgres official migrations
 -- ============================================================
 
--- 1. 创建 Supabase 专用 Role
+-- 1. Create Supabase Dedicated Roles
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN
@@ -30,13 +30,13 @@ $$;
 -- Ensure existing clusters also grant replication to supabase_admin
 ALTER ROLE supabase_admin WITH REPLICATION;
 
--- 授予 authenticator 可以切换到各角色
+-- Grant roles to postgres/authenticator
 GRANT anon TO postgres;
 GRANT authenticated TO postgres;
 GRANT service_role TO postgres;
 GRANT supabase_admin TO postgres;
 
--- 设置 supabase_auth_admin 默认 search_path (GoTrue 需要)
+-- Set supabase_auth_admin default search_path (required by GoTrue)
 ALTER ROLE supabase_auth_admin SET search_path TO auth, public;
 
 -- 2. Auth Schema
@@ -308,7 +308,7 @@ CREATE INDEX IF NOT EXISTS one_time_tokens_token_hash_hash_idx ON auth.one_time_
 CREATE INDEX IF NOT EXISTS one_time_tokens_relates_to_hash_idx ON auth.one_time_tokens USING hash (relates_to);
 CREATE UNIQUE INDEX IF NOT EXISTS one_time_tokens_user_id_token_type_key ON auth.one_time_tokens (user_id, token_type);
 
--- 授权
+-- Grants
 GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA auth TO supabase_auth_admin;
 GRANT SELECT ON ALL TABLES IN SCHEMA auth TO service_role;
@@ -426,7 +426,7 @@ CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads_parts (
 
 CREATE INDEX IF NOT EXISTS idx_multipart_uploads_list ON storage.s3_multipart_uploads (bucket_id, (key COLLATE "C"), created_at ASC);
 
--- 授权
+-- Grants
 GRANT ALL ON ALL TABLES IN SCHEMA storage TO supabase_storage_admin;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO supabase_storage_admin;
 -- service_role has BYPASSRLS and needs full DML for runtime uploads/deletes
@@ -439,7 +439,7 @@ GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO authenticated;
 GRANT SELECT ON ALL TABLES IN SCHEMA storage TO anon;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA storage TO anon;
 
--- 启用 RLS
+-- Enable RLS
 ALTER TABLE storage.buckets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE storage.s3_multipart_uploads ENABLE ROW LEVEL SECURITY;
@@ -557,7 +557,7 @@ EXCEPTION WHEN insufficient_privilege THEN
   NULL;
 END $$;
 
--- 5. Public Schema 权限
+-- 5. Public Schema Permissions
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO service_role;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO service_role;

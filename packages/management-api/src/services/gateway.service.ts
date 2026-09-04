@@ -109,7 +109,7 @@ interface RateLimitConfig {
 }
 
 const RATE_LIMIT_TIERS: Record<"free" | "pro" | "enterprise", RateLimitConfig> = {
-    // 整体 API 限流需要容纳现代 SPA 的并发初始化请求，同时保留持续流量保护。
+    // Overall API rate limiting must accommodate concurrent initialization requests from modern SPAs while maintaining continuous traffic protection.
     free: { second: 60, minute: 3000, hour: 100000 },
     pro: { second: 300, minute: 18000, hour: 500000 },
     enterprise: { second: 1500, minute: 90000, hour: 3000000 },
@@ -448,8 +448,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 } catch (error: unknown) {
                     const message = error instanceof Error ? error.message : String(error);
                     logger.warn(`[CaddyGatewayProvider] Caddy reachable but config apply failed on attempt ${attempt}: ${message}`);
-                    // caddy 可达但 /load 被拒（通常是配置校验失败），退避后重试可能仍失败；
-                    // 为避免无限重试无效配置，在剩余尝试内继续，但错误会向上透传。
+                    // Caddy is reachable but /load was rejected (typically config validation failure); retrying after backoff may still fail;
+                    // to avoid infinite retries of invalid config, continue within remaining attempts, but bubble the error up.
                     if (attempt >= maxAttempts) return { ready: false, error: message };
                 }
             } else {
@@ -2203,7 +2203,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     private async setupHostedAuthRoutesUnlocked(): Promise<{ success: boolean; error?: string }> {
         if (!config.hostedAuthPageEnabled) {
-            // 清除已有路由
+            // Clear existing routes
             await this.hydrateFromDiskIfUninitialized();
             let changed = false;
             for (const id of ["route-supauth-hosted-login", "route-supauth-authorize-page"]) {

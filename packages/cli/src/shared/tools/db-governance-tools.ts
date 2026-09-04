@@ -53,7 +53,7 @@ function textResult(text: string, isError = false): ToolResult {
     return { isError, content: [{ type: "text" as const, text }] };
 }
 
-/** 归一化动态 import 出来的模块声明：缺省数组补空，保证 lint/reconcile 不崩。 */
+/** Normalize dynamically imported module declaration: fill defaults for empty arrays so lint/reconcile does not fail. */
 function normalizeModule(candidate: unknown, sourcePath: string): DatabaseModule {
     if (typeof candidate !== "object" || candidate === null || typeof (candidate as { name?: unknown }).name !== "string") {
         throw new Error(`Invalid database module export in ${sourcePath}（应导出 defineDatabaseModule(...) 结果）`);
@@ -70,9 +70,9 @@ function normalizeModule(candidate: unknown, sourcePath: string): DatabaseModule
 }
 
 /**
- * 加载数据库治理模块声明：
- * --module_file 指向一个 `export default defineDatabaseModule(...)`（或数组）的文件；
- * 缺省读 <root>/db/modules.ts（default 或命名 exports modules，单个或数组均可）。
+ * Load database governance module declarations:
+ * --module_file points to a file exporting `default defineDatabaseModule(...)` (or an array);
+ * defaults to <root>/db/modules.ts (default or named "modules" export, single or array).
  */
 export async function loadDatabaseModules(root: string, moduleFile?: string): Promise<DatabaseModule[]> {
     const filePath = moduleFile
@@ -85,8 +85,8 @@ export async function loadDatabaseModules(root: string, moduleFile?: string): Pr
     }
     let imported: Record<string, unknown>;
     try {
-        // 注意：用绝对路径而非 file:// URL——Bun 对 file:// import 有目录缓存，
-        // 运行中新写入的同目录文件会误报 Cannot find module。
+        // Note: use absolute path instead of file:// URL — Bun caches file:// imports by directory,
+        // which can falsely report Cannot find module for files written in the same directory during runtime.
         imported = await import(filePath);
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -114,7 +114,7 @@ function formatReconcileReport(report: ReconcileReport): string {
     return lines.join("\n");
 }
 
-/** 可测试的编排点：注入 executor，读取 catalog 并与声明模块对账。 */
+/** Testable orchestration point: inject executor, read catalog, and reconcile against declared modules. */
 export async function runModuleCheck(
     module: DatabaseModule,
     executor: QueryExecutor,

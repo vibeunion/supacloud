@@ -379,9 +379,9 @@ const STORAGE_CORS_EXPOSE_HEADERS = [
 
 export const storageCompatRoutes = new Elysia({ prefix: "" })
 
-    // ── CORS: Storage API 必须自行设置 CORS 响应头 ──
-    // Caddy 网关对 storage 路由启用了 preserveUpstreamCors，不再删除上游 CORS 头。
-    // 这里为所有 Storage API 响应设置 CORS 头，确保跨域访问（特别是 public bucket 的图片加载）正常工作。
+    // ── CORS: Storage API must manage its own CORS response headers ──
+    // Caddy gateway enables preserveUpstreamCors on storage routes and no longer strips upstream CORS headers.
+    // Set CORS headers for all Storage API responses to ensure cross-origin access (especially image loads from public buckets) works properly.
     .options('/*', ({ headers, set }) => {
         const origin = headers['origin'] || headers['Origin'] || '';
         if (origin) {
