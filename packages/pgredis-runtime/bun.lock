@@ -6,7 +6,7 @@
       "name": "@supacloud/pgredis-runtime",
       "dependencies": {
         "@postgresx/bun-listen": "0.3.2",
-        "@postgresx/noredis": "0.7.1",
+        "@postgresx/noredis": "0.7.2",
         "elysia": "^1.4.30",
       },
       "devDependencies": {
@@ -20,7 +20,7 @@
 
     "@postgresx/bun-listen": ["@postgresx/bun-listen@0.3.2", "https://registry.npmmirror.com/@postgresx/bun-listen/-/bun-listen-0.3.2.tgz", {}, "sha512-uXC4dCYdUR0NG4GTC6WC3i3FH08uhL4x8/lqOCc3bbVUkk/IjlNr6e/lUwHzmCQV9it62vXQVRI2/yZpW0RTLA=="],
 
-    "@postgresx/noredis": ["@postgresx/noredis@0.7.1", "https://registry.npmmirror.com/@postgresx/noredis/-/noredis-0.7.1.tgz", {}, "sha512-OB1gWggRfopyaZP2N2JNbi8gqTP3O4ccyxnQhpoXnABZvCxPxdqrWTjtih4OGXw/A2V3Rh3F3moDHBZt6R6MUw=="],
+    "@postgresx/noredis": ["@postgresx/noredis@0.7.2", "https://registry.npmjs.org/@postgresx/noredis/-/noredis-0.7.2.tgz", {}, "sha512-puqjCylpyBlnY/WwlF02RVQzxUhsXV/Qm6QYLQD6KKOW0IwgFyyZBMzq44wmnJFAaQVa8bXSjo7+4eUBkTf8kQ=="],
 
     "@sinclair/typebox": ["@sinclair/typebox@0.34.52", "https://registry.npmmirror.com/@sinclair/typebox/-/typebox-0.34.52.tgz", {}, "sha512-XiMQh7qqVlxZzcVD+kkGMNGMzcTrDMLWI7S4x7z1MkCkbDPrekpZXEUK0eZqZFMuHQg2a2DZOcDIh9o5v3Gonw=="],
 
