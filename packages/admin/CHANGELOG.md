@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.20.0](https://github.com/vibeunion/supacloud/compare/admin-v0.19.0...admin-v0.20.0) (2026-09-04)
+
+
+### Features
+
+* **admin:** add managed rollback backup cleanup ([#1126](https://github.com/vibeunion/supacloud/issues/1126)) ([d05b268](https://github.com/vibeunion/supacloud/commit/d05b2686302686f0170a1a4c263c897150ac3dc8))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump supabase-js, ts-morph and type definitions ([#1129](https://github.com/vibeunion/supacloud/issues/1129)) ([c56c38e](https://github.com/vibeunion/supacloud/commit/c56c38e54d3b293a9a86359d79a2f3ff1db7da64))
+
 ## [0.19.0](https://github.com/vibeunion/supacloud/compare/admin-v0.18.2...admin-v0.19.0) (2026-09-03)
 
 

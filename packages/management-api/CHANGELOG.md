@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.70.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.69.1...management-api-v0.70.0) (2026-09-04)
+
+
+### Features
+
+* **database:** support database execute action and query mutation modes ([#1131](https://github.com/vibeunion/supacloud/issues/1131)) ([7f979b5](https://github.com/vibeunion/supacloud/commit/7f979b5531eb3ed91858ddcb308225c78eb17217))
+
+
+### Bug Fixes
+
+* **gateway:** include dependent frontend origins for shared auth ([#1128](https://github.com/vibeunion/supacloud/issues/1128)) ([0386724](https://github.com/vibeunion/supacloud/commit/03867247f5958663168581f71e9da5bdfbbbf697))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump supabase-js, ts-morph and type definitions ([#1129](https://github.com/vibeunion/supacloud/issues/1129)) ([c56c38e](https://github.com/vibeunion/supacloud/commit/c56c38e54d3b293a9a86359d79a2f3ff1db7da64))
+
 ## [0.69.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.69.0...management-api-v0.69.1) (2026-09-03)
 
 

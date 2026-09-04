@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.36.0...web-console-v0.36.1) (2026-09-04)
+
+
+### Miscellaneous Chores
+
+* **deps:** bump supabase-js, ts-morph and type definitions ([#1129](https://github.com/vibeunion/supacloud/issues/1129)) ([c56c38e](https://github.com/vibeunion/supacloud/commit/c56c38e54d3b293a9a86359d79a2f3ff1db7da64))
+
 ## [0.36.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.35.3...web-console-v0.36.0) (2026-09-03)
 
 
