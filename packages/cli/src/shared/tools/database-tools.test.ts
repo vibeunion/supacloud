@@ -2064,4 +2064,122 @@ describe("database migration helpers", () => {
     expect(catalogFailure.content[0].text).toBe("❌ RPC catalog request failed (500)");
     expect(catalogFailure.content[0].text).not.toContain("secret");
   });
+
+  test("execute action sends SQL with default migration mode and formats result", async () => {
+    const posts: Array<{ path: string; body: { sql: string; mode?: string } }> = [];
+    const callback = captureDatabaseTool({
+      post: async (path: string, body: { sql: string; mode?: string }) => {
+        posts.push({ path, body });
+        return {
+          ok: true,
+          status: 200,
+          data: { command: "CREATE TABLE", rowCount: 0, rows: [] },
+        };
+      },
+    });
+
+    const result = await callback({
+      action: "execute",
+      ref: "proj",
+      sql: "CREATE TABLE public.items (id uuid);",
+    });
+
+    expect(posts).toHaveLength(1);
+    expect(posts[0].path).toBe("/v1/projects/proj/database/sql");
+    expect(posts[0].body.sql).toBe("CREATE TABLE public.items (id uuid);");
+    expect(posts[0].body.mode).toBe("migration");
+    expect(result.content[0].text).toContain("✅ Query OK. No rows returned.");
+  });
+
+  test("execute action supports reading SQL from local file", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "supacloud-exec-file-"));
+    const sqlFile = join(tmpDir, "migration.sql");
+    const posts: Array<{ path: string; body: { sql: string; mode?: string } }> = [];
+    try {
+      writeFileSync(sqlFile, "ALTER TABLE public.items ADD COLUMN tag text;");
+      const callback = captureDatabaseTool({
+        post: async (path: string, body: { sql: string; mode?: string }) => {
+          posts.push({ path, body });
+          return {
+            ok: true,
+            status: 200,
+            data: { command: "ALTER TABLE", rowCount: 0, rows: [] },
+          };
+        },
+      });
+
+      const result = await callback({
+        action: "execute",
+        ref: "proj",
+        file: sqlFile,
+      });
+
+      expect(posts).toHaveLength(1);
+      expect(posts[0].body.sql).toBe("ALTER TABLE public.items ADD COLUMN tag text;");
+      expect(posts[0].body.mode).toBe("migration");
+      expect(result.content[0].text).toContain("✅ Query OK");
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  test("execute action supports explicit mode and admin flag", async () => {
+    const posts: Array<{ path: string; body: { sql: string; mode?: string; admin?: boolean } }> = [];
+    const callback = captureDatabaseTool({
+      post: async (path: string, body: { sql: string; mode?: string; admin?: boolean }) => {
+        posts.push({ path, body });
+        return { ok: true, status: 200, data: { command: "SELECT", rows: [{ num: 42 }], rowCount: 1 } };
+      },
+    });
+
+    const result = await callback({
+      action: "execute",
+      ref: "proj",
+      sql: "SELECT 42 as num;",
+      mode: "admin",
+      admin: true,
+    });
+
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body.mode).toBe("admin");
+    expect(posts[0].body.admin).toBe(true);
+    expect(result.content[0].text).toContain("42");
+  });
+
+  test("query action passes mode if specified", async () => {
+    const posts: Array<{ path: string; body: { sql: string; mode?: string } }> = [];
+    const callback = captureDatabaseTool({
+      post: async (path: string, body: { sql: string; mode?: string }) => {
+        posts.push({ path, body });
+        return { ok: true, status: 200, data: { command: "SELECT", rows: [{ id: "1" }], rowCount: 1 } };
+      },
+    });
+
+    await callback({
+      action: "query",
+      ref: "proj",
+      sql: "SELECT id FROM users",
+      mode: "read",
+    });
+
+    expect(posts).toHaveLength(1);
+    expect(posts[0].body.mode).toBe("read");
+  });
+
+  test("execute action is rejected when readOnly is enabled", async () => {
+    let callback: ((args: Record<string, unknown>) => Promise<CapturedDatabaseToolResponse>) | undefined;
+    registerDatabaseTools({
+      tool(name: string, _description: string, _schema: Record<string, unknown>, toolCallback: typeof callback) {
+        if (name === "database") callback = toolCallback;
+      },
+    }, {} as any, { readOnly: true });
+
+    const response = await callback!({
+      action: "execute",
+      ref: "proj",
+      sql: "INSERT INTO items VALUES (1)",
+    });
+
+    expect(response.content[0].text).toContain("Write blocked: execute (read-only mode)");
+  });
 });

@@ -499,4 +499,81 @@ describe("database SQL routes", () => {
     expect(response.status).toBe(400);
     expect(rlsDb.reserve).not.toHaveBeenCalled();
   });
+
+  test("POST /query executes SELECT queries with default read mode", async () => {
+    const response = await request("project-a", "/query", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: "SELECT id, name FROM public.users" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(executeQuery).toHaveBeenCalledWith("shared_tenant_db", "SELECT id, name FROM public.users", {
+      mode: "read",
+      username: "tenant_user",
+      password: "test-password",
+    });
+  });
+
+  test("POST /query auto-detects DDL/DML mutations and executes in migration mode", async () => {
+    const response = await request("project-a", "/query", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ query: "CREATE TABLE public.widgets (id uuid PRIMARY KEY, name text)" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(executeQuery).toHaveBeenCalledWith(
+      "shared_tenant_db",
+      "CREATE TABLE public.widgets (id uuid PRIMARY KEY, name text)",
+      {
+        mode: "migration",
+        username: "tenant_user",
+        password: "test-password",
+      },
+    );
+    expect(withProjectMigrationLocks).toHaveBeenCalledTimes(1);
+    expect(schemaReloadQueries.some(({ values }) => values.includes("pgrst_project-a"))).toBe(true);
+  });
+
+  test("POST /query accepts sql field as alias for query", async () => {
+    const response = await request("project-a", "/query", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sql: "INSERT INTO public.widgets (name) VALUES ('gear')" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(executeQuery).toHaveBeenCalledWith(
+      "shared_tenant_db",
+      "INSERT INTO public.widgets (name) VALUES ('gear')",
+      {
+        mode: "migration",
+        username: "tenant_user",
+        password: "test-password",
+      },
+    );
+  });
+
+  test("POST /query supports explicit mode and query_id cancellation tracking", async () => {
+    const customQueryId = "query-e2e-cancel-id-123456";
+    const response = await request("project-a", "/query", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        query: "SELECT 1",
+        mode: "read",
+        query_id: customQueryId,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(executeQuery).toHaveBeenCalledWith("shared_tenant_db", "SELECT 1", {
+      mode: "read",
+      projectRef: "project-a",
+      queryId: customQueryId,
+      username: "tenant_user",
+      password: "test-password",
+    });
+  });
 });

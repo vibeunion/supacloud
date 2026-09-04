@@ -2,7 +2,7 @@ import { Elysia, t } from "elysia";
 import type { SQL, TransactionSQL } from "bun";
 import { projectService } from "../services";
 import { db, getProjectDb, getProjectRoleDb, removeProjectDbCache, resolveAuthenticatorName, resolveDbName, sql as metaSql, type SqlExecutionMode } from "../db";
-import { isDangerousSQL, normalizeSqlForPolicy, sqlContainsTransactionControl } from "../db/sql-policy";
+import { isDangerousSQL, normalizeSqlForPolicy, sqlContainsTransactionControl, WRITE_SQL_PATTERN } from "../db/sql-policy";
 import { cancelActiveSqlQuery } from "../db/sql-query-registry";
 import { splitSqlStatements, stripOuterTransactionStatements } from "../db/sql-statements";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
@@ -525,9 +525,18 @@ async function readQueryPerformanceStats(credentials: {
   return { installed: true, rows };
 }
 
-function resolveSqlMode(body: Record<string, unknown>): SqlExecutionMode {
-  const mode = typeof body.mode === "string" ? body.mode : "read";
+function resolveSqlMode(body: Record<string, unknown>, sqlQuery?: string): SqlExecutionMode {
+  const mode = typeof body.mode === "string" ? body.mode : undefined;
   if (mode === "migration" || mode === "admin") return mode;
+  if (mode === "read") return "read";
+  if (sqlQuery) {
+    const rawStatements = splitSqlStatements(sqlQuery);
+    if (rawStatements.length > 1) return "migration";
+    const normalized = normalizeSqlForPolicy(rawStatements[0] || "");
+    if (WRITE_SQL_PATTERN.test(normalized) || !/^\s*(SELECT|WITH|EXPLAIN|SHOW)\b/i.test(normalized)) {
+      return "migration";
+    }
+  }
   return "read";
 }
 
@@ -1158,6 +1167,101 @@ function createTableFailure(error: unknown, projectRef: string) {
   return { message: "Failed to create table", code: "500", status: 500 as const };
 }
 
+async function executeProjectSqlRoute({
+  projectRef,
+  body,
+  request,
+  set,
+}: {
+  projectRef: string;
+  body: Record<string, unknown>;
+  request: Request;
+  set: { status: number | string };
+}) {
+  const authError = await requireProjectOrAdminAuth(request, projectRef);
+  if (authError) return projectAuthResponse(authError, set);
+
+  const project = await projectService.getProject(projectRef);
+  if (!project) {
+    set.status = 404;
+    return { message: "Project not found", code: "404", status: 404 };
+  }
+
+  try {
+    const sqlQuery = typeof body.query === "string" && body.query
+      ? body.query
+      : typeof body.sql === "string" && body.sql
+        ? body.sql
+        : undefined;
+    if (!sqlQuery) {
+      set.status = 400;
+      return { message: "query or sql is required", code: "400", status: 400 };
+    }
+    const mode = resolveSqlMode(body, sqlQuery);
+
+    if (mode === "admin") {
+      if (!requireAdminMode(body)) {
+        set.status = 403;
+        return { message: "Admin SQL requires mode=admin and admin=true", code: "403", status: 403 };
+      }
+      const authError = await requireAdminAuth(request);
+      if (authError) {
+        set.status = authError.status;
+        return { message: authError.body.error, code: String(authError.status), status: authError.status };
+      }
+    }
+    const credentials = await getProjectDatabaseCredentials(projectRef);
+    if (!credentials) {
+      set.status = 404;
+      return { message: "Project database credentials not found", code: "404", status: 404 };
+    }
+    const useRoleConnection = mode !== "admin";
+    const execute = async () => {
+      if (mode === "migration") {
+        await branchReplacementJournal.assertInactive([projectRef]);
+      }
+      const result = await db.executeQuery(credentials.db_name, sqlQuery, {
+        mode,
+        ...(typeof body.query_id === "string"
+          ? { projectRef, queryId: body.query_id }
+          : {}),
+        ...(useRoleConnection ? { username: credentials.db_user, password: credentials.db_password } : {}),
+      });
+      const adminMayChangeSchema = mode === "admin" && sqlExecutionMayChangeSchema(result, sqlQuery);
+      let schemaReloadStatus: SchemaReloadStatus | undefined;
+      let ddlCommitted: true | undefined;
+      if (mode === "migration" || adminMayChangeSchema) {
+        const adminDb = getProjectDb(credentials.db_name);
+        schemaReloadStatus = await tryNotifyPostgrestSchemaReload(adminDb, projectRef)
+          ? "notified"
+          : "notification_failed";
+        if (mode === "migration" || adminSqlCanConfirmDdlCommitted(sqlQuery)) {
+          ddlCommitted = true;
+        }
+      }
+      return { result, schemaReloadStatus, ddlCommitted };
+    };
+    const execution = mode === "migration"
+      ? await withProjectMigrationLocks({ projectRefs: [projectRef] }, execute)
+      : await execute();
+    return sqlRouteResponse(execution.result, {
+      schemaReloadStatus: execution.schemaReloadStatus,
+      ddlCommitted: execution.ddlCommitted,
+    });
+  } catch (error: unknown) {
+    if (error instanceof ProjectMigrationLockError) {
+      set.status = error.httpStatus;
+      return { message: error.message, code: error.code, status: error.httpStatus };
+    }
+    if (error instanceof BranchReplacementJournalActiveError) {
+      set.status = error.httpStatus;
+      return { message: error.message, code: error.code, status: error.httpStatus };
+    }
+    set.status = 400;
+    return sqlRouteErrorResponse(error);
+  }
+}
+
 export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" })
     .get(
         "/tables",
@@ -1621,38 +1725,23 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
     .post(
         "/query",
         async ({ params, body, set, request }) => {
-            const authError = await requireProjectOrAdminAuth(request, params.ref);
-            if (authError) return projectAuthResponse(authError, set);
-
-            const project = await projectService.getProject(params.ref);
-            if (!project) {
-                set.status = 404;
-                return { message: "Project not found", code: "404", status: 404 };
-            }
-
-            try {
-                const credentials = await getProjectDatabaseCredentials(params.ref);
-                if (!credentials) {
-                    set.status = 404;
-                    return { message: "Project database credentials not found", code: "404", status: 404 };
-                }
-                const result = await db.executeQuery(credentials.db_name, body.query, {
-                    mode: "read",
-                    username: credentials.db_user,
-                    password: credentials.db_password,
-                });
-                return sqlRouteResponse(result);
-            } catch (error: unknown) {
-                set.status = 400;
-                return sqlRouteErrorResponse(error);
-            }
+            return executeProjectSqlRoute({
+                projectRef: params.ref,
+                body: body as Record<string, unknown>,
+                request,
+                set,
+            });
         },
         {
             params: t.Object({ ref: t.String({ minLength: 1 }) }),
             body: t.Object({
-                query: t.String(),
+                sql: t.Optional(t.String()),
+                query: t.Optional(t.String()),
+                mode: t.Optional(t.Union([t.Literal("read"), t.Literal("migration"), t.Literal("admin")])),
+                admin: t.Optional(t.Boolean()),
+                query_id: t.Optional(t.String({ minLength: 16, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" })),
             }),
-            detail: { tags: ["projects"], summary: "Execute a read-only SQL query" },
+            detail: { tags: ["projects"], summary: "Execute a SQL query with mode control" },
         }
     )
     .get(
@@ -1698,84 +1787,12 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
     .post(
         "/sql",
         async ({ params, body, set, request }) => {
-            const authError = await requireProjectOrAdminAuth(request, params.ref);
-            if (authError) return projectAuthResponse(authError, set);
-
-            const project = await projectService.getProject(params.ref);
-            if (!project) {
-                set.status = 404;
-                return { message: "Project not found", code: "404", status: 404 };
-            }
-
-            try {
-                const sqlQuery = body.query || body.sql;
-                if (!sqlQuery) {
-                    set.status = 400;
-                    return { message: "query or sql is required", code: "400", status: 400 };
-                }
-                const mode = resolveSqlMode(body as Record<string, unknown>);
-
-                if (mode === "admin") {
-                    if (!requireAdminMode(body as Record<string, unknown>)) {
-                        set.status = 403;
-                        return { message: "Admin SQL requires mode=admin and admin=true", code: "403", status: 403 };
-                    }
-                    const authError = await requireAdminAuth(request);
-                    if (authError) {
-                        set.status = authError.status;
-                        return { message: authError.body.error, code: String(authError.status), status: authError.status };
-                    }
-                }
-                const credentials = await getProjectDatabaseCredentials(params.ref);
-                if (!credentials) {
-                    set.status = 404;
-                    return { message: "Project database credentials not found", code: "404", status: 404 };
-                }
-                const useRoleConnection = mode !== "admin";
-                const execute = async () => {
-                  if (mode === "migration") {
-                    await branchReplacementJournal.assertInactive([params.ref]);
-                  }
-                  const result = await db.executeQuery(credentials.db_name, sqlQuery, {
-                    mode,
-                    ...(typeof body.query_id === "string"
-                      ? { projectRef: params.ref, queryId: body.query_id }
-                      : {}),
-                    ...(useRoleConnection ? { username: credentials.db_user, password: credentials.db_password } : {}),
-                  });
-                  const adminMayChangeSchema = mode === "admin" && sqlExecutionMayChangeSchema(result, sqlQuery);
-                  let schemaReloadStatus: SchemaReloadStatus | undefined;
-                  let ddlCommitted: true | undefined;
-                  if (mode === "migration" || adminMayChangeSchema) {
-                    const adminDb = getProjectDb(credentials.db_name);
-                    schemaReloadStatus = await tryNotifyPostgrestSchemaReload(adminDb, params.ref)
-                      ? "notified"
-                      : "notification_failed";
-                    if (mode === "migration" || adminSqlCanConfirmDdlCommitted(sqlQuery)) {
-                      ddlCommitted = true;
-                    }
-                  }
-                  return { result, schemaReloadStatus, ddlCommitted };
-                };
-                const execution = mode === "migration"
-                  ? await withProjectMigrationLocks({ projectRefs: [params.ref] }, execute)
-                  : await execute();
-                return sqlRouteResponse(execution.result, {
-                  schemaReloadStatus: execution.schemaReloadStatus,
-                  ddlCommitted: execution.ddlCommitted,
-                });
-            } catch (error: unknown) {
-                if (error instanceof ProjectMigrationLockError) {
-                    set.status = error.httpStatus;
-                    return { message: error.message, code: error.code, status: error.httpStatus };
-                }
-                if (error instanceof BranchReplacementJournalActiveError) {
-                    set.status = error.httpStatus;
-                    return { message: error.message, code: error.code, status: error.httpStatus };
-                }
-                set.status = 400;
-                return sqlRouteErrorResponse(error);
-            }
+            return executeProjectSqlRoute({
+                projectRef: params.ref,
+                body: body as Record<string, unknown>,
+                request,
+                set,
+            });
         },
         {
             params: t.Object({ ref: t.String({ minLength: 1 }) }),
