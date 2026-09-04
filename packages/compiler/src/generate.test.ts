@@ -553,6 +553,9 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
                 scope: "application",
                 deps: [],
                 importPath: "./tokens",
+                exported: true,
+                file: "src/tokens.ts",
+                line: 1,
               },
             ],
             controllers: [
