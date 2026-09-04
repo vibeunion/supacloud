@@ -1,4 +1,5 @@
 import type { InjectionToken } from "./token";
+import { APP_INITIALIZER } from "./context";
 import type { Scope } from "./scope";
 
 /** A class usable as a DI token / provider implementation. */
@@ -91,4 +92,33 @@ export function flattenProviders(providers: Array<Provider | EnvironmentProvider
     }
   }
   return result;
+}
+
+/**
+ * Configures an application initializer function that executes during startup before accepting requests.
+ * Modeled after Angular's provideAppInitializer.
+ */
+export function provideAppInitializer(
+  initializerFn: () => void | Promise<void>,
+): EnvironmentProviders {
+  return makeEnvironmentProviders([
+    {
+      provide: APP_INITIALIZER,
+      useValue: initializerFn,
+      multi: true,
+    },
+  ]);
+}
+
+/**
+ * Functional provider helper to register an InjectionToken with a static value or factory.
+ * Modeled after Angular's provideToken pattern.
+ */
+export function provideToken<T>(token: Token<T>, value: T): EnvironmentProviders {
+  return makeEnvironmentProviders([
+    {
+      provide: token,
+      useValue: value,
+    },
+  ]);
 }

@@ -3,6 +3,8 @@ import type { Scope } from "./scope";
 export interface InjectionTokenOptions<T> {
   /** Optional default factory used when no explicit provider is registered. */
   factory?: () => T;
+  /** Automatically provide in the root injector context without manual module declaration (Angular tree-shakable provider). */
+  providedIn?: "root";
   /** Default scope when the token itself is used as a provider. */
   scope?: Scope;
 }
@@ -14,11 +16,13 @@ export interface InjectionTokenOptions<T> {
 export class InjectionToken<T> {
   readonly name: string;
   readonly factory?: () => T;
+  readonly providedIn?: "root";
   readonly scope?: Scope;
 
   constructor(name: string, options: InjectionTokenOptions<T> = {}) {
     this.name = name;
     this.factory = options.factory;
+    this.providedIn = options.providedIn;
     this.scope = options.scope;
   }
 

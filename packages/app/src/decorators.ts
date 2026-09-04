@@ -21,6 +21,13 @@ export const SELF_PARAMS_METADATA = "supacloud:self-params";
 export const SKIP_SELF_PARAMS_METADATA = "supacloud:skip-self-params";
 export const HOST_PARAMS_METADATA = "supacloud:host-params";
 export const GUARDS_METADATA = "supacloud:guards";
+export const ROUTE_PARAMS_METADATA = "supacloud:route-params";
+
+export interface RouteParamBinding {
+  index: number;
+  type: "param" | "query" | "body" | "headers";
+  name?: string;
+}
 
 export interface InjectableOptions {
   scope?: Scope;
@@ -313,10 +320,59 @@ export function getCommandMeta(target: object): CommandMeta | undefined {
   return readOwnOrInherited(target, COMMAND_METADATA);
 }
 
-export function Query(options: QueryOptions): ClassDecorator {
-  return (target) => {
-    defineMetadata(target, QUERY_METADATA, { ...options });
+export function Param(name?: string): ParameterDecorator {
+  return (target, propertyKey, parameterIndex) => {
+    if (propertyKey === undefined) {
+      throw new Error("@Param() is only supported on controller method parameters");
+    }
+    const cls = (target as { constructor: Type<unknown> }).constructor;
+    const key = `${ROUTE_PARAMS_METADATA}:${String(propertyKey)}`;
+    const existing = readOwnOrInherited<RouteParamBinding[]>(cls, key) ?? [];
+    defineMetadata(cls, key, [...existing, { index: parameterIndex, type: "param", name }]);
   };
+}
+
+export function Body(): ParameterDecorator {
+  return (target, propertyKey, parameterIndex) => {
+    if (propertyKey === undefined) {
+      throw new Error("@Body() is only supported on controller method parameters");
+    }
+    const cls = (target as { constructor: Type<unknown> }).constructor;
+    const key = `${ROUTE_PARAMS_METADATA}:${String(propertyKey)}`;
+    const existing = readOwnOrInherited<RouteParamBinding[]>(cls, key) ?? [];
+    defineMetadata(cls, key, [...existing, { index: parameterIndex, type: "body" }]);
+  };
+}
+
+export function Headers(name?: string): ParameterDecorator {
+  return (target, propertyKey, parameterIndex) => {
+    if (propertyKey === undefined) {
+      throw new Error("@Headers() is only supported on controller method parameters");
+    }
+    const cls = (target as { constructor: Type<unknown> }).constructor;
+    const key = `${ROUTE_PARAMS_METADATA}:${String(propertyKey)}`;
+    const existing = readOwnOrInherited<RouteParamBinding[]>(cls, key) ?? [];
+    defineMetadata(cls, key, [...existing, { index: parameterIndex, type: "headers", name }]);
+  };
+}
+
+export function Query(optionsOrName?: QueryOptions | string): ClassDecorator & ParameterDecorator {
+  return ((target: object, propertyKey?: string | symbol, parameterIndex?: number) => {
+    if (typeof parameterIndex === "number" && propertyKey !== undefined) {
+      const cls = (target as { constructor: Type<unknown> }).constructor;
+      const key = `${ROUTE_PARAMS_METADATA}:${String(propertyKey)}`;
+      const existing = readOwnOrInherited<RouteParamBinding[]>(cls, key) ?? [];
+      const name = typeof optionsOrName === "string" ? optionsOrName : undefined;
+      defineMetadata(cls, key, [...existing, { index: parameterIndex, type: "query", name }]);
+    } else {
+      const opts = typeof optionsOrName === "object" && optionsOrName !== null ? optionsOrName : { name: String(optionsOrName ?? "") };
+      defineMetadata(target, QUERY_METADATA, { ...opts });
+    }
+  }) as ClassDecorator & ParameterDecorator;
+}
+
+export function getRouteParams(target: object, propertyKey: string | symbol): RouteParamBinding[] {
+  return readOwnOrInherited(target, `${ROUTE_PARAMS_METADATA}:${String(propertyKey)}`) ?? [];
 }
 
 export function getQueryMeta(target: object): QueryMeta | undefined {

@@ -9,6 +9,7 @@ import type {
   ValidateOptions,
 } from "./types";
 import { resolveModuleBoundaries } from "./profiles";
+import { findClosestMatch } from "./util";
 
 const SCOPE_LIFETIME_RANK: Record<Scope, number> = {
   application: 0,
@@ -172,6 +173,46 @@ export function validateGraph(
               controller.file,
             );
           }
+        }
+
+        const pathParams = route.pathParams ?? [];
+        const paramBindings = route.paramBindings ?? [];
+
+        for (const binding of paramBindings) {
+          if (!pathParams.includes(binding)) {
+            const suggestion = findClosestMatch(binding, pathParams);
+            error(
+              "unmatched-path-param",
+              `Controller ${controller.className} handler ${route.handler} binds @Param('${binding}'), but route path '${route.path}' does not define parameter ':${binding}'.`,
+              controller.file,
+              undefined,
+              suggestion ? `Did you mean @Param('${suggestion}')?` : undefined,
+            );
+          }
+        }
+
+        if (paramBindings.length > 0) {
+          for (const param of pathParams) {
+            if (!paramBindings.includes(param)) {
+              warn(
+                "missing-path-param",
+                `Route path '${route.path}' defines parameter ':${param}', but handler ${controller.className}.${route.handler} does not bind it with @Param('${param}').`,
+                controller.file,
+                undefined,
+                `Add @Param('${param}') to ${route.handler} arguments.`,
+              );
+            }
+          }
+        }
+
+        if (route.hasBodyBinding && (route.method === "GET" || route.method === "HEAD" || route.method === "OPTIONS")) {
+          error(
+            "invalid-body-binding",
+            `Route handler ${controller.className}.${route.handler} binds @Body() on HTTP ${route.method} route '${route.path}'. Request bodies are not supported on ${route.method} requests.`,
+            controller.file,
+            undefined,
+            `Use POST, PUT, or PATCH for routes accepting a request body, or bind parameters via @Query() / @Param().`,
+          );
         }
       }
 

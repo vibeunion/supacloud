@@ -49,7 +49,10 @@ interface TokenInfo {
   /** InjectionToken string name, e.g. "supacloud.case-repository". */
   stringName?: string;
   scope?: Scope;
+  providedIn?: "root";
+  hasFactory?: boolean;
   file: string;
+  line?: number;
 }
 
 interface ClassInfo {
@@ -76,9 +79,18 @@ export async function analyzeProject(
   include?: string[],
   cache?: DependencyGraphCache,
 ): Promise<ApplicationGraph> {
-  const project = createProject(rootDir);
-  const patterns = (include ?? DEFAULT_INCLUDE).map((glob) => join(rootDir, glob));
-  project.addSourceFilesAtPaths(patterns);
+  let project: Project;
+  if (cache?.project) {
+    project = cache.project;
+    for (const sf of project.getSourceFiles()) {
+      sf.refreshFromFileSystemSync();
+    }
+  } else {
+    project = createProject(rootDir);
+    const patterns = (include ?? DEFAULT_INCLUDE).map((glob) => join(rootDir, glob));
+    project.addSourceFilesAtPaths(patterns);
+    if (cache) cache.project = project;
+  }
   const sourceFiles = project
     .getSourceFiles()
     .filter((sf) => !sf.getFilePath().includes("node_modules") && !sf.isDeclarationFile())
@@ -303,6 +315,23 @@ export async function analyzeProject(
       }
     }
   }
+
+  for (const [name, tokenInfo] of ctx.tokensByName.entries()) {
+    if (tokenInfo.providedIn === "root" && !allRegisteredClasses.has(name)) {
+      rootProviders.push({
+        token: name,
+        tokenKind: "injection-token",
+        kind: "factory",
+        scope: tokenInfo.scope ?? "application",
+        deps: [],
+        providedIn: "root",
+        exported: true,
+        file: sourcePath(ctx.rootDir, tokenInfo.file),
+        line: tokenInfo.line ?? 1,
+      });
+    }
+  }
+
   if (rootProviders.length > 0 || standaloneControllers.length > 0 || standaloneCommands.length > 0) {
     const existingRoot = modules.find((m) => m.name === "root" || m.name === "app");
     if (existingRoot) {
@@ -389,7 +418,7 @@ function parseTokenVariable(decl: VariableDeclaration, file: string): TokenInfo 
   if (!init || !Node.isNewExpression(init)) return undefined;
   if (init.getExpression().getText() !== "InjectionToken") return undefined;
   const [nameArg, optionsArg] = init.getArguments();
-  const info: TokenInfo = { name: decl.getName(), file };
+  const info: TokenInfo = { name: decl.getName(), file, line: decl.getStartLineNumber() };
   if (nameArg && Node.isStringLiteral(nameArg)) {
     info.stringName = nameArg.getLiteralText();
   }
@@ -397,6 +426,14 @@ function parseTokenVariable(decl: VariableDeclaration, file: string): TokenInfo 
     const scope = stringLiteralProp(optionsArg, "scope");
     if (scope && (SCOPES as string[]).includes(scope)) {
       info.scope = scope as Scope;
+    }
+    const providedIn = stringLiteralProp(optionsArg, "providedIn");
+    if (providedIn === "root") {
+      info.providedIn = "root";
+    }
+    const factory = getProp(optionsArg, "factory");
+    if (factory) {
+      info.hasFactory = true;
     }
   }
   return info;
@@ -731,11 +768,42 @@ function parseController(
       if (!httpMethod) continue;
       const args = dec.getArguments();
       const pathArg = args[0];
+      const routePath = pathArg && Node.isStringLiteral(pathArg) ? pathArg.getLiteralText() : "/";
       const route: RouteNode = {
         method: httpMethod,
-        path: pathArg && Node.isStringLiteral(pathArg) ? pathArg.getLiteralText() : "/",
+        path: routePath,
         handler: method.getName(),
       };
+      const pathParams: string[] = [];
+      const paramRegex = /:([a-zA-Z0-9_]+)/g;
+      let match: RegExpExecArray | null;
+      while ((match = paramRegex.exec(routePath)) !== null) {
+        pathParams.push(match[1]);
+      }
+      if (pathParams.length > 0) route.pathParams = pathParams;
+
+      const paramBindings: string[] = [];
+      const queryBindings: string[] = [];
+      let hasBodyBinding = false;
+      for (const p of method.getParameters()) {
+        for (const pDec of p.getDecorators()) {
+          const dName = decoratorName(pDec);
+          const firstArg = pDec.getArguments()[0];
+          if (dName === "Param") {
+            const pName = firstArg && Node.isStringLiteral(firstArg) ? firstArg.getLiteralText() : p.getName();
+            paramBindings.push(pName);
+          } else if (dName === "Query") {
+            const qName = firstArg && Node.isStringLiteral(firstArg) ? firstArg.getLiteralText() : p.getName();
+            queryBindings.push(qName);
+          } else if (dName === "Body") {
+            hasBodyBinding = true;
+          }
+        }
+      }
+      if (paramBindings.length > 0) route.paramBindings = paramBindings;
+      if (queryBindings.length > 0) route.queryBindings = queryBindings;
+      if (hasBodyBinding) route.hasBodyBinding = true;
+
       const routeGuards: string[] = [...classGuards];
       for (const mDec of method.getDecorators()) {
         if (decoratorName(mDec) === "UseGuards") {

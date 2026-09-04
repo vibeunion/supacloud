@@ -365,4 +365,45 @@ describe("Angular-style functional inject() & injection context", () => {
     expect(APP_INITIALIZER.scope).toBe("application");
     expect(APP_INITIALIZER.name).toBe("supacloud.app-initializer");
   });
+
+  test("Param, Query, Body, Headers decorators record route parameter bindings", () => {
+    const { Param, Query, Body, Headers, getRouteParams } = require("./index");
+    class UserController {
+      getUser(
+        @Param("id") id: string,
+        @Query("filter") filter: string,
+        @Body() body: any,
+        @Headers("authorization") auth: string,
+      ) {
+        return { id, filter, body, auth };
+      }
+    }
+
+    const params = getRouteParams(UserController, "getUser");
+    expect(params).toHaveLength(4);
+    expect(params.find((p: any) => p.type === "param")).toEqual({ index: 0, type: "param", name: "id" });
+    expect(params.find((p: any) => p.type === "query")).toEqual({ index: 1, type: "query", name: "filter" });
+    expect(params.find((p: any) => p.type === "body")).toEqual({ index: 2, type: "body" });
+    expect(params.find((p: any) => p.type === "headers")).toEqual({ index: 3, type: "headers", name: "authorization" });
+  });
+
+  test("provideAppInitializer and provideToken produce valid EnvironmentProviders", () => {
+    const { provideAppInitializer, provideToken, isEnvironmentProviders } = require("./index");
+    const fn = async () => {};
+    const initEp = provideAppInitializer(fn);
+    expect(isEnvironmentProviders(initEp)).toBe(true);
+    expect(initEp.ɵproviders[0]).toMatchObject({
+      provide: APP_INITIALIZER,
+      useValue: fn,
+      multi: true,
+    });
+
+    const customToken = new InjectionToken<string>("custom");
+    const tokenEp = provideToken(customToken, "custom-val");
+    expect(isEnvironmentProviders(tokenEp)).toBe(true);
+    expect(tokenEp.ɵproviders[0]).toMatchObject({
+      provide: customToken,
+      useValue: "custom-val",
+    });
+  });
 });

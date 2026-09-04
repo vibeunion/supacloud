@@ -10,6 +10,8 @@ export {
   isFactoryProvider,
   isValueProvider,
   makeEnvironmentProviders,
+  provideAppInitializer,
+  provideToken,
 } from "./provider";
 export type {
   ClassProvider,
@@ -22,17 +24,20 @@ export type {
   ValueProvider,
 } from "./provider";
 export {
+  Body,
   Command,
   Controller,
   Delete,
   Get,
   Head,
+  Headers,
   Host,
   Inject,
   Injectable,
   Module,
   Optional,
   Options,
+  Param,
   Patch,
   Post,
   Put,
@@ -46,6 +51,7 @@ export {
   getHostParams,
   getInjectParams,
   getOptionalParams,
+  getRouteParams,
   getSelfParams,
   getSkipSelfParams,
   getInjectableMeta,
@@ -59,6 +65,7 @@ export {
   INJECTABLE_METADATA,
   INJECT_PARAMS_METADATA,
   OPTIONAL_PARAMS_METADATA,
+  ROUTE_PARAMS_METADATA,
   SELF_PARAMS_METADATA,
   SKIP_SELF_PARAMS_METADATA,
   MODULE_METADATA,
@@ -81,6 +88,7 @@ export type {
   ResolveFn,
   RouteDefinition,
   RouteOptions,
+  RouteParamBinding,
 } from "./decorators";
 export { defineModule } from "./module";
 export { APP_INITIALIZER, DB_CLIENT, JOB_CONTEXT, REQUEST_CONTEXT } from "./context";

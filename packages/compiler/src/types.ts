@@ -68,6 +68,14 @@ export interface RouteNode {
   redirectTo?: string;
   /** Route redirect matching rule (Angular Router style). */
   pathMatch?: "full" | "prefix";
+  /** Path parameters parsed from route path (e.g. :id -> 'id'). */
+  pathParams?: string[];
+  /** Handler method parameter bindings declared via @Param('name'). */
+  paramBindings?: string[];
+  /** Handler method query bindings declared via @Query('name'). */
+  queryBindings?: string[];
+  /** Handler method has @Body() binding. */
+  hasBodyBinding?: boolean;
 }
 
 export interface ControllerNode {
@@ -291,6 +299,8 @@ export interface DependencyGraphCache {
   modules: Map<string, CachedModuleEntry>;
   /** Global file hashes by relative file path. */
   fileHashes: Map<string, string>;
+  /** Retained AST project for true incremental graph re-analysis. */
+  project?: any;
   lastStats?: {
     reusedModules: string[];
     reanalyzedModules: string[];

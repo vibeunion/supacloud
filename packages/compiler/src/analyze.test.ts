@@ -128,6 +128,7 @@ describe("analyzeProject：controller 与路由", () => {
       params: "AcceptParams",
       response: "AcceptResult",
       command: "AcceptCaseCommand",
+      pathParams: ["caseId"],
     });
     expect(controller.schemaImports).toEqual({
       CreateCaseBody: "src/features/case/contracts",

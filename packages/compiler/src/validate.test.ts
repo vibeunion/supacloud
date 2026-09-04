@@ -929,4 +929,97 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(redirectDiag).toBeDefined();
     expect(redirectDiag?.message).toContain("circular redirectTo");
   });
+
+  test("Ivy-style route parameter checking: unmatched and missing path parameters report actionable diagnostics", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "users",
+          className: "UserModule",
+          file: "src/user.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "UserController",
+              path: "/users",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/:userId/roles/:roleId",
+                  handler: "getRole",
+                  pathParams: ["userId", "roleId"],
+                  paramBindings: ["user_id"], // Typo: user_id instead of userId
+                },
+              ],
+              file: "src/user.controller.ts",
+              importPath: "./user.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    const unmatchedDiag = diags.find((d) => d.code === "unmatched-path-param");
+    expect(unmatchedDiag).toBeDefined();
+    expect(unmatchedDiag?.severity).toBe("error");
+    expect(unmatchedDiag?.message).toContain("binds @Param('user_id')");
+    expect(unmatchedDiag?.suggestion).toContain("Did you mean @Param('userId')?");
+
+    const missingDiags = diags.filter((d) => d.code === "missing-path-param");
+    expect(missingDiags.length).toBeGreaterThan(0);
+    expect(missingDiags.some((d) => d.message.includes("roleId"))).toBe(true);
+  });
+
+  test("Ivy-style route parameter checking: invalid @Body() binding on GET reports error", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "items",
+          className: "ItemModule",
+          file: "src/item.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "ItemController",
+              path: "/items",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/",
+                  handler: "listItems",
+                  hasBodyBinding: true,
+                },
+              ],
+              file: "src/item.controller.ts",
+              importPath: "./item.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    const bodyDiag = diags.find((d) => d.code === "invalid-body-binding");
+    expect(bodyDiag).toBeDefined();
+    expect(bodyDiag?.severity).toBe("error");
+    expect(bodyDiag?.message).toContain("binds @Body() on HTTP GET route");
+    expect(bodyDiag?.suggestion).toContain("Use POST, PUT, or PATCH");
+  });
 });
