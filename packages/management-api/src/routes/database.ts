@@ -1176,7 +1176,7 @@ async function executeProjectSqlRoute({
   projectRef: string;
   body: Record<string, unknown>;
   request: Request;
-  set: { status: number | string };
+  set: { status?: number | string };
 }) {
   const authError = await requireProjectOrAdminAuth(request, projectRef);
   if (authError) return projectAuthResponse(authError, set);
