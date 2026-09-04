@@ -1,3 +1,5 @@
+import type { HttpContext } from "./http_context";
+
 /**
  * Angular-inspired functional HTTP interceptor pipeline.
  * Modeled after Angular 15+ HttpInterceptorFn and withInterceptors API.
@@ -8,6 +10,7 @@ export interface HttpRequestPayload {
   url: string;
   headers: Record<string, string>;
   body?: unknown;
+  context?: HttpContext;
 }
 
 export type HttpInterceptorFn = (

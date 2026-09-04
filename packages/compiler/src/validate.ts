@@ -35,6 +35,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "skip-self-dependency-violation": { code: "SC2005", docsUrl: "https://supacloud.dev/errors/SC2005" },
   "export-unprovided-token": { code: "SC2006", docsUrl: "https://supacloud.dev/errors/SC2006" },
   "unresolved-alias-target": { code: "SC2007", docsUrl: "https://supacloud.dev/errors/SC2007" },
+  "self-referencing-alias": { code: "SC2008", docsUrl: "https://supacloud.dev/errors/SC2008" },
   "shadowed-route": { code: "SC3001", docsUrl: "https://supacloud.dev/errors/SC3001" },
   "unresolved-route-redirect": { code: "SC3002", docsUrl: "https://supacloud.dev/errors/SC3002" },
   "circular-route-redirect": { code: "SC3003", docsUrl: "https://supacloud.dev/errors/SC3003" },
@@ -47,6 +48,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "malformed-route-path": { code: "SC3010", docsUrl: "https://supacloud.dev/errors/SC3010" },
   "duplicate-path-param": { code: "SC3011", docsUrl: "https://supacloud.dev/errors/SC3011" },
   "wildcard-not-trailing": { code: "SC3012", docsUrl: "https://supacloud.dev/errors/SC3012" },
+  "invalid-query-param-name": { code: "SC3013", docsUrl: "https://supacloud.dev/errors/SC3013" },
   "command-missing-permission": { code: "SC4001", docsUrl: "https://supacloud.dev/errors/SC4001" },
   "duplicate-command": { code: "SC4002", docsUrl: "https://supacloud.dev/errors/SC4002" },
   "route-command-unresolved": { code: "SC4003", docsUrl: "https://supacloud.dev/errors/SC4003" },
@@ -335,6 +337,28 @@ export function validateGraph(
                 `Add @Param('${param}') to ${route.handler} arguments.`,
               );
             }
+          }
+        }
+
+        // Angular Ivy-style query parameter static validation (SC3013)
+        const queryBindings = route.queryBindings ?? [];
+        for (const q of queryBindings) {
+          if (!q || q.trim().length === 0) {
+            error(
+              "invalid-query-param-name",
+              `Controller ${controller.className} handler ${route.handler} specifies an empty @Query() parameter binding.`,
+              controller.file,
+              undefined,
+              `Specify a non-empty parameter name in @Query('paramName').`,
+            );
+          } else if (/[#?&=/\s]/.test(q)) {
+            error(
+              "invalid-query-param-name",
+              `Controller ${controller.className} handler ${route.handler} specifies invalid @Query('${q}') with illegal character. Query parameter names cannot contain '#', '?', '&', '=', '/', or whitespace.`,
+              controller.file,
+              undefined,
+              `Rename query parameter '${q}' to a valid identifier name without reserved characters.`,
+            );
           }
         }
 
@@ -729,15 +753,25 @@ export function validateGraph(
     for (const provider of module.providers) {
       if (provider.useExisting) {
         const target = provider.useExisting;
-        const resolved = resolveDep(module, target);
-        if (!resolved && !graph.externalTokens.includes(target)) {
+        if (target === provider.token) {
           error(
-            "unresolved-alias-target",
-            `Module '${module.name}' defines provider '${provider.token}' with useExisting: '${target}', but '${target}' is neither provided in '${module.name}' nor imported from an imported module.`,
+            "self-referencing-alias",
+            `Module '${module.name}' defines provider '${provider.token}' with useExisting referencing itself.`,
             provider.file ?? module.file,
             provider.line ?? module.line,
-            `Add a provider for '${target}' to '${module.name}.providers' or an imported module, or update useExisting to reference an available token.`,
+            `Change useExisting to reference a different provider token, or remove the self-referencing alias.`,
           );
+        } else {
+          const resolved = resolveDep(module, target);
+          if (!resolved && !graph.externalTokens.includes(target)) {
+            error(
+              "unresolved-alias-target",
+              `Module '${module.name}' defines provider '${provider.token}' with useExisting: '${target}', but '${target}' is neither provided in '${module.name}' nor imported from an imported module.`,
+              provider.file ?? module.file,
+              provider.line ?? module.line,
+              `Add a provider for '${target}' to '${module.name}.providers' or an imported module, or update useExisting to reference an available token.`,
+            );
+          }
         }
       }
     }

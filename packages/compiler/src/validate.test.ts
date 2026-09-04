@@ -1666,4 +1666,89 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(wildcardDiag?.docsUrl).toBe("https://supacloud.dev/errors/SC3012");
     expect(wildcardDiag?.message).toContain("trailing segment");
   });
+
+  test("detects self-referencing provider useExisting alias (SC2008)", () => {
+    const graphWithSelfAlias: ApplicationGraph = {
+      modules: [
+        {
+          name: "AuthModule",
+          className: "AuthModule",
+          file: "src/auth.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              token: "AuthService",
+              tokenKind: "class",
+              kind: "existing",
+              useExisting: "AuthService",
+              scope: "application",
+              deps: [],
+              file: "src/auth.service.ts",
+              line: 10,
+              exported: false,
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graphWithSelfAlias);
+    const selfAliasDiag = diags.find((d) => d.code === "self-referencing-alias");
+    expect(selfAliasDiag).toBeDefined();
+    expect(selfAliasDiag?.errorCode).toBe("SC2008");
+    expect(selfAliasDiag?.docsUrl).toBe("https://supacloud.dev/errors/SC2008");
+    expect(selfAliasDiag?.message).toContain("referencing itself");
+    expect(selfAliasDiag?.suggestion).toContain("different provider token");
+  });
+
+  test("detects invalid route query parameter names (SC3013)", () => {
+    const graphWithInvalidQuery: ApplicationGraph = {
+      modules: [
+        {
+          name: "SearchModule",
+          className: "SearchModule",
+          file: "src/search.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "SearchController",
+              path: "/search",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/query",
+                  handler: "search",
+                  queryBindings: ["validQuery", "invalid#param", " "],
+                },
+              ],
+              file: "src/search.controller.ts",
+              importPath: "./search.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graphWithInvalidQuery);
+    const invalidQueryDiags = diags.filter((d) => d.code === "invalid-query-param-name");
+    expect(invalidQueryDiags.length).toBe(2);
+    expect(invalidQueryDiags[0].errorCode).toBe("SC3013");
+    expect(invalidQueryDiags[0].docsUrl).toBe("https://supacloud.dev/errors/SC3013");
+    expect(invalidQueryDiags.some((d) => d.message.includes("illegal character"))).toBe(true);
+    expect(invalidQueryDiags.some((d) => d.message.includes("empty @Query()"))).toBe(true);
+  });
 });

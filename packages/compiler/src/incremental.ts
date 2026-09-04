@@ -79,6 +79,9 @@ export function createIncrementalCompiler(): IncrementalCompiler {
         : result.graph.modules.map((module) => module.name);
       const reusedModules = result.graph.cacheStats?.reusedModules ?? [];
       const reanalyzedModules = result.graph.cacheStats?.reanalyzedModules ?? affectedModules;
+      if (cache) {
+        cache.dependencyGraph = new ModuleDependencyGraph(result.graph.modules);
+      }
       const stats: CompileStats = {
         cacheHit: false,
         changedFiles,
@@ -95,6 +98,7 @@ export function createIncrementalCompiler(): IncrementalCompiler {
       previousResult = undefined;
       cache.modules.clear();
       cache.fileHashes.clear();
+      cache.dependencyGraph = undefined;
     },
     getCache(): DependencyGraphCache {
       return cache;
@@ -184,36 +188,107 @@ function diffFiles(previous: Record<string, string> | undefined, current: Record
   return [...names].filter((name) => previous[name] !== current[name]).sort();
 }
 
-function findAffectedModules(previous: ModuleNode[], current: ModuleNode[], changedFiles: string[]): string[] {
-  if (changedFiles.length === 0) return [];
-  const changedSet = new Set(changedFiles);
-  const matchesChanged = (path: string | undefined): boolean => {
-    if (!path) return false;
-    const normalized = path.replace(/\.(tsx?|mts|cts)$/, "");
-    return [...changedSet].some((file) => file.replace(/\.(tsx?|mts|cts)$/, "") === normalized);
-  };
-  const affected = new Set<string>();
-  const markIfOwned = (module: ModuleNode): void => {
-    const ownsChangedFile = [
-      module.file,
-      ...module.providers.map((provider) => provider.importPath),
-      ...module.controllers.map((controller) => controller.importPath),
-    ].some((path) => matchesChanged(path));
-    if (ownsChangedFile) affected.add(module.name);
-  };
-  for (const module of current) markIfOwned(module);
-  if (affected.size === 0) return current.map((module) => module.name);
+/**
+ * Angular Ivy-inspired module dependency graph.
+ * Tracks forward module imports, reverse dependent relationships, and file ownership
+ * to compute precise affected module subgraphs during incremental compilation.
+ */
+export class ModuleDependencyGraph {
+  private readonly imports = new Map<string, Set<string>>();
+  private readonly dependents = new Map<string, Set<string>>();
+  private readonly fileOwners = new Map<string, Set<string>>();
+  private readonly moduleMap = new Map<string, ModuleNode>();
 
-  const modules = new Map(current.map((module) => [module.name, module]));
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const module of modules.values()) {
-      if (module.imports.some((dependency) => affected.has(dependency)) && !affected.has(module.name)) {
-        affected.add(module.name);
-        changed = true;
+  constructor(modules: ModuleNode[] = []) {
+    this.rebuild(modules);
+  }
+
+  rebuild(modules: ModuleNode[]): void {
+    this.imports.clear();
+    this.dependents.clear();
+    this.fileOwners.clear();
+    this.moduleMap.clear();
+
+    for (const mod of modules) {
+      this.moduleMap.set(mod.name, mod);
+      this.imports.set(mod.name, new Set(mod.imports));
+      if (!this.dependents.has(mod.name)) {
+        this.dependents.set(mod.name, new Set());
+      }
+      this.indexFile(mod.file, mod.name);
+      for (const p of mod.providers) {
+        if (p.importPath) this.indexFile(p.importPath, mod.name);
+        if (p.file) this.indexFile(p.file, mod.name);
+      }
+      for (const c of mod.controllers) {
+        if (c.importPath) this.indexFile(c.importPath, mod.name);
+        if (c.file) this.indexFile(c.file, mod.name);
+      }
+    }
+
+    for (const [modName, imps] of this.imports.entries()) {
+      for (const imp of imps) {
+        if (!this.dependents.has(imp)) {
+          this.dependents.set(imp, new Set());
+        }
+        this.dependents.get(imp)!.add(modName);
       }
     }
   }
-  return current.filter((module) => affected.has(module.name)).map((module) => module.name);
+
+  private indexFile(path: string | undefined, moduleName: string): void {
+    if (!path) return;
+    const normalized = path.replace(/\.(tsx?|mts|cts)$/, "");
+    if (!this.fileOwners.has(normalized)) {
+      this.fileOwners.set(normalized, new Set());
+    }
+    this.fileOwners.get(normalized)!.add(moduleName);
+  }
+
+  getModulesOwningFile(filePath: string): string[] {
+    const normalized = filePath.replace(/\.(tsx?|mts|cts)$/, "");
+    return Array.from(this.fileOwners.get(normalized) ?? []);
+  }
+
+  getAffectedModules(changedFiles: string[]): string[] {
+    if (changedFiles.length === 0) return [];
+    const directlyAffected = new Set<string>();
+    for (const file of changedFiles) {
+      for (const modName of this.getModulesOwningFile(file)) {
+        directlyAffected.add(modName);
+      }
+    }
+    if (directlyAffected.size === 0) {
+      return Array.from(this.moduleMap.keys());
+    }
+
+    const affected = new Set(directlyAffected);
+    const queue = Array.from(directlyAffected);
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      const dependents = this.dependents.get(current);
+      if (dependents) {
+        for (const dep of dependents) {
+          if (!affected.has(dep)) {
+            affected.add(dep);
+            queue.push(dep);
+          }
+        }
+      }
+    }
+    return Array.from(this.moduleMap.keys()).filter((name) => affected.has(name));
+  }
+
+  getDirectImports(moduleName: string): string[] {
+    return Array.from(this.imports.get(moduleName) ?? []);
+  }
+
+  getDirectDependents(moduleName: string): string[] {
+    return Array.from(this.dependents.get(moduleName) ?? []);
+  }
+}
+
+function findAffectedModules(previous: ModuleNode[], current: ModuleNode[], changedFiles: string[]): string[] {
+  const depGraph = new ModuleDependencyGraph(current);
+  return depGraph.getAffectedModules(changedFiles);
 }

@@ -200,3 +200,29 @@ export {
   isPlatformServer,
 } from "./platform";
 export type { PlatformId } from "./platform";
+export { HttpParams } from "./http_params";
+export type { HttpParamsOptions } from "./http_params";
+export { HttpHeaders } from "./http_headers";
+export { HttpContext, HttpContextToken } from "./http_context";
+export {
+  HTTP_CLIENT_CONFIG,
+  HTTP_INTERCEPTORS,
+  HttpClient,
+  HttpErrorResponse,
+  provideHttpClient,
+  withFetch,
+  withRequestsMadeViaParent,
+} from "./http_client";
+export type {
+  HttpClientConfig,
+  HttpClientFeature,
+  HttpClientFeatureKind,
+  HttpRequestOptions,
+} from "./http_client";
+export {
+  DefaultUrlSerializer,
+  UrlSegmentGroup,
+  UrlSerializer,
+  UrlTree,
+} from "./url_tree";
+export type { UrlSegment } from "./url_tree";

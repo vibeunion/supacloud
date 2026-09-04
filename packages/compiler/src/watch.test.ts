@@ -29,6 +29,7 @@ describe("watchProject", () => {
 
     const initial = await handle.ready;
     expect(initial.type).toBe("compiled");
+    await new Promise((resolve) => setTimeout(resolve, 50));
     await appendFile(join(rootDir, "src/features/health/health.module.ts"), "\n", "utf8");
 
     await new Promise<void>((resolvePromise, rejectPromise) => {

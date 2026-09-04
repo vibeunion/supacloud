@@ -4,6 +4,7 @@ export { watchProject } from "./watch";
 export { doctorProject, explainGraph, formatGraph } from "./inspect";
 export { createIncrementalCompiler } from "./incremental";
 export { createDependencyGraphCache } from "./incremental";
+export { ModuleDependencyGraph } from "./incremental";
 export { generateApplication, renderApplication } from "./generate";
 export type { GenerateOptions, RenderedArtifacts } from "./generate";
 export type { DoctorResult } from "./inspect";

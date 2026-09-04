@@ -325,6 +325,8 @@ export interface DependencyGraphCache {
   fileHashes: Map<string, string>;
   /** Retained AST project for true incremental graph re-analysis. */
   project?: any;
+  /** Retained module dependency graph tracking imports and reverse dependents. */
+  dependencyGraph?: any;
   lastStats?: {
     reusedModules: string[];
     reanalyzedModules: string[];
