@@ -130,3 +130,112 @@ export function untracked<T>(fn: () => T): T {
     isTrackingEnabled = prevTracking;
   }
 }
+
+export interface LinkedSignalOptions<S, D> {
+  source: () => S;
+  computation: (source: S, previous?: { source: S; value: D }) => D;
+  equal?: (a: D, b: D) => boolean;
+}
+
+/**
+ * Creates a writable signal whose value is linked to a source reactive computation.
+ * When the source dependencies change, the linkedSignal automatically recomputes its value.
+ * Unlike a standard computed signal, a linkedSignal is writable and can be manually modified.
+ * Modeled directly after Angular 19's linkedSignal.
+ */
+export function linkedSignal<D>(
+  computation: () => D,
+  options?: { equal?: (a: D, b: D) => boolean },
+): WritableSignal<D>;
+export function linkedSignal<S, D = S>(
+  options: LinkedSignalOptions<S, D>,
+): WritableSignal<D>;
+export function linkedSignal<S, D>(
+  computationOrOptions: (() => D) | LinkedSignalOptions<S, D>,
+  shorthandOptions?: { equal?: (a: D, b: D) => boolean },
+): WritableSignal<D> {
+  let sourceFn: () => S;
+  let computationFn: (source: S, previous?: { source: S; value: D }) => D;
+  let equalFn: (a: D, b: D) => boolean;
+
+  if (typeof computationOrOptions === "function") {
+    sourceFn = computationOrOptions as unknown as () => S;
+    computationFn = (s: S) => s as unknown as D;
+    equalFn = shorthandOptions?.equal ?? Object.is;
+  } else {
+    sourceFn = computationOrOptions.source;
+    computationFn = computationOrOptions.computation;
+    equalFn = computationOrOptions.equal ?? Object.is;
+  }
+
+  let currentValue: D;
+  let hasValue = false;
+  let previousRecord: { source: S; value: D } | undefined = undefined;
+  let isDirty = true;
+  const subscribers = new Set<Consumer>();
+
+  const onSourceChanged = () => {
+    if (!isDirty) {
+      isDirty = true;
+      for (const notify of [...subscribers]) {
+        notify();
+      }
+    }
+  };
+
+  const recompute = () => {
+    const prevConsumer = activeConsumer;
+    activeConsumer = onSourceChanged;
+    let nextSource: S;
+    try {
+      nextSource = sourceFn();
+    } finally {
+      activeConsumer = prevConsumer;
+    }
+
+    if (hasValue && previousRecord && Object.is(nextSource, previousRecord.source)) {
+      isDirty = false;
+      return currentValue;
+    }
+
+    const nextValue = computationFn(nextSource, previousRecord);
+    currentValue = nextValue;
+    hasValue = true;
+    previousRecord = { source: nextSource, value: currentValue };
+    isDirty = false;
+    return currentValue;
+  };
+
+  const read = (() => {
+    if (isTrackingEnabled && activeConsumer) {
+      subscribers.add(activeConsumer);
+    }
+    if (isDirty || !hasValue) {
+      return recompute();
+    }
+    return currentValue;
+  }) as WritableSignal<D>;
+
+  read.set = (newValue: D) => {
+    if (!hasValue || isDirty) {
+      recompute();
+    }
+    if (!equalFn(currentValue, newValue)) {
+      currentValue = newValue;
+      if (previousRecord) {
+        previousRecord.value = newValue;
+      }
+      for (const notify of [...subscribers]) {
+        notify();
+      }
+    }
+  };
+
+  read.update = (updateFn: (current: D) => D) => {
+    read.set(updateFn(read()));
+  };
+
+  read.asReadonly = () => (() => read()) as Signal<D>;
+
+  return read;
+}

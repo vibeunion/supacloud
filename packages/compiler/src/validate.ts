@@ -42,6 +42,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "duplicate-route": { code: "SC3007", docsUrl: "https://supacloud.dev/errors/SC3007" },
   "missing-body-schema": { code: "SC3008", docsUrl: "https://supacloud.dev/errors/SC3008" },
   "unused-route-schema": { code: "SC3009", docsUrl: "https://supacloud.dev/errors/SC3009" },
+  "malformed-route-path": { code: "SC3010", docsUrl: "https://supacloud.dev/errors/SC3010" },
   "command-missing-permission": { code: "SC4001", docsUrl: "https://supacloud.dev/errors/SC4001" },
   "duplicate-command": { code: "SC4002", docsUrl: "https://supacloud.dev/errors/SC4002" },
   "route-command-unresolved": { code: "SC4003", docsUrl: "https://supacloud.dev/errors/SC4003" },
@@ -191,6 +192,33 @@ export function validateGraph(
   for (const module of graph.modules) {
     for (const controller of module.controllers) {
       for (const route of controller.routes) {
+        // Malformed route path detection (SC3010, Angular Ivy Router style)
+        if (route.path.includes("//") || controller.path.includes("//")) {
+          error(
+            "malformed-route-path",
+            `Route ${route.method} ${route.path} has malformed path: contains consecutive slashes '//'.`,
+            controller.file,
+            undefined,
+            "Remove duplicate consecutive slashes from the route path.",
+          );
+        } else if (/(^|\/):(\/|$)/.test(route.path) || route.path.endsWith("/:")) {
+          error(
+            "malformed-route-path",
+            `Route ${route.method} ${route.path} has malformed path: parameter colon ':' is missing a parameter identifier.`,
+            controller.file,
+            undefined,
+            "Specify a valid parameter name following the colon (e.g. ':id').",
+          );
+        } else if (route.path.includes("?") || route.path.includes("#")) {
+          error(
+            "malformed-route-path",
+            `Route ${route.method} ${route.path} has malformed path: contains invalid URL query '?' or fragment '#' character.`,
+            controller.file,
+            undefined,
+            "Declare query parameters using @Query() decorators instead of in the route path.",
+          );
+        }
+
         const fullPath = joinRoutePaths(controller.path, route.path);
         const rawFullPath = joinRawRoutePaths(controller.path, route.path);
         const key = `${route.method} ${fullPath}`;
@@ -618,7 +646,7 @@ export function validateGraph(
   for (const mod of graph.modules) {
     for (const exp of mod.exports) referencedTokens.add(exp);
     for (const ctrl of mod.controllers) {
-      for (const d of ctrl.deps) referencedTokens.add(d);
+      for (const d of ctrl.deps ?? []) referencedTokens.add(d);
       for (const d of ctrl.optionalDeps ?? []) referencedTokens.add(d);
       for (const d of ctrl.selfDeps ?? []) referencedTokens.add(d);
       for (const d of ctrl.skipSelfDeps ?? []) referencedTokens.add(d);

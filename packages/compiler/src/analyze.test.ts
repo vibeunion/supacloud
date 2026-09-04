@@ -431,4 +431,30 @@ describe("analyzeProject：command 与 externalTokens", () => {
       org: "OrgResolver",
     });
   });
+
+  test("automatically infers route parameter bindings and transforms from method signature (withComponentInputBinding)", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-input-binding-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": GOOD_PROJECT_FILES["tsconfig.json"],
+      "src/auto_binding.controller.ts": `
+        import { Controller, Get, Query } from "@supacloud/app";
+
+        @Controller({ path: "/inventory", standalone: true })
+        export class InventoryController {
+          @Get("/:itemId/details/:subId")
+          getItem(itemId: string, subId: number, @Query("format") format: string) {}
+        }
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    const rootMod = analyzed.modules.find((m) => m.name === "root");
+    const ctrl = rootMod?.controllers.find((c) => c.className === "InventoryController");
+    expect(ctrl).toBeDefined();
+    const route = ctrl?.routes[0];
+    expect(route?.pathParams).toEqual(["itemId", "subId"]);
+    expect(route?.paramBindings).toEqual(["itemId", "subId"]);
+    expect(route?.paramTransforms?.["subId"]).toBe("number");
+    expect(route?.queryBindings).toEqual(["format"]);
+  });
 });

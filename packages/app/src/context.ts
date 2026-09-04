@@ -39,6 +39,15 @@ export const APP_INITIALIZER = new InjectionToken<() => void | Promise<void>>(
 );
 
 /**
+ * Built-in multi-provider token for environment initialization hooks.
+ * Modeled directly after Angular 14+ ENVIRONMENT_INITIALIZER.
+ */
+export const ENVIRONMENT_INITIALIZER = new InjectionToken<() => void | Promise<void>>(
+  "supacloud.environment-initializer",
+  { scope: "application" },
+);
+
+/**
  * Lifecycle interface for services that need to perform teardown logic when the application shuts down.
  * Modeled after Angular's OnDestroy.
  */

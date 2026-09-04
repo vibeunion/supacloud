@@ -102,18 +102,27 @@ export type {
   RouteParamBinding,
 } from "./decorators";
 export { defineModule } from "./module";
-export { APP_INITIALIZER, DB_CLIENT, DESTROY_REF, JOB_CONTEXT, REQUEST_CONTEXT, createDestroyRef } from "./context";
+export {
+  APP_INITIALIZER,
+  DB_CLIENT,
+  DESTROY_REF,
+  ENVIRONMENT_INITIALIZER,
+  JOB_CONTEXT,
+  REQUEST_CONTEXT,
+  createDestroyRef,
+} from "./context";
 export type { DestroyRef, OnDestroy } from "./context";
 export {
   assertInInjectionContext,
   createChildInjector,
+  createEnvironmentInjector,
   getActiveInjector,
   inject,
   injectAll,
   injectDestroySignal,
   runInInjectionContext,
 } from "./inject";
-export type { InjectFlags, InjectorLike } from "./inject";
+export type { EnvironmentInjector, InjectFlags, InjectorLike } from "./inject";
 export { forwardRef, isForwardRef, resolveForwardRef } from "./forward_ref";
 export type { ForwardRefFn } from "./forward_ref";
 export { matchRoute } from "./route_match";
@@ -129,10 +138,11 @@ export type { HttpInterceptorFn, HttpRequestPayload } from "./interceptor";
 export {
   computed,
   effect,
+  linkedSignal,
   signal,
   untracked,
 } from "./signal";
-export type { Signal, WritableSignal } from "./signal";
+export type { LinkedSignalOptions, Signal, WritableSignal } from "./signal";
 export { resource } from "./resource";
 export type {
   ResourceLoaderParams,
@@ -145,3 +155,9 @@ export type { RoutePipelineContext, RoutePipelineDefinition, RoutePipelineResult
 export { TestBed } from "./testing";
 export type { TestModuleMetadata } from "./testing";
 export { provideRouter, ROUTE_CONFIG } from "./route_provider";
+export {
+  TransferState,
+  TRANSFER_STATE,
+  makeStateKey,
+} from "./transfer_state";
+export type { StateKey } from "./transfer_state";
