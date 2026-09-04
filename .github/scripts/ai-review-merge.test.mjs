@@ -134,9 +134,9 @@ describe('trusted review workflow', () => {
     for (const packagePath of ['packages/admin/**', 'packages/cli/**', 'packages/supacloud/**', 'packages/function-adapter/**']) {
       assert.match(workflow, new RegExp(packagePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     }
-    assert.match(workflow, /working-directory: packages\/admin[\s\S]*?bun run typecheck[\s\S]*?bun test/);
-    assert.match(workflow, /working-directory: packages\/cli[\s\S]*?bun run typecheck[\s\S]*?bun test/);
-    assert.match(workflow, /working-directory: packages\/supacloud[\s\S]*?bun run typecheck[\s\S]*?bun test[\s\S]*?bun run build/);
+    assert.match(workflow, /working-directory: packages\/admin\n\s+script: \|\n\s+bun install --frozen-lockfile[\s\S]*?bun run typecheck[\s\S]*?bun test/);
+    assert.match(workflow, /working-directory: packages\/cli\n\s+script: \|\n\s+bun install --frozen-lockfile[\s\S]*?bun run typecheck[\s\S]*?bun test/);
+    assert.match(workflow, /working-directory: packages\/supacloud\n\s+script: \|\n\s+bun install --frozen-lockfile[\s\S]*?bun run typecheck[\s\S]*?bun test[\s\S]*?bun run build/);
     assert.match(workflow, /working-directory: packages\/management-api[\s\S]*?run: bun run test:unit/);
     assert.match(managementPackage, /"test:unit": "bun run scripts\/run-unit-tests\.ts"/);
     assert.match(unitRunner, /mock\\\.module/);
@@ -145,6 +145,7 @@ describe('trusted review workflow', () => {
     assert.match(unitRunner, /await runTestBatch\(\[apiTest\]/);
     assert.match(workflow, /audit_dependencies\.ts/);
     assert.match(readFileSync(new URL('../../scripts/audit_dependencies.ts', import.meta.url), 'utf8'), /\["audit", "--audit-level", "high"\]/);
+    assert.match(workflow, /bun run \.\.\/\.\.\/scripts\/audit_dependencies\.ts/);
     assert.match(workflow, /anchore\/sbom-action@/);
     assert.match(workflow, /XCADDY_VERSION:\s*["']v0\.4\.5["']/);
     assert.match(workflow, /xcaddy\/cmd\/xcaddy@\$\{XCADDY_VERSION\}/);

@@ -1,7 +1,8 @@
 {
   "version": "0.0.2",
   "scripts": {
-    "check:boundaries": "bun run scripts/check_workspace_boundaries.ts"
+    "check:boundaries": "bun run scripts/check_workspace_boundaries.ts",
+    "check:invariants": "bun run scripts/check_business_invariants.ts"
   },
   "dependencies": {
     "@types/ws": "^8.18.1",

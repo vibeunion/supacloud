@@ -54,7 +54,7 @@
     "tar": "^7.5.22"
   },
   "devDependencies": {
-    "@supabase/supabase-js": "^2.112.4",
+    "@supabase/supabase-js": "^2.114.0",
     "@types/bun": "^1.4.0",
     "elysia": "^1.4.30",
     "typescript": "^7.0.2"
