@@ -101,6 +101,7 @@ export function validateGraph(
   const modulesByName = new Map<string, ModuleNode>();
   const commandsByName = new Map<string, { module: ModuleNode; className: string }>();
   const routesByKey = new Map<string, { module: ModuleNode; controller: ControllerNode }>();
+  const declaredRoutes: Array<{ method: string; path: string; fullPath: string; rawFullPath: string; controller: ControllerNode; module: ModuleNode; handler: string }> = [];
 
   for (const module of graph.modules) {
     const previousModule = modulesByName.get(module.name);
@@ -135,6 +136,7 @@ export function validateGraph(
     for (const controller of module.controllers) {
       for (const route of controller.routes) {
         const fullPath = joinRoutePaths(controller.path, route.path);
+        const rawFullPath = joinRawRoutePaths(controller.path, route.path);
         const key = `${route.method} ${fullPath}`;
         const previous = routesByKey.get(key);
         if (previous) {
@@ -146,6 +148,20 @@ export function validateGraph(
         } else {
           routesByKey.set(key, { module, controller });
         }
+
+        // Shadowed route detection: specific route shadowed by earlier parameterized route on same HTTP method
+        for (const prev of declaredRoutes) {
+          if (prev.method === route.method && isRouteShadowed(prev.rawFullPath, rawFullPath)) {
+            warn(
+              "shadowed-route",
+              `Route ${route.method} ${rawFullPath} (${controller.className}.${route.handler}) is shadowed by earlier parameterized route ${prev.method} ${prev.rawFullPath} (${prev.controller.className}.${prev.handler}) and will never be matched.`,
+              controller.file,
+              undefined,
+              `Move specific route '${route.path}' before parameterized route '${prev.path}'.`,
+            );
+          }
+        }
+        declaredRoutes.push({ method: route.method, path: route.path, fullPath, rawFullPath, controller, module, handler: route.handler });
 
         if (route.command && !module.commands.some((command) => command.className === route.command)) {
           error(
@@ -472,6 +488,42 @@ function joinRoutePaths(prefix: string, path: string): string {
   const joined = `${prefix}/${path}`.replace(/\/{2,}/g, "/");
   const normalized = joined.length > 1 ? joined.replace(/\/+$/, "") : joined;
   return normalized.replace(/:[^/]+/g, ":param");
+}
+
+function joinRawRoutePaths(prefix: string, path: string): string {
+  const joined = `${prefix}/${path}`.replace(/\/{2,}/g, "/");
+  return joined.length > 1 ? joined.replace(/\/+$/, "") : joined;
+}
+
+/**
+ * Detects if laterPath is shadowed by earlierPath on the same HTTP method.
+ * E.g., earlierPath="/users/:id" shadows laterPath="/users/profile".
+ * But earlierPath="/users/profile" does NOT shadow laterPath="/users/:id".
+ */
+function isRouteShadowed(earlierPath: string, laterPath: string): boolean {
+  const earlierSegments = earlierPath.split("/").filter(Boolean);
+  const laterSegments = laterPath.split("/").filter(Boolean);
+
+  if (earlierSegments.length !== laterSegments.length) {
+    return false;
+  }
+
+  let hasParamShadowing = false;
+  for (let i = 0; i < earlierSegments.length; i += 1) {
+    const e = earlierSegments[i];
+    const l = laterSegments[i];
+
+    if (e === l) {
+      continue;
+    }
+    if (e.startsWith(":") && !l.startsWith(":")) {
+      hasParamShadowing = true;
+      continue;
+    }
+    return false;
+  }
+
+  return hasParamShadowing;
 }
 
 /** Provider-level circular dependency detection (DFS, reporting cycle path). */

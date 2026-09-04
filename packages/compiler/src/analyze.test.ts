@@ -250,4 +250,107 @@ describe("analyzeProject：command 与 externalTokens", () => {
     expect(ctrl?.routes[0].queryTransforms).toEqual({ limit: "number" });
     expect(ctrl?.routes[0].queryDefaults).toEqual({ limit: 20 });
   });
+
+  test("unwraps forwardRef in @Inject, useClass, and provider tokens", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-forwardref-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": GOOD_PROJECT_FILES["tsconfig.json"],
+      "src/test.service.ts": `
+        import { Injectable, Inject, Module, forwardRef, InjectionToken } from "@supacloud/app";
+
+        export const SERVICE_TOKEN = new InjectionToken<string>("service-token");
+
+        @Injectable()
+        export class FirstService {
+          constructor(@Inject(forwardRef(() => SecondService)) private second: any) {}
+        }
+
+        @Injectable()
+        export class SecondService {
+          constructor(private first: FirstService) {}
+        }
+
+        @Module({
+          name: "forwardRefModule",
+          providers: [
+            FirstService,
+            SecondService,
+            {
+              provide: forwardRef(() => SERVICE_TOKEN),
+              useClass: forwardRef(() => FirstService),
+            },
+          ],
+        })
+        export class ForwardRefModule {}
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    const mod = analyzed.modules.find((m) => m.name === "forwardRefModule");
+    expect(mod).toBeDefined();
+
+    const first = mod?.providers.find((p) => p.token === "FirstService");
+    expect(first?.deps).toEqual(["SecondService"]);
+
+    const alias = mod?.providers.find((p) => p.token === "SERVICE_TOKEN");
+    expect(alias).toBeDefined();
+    expect(alias?.useClass).toBe("FirstService");
+  });
+
+  test("analyzes route title and data metadata from options and decorators", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-route-metadata-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": GOOD_PROJECT_FILES["tsconfig.json"],
+      "src/test.controller.ts": `
+        import { Controller, Get, Title, Data } from "@supacloud/app";
+
+        @Controller({ path: "/docs", standalone: true })
+        export class DocsController {
+          @Get("/overview", { title: "Documentation Overview", data: { auth: false, version: 2 } })
+          getOverview() {}
+
+          @Get("/advanced")
+          @Title("Advanced Guides")
+          @Data({ auth: true, tier: "pro" })
+          getAdvanced() {}
+        }
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    const rootMod = analyzed.modules.find((m) => m.name === "root");
+    const ctrl = rootMod?.controllers.find((c) => c.className === "DocsController");
+    expect(ctrl).toBeDefined();
+    expect(ctrl?.routes[0].title).toBe("Documentation Overview");
+    expect(ctrl?.routes[0].data).toEqual({ auth: false, version: 2 });
+    expect(ctrl?.routes[1].title).toBe("Advanced Guides");
+    expect(ctrl?.routes[1].data).toEqual({ auth: true, tier: "pro" });
+  });
+
+  test("analyzes property-level inject with self, skipSelf, and host flags", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-inject-modifiers-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": GOOD_PROJECT_FILES["tsconfig.json"],
+      "src/test.service.ts": `
+        import { Injectable, inject, InjectionToken } from "@supacloud/app";
+        const LOCAL_SVC = new InjectionToken<string>("local");
+        const PARENT_SVC = new InjectionToken<string>("parent");
+        const HOST_SVC = new InjectionToken<string>("host");
+
+        @Injectable({ providedIn: 'root' })
+        export class ScopedService {
+          private local = inject(LOCAL_SVC, { self: true });
+          private parent = inject(PARENT_SVC, { skipSelf: true });
+          private host = inject(HOST_SVC, { host: true });
+        }
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    const rootMod = analyzed.modules.find((m) => m.name === "root");
+    const prov = rootMod?.providers.find((p) => p.token === "ScopedService");
+    expect(prov?.selfDeps).toContain("LOCAL_SVC");
+    expect(prov?.skipSelfDeps).toContain("PARENT_SVC");
+    expect(prov?.hostDeps).toContain("HOST_SVC");
+  });
 });

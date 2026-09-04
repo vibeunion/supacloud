@@ -1022,4 +1022,82 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(bodyDiag?.message).toContain("binds @Body() on HTTP GET route");
     expect(bodyDiag?.suggestion).toContain("Use POST, PUT, or PATCH");
   });
+
+  test("Ivy-style route order checking: shadowed-route detects specific routes shadowed by earlier wildcard", () => {
+    const badGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "items",
+          className: "ItemsModule",
+          file: "src/items.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "ItemsController",
+              path: "/items",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/:id",
+                  handler: "getItem",
+                },
+                {
+                  method: "GET",
+                  path: "/overview",
+                  handler: "getOverview",
+                },
+              ],
+              file: "src/items.controller.ts",
+              importPath: "./items.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(badGraph);
+    const shadowDiag = diags.find((d) => d.code === "shadowed-route");
+    expect(shadowDiag).toBeDefined();
+    expect(shadowDiag?.message).toContain("Route GET /items/overview (ItemsController.getOverview) is shadowed");
+    expect(shadowDiag?.message).toContain("earlier parameterized route GET /items/:id");
+    expect(shadowDiag?.suggestion).toContain("Move specific route '/overview' before parameterized route '/:id'");
+
+    // If ordered correctly (specific first, then parameterized), no shadowed-route diagnostic
+    const goodGraph: ApplicationGraph = {
+      ...badGraph,
+      modules: [
+        {
+          ...badGraph.modules[0],
+          controllers: [
+            {
+              ...badGraph.modules[0].controllers[0],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/overview",
+                  handler: "getOverview",
+                },
+                {
+                  method: "GET",
+                  path: "/:id",
+                  handler: "getItem",
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+
+    const goodDiags = validateGraph(goodGraph);
+    expect(goodDiags.find((d) => d.code === "shadowed-route")).toBeUndefined();
+  });
 });

@@ -35,6 +35,8 @@ const INTERFACES = `export interface CompiledRoute {
   paramDefaults?: Record<string, unknown>;
   queryTransforms?: Record<string, "number" | "boolean" | "string">;
   queryDefaults?: Record<string, unknown>;
+  title?: string;
+  data?: Record<string, unknown>;
 }
 
 export interface CompiledCommand {
@@ -390,6 +392,12 @@ class ModuleGenerator {
         if (route.queryDefaults && Object.keys(route.queryDefaults).length > 0) {
           fields.push(`queryDefaults: ${JSON.stringify(route.queryDefaults)}`);
         }
+        if (route.title) {
+          fields.push(`title: ${JSON.stringify(route.title)}`);
+        }
+        if (route.data && Object.keys(route.data).length > 0) {
+          fields.push(`data: ${JSON.stringify(route.data)}`);
+        }
         return `{ ${fields.join(", ")} }`;
       });
       return [
@@ -629,6 +637,8 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     paramDefaults?: Record<string, unknown>;
     queryTransforms?: Record<string, "number" | "boolean" | "string">;
     queryDefaults?: Record<string, unknown>;
+    title?: string;
+    data?: Record<string, unknown>;
   }> = [];
 
   for (const module of graph.modules) {
@@ -653,6 +663,8 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
           paramDefaults: route.paramDefaults,
           queryTransforms: route.queryTransforms,
           queryDefaults: route.queryDefaults,
+          title: route.title,
+          data: route.data,
         });
 
         routeMethods.push(`

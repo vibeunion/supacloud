@@ -27,6 +27,7 @@ export {
   Body,
   Command,
   Controller,
+  Data,
   Delete,
   Get,
   Head,
@@ -44,6 +45,7 @@ export {
   Query,
   Self,
   SkipSelf,
+  Title,
   UseGuards,
   getCommandMeta,
   getControllerMeta,
@@ -100,6 +102,9 @@ export {
   createChildInjector,
   getActiveInjector,
   inject,
+  injectDestroySignal,
   runInInjectionContext,
 } from "./inject";
 export type { InjectFlags, InjectorLike } from "./inject";
+export { forwardRef, isForwardRef, resolveForwardRef } from "./forward_ref";
+export type { ForwardRefFn } from "./forward_ref";

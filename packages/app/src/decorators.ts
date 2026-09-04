@@ -21,6 +21,8 @@ export const SELF_PARAMS_METADATA = "supacloud:self-params";
 export const SKIP_SELF_PARAMS_METADATA = "supacloud:skip-self-params";
 export const HOST_PARAMS_METADATA = "supacloud:host-params";
 export const GUARDS_METADATA = "supacloud:guards";
+export const TITLE_METADATA = "supacloud:route:title";
+export const DATA_METADATA = "supacloud:route:data";
 export const ROUTE_PARAMS_METADATA = "supacloud:route-params";
 
 export interface RouteParamBinding {
@@ -131,6 +133,10 @@ export interface RouteOptions {
   redirectTo?: string;
   /** Angular-style route path matching strategy. */
   pathMatch?: "full" | "prefix";
+  /** Route title or label (modeled after Angular Route.title). */
+  title?: string;
+  /** Static route metadata dictionary (modeled after Angular Route.data). */
+  data?: Record<string, unknown>;
 }
 
 export interface RouteDefinition extends RouteOptions {
@@ -413,6 +419,13 @@ function createRouteDecorator(method: HttpMethod) {
   return (path: string, options: RouteOptions = {}): MethodDecorator =>
     (target, propertyKey) => {
       const cls = (target as { constructor: Type<unknown> }).constructor;
+      const titleKey = `${TITLE_METADATA}:${String(propertyKey)}`;
+      const dataKey = `${DATA_METADATA}:${String(propertyKey)}`;
+      const title = options.title ?? readOwnOrInherited<string>(cls, titleKey);
+      const data = {
+        ...(readOwnOrInherited<Record<string, unknown>>(cls, dataKey) ?? {}),
+        ...(options.data ?? {}),
+      };
       const routes: RouteDefinition[] = [
         ...(readOwnOrInherited<RouteDefinition[]>(cls, ROUTES_METADATA) ?? []),
       ];
@@ -421,6 +434,8 @@ function createRouteDecorator(method: HttpMethod) {
         path,
         handler: String(propertyKey),
         ...options,
+        title: title || undefined,
+        data: Object.keys(data).length > 0 ? data : undefined,
       });
       defineMetadata(cls, ROUTES_METADATA, routes);
     };
@@ -433,6 +448,39 @@ export const Patch = createRouteDecorator("PATCH");
 export const Delete = createRouteDecorator("DELETE");
 export const Head = createRouteDecorator("HEAD");
 export const Options = createRouteDecorator("OPTIONS");
+
+/**
+ * Sets a route title. Modeled after Angular Route.title.
+ */
+export function Title(title: string): MethodDecorator {
+  return (target, propertyKey) => {
+    const cls = (target as { constructor: Type<unknown> }).constructor;
+    const key = `${TITLE_METADATA}:${String(propertyKey)}`;
+    defineMetadata(cls, key, title);
+    const routes = readOwnOrInherited<RouteDefinition[]>(cls, ROUTES_METADATA) ?? [];
+    const route = routes.find((r) => r.handler === String(propertyKey));
+    if (route) {
+      route.title = title;
+    }
+  };
+}
+
+/**
+ * Attaches arbitrary static metadata to a route. Modeled after Angular Route.data.
+ */
+export function Data(data: Record<string, unknown>): MethodDecorator {
+  return (target, propertyKey) => {
+    const cls = (target as { constructor: Type<unknown> }).constructor;
+    const key = `${DATA_METADATA}:${String(propertyKey)}`;
+    const existing = readOwnOrInherited<Record<string, unknown>>(cls, key) ?? {};
+    defineMetadata(cls, key, { ...existing, ...data });
+    const routes = readOwnOrInherited<RouteDefinition[]>(cls, ROUTES_METADATA) ?? [];
+    const route = routes.find((r) => r.handler === String(propertyKey));
+    if (route) {
+      route.data = { ...route.data, ...data };
+    }
+  };
+}
 
 export function getRoutes(target: object): RouteDefinition[] {
   return readOwnOrInherited(target, ROUTES_METADATA) ?? [];

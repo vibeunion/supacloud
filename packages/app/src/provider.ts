@@ -1,4 +1,5 @@
 import type { InjectionToken } from "./token";
+import type { ForwardRefFn } from "./forward_ref";
 import { APP_INITIALIZER } from "./context";
 import type { Scope } from "./scope";
 
@@ -8,7 +9,7 @@ export interface Type<T> {
 }
 
 /** Anything that can identify a provider: an InjectionToken or a class. */
-export type Token<T = any> = InjectionToken<T> | Type<T>;
+export type Token<T = any> = InjectionToken<T> | Type<T> | ForwardRefFn<InjectionToken<T> | Type<T>>;
 
 interface BaseProvider {
   /** Overrides the scope derived from @Injectable / token defaults. */
@@ -21,7 +22,7 @@ interface BaseProvider {
 
 export interface ClassProvider<T = any> extends BaseProvider {
   provide: Token<T>;
-  useClass: Type<T>;
+  useClass: Type<T> | ForwardRefFn<Type<T>>;
   /** Explicit dependency tokens, positional (constructor order). */
   deps?: Token[];
 }
