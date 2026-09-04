@@ -82,6 +82,8 @@ export interface GenerateOptions {
   outDir: string;
   generateClient?: boolean;
   generatePermissions?: boolean;
+  /** Prune unused root providers from compiled output (Angular Ivy AOT tree-shaking). */
+  treeShakeUnusedProviders?: boolean;
 }
 
 export interface RenderedArtifacts {
@@ -96,7 +98,30 @@ export function renderApplication(
   graph: ApplicationGraph,
   options: GenerateOptions,
 ): RenderedArtifacts {
-  const modules = topoSortModules(graph.modules);
+  let modules = topoSortModules(graph.modules);
+  if (options.treeShakeUnusedProviders) {
+    const referencedTokens = new Set<string>();
+    for (const mod of graph.modules) {
+      for (const exp of mod.exports) referencedTokens.add(exp);
+      for (const ctrl of mod.controllers) {
+        for (const d of ctrl.deps) referencedTokens.add(d);
+        for (const d of ctrl.optionalDeps ?? []) referencedTokens.add(d);
+        for (const d of ctrl.selfDeps ?? []) referencedTokens.add(d);
+        for (const d of ctrl.skipSelfDeps ?? []) referencedTokens.add(d);
+      }
+      for (const p of mod.providers) {
+        for (const d of p.deps ?? []) referencedTokens.add(d);
+        for (const d of p.optionalDeps ?? []) referencedTokens.add(d);
+        for (const d of p.selfDeps ?? []) referencedTokens.add(d);
+        for (const d of p.skipSelfDeps ?? []) referencedTokens.add(d);
+        if (p.useExisting) referencedTokens.add(p.useExisting);
+      }
+    }
+    modules = modules.map((mod) => ({
+      ...mod,
+      providers: mod.providers.filter((p) => p.providedIn !== "root" || p.multi || referencedTokens.has(p.token) || p.exported),
+    }));
+  }
   const imports = new ImportManager();
 
   const factorySections: string[] = [];
@@ -681,11 +706,11 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
 
         routeMethods.push(`
     ${route.handler}: (options: {
-      params?: Record<string, string | number>;
+      params${(route.pathParams && route.pathParams.length > 0) || (fullPath.match(/:([a-zA-Z0-9_]+)/g) ?? []).length > 0 ? "" : "?"}: ${(route.pathParams && route.pathParams.length > 0) || (fullPath.match(/:([a-zA-Z0-9_]+)/g) ?? []).length > 0 ? `{ ${((route.pathParams && route.pathParams.length > 0 ? route.pathParams : (fullPath.match(/:([a-zA-Z0-9_]+)/g) ?? []).map((p) => p.slice(1)))).map((p) => `${p}: string | number`).join("; ")} }` : "Record<string, string | number>"};
       query?: Record<string, unknown>;
       body?: unknown;
       headers?: Record<string, string>;
-    } = {}) => request(${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}, options),`);
+    }${(route.pathParams && route.pathParams.length > 0) || (fullPath.match(/:([a-zA-Z0-9_]+)/g) ?? []).length > 0 ? "" : " = {}"}) => request(${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}, options),`);
       }
 
       controllerEntries.push(`
@@ -717,6 +742,33 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     "}",
     "",
     "export const API_ROUTES = " + JSON.stringify(allRoutes, null, 2) + " as const;",
+    "",
+    "export type AppRoutePath = typeof API_ROUTES[number]['path'];",
+    "",
+    "/**",
+    " * Type-safe URL builder replacing route path parameters and appending query parameters.",
+    " */",
+    "export function buildRouteUrl(",
+    "  path: string,",
+    "  params?: Record<string, string | number>,",
+    "  query?: Record<string, unknown>,",
+    "): string {",
+    "  let url = path;",
+    "  if (params) {",
+    "    for (const [key, value] of Object.entries(params)) {",
+    "      url = url.replace(`:${key}`, encodeURIComponent(String(value)));",
+    "    }",
+    "  }",
+    "  if (query) {",
+    "    const searchParams = new URLSearchParams();",
+    "    for (const [k, v] of Object.entries(query)) {",
+    "      if (v !== undefined && v !== null) searchParams.set(k, String(v));",
+    "    }",
+    "    const qs = searchParams.toString();",
+    '    if (qs) url += (url.includes("?") ? "&" : "?") + qs;',
+    "  }",
+    "  return url;",
+    "}",
     "",
     "export function createApiClient(config: ApiClientConfig = {}) {",
     "  const fetcher = config.fetch ?? globalThis.fetch.bind(globalThis);",
@@ -775,6 +827,8 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     "",
     "  return {",
     "    request,",
+    "    buildRouteUrl,",
+    "    routes: API_ROUTES,",
     ...controllerEntries,
     "  };",
     "}",

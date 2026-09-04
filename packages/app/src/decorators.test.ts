@@ -591,4 +591,113 @@ describe("Angular-style functional inject() & injection context", () => {
       expect(() => inject("CHILD_ONLY", { skipSelf: true })).toThrow(/NullInjectorError/);
     });
   });
+
+  test("Resolve decorator and executeResolvers run route prefetchers", async () => {
+    const { Get, Resolve, executeResolvers, getRoutes } = require("./index");
+
+    const userResolver = async (ctx: any) => ({ id: ctx.userId, name: "Alice" });
+    const teamResolver = (ctx: any) => `team-${ctx.teamId}`;
+
+    class TestController {
+      @Get("/profile")
+      @Resolve({ user: userResolver, team: teamResolver })
+      getProfile() {}
+    }
+
+    const routes = getRoutes(TestController);
+    const route = routes.find((r: any) => r.handler === "getProfile");
+    expect(route).toBeDefined();
+    expect(route?.resolvers?.user).toBe(userResolver);
+    expect(route?.resolvers?.team).toBe(teamResolver);
+
+    const resolved = await executeResolvers(route!.resolvers!, { userId: "u123", teamId: "t456" });
+    expect(resolved).toEqual({
+      user: { id: "u123", name: "Alice" },
+      team: "team-t456",
+    });
+  });
+
+  test("Angular functional interceptors pipeline", async () => {
+    const {
+      withInterceptors,
+      createBearerAuthInterceptor,
+      createHeaderInterceptor,
+      createRetryInterceptor,
+      createTimeoutInterceptor,
+    } = require("./index");
+
+    const bearer = createBearerAuthInterceptor("test-token-123");
+    const customHeader = createHeaderInterceptor({ "x-trace-id": "trace-999" });
+    const pipeline = withInterceptors(bearer, customHeader);
+    expect(pipeline.length).toBe(2);
+
+    let finalHeaders: Record<string, string> = {};
+    const mockNext = async (req: any) => {
+      finalHeaders = { ...req.headers };
+      return new Response("ok", { status: 200 });
+    };
+
+    const reqPayload = { method: "GET", url: "https://api.test/cases", headers: {} };
+    await pipeline[0](reqPayload, async (r1: any) => pipeline[1](r1, mockNext));
+
+    expect(finalHeaders.authorization).toBe("Bearer test-token-123");
+    expect(finalHeaders["x-trace-id"]).toBe("trace-999");
+
+    // Timeout interceptor
+    const timeout = createTimeoutInterceptor(10);
+    const slowNext = () => new Promise<Response>((resolve) => setTimeout(() => resolve(new Response("late")), 100));
+    await expect(timeout(reqPayload, slowNext)).rejects.toThrow(/timed out/);
+
+    // Retry interceptor
+    let attempts = 0;
+    const flakyNext = async () => {
+      attempts++;
+      if (attempts < 3) throw new Error("Network glitch");
+      return new Response("recovered", { status: 200 });
+    };
+    const retry = createRetryInterceptor(3, 5);
+    const retryRes = await retry(reqPayload, flakyNext);
+    expect(retryRes.status).toBe(200);
+    expect(attempts).toBe(3);
+  });
+
+  test("Angular-style zero-dependency reactive signals (signal, computed, effect, untracked)", () => {
+    const { signal, computed, effect, untracked } = require("./index");
+
+    const count = signal(10);
+    const multiplier = signal(2);
+    const total = computed(() => count() * multiplier());
+
+    expect(count()).toBe(10);
+    expect(total()).toBe(20);
+
+    let effectRunCount = 0;
+    let lastSeenTotal = 0;
+    const dispose = effect(() => {
+      effectRunCount++;
+      lastSeenTotal = total();
+    });
+
+    expect(effectRunCount).toBe(1);
+    expect(lastSeenTotal).toBe(20);
+
+    count.set(15);
+    expect(total()).toBe(30);
+    expect(effectRunCount).toBe(2);
+    expect(lastSeenTotal).toBe(30);
+
+    multiplier.update((m: number) => m + 1); // 3
+    expect(total()).toBe(45);
+    expect(effectRunCount).toBe(3);
+    expect(lastSeenTotal).toBe(45);
+
+    // untracked reads without adding dependencies
+    const readWithoutTracking = untracked(() => count());
+    expect(readWithoutTracking).toBe(15);
+
+    dispose();
+    count.set(100);
+    // effect shouldn't run after disposal
+    expect(effectRunCount).toBe(3);
+  });
 });

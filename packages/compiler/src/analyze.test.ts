@@ -402,4 +402,33 @@ describe("analyzeProject：command 与 externalTokens", () => {
     expect(prov?.kind).toBe("factory");
     expect(prov?.importPath).toBe("src/tokens");
   });
+
+  test("analyzes @Resolve decorator on controller methods", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-resolve-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": GOOD_PROJECT_FILES["tsconfig.json"],
+      "src/resolver.controller.ts": `
+        import { Controller, Get, Resolve } from "@supacloud/app";
+
+        const UserResolver = (ctx: any) => ({ id: ctx.userId });
+        const OrgResolver = (ctx: any) => ({ id: ctx.orgId });
+
+        @Controller({ path: "/accounts", standalone: true })
+        export class AccountsController {
+          @Get("/:id")
+          @Resolve({ user: UserResolver, org: OrgResolver })
+          getAccount() {}
+        }
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    const rootMod = analyzed.modules.find((m) => m.name === "root");
+    const ctrl = rootMod?.controllers.find((c) => c.className === "AccountsController");
+    expect(ctrl).toBeDefined();
+    expect(ctrl?.routes[0].resolvers).toEqual({
+      user: "UserResolver",
+      org: "OrgResolver",
+    });
+  });
 });

@@ -1154,4 +1154,111 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(redirectDiag?.message).toContain("redirects to '/portal/dashbaord', but no matching route was found");
     expect(redirectDiag?.suggestion).toContain("Did you mean '/portal/dashboard'?");
   });
+
+  test("Angular Ivy-style standardized error codes and docsUrls on diagnostics", () => {
+    const badGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "TestModule",
+          className: "TestModule",
+          file: "src/test.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              token: "A",
+              tokenKind: "class",
+              kind: "class",
+              scope: "application",
+              deps: ["B"],
+              exported: false,
+              file: "src/a.ts",
+              line: 10,
+            },
+            {
+              token: "B",
+              tokenKind: "class",
+              kind: "class",
+              scope: "application",
+              deps: ["A"],
+              exported: false,
+              file: "src/b.ts",
+              line: 20,
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(badGraph);
+    const cycleDiag = diags.find((d) => d.code === "circular-dependency");
+    expect(cycleDiag).toBeDefined();
+    expect(cycleDiag?.errorCode).toBe("SC1001");
+    expect(cycleDiag?.docsUrl).toBe("https://supacloud.dev/errors/SC1001");
+  });
+
+  test("Angular Ivy-style unused root provider tree-shaking detection", () => {
+    const graphWithUnusedRoot: ApplicationGraph = {
+      modules: [
+        {
+          name: "RootModule",
+          className: "RootModule",
+          file: "src/root.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              token: "UsedService",
+              tokenKind: "class",
+              kind: "class",
+              scope: "application",
+              providedIn: "root",
+              deps: [],
+              exported: false,
+              file: "src/used.service.ts",
+              line: 5,
+            },
+            {
+              token: "OrphanRootService",
+              tokenKind: "class",
+              kind: "class",
+              scope: "application",
+              providedIn: "root",
+              deps: [],
+              exported: false,
+              file: "src/orphan.service.ts",
+              line: 12,
+            },
+          ],
+          controllers: [
+            {
+              className: "MainController",
+              path: "/main",
+              scope: "request",
+              deps: ["UsedService"],
+              routes: [],
+              file: "src/main.controller.ts",
+              importPath: "./main.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graphWithUnusedRoot);
+    const unused = diags.find((d) => d.code === "unused-root-provider");
+    expect(unused).toBeDefined();
+    expect(unused?.errorCode).toBe("SC5001");
+    expect(unused?.message).toContain('Root provider "OrphanRootService" is declared with providedIn: \'root\'');
+    expect(unused?.suggestion).toContain("enable tree-shaking");
+  });
 });

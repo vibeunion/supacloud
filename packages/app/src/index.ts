@@ -45,10 +45,12 @@ export {
   Post,
   Put,
   Query,
+  Resolve,
   Self,
   SkipSelf,
   Title,
   UseGuards,
+  executeResolvers,
   getCommandMeta,
   getControllerMeta,
   getGuards,
@@ -69,6 +71,7 @@ export {
   HOST_PARAMS_METADATA,
   INJECTABLE_METADATA,
   INJECT_PARAMS_METADATA,
+  RESOLVE_METADATA,
   OPTIONAL_PARAMS_METADATA,
   ROUTE_PARAMS_METADATA,
   SELF_PARAMS_METADATA,
@@ -114,3 +117,18 @@ export { forwardRef, isForwardRef, resolveForwardRef } from "./forward_ref";
 export type { ForwardRefFn } from "./forward_ref";
 export { matchRoute } from "./route_match";
 export type { RouteMatchResult } from "./route_match";
+export {
+  createBearerAuthInterceptor,
+  createHeaderInterceptor,
+  createRetryInterceptor,
+  createTimeoutInterceptor,
+  withInterceptors,
+} from "./interceptor";
+export type { HttpInterceptorFn, HttpRequestPayload } from "./interceptor";
+export {
+  computed,
+  effect,
+  signal,
+  untracked,
+} from "./signal";
+export type { Signal, WritableSignal } from "./signal";

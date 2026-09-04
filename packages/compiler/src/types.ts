@@ -17,6 +17,10 @@ export interface Diagnostic {
   line?: number;
   /** Actionable Angular Ivy-style remediation hint. */
   suggestion?: string;
+  /** Standardized compiler diagnostic code (e.g. SC1001) modeled after Angular ngtsc error codes. */
+  errorCode?: string;
+  /** Documentation URL for this diagnostic. */
+  docsUrl?: string;
 }
 
 export interface ProviderNode {
@@ -197,6 +201,8 @@ export interface CompileOptions {
   generateClient?: boolean;
   /** Generate typed permissions registry in permissions.ts (default: false). */
   generatePermissions?: boolean;
+  /** Prune unused root providers from compiled output (Angular Ivy AOT tree-shaking). */
+  treeShakeUnusedProviders?: boolean;
   /** Incremental dependency graph cache. */
   cache?: DependencyGraphCache;
 }
