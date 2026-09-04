@@ -277,6 +277,7 @@ export async function analyzeProject(
           skipSelfDeps: skipSelfDeps.length > 0 ? skipSelfDeps : undefined,
           hostDeps: hostDeps.length > 0 ? hostDeps : undefined,
           providedIn: "root",
+          hasOnDestroy: classInfo.decl.getMethod("onDestroy") !== undefined || undefined,
           exported: true,
           file,
           line,
@@ -590,6 +591,7 @@ function parseProvider(
       skipSelfDeps: skipSelfDeps.length > 0 ? skipSelfDeps : undefined,
       hostDeps: hostDeps.length > 0 ? hostDeps : undefined,
       providedIn: injectable?.providedIn,
+      hasOnDestroy: cls?.getMethod("onDestroy") !== undefined || undefined,
       exported: exportsSet.has(className),
       file,
       line,
@@ -644,6 +646,7 @@ function parseProvider(
       hostDeps: hostDeps.length > 0 ? hostDeps : undefined,
       multi: multi ?? undefined,
       providedIn: injectable?.providedIn,
+      hasOnDestroy: cls?.getMethod("onDestroy") !== undefined || undefined,
       exported: exportsSet.has(token),
       file,
       line,
@@ -784,17 +787,25 @@ function parseController(
 
       const paramBindings: string[] = [];
       const queryBindings: string[] = [];
+      const paramTransforms: Record<string, "number" | "boolean" | "string"> = {};
+      const paramDefaults: Record<string, unknown> = {};
+      const queryTransforms: Record<string, "number" | "boolean" | "string"> = {};
+      const queryDefaults: Record<string, unknown> = {};
       let hasBodyBinding = false;
       for (const p of method.getParameters()) {
         for (const pDec of p.getDecorators()) {
           const dName = decoratorName(pDec);
-          const firstArg = pDec.getArguments()[0];
+          const dArgs = pDec.getArguments();
           if (dName === "Param") {
-            const pName = firstArg && Node.isStringLiteral(firstArg) ? firstArg.getLiteralText() : p.getName();
-            paramBindings.push(pName);
+            const parsed = parseBindingOptions(dArgs, p.getName());
+            paramBindings.push(parsed.name);
+            if (parsed.transform) paramTransforms[parsed.name] = parsed.transform;
+            if (parsed.default !== undefined) paramDefaults[parsed.name] = parsed.default;
           } else if (dName === "Query") {
-            const qName = firstArg && Node.isStringLiteral(firstArg) ? firstArg.getLiteralText() : p.getName();
-            queryBindings.push(qName);
+            const parsed = parseBindingOptions(dArgs, p.getName());
+            queryBindings.push(parsed.name);
+            if (parsed.transform) queryTransforms[parsed.name] = parsed.transform;
+            if (parsed.default !== undefined) queryDefaults[parsed.name] = parsed.default;
           } else if (dName === "Body") {
             hasBodyBinding = true;
           }
@@ -802,6 +813,10 @@ function parseController(
       }
       if (paramBindings.length > 0) route.paramBindings = paramBindings;
       if (queryBindings.length > 0) route.queryBindings = queryBindings;
+      if (Object.keys(paramTransforms).length > 0) route.paramTransforms = paramTransforms;
+      if (Object.keys(paramDefaults).length > 0) route.paramDefaults = paramDefaults;
+      if (Object.keys(queryTransforms).length > 0) route.queryTransforms = queryTransforms;
+      if (Object.keys(queryDefaults).length > 0) route.queryDefaults = queryDefaults;
       if (hasBodyBinding) route.hasBodyBinding = true;
 
       const routeGuards: string[] = [...classGuards];
@@ -834,6 +849,16 @@ function parseController(
         if (guardsExpr && Node.isArrayLiteralExpression(guardsExpr)) {
           for (const el of guardsExpr.getElements()) {
             routeGuards.push(tokenText(el));
+          }
+        }
+        const canMatchExpr = getProp(optionsArg, "canMatch");
+        if (canMatchExpr && Node.isArrayLiteralExpression(canMatchExpr)) {
+          const canMatchList: string[] = [];
+          for (const el of canMatchExpr.getElements()) {
+            canMatchList.push(tokenText(el));
+          }
+          if (canMatchList.length > 0) {
+            route.canMatch = canMatchList;
           }
         }
         const resolversExpr = getProp(optionsArg, "resolvers");
@@ -1166,6 +1191,63 @@ function booleanProp(obj: ObjectLiteralExpression, name: string): boolean | unde
 function parseScopeProp(obj: ObjectLiteralExpression): Scope | undefined {
   const scope = stringLiteralProp(obj, "scope");
   return scope && (SCOPES as string[]).includes(scope) ? (scope as Scope) : undefined;
+}
+
+function parseBindingOptions(args: Node[], defaultName: string): {
+  name: string;
+  transform?: "number" | "boolean" | "string";
+  default?: unknown;
+} {
+  let name = defaultName;
+  let transform: "number" | "boolean" | "string" | undefined;
+  let defaultValue: unknown;
+
+  const first = args[0];
+  const second = args[1];
+
+  if (first && Node.isStringLiteral(first)) {
+    name = first.getLiteralText();
+  } else if (first && Node.isObjectLiteralExpression(first)) {
+    const nameProp = getProp(first, "name");
+    if (nameProp && Node.isStringLiteral(nameProp)) {
+      name = nameProp.getLiteralText();
+    }
+    const trProp = getProp(first, "transform");
+    if (trProp && Node.isStringLiteral(trProp)) {
+      const val = trProp.getLiteralText();
+      if (val === "number" || val === "boolean" || val === "string") {
+        transform = val;
+      }
+    }
+    const defProp = getProp(first, "default");
+    if (defProp) {
+      defaultValue = parseLiteralValue(defProp);
+    }
+  }
+
+  if (second && Node.isObjectLiteralExpression(second)) {
+    const trProp = getProp(second, "transform");
+    if (trProp && Node.isStringLiteral(trProp)) {
+      const val = trProp.getLiteralText();
+      if (val === "number" || val === "boolean" || val === "string") {
+        transform = val;
+      }
+    }
+    const defProp = getProp(second, "default");
+    if (defProp) {
+      defaultValue = parseLiteralValue(defProp);
+    }
+  }
+
+  return { name, transform, default: defaultValue };
+}
+
+function parseLiteralValue(node: Node): unknown {
+  if (Node.isStringLiteral(node)) return node.getLiteralText();
+  if (Node.isNumericLiteral(node)) return node.getLiteralValue();
+  if (node.getKindName() === "TrueKeyword") return true;
+  if (node.getKindName() === "FalseKeyword") return false;
+  return undefined;
 }
 
 /** Absolute path -> posix-style module path relative to rootDir without extension (for import generation). */

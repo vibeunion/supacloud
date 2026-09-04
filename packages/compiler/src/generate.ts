@@ -27,9 +27,14 @@ const INTERFACES = `export interface CompiledRoute {
   response?: unknown;
   command?: string;
   guards?: string[];
+  canMatch?: string[];
   resolvers?: Record<string, string>;
   redirectTo?: string;
   pathMatch?: "full" | "prefix";
+  paramTransforms?: Record<string, "number" | "boolean" | "string">;
+  paramDefaults?: Record<string, unknown>;
+  queryTransforms?: Record<string, "number" | "boolean" | "string">;
+  queryDefaults?: Record<string, unknown>;
 }
 
 export interface CompiledCommand {
@@ -120,6 +125,23 @@ export function renderApplication(
     "    }",
     '  } else if (typeof initializers === "function") {',
     "    await (initializers as () => unknown)();",
+    "  }",
+    "}",
+    "",
+    "export async function destroyApplication(services: Record<string, unknown>): Promise<void> {",
+    '  const destroyRef = (services.destroyRef ?? (services as any)["supacloud.destroy-ref"]) as { destroy?: () => Promise<void>; _teardowns?: Array<() => void | Promise<void>> } | undefined;',
+    '  if (destroyRef && typeof destroyRef.destroy === "function") {',
+    "    await destroyRef.destroy();",
+    "  } else if (destroyRef && Array.isArray(destroyRef._teardowns)) {",
+    "    for (const teardown of [...destroyRef._teardowns].reverse()) {",
+    '      if (typeof teardown === "function") await teardown();',
+    "    }",
+    "  }",
+    "  const instances = Object.values(services);",
+    "  for (const inst of instances.reverse()) {",
+    '    if (inst && typeof (inst as any).onDestroy === "function") {',
+    "      await (inst as any).onDestroy();",
+    "    }",
     "  }",
     "}",
     "",
@@ -344,6 +366,9 @@ class ModuleGenerator {
         if (route.guards && route.guards.length > 0) {
           fields.push(`guards: ${JSON.stringify(route.guards)}`);
         }
+        if (route.canMatch && route.canMatch.length > 0) {
+          fields.push(`canMatch: ${JSON.stringify(route.canMatch)}`);
+        }
         if (route.resolvers && Object.keys(route.resolvers).length > 0) {
           fields.push(`resolvers: ${JSON.stringify(route.resolvers)}`);
         }
@@ -352,6 +377,18 @@ class ModuleGenerator {
         }
         if (route.pathMatch) {
           fields.push(`pathMatch: ${JSON.stringify(route.pathMatch)}`);
+        }
+        if (route.paramTransforms && Object.keys(route.paramTransforms).length > 0) {
+          fields.push(`paramTransforms: ${JSON.stringify(route.paramTransforms)}`);
+        }
+        if (route.paramDefaults && Object.keys(route.paramDefaults).length > 0) {
+          fields.push(`paramDefaults: ${JSON.stringify(route.paramDefaults)}`);
+        }
+        if (route.queryTransforms && Object.keys(route.queryTransforms).length > 0) {
+          fields.push(`queryTransforms: ${JSON.stringify(route.queryTransforms)}`);
+        }
+        if (route.queryDefaults && Object.keys(route.queryDefaults).length > 0) {
+          fields.push(`queryDefaults: ${JSON.stringify(route.queryDefaults)}`);
         }
         return `{ ${fields.join(", ")} }`;
       });
@@ -584,9 +621,14 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     handler: string;
     command?: string;
     guards?: string[];
+    canMatch?: string[];
     resolvers?: Record<string, string>;
     redirectTo?: string;
     pathMatch?: "full" | "prefix";
+    paramTransforms?: Record<string, "number" | "boolean" | "string">;
+    paramDefaults?: Record<string, unknown>;
+    queryTransforms?: Record<string, "number" | "boolean" | "string">;
+    queryDefaults?: Record<string, unknown>;
   }> = [];
 
   for (const module of graph.modules) {
@@ -603,9 +645,14 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
           handler: route.handler,
           command: route.command,
           guards: route.guards,
+          canMatch: route.canMatch,
           resolvers: route.resolvers,
           redirectTo: route.redirectTo,
           pathMatch: route.pathMatch,
+          paramTransforms: route.paramTransforms,
+          paramDefaults: route.paramDefaults,
+          queryTransforms: route.queryTransforms,
+          queryDefaults: route.queryDefaults,
         });
 
         routeMethods.push(`

@@ -66,6 +66,31 @@ export function inject<T>(token: Token<T>, options?: InjectFlags): T {
 }
 
 /**
+ * Creates a hierarchical child injector that inherits providers from a parent injector.
+ * Modeled directly after Angular's hierarchical injectors.
+ */
+export function createChildInjector(
+  parent: InjectorLike,
+  localProviders: Map<Token<unknown> | string, unknown> | Record<string, unknown> = new Map(),
+): InjectorLike {
+  const providerMap = localProviders instanceof Map
+    ? (localProviders as Map<Token<unknown> | string, unknown>)
+    : new Map<Token<unknown> | string, unknown>(Object.entries(localProviders));
+
+  return {
+    get<T>(token: Token<T>): T | undefined {
+      if (providerMap.has(token)) {
+        return providerMap.get(token) as T;
+      }
+      if (token instanceof InjectionToken && providerMap.has(token.name)) {
+        return providerMap.get(token.name) as T;
+      }
+      return parent.get(token);
+    },
+  };
+}
+
+/**
  * Asserts that execution is currently within an injection context.
  * Modeled after Angular's `assertInInjectionContext`.
  */

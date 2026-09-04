@@ -27,6 +27,14 @@ export interface RouteParamBinding {
   index: number;
   type: "param" | "query" | "body" | "headers";
   name?: string;
+  transform?: "number" | "boolean" | "string";
+  default?: unknown;
+}
+
+export interface ParamOptions {
+  name?: string;
+  transform?: "number" | "boolean" | "string";
+  default?: unknown;
 }
 
 export interface InjectableOptions {
@@ -97,6 +105,7 @@ export interface ControllerOptions {
 }
 
 export type CanActivateFn<TContext = any> = (ctx: TContext) => boolean | Promise<boolean>;
+export type CanMatchFn<TContext = any> = (ctx: TContext) => boolean | Promise<boolean>;
 export type ResolveFn<T = any, TContext = any> = (ctx: TContext) => T | Promise<T>;
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
@@ -114,6 +123,8 @@ export interface RouteOptions {
   command?: Type<unknown>;
   /** Angular-style functional route guards executed before handler. */
   guards?: Array<CanActivateFn | string>;
+  /** Angular-style route matching guard determining whether route can match. */
+  canMatch?: Array<CanMatchFn | string>;
   /** Angular-style route resolvers executed before handler to preload dependencies. */
   resolvers?: Record<string, ResolveFn | string>;
   /** Angular-style route redirect target path. */
@@ -320,7 +331,7 @@ export function getCommandMeta(target: object): CommandMeta | undefined {
   return readOwnOrInherited(target, COMMAND_METADATA);
 }
 
-export function Param(name?: string): ParameterDecorator {
+export function Param(nameOrOptions?: string | ParamOptions, options?: ParamOptions): ParameterDecorator {
   return (target, propertyKey, parameterIndex) => {
     if (propertyKey === undefined) {
       throw new Error("@Param() is only supported on controller method parameters");
@@ -328,7 +339,10 @@ export function Param(name?: string): ParameterDecorator {
     const cls = (target as { constructor: Type<unknown> }).constructor;
     const key = `${ROUTE_PARAMS_METADATA}:${String(propertyKey)}`;
     const existing = readOwnOrInherited<RouteParamBinding[]>(cls, key) ?? [];
-    defineMetadata(cls, key, [...existing, { index: parameterIndex, type: "param", name }]);
+    const name = typeof nameOrOptions === "string" ? nameOrOptions : nameOrOptions?.name;
+    const transform = typeof nameOrOptions === "object" ? nameOrOptions.transform : options?.transform;
+    const defaultValue = typeof nameOrOptions === "object" ? nameOrOptions.default : options?.default;
+    defineMetadata(cls, key, [...existing, { index: parameterIndex, type: "param", name, transform, default: defaultValue }]);
   };
 }
 
@@ -356,14 +370,16 @@ export function Headers(name?: string): ParameterDecorator {
   };
 }
 
-export function Query(optionsOrName?: QueryOptions | string): ClassDecorator & ParameterDecorator {
+export function Query(optionsOrName?: QueryOptions | ParamOptions | string, options?: ParamOptions): ClassDecorator & ParameterDecorator {
   return ((target: object, propertyKey?: string | symbol, parameterIndex?: number) => {
     if (typeof parameterIndex === "number" && propertyKey !== undefined) {
       const cls = (target as { constructor: Type<unknown> }).constructor;
       const key = `${ROUTE_PARAMS_METADATA}:${String(propertyKey)}`;
       const existing = readOwnOrInherited<RouteParamBinding[]>(cls, key) ?? [];
-      const name = typeof optionsOrName === "string" ? optionsOrName : undefined;
-      defineMetadata(cls, key, [...existing, { index: parameterIndex, type: "query", name }]);
+      const name = typeof optionsOrName === "string" ? optionsOrName : (optionsOrName as ParamOptions)?.name;
+      const transform = typeof optionsOrName === "object" ? (optionsOrName as ParamOptions).transform : options?.transform;
+      const defaultValue = typeof optionsOrName === "object" ? (optionsOrName as ParamOptions).default : options?.default;
+      defineMetadata(cls, key, [...existing, { index: parameterIndex, type: "query", name, transform, default: defaultValue }]);
     } else {
       const opts = typeof optionsOrName === "object" && optionsOrName !== null ? optionsOrName : { name: String(optionsOrName ?? "") };
       defineMetadata(target, QUERY_METADATA, { ...opts });
@@ -372,7 +388,8 @@ export function Query(optionsOrName?: QueryOptions | string): ClassDecorator & P
 }
 
 export function getRouteParams(target: object, propertyKey: string | symbol): RouteParamBinding[] {
-  return readOwnOrInherited(target, `${ROUTE_PARAMS_METADATA}:${String(propertyKey)}`) ?? [];
+  const params = readOwnOrInherited<RouteParamBinding[]>(target, `${ROUTE_PARAMS_METADATA}:${String(propertyKey)}`) ?? [];
+  return [...params].sort((a, b) => a.index - b.index);
 }
 
 export function getQueryMeta(target: object): QueryMeta | undefined {
