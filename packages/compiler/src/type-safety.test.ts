@@ -44,6 +44,7 @@ describe("compiler type-safety gates", () => {
       "source-any",
       "source-type-assertion",
       "source-non-null-assertion",
+      "source-any",
       "source-implicit-widening",
     ]);
     expect(diagnostics.every((diagnostic) => diagnostic.severity === "error")).toBe(true);

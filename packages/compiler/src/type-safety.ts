@@ -135,6 +135,17 @@ function scanSourceFile(
     if (!initializer || declaration.getTypeNode()) continue;
     const declarationType = declaration.getType();
     const initializerType = initializer.getType();
+    if (declarationType.isAny()) {
+      diagnostics.push(makeDiagnostic(
+        "source-any",
+        "生产源码中的变量被推断为 any；请为边界数据提供解析类型或显式 unknown。",
+        sourceFile,
+        declaration,
+        strict,
+        rootDir,
+      ));
+      continue;
+    }
     if (declaration.getVariableStatement()?.getDeclarationKind() === "let"
       && isLiteralSyntax(initializer)
       && !declarationType.isLiteral()) {
@@ -160,6 +171,19 @@ function scanSourceFile(
         `常量对象 ${declaration.getName()} 的字面量属性会隐式宽化；请补充对象类型或使用 as const。`,
         sourceFile,
         declaration,
+        strict,
+        rootDir,
+      ));
+    }
+  }
+
+  for (const parameter of sourceFile.getDescendantsOfKind(SyntaxKind.Parameter)) {
+    if (!parameter.getTypeNode() && parameter.getType().isAny()) {
+      diagnostics.push(makeDiagnostic(
+        "source-any",
+        "生产源码中的参数被推断为 any；请补充参数类型。",
+        sourceFile,
+        parameter,
         strict,
         rootDir,
       ));
