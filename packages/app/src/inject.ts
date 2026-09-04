@@ -15,7 +15,8 @@ export interface InjectFlags {
 }
 
 export interface InjectorLike {
-  get<T>(token: Token<T>): T | undefined;
+  get<T>(token: Token<T>, options?: InjectFlags): T | undefined;
+  readonly parent?: InjectorLike;
 }
 
 let currentInjector: InjectorLike | null = null;
@@ -61,12 +62,23 @@ export function inject<T>(token: Token<T>, options?: InjectFlags): T {
   }
 
   const resolved = resolveForwardRef(token);
-  const value = currentInjector.get(resolved);
+  let value: unknown;
+
+  if (options?.skipSelf) {
+    if (!currentInjector.parent) {
+      if (options.optional) return undefined as unknown as T;
+      throw new Error(`NullInjectorError: No parent provider found for skipSelf token ${tokenToString(resolved)}`);
+    }
+    value = currentInjector.parent.get(resolved, options);
+  } else {
+    value = currentInjector.get(resolved, options);
+  }
+
   if (value === undefined) {
     if (options?.optional) {
       return undefined as unknown as T;
     }
-    if (resolved instanceof InjectionToken && resolved.factory) {
+    if (resolved instanceof InjectionToken && resolved.factory && !options?.self && !options?.skipSelf) {
       return resolved.factory();
     }
     throw new Error(`NullInjectorError: No provider for ${tokenToString(resolved)}`);
@@ -81,19 +93,23 @@ export function inject<T>(token: Token<T>, options?: InjectFlags): T {
 export function createChildInjector(
   parent: InjectorLike,
   localProviders: Map<Token<unknown> | string, unknown> | Record<string, unknown> = new Map(),
-): InjectorLike {
+): InjectorLike & { readonly parent: InjectorLike } {
   const providerMap = localProviders instanceof Map
     ? (localProviders as Map<Token<unknown> | string, unknown>)
     : new Map<Token<unknown> | string, unknown>(Object.entries(localProviders));
 
   return {
-    get<T>(token: Token<T>): T | undefined {
+    parent,
+    get<T>(token: Token<T>, options?: InjectFlags): T | undefined {
       const resolved = resolveForwardRef(token);
       if (providerMap.has(resolved)) {
         return providerMap.get(resolved) as T;
       }
       if (resolved instanceof InjectionToken && providerMap.has(resolved.name)) {
         return providerMap.get(resolved.name) as T;
+      }
+      if (options?.self) {
+        return undefined;
       }
       return parent.get(resolved);
     },

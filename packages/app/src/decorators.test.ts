@@ -519,4 +519,76 @@ describe("Angular-style functional inject() & injection context", () => {
     expect(routes[1].title).toBe("Settings Page");
     expect(routes[1].data).toEqual({ flag: "experimental" });
   });
+
+  test("CanDeactivate guard can be declared via options and decorator", () => {
+    const { Get, CanDeactivate, getRoutes } = require("./index");
+    class GuardedController {
+      @Get("/form", { canDeactivate: ["DirtyFormGuard"] })
+      form() {}
+
+      @Get("/wizard")
+      @CanDeactivate("WizardGuard")
+      wizard() {}
+    }
+
+    const routes = getRoutes(GuardedController);
+    expect(routes[0].canDeactivate).toEqual(["DirtyFormGuard"]);
+    expect(routes[1].canDeactivate).toEqual(["WizardGuard"]);
+  });
+
+  test("provideEnvironmentInitializer creates valid environment providers", () => {
+    const { provideEnvironmentInitializer, isEnvironmentProviders } = require("./index");
+    const ep = provideEnvironmentInitializer(() => {});
+    expect(isEnvironmentProviders(ep)).toBe(true);
+    expect(ep.ɵproviders).toHaveLength(1);
+  });
+
+  test("matchRoute extracts path params and honors full/prefix pathMatch strategies", () => {
+    const { matchRoute } = require("./index");
+
+    const match1 = matchRoute("/users/:id/edit", "/users/123/edit");
+    expect(match1.matched).toBe(true);
+    expect(match1.params).toEqual({ id: "123" });
+
+    const match2 = matchRoute("/users/:id", "/users/123/edit", "full");
+    expect(match2.matched).toBe(false);
+
+    const match3 = matchRoute("/users/:id", "/users/123/edit", "prefix");
+    expect(match3.matched).toBe(true);
+    expect(match3.params).toEqual({ id: "123" });
+    expect(match3.remainingUrl).toBe("/edit");
+
+    const match4 = matchRoute("/users", "/posts");
+    expect(match4.matched).toBe(false);
+  });
+
+  test("createChildInjector and inject enforce self and skipSelf resolution modifiers at runtime", () => {
+    const { createChildInjector, inject, runInInjectionContext } = require("./index");
+
+    const parent = {
+      get: (token: any) => token === "PARENT_ONLY" ? "parent-val" : token === "SHARED" ? "parent-shared" : undefined,
+    };
+
+    const child = createChildInjector(parent, {
+      SHARED: "child-shared",
+      CHILD_ONLY: "child-val",
+    });
+
+    runInInjectionContext(child, () => {
+      // Standard resolution: child overrides parent
+      expect(inject("SHARED")).toBe("child-shared");
+      expect(inject("PARENT_ONLY")).toBe("parent-val");
+      expect(inject("CHILD_ONLY")).toBe("child-val");
+
+      // { self: true } requires token in current child
+      expect(inject("CHILD_ONLY", { self: true })).toBe("child-val");
+      expect(inject("PARENT_ONLY", { self: true, optional: true })).toBeUndefined();
+      expect(() => inject("PARENT_ONLY", { self: true })).toThrow(/NullInjectorError/);
+
+      // { skipSelf: true } skips child and checks parent
+      expect(inject("SHARED", { skipSelf: true })).toBe("parent-shared");
+      expect(inject("CHILD_ONLY", { skipSelf: true, optional: true })).toBeUndefined();
+      expect(() => inject("CHILD_ONLY", { skipSelf: true })).toThrow(/NullInjectorError/);
+    });
+  });
 });

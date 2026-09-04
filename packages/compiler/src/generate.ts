@@ -28,6 +28,7 @@ const INTERFACES = `export interface CompiledRoute {
   command?: string;
   guards?: string[];
   canMatch?: string[];
+  canDeactivate?: string[];
   resolvers?: Record<string, string>;
   redirectTo?: string;
   pathMatch?: "full" | "prefix";
@@ -371,6 +372,9 @@ class ModuleGenerator {
         if (route.canMatch && route.canMatch.length > 0) {
           fields.push(`canMatch: ${JSON.stringify(route.canMatch)}`);
         }
+        if (route.canDeactivate && route.canDeactivate.length > 0) {
+          fields.push(`canDeactivate: ${JSON.stringify(route.canDeactivate)}`);
+        }
         if (route.resolvers && Object.keys(route.resolvers).length > 0) {
           fields.push(`resolvers: ${JSON.stringify(route.resolvers)}`);
         }
@@ -500,6 +504,12 @@ class ModuleGenerator {
         return { constLine: `const ${local} = ${expr};`, key, expr: local };
       }
       case "factory": {
+        if (provider.tokenKind === "injection-token" && !provider.useFactoryName) {
+          const tokenIdent = this.imports.add(provider.token, provider.importPath);
+          const local = this.localVar(isMulti ? `${provider.token}Item` : provider.token, kind);
+          const constLine = `const ${local} = typeof ${tokenIdent} === "object" && ${tokenIdent} && "factory" in ${tokenIdent} && typeof (${tokenIdent} as any).factory === "function" ? (${tokenIdent} as any).factory() : undefined;`;
+          return { constLine, key, expr: local };
+        }
         const factory = this.imports.add(provider.useFactoryName ?? "", provider.importPath);
         const args = provider.deps
           .map((dep) => this.depExpr(dep, kind, provider.optionalDeps?.includes(dep)))
@@ -630,6 +640,7 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     command?: string;
     guards?: string[];
     canMatch?: string[];
+    canDeactivate?: string[];
     resolvers?: Record<string, string>;
     redirectTo?: string;
     pathMatch?: "full" | "prefix";
@@ -656,6 +667,7 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
           command: route.command,
           guards: route.guards,
           canMatch: route.canMatch,
+          canDeactivate: route.canDeactivate,
           resolvers: route.resolvers,
           redirectTo: route.redirectTo,
           pathMatch: route.pathMatch,

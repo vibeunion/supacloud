@@ -329,6 +329,7 @@ export async function analyzeProject(
         exported: true,
         file: sourcePath(ctx.rootDir, tokenInfo.file),
         line: tokenInfo.line ?? 1,
+        importPath: modulePath(ctx.rootDir, tokenInfo.file),
       });
     }
   }
@@ -824,12 +825,17 @@ function parseController(
       if (hasBodyBinding) route.hasBodyBinding = true;
 
       const routeGuards: string[] = [...classGuards];
+      const routeCanDeactivate: string[] = [];
       for (const mDec of method.getDecorators()) {
         const dName = decoratorName(mDec);
         const mArgs = mDec.getArguments();
         if (dName === "UseGuards") {
           for (const gArg of mArgs) {
             routeGuards.push(tokenText(gArg as Expression));
+          }
+        } else if (dName === "CanDeactivate") {
+          for (const gArg of mArgs) {
+            routeCanDeactivate.push(tokenText(gArg as Expression));
           }
         } else if (dName === "Title") {
           const tArg = mArgs[0];
@@ -877,6 +883,12 @@ function parseController(
             route.canMatch = canMatchList;
           }
         }
+        const canDeactivateExpr = getProp(optionsArg, "canDeactivate");
+        if (canDeactivateExpr && Node.isArrayLiteralExpression(canDeactivateExpr)) {
+          for (const el of canDeactivateExpr.getElements()) {
+            routeCanDeactivate.push(tokenText(el));
+          }
+        }
         const resolversExpr = getProp(optionsArg, "resolvers");
         if (resolversExpr && Node.isObjectLiteralExpression(resolversExpr)) {
           const resolvers: Record<string, string> = {};
@@ -913,6 +925,9 @@ function parseController(
       }
       if (routeGuards.length > 0) {
         route.guards = routeGuards;
+      }
+      if (routeCanDeactivate.length > 0) {
+        route.canDeactivate = routeCanDeactivate;
       }
       routes.push(route);
     }

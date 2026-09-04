@@ -1100,4 +1100,58 @@ describe("validateGraph：坏 fixture 诊断", () => {
     const goodDiags = validateGraph(goodGraph);
     expect(goodDiags.find((d) => d.code === "shadowed-route")).toBeUndefined();
   });
+
+  test("unresolved-route-redirect warns when redirectTo points to non-existent route target", () => {
+    const graphWithBrokenRedirect: ApplicationGraph = {
+      modules: [
+        {
+          name: "routing",
+          className: "RoutingModule",
+          file: "src/routing.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "RoutingController",
+              path: "/portal",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/dashboard",
+                  handler: "getDashboard",
+                },
+                {
+                  method: "GET",
+                  path: "/old-dash",
+                  handler: "getOldDash",
+                  redirectTo: "/portal/dashbaord", // Typo in redirect target!
+                },
+                {
+                  method: "GET",
+                  path: "/home",
+                  handler: "getHome",
+                  redirectTo: "/portal/dashboard", // Valid redirect target
+                },
+              ],
+              file: "src/routing.controller.ts",
+              importPath: "./routing.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graphWithBrokenRedirect);
+    const redirectDiag = diags.find((d) => d.code === "unresolved-route-redirect");
+    expect(redirectDiag).toBeDefined();
+    expect(redirectDiag?.message).toContain("redirects to '/portal/dashbaord', but no matching route was found");
+    expect(redirectDiag?.suggestion).toContain("Did you mean '/portal/dashboard'?");
+  });
 });

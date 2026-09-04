@@ -21,6 +21,7 @@ export const SELF_PARAMS_METADATA = "supacloud:self-params";
 export const SKIP_SELF_PARAMS_METADATA = "supacloud:skip-self-params";
 export const HOST_PARAMS_METADATA = "supacloud:host-params";
 export const GUARDS_METADATA = "supacloud:guards";
+export const CAN_DEACTIVATE_METADATA = "supacloud:guards:can-deactivate";
 export const TITLE_METADATA = "supacloud:route:title";
 export const DATA_METADATA = "supacloud:route:data";
 export const ROUTE_PARAMS_METADATA = "supacloud:route-params";
@@ -108,6 +109,7 @@ export interface ControllerOptions {
 
 export type CanActivateFn<TContext = any> = (ctx: TContext) => boolean | Promise<boolean>;
 export type CanMatchFn<TContext = any> = (ctx: TContext) => boolean | Promise<boolean>;
+export type CanDeactivateFn<T = any, TContext = any> = (component: T, ctx: TContext) => boolean | Promise<boolean>;
 export type ResolveFn<T = any, TContext = any> = (ctx: TContext) => T | Promise<T>;
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
@@ -127,6 +129,8 @@ export interface RouteOptions {
   guards?: Array<CanActivateFn | string>;
   /** Angular-style route matching guard determining whether route can match. */
   canMatch?: Array<CanMatchFn | string>;
+  /** Angular-style route deactivation guard executed before leaving/cleaning up route. */
+  canDeactivate?: Array<CanDeactivateFn | string>;
   /** Angular-style route resolvers executed before handler to preload dependencies. */
   resolvers?: Record<string, ResolveFn | string>;
   /** Angular-style route redirect target path. */
@@ -421,11 +425,16 @@ function createRouteDecorator(method: HttpMethod) {
       const cls = (target as { constructor: Type<unknown> }).constructor;
       const titleKey = `${TITLE_METADATA}:${String(propertyKey)}`;
       const dataKey = `${DATA_METADATA}:${String(propertyKey)}`;
+      const deactKey = `${CAN_DEACTIVATE_METADATA}:${String(propertyKey)}`;
       const title = options.title ?? readOwnOrInherited<string>(cls, titleKey);
       const data = {
         ...(readOwnOrInherited<Record<string, unknown>>(cls, dataKey) ?? {}),
         ...(options.data ?? {}),
       };
+      const canDeactivate = [
+        ...(readOwnOrInherited<Array<CanDeactivateFn | string>>(cls, deactKey) ?? []),
+        ...(options.canDeactivate ?? []),
+      ];
       const routes: RouteDefinition[] = [
         ...(readOwnOrInherited<RouteDefinition[]>(cls, ROUTES_METADATA) ?? []),
       ];
@@ -434,6 +443,7 @@ function createRouteDecorator(method: HttpMethod) {
         path,
         handler: String(propertyKey),
         ...options,
+        canDeactivate: canDeactivate.length > 0 ? canDeactivate : undefined,
         title: title || undefined,
         data: Object.keys(data).length > 0 ? data : undefined,
       });
@@ -478,6 +488,23 @@ export function Data(data: Record<string, unknown>): MethodDecorator {
     const route = routes.find((r) => r.handler === String(propertyKey));
     if (route) {
       route.data = { ...route.data, ...data };
+    }
+  };
+}
+
+/**
+ * Attaches CanDeactivateFn guards to a route method. Modeled after Angular Route.canDeactivate.
+ */
+export function CanDeactivate(...guards: Array<CanDeactivateFn | string>): MethodDecorator {
+  return (target, propertyKey) => {
+    const cls = (target as { constructor: Type<unknown> }).constructor;
+    const key = `${CAN_DEACTIVATE_METADATA}:${String(propertyKey)}`;
+    const existing = readOwnOrInherited<Array<CanDeactivateFn | string>>(cls, key) ?? [];
+    defineMetadata(cls, key, [...existing, ...guards]);
+    const routes = readOwnOrInherited<RouteDefinition[]>(cls, ROUTES_METADATA) ?? [];
+    const route = routes.find((r) => r.handler === String(propertyKey));
+    if (route) {
+      route.canDeactivate = [...(route.canDeactivate ?? []), ...guards];
     }
   };
 }
