@@ -1,5 +1,6 @@
-import type { Token } from "./provider";
-import { DESTROY_REF } from "./context";
+import type { EnvironmentProviders, Provider, Token, Type } from "./provider";
+import { flattenProviders, isClassProvider, isExistingProvider, isFactoryProvider, isValueProvider } from "./provider";
+import { APP_INITIALIZER, DESTROY_REF, ENVIRONMENT_INITIALIZER, createDestroyRef } from "./context";
 import { resolveForwardRef } from "./forward_ref";
 import { InjectionToken } from "./token";
 
@@ -152,4 +153,213 @@ function tokenToString(token: Token<any>): string {
   if (token instanceof InjectionToken) return token.toString();
   if (typeof token === "function") return token.name || "AnonymousClass";
   return String(token);
+}
+
+export interface EnvironmentInjector extends InjectorLike {
+  get<T>(token: Token<T>, options?: InjectFlags): T;
+  get<T>(token: Token<T>, notFoundValue: T, options?: InjectFlags): T;
+  runInContext<R>(fn: () => R): R;
+  destroy(): void;
+  readonly destroyed: boolean;
+  readonly parent?: InjectorLike;
+}
+
+/**
+ * Creates an EnvironmentInjector with an isolated dependency scope and lifecycle.
+ * Modeled directly after Angular 14+ createEnvironmentInjector.
+ * Automatically executes all ENVIRONMENT_INITIALIZER / APP_INITIALIZER hooks upon creation,
+ * and executes DestroyRef teardowns and OnDestroy hooks upon destroy().
+ */
+export function createEnvironmentInjector(
+  providers: Array<Provider | EnvironmentProviders>,
+  parent?: InjectorLike,
+): EnvironmentInjector {
+  let isDestroyed = false;
+  const flatProviders = flattenProviders(providers);
+  const effectiveProviders = new Map<Token<unknown>, Provider>();
+  const multiProviders = new Map<Token<unknown>, Provider[]>();
+  const instances = new Map<Token<unknown> | string, unknown>();
+
+  // Create isolated destroyRef for this environment injector
+  const localDestroyRef = createDestroyRef();
+  instances.set(DESTROY_REF, localDestroyRef);
+
+  for (const p of flatProviders) {
+    const token = typeof p === "function" ? resolveForwardRef(p) : resolveForwardRef(p.provide);
+    if (typeof p !== "function" && p.multi) {
+      const list = multiProviders.get(token) ?? [];
+      list.push(p);
+      multiProviders.set(token, list);
+    } else {
+      effectiveProviders.set(token, p);
+    }
+  }
+
+  const injector: EnvironmentInjector = {
+    parent,
+    get destroyed() {
+      return isDestroyed;
+    },
+    runInContext<R>(fn: () => R): R {
+      if (isDestroyed) {
+        throw new Error("EnvironmentInjector has already been destroyed.");
+      }
+      return runInInjectionContext(injector, fn);
+    },
+    destroy(): void {
+      if (isDestroyed) return;
+      isDestroyed = true;
+      void localDestroyRef.destroy();
+      for (const inst of instances.values()) {
+        if (inst && typeof inst === "object" && inst !== localDestroyRef) {
+          if ("onDestroy" in inst && typeof (inst as any).onDestroy === "function") {
+            try {
+              (inst as any).onDestroy();
+            } catch (err) {
+              console.error("Error in onDestroy hook:", err);
+            }
+          }
+          if ("ngOnDestroy" in inst && typeof (inst as any).ngOnDestroy === "function") {
+            try {
+              (inst as any).ngOnDestroy();
+            } catch (err) {
+              console.error("Error in ngOnDestroy hook:", err);
+            }
+          }
+        }
+      }
+      instances.clear();
+    },
+    get<T>(token: Token<T>, notFoundOrOptions?: T | InjectFlags, maybeOptions?: InjectFlags): T {
+      if (isDestroyed) {
+        throw new Error("EnvironmentInjector has already been destroyed.");
+      }
+      let notFoundValue: T | undefined = undefined;
+      let flags: InjectFlags | undefined = undefined;
+
+      if (
+        notFoundOrOptions !== undefined &&
+        (typeof notFoundOrOptions !== "object" ||
+          notFoundOrOptions === null ||
+          (!("optional" in notFoundOrOptions) &&
+            !("skipSelf" in notFoundOrOptions) &&
+            !("self" in notFoundOrOptions) &&
+            !("host" in notFoundOrOptions)))
+      ) {
+        notFoundValue = notFoundOrOptions as T;
+        flags = maybeOptions;
+      } else if (notFoundOrOptions && typeof notFoundOrOptions === "object") {
+        flags = notFoundOrOptions as InjectFlags;
+      }
+
+      const resolved = resolveForwardRef(token);
+
+      if (flags?.skipSelf) {
+        if (!parent) {
+          if (flags.optional) return undefined as unknown as T;
+          if (notFoundValue !== undefined) return notFoundValue;
+          throw new Error(`NullInjectorError: No parent provider found for skipSelf token ${tokenToString(resolved)}`);
+        }
+        const val = parent.get(resolved, flags);
+        if (val === undefined && notFoundValue !== undefined) return notFoundValue;
+        return val as T;
+      }
+
+      if (instances.has(resolved)) {
+        return instances.get(resolved) as T;
+      }
+      if (resolved instanceof InjectionToken && instances.has(resolved.name)) {
+        return instances.get(resolved.name) as T;
+      }
+
+      if (multiProviders.has(resolved)) {
+        const provs = multiProviders.get(resolved)!;
+        const results = provs.map((prov) => {
+          if (isValueProvider(prov)) return prov.useValue;
+          if (isFactoryProvider(prov)) return runInInjectionContext(injector, () => prov.useFactory());
+          if (isClassProvider(prov)) return runInInjectionContext(injector, () => new (prov.useClass as Type<any>)());
+          if (isExistingProvider(prov)) return injector.get(prov.useExisting);
+          return undefined;
+        });
+        instances.set(resolved, results);
+        if (resolved instanceof InjectionToken) {
+          instances.set(resolved.name, results);
+        }
+        return results as unknown as T;
+      }
+
+      const provider = effectiveProviders.get(resolved);
+      if (!provider) {
+        if (flags?.self) {
+          if (flags.optional) return undefined as unknown as T;
+          if (notFoundValue !== undefined) return notFoundValue;
+          throw new Error(`NullInjectorError: No local provider for ${tokenToString(resolved)}`);
+        }
+        if (parent) {
+          const fromParent = parent.get(resolved, flags);
+          if (fromParent !== undefined) return fromParent as T;
+        }
+        if (flags?.optional) return undefined as unknown as T;
+        if (notFoundValue !== undefined) return notFoundValue;
+        if (resolved instanceof InjectionToken && resolved.factory && !flags?.self && !flags?.skipSelf) {
+          const inst = resolved.factory();
+          instances.set(resolved, inst);
+          return inst;
+        }
+        if (typeof resolved === "function") {
+          try {
+            const inst = new (resolved as Type<T>)();
+            instances.set(resolved, inst);
+            return inst;
+          } catch {
+            // not a zero-arg constructor
+          }
+        }
+        throw new Error(`NullInjectorError: No provider for ${tokenToString(resolved)}`);
+      }
+
+      let created: unknown;
+      if (typeof provider === "function") {
+        created = runInInjectionContext(injector, () => new (provider as Type<any>)());
+      } else if (isValueProvider(provider)) {
+        created = provider.useValue;
+      } else if (isFactoryProvider(provider)) {
+        created = runInInjectionContext(injector, () => provider.useFactory());
+      } else if (isClassProvider(provider)) {
+        created = runInInjectionContext(injector, () => new (provider.useClass as Type<any>)());
+      } else if (isExistingProvider(provider)) {
+        created = injector.get(provider.useExisting);
+      }
+
+      instances.set(resolved, created);
+      return created as T;
+    },
+  };
+
+  // Run all ENVIRONMENT_INITIALIZER / APP_INITIALIZER tokens automatically upon creation
+  const envInitializers = injector.get(ENVIRONMENT_INITIALIZER, { optional: true });
+  const seenInits = new Set<unknown>();
+  if (Array.isArray(envInitializers)) {
+    for (const init of envInitializers) {
+      if (typeof init === "function") {
+        seenInits.add(init);
+        runInInjectionContext(injector, () => {
+          void init();
+        });
+      }
+    }
+  }
+  const appInitializers = injector.get(APP_INITIALIZER, { optional: true });
+  if (Array.isArray(appInitializers)) {
+    for (const init of appInitializers) {
+      if (typeof init === "function" && !seenInits.has(init)) {
+        seenInits.add(init);
+        runInInjectionContext(injector, () => {
+          void init();
+        });
+      }
+    }
+  }
+
+  return injector;
 }

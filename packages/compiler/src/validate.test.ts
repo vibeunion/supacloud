@@ -1455,4 +1455,62 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(redirectCycleDiag?.errorCode).toBe("SC3003");
     expect(redirectCycleDiag?.message).toContain("/step-a -> /step-b -> /step-c -> /step-a");
   });
+
+  test("detects malformed route paths with consecutive slashes, empty params, or query characters (SC3010)", () => {
+    const graphWithMalformedRoutes: ApplicationGraph = {
+      modules: [
+        {
+          name: "MalformedModule",
+          className: "MalformedModule",
+          file: "src/malformed.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "MalformedController",
+              path: "/api",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/users//profile",
+                  handler: "getProfile",
+                },
+                {
+                  method: "GET",
+                  path: "/items/:",
+                  handler: "getItems",
+                },
+                {
+                  method: "GET",
+                  path: "/search?q=test",
+                  handler: "search",
+                },
+              ],
+              file: "src/malformed.controller.ts",
+              importPath: "./malformed.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graphWithMalformedRoutes);
+    const malformedDiags = diags.filter((d) => d.code === "malformed-route-path");
+    expect(malformedDiags).toHaveLength(3);
+    for (const diag of malformedDiags) {
+      expect(diag.errorCode).toBe("SC3010");
+      expect(diag.docsUrl).toBe("https://supacloud.dev/errors/SC3010");
+      expect(diag.suggestion).toBeDefined();
+    }
+    expect(malformedDiags.some((d) => d.message.includes("consecutive slashes"))).toBe(true);
+    expect(malformedDiags.some((d) => d.message.includes("missing a parameter identifier"))).toBe(true);
+    expect(malformedDiags.some((d) => d.message.includes("invalid URL query"))).toBe(true);
+  });
 });

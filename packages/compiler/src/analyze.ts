@@ -798,21 +798,38 @@ function parseController(
       const queryDefaults: Record<string, unknown> = {};
       let hasBodyBinding = false;
       for (const p of method.getParameters()) {
+        const pName = p.getName();
+        let hasBindingDecorator = false;
         for (const pDec of p.getDecorators()) {
           const dName = decoratorName(pDec);
           const dArgs = pDec.getArguments();
           if (dName === "Param") {
-            const parsed = parseBindingOptions(dArgs, p.getName());
+            hasBindingDecorator = true;
+            const parsed = parseBindingOptions(dArgs, pName);
             paramBindings.push(parsed.name);
             if (parsed.transform) paramTransforms[parsed.name] = parsed.transform;
             if (parsed.default !== undefined) paramDefaults[parsed.name] = parsed.default;
           } else if (dName === "Query") {
-            const parsed = parseBindingOptions(dArgs, p.getName());
+            hasBindingDecorator = true;
+            const parsed = parseBindingOptions(dArgs, pName);
             queryBindings.push(parsed.name);
             if (parsed.transform) queryTransforms[parsed.name] = parsed.transform;
             if (parsed.default !== undefined) queryDefaults[parsed.name] = parsed.default;
           } else if (dName === "Body") {
+            hasBindingDecorator = true;
             hasBodyBinding = true;
+          }
+        }
+        // Automatic route parameter binding (Angular withComponentInputBinding pattern):
+        // If a method parameter name matches a route path parameter (:name) and has no explicit binding decorator,
+        // automatically infer the path parameter binding and deduce its primitive transform.
+        if (!hasBindingDecorator && pathParams.includes(pName)) {
+          paramBindings.push(pName);
+          const typeText = p.getType().getText();
+          if (typeText === "number") {
+            paramTransforms[pName] = "number";
+          } else if (typeText === "boolean") {
+            paramTransforms[pName] = "boolean";
           }
         }
       }

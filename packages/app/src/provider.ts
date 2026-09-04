@@ -1,6 +1,6 @@
 import type { InjectionToken } from "./token";
 import type { ForwardRefFn } from "./forward_ref";
-import { APP_INITIALIZER } from "./context";
+import { APP_INITIALIZER, ENVIRONMENT_INITIALIZER } from "./context";
 import type { Scope } from "./scope";
 
 /** A class usable as a DI token / provider implementation. */
@@ -118,7 +118,13 @@ export function provideAppInitializer(
 export function provideEnvironmentInitializer(
   initializerFn: () => void | Promise<void>,
 ): EnvironmentProviders {
-  return provideAppInitializer(initializerFn);
+  return makeEnvironmentProviders([
+    {
+      provide: ENVIRONMENT_INITIALIZER,
+      useValue: initializerFn,
+      multi: true,
+    },
+  ]);
 }
 
 /**
