@@ -10,6 +10,7 @@ const registry = new TenantCacheRegistry({
   tenantIdleMs: config.tenantIdleMs,
   l1MaxEntries: config.l1MaxEntries,
   l1TtlMs: config.l1TtlMs,
+  cleanupBatchSize: config.cleanupBatchSize,
 });
 const app = createPgredisRuntimeApp({
   signingSecret: config.internalToken,
@@ -27,10 +28,20 @@ app.listen({
 
 console.log(`[pgredis-runtime] listening on ${config.host}:${config.port}`);
 
+const cleanupTimer = setInterval(() => {
+  void registry.sweepExpired().catch((error) => {
+    console.error("[pgredis-runtime] expired cache cleanup failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+}, config.cleanupIntervalMs);
+cleanupTimer.unref?.();
+
 let shuttingDown = false;
 async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
+  clearInterval(cleanupTimer);
   await app.stop(true);
   await registry.shutdown();
   process.exit(0);

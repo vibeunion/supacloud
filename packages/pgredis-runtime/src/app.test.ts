@@ -157,6 +157,11 @@ describe("pgredis-runtime internal API", () => {
       activeTenants: 1,
       queue: false,
       rateLimit: false,
+      extensions: {
+        required: [],
+        recommended: ["pg_stat_statements", "pg_cron"],
+        optional: ["pg_ivm"],
+      },
     });
     const projectResponse = await app.handle(adminRequest("/internal/v1/admin/projects/tenant-a/status"));
     expect(await projectResponse.json()).toMatchObject({ projectRef: "tenant-a", configured: true });
@@ -236,7 +241,12 @@ describe("pgredis-runtime internal API", () => {
     expect((await app.handle(request({ op: "get", key: "a" }, "Bearer wrong"))).status).toBe(401);
     expect((await app.handle(request({ op: "set", key: "a", value: "too-large" }))).status).toBe(400);
     const health = await (await app.handle(new Request("http://localhost/health"))).json();
-    expect(health).toMatchObject({ l1: true, queue: false, rateLimit: false });
+    expect(health).toMatchObject({
+      l1: true,
+      queue: false,
+      rateLimit: false,
+      extensions: { required: [], recommended: ["pg_stat_statements", "pg_cron"], optional: ["pg_ivm"] },
+    });
   });
 
   test("returns 503 when tenant capacity is exhausted", async () => {

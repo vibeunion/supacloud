@@ -21,6 +21,7 @@ export interface TenantCache {
   getset<T = unknown>(key: string, value: T): Promise<T | null>;
   getdel<T = unknown>(key: string): Promise<T | null>;
   flush(): Promise<number>;
+  cleanupExpired?(limit?: number): Promise<number>;
 }
 
 interface TenantCacheBackend {
@@ -91,6 +92,7 @@ export interface TenantCacheRegistryOptions {
   tenantIdleMs: number;
   l1MaxEntries: number;
   l1TtlMs: number;
+  cleanupBatchSize?: number;
   now?: () => number;
   loadConfig?: (tenantsDir: string, ref: string) => Promise<TenantDatabaseConfig>;
   createBackend?: (
@@ -143,6 +145,7 @@ export function createTransactionalTenantCache(
   adapter: PgSqlLike,
   cache: LocalCache,
   createTransactionCache: (tx: PgSqlLike) => TransactionCache,
+  cleanupExpired?: (limit?: number) => Promise<number>,
 ): TenantCache {
   const transaction = async <T>(
     operation: (tx: PgSqlLike, txCache: TransactionCache) => Promise<T>,
@@ -215,6 +218,9 @@ export function createTransactionalTenantCache(
       cache.invalidateAll();
       return deleted;
     },
+    cleanupExpired: cleanupExpired
+      ? (limit = 500) => cleanupExpired(Math.max(1, Math.min(Math.trunc(limit), 10_000)))
+      : undefined,
   };
 }
 
@@ -301,6 +307,7 @@ async function createPostgresBackend(
       l1: false,
       notify: { channel: NOTIFY_CHANNEL },
     }),
+    cache.cleanupExpired.bind(cache),
   );
 
   return {
@@ -354,6 +361,23 @@ export class TenantCacheRegistry {
     for (const entry of stale) this.retireEntry(entry);
     await Promise.all(stale.map((entry) => entry.closePromise));
     return stale.length;
+  }
+
+  async sweepExpired(): Promise<number> {
+    const limit = this.options.cleanupBatchSize ?? 500;
+    let deleted = 0;
+    for (const entry of this.entries.values()) {
+      if (entry.retiring || !entry.cache.cleanupExpired) continue;
+      entry.leases += 1;
+      try {
+        deleted += await entry.cache.cleanupExpired(limit);
+      } catch {
+        // Cleanup is best effort; the next interval retries the batch.
+      } finally {
+        this.releaseEntry(entry);
+      }
+    }
+    return deleted;
   }
 
   async shutdown(): Promise<void> {

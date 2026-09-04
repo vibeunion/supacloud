@@ -4,6 +4,23 @@
 `@postgresx/noredis`，按项目维护隔离的 PostgreSQL 连接池和有界 L1，本身不承担队列、
 网关限流或持久业务数据。
 
+上游 pgredis 仓库：`git@github.com:vibeunion/postgresx.git`，对应目录为
+`packages/pgredis`。发布包名暂为 `@postgresx/noredis`；同步上游代码时应使用 SSH 地址。
+
+## PostgreSQL 扩展边界
+
+pgredis 的 KV 路径只依赖 PostgreSQL 核心能力：事务、JSONB、`UNLOGGED` 表和
+`LISTEN/NOTIFY`。因此以下扩展都不是 pgredis 的启动硬依赖：
+
+- `pg_stat_statements`：推荐，用于定位真正需要缓存或优化的 SQL；
+- `pg_cron`：推荐，用于项目级物化视图刷新或其他数据库维护任务；
+- `pg_ivm`：可选，仅适用于需要增量维护的物化视图，不参与 KV 读写。
+
+pgredis-runtime 默认每 60 秒调用上游 `PgKvCache.cleanupExpired()`，每批最多 500 行；
+因此没有 `pg_cron` 时缓存表仍能正常回收。可以用 `PGREDIS_RUNTIME_CLEANUP_INTERVAL_MS`
+和 `PGREDIS_RUNTIME_CLEANUP_BATCH_SIZE` 调整清理节奏。健康和管理状态会公开这组扩展策略，
+但不会因为推荐扩展缺失而拒绝启动。
+
 ## 架构边界
 
 ```text
@@ -110,6 +127,8 @@ PGREDIS_RUNTIME_INTERNAL_TOKEN=<same-internal-token>
 PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT=2
 PGREDIS_RUNTIME_L1_MAX_ENTRIES=1000
 PGREDIS_RUNTIME_L1_TTL_MS=30000
+PGREDIS_RUNTIME_CLEANUP_INTERVAL_MS=60000
+PGREDIS_RUNTIME_CLEANUP_BATCH_SIZE=500
 ```
 
 Docker 部署中，Management API、Edge Runtime 与 `pgredis-runtime` 共享私有

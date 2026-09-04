@@ -13,6 +13,11 @@ export interface PgredisPlatformStatus {
   namespace: string;
   queue: false;
   rateLimit: false;
+  extensions: {
+    required: readonly string[];
+    recommended: readonly string[];
+    optional: readonly string[];
+  };
   activeTenants: number;
   maxTenants: number;
   connectionsPerTenant: number;
@@ -78,6 +83,7 @@ export class PgredisRuntimeService {
         namespace: "unconfigured",
         queue: false,
         rateLimit: false,
+        extensions: { required: [], recommended: [], optional: [] },
         activeTenants: 0,
         maxTenants: 0,
         connectionsPerTenant: 0,
