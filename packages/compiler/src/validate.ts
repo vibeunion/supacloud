@@ -6,7 +6,9 @@ import type {
   ModuleNode,
   ProviderNode,
   Scope,
+  ValidateOptions,
 } from "./types";
+import { resolveModuleBoundaries } from "./profiles";
 
 const SCOPE_LIFETIME_RANK: Record<Scope, number> = {
   application: 0,
@@ -25,11 +27,28 @@ interface ProviderRef {
  */
 export function validateGraph(
   graph: ApplicationGraph,
-  options: boolean | { strict?: boolean; moduleBoundaries?: ModuleBoundaryRule[] } = false,
+  options: boolean | ValidateOptions = false,
 ): Diagnostic[] {
   const strict = typeof options === "boolean" ? options : (options.strict ?? false);
-  const moduleBoundaries = typeof options === "object" ? options.moduleBoundaries : undefined;
   const diagnostics: Diagnostic[] = [];
+
+  let moduleBoundaries: ModuleBoundaryRule[] | undefined;
+  if (typeof options === "object") {
+    try {
+      moduleBoundaries = resolveModuleBoundaries({
+        preset: options.moduleBoundaryPreset,
+        rules: options.moduleBoundaries,
+      });
+    } catch (err) {
+      diagnostics.push({
+        severity: "error",
+        code: "invalid-boundary-preset",
+        message: err instanceof Error ? err.message : String(err),
+        file: graph.modules[0]?.file,
+        line: graph.modules[0]?.line,
+      });
+    }
+  }
 
   // 全局 token → provider 索引（同模块重复注册由 duplicate-token 报告，索引取第一个）。
   const globalProviders = new Map<string, ProviderRef>();

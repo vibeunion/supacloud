@@ -212,4 +212,181 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(violations).toHaveLength(1);
     expect(violations[0].message).toContain("仅允许依赖带有 [type:contracts, type:util]");
   });
+
+  test("moduleBoundaryPreset blocks cross-feature dependencies and core-to-feature dependencies", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "app",
+          className: "AppModule",
+          tags: ["type:root"],
+          file: "src/app.module.ts",
+          line: 1,
+          imports: ["feature-case", "core-auth"],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "feature-case",
+          className: "FeatureCaseModule",
+          tags: ["type:feature"],
+          file: "src/case.module.ts",
+          line: 1,
+          imports: ["feature-billing"], // Violation: feature slices cannot depend on one another.
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "feature-billing",
+          className: "FeatureBillingModule",
+          tags: ["type:feature"],
+          file: "src/billing.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "core-auth",
+          className: "CoreAuthModule",
+          tags: ["type:core"],
+          file: "src/core.module.ts",
+          line: 1,
+          imports: ["feature-billing"], // Violation: core modules cannot depend upward on features.
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph, {
+      moduleBoundaryPreset: "modular-monolith",
+    });
+
+    const violations = diags.filter((d) => d.code === "module-boundary-violation");
+    expect(violations).toHaveLength(2);
+    expect(violations[0].message).toContain("feature-case");
+    expect(violations[0].message).toContain("feature-billing");
+    expect(violations[1].message).toContain("core-auth");
+    expect(violations[1].message).toContain("feature-billing");
+  });
+
+  test("moduleBoundaryPreset protects domain purity and layering direction", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "domain-case",
+          className: "DomainCaseModule",
+          tags: ["type:domain"],
+          file: "src/domain.module.ts",
+          line: 1,
+          imports: ["api-controller"], // Violation: the domain cannot depend on API/controller layers.
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "api-controller",
+          className: "ApiControllerModule",
+          tags: ["type:api"],
+          file: "src/api.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph, {
+      moduleBoundaryPreset: "clean-architecture",
+    });
+
+    const violations = diags.filter((d) => d.code === "module-boundary-violation");
+    expect(violations).toHaveLength(1);
+    expect(violations[0].message).toContain("domain-case");
+    expect(violations[0].message).toContain("api-controller");
+  });
+
+  test("moduleBoundaryPreset merges with custom rules", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "feature-case",
+          className: "FeatureCaseModule",
+          tags: ["type:feature", "scope:case"],
+          file: "src/case.module.ts",
+          line: 1,
+          imports: ["feature-billing"], // Violation 1: the modular-monolith preset blocks cross-feature dependencies.
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "feature-billing",
+          className: "FeatureBillingModule",
+          tags: ["type:feature", "scope:billing"],
+          file: "src/billing.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph, {
+      moduleBoundaryPreset: "modular-monolith",
+      moduleBoundaries: [
+        {
+          sourceTag: "scope:case",
+          bannedDependenciesWithTags: ["scope:billing"], // Violation 2: custom scope isolation rule.
+        },
+      ],
+    });
+
+    const violations = diags.filter((d) => d.code === "module-boundary-violation");
+    expect(violations).toHaveLength(2);
+  });
+
+  test("moduleBoundaryPreset reports invalid-boundary-preset for unknown presets", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph, {
+      moduleBoundaryPreset: "non-existent-preset" as any,
+    });
+
+    const errors = diags.filter((d) => d.code === "invalid-boundary-preset");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].severity).toBe("error");
+    expect(errors[0].message).toContain("Unknown module boundary preset");
+  });
 });

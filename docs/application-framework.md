@@ -94,20 +94,27 @@ const result = await compileProject({
   include: ["src/**/*.ts"],
   outDir: "generated",
   strict: true,
+  // Built-in architecture boundary preset: 'modular-monolith' | 'angular-enterprise' | 'clean-architecture'
+  moduleBoundaryPreset: "modular-monolith",
+  // Optional: merge custom rules with the preset.
   moduleBoundaries: [
     {
       sourceTag: "type:ui",
       bannedDependenciesWithTags: ["type:data-access"],
     },
-    {
-      sourceTag: "type:feature",
-      onlyDependOnLibsWithTags: ["type:feature", "type:ui", "type:data-access", "type:contracts"],
-    },
   ],
 });
 ```
 
-诊断码：`circular-dependency`、`scope-violation`、`module-boundary`、`module-boundary-violation`、`unresolved-token`、`duplicate-token`、`duplicate-module`、`duplicate-command`、`duplicate-route`、`route-command-unresolved`、`command-missing-permission`（始终为 error）、`missing-deps`。
+Diagnostic codes: `circular-dependency`, `scope-violation`, `module-boundary`, `module-boundary-violation`, `invalid-boundary-preset`, `unresolved-token`, `duplicate-token`, `duplicate-module`, `duplicate-command`, `duplicate-route`, `route-command-unresolved`, `command-missing-permission` (always an error), and `missing-deps`.
+
+### Module Boundary Profiles
+
+`@supacloud/compiler` includes three built-in architecture governance profiles:
+
+- **`modular-monolith`** (aliases: `feature-slices`, `vertical-slices`): for vertical slices and modular monoliths. Blocks cross-feature dependencies; `type:root` / `type:app` may aggregate only `feature` / `core` / `shared` / `domain` modules; `type:core` / `type:shared` cannot depend upward on feature slices.
+- **`angular-enterprise`** (alias: `angular`): for Angular / Nx enterprise monorepos. Enforces one-way flow across `type:feature`, `type:ui`, `type:data-access`, `type:util`, `type:shared`, and `type:core`.
+- **`clean-architecture`** (alias: `domain-driven`): for Clean Architecture / Spring Boot DDD layering. Enforces `presentation/API -> application -> domain <- infrastructure` dependency inversion and domain purity.
 
 产物：
 
