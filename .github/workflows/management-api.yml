@@ -83,7 +83,7 @@ jobs:
 
       - name: Audit Management API dependencies
         working-directory: packages/management-api
-        run: bun audit --audit-level high
+        run: bun run ../../scripts/audit_dependencies.ts
 
       - name: Check Swagger route coverage
         working-directory: packages/management-api
@@ -120,7 +120,7 @@ jobs:
           bun test
           bun run check
           bun run build
-          bun audit --audit-level high
+          bun run ../../scripts/audit_dependencies.ts
 
       - name: Check SupaCloud JS SDK
         working-directory: packages/supacloud-js
@@ -131,7 +131,7 @@ jobs:
           bun run build
           bun run typecheck:consumer
           bun test
-          bun audit --audit-level high
+          bun run ../../scripts/audit_dependencies.ts
 
       - name: Check edge runtime
         working-directory: packages/edge-runtime
@@ -139,7 +139,7 @@ jobs:
           bun install --frozen-lockfile
           bun run typecheck
           bun test
-          bun audit --audit-level high
+          bun run ../../scripts/audit_dependencies.ts
 
       - name: Check pgredis runtime
         working-directory: packages/pgredis-runtime
@@ -147,14 +147,14 @@ jobs:
           bun install --frozen-lockfile
           bun run typecheck
           bun test
-          bun audit --audit-level high
+          bun run ../../scripts/audit_dependencies.ts
 
       - name: Check SupaCloud Lite
         working-directory: packages/supacloud-lite
         run: |
           bun install --frozen-lockfile
           bun run check
-          bun audit --audit-level high
+          bun run ../../scripts/audit_dependencies.ts
 
       - name: Check project CLI
         working-directory: packages/cli
@@ -163,7 +163,7 @@ jobs:
           bun run typecheck
           bun test src
           bun run build
-          bun audit --audit-level high
+          bun run ../../scripts/audit_dependencies.ts
 
       - name: Check Function adapters
         working-directory: packages/function-adapter
@@ -172,7 +172,7 @@ jobs:
           bun run typecheck
           bun test
           bun run build
-          bun audit --audit-level high
+          bun run ../../scripts/audit_dependencies.ts
 
       - name: Check admin CLI
         working-directory: packages/admin
@@ -181,7 +181,7 @@ jobs:
           bun run typecheck
           bun test src
           bun run build
-          bun audit --audit-level high
+          bun run ../../scripts/audit_dependencies.ts
 
       - name: Check unified supacloudctl CLI
         working-directory: packages/supacloud
@@ -190,7 +190,7 @@ jobs:
           bun run typecheck
           bun test src/index.test.ts
           bun run build
-          bun audit --audit-level high
+          bun run ../../scripts/audit_dependencies.ts
 
       - name: Check app framework metadata
         working-directory: packages/app
@@ -200,7 +200,7 @@ jobs:
           bun run typecheck:test
           bun test
           bun run build
-          bun audit --audit-level high
+          bun run ../../scripts/audit_dependencies.ts
 
       - name: Check app compiler
         working-directory: packages/compiler
@@ -210,7 +210,7 @@ jobs:
           bun run typecheck:test
           bun test
           bun run build
-          bun audit --audit-level high
+          bun run ../../scripts/audit_dependencies.ts
 
       - name: Check elysia adapter
         working-directory: packages/elysia
@@ -220,7 +220,7 @@ jobs:
           bun run typecheck:test
           bun test
           bun run build
-          bun audit --audit-level high
+          bun run ../../scripts/audit_dependencies.ts
 
       - name: Check database governance
         working-directory: packages/db
@@ -230,7 +230,7 @@ jobs:
           bun run typecheck:test
           bun test
           bun run build
-          bun audit --audit-level high
+          bun run ../../scripts/audit_dependencies.ts
 
       - name: Check testing utilities
         working-directory: packages/testing
@@ -240,7 +240,7 @@ jobs:
           bun run typecheck:test
           bun test
           bun run build
-          bun audit --audit-level high
+          bun run ../../scripts/audit_dependencies.ts
 
       - name: Generate CycloneDX SBOM
         uses: anchore/sbom-action@v0
@@ -282,7 +282,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun run check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          bun audit --audit-level high
+          bun run ../../scripts/audit_dependencies.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   supacloud-lite-standalone-native:
