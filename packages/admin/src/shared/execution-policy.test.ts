@@ -37,7 +37,7 @@ describe("Admin execution policy", () => {
                 "gateway.routes", "gateway.get_certificate", "gateway.custom_hostname",
                 "frontend.list_releases", "frontend.get_release",
                 "ssh.ping", "ssh.versions", "ssh.diagnose", "ssh.exec",
-                "ssh.troubleshoot", "ssh.container_logs", "ssh.tenant_list",
+                "ssh.troubleshoot", "ssh.container_logs", "ssh.backup_cleanup_plan", "ssh.tenant_list",
                 "ssh.tenant_inspect", "ssh.tenant_diagnose", "ssh.upgrade_status",
             ],
             write: [
@@ -50,7 +50,7 @@ describe("Admin execution policy", () => {
                 "gateway.deploy_certificate", "gateway.rebuild", "gateway.set_custom_hostname",
                 "gateway.delete_custom_hostname", "gateway.verify_custom_hostname",
                 "frontend.upload_release", "frontend.activate_release",
-                "ssh.setup", "ssh.install", "ssh.upgrade", "ssh.tenant_migrate",
+                "ssh.setup", "ssh.install", "ssh.upgrade", "ssh.backup_cleanup_apply", "ssh.tenant_migrate",
             ],
         } as const;
 
