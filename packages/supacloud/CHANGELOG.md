@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.3](https://github.com/vibeunion/supacloud/compare/supacloud-v0.11.2...supacloud-v0.11.3) (2026-09-04)
+
+
+### Miscellaneous Chores
+
+* unify all code comments to English across packages ([#1136](https://github.com/vibeunion/supacloud/issues/1136)) ([2587201](https://github.com/vibeunion/supacloud/commit/2587201347494975cd313ff3aa4b0c5c3af48780))
+
 ## [0.11.2](https://github.com/vibeunion/supacloud/compare/supacloud-v0.11.1...supacloud-v0.11.2) (2026-09-03)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.3](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.21.2...edge-runtime-v0.21.3) (2026-09-04)
+
+
+### Miscellaneous Chores
+
+* unify all code comments to English across packages ([#1136](https://github.com/vibeunion/supacloud/issues/1136)) ([2587201](https://github.com/vibeunion/supacloud/commit/2587201347494975cd313ff3aa4b0c5c3af48780))
+
 ## [0.21.2](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.21.1...edge-runtime-v0.21.2) (2026-09-04)
 
 

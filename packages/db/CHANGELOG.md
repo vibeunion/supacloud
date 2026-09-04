@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/vibeunion/supacloud/compare/db-v0.3.0...db-v0.3.1) (2026-09-04)
+
+
+### Miscellaneous Chores
+
+* unify all code comments to English across packages ([#1136](https://github.com/vibeunion/supacloud/issues/1136)) ([2587201](https://github.com/vibeunion/supacloud/commit/2587201347494975cd313ff3aa4b0c5c3af48780))
+
 ## [0.3.0](https://github.com/vibeunion/supacloud/compare/db-v0.2.0...db-v0.3.0) (2026-09-03)
 
 
