@@ -109,6 +109,7 @@ export {
   createChildInjector,
   getActiveInjector,
   inject,
+  injectAll,
   injectDestroySignal,
   runInInjectionContext,
 } from "./inject";
@@ -132,3 +133,15 @@ export {
   untracked,
 } from "./signal";
 export type { Signal, WritableSignal } from "./signal";
+export { resource } from "./resource";
+export type {
+  ResourceLoaderParams,
+  ResourceOptions,
+  ResourceRef,
+  ResourceStatus,
+} from "./resource";
+export { executeRoutePipeline } from "./route_pipeline";
+export type { RoutePipelineContext, RoutePipelineDefinition, RoutePipelineResult } from "./route_pipeline";
+export { TestBed } from "./testing";
+export type { TestModuleMetadata } from "./testing";
+export { provideRouter, ROUTE_CONFIG } from "./route_provider";

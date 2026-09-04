@@ -1261,4 +1261,198 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(unused?.message).toContain('Root provider "OrphanRootService" is declared with providedIn: \'root\'');
     expect(unused?.suggestion).toContain("enable tree-shaking");
   });
+
+  test("detects circular useExisting alias chains (SC1007)", () => {
+    const graphWithAliasCycle: ApplicationGraph = {
+      modules: [
+        {
+          name: "alias-cycle-module",
+          className: "AliasCycleModule",
+          file: "src/alias.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              kind: "existing",
+              token: "AliasA",
+              tokenKind: "class",
+              scope: "application",
+              deps: [],
+              useExisting: "AliasB",
+              exported: false,
+              file: "src/alias.ts",
+              line: 10,
+            },
+            {
+              kind: "existing",
+              token: "AliasB",
+              tokenKind: "class",
+              scope: "application",
+              deps: [],
+              useExisting: "AliasA",
+              exported: false,
+              file: "src/alias.ts",
+              line: 20,
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graphWithAliasCycle);
+    const aliasDiag = diags.find((d) => d.code === "circular-existing-alias");
+    expect(aliasDiag).toBeDefined();
+    expect(aliasDiag?.errorCode).toBe("SC1007");
+    expect(aliasDiag?.message).toContain("AliasA -> AliasB -> AliasA");
+  });
+
+  test("warns when handler binds @Body() without route body schema (SC3008)", () => {
+    const graphWithMissingBodySchema: ApplicationGraph = {
+      modules: [
+        {
+          name: "test-module",
+          className: "TestModule",
+          file: "src/test.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "OrderController",
+              path: "/orders",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "POST",
+                  path: "/create",
+                  handler: "createOrder",
+                  hasBodyBinding: true,
+                  // body: undefined (missing schema)
+                },
+              ],
+              file: "src/order.controller.ts",
+              importPath: "./order.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graphWithMissingBodySchema);
+    const schemaDiag = diags.find((d) => d.code === "missing-body-schema");
+    expect(schemaDiag).toBeDefined();
+    expect(schemaDiag?.errorCode).toBe("SC3008");
+    expect(schemaDiag?.message).toContain("OrderController.createOrder binds @Body()");
+  });
+
+  test("warns when route specifies body schema but handler lacks @Body() binding (SC3009)", () => {
+    const graphWithUnusedSchema: ApplicationGraph = {
+      modules: [
+        {
+          name: "test-module",
+          className: "TestModule",
+          file: "src/test.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "ItemController",
+              path: "/items",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "POST",
+                  path: "/add",
+                  handler: "addItem",
+                  body: "ItemPayloadSchema",
+                  hasBodyBinding: false,
+                },
+              ],
+              file: "src/item.controller.ts",
+              importPath: "./item.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graphWithUnusedSchema);
+    const schemaDiag = diags.find((d) => d.code === "unused-route-schema");
+    expect(schemaDiag).toBeDefined();
+    expect(schemaDiag?.errorCode).toBe("SC3009");
+    expect(schemaDiag?.message).toContain("defines body schema 'ItemPayloadSchema'");
+  });
+
+  test("detects multi-hop circular route redirect chains (SC3003)", () => {
+    const graphWithMultiHopRedirectCycle: ApplicationGraph = {
+      modules: [
+        {
+          name: "redirect-module",
+          className: "RedirectModule",
+          file: "src/redirect.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "RedirectController",
+              path: "",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/step-a",
+                  handler: "stepA",
+                  redirectTo: "/step-b",
+                },
+                {
+                  method: "GET",
+                  path: "/step-b",
+                  handler: "stepB",
+                  redirectTo: "/step-c",
+                },
+                {
+                  method: "GET",
+                  path: "/step-c",
+                  handler: "stepC",
+                  redirectTo: "/step-a",
+                },
+              ],
+              file: "src/redirect.controller.ts",
+              importPath: "./redirect.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graphWithMultiHopRedirectCycle);
+    const redirectCycleDiag = diags.find(
+      (d) => d.code === "circular-route-redirect" && d.message.includes("forms a cycle"),
+    );
+    expect(redirectCycleDiag).toBeDefined();
+    expect(redirectCycleDiag?.errorCode).toBe("SC3003");
+    expect(redirectCycleDiag?.message).toContain("/step-a -> /step-b -> /step-c -> /step-a");
+  });
 });

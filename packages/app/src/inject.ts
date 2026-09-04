@@ -87,6 +87,16 @@ export function inject<T>(token: Token<T>, options?: InjectFlags): T {
 }
 
 /**
+ * Injects all instances registered for a multi-provider token.
+ * Modeled after Angular's multi-provider injection.
+ */
+export function injectAll<T>(token: Token<T>): T[] {
+  const value = inject<T | T[]>(token, { optional: true });
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+/**
  * Creates a hierarchical child injector that inherits providers from a parent injector.
  * Modeled directly after Angular's hierarchical injectors.
  */
