@@ -1172,11 +1172,13 @@ async function executeProjectSqlRoute({
   body,
   request,
   set,
+  skipReplacementJournalCheck = false,
 }: {
   projectRef: string;
   body: Record<string, unknown>;
   request: Request;
   set: { status?: number | string };
+  skipReplacementJournalCheck?: boolean;
 }) {
   const authError = await requireProjectOrAdminAuth(request, projectRef);
   if (authError) return projectAuthResponse(authError, set);
@@ -1217,7 +1219,7 @@ async function executeProjectSqlRoute({
     }
     const useRoleConnection = mode !== "admin";
     const execute = async () => {
-      if (mode === "migration") {
+      if (mode === "migration" && !skipReplacementJournalCheck) {
         await branchReplacementJournal.assertInactive([projectRef]);
       }
       const result = await db.executeQuery(credentials.db_name, sqlQuery, {
@@ -1787,11 +1789,20 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
     .post(
         "/sql",
         async ({ params, body, set, request }) => {
+            const sqlQuery = typeof body.query === "string" && body.query
+                ? body.query
+                : typeof body.sql === "string" && body.sql
+                    ? body.sql
+                    : undefined;
+            if (resolveSqlMode(body as Record<string, unknown>, sqlQuery) === "migration") {
+                await branchReplacementJournal.assertInactive([params.ref]);
+            }
             return executeProjectSqlRoute({
                 projectRef: params.ref,
                 body: body as Record<string, unknown>,
                 request,
                 set,
+                skipReplacementJournalCheck: true,
             });
         },
         {
