@@ -33,6 +33,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "disallow-controller-direct-db": { code: "SC2003", docsUrl: "https://supacloud.dev/errors/SC2003" },
   "self-dependency-violation": { code: "SC2004", docsUrl: "https://supacloud.dev/errors/SC2004" },
   "skip-self-dependency-violation": { code: "SC2005", docsUrl: "https://supacloud.dev/errors/SC2005" },
+  "export-unprovided-token": { code: "SC2006", docsUrl: "https://supacloud.dev/errors/SC2006" },
   "shadowed-route": { code: "SC3001", docsUrl: "https://supacloud.dev/errors/SC3001" },
   "unresolved-route-redirect": { code: "SC3002", docsUrl: "https://supacloud.dev/errors/SC3002" },
   "circular-route-redirect": { code: "SC3003", docsUrl: "https://supacloud.dev/errors/SC3003" },
@@ -43,6 +44,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "missing-body-schema": { code: "SC3008", docsUrl: "https://supacloud.dev/errors/SC3008" },
   "unused-route-schema": { code: "SC3009", docsUrl: "https://supacloud.dev/errors/SC3009" },
   "malformed-route-path": { code: "SC3010", docsUrl: "https://supacloud.dev/errors/SC3010" },
+  "duplicate-path-param": { code: "SC3011", docsUrl: "https://supacloud.dev/errors/SC3011" },
   "command-missing-permission": { code: "SC4001", docsUrl: "https://supacloud.dev/errors/SC4001" },
   "duplicate-command": { code: "SC4002", docsUrl: "https://supacloud.dev/errors/SC4002" },
   "route-command-unresolved": { code: "SC4003", docsUrl: "https://supacloud.dev/errors/SC4003" },
@@ -276,6 +278,20 @@ export function validateGraph(
         }
 
         const pathParams = route.pathParams ?? [];
+        const seenParams = new Set<string>();
+        for (const p of pathParams) {
+          if (seenParams.has(p)) {
+            error(
+              "duplicate-path-param",
+              `Route ${route.method} '${route.path}' defines duplicate path parameter ':${p}'. Each parameter in a route path must be unique.`,
+              controller.file,
+              undefined,
+              `Rename the duplicate parameter ':${p}' to a unique name (e.g. ':${p}Id').`,
+            );
+          }
+          seenParams.add(p);
+        }
+
         const paramBindings = route.paramBindings ?? [];
 
         for (const binding of paramBindings) {
@@ -671,6 +687,23 @@ export function validateGraph(
           `Inject "${provider.token}" in a service or controller, export it, or remove providedIn: 'root' to enable tree-shaking.`,
         );
       }
+    }
+  }
+
+  // Angular Ivy-style export validation (SC2006)
+  for (const module of graph.modules) {
+    for (const expToken of module.exports) {
+      const resolved = resolveDep(module, expToken);
+      if (resolved) continue;
+      if (module.imports.includes(expToken)) continue;
+
+      error(
+        "export-unprovided-token",
+        `Module '${module.name}' exports token '${expToken}', but it is neither provided in '${module.name}' nor imported from an imported module.`,
+        module.file,
+        module.line,
+        `Add a provider for '${expToken}' to '${module.name}.providers', or remove '${expToken}' from exports.`,
+      );
     }
   }
 

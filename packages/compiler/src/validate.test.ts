@@ -1513,4 +1513,75 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(malformedDiags.some((d) => d.message.includes("missing a parameter identifier"))).toBe(true);
     expect(malformedDiags.some((d) => d.message.includes("invalid URL query"))).toBe(true);
   });
+
+  test("detects unprovided exported tokens in modules (SC2006)", () => {
+    const graphWithUnprovidedExport: ApplicationGraph = {
+      modules: [
+        {
+          name: "FaultyExportModule",
+          className: "FaultyExportModule",
+          file: "src/faulty.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: ["GhostToken"],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graphWithUnprovidedExport);
+    const exportDiag = diags.find((d) => d.code === "export-unprovided-token");
+    expect(exportDiag).toBeDefined();
+    expect(exportDiag?.errorCode).toBe("SC2006");
+    expect(exportDiag?.docsUrl).toBe("https://supacloud.dev/errors/SC2006");
+    expect(exportDiag?.message).toContain("GhostToken");
+  });
+
+  test("detects duplicate path parameters in route paths (SC3011)", () => {
+    const graphWithDuplicateParam: ApplicationGraph = {
+      modules: [
+        {
+          name: "DupParamModule",
+          className: "DupParamModule",
+          file: "src/dup_param.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "DupParamController",
+              path: "/orgs",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/:slug/teams/:slug",
+                  pathParams: ["slug", "slug"],
+                  handler: "getTeam",
+                },
+              ],
+              file: "src/dup_param.controller.ts",
+              importPath: "./dup_param.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graphWithDuplicateParam);
+    const dupParamDiag = diags.find((d) => d.code === "duplicate-path-param");
+    expect(dupParamDiag).toBeDefined();
+    expect(dupParamDiag?.errorCode).toBe("SC3011");
+    expect(dupParamDiag?.docsUrl).toBe("https://supacloud.dev/errors/SC3011");
+    expect(dupParamDiag?.message).toContain(":slug");
+  });
 });

@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach } from "bun:test";
 import { InjectionToken } from "./token";
 import { TestBed } from "./testing";
-import { inject, injectAll } from "./inject";
+import { INJECTOR, inject, injectAll } from "./inject";
 import { provideRouter, ROUTE_CONFIG } from "./route_provider";
 
 describe("Angular-style TestBed testing environment", () => {
@@ -85,6 +85,14 @@ describe("Angular-style TestBed testing environment", () => {
 
     const viaInjectAll = TestBed.run(() => injectAll(PLUGIN_TOKEN));
     expect(viaInjectAll).toEqual(["plugin-a", "plugin-b", "plugin-c"]);
+
+    // Directly via TestBed.injectAll
+    const directInjectAll = TestBed.injectAll(PLUGIN_TOKEN);
+    expect(directInjectAll).toEqual(["plugin-a", "plugin-b", "plugin-c"]);
+
+    // Resolving INJECTOR token from TestBed
+    const testBedInjector = TestBed.inject(INJECTOR);
+    expect(testBedInjector).toBeDefined();
   });
 
   it("supports provideRouter and ROUTE_CONFIG in TestBed", () => {

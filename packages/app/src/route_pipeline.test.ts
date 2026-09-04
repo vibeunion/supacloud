@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { executeRoutePipeline } from "./route_pipeline";
-import type { RoutePipelineDefinition } from "./route_pipeline";
+import type { RoutePipelineDefinition, RouterEvent } from "./route_pipeline";
 
 describe("Angular Router lifecycle pipeline (executeRoutePipeline)", () => {
   it("executes handler successfully on happy path", async () => {
@@ -145,5 +145,42 @@ describe("Angular Router lifecycle pipeline (executeRoutePipeline)", () => {
 
     expect(result.status).toBe(500);
     expect(result.error).toBe("Simulated backend failure");
+  });
+
+  it("emits Angular Router events throughout navigation lifecycle", async () => {
+    const events: RouterEvent[] = [];
+    const route: RoutePipelineDefinition = {
+      path: "/items/:id",
+      method: "GET",
+      canMatch: [() => true],
+      guards: [() => true],
+      resolvers: {
+        item: () => ({ id: "item-123" }),
+      },
+      handler: (ctx) => ({ success: true, item: ctx.resolved?.item }),
+    };
+
+    const result = await executeRoutePipeline(
+      route,
+      { url: "/items/item-123", method: "GET" },
+      undefined,
+      { onEvent: (e) => events.push(e) },
+    );
+
+    expect(result.status).toBe(200);
+    const eventTypes = events.map((e) => e.type);
+    expect(eventTypes).toEqual([
+      "NavigationStart",
+      "RoutesRecognized",
+      "GuardsCheckStart",
+      "GuardsCheckEnd",
+      "GuardsCheckStart",
+      "GuardsCheckEnd",
+      "ResolveStart",
+      "ResolveEnd",
+      "ExecutionStart",
+      "ExecutionEnd",
+      "NavigationEnd",
+    ]);
   });
 });
