@@ -354,4 +354,51 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     expect(appCode).toContain('path: "/standalone"');
     expect(appCode).toContain('guards: ["authGuard"]');
   });
+
+  test("renderApplication generates initializeApplication and redirectTo/pathMatch", async () => {
+    const rendered = renderApplication(
+      {
+        modules: [
+          {
+            name: "routes",
+            className: "RoutesModule",
+            file: "src/routes.module.ts",
+            line: 1,
+            imports: [],
+            providers: [],
+            controllers: [
+              {
+                className: "RedirectController",
+                path: "/redirect",
+                scope: "request",
+                deps: [],
+                routes: [
+                  {
+                    method: "GET",
+                    path: "/",
+                    handler: "index",
+                    redirectTo: "/redirect/target",
+                    pathMatch: "full",
+                  },
+                ],
+                file: "src/redirect.controller.ts",
+                importPath: "./redirect.controller",
+              },
+            ],
+            commands: [],
+            queries: [],
+            exports: [],
+          },
+        ],
+        externalTokens: [],
+      },
+      { rootDir: "/app", outDir: "/app/gen", generateClient: true },
+    );
+
+    expect(rendered.applicationCode).toContain("export async function initializeApplication(");
+    expect(rendered.applicationCode).toContain('redirectTo: "/redirect/target"');
+    expect(rendered.applicationCode).toContain('pathMatch: "full"');
+    expect(rendered.clientCode).toContain("export type HttpInterceptorFn");
+    expect(rendered.clientCode).toContain("interceptors?: HttpInterceptorFn[];");
+  });
 });

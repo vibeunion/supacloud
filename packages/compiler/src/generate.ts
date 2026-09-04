@@ -28,6 +28,8 @@ const INTERFACES = `export interface CompiledRoute {
   command?: string;
   guards?: string[];
   resolvers?: Record<string, string>;
+  redirectTo?: string;
+  pathMatch?: "full" | "prefix";
 }
 
 export interface CompiledCommand {
@@ -108,6 +110,17 @@ export function renderApplication(
     "  return [",
     ...descriptorEntries.map((entry) => indent(entry, 4) + ","),
     "  ];",
+    "}",
+    "",
+    "export async function initializeApplication(services: Record<string, unknown>): Promise<void> {",
+    '  const initializers = (services.appInitializer ?? (services as any)["supacloud.app-initializer"]) as unknown;',
+    "  if (Array.isArray(initializers)) {",
+    "    for (const init of initializers) {",
+    '      if (typeof init === "function") await init();',
+    "    }",
+    '  } else if (typeof initializers === "function") {',
+    "    await (initializers as () => unknown)();",
+    "  }",
     "}",
     "",
     ...factorySections,
@@ -333,6 +346,12 @@ class ModuleGenerator {
         }
         if (route.resolvers && Object.keys(route.resolvers).length > 0) {
           fields.push(`resolvers: ${JSON.stringify(route.resolvers)}`);
+        }
+        if (route.redirectTo) {
+          fields.push(`redirectTo: ${JSON.stringify(route.redirectTo)}`);
+        }
+        if (route.pathMatch) {
+          fields.push(`pathMatch: ${JSON.stringify(route.pathMatch)}`);
         }
         return `{ ${fields.join(", ")} }`;
       });
@@ -566,6 +585,8 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     command?: string;
     guards?: string[];
     resolvers?: Record<string, string>;
+    redirectTo?: string;
+    pathMatch?: "full" | "prefix";
   }> = [];
 
   for (const module of graph.modules) {
@@ -583,6 +604,8 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
           command: route.command,
           guards: route.guards,
           resolvers: route.resolvers,
+          redirectTo: route.redirectTo,
+          pathMatch: route.pathMatch,
         });
 
         routeMethods.push(`
@@ -610,10 +633,16 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     "  headers?: Record<string, string>;",
     "}",
     "",
+    "export type HttpInterceptorFn = (",
+    "  req: { method: string; url: string; headers: Record<string, string>; body?: unknown },",
+    "  next: (req: { method: string; url: string; headers: Record<string, string>; body?: unknown }) => Promise<Response>,",
+    ") => Promise<Response>;",
+    "",
     "export interface ApiClientConfig {",
     "  baseUrl?: string;",
     "  fetch?: typeof fetch;",
     "  headers?: Record<string, string> | (() => Record<string, string> | Promise<Record<string, string>>);",
+    "  interceptors?: HttpInterceptorFn[];",
     "}",
     "",
     "export const API_ROUTES = " + JSON.stringify(allRoutes, null, 2) + " as const;",
@@ -647,11 +676,21 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     "      ...customHeaders,",
     "      ...options.headers,",
     "    };",
-    "    const response = await fetcher(url, {",
-    "      method,",
-    "      headers,",
-    "      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,",
-    "    });",
+    "    const interceptors = config.interceptors ?? [];",
+    "    const executeChain = (",
+    "      index: number,",
+    "      reqPayload: { method: string; url: string; headers: Record<string, string>; body?: unknown },",
+    "    ): Promise<Response> => {",
+    "      if (index < interceptors.length) {",
+    "        return interceptors[index](reqPayload, (nextPayload) => executeChain(index + 1, nextPayload));",
+    "      }",
+    "      return fetcher(reqPayload.url, {",
+    "        method: reqPayload.method,",
+    "        headers: reqPayload.headers,",
+    "        body: reqPayload.body !== undefined ? JSON.stringify(reqPayload.body) : undefined,",
+    "      });",
+    "    };",
+    "    const response = await executeChain(0, { method, url, headers, body: options.body });",
     "    if (!response.ok) {",
     "      const errBody = await response.text();",
     "      throw new Error(`API request failed: ${method} ${path} -> ${response.status} ${errBody}`);",

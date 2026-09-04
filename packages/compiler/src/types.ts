@@ -64,6 +64,10 @@ export interface RouteNode {
   guards?: string[];
   /** Route resolvers executed before handler (Angular ResolveFn style). */
   resolvers?: Record<string, string>;
+  /** Route redirect target (Angular Router style). */
+  redirectTo?: string;
+  /** Route redirect matching rule (Angular Router style). */
+  pathMatch?: "full" | "prefix";
 }
 
 export interface ControllerNode {

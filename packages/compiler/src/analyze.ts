@@ -782,6 +782,17 @@ function parseController(
             route.resolvers = resolvers;
           }
         }
+        const redirectToExpr = getProp(optionsArg, "redirectTo");
+        if (redirectToExpr && Node.isStringLiteral(redirectToExpr)) {
+          route.redirectTo = redirectToExpr.getLiteralText();
+        }
+        const pathMatchExpr = getProp(optionsArg, "pathMatch");
+        if (pathMatchExpr && Node.isStringLiteral(pathMatchExpr)) {
+          const val = pathMatchExpr.getLiteralText();
+          if (val === "full" || val === "prefix") {
+            route.pathMatch = val;
+          }
+        }
       }
       if (routeGuards.length > 0) {
         route.guards = routeGuards;
@@ -835,42 +846,58 @@ function classDeps(
   }
 
   const ctor = cls.getConstructors()[0];
-  if (!ctor || ctor.getParameters().length === 0) {
-    return {
-      deps: [],
-      optionalDeps: [],
-      selfDeps: [],
-      skipSelfDeps: [],
-      hostDeps: [],
-      missing: false,
-    };
-  }
-
-  const injectParams = parseInjectParams(cls);
-  const optionalIndices = parseOptionalParams(cls);
-  const selfIndices = parseModifierParams(cls, "Self");
-  const skipSelfIndices = parseModifierParams(cls, "SkipSelf");
-  const hostIndices = parseModifierParams(cls, "Host");
   const deps: string[] = [];
   const optionalDeps: string[] = [];
   const selfDeps: string[] = [];
   const skipSelfDeps: string[] = [];
   const hostDeps: string[] = [];
   let missing = false;
-  ctor.getParameters().forEach((param, index) => {
-    const isOptional = optionalIndices.has(index);
-    const injected = injectParams.get(index);
-    const tokenName = injected ?? paramTypeTokenName(param, ctx);
-    if (tokenName) {
-      deps.push(tokenName);
-      if (isOptional) optionalDeps.push(tokenName);
-      if (selfIndices.has(index)) selfDeps.push(tokenName);
-      if (skipSelfIndices.has(index)) skipSelfDeps.push(tokenName);
-      if (hostIndices.has(index)) hostDeps.push(tokenName);
-    } else {
-      if (!isOptional) missing = true;
+
+  if (ctor && ctor.getParameters().length > 0) {
+    const injectParams = parseInjectParams(cls);
+    const optionalIndices = parseOptionalParams(cls);
+    const selfIndices = parseModifierParams(cls, "Self");
+    const skipSelfIndices = parseModifierParams(cls, "SkipSelf");
+    const hostIndices = parseModifierParams(cls, "Host");
+    ctor.getParameters().forEach((param, index) => {
+      const isOptional = optionalIndices.has(index);
+      const injected = injectParams.get(index);
+      const tokenName = injected ?? paramTypeTokenName(param, ctx);
+      if (tokenName) {
+        deps.push(tokenName);
+        if (isOptional) optionalDeps.push(tokenName);
+        if (selfIndices.has(index)) selfDeps.push(tokenName);
+        if (skipSelfIndices.has(index)) skipSelfDeps.push(tokenName);
+        if (hostIndices.has(index)) hostDeps.push(tokenName);
+      } else {
+        if (!isOptional) missing = true;
+      }
+    });
+  }
+
+  // Property-level inject() calls (Angular functional DI syntax: private foo = inject(TOKEN))
+  for (const prop of cls.getProperties()) {
+    const init = prop.getInitializer();
+    if (init && Node.isCallExpression(init)) {
+      const callName = init.getExpression().getText().split(".").pop();
+      if (callName === "inject") {
+        const [tokenArg, optionsArg] = init.getArguments();
+        if (tokenArg) {
+          const tokenName = tokenText(tokenArg as Expression);
+          if (tokenName) {
+            if (!deps.includes(tokenName)) deps.push(tokenName);
+            if (optionsArg && Node.isObjectLiteralExpression(optionsArg)) {
+              const isOptional = booleanProp(optionsArg, "optional");
+              if (isOptional && !optionalDeps.includes(tokenName)) {
+                optionalDeps.push(tokenName);
+              }
+            }
+          }
+        }
+      }
     }
-  });
+  }
+
   return { deps, optionalDeps, selfDeps, skipSelfDeps, hostDeps, missing };
 }
 

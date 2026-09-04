@@ -883,4 +883,46 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(skipDiag).toBeDefined();
     expect(skipDiag?.message).toContain("@SkipSelf()");
   });
+
+  test("circular redirectTo reports circular-route-redirect diagnostic", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "feature",
+          className: "FeatureModule",
+          file: "src/feature.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "RedirectController",
+              path: "/cases",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/cases",
+                  handler: "index",
+                  redirectTo: "/cases",
+                },
+              ],
+              file: "src/redirect.controller.ts",
+              importPath: "./redirect.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    const redirectDiag = diags.find((d) => d.code === "circular-route-redirect");
+    expect(redirectDiag).toBeDefined();
+    expect(redirectDiag?.message).toContain("circular redirectTo");
+  });
 });

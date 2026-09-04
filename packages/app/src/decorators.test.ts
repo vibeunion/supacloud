@@ -33,6 +33,8 @@ import {
 } from "./decorators";
 import { InjectionToken } from "./token";
 import { makeEnvironmentProviders } from "./provider";
+import { APP_INITIALIZER } from "./context";
+import { assertInInjectionContext, inject, runInInjectionContext } from "./inject";
 
 const DB_CLIENT = new InjectionToken<{ query: (sql: string) => unknown }>("db.client");
 
@@ -307,5 +309,60 @@ describe("@Controller and route decorators", () => {
 
     expect(getGuards(AdminController)).toEqual([authGuard]);
     expect(getGuards(AdminController, "dashboard")).toEqual([authGuard, adminGuard]);
+  });
+
+  test("supports redirectTo and pathMatch on route decorators", () => {
+    @Controller("/cases")
+    class RedirectController {
+      @Get("/", { redirectTo: "/cases/active", pathMatch: "full" })
+      index() {}
+    }
+
+    const routes = getRoutes(RedirectController);
+    expect(routes[0].redirectTo).toBe("/cases/active");
+    expect(routes[0].pathMatch).toBe("full");
+  });
+});
+
+describe("Angular-style functional inject() & injection context", () => {
+  const FOO = new InjectionToken<string>("foo");
+  const BAR = new InjectionToken<number>("bar", { factory: () => 42 });
+
+  test("inject() throws when called outside injection context", () => {
+    expect(() => inject(FOO)).toThrow("inject() can only be used within an active injection context");
+  });
+
+  test("assertInInjectionContext asserts active context", () => {
+    expect(() => assertInInjectionContext("myGuard")).toThrow("myGuard must be called from an active injection context");
+  });
+
+  test("runInInjectionContext resolves tokens via inject()", () => {
+    const map = new Map<unknown, unknown>([[FOO, "hello"]]);
+    const injector = {
+      get: <T>(token: unknown) => map.get(token) as T | undefined,
+    };
+
+    const result = runInInjectionContext(injector, () => {
+      assertInInjectionContext("testScope");
+      return inject(FOO);
+    });
+    expect(result).toBe("hello");
+  });
+
+  test("inject() supports { optional: true }", () => {
+    const injector = { get: () => undefined };
+    const result = runInInjectionContext(injector, () => inject(FOO, { optional: true }));
+    expect(result).toBeUndefined();
+  });
+
+  test("inject() falls back to token factory when not in injector", () => {
+    const injector = { get: () => undefined };
+    const result = runInInjectionContext(injector, () => inject(BAR));
+    expect(result).toBe(42);
+  });
+
+  test("APP_INITIALIZER has application scope", () => {
+    expect(APP_INITIALIZER.scope).toBe("application");
+    expect(APP_INITIALIZER.name).toBe("supacloud.app-initializer");
   });
 });

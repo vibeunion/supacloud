@@ -83,4 +83,11 @@ export type {
   RouteOptions,
 } from "./decorators";
 export { defineModule } from "./module";
-export { DB_CLIENT, JOB_CONTEXT, REQUEST_CONTEXT } from "./context";
+export { APP_INITIALIZER, DB_CLIENT, JOB_CONTEXT, REQUEST_CONTEXT } from "./context";
+export {
+  assertInInjectionContext,
+  getActiveInjector,
+  inject,
+  runInInjectionContext,
+} from "./inject";
+export type { InjectFlags, InjectorLike } from "./inject";

@@ -109,6 +109,10 @@ export interface RouteOptions {
   guards?: Array<CanActivateFn | string>;
   /** Angular-style route resolvers executed before handler to preload dependencies. */
   resolvers?: Record<string, ResolveFn | string>;
+  /** Angular-style route redirect target path. */
+  redirectTo?: string;
+  /** Angular-style route path matching strategy. */
+  pathMatch?: "full" | "prefix";
 }
 
 export interface RouteDefinition extends RouteOptions {

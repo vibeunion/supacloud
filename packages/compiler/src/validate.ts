@@ -161,6 +161,18 @@ export function validateGraph(
             controller.file,
           );
         }
+
+        if (route.redirectTo) {
+          const target = route.redirectTo.replace(/\/+$/, "");
+          const current = fullPath.replace(/\/+$/, "");
+          if (target === current || target === route.path.replace(/\/+$/, "")) {
+            error(
+              "circular-route-redirect",
+              `Route ${key} defines circular redirectTo '${route.redirectTo}'`,
+              controller.file,
+            );
+          }
+        }
       }
 
       if (typeof options === "object" && options.disallowControllerDirectDb) {
