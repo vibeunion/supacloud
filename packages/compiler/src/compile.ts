@@ -13,6 +13,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
     ...(graph.diagnostics ?? []),
     ...validateGraph(graph, {
       strict: options.strict,
+      moduleBoundaryPreset: options.moduleBoundaryPreset,
       moduleBoundaries: options.moduleBoundaries,
     }),
   ];

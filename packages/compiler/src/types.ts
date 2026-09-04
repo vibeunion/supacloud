@@ -118,6 +118,8 @@ export interface CompileOptions {
   outDir: string;
   /** warn 级诊断升级为 error。 */
   strict?: boolean;
+  /** 内置架构边界预设 Profile（如 'modular-monolith' | 'angular-enterprise' | 'clean-architecture'）。 */
+  moduleBoundaryPreset?: ModuleBoundaryPresetName;
   /** 模块边界与架构治理规则（受 Nx enforce-module-boundaries 启发）。 */
   moduleBoundaries?: ModuleBoundaryRule[];
 }
@@ -129,6 +131,28 @@ export interface ModuleBoundaryRule {
   onlyDependOnLibsWithTags?: string[];
   /** 源模块禁止依赖具有这些标签的模块。 */
   bannedDependenciesWithTags?: string[];
+}
+
+/** 内置的模块边界预设 Profile 名称。 */
+export type ModuleBoundaryPresetName =
+  | "modular-monolith"
+  | "feature-slices"
+  | "vertical-slices"
+  | "angular-enterprise"
+  | "angular"
+  | "clean-architecture"
+  | "domain-driven";
+
+export interface ModuleBoundaryProfile {
+  name: ModuleBoundaryPresetName;
+  description: string;
+  rules: ModuleBoundaryRule[];
+}
+
+export interface ValidateOptions {
+  strict?: boolean;
+  moduleBoundaryPreset?: ModuleBoundaryPresetName;
+  moduleBoundaries?: ModuleBoundaryRule[];
 }
 
 export interface CompileResult {

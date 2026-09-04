@@ -212,4 +212,181 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(violations).toHaveLength(1);
     expect(violations[0].message).toContain("仅允许依赖带有 [type:contracts, type:util]");
   });
+
+  test("moduleBoundaryPreset：modular-monolith 预设拦截 Feature 之间交叉依赖与 Core 反向依赖", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "app",
+          className: "AppModule",
+          tags: ["type:root"],
+          file: "src/app.module.ts",
+          line: 1,
+          imports: ["feature-case", "core-auth"],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "feature-case",
+          className: "FeatureCaseModule",
+          tags: ["type:feature"],
+          file: "src/case.module.ts",
+          line: 1,
+          imports: ["feature-billing"], // 违规：Feature 之间禁止交叉依赖
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "feature-billing",
+          className: "FeatureBillingModule",
+          tags: ["type:feature"],
+          file: "src/billing.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "core-auth",
+          className: "CoreAuthModule",
+          tags: ["type:core"],
+          file: "src/core.module.ts",
+          line: 1,
+          imports: ["feature-billing"], // 违规：Core 禁止反向依赖 Feature
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph, {
+      moduleBoundaryPreset: "modular-monolith",
+    });
+
+    const violations = diags.filter((d) => d.code === "module-boundary-violation");
+    expect(violations).toHaveLength(2);
+    expect(violations[0].message).toContain("feature-case");
+    expect(violations[0].message).toContain("禁止依赖带有标签 'type:feature'");
+    expect(violations[1].message).toContain("core-auth");
+    expect(violations[1].message).toContain("禁止依赖带有标签 'type:feature'");
+  });
+
+  test("moduleBoundaryPreset：clean-architecture 预设保护领域层纯净与分层依赖流向", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "domain-case",
+          className: "DomainCaseModule",
+          tags: ["type:domain"],
+          file: "src/domain.module.ts",
+          line: 1,
+          imports: ["api-controller"], // 违规：Domain 绝不能依赖上层 API/Controller
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "api-controller",
+          className: "ApiControllerModule",
+          tags: ["type:api"],
+          file: "src/api.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph, {
+      moduleBoundaryPreset: "clean-architecture",
+    });
+
+    const violations = diags.filter((d) => d.code === "module-boundary-violation");
+    expect(violations).toHaveLength(1);
+    expect(violations[0].message).toContain("domain-case");
+    expect(violations[0].message).toContain("禁止依赖带有标签 'type:api'");
+  });
+
+  test("moduleBoundaryPreset：预设与自定义规则合并生效", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "feature-case",
+          className: "FeatureCaseModule",
+          tags: ["type:feature", "scope:case"],
+          file: "src/case.module.ts",
+          line: 1,
+          imports: ["feature-billing"], // 违规 1：modular-monolith 预设拦截 feature 间依赖
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "feature-billing",
+          className: "FeatureBillingModule",
+          tags: ["type:feature", "scope:billing"],
+          file: "src/billing.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph, {
+      moduleBoundaryPreset: "modular-monolith",
+      moduleBoundaries: [
+        {
+          sourceTag: "scope:case",
+          bannedDependenciesWithTags: ["scope:billing"], // 违规 2：自定义 scope 隔离规则
+        },
+      ],
+    });
+
+    const violations = diags.filter((d) => d.code === "module-boundary-violation");
+    expect(violations).toHaveLength(2);
+  });
+
+  test("moduleBoundaryPreset：传入未知预设时产生明确的 invalid-boundary-preset 错误诊断", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph, {
+      moduleBoundaryPreset: "non-existent-preset" as any,
+    });
+
+    const errors = diags.filter((d) => d.code === "invalid-boundary-preset");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].severity).toBe("error");
+    expect(errors[0].message).toContain("未知的模块边界预设 Profile");
+  });
 });

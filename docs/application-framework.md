@@ -94,20 +94,27 @@ const result = await compileProject({
   include: ["src/**/*.ts"],
   outDir: "generated",
   strict: true,
+  // 内置架构边界预设：'modular-monolith' | 'angular-enterprise' | 'clean-architecture'
+  moduleBoundaryPreset: "modular-monolith",
+  // 可选：叠加自定义规则（与 preset 自动合并）
   moduleBoundaries: [
     {
       sourceTag: "type:ui",
       bannedDependenciesWithTags: ["type:data-access"],
     },
-    {
-      sourceTag: "type:feature",
-      onlyDependOnLibsWithTags: ["type:feature", "type:ui", "type:data-access", "type:contracts"],
-    },
   ],
 });
 ```
 
-诊断码：`circular-dependency`、`scope-violation`、`module-boundary`、`module-boundary-violation`、`unresolved-token`、`duplicate-token`、`duplicate-module`、`duplicate-command`、`duplicate-route`、`route-command-unresolved`、`command-missing-permission`（始终为 error）、`missing-deps`。
+诊断码：`circular-dependency`、`scope-violation`、`module-boundary`、`module-boundary-violation`、`invalid-boundary-preset`、`unresolved-token`、`duplicate-token`、`duplicate-module`、`duplicate-command`、`duplicate-route`、`route-command-unresolved`、`command-missing-permission`（始终为 error）、`missing-deps`。
+
+### 模块边界治理预设（Module Boundary Profiles）
+
+`@supacloud/compiler` 内置三套开箱即用的架构治理预设 Profile：
+
+- **`modular-monolith`**（别名 `feature-slices`、`vertical-slices`）：适用于业务垂直切片/模块化单体。禁止 `type:feature` 之间交叉依赖；`type:root` / `type:app` 仅允许聚合 `feature` / `core` / `shared` / `domain` 模块；`type:core` / `type:shared` 禁止向上反向依赖业务切片。
+- **`angular-enterprise`**（别名 `angular`）：适用于 Angular / Nx 企业级 monorepo。约束 `type:feature`、`type:ui`、`type:data-access`、`type:util`、`type:shared`、`type:core` 的单向流向。
+- **`clean-architecture`**（别名 `domain-driven`）：适用于 Clean Architecture / Spring Boot DDD 分层。严格限制 `Presentation/API -> Application -> Domain <- Infrastructure` 的依赖倒置与领域层纯净性。
 
 产物：
 
