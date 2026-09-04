@@ -1,12 +1,12 @@
-import type { Provider, Token, Type } from "./provider";
+import type { EnvironmentProviders, Provider, Token, Type } from "./provider";
 import { flattenProviders, isClassProvider, isExistingProvider, isFactoryProvider, isValueProvider } from "./provider";
 import { runInInjectionContext, type InjectFlags, type InjectorLike } from "./inject";
 import { resolveForwardRef } from "./forward_ref";
 import { InjectionToken } from "./token";
 
 export interface TestModuleMetadata {
-  providers?: Provider[];
-  imports?: Array<{ providers?: Provider[] } | any>;
+  providers?: Array<Provider | EnvironmentProviders>;
+  imports?: Array<{ providers?: Array<Provider | EnvironmentProviders> } | any>;
 }
 
 /**
@@ -24,7 +24,7 @@ export class TestBed {
    */
   static configureTestingModule(moduleDef: TestModuleMetadata): typeof TestBed {
     TestBed.resetTestingModule();
-    const allProviders: Provider[] = [...(moduleDef.providers ?? [])];
+    const allProviders: Array<Provider | EnvironmentProviders> = [...(moduleDef.providers ?? [])];
     if (moduleDef.imports) {
       for (const imp of moduleDef.imports) {
         if (imp && typeof imp === "object" && "providers" in imp && Array.isArray(imp.providers)) {
