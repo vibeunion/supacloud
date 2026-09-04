@@ -41,7 +41,7 @@
     "directory": "packages/compiler"
   },
   "dependencies": {
-    "ts-morph": "^26.0.0"
+    "ts-morph": "^28.0.0"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",
