@@ -23,6 +23,7 @@ import type {
   ControllerNode,
   DependencyGraphCache,
   Diagnostic,
+  HandlerParamNode,
   ModuleNode,
   ProviderNode,
   QueryNode,
@@ -177,11 +178,15 @@ export async function analyzeProject(
     const modulesToKeep = new Map<string, CachedModuleEntry>();
     const finalModules: ModuleNode[] = [];
     const finalDiagnostics: Diagnostic[] = [];
+    const affectedModuleNames = (cache.dependencyGraph && typeof cache.dependencyGraph.getAffectedModules === "function")
+      ? new Set<string>(cache.dependencyGraph.getAffectedModules(Array.from(changedFiles)))
+      : new Set<string>();
 
     for (const [modName, entry] of cache.modules.entries()) {
       const hasChangedFile = entry.ownedFiles.some((f) => changedFiles.has(f));
       const moduleFileExists = currentFileHashes.has(entry.module.file);
-      if (!hasChangedFile && moduleFileExists) {
+      const isAffectedByDep = affectedModuleNames.has(modName);
+      if (!hasChangedFile && !isAffectedByDep && moduleFileExists) {
         modulesToKeep.set(modName, entry);
         reusedModules.push(modName);
         finalModules.push(entry.module);
@@ -797,9 +802,11 @@ function parseController(
       const queryTransforms: Record<string, "number" | "boolean" | "string"> = {};
       const queryDefaults: Record<string, unknown> = {};
       let hasBodyBinding = false;
+      const handlerParams: HandlerParamNode[] = [];
       for (const p of method.getParameters()) {
         const pName = p.getName();
         let hasBindingDecorator = false;
+        let paramNode: HandlerParamNode | undefined;
         for (const pDec of p.getDecorators()) {
           const dName = decoratorName(pDec);
           const dArgs = pDec.getArguments();
@@ -809,15 +816,33 @@ function parseController(
             paramBindings.push(parsed.name);
             if (parsed.transform) paramTransforms[parsed.name] = parsed.transform;
             if (parsed.default !== undefined) paramDefaults[parsed.name] = parsed.default;
+            paramNode = {
+              name: pName,
+              kind: "param",
+              bindingName: parsed.name,
+              transform: parsed.transform,
+              default: parsed.default,
+            };
           } else if (dName === "Query") {
             hasBindingDecorator = true;
             const parsed = parseBindingOptions(dArgs, pName);
             queryBindings.push(parsed.name);
             if (parsed.transform) queryTransforms[parsed.name] = parsed.transform;
             if (parsed.default !== undefined) queryDefaults[parsed.name] = parsed.default;
+            paramNode = {
+              name: pName,
+              kind: "query",
+              bindingName: parsed.name,
+              transform: parsed.transform,
+              default: parsed.default,
+            };
           } else if (dName === "Body") {
             hasBindingDecorator = true;
             hasBodyBinding = true;
+            paramNode = { name: pName, kind: "body" };
+          } else if (dName === "Headers") {
+            hasBindingDecorator = true;
+            paramNode = { name: pName, kind: "headers" };
           }
         }
         // Automatic route parameter binding (Angular withComponentInputBinding pattern):
@@ -826,12 +851,28 @@ function parseController(
         if (!hasBindingDecorator && pathParams.includes(pName)) {
           paramBindings.push(pName);
           const typeText = p.getType().getText();
+          let inferredTransform: "number" | "boolean" | "string" | undefined;
           if (typeText === "number") {
             paramTransforms[pName] = "number";
+            inferredTransform = "number";
           } else if (typeText === "boolean") {
             paramTransforms[pName] = "boolean";
+            inferredTransform = "boolean";
+          }
+          paramNode = {
+            name: pName,
+            kind: "param",
+            bindingName: pName,
+            transform: inferredTransform,
+          };
+        } else if (!hasBindingDecorator) {
+          if (pName === "req" || pName === "ctx" || pName === "context") {
+            paramNode = { name: pName, kind: "context" };
+          } else {
+            paramNode = { name: pName, kind: "unknown" };
           }
         }
+        if (paramNode) handlerParams.push(paramNode);
       }
       if (paramBindings.length > 0) route.paramBindings = paramBindings;
       if (queryBindings.length > 0) route.queryBindings = queryBindings;
@@ -840,6 +881,7 @@ function parseController(
       if (Object.keys(queryTransforms).length > 0) route.queryTransforms = queryTransforms;
       if (Object.keys(queryDefaults).length > 0) route.queryDefaults = queryDefaults;
       if (hasBodyBinding) route.hasBodyBinding = true;
+      if (handlerParams.length > 0) route.handlerParams = handlerParams;
 
       const routeGuards: string[] = [...classGuards];
       const routeCanDeactivate: string[] = [];

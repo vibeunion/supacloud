@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { executeRoutePipeline } from "./route_pipeline";
+import { RedirectCommand, executeRoutePipeline } from "./route_pipeline";
 import type { RoutePipelineDefinition, RouterEvent } from "./route_pipeline";
 
 describe("Angular Router lifecycle pipeline (executeRoutePipeline)", () => {
@@ -182,5 +182,39 @@ describe("Angular Router lifecycle pipeline (executeRoutePipeline)", () => {
       "ExecutionEnd",
       "NavigationEnd",
     ]);
+  });
+
+  it("supports Angular 18+ RedirectCommand from guard or handler", async () => {
+    const guardedRoute: RoutePipelineDefinition = {
+      path: "/admin",
+      method: "GET",
+      guards: [() => new RedirectCommand("/login", { status: 307 })],
+      handler: () => ({ secret: "42" }),
+    };
+
+    const guardRedirect = await executeRoutePipeline(guardedRoute, { url: "/admin", method: "GET" });
+    expect(guardRedirect.status).toBe(307);
+    expect(guardRedirect.redirect).toBe("/login");
+    expect(guardRedirect.headers?.Location).toBe("/login");
+
+    const handlerRoute: RoutePipelineDefinition = {
+      path: "/legacy",
+      method: "GET",
+      handler: () => new RedirectCommand("/modern"),
+    };
+    const handlerRedirect = await executeRoutePipeline(handlerRoute, { url: "/legacy", method: "GET" });
+    expect(handlerRedirect.status).toBe(302);
+    expect(handlerRedirect.redirect).toBe("/modern");
+  });
+
+  it("executes compiled route invoker when provided", async () => {
+    const compiledRoute: RoutePipelineDefinition = {
+      path: "/users/:id",
+      method: "GET",
+      handler: "getUser",
+      invoker: (_ctrl, req) => ({ userId: Number(req.params?.id), queryPage: Number(req.query?.page ?? 1) }),
+    };
+    const result = await executeRoutePipeline(compiledRoute, { url: "/users/100", method: "GET", params: { id: "100" }, query: { page: "2" } });
+    expect(result.body).toEqual({ userId: 100, queryPage: 2 });
   });
 });

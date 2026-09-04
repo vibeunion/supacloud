@@ -2,6 +2,34 @@ import type { CanActivateFn, CanDeactivateFn, CanMatchFn, ResolveFn } from "./de
 import { executeResolvers } from "./decorators";
 import { DefaultTitleStrategy, type TitleStrategy } from "./title_strategy";
 
+export interface NavigationExtras {
+  status?: number;
+  skipLocationChange?: boolean;
+  queryParams?: Record<string, unknown>;
+  headers?: Record<string, string>;
+}
+
+/**
+ * Angular 18+ RedirectCommand for functional guards, resolvers, and handlers.
+ * Allows returning a redirect destination directly from route pipelines.
+ */
+export class RedirectCommand {
+  constructor(
+    public readonly redirectTo: string | { toString(): string },
+    public readonly navigationExtras?: NavigationExtras,
+  ) {}
+}
+
+export function isRedirectCommand(val: unknown): val is RedirectCommand {
+  return (
+    val instanceof RedirectCommand ||
+    (typeof val === "object" &&
+      val !== null &&
+      "redirectTo" in val &&
+      (val as any).constructor?.name === "RedirectCommand")
+  );
+}
+
 export interface RoutePipelineContext {
   url: string;
   method: string;
@@ -24,6 +52,10 @@ export interface RoutePipelineDefinition {
   resolvers?: Record<string, ResolveFn | string>;
   title?: string;
   data?: Record<string, unknown>;
+  invoker?: (
+    controller: unknown,
+    request: RoutePipelineContext,
+  ) => Promise<unknown> | unknown;
 }
 
 export interface RoutePipelineResult<T = unknown> {
@@ -32,6 +64,8 @@ export interface RoutePipelineResult<T = unknown> {
   body?: T;
   error?: string;
   resolvedData?: Record<string, unknown>;
+  redirect?: string;
+  headers?: Record<string, string>;
 }
 
 export type RouterEventType =
@@ -93,6 +127,16 @@ export async function executeRoutePipeline<T = unknown>(
     for (const guard of route.canMatch) {
       if (typeof guard === "function") {
         const can = await guard(ctx);
+        if (isRedirectCommand(can)) {
+          emit("GuardsCheckEnd", { stage: "canMatch", allowed: false });
+          emit("NavigationCancel", { reason: "Redirected by CanMatch guard" });
+          return {
+            matched: true,
+            status: can.navigationExtras?.status ?? 302,
+            redirect: String(can.redirectTo),
+            headers: { Location: String(can.redirectTo), ...(can.navigationExtras?.headers ?? {}) },
+          };
+        }
         if (!can) {
           emit("GuardsCheckEnd", { stage: "canMatch", allowed: false });
           emit("NavigationCancel", { reason: "CanMatch guard rejected" });
@@ -109,6 +153,16 @@ export async function executeRoutePipeline<T = unknown>(
     for (const guard of route.guards) {
       if (typeof guard === "function") {
         const allowed = await guard(ctx);
+        if (isRedirectCommand(allowed)) {
+          emit("GuardsCheckEnd", { stage: "canActivate", allowed: false });
+          emit("NavigationCancel", { reason: "Redirected by CanActivate guard" });
+          return {
+            matched: true,
+            status: allowed.navigationExtras?.status ?? 302,
+            redirect: String(allowed.redirectTo),
+            headers: { Location: String(allowed.redirectTo), ...(allowed.navigationExtras?.headers ?? {}) },
+          };
+        }
         if (!allowed) {
           emit("GuardsCheckEnd", { stage: "canActivate", allowed: false });
           emit("NavigationCancel", { reason: "CanActivate guard rejected" });
@@ -135,12 +189,24 @@ export async function executeRoutePipeline<T = unknown>(
   let responseBody: T;
   try {
     emit("ExecutionStart");
-    if (componentInstance && typeof route.handler === "string" && typeof componentInstance[route.handler] === "function") {
+    if (route.invoker && typeof route.invoker === "function") {
+      responseBody = (await route.invoker(componentInstance, ctx)) as T;
+    } else if (componentInstance && typeof route.handler === "string" && typeof componentInstance[route.handler] === "function") {
       responseBody = await componentInstance[route.handler](ctx);
     } else if (typeof route.handler === "function") {
       responseBody = await route.handler(ctx);
     } else {
       throw new Error(`Handler '${String(route.handler)}' is not executable on component instance.`);
+    }
+    if (isRedirectCommand(responseBody)) {
+      emit("ExecutionEnd");
+      return {
+        matched: true,
+        status: responseBody.navigationExtras?.status ?? 302,
+        redirect: String(responseBody.redirectTo),
+        headers: { Location: String(responseBody.redirectTo), ...(responseBody.navigationExtras?.headers ?? {}) },
+        resolvedData,
+      };
     }
     emit("ExecutionEnd");
   } catch (err) {

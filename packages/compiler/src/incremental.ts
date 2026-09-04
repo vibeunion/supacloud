@@ -73,14 +73,18 @@ export function createIncrementalCompiler(): IncrementalCompiler {
         return { ...previousResult, written: [], stats };
       }
 
-      const result = await compileProject({ ...options, cache: options.cache ?? cache });
+      const activeCache = options.cache ?? cache;
+      if (!activeCache.dependencyGraph && previousResult) {
+        activeCache.dependencyGraph = new ModuleDependencyGraph(previousResult.graph.modules);
+      }
+      const result = await compileProject({ ...options, cache: activeCache });
       const affectedModules = previousResult
         ? findAffectedModules(previousResult.graph.modules, result.graph.modules, changedFiles)
         : result.graph.modules.map((module) => module.name);
       const reusedModules = result.graph.cacheStats?.reusedModules ?? [];
       const reanalyzedModules = result.graph.cacheStats?.reanalyzedModules ?? affectedModules;
-      if (cache) {
-        cache.dependencyGraph = new ModuleDependencyGraph(result.graph.modules);
+      if (activeCache) {
+        activeCache.dependencyGraph = new ModuleDependencyGraph(result.graph.modules);
       }
       const stats: CompileStats = {
         cacheHit: false,

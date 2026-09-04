@@ -49,11 +49,19 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "duplicate-path-param": { code: "SC3011", docsUrl: "https://supacloud.dev/errors/SC3011" },
   "wildcard-not-trailing": { code: "SC3012", docsUrl: "https://supacloud.dev/errors/SC3012" },
   "invalid-query-param-name": { code: "SC3013", docsUrl: "https://supacloud.dev/errors/SC3013" },
+  "unmatched-path-param-decorator": { code: "SC3014", docsUrl: "https://supacloud.dev/errors/SC3014" },
+  "invalid-query-default-type": { code: "SC3015", docsUrl: "https://supacloud.dev/errors/SC3015" },
+  "disallowed-body-on-get-delete": { code: "SC3016", docsUrl: "https://supacloud.dev/errors/SC3016" },
+  "duplicate-query-param-binding": { code: "SC3017", docsUrl: "https://supacloud.dev/errors/SC3017" },
+  "conflicting-route-method": { code: "SC3018", docsUrl: "https://supacloud.dev/errors/SC3018" },
+  "missing-param-colon": { code: "SC3019", docsUrl: "https://supacloud.dev/errors/SC3019" },
+  "missing-token-factory": { code: "SC2009", docsUrl: "https://supacloud.dev/errors/SC2009" },
   "command-missing-permission": { code: "SC4001", docsUrl: "https://supacloud.dev/errors/SC4001" },
   "duplicate-command": { code: "SC4002", docsUrl: "https://supacloud.dev/errors/SC4002" },
   "route-command-unresolved": { code: "SC4003", docsUrl: "https://supacloud.dev/errors/SC4003" },
   "command-governance-unsupported": { code: "SC4004", docsUrl: "https://supacloud.dev/errors/SC4004" },
   "route-command-binding-disabled": { code: "SC4005", docsUrl: "https://supacloud.dev/errors/SC4005" },
+  "command-transaction-readonly": { code: "SC4006", docsUrl: "https://supacloud.dev/errors/SC4006" },
   "unused-root-provider": { code: "SC5001", docsUrl: "https://supacloud.dev/errors/SC5001" },
 };
 
@@ -243,6 +251,19 @@ export function validateGraph(
         const fullPath = joinRoutePaths(controller.path, route.path);
         const rawFullPath = joinRawRoutePaths(controller.path, route.path);
         const key = `${route.method} ${fullPath}`;
+
+        // Detect OpenAPI-style {param} in route paths (SC3019)
+        const openApiMatch = route.path.match(/\{([a-zA-Z0-9_]+)\}/);
+        if (openApiMatch) {
+          error(
+            "missing-param-colon",
+            `Route path '${route.path}' in '${controller.className}.${route.handler}' uses OpenAPI-style '{${openApiMatch[1]}}'. SupaCloud routes require Express/Angular-style ':${openApiMatch[1]}'.`,
+            controller.file,
+            undefined,
+            `Replace '{${openApiMatch[1]}}' with ':${openApiMatch[1]}'.`,
+          );
+        }
+
         const previous = routesByKey.get(key);
         if (previous) {
           error(
@@ -274,6 +295,20 @@ export function validateGraph(
             `路由 ${key} 绑定的 command 类 ${route.command} 未在模块 ${module.name} 声明`,
             controller.file,
           );
+        }
+
+        // Command transaction safety on safe HTTP methods (SC4006, Angular CQRS style)
+        if ((route.method === "GET" || route.method === "HEAD") && route.command) {
+          const boundCommand = module.commands.find((c) => c.className === route.command);
+          if (boundCommand && boundCommand.transaction === "required") {
+            error(
+              "command-transaction-readonly",
+              `GET route '${route.path}' in '${controller.className}.${route.handler}' binds mutating command '${route.command}' with transaction: 'required'. Mutating transactions are not permitted on read-only HTTP GET requests.`,
+              controller.file,
+              undefined,
+              `Use POST, PUT, or PATCH for mutating command routes, or set transaction: 'none'.`,
+            );
+          }
         }
 
         if (typeof options === "object" && options.allowRouteCommandBindings === false && route.command) {
@@ -314,7 +349,23 @@ export function validateGraph(
         const paramBindings = route.paramBindings ?? [];
 
         for (const binding of paramBindings) {
-          if (!pathParams.includes(binding)) {
+          if (!binding || binding.trim().length === 0) {
+            error(
+              "unmatched-path-param-decorator",
+              `Controller ${controller.className} handler ${route.handler} specifies an empty @Param() parameter binding.`,
+              controller.file,
+              undefined,
+              `Specify a non-empty path parameter name matching a segment in route path '${route.path}'.`,
+            );
+          } else if (/[#?&=/\s]/.test(binding)) {
+            error(
+              "unmatched-path-param-decorator",
+              `Controller ${controller.className} handler ${route.handler} specifies invalid @Param('${binding}') with illegal character. Path parameter names cannot contain '#', '?', '&', '=', '/', or whitespace.`,
+              controller.file,
+              undefined,
+              `Rename path parameter binding '${binding}' to a valid identifier matching route path segment.`,
+            );
+          } else if (!pathParams.includes(binding)) {
             const suggestion = findClosestMatch(binding, pathParams);
             error(
               "unmatched-path-param",
@@ -342,6 +393,7 @@ export function validateGraph(
 
         // Angular Ivy-style query parameter static validation (SC3013)
         const queryBindings = route.queryBindings ?? [];
+        const seenQueries = new Set<string>();
         for (const q of queryBindings) {
           if (!q || q.trim().length === 0) {
             error(
@@ -359,9 +411,51 @@ export function validateGraph(
               undefined,
               `Rename query parameter '${q}' to a valid identifier name without reserved characters.`,
             );
+          } else if (seenQueries.has(q)) {
+            error(
+              "duplicate-query-param-binding",
+              `Controller ${controller.className} handler ${route.handler} specifies duplicate @Query('${q}') parameter binding. Each query parameter should only be bound once per handler.`,
+              controller.file,
+              undefined,
+              `Remove or rename the duplicate @Query('${q}') parameter binding in ${route.handler}.`,
+            );
+          }
+          seenQueries.add(q);
+        }
+
+        // Query parameter default value type validation (SC3015)
+        if (route.queryDefaults && route.queryTransforms) {
+          for (const [paramName, defVal] of Object.entries(route.queryDefaults)) {
+            const transform = route.queryTransforms[paramName];
+            if (transform === "number" && typeof defVal !== "number") {
+              error(
+                "invalid-query-default-type",
+                `Controller ${controller.className} handler ${route.handler} specifies transform 'number' for @Query('${paramName}'), but default value '${String(defVal)}' is not a number.`,
+                controller.file,
+                undefined,
+                `Provide a numeric default (e.g. default: 0) or change transform type to 'string'.`,
+              );
+            } else if (transform === "boolean" && typeof defVal !== "boolean") {
+              error(
+                "invalid-query-default-type",
+                `Controller ${controller.className} handler ${route.handler} specifies transform 'boolean' for @Query('${paramName}'), but default value '${String(defVal)}' is not a boolean.`,
+                controller.file,
+                undefined,
+                `Provide a boolean default (e.g. default: false) or change transform type.`,
+              );
+            }
           }
         }
 
+        if ((route.method === "GET" || route.method === "HEAD" || route.method === "OPTIONS" || route.method === "DELETE") && (route.hasBodyBinding || route.body)) {
+          error(
+            "disallowed-body-on-get-delete",
+            `Route handler ${controller.className}.${route.handler} binds @Body() or declares body schema on HTTP ${route.method} route '${route.path}'. Request bodies are not supported on ${route.method} requests.`,
+            controller.file,
+            undefined,
+            `Use POST, PUT, or PATCH for routes accepting a request body, or bind parameters via @Query() / @Param().`,
+          );
+        }
         if (route.hasBodyBinding && (route.method === "GET" || route.method === "HEAD" || route.method === "OPTIONS")) {
           error(
             "invalid-body-binding",
@@ -385,6 +479,26 @@ export function validateGraph(
             controller.file,
             undefined,
             `Bind parameter with @Body() in ${controller.className}.${route.handler} or remove unused body schema option.`,
+          );
+        }
+      }
+
+      // Check for handler methods annotated with multiple distinct HTTP methods (SC3018)
+      const handlerMethodMap = new Map<string, string[]>();
+      for (const route of controller.routes) {
+        const methods = handlerMethodMap.get(route.handler) ?? [];
+        methods.push(route.method);
+        handlerMethodMap.set(route.handler, methods);
+      }
+      for (const [handler, methods] of handlerMethodMap.entries()) {
+        const uniqueMethods = Array.from(new Set(methods));
+        if (uniqueMethods.length > 1) {
+          warn(
+            "conflicting-route-method",
+            `Controller ${controller.className} handler '${handler}' is mapped to multiple HTTP methods: ${uniqueMethods.join(", ")}.`,
+            controller.file,
+            undefined,
+            `Separate distinct HTTP methods into separate controller handlers.`,
           );
         }
       }
@@ -568,6 +682,14 @@ export function validateGraph(
                 provider.file,
                 provider.line,
                 `Import module '${owner.module.name}' in '${module.name}', add '${dep}' to '${owner.module.name}' exports, or mark @Injectable({ providedIn: 'root' }).`,
+              );
+            } else if (dep.includes("TOKEN") || dep.endsWith("Token") || (dep.length > 2 && dep === dep.toUpperCase())) {
+              error(
+                "missing-token-factory",
+                `InjectionToken '${dep}' referenced by provider '${provider.token}' has no provider in module '${module.name}' and no default factory function.`,
+                provider.file,
+                provider.line,
+                `Provide '${dep}' in @Module({ providers: [...] }) or declare it with new InjectionToken('${dep}', { factory: () => ... }).`,
               );
             } else {
               error(

@@ -111,7 +111,7 @@ describe("generate：application.ts 关键内容", () => {
     expect(applicationCode).toContain('serviceKey: "caseController"');
     expect(applicationCode).toContain('path: "/cases"');
     expect(applicationCode).toContain(
-      '{ method: "POST", path: "/:caseId/accept", handler: "accept", body: CreateCaseBody, params: AcceptParams, response: AcceptResult, command: "AcceptCaseCommand" }',
+      '{ method: "POST", path: "/:caseId/accept", handler: "accept", body: CreateCaseBody, params: AcceptParams, response: AcceptResult, command: "AcceptCaseCommand", invoker: async (ctrl: any, req: any) => await (ctrl as any).accept(req) }',
     );
   });
 });
@@ -710,5 +710,61 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     });
     expect(withTreeShaking.applicationCode).toContain("UsedService");
     expect(withTreeShaking.applicationCode).not.toContain("DeadService");
+  });
+
+  test("renderApplication generates typed route invoker with parameter and query coercion", () => {
+    const graph: ApplicationGraph = {
+      modules: [
+        {
+          name: "users",
+          className: "UsersModule",
+          file: "src/users.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "UsersController",
+              path: "/users",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/:id",
+                  handler: "getUser",
+                  pathParams: ["id"],
+                  paramBindings: ["id"],
+                  paramTransforms: { id: "number" },
+                  queryBindings: ["limit"],
+                  queryTransforms: { limit: "number" },
+                  queryDefaults: { limit: 20 },
+                  handlerParams: [
+                    { name: "id", kind: "param", bindingName: "id", transform: "number" },
+                    { name: "limit", kind: "query", bindingName: "limit", transform: "number", default: 20 },
+                    { name: "body", kind: "body" },
+                  ],
+                },
+              ],
+              file: "src/users.controller.ts",
+              importPath: "./users.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const rendered = renderApplication(graph, {
+      rootDir: "/app",
+      outDir: "/app/gen",
+    });
+    expect(rendered.applicationCode).toContain("invoker: async (ctrl: any, req: any) => await (ctrl as any).getUser(");
+    expect(rendered.applicationCode).toContain('Number(req.params?.["id"])');
+    expect(rendered.applicationCode).toContain('Number(req.query?.["limit"])');
+    expect(rendered.applicationCode).toContain(": 20");
   });
 });

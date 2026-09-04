@@ -151,8 +151,13 @@ export type {
   ResourceRef,
   ResourceStatus,
 } from "./resource";
-export { executeRoutePipeline } from "./route_pipeline";
+export {
+  RedirectCommand,
+  executeRoutePipeline,
+  isRedirectCommand,
+} from "./route_pipeline";
 export type {
+  NavigationExtras,
   RoutePipelineContext,
   RoutePipelineDefinition,
   RoutePipelineOptions,
@@ -226,3 +231,34 @@ export {
   UrlTree,
 } from "./url_tree";
 export type { UrlSegment } from "./url_tree";
+export {
+  AbstractControl,
+  FormArray,
+  FormControl,
+  FormGroup,
+  Validators,
+} from "./forms";
+export type {
+  AbstractControlOptions,
+  AsyncValidatorFn,
+  FormControlStatus,
+  ValidationErrors,
+  ValidatorFn,
+} from "./forms";
+export {
+  booleanAttribute,
+  numberAttribute,
+} from "./input_transform";
+export {
+  DatePipe,
+  JsonPipe,
+  LowerCasePipe,
+  Pipe,
+  TrimPipe,
+  UpperCasePipe,
+  getPipeMetadata,
+} from "./pipe";
+export type {
+  PipeMetadata,
+  PipeTransform,
+} from "./pipe";

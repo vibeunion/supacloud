@@ -56,6 +56,14 @@ export interface ProviderNode {
   importPath?: string;
 }
 
+export interface HandlerParamNode {
+  name: string;
+  kind: "param" | "query" | "body" | "headers" | "context" | "unknown";
+  bindingName?: string;
+  transform?: "number" | "boolean" | "string";
+  default?: unknown;
+}
+
 export interface RouteNode {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   path: string;
@@ -98,6 +106,8 @@ export interface RouteNode {
   title?: string;
   /** Route static metadata dictionary (Angular Route.data style). */
   data?: Record<string, unknown>;
+  /** Detailed method parameter metadata for compile-time typed invoker generation. */
+  handlerParams?: HandlerParamNode[];
 }
 
 export interface ControllerNode {

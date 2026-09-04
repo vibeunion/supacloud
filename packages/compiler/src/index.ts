@@ -1,7 +1,7 @@
 export { analyzeProject } from "./analyze";
 export { checkProject, compileProject } from "./compile";
 export { watchProject } from "./watch";
-export { doctorProject, explainGraph, formatGraph } from "./inspect";
+export { doctorProject, explainGraph, formatGraph, exportGraphDot, exportGraphMermaid } from "./inspect";
 export { createIncrementalCompiler } from "./incremental";
 export { createDependencyGraphCache } from "./incremental";
 export { ModuleDependencyGraph } from "./incremental";
