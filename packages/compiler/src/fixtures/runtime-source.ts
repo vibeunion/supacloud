@@ -1,7 +1,7 @@
 /**
- * fixture 项目里 @supacloud/app 的本地替身：同名装饰器与 token 的 noop 实现。
- * AST 分析只按装饰器名匹配，生成代码也不 import 它；实现仅为了让
- * fixture 源码可以被 bun 动态 import 执行。
+ * Local stand-in for @supacloud/app in fixture projects: noop implementations of decorators and tokens.
+ * AST analysis matches decorators by name only and generated code does not import it;
+ * implementation exists only so fixture sources can be dynamically imported and executed by bun.
  */
 export const RUNTIME_SOURCE = `export class InjectionToken<T = unknown> {
   readonly name: string;

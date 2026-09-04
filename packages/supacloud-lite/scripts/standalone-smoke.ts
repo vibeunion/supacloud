@@ -274,7 +274,7 @@ async function waitForHealth(url: string, processHandle: Bun.Subprocess): Promis
     try {
       if ((await fetch(`${url}/health`)).ok) return
     } catch {
-      // 进程初始化 PGlite 时端口尚未开放，继续轮询。
+      // Port is not open yet while process initializes PGlite; continue polling.
     }
     await Bun.sleep(100)
   }

@@ -11,7 +11,7 @@ export default defineConfig({
 		external: ['bun', 'bun:sql', 'monaco-editor']
 	},
 	optimizeDeps: {
-		// @svadmin/core 发布的是 Svelte TypeScript 源码，需绕过预构建并交给 Svelte 编译器。
+		// @svadmin/core publishes Svelte TypeScript source code; bypass pre-bundling and pass to Svelte compiler.
 		exclude: ['bun', 'bun:sql', 'monaco-editor', '@svadmin/core']
 	},
 	build: {

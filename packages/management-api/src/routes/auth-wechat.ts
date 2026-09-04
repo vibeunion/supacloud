@@ -434,8 +434,8 @@ export default async function handler(req: Request) {
     // Embed native OAuth provider tokens to complete the session payload matching Official Supabase
     if (session_key) (finalSession as any).provider_token = session_key;
 
-    // 包裹在 { data: { session, user } } 中，符合 supabase-mp-js 的 signInWithWechat 契约
-    // signInWithWechat 从 responseData.data.session 和 responseData.data.user 解构 session/user
+    // Wrapped in { data: { session, user } }, matching supabase-mp-js signInWithWechat contract
+    // signInWithWechat destructures session/user from responseData.data.session and responseData.data.user
     return new Response(JSON.stringify({ data: { session: finalSession, user: responseUser } }), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" } })
   } catch (error: unknown) {
     console.error("WeChat MiniProgram Login Error:", error instanceof Error ? error.message : String(error))
@@ -508,7 +508,7 @@ export default async function handler(req: Request) {
     if (tokenData.access_token) (finalSession as any).provider_token = tokenData.access_token;
     if (tokenData.refresh_token) (finalSession as any).provider_refresh_token = tokenData.refresh_token;
 
-    // 包裹在 { data: { session, user } } 中，符合 supabase-mp-js 的 signInWithWechat 契约
+    // Wrapped in { data: { session, user } }, matching supabase-mp-js signInWithWechat contract
     return new Response(JSON.stringify({ data: { session: finalSession, user: responseUser } }), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" } })
   } catch (error: unknown) {
     console.error("WeChat MP Login Error:", error instanceof Error ? error.message : String(error))

@@ -28,7 +28,7 @@ describe("Frontend deployment upload routes", () => {
   beforeAll(async () => {
     app = new Elysia().use(frontendRoutes);
 
-    // 动态生成一个合法但极小的 zip 二进制，用于完整的 unzip 验证测试
+    // Dynamically generate a valid minimal zip binary for complete unzip verification testing
     const tempDir = path.join(tmpdir(), "supacloud-test-zip-");
     const testFile = path.join(tempDir, "index.html");
     tempZipPath = path.join(tempDir, "test.zip");
@@ -39,7 +39,7 @@ describe("Frontend deployment upload routes", () => {
 
     testZipBytes = new Uint8Array(await Bun.file(tempZipPath).arrayBuffer());
 
-    // 清理临时目录
+    // Clean up temporary directory
     await rm(tempDir, { recursive: true, force: true });
   });
 
@@ -47,7 +47,7 @@ describe("Frontend deployment upload routes", () => {
     requireProjectOrAdminAuth.mockReset();
     requireProjectOrAdminAuth.mockResolvedValue(null);
 
-    // Mock getDeployment 保证存在该部署
+    // Mock getDeployment to ensure deployment exists
     spyOn(frontendService, "getDeployment").mockImplementation(async (ref, id) => {
       return {
         id,
@@ -60,7 +60,7 @@ describe("Frontend deployment upload routes", () => {
       } as any;
     });
 
-    // Mock deployFromSource 避免启动真实的构建发布逻辑
+    // Mock deployFromSource to avoid starting real build and publish logic
     spyOn(frontendService, "deployFromSource").mockImplementation(async (ref, id, sourceDir) => {
       return {
         success: true,
@@ -187,10 +187,10 @@ describe("Frontend deployment upload routes", () => {
   });
 
   test("supports multipart/form-data upload when parsed by Elysia (mocked body.file)", async () => {
-    // 模拟 Elysia 已经内置解析为 body: { file: Blob } 的对象形式
+    // Simulate Elysia built-in parsed object format: body: { file: Blob }
     const mockFile = new Blob([testZipBytes], { type: "application/zip" });
 
-    // 我们直接发起带有 Form 数据的请求，Elysia 默认应该解析它
+    // Send request with FormData directly; Elysia should parse it by default
     const form = new FormData();
     form.append("file", mockFile, "upload.zip");
 

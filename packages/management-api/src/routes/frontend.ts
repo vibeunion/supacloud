@@ -68,7 +68,7 @@ async function validateZipArchive(zipPath: string): Promise<{ ok: true } | { ok:
 }
 
 async function readUploadedZip(request: Request, body: unknown): Promise<Uint8Array> {
-  // 1. 如果 body 本身就是 File / Blob，或具有 arrayBuffer 方法
+  // 1. If body is already File / Blob or has arrayBuffer method
   if (body && typeof body === "object" && typeof (body as any).arrayBuffer === "function") {
     try {
       return new Uint8Array(await (body as any).arrayBuffer());
@@ -77,7 +77,7 @@ async function readUploadedZip(request: Request, body: unknown): Promise<Uint8Ar
     }
   }
 
-  // 2. 如果 body 是一个对象，检测其属性（例如 file 字段，或其他任意包含 arrayBuffer 的字段）
+  // 2. If body is an object, inspect its properties (e.g. file field or any field containing arrayBuffer)
   if (body && typeof body === "object") {
     const directFile = (body as Record<string, unknown>).file;
     if (directFile && typeof directFile === "object" && typeof (directFile as any).arrayBuffer === "function") {
@@ -88,7 +88,7 @@ async function readUploadedZip(request: Request, body: unknown): Promise<Uint8Ar
       }
     }
 
-    // 遍历所有键，兼容不同客户端的自定义字段名
+    // Iterate all keys to support custom field names from different clients
     for (const val of Object.values(body)) {
       if (val && typeof val === "object" && typeof (val as any).arrayBuffer === "function") {
         try {
@@ -100,7 +100,7 @@ async function readUploadedZip(request: Request, body: unknown): Promise<Uint8Ar
     }
   }
 
-  // 3. 若流未被 Elysia 消费，直接从 request 读取，添加异常保护，移除 clone
+  // 3. If stream has not been consumed by Elysia, read directly from request with exception guards (no clone)
   const contentType = request.headers.get("content-type") || "";
   if (contentType.includes("multipart/form-data")) {
     try {
@@ -114,7 +114,7 @@ async function readUploadedZip(request: Request, body: unknown): Promise<Uint8Ar
     }
   }
 
-  // 4. 最后回退：尝试直接读取 request 二进制，添加异常保护
+  // 4. Final fallback: attempt reading request binary directly with exception guards
   try {
     return new Uint8Array(await request.arrayBuffer());
   } catch {
@@ -208,7 +208,7 @@ function releaseError(error: unknown) {
 }
 
 export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" })
-  // 组级守卫：委托 proof 必须通过 operations 能力检查，防止越权创建部署/修改环境变量
+  // Group guard: delegated proofs must pass operations capability checks to prevent unauthorized deployments or env updates
   .onBeforeHandle(async ({ params, request }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);

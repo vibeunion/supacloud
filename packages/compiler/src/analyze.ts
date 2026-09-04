@@ -41,9 +41,9 @@ const ROUTE_DECORATORS: Record<string, RouteNode["method"]> = {
 const SCOPES: Scope[] = ["application", "request", "job"];
 
 interface TokenInfo {
-  /** 变量名，如 CASE_REPOSITORY。 */
+  /** Variable name, e.g. CASE_REPOSITORY. */
   name: string;
-  /** InjectionToken 字符串 name，如 "supacloud.case-repository"。 */
+  /** InjectionToken string name, e.g. "supacloud.case-repository". */
   stringName?: string;
   scope?: Scope;
   file: string;
@@ -55,7 +55,7 @@ interface ClassInfo {
   file: string;
 }
 
-/** 分析上下文：全项目符号索引 + 诊断收集。 */
+/** Analysis context: project-wide symbol index + diagnostics collection. */
 interface AnalysisContext {
   rootDir: string;
   tokensByName: Map<string, TokenInfo>;
@@ -64,9 +64,9 @@ interface AnalysisContext {
 }
 
 /**
- * 分析 rootDir 下的源码（ts-morph AST，无类型检查依赖），构建 ApplicationGraph。
- * 装饰器仅按名字匹配（Module/Injectable/Inject/Command/Query/Controller/Get/...），
- * 不校验 import 来源，因此本包不需要依赖 @supacloud/app。
+ * Analyzes source code under rootDir (via ts-morph AST, without typecheck dependency) to build ApplicationGraph.
+ * Decorators are matched by name only (Module/Injectable/Inject/Command/Query/Controller/Get/...),
+ * without checking import origins, so this package does not need to depend on @supacloud/app.
  */
 export async function analyzeProject(
   rootDir: string,
@@ -90,8 +90,8 @@ export async function analyzeProject(
     indexFile(sf, ctx);
   }
 
-  // 第一遍：发现全部模块候选（@Module 类 / defineModule 调用），先登记名字，
-  // 以便 imports 能把模块类引用解析成模块 name。
+  // First pass: Discover all module candidates (@Module class / defineModule calls), register names first
+  // so that imports can resolve module class references to module names.
   interface ModuleCandidate {
     node: ClassDeclaration | VariableDeclaration;
     options: ObjectLiteralExpression;
@@ -171,7 +171,7 @@ function createProject(rootDir: string): Project {
   });
 }
 
-/** 索引文件中的 InjectionToken 变量与类声明。 */
+/** Indexes InjectionToken variables and class declarations in the file. */
 function indexFile(sf: SourceFile, ctx: AnalysisContext): void {
   for (const cls of sf.getClasses()) {
     const name = cls.getName();
@@ -189,7 +189,7 @@ function indexFile(sf: SourceFile, ctx: AnalysisContext): void {
   }
 }
 
-/** 解析 `const X = new InjectionToken("name", { scope })` 变量定义。 */
+/** Parses `const X = new InjectionToken("name", { scope })` variable declaration. */
 function parseTokenVariable(decl: VariableDeclaration, file: string): TokenInfo | undefined {
   const init = decl.getInitializer();
   if (!init || !Node.isNewExpression(init)) return undefined;
@@ -253,7 +253,7 @@ function parseModule(
     if (controller) controllers.push(controller);
   }
 
-  // @Command/@Query：providers（裸类或 useClass）+ commands/queries 数组中带装饰器的类。
+  // @Command/@Query: providers (bare class or useClass) + decorated classes in commands/queries array.
   const handlerClasses: ClassDeclaration[] = [];
   const seenHandlers = new Set<string>();
   const collectHandler = (expr: Expression) => {
@@ -334,7 +334,7 @@ function parseProvider(
   const file = sourcePath(ctx.rootDir, el.getSourceFile().getFilePath());
   const line = el.getStartLineNumber();
 
-  // 裸类引用 → class provider，token = 类名
+  // Bare class reference -> class provider, token = class name
   if (Node.isIdentifier(el)) {
     const decl = resolveDeclaration(el)[0];
     const cls = decl && Node.isClassDeclaration(decl) ? decl : undefined;
@@ -520,9 +520,9 @@ function parseController(el: Expression, ctx: AnalysisContext): ControllerNode |
 }
 
 /**
- * 类 provider / controller 的依赖解析：
- * @Injectable({ deps }) > 构造函数 @Inject 参数装饰器 > 构造函数参数类型名
- * （仅当类型名是已知类/已知 token 时），解析不了标记 missing。
+ * Dependency resolution for class provider / controller:
+ * @Injectable({ deps }) > constructor @Inject parameter decorator > constructor parameter type name
+ * (only when type name is a known class / known token); otherwise marked missing.
  */
 function classDeps(cls: ClassDeclaration, ctx: AnalysisContext): { deps: string[]; missing: boolean } {
   const injectable = parseInjectableOptions(cls, ctx);
@@ -550,7 +550,7 @@ function classDeps(cls: ClassDeclaration, ctx: AnalysisContext): { deps: string[
   return { deps, missing };
 }
 
-/** 构造函数参数类型名回退：仅当类型名引用了已知类或已知 InjectionToken 变量时采用。 */
+/** Fallback for constructor parameter type name: only used if type name references a known class or known InjectionToken variable. */
 function paramTypeTokenName(param: ParameterDeclaration, ctx: AnalysisContext): string | undefined {
   const typeNode = param.getTypeNode();
   if (!typeNode) return undefined;
@@ -561,7 +561,7 @@ function paramTypeTokenName(param: ParameterDeclaration, ctx: AnalysisContext): 
 }
 
 // ---------------------------------------------------------------------------
-// AST 工具
+// AST Utilities
 // ---------------------------------------------------------------------------
 
 function parseInjectableOptions(
@@ -582,7 +582,7 @@ function parseInjectableOptions(
   };
 }
 
-/** 构造函数 @Inject(token) 参数装饰器 → 参数下标 → token 名。 */
+/** Constructor @Inject(token) parameter decorator -> parameter index -> token name. */
 function parseInjectParams(cls: ClassDeclaration): Map<number, string> {
   const result = new Map<number, string>();
   const ctor = cls.getConstructors()[0];
@@ -620,7 +620,7 @@ function resolveScope(
   return "application";
 }
 
-/** identifier → token 名 + 类别（跨 import 解析到声明）。 */
+/** Identifier -> token name + kind (resolves across imports to declaration). */
 function tokenNameOf(expr: Expression, ctx: AnalysisContext): { name: string; kind: TokenKind } {
   if (Node.isIdentifier(expr)) {
     const decl = resolveDeclaration(expr)[0];
@@ -638,7 +638,7 @@ function tokenNameOf(expr: Expression, ctx: AnalysisContext): { name: string; ki
   return { name: expr.getText(), kind: "class" };
 }
 
-/** 解析标识符到其声明（跟随 import alias）。 */
+/** Resolves identifier to its declarations (following import aliases). */
 function resolveDeclaration(id: Identifier): Node[] {
   let symbol: TsSymbol | undefined = id.getSymbol();
   if (!symbol) return [];
@@ -657,7 +657,7 @@ function resolveDeclaration(id: Identifier): Node[] {
   return declarations;
 }
 
-/** 标识符定义处的文件路径（rootDir 相对、去扩展名），供生成 import。 */
+/** File path where identifier is defined (relative to rootDir, stripped of extension) for import generation. */
 function importPathOf(id: Identifier, ctx: AnalysisContext): string | undefined {
   const symbol = id.getSymbol();
   const first = symbol?.getDeclarations()[0];
@@ -712,12 +712,12 @@ function parseScopeProp(obj: ObjectLiteralExpression): Scope | undefined {
   return scope && (SCOPES as string[]).includes(scope) ? (scope as Scope) : undefined;
 }
 
-/** 绝对路径 → rootDir 相对、posix 风格、去扩展名的模块路径（供生成 import）。 */
+/** Absolute path -> posix-style module path relative to rootDir without extension (for import generation). */
 function modulePath(rootDir: string, absFile: string): string {
   return sourcePath(rootDir, absFile).replace(/\.(ts|tsx|js|mts|cts)$/, "");
 }
 
-/** 绝对路径 → rootDir 相对、posix 风格的源文件路径（保留扩展名，供诊断定位）。 */
+/** Absolute path -> posix-style source file path relative to rootDir (keeping extension, for diagnostic location). */
 function sourcePath(rootDir: string, absFile: string): string {
   return relative(rootDir, absFile).split(sep).join("/");
 }

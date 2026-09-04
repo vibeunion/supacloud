@@ -78,7 +78,7 @@ function hasOwn(input: Record<string, unknown>, key: string): boolean {
 }
 
 function parseTimeout(name: string, input: unknown): number {
-  // 边界：接受 0 和 int32 最大值；拒绝负数、越界、非整数和非纯数字字符串。
+  // Boundary: accepts 0 and int32 max; rejects negative numbers, out-of-range, non-integers, and non-numeric strings.
   const parsed = typeof input === "string" && /^\d+$/.test(input)
     ? Number(input)
     : input;

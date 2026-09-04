@@ -80,7 +80,7 @@ const FIXTURE_FILES: Record<string, string> = {
     "db/policies/cases_select.sql": `alter table public.cases enable row level security;
 create policy cases_select on public.cases for select to authenticated using (true);
 `,
-    // security definer 但未 set search_path → definer-no-search-path error
+    // security definer without search_path set -> definer-no-search-path error
     "db/functions/case_create.sql": `create or replace function public.case_create()
 returns void language plpgsql security definer as $$ begin end; $$;
 `,
@@ -90,12 +90,12 @@ returns void language plpgsql security definer as $$ begin end; $$;
 drop policy if exists clean_select on public.clean;
 create policy clean_select on public.clean for select to authenticated using (true);
 `,
-    // 供 loader 边界测试：必须在任何同目录 import 发生前落盘（Bun 会缓存目录列表）
+    // For loader boundary testing: must write to disk before any same-directory import occurs (Bun caches directory listings)
     "db/single.ts": `export const modules = { name: "solo" };\n`,
     "db/invalid.ts": `export default 42;\n`,
 };
 
-/** 按 catalog SQL 文本分派的 mock executor。 */
+/** Mock executor dispatched based on catalog SQL text. */
 function mockExecutor(overrides: { policies?: unknown[] } = {}): QueryExecutor {
     return {
         async query<T>(sql: string): Promise<T[]> {
@@ -222,7 +222,7 @@ describe("db governance tools", () => {
             .rejects.toThrow("--database_url");
 
         const withEnv = captureDbCallback({ DATABASE_URL: "postgresql://127.0.0.1:1/nope" });
-        // URL 存在但连不上 → 清晰的连接错误而不是裸异常
+        // URL exists but cannot connect -> clear connection error instead of raw exception
         await expect(withEnv({ action: "module_check", root, module_file: "db/modules.ts" }))
             .rejects.toThrow("无法读取数据库 catalog");
     });

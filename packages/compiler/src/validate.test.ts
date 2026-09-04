@@ -150,7 +150,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
       externalTokens: [],
     };
 
-    // Rule: type:ui 不能依赖 type:data-access (只能依赖 type:ui 或 type:contracts)
+    // Rule: type:ui cannot depend on type:data-access (can only depend on type:ui or type:contracts)
     const diags = validateGraph(sampleGraph, {
       moduleBoundaries: [
         {

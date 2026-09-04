@@ -32,7 +32,7 @@ const FIXTURE_TSCONFIG = `{
 }
 `;
 
-/** @supacloud/app 的本地 noop 替身：AST 分析只按装饰器名匹配。 */
+/** Local noop stand-in for @supacloud/app: AST analysis matches by decorator name only. */
 const RUNTIME_SOURCE = `export class InjectionToken<T = unknown> {
   readonly name: string;
   constructor(name: string) { this.name = name; }
@@ -214,7 +214,7 @@ describe("app tools", () => {
         expect(forced.content[0].text).toContain("overwritten");
         expect(existsSync(moduleFile)).toBe(true);
 
-        // fixture 已有 case.controller.ts → 提示手工合并，--force 也不覆盖
+        // Fixture already has case.controller.ts -> prompts manual merge, --force does not overwrite
         await expect(app({ action: "generate", kind: "controller", module: "case", root }))
             .rejects.toThrow("手工合并");
         await expect(app({ action: "generate", kind: "controller", module: "case", root, force: true }))

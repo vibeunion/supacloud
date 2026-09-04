@@ -1224,7 +1224,6 @@ EOF
     configure_podman_mirrors
 }
 
-# ========== 安装 Docker Compose ==========
 # ========== Install JuiceFS (Postgres LO) ==========
 install_juicefs() {
     log_step "Preparing JuiceFS (Postgres LO)..."
@@ -3566,8 +3565,8 @@ install_management_api() {
     mkdir -p "$API_DATA_DIR"
     mkdir -p /etc/supabase
 
-    # 1. 部署二进制文件
-    # 支持本地 supacloud 或 CI 产出的 supacloud-linux-amd64/arm64
+    # 1. Deploy binary files
+    # Supports local supacloud or CI-built supacloud-linux-amd64/arm64
     local ARCH=$(uname -m)
     local CI_BIN=""
     local SELECTED_BIN_SOURCE=""

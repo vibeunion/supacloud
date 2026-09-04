@@ -1565,8 +1565,8 @@ Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec
                     const s = args.schemas || "public,auth,storage";
                     const schemas = s.split(",").map((x: string) => x.trim()).filter(Boolean);
                     if (schemas.length === 0) throw new Error("At least one schema is required");
-                    // 逐项按 PostgreSQL 标识符规则校验：\s 允许换行会把 "public\nreboot"
-                    // 这类输入拆成独立的远程 shell 命令
+                    // Validate each item per PostgreSQL identifier rules: \s allowing newlines would split
+                    // inputs like "public\nreboot" into separate remote shell commands
                     for (const schema of schemas) {
                         if (!SAFE_SCHEMA_IDENTIFIER.test(schema)) {
                             throw new Error(`Invalid schema identifier: ${JSON.stringify(schema)}`);

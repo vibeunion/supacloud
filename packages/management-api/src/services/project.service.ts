@@ -215,7 +215,7 @@ export class ProjectService {
       const storage = services.find((service) => service.id === "storage" || service.name.toLowerCase() === "storage");
       if (storage?.healthy || storage?.status === "ACTIVE_HEALTHY") return true;
     } catch {
-      // 忽略租户服务状态探测异常，继续使用本地探测兜底。
+      // Ignore tenant service status probe exceptions and fall back to local probe.
     }
 
     try {
@@ -224,7 +224,7 @@ export class ProjectService {
         .quiet();
       if (result.exitCode === 0) return true;
     } catch {
-      // 忽略 systemd 探测异常，继续使用共享存储探测兜底。
+      // Ignore systemd probe exceptions and fall back to shared storage probe.
     }
 
     return await this.checkStorageHealth();

@@ -19,7 +19,7 @@ export function planReadFile(path: string): Promise<string> {
   return Promise.resolve(content);
 }
 
-/** 四种对象各一条，声明顺序故意打乱以验证 step 依赖序 */
+/** One entry for each of the four object types, with deliberately shuffled order to verify step dependency ordering */
 export function planTestModule() {
   return defineDatabaseModule({
     name: 'cases',

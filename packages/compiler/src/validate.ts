@@ -22,8 +22,8 @@ interface ProviderRef {
 }
 
 /**
- * 校验 ApplicationGraph，产出诊断列表。
- * strict 时 warn 级诊断升级为 error。
+ * Validates ApplicationGraph and produces diagnostics list.
+ * In strict mode, warn-level diagnostics are promoted to error.
  */
 export function validateGraph(
   graph: ApplicationGraph,
@@ -50,7 +50,7 @@ export function validateGraph(
     }
   }
 
-  // 全局 token → provider 索引（同模块重复注册由 duplicate-token 报告，索引取第一个）。
+  // Global token -> provider index (duplicate registrations within same module reported by duplicate-token; index keeps first).
   const globalProviders = new Map<string, ProviderRef>();
   for (const module of graph.modules) {
     for (const provider of module.providers) {
@@ -60,7 +60,7 @@ export function validateGraph(
     }
   }
 
-  /** 在 module 的可见域内解析 dep token：本模块 providers > imports 模块的 exports。 */
+  /** Resolves dep token in module visibility scope: own providers > imported module exports. */
   function resolveDep(module: ModuleNode, token: string): ProviderRef | undefined {
     const own = module.providers.find((p) => p.token === token);
     if (own) return { module, provider: own };
@@ -175,7 +175,7 @@ export function validateGraph(
   }
 
   for (const module of graph.modules) {
-    // duplicate-token：同一 token 在同模块重复注册。
+    // duplicate-token: Same token registered multiple times within the same module.
     const seen = new Map<string, ProviderNode>();
     for (const provider of module.providers) {
       const first = seen.get(provider.token);
@@ -191,7 +191,7 @@ export function validateGraph(
       }
     }
 
-    // scope-violation / 模块边界：检查每个 provider 的 deps。
+    // scope-violation / module boundary: check dependencies of each provider.
     for (const provider of module.providers) {
       for (const dep of provider.deps) {
         const resolved = resolveDep(module, dep);
@@ -216,7 +216,7 @@ export function validateGraph(
           }
           continue;
         }
-        // controller 属 request 不受此限（它可依赖 application）。
+        // Controllers belong to request scope and are not restricted here (can depend on application).
         if (
           SCOPE_LIFETIME_RANK[resolved.provider.scope] > SCOPE_LIFETIME_RANK[provider.scope]
         ) {
@@ -230,7 +230,7 @@ export function validateGraph(
       }
     }
 
-    // command-missing-permission：命令没有权限声明时禁止生成可采用的应用。
+    // command-missing-permission: Commands without permission declarations must not generate adoptable applications.
     for (const command of module.commands) {
       if (!command.permission) {
         error(
@@ -289,7 +289,7 @@ export function validateGraph(
     }
   }
 
-  // module-boundary-violation：基于模块标签（Tags）与边界规则进行架构分层与依赖流向校验。
+  // module-boundary-violation: Architecture layering and dependency flow validation based on module tags and boundary rules.
   if (moduleBoundaries && moduleBoundaries.length > 0) {
     for (const module of graph.modules) {
       const sourceTags = module.tags ?? [];
@@ -345,7 +345,7 @@ function joinRoutePaths(prefix: string, path: string): string {
   return normalized.replace(/:[^/]+/g, ":param");
 }
 
-/** provider 级循环依赖检测（DFS，报环路径）。 */
+/** Provider-level circular dependency detection (DFS, reporting cycle path). */
 function detectCycles(
   graph: ApplicationGraph,
   resolveDep: (module: ModuleNode, token: string) => ProviderRef | undefined,

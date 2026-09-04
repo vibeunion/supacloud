@@ -107,7 +107,7 @@ describe("platform v2 migrations", () => {
         project_ref: "proj_1",
         deploy_type: "frontend",
         description: "v1.2.3",
-        // 真实旧 schema 没有 status/deployed_at，只有 created_at。
+        // Legacy schema only has created_at without status/deployed_at.
         created_at: new Date("2026-05-01T00:00:00.000Z"),
       },
       {
@@ -146,7 +146,7 @@ describe("platform v2 migrations", () => {
 
     expect(await migrateLegacyDeploymentHistory(database)).toBe(2);
 
-    // 旧表被归档而不是 DROP CASCADE，新表重新建立
+    // Archive legacy table instead of DROP CASCADE, then recreate new table
     expect(statements.some((query) => query.includes("RENAME TO deployment_history_legacy"))).toBe(true);
     expect(statements.some((query) => query.includes("DROP TABLE"))).toBe(false);
     expect(statements.some((query) => query.includes("CREATE TABLE deployment_history"))).toBe(true);

@@ -374,8 +374,8 @@ async function translateOpaqueApiKeyHeaders(
         const resolved = await sdkProxyInternals.resolveProjectApiKey(candidate, { includeProvisioning: true });
         if (!resolved) return isOpaqueApiKey(candidate) ? null : undefined;
         if (resolved.ref !== ref) return null;
-        // 从属项目只能借用 SupAuth owner 的匿名入口。绝不能把从属项目的
-        // service_role/secret 凭据升级为 owner 的全局管理员凭据。
+        // Subordinate projects may only borrow the SupAuth owner's anonymous endpoint. Never escalate
+        // a subordinate project's service_role/secret credentials to the owner's global admin credentials.
         if (authAuthorityRef !== ref) {
             if (resolved.role === "service_role") return null;
             return getUpstreamAnonKey(authAuthorityRef);

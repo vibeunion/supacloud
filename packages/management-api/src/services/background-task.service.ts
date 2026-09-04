@@ -128,8 +128,8 @@ export async function enqueueBackgroundFunctionTask(
 }
 
 /**
- * mirror 只记录租户侧执行证据；worker 仍须在 dispatch 前直读 auth.users 授权。
- * 这里的 userExists 仅解释为何没有写入证据，不能替代最终授权判断。
+ * The mirror records tenant-side execution evidence only; the worker must still read auth.users directly before dispatch.
+ * userExists here merely explains why evidence was not recorded, and does not replace final authorization.
  */
 export async function createBackgroundTaskMirrorIfUserExists(
   task: ProjectTask,

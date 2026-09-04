@@ -272,14 +272,14 @@ describe("JuiceFSDriver path traversal protection", () => {
   test("rejects dot-segment and prefixed sibling bucket identifiers", async () => {
     await withTempMount(async (mount) => {
       const driver = new JuiceFSDriver();
-      // 相邻项目目录已存在时，../supa-victim 也不能通过边界校验
+      // Even if an adjacent project directory exists, ../supa-victim must not pass boundary validation
       await mkdir(join(mount, "supa-victim"), { recursive: true });
 
       for (const bucket of ["..", ".", "...", "../supa-victim", "a/b", "a\\b"]) {
         expect(await driver.createBucket("proj", bucket)).toBe(false);
         expect(await driver.uploadFile("proj", bucket, "x.txt", new TextEncoder().encode("x"), "text/plain")).toBe(false);
       }
-      // 相邻项目目录未被写入
+      // Ensure adjacent project directory was not written to
       expect(await driver.isBucketEmpty("proj", "gallery").catch(() => true)).toBe(true);
     });
   });
@@ -311,7 +311,7 @@ describe("JuiceFSDriver path traversal protection", () => {
         const driver = new JuiceFSDriver();
         await expect(driver.getDownloadResponse("proj", "gallery", "link/secret.txt"))
           .rejects.toThrow(/Path traversal blocked/);
-        // 通过符号链接写出桶外也必须失败
+        // Writing outside the bucket via symlink must also fail
         expect(
           await driver.uploadFile("proj", "gallery", "link/evil.txt", new TextEncoder().encode("x"), "text/plain"),
         ).toBe(false);

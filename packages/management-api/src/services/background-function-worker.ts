@@ -566,7 +566,7 @@ export class BackgroundFunctionWorker {
       return;
     }
 
-    // mirror 只保留证据；dispatch 前必须绕过任何正向共享缓存，直读 GoTrue。
+    // The mirror retains evidence only; prior to dispatch, bypass any positive shared caches and read directly from GoTrue.
     try {
       await assertBackgroundInvokerUserExists(task);
     } catch (error) {

@@ -2,20 +2,20 @@ import { describe, test, expect } from "bun:test";
 import { ProjectService } from "../../src/services/project.service";
 
 describe("ProjectService", () => {
-  // 由于模块级别的 import 耦合，这里测试公共行为
+  // Test public behavior here due to module-level import coupling
   const projectService = new ProjectService();
 
   describe("listProjects", () => {
     test("should return array of projects", async () => {
-      // 这个测试会调用真实的 repository, 在没有数据库时会失败
-      // 所以这里只测试方法签名和返回类型
+      // This test calls the real repository and fails without a database
+      // Only test method signatures and return types here
       expect(typeof projectService.listProjects).toBe("function");
     });
   });
 
   describe("getProject", () => {
     test("should return null for non-existent ref", async () => {
-      // 在没有数据库的环境下，验证方法存在即可
+      // In an environment without a database, verifying method existence is sufficient
       expect(typeof projectService.getProject).toBe("function");
     });
   });

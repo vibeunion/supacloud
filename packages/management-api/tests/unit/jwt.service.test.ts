@@ -24,7 +24,7 @@ describe("JwtService", () => {
 
     test("should only contain alphanumeric and dash/underscore", () => {
       const secret = jwtService.generateSecret();
-      // nanoid 默认使用 URL-safe 字符
+      // nanoid uses URL-safe characters by default
       expect(secret).toMatch(/^[A-Za-z0-9_-]+$/);
     });
   });
@@ -164,7 +164,7 @@ describe("JwtService", () => {
     test("keys should be generated with the same secret", async () => {
       const keySet = await jwtService.generateKeySet();
 
-      // 使用相同的 secret 应该能验证签名
+      // Should verify signature using the same secret
       const anonParts = keySet.anonKey.split(".");
       const serviceParts = keySet.serviceRoleKey.split(".");
 

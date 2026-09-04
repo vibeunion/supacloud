@@ -1,6 +1,6 @@
 /**
- * Apply：把 ModulePlan 落到数据库 —— 账本幂等 + advisory lock + 单事务 + catalog 回读验证。
- * 边界与 plan 一致：只管模块声明的可重复 SQL 对象，不做表结构 migration。
+ * Apply: Executes ModulePlan against database - ledger idempotency + advisory lock + single transaction + catalog verification.
+ * Boundary matches plan: handles repeatable SQL objects declared by modules, not table migrations.
  */
 
 import { readCatalog, type DatabaseCatalog, type QueryExecutor } from './catalog.js';
@@ -9,11 +9,11 @@ import { splitQualifiedName } from './reconcile.js';
 
 export interface ApplyResult {
   module: string;
-  /** 实际执行了 SQL 的 step 名 */
+  /** Names of steps whose SQL was executed */
   applied: string[];
-  /** ledger 哈希一致跳过的 */
+  /** Steps skipped because ledger hash matched */
   skipped: string[];
-  /** 应用后在 catalog 中确认存在的对象 */
+  /** Objects confirmed to exist in catalog after apply */
   verified: string[];
   failed?: { step: string; error: string };
 }
@@ -34,7 +34,7 @@ values ($1, $2, $3)
 on conflict (object_identity) do update
 set module = excluded.module, sha256 = excluded.sha256, applied_at = now()`;
 
-/** 携带失败 step 名的内部错误，事务回滚后据此填充 ApplyResult.failed */
+/** Internal error carrying failed step name; used to populate ApplyResult.failed after transaction rollback */
 class StepFailure extends Error {
   constructor(
     readonly step: string,
@@ -50,9 +50,9 @@ function toFailure(error: unknown): { step: string; error: string } {
 }
 
 /**
- * 在事务中执行 fn：executor 提供 transaction 时交给它管理 begin/commit/rollback，
- * 否则在当前 executor 上顺序执行 begin/commit/rollback 语句。
- * 失败时回滚并返回失败信息（不抛出）。
+ * Executes fn in transaction: delegates begin/commit/rollback to executor when it provides transaction,
+ * otherwise sequentially executes begin/commit/rollback statements on current executor.
+ * Rolls back on failure and returns failure info (does not throw).
  */
 async function runInTransaction(
   executor: QueryExecutor,
@@ -77,7 +77,7 @@ async function runInTransaction(
   return undefined;
 }
 
-/** step 声明的对象在 catalog 中是否存在 */
+/** Checks whether object declared by step exists in catalog */
 function existsInCatalog(step: PlanStep, catalog: DatabaseCatalog): boolean {
   switch (step.kind) {
     case 'function': {
@@ -112,7 +112,7 @@ function existsInCatalog(step: PlanStep, catalog: DatabaseCatalog): boolean {
   }
 }
 
-/** 从 step 名推导 catalog 验证需要覆盖的 schema 集合 */
+/** Derives set of schemas requiring catalog verification from step names */
 function planSchemas(plan: ModulePlan): string[] {
   const schemas = new Set<string>();
   for (const step of plan.steps) {
@@ -126,7 +126,7 @@ export async function applyModulePlan(
   executor: QueryExecutor,
   plan: ModulePlan,
 ): Promise<ApplyResult> {
-  // error 级风险直接拒绝执行，不触碰数据库
+  // Reject execution directly on error-level risks without touching database
   const errorRisks = plan.steps.flatMap((step) =>
     step.risk
       .filter((risk) => risk.severity === 'error')
@@ -143,13 +143,13 @@ export async function applyModulePlan(
     verified: [],
   };
 
-  // 确保账本表存在
+  // Ensure ledger table exists
   await executor.query(LEDGER_SCHEMA_SQL);
   await executor.query(LEDGER_TABLE_SQL);
 
   await executor.query(LOCK_SQL);
   try {
-    // 事务内先写入局部数组，提交成功后才算真正 applied/skipped（回滚则丢弃）
+    // Collect applied/skipped in local arrays; only considered final after commit succeeds
     const applied: string[] = [];
     const skipped: string[] = [];
     const failed = await runInTransaction(executor, async (tx) => {
@@ -179,7 +179,7 @@ export async function applyModulePlan(
     await executor.query(UNLOCK_SQL);
   }
 
-  // 应用后读回 catalog，验证声明对象真实存在
+  // Read back catalog after apply to verify declared objects actually exist
   const catalog = await readCatalog(executor, planSchemas(plan));
   for (const step of plan.steps) {
     if (existsInCatalog(step, catalog)) {

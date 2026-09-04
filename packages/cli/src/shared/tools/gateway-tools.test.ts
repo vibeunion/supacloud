@@ -263,7 +263,7 @@ describe("gateway CLI tool — actions", () => {
 
     test("ref override works when no projectRef default", async () => {
         const calls: string[] = [];
-        // 不传 projectRef，模拟未自动关联项目时 --ref 覆盖生效
+        // Do not pass projectRef, simulating --ref override when project is not auto-associated
         let callback: Callback | undefined;
         registerGatewayTools(
             { tool: (_n: string, _d: string, _s: Record<string, unknown>, cb: Callback) => { callback = cb; } } as any,

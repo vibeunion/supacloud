@@ -705,10 +705,10 @@ function parseLegacyDeploymentConfig(value: unknown): Record<string, unknown> {
 
 /**
  * Legacy deployment_history（id UUID, project_ref, deploy_type, description, ...）
- * 与当前 schema（id TEXT, app, tenant, version, ...）不兼容。
- * 旧实现直接 DROP TABLE ... CASCADE，升级启动即永久丢失全部历史。
- * 改为在同一事务内：归档旧表（RENAME 保留全部原始数据与依赖对象）、
- * 建立新表、逐行回填、核对行数；行数不符则抛错回滚，阻断升级。
+ * is incompatible with current schema (id TEXT, app, tenant, version, ...).
+ * Older implementations executed DROP TABLE ... CASCADE, permanently losing history on upgrade.
+ * Handled within the same transaction: archive old table (RENAME to preserve raw data and dependencies),
+ * create new table, backfill row by row, and verify row count; rolls back on mismatch to block unsafe upgrades.
  */
 export async function migrateLegacyDeploymentHistory(db: SQL): Promise<number> {
   const legacy = await db`

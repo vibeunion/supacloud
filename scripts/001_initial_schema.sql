@@ -1,13 +1,13 @@
 -- ============================================================
--- AoristCross — 初始数据库 Schema
--- 对应 admin/src/resources.ts 中定义的全部 16 个资源模块
+-- AoristCross - Initial Database Schema
+-- Corresponds to all 16 resource modules defined in admin/src/resources.ts
 -- ============================================================
 
--- 0. 扩展 & 工具函数
+-- 0. Extensions & Utility Functions
 -- -----------------------------------------------------------
 CREATE EXTENSION IF NOT EXISTS "moddatetime" SCHEMA extensions;
 
--- updated_at 自动更新触发器的统一创建函数
+-- Unified creation function for updated_at auto-update trigger
 CREATE OR REPLACE FUNCTION create_updated_at_trigger(tbl regclass)
 RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
@@ -21,10 +21,10 @@ $$;
 
 
 -- ============================================================
--- 1. 用户与权限
+-- 1. Users and Permissions
 -- ============================================================
 
--- 1.1 profiles — 用户档案（与 auth.users 1:1）
+-- 1.1 profiles - User profiles (1:1 with auth.users)
 CREATE TABLE profiles (
   id            uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   display_name  text,
@@ -47,7 +47,7 @@ CREATE INDEX idx_profiles_phone      ON profiles(phone);
 CREATE INDEX idx_profiles_created_at ON profiles(created_at);
 
 
--- 1.2 activation_codes — 激活码
+-- 1.2 activation_codes - Activation codes
 CREATE TABLE activation_codes (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   code          text NOT NULL UNIQUE,
@@ -66,7 +66,7 @@ SELECT create_updated_at_trigger('activation_codes');
 CREATE INDEX idx_activation_codes_is_used ON activation_codes(is_used);
 
 
--- 1.3 subscription_plans — 订阅套餐
+-- 1.3 subscription_plans - Subscription plans
 CREATE TABLE subscription_plans (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name           text NOT NULL,
@@ -89,10 +89,10 @@ SELECT create_updated_at_trigger('subscription_plans');
 
 
 -- ============================================================
--- 2. AI 内容生成
+-- 2. AI Content Generation
 -- ============================================================
 
--- 2.1 patterns — 图案管理
+-- 2.1 patterns - Pattern management
 CREATE TABLE patterns (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   title          text NOT NULL,
@@ -122,7 +122,7 @@ CREATE INDEX idx_patterns_style      ON patterns(style);
 CREATE INDEX idx_patterns_created_at ON patterns(created_at);
 
 
--- 2.2 mockup_categories — 样机分类（需先于 mockup_templates 建表）
+-- 2.2 mockup_categories - Mockup categories (must be created before mockup_templates)
 CREATE TABLE mockup_categories (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   label           text NOT NULL,
@@ -137,7 +137,7 @@ ALTER TABLE mockup_categories ENABLE ROW LEVEL SECURITY;
 SELECT create_updated_at_trigger('mockup_categories');
 
 
--- 2.3 mockup_templates — 样机模板
+-- 2.3 mockup_templates - Mockup templates
 CREATE TABLE mockup_templates (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name             text NOT NULL,
@@ -158,7 +158,7 @@ CREATE INDEX idx_mockup_templates_category ON mockup_templates(category_id);
 CREATE INDEX idx_mockup_templates_product  ON mockup_templates(product_type);
 
 
--- 2.4 mockups — 样机成品
+-- 2.4 mockups - Rendered mockups
 CREATE TABLE mockups (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name          text NOT NULL,
@@ -182,7 +182,7 @@ CREATE INDEX idx_mockups_status     ON mockups(status);
 CREATE INDEX idx_mockups_created_at ON mockups(created_at);
 
 
--- 2.5 titles — 标题记录
+-- 2.5 titles - Generated titles
 CREATE TABLE titles (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   pattern_id      uuid REFERENCES patterns(id) ON DELETE SET NULL,
@@ -209,7 +209,7 @@ CREATE INDEX idx_titles_platform   ON titles(platform);
 CREATE INDEX idx_titles_created_at ON titles(created_at);
 
 
--- 2.6 video_presets — 视频配置模板
+-- 2.6 video_presets - Video preset templates
 CREATE TABLE video_presets (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name          text NOT NULL,
@@ -228,7 +228,7 @@ ALTER TABLE video_presets ENABLE ROW LEVEL SECURITY;
 SELECT create_updated_at_trigger('video_presets');
 
 
--- 2.7 videos — 视频记录
+-- 2.7 videos - Video records
 CREATE TABLE videos (
   id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name             text,
@@ -259,10 +259,10 @@ CREATE INDEX idx_videos_created_at ON videos(created_at);
 
 
 -- ============================================================
--- 3. 运营数据
+-- 3. Operations Data
 -- ============================================================
 
--- 3.1 trending_products — 趋势热榜
+-- 3.1 trending_products - Trending products
 CREATE TABLE trending_products (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   title        text NOT NULL,
@@ -288,7 +288,7 @@ CREATE INDEX idx_trending_bsr        ON trending_products(bsr);
 CREATE INDEX idx_trending_created_at ON trending_products(created_at);
 
 
--- 3.2 gallery_assets — 图片库
+-- 3.2 gallery_assets - Image gallery assets
 CREATE TABLE gallery_assets (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name        text NOT NULL,
@@ -310,7 +310,7 @@ CREATE INDEX idx_gallery_source     ON gallery_assets(source);
 CREATE INDEX idx_gallery_created_at ON gallery_assets(created_at);
 
 
--- 3.3 exports — 导出记录
+-- 3.3 exports - Export records
 CREATE TABLE exports (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   batch_name     text,
@@ -332,7 +332,7 @@ CREATE INDEX idx_exports_status     ON exports(status);
 CREATE INDEX idx_exports_created_at ON exports(created_at);
 
 
--- 3.4 tasks — 任务队列
+-- 3.4 tasks - Task queue
 CREATE TABLE tasks (
   id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name           text NOT NULL,
@@ -359,10 +359,10 @@ CREATE INDEX idx_tasks_user_status_created_desc ON tasks(user_id, status, create
 
 
 -- ============================================================
--- 4. AI 智能体
+-- 4. AI Agents
 -- ============================================================
 
--- 4.1 agents — AI 智能体
+-- 4.1 agents - AI agents
 CREATE TABLE agents (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name          text NOT NULL,
@@ -386,7 +386,7 @@ CREATE INDEX idx_agents_status     ON agents(status);
 CREATE INDEX idx_agents_created_at ON agents(created_at);
 
 
--- 4.2 agent_logs — 智能体调用日志
+-- 4.2 agent_logs - Agent invocation logs
 CREATE TABLE agent_logs (
   id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   agent_id        uuid NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
@@ -407,10 +407,10 @@ CREATE INDEX idx_agent_logs_created_at ON agent_logs(created_at);
 
 
 -- ============================================================
--- 5. 系统配置
+-- 5. System Configuration
 -- ============================================================
 
--- 5.1 system_configs — K/V 配置项（主键为 key）
+-- 5.1 system_configs - K/V configuration items (primary key is key)
 CREATE TABLE system_configs (
   key          text PRIMARY KEY,
   value        text NOT NULL,
@@ -423,7 +423,7 @@ ALTER TABLE system_configs ENABLE ROW LEVEL SECURITY;
 SELECT create_updated_at_trigger('system_configs');
 
 
--- 5.2 help_articles — 帮助文档
+-- 5.2 help_articles - Help documentation
 CREATE TABLE help_articles (
   id           uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   title        text NOT NULL,
@@ -440,6 +440,6 @@ CREATE INDEX idx_help_articles_category ON help_articles(category);
 
 
 -- ============================================================
--- 6. 清理辅助函数（可选保留）
+-- 6. Cleanup Helper Function (optional)
 -- ============================================================
 DROP FUNCTION IF EXISTS create_updated_at_trigger(regclass);

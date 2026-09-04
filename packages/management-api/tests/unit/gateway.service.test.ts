@@ -2609,7 +2609,7 @@ describe("CaddyGatewayProvider ensureGatewayReady", () => {
 
     test("retries until Caddy Admin API becomes reachable, then persists the JSON config", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
-        // 前 2 次连接拒绝（模拟 caddy 尚未启动），第 3 次起返回 ok
+        // First 2 attempts are connection refused (simulate Caddy not started yet); 3rd attempt onward returns ok
         let configAttempts = 0;
         let loadedConfig: unknown = {};
         const originalFetch = globalThis.fetch;
@@ -2788,10 +2788,10 @@ describe("gateway-health worker", () => {
         const { runGatewayHealthCheck, resetGatewayHealthState } = await import("../../src/workers/gateway-health.worker");
         resetGatewayHealthState();
 
-        // 初始状态：未观测过可达 -> 首次探测可达会执行恢复重建。
+        // Initial state: not yet observed reachable -> initial reachable probe triggers recovery rebuild.
         const reconcileAll = async () => canonicalHealthState(0);
         await runGatewayHealthCheck({ reconcileAll });
-        // 第二次：仍然可达且未达到周期阈值，不应重复重建。
+        // Second attempt: still reachable and period threshold not reached, should not rebuild repeatedly.
         const rebuilt = await runGatewayHealthCheck({ reconcileAll });
 
         expect(rebuilt).toBe(false);
@@ -2840,10 +2840,10 @@ describe("gateway-health worker", () => {
         const { runGatewayHealthCheck, resetGatewayHealthState } = await import("../../src/workers/gateway-health.worker");
         resetGatewayHealthState();
 
-        // 第一次：不可达
+        // First attempt: unreachable
         const reconcileAll = async () => canonicalHealthState(3);
         await runGatewayHealthCheck({ reconcileAll });
-        // 模拟 caddy 重启后恢复
+        // Simulate recovery after Caddy restarts
         reachable = true;
         const rebuilt = await runGatewayHealthCheck({ reconcileAll });
 

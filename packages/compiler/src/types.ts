@@ -1,6 +1,6 @@
 /**
- * ApplicationGraph：编译器从源码 AST 构建出的静态应用图。
- * 运行期不反射、无容器，所有信息都在该结构与生成代码中显式给出。
+ * ApplicationGraph: Static application graph built by the compiler from source AST.
+ * No runtime reflection or container; all metadata is explicitly represented here and in generated code.
  */
 
 export type Scope = "application" | "request" | "job";
@@ -18,7 +18,7 @@ export interface Diagnostic {
 }
 
 export interface ProviderNode {
-  /** token 名（InjectionToken 变量名或类名）。 */
+  /** Token name (InjectionToken variable name or class name). */
   token: string;
   tokenKind: TokenKind;
   kind: ProviderKind;
@@ -27,12 +27,12 @@ export interface ProviderNode {
   useFactoryName?: string;
   useExisting?: string;
   scope: Scope;
-  /** token 名，构造/工厂参数顺序。 */
+  /** Token names in constructor/factory parameter order. */
   deps: string[];
   exported: boolean;
   file: string;
   line: number;
-  /** useClass/useFactory/useValue 符号的模块相对路径（供生成 import）。 */
+  /** Relative module path of useClass/useFactory/useValue symbol (for import generation). */
   importPath?: string;
 }
 
@@ -56,7 +56,7 @@ export interface ControllerNode {
   routes: RouteNode[];
   file: string;
   importPath: string;
-  /** 路由 schema 符号名 → 模块相对路径（供生成 import）。 */
+  /** Route schema symbol name -> relative module path (for import generation). */
   schemaImports?: Record<string, string>;
 }
 
@@ -75,48 +75,48 @@ export interface QueryNode {
 }
 
 export interface ModuleNode {
-  /** @Module({ name }) 或 defineModule 的 name。 */
+  /** Name from @Module({ name }) or defineModule. */
   name: string;
   className: string;
-  /** 模块标签（如 ['scope:case', 'type:feature']），用于架构边界治理。 */
+  /** Module tags (e.g. ['scope:case', 'type:feature']) for architecture boundary governance. */
   tags?: string[];
   file: string;
   line: number;
-  /** 被 import 模块的 name。 */
+  /** Names of imported modules. */
   imports: string[];
   providers: ProviderNode[];
   controllers: ControllerNode[];
   commands: CommandNode[];
   queries: QueryNode[];
-  /** 导出的 token 名。 */
+  /** Exported token names. */
   exports: string[];
 }
 
 export interface ApplicationGraph {
   modules: ModuleNode[];
-  /** 被依赖但无任何模块提供的 token 名（平台注入）。 */
+  /** Depended token names provided by platform injection rather than any module. */
   externalTokens: string[];
   /**
-   * 分析阶段产生的诊断（如 missing-deps），由 compileProject 合并进结果。
-   * 不写入 app.manifest.json。
+   * Diagnostics produced during analysis (e.g. missing-deps), merged by compileProject.
+   * Omitted from app.manifest.json.
    */
   diagnostics?: Diagnostic[];
   /**
-   * InjectionToken 变量名 → 字符串 name（如 REQUEST_CONTEXT →
-   * "supacloud.request-context"），供代码生成识别内置上下文 token。
-   * 不写入 app.manifest.json。
+   * InjectionToken variable name -> string name (e.g. REQUEST_CONTEXT ->
+   * "supacloud.request-context"), used during code generation to identify built-in context tokens.
+   * Omitted from app.manifest.json.
    */
   tokenNames?: Record<string, string>;
 }
 
 export interface CompileOptions {
-  /** 项目根（含 tsconfig）。 */
+  /** Project root directory (containing tsconfig). */
   rootDir: string;
-  /** glob，默认 ['**\/*.module.ts', '**\/*.ts']。 */
+  /** Glob patterns, defaults to ['**\/*.module.ts', '**\/*.ts']. */
   include?: string[];
-  /** 生成目录（如 <rootDir>/generated）。 */
+  /** Output directory (e.g. <rootDir>/generated). */
   outDir: string;
-  /** warn 级诊断升级为 error。 */
+  /** Upgrade warn-level diagnostics to error. */
   strict?: boolean;
   /** Built-in architecture boundary preset (for example, 'modular-monolith'). */
   moduleBoundaryPreset?: ModuleBoundaryPresetName;

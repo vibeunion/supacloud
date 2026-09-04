@@ -222,7 +222,7 @@ describe("RealtimeService tenant payloads", () => {
 });
 
 describe("RealtimeService registration retry", () => {
-  // 测试内缩短 backoff，避免默认 3s × 重试次数撑爆单测 5s 超时
+  // Shorten backoff in tests to avoid the default 3s * retries exceeding the 5s unit test timeout
   const origBackoff = process.env.REALTIME_REGISTER_BACKOFF_MS;
   const origAttempts = process.env.REALTIME_REGISTER_MAX_ATTEMPTS;
   beforeEach(() => {
@@ -240,7 +240,7 @@ describe("RealtimeService registration retry", () => {
     let attempts = 0;
     globalThis.fetch = (async () => {
       attempts++;
-      // 前 2 次模拟容器未就绪（连接级失败），第 3 次容器拉起返回 201
+      // First 2 attempts simulate container not ready (connection failure); 3rd attempt returns 201 after container starts
       if (attempts < 3) {
         throw new Error("Unable to connect. Is the computer able to access the url?");
       }
@@ -263,7 +263,7 @@ describe("RealtimeService registration retry", () => {
     let attempts = 0;
     globalThis.fetch = (async () => {
       attempts++;
-      // 逻辑错误：立即返回 400，不应重试
+      // Logical error: return 400 immediately, should not retry
       return new Response("bad request", { status: 400 });
     }) as typeof fetch;
 

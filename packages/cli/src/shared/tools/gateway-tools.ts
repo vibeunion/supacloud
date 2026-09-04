@@ -1,15 +1,15 @@
 /**
  * Gateway / Caddy — Compound tool.
  *
- * SupaCloud 把网关配置作为 JSON 通过 Caddy Admin API（POST /load）注入，
- * 而不是写 Caddyfile。本工具把这些受控端点暴露给 CLI：
- *   - 自定义网关路由（reverse_proxy / 静态站点 / 重定向）的增删改查
- *   - 网关配置（限流档位、CORS、JWT）
- *   - 证书自动化（lego 申请/续期、手动部署证书）
- *   - 全量重建（把模板/CORS 变更传播到所有租户）
- *   - 自定义域名（绑定到 Caddy TLS 路由）
+ * SupaCloud injects gateway configuration as JSON through the Caddy Admin API (POST /load),
+ * rather than writing a Caddyfile. This tool exposes these managed endpoints to the CLI:
+ *   - CRUD for custom gateway routes (reverse_proxy / static site / redirect)
+ *   - Gateway configuration (rate limit tiers, CORS, JWT)
+ *   - Certificate automation (lego issuance/renewal, manual certificate deployment)
+ *   - Full rebuild (propagates template/CORS changes to all tenants)
+ *   - Custom domains (bind to Caddy TLS routes)
  *
- * 注意：相关端点均要求 admin 权限，需使用管理员 API Token。
+ * Note: These endpoints require admin privileges and must use an admin API token.
  */
 import { Type } from "@sinclair/typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
@@ -97,7 +97,7 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
                 "delete_custom_hostname", "verify_custom_hostname",
             ]), "Action"),
             ref: optional(Type.String(), projectRef ? "可选：覆盖自动关联的项目 ref" : "项目 ref"),
-            // 路由参数
+            // Route parameters
             route_id: optional(Type.String(), "[upsert_route/update_route/delete_route] 路由 ID（字母/数字/_/-，1-64）"),
             hosts: withDescription(stringArray, "[upsert_route/update_route] 主机名列表，逗号分隔或 JSON 数组（1-20）"),
             paths: withDescription(stringArray, "[upsert_route/update_route] 路径列表，逗号分隔或 JSON 数组（1-32）"),
@@ -115,12 +115,12 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
             cors: withDescription(stringArray, "[upsert_route/update_route] 额外 CORS 源，逗号分隔"),
             priority: optional(Type.Number(), "[upsert_route/update_route] 路由优先级"),
             enabled: optional(Type.Boolean(), "[upsert_route/update_route] 是否启用"),
-            // 网关配置
+            // Gateway configuration
             rate_limit_tier: optional(stringEnum(["free", "pro", "enterprise"]), "[config] 限流档位"),
             cors_origins: optional(Type.String(), "[config] CORS 源（逗号分隔）"),
             jwt_enabled: optional(Type.Boolean(), "[config] 是否启用 JWT"),
             jwt_secret: optional(Type.String(), "[config] JWT 密钥"),
-            // 证书
+            // Certificates
             cert_mode: optional(stringEnum(["lego", "manual"]), "[update_certificate] 证书模式"),
             challenge: optional(stringEnum(["dns-01", "http-01"]), "[update_certificate/issue_certificate] ACME challenge"),
             email: optional(Type.String(), "[update_certificate/issue_certificate] ACME 邮箱"),
@@ -131,9 +131,9 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
             renew: optional(Type.Boolean(), "[issue_certificate] 仅续期已有证书"),
             cert: optional(Type.String(), "[deploy_certificate] PEM 证书内容"),
             key: optional(Type.String(), "[deploy_certificate] PEM 私钥内容"),
-            // 重建
+            // Rebuild
             clean: optional(Type.Boolean(), "[rebuild] 清理后全量重建"),
-            // 自定义域名
+            // Custom domain
             custom_hostname: optional(Type.String(), "[set_custom_hostname] 自定义域名"),
         },
         async (args: any) => {

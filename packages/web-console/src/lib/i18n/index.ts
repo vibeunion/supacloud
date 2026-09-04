@@ -28,10 +28,10 @@ init({
 // Guard against race conditions where templates call $t() before locale settles.
 locale.set(initialLocale);
 
-// 在客戶端環境下導出一個等待函數
+// Export a wait function in client environment
 export { waitLocale };
 
-// 持久化語言選擇
+// Persist locale selection
 if (typeof localStorage !== 'undefined') {
   locale.subscribe(val => {
     if (val) localStorage.setItem('selected-locale', normalizeLocale(val));

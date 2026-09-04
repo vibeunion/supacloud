@@ -1,6 +1,6 @@
 /**
- * Manifest：把若干 DatabaseModule 汇总为可序列化的数据库治理清单，
- * 并提供 explainObject 做人类可读的对象解释。
+ * Manifest: Aggregates multiple DatabaseModules into a serializable database governance inventory,
+ * and provides explainObject for human-readable object explanation.
  */
 
 import type {
@@ -91,8 +91,8 @@ function describeGrant(moduleName: string, grant: GrantDecl): string {
 }
 
 /**
- * 按名字解释一个对象：策略（name 或 table.name）、函数（schema.name）、
- * 触发器（name）、归属表（schema.name）、授权对象（schema.name，最后兜底）。
+ * Explains an object by name: policy (name or table.name), function (schema.name),
+ * trigger (name), owning table (schema.name), or granted object (schema.name fallback).
  */
 export function explainObject(manifest: DatabaseManifest, name: string): string {
   for (const module of manifest.modules) {

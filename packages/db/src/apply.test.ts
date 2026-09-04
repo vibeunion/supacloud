@@ -71,7 +71,7 @@ const STEP_NAMES = [
   'public.cases:SELECT:authenticated',
 ];
 
-/** 应用后 catalog 回读验证用的固定行（覆盖全部四个声明对象） */
+/** Fixed rows used for post-apply catalog readback verification (covering all four declared objects) */
 const HAPPY_CATALOG_ROUTES = [
   { match: 'pg_class c\nJOIN pg_namespace', rows: [] },
   {
@@ -118,15 +118,15 @@ const HAPPY_CATALOG_ROUTES = [
 ];
 
 interface MockOptions {
-  /** step.sql 含此片段时抛错，模拟执行失败 */
+  /** Throws error when step.sql contains this fragment to simulate execution failure */
   failOn?: string;
-  /** 提供 transaction(fn)，走托管事务路径 */
+  /** Provides transaction(fn) to use managed transaction path */
   withTransaction?: boolean;
 }
 
 /**
- * 内存版 mock executor：用 Map 模拟 _supacloud.db_object_ledger，
- * begin/commit/rollback 语义真实生效（事务内写入 pending，commit 落账，rollback 丢弃）。
+ * In-memory mock executor: simulates _supacloud.db_object_ledger with Map,
+ * where begin/commit/rollback semantics actually take effect (writes to pending in tx, commits to ledger, drops on rollback).
  */
 function mockApplyExecutor(options: MockOptions = {}): {
   executor: QueryExecutor;
@@ -171,7 +171,7 @@ function mockApplyExecutor(options: MockOptions = {}): {
       }
       if (sql.includes('db_object_ledger where object_identity')) {
         const identity = params?.[0] as string;
-        // 事务内读：先看事务缓冲，再回退到已提交账本（read-your-writes + 已提交数据可见）
+        // In-transaction read: check transaction buffer first, then fall back to committed ledger (read-your-writes + committed visibility)
         const row = pending?.get(identity) ?? ledger.get(identity);
         return Promise.resolve((row ? [{ sha256: row.sha256 }] : []) as T[]);
       }
@@ -282,7 +282,7 @@ describe('applyModulePlan', () => {
     expect(lockIndex).toBeGreaterThanOrEqual(0);
     expect(unlockIndex).toBeGreaterThan(commitIndex);
     expect(lockIndex).toBeLessThan(beginIndex);
-    // 失败路径同样必须 unlock
+    // Failure paths must also unlock
     const failing = mockApplyExecutor({ failOn: 'create policy' });
     await applyModulePlan(failing.executor, await makePlan());
     const failingSqls = sqls(failing.calls);

@@ -46,7 +46,7 @@ function textResult(text: string, isError = false): ToolResult {
     return { isError, content: [{ type: "text" as const, text }] };
 }
 
-/** kebab/snake/空格分隔名 → PascalCase（generate 的类名）。 */
+/** kebab/snake/space-separated name -> PascalCase (class name for generate). */
 function pascalName(name: string): string {
     const joined = name
         .split(/[^A-Za-z0-9]+/)
@@ -56,7 +56,7 @@ function pascalName(name: string): string {
     return joined || "App";
 }
 
-/** kebab-case → camelCase（command/query 的语义名后缀）。 */
+/** kebab-case -> camelCase (semantic name suffix for command/query). */
 function camelName(name: string): string {
     const pascal = pascalName(name);
     return pascal.charAt(0).toLowerCase() + pascal.slice(1);
@@ -101,7 +101,7 @@ function commandScaffold(moduleName: string, name: string): string {
 @Injectable()
 @Command({
     name: ${JSON.stringify(`${moduleName}.${camelName(name)}`)},
-    // TODO: 声明业务权限标识（如 ${moduleName}.${camelName(name)}）
+    // TODO: Declare business permission identifier (e.g. ${moduleName}.${camelName(name)})
     permission: "TODO",
 })
 export class ${pascalName(name)}Command {}
@@ -257,7 +257,7 @@ async function runGraph(args: AppToolArguments): Promise<ToolResult> {
     return textResult(formatGraphText(manifest));
 }
 
-/** token → 依赖它的 provider/controller 所属模块与名称（反向索引）。 */
+/** token -> dependent provider/controller module and name (reverse index). */
 function reverseDependencies(manifest: AppManifest, token: string): string[] {
     const dependents: string[] = [];
     for (const module of manifest.modules) {
@@ -432,7 +432,7 @@ export function registerAppTools(server: ToolServer): void {
     );
 }
 
-// 供测试与内部复用
+// For testing and internal reuse
 export const __internal = {
     pascalName,
     camelName,
