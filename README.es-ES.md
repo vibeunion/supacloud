@@ -138,6 +138,14 @@ supacloud-cli frontend list --ref <project-ref>
 `supacloud-cli` es por defecto específico del proyecto y se vincula automáticamente desde el `.env` del espacio de trabajo actual cuando está disponible.
 No existe un alias de compatibilidad de CLI de proyecto llamado `supacloud`: ese nombre está reservado para el binario del servidor compilado en `/usr/local/bin/supacloud`. Usa `supacloudctl` solo para el despachador local unificado opcional.
 
+La entrada al estilo npm usa Node.js de forma predeterminada. Los usuarios de
+Bun pueden ejecutar el paquete explícitamente con Bun, también desde terminales
+de Windows, sin instalar Node.js ni un wrapper independiente:
+
+```bash
+bunx --bun --package @supacloud/cli supacloud-cli status
+```
+
 - `SUPABASE_URL` o `SUPACLOUD_API_URL`
 - `SUPABASE_SERVICE_ROLE_KEY` o `SUPACLOUD_API_TOKEN`
 

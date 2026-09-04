@@ -12,6 +12,13 @@ npm install -g @supacloud/cli
 supacloud-cli status
 ```
 
+Bun users can run the same package explicitly with Bun, including on Windows,
+without installing Node.js or a separate wrapper:
+
+```bash
+bunx --bun --package @supacloud/cli supacloud-cli status
+```
+
 One-off execution:
 
 ```bash
