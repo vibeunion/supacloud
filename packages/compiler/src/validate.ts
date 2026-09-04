@@ -146,6 +146,30 @@ export function validateGraph(
             controller.file,
           );
         }
+
+        if (typeof options === "object" && options.allowRouteCommandBindings === false && route.command) {
+          error(
+            "route-command-binding-disallowed",
+            `Route ${key} binds command ${route.command}, but route-level command bindings are disabled by policy. Use an application service (${controller.className}.${route.handler}, ${controller.file}).`,
+            controller.file,
+          );
+        }
+      }
+
+      if (typeof options === "object" && options.disallowControllerDirectDb) {
+        for (const dep of controller.deps) {
+          const isDbClient =
+            dep === "DB_CLIENT" ||
+            dep === "DatabaseClient" ||
+            graph.tokenNames?.[dep] === "supacloud.db-client";
+          if (isDbClient) {
+            error(
+              "controller-direct-db-access",
+              `Controller ${controller.className} directly injects database client '${dep}', violating presentation layer separation (${controller.file})`,
+              controller.file,
+            );
+          }
+        }
       }
     }
   }
@@ -216,6 +240,52 @@ export function validateGraph(
           module.line,
         );
       }
+
+      if (typeof options === "object" && options.commandCapabilities) {
+        const caps = options.commandCapabilities;
+        const location = `${command.className} (${module.file})`;
+        if (command.permission && caps.permission === false) {
+          error(
+            "command-permission-unsupported",
+            `Command ${command.name} declares permission, but runtime permission checks are unavailable (${location}).`,
+            module.file,
+            module.line,
+          );
+        }
+        if (command.audit && caps.audit === false) {
+          error(
+            "command-audit-unsupported",
+            `Command ${command.name} declares audit, but audit persistence is unavailable (${location}).`,
+            module.file,
+            module.line,
+          );
+        }
+        if (command.idempotency === "required" && caps.idempotency === false) {
+          error(
+            "command-idempotency-unsupported",
+            `Command ${command.name} declares idempotency, but idempotency receipt persistence is unavailable (${location}).`,
+            module.file,
+            module.line,
+          );
+        }
+        if (command.transaction === "required") {
+          if (caps.transaction === "rpc-only") {
+            warn(
+              "command-transaction-rpc-only",
+              `Command ${command.name} declares transaction: 'required', but only DB RPC transactions are available; multi-table writes must use one DB RPC (${location}).`,
+              module.file,
+              module.line,
+            );
+          } else if (caps.transaction === false) {
+            error(
+              "command-transaction-unsupported",
+              `Command ${command.name} declares transaction: 'required', but transaction support is unavailable (${location}).`,
+              module.file,
+              module.line,
+            );
+          }
+        }
+      }
     }
   }
 
@@ -262,6 +332,10 @@ export function validateGraph(
   }
 
   diagnostics.push(...detectCycles(graph, resolveDep));
+  diagnostics.push(...detectModuleCycles(graph));
+  if (typeof options === "object" && options.detectOrphanModules) {
+    diagnostics.push(...detectOrphanModules(graph));
+  }
   return diagnostics;
 }
 
@@ -320,5 +394,97 @@ function detectCycles(
   };
 
   for (const ref of nodes) visit(ref);
+  return diagnostics;
+}
+
+/** Module-level circular import detection (DFS, reporting import cycle). */
+function detectModuleCycles(graph: ApplicationGraph): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  const moduleMap = new Map<string, ModuleNode>(graph.modules.map((m) => [m.name, m]));
+  const state = new Map<string, "visiting" | "done">();
+  const stack: string[] = [];
+  const reported = new Set<string>();
+
+  const visit = (name: string): void => {
+    if (state.get(name) === "done") return;
+    if (state.get(name) === "visiting") {
+      const cycleStart = stack.indexOf(name);
+      const cycle = [...stack.slice(cycleStart), name];
+      const cycleKey = [...cycle].sort().join("|");
+      if (!reported.has(cycleKey)) {
+        reported.add(cycleKey);
+        const mod = moduleMap.get(name);
+        diagnostics.push({
+          severity: "error",
+          code: "circular-module-import",
+          message: `Module circular import detected: ${cycle.join(" -> ")}`,
+          file: mod?.file,
+          line: mod?.line,
+        });
+      }
+      return;
+    }
+
+    state.set(name, "visiting");
+    stack.push(name);
+    const mod = moduleMap.get(name);
+    if (mod) {
+      for (const importName of mod.imports) {
+        if (moduleMap.has(importName)) {
+          visit(importName);
+        }
+      }
+    }
+    stack.pop();
+    state.set(name, "done");
+  };
+
+  for (const mod of graph.modules) {
+    visit(mod.name);
+  }
+  return diagnostics;
+}
+
+/** Detects modules declared in the application that are unreachable from root modules. */
+function detectOrphanModules(graph: ApplicationGraph): Diagnostic[] {
+  const diagnostics: Diagnostic[] = [];
+  const rootModules = graph.modules.filter(
+    (m) =>
+      (m.tags && (m.tags.includes("type:root") || m.tags.includes("type:app"))) ||
+      m.name === "app" ||
+      m.name === "root",
+  );
+  if (rootModules.length === 0) return diagnostics;
+
+  const reachable = new Set<string>();
+  const moduleMap = new Map<string, ModuleNode>(graph.modules.map((m) => [m.name, m]));
+  const queue: string[] = rootModules.map((m) => m.name);
+  for (const root of rootModules) {
+    reachable.add(root.name);
+  }
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const mod = moduleMap.get(current);
+    if (!mod) continue;
+    for (const imp of mod.imports) {
+      if (!reachable.has(imp)) {
+        reachable.add(imp);
+        queue.push(imp);
+      }
+    }
+  }
+
+  for (const mod of graph.modules) {
+    if (!reachable.has(mod.name)) {
+      diagnostics.push({
+        severity: "warn",
+        code: "orphan-module",
+        message: `Module '${mod.name}' is declared but not reachable from any root module (${rootModules.map((r) => r.name).join(", ")})`,
+        file: mod.file,
+        line: mod.line,
+      });
+    }
+  }
   return diagnostics;
 }

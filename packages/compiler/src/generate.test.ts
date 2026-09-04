@@ -1,9 +1,9 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { compileProject } from "./compile";
+import { checkProject, compileProject } from "./compile";
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
 import { writeFixtureProject } from "./fixtures/helpers";
 import type { CompileResult } from "./types";
@@ -194,5 +194,25 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
     expect(controller.routes[0].body).toBe(contracts.CreateCaseBody);
     expect(controller.routes[0].params).toBe(contracts.AcceptParams);
     expect(controller.routes[0].response).toBe(contracts.AcceptResult);
+  });
+
+  test("checkProject reports matching artifacts and detects drift", async () => {
+    // 1. Freshly generated artifacts match.
+    const check1 = await checkProject({ rootDir, outDir });
+    expect(check1.upToDate).toBe(true);
+    expect(check1.mismatches).toHaveLength(0);
+
+    // 2. Tampering with a file must be detected.
+    const manifestPath = join(outDir, "app.manifest.json");
+    const originalContent = await readFile(manifestPath, "utf8");
+    await writeFile(manifestPath, '{"tampered": true}\n', "utf8");
+
+    try {
+      const check2 = await checkProject({ rootDir, outDir });
+      expect(check2.upToDate).toBe(false);
+      expect(check2.mismatches.some((m) => m.includes("app.manifest.json"))).toBe(true);
+    } finally {
+      await writeFile(manifestPath, originalContent, "utf8");
+    }
   });
 });

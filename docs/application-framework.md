@@ -116,6 +116,42 @@ Diagnostic codes: `circular-dependency`, `scope-violation`, `module-boundary`, `
 - **`angular-enterprise`** (alias: `angular`): for Angular / Nx enterprise monorepos. Enforces one-way flow across `type:feature`, `type:ui`, `type:data-access`, `type:util`, `type:shared`, and `type:core`.
 - **`clean-architecture`** (alias: `domain-driven`): for Clean Architecture / Spring Boot DDD layering. Enforces `presentation/API -> application -> domain <- infrastructure` dependency inversion and domain purity.
 
+### Drift Detection & Preflight (`checkProject`)
+
+Use `checkProject` in CI or pre-commit checks to verify that committed `application.ts` and `app.manifest.json` have not drifted, without overwriting files on disk:
+
+```ts
+import { checkProject } from "@supacloud/compiler";
+
+const check = await checkProject({
+  rootDir: ".",
+  outDir: "generated",
+  strict: true,
+  moduleBoundaryPreset: "modular-monolith",
+  allowRouteCommandBindings: false,
+  commandCapabilities: {
+    permission: true,
+    audit: true,
+    idempotency: true,
+    transaction: "rpc-only",
+  },
+});
+
+if (!check.upToDate) {
+  console.error("Artifact drift detected:", check.mismatches);
+}
+```
+
+CLI usage:
+
+```bash
+# Full compilation
+bunx supacloud-compiler compile -r ./src -o ./src/generated --preset modular-monolith
+
+# Preflight / CI drift check
+bunx supacloud-compiler check -r ./src -o ./src/generated --preset modular-monolith --strict
+```
+
 产物：
 
 - `generated/application.ts`：拓扑序静态工厂 `createCompiledModules()`，纯 `new` 实例化

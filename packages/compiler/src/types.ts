@@ -37,7 +37,7 @@ export interface ProviderNode {
 }
 
 export interface RouteNode {
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   path: string;
   handler: string;
   body?: string;
@@ -122,6 +122,14 @@ export interface CompileOptions {
   moduleBoundaryPreset?: ModuleBoundaryPresetName;
   /** Module boundary and architecture governance rules inspired by Nx enforce-module-boundaries. */
   moduleBoundaries?: ModuleBoundaryRule[];
+  /** Allow routes to bind directly to @Command (defaults to true). */
+  allowRouteCommandBindings?: boolean;
+  /** Runtime Command executor capabilities used to validate declared governance metadata. */
+  commandCapabilities?: CommandExecutionCapabilities;
+  /** Disallow controllers from directly injecting DB clients (enforces presentation layer separation). */
+  disallowControllerDirectDb?: boolean;
+  /** Detect modules declared in the project that are unreachable from any root module. */
+  detectOrphanModules?: boolean;
 }
 
 export interface ModuleBoundaryRule {
@@ -153,10 +161,44 @@ export interface ValidateOptions {
   strict?: boolean;
   moduleBoundaryPreset?: ModuleBoundaryPresetName;
   moduleBoundaries?: ModuleBoundaryRule[];
+  /** Allow routes to bind directly to @Command (defaults to true). */
+  allowRouteCommandBindings?: boolean;
+  /** Runtime Command executor capabilities used to validate declared governance metadata. */
+  commandCapabilities?: CommandExecutionCapabilities;
+  /** Disallow controllers from directly injecting DB clients. */
+  disallowControllerDirectDb?: boolean;
+  /** Detect modules declared in the project that are unreachable from any root module. */
+  detectOrphanModules?: boolean;
+}
+
+/** Runtime capabilities declared by the Command executor. */
+export interface CommandExecutionCapabilities {
+  /** Whether runtime permission checks are supported. */
+  permission?: boolean;
+  /** Whether runtime audit persistence is supported. */
+  audit?: boolean;
+  /** Whether idempotency receipts are supported. */
+  idempotency?: boolean;
+  /**
+   * Transaction execution capability:
+   * - true: full transaction boundaries are supported;
+   * - 'rpc-only': application-level transactions are unavailable and multi-table writes must use one DB RPC (warn);
+   * - false: transaction support is disabled (error).
+   */
+  transaction?: boolean | "rpc-only";
 }
 
 export interface CompileResult {
   diagnostics: Diagnostic[];
   graph: ApplicationGraph;
   written: string[];
+}
+
+export interface CheckProjectResult {
+  /** Whether generated artifacts exactly match the files on disk. */
+  upToDate: boolean;
+  /** Relative paths of missing or mismatched artifacts. */
+  mismatches: string[];
+  diagnostics: Diagnostic[];
+  graph: ApplicationGraph;
 }

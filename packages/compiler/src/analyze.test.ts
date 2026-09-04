@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { analyzeProject } from "./analyze";
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
 import { writeFixtureProject } from "./fixtures/helpers";
+import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./fixtures/runtime-source";
 import type { ApplicationGraph, ModuleNode } from "./types";
 
 let rootDir: string;
@@ -133,6 +134,31 @@ describe("analyzeProject：controller 与路由", () => {
       AcceptParams: "src/features/case/contracts",
       AcceptResult: "src/features/case/contracts",
     });
+  });
+
+  test("analyzes HEAD and OPTIONS route decorators", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-compiler-http-methods-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
+      "src/status.module.ts": `import { Controller, Head, Module, Options } from "./runtime";
+
+@Controller("/status")
+class StatusController {
+  @Head("/")
+  head() {}
+
+  @Options("/")
+  options() {}
+}
+
+@Module({ name: "status", controllers: [StatusController] })
+export class StatusModule {}
+`,
+    });
+
+    const status = (await analyzeProject(root)).modules[0];
+    expect(status.controllers[0]?.routes.map((route) => route.method)).toEqual(["HEAD", "OPTIONS"]);
   });
 });
 

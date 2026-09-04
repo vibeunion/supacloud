@@ -50,6 +50,8 @@ export const Post = routeDecorator("POST");
 export const Put = routeDecorator("PUT");
 export const Patch = routeDecorator("PATCH");
 export const Delete = routeDecorator("DELETE");
+export const Head = routeDecorator("HEAD");
+export const Options = routeDecorator("OPTIONS");
 
 export const REQUEST_CONTEXT = new InjectionToken("supacloud.request-context", {
   scope: "request",

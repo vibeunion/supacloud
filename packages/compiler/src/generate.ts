@@ -68,14 +68,16 @@ export interface GenerateOptions {
   outDir: string;
 }
 
-/**
- * 生成静态工厂代码（application.ts）与 app.manifest.json，返回写入的绝对路径。
- * 生成代码只 import 业务类/schema，不 import @supacloud/app，运行期无反射、无容器。
- */
-export async function generateApplication(
+export interface RenderedArtifacts {
+  applicationCode: string;
+  manifestJson: string;
+}
+
+/** Render application.ts and app.manifest.json content without file I/O. */
+export function renderApplication(
   graph: ApplicationGraph,
   options: GenerateOptions,
-): Promise<string[]> {
+): RenderedArtifacts {
   const modules = topoSortModules(graph.modules);
   const imports = new ImportManager();
 
@@ -110,11 +112,27 @@ export async function generateApplication(
     externalTokens: graph.externalTokens,
   };
 
+  return {
+    applicationCode: code,
+    manifestJson: JSON.stringify(manifest, null, 2) + "\n",
+  };
+}
+
+/**
+ * Generate static factory code (application.ts) and app.manifest.json.
+ * Generated code imports only application classes and schemas, with no runtime reflection or container lookup.
+ */
+export async function generateApplication(
+  graph: ApplicationGraph,
+  options: GenerateOptions,
+): Promise<string[]> {
+  const rendered = renderApplication(graph, options);
+
   await mkdir(options.outDir, { recursive: true });
   const applicationPath = join(options.outDir, "application.ts");
   const manifestPath = join(options.outDir, "app.manifest.json");
-  await writeFile(applicationPath, code, "utf8");
-  await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n", "utf8");
+  await writeFile(applicationPath, rendered.applicationCode, "utf8");
+  await writeFile(manifestPath, rendered.manifestJson, "utf8");
   return [applicationPath, manifestPath];
 }
 
