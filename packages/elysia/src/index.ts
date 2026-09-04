@@ -5,7 +5,7 @@ import { Elysia } from "elysia";
 // ---------------------------------------------------------------------------
 
 export interface CompiledRoute {
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   path: string;
   /** Method name on the controller instance. */
   handler: string;
@@ -502,6 +502,12 @@ export function createModulePlugin(
           break;
         case "DELETE":
           plugin.delete(path, handler, schema);
+          break;
+        case "HEAD":
+          plugin.head(path, handler, schema);
+          break;
+        case "OPTIONS":
+          plugin.options(path, handler, schema);
           break;
       }
     }

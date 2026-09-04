@@ -1,7 +1,7 @@
 export { analyzeProject } from "./analyze";
-export { compileProject } from "./compile";
-export { generateApplication } from "./generate";
-export type { GenerateOptions } from "./generate";
+export { checkProject, compileProject } from "./compile";
+export { generateApplication, renderApplication } from "./generate";
+export type { GenerateOptions, RenderedArtifacts } from "./generate";
 export { validateGraph } from "./validate";
 export { camelName } from "./util";
 export {
@@ -15,6 +15,8 @@ export {
 } from "./profiles";
 export type {
   ApplicationGraph,
+  CheckProjectResult,
+  CommandExecutionCapabilities,
   CommandNode,
   CompileOptions,
   CompileResult,
