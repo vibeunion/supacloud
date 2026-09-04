@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { createEnvironmentInjector, inject, runInInjectionContext } from "./inject";
+import { INJECTOR, createEnvironmentInjector, inject, runInInjectionContext } from "./inject";
 import { InjectionToken } from "./token";
 import { DESTROY_REF, type OnDestroy } from "./context";
 import { provideEnvironmentInitializer, provideToken } from "./provider";
@@ -100,5 +100,13 @@ describe("Angular 14+ EnvironmentInjector and createEnvironmentInjector", () => 
 
     expect(child.get(CHILD_CONFIG)).toBe("child-val");
     expect(child.get(ROOT_CONFIG)).toBe("root-val");
+  });
+
+  it("resolves the INJECTOR token within an active injection context", () => {
+    const env = createEnvironmentInjector([]);
+    const resolvedInjector = env.runInContext(() => {
+      return inject(INJECTOR);
+    });
+    expect(resolvedInjector).toBe(env);
   });
 });

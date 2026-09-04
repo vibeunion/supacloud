@@ -30,6 +30,21 @@ export function getActiveInjector(): InjectorLike | null {
 }
 
 /**
+ * Built-in injection token for resolving the active injector instance.
+ * Modeled directly after Angular's INJECTOR token.
+ */
+export const INJECTOR = new InjectionToken<InjectorLike>("supacloud.injector", {
+  scope: "application",
+  factory: () => {
+    const active = getActiveInjector();
+    if (!active) {
+      throw new Error("Cannot resolve INJECTOR outside of an active injection context.");
+    }
+    return active;
+  },
+});
+
+/**
  * Executes a function within the scope of a specific injector.
  * Modeled directly after Angular's `runInInjectionContext(injector, fn)`.
  */
@@ -335,6 +350,7 @@ export function createEnvironmentInjector(
       return created as T;
     },
   };
+  instances.set(INJECTOR, injector);
 
   // Run all ENVIRONMENT_INITIALIZER / APP_INITIALIZER tokens automatically upon creation
   const envInitializers = injector.get(ENVIRONMENT_INITIALIZER, { optional: true });

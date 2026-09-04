@@ -1,6 +1,6 @@
 import type { EnvironmentProviders, Provider, Token, Type } from "./provider";
 import { flattenProviders, isClassProvider, isExistingProvider, isFactoryProvider, isValueProvider } from "./provider";
-import { runInInjectionContext, type InjectFlags, type InjectorLike } from "./inject";
+import { INJECTOR, injectAll, runInInjectionContext, type InjectFlags, type InjectorLike } from "./inject";
 import { resolveForwardRef } from "./forward_ref";
 import { InjectionToken } from "./token";
 
@@ -59,6 +59,16 @@ export class TestBed {
         throw new Error(`TestBed: No provider found for token ${String(resolved)}`);
       }
       return val as T;
+    });
+  }
+
+  /**
+   * Injects all instances registered for a multi-provider token from the test environment.
+   */
+  static injectAll<T>(token: Token<T>): T[] {
+    const injector = TestBed.getOrCreateInjector();
+    return runInInjectionContext(injector, () => {
+      return injectAll(token);
     });
   }
 
@@ -175,6 +185,7 @@ export class TestBed {
     };
 
     TestBed.activeInjector = rootInjector;
+    instances.set(INJECTOR, rootInjector);
     return rootInjector;
   }
 }

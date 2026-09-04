@@ -113,6 +113,7 @@ export {
 } from "./context";
 export type { DestroyRef, OnDestroy } from "./context";
 export {
+  INJECTOR,
   assertInInjectionContext,
   createChildInjector,
   createEnvironmentInjector,
@@ -151,7 +152,14 @@ export type {
   ResourceStatus,
 } from "./resource";
 export { executeRoutePipeline } from "./route_pipeline";
-export type { RoutePipelineContext, RoutePipelineDefinition, RoutePipelineResult } from "./route_pipeline";
+export type {
+  RoutePipelineContext,
+  RoutePipelineDefinition,
+  RoutePipelineOptions,
+  RoutePipelineResult,
+  RouterEvent,
+  RouterEventType,
+} from "./route_pipeline";
 export { TestBed } from "./testing";
 export type { TestModuleMetadata } from "./testing";
 export { provideRouter, ROUTE_CONFIG } from "./route_provider";
@@ -161,3 +169,14 @@ export {
   makeStateKey,
 } from "./transfer_state";
 export type { StateKey } from "./transfer_state";
+export {
+  PLATFORM_BROWSER_ID,
+  PLATFORM_EDGE_ID,
+  PLATFORM_ID,
+  PLATFORM_SERVER_ID,
+  detectPlatform,
+  isPlatformBrowser,
+  isPlatformEdge,
+  isPlatformServer,
+} from "./platform";
+export type { PlatformId } from "./platform";
