@@ -1,6 +1,6 @@
 import { config } from "../config";
 import { logger } from "../utils/logger";
-import { getStorageDriver } from "./storage.adapter";
+import { getStorageDriver, type ConditionalUploadResult } from "./storage.adapter";
 import {
   storageBucketInputError,
   storageBucketRevisionError,
@@ -291,6 +291,21 @@ export class StorageService {
 
   static async uploadFile(projectRef: string, bucketName: string, fileName: string, fileData: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream, contentType: string): Promise<boolean> {
     return await getStorageDriver().uploadFile(projectRef, bucketName, fileName, fileData, contentType);
+  }
+
+  static async uploadFileConditional(
+    projectRef: string,
+    bucketName: string,
+    fileName: string,
+    fileData: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream,
+    contentType: string,
+    expectedEtag: string | null,
+  ): Promise<ConditionalUploadResult | null> {
+    const driver = getStorageDriver();
+    if (!driver.uploadFileConditional) return null;
+    return await driver.uploadFileConditional(
+      projectRef, bucketName, fileName, fileData, contentType, expectedEtag,
+    );
   }
 
   static async copyFile(projectRef: string, srcBucket: string, srcKey: string, destBucket: string, destKey: string): Promise<boolean> {

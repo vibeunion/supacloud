@@ -219,6 +219,43 @@ describe("JuiceFSDriver uploadFile", () => {
   });
 });
 
+describe("JuiceFSDriver conditional uploadFile", () => {
+  test("creates exclusively, rejects stale ETags, and replaces with the current ETag", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-storage-conditional-"));
+    try {
+      const driver = new JuiceFSDriver();
+      (driver as unknown as { getBasePath: (...parts: string[]) => string }).getBasePath =
+        (_projectRef: string, bucket?: string, key?: string) => join(root, bucket || "", key || "");
+      expect(await driver.createBucket("testref", "gallery")).toBe(true);
+
+      const first = await driver.uploadFileConditional(
+        "testref", "gallery", "raw.txt", new TextEncoder().encode("one"), "text/plain", null,
+      );
+      expect(first.outcome).toBe("created");
+      expect(await readFile(join(root, "gallery", "raw.txt"), "utf8")).toBe("one");
+
+      const duplicate = await driver.uploadFileConditional(
+        "testref", "gallery", "raw.txt", new TextEncoder().encode("two"), "text/plain", null,
+      );
+      expect(duplicate).toEqual({ outcome: "exists" });
+      expect(await readFile(join(root, "gallery", "raw.txt"), "utf8")).toBe("one");
+
+      const stale = await driver.uploadFileConditional(
+        "testref", "gallery", "raw.txt", new TextEncoder().encode("two"), "text/plain", "stale",
+      );
+      expect(stale).toEqual({ outcome: "etag_mismatch" });
+
+      const replaced = await driver.uploadFileConditional(
+        "testref", "gallery", "raw.txt", new TextEncoder().encode("two"), "text/plain", first.etag,
+      );
+      expect(replaced.outcome).toBe("replaced");
+      expect(await readFile(join(root, "gallery", "raw.txt"), "utf8")).toBe("two");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("JuiceFSDriver path traversal protection", () => {
   async function withTempMount<T>(fn: (mount: string) => Promise<T>): Promise<T> {
     const mount = await mkdtemp(join(tmpdir(), "supacloud-mount-"));
