@@ -1584,4 +1584,86 @@ describe("validateGraph：坏 fixture 诊断", () => {
     expect(dupParamDiag?.docsUrl).toBe("https://supacloud.dev/errors/SC3011");
     expect(dupParamDiag?.message).toContain(":slug");
   });
+
+  test("detects unresolved useExisting alias targets (SC2007)", () => {
+    const graphWithUnresolvedAlias: ApplicationGraph = {
+      modules: [
+        {
+          name: "AliasModule",
+          className: "AliasModule",
+          file: "src/alias.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              token: "MyServiceAlias",
+              tokenKind: "injection-token",
+              kind: "existing",
+              exported: false,
+              scope: "application",
+              deps: [],
+              useExisting: "GhostTargetService",
+              file: "src/alias.module.ts",
+              line: 10,
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graphWithUnresolvedAlias);
+    const aliasDiag = diags.find((d) => d.code === "unresolved-alias-target");
+    expect(aliasDiag).toBeDefined();
+    expect(aliasDiag?.errorCode).toBe("SC2007");
+    expect(aliasDiag?.docsUrl).toBe("https://supacloud.dev/errors/SC2007");
+    expect(aliasDiag?.message).toContain("GhostTargetService");
+  });
+
+  test("detects wildcard '**' in non-trailing position (SC3012)", () => {
+    const graphWithInnerWildcard: ApplicationGraph = {
+      modules: [
+        {
+          name: "WildcardModule",
+          className: "WildcardModule",
+          file: "src/wildcard.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          controllers: [
+            {
+              className: "WildcardController",
+              path: "/files",
+              scope: "request",
+              deps: [],
+              routes: [
+                {
+                  method: "GET",
+                  path: "/**/download",
+                  handler: "download",
+                },
+              ],
+              file: "src/wildcard.controller.ts",
+              importPath: "./wildcard.controller",
+            },
+          ],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(graphWithInnerWildcard);
+    const wildcardDiag = diags.find((d) => d.code === "wildcard-not-trailing");
+    expect(wildcardDiag).toBeDefined();
+    expect(wildcardDiag?.errorCode).toBe("SC3012");
+    expect(wildcardDiag?.docsUrl).toBe("https://supacloud.dev/errors/SC3012");
+    expect(wildcardDiag?.message).toContain("trailing segment");
+  });
 });

@@ -162,7 +162,26 @@ export type {
 } from "./route_pipeline";
 export { TestBed } from "./testing";
 export type { TestModuleMetadata } from "./testing";
-export { provideRouter, ROUTE_CONFIG } from "./route_provider";
+export {
+  APP_BASE_HREF,
+  ROUTER_CONFIGURATION,
+  ROUTE_CONFIG,
+  provideRouter,
+  withComponentInputBinding,
+  withRouterConfig,
+  withTitleStrategy,
+} from "./route_provider";
+export type { RouterConfigOptions, RouterFeature } from "./route_provider";
+export {
+  DefaultTitleStrategy,
+  TITLE_STRATEGY,
+  TitleStrategy,
+} from "./title_strategy";
+export {
+  joinWithSlash,
+  normalizePath,
+  stripTrailingSlash,
+} from "./location";
 export {
   TransferState,
   TRANSFER_STATE,
@@ -170,6 +189,7 @@ export {
 } from "./transfer_state";
 export type { StateKey } from "./transfer_state";
 export {
+  DOCUMENT,
   PLATFORM_BROWSER_ID,
   PLATFORM_EDGE_ID,
   PLATFORM_ID,
