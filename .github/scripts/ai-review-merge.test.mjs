@@ -143,7 +143,8 @@ describe('trusted review workflow', () => {
     assert.match(unitRunner, /await runTestBatch\(sharedFiles/);
     assert.match(unitRunner, /await runTestBatch\(\[file\]/);
     assert.match(unitRunner, /await runTestBatch\(\[apiTest\]/);
-    assert.match(workflow, /bun audit --audit-level high/);
+    assert.match(workflow, /audit_dependencies\.ts/);
+    assert.match(readFileSync(new URL('../../scripts/audit_dependencies.ts', import.meta.url), 'utf8'), /\["audit", "--audit-level", "high"\]/);
     assert.match(workflow, /anchore\/sbom-action@/);
     assert.match(workflow, /XCADDY_VERSION:\s*["']v0\.4\.5["']/);
     assert.match(workflow, /xcaddy\/cmd\/xcaddy@\$\{XCADDY_VERSION\}/);
