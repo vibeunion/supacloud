@@ -316,6 +316,8 @@ def main() -> None:
         "PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT=2",
         "PGREDIS_RUNTIME_L1_MAX_ENTRIES=1000",
         "PGREDIS_RUNTIME_L1_TTL_MS=30000",
+        "PGREDIS_RUNTIME_CLEANUP_INTERVAL_MS=60000",
+        "PGREDIS_RUNTIME_CLEANUP_BATCH_SIZE=500",
     ]
     env_payload = "\n".join(env_lines) + "\n"
     if args.output:

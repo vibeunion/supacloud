@@ -11,6 +11,8 @@ export interface PgredisRuntimeConfig {
   tenantIdleMs: number;
   l1MaxEntries: number;
   l1TtlMs: number;
+  cleanupIntervalMs: number;
+  cleanupBatchSize: number;
   capabilityMaxTtlMs: number;
 }
 
@@ -73,6 +75,16 @@ export function loadPgredisRuntimeConfig(
       env.PGREDIS_RUNTIME_L1_TTL_MS,
       30_000,
       "PGREDIS_RUNTIME_L1_TTL_MS",
+    ),
+    cleanupIntervalMs: positiveInteger(
+      env.PGREDIS_RUNTIME_CLEANUP_INTERVAL_MS,
+      60_000,
+      "PGREDIS_RUNTIME_CLEANUP_INTERVAL_MS",
+    ),
+    cleanupBatchSize: positiveInteger(
+      env.PGREDIS_RUNTIME_CLEANUP_BATCH_SIZE,
+      500,
+      "PGREDIS_RUNTIME_CLEANUP_BATCH_SIZE",
     ),
     capabilityMaxTtlMs: positiveInteger(
       env.PGREDIS_RUNTIME_CAPABILITY_MAX_TTL_MS,

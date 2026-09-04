@@ -3,6 +3,14 @@
 `pgredis-runtime` 是 SupaCloud 的私有缓存数据面。它按项目加载独立 PostgreSQL
 连接池，并只向 Edge Runtime 暴露经过内部认证的 KV/TTL API。
 
+上游 pgredis 实现位于 `git@github.com:vibeunion/postgresx.git` 的
+`packages/pgredis`；当前发布包名仍为 `@postgresx/noredis`。需要检查或同步上游时使用
+SSH remote，不使用 HTTPS remote。
+
+pgredis 不要求 `pg_cron`、`pg_stat_statements` 或 `pg_ivm` 才能启动。它只使用
+PostgreSQL 核心事务、JSONB、UNLOGGED 表和 LISTEN/NOTIFY；这些扩展分别用于观测、
+定时维护和物化视图增量维护，属于推荐或可选能力。
+
 边界：
 
 - Edge Worker 只持有请求级 HTTP binding，不创建 PostgreSQL 连接或 L1。
@@ -11,7 +19,7 @@
 - Management API 可通过独立内部令牌访问有界管理接口，提供平台/项目状态、
   精确键操作，以及必须匹配项目 Ref 的命名空间清空。Web Console 不直连本服务。
 - PGMQ 仍是 SupaCloud 唯一队列实现，Caddy 仍负责网关限流。
-- 当前固定使用包含 L1 失效与原子交换修复的 `@postgresx/noredis@0.6.1`。
+- 当前使用上游 `@postgresx/noredis` 的 `PgKvCache`，包括其 TTL 清理和 L1 失效实现。
   L1 仅存在于每租户 runtime client，并通过 PostgreSQL `LISTEN/NOTIFY`
   跨实例失效；断线重连会清空该租户 L1。
 - `set`、`delete`、`getset`、`getdel` 的数据变更与失效通知在同一事务中提交；
