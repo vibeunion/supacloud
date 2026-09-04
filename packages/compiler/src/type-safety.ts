@@ -97,6 +97,7 @@ function scanSourceFile(
 
   for (const node of sourceFile.getDescendants()) {
     if (Node.isAsExpression(node)) {
+      if (Node.isAsExpression(node.getParent()) || Node.isTypeAssertion(node.getParent())) continue;
       const assertedType = node.getTypeNode()?.getText();
       if (assertedType === "const") continue;
       diagnostics.push(makeDiagnostic(
@@ -108,6 +109,7 @@ function scanSourceFile(
         rootDir,
       ));
     } else if (Node.isTypeAssertion(node)) {
+      if (Node.isAsExpression(node.getParent()) || Node.isTypeAssertion(node.getParent())) continue;
       diagnostics.push(makeDiagnostic(
         "source-type-assertion",
         `生产源码包含类型断言 ${node.getText()}；请优先使用类型守卫、satisfies 或显式边界解析。`,
@@ -163,6 +165,7 @@ function scanSourceFile(
       ));
     }
   }
+
 }
 
 function isProductionSource(
