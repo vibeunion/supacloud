@@ -37,3 +37,66 @@ export const APP_INITIALIZER = new InjectionToken<() => void | Promise<void>>(
   "supacloud.app-initializer",
   { scope: "application" },
 );
+
+/**
+ * Lifecycle interface for services that need to perform teardown logic when the application shuts down.
+ * Modeled after Angular's OnDestroy.
+ */
+export interface OnDestroy {
+  onDestroy(): void | Promise<void>;
+}
+
+/**
+ * Mechanism to register teardown callbacks for an active context or service.
+ * Modeled directly after Angular's DestroyRef.
+ */
+export interface DestroyRef {
+  onDestroy(callback: () => void | Promise<void>): () => void;
+}
+
+/**
+ * Built-in token for registering teardown callbacks.
+ * Modeled after Angular's DestroyRef.
+ */
+export const DESTROY_REF = new InjectionToken<DestroyRef>("supacloud.destroy-ref", {
+  scope: "application",
+  factory: () => createDestroyRef(),
+});
+
+/**
+ * Creates a default DestroyRef instance for tracking teardown hooks.
+ */
+export function createDestroyRef(): DestroyRef & {
+  readonly destroyed: boolean;
+  destroy(): Promise<void>;
+  _teardowns: Array<() => void | Promise<void>>;
+} {
+  let isDestroyed = false;
+  const callbacks: Array<() => void | Promise<void>> = [];
+
+  return {
+    get destroyed() {
+      return isDestroyed;
+    },
+    onDestroy(callback: () => void | Promise<void>): () => void {
+      if (isDestroyed) {
+        throw new Error("Cannot register onDestroy callback on an already destroyed DestroyRef");
+      }
+      callbacks.push(callback);
+      return () => {
+        const idx = callbacks.indexOf(callback);
+        if (idx !== -1) callbacks.splice(idx, 1);
+      };
+    },
+    async destroy(): Promise<void> {
+      if (isDestroyed) return;
+      isDestroyed = true;
+      const reversed = [...callbacks].reverse();
+      callbacks.length = 0;
+      for (const cb of reversed) {
+        await cb();
+      }
+    },
+    _teardowns: callbacks,
+  };
+}

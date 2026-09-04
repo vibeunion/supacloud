@@ -43,6 +43,8 @@ export interface ProviderNode {
   multi?: boolean;
   /** Automatically provided in the root injector context without manual module declaration (Angular-style). */
   providedIn?: "root";
+  /** Class implements OnDestroy interface or onDestroy method. */
+  hasOnDestroy?: boolean;
   exported: boolean;
   file: string;
   line: number;
@@ -62,6 +64,8 @@ export interface RouteNode {
   command?: string;
   /** Route guards executed before handler (Angular CanActivateFn style). */
   guards?: string[];
+  /** Route matching guards executed before route activation (Angular CanMatchFn style). */
+  canMatch?: string[];
   /** Route resolvers executed before handler (Angular ResolveFn style). */
   resolvers?: Record<string, string>;
   /** Route redirect target (Angular Router style). */
@@ -76,6 +80,14 @@ export interface RouteNode {
   queryBindings?: string[];
   /** Handler method has @Body() binding. */
   hasBodyBinding?: boolean;
+  /** Parameter transforms declared via @Param({ transform: ... }) */
+  paramTransforms?: Record<string, "number" | "boolean" | "string">;
+  /** Parameter defaults declared via @Param({ default: ... }) */
+  paramDefaults?: Record<string, unknown>;
+  /** Query transforms declared via @Query({ transform: ... }) */
+  queryTransforms?: Record<string, "number" | "boolean" | "string">;
+  /** Query defaults declared via @Query({ default: ... }) */
+  queryDefaults?: Record<string, unknown>;
 }
 
 export interface ControllerNode {

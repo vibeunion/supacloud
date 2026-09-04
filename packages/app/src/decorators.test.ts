@@ -406,4 +406,71 @@ describe("Angular-style functional inject() & injection context", () => {
       useValue: "custom-val",
     });
   });
+
+  test("createChildInjector resolves child tokens and falls back to parent", () => {
+    const { createChildInjector, runInInjectionContext, inject } = require("./index");
+    const PARENT_TOKEN = new InjectionToken<string>("parent");
+    const CHILD_TOKEN = new InjectionToken<string>("child");
+
+    const parentMap = new Map([[PARENT_TOKEN, "parent-val"]]);
+    const parent = { get: <T>(t: any) => parentMap.get(t) as T | undefined };
+
+    const child = createChildInjector(parent, new Map([[CHILD_TOKEN, "child-val"]]));
+
+    runInInjectionContext(child, () => {
+      expect(inject(CHILD_TOKEN)).toBe("child-val");
+      expect(inject(PARENT_TOKEN)).toBe("parent-val");
+    });
+  });
+
+  test("Param with transform and default options records metadata", () => {
+    const { Param, Query, getRouteParams } = require("./index");
+    class SearchController {
+      search(
+        @Param({ name: "id", transform: "number" }) id: number,
+        @Query({ name: "page", transform: "number", default: 1 }) page: number,
+      ) {
+        return { id, page };
+      }
+    }
+
+    const params = getRouteParams(SearchController, "search");
+    expect(params[0]).toMatchObject({ index: 0, type: "param", name: "id", transform: "number" });
+    expect(params[1]).toMatchObject({ index: 1, type: "query", name: "page", transform: "number", default: 1 });
+  });
+
+  test("DESTROY_REF has application scope", () => {
+    const { DESTROY_REF } = require("./index");
+    expect(DESTROY_REF.scope).toBe("application");
+    expect(DESTROY_REF.name).toBe("supacloud.destroy-ref");
+  });
+
+  test("createDestroyRef runs callbacks in reverse order and supports unregistering", async () => {
+    const { createDestroyRef } = require("./index");
+    const destroyRef = createDestroyRef();
+    const log: string[] = [];
+
+    destroyRef.onDestroy(() => { log.push("first"); });
+    const unregisterSecond = destroyRef.onDestroy(() => { log.push("second"); });
+    destroyRef.onDestroy(() => { log.push("third"); });
+
+    unregisterSecond();
+    expect(destroyRef.destroyed).toBe(false);
+
+    await destroyRef.destroy();
+    expect(destroyRef.destroyed).toBe(true);
+    expect(log).toEqual(["third", "first"]);
+
+    expect(() => destroyRef.onDestroy(() => {})).toThrow("already destroyed");
+  });
+
+  test("inject(DESTROY_REF) resolves default factory when not in injector", () => {
+    const { DESTROY_REF, inject, runInInjectionContext } = require("./index");
+    const injector = { get: () => undefined };
+    runInInjectionContext(injector, () => {
+      const ref = inject(DESTROY_REF);
+      expect(ref).toBeDefined();
+      expect(typeof ref.onDestroy).toBe("function");
+    });
+  });
 });

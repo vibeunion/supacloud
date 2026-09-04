@@ -401,4 +401,91 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     expect(rendered.clientCode).toContain("export type HttpInterceptorFn");
     expect(rendered.clientCode).toContain("interceptors?: HttpInterceptorFn[];");
   });
+
+  test("renderApplication generates destroyApplication and executes teardown in reverse order", async () => {
+    const rendered = renderApplication(
+      {
+        modules: [
+          {
+            name: "items",
+            className: "ItemsModule",
+            file: "src/items.module.ts",
+            line: 1,
+            imports: [],
+            providers: [],
+            controllers: [
+              {
+                className: "ItemsController",
+                path: "/items",
+                scope: "request",
+                deps: [],
+                routes: [
+                  {
+                    method: "GET",
+                    path: "/:id",
+                    handler: "getItem",
+                    canMatch: ["matchGuard"],
+                    paramTransforms: { id: "number" },
+                    queryTransforms: { page: "number" },
+                    queryDefaults: { page: 1 },
+                  },
+                ],
+                file: "src/items.controller.ts",
+                importPath: "./items.controller",
+              },
+            ],
+            commands: [],
+            queries: [],
+            exports: [],
+          },
+        ],
+        externalTokens: [],
+      },
+      { rootDir: "/app", outDir: "/app/gen", generateClient: true },
+    );
+
+    expect(rendered.applicationCode).toContain("export async function destroyApplication(");
+    expect(rendered.applicationCode).toContain('canMatch: ["matchGuard"]');
+    expect(rendered.applicationCode).toContain('paramTransforms: {"id":"number"}');
+    expect(rendered.applicationCode).toContain('queryTransforms: {"page":"number"}');
+    expect(rendered.applicationCode).toContain('queryDefaults: {"page":1}');
+    expect(rendered.clientCode).toContain('"canMatch": [');
+    expect(rendered.clientCode).toContain('"matchGuard"');
+
+    // Evaluate destroyApplication execution using compiled artifacts from beforeAll
+    const teardownOrder: string[] = [];
+    const mockServices = {
+      firstService: {
+        onDestroy() {
+          teardownOrder.push("firstService");
+        },
+      },
+      secondService: {
+        onDestroy() {
+          teardownOrder.push("secondService");
+        },
+      },
+      destroyRef: {
+        _teardowns: [
+          () => {
+            teardownOrder.push("destroyRef-first");
+          },
+          () => {
+            teardownOrder.push("destroyRef-second");
+          },
+        ],
+      },
+    };
+
+    const compiledMod = await import(pathToFileURL(join(outDir, "application.ts")).href);
+    await compiledMod.destroyApplication(mockServices);
+
+    // destroyRef teardowns in reverse, then services in reverse
+    expect(teardownOrder).toEqual([
+      "destroyRef-second",
+      "destroyRef-first",
+      "secondService",
+      "firstService",
+    ]);
+  });
 });

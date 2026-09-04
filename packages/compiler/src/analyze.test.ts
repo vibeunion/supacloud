@@ -210,4 +210,44 @@ describe("analyzeProject：command 与 externalTokens", () => {
     expect(prov?.deps).toContain("CACHE");
     expect(prov?.optionalDeps).toContain("CACHE");
   });
+
+  test("analyzes canMatch guards, param transforms/defaults, and onDestroy hooks", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-angular-dx-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": GOOD_PROJECT_FILES["tsconfig.json"],
+      "src/test.controller.ts": `
+        import { Controller, Get, Param, Query, Injectable, OnDestroy } from "@supacloud/app";
+
+        @Injectable({ providedIn: 'root' })
+        export class LifecycleService implements OnDestroy {
+          onDestroy(): void {}
+        }
+
+        @Controller({ path: "/items", standalone: true })
+        export class ItemsController {
+          @Get("/:id", { canMatch: ["FeatureMatchGuard"] })
+          getItem(
+            @Param({ name: "id", transform: "number" }) id: number,
+            @Query({ name: "limit", transform: "number", default: 20 }) limit: number,
+          ) {
+            return { id, limit };
+          }
+        }
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    const rootMod = analyzed.modules.find((m) => m.name === "root");
+    expect(rootMod).toBeDefined();
+
+    const prov = rootMod?.providers.find((p) => p.token === "LifecycleService");
+    expect(prov?.hasOnDestroy).toBe(true);
+
+    const ctrl = rootMod?.controllers.find((c) => c.className === "ItemsController");
+    expect(ctrl).toBeDefined();
+    expect(ctrl?.routes[0].canMatch).toEqual(["FeatureMatchGuard"]);
+    expect(ctrl?.routes[0].paramTransforms).toEqual({ id: "number" });
+    expect(ctrl?.routes[0].queryTransforms).toEqual({ limit: "number" });
+    expect(ctrl?.routes[0].queryDefaults).toEqual({ limit: 20 });
+  });
 });

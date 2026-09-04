@@ -74,6 +74,7 @@ export {
 } from "./decorators";
 export type {
   CanActivateFn,
+  CanMatchFn,
   CommandMeta,
   CommandOptions,
   ControllerMeta,
@@ -83,6 +84,7 @@ export type {
   InjectableOptions,
   ModuleMeta,
   ModuleOptions,
+  ParamOptions,
   QueryMeta,
   QueryOptions,
   ResolveFn,
@@ -91,9 +93,11 @@ export type {
   RouteParamBinding,
 } from "./decorators";
 export { defineModule } from "./module";
-export { APP_INITIALIZER, DB_CLIENT, JOB_CONTEXT, REQUEST_CONTEXT } from "./context";
+export { APP_INITIALIZER, DB_CLIENT, DESTROY_REF, JOB_CONTEXT, REQUEST_CONTEXT, createDestroyRef } from "./context";
+export type { DestroyRef, OnDestroy } from "./context";
 export {
   assertInInjectionContext,
+  createChildInjector,
   getActiveInjector,
   inject,
   runInInjectionContext,
