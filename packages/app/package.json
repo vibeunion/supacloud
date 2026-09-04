@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/app",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Angular-style application metadata for SupaCloud: modules, DI tokens, providers, scopes, controllers and commands",
   "type": "module",
   "main": "./dist/index.js",
