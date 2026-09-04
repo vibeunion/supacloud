@@ -1,4 +1,6 @@
 import type { Provider, Token, Type } from "./provider";
+import type { EnvironmentProviders } from "./provider";
+import { flattenProviders } from "./provider";
 import type { Scope } from "./scope";
 import { DEFAULT_SCOPE } from "./scope";
 
@@ -15,6 +17,10 @@ export const CONTROLLER_METADATA = "supacloud:controller";
 export const ROUTES_METADATA = "supacloud:routes";
 export const INJECT_PARAMS_METADATA = "supacloud:inject-params";
 export const OPTIONAL_PARAMS_METADATA = "supacloud:optional-params";
+export const SELF_PARAMS_METADATA = "supacloud:self-params";
+export const SKIP_SELF_PARAMS_METADATA = "supacloud:skip-self-params";
+export const HOST_PARAMS_METADATA = "supacloud:host-params";
+export const GUARDS_METADATA = "supacloud:guards";
 
 export interface InjectableOptions {
   scope?: Scope;
@@ -35,7 +41,7 @@ export interface ModuleOptions {
   /** Tags for architectural boundary governance (e.g. ['scope:case', 'type:feature']). */
   tags?: string[];
   imports?: Array<Type<unknown>>;
-  providers?: Provider[];
+  providers?: Array<Provider | EnvironmentProviders>;
   controllers?: Array<Type<unknown>>;
   commands?: Array<Type<unknown>>;
   queries?: Array<Type<unknown>>;
@@ -57,11 +63,14 @@ export interface CommandOptions {
   audit?: string;
   /** Idempotency strategy, e.g. "required". */
   idempotency?: "required" | "none";
+  /** Automatically discover and register without manual module declaration. */
+  standalone?: boolean;
 }
 
 export type CommandMeta = Omit<CommandOptions, "transaction" | "idempotency"> & {
   transaction: "required" | "none";
   idempotency: "required" | "none";
+  standalone?: boolean;
 };
 
 export interface QueryOptions {
@@ -72,7 +81,16 @@ export type QueryMeta = QueryOptions;
 
 export interface ControllerMeta {
   path: string;
+  standalone?: boolean;
 }
+
+export interface ControllerOptions {
+  path?: string;
+  standalone?: boolean;
+}
+
+export type CanActivateFn<TContext = any> = (ctx: TContext) => boolean | Promise<boolean>;
+export type ResolveFn<T = any, TContext = any> = (ctx: TContext) => T | Promise<T>;
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
@@ -87,6 +105,10 @@ export interface RouteOptions {
   response?: unknown;
   /** Command class whose governance metadata must be enforced for this route. */
   command?: Type<unknown>;
+  /** Angular-style functional route guards executed before handler. */
+  guards?: Array<CanActivateFn | string>;
+  /** Angular-style route resolvers executed before handler to preload dependencies. */
+  resolvers?: Record<string, ResolveFn | string>;
 }
 
 export interface RouteDefinition extends RouteOptions {
@@ -166,14 +188,101 @@ export function getOptionalParams(target: object): number[] {
   return readOwnOrInherited(target, OPTIONAL_PARAMS_METADATA) ?? [];
 }
 
+/**
+ * Parameter decorator asserting that dependency must be provided in the current module/scope.
+ * Modeled after Angular's @Self(); fails at compile time if resolved from imported modules or fallback.
+ */
+export function Self(): ParameterDecorator {
+  return (target, propertyKey, parameterIndex) => {
+    if (propertyKey !== undefined) {
+      throw new Error("@Self() is only supported on constructor parameters");
+    }
+    const cls = target as Type<unknown>;
+    const list = [...(readOwnOrInherited<number[]>(cls, SELF_PARAMS_METADATA) ?? [])];
+    if (!list.includes(parameterIndex)) list.push(parameterIndex);
+    defineMetadata(cls, SELF_PARAMS_METADATA, list);
+  };
+}
+
+export function getSelfParams(target: object): number[] {
+  return readOwnOrInherited(target, SELF_PARAMS_METADATA) ?? [];
+}
+
+/**
+ * Parameter decorator asserting that dependency must NOT be resolved from the current module itself.
+ * Modeled after Angular's @SkipSelf(); searches parent/imported scopes.
+ */
+export function SkipSelf(): ParameterDecorator {
+  return (target, propertyKey, parameterIndex) => {
+    if (propertyKey !== undefined) {
+      throw new Error("@SkipSelf() is only supported on constructor parameters");
+    }
+    const cls = target as Type<unknown>;
+    const list = [...(readOwnOrInherited<number[]>(cls, SKIP_SELF_PARAMS_METADATA) ?? [])];
+    if (!list.includes(parameterIndex)) list.push(parameterIndex);
+    defineMetadata(cls, SKIP_SELF_PARAMS_METADATA, list);
+  };
+}
+
+export function getSkipSelfParams(target: object): number[] {
+  return readOwnOrInherited(target, SKIP_SELF_PARAMS_METADATA) ?? [];
+}
+
+/**
+ * Parameter decorator specifying host resolution boundary.
+ * Modeled after Angular's @Host().
+ */
+export function Host(): ParameterDecorator {
+  return (target, propertyKey, parameterIndex) => {
+    if (propertyKey !== undefined) {
+      throw new Error("@Host() is only supported on constructor parameters");
+    }
+    const cls = target as Type<unknown>;
+    const list = [...(readOwnOrInherited<number[]>(cls, HOST_PARAMS_METADATA) ?? [])];
+    if (!list.includes(parameterIndex)) list.push(parameterIndex);
+    defineMetadata(cls, HOST_PARAMS_METADATA, list);
+  };
+}
+
+export function getHostParams(target: object): number[] {
+  return readOwnOrInherited(target, HOST_PARAMS_METADATA) ?? [];
+}
+
+/**
+ * Class and method decorator attaching functional route guards.
+ * Modeled after Angular Router guards.
+ */
+export function UseGuards(...guards: Array<CanActivateFn | string>): ClassDecorator & MethodDecorator {
+  return (target: object, propertyKey?: string | symbol) => {
+    if (propertyKey !== undefined) {
+      const cls = (target as { constructor: Type<unknown> }).constructor;
+      const key = `${GUARDS_METADATA}:${String(propertyKey)}`;
+      const existing = readOwnOrInherited<Array<CanActivateFn | string>>(cls, key) ?? [];
+      defineMetadata(cls, key, [...existing, ...guards]);
+    } else {
+      const existing = readOwnOrInherited<Array<CanActivateFn | string>>(target, GUARDS_METADATA) ?? [];
+      defineMetadata(target, GUARDS_METADATA, [...existing, ...guards]);
+    }
+  };
+}
+
+export function getGuards(target: object, propertyKey?: string | symbol): Array<CanActivateFn | string> {
+  if (propertyKey !== undefined) {
+    const methodGuards = readOwnOrInherited<Array<CanActivateFn | string>>(target, `${GUARDS_METADATA}:${String(propertyKey)}`) ?? [];
+    const classGuards = readOwnOrInherited<Array<CanActivateFn | string>>(target, GUARDS_METADATA) ?? [];
+    return [...classGuards, ...methodGuards];
+  }
+  return readOwnOrInherited(target, GUARDS_METADATA) ?? [];
+}
+
 export function Module(options: ModuleOptions): ClassDecorator {
   return (target) => {
     const meta: ModuleMeta = {
       name: options.name,
       tags: options.tags ?? [],
       imports: options.imports ?? [],
-      providers: options.providers ?? [],
-      controllers: options.controllers ?? [],
+    providers: options.providers ? flattenProviders(options.providers) : [],
+    controllers: options.controllers ?? [],
       commands: options.commands ?? [],
       queries: options.queries ?? [],
       exports: options.exports ?? [],
@@ -210,9 +319,12 @@ export function getQueryMeta(target: object): QueryMeta | undefined {
   return readOwnOrInherited(target, QUERY_METADATA);
 }
 
-export function Controller(path: string): ClassDecorator {
+export function Controller(pathOrOptions: string | ControllerOptions = "/"): ClassDecorator {
   return (target) => {
-    defineMetadata(target, CONTROLLER_METADATA, { path });
+    const meta: ControllerMeta = typeof pathOrOptions === "string"
+      ? { path: pathOrOptions }
+      : { path: pathOrOptions.path ?? "/", standalone: pathOrOptions.standalone };
+    defineMetadata(target, CONTROLLER_METADATA, meta);
   };
 }
 

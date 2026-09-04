@@ -64,3 +64,31 @@ export function isFactoryProvider<T>(provider: Provider<T>): provider is Factory
 export function isExistingProvider<T>(provider: Provider<T>): provider is ExistingProvider<T> {
   return typeof provider === "object" && provider !== null && "useExisting" in provider;
 }
+
+/**
+ * Encapsulates a set of providers created by functional provideXxx APIs.
+ * Modeled directly after Angular's EnvironmentProviders.
+ */
+export interface EnvironmentProviders {
+  ɵproviders: Provider[];
+}
+
+export function makeEnvironmentProviders(providers: Provider[]): EnvironmentProviders {
+  return { ɵproviders: providers };
+}
+
+export function isEnvironmentProviders(value: unknown): value is EnvironmentProviders {
+  return typeof value === "object" && value !== null && "ɵproviders" in value && Array.isArray((value as EnvironmentProviders).ɵproviders);
+}
+
+export function flattenProviders(providers: Array<Provider | EnvironmentProviders>): Provider[] {
+  const result: Provider[] = [];
+  for (const p of providers) {
+    if (isEnvironmentProviders(p)) {
+      result.push(...p.ɵproviders);
+    } else {
+      result.push(p);
+    }
+  }
+  return result;
+}

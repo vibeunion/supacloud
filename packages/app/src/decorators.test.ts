@@ -14,16 +14,25 @@ import {
   Post,
   Put,
   Query,
+  Host,
+  Self,
+  SkipSelf,
+  UseGuards,
   getCommandMeta,
   getControllerMeta,
+  getGuards,
+  getHostParams,
   getInjectParams,
   getOptionalParams,
+  getSelfParams,
+  getSkipSelfParams,
   getInjectableMeta,
   getModuleMeta,
   getQueryMeta,
   getRoutes,
 } from "./decorators";
 import { InjectionToken } from "./token";
+import { makeEnvironmentProviders } from "./provider";
 
 const DB_CLIENT = new InjectionToken<{ query: (sql: string) => unknown }>("db.client");
 
@@ -94,12 +103,43 @@ describe("@Inject", () => {
       return Service;
     }).toThrow("@Optional() is only supported on constructor parameters");
   });
+
+  test("records @Self, @SkipSelf, and @Host parameter modifiers", () => {
+    const TOKEN_A = new InjectionToken("A");
+    const TOKEN_B = new InjectionToken("B");
+    const TOKEN_C = new InjectionToken("C");
+
+    @Injectable()
+    class ServiceWithModifiers {
+      constructor(
+        @Self() @Inject(TOKEN_A) private readonly a: unknown,
+        @SkipSelf() @Inject(TOKEN_B) private readonly b: unknown,
+        @Host() @Inject(TOKEN_C) private readonly c: unknown,
+      ) {}
+    }
+
+    expect(getSelfParams(ServiceWithModifiers)).toEqual([0]);
+    expect(getSkipSelfParams(ServiceWithModifiers)).toEqual([1]);
+    expect(getHostParams(ServiceWithModifiers)).toEqual([2]);
+  });
 });
 
 describe("Provider multi flag", () => {
   test("provider interfaces accept multi: true", () => {
     const provider = { provide: DB_CLIENT, useClass: class Fake {}, multi: true };
     expect(provider.multi).toBe(true);
+  });
+
+  test("makeEnvironmentProviders flattens into module providers", () => {
+    const env = makeEnvironmentProviders([
+      { provide: DB_CLIENT, useClass: class Fake {} },
+    ]);
+    @Module({
+      name: "env-mod",
+      providers: [env],
+    })
+    class EnvModule {}
+    expect(getModuleMeta(EnvModule)?.providers).toHaveLength(1);
   });
 });
 
@@ -173,6 +213,12 @@ describe("@Command / @Query", () => {
     });
   });
 
+  test("supports standalone: true on @Command", () => {
+    @Command({ name: "case.standalone", permission: "case.standalone", standalone: true })
+    class StandaloneCommand {}
+    expect(getCommandMeta(StandaloneCommand)?.standalone).toBe(true);
+  });
+
   test("stores query metadata", () => {
     @Query({ name: "case.get" })
     class GetCaseQuery {}
@@ -235,5 +281,31 @@ describe("@Controller and route decorators", () => {
       { method: "HEAD", path: "/", handler: "head" },
       { method: "OPTIONS", path: "/", handler: "options" },
     ]);
+  });
+
+  test("accepts ControllerOptions with standalone: true", () => {
+    @Controller({ path: "/api/v2", standalone: true })
+    class StandaloneController {}
+
+    expect(getControllerMeta(StandaloneController)).toEqual({
+      path: "/api/v2",
+      standalone: true,
+    });
+  });
+
+  test("attaches route guards via @UseGuards", () => {
+    const authGuard = () => true;
+    const adminGuard = () => true;
+
+    @UseGuards(authGuard)
+    @Controller("/admin")
+    class AdminController {
+      @UseGuards(adminGuard)
+      @Get("/dashboard")
+      dashboard() {}
+    }
+
+    expect(getGuards(AdminController)).toEqual([authGuard]);
+    expect(getGuards(AdminController, "dashboard")).toEqual([authGuard, adminGuard]);
   });
 });

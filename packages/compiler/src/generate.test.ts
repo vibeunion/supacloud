@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { checkProject, compileProject } from "./compile";
+import { renderApplication } from "./generate";
 import { BAD_PROJECT_FILES } from "./fixtures/bad-project";
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
 import { writeFixtureProject } from "./fixtures/helpers";
@@ -272,5 +273,85 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     expect(permissionsModule.hasPermission(["case.accept"], "case.accept")).toBe(true);
     expect(permissionsModule.hasPermission(["*"], "case.accept")).toBe(true);
     expect(permissionsModule.hasPermission(["other"], "case.accept")).toBe(false);
+  });
+
+  test("renderApplication outputs guards and resolvers in controller routes", () => {
+    const rendered = renderApplication(
+      {
+        modules: [
+          {
+            name: "admin",
+            className: "AdminModule",
+            file: "src/admin.module.ts",
+            line: 1,
+            imports: [],
+            providers: [],
+            controllers: [
+              {
+                className: "AdminController",
+                path: "/admin",
+                scope: "request",
+                deps: [],
+                routes: [
+                  {
+                    method: "GET",
+                    path: "/dashboard",
+                    handler: "dashboard",
+                    guards: ["authGuard", "roleGuard"],
+                    resolvers: { stats: "statsResolver" },
+                  },
+                ],
+                file: "src/admin.controller.ts",
+                importPath: "./admin.controller",
+              },
+            ],
+            commands: [],
+            queries: [],
+            exports: [],
+          },
+        ],
+        externalTokens: [],
+      },
+      { rootDir: "/app", outDir: "/app/gen", generateClient: true },
+    );
+
+    expect(rendered.applicationCode).toContain('guards: ["authGuard","roleGuard"]');
+    expect(rendered.applicationCode).toContain('resolvers: {"stats":"statsResolver"}');
+    expect(rendered.clientCode).toContain('"guards": [\n      "authGuard",\n      "roleGuard"\n    ]');
+  });
+
+  test("compileProject auto-discovers standalone controllers and commands into root module", async () => {
+    const standaloneDir = await mkdtemp(join(tmpdir(), "supacloud-standalone-"));
+    await writeFixtureProject(standaloneDir, {
+      "tsconfig.json": GOOD_PROJECT_FILES["tsconfig.json"],
+      "src/standalone.controller.ts": `
+        import { Controller, Get, UseGuards } from "@supacloud/app";
+
+        @UseGuards("authGuard")
+        @Controller({ path: "/standalone", standalone: true })
+        export class StandaloneController {
+          @Get("/ping")
+          ping() { return "pong"; }
+        }
+      `,
+      "src/standalone.command.ts": `
+        import { Command } from "@supacloud/app";
+
+        @Command({ name: "standalone.run", permission: "standalone.run", standalone: true })
+        export class StandaloneCommand {}
+      `,
+    });
+
+    const out = join(standaloneDir, "gen");
+    const res = await compileProject({ rootDir: standaloneDir, outDir: out, generateClient: true });
+    expect(res.diagnostics).toEqual([]);
+    const rootMod = res.graph.modules.find((m) => m.name === "root");
+    expect(rootMod).toBeDefined();
+    expect(rootMod?.controllers.map((c) => c.className)).toContain("StandaloneController");
+    expect(rootMod?.commands.map((c) => c.className)).toContain("StandaloneCommand");
+
+    const appCode = await readFile(join(out, "application.ts"), "utf8");
+    expect(appCode).toContain('path: "/standalone"');
+    expect(appCode).toContain('guards: ["authGuard"]');
   });
 });

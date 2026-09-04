@@ -778,4 +778,109 @@ describe("validateGraph：坏 fixture 诊断", () => {
     const diags = validateGraph(sampleGraph);
     expect(diags.filter((d) => d.code === "module-boundary")).toHaveLength(0);
   });
+
+  test("selfDeps requires provider to be declared in current module", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "feature",
+          className: "FeatureModule",
+          file: "src/feature.module.ts",
+          line: 1,
+          imports: ["core"],
+          providers: [
+            {
+              token: "FeatureService",
+              tokenKind: "class",
+              kind: "class",
+              useClass: "FeatureService",
+              scope: "application",
+              deps: ["ConfigToken"],
+              selfDeps: ["ConfigToken"],
+              file: "src/feature.service.ts",
+              line: 1,
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+        {
+          name: "core",
+          className: "CoreModule",
+          file: "src/core.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              token: "ConfigToken",
+              tokenKind: "class",
+              kind: "class",
+              scope: "application",
+              deps: [],
+              file: "src/core.ts",
+              line: 1,
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: ["ConfigToken"],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    const selfDiag = diags.find((d) => d.code === "self-resolution-failed");
+    expect(selfDiag).toBeDefined();
+    expect(selfDiag?.message).toContain("@Self()");
+  });
+
+  test("skipSelfDeps rejects provider declared in own module", () => {
+    const sampleGraph: ApplicationGraph = {
+      modules: [
+        {
+          name: "feature",
+          className: "FeatureModule",
+          file: "src/feature.module.ts",
+          line: 1,
+          imports: [],
+          providers: [
+            {
+              token: "LocalToken",
+              tokenKind: "class",
+              kind: "class",
+              scope: "application",
+              deps: [],
+              file: "src/local.ts",
+              line: 1,
+            },
+            {
+              token: "FeatureService",
+              tokenKind: "class",
+              kind: "class",
+              useClass: "FeatureService",
+              scope: "application",
+              deps: ["LocalToken"],
+              skipSelfDeps: ["LocalToken"],
+              file: "src/feature.service.ts",
+              line: 1,
+            },
+          ],
+          controllers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+        },
+      ],
+      externalTokens: [],
+    };
+
+    const diags = validateGraph(sampleGraph);
+    const skipDiag = diags.find((d) => d.code === "skip-self-resolution-failed");
+    expect(skipDiag).toBeDefined();
+    expect(skipDiag?.message).toContain("@SkipSelf()");
+  });
 });

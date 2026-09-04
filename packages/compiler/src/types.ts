@@ -33,6 +33,12 @@ export interface ProviderNode {
   deps: string[];
   /** Parameter tokens that are marked @Optional() (receive undefined if unresolved). */
   optionalDeps?: string[];
+  /** Parameter tokens marked @Self() (must be resolved from current module's own providers). */
+  selfDeps?: string[];
+  /** Parameter tokens marked @SkipSelf() (must NOT be resolved from current module's own providers). */
+  skipSelfDeps?: string[];
+  /** Parameter tokens marked @Host(). */
+  hostDeps?: string[];
   /** When true, multiple providers can contribute to this token as an array of instances (Angular multi-providers). */
   multi?: boolean;
   /** Automatically provided in the root injector context without manual module declaration (Angular-style). */
@@ -54,6 +60,10 @@ export interface RouteNode {
   response?: string;
   /** @Command-decorated class explicitly bound by the route. */
   command?: string;
+  /** Route guards executed before handler (Angular CanActivateFn style). */
+  guards?: string[];
+  /** Route resolvers executed before handler (Angular ResolveFn style). */
+  resolvers?: Record<string, string>;
 }
 
 export interface ControllerNode {
@@ -63,6 +73,10 @@ export interface ControllerNode {
   deps: string[];
   /** Parameter tokens marked @Optional(). */
   optionalDeps?: string[];
+  selfDeps?: string[];
+  skipSelfDeps?: string[];
+  /** Automatically registered without manual module declaration (Angular standalone controller style). */
+  standalone?: boolean;
   routes: RouteNode[];
   file: string;
   importPath: string;
@@ -77,6 +91,8 @@ export interface CommandNode {
   transaction: "required" | "none";
   audit?: string;
   idempotency: "required" | "none";
+  /** Automatically registered without manual module declaration. */
+  standalone?: boolean;
 }
 
 export interface QueryNode {

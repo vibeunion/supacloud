@@ -178,6 +178,35 @@ export function validateGraph(
           }
         }
       }
+
+      if (controller.selfDeps && controller.selfDeps.length > 0) {
+        for (const dep of controller.selfDeps) {
+          const own = module.providers.find((p) => p.token === dep);
+          if (!own) {
+            error(
+              "self-resolution-failed",
+              `模块 ${module.name} 的 controller ${controller.className} 参数标记了 @Self()，但 ${dep} 未在当前模块内部提供`,
+              controller.file,
+              undefined,
+              `Provide '${dep}' in module '${module.name}' or remove @Self().`,
+            );
+          }
+        }
+      }
+      if (controller.skipSelfDeps && controller.skipSelfDeps.length > 0) {
+        for (const dep of controller.skipSelfDeps) {
+          const own = module.providers.find((p) => p.token === dep);
+          if (own) {
+            error(
+              "skip-self-resolution-failed",
+              `模块 ${module.name} 的 controller ${controller.className} 参数标记了 @SkipSelf()，但 ${dep} 在当前模块内部声明了 provider`,
+              controller.file,
+              undefined,
+              `Remove '${dep}' from module '${module.name}' providers or remove @SkipSelf().`,
+            );
+          }
+        }
+      }
     }
   }
 
@@ -204,6 +233,34 @@ export function validateGraph(
 
     // scope-violation / module boundary: check dependencies of each provider.
     for (const provider of module.providers) {
+      if (provider.selfDeps && provider.selfDeps.length > 0) {
+        for (const dep of provider.selfDeps) {
+          const own = module.providers.find((p) => p.token === dep);
+          if (!own) {
+            error(
+              "self-resolution-failed",
+              `模块 ${module.name} 的 provider ${provider.token} 参数标记了 @Self()，但 ${dep} 未在当前模块内部提供`,
+              provider.file,
+              provider.line,
+              `Provide '${dep}' in module '${module.name}' or remove @Self().`,
+            );
+          }
+        }
+      }
+      if (provider.skipSelfDeps && provider.skipSelfDeps.length > 0) {
+        for (const dep of provider.skipSelfDeps) {
+          const own = module.providers.find((p) => p.token === dep);
+          if (own) {
+            error(
+              "skip-self-resolution-failed",
+              `模块 ${module.name} 的 provider ${provider.token} 参数标记了 @SkipSelf()，但 ${dep} 在当前模块内部声明了 provider`,
+              provider.file,
+              provider.line,
+              `Remove '${dep}' from module '${module.name}' providers or remove @SkipSelf().`,
+            );
+          }
+        }
+      }
       for (const dep of provider.deps) {
         const isOptional = provider.optionalDeps?.includes(dep);
         const resolved = resolveDep(module, dep);

@@ -26,6 +26,8 @@ const INTERFACES = `export interface CompiledRoute {
   query?: unknown;
   response?: unknown;
   command?: string;
+  guards?: string[];
+  resolvers?: Record<string, string>;
 }
 
 export interface CompiledCommand {
@@ -35,6 +37,7 @@ export interface CompiledCommand {
   transaction: "required" | "none";
   audit?: string;
   idempotency: "required" | "none";
+  standalone?: boolean;
 }
 
 export interface CompiledController {
@@ -325,6 +328,12 @@ class ModuleGenerator {
           }
         }
         if (route.command) fields.push(`command: ${JSON.stringify(route.command)}`);
+        if (route.guards && route.guards.length > 0) {
+          fields.push(`guards: ${JSON.stringify(route.guards)}`);
+        }
+        if (route.resolvers && Object.keys(route.resolvers).length > 0) {
+          fields.push(`resolvers: ${JSON.stringify(route.resolvers)}`);
+        }
         return `{ ${fields.join(", ")} }`;
       });
       return [
@@ -555,6 +564,8 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     controller: string;
     handler: string;
     command?: string;
+    guards?: string[];
+    resolvers?: Record<string, string>;
   }> = [];
 
   for (const module of graph.modules) {
@@ -570,6 +581,8 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
           controller: controller.className,
           handler: route.handler,
           command: route.command,
+          guards: route.guards,
+          resolvers: route.resolvers,
         });
 
         routeMethods.push(`
