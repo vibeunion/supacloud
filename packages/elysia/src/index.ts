@@ -58,13 +58,13 @@ export interface CompiledModule {
     services: Record<string, unknown>,
     ctx: unknown,
     imported?: Record<string, Record<string, unknown>>,
-  ): Record<string, unknown>;
+  ): Record<string, unknown> | Promise<Record<string, unknown>>;
   destroyRequestScope?(scope: Record<string, unknown>): Promise<void>;
   createJobScope?(
     services: Record<string, unknown>,
     ctx: unknown,
     imported?: Record<string, Record<string, unknown>>,
-  ): Record<string, unknown>;
+  ): Record<string, unknown> | Promise<Record<string, unknown>>;
   destroyJobScope?(scope: Record<string, unknown>): Promise<void>;
   controllers: CompiledController[];
   commands?: CompiledCommand[];
@@ -566,7 +566,7 @@ export function createModulePlugin(
       const handler = async (ctx: HttpContext) => {
         const requestContext = ctx.requestContext ?? await ctxFactory(ctx.request);
         const requestScope = createRequestScope
-          ? createRequestScope(services, requestContext, imported)
+          ? await createRequestScope(services, requestContext, imported)
           : undefined;
         if (requestScope && compiled.destroyRequestScope) requestScopes.set(ctx.request, requestScope);
         const source =
@@ -707,7 +707,7 @@ export async function executeJob(
   executor?: JobExecutor,
 ): Promise<unknown> {
   const jobScope = job.scope === "job" && compiled.createJobScope
-    ? compiled.createJobScope(services, requestContext, imported)
+    ? await compiled.createJobScope(services, requestContext, imported)
     : undefined;
 
   try {

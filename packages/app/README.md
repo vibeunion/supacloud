@@ -31,7 +31,9 @@ Use one `around(context, next)` function for cross-cutting behavior at the
 module, route, command, or job boundary:
 
 ```ts
-const auditAspect = async (context, next) => {
+import type { Aspect } from "@supacloud/app";
+
+const auditAspect: Aspect = async (context, next) => {
   const result = await next();
   await audit.write(context, result);
   return result;

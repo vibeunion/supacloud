@@ -184,6 +184,8 @@ export interface CommandNode {
 export interface JobNode {
   className: string;
   name: string;
+  /** Generated services key; follows a custom useClass provider token when present. */
+  serviceKey: string;
   scope: Scope;
   aspects?: AspectRefNode[];
 }

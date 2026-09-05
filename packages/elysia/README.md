@@ -8,8 +8,9 @@ Runtime adapter that turns `@supacloud/compiler` output into a production-ready
 - **Decoupled compilation**: takes the output of `@supacloud/compiler` directly.
 - **Topological initialization**: modules are registered in dependency order,
   passing exported services downstream via Elysia plugins.
-- **Request-scoped providers**: creates a fresh scope per HTTP request via
-  `createRequestScope`, mapping request-scoped controllers and services.
+- **Request-scoped providers**: creates a fresh scope per HTTP request via the
+  asynchronous compiler-generated `createRequestScope`, mapping request-scoped
+  controllers and services.
 - **Request-scope teardown**: invokes the compiler-generated
   `destroyRequestScope` after the response, including when the handler fails.
 - **TypeBox schema binding**: attaches compiled parameter, query, body, and
@@ -58,8 +59,9 @@ export default app;
 ```
 
 Jobs are executed explicitly with `executeJob(compiledModule, services, job,
-input, requestContext)`. The compiler-generated job scope is destroyed after
-execution, including when the job throws.
+input, requestContext)`. The asynchronous compiler-generated job scope is
+destroyed after execution, including when the job throws or scope construction
+fails partway through.
 
 ## API
 

@@ -106,13 +106,13 @@ export interface CompiledModule {
     services: Record<string, unknown>,
     ctx: unknown,
     imported?: Record<string, Record<string, unknown>>,
-  ): Record<string, unknown>;
+  ): Promise<Record<string, unknown>>;
   destroyRequestScope?(scope: Record<string, unknown>): Promise<void>;
   createJobScope?(
     services: Record<string, unknown>,
     ctx: unknown,
     imported?: Record<string, Record<string, unknown>>,
-  ): Record<string, unknown>;
+  ): Promise<Record<string, unknown>>;
   destroyJobScope?(scope: Record<string, unknown>): Promise<void>;
   controllers: CompiledController[];
   commands: CompiledCommand[];
@@ -649,7 +649,7 @@ class ModuleGenerator {
   private renderJobs(): string {
     const jobs = this.module.jobs ?? [];
     if (jobs.length === 0) return "[]";
-    return `[${jobs.map((job) => `{ className: ${JSON.stringify(job.className)}, name: ${JSON.stringify(job.name)}, serviceKey: ${JSON.stringify(camelName(job.className))}, scope: ${JSON.stringify(job.scope)},${job.aspects && job.aspects.length > 0 ? ` aspects: ${this.renderAspects(job.aspects)},` : ""} }`).join(", ")}]`;
+    return `[${jobs.map((job) => `{ className: ${JSON.stringify(job.className)}, name: ${JSON.stringify(job.name)}, serviceKey: ${JSON.stringify(job.serviceKey)}, scope: ${JSON.stringify(job.scope)},${job.aspects && job.aspects.length > 0 ? ` aspects: ${this.renderAspects(job.aspects)},` : ""} }`).join(", ")}]`;
   }
 
   private renderAspects(aspects: Array<AspectRefNode>): string {
@@ -670,12 +670,22 @@ class ModuleGenerator {
   private renderScopeFactory(kind: "request" | "job"): string {
     const suffix = kind === "request" ? "RequestScope" : "JobScope";
     return [
-      `function create${this.pascal}${suffix}(`,
+      `async function create${this.pascal}${suffix}(`,
       `  services: Record<string, unknown>,`,
       `  ctx: unknown,`,
       `  imported: Record<string, Record<string, unknown>> = {},`,
-      `): Record<string, unknown> {`,
-      indent(this.renderFactoryBody(kind), 2),
+      `): Promise<Record<string, unknown>> {`,
+      `  const scope: Record<string, unknown> = {};`,
+      `  try {`,
+      indent(this.renderFactoryBody(kind, true), 4),
+      `  } catch (error) {`,
+      `    try {`,
+      `      await destroy${this.pascal}${suffix}(scope);`,
+      `    } catch (cleanupError) {`,
+      `      console.error("supacloud: ${kind} scope rollback failed for ${this.module.name}", cleanupError);`,
+      `    }`,
+      `    throw error;`,
+      `  }`,
       `}`,
     ].join("\n");
   }
@@ -704,7 +714,7 @@ class ModuleGenerator {
   }
 
   /** Factory function body: instantiates providers and controllers for this scope in dependency topological order. */
-  private renderFactoryBody(kind: FactoryKind): string {
+  private renderFactoryBody(kind: FactoryKind, scoped = false): string {
     const providers = orderProviders(
       this.module.providers.filter((p) => factoryOfScope(p.scope) === kind),
     );
@@ -720,12 +730,20 @@ class ModuleGenerator {
       if (provider.multi) {
         const emitted = this.emitProvider(provider, kind, true);
         if (emitted.constLine) lines.push(emitted.constLine);
+        if (scoped) {
+          lines.push(
+            `scope[${JSON.stringify(emitted.key)}] = [...(Array.isArray(scope[${JSON.stringify(emitted.key)}]) ? scope[${JSON.stringify(emitted.key)}] : []), ${emitted.expr}];`,
+          );
+        }
         const list = multiGroups.get(emitted.key) ?? [];
         list.push(emitted.expr);
         multiGroups.set(emitted.key, list);
       } else {
         const emitted = this.emitProvider(provider, kind, false);
         if (emitted.constLine) lines.push(emitted.constLine);
+        if (scoped) {
+          lines.push(`scope[${JSON.stringify(emitted.key)}] = ${emitted.expr};`);
+        }
         returns.set(emitted.key, emitted.expr);
       }
     }
@@ -735,7 +753,14 @@ class ModuleGenerator {
     for (const controller of controllers) {
       const emitted = this.emitController(controller, kind);
       lines.push(emitted.constLine);
+      if (scoped) {
+        lines.push(`scope[${JSON.stringify(emitted.key)}] = ${emitted.expr};`);
+      }
       returns.set(emitted.key, emitted.expr);
+    }
+    if (scoped) {
+      lines.push(`return scope;`);
+      return lines.join("\n");
     }
     const entries = [...returns.entries()].map(([key, expr]) =>
       key === expr ? key : `${key}: ${expr}`,
