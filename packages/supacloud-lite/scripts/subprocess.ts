@@ -29,7 +29,7 @@ export interface BufferedCommandExecution {
 export async function executeBufferedCommand(options: BufferedCommandOptions): Promise<BufferedCommandExecution> {
   const timeoutController = new AbortController()
   const processHandle = spawnBufferedCommand(options, timeoutController.signal)
-  let timedOut = false
+  let timedOut: boolean = false
   const timeout = setTimeout(() => {
     timedOut = true
     timeoutController.abort()

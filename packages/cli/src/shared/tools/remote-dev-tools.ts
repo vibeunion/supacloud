@@ -78,8 +78,8 @@ export const remoteDevToolSchema = {
 function runProcess(executable: string, args: string[], cwd: string): Promise<CommandResult> {
     return new Promise((resolveResult, reject) => {
         const child = spawn(executable, args, { cwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
-        let stdout = "";
-        let stderr = "";
+        let stdout: string = "";
+        let stderr: string = "";
         child.stdout?.setEncoding("utf8");
         child.stderr?.setEncoding("utf8");
         child.stdout?.on("data", (chunk) => { stdout += String(chunk); });
@@ -234,7 +234,7 @@ async function syncOnce(args: Record<string, unknown>, options: RemoteDevToolOpt
     const target = String(args.target || "project");
     const source = targetDirectory(root, target, typeof args.function === "string" ? args.function : undefined, projectConfig as Record<string, unknown>);
     if (!existsSync(source)) throw new Error(`Dev source directory not found: ${source}`);
-    let compiled = false;
+    let compiled: boolean = false;
     if (config.compile === true && target !== "db") {
         const compileRoot = resolve(root, config.compileRoot || ".");
         const compileOutDir = resolve(root, config.compileOutDir || "generated");
@@ -288,7 +288,7 @@ export function registerRemoteDevTools(server: ToolServer, options: RemoteDevToo
         if (args.action === "watch") {
             const root = resolve(String(args.project_dir || options.cwd || process.cwd()));
             const interval = Math.max(100, Math.min(10_000, Number(args.interval_ms || 300)));
-            let fingerprint = "";
+            let fingerprint: string = "";
             let lastSync: Record<string, unknown> | null = null;
             for (;;) {
                 const nextFingerprint = await sourceFingerprint(root);

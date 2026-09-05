@@ -114,8 +114,12 @@ describe("@supacloud/js", () => {
             ? input.toString()
             : input.url;
       calls.push({ url, init });
+      const task = { id: "tsk_123", status: "running" };
+      const payload = url.includes("/tasks?") || url.includes("/tasks/dlq")
+        ? [task]
+        : task;
       return Promise.resolve(
-        new Response(JSON.stringify({ id: "tsk_123", status: "running" }), {
+        new Response(JSON.stringify(payload), {
           headers: { "content-type": "application/json" },
         }),
       );
@@ -236,8 +240,41 @@ describe("@supacloud/js", () => {
             ? input.toString()
             : input.url;
       calls.push({ url, init });
+      let payload: unknown;
+      if (url.endsWith("/tasks/queues")) {
+        payload = (init?.method ?? "GET") === "POST"
+          ? { queue_name: "emails" }
+          : [{ queue_name: "emails" }];
+      } else if (url.endsWith("/tasks/queues/emails")) {
+        payload = undefined;
+      } else if (url.endsWith("/messages?archived=true&limit=10")) {
+        payload = [{ id: "msg_123", msg_id: 123, payload: { hello: "world" } }];
+      } else if (url.endsWith("/stats")) {
+        payload = {
+          queue_name: "emails",
+          queue_length: 1,
+          newest_msg_age_sec: null,
+          oldest_msg_age_sec: null,
+          total_messages: 1,
+          scrape_time: "now",
+        };
+      } else if (url.endsWith("/settings")) {
+        payload = {
+          max_in_flight: 20,
+          default_visibility_timeout_sec: 60,
+          max_attempts: 3,
+          rate_limit_per_minute: 100,
+        };
+      } else if (url.endsWith("/purge")) {
+        payload = { queue_name: "emails", purged: 1 };
+      } else {
+        payload = { id: "msg_123", msg_id: 123, status: "leased", payload: { hello: "world" } };
+      }
+      if (url.endsWith("/tasks/queues/emails") && init?.method === "DELETE") {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
       return Promise.resolve(
-        new Response(JSON.stringify({ id: "msg_123", status: "leased", payload: { hello: "world" } }), {
+        new Response(JSON.stringify(payload), {
           headers: { "content-type": "application/json" },
         }),
       );

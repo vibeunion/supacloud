@@ -8,6 +8,23 @@ function oauthResponse(status: number, payload: Record<string, unknown>) {
   };
 }
 
+function enabledStatus(): Record<string, unknown> {
+  return {
+    enabled: true,
+    allow_dynamic_registration: false,
+    issuer: "https://auth.example.test",
+    discovery_url: "https://auth.example.test/.well-known/openid-configuration",
+    oauth_authorization_server_metadata_url: "https://auth.example.test/.well-known/oauth-authorization-server",
+    jwks_url: "https://auth.example.test/.well-known/jwks.json",
+    authorization_endpoint: "https://auth.example.test/authorize",
+    token_endpoint: "https://auth.example.test/token",
+    registration_endpoint: "https://auth.example.test/register",
+    signing_alg: "ES256",
+    oidc_id_token_ready: true,
+    migration_status: "oidc_es256_migrated",
+  };
+}
+
 describe("migrateOAuthServerWithReadback", () => {
   test("keeps an ordinary 503 as a migration failure without a readback", async () => {
     let migrationCalls = 0;
@@ -44,7 +61,7 @@ describe("migrateOAuthServerWithReadback", () => {
       },
       async () => {
         readbackCalls += 1;
-        return oauthResponse(200, { enabled: true, migration_status: "oidc_es256_migrated" });
+        return oauthResponse(200, enabledStatus());
       },
     );
 

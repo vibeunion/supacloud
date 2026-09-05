@@ -6,7 +6,7 @@
  */
 
 // Error-correction level → format bits. We use M (medium) like GoTrue.
-const ECC_M = { ordinal: 0, formatBits: 0 }
+const ECC_M = { ordinal: 0, formatBits: 0 } as const
 
 const ECC_CODEWORDS_PER_BLOCK = [
   // index by version (1..40); level M row
@@ -37,9 +37,9 @@ function getNumDataCodewords(ver: number): number {
 function reedSolomonComputeDivisor(degree: number): Uint8Array {
   const result = new Uint8Array(degree)
   result[degree - 1] = 1
-  let root = 1
-  for (let i = 0; i < degree; i++) {
-    for (let j = 0; j < result.length; j++) {
+  let root: number = 1
+  for (let i: number = 0; i < degree; i++) {
+    for (let j: number = 0; j < result.length; j++) {
       result[j] = reedSolomonMultiply(result[j], root)
       if (j + 1 < result.length) result[j] ^= result[j + 1]
     }
@@ -53,13 +53,13 @@ function reedSolomonComputeRemainder(data: Uint8Array, divisor: Uint8Array): Uin
     const factor = b ^ result[0]
     result.copyWithin(0, 1)
     result[result.length - 1] = 0
-    for (let i = 0; i < result.length; i++) result[i] ^= reedSolomonMultiply(divisor[i], factor)
+    for (let i: number = 0; i < result.length; i++) result[i] ^= reedSolomonMultiply(divisor[i], factor)
   }
   return result
 }
 function reedSolomonMultiply(x: number, y: number): number {
-  let z = 0
-  for (let i = 7; i >= 0; i--) {
+  let z: number = 0
+  for (let i: number = 7; i >= 0; i--) {
     z = (z << 1) ^ ((z >>> 7) * 0x11d)
     z ^= ((y >>> i) & 1) * x
   }
@@ -74,7 +74,7 @@ class QrCode {
   static encodeText(text: string): QrCode {
     const bytes = new TextEncoder().encode(text)
     // byte-mode segment bit length = 4 (mode) + charCountBits + 8*len
-    let version = 1
+    let version: number = 1
     for (; version <= 40; version++) {
       const dataCapacityBits = getNumDataCodewords(version) * 8
       const ccBits = version < 10 ? 8 : 16
@@ -94,10 +94,10 @@ class QrCode {
     const dataCapacityBits = getNumDataCodewords(version) * 8
     append(0, Math.min(4, dataCapacityBits - bb.length))
     while (bb.length % 8 !== 0) bb.push(0)
-    for (let pad = 0xec; bb.length < dataCapacityBits; pad ^= 0xec ^ 0x11) append(pad, 8)
+    for (let pad: number = 0xec; bb.length < dataCapacityBits; pad ^= 0xec ^ 0x11) append(pad, 8)
 
     const dataCodewords = new Uint8Array(bb.length / 8)
-    for (let i = 0; i < bb.length; i++) dataCodewords[i >>> 3] |= bb[i] << (7 - (i & 7))
+    for (let i: number = 0; i < bb.length; i++) dataCodewords[i >>> 3] |= bb[i] << (7 - (i & 7))
 
     return new QrCode(version, dataCodewords)
   }
@@ -114,8 +114,8 @@ class QrCode {
 
     // pick the mask with the lowest penalty (all masks are valid; this is polish)
     let minPenalty = Infinity
-    let bestMask = 0
-    for (let mask = 0; mask < 8; mask++) {
+    let bestMask: number = 0
+    for (let mask: number = 0; mask < 8; mask++) {
       this.applyMask(mask)
       this.drawFormatBits(mask)
       const penalty = this.getPenaltyScore()
@@ -138,7 +138,7 @@ class QrCode {
   }
 
   private drawFunctionPatterns(): void {
-    for (let i = 0; i < this.size; i++) {
+    for (let i: number = 0; i < this.size; i++) {
       this.setFunctionModule(6, i, i % 2 === 0)
       this.setFunctionModule(i, 6, i % 2 === 0)
     }
@@ -148,8 +148,8 @@ class QrCode {
 
     const alignPos = this.getAlignmentPatternPositions()
     const n = alignPos.length
-    for (let i = 0; i < n; i++) {
-      for (let j = 0; j < n; j++) {
+    for (let i: number = 0; i < n; i++) {
+      for (let j: number = 0; j < n; j++) {
         if (!((i === 0 && j === 0) || (i === 0 && j === n - 1) || (i === n - 1 && j === 0)))
           this.drawAlignmentPattern(alignPos[i], alignPos[j])
       }
@@ -161,24 +161,24 @@ class QrCode {
   private drawFormatBits(mask: number): void {
     const data = (ECC_M.formatBits << 3) | mask
     let rem = data
-    for (let i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537)
+    for (let i: number = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >>> 9) * 0x537)
     const bits = ((data << 10) | rem) ^ 0x5412
-    for (let i = 0; i <= 5; i++) this.setFunctionModule(8, i, ((bits >>> i) & 1) !== 0)
+    for (let i: number = 0; i <= 5; i++) this.setFunctionModule(8, i, ((bits >>> i) & 1) !== 0)
     this.setFunctionModule(8, 7, ((bits >>> 6) & 1) !== 0)
     this.setFunctionModule(8, 8, ((bits >>> 7) & 1) !== 0)
     this.setFunctionModule(7, 8, ((bits >>> 8) & 1) !== 0)
-    for (let i = 9; i < 15; i++) this.setFunctionModule(14 - i, 8, ((bits >>> i) & 1) !== 0)
-    for (let i = 0; i < 8; i++) this.setFunctionModule(this.size - 1 - i, 8, ((bits >>> i) & 1) !== 0)
-    for (let i = 8; i < 15; i++) this.setFunctionModule(8, this.size - 15 + i, ((bits >>> i) & 1) !== 0)
+    for (let i: number = 9; i < 15; i++) this.setFunctionModule(14 - i, 8, ((bits >>> i) & 1) !== 0)
+    for (let i: number = 0; i < 8; i++) this.setFunctionModule(this.size - 1 - i, 8, ((bits >>> i) & 1) !== 0)
+    for (let i: number = 8; i < 15; i++) this.setFunctionModule(8, this.size - 15 + i, ((bits >>> i) & 1) !== 0)
     this.setFunctionModule(8, this.size - 8, true)
   }
 
   private drawVersion(): void {
     if (this.version < 7) return
     let rem = this.version
-    for (let i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >>> 11) * 0x1f25)
+    for (let i: number = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >>> 11) * 0x1f25)
     const bits = (this.version << 12) | rem
-    for (let i = 0; i < 18; i++) {
+    for (let i: number = 0; i < 18; i++) {
       const bit = ((bits >>> i) & 1) !== 0
       const a = this.size - 11 + (i % 3)
       const b = Math.floor(i / 3)
@@ -224,8 +224,8 @@ class QrCode {
 
     const blocks: Uint8Array[] = []
     const rsDiv = reedSolomonComputeDivisor(blockEccLen)
-    let k = 0
-    for (let i = 0; i < numBlocks; i++) {
+    let k: number = 0
+    for (let i: number = 0; i < numBlocks; i++) {
       const datLen = shortBlockLen - blockEccLen + (i < numShortBlocks ? 0 : 1)
       const dat = data.slice(k, k + datLen)
       k += datLen
@@ -237,9 +237,9 @@ class QrCode {
     }
 
     const result = new Uint8Array(rawCodewords)
-    let ri = 0
-    for (let i = 0; i < blocks[0].length; i++) {
-      for (let j = 0; j < blocks.length; j++) {
+    let ri: number = 0
+    for (let i: number = 0; i < blocks[0].length; i++) {
+      for (let j: number = 0; j < blocks.length; j++) {
         // skip the unused cell in short blocks' data region
         if (i !== shortBlockLen - blockEccLen || j >= numShortBlocks) {
           result[ri++] = blocks[j][i]
@@ -250,11 +250,11 @@ class QrCode {
   }
 
   private drawCodewords(data: Uint8Array): void {
-    let i = 0
+    let i: number = 0
     for (let right = this.size - 1; right >= 1; right -= 2) {
       if (right === 6) right = 5
-      for (let vert = 0; vert < this.size; vert++) {
-        for (let j = 0; j < 2; j++) {
+      for (let vert: number = 0; vert < this.size; vert++) {
+        for (let j: number = 0; j < 2; j++) {
           const x = right - j
           const upward = ((right + 1) & 2) === 0
           const y = upward ? this.size - 1 - vert : vert
@@ -268,9 +268,9 @@ class QrCode {
   }
 
   private applyMask(mask: number): void {
-    for (let y = 0; y < this.size; y++) {
-      for (let x = 0; x < this.size; x++) {
-        let invert = false
+    for (let y: number = 0; y < this.size; y++) {
+      for (let x: number = 0; x < this.size; x++) {
+        let invert: boolean = false
         switch (mask) {
           case 0: invert = (x + y) % 2 === 0; break
           case 1: invert = y % 2 === 0; break
@@ -287,13 +287,13 @@ class QrCode {
   }
 
   private getPenaltyScore(): number {
-    let result = 0
+    let result: number = 0
     const size = this.size
     // adjacent same-color runs in rows/columns
-    for (let y = 0; y < size; y++) {
-      let runColor = false
-      let runLen = 0
-      for (let x = 0; x < size; x++) {
+    for (let y: number = 0; y < size; y++) {
+      let runColor: boolean = false
+      let runLen: number = 0
+      for (let x: number = 0; x < size; x++) {
         if (this.modules[y][x] === runColor) {
           runLen++
           if (runLen === 5) result += 3
@@ -304,10 +304,10 @@ class QrCode {
         }
       }
     }
-    for (let x = 0; x < size; x++) {
-      let runColor = false
-      let runLen = 0
-      for (let y = 0; y < size; y++) {
+    for (let x: number = 0; x < size; x++) {
+      let runColor: boolean = false
+      let runLen: number = 0
+      for (let y: number = 0; y < size; y++) {
         if (this.modules[y][x] === runColor) {
           runLen++
           if (runLen === 5) result += 3
@@ -319,15 +319,15 @@ class QrCode {
       }
     }
     // 2x2 blocks
-    for (let y = 0; y < size - 1; y++) {
-      for (let x = 0; x < size - 1; x++) {
+    for (let y: number = 0; y < size - 1; y++) {
+      for (let x: number = 0; x < size - 1; x++) {
         const c = this.modules[y][x]
         if (c === this.modules[y][x + 1] && c === this.modules[y + 1][x] && c === this.modules[y + 1][x + 1])
           result += 3
       }
     }
     // proportion of dark modules
-    let dark = 0
+    let dark: number = 0
     for (const rowArr of this.modules) for (const v of rowArr) if (v) dark++
     const total = size * size
     const k = Math.ceil(Math.abs(dark * 20 - total * 10) / total) - 1
@@ -339,8 +339,8 @@ class QrCode {
   toSvgString(border: number): string {
     const dim = this.size + border * 2
     const parts: string[] = []
-    for (let y = 0; y < this.size; y++) {
-      for (let x = 0; x < this.size; x++) {
+    for (let y: number = 0; y < this.size; y++) {
+      for (let x: number = 0; x < this.size; x++) {
         if (this.modules[y][x]) parts.push(`M${x + border},${y + border}h1v1h-1z`)
       }
     }

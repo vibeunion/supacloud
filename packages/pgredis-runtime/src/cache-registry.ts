@@ -18,7 +18,11 @@ export interface TenantCache {
   ): Promise<boolean>;
   delete(key: string): Promise<boolean>;
   ttl(key: string): Promise<number | null>;
-  getset<T = unknown>(key: string, value: T): Promise<T | null>;
+  getset<T>(
+    key: string,
+    value: T,
+    decode: (value: unknown) => T,
+  ): Promise<T | null>;
   getdel<T = unknown>(key: string): Promise<T | null>;
   flush(): Promise<number>;
   cleanupExpired?(limit?: number): Promise<number>;
@@ -118,12 +122,12 @@ function notification(op: "set" | "delete", key: string): string {
   return JSON.stringify({ namespace: CACHE_NAMESPACE, op, key });
 }
 
-function deserializeJsonValue<T>(value: unknown): T {
-  if (typeof value !== "string") return value as T;
+function deserializeJsonValue(value: unknown): unknown {
+  if (typeof value !== "string") return value;
   try {
-    return JSON.parse(value) as T;
+    return JSON.parse(value);
   } catch {
-    return value as T;
+    return value;
   }
 }
 
@@ -152,7 +156,7 @@ export function createTransactionalTenantCache(
     serializable = false,
   ): Promise<T> => {
     if (!adapter.begin) throw new Error("pgredis runtime requires transaction-capable PostgreSQL adapter");
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt: number = 0; attempt < 3; attempt += 1) {
       try {
         return await adapter.begin(async (tx) => {
           if (serializable) await tx.unsafe("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
@@ -178,9 +182,9 @@ export function createTransactionalTenantCache(
       cache.invalidate(key);
       return deleted;
     },
-    async getset<T = unknown>(key: string, value: T) {
+    async getset<T>(key: string, value: T, decode: (value: unknown) => T) {
       const serialized = JSON.stringify(value);
-      const previousValue = await transaction<T | null>(async (tx) => {
+      const previousValue = await transaction<unknown | null>(async (tx) => {
         const rows = await tx.unsafe<{ value: unknown }>(
           `SELECT value
            FROM ${CACHE_TABLE}
@@ -203,10 +207,10 @@ export function createTransactionalTenantCache(
           NOTIFY_CHANNEL,
           notification("set", key),
         ]);
-        return rows[0] ? deserializeJsonValue<T>(rows[0].value) : null;
+        return rows[0] ? deserializeJsonValue(rows[0].value) : null;
       }, true);
       cache.invalidate(key);
-      return previousValue;
+      return previousValue === null ? null : decode(previousValue);
     },
     async getdel<T = unknown>(key: string) {
       const deletedValue = await transaction((_tx, txCache) => txCache.getdel<T>(key));
@@ -228,7 +232,7 @@ function waitForListener(listener: PgListenerHandle, timeoutMs = 5_000): Promise
   const health = listener.getHealth();
   if (health.connected) return Promise.resolve();
   return new Promise((resolve, reject) => {
-    let settled = false;
+    let settled: boolean = false;
     const timer = setTimeout(() => finish(new Error("pgredis LISTEN connection timed out")), timeoutMs);
     const offConnected = listener.on("connected", () => finish());
     const offError = listener.on("error", (error) => finish(error));
@@ -343,7 +347,7 @@ export class TenantCacheRegistry {
       this.releaseEntry(entry);
       throw new Error("pgredis runtime is shutting down");
     }
-    let released = false;
+    let released: boolean = false;
     return {
       cache: entry.cache,
       release: () => {
@@ -365,7 +369,7 @@ export class TenantCacheRegistry {
 
   async sweepExpired(): Promise<number> {
     const limit = this.options.cleanupBatchSize ?? 500;
-    let deleted = 0;
+    let deleted: number = 0;
     for (const entry of this.entries.values()) {
       if (entry.retiring || !entry.cache.cleanupExpired) continue;
       entry.leases += 1;
@@ -464,7 +468,7 @@ export class TenantCacheRegistry {
       if (existing.leases === 0) await existing.closePromise;
     }
     this.creating += 1;
-    let reservationActive = true;
+    let reservationActive: boolean = true;
     try {
       await this.evictForCapacity();
       const backend = await this.createBackend(

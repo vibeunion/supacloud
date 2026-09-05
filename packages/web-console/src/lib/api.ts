@@ -6,7 +6,7 @@
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
 const SESSION_REFRESH_WINDOW_MS = 2 * 60 * 1000;
-let studioSessionExpiresAtMs = 0;
+let studioSessionExpiresAtMs: number = 0;
 type StudioSessionRefresh = { promise: Promise<StudioSessionState> };
 let studioSessionRefresh: StudioSessionRefresh | null = null;
 
@@ -46,7 +46,7 @@ export async function ensureMutationSucceeded(response: Response, fallback: stri
 async function readJsonObject(response: Response): Promise<Record<string, unknown>> {
   const value: unknown = await response.json().catch(() => ({}));
   return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
+    ? Object.fromEntries(Object.entries(value))
     : {};
 }
 
@@ -170,7 +170,7 @@ function mergeAbortSignals(signals: Array<AbortSignal | null | undefined>): {
   signal: AbortSignal | undefined;
   cleanup: () => void;
 } {
-  const validSignals = signals.filter(Boolean) as AbortSignal[];
+  const validSignals = signals.filter((signal): signal is AbortSignal => signal !== null && signal !== undefined);
   if (validSignals.length === 0) return { signal: undefined, cleanup: () => {} };
   if (validSignals.length === 1) return { signal: validSignals[0], cleanup: () => {} };
 

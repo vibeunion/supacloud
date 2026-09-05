@@ -143,9 +143,9 @@ function readNumber(field: ConfigField): string {
 }
 
 function parseTokenizedDuration(duration: string): number | null {
-  let cursor = 0;
-  let totalSeconds = 0;
-  let validSequence = true;
+  let cursor: number = 0;
+  let totalSeconds: number = 0;
+  let validSequence: boolean = true;
   DURATION_TOKEN.lastIndex = 0;
   for (let match = DURATION_TOKEN.exec(duration); match; match = DURATION_TOKEN.exec(duration)) {
     if (match.index !== cursor) {

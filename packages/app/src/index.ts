@@ -20,6 +20,8 @@ export type {
   ExistingProvider,
   FactoryProvider,
   Provider,
+  ProviderDep,
+  ProviderDependency,
   Token,
   Type,
   ValueProvider,

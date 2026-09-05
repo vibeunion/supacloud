@@ -14,6 +14,7 @@ import {
 import type { FrontendFramework } from "../types/frontend";
 import { FRAMEWORK_DEFAULTS } from "../types/frontend";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
+import { maskFrontendBuildLog, toFrontendDeploymentResponse } from "../utils/frontend-security";
 
 const FRONTEND_UPLOAD_MAX_BYTES = Number(process.env.FRONTEND_UPLOAD_MAX_BYTES || 100 * 1024 * 1024);
 const FRONTEND_UPLOAD_MAX_FILES = Number(process.env.FRONTEND_UPLOAD_MAX_FILES || 10_000);
@@ -217,7 +218,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
     "/deployments",
     async ({ params }) => {
       const deployments = await frontendService.listDeployments(params.ref);
-      return { deployments };
+      return { deployments: deployments.map(toFrontendDeploymentResponse) };
     },
     {
       params: t.Object({
@@ -234,7 +235,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       if (!deployment) {
                 return status(404, { message: "Deployment not found", code: "404" });
       }
-      return deployment;
+      return toFrontendDeploymentResponse(deployment);
     },
     {
       params: t.Object({
@@ -354,7 +355,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       });
 
       set.status = 201;
-      return deployment;
+      return toFrontendDeploymentResponse(deployment);
     },
     {
       params: t.Object({
@@ -395,7 +396,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
                 return status(404, { message: "Deployment not found", code: "404" });
       }
 
-      return deployment;
+      return toFrontendDeploymentResponse(deployment);
     },
     {
       params: t.Object({
@@ -613,7 +614,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       if (!deployment) {
                 return status(404, { message: "Deployment not found", code: "404" });
       }
-      return deployment;
+      return toFrontendDeploymentResponse(deployment);
     },
     {
       params: t.Object({
@@ -634,7 +635,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       if (!deployment) {
                 return status(404, { message: "Deployment not found", code: "404" });
       }
-      return deployment;
+      return toFrontendDeploymentResponse(deployment);
     },
     {
       params: t.Object({
@@ -659,7 +660,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       if (!deployment) {
                 return status(404, { message: "Deployment not found", code: "404" });
       }
-      return deployment;
+      return toFrontendDeploymentResponse(deployment);
     },
     {
       params: t.Object({
@@ -752,7 +753,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       if (!deployment) {
                 return status(404, { message: "Deployment not found", code: "404" });
       }
-      return deployment;
+      return toFrontendDeploymentResponse(deployment);
     },
     {
       params: t.Object({
@@ -789,7 +790,14 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
     "/deployments/:id/deployment-records",
     async ({ params, set }) => {
       const records = await frontendService.listDeploymentRecords(params.ref, params.id);
-      return { records };
+      const deployment = await frontendService.getDeployment(params.ref, params.id);
+      const secrets = Object.values(deployment?.env_vars || {});
+      return {
+        records: records.map((record) => ({
+          ...record,
+          build_log: maskFrontendBuildLog(record.build_log, secrets),
+        })),
+      };
     },
     {
       params: t.Object({
@@ -807,7 +815,14 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       if (!record) {
                 return status(404, { message: "Record not found", code: "404" });
       }
-      return record;
+      const deployment = await frontendService.getDeployment(params.ref, params.id);
+      return {
+        ...record,
+        build_log: maskFrontendBuildLog(
+          record.build_log,
+          Object.values(deployment?.env_vars || {}),
+        ),
+      };
     },
     {
       params: t.Object({

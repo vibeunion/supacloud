@@ -329,7 +329,7 @@ function filterSecretsEnv(env: FunctionContext['env'], secrets: string[]): Funct
  * once the body is streaming in, there is no way to turn it into a clean 413.
  */
 function withCountedBody(req: Request, limit: number): Request {
-  let seen = 0
+  let seen: number = 0
   const counter = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
       seen += chunk.byteLength
@@ -359,7 +359,7 @@ function withResponseLimit(name: string, res: Response, limit: number): Response
     return json(502, { error: `function "${name}" response exceeded ${limit} bytes` })
   }
   if (!res.body) return res
-  let seen = 0
+  let seen: number = 0
   const counter = new TransformStream<Uint8Array, Uint8Array>({
     transform(chunk, controller) {
       seen += chunk.byteLength

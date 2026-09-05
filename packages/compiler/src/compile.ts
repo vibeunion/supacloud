@@ -11,7 +11,7 @@ import { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
  * Files are emitted even when error-level diagnostics exist; caller decides adoption based on diagnostics.
  */
 export async function compileProject(options: CompileOptions): Promise<CompileResult> {
-  const graph = await analyzeProject(options.rootDir, options.include, options.cache);
+  const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths);
   const diagnostics: Diagnostic[] = [
     ...(graph.diagnostics ?? []),
     ...validateGraph(graph, {
@@ -54,14 +54,16 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
     }, options.strict ?? false));
   }
   const hasErrors = diagnostics.some((diagnostic) => diagnostic.severity === "error");
+  const generatedOptions = {
+    rootDir: options.rootDir,
+    outDir: options.outDir,
+    generateClient: options.generateClient,
+    generatePermissions: options.generatePermissions,
+    treeShakeUnusedProviders: options.treeShakeUnusedProviders,
+    artifactHashes: options.cache?.generatedHashes,
+  };
   const written = !hasErrors || options.writeOnError !== false
-    ? await generateApplication(graph, {
-        rootDir: options.rootDir,
-        outDir: options.outDir,
-        generateClient: options.generateClient,
-        generatePermissions: options.generatePermissions,
-        treeShakeUnusedProviders: options.treeShakeUnusedProviders,
-      })
+    ? await generateApplication(graph, generatedOptions)
     : [];
   const stats = graph.cacheStats
     ? {
@@ -75,12 +77,13 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
   return { diagnostics, graph, written, stats };
 }
 
+
 /**
  * Check generated artifacts without writing files to disk.
  * Analyze the AST, run governance checks, and compare application.ts and app.manifest.json.
  */
 export async function checkProject(options: CompileOptions): Promise<CheckProjectResult> {
-  const graph = await analyzeProject(options.rootDir, options.include, options.cache);
+  const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths);
   const diagnostics: Diagnostic[] = [
     ...(graph.diagnostics ?? []),
     ...validateGraph(graph, {

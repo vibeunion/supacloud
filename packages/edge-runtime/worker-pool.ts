@@ -355,7 +355,7 @@ export class WorkerPool {
     this.maxWorkerReplacementsBeforeRecycle = config.maxWorkerReplacementsBeforeRecycle
       ?? DEFAULT_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE;
     this.onWorkerRecycleRequired = config.onWorkerRecycleRequired ?? (() => process.exit(1));
-    for (let i = 0; i < config.size; i++) {
+    for (let i: number = 0; i < config.size; i++) {
       const w = this.createWorker();
       this.idle.push(w);
       this.activeWorkers.add(w);
@@ -552,9 +552,9 @@ export class WorkerPool {
     this.totalQueueWaitMs += queueWaitMs;
     const cancelGraceMs = 3_000;
 
-    let resolved = false;
-    let executionStarted = false;
-    let cancellationRequested = false;
+    let resolved: boolean = false;
+    let executionStarted: boolean = false;
+    let cancellationRequested: boolean = false;
     const resolveOnce = (response: Response) => {
       if (resolved) return;
       resolved = true;
@@ -790,7 +790,7 @@ export class WorkerPool {
       }
       if (msg.type === "stream_start" && msg.streamId) {
         const streamId = msg.streamId;
-        let streamFinished = false;
+        let streamFinished: boolean = false;
         let streamListener: ((streamMsg: any) => void) | undefined;
         const clearStreamState = () => {
           streamFinished = true;

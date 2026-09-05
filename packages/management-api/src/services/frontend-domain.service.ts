@@ -9,6 +9,13 @@ import type {
   FrontendDeployment,
 } from "../types/frontend";
 import type { FrontendDeploymentLock } from "./frontend-deployment-lock";
+import { decryptSecretIfNeeded, encryptSecretIfNeeded } from "../utils/secret-crypto";
+import { timingSafeEqual } from "node:crypto";
+import {
+  MASKED_FRONTEND_VALUE,
+  normalizeFrontendCustomDomain,
+  normalizeFrontendEnvVars,
+} from "../utils/frontend-security";
 
 interface FrontendDomainServiceOptions {
   deploymentLock: FrontendDeploymentLock;
@@ -29,6 +36,33 @@ function newDeployToken(name: string): DeployToken {
   };
 }
 
+function readToken(candidate: DeployToken): string | null {
+  if (candidate.token_encrypted) return decryptSecretIfNeeded(candidate.token_encrypted);
+  return candidate.token || null;
+}
+
+function safeTokenEqual(expected: string, actual: string): boolean {
+  const expectedBytes = Buffer.from(expected, "utf8");
+  const actualBytes = Buffer.from(actual, "utf8");
+  return expectedBytes.length === actualBytes.length
+    && timingSafeEqual(expectedBytes, actualBytes);
+}
+
+function sameGitTarget(left: string, right: string): boolean {
+  try {
+    const a = new URL(left);
+    const b = new URL(right);
+    if (b.username || b.password) return false;
+    a.username = "";
+    a.password = "";
+    b.username = "";
+    b.password = "";
+    return a.toString() === b.toString();
+  } catch {
+    return left === right;
+  }
+}
+
 export class FrontendDomainService {
   constructor(private readonly options: FrontendDomainServiceOptions) {}
 
@@ -40,9 +74,16 @@ export class FrontendDomainService {
     return this.options.deploymentLock(projectRef, deploymentId, async () => {
       const deployment = await this.options.getDeployment(projectRef, deploymentId);
       if (!deployment) return null;
+      const nextEnvVars = { ...deployment.env_vars };
+      for (const [name, value] of Object.entries(envVars)) {
+        if (value === MASKED_FRONTEND_VALUE && Object.prototype.hasOwnProperty.call(nextEnvVars, name)) {
+          continue;
+        }
+        nextEnvVars[name] = value;
+      }
       const updated = {
         ...deployment,
-        env_vars: { ...deployment.env_vars, ...envVars },
+        env_vars: normalizeFrontendEnvVars(nextEnvVars),
         updated_at: new Date().toISOString(),
       };
       await this.options.writeDeployment(updated);
@@ -56,8 +97,9 @@ export class FrontendDomainService {
     domain: string,
   ): Promise<FrontendDeployment | null> {
     return this.mutateCustomDomains(projectRef, deploymentId, (deployment) => {
-      if (deployment.custom_domains.includes(domain)) return null;
-      return [...deployment.custom_domains, domain];
+      const normalized = normalizeFrontendCustomDomain(domain);
+      if (deployment.custom_domains.includes(normalized)) return null;
+      return [...deployment.custom_domains, normalized];
     });
   }
 
@@ -67,8 +109,9 @@ export class FrontendDomainService {
     domain: string,
   ): Promise<FrontendDeployment | null> {
     return this.mutateCustomDomains(projectRef, deploymentId, (deployment) => {
-      if (!deployment.custom_domains.includes(domain)) return null;
-      return deployment.custom_domains.filter((candidate) => candidate !== domain);
+      const normalized = normalizeFrontendCustomDomain(domain);
+      if (!deployment.custom_domains.includes(normalized)) return null;
+      return deployment.custom_domains.filter((candidate) => candidate !== normalized);
     });
   }
 
@@ -101,13 +144,33 @@ export class FrontendDomainService {
       const deployment = await this.options.getDeployment(projectRef, deploymentId);
       if (!deployment) return null;
       const deployToken = newDeployToken(name);
+      const token = readToken(deployToken)!;
       await this.options.writeDeployment({
         ...deployment,
-        deploy_tokens: [...(deployment.deploy_tokens || []), deployToken],
+        deploy_tokens: [
+          ...(deployment.deploy_tokens || []),
+          {
+            id: deployToken.id,
+            name: deployToken.name,
+            token_encrypted: encryptSecretIfNeeded(token),
+            created_at: deployToken.created_at,
+          },
+        ],
         updated_at: new Date().toISOString(),
       });
-      return { id: deployToken.id, token: deployToken.token };
+      return { id: deployToken.id, token };
     });
+  }
+
+  async getDeployTokenSecrets(
+    projectRef: string,
+    deploymentId: string,
+  ): Promise<string[]> {
+    const deployment = await this.options.getDeployment(projectRef, deploymentId);
+    if (!deployment) return [];
+    return (deployment.deploy_tokens || [])
+      .map(readToken)
+      .filter((token): token is string => Boolean(token));
   }
 
   async listDeployTokens(
@@ -149,7 +212,10 @@ export class FrontendDomainService {
     return this.options.deploymentLock(projectRef, deploymentId, async () => {
       const deployment = await this.options.getDeployment(projectRef, deploymentId);
       if (!deployment) return false;
-      const foundToken = (deployment.deploy_tokens || []).find((candidate) => candidate.token === token);
+      const foundToken = (deployment.deploy_tokens || []).find((candidate) => {
+        const candidateToken = readToken(candidate);
+        return candidateToken ? safeTokenEqual(candidateToken, token) : false;
+      });
       if (!foundToken) return false;
       const lastUsedAt = new Date().toISOString();
       await this.options.writeDeployment({
@@ -174,7 +240,9 @@ export class FrontendDomainService {
       if (!deployment) return null;
       const updated = {
         ...deployment,
-        git_url: gitUrl,
+        git_url: deployment.git_url && sameGitTarget(deployment.git_url, gitUrl)
+          ? deployment.git_url
+          : gitUrl,
         git_branch: branch,
         updated_at: new Date().toISOString(),
       };

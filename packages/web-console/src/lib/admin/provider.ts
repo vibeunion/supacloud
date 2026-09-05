@@ -5,6 +5,26 @@ import {
 } from '@svadmin/elysia';
 import type { BaseRecord, ChatMessage, ChatProvider, GetListResult } from '@svadmin/core';
 
+function toRecord(value: object): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) result[key] = item;
+  return result;
+}
+
+function isBaseRecord(value: unknown): value is BaseRecord {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
+function providerRecords<TData extends BaseRecord>(records: BaseRecord[]): TData[] {
+  // @svadmin/elysia exposes a generic response parser without a decoder
+  // parameter. The records have been structurally validated at this boundary.
+  return records as unknown as TData[];
+}
+
 const getApiUrl = () => {
     if (typeof window === 'undefined') return 'http://localhost:9090'; // SSR
     return window.location.origin;
@@ -19,7 +39,7 @@ function parseNamedListEnvelope<TData extends BaseRecord>(
     throw new Error(`Invalid list response for ${context.resource}. Expected an object containing ${recordKey}.`);
   }
 
-  const response = payload as Record<string, unknown>;
+  const response = toRecord(payload);
   const applicationError = typeof response.error === 'string'
     ? response.error
     : typeof response.message === 'string'
@@ -31,13 +51,16 @@ function parseNamedListEnvelope<TData extends BaseRecord>(
   if (!Array.isArray(records)) {
     throw new Error(`Invalid list response for ${context.resource}. Expected an object containing ${recordKey}.`);
   }
+  if (!records.every(isBaseRecord)) {
+    throw new Error(`Invalid list response for ${context.resource}. Expected object records.`);
+  }
 
   const metadata = Object.fromEntries(
     Object.entries(response).filter(([key]) => key !== recordKey),
   );
   return {
     ...metadata,
-    data: records as TData[],
+      data: providerRecords<TData>(records),
     total: typeof response.total === 'number' ? response.total : records.length,
   };
 }
@@ -48,8 +71,8 @@ function namedEnvelopeAdapter(
 ): ElysiaResourceAdapter {
   return {
     match,
-    parseListResponse: <TData extends BaseRecord>(payload: unknown, context: ElysiaListContext) =>
-      parseNamedListEnvelope<TData>(payload, context, recordKey),
+    parseListResponse: (payload, context) =>
+      parseNamedListEnvelope(payload, context, recordKey),
   };
 }
 
@@ -124,8 +147,20 @@ export const chatProvider: ChatProvider = {
       const decoder = new TextDecoder();
 
       if (!reader) {
-        const fallback = await res.json().catch(() => null);
-        const content = fallback?.choices?.[0]?.message?.content;
+        const fallback: unknown = await res.json().catch(() => null);
+        const fallbackRecord = fallback !== null && typeof fallback === "object" && !Array.isArray(fallback)
+          ? toRecord(fallback)
+          : {};
+        const choices = isUnknownArray(fallbackRecord.choices) ? fallbackRecord.choices : [];
+        const firstChoice = choices[0];
+        const choiceRecord = firstChoice !== null && typeof firstChoice === "object" && !Array.isArray(firstChoice)
+          ? toRecord(firstChoice)
+          : {};
+        const message = choiceRecord.message;
+        const messageRecord = message !== null && typeof message === "object" && !Array.isArray(message)
+          ? toRecord(message)
+          : {};
+        const content = typeof messageRecord.content === "string" ? messageRecord.content : undefined;
         if (content) {
           yield content;
           return;
@@ -133,7 +168,7 @@ export const chatProvider: ChatProvider = {
         throw new Error('No readable stream');
       }
 
-      let buffered = "";
+      let buffered: string = "";
 
       while (true) {
         const { done, value } = await reader.read();
@@ -149,9 +184,21 @@ export const chatProvider: ChatProvider = {
           const payload = trimmed.slice(5).trim();
           if (!payload || payload === '[DONE]') continue;
           try {
-            const data = JSON.parse(payload);
-            if (data.choices?.[0]?.delta?.content) {
-              yield data.choices[0].delta.content;
+            const data: unknown = JSON.parse(payload);
+            const dataRecord = data !== null && typeof data === "object" && !Array.isArray(data)
+              ? toRecord(data)
+              : {};
+            const dataChoices = isUnknownArray(dataRecord.choices) ? dataRecord.choices : [];
+            const delta = dataChoices[0];
+            const deltaRecord = delta !== null && typeof delta === "object" && !Array.isArray(delta)
+              ? toRecord(delta)
+              : {};
+            const contentRecord = deltaRecord.delta;
+            const content = contentRecord !== null && typeof contentRecord === "object" && !Array.isArray(contentRecord)
+              ? toRecord(contentRecord).content
+              : undefined;
+            if (typeof content === "string") {
+              yield content;
             }
           } catch {
             // Ignore malformed stream fragments.
@@ -165,9 +212,21 @@ export const chatProvider: ChatProvider = {
         const payload = tail.slice(5).trim();
         if (payload && payload !== '[DONE]') {
             try {
-              const data = JSON.parse(payload);
-              if (data.choices?.[0]?.delta?.content) {
-                yield data.choices[0].delta.content;
+              const data: unknown = JSON.parse(payload);
+              const dataRecord = data !== null && typeof data === "object" && !Array.isArray(data)
+                ? toRecord(data)
+                : {};
+              const dataChoices = isUnknownArray(dataRecord.choices) ? dataRecord.choices : [];
+              const delta = dataChoices[0];
+              const deltaRecord = delta !== null && typeof delta === "object" && !Array.isArray(delta)
+                ? toRecord(delta)
+                : {};
+              const contentRecord = deltaRecord.delta;
+              const content = contentRecord !== null && typeof contentRecord === "object" && !Array.isArray(contentRecord)
+                ? toRecord(contentRecord).content
+                : undefined;
+              if (typeof content === "string") {
+                yield content;
               }
             } catch {
               // Ignore malformed tail payload.

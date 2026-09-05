@@ -12,7 +12,9 @@
  *   SSR: build -> start process -> readiness -> switch proxy route
  */
 import { $ } from "bun";
-import { chmod, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { isAbsolute, relative, resolve } from "node:path";
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from "node:zlib";
 import { logger } from "../utils/logger";
 import { config } from "../config";
@@ -40,11 +42,34 @@ import {
   withFrontendDeploymentLock,
   type FrontendDeploymentLock,
 } from "./frontend-deployment-lock";
+import {
+  maskFrontendBuildLog,
+  normalizeFrontendCustomDomain,
+  normalizeFrontendCustomDomains,
+  normalizeFrontendEnvVars,
+  normalizeFrontendOutputDir,
+  sanitizeFrontendGitUrl,
+} from "../utils/frontend-security";
 
 const FRONTEND_BASE_DIR = "/var/supacloud/frontends";
 const READINESS_TIMEOUT_MS = 30_000;
 const READINESS_INTERVAL_MS = 500;
-const UNSAFE_COMMAND_PATTERN = /[\n\r;&|`$<>]/;
+const MAX_BUILD_COMMAND_LENGTH = 4096;
+const MAX_BUILD_LOG_BYTES = 256 * 1024;
+const SAFE_BUILD_ENV_KEYS = ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "TZ", "CI", "NODE_ENV"] as const;
+const SAFE_GIT_ENV_KEYS = [
+  "SSH_AUTH_SOCK",
+  "SSH_AGENT_PID",
+  "GIT_SSH_COMMAND",
+  "GIT_CONFIG_GLOBAL",
+  "GIT_CONFIG_SYSTEM",
+  "GIT_CONFIG_NOSYSTEM",
+  "GITHUB_TOKEN",
+  "GH_TOKEN",
+  "GITLAB_TOKEN",
+  "BITBUCKET_TOKEN",
+] as const;
+const RESTRICTED_BUILD_SHELL_PATTERN = /[\r\n;&|`<>]|\$\(|\$\{/;
 const SAFE_GIT_SSH_PATTERN = /^git@[A-Za-z0-9.-]+:[A-Za-z0-9._~/-]+\.git$/;
 const STATIC_PRECOMPRESS_MIN_BYTES = 1024;
 const STATIC_PRECOMPRESS_EXTENSIONS = new Set([
@@ -93,11 +118,92 @@ function normalizeHealthCheckPath(value: string | undefined): string {
   return `${url.pathname}${url.search}`;
 }
 
-function assertSafeBuildCommand(command: string): void {
-  if (process.env.SUPACLOUD_RESTRICT_BUILD_COMMANDS !== "true") return;
-  if (command.length > 200 || UNSAFE_COMMAND_PATTERN.test(command)) {
+function assertBuildCommandPolicy(command: string): void {
+  if (command.length > MAX_BUILD_COMMAND_LENGTH) {
+    throw new Error(`Build command exceeds ${MAX_BUILD_COMMAND_LENGTH} characters`);
+  }
+  if (process.env.SUPACLOUD_RESTRICT_BUILD_COMMANDS === "true" && RESTRICTED_BUILD_SHELL_PATTERN.test(command)) {
     throw new Error("Build command contains unsupported shell syntax");
   }
+}
+
+function buildCommandEnvironment(
+  deploymentEnv: Record<string, string>,
+  nodeVersion: string,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of SAFE_BUILD_ENV_KEYS) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  Object.assign(env, normalizeFrontendEnvVars(deploymentEnv));
+  env.NODE_VERSION = nodeVersion;
+  return env;
+}
+
+function buildGitEnvironment(): Record<string, string> {
+  const env = buildCommandEnvironment({}, "20");
+  for (const key of SAFE_GIT_ENV_KEYS) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
+
+function gitUrlForLog(gitUrl: string): string {
+  return sanitizeFrontendGitUrl(gitUrl);
+}
+
+function appendBuildLog(log: string, chunk: string): string {
+  const next = `${log}${chunk}`;
+  if (Buffer.byteLength(next, "utf8") <= MAX_BUILD_LOG_BYTES) return next;
+  const suffix = "\n[build log truncated]\n";
+  const available = Math.max(0, MAX_BUILD_LOG_BYTES - Buffer.byteLength(suffix, "utf8"));
+  return `${Buffer.from(next, "utf8").subarray(0, available).toString("utf8")}${suffix}`;
+}
+
+async function runBuildCommand(
+  command: string,
+  cwd: string,
+  env: Record<string, string>,
+  runtimeUser?: string,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  assertBuildCommandPolicy(command);
+  // Preserve the existing build-command UX while keeping management-api
+  // credentials out of the child environment.
+  const commandArgs = ["/bin/sh", "-c", command];
+  const setprivPath = ["/usr/bin/setpriv", "/bin/setpriv"].find(existsSync);
+  const spawnArgs = runtimeUser && process.getuid?.() === 0
+    ? setprivPath
+      ? [setprivPath, "--reuid", runtimeUser, "--regid", runtimeUser, "--clear-groups", "--", ...commandArgs]
+      : (() => { throw new Error("Frontend builds require setpriv when Management API runs as root"); })()
+    : commandArgs;
+  const proc = Bun.spawn(spawnArgs, {
+    cwd,
+    env,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [exitCode, stdout, stderr] = await Promise.all([
+    proc.exited,
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+  ]);
+  return { exitCode, stdout, stderr };
+}
+
+async function resolveContainedOutputDir(sourceDir: string, outputDir: string): Promise<string> {
+  const requested = outputDir.trim();
+  if (!requested || isAbsolute(requested) || requested.split(/[\\/]/).includes("..")) {
+    throw new Error("Frontend output_dir must be a relative path without parent traversal");
+  }
+  const canonicalRoot = await realpath(sourceDir);
+  const canonicalCandidate = await realpath(resolve(canonicalRoot, requested));
+  const escaped = relative(canonicalRoot, canonicalCandidate);
+  if (escaped === ".." || escaped.startsWith(`..${"/"}`) || isAbsolute(escaped)) {
+    throw new Error("Frontend output_dir escapes the source directory");
+  }
+  return canonicalCandidate;
 }
 
 function assertSafeGitUrl(gitUrl: string): void {
@@ -376,7 +482,9 @@ export class FrontendService {
   async createDeployment(projectRef: string, deploymentConfig: FrontendDeploymentConfig): Promise<FrontendDeployment> {
     const deploymentId = this.generateId();
     const defaults = FRAMEWORK_DEFAULTS[deploymentConfig.framework];
-    const domain = deploymentConfig.domain || defaultFrontendDomain(projectRef, deploymentId);
+    const domain = deploymentConfig.domain
+      ? normalizeFrontendCustomDomain(deploymentConfig.domain)
+      : defaultFrontendDomain(projectRef, deploymentId);
 
     const deployment: FrontendDeployment = {
       id: deploymentId,
@@ -384,15 +492,15 @@ export class FrontendService {
       name: deploymentConfig.name,
       framework: deploymentConfig.framework,
       domain,
-      custom_domains: deploymentConfig.custom_domains || [],
+      custom_domains: normalizeFrontendCustomDomains(deploymentConfig.custom_domains),
       build_command: deploymentConfig.build_command || defaults.build_command,
-      output_dir: deploymentConfig.output_dir || defaults.output_dir,
+      output_dir: normalizeFrontendOutputDir(deploymentConfig.output_dir || defaults.output_dir),
       install_command: deploymentConfig.install_command || defaults.install_command,
       node_version: deploymentConfig.node_version || defaults.node_version,
       health_check_path: normalizeHealthCheckPath(
         deploymentConfig.health_check_path || defaults.health_check_path,
       ),
-      env_vars: deploymentConfig.env_vars || {},
+      env_vars: normalizeFrontendEnvVars(deploymentConfig.env_vars),
       status: "pending",
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -422,12 +530,22 @@ export class FrontendService {
       const definedUpdates = Object.fromEntries(
         Object.entries(updates).filter(([, value]) => value !== undefined),
       ) as Partial<FrontendDeploymentConfig>;
-      const normalizedUpdates = definedUpdates.health_check_path === undefined
-        ? definedUpdates
-        : {
-            ...definedUpdates,
-            health_check_path: normalizeHealthCheckPath(definedUpdates.health_check_path),
-          };
+      const normalizedUpdates: Partial<FrontendDeploymentConfig> = { ...definedUpdates };
+      if (definedUpdates.domain !== undefined) {
+        normalizedUpdates.domain = normalizeFrontendCustomDomain(definedUpdates.domain);
+      }
+      if (definedUpdates.custom_domains !== undefined) {
+        normalizedUpdates.custom_domains = normalizeFrontendCustomDomains(definedUpdates.custom_domains);
+      }
+      if (definedUpdates.env_vars !== undefined) {
+        normalizedUpdates.env_vars = normalizeFrontendEnvVars(definedUpdates.env_vars);
+      }
+      if (definedUpdates.output_dir !== undefined) {
+        normalizedUpdates.output_dir = normalizeFrontendOutputDir(definedUpdates.output_dir);
+      }
+      if (definedUpdates.health_check_path !== undefined) {
+        normalizedUpdates.health_check_path = normalizeHealthCheckPath(definedUpdates.health_check_path);
+      }
       const updated = {
         ...deployment,
         ...normalizedUpdates,
@@ -519,7 +637,8 @@ export class FrontendService {
     deploymentId: string,
     sourcePath: string,
   ): Promise<FrontendBuildResult> {
-    if (!await this.getDeployment(projectRef, deploymentId)) {
+    const deployment = await this.getDeployment(projectRef, deploymentId);
+    if (!deployment) {
       return { success: false, deployment_id: deploymentId, url: "", build_log: "", error: "Deployment not found" };
     }
 
@@ -540,12 +659,19 @@ export class FrontendService {
       return await this.buildDeployment(projectRef, deploymentId, sourceDir);
     } catch (error: unknown) {
       const errorMsg = error instanceof Error ? error.message : String(error);
+      const safeError = maskFrontendBuildLog(errorMsg, Object.values(deployment.env_vars));
       await this.updateDeployment(projectRef, deploymentId, {
         status: "failed",
-        build_log: `Error copying source: ${errorMsg}`,
+        build_log: `Error copying source: ${safeError}`,
       } as Partial<FrontendDeployment>);
 
-      return { success: false, deployment_id: deploymentId, url: "", build_log: `Error: ${errorMsg}`, error: errorMsg };
+      return {
+        success: false,
+        deployment_id: deploymentId,
+        url: "",
+        build_log: `Error: ${safeError}`,
+        error: safeError,
+      };
     }
   }
 
@@ -567,7 +693,8 @@ export class FrontendService {
     gitUrl: string,
     branch: string,
   ): Promise<FrontendBuildResult> {
-    if (!await this.getDeployment(projectRef, deploymentId)) {
+    const deployment = await this.getDeployment(projectRef, deploymentId);
+    if (!deployment) {
       return { success: false, deployment_id: deploymentId, url: "", build_log: "", error: "Deployment not found" };
     }
 
@@ -590,17 +717,18 @@ export class FrontendService {
 
       await $`rm -rf ${sourceDir}`.quiet();
 
-      buildLog += `$ git clone --branch ${branch} ${gitUrl}\n`;
+      buildLog += `$ git clone --branch ${branch} ${gitUrlForLog(gitUrl)}\n`;
       const cloneResult = await $`git clone --branch ${branch} --depth 1 ${gitUrl} ${sourceDir}`
         .env({
-          ...process.env,
+          ...buildGitEnvironment(),
           GIT_TERMINAL_PROMPT: "0",
           GIT_ASKPASS: "echo",
         })
         .quiet();
-      buildLog += cloneResult.stdout.toString();
-      buildLog += cloneResult.stderr.toString();
-      buildLog += "\n";
+      buildLog = appendBuildLog(
+        buildLog,
+        `${cloneResult.stdout.toString()}${cloneResult.stderr.toString()}\n`,
+      );
 
       if (cloneResult.exitCode !== 0) {
         throw new Error(`Git clone failed: ${cloneResult.stderr.toString()}`);
@@ -608,18 +736,28 @@ export class FrontendService {
 
       return await this.buildDeployment(projectRef, deploymentId, sourceDir);
     } catch (error: unknown) {
-      buildLog += `\nError: ${error instanceof Error ? error.message : String(error)}\n`;
+      buildLog = appendBuildLog(
+        buildLog,
+        `\nError: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+      const safeBuildLog = maskFrontendBuildLog(
+        buildLog,
+        [...Object.values(deployment.env_vars), gitUrl],
+      );
       await this.updateDeployment(projectRef, deploymentId, {
         status: "failed",
-        build_log: buildLog,
+        build_log: safeBuildLog,
       } as Partial<FrontendDeployment>);
 
       return {
         success: false,
         deployment_id: deploymentId,
         url: "",
-        build_log: buildLog,
-        error: (error instanceof Error ? error.message : String(error)),
+        build_log: safeBuildLog,
+        error: maskFrontendBuildLog(
+          error instanceof Error ? error.message : String(error),
+          [gitUrl],
+        ),
       };
     }
   }
@@ -643,29 +781,37 @@ export class FrontendService {
     await this.updateDeployment(projectRef, deploymentId, { status: "building" } as Partial<FrontendDeployment>);
 
     try {
+      const buildUser = process.getuid?.() === 0
+        ? await tenantRuntimeService.ensureTenantRuntimeUser(projectRef)
+        : undefined;
+      if (buildUser) {
+        await $`chown -R ${buildUser}:${buildUser} ${sourceDir}`.quiet();
+      }
       if (deployment.install_command) {
-        assertSafeBuildCommand(deployment.install_command);
         buildLog += `$ ${deployment.install_command}\n`;
-        const installResult = await $`${deployment.install_command}`
-          .cwd(sourceDir)
-          .env({ ...process.env, ...deployment.env_vars, NODE_VERSION: deployment.node_version })
-          .quiet();
-        buildLog += installResult.stdout.toString() + "\n";
+        const installResult = await runBuildCommand(
+          deployment.install_command,
+          sourceDir,
+          buildCommandEnvironment(deployment.env_vars, deployment.node_version),
+          buildUser,
+        );
+        buildLog = appendBuildLog(buildLog, installResult.stdout + installResult.stderr + "\n");
         if (installResult.exitCode !== 0) {
-          throw new Error(`Install failed: ${installResult.stderr.toString()}`);
+          throw new Error(`Install failed: ${installResult.stderr}`);
         }
       }
 
       if (deployment.build_command) {
-        assertSafeBuildCommand(deployment.build_command);
         buildLog += `$ ${deployment.build_command}\n`;
-        const buildResult = await $`${deployment.build_command}`
-          .cwd(sourceDir)
-          .env({ ...process.env, ...deployment.env_vars, NODE_VERSION: deployment.node_version })
-          .quiet();
-        buildLog += buildResult.stdout.toString() + "\n";
+        const buildResult = await runBuildCommand(
+          deployment.build_command,
+          sourceDir,
+          buildCommandEnvironment(deployment.env_vars, deployment.node_version),
+          buildUser,
+        );
+        buildLog = appendBuildLog(buildLog, buildResult.stdout + buildResult.stderr + "\n");
         if (buildResult.exitCode !== 0) {
-          throw new Error(`Build failed: ${buildResult.stderr.toString()}`);
+          throw new Error(`Build failed: ${buildResult.stderr}`);
         }
       }
 
@@ -677,18 +823,28 @@ export class FrontendService {
       const prepared = await this.prepareLegacyBuild(deployment, sourceDir, buildLog);
       return await this.publishLegacyBuild(projectRef, deploymentId, prepared);
     } catch (error: unknown) {
-      buildLog += `\nError: ${error instanceof Error ? error.message : String(error)}\n`;
+      buildLog = appendBuildLog(
+        buildLog,
+        `\nError: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+      const safeBuildLog = maskFrontendBuildLog(
+        buildLog,
+        Object.values(deployment.env_vars),
+      );
       await this.updateDeployment(projectRef, deploymentId, {
         status: "failed",
-        build_log: buildLog,
+        build_log: safeBuildLog,
       } as Partial<FrontendDeployment>);
 
       return {
         success: false,
         deployment_id: deploymentId,
         url: "",
-        build_log: buildLog,
-        error: (error instanceof Error ? error.message : String(error)),
+        build_log: safeBuildLog,
+        error: maskFrontendBuildLog(
+          error instanceof Error ? error.message : String(error),
+          Object.values(deployment.env_vars),
+        ),
       };
     }
   }
@@ -700,7 +856,7 @@ export class FrontendService {
   ): Promise<PreparedLegacyBuild> {
     const deploymentDir = this.joinPath(this.baseDir, deployment.project_ref, deployment.id);
     const stagingDir = await mkdtemp(this.joinPath(deploymentDir, ".legacy-build-"));
-    const outputDir = this.joinPath(sourceDir, deployment.output_dir);
+    const outputDir = await resolveContainedOutputDir(sourceDir, deployment.output_dir);
     try {
       await $`cp -r ${outputDir}/. ${stagingDir}`.quiet();
       await this.precompressStaticAssets(stagingDir);
@@ -730,7 +886,7 @@ export class FrontendService {
             ...deployment,
             status: "success" as const,
             last_deployed_at: new Date().toISOString(),
-            build_log: prepared.buildLog,
+            build_log: maskFrontendBuildLog(prepared.buildLog, Object.values(deployment.env_vars)),
             updated_at: new Date().toISOString(),
           });
         } catch (error: unknown) {
@@ -742,7 +898,7 @@ export class FrontendService {
           success: true,
           deployment_id: deploymentId,
           url: deployment.deployment_url,
-          build_log: prepared.buildLog,
+          build_log: maskFrontendBuildLog(prepared.buildLog, Object.values(deployment.env_vars)),
         };
       });
     } finally {
@@ -826,7 +982,7 @@ export class FrontendService {
       ...deployment,
       status: "success" as const,
       last_deployed_at: new Date().toISOString(),
-      build_log: buildLog,
+      build_log: maskFrontendBuildLog(buildLog, Object.values(deployment.env_vars)),
       updated_at: new Date().toISOString(),
     });
   }
@@ -839,7 +995,7 @@ export class FrontendService {
       success: true,
       deployment_id: deployment.id,
       url: deployment.deployment_url,
-      build_log: buildLog,
+      build_log: maskFrontendBuildLog(buildLog, Object.values(deployment.env_vars)),
     };
   }
 
@@ -861,7 +1017,8 @@ export class FrontendService {
     const deploymentDir = this.joinPath(this.baseDir, deployment.project_ref, deployment.id);
     const stagingDir = await mkdtemp(this.joinPath(deploymentDir, ".legacy-ssr-build-"));
     try {
-      await $`cp -r ${this.joinPath(sourceDir, deployment.output_dir)}/. ${stagingDir}`.quiet();
+      const outputDir = await resolveContainedOutputDir(sourceDir, deployment.output_dir);
+      await $`cp -r ${outputDir}/. ${stagingDir}`.quiet();
       if (deployment.framework === "sveltekit") {
         await prepareSvelteKitRuntime(sourceDir, stagingDir);
       }
@@ -1023,6 +1180,14 @@ User=${runtimeUser}
 Group=${runtimeUser}
 WorkingDirectory=${buildDir}
 NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+CapabilityBoundingSet=
+AmbientCapabilities=
 Environment="PORT=${port}"
 Environment="NODE_ENV=production"
 EnvironmentFile=${envFile}
@@ -1128,7 +1293,12 @@ WantedBy=multi-user.target
 
   async getBuildLog(projectRef: string, deploymentId: string): Promise<string> {
     const deployment = await this.getDeployment(projectRef, deploymentId);
-    return deployment?.build_log || "";
+    return deployment
+      ? maskFrontendBuildLog(
+          deployment.build_log,
+          [...Object.values(deployment.env_vars || {}), deployment.git_url || ""],
+        )
+      : "";
   }
 
   // ── Delegated to domain service ───────────────────────────────────
@@ -1140,6 +1310,7 @@ WantedBy=multi-user.target
   listDeployTokens = (...args: Parameters<FrontendDomainService["listDeployTokens"]>) => this.domainService.listDeployTokens(...args);
   deleteDeployToken = (...args: Parameters<FrontendDomainService["deleteDeployToken"]>) => this.domainService.deleteDeployToken(...args);
   verifyDeployToken = (...args: Parameters<FrontendDomainService["verifyDeployToken"]>) => this.domainService.verifyDeployToken(...args);
+  getDeployTokenSecrets = (...args: Parameters<FrontendDomainService["getDeployTokenSecrets"]>) => this.domainService.getDeployTokenSecrets(...args);
   setGitConfig = (...args: Parameters<FrontendDomainService["setGitConfig"]>) => this.domainService.setGitConfig(...args);
 
   // ── Delegated to record service ───────────────────────────────────

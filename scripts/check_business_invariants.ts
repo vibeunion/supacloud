@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 
 export interface SqlTableDefinition {
@@ -19,6 +19,15 @@ export const DEFAULT_SQL_FILES = [
   "scripts/002_tasks_queue_schema_patch.sql",
   "scripts/004_background_task_mirror_migration.sql",
 ] as const;
+
+export async function discoverSqlFiles(root: string): Promise<string[]> {
+  const scriptsDir = join(root, "scripts");
+  const entries = await readdir(scriptsDir, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile() && /^\d+[_-].+\.sql$/i.test(entry.name))
+    .map((entry) => join("scripts", entry.name))
+    .sort();
+}
 
 function normalizeIdentifier(value: string): string {
   return value
@@ -149,7 +158,8 @@ export function checkBusinessInvariants(
 
 async function main() {
   const root = resolve(import.meta.dir, "..");
-  const files = await Promise.all(DEFAULT_SQL_FILES.map(async (relativePath) => ({
+  const relativePaths = await discoverSqlFiles(root);
+  const files = await Promise.all(relativePaths.map(async (relativePath) => ({
     path: relativePath,
     sql: await readFile(join(root, relativePath), "utf8"),
   })));

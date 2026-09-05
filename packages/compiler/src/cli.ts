@@ -6,6 +6,16 @@ import { doctorProject, explainGraph, formatGraph } from "./inspect";
 import { watchProject } from "./watch";
 import type { Diagnostic, ModuleBoundaryPresetName } from "./types";
 
+function isModuleBoundaryPresetName(value: string | undefined): value is ModuleBoundaryPresetName {
+  return value === "modular-monolith"
+    || value === "feature-slices"
+    || value === "vertical-slices"
+    || value === "angular-enterprise"
+    || value === "angular"
+    || value === "clean-architecture"
+    || value === "domain-driven";
+}
+
 function printUsage(): void {
   console.log(`
 @supacloud/compiler CLI
@@ -53,17 +63,17 @@ async function run(): Promise<void> {
     process.exit(1);
   }
 
-  let rootDir = ".";
+  let rootDir: string = ".";
   let outDir: string | undefined;
-  let strict = false;
-  let generateClient = false;
-  let generatePermissions = false;
+  let strict: boolean = false;
+  let generateClient: boolean = false;
+  let generatePermissions: boolean = false;
   let preset: ModuleBoundaryPresetName | undefined;
-  let debounceMs = 100;
+  let debounceMs: number = 100;
   let query: string | undefined;
-  let json = false;
+  let json: boolean = false;
 
-  for (let i = 1; i < args.length; i++) {
+  for (let i: number = 1; i < args.length; i++) {
     const arg = args[i];
     if (arg === "--root" || arg === "-r") {
       rootDir = args[++i];
@@ -84,7 +94,12 @@ async function run(): Promise<void> {
     } else if (arg === "--json") {
       json = true;
     } else if (arg === "--preset" || arg === "-p") {
-      preset = args[++i] as ModuleBoundaryPresetName;
+      const presetArg = args[++i];
+      if (!isModuleBoundaryPresetName(presetArg)) {
+        console.error(`Error: --preset requires a known preset, received "${presetArg ?? ""}"`);
+        process.exit(1);
+      }
+      preset = presetArg;
     } else if (!arg.startsWith("-") && rootDir === ".") {
       if (command === "explain" && !query) query = arg;
       else rootDir = arg;
@@ -225,7 +240,7 @@ function printDiagnostics(diagnostics: Diagnostic[]): void {
   }
 }
 
-run().catch((err) => {
+run().catch((err: unknown) => {
   console.error("Unhandled error:", err);
   process.exit(1);
 });

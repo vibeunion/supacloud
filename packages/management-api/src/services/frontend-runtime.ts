@@ -71,6 +71,14 @@ User=${runtimeUser}
 Group=${runtimeUser}
 WorkingDirectory=${buildDir}
 NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+CapabilityBoundingSet=
+AmbientCapabilities=
 Environment="PORT=${input.port}"
 Environment="NODE_ENV=production"
 Environment="PROTOCOL_HEADER=x-forwarded-proto"

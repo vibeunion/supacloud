@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { access, readdir, readFile } from "node:fs/promises";
-import { relative, resolve, sep } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { compileProject } from "./compile";
 import type {
   CompileOptions,
@@ -24,6 +24,7 @@ export function createDependencyGraphCache(): DependencyGraphCache {
   return {
     modules: new Map(),
     fileHashes: new Map(),
+    generatedHashes: new Map(),
   };
 }
 
@@ -36,17 +37,25 @@ interface Snapshot {
 export function createIncrementalCompiler(): IncrementalCompiler {
   let previousSnapshot: Snapshot | undefined;
   let previousResult: CompileResult | undefined;
+  let previousCache: DependencyGraphCache | undefined;
   const cache: DependencyGraphCache = createDependencyGraphCache();
 
   return {
     async compile(options, changedPaths): Promise<IncrementalCompileResult> {
-      const snapshot = changedPaths && previousSnapshot
+      const optionsKey = optionsKeyOf(options);
+      const snapshot = changedPaths && previousSnapshot && previousSnapshot.optionsKey === optionsKey
         ? await updateSnapshot(previousSnapshot, options, changedPaths)
         : await createSnapshot(options);
       const changedFiles = changedPaths && previousSnapshot
         ? diffFiles(previousSnapshot.files, snapshot.files)
         : diffFiles(previousSnapshot?.files, snapshot.files);
-      const cacheHit = Boolean(previousSnapshot && previousSnapshot.optionsKey === snapshot.optionsKey && changedFiles.length === 0);
+      const activeCache = options.cache ?? cache;
+      const cacheHit = Boolean(
+        previousSnapshot
+        && previousSnapshot.optionsKey === snapshot.optionsKey
+        && previousCache === activeCache
+        && changedFiles.length === 0,
+      );
 
       if (cacheHit && previousResult) {
         return {
@@ -61,23 +70,14 @@ export function createIncrementalCompiler(): IncrementalCompiler {
         };
       }
 
-      if (previousResult && previousSnapshot && changedFiles.length > 0 && !(await requiresGraphRebuild(options.rootDir, changedFiles))) {
-        const stats: CompileStats = {
-          cacheHit: true,
-          changedFiles,
-          affectedModules: findAffectedModules(previousResult.graph.modules, previousResult.graph.modules, changedFiles),
-          reusedModules: previousResult.graph.modules.map((m) => m.name),
-          reanalyzedModules: [],
-        };
-        previousSnapshot = snapshot;
-        return { ...previousResult, written: [], stats };
-      }
-
-      const activeCache = options.cache ?? cache;
       if (!activeCache.dependencyGraph && previousResult) {
         activeCache.dependencyGraph = new ModuleDependencyGraph(previousResult.graph.modules);
       }
-      const result = await compileProject({ ...options, cache: activeCache });
+      const result = await compileProject({
+        ...options,
+        cache: activeCache,
+        changedPaths: changedFiles,
+      });
       const affectedModules = previousResult
         ? findAffectedModules(previousResult.graph.modules, result.graph.modules, changedFiles)
         : result.graph.modules.map((module) => module.name);
@@ -95,14 +95,18 @@ export function createIncrementalCompiler(): IncrementalCompiler {
       };
       previousSnapshot = snapshot;
       previousResult = result;
+      previousCache = activeCache;
       return { ...result, stats };
     },
     reset(): void {
       previousSnapshot = undefined;
       previousResult = undefined;
+      previousCache = undefined;
       cache.modules.clear();
       cache.fileHashes.clear();
+      cache.generatedHashes?.clear();
       cache.dependencyGraph = undefined;
+      cache.programSession?.reset();
     },
     getCache(): DependencyGraphCache {
       return cache;
@@ -115,7 +119,9 @@ async function updateSnapshot(previous: Snapshot, options: CompileOptions, chang
   const outDir = resolve(options.outDir);
   const files = { ...previous.files };
   for (const changedPath of changedPaths) {
-    const absolutePath = resolve(rootDir, changedPath);
+    const absolutePath = isAbsolute(changedPath) ? resolve(changedPath) : resolve(rootDir, changedPath);
+    const relativeChangedPath = relative(rootDir, absolutePath);
+    if (relativeChangedPath === ".." || relativeChangedPath.startsWith(`..${sep}`)) continue;
     if (absolutePath === outDir || absolutePath.startsWith(`${outDir}/`)) continue;
     const relativePath = relative(rootDir, absolutePath).split(sep).join("/");
     try {
@@ -143,8 +149,11 @@ async function createSnapshot(options: CompileOptions): Promise<Snapshot> {
 
 function optionsKeyOf(options: CompileOptions): string {
   return JSON.stringify({
+    rootDir: resolve(options.rootDir),
+    outDir: resolve(options.outDir),
     include: options.include,
     strict: options.strict,
+    writeOnError: options.writeOnError,
     moduleBoundaryPreset: options.moduleBoundaryPreset,
     moduleBoundaries: options.moduleBoundaries,
     allowRouteCommandBindings: options.allowRouteCommandBindings,
@@ -154,20 +163,8 @@ function optionsKeyOf(options: CompileOptions): string {
     generateClient: options.generateClient,
     generatePermissions: options.generatePermissions,
     typeSafety: options.typeSafety,
+    treeShakeUnusedProviders: options.treeShakeUnusedProviders,
   });
-}
-
-async function requiresGraphRebuild(rootDir: string, changedFiles: string[]): Promise<boolean> {
-  for (const relativePath of changedFiles) {
-    const path = resolve(rootDir, relativePath);
-    try {
-      const source = await readFile(path, "utf8");
-      if (/@(?:Module|Injectable|Inject|Controller|Command|Query)\b|new\s+InjectionToken\b|\bdefineModule\s*\(/.test(source)) return true;
-    } catch {
-      return true;
-    }
-  }
-  return false;
 }
 
 async function listSourceFiles(rootDir: string, outDir: string): Promise<string[]> {
@@ -236,7 +233,8 @@ export class ModuleDependencyGraph {
         if (!this.dependents.has(imp)) {
           this.dependents.set(imp, new Set());
         }
-        this.dependents.get(imp)!.add(modName);
+        const dependents = this.dependents.get(imp);
+        if (dependents) dependents.add(modName);
       }
     }
   }
@@ -247,7 +245,8 @@ export class ModuleDependencyGraph {
     if (!this.fileOwners.has(normalized)) {
       this.fileOwners.set(normalized, new Set());
     }
-    this.fileOwners.get(normalized)!.add(moduleName);
+    const owners = this.fileOwners.get(normalized);
+    if (owners) owners.add(moduleName);
   }
 
   getModulesOwningFile(filePath: string): string[] {
@@ -264,13 +263,17 @@ export class ModuleDependencyGraph {
       }
     }
     if (directlyAffected.size === 0) {
-      return Array.from(this.moduleMap.keys());
+      // An unrelated source file is not a graph dependency. Shared semantic
+      // files are indexed by their provider/controller import paths above;
+      // unknown files therefore remain outside the module closure.
+      return [];
     }
 
     const affected = new Set(directlyAffected);
     const queue = Array.from(directlyAffected);
     while (queue.length > 0) {
-      const current = queue.shift()!;
+      const current = queue.shift();
+      if (!current) continue;
       const dependents = this.dependents.get(current);
       if (dependents) {
         for (const dep of dependents) {

@@ -43,7 +43,7 @@ export function parseGlobalOptions(args: string[]): GlobalCliOptions {
     const values: Partial<Record<GlobalOptionKey, string>> = {};
     const remainingArgs: string[] = [];
 
-    for (let index = 0; index < args.length;) {
+    for (let index: number = 0; index < args.length;) {
         const flag = globalFlag(args[index]);
         if (!flag) {
             remainingArgs.push(args[index]);

@@ -11,6 +11,16 @@ export interface Type<T> {
 /** Anything that can identify a provider: an InjectionToken or a class. */
 export type Token<T = any> = InjectionToken<T> | Type<T> | ForwardRefFn<InjectionToken<T> | Type<T>>;
 
+export interface ProviderDependency {
+  token: Token;
+  optional?: boolean;
+  self?: boolean;
+  skipSelf?: boolean;
+  host?: boolean;
+}
+
+export type ProviderDep = Token | ProviderDependency;
+
 interface BaseProvider {
   /** Overrides the scope derived from @Injectable / token defaults. */
   scope?: Scope;
@@ -24,7 +34,7 @@ export interface ClassProvider<T = any> extends BaseProvider {
   provide: Token<T>;
   useClass: Type<T> | ForwardRefFn<Type<T>>;
   /** Explicit dependency tokens, positional (constructor order). */
-  deps?: Token[];
+  deps?: ProviderDep[];
 }
 
 export interface ValueProvider<T = any> extends BaseProvider {
@@ -35,7 +45,7 @@ export interface ValueProvider<T = any> extends BaseProvider {
 export interface FactoryProvider<T = any> extends BaseProvider {
   provide: Token<T>;
   useFactory: (...deps: any[]) => T;
-  deps?: Token[];
+  deps?: ProviderDep[];
 }
 
 export interface ExistingProvider<T = any> extends BaseProvider {
@@ -72,10 +82,12 @@ export function isExistingProvider<T>(provider: Provider<T>): provider is Existi
  * Modeled directly after Angular's EnvironmentProviders.
  */
 export interface EnvironmentProviders {
-  ɵproviders: Provider[];
+  ɵproviders: Array<Provider | EnvironmentProviders>;
 }
 
-export function makeEnvironmentProviders(providers: Provider[]): EnvironmentProviders {
+export function makeEnvironmentProviders(
+  providers: Array<Provider | EnvironmentProviders>,
+): EnvironmentProviders {
   return { ɵproviders: providers };
 }
 
@@ -87,7 +99,7 @@ export function flattenProviders(providers: Array<Provider | EnvironmentProvider
   const result: Provider[] = [];
   for (const p of providers) {
     if (isEnvironmentProviders(p)) {
-      result.push(...p.ɵproviders);
+      result.push(...flattenProviders(p.ɵproviders));
     } else {
       result.push(p);
     }

@@ -46,7 +46,7 @@ describe("pgredis-runtime internal API", () => {
       async set(key, value, options) { calls.push(["set", key, value, options]); return true; },
       async delete(key) { calls.push(["delete", key]); return true; },
       async ttl(key) { calls.push(["ttl", key]); return 500; },
-      async getset<T>(key: string, value: T) { calls.push(["getset", key, value]); return "old" as T; },
+      async getset<T>(key: string, value: T, _decode: (value: unknown) => T) { calls.push(["getset", key, value]); return "old" as T; },
       async getdel<T>(key: string) { calls.push(["getdel", key]); return "deleted" as T; },
       async flush() { calls.push(["flush"]); return 2; },
     };

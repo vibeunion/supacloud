@@ -8,6 +8,11 @@ SupaCloud compiler (`@supacloud/compiler`) reads that metadata from source,
 validates the dependency graph and generates plain static factories — there is
 no runtime reflection and no `reflect-metadata` dependency.
 
+Runtime DI delegates to Angular's public `@angular/core` APIs through a small
+compatibility adapter. SupaCloud decorators retain module/compiler metadata,
+while production application factories remain compiler-generated and
+reflection-free.
+
 ```ts
 import {
   Command,

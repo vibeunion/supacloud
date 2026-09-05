@@ -22,7 +22,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/cli.ts --outdir dist --target node --external ts-morph",
+    "build:js": "bun build src/index.ts src/cli.ts --outdir dist --target node --external @typescript/typescript6",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
@@ -44,7 +44,7 @@
     "directory": "packages/compiler"
   },
   "dependencies": {
-    "ts-morph": "^28.0.0"
+    "@typescript/typescript6": "^6.0.2"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",

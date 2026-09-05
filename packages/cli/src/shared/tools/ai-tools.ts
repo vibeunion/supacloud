@@ -85,7 +85,7 @@ function backupTimestamp(now: Date): string {
 function availableBackupDirectory(destinationDirectory: string, now: Date): string {
     const baseDirectory = `${destinationDirectory}.backup-${backupTimestamp(now)}`;
     let candidate = baseDirectory;
-    let suffix = 2;
+    let suffix: number = 2;
     while (existsSync(candidate)) {
         candidate = `${baseDirectory}-${suffix}`;
         suffix += 1;

@@ -310,8 +310,8 @@ if (!process.env.EDGE_RUNTIME_VERSION) {
   process.env.EDGE_RUNTIME_VERSION = "1.58.3";
 }
 
-let shuttingDown = false;
-let workerRecycleScheduled = false;
+let shuttingDown: boolean = false;
+let workerRecycleScheduled: boolean = false;
 
 function requestRuntimeRecycle(): void {
   if (workerRecycleScheduled || shuttingDown) return;
@@ -682,7 +682,7 @@ async function appendFunctionRuntimeLog(
         execution_id: context.executionId,
         background: context.background,
       },
-    };
+    } as const;
     await fs.appendFile(logFile, `${JSON.stringify(payload)}\n`, "utf8");
   } catch (error) {
     console.warn(

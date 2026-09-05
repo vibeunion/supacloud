@@ -105,6 +105,58 @@ describe("generate：application.ts 关键内容", () => {
     );
   });
 
+  test("property-level inject() uses a generated static token identity context", () => {
+    const rendered = renderApplication({
+      modules: [{
+        name: "functional",
+        className: "FunctionalModule",
+        file: "src/functional.module.ts",
+        line: 1,
+        imports: [],
+        providers: [{
+          token: "CONFIG",
+          tokenKind: "injection-token",
+          kind: "value",
+          useValueExpr: '{ mode: "strict" }',
+          scope: "application",
+          deps: [],
+          exported: false,
+          file: "src/functional.module.ts",
+          line: 1,
+        }, {
+          token: "FunctionalService",
+          tokenKind: "class",
+          kind: "class",
+          useClass: "FunctionalService",
+          scope: "application",
+          deps: ["CONFIG"],
+          functionalInjects: [{
+            token: "CONFIG",
+            expression: "CONFIG",
+            importPath: "src/functional.module",
+          }],
+          exported: false,
+          file: "src/functional.module.ts",
+          line: 1,
+          importPath: "src/functional.service",
+        }],
+        controllers: [],
+        commands: [],
+        queries: [],
+        exports: [],
+      }],
+      externalTokens: [],
+    }, {
+      rootDir: "/app",
+      outDir: "/app/generated",
+    });
+
+    expect(rendered.applicationCode).toContain('import { runInInjectionContext } from "@supacloud/app";');
+    expect(rendered.applicationCode).toContain("if (token === CONFIG) return config as T;");
+    expect(rendered.applicationCode).toContain("runInInjectionContext({");
+    expect(rendered.applicationCode).not.toContain("new StaticInjector");
+  });
+
   test("request 工厂：REQUEST_CONTEXT 传 ctx，其余从 services 解析", () => {
     expect(applicationCode).toContain("createCaseRequestScope");
     expect(applicationCode).toContain(
@@ -147,6 +199,7 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
       ctx: unknown,
       imported?: Record<string, Partial<RuntimeServices>>,
     ) => RuntimeServices;
+    destroyRequestScope?: (scope: RuntimeServices) => Promise<void>;
   };
   let compiled: {
     createCompiledModules: () => RuntimeModule[];
@@ -171,6 +224,7 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
       permission: "case.accept",
     });
     expect(typeof modules[1].createRequestScope).toBe("function");
+    expect(typeof modules[1].destroyRequestScope).toBe("function");
     expect(modules[2].createRequestScope).toBeUndefined();
   });
 
@@ -802,5 +856,60 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     expect(rendered.applicationCode).toContain('Number(req.params?.["id"])');
     expect(rendered.applicationCode).toContain('Number(req.query?.["limit"])');
     expect(rendered.applicationCode).toContain(": 20");
+  });
+
+  test("renderApplication emits static request-scope destruction plans", () => {
+    const rendered = renderApplication(
+      {
+        modules: [
+          {
+            name: "scoped",
+            className: "ScopedModule",
+            file: "src/scoped.module.ts",
+            line: 1,
+            imports: [],
+            providers: [
+              {
+                token: "REQUEST_RESOURCE",
+                tokenKind: "injection-token",
+                kind: "class",
+                useClass: "RequestResource",
+                scope: "request",
+                deps: [],
+                hasOnDestroy: true,
+                exported: false,
+                file: "src/request-resource.ts",
+                line: 1,
+                importPath: "./request-resource",
+              },
+            ],
+            controllers: [
+              {
+                className: "ScopedController",
+                path: "/scoped",
+                scope: "request",
+                deps: [],
+                hasOnDestroy: true,
+                routes: [],
+                file: "src/scoped.controller.ts",
+                importPath: "./scoped.controller",
+              },
+            ],
+            commands: [],
+            queries: [],
+            exports: [],
+          },
+        ],
+        externalTokens: [],
+      },
+      { rootDir: "/app", outDir: "/app/generated" },
+    );
+
+    expect(rendered.applicationCode).toContain(
+      "async function destroyScopedRequestScope(scope: Record<string, unknown>): Promise<void>",
+    );
+    expect(rendered.applicationCode).toContain(
+      'await destroyScopeInstances(scope, [{"key":"requestResource"},{"key":"scopedController"}]);',
+    );
   });
 });

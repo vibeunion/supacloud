@@ -78,7 +78,7 @@ export function parseGlobalAdminOptions(args: string[]): GlobalAdminOptions {
     const selectedOptions: Partial<Record<GlobalOptionKey, string>> = {};
     const commandArgs: string[] = [];
 
-    for (let index = 0; index < args.length;) {
+    for (let index: number = 0; index < args.length;) {
         const parsedArgument = parseGlobalArgument(args, index, selectedOptions);
         if (parsedArgument.commandArgument !== undefined) {
             commandArgs.push(parsedArgument.commandArgument);

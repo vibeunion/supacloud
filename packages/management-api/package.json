@@ -39,11 +39,11 @@
     "acorn": "^8.18.0",
     "aws4fetch": "^1.0.20",
     "elysia": "^1.4.30",
-    "jose": "^6.2.10",
+    "jose": "^6.2.11",
     "nanoid": "^6.0.1"
   },
   "devDependencies": {
-    "@supabase/supabase-js": "^2.114.0",
+    "@supabase/supabase-js": "^2.115.0",
     "@types/bun": "^1.4.0",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",

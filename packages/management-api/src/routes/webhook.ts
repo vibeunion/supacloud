@@ -2,15 +2,8 @@ import { Elysia, t, type Static, status } from "elysia";
 import { logger } from "../utils/logger";
 import { frontendService } from "../services/frontend.service";
 import type { FrontendDeployment } from "../types/frontend";
-import { timingSafeEqual } from "crypto";
+import { timingSafeEqual } from "node:crypto";
 import { processAutoBranchingFromPush } from "../services/auto-branching.service";
-
-function safeTokenEqual(a: string, b: string): boolean {
-  const bufA = Buffer.from(a, "utf8");
-  const bufB = Buffer.from(b, "utf8");
-  if (bufA.length !== bufB.length) return false;
-  return timingSafeEqual(bufA, bufB);
-}
 
 // Shared TypeBox schema for Git webhook payloads (GitHub/GitLab/Gitee/GitCode)
 const WebhookBodySchema = t.Object({
@@ -174,8 +167,12 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
           } else {
             const payloadStr = JSON.stringify(body);
             const safeSignature = signature || "";
-            for (const t of tokens) {
-              if (await verifyGitHubSignature(payloadStr, safeSignature, t.token)) {
+            const tokenSecrets = await frontendService.getDeployTokenSecrets(
+              deployment.project_ref,
+              deployment.id,
+            );
+            for (const token of tokenSecrets) {
+              if (await verifyGitHubSignature(payloadStr, safeSignature, token)) {
                 isValidSignature = true;
                 break;
               }
@@ -485,7 +482,11 @@ async function triggerDeployForGit(
         results.push({ deployment_id: deployment.id, project_ref: deployment.project_ref, success: false, error: "Missing webhook token" });
         continue;
       }
-      const isValid = deployment.deploy_tokens.some(t => safeTokenEqual(t.token, token!));
+      const isValid = await frontendService.verifyDeployToken(
+        deployment.project_ref,
+        deployment.id,
+        token,
+      );
       if (!isValid) {
         results.push({ deployment_id: deployment.id, project_ref: deployment.project_ref, success: false, error: "Invalid webhook token" });
         continue;

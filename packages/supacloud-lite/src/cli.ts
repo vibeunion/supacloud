@@ -52,7 +52,7 @@ function parseArgs(argv: string[]): CliOptions {
     json: false,
   }
 
-  for (let index = 0; index < args.length; index++) {
+  for (let index: number = 0; index < args.length; index++) {
     const argument = args[index]!
     const next = () => {
       const value = args[++index]
@@ -525,7 +525,7 @@ function formatDatabaseEngine(engine: NonNullable<ProjectRuntimeOptions['engine'
   return dataDir ? `${label} (${dataDir})` : `${label} (memory)`
 }
 
-let exitCode = 0
+let exitCode: number = 0
 try {
   await main()
 } catch (error) {

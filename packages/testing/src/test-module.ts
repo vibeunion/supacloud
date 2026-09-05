@@ -9,20 +9,21 @@
 const INJECTABLE_METADATA = "supacloud:injectable";
 const INJECT_PARAMS_METADATA = "supacloud:inject-params";
 const MODULE_METADATA = "supacloud:module";
+type Constructor = Function;
 
 export interface ProviderOverride {
   /** InjectionToken instance or class identifying the provider to replace. */
   token: unknown;
   useValue?: unknown;
-  useClass?: new (...args: any[]) => unknown;
-  useFactory?: (...deps: any[]) => unknown;
+  useClass?: Constructor;
+  useFactory?: (...deps: unknown[]) => unknown;
 }
 
 export interface ModuleMetaLike {
   name: string;
   /** Classes or { provide, useClass|useValue|useFactory|useExisting, deps?, scope? } records. */
   providers: unknown[];
-  imports?: Array<new (...args: any[]) => unknown> | ModuleMetaLike[];
+  imports?: Array<Constructor> | ModuleMetaLike[];
   [key: string]: unknown;
 }
 
@@ -36,7 +37,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function isClass(value: unknown): value is new (...args: any[]) => unknown {
+function isClass(value: unknown): value is Constructor {
   return typeof value === "function";
 }
 
@@ -58,7 +59,7 @@ function camelCase(name: string): string {
  */
 export function tokenKey(token: unknown): string {
   if (isClass(token)) {
-    const name = (token as { name?: string }).name;
+    const name = token.name;
     if (!name) {
       throw new Error("tokenKey: anonymous class tokens are not supported");
     }
@@ -79,11 +80,14 @@ function describeToken(token: unknown): string {
 }
 
 /** Merge @Injectable deps with @Inject param tokens into a positional array. */
-function classDeps(cls: new (...args: any[]) => unknown): unknown[] {
-  const statics = cls as unknown as Record<string, unknown>;
-  const meta = statics[INJECTABLE_METADATA] as { deps?: unknown[] } | undefined;
-  const params = statics[INJECT_PARAMS_METADATA] as Record<number, unknown> | undefined;
-  const deps: unknown[] = [...(meta?.deps ?? [])];
+function classDeps(cls: Constructor): unknown[] {
+  const metaValue: unknown = Reflect.get(cls, INJECTABLE_METADATA);
+  const meta = isRecord(metaValue) && Array.isArray(metaValue.deps)
+    ? metaValue.deps
+    : [];
+  const paramsValue: unknown = Reflect.get(cls, INJECT_PARAMS_METADATA);
+  const params = isRecord(paramsValue) ? paramsValue : undefined;
+  const deps: unknown[] = [...meta];
   if (params) {
     for (const [index, token] of Object.entries(params)) {
       deps[Number(index)] = token;
@@ -101,7 +105,7 @@ function explicitDeps(provider: unknown): unknown[] | undefined {
 }
 
 /** Deps used to construct an override, falling back to the original declaration. */
-function overrideDeps(record: ProviderRecord, overrideClass?: new (...args: any[]) => unknown): unknown[] {
+function overrideDeps(record: ProviderRecord, overrideClass?: Constructor): unknown[] {
   if (overrideClass) {
     const own = classDeps(overrideClass);
     if (own.length > 0) return own;
@@ -118,12 +122,11 @@ function overrideDeps(record: ProviderRecord, overrideClass?: new (...args: any[
 function collectProviders(meta: ModuleMetaLike, records: ProviderRecord[]): void {
   for (const imported of meta.imports ?? []) {
     if (isClass(imported)) {
-      const importedMeta = (imported as unknown as Record<string, unknown>)[MODULE_METADATA] as
-        | ModuleMetaLike
-        | undefined;
+      const metadata: unknown = Reflect.get(imported, MODULE_METADATA);
+      const importedMeta = isModuleMetaLike(metadata) ? metadata : undefined;
       if (importedMeta) collectProviders(importedMeta, records);
     } else if (isRecord(imported)) {
-      collectProviders(imported as ModuleMetaLike, records);
+      if (isModuleMetaLike(imported)) collectProviders(imported, records);
     }
   }
   for (const provider of meta.providers ?? []) {
@@ -216,17 +219,17 @@ function instantiate(
     if ("useValue" in override) return override.useValue;
     if (override.useClass) {
       const deps = overrideDeps(record, override.useClass).map(resolve);
-      return new override.useClass(...deps);
+      return Reflect.construct(override.useClass, deps);
     }
     if (override.useFactory) {
-      return override.useFactory(...overrideDeps(record).map(resolve));
+      return Reflect.apply(override.useFactory, undefined, overrideDeps(record).map(resolve));
     }
     throw new Error(`createTestModule: override for "${describeToken(record.token)}" has no use* value`);
   }
 
   // Bare class provider: the class is its own token.
   if (isClass(provider)) {
-    return new provider(...classDeps(provider).map(resolve));
+    return Reflect.construct(provider, classDeps(provider).map(resolve));
   }
   if (!isRecord(provider)) {
     throw new Error(`createTestModule: invalid provider for "${describeToken(record.token)}"`);
@@ -234,14 +237,20 @@ function instantiate(
   if ("useValue" in provider) return provider.useValue;
   if (isClass(provider.useClass)) {
     const deps = (explicitDeps(provider) ?? classDeps(provider.useClass)).map(resolve);
-    return new provider.useClass(...deps);
+    return Reflect.construct(provider.useClass, deps);
   }
   if (typeof provider.useFactory === "function") {
     const deps = (explicitDeps(provider) ?? []).map(resolve);
-    return (provider.useFactory as (...deps: any[]) => unknown)(...deps);
+    return Reflect.apply(provider.useFactory, undefined, deps);
   }
   if ("useExisting" in provider) {
     return resolve(provider.useExisting);
   }
   throw new Error(`createTestModule: invalid provider for "${describeToken(record.token)}"`);
+}
+
+function isModuleMetaLike(value: unknown): value is ModuleMetaLike {
+  return isRecord(value)
+    && typeof value.name === "string"
+    && Array.isArray(value.providers);
 }

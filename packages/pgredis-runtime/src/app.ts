@@ -1,24 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
-import { Elysia, t } from "elysia";
+import { Elysia, t, type Static } from "elysia";
 import { TenantCapacityError, type TenantCache, type TenantCacheRegistry } from "./cache-registry";
 import { InvalidCapabilityError, verifyPgredisCapability } from "./capability";
 import { pgredisExtensionPolicy } from "./extension-policy";
 import { PROJECT_REF_PATTERN, TenantConfigError } from "./tenant-config";
 
 type CacheOperation = "get" | "set" | "delete" | "ttl" | "getset" | "getdel";
-
-interface CacheRequest {
-  op: CacheOperation;
-  key: string;
-  value?: unknown;
-  ttlMs?: number | null;
-}
-
-type AdminCacheRequest =
-  | { projectRef: string; op: "get" | "delete" | "ttl" | "getdel"; key: string }
-  | { projectRef: string; op: "set"; key: string; value: unknown; ttlMs?: number | null }
-  | { projectRef: string; op: "getset"; key: string; value: unknown }
-  | { projectRef: string; op: "flush"; confirmProjectRef: string };
 
 export interface PgredisRuntimeAppOptions {
   signingSecret: string;
@@ -63,7 +50,7 @@ async function executeCacheOperation(
       if (!("value" in body) || jsonSize(body.value) > maxValueBytes) {
         throw new ClientRequestError("Cache value is missing or too large");
       }
-      return { value: await cache.getset(body.key, body.value) };
+      return { value: await cache.getset(body.key, body.value, (value) => value) };
     }
     case "getdel":
       return { value: await cache.getdel(body.key) };
@@ -109,6 +96,7 @@ const cacheRequestSchema = t.Object({
     t.Null(),
   ])),
 }, { additionalProperties: false });
+type CacheRequest = Static<typeof cacheRequestSchema>;
 
 const projectRefSchema = t.String({
   minLength: 1,
@@ -141,6 +129,7 @@ const adminCacheRequestSchema = t.Union([
     confirmProjectRef: projectRefSchema,
   }, { additionalProperties: false }),
 ]);
+type AdminCacheRequest = Static<typeof adminCacheRequestSchema>;
 
 export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
   const adminToken = options.adminToken ?? options.signingSecret;
@@ -223,7 +212,7 @@ export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
       "/internal/v1/admin/cache",
       async ({ body, request }) => {
         requireInternalToken(request, adminToken);
-        const adminRequest = body as AdminCacheRequest;
+        const adminRequest: AdminCacheRequest = body;
         if (
           adminRequest.op === "flush"
           && adminRequest.confirmProjectRef !== adminRequest.projectRef
@@ -264,7 +253,7 @@ export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
         try {
           return await executeCacheOperation(
             lease.cache,
-            body as CacheRequest,
+            body,
             options.maxValueBytes,
             options.maxTtlMs,
           );

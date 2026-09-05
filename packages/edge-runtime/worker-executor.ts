@@ -116,7 +116,7 @@ const moduleCache = new Map<string, ModuleCacheEntry>();
 
 function evictOldestModule() {
   while (moduleCache.size >= MAX_MODULE_CACHE) {
-    let oldestKey = "";
+    let oldestKey: string = "";
     let oldestTime = Infinity;
     for (const [key, entry] of moduleCache) {
       if (entry.lastUsed < oldestTime) {
@@ -160,7 +160,7 @@ function buildModuleImportUrl(identity: ModuleIdentity): string {
 }
 
 function invalidateCachedModules(predicate: (entry: ModuleCacheEntry) => boolean): number {
-  let invalidated = 0;
+  let invalidated: number = 0;
   for (const [key, entry] of moduleCache) {
     if (predicate(entry)) {
       moduleCache.delete(key);
@@ -252,7 +252,7 @@ function isDynamicImportLiteral(source: string, start: number, end: number): boo
     return false;
   }
 
-  for (let index = 1; index < expression.length; index++) {
+  for (let index: number = 1; index < expression.length; index++) {
     const character = expression[index];
     if (character === "\\") {
       index++;
@@ -341,11 +341,11 @@ async function assertTenantModuleGraphSafe(
 const originalProcessEnv = process.env;
 const bunRuntime = (globalThis as unknown as { Bun?: { env: Record<string, string | undefined> } }).Bun;
 const originalBunEnv = bunRuntime ? { ...bunRuntime.env } : null;
-let envSnapshotActive = false;
+let envSnapshotActive: boolean = false;
 let currentAbortController: AbortController | null = null;
 let currentInjectedEnv: Record<string, string> = {};
 let currentWaitUntilTasks: Promise<unknown>[] = [];
-let retiring = false;
+let retiring: boolean = false;
 
 async function resolveMessageTlsPolicy(
   tlsPolicy: EdgeFetchTlsPolicy | undefined,
@@ -819,7 +819,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
 
           try {
             const reader = response.body.getReader();
-            let responseBytes = 0;
+            let responseBytes: number = 0;
             while (true) {
               const { done, value } = await reader.read();
               if (done) {

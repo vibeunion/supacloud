@@ -256,7 +256,7 @@ function assertOfficialDownloadUrl(url: URL): void {
 }
 
 function boundedWriter(maxBytes: number): Transform {
-    let receivedBytes = 0;
+    let receivedBytes: number = 0;
     return new Transform({
         transform(chunk: Buffer, _encoding, callback) {
             receivedBytes += chunk.length;
@@ -328,7 +328,7 @@ async function downloadDirect(url: string, destination: string, maxBytes: number
     assertOfficialDownloadUrl(parsed);
     const deadline = Date.now() + DOWNLOAD_TIMEOUT_MS;
     const retryFailures: unknown[] = [];
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
+    for (let attempt: number = 1; attempt <= 3; attempt += 1) {
         rmSync(destination, { force: true });
         try {
             await downloadHttpsResponse({ url: parsed, destination, maxBytes, redirects: 0, deadline });
@@ -485,8 +485,8 @@ function spawnGithubCli(arguments_: string[]): GithubCliProcess {
 
 function githubCliExitCode(child: GithubCliProcess, timeoutMs: number): Promise<number> {
     return new Promise<number>((resolve, reject) => {
-        let timedOut = false;
-        let settled = false;
+        let timedOut: boolean = false;
+        let settled: boolean = false;
         let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
         const timeout = setTimeout(() => {
             timedOut = true;
@@ -508,8 +508,8 @@ function githubCliExitCode(child: GithubCliProcess, timeoutMs: number): Promise<
 
 export async function runGithubCli(arguments_: string[], timeoutMs: number): Promise<GithubCliResult> {
     const child = spawnGithubCli(arguments_);
-    let stdout = "";
-    let stderr = "";
+    let stdout: string = "";
+    let stderr: string = "";
     child.stdout.on("data", (chunk: Buffer) => { stdout = `${stdout}${chunk.toString()}`.slice(-8_000); });
     child.stderr.on("data", (chunk: Buffer) => { stderr = `${stderr}${chunk.toString()}`.slice(-8_000); });
     const exitCode = await githubCliExitCode(child, timeoutMs);
@@ -523,7 +523,7 @@ export async function runGithubCliDownload(
     timeoutMs: number,
 ): Promise<GithubCliResult> {
     const child = spawnGithubCli(arguments_);
-    let stderr = "";
+    let stderr: string = "";
     child.stderr.on("data", (chunk: Buffer) => { stderr = `${stderr}${chunk.toString()}`.slice(-8_000); });
     const write = pipeline(
         child.stdout,

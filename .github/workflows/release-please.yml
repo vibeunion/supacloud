@@ -421,14 +421,6 @@ jobs:
           bun run check
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
-      - name: Publish cli to NPM
-        if: ${{ needs.release-please.outputs.cli_released == 'true' }}
-        working-directory: packages/cli
-        run: |
-          bun install --frozen-lockfile
-          bun run build
-          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
-
       - name: Publish admin to NPM
         if: ${{ needs.release-please.outputs.admin_released == 'true' }}
         working-directory: packages/admin
@@ -472,6 +464,33 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
           bun install --frozen-lockfile
+          bun run build
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
+      - name: Publish cli to NPM
+        if: ${{ needs.release-please.outputs.cli_released == 'true' }}
+        working-directory: packages/cli
+        run: |
+          if [[ "${{ needs.release-please.outputs.compiler_released }}" == "true" ]]; then
+            compiler_version="$(node -p "require('../compiler/package.json').version")"
+            published=""
+            for attempt in $(seq 1 12); do
+              published="$(npm view "@supacloud/compiler@$compiler_version" version 2>/dev/null || true)"
+              if [[ "$published" == "$compiler_version" ]]; then
+                break
+              fi
+              if [[ "$attempt" -lt 12 ]]; then
+                sleep 5
+              fi
+            done
+            if [[ "$published" != "$compiler_version" ]]; then
+              echo "Published compiler is not visible: @supacloud/compiler@$compiler_version" >&2
+              exit 1
+            fi
+            node "$GITHUB_WORKSPACE/.github/scripts/sync-compiler-dependency.mjs"
+            bun install --lockfile-only --registry https://registry.npmjs.org
+          fi
+          bun install --frozen-lockfile --registry https://registry.npmjs.org
           bun run build
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
@@ -610,6 +629,106 @@ jobs:
               --head "$branch" \
               --title "fix(supacloud): sync published CLI dependencies" \
               --body "Synchronize the umbrella package with the CLI and Admin versions that have completed trusted npm publication, including the reproducible Bun lockfile."
+          else
+            echo "Updated dependency synchronization PR #$existing_pr."
+          fi
+
+  sync-cli-compiler-dependency:
+    needs: [release-please, publish-npm]
+    if: ${{ always() && needs.publish-npm.result == 'success' && needs.release-please.outputs.compiler_released == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Synchronize CLI compiler dependency
+        id: synchronize
+        run: |
+          if ! sync_output="$(node .github/scripts/sync-compiler-dependency.mjs)"; then
+            echo "Compiler dependency synchronization failed." >&2
+            exit 1
+          fi
+          case "$sync_output" in
+            changed=true|changed=false) ;;
+            *)
+              echo "Unexpected compiler dependency synchronization output: $sync_output" >&2
+              exit 1
+              ;;
+          esac
+          printf '%s\n' "$sync_output" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for published compiler
+        if: ${{ steps.synchronize.outputs.changed == 'true' }}
+        run: |
+          compiler_version="$(node -p "require('./packages/compiler/package.json').version")"
+          published=""
+          for attempt in $(seq 1 12); do
+            published="$(npm view "@supacloud/compiler@$compiler_version" version 2>/dev/null || true)"
+            if [[ "$published" == "$compiler_version" ]]; then
+              break
+            fi
+            if [[ "$attempt" -lt 12 ]]; then
+              sleep 5
+            fi
+          done
+          if [[ "$published" != "$compiler_version" ]]; then
+            echo "Published compiler is not visible: @supacloud/compiler@$compiler_version" >&2
+            exit 1
+          fi
+
+      - name: Regenerate and verify CLI lockfile
+        if: ${{ steps.synchronize.outputs.changed == 'true' }}
+        working-directory: packages/cli
+        run: |
+          bun install --lockfile-only --registry https://registry.npmjs.org
+          bun install --frozen-lockfile --registry https://registry.npmjs.org
+          bun run typecheck
+          bun run build
+          git diff --check -- package.json bun.lock
+
+      - name: Open CLI dependency synchronization PR
+        if: ${{ steps.synchronize.outputs.changed == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+        run: |
+          if git diff --quiet -- packages/cli/package.json packages/cli/bun.lock; then
+            echo "Dependency synchronization reported a change but produced no diff." >&2
+            exit 1
+          fi
+
+          branch="automation/sync-cli-compiler-dependency"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add packages/cli/package.json packages/cli/bun.lock
+          git commit -m "fix(cli): sync published compiler dependency"
+          git push --force-with-lease origin "HEAD:$branch"
+
+          existing_pr="$(gh pr list --base main --head "$branch" --state open --json number --jq '.[0].number // empty')"
+          if [[ -z "$existing_pr" ]]; then
+            gh pr create \
+              --base main \
+              --head "$branch" \
+              --title "fix(cli): sync published compiler dependency" \
+              --body "Synchronize the CLI with the compiler release after trusted npm publication, including the reproducible Bun lockfile."
           else
             echo "Updated dependency synchronization PR #$existing_pr."
           fi
