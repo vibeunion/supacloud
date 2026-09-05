@@ -14,6 +14,19 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.45.0](https://github.com/vibeunion/supacloud/compare/cli-v0.44.1...cli-v0.45.0) (2026-09-05)
+
+
+### Features
+
+* **compiler:** enforce generated type safety ([#1157](https://github.com/vibeunion/supacloud/issues/1157)) ([1c79d4a](https://github.com/vibeunion/supacloud/commit/1c79d4af99cd144c63787a7c69a60f142bcef94a))
+* migrate compiler and strengthen type safety ([81ffb9d](https://github.com/vibeunion/supacloud/commit/81ffb9dae9a09b5561f90e655f1503514d3fe1d7))
+
+
+### Documentation
+
+* **cli:** document Bun execution path ([#1155](https://github.com/vibeunion/supacloud/issues/1155)) ([49a7a3f](https://github.com/vibeunion/supacloud/commit/49a7a3fbd99eca4289a08564b467b5770824dc3a))
+
 ## [0.44.1](https://github.com/vibeunion/supacloud/compare/cli-v0.44.0...cli-v0.44.1) (2026-09-04)
 
 

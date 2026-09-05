@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/vibeunion/supacloud/compare/admin-v0.20.1...admin-v0.21.0) (2026-09-05)
+
+
+### Features
+
+* migrate compiler and strengthen type safety ([81ffb9d](https://github.com/vibeunion/supacloud/commit/81ffb9dae9a09b5561f90e655f1503514d3fe1d7))
+
 ## [0.20.1](https://github.com/vibeunion/supacloud/compare/admin-v0.20.0...admin-v0.20.1) (2026-09-04)
 
 

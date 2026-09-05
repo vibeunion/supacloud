@@ -42,14 +42,20 @@ registerCheck({
   severity: "critical",
   repairable: false,
   async run(): Promise<DiagnosticCheckResult | null> {
+    const { config } = await import("../../config");
     const gateway = { unit: "supacloud-caddy", label: "Caddy Gateway" };
     const services = [
       { unit: "supacloud", label: "Management API" },
       gateway,
-      { unit: "supacloud-edge-runtime", label: "Edge Runtime" },
       { unit: "supacloud-pgredis-runtime", label: "pgredis Runtime" },
     ];
     const optionalSkipped: string[] = [];
+
+    if (config.edgeRuntimeMode === "external") {
+      services.push({ unit: "supacloud-edge-runtime", label: "Edge Runtime" });
+    } else {
+      optionalSkipped.push("Edge Runtime standalone unit (embedded in supacloud.service)");
+    }
 
     if (await isSystemdUnitInstalled("patroni")) {
       services.push({ unit: "patroni", label: "Patroni (PostgreSQL HA)" });

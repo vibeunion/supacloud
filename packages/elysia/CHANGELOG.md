@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.4.0...elysia-v0.5.0) (2026-09-05)
+
+
+### Features
+
+* add statically compiled AOP boundaries and jobs ([#1160](https://github.com/vibeunion/supacloud/issues/1160)) ([66c962a](https://github.com/vibeunion/supacloud/commit/66c962a923ed6c4dbd3a354715346878793bb14c))
+* migrate compiler and strengthen type safety ([81ffb9d](https://github.com/vibeunion/supacloud/commit/81ffb9dae9a09b5561f90e655f1503514d3fe1d7))
+
 ## [0.4.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.3.0...elysia-v0.4.0) (2026-09-04)
 
 
