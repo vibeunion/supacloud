@@ -169,4 +169,26 @@ describe("Angular 14+ EnvironmentInjector and createEnvironmentInjector", () => 
 
     expect(env.get(DERIVED)).toBe("context:derived");
   });
+
+  it("supports Angular provider deps descriptors without a custom lookup container", () => {
+    const VALUE = new InjectionToken<string>("VALUE");
+    const MISSING = new InjectionToken<string>("MISSING");
+    const RESULT = new InjectionToken<string>("RESULT");
+
+    const parent = createEnvironmentInjector([
+      { provide: VALUE, useValue: "parent" },
+    ]);
+    const child = createEnvironmentInjector([
+      {
+        provide: RESULT,
+        useFactory: (value: string, missing: string | undefined) => `${value}:${missing ?? "optional"}`,
+        deps: [
+          { token: VALUE, skipSelf: true },
+          { token: MISSING, optional: true },
+        ],
+      },
+    ], parent);
+
+    expect(child.get(RESULT)).toBe("parent:optional");
+  });
 });

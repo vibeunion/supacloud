@@ -1,4 +1,4 @@
-import type { Provider, Token, Type } from "./provider";
+import type { Provider, ProviderDep, Token, Type } from "./provider";
 import type { EnvironmentProviders } from "./provider";
 import { flattenProviders } from "./provider";
 import type { Scope } from "./scope";
@@ -54,13 +54,13 @@ export interface InjectableOptions {
   /** Automatically provide this service in root scope without manual module declaration (Angular-style). */
   providedIn?: "root";
   /** Explicit constructor dependency tokens, in parameter order. */
-  deps?: Token[];
+  deps?: ProviderDep[];
 }
 
 export interface InjectableMeta {
   scope: Scope;
   providedIn?: "root";
-  deps: Token[];
+  deps: ProviderDep[];
 }
 
 export interface ModuleOptions {
@@ -183,7 +183,7 @@ export function Injectable(options: InjectableOptions = {}): ClassDecorator {
     AngularInjectable({
       providedIn: options.providedIn ?? null,
     })(target);
-    const prototype = (target as Type<unknown>).prototype as Record<string, unknown>;
+    const prototype = (target as unknown as Type<unknown>).prototype as Record<string, unknown>;
     if (
       typeof prototype.ngOnDestroy !== "function" &&
       typeof prototype.onDestroy === "function"

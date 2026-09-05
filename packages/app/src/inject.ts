@@ -9,9 +9,18 @@ import {
   type InjectOptions,
   type Provider as AngularProvider,
 } from "@angular/core";
-import type { EnvironmentProviders, Provider, Token } from "./provider";
-import { flattenProviders } from "./provider";
+import type { EnvironmentProviders, Provider, ProviderDep, ProviderDependency, Token, Type } from "./provider";
+import { flattenProviders, isClassProvider, isFactoryProvider } from "./provider";
 import { APP_INITIALIZER, DESTROY_REF, ENVIRONMENT_INITIALIZER } from "./context";
+import {
+  getInjectableMeta,
+  getInjectParams,
+  getOptionalParams,
+  getSelfParams,
+  getSkipSelfParams,
+  getHostParams,
+} from "./decorators";
+import { resolveForwardRef } from "./forward_ref";
 import { InjectionToken } from "./token";
 
 export type InjectFlags = InjectOptions;
@@ -65,7 +74,8 @@ export function inject<T>(token: Token<T>, options?: InjectFlags): T {
     ) {
       return token.factory() as T;
     }
-    return undefined as T;
+    if (options?.optional) return undefined as T;
+    throw new Error(`NullInjectorError: No provider for ${tokenToString(token)}`);
   } catch (error) {
     if (
       error instanceof Error &&
@@ -159,6 +169,60 @@ export function createEnvironmentInjector(
   parent?: InjectorLike,
 ): EnvironmentInjector {
   let adapter: EnvironmentInjector;
+  const trackedInstances: unknown[] = [];
+  const track = (value: unknown): unknown => {
+    if (value && typeof value === "object" && !trackedInstances.includes(value)) {
+      trackedInstances.push(value);
+    }
+    return value;
+  };
+  const instantiate = (type: Type<unknown>, explicitDeps?: unknown[]): unknown => {
+    const dependencies = explicitDeps ?? resolveClassDependencies(type);
+    return track(new type(...dependencies));
+  };
+  const normalizedProviders: AngularProvider[] = flattenProviders(providers).map((provider) => {
+    if (typeof provider === "function") {
+      const type = resolveForwardRef(provider);
+      return {
+        provide: type,
+        useFactory: () => instantiate(type as Type<unknown>),
+      };
+    }
+    if (isClassProvider(provider)) {
+      const type = resolveForwardRef(provider.useClass) as Type<unknown>;
+      const dependencies = provider.deps ?? [];
+      const hasDescriptors = dependencies.some((dependency) => isProviderDependency(dependency));
+      return {
+        provide: provider.provide,
+        useFactory: (...deps: unknown[]) => instantiate(
+          type,
+          hasDescriptors
+            ? dependencies.map((dependency) => resolveProviderDependency(dependency))
+            : deps,
+        ),
+        deps: hasDescriptors
+          ? undefined
+          : dependencies as unknown as never[],
+      };
+    }
+    if (isFactoryProvider(provider)) {
+      const dependencies = provider.deps ?? [];
+      const hasDescriptors = dependencies.some((dependency) => isProviderDependency(dependency));
+      if (hasDescriptors) {
+        return {
+          provide: provider.provide,
+          useFactory: () => track(provider.useFactory(
+            ...dependencies.map((dependency) => resolveProviderDependency(dependency)),
+          )),
+        };
+      }
+      return {
+        ...provider,
+        useFactory: (...deps: unknown[]) => track(provider.useFactory(...deps)),
+      } as AngularProvider;
+    }
+    return provider as AngularProvider;
+  });
   const runtime = angularCreateEnvironmentInjector(
     [
       {
@@ -169,7 +233,7 @@ export function createEnvironmentInjector(
         provide: INJECTOR,
         useFactory: () => adapter,
       },
-      ...flattenProviders(providers),
+      ...normalizedProviders,
     ] as AngularProvider[],
     parent as AngularEnvironmentInjector,
     "supacloud",
@@ -203,10 +267,22 @@ export function createEnvironmentInjector(
       }
     },
     runInContext<R>(fn: () => R): R {
+      if (runtime.destroyed) {
+        throw new Error("EnvironmentInjector has already been destroyed.");
+      }
       return runInInjectionContext(adapter, fn);
     },
     destroy(): void {
       runtime.destroy();
+      for (const instance of [...trackedInstances].reverse()) {
+        if (!instance || typeof instance !== "object") continue;
+        const candidate = instance as {
+          onDestroy?: () => void | Promise<void>;
+          ngOnDestroy?: () => void | Promise<void>;
+        };
+        const hook = candidate.onDestroy ?? candidate.ngOnDestroy;
+        if (hook) void hook.call(instance);
+      }
     },
   };
 
@@ -226,6 +302,57 @@ function runInitializers(
       void injector.runInContext(() => initializer());
     }
   }
+}
+
+function resolveClassDependencies(type: Type<unknown>): unknown[] {
+  const metadata = getInjectableMeta(type);
+  const indexed = new Map<number, ProviderDep>();
+  if (metadata?.deps) {
+    metadata.deps.forEach((dependency, index) => {
+      indexed.set(index, dependency);
+    });
+  }
+  for (const [index, token] of Object.entries(getInjectParams(type))) {
+    indexed.set(Number(index), token);
+  }
+  if (indexed.size === 0) return [];
+  const optional = new Set(getOptionalParams(type));
+  const self = new Set(getSelfParams(type));
+  const skipSelf = new Set(getSkipSelfParams(type));
+  const host = new Set(getHostParams(type));
+  const maxIndex = Math.max(...indexed.keys());
+  return Array.from({ length: maxIndex + 1 }, (_, index) => {
+    const dependency = indexed.get(index);
+    if (!dependency) return undefined;
+    const token = isProviderDependency(dependency) ? dependency.token : dependency;
+    const descriptor = isProviderDependency(dependency) ? dependency : undefined;
+    const options: InjectFlags = {
+      optional: descriptor?.optional ?? optional.has(index),
+      self: descriptor?.self ?? self.has(index),
+      skipSelf: descriptor?.skipSelf ?? skipSelf.has(index),
+      host: descriptor?.host ?? host.has(index),
+    };
+    const resolved = resolveForwardRef(token);
+    return options.optional || options.self || options.skipSelf || options.host
+      ? angularInject(resolved as never, options)
+      : angularInject(resolved as never);
+  });
+}
+
+function resolveProviderDependency(dependency: ProviderDep): unknown {
+  const descriptor: ProviderDependency = isProviderDependency(dependency)
+    ? dependency
+    : { token: dependency };
+  const { token, optional, self, skipSelf, host } = descriptor;
+  const options: InjectFlags = { optional, self, skipSelf, host };
+  const resolved = resolveForwardRef(token);
+  return optional || self || skipSelf || host
+    ? angularInject(resolved as never, options)
+    : angularInject(resolved as never);
+}
+
+function isProviderDependency(value: unknown): value is ProviderDependency {
+  return typeof value === "object" && value !== null && "token" in value;
 }
 
 function isInjectOptions(value: unknown): value is InjectFlags {
