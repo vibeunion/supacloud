@@ -516,12 +516,14 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     const http = new HttpTransport({
         baseUrl: context.apiUrl,
         token: context.apiToken,
+        insecureTls: context.insecureTls,
     });
     const applicationHttp = context.inferredSupabaseUrl && context.inferredServiceRoleKey
         ? new HttpTransport({
             baseUrl: context.inferredSupabaseUrl,
             token: context.inferredServiceRoleKey,
             apiKey: context.inferredServiceRoleKey,
+            insecureTls: context.insecureTls,
         })
         : undefined;
 

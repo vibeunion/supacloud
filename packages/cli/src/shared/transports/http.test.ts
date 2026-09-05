@@ -77,6 +77,23 @@ test("HttpTransport sends an optional application API key only when configured",
     ]);
 });
 
+test("HttpTransport opts into Bun's insecure TLS mode only when configured", async () => {
+    const tlsOptions: unknown[] = [];
+    globalThis.fetch = (async (_input, init) => {
+        tlsOptions.push((init as RequestInit & { tls?: unknown }).tls);
+        return Response.json({ ok: true });
+    }) as typeof fetch;
+
+    await createTransport().get("/strict");
+    await new HttpTransport({
+        baseUrl: "https://api.example.test",
+        token: "test-token",
+        insecureTls: true,
+    }).get("/insecure");
+
+    expect(tlsOptions).toEqual([undefined, { rejectUnauthorized: false }]);
+});
+
 function retryableNetworkError(kind: "AbortError" | "ECONNREFUSED" | "ECONNRESET"): Error {
     const error = new Error(kind);
     if (kind === "AbortError") error.name = kind;

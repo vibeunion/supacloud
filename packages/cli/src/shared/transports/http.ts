@@ -9,6 +9,7 @@ export interface HttpConfig {
     baseUrl: string;
     token: string;
     apiKey?: string;
+    insecureTls?: boolean;
 }
 
 export interface HttpResult<T = unknown> {
@@ -136,15 +137,17 @@ async function fetchWithTimeout(
     url: string,
     options: RequestInit,
     timeoutMs = DEFAULT_TIMEOUT,
+    insecureTls = false,
 ): Promise<Response> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
         return await fetch(url, {
             ...options,
+            ...(insecureTls ? { tls: { rejectUnauthorized: false } } : {}),
             signal: controller.signal,
             redirect: "error",
-        });
+        } as RequestInit);
     } finally {
         clearTimeout(timeout);
     }
@@ -154,11 +157,12 @@ async function fetchWithRetry(
     url: string,
     options: RequestInit,
     timeoutMs = DEFAULT_TIMEOUT,
+    insecureTls = false,
 ): Promise<Response> {
     const retries = isRetryableMethod(options.method) ? MAX_RETRIES : 0;
     for (let attempt: number = 0; attempt <= retries; attempt++) {
         try {
-            const res = await fetchWithTimeout(url, options, timeoutMs);
+            const res = await fetchWithTimeout(url, options, timeoutMs, insecureTls);
 
             if (res.status >= 500 && res.status < 600 && attempt < retries) {
                 const delay = RETRY_BASE_DELAY * Math.pow(2, attempt);
@@ -334,11 +338,13 @@ export class HttpTransport {
     private baseUrl: string;
     private token: string;
     private apiKey: string;
+    private insecureTls: boolean;
 
     constructor(config: HttpConfig) {
         this.baseUrl = config.baseUrl.replace(/\/$/, "");
         this.token = config.token;
         this.apiKey = config.apiKey ?? "";
+        this.insecureTls = config.insecureTls ?? false;
     }
 
     private headers(): Record<string, string> {
@@ -361,7 +367,7 @@ export class HttpTransport {
                 method,
                 headers: this.headers(),
                 body: serializedBody,
-            }, timeoutMs);
+            }, timeoutMs, this.insecureTls);
             const responseBody = await responseReader(response);
             return responseBody.ok
                 ? { ok: response.ok, status: response.status, data: responseBody.parsedJson }
@@ -382,7 +388,7 @@ export class HttpTransport {
             const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "GET",
                 headers: this.headers(),
-            });
+            }, DEFAULT_TIMEOUT, this.insecureTls);
             if (maxJsonBytes !== undefined) {
                 const data = await boundedResponseJson(res, maxJsonBytes, responseTimeoutMs);
                 return data === null
@@ -416,7 +422,7 @@ export class HttpTransport {
                 method: "POST",
                 headers: this.headers(),
                 body: serializedRequestBody(body),
-            }, timeoutMs);
+            }, timeoutMs, this.insecureTls);
             const data = await boundedResponseJson(response, maxJsonBytes, responseTimeoutMs);
             return data === null
                 ? responseReadFailure<T>(response.status)
@@ -472,7 +478,7 @@ export class HttpTransport {
                 body: body.stream,
                 duplex: "half",
             } as RequestInit & { duplex: "half" };
-            const response = await fetchWithRetry(`${this.baseUrl}${path}`, request, timeoutMs);
+            const response = await fetchWithRetry(`${this.baseUrl}${path}`, request, timeoutMs, this.insecureTls);
             const data = await boundedResponseJson(response, maxJsonBytes, responseTimeoutMs);
             return data === null
                 ? responseReadFailure<T>(response.status)
@@ -507,7 +513,7 @@ export class HttpTransport {
                 method: "POST",
                 headers,
                 body: formData,
-            });
+            }, DEFAULT_TIMEOUT, this.insecureTls);
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {
@@ -521,7 +527,7 @@ export class HttpTransport {
                 method: "PATCH",
                 headers: this.headers(),
                 body: body ? JSON.stringify(body) : undefined,
-            });
+            }, DEFAULT_TIMEOUT, this.insecureTls);
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {
@@ -535,7 +541,7 @@ export class HttpTransport {
                 method: "PUT",
                 headers: this.headers(),
                 body: body ? JSON.stringify(body) : undefined,
-            });
+            }, DEFAULT_TIMEOUT, this.insecureTls);
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {
@@ -549,7 +555,7 @@ export class HttpTransport {
                 method: "DELETE",
                 headers: this.headers(),
                 body: serializedRequestBody(body),
-            });
+            }, DEFAULT_TIMEOUT, this.insecureTls);
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {
