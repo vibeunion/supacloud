@@ -37,6 +37,15 @@ describe('CLI compiler dependency sync', () => {
     );
   });
 
+  test('converts the local workspace dependency to a publishable range', () => {
+    const synchronization = syncCompilerDependency(packagesWithRange('file:../../packages/compiler', '0.6.0'));
+    assert.equal(synchronization.changed, true);
+    assert.equal(
+      synchronization.package.dependencies['@supacloud/compiler'],
+      '^0.6.0',
+    );
+  });
+
   test('fails closed for a compiler version regression', () => {
     assert.throws(
       () => syncCompilerDependency(packagesWithRange('^0.6.0', '0.5.0')),
