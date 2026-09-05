@@ -16,6 +16,8 @@ export interface CompiledRoute {
   response?: unknown;
   /** Class name of the @Command explicitly bound to this route. */
   command?: string;
+  /** Statically generated route aspects. */
+  aspects?: ApplicationAspect[];
 }
 
 export interface CompiledCommand {
@@ -25,6 +27,16 @@ export interface CompiledCommand {
   transaction?: "required" | "none" | string;
   audit?: string;
   idempotency?: "required" | "none" | string;
+  /** Statically generated command aspects. */
+  aspects?: ApplicationAspect[];
+}
+
+export interface CompiledJob {
+  className: string;
+  name: string;
+  serviceKey: string;
+  scope: "application" | "request" | "job";
+  aspects?: ApplicationAspect[];
 }
 
 export interface CompiledController {
@@ -48,8 +60,17 @@ export interface CompiledModule {
     imported?: Record<string, Record<string, unknown>>,
   ): Record<string, unknown>;
   destroyRequestScope?(scope: Record<string, unknown>): Promise<void>;
+  createJobScope?(
+    services: Record<string, unknown>,
+    ctx: unknown,
+    imported?: Record<string, Record<string, unknown>>,
+  ): Record<string, unknown>;
+  destroyJobScope?(scope: Record<string, unknown>): Promise<void>;
   controllers: CompiledController[];
   commands?: CompiledCommand[];
+  jobs?: CompiledJob[];
+  /** Statically generated module aspects. */
+  aspects?: ApplicationAspect[];
 }
 
 // ---------------------------------------------------------------------------
@@ -96,6 +117,47 @@ export type CommandExecutor = (
   invocation: CommandInvocation,
   next: () => unknown | Promise<unknown>,
 ) => unknown | Promise<unknown>;
+
+export interface ApplicationAspectContext {
+  kind: "route" | "command" | "job";
+  name: string;
+  input: unknown;
+  request?: Request;
+  requestContext?: unknown;
+  scope?: Record<string, unknown>;
+  services?: Record<string, unknown>;
+  metadata?: unknown;
+}
+
+export type ApplicationAspect = (
+  context: ApplicationAspectContext,
+  next: () => unknown | Promise<unknown>,
+) => unknown | Promise<unknown>;
+
+/**
+ * Compose the compiler-emitted aspect list into a deterministic onion chain.
+ * The runtime only executes the functions it receives; it never discovers or
+ * registers aspects.
+ */
+export function composeAspects(
+  ...aspects: (ApplicationAspect | undefined | null)[]
+): ApplicationAspect {
+  const active = aspects.filter(
+    (aspect): aspect is ApplicationAspect => typeof aspect === "function",
+  );
+  return (context, next) => {
+    let index = -1;
+    const dispatch = (current: number): Promise<unknown> => {
+      if (current <= index) {
+        return Promise.reject(new Error("next() called multiple times"));
+      }
+      index = current;
+      if (current === active.length) return Promise.resolve(next());
+      return Promise.resolve(active[current](context, () => dispatch(current + 1)));
+    };
+    return dispatch(0);
+  };
+}
 
 export type CommandAuthorizer = (
   invocation: CommandInvocation,
@@ -203,6 +265,19 @@ export interface ApplicationOptions {
   /** Maps framework or application failures to the public HTTP contract. */
   errorMapper?: ErrorMapper;
 }
+
+export interface JobInvocation {
+  job: CompiledJob;
+  input: unknown;
+  requestContext: unknown;
+  scope?: Record<string, unknown>;
+  services: Record<string, unknown>;
+}
+
+export type JobExecutor = (
+  invocation: JobInvocation,
+  next: () => unknown | Promise<unknown>,
+) => unknown | Promise<unknown>;
 
 function safeHeaderValue(value: string | null, maxLength: number): string | undefined {
   if (!value || value.length > maxLength || /[\u0000-\u001f\u007f]/.test(value)) {
@@ -512,28 +587,68 @@ export function createModulePlugin(
           requestContext,
         };
         const invoke = () => Reflect.apply(method, instance, [input]);
-        if (!route.command) return invoke();
-
-        const command = commandsByClassName.get(route.command);
-        if (!command) {
-          throw new ApplicationError(`Command "${route.command}" is not registered`, {
-            code: "COMMAND_NOT_REGISTERED",
-          });
-        }
-        if (!commandExecutor) {
-          throw new ApplicationError(`Command "${command.name}" has no executor`, {
-            status: 501,
-            code: "COMMAND_EXECUTOR_UNAVAILABLE",
-          });
-        }
-        return commandExecutor({
-          command,
+        const routeContext: ApplicationAspectContext = {
+          kind: "route",
+          name: `${route.method} ${path}`,
           input,
           request: ctx.request,
           requestContext,
           scope: requestScope,
           services,
-        }, invoke);
+          metadata: route,
+        };
+        const command = route.command
+          ? commandsByClassName.get(route.command)
+          : undefined;
+        const commandContext: ApplicationAspectContext = {
+          kind: "command",
+          name: command?.name ?? route.command ?? `${route.method} ${path}`,
+          input,
+          request: ctx.request,
+          requestContext,
+          scope: requestScope,
+          services,
+          metadata: command ?? route,
+        };
+        const commandAspects = route.command
+          ? commandsByClassName.get(route.command)?.aspects ?? []
+          : [];
+        const routePipeline = composeAspects(...(route.aspects ?? []));
+        const commandPipeline = composeAspects(...commandAspects);
+        const modulePipeline = composeAspects(...(compiled.aspects ?? []));
+        const invokeRoute = () => routePipeline(
+          routeContext,
+          () => route.command
+            ? commandPipeline(commandContext, () => invokeCommand())
+            : invoke(),
+        );
+        const invokeCommand = () => {
+          if (!route.command) return invoke();
+          if (!command) {
+            throw new ApplicationError(`Command "${route.command}" is not registered`, {
+              code: "COMMAND_NOT_REGISTERED",
+            });
+          }
+          if (!commandExecutor) {
+            throw new ApplicationError(`Command "${command.name}" has no executor`, {
+              status: 501,
+              code: "COMMAND_EXECUTOR_UNAVAILABLE",
+            });
+          }
+          const invocation: CommandInvocation = {
+            command,
+            input,
+            request: ctx.request,
+            requestContext,
+            scope: requestScope,
+            services,
+          };
+          return commandExecutor(invocation, invoke);
+        };
+        return modulePipeline(
+          route.command ? commandContext : routeContext,
+          invokeRoute,
+        );
       };
 
       switch (route.method) {
@@ -573,6 +688,70 @@ export function createModulePlugin(
   });
 
   return plugin as unknown as Elysia;
+}
+
+/**
+ * Execute one compiler-emitted Job descriptor.
+ *
+ * Job classes use `run(input)` as their entry method; `execute(input)` is also
+ * accepted for command-like job implementations. The scope factory and
+ * destruction hooks are generated statically by the compiler.
+ */
+export async function executeJob(
+  compiled: CompiledModule,
+  services: Record<string, unknown>,
+  job: CompiledJob,
+  input: unknown,
+  requestContext: unknown,
+  imported: Record<string, Record<string, unknown>> = {},
+  executor?: JobExecutor,
+): Promise<unknown> {
+  const jobScope = job.scope === "job" && compiled.createJobScope
+    ? compiled.createJobScope(services, requestContext, imported)
+    : undefined;
+
+  try {
+    const source = job.scope === "job" ? jobScope : services;
+    const instance = controllerInstance(source?.[job.serviceKey]);
+    const method = instance?.run ?? instance?.execute;
+    if (typeof method !== "function") {
+      throw new ApplicationError(
+        `Job "${job.name}" has no run(input) or execute(input) handler`,
+        { code: "JOB_HANDLER_UNAVAILABLE" },
+      );
+    }
+
+    const invocation: JobInvocation = {
+      job,
+      input,
+      requestContext,
+      scope: jobScope,
+      services,
+    };
+    const context: ApplicationAspectContext = {
+      kind: "job",
+      name: job.name,
+      input,
+      requestContext,
+      scope: jobScope,
+      services,
+      metadata: job,
+    };
+    const invoke = () => Reflect.apply(method, instance, [input]);
+    const pipeline = composeAspects(
+      ...(compiled.aspects ?? []),
+      ...(job.aspects ?? []),
+    );
+
+    return await pipeline(
+      context,
+      executor ? () => executor(invocation, invoke) : invoke,
+    );
+  } finally {
+    if (jobScope && compiled.destroyJobScope) {
+      await compiled.destroyJobScope(jobScope);
+    }
+  }
 }
 
 export function defaultErrorResponse(

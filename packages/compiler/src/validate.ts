@@ -64,6 +64,8 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "command-governance-unsupported": { code: "SC4004", docsUrl: "https://supacloud.dev/errors/SC4004" },
   "route-command-binding-disabled": { code: "SC4005", docsUrl: "https://supacloud.dev/errors/SC4005" },
   "command-transaction-readonly": { code: "SC4006", docsUrl: "https://supacloud.dev/errors/SC4006" },
+  "dynamic-aspect-reference": { code: "SC4010", docsUrl: "https://supacloud.dev/errors/SC4010" },
+  "invalid-aspect-reference": { code: "SC4011", docsUrl: "https://supacloud.dev/errors/SC4011" },
   "unused-root-provider": { code: "SC5001", docsUrl: "https://supacloud.dev/errors/SC5001" },
 };
 

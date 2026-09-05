@@ -11,6 +11,7 @@ import {
   Self as AngularSelf,
   SkipSelf as AngularSkipSelf,
 } from "@angular/core";
+import type { Aspect } from "./aspect";
 
 /**
  * Decorator metadata keys. Metadata is attached as static properties on the
@@ -20,6 +21,7 @@ import {
 export const INJECTABLE_METADATA = "supacloud:injectable";
 export const MODULE_METADATA = "supacloud:module";
 export const COMMAND_METADATA = "supacloud:command";
+export const JOB_METADATA = "supacloud:job";
 export const QUERY_METADATA = "supacloud:query";
 export const CONTROLLER_METADATA = "supacloud:controller";
 export const ROUTES_METADATA = "supacloud:routes";
@@ -71,12 +73,16 @@ export interface ModuleOptions {
   providers?: Array<Provider | EnvironmentProviders>;
   controllers?: Array<Type<unknown>>;
   commands?: Array<Type<unknown>>;
+  jobs?: Array<Type<unknown>>;
   queries?: Array<Type<unknown>>;
+  /** Explicit static aspects applied to every route and command in this module. */
+  aspects?: Aspect[];
   exports?: Token[];
 }
 
-export interface ModuleMeta extends Required<Omit<ModuleOptions, "exports" | "tags">> {
+export interface ModuleMeta extends Required<Omit<ModuleOptions, "exports" | "tags" | "aspects">> {
   tags?: string[];
+  aspects: Aspect[];
   exports: Token[];
 }
 
@@ -92,7 +98,17 @@ export interface CommandOptions {
   idempotency?: "required" | "none";
   /** Automatically discover and register without manual module declaration. */
   standalone?: boolean;
+  /** Explicit static aspects applied around this command invocation. */
+  aspects?: Aspect[];
 }
+
+export interface JobOptions {
+  name: string;
+  /** Explicit static aspects applied around this job invocation. */
+  aspects?: Aspect[];
+}
+
+export type JobMeta = JobOptions;
 
 export type CommandMeta = Omit<CommandOptions, "transaction" | "idempotency"> & {
   transaction: "required" | "none";
@@ -157,6 +173,8 @@ export interface RouteOptions {
   title?: string;
   /** Static route metadata dictionary (modeled after Angular Route.data). */
   data?: Record<string, unknown>;
+  /** Explicit static aspects applied around this route invocation. */
+  aspects?: Aspect[];
 }
 
 export interface RouteDefinition extends RouteOptions {
@@ -351,9 +369,11 @@ export function Module(options: ModuleOptions): ClassDecorator {
       tags: options.tags ?? [],
       imports: options.imports ?? [],
     providers: options.providers ? flattenProviders(options.providers) : [],
-    controllers: options.controllers ?? [],
+      controllers: options.controllers ?? [],
       commands: options.commands ?? [],
+      jobs: options.jobs ?? [],
       queries: options.queries ?? [],
+      aspects: options.aspects ?? [],
       exports: options.exports ?? [],
     };
     defineMetadata(target, MODULE_METADATA, meta);
@@ -376,6 +396,16 @@ export function Command(options: CommandOptions): ClassDecorator {
 
 export function getCommandMeta(target: object): CommandMeta | undefined {
   return readOwnOrInherited(target, COMMAND_METADATA);
+}
+
+export function Job(options: JobOptions): ClassDecorator {
+  return (target) => {
+    defineMetadata(target, JOB_METADATA, { ...options });
+  };
+}
+
+export function getJobMeta(target: object): JobMeta | undefined {
+  return readOwnOrInherited(target, JOB_METADATA);
 }
 
 export function Param(nameOrOptions?: string | ParamOptions, options?: ParamOptions): ParameterDecorator {

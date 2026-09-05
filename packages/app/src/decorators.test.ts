@@ -7,6 +7,7 @@ import {
   Head,
   Inject,
   Injectable,
+  Job,
   Module,
   Optional,
   Options,
@@ -27,6 +28,7 @@ import {
   getSelfParams,
   getSkipSelfParams,
   getInjectableMeta,
+  getJobMeta,
   getModuleMeta,
   getQueryMeta,
   getRoutes,
@@ -157,7 +159,9 @@ describe("@Module", () => {
       providers: [],
       controllers: [],
       commands: [],
+      jobs: [],
       queries: [],
+      aspects: [],
       exports: [],
     });
   });
@@ -192,6 +196,30 @@ describe("@Module", () => {
 
     const meta = getModuleMeta(CaseModule);
     expect(meta?.tags).toEqual(["scope:case", "type:feature"]);
+  });
+});
+
+describe("static aspects and jobs", () => {
+  test("@Module, @Command, and @Job preserve explicit aspect references", () => {
+    const aspect = () => {};
+
+    @Command({ name: "case.accept", permission: "case.accept", aspects: [aspect] })
+    class AcceptCommand {}
+
+    @Job({ name: "case.rebuild", aspects: [aspect] })
+    class RebuildJob {}
+
+    @Module({
+      name: "case",
+      aspects: [aspect],
+      commands: [AcceptCommand],
+      jobs: [RebuildJob],
+    })
+    class CaseModule {}
+
+    expect(getModuleMeta(CaseModule)?.aspects).toEqual([aspect]);
+    expect(getCommandMeta(AcceptCommand)?.aspects).toEqual([aspect]);
+    expect(getJobMeta(RebuildJob)?.aspects).toEqual([aspect]);
   });
 });
 
@@ -392,7 +420,7 @@ describe("Angular-style functional inject() & injection context", () => {
     const fn = async () => {};
     const initEp = provideAppInitializer(fn);
     expect(isEnvironmentProviders(initEp)).toBe(true);
-    expect(initEp.ɵproviders[0]).toMatchObject({
+    expect(initEp.providers[0]).toMatchObject({
       provide: APP_INITIALIZER,
       useValue: fn,
       multi: true,
@@ -401,7 +429,7 @@ describe("Angular-style functional inject() & injection context", () => {
     const customToken = new InjectionToken<string>("custom");
     const tokenEp = provideToken(customToken, "custom-val");
     expect(isEnvironmentProviders(tokenEp)).toBe(true);
-    expect(tokenEp.ɵproviders[0]).toMatchObject({
+    expect(tokenEp.providers[0]).toMatchObject({
       provide: customToken,
       useValue: "custom-val",
     });
@@ -540,7 +568,7 @@ describe("Angular-style functional inject() & injection context", () => {
     const { provideEnvironmentInitializer, isEnvironmentProviders } = require("./index");
     const ep = provideEnvironmentInitializer(() => {});
     expect(isEnvironmentProviders(ep)).toBe(true);
-    expect(ep.ɵproviders).toHaveLength(1);
+    expect(ep.providers).toHaveLength(1);
   });
 
   test("matchRoute extracts path params and honors full/prefix pathMatch strategies", () => {

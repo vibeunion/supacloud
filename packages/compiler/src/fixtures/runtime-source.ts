@@ -33,6 +33,10 @@ export function Command(_options: Record<string, unknown>) {
   return () => {};
 }
 
+export function Job(_options: Record<string, unknown>) {
+  return () => {};
+}
+
 export function Query(_options: Record<string, unknown>) {
   return () => {};
 }

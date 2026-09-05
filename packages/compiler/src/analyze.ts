@@ -4,6 +4,7 @@ import * as ts from "@typescript/typescript6";
 import { createIncrementalProgramSession } from "./program";
 import type {
   ApplicationGraph,
+  AspectRefNode,
   CachedModuleEntry,
   CommandNode,
   ControllerNode,
@@ -11,6 +12,7 @@ import type {
   Diagnostic,
   HandlerParamNode,
   FunctionalInjectNode,
+  JobNode,
   ModuleNode,
   ProviderNode,
   QueryNode,
@@ -396,6 +398,11 @@ export async function analyzeProject(
             audit: stringLiteralProp(meta, "audit"),
             idempotency: commandModeProp(meta, "idempotency") ?? "none",
             standalone: true,
+            aspects: parseAspectRefs(
+              getProp(meta, "aspects"),
+              ctx,
+              `command ${classInfo.decl.name?.text ?? name}`,
+            ),
           });
         }
       }
@@ -597,6 +604,11 @@ function parseModule(
   const tags = arrayProp(options, "tags")
     .map((el) => (ts.isStringLiteral(el) ? el.text : nodeText(el).replace(/['"]/g, "")))
     .filter(Boolean);
+  const aspects = parseAspectRefs(
+    getProp(options, "aspects"),
+    ctx,
+    `module ${name}`,
+  );
 
   const imports = arrayProp(options, "imports")
     .map((el) => {
@@ -641,6 +653,35 @@ function parseModule(
     const provider = parseProvider(el, exportsSet, ctx);
     if (provider) providers.push(provider);
   }
+  for (const el of arrayProp(options, "jobs")) {
+    if (!ts.isIdentifier(el)) continue;
+    const decl = resolveDeclaration(el, ctx)[0];
+    if (!decl || !ts.isClassDeclaration(decl)) continue;
+    const className = decl.name?.text ?? el.text;
+    const registeredProvider = providers.find((provider) => provider.token === className);
+    if (registeredProvider) continue;
+    const deps = classDeps(decl, ctx);
+    const injectable = parseInjectableOptions(decl, ctx);
+    const scope = injectable?.scope === "application" ? "application" : "job";
+    providers.push({
+      token: className,
+      tokenKind: "class",
+      kind: "class",
+      useClass: className,
+      scope,
+      deps: deps.deps,
+      optionalDeps: deps.optionalDeps.length > 0 ? deps.optionalDeps : undefined,
+      selfDeps: deps.selfDeps.length > 0 ? deps.selfDeps : undefined,
+      skipSelfDeps: deps.skipSelfDeps.length > 0 ? deps.skipSelfDeps : undefined,
+      hostDeps: deps.hostDeps.length > 0 ? deps.hostDeps : undefined,
+      functionalInjects: deps.functionalInjects.length > 0 ? deps.functionalInjects : undefined,
+      hasOnDestroy: hasDestroyHook(decl) || undefined,
+      exported: exportsSet.has(className),
+      file: sourcePath(ctx.rootDir, decl.getSourceFile().fileName),
+      line: lineOf(decl),
+      importPath: modulePath(ctx.rootDir, decl.getSourceFile().fileName),
+    });
+  }
 
   const controllers: ControllerNode[] = [];
   for (const el of arrayProp(options, "controllers")) {
@@ -648,7 +689,8 @@ function parseModule(
     if (controller) controllers.push(controller);
   }
 
-  // @Command/@Query: providers (bare class or useClass) + decorated classes in commands/queries array.
+  // @Command/@Job/@Query: providers (bare class or useClass) + decorated classes
+  // in commands/jobs/queries arrays.
   const handlerClasses: ClassDeclaration[] = [];
   const seenHandlers = new Set<string>();
   const collectHandler = (expr: Expression) => {
@@ -667,15 +709,22 @@ function parseModule(
     }
   }
   arrayProp(options, "commands").forEach(collectHandler);
+  arrayProp(options, "jobs").forEach(collectHandler);
   arrayProp(options, "queries").forEach(collectHandler);
 
   const commands: CommandNode[] = [];
+  const jobs: JobNode[] = [];
   const queries: QueryNode[] = [];
   for (const cls of handlerClasses) {
     const commandDec = findDecorator(cls, "Command");
     if (commandDec) {
       const meta = decoratorObjectArg(commandDec);
       if (meta) {
+        const aspects = parseAspectRefs(
+          getProp(meta, "aspects"),
+          ctx,
+          `command ${cls.name?.text ?? "<anonymous>"}`,
+        );
         commands.push({
           className: cls.name?.text ?? "<anonymous>",
           name: stringLiteralProp(meta, "name") ?? cls.name?.text ?? "<anonymous>",
@@ -683,7 +732,27 @@ function parseModule(
           transaction: commandModeProp(meta, "transaction") ?? "none",
           audit: stringLiteralProp(meta, "audit"),
           idempotency: commandModeProp(meta, "idempotency") ?? "none",
-          standalone: booleanProp(meta, "standalone") || undefined,
+          ...(booleanProp(meta, "standalone") ? { standalone: true } : {}),
+          ...(aspects.length > 0 ? { aspects } : {}),
+        });
+      }
+    }
+    const jobDec = findDecorator(cls, "Job");
+    if (jobDec) {
+      const meta = decoratorObjectArg(jobDec);
+      if (meta) {
+        const injectable = parseInjectableOptions(cls, ctx);
+        const provider = providers.find((candidate) => candidate.token === (cls.name?.text ?? "<anonymous>"));
+        const aspects = parseAspectRefs(
+          getProp(meta, "aspects"),
+          ctx,
+          `job ${cls.name?.text ?? "<anonymous>"}`,
+        );
+        jobs.push({
+          className: cls.name?.text ?? "<anonymous>",
+          name: stringLiteralProp(meta, "name") ?? cls.name?.text ?? "<anonymous>",
+          scope: provider?.scope ?? (injectable?.scope === "application" ? "application" : "job"),
+          ...(aspects.length > 0 ? { aspects } : {}),
         });
       }
     }
@@ -709,7 +778,9 @@ function parseModule(
     providers,
     controllers,
     commands,
+    jobs,
     queries,
+    ...(aspects.length > 0 ? { aspects } : {}),
     exports,
   };
 }
@@ -1463,6 +1534,12 @@ function parseController(
         if (dataExpr && ts.isObjectLiteralExpression(dataExpr)) {
           route.data = { ...route.data, ...parseObjectLiteralValues(dataExpr) };
         }
+        const aspects = parseAspectRefs(
+          getProp(optionsArg, "aspects"),
+          ctx,
+          `route ${httpMethod} ${routePath}`,
+        );
+        if (aspects.length > 0) route.aspects = aspects;
       }
       if (routeGuards.length > 0) {
         route.guards = routeGuards;
@@ -1803,9 +1880,13 @@ function decoratorObjectArg(dec: Decorator): ObjectLiteralExpression | undefined
 
 function getProp(obj: ObjectLiteralExpression, name: string): Expression | undefined {
   const prop = obj.properties.find((item) =>
-    ts.isPropertyAssignment(item) && propertyName(item.name) === name,
+    (ts.isPropertyAssignment(item) || ts.isShorthandPropertyAssignment(item))
+    && propertyName(item.name) === name,
   );
-  return prop && ts.isPropertyAssignment(prop) ? prop.initializer : undefined;
+  if (!prop) return undefined;
+  if (ts.isPropertyAssignment(prop)) return prop.initializer;
+  if (ts.isShorthandPropertyAssignment(prop)) return prop.name;
+  return undefined;
 }
 
 function toCompilerDiagnostic(diagnostic: ts.Diagnostic, rootDir: string): Diagnostic {
@@ -1831,6 +1912,81 @@ function stringLiteralProp(obj: ObjectLiteralExpression, name: string): string |
 function arrayProp(obj: ObjectLiteralExpression, name: string): Expression[] {
   const expr = getProp(obj, name);
   return expr && ts.isArrayLiteralExpression(expr) ? [...expr.elements] : [];
+}
+
+function parseAspectRefs(
+  expression: Expression | undefined,
+  ctx: AnalysisContext,
+  owner: string,
+): AspectRefNode[] {
+  if (!expression) return [];
+  if (!ts.isArrayLiteralExpression(expression)) {
+    ctx.diagnostics.push({
+      severity: "error",
+      code: "dynamic-aspect-reference",
+      message: `${owner} 的 aspects 必须是显式数组字面量，并且每一项必须是可解析的函数引用`,
+      file: sourcePath(ctx.rootDir, expression.getSourceFile().fileName),
+      line: lineOf(expression),
+      suggestion: "使用 aspects: [auditAspect, transactionAspect]，不要使用变量、调用表达式或字符串 pointcut。",
+      errorCode: "SC4010",
+      docsUrl: "https://supacloud.dev/errors/SC4010",
+    });
+    return [];
+  }
+
+  const refs: AspectRefNode[] = [];
+  for (const element of expression.elements) {
+    if (ts.isSpreadElement(element) || !ts.isIdentifier(element)) {
+      ctx.diagnostics.push({
+        severity: "error",
+        code: "dynamic-aspect-reference",
+        message: `${owner} 的 aspects 只能包含显式的函数标识符引用，无法静态编译 '${nodeText(element)}'`,
+        file: sourcePath(ctx.rootDir, element.getSourceFile().fileName),
+        line: lineOf(element),
+        suggestion: "将 aspect 直接写入数组，例如 aspects: [auditAspect]。",
+        errorCode: "SC4010",
+        docsUrl: "https://supacloud.dev/errors/SC4010",
+      });
+      continue;
+    }
+
+    const declaration = resolveDeclaration(element, ctx).find((candidate) =>
+      ts.isFunctionDeclaration(candidate)
+      || (ts.isVariableDeclaration(candidate)
+        && candidate.initializer !== undefined
+        && (ts.isArrowFunction(candidate.initializer)
+          || ts.isFunctionExpression(candidate.initializer))),
+    );
+    if (!declaration) {
+      ctx.diagnostics.push({
+        severity: "error",
+        code: "invalid-aspect-reference",
+        message: `${owner} 引用了 '${element.text}'，但它不是可静态解析的 aspect 函数`,
+        file: sourcePath(ctx.rootDir, element.getSourceFile().fileName),
+        line: lineOf(element),
+        suggestion: "aspect 必须是函数声明、箭头函数或函数表达式的直接引用。",
+        errorCode: "SC4011",
+        docsUrl: "https://supacloud.dev/errors/SC4011",
+      });
+      continue;
+    }
+
+    const name = ts.isFunctionDeclaration(declaration)
+      ? declaration.name?.text
+      : ts.isVariableDeclaration(declaration)
+        ? variableName(declaration)
+        : undefined;
+    if (!name) continue;
+    const declaredFile = declaration.getSourceFile().fileName;
+    const projectLocal = isProjectSourcePath(declaredFile, ctx.rootDir);
+    refs.push({
+      name,
+      expression: element.text,
+      importPath: projectLocal ? modulePath(ctx.rootDir, declaredFile) : undefined,
+      importModule: projectLocal ? undefined : importModuleOf(element, ctx),
+    });
+  }
+  return refs;
 }
 
 function booleanProp(obj: ObjectLiteralExpression, name: string): boolean | undefined {
