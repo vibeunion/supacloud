@@ -25,6 +25,28 @@ function writeEnvironment(workspace: string, filename: string, values: Record<st
 }
 
 describe("resolveSupaCloudContext", () => {
+    test("allows explicit insecure TLS only for non-production environments", () => {
+        const context = resolveSupaCloudContext({
+            SUPACLOUD_ENV: "test",
+            SUPACLOUD_API_URL: "https://management.internal.example",
+            SUPACLOUD_API_TOKEN: "token",
+            SUPACLOUD_PROJECT_REF: "project-ref",
+            SUPACLOUD_TLS_INSECURE: "true",
+        }, "/tmp/no-such-supacloud-context");
+
+        expect(context.insecureTls).toBe(true);
+    });
+
+    test("rejects insecure TLS for production environments", () => {
+        expect(() => resolveSupaCloudContext({
+            SUPACLOUD_ENV: "production",
+            SUPACLOUD_API_URL: "https://management.example.com",
+            SUPACLOUD_API_TOKEN: "token",
+            SUPACLOUD_PROJECT_REF: "project-ref",
+            SUPACLOUD_TLS_INSECURE: "true",
+        }, "/tmp/no-such-supacloud-context")).toThrow("forbidden for production");
+    });
+
     test("keeps custom project application credentials out of Management context", () => {
         const context = resolveSupaCloudContext({
             SUPABASE_URL: "https://api.xg.aizhuliren.cn",

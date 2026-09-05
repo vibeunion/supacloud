@@ -28,6 +28,7 @@ export interface ResolvedContext {
     credentialScope: ContextCredentialScope;
     source: ContextSourceKind;
     sourcePath: string | null;
+    insecureTls: boolean;
 }
 
 interface ContextSource {
@@ -162,6 +163,16 @@ function completeProjectContext(values: Record<string, string>): boolean {
     return Boolean(core.apiUrl && core.apiToken && core.projectRef);
 }
 
+function parseInsecureTls(values: Record<string, string>, environment: string): boolean {
+    const requested = values.SUPACLOUD_TLS_INSECURE?.trim().toLowerCase();
+    if (!requested) return false;
+    if (!["1", "true", "yes"].includes(requested)) return false;
+    if (environment === "production") {
+        throw new Error("SUPACLOUD_TLS_INSECURE is forbidden for production environments");
+    }
+    return true;
+}
+
 function namedEnvironmentSource(cwd: string, selector: string): ContextSource {
     const environment = normalizeEnvironmentName(selector);
     const path = resolve(cwd, `.env.supacloud.${selector}`);
@@ -216,6 +227,7 @@ export function resolveSupaCloudContext(
     const core = sourceProjectCore(source.values);
     const host = source.values.SUPACLOUD_HOST || hostFromUrl(core.apiUrl || core.supabaseUrl);
     const readOnly = env.SUPACLOUD_READ_ONLY === "true" || source.values.SUPACLOUD_READ_ONLY === "true";
+    const insecureTls = parseInsecureTls(source.values, source.environment);
 
     return {
         host,
@@ -234,5 +246,6 @@ export function resolveSupaCloudContext(
         credentialScope: core.credentialScope,
         source: source.kind,
         sourcePath: source.path,
+        insecureTls,
     };
 }
