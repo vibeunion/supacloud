@@ -20,7 +20,7 @@
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.3",
     "@typescript/native": "npm:typescript@^7.0.2",
-    "autoprefixer": "^10.5.4",
+    "autoprefixer": "^10.5.5",
     "bits-ui": "^2.19.0",
     "clsx": "^2.1.1",
     "jsdom": "30.0.1",

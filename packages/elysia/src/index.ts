@@ -47,6 +47,7 @@ export interface CompiledModule {
     ctx: unknown,
     imported?: Record<string, Record<string, unknown>>,
   ): Record<string, unknown>;
+  destroyRequestScope?(scope: Record<string, unknown>): Promise<void>;
   controllers: CompiledController[];
   commands?: CompiledCommand[];
 }
@@ -210,6 +211,33 @@ function safeHeaderValue(value: string | null, maxLength: number): string | unde
   return value;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isTrustedIdentity(value: unknown): value is TrustedRequestIdentity {
+  return isRecord(value)
+    && typeof value.authenticated === "boolean"
+    && (value.subject === undefined || typeof value.subject === "string")
+    && (value.accessToken === undefined || typeof value.accessToken === "string");
+}
+
+type AuthenticatedTrustedIdentity = TrustedRequestIdentity & {
+  authenticated: true;
+  subject: string;
+  accessToken: string;
+};
+
+function isAuthenticatedTrustedIdentity(
+  value: TrustedRequestIdentity | undefined,
+): value is AuthenticatedTrustedIdentity {
+  return value?.authenticated === true
+    && typeof value.subject === "string"
+    && value.subject.length > 0
+    && typeof value.accessToken === "string"
+    && value.accessToken.length > 0;
+}
+
 function bearerToken(request: Request): string | undefined {
   const authorization = request.headers.get("authorization");
   const match = authorization?.match(/^Bearer\s+(.+)$/i);
@@ -289,14 +317,21 @@ export function createCommandExecutor(
 ): CommandExecutor {
   return async (invocation, next) => {
     const { command } = invocation;
+    const audit = command.audit ? governance.audit : undefined;
+    const transaction = command.transaction === "required"
+      ? governance.transaction
+      : undefined;
+    const idempotency = command.idempotency === "required"
+      ? governance.idempotency
+      : undefined;
 
-    if (command.audit && !governance.audit) {
+    if (command.audit && !audit) {
       throw missingGovernanceAdapter(command, "audit");
     }
-    if (command.transaction === "required" && !governance.transaction) {
+    if (command.transaction === "required" && !transaction) {
       throw missingGovernanceAdapter(command, "transaction");
     }
-    if (command.idempotency === "required" && !governance.idempotency) {
+    if (command.idempotency === "required" && !idempotency) {
       throw missingGovernanceAdapter(command, "idempotency");
     }
 
@@ -304,20 +339,22 @@ export function createCommandExecutor(
       await governance.authorize(invocation);
       let execute = async () => {
         const result = await next();
-        if (command.audit) await governance.audit!.succeeded(invocation, result);
+        if (audit) await audit.succeeded.call(audit, invocation, result);
         return result;
       };
       if (command.transaction === "required") {
+        if (!transaction) throw missingGovernanceAdapter(command, "transaction");
         const inner = execute;
-        execute = () => Promise.resolve(governance.transaction!(invocation, inner));
+        execute = () => Promise.resolve(transaction.call(governance, invocation, inner));
       }
       if (command.idempotency === "required") {
+        if (!idempotency) throw missingGovernanceAdapter(command, "idempotency");
         const inner = execute;
-        execute = () => Promise.resolve(governance.idempotency!(invocation, inner));
+        execute = () => Promise.resolve(idempotency.call(governance, invocation, inner));
       }
       return await execute();
     } catch (error) {
-      if (command.audit) await governance.audit!.failed(invocation, error);
+      if (audit) await audit.failed.call(audit, invocation, error);
       throw error;
     }
   };
@@ -327,21 +364,20 @@ export function requireTrustedIdentity(
   requestContext: unknown,
 ): Required<Pick<TrustedRequestIdentity, "subject" | "accessToken">>
   & TrustedRequestIdentity {
-  const context = requestContext as Partial<SupaCloudRequestContext> | null;
-  const identity = context?.identity;
-  if (!identity?.authenticated || !identity.subject || !identity.accessToken) {
+  const context = isRecord(requestContext) ? requestContext : {};
+  const identity = isTrustedIdentity(context.identity) ? context.identity : undefined;
+  if (!isAuthenticatedTrustedIdentity(identity)) {
     throw new ApplicationError("Authenticated user context is required", {
       status: 401,
       code: "AUTHENTICATION_REQUIRED",
     });
   }
-  return identity as Required<Pick<TrustedRequestIdentity, "subject" | "accessToken">>
-    & TrustedRequestIdentity;
+  return identity;
 }
 
 export function requireIdempotencyKey(invocation: CommandInvocation): string {
-  const context = invocation.requestContext as Partial<SupaCloudRequestContext> | null;
-  const key = context?.idempotencyKey
+  const context = isRecord(invocation.requestContext) ? invocation.requestContext : {};
+  const key = (typeof context.idempotencyKey === "string" ? context.idempotencyKey : undefined)
     ?? safeHeaderValue(invocation.request.headers.get(IDEMPOTENCY_KEY_HEADER), 512);
   if (!key) {
     throw new ApplicationError("Idempotency-Key header is required", {
@@ -367,16 +403,11 @@ interface HttpContext {
   requestContext?: unknown;
 }
 
-type ControllerInstance = Record<
-  string,
-  (input: {
-    body: unknown;
-    params: Record<string, string>;
-    query: Record<string, unknown>;
-    request: Request;
-    scope?: Record<string, unknown>;
-  }) => unknown
->;
+type ControllerInstance = Record<string, unknown>;
+
+function controllerInstance(value: unknown): ControllerInstance | undefined {
+  return isRecord(value) ? value : undefined;
+}
 
 /**
  * Adapt a single compiled module into an Elysia plugin.
@@ -428,6 +459,20 @@ export function createModulePlugin(
   );
 
   const createRequestScope = compiled.createRequestScope;
+  const requestScopes = new WeakMap<Request, Record<string, unknown>>();
+  if (compiled.destroyRequestScope) {
+    const destroyRequestScope = compiled.destroyRequestScope;
+    plugin.onAfterResponse(async ({ request }) => {
+      const scope = requestScopes.get(request);
+      if (!scope) return;
+      requestScopes.delete(request);
+      try {
+        await destroyRequestScope(scope);
+      } catch (error) {
+        console.error(`supacloud: request scope cleanup failed for "${compiled.name}"`, error);
+      }
+    });
+  }
   plugin.resolve(async ({ request }) => {
     const requestContext = await ctxFactory(request);
     requestContexts.set(request, requestContext);
@@ -448,11 +493,10 @@ export function createModulePlugin(
         const requestScope = createRequestScope
           ? createRequestScope(services, requestContext, imported)
           : undefined;
+        if (requestScope && compiled.destroyRequestScope) requestScopes.set(ctx.request, requestScope);
         const source =
           controller.scope === "request" ? requestScope : services;
-        const instance = source?.[controller.serviceKey] as
-          | ControllerInstance
-          | undefined;
+        const instance = controllerInstance(source?.[controller.serviceKey]);
         const method = instance?.[route.handler];
         if (typeof method !== "function") {
           throw new Error(
@@ -467,10 +511,15 @@ export function createModulePlugin(
           scope: requestScope,
           requestContext,
         };
-        const invoke = () => method.call(instance, input);
+        const invoke = () => Reflect.apply(method, instance, [input]);
         if (!route.command) return invoke();
 
-        const command = commandsByClassName.get(route.command)!;
+        const command = commandsByClassName.get(route.command);
+        if (!command) {
+          throw new ApplicationError(`Command "${route.command}" is not registered`, {
+            code: "COMMAND_NOT_REGISTERED",
+          });
+        }
         if (!commandExecutor) {
           throw new ApplicationError(`Command "${command.name}" has no executor`, {
             status: 501,
@@ -553,15 +602,14 @@ export function defaultErrorResponse(
 }
 
 function isPublicApplicationError(error: unknown): error is PublicApplicationError {
-  if (!(error instanceof Error)) return false;
-  const candidate = error as Partial<PublicApplicationError>;
-  return candidate.expose === true
-    && typeof candidate.status === "number"
-    && Number.isInteger(candidate.status)
-    && candidate.status >= 400
-    && candidate.status <= 599
-    && typeof candidate.code === "string"
-    && candidate.code.length > 0;
+  if (!(error instanceof Error) || !isRecord(error)) return false;
+  return error.expose === true
+    && typeof error.status === "number"
+    && Number.isInteger(error.status)
+    && error.status >= 400
+    && error.status <= 599
+    && typeof error.code === "string"
+    && error.code.length > 0;
 }
 
 /**
@@ -594,7 +642,7 @@ export function createApplication(options: ApplicationOptions): Elysia {
     }, imported));
   }
 
-  return app as unknown as Elysia;
+  return app;
 }
 
 /** Semantic alias of createApplication for readable tests. */

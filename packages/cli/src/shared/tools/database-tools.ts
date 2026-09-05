@@ -191,7 +191,7 @@ function sortMigrationFiles(migrations: MigrationFile[]): MigrationFile[] {
         if (versionA > versionB) return 1;
         return a.file.localeCompare(b.file);
     });
-    for (let i = 1; i < sorted.length; i += 1) {
+    for (let i: number = 1; i < sorted.length; i += 1) {
         const previous = sorted[i - 1];
         const current = sorted[i];
         if (previous.version === current.version && (previous.file !== current.file || previous.name !== current.name)) {
@@ -1209,7 +1209,7 @@ function formatTableList(data: unknown, schemas: string[]): string {
     if (!rows.length) return `No tables in: ${schemas.join(", ")}`;
     const grouped: Record<string, string[]> = {};
     for (const r of rows) { (grouped[r.schema] ??= []).push(r.table); }
-    let out = "📋 Tables:\n\n";
+    let out: string = "📋 Tables:\n\n";
     for (const [s, ts] of Object.entries(grouped)) { out += `Schema: ${s}\n${ts.map(t => `  - ${t}`).join("\n")}\n\n`; }
     return out;
 }
@@ -1266,7 +1266,7 @@ function formatRlsPolicies(data: unknown, schema: string, table: string): string
 function formatAuthUsers(data: unknown): string {
     const rows = (data as any)?.rows || [];
     if (!rows.length) return "No users.";
-    let out = "👥 Auth Users:\n\n";
+    let out: string = "👥 Auth Users:\n\n";
     for (const u of rows) {
         out += `  ${u.email_confirmed_at ? "✅" : "⏳"} ${u.email} (${u.role})\n      ID: ${u.id}\n      Created: ${u.created_at}\n`;
         if (u.last_sign_in_at) out += `      Last login: ${u.last_sign_in_at}\n`;
@@ -1299,7 +1299,7 @@ function formatConnections(data: unknown): string {
 function formatDbStats(data: unknown): string {
     const rows = (data as any)?.rows || [];
     if (!rows.length) return "No stats.";
-    let out = "📊 Stats:\n\n  Table                          | Rows      | Total      | Table      | Index\n  -------------------------------|-----------|------------|------------|----------\n";
+    let out: string = "📊 Stats:\n\n  Table                          | Rows      | Total      | Table      | Index\n  -------------------------------|-----------|------------|------------|----------\n";
     for (const t of rows) {
         out += `  ${`${t.schemaname}.${t.table_name}`.padEnd(30)} | ${String(t.row_count || 0).padStart(9)} | ${t.total_size.padStart(10)} | ${t.table_size.padStart(10)} | ${t.index_size.padStart(10)}\n`;
     }

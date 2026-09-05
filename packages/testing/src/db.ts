@@ -47,10 +47,20 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+interface BunFileApi {
+  file(path: string): { text(): Promise<string> };
+}
+
+function isBunFileApi(value: unknown): value is BunFileApi {
+  if (!value || typeof value !== "object") return false;
+  const file: unknown = Reflect.get(value, "file");
+  return typeof file === "function";
+}
+
 /** Default file reader: uses Bun.file without requiring bun types at compile time. */
 function defaultReadFile(path: string): Promise<string> {
-  const bun = (globalThis as { Bun?: { file(p: string): { text(): Promise<string> } } }).Bun;
-  if (!bun) {
+  const bun: unknown = Reflect.get(globalThis, "Bun");
+  if (!isBunFileApi(bun)) {
     throw new Error("runSqlTests: no readFile provided and Bun.file is not available");
   }
   return bun.file(path).text();

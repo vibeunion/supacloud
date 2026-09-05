@@ -124,7 +124,7 @@ function responseExceedsDeclaredLimit(response: Response, maxBytes: number): boo
 
 function joinedResponseBytes(chunks: Uint8Array[], totalBytes: number): Uint8Array {
     const responseBytes = new Uint8Array(totalBytes);
-    let offset = 0;
+    let offset: number = 0;
     for (const chunk of chunks) {
         responseBytes.set(chunk, offset);
         offset += chunk.byteLength;
@@ -141,7 +141,7 @@ async function responseBytesFromReader(
     maxBytes: number,
 ): Promise<Uint8Array | null> {
     const chunks: Uint8Array[] = [];
-    let totalBytes = 0;
+    let totalBytes: number = 0;
     while (true) {
         const { done, value } = await reader.read();
         if (done) return joinedResponseBytes(chunks, totalBytes);
@@ -239,7 +239,7 @@ async function fetchWithRetry(
     timeoutMs = DEFAULT_TIMEOUT,
 ): Promise<Response> {
     const retries = isRetryableMethod(options.method) ? MAX_RETRIES : 0;
-    for (let attempt = 0; attempt <= retries; attempt++) {
+    for (let attempt: number = 0; attempt <= retries; attempt++) {
         try {
             const res = await fetchWithTimeout(url, options, timeoutMs);
 

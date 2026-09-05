@@ -238,7 +238,7 @@ async function withServer(options: ServerOptions, check: (url: string) => Promis
   const stdout = new Response(processHandle.stdout).text()
   const stderr = new Response(processHandle.stderr).text()
   const url = `http://127.0.0.1:${port}`
-  let checkCompleted = false
+  let checkCompleted: boolean = false
   try {
     await waitForHealth(url, processHandle)
     console.log(`[standalone-smoke] ${options.phaseLabel}: healthy`)
@@ -269,7 +269,7 @@ function expectedStandaloneShutdownExitCode(): number {
 }
 
 async function waitForHealth(url: string, processHandle: Bun.Subprocess): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt++) {
+  for (let attempt: number = 0; attempt < 100; attempt++) {
     if (processHandle.exitCode !== null) throw new Error(`standalone server exited before becoming healthy (${processHandle.exitCode})`)
     try {
       if ((await fetch(`${url}/health`)).ok) return

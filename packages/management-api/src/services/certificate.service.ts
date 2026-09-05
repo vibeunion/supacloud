@@ -9,6 +9,7 @@ import {
   resolveProjectApiHosts,
   resolveProjectStudioHost,
 } from "../utils/project-routing";
+import { normalizeFrontendCertificateDomain } from "../utils/frontend-security";
 import { gatewayService } from "./gateway.service";
 
 export type CertificateMode = "lego" | "manual";
@@ -44,13 +45,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function normalizeDomain(value: string): string {
-  const trimmed = value.trim().toLowerCase();
-  if (!trimmed) return "";
   try {
-    const parsed = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
-    return parsed.hostname.toLowerCase();
+    return normalizeFrontendCertificateDomain(value);
   } catch {
-    return trimmed.replace(/:\d+$/, "");
+    return "";
   }
 }
 

@@ -13,6 +13,10 @@ type DatabaseSqlPayload = {
   statements?: unknown;
 };
 
+function isDatabaseSqlPayload(value: unknown): value is DatabaseSqlPayload {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 export type DatabaseSqlResponse = {
   rows: unknown[];
   rowCount: number;
@@ -49,8 +53,8 @@ async function responsePayload(response: Response): Promise<DatabaseSqlPayload> 
   if (!text) return {};
   try {
     const payload: unknown = JSON.parse(text);
-    return payload && typeof payload === "object" && !Array.isArray(payload)
-      ? payload as DatabaseSqlPayload
+    return isDatabaseSqlPayload(payload)
+      ? payload
       : { message: text };
   } catch {
     return { message: text };

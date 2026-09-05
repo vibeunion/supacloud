@@ -199,7 +199,7 @@ export function compareSemver(left: string, right: string): number {
     const b = parseSemver(right);
     if (!a || !b) return left.localeCompare(right);
 
-    for (let i = 0; i < 3; i += 1) {
+    for (let i: number = 0; i < 3; i += 1) {
         if (a.main[i] !== b.main[i]) return a.main[i] > b.main[i] ? 1 : -1;
     }
 

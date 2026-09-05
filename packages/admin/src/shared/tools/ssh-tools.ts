@@ -601,9 +601,9 @@ async function executeOfficialUpgrade(
     timeoutMs: number,
 ): Promise<Awaited<ReturnType<SshTransport["exec"]>>> {
     let execution: OfficialUpgradeExecution | undefined;
-    let executionFailed = false;
+    let executionFailed: boolean = false;
     let executionError: unknown;
-    let upgradeExecutionRequested = false;
+    let upgradeExecutionRequested: boolean = false;
     try {
         await prepareRemoteUpgradeHelperDirectory(ssh, helperPath);
         await ssh.uploadText(helperPath, releaseAssetsScript, 0o600);
@@ -619,7 +619,7 @@ async function executeOfficialUpgrade(
         executionError = error;
     }
 
-    let cleanupFailed = false;
+    let cleanupFailed: boolean = false;
     let cleanupError: unknown;
     try {
         await removeRemoteUpgradeHelper(ssh, helperPath);
@@ -691,10 +691,10 @@ function assertSafeExecCommand(command: string): string {
     }
 
     if (commandName === "journalctl") {
-        let unit = "";
-        let tailCount = "";
-        let noPager = false;
-        for (let index = 1; index < tokens.length; index += 1) {
+        let unit: string = "";
+        let tailCount: string = "";
+        let noPager: boolean = false;
+        for (let index: number = 1; index < tokens.length; index += 1) {
             const token = tokens[index];
             if (token === "-u" && !unit) {
                 unit = tokens[++index] || "";
@@ -723,7 +723,7 @@ function assertSafeExecCommand(command: string): string {
             reject();
         }
         if (action === "logs") {
-            let index = 2;
+            let index: number = 2;
             if (tokens[index] !== "--tail") reject();
             const countToken = tokens[index + 1] || "";
             const count = Number(countToken);
@@ -745,7 +745,7 @@ function assertSafeExecCommand(command: string): string {
 
     if (commandName === "pg_isready") {
         const seen = new Set<string>();
-        for (let index = 1; index < tokens.length; index += 2) {
+        for (let index: number = 1; index < tokens.length; index += 2) {
             const option = tokens[index];
             const optionValue = tokens[index + 1];
             if (!optionValue || seen.has(option)) reject();

@@ -107,7 +107,7 @@ const DISABLED_BUN_HOST_CAPABILITIES = [
   "udpSocket",
 ];
 
-let projectRootControlInitialized = false;
+let projectRootControlInitialized: boolean = false;
 
 export function initializeProjectRootControl(): (root: string | null) => void {
   if (projectRootControlInitialized) {

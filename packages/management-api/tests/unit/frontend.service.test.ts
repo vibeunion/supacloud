@@ -138,6 +138,64 @@ describe("FrontendService DNS records", () => {
 });
 
 describe("FrontendService SvelteKit defaults", () => {
+  test("keeps shell-compatible build commands working by default", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-shell-build-"));
+    const sourceDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-shell-source-"));
+    const previousPolicy = process.env.SUPACLOUD_RESTRICT_BUILD_COMMANDS;
+    delete process.env.SUPACLOUD_RESTRICT_BUILD_COMMANDS;
+
+    try {
+      const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
+      (service as any).applyGatewayRoute = async () => undefined;
+      const deployment = await service.createDeployment("proj123", {
+        name: "shell-site",
+        framework: "static",
+        install_command: "",
+        build_command: "mkdir -p dist && printf '<h1>ok</h1>' > dist/index.html",
+        output_dir: "dist",
+      });
+
+      const result = await service.deployFromSource("proj123", deployment.id, sourceDir);
+
+      expect(result.success).toBe(true);
+      expect(await readFile(join(baseDir, "proj123", deployment.id, "build", "index.html"), "utf8"))
+        .toBe("<h1>ok</h1>");
+    } finally {
+      if (previousPolicy === undefined) delete process.env.SUPACLOUD_RESTRICT_BUILD_COMMANDS;
+      else process.env.SUPACLOUD_RESTRICT_BUILD_COMMANDS = previousPolicy;
+      await rm(baseDir, { recursive: true, force: true });
+      await rm(sourceDir, { recursive: true, force: true });
+    }
+  });
+
+  test("supports an explicit restricted build-command policy", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-shell-policy-"));
+    const sourceDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-shell-policy-source-"));
+    const previousPolicy = process.env.SUPACLOUD_RESTRICT_BUILD_COMMANDS;
+    process.env.SUPACLOUD_RESTRICT_BUILD_COMMANDS = "true";
+
+    try {
+      const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
+      const deployment = await service.createDeployment("proj123", {
+        name: "restricted-site",
+        framework: "static",
+        install_command: "",
+        build_command: "printf ok > index.html && printf blocked > blocked.html",
+        output_dir: ".",
+      });
+
+      const result = await service.deployFromSource("proj123", deployment.id, sourceDir);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("unsupported shell syntax");
+    } finally {
+      if (previousPolicy === undefined) delete process.env.SUPACLOUD_RESTRICT_BUILD_COMMANDS;
+      else process.env.SUPACLOUD_RESTRICT_BUILD_COMMANDS = previousPolicy;
+      await rm(baseDir, { recursive: true, force: true });
+      await rm(sourceDir, { recursive: true, force: true });
+    }
+  });
+
   test("uses an adapter-node output and a root readiness probe", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "supacloud-sveltekit-defaults-"));
     const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
@@ -597,6 +655,56 @@ describe("FrontendService deployment serialization", () => {
         git_url: "https://git.example.com/org/repo.git",
         git_branch: "main",
         deploy_tokens: [],
+      });
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  test("preserves private Git credentials when the UI saves a redacted repository URL", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-git-redaction-"));
+    const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
+
+    try {
+      const deployment = await service.createDeployment("proj123", { name: "site", framework: "static" });
+      await service.setGitConfig(
+        "proj123",
+        deployment.id,
+        "https://build-user:build-secret@git.example.com/org/repo.git",
+        "main",
+      );
+      await service.setGitConfig(
+        "proj123",
+        deployment.id,
+        "https://git.example.com/org/repo.git",
+        "main",
+      );
+
+      expect((await service.getDeployment("proj123", deployment.id))?.git_url)
+        .toBe("https://build-user:build-secret@git.example.com/org/repo.git");
+    } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  test("does not overwrite an environment secret when the masked value is submitted back", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-env-mask-"));
+    const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
+
+    try {
+      const deployment = await service.createDeployment("proj123", {
+        name: "site",
+        framework: "static",
+        env_vars: { VITE_API_TOKEN: "real-secret-value" },
+      });
+      await service.setEnvVars("proj123", deployment.id, {
+        VITE_API_TOKEN: "********",
+        FEATURE_FLAG: "enabled",
+      });
+
+      expect((await service.getDeployment("proj123", deployment.id))?.env_vars).toEqual({
+        VITE_API_TOKEN: "real-secret-value",
+        FEATURE_FLAG: "enabled",
       });
     } finally {
       await rm(baseDir, { recursive: true, force: true });

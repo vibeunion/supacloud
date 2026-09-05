@@ -209,6 +209,28 @@ describe("analyzeProject：command 与 externalTokens", () => {
     expect(prov?.deps).toContain("CONFIG");
     expect(prov?.deps).toContain("CACHE");
     expect(prov?.optionalDeps).toContain("CACHE");
+    expect(prov?.functionalInjects).toEqual([
+      {
+        token: "CONFIG",
+        expression: "CONFIG",
+        importPath: "src/test.service",
+        importModule: undefined,
+        optional: false,
+        self: false,
+        skipSelf: false,
+        host: false,
+      },
+      {
+        token: "CACHE",
+        expression: "CACHE",
+        importPath: "src/test.service",
+        importModule: undefined,
+        optional: true,
+        self: false,
+        skipSelf: false,
+        host: false,
+      },
+    ]);
   });
 
   test("analyzes canMatch guards, param transforms/defaults, and onDestroy hooks", async () => {
@@ -403,6 +425,46 @@ describe("analyzeProject：command 与 externalTokens", () => {
     expect(prov?.importPath).toBe("src/tokens");
   });
 
+  test("expands nested EnvironmentProviders and standalone provider helpers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-environment-providers-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": GOOD_PROJECT_FILES["tsconfig.json"],
+      "src/runtime.ts": `${RUNTIME_SOURCE}
+export function makeEnvironmentProviders(providers: unknown[]) { return { ɵproviders: providers }; }
+export function provideToken(token: unknown, value: unknown) { return { token, value }; }
+export function provideEnvironmentInitializer(initializer: unknown) { return initializer; }
+`,
+      "src/config.ts": `
+        import { InjectionToken } from "./runtime";
+        export const CONFIG = new InjectionToken<{ mode: string }>("config");
+      `,
+      "src/app.module.ts": `
+        import { Module, makeEnvironmentProviders, provideEnvironmentInitializer, provideToken } from "./runtime";
+        import { CONFIG } from "./config";
+        const SHARED = makeEnvironmentProviders([
+          makeEnvironmentProviders([provideToken(CONFIG, { mode: "strict" })]),
+        ]);
+        @Module({
+          name: "app",
+          providers: [SHARED, provideEnvironmentInitializer(() => {})],
+          exports: [CONFIG],
+        })
+        export class AppModule {}
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    const app = analyzed.modules.find((module) => module.name === "app");
+    expect(app?.providers.map((provider) => provider.token)).toEqual([
+      "CONFIG",
+      "ENVIRONMENT_INITIALIZER",
+    ]);
+    expect(app?.providers.find((provider) => provider.token === "CONFIG")?.useValueExpr)
+      .toContain('{ mode: "strict" }');
+    expect(app?.providers.find((provider) => provider.token === "ENVIRONMENT_INITIALIZER")?.multi)
+      .toBe(true);
+  });
+
   test("analyzes @Resolve decorator on controller methods", async () => {
     const root = await mkdtemp(join(tmpdir(), "supacloud-resolve-"));
     await writeFixtureProject(root, {
@@ -456,5 +518,71 @@ describe("analyzeProject：command 与 externalTokens", () => {
     expect(route?.paramBindings).toEqual(["itemId", "subId"]);
     expect(route?.paramTransforms?.["subId"]).toBe("number");
     expect(route?.queryBindings).toEqual(["format"]);
+  });
+});
+
+describe("analyzeProject：Angular Provider 类型契约", () => {
+  test("useClass 与 InjectionToken<T> 不兼容时生成静态诊断", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-compiler-provider-class-type-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
+      "src/provider.ts": `
+        import { InjectionToken, Module } from "./runtime";
+
+        interface Repository {
+          find(id: string): Promise<string>;
+        }
+
+        const REPOSITORY = new InjectionToken<Repository>("repository");
+
+        class WrongRepository {
+          find(id: string): string {
+            return id;
+          }
+        }
+
+        @Module({
+          name: "provider",
+          providers: [{ provide: REPOSITORY, useClass: WrongRepository }],
+        })
+        export class ProviderModule {}
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    const diagnostic = analyzed.diagnostics?.find((item) => item.code === "provider-type-mismatch");
+    expect(diagnostic).toMatchObject({
+      severity: "error",
+      errorCode: "SC2010",
+      docsUrl: "https://supacloud.dev/errors/SC2010",
+    });
+    expect(diagnostic?.message).toContain("REPOSITORY");
+    expect(diagnostic?.message).toContain("useClass");
+  });
+
+  test("useValue 与 InjectionToken<T> 不兼容时生成静态诊断", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-compiler-provider-value-type-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
+      "src/provider.ts": `
+        import { InjectionToken, Module } from "./runtime";
+
+        const CONFIG = new InjectionToken<{ retries: number }>("config");
+
+        @Module({
+          name: "provider",
+          providers: [{ provide: CONFIG, useValue: { retries: "three" } }],
+        })
+        export class ProviderModule {}
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    const diagnostic = analyzed.diagnostics?.find((item) => item.code === "provider-type-mismatch");
+    expect(diagnostic?.severity).toBe("error");
+    expect(diagnostic?.message).toContain("CONFIG");
+    expect(diagnostic?.message).toContain("useValue");
   });
 });

@@ -29,7 +29,7 @@ app.listen({
 console.log(`[pgredis-runtime] listening on ${config.host}:${config.port}`);
 
 const cleanupTimer = setInterval(() => {
-  void registry.sweepExpired().catch((error) => {
+  void registry.sweepExpired().catch((error: unknown) => {
     console.error("[pgredis-runtime] expired cache cleanup failed", {
       error: error instanceof Error ? error.message : String(error),
     });
@@ -37,7 +37,7 @@ const cleanupTimer = setInterval(() => {
 }, config.cleanupIntervalMs);
 cleanupTimer.unref?.();
 
-let shuttingDown = false;
+let shuttingDown: boolean = false;
 async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;

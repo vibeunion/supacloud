@@ -40,8 +40,14 @@ export type FunctionConfigMutationReceipt = {
 
 function record(candidate: unknown): Record<string, unknown> | null {
   return candidate !== null && typeof candidate === "object" && !Array.isArray(candidate)
-    ? candidate as Record<string, unknown>
+    ? toRecord(candidate)
     : null;
+}
+
+function toRecord(value: object): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) result[key] = item;
+  return result;
 }
 
 export function isObservedFunctionActivationId(candidate: unknown): candidate is string {
@@ -64,7 +70,7 @@ function positiveVersion(candidate: unknown): candidate is string {
 }
 
 function stringRoutes(candidate: unknown): candidate is string[] {
-  return Array.isArray(candidate) && candidate.every((route) => typeof route === "string");
+  return Array.isArray(candidate) && candidate.every((route: unknown) => typeof route === "string");
 }
 
 function invalidReceipt(): never {

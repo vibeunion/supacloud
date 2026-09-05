@@ -14,9 +14,9 @@ export interface ProjectApiKeys {
 }
 
 function bytesToBase64Url(bytes: Uint8Array): string {
-  let binary = ''
+  let binary: string = ''
   const chunk = 0x8000
-  for (let i = 0; i < bytes.length; i += chunk) {
+  for (let i: number = 0; i < bytes.length; i += chunk) {
     binary += String.fromCharCode(...bytes.subarray(i, i + chunk))
   }
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -27,7 +27,7 @@ function base64UrlToBytes(str: string): Uint8Array {
   const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
   const binary = atob(padded)
   const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  for (let i: number = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
   return bytes
 }
 
@@ -74,7 +74,7 @@ export async function mintProjectApiKeys(jwtSecret: string): Promise<ProjectApiK
     ref: 'local',
     iat: PROJECT_API_KEY_ISSUED_AT,
     exp: PROJECT_API_KEY_EXPIRES_AT,
-  }
+  } satisfies JwtClaims
   return {
     anonKey: await signJwt({ ...commonClaims, role: 'anon' }, jwtSecret),
     serviceRoleKey: await signJwt({ ...commonClaims, role: 'service_role' }, jwtSecret),

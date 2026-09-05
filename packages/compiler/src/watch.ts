@@ -11,15 +11,15 @@ export function watchProject(options: WatchOptions): WatchHandle {
   const outDir = resolve(options.outDir);
   const debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let closed = false;
-  let compiling = false;
-  let pending = false;
+  let closed: boolean = false;
+  let compiling: boolean = false;
+  let pending: boolean = false;
   const pendingPaths = new Set<string>();
   let watcher: ReturnType<typeof watch> | undefined;
   const incremental = createIncrementalCompiler();
   let initialEvent: WatchEvent | undefined;
-  let resolveReady!: (event: WatchEvent) => void;
-  let rejectReady!: (error: unknown) => void;
+  let resolveReady: (event: WatchEvent) => void = () => undefined;
+  let rejectReady: (error: unknown) => void = () => undefined;
 
   const ready = new Promise<WatchEvent>((resolvePromise, rejectPromise) => {
     resolveReady = resolvePromise;

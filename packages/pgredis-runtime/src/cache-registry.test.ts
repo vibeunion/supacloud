@@ -418,7 +418,7 @@ describe("createTransactionalTenantCache", () => {
       () => fakeCache(),
     );
 
-    expect(await cache.getset<{ previous?: boolean; next?: boolean }>("shared", { next: true }))
+    expect(await cache.getset<{ previous?: boolean; next?: boolean }>("shared", { next: true }, (value) => value as { previous?: boolean; next?: boolean }))
       .toEqual({ previous: true });
     expect(calls[0]).toBe("BEGIN");
     expect(calls[1]).toBe("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE");
@@ -451,7 +451,7 @@ describe("createTransactionalTenantCache", () => {
       () => fakeCache(),
     );
 
-    await expect(cache.getset("shared", "next")).rejects.toThrow("notify failed");
+    await expect(cache.getset("shared", "next", (value) => value as string)).rejects.toThrow("notify failed");
     expect(invalidated).toBeFalse();
   });
 

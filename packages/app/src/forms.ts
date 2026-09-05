@@ -23,11 +23,12 @@ export interface AbstractControlOptions {
  */
 export abstract class AbstractControl<TValue = any> {
   private _value!: TValue;
-  private _status: FormControlStatus = "VALID";
-  private _errors: ValidationErrors | null = null;
+  protected _status: FormControlStatus = "VALID";
+  protected _errors: ValidationErrors | null = null;
   private _pristine = true;
   private _touched = false;
   private _parent: FormGroup | FormArray | null = null;
+  private _validationRun = 0;
   protected _validator: ValidatorFn | null = null;
   protected _asyncValidator: AsyncValidatorFn | null = null;
 
@@ -153,6 +154,7 @@ export abstract class AbstractControl<TValue = any> {
   }
 
   disable(): void {
+    this._validationRun += 1;
     this._status = "DISABLED";
     this._errors = null;
     if (this._parent) this._parent.updateValueAndValidity();
@@ -165,7 +167,11 @@ export abstract class AbstractControl<TValue = any> {
 
   setErrors(errors: ValidationErrors | null): void {
     this._errors = errors;
-    this._status = errors ? "INVALID" : "VALID";
+    this._status = this.disabled ? "DISABLED" : errors ? "INVALID" : "VALID";
+  }
+
+  protected cancelPendingValidation(): void {
+    this._validationRun += 1;
   }
 
   hasError(errorCode: string, path?: string | (string | number)[]): boolean {
@@ -187,6 +193,7 @@ export abstract class AbstractControl<TValue = any> {
   }
 
   updateValueAndValidity(): void {
+    const validationRun = ++this._validationRun;
     if (this.disabled) {
       this._status = "DISABLED";
       this._errors = null;
@@ -203,11 +210,17 @@ export abstract class AbstractControl<TValue = any> {
 
     if (this._status === "VALID" && this._asyncValidator) {
       this._status = "PENDING";
-      this._asyncValidator(this).then((errors) => {
-        if (this._status === "PENDING") {
+      this._asyncValidator(this)
+        .then((errors) => {
+          if (validationRun !== this._validationRun) return;
           this.setErrors(errors);
-        }
-      });
+          this._parent?.updateValueAndValidity();
+        })
+        .catch(() => {
+          if (validationRun !== this._validationRun) return;
+          this.setErrors({ asyncValidator: true });
+          this._parent?.updateValueAndValidity();
+        });
     }
 
     if (this._parent) {
@@ -357,6 +370,7 @@ export class FormGroup<
   override updateValueAndValidity(): void {
     if (this.disabled) {
       this.setErrors(null);
+      this.parent?.updateValueAndValidity();
       return;
     }
     let hasInvalid = false;
@@ -367,12 +381,17 @@ export class FormGroup<
     }
 
     if (hasInvalid) {
+      this.cancelPendingValidation();
       this.setErrors({ invalidChildren: true });
     } else if (hasPending) {
-      (this as any)._status = "PENDING";
+      this.cancelPendingValidation();
+      this._errors = null;
+      this._status = "PENDING";
     } else {
       super.updateValueAndValidity();
+      return;
     }
+    this.parent?.updateValueAndValidity();
   }
 }
 
@@ -457,6 +476,7 @@ export class FormArray<
   override updateValueAndValidity(): void {
     if (this.disabled) {
       this.setErrors(null);
+      this.parent?.updateValueAndValidity();
       return;
     }
     let hasInvalid = false;
@@ -467,12 +487,17 @@ export class FormArray<
     }
 
     if (hasInvalid) {
+      this.cancelPendingValidation();
       this.setErrors({ invalidChildren: true });
     } else if (hasPending) {
-      (this as any)._status = "PENDING";
+      this.cancelPendingValidation();
+      this._errors = null;
+      this._status = "PENDING";
     } else {
       super.updateValueAndValidity();
+      return;
     }
+    this.parent?.updateValueAndValidity();
   }
 }
 

@@ -192,7 +192,7 @@ export class QueryBuilder {
       })
       .join(', ')
 
-    let conflict = ''
+    let conflict: string = ''
     if (opts.upsert) {
       const target = this.q.onConflict ?? tinfo.primaryKey
       if (target.length === 0) {
@@ -505,7 +505,7 @@ export class QueryBuilder {
 
   /** Render `limit`/`offset` for the given path key (`''` = base); empty when neither is set. */
   renderLimitOffset(pathKey: string): string {
-    let s = ''
+    let s: string = ''
     const limit = this.q.limits.get(pathKey)
     const offset = this.q.offsets.get(pathKey)
     if (limit !== undefined) s += ` limit ${limit}`
@@ -593,7 +593,7 @@ export function renderColumnExpr(alias: string, raw: string): string {
   const base = unquote(tokens[0].trim())
   // empty alias → unqualified column (used for UPDATE/DELETE on subset engines)
   let expr = alias ? `${quoteIdent(alias)}.${quoteIdent(base)}` : quoteIdent(base)
-  for (let i = 1; i < tokens.length; i += 2) {
+  for (let i: number = 1; i < tokens.length; i += 2) {
     const op = tokens[i]
     const key = tokens[i + 1]?.trim() ?? ''
     expr += /^\d+$/.test(key) ? `${op}${key}` : `${op}${quoteLiteral(unquote(key))}`

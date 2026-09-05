@@ -22,6 +22,11 @@ function invalid(): never {
   throw new InvalidCapabilityError();
 }
 
+function record(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return invalid();
+  return Object.fromEntries(Object.entries(value));
+}
+
 export function verifyPgredisCapability(
   token: string,
   signingSecret: string,
@@ -45,8 +50,7 @@ export function verifyPgredisCapability(
   } catch {
     invalid();
   }
-  if (!claims || typeof claims !== "object" || Array.isArray(claims)) invalid();
-  const value = claims as Record<string, unknown>;
+  const value = record(claims);
   const now = options.now ?? Date.now();
   if (
     value.v !== 1
@@ -65,5 +69,13 @@ export function verifyPgredisCapability(
     || value.exp <= now
     || value.exp - value.iat > options.maxTtlMs
   ) invalid();
-  return value as unknown as CapabilityClaims;
+  return {
+    v: 1,
+    aud: "pgredis-runtime",
+    scope: "cache",
+    projectRef: value.projectRef,
+    sub: value.sub,
+    iat: value.iat,
+    exp: value.exp,
+  };
 }

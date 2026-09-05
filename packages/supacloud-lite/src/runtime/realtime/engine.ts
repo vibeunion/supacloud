@@ -136,7 +136,7 @@ export class RealtimeEngine {
         const read = ((rd.rows[0]?.n ?? 0) as number) > 0
         // write: does an INSERT policy let them broadcast? (last query - a
         // failure aborts the tx, which we roll back anyway)
-        let write = true
+        let write: boolean = true
         try {
           await tx.query(
             `insert into realtime.messages (topic, extension, event, payload, private) values ($1, 'broadcast', 'authz-w', '{}'::jsonb, true)`,
@@ -314,7 +314,7 @@ export class RealtimeEngine {
 
     const ctx = await this.contextFromToken(msg.payload?.access_token as string | undefined)
     const isPrivate = config.private === true
-    let canBroadcast = true
+    let canBroadcast: boolean = true
     // Private channels are RLS-authorized against realtime.messages (skipped on
     // subset engines with no RLS). No read policy → join is rejected.
     if (isPrivate && !this.db.engine.minimalBootstrap) {
@@ -434,7 +434,7 @@ export class RealtimeEngine {
   private handleBinary(conn: Connection, bytes: Uint8Array): void {
     if (bytes.length < 7 || bytes[0] !== 3) return
     const [, joinRefLen, refLen, topicLen, eventLen, metaLen, encoding] = bytes
-    let offset = 7
+    let offset: number = 7
     const decoder = new TextDecoder()
     const read = (len: number) => {
       const out = decoder.decode(bytes.subarray(offset, offset + len))

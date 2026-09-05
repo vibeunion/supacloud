@@ -22,7 +22,7 @@ export function camelName(token: string): string {
 export function relativeImportPath(fromDir: string, toFile: string): string {
   const fromParts = fromDir.split("/").filter(Boolean);
   const toParts = toFile.split("/").filter(Boolean);
-  let common = 0;
+  let common: number = 0;
   while (
     common < fromParts.length &&
     common < toParts.length &&

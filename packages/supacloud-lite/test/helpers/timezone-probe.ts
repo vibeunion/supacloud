@@ -22,7 +22,7 @@ const TIMEZONE_PROBE_MIGRATION = {
     grant select on public.timezone_probes to service_role;
     grant execute on function public.timezone_probe() to service_role;
   `,
-}
+} as const
 const dataDir = process.env.SUPACLOUD_LITE_TIMEZONE_DATA_DIR
 const probeMode = process.env.SUPACLOUD_LITE_TIMEZONE_PROBE_MODE
 

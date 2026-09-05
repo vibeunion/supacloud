@@ -3,13 +3,28 @@
  * No runtime reflection or container; all metadata is explicitly represented here and in generated code.
  */
 
-import type { Project } from "ts-morph";
+import type { IncrementalProgramSession } from "./program";
 
 export type Scope = "application" | "request" | "job";
 
 export type ProviderKind = "class" | "value" | "factory" | "existing";
 
 export type TokenKind = "injection-token" | "class";
+
+export interface FunctionalInjectNode {
+  /** Logical token name used by the application graph. */
+  token: string;
+  /** Source expression used to identify the runtime token. */
+  expression: string;
+  /** Relative source module path for the token expression. */
+  importPath?: string;
+  /** Package module specifier for a library token. */
+  importModule?: string;
+  optional?: boolean;
+  self?: boolean;
+  skipSelf?: boolean;
+  host?: boolean;
+}
 
 export interface Diagnostic {
   severity: "error" | "warn";
@@ -45,6 +60,8 @@ export interface ProviderNode {
   skipSelfDeps?: string[];
   /** Parameter tokens marked @Host(). */
   hostDeps?: string[];
+  /** Property-level Angular functional inject() calls compiled into a static context. */
+  functionalInjects?: FunctionalInjectNode[];
   /** When true, multiple providers can contribute to this token as an array of instances (Angular multi-providers). */
   multi?: boolean;
   /** Automatically provided in the root injector context without manual module declaration (Angular-style). */
@@ -56,6 +73,8 @@ export interface ProviderNode {
   line: number;
   /** Relative module path of useClass/useFactory/useValue symbol (for import generation). */
   importPath?: string;
+  /** Package module specifier for providers supplied by a library. */
+  importModule?: string;
 }
 
 export interface HandlerParamNode {
@@ -117,10 +136,16 @@ export interface ControllerNode {
   path: string;
   scope: Scope;
   deps: string[];
+  /** Class implements OnDestroy interface or onDestroy method. */
+  hasOnDestroy?: boolean;
   /** Parameter tokens marked @Optional(). */
   optionalDeps?: string[];
   selfDeps?: string[];
   skipSelfDeps?: string[];
+  /** Parameter tokens marked @Host(). */
+  hostDeps?: string[];
+  /** Property-level Angular functional inject() calls compiled into a static context. */
+  functionalInjects?: FunctionalInjectNode[];
   /** Automatically registered without manual module declaration (Angular standalone controller style). */
   standalone?: boolean;
   routes: RouteNode[];
@@ -217,6 +242,11 @@ export interface CompileOptions {
   treeShakeUnusedProviders?: boolean;
   /** Incremental dependency graph cache. */
   cache?: DependencyGraphCache;
+  /**
+   * Changed source paths supplied by the watch/incremental driver.
+   * This is an implementation hint and does not change the public graph shape.
+   */
+  changedPaths?: string[];
   /** Type-safety gates for generated artifacts and production source. */
   typeSafety?: TypeSafetyOptions;
 }
@@ -346,10 +376,12 @@ export interface DependencyGraphCache {
   modules: Map<string, CachedModuleEntry>;
   /** Global file hashes by relative file path. */
   fileHashes: Map<string, string>;
-  /** Retained AST project for true incremental graph re-analysis. */
-  project?: Project;
+  /** Retained native TypeScript BuilderProgram session. */
+  programSession?: IncrementalProgramSession;
   /** Retained module dependency graph tracking imports and reverse dependents. */
   dependencyGraph?: DependencyGraphIndex;
+  /** Content hashes for generated artifacts, used by the incremental emitter. */
+  generatedHashes?: Map<string, string>;
   lastStats?: {
     reusedModules: string[];
     reanalyzedModules: string[];

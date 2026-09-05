@@ -69,7 +69,7 @@ function uniqueToolName(name: string, moduleName: string, used: Set<string>): st
     const prefix = sanitizeToolName(moduleName).slice(0, 32);
     const candidateBase = `${prefix}_${base}`.slice(0, 64);
     let candidate = candidateBase;
-    let suffix = 2;
+    let suffix: number = 2;
     while (used.has(candidate)) {
         candidate = `${candidateBase.slice(0, 64 - String(suffix).length - 1)}_${suffix}`;
         suffix += 1;

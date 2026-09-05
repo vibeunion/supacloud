@@ -141,7 +141,7 @@ export function cronMatches(expr: string, date: Date): boolean {
     [1, 12],
     [0, 6],
   ]
-  for (let i = 0; i < 5; i++) {
+  for (let i: number = 0; i < 5; i++) {
     if (!fieldMatches(fields[i], parts[i], ranges[i][0], ranges[i][1])) return false
   }
   return true
@@ -156,7 +156,7 @@ function fieldMatches(field: string, value: number, min: number, max: number): b
 
 function matchPart(part: string, value: number, min: number, max: number): boolean {
   // step: */K or range/K
-  let step = 1
+  let step: number = 1
   let rangeStr = part
   const slash = part.indexOf('/')
   if (slash !== -1) {

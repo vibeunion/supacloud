@@ -6,7 +6,7 @@ function toHex(bytes: Uint8Array): string {
 
 function fromHex(hex: string): Uint8Array {
   const out = new Uint8Array(hex.length / 2)
-  for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
+  for (let i: number = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16)
   return out
 }
 
@@ -57,7 +57,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
   if (actual.length !== expected.length) return false
   // SECURITY: constant-time compare over the full hash to avoid leaking a
   // match prefix via timing.
-  let diff = 0
-  for (let i = 0; i < actual.length; i++) diff |= actual.charCodeAt(i) ^ expected.charCodeAt(i)
+  let diff: number = 0
+  for (let i: number = 0; i < actual.length; i++) diff |= actual.charCodeAt(i) ^ expected.charCodeAt(i)
   return diff === 0
 }

@@ -127,7 +127,7 @@ function authError(status: number, errorCode: string, msg: string): Response {
 /** A cryptographically-random numeric OTP of `length` digits (6-10). */
 function randomOtp(length: number): string {
   const n = Math.max(6, Math.min(10, Math.floor(length)))
-  let code = ''
+  let code: string = ''
   // 250 is the largest multiple of 10 below 256. Rejecting bytes >=250 avoids
   // modulo bias while keeping the code cryptographically random.
   while (code.length < n) {

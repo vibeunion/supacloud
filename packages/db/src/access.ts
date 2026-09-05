@@ -95,7 +95,7 @@ export function createDatabaseAccessBoundary<UserClient, ServiceClient = never>(
           "Service-role database access is not configured",
         );
       }
-      serviceClient ??= Promise.resolve(options.createServiceClient()).catch((error) => {
+      serviceClient ??= Promise.resolve(options.createServiceClient()).catch((error: unknown) => {
         serviceClient = undefined;
         throw error;
       });

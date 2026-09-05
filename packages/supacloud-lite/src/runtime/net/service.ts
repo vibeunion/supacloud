@@ -71,7 +71,7 @@ function isPrivateIp(host: string): boolean {
  */
 export async function guardedFetch(fetchImpl: typeof fetch, url: string, init: RequestInit = {}): Promise<Response> {
   let current = url
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+  for (let hop: number = 0; hop <= MAX_REDIRECTS; hop++) {
     const blocked = blockedNetTarget(current)
     if (blocked) throw new Error(blocked)
     const res = await fetchImpl(current, { ...init, redirect: 'manual' })
@@ -196,7 +196,7 @@ export class NetService {
     let contentType: string | null = null
     let content: string | null = null
     let respHeaders: Record<string, string> | null = null
-    let timedOut = false
+    let timedOut: boolean = false
     let errorMsg: string | null = null
 
     try {
@@ -259,7 +259,7 @@ async function readCapped(res: Response, maxBytes: number): Promise<string> {
   if (!res.body) return await res.text()
   const reader = res.body.getReader()
   const chunks: Uint8Array[] = []
-  let total = 0
+  let total: number = 0
   while (total < maxBytes) {
     const { done, value } = await reader.read()
     if (done) break
@@ -268,7 +268,7 @@ async function readCapped(res: Response, maxBytes: number): Promise<string> {
   }
   await reader.cancel().catch(() => {})
   let merged = new Uint8Array(Math.min(total, maxBytes))
-  let offset = 0
+  let offset: number = 0
   for (const c of chunks) {
     const take = Math.min(c.length, merged.length - offset)
     merged.set(c.subarray(0, take), offset)

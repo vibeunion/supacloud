@@ -159,7 +159,7 @@ export function parseQuery(searchParams: URLSearchParams): ParsedQuery {
 }
 
 function parseFilterValue(column: string, raw: string, path: string[]): FilterCond {
-  let negated = false
+  let negated: boolean = false
   let rest = raw
   if (rest.startsWith('not.')) {
     negated = true
@@ -210,7 +210,7 @@ function parseLogicTree(op: 'and' | 'or', raw: string, path: string[], negated: 
 function parseOrderTerm(term: string, path: string[]): OrderTerm {
   const parts = term.split('.')
   const column = unquote(parts[0])
-  let asc = true
+  let asc: boolean = true
   let nullsFirst: boolean | undefined
   for (const p of parts.slice(1)) {
     if (p === 'asc') asc = true
@@ -225,10 +225,10 @@ function parseOrderTerm(term: string, path: string[]): OrderTerm {
 /** Split on a delimiter, ignoring delimiters inside parens and double quotes. */
 export function splitTopLevel(str: string, delim: string): string[] {
   const out: string[] = []
-  let depth = 0
-  let inQuote = false
-  let current = ''
-  for (let i = 0; i < str.length; i++) {
+  let depth: number = 0
+  let inQuote: boolean = false
+  let current: string = ''
+  for (let i: number = 0; i < str.length; i++) {
     const ch = str[i]
     if (inQuote) {
       current += ch
@@ -275,7 +275,7 @@ export function parseSelect(value: string): SelectItem[] {
 function parseSelectItem(item: string): SelectItem {
   if (item === '') throw new ParseError('empty select item')
 
-  let spread = false
+  let spread: boolean = false
   if (item.startsWith('...')) {
     spread = true
     item = item.slice(3)
@@ -312,7 +312,7 @@ function parseSelectItem(item: string): SelectItem {
     const headParts = head.split('!')
     const name = unquote(headParts[0])
     let hint: string | undefined
-    let inner = false
+    let inner: boolean = false
     for (const part of headParts.slice(1)) {
       if (part === 'inner') inner = true
       else if (part === 'left') { /* left is the default */ }
@@ -346,8 +346,8 @@ function parseSelectItem(item: string): SelectItem {
 
 /** Index of an alias ':' (not '::'), outside quotes/parens; -1 when absent. */
 function findAliasColon(item: string): number {
-  let inQuote = false
-  for (let i = 0; i < item.length; i++) {
+  let inQuote: boolean = false
+  for (let i: number = 0; i < item.length; i++) {
     const ch = item[i]
     if (ch === '"') inQuote = !inQuote
     if (inQuote) continue

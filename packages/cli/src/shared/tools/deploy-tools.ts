@@ -357,7 +357,7 @@ async function collectArchiveFiles(root: string): Promise<{ files: Zippable; byt
     await visit(root);
     if (paths.length === 0) throw new Error(`Frontend output directory is empty: ${root}`);
 
-    let bytes = 0;
+    let bytes: number = 0;
     const files: Zippable = {};
     for (const path of paths) {
         const data = new Uint8Array(await readFile(path));

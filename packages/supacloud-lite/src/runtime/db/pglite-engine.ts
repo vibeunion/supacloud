@@ -107,7 +107,7 @@ export async function createPgliteEngine(dataDir?: string): Promise<DbEngine> {
   } finally {
     await removePreparedBundles(cleanupStandaloneBundles)
   }
-  let closed = false
+  let closed: boolean = false
 
   return {
     async query<T>(sql: string, params?: unknown[]): Promise<EngineResults<T>> {

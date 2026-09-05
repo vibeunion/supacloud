@@ -208,7 +208,7 @@ async function createProjectStatusResult(context: ResolvedContext) {
             ? Boolean(context.inferredServiceRoleKey)
             : Boolean(context.apiToken),
         checks,
-    };
+    } as const;
     return {
         isError: !projectStatusIsHealthy(checks),
         content: [{ type: "text" as const, text: JSON.stringify(statusPayload, null, 2) }],

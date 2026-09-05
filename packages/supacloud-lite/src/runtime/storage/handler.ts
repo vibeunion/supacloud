@@ -744,7 +744,7 @@ export class StorageHandler {
 
     try {
       const data = new Uint8Array(upload.length)
-      let cursor = 0
+      let cursor: number = 0
       for (const part of upload.chunks) {
         data.set(part, cursor)
         cursor += part.length
@@ -1324,7 +1324,7 @@ async function readLimitedBody(request: Request, maxBytes: number): Promise<Uint
   if (!request.body) return new Uint8Array()
   const reader = request.body.getReader()
   const chunks: Uint8Array[] = []
-  let total = 0
+  let total: number = 0
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
@@ -1336,7 +1336,7 @@ async function readLimitedBody(request: Request, maxBytes: number): Promise<Uint
     total += value.byteLength
   }
   const body = new Uint8Array(total)
-  let offset = 0
+  let offset: number = 0
   for (const chunk of chunks) {
     body.set(chunk, offset)
     offset += chunk.byteLength
@@ -1360,7 +1360,7 @@ export function parseMultipart(bytes: Uint8Array, boundary: string): MultipartPa
 
   const indexOf = (needle: Uint8Array, from: number): number => {
     outer: for (let i = from; i <= bytes.length - needle.length; i++) {
-      for (let j = 0; j < needle.length; j++) {
+      for (let j: number = 0; j < needle.length; j++) {
         if (bytes[i + j] !== needle[j]) continue outer
       }
       return i

@@ -10,6 +10,7 @@ import { routerService } from "./router.service";
 import { logger } from "../utils/logger";
 import type { BackupResponse } from "./project.service";
 import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
+import { normalizeFrontendCustomDomain } from "../utils/frontend-security";
 
 export class ProjectOpsService {
   // --- Backup Management ---
@@ -64,11 +65,12 @@ export class ProjectOpsService {
     const project = await projectRepository.findByRef(ref);
     if (!project) return false;
 
-    const result = await routerService.bindCustomDomain(ref, domain);
+    const normalizedDomain = normalizeFrontendCustomDomain(domain);
+    const result = await routerService.bindCustomDomain(ref, normalizedDomain);
     if (result.success) {
       await projectRepository.updateConfig(
         ref,
-        mergeProjectConfig(project.config, { custom_domain: domain }),
+        mergeProjectConfig(project.config, { custom_domain: normalizedDomain }),
       );
       try {
         const { tenantRuntimeService } = await import("./tenant-runtime.service");

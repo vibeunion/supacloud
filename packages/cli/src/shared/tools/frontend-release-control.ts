@@ -203,7 +203,7 @@ function sameArchiveIdentity(left: BigIntStats, right: BigIntStats): boolean {
 async function archiveSha256(handle: FileHandle, sizeBytes: number): Promise<string> {
     const hash = createHash("sha256");
     const chunk = new Uint8Array(Math.min(sizeBytes, ARCHIVE_CHUNK_BYTES));
-    for (let offset = 0; offset < sizeBytes;) {
+    for (let offset: number = 0; offset < sizeBytes;) {
         const requested = Math.min(chunk.byteLength, sizeBytes - offset);
         const { bytesRead } = await handle.read(chunk, 0, requested, offset);
         if (bytesRead < 1) throw new Error("Frontend release archive changed while it was hashed");
@@ -235,7 +235,7 @@ async function verifiedArchive(path: string): Promise<LocalArchive> {
 }
 
 function archiveStream(archive: LocalArchive): ReadableStream<Uint8Array> {
-    let offset = 0;
+    let offset: number = 0;
     return new ReadableStream<Uint8Array>({
         async pull(controller) {
             if (offset === archive.sizeBytes) {

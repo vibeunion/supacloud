@@ -1,8 +1,12 @@
 import { describe, expect, it } from "bun:test";
-import { INJECTOR, createEnvironmentInjector, inject, runInInjectionContext } from "./inject";
+import { INJECTOR, createEnvironmentInjector, inject, injectAll, runInInjectionContext } from "./inject";
 import { InjectionToken } from "./token";
 import { DESTROY_REF, type OnDestroy } from "./context";
-import { provideEnvironmentInitializer, provideToken } from "./provider";
+import {
+  makeEnvironmentProviders,
+  provideEnvironmentInitializer,
+  provideToken,
+} from "./provider";
 
 describe("Angular 14+ EnvironmentInjector and createEnvironmentInjector", () => {
   it("resolves basic providers and executes runInContext", () => {
@@ -108,5 +112,83 @@ describe("Angular 14+ EnvironmentInjector and createEnvironmentInjector", () => 
       return inject(INJECTOR);
     });
     expect(resolvedInjector).toBe(env);
+  });
+
+  it("resolves provider deps, aliases, multi providers, and nested environment providers", () => {
+    const CONFIG = new InjectionToken<{ prefix: string }>("CONFIG");
+    const VALUE = new InjectionToken<string>("VALUE");
+    const HOOKS = new InjectionToken<() => string>("HOOKS");
+    const HOOK_ALIAS = new InjectionToken<() => string>("HOOK_ALIAS");
+    class Service {
+      constructor(
+        readonly config: { prefix: string },
+        readonly value: string,
+      ) {}
+    }
+
+    const env = createEnvironmentInjector([
+      makeEnvironmentProviders([
+        provideToken(CONFIG, { prefix: "supacloud" }),
+        provideToken(VALUE, "di"),
+      ]),
+      {
+        provide: Service,
+        useClass: Service,
+        deps: [CONFIG, VALUE],
+      },
+      {
+        provide: HOOKS,
+        useFactory: (service: Service) => () => `${service.config.prefix}-${service.value}`,
+        deps: [Service],
+        multi: true,
+      },
+      {
+        provide: HOOK_ALIAS,
+        useValue: () => "di",
+      },
+      {
+        provide: HOOKS,
+        useExisting: HOOK_ALIAS,
+        multi: true,
+      },
+    ]);
+
+    expect(env.get(Service).value).toBe("di");
+    expect(env.runInContext(() => injectAll(HOOKS).map((hook) => hook()))).toEqual([
+      "supacloud-di",
+      "di",
+    ]);
+  });
+
+  it("runs token factories inside the active injection context", () => {
+    const CONFIG = new InjectionToken<string>("CONFIG");
+    const DERIVED = new InjectionToken<string>("DERIVED", {
+      factory: () => `${inject(CONFIG)}:derived`,
+    });
+    const env = createEnvironmentInjector([provideToken(CONFIG, "context")]);
+
+    expect(env.get(DERIVED)).toBe("context:derived");
+  });
+
+  it("supports Angular provider deps descriptors without a custom lookup container", () => {
+    const VALUE = new InjectionToken<string>("VALUE");
+    const MISSING = new InjectionToken<string>("MISSING");
+    const RESULT = new InjectionToken<string>("RESULT");
+
+    const parent = createEnvironmentInjector([
+      { provide: VALUE, useValue: "parent" },
+    ]);
+    const child = createEnvironmentInjector([
+      {
+        provide: RESULT,
+        useFactory: (value: string, missing: string | undefined) => `${value}:${missing ?? "optional"}`,
+        deps: [
+          { token: VALUE, skipSelf: true },
+          { token: MISSING, optional: true },
+        ],
+      },
+    ], parent);
+
+    expect(child.get(RESULT)).toBe("parent:optional");
   });
 });

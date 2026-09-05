@@ -47,7 +47,7 @@ function formatSize(size: number): string {
   const units = ["KB", "MB", "GB", "TB"];
   let value = size / 1024;
   let unit = units[0];
-  for (let index = 1; index < units.length && value >= 1024; index += 1) {
+  for (let index: number = 1; index < units.length && value >= 1024; index += 1) {
     value /= 1024;
     unit = units[index];
   }

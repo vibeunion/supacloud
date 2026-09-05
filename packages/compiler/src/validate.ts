@@ -56,6 +56,8 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "conflicting-route-method": { code: "SC3018", docsUrl: "https://supacloud.dev/errors/SC3018" },
   "missing-param-colon": { code: "SC3019", docsUrl: "https://supacloud.dev/errors/SC3019" },
   "missing-token-factory": { code: "SC2009", docsUrl: "https://supacloud.dev/errors/SC2009" },
+  "provider-type-mismatch": { code: "SC2010", docsUrl: "https://supacloud.dev/errors/SC2010" },
+  "unsupported-provider-helper": { code: "SC2011", docsUrl: "https://supacloud.dev/errors/SC2011" },
   "command-missing-permission": { code: "SC4001", docsUrl: "https://supacloud.dev/errors/SC4001" },
   "duplicate-command": { code: "SC4002", docsUrl: "https://supacloud.dev/errors/SC4002" },
   "route-command-unresolved": { code: "SC4003", docsUrl: "https://supacloud.dev/errors/SC4003" },
@@ -112,10 +114,17 @@ export function validateGraph(
     }
   }
 
-  /** Resolves dep token in module visibility scope: own providers > imported module exports. */
-  function resolveDep(module: ModuleNode, token: string): ProviderRef | undefined {
-    const own = module.providers.find((p) => p.token === token);
-    if (own) return { module, provider: own };
+  /** Resolves a token using the static equivalent of the current injector level. */
+  function resolveDep(
+    module: ModuleNode,
+    token: string,
+    flags: { self?: boolean; skipSelf?: boolean } = {},
+  ): ProviderRef | undefined {
+    if (!flags.skipSelf) {
+      const own = module.providers.find((p) => p.token === token);
+      if (own) return { module, provider: own };
+    }
+    if (flags.self) return undefined;
     for (const importName of module.imports) {
       const imported = graph.modules.find((m) => m.name === importName);
       if (!imported || !imported.exports.includes(token)) continue;
@@ -521,7 +530,9 @@ export function validateGraph(
 
       if (controller.selfDeps && controller.selfDeps.length > 0) {
         for (const dep of controller.selfDeps) {
-          const own = module.providers.find((p) => p.token === dep);
+          const own = module.providers.find((p) =>
+            p.token === dep && p.scope === controller.scope,
+          );
           if (!own) {
             error(
               "self-resolution-failed",
@@ -535,7 +546,9 @@ export function validateGraph(
       }
       if (controller.skipSelfDeps && controller.skipSelfDeps.length > 0) {
         for (const dep of controller.skipSelfDeps) {
-          const own = module.providers.find((p) => p.token === dep);
+          const own = module.providers.find((p) =>
+            p.token === dep && p.scope === controller.scope,
+          );
           if (own) {
             error(
               "skip-self-resolution-failed",
@@ -640,7 +653,9 @@ export function validateGraph(
     for (const provider of module.providers) {
       if (provider.selfDeps && provider.selfDeps.length > 0) {
         for (const dep of provider.selfDeps) {
-          const own = module.providers.find((p) => p.token === dep);
+          const own = module.providers.find((p) =>
+            p.token === dep && p.scope === provider.scope,
+          );
           if (!own) {
             error(
               "self-resolution-failed",
@@ -654,7 +669,9 @@ export function validateGraph(
       }
       if (provider.skipSelfDeps && provider.skipSelfDeps.length > 0) {
         for (const dep of provider.skipSelfDeps) {
-          const own = module.providers.find((p) => p.token === dep);
+          const own = module.providers.find((p) =>
+            p.token === dep && p.scope === provider.scope,
+          );
           if (own) {
             error(
               "skip-self-resolution-failed",
@@ -668,14 +685,18 @@ export function validateGraph(
       }
       for (const dep of provider.deps) {
         const isOptional = provider.optionalDeps?.includes(dep);
-        const resolved = resolveDep(module, dep);
+        const resolved = resolveDep(module, dep, {
+          self: provider.selfDeps?.includes(dep),
+          skipSelf: provider.skipSelfDeps?.includes(dep),
+        });
         if (!resolved) {
           if (isOptional) {
             continue;
           }
           if (!graph.externalTokens.includes(dep)) {
             if (globalProviders.has(dep)) {
-              const owner = globalProviders.get(dep)!;
+              const owner = globalProviders.get(dep);
+              if (!owner) continue;
               error(
                 "module-boundary",
                 `模块 ${module.name} 的 provider ${provider.token} 依赖 ${dep}，该 token 由模块 ${owner.module.name} 提供但未被 import`,
@@ -805,7 +826,8 @@ export function validateGraph(
           }
 
           if (rule.onlyDependOnLibsWithTags && rule.onlyDependOnLibsWithTags.length > 0) {
-            const hasAllowed = targetTags.some((t) => rule.onlyDependOnLibsWithTags!.includes(t));
+            const allowedTags = rule.onlyDependOnLibsWithTags;
+            const hasAllowed = targetTags.some((t) => allowedTags.includes(t));
             if (!hasAllowed && targetTags.length > 0) {
               error(
                 "module-boundary-violation",
@@ -829,12 +851,14 @@ export function validateGraph(
       for (const d of ctrl.optionalDeps ?? []) referencedTokens.add(d);
       for (const d of ctrl.selfDeps ?? []) referencedTokens.add(d);
       for (const d of ctrl.skipSelfDeps ?? []) referencedTokens.add(d);
+      for (const d of ctrl.hostDeps ?? []) referencedTokens.add(d);
     }
     for (const p of mod.providers) {
       for (const d of p.deps ?? []) referencedTokens.add(d);
       for (const d of p.optionalDeps ?? []) referencedTokens.add(d);
       for (const d of p.selfDeps ?? []) referencedTokens.add(d);
       for (const d of p.skipSelfDeps ?? []) referencedTokens.add(d);
+      for (const d of p.hostDeps ?? []) referencedTokens.add(d);
       if (p.useExisting) referencedTokens.add(p.useExisting);
     }
   }
@@ -932,8 +956,8 @@ function isRouteShadowed(earlierPath: string, laterPath: string): boolean {
     return false;
   }
 
-  let hasParamShadowing = false;
-  for (let i = 0; i < earlierSegments.length; i += 1) {
+  let hasParamShadowing: boolean = false;
+  for (let i: number = 0; i < earlierSegments.length; i += 1) {
     const e = earlierSegments[i];
     const l = laterSegments[i];
 
@@ -954,7 +978,7 @@ function routeMatchesTarget(routePattern: string, targetPath: string): boolean {
   const pSegs = routePattern.split("/").filter(Boolean);
   const tSegs = targetPath.split("/").filter(Boolean);
   if (pSegs.length !== tSegs.length) return false;
-  for (let i = 0; i < pSegs.length; i += 1) {
+  for (let i: number = 0; i < pSegs.length; i += 1) {
     if (pSegs[i].startsWith(":")) continue;
     if (pSegs[i] !== tSegs[i]) return false;
   }
@@ -964,7 +988,11 @@ function routeMatchesTarget(routePattern: string, targetPath: string): boolean {
 /** Provider-level circular dependency detection (DFS, reporting cycle path). */
 function detectCycles(
   graph: ApplicationGraph,
-  resolveDep: (module: ModuleNode, token: string) => ProviderRef | undefined,
+  resolveDep: (
+    module: ModuleNode,
+    token: string,
+    flags?: { self?: boolean; skipSelf?: boolean },
+  ) => ProviderRef | undefined,
 ): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const nodeId = (ref: ProviderRef) => `${ref.module.name}:${ref.provider.token}`;
@@ -1006,7 +1034,10 @@ function detectCycles(
     state.set(id, "visiting");
     stack.push(ref);
     for (const dep of ref.provider.deps) {
-      const resolved = resolveDep(ref.module, dep);
+      const resolved = resolveDep(ref.module, dep, {
+        self: ref.provider.selfDeps?.includes(dep),
+        skipSelf: ref.provider.skipSelfDeps?.includes(dep),
+      });
       if (resolved) visit(resolved);
     }
     stack.pop();
@@ -1139,7 +1170,8 @@ function detectOrphanModules(graph: ApplicationGraph): Diagnostic[] {
   }
 
   while (queue.length > 0) {
-    const current = queue.shift()!;
+      const current = queue.shift();
+      if (!current) continue;
     const mod = moduleMap.get(current);
     if (!mod) continue;
     for (const imp of mod.imports) {

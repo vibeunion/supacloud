@@ -11,7 +11,7 @@ export function nextSqlTabName(tabs: NamedSqlTab[], untitledName: string): strin
   const names = new Set(tabs.map((tab) => normalizedTabName(tab.name)));
 
   // Start at one and fill the first unused suffix so restored tabs remain easy to distinguish.
-  for (let suffix = 1; ; suffix += 1) {
+  for (let suffix: number = 1; ; suffix += 1) {
     const candidate = `${untitledName} ${suffix}`;
     if (!names.has(normalizedTabName(candidate))) return candidate;
   }
