@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.46.0](https://github.com/vibeunion/supacloud/compare/cli-v0.45.0...cli-v0.46.0) (2026-09-05)
+
+
+### Features
+
+* **cli:** allow explicit insecure TLS for test environments ([#1165](https://github.com/vibeunion/supacloud/issues/1165)) ([228a9b7](https://github.com/vibeunion/supacloud/commit/228a9b704c02a0a7b52d7b402c7c500840ec0fff))
+
 ## [0.45.0](https://github.com/vibeunion/supacloud/compare/cli-v0.44.1...cli-v0.45.0) (2026-09-05)
 
 

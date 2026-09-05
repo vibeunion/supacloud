@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.73.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.73.0...management-api-v0.73.1) (2026-09-05)
+
+
+### Bug Fixes
+
+* **management-api:** migrate legacy task authorities safely ([#1164](https://github.com/vibeunion/supacloud/issues/1164)) ([b21ae05](https://github.com/vibeunion/supacloud/commit/b21ae05bee4a2df9990c3dbc012f77ffd0cbbd3f))
+
 ## [0.73.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.72.0...management-api-v0.73.0) (2026-09-05)
 
 
