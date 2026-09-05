@@ -3,6 +3,7 @@ import { access, mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   ApplicationGraph,
+  AspectRefNode,
   ControllerNode,
   FunctionalInjectNode,
   ModuleNode,
@@ -40,6 +41,7 @@ const INTERFACES = `export interface CompiledRoute {
   queryDefaults?: Record<string, unknown>;
   title?: string;
   data?: Record<string, unknown>;
+  aspects?: CompiledAspect[];
   invoker?: (
     controller: unknown,
     request: {
@@ -60,7 +62,32 @@ export interface CompiledCommand {
   audit?: string;
   idempotency: "required" | "none";
   standalone?: boolean;
+  aspects?: CompiledAspect[];
 }
+
+export interface CompiledJob {
+  className: string;
+  name: string;
+  serviceKey: string;
+  scope: "application" | "request" | "job";
+  aspects?: CompiledAspect[];
+}
+
+export interface CompiledAspectContext {
+  kind: "route" | "command" | "job";
+  name: string;
+  input: unknown;
+  request?: Request;
+  requestContext?: unknown;
+  scope?: Record<string, unknown>;
+  services?: Record<string, unknown>;
+  metadata?: unknown;
+}
+
+export type CompiledAspect = (
+  context: CompiledAspectContext,
+  next: () => unknown | Promise<unknown>,
+) => unknown | Promise<unknown>;
 
 export interface CompiledController {
   path: string;
@@ -89,6 +116,8 @@ export interface CompiledModule {
   destroyJobScope?(scope: Record<string, unknown>): Promise<void>;
   controllers: CompiledController[];
   commands: CompiledCommand[];
+  jobs: CompiledJob[];
+  aspects?: CompiledAspect[];
 }`;
 
 const TYPE_GUARDS = `function isRecord(value: unknown): value is Record<string, unknown> {
@@ -470,7 +499,11 @@ class ModuleGenerator {
       lines.push(`  destroyJobScope: destroy${this.pascal}JobScope,`);
     }
     lines.push(`  controllers: ${this.renderControllers()},`);
-    lines.push(`  commands: ${JSON.stringify(this.module.commands)},`);
+    lines.push(`  commands: ${this.renderCommands()},`);
+    lines.push(`  jobs: ${this.renderJobs()},`);
+    if (this.module.aspects && this.module.aspects.length > 0) {
+      lines.push(`  aspects: ${this.renderAspects(this.module.aspects)},`);
+    }
     lines.push(`}`);
     return lines.join("\n");
   }
@@ -535,6 +568,9 @@ class ModuleGenerator {
         if (route.data && Object.keys(route.data).length > 0) {
           fields.push(`data: ${JSON.stringify(route.data)}`);
         }
+        if (route.aspects && route.aspects.length > 0) {
+          fields.push(`aspects: ${this.renderAspects(route.aspects)}`);
+        }
         const invokerArgs = (route.handlerParams ?? []).map((hp) => {
           if (hp.kind === "param") {
             const accessor = `req.params?.[${JSON.stringify(hp.bindingName ?? hp.name)}]`;
@@ -589,6 +625,35 @@ class ModuleGenerator {
       ].join("\n");
     });
     return `[${items.map((item) => `\n${indent(item, 2)}`).join(",")}\n]`;
+  }
+
+  private renderCommands(): string {
+    if (this.module.commands.length === 0) return "[]";
+    return `[${this.module.commands.map((command) => {
+      const fields = [
+        `className: ${JSON.stringify(command.className)}`,
+        `name: ${JSON.stringify(command.name)}`,
+        `permission: ${JSON.stringify(command.permission ?? "")}`,
+        `transaction: ${JSON.stringify(command.transaction)}`,
+        ...(command.audit ? [`audit: ${JSON.stringify(command.audit)}`] : []),
+        `idempotency: ${JSON.stringify(command.idempotency)}`,
+        ...(command.standalone ? ["standalone: true"] : []),
+        ...(command.aspects && command.aspects.length > 0
+          ? [`aspects: ${this.renderAspects(command.aspects)}`]
+          : []),
+      ];
+      return `{ ${fields.join(", ")} }`;
+    }).join(", ")}]`;
+  }
+
+  private renderJobs(): string {
+    const jobs = this.module.jobs ?? [];
+    if (jobs.length === 0) return "[]";
+    return `[${jobs.map((job) => `{ className: ${JSON.stringify(job.className)}, name: ${JSON.stringify(job.name)}, serviceKey: ${JSON.stringify(camelName(job.className))}, scope: ${JSON.stringify(job.scope)},${job.aspects && job.aspects.length > 0 ? ` aspects: ${this.renderAspects(job.aspects)},` : ""} }`).join(", ")}]`;
+  }
+
+  private renderAspects(aspects: Array<AspectRefNode>): string {
+    return `[${aspects.map((aspect) => this.imports.add(aspect.name, aspect.importPath, aspect.importModule)).join(", ")}]`;
   }
 
   private renderServicesFactory(): string {

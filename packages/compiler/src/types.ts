@@ -26,6 +26,17 @@ export interface FunctionalInjectNode {
   host?: boolean;
 }
 
+export interface AspectRefNode {
+  /** Exported symbol name used in the generated static import. */
+  name: string;
+  /** Source expression retained for diagnostics and manifest inspection. */
+  expression: string;
+  /** Relative source module path for a project-local aspect. */
+  importPath?: string;
+  /** Package module specifier for a library aspect. */
+  importModule?: string;
+}
+
 export interface Diagnostic {
   severity: "error" | "warn";
   code: string;
@@ -129,6 +140,8 @@ export interface RouteNode {
   data?: Record<string, unknown>;
   /** Detailed method parameter metadata for compile-time typed invoker generation. */
   handlerParams?: HandlerParamNode[];
+  /** Explicit aspects applied around this route. */
+  aspects?: AspectRefNode[];
 }
 
 export interface ControllerNode {
@@ -164,6 +177,15 @@ export interface CommandNode {
   idempotency: "required" | "none";
   /** Automatically registered without manual module declaration. */
   standalone?: boolean;
+  /** Explicit aspects applied around this command. */
+  aspects?: AspectRefNode[];
+}
+
+export interface JobNode {
+  className: string;
+  name: string;
+  scope: Scope;
+  aspects?: AspectRefNode[];
 }
 
 export interface QueryNode {
@@ -184,7 +206,10 @@ export interface ModuleNode {
   providers: ProviderNode[];
   controllers: ControllerNode[];
   commands: CommandNode[];
+  jobs?: JobNode[];
   queries: QueryNode[];
+  /** Explicit aspects applied to all routes and commands in this module. */
+  aspects?: AspectRefNode[];
   /** Exported token names. */
   exports: string[];
 }

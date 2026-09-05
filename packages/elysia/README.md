@@ -17,6 +17,9 @@ Runtime adapter that turns `@supacloud/compiler` output into a production-ready
 - **Unified Command Pipeline**: runs `@Command`-decorated handlers through a
   structured `commandGovernance` adapter chain or a custom `composeCommandExecutors`
   pipeline (fail-closed if command routes lack an executor).
+- **Static AOP pipeline**: executes compiler-emitted module, route, command, and
+  job aspects with `composeAspects`; no runtime discovery or registration is
+  performed.
 - **Public error mapping**: transforms framework / application errors via
   `errorMapper` with standard `ApplicationError` envelope support, preserving
   Elysia's default behavior (422) for schema validation errors.
@@ -54,6 +57,10 @@ const app = createApplication({
 export default app;
 ```
 
+Jobs are executed explicitly with `executeJob(compiledModule, services, job,
+input, requestContext)`. The compiler-generated job scope is destroyed after
+execution, including when the job throws.
+
 ## API
 
 ### `createApplication(options: ApplicationOptions): Elysia`
@@ -68,6 +75,16 @@ directly onto an existing Elysia app.
 ### `composeCommandExecutors(...executors): CommandExecutor`
 
 Composes multiple `CommandExecutor` middleware functions into an onion-style pipeline.
+
+### `composeAspects(...aspects): ApplicationAspect`
+
+Composes static `around(context, next)` functions. Calling `next()` more than
+once is rejected.
+
+### `executeJob(...)`
+
+Executes a compiler-emitted Job descriptor with its static aspect list and
+compiler-generated job scope.
 
 ### `ApplicationError`
 

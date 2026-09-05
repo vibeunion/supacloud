@@ -162,7 +162,7 @@ export interface EnvironmentInjector extends InjectorLike {
 /**
  * Runtime compatibility adapter over Angular's public EnvironmentInjector.
  * SupaCloud EnvironmentProviders are flattened before crossing the boundary;
- * no Angular private ɵ API is referenced.
+ * no Angular private API is referenced.
  */
 export function createEnvironmentInjector(
   providers: Array<Provider | EnvironmentProviders>,

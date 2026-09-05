@@ -2,12 +2,14 @@ import { describe, expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
 import {
   ApplicationError,
+  composeAspects,
   composeCommandExecutors,
   createApplication,
   createModulePlugin,
   createSupaCloudRequestContext,
   createTestApp,
   defaultErrorResponse,
+  executeJob,
   requireIdempotencyKey,
   requireTrustedIdentity,
   type ApplicationOptions,
@@ -402,6 +404,71 @@ describe("createApplication", () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toMatchObject({ ok: false });
   });
+
+  test("executes module, route, command, governance, and handler in static onion order", async () => {
+    const events: string[] = [];
+    const around = (label: string) => async (
+      _context: { kind: string },
+      next: () => unknown | Promise<unknown>,
+    ) => {
+      events.push(`${label}:before`);
+      const result = await next();
+      events.push(`${label}:after`);
+      return result;
+    };
+    const app = createTestApp({
+      modules: [{
+        name: "aop",
+        aspects: [around("module")],
+        createServices: () => ({
+          controller: { run: () => {
+            events.push("handler");
+            return { ok: true };
+          } },
+        }),
+        controllers: [{
+          path: "/aop",
+          serviceKey: "controller",
+          scope: "application",
+          routes: [{
+            method: "POST",
+            path: "/",
+            handler: "run",
+            aspects: [around("route")],
+            command: "RunCommand",
+          }],
+        }],
+        commands: [{
+          className: "RunCommand",
+          name: "aop.run",
+          permission: "aop.run",
+          transaction: "none",
+          idempotency: "none",
+          aspects: [around("command")],
+        }],
+      }],
+      commandExecutor: async (_invocation, next) => {
+        events.push("governance:before");
+        const result = await next();
+        events.push("governance:after");
+        return result;
+      },
+    });
+
+    const response = await testRequest(app, "/aop", { method: "POST" });
+    expect(response.status).toBe(200);
+    expect(events).toEqual([
+      "module:before",
+      "route:before",
+      "command:before",
+      "governance:before",
+      "handler",
+      "governance:after",
+      "command:after",
+      "route:after",
+      "module:after",
+    ]);
+  });
 });
 
 describe("SupaCloud request context", () => {
@@ -673,5 +740,144 @@ describe("composeCommandExecutors", () => {
     const optRes = await testRequest(app, "/status", { method: "OPTIONS" });
     expect(optRes.status).toBe(204);
     expect(optRes.headers.get("allow")).toBe("GET, HEAD, OPTIONS");
+  });
+});
+
+describe("composeAspects and executeJob", () => {
+  test("rejects repeated next() calls", async () => {
+    const pipeline = composeAspects(async (_context, next) => {
+      await next();
+      return next();
+    });
+    await expect(pipeline({
+      kind: "route",
+      name: "test",
+      input: {},
+    }, () => "ok")).rejects.toThrow("next() called multiple times");
+  });
+
+  test("executes a job with static aspects and destroys its job scope", async () => {
+    const events: string[] = [];
+    let destroyed = 0;
+    const aspect = async (
+      context: { kind: string; name: string },
+      next: () => unknown | Promise<unknown>,
+    ) => {
+      events.push(`${context.kind}:${context.name}:before`);
+      const result = await next();
+      events.push(`${context.kind}:${context.name}:after`);
+      return result;
+    };
+    const compiled: CompiledModule = {
+      name: "jobs",
+      createServices: () => ({}),
+      createJobScope: () => ({
+        rebuildJob: {
+          run: (input: { id: string }) => {
+            events.push(`run:${input.id}`);
+            return input.id;
+          },
+        },
+      }),
+      destroyJobScope: async () => {
+        destroyed += 1;
+      },
+      controllers: [],
+      commands: [],
+      jobs: [{
+        className: "RebuildJob",
+        name: "case.rebuild",
+        serviceKey: "rebuildJob",
+        scope: "job",
+        aspects: [aspect],
+      }],
+      aspects: [aspect],
+    };
+
+    const result = await executeJob(
+      compiled,
+      {},
+      compiled.jobs?.[0] ?? (() => {
+        throw new Error("job fixture is missing");
+      })(),
+      { id: "42" },
+      { jobId: "j-1" },
+    );
+    expect(result).toBe("42");
+    expect(events).toEqual([
+      "job:case.rebuild:before",
+      "job:case.rebuild:before",
+      "run:42",
+      "job:case.rebuild:after",
+      "job:case.rebuild:after",
+    ]);
+    expect(destroyed).toBe(1);
+  });
+
+  test("destroys a job scope when the handler is unavailable", async () => {
+    let destroyed = 0;
+    const compiled: CompiledModule = {
+      name: "jobs",
+      createServices: () => ({}),
+      createJobScope: () => ({}),
+      destroyJobScope: async () => {
+        destroyed += 1;
+      },
+      controllers: [],
+      commands: [],
+      jobs: [],
+    };
+
+    await expect(executeJob(
+      compiled,
+      {},
+      {
+        className: "BrokenJob",
+        name: "case.broken",
+        serviceKey: "brokenJob",
+        scope: "job",
+      },
+      {},
+      {},
+    )).rejects.toMatchObject({ code: "JOB_HANDLER_UNAVAILABLE" });
+    expect(destroyed).toBe(1);
+  });
+
+  test("does not create or destroy a job scope for an application-scoped job", async () => {
+    let created = 0;
+    let destroyed = 0;
+    const compiled: CompiledModule = {
+      name: "jobs",
+      createServices: () => ({
+        applicationJob: {
+          run: (input: string) => input.toUpperCase(),
+        },
+      }),
+      createJobScope: () => {
+        created += 1;
+        return {};
+      },
+      destroyJobScope: async () => {
+        destroyed += 1;
+      },
+      controllers: [],
+      commands: [],
+      jobs: [],
+    };
+
+    await expect(executeJob(
+      compiled,
+      compiled.createServices({}, {}),
+      {
+        className: "ApplicationJob",
+        name: "case.application",
+        serviceKey: "applicationJob",
+        scope: "application",
+      },
+      "ok",
+      {},
+    )).resolves.toBe("OK");
+    expect(created).toBe(0);
+    expect(destroyed).toBe(0);
   });
 });

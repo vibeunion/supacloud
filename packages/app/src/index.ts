@@ -1,5 +1,14 @@
 export { SCOPES, DEFAULT_SCOPE, SCOPE_LIFETIME_RANK, isScopeViolation } from "./scope";
 export type { Scope } from "./scope";
+export type {
+  Aspect,
+  AspectContext,
+  AspectKind,
+  AspectNext,
+  CommandAspect,
+  JobAspect,
+  RouteAspect,
+} from "./aspect";
 export { InjectionToken } from "./token";
 export type { InjectionTokenOptions } from "./token";
 export {
@@ -39,6 +48,7 @@ export {
   Host,
   Inject,
   Injectable,
+  Job,
   Module,
   Optional,
   Options,
@@ -54,6 +64,7 @@ export {
   UseGuards,
   executeResolvers,
   getCommandMeta,
+  getJobMeta,
   getControllerMeta,
   getGuards,
   getHostParams,
@@ -67,6 +78,7 @@ export {
   getQueryMeta,
   getRoutes,
   COMMAND_METADATA,
+  JOB_METADATA,
   CONTROLLER_METADATA,
   GUARDS_METADATA,
   CAN_DEACTIVATE_METADATA,
@@ -88,6 +100,8 @@ export type {
   CanMatchFn,
   CommandMeta,
   CommandOptions,
+  JobMeta,
+  JobOptions,
   ControllerMeta,
   ControllerOptions,
   HttpMethod,
