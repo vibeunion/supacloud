@@ -9,9 +9,9 @@
   "packages/supacloud": "0.12.0",
   "packages/function-adapter": "0.3.0",
   "packages/supacloud-lite": "0.13.0",
-  "packages/app": "0.6.0",
-  "packages/compiler": "0.6.0",
-  "packages/elysia": "0.5.0",
+  "packages/app": "0.6.1",
+  "packages/compiler": "0.6.1",
+  "packages/elysia": "0.5.1",
   "packages/db": "0.4.0",
   "packages/testing": "0.5.0"
 }

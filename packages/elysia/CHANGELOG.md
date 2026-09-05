@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.5.0...elysia-v0.5.1) (2026-09-05)
+
+
+### Bug Fixes
+
+* **compiler:** close job scope review gaps ([#1161](https://github.com/vibeunion/supacloud/issues/1161)) ([2784942](https://github.com/vibeunion/supacloud/commit/278494285d6225d98619e3df76071418539894e6))
+
 ## [0.5.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.4.0...elysia-v0.5.0) (2026-09-05)
 
 
