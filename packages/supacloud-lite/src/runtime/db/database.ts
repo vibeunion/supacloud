@@ -594,8 +594,8 @@ export class Database {
 export function parseIdentityArgs(identity: string): FunctionArg[] {
   if (!identity.trim()) return []
   const parts: string[] = []
-  let depth = 0
-  let current = ''
+  let depth: number = 0
+  let current: string = ''
   for (const ch of identity) {
     if (ch === '(') depth++
     if (ch === ')') depth--

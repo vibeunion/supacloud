@@ -241,7 +241,7 @@ async function expectWorkflowLeaseRecovery(workflows: WorkflowClient): Promise<v
   ], 'reclaimed lease claim')
   assert(reclaimed.runId === runId && reclaimed.attempt === 2, 'workflow lease was not reclaimed at attempt two')
   assert(await rejectedCode(() => workflows.complete({ ...attemptRequest(expired), runOutput: { stale: true } })) === '40001', 'stale worker completion was accepted')
-  const retryRequest = { ...attemptRequest(reclaimed), errorMessage: 'retry once', delaySeconds: 0 }
+  const retryRequest = { ...attemptRequest(reclaimed), errorMessage: 'retry once', delaySeconds: 0 } satisfies Parameters<WorkflowClient['retry']>[0]
   const retried = await workflows.retry(retryRequest)
   const repeated = await workflows.retry(retryRequest)
   assert(retried.steps[0]?.status === 'queued' && repeated.idempotent, 'workflow retry was not idempotent')
@@ -407,7 +407,7 @@ async function withServer<T>(
 ): Promise<T> {
   const port = await findEphemeralPort()
   const server = startNativeServer(environment, port)
-  let checkCompleted = false
+  let checkCompleted: boolean = false
   try {
     const url = `http://127.0.0.1:${port}`
     await waitForHealth(url, server.processHandle)
@@ -455,7 +455,7 @@ function isRequestedShutdown(exitCode: number): boolean {
 }
 
 async function waitForHealth(url: string, processHandle: Bun.Subprocess): Promise<void> {
-  for (let attempt = 0; attempt < 600; attempt++) {
+  for (let attempt: number = 0; attempt < 600; attempt++) {
     if (processHandle.exitCode !== null) throw new Error(`standalone native server exited before health (${processHandle.exitCode})`)
     try {
       if ((await fetch(`${url}/health`)).ok) return

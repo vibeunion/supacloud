@@ -457,7 +457,7 @@ function waitForPollingInterval(
   signal?: AbortSignal,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    let settled = false;
+    let settled: boolean = false;
     const finish = (settle: () => void) => {
       if (settled) return;
       settled = true;
@@ -767,7 +767,7 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
   }
 
   subscribe(taskId: string, options: SupaCloudTaskSubscribeOptions) {
-    let closed = false;
+    let closed: boolean = false;
     let channel: RealtimeChannel | null = null;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
     let realtimeTimeoutTimer: ReturnType<typeof setTimeout> | null = null;

@@ -10,6 +10,8 @@ Runtime adapter that turns `@supacloud/compiler` output into a production-ready
   passing exported services downstream via Elysia plugins.
 - **Request-scoped providers**: creates a fresh scope per HTTP request via
   `createRequestScope`, mapping request-scoped controllers and services.
+- **Request-scope teardown**: invokes the compiler-generated
+  `destroyRequestScope` after the response, including when the handler fails.
 - **TypeBox schema binding**: attaches compiled parameter, query, body, and
   response TypeBox schemas directly to Elysia route definitions.
 - **Unified Command Pipeline**: runs `@Command`-decorated handlers through a

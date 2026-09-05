@@ -32,6 +32,7 @@ interface Captured {
   auditService?: AuditService;
   caseImported?: Record<string, Record<string, unknown>>;
   caseDeps?: Record<string, unknown>;
+  requestScopeDestroyed?: number;
 }
 
 function createAuditModule(captured: Captured): CompiledModule {
@@ -96,6 +97,9 @@ function createCaseModule(captured: Captured): CompiledModule {
           requestId,
         ),
       };
+    },
+    destroyRequestScope: async () => {
+      captured.requestScopeDestroyed = (captured.requestScopeDestroyed ?? 0) + 1;
     },
     controllers: [
       {
@@ -494,6 +498,8 @@ describe("createModulePlugin", () => {
       requestId: "req-standalone",
     });
     expect(captured.auditService?.entries).toEqual(["case.get:9"]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(captured.requestScopeDestroyed).toBe(1);
   });
 });
 

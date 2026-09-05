@@ -171,7 +171,7 @@ export async function runCli(
         return;
     }
     
-    let startIdx = 1;
+    let startIdx: number = 1;
 
     // Check if there is an action argument (assuming index 1 is action if not starting with '--')
     if (args.length > 1 && !args[1].startsWith("--")) {

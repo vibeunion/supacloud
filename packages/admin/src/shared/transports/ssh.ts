@@ -156,7 +156,7 @@ const SENSITIVE_STRUCTURED_FIELD = /(?:password|pass|secret|token|key|credential
 
 function decodedStructuredFieldName(encodedName: string): string | null {
     let decodedName = encodedName.replace(/\\'/g, "'");
-    for (let decodingPass = 0; decodingPass < 3; decodingPass += 1) {
+    for (let decodingPass: number = 0; decodingPass < 3; decodingPass += 1) {
         if (decodedName.length > 256) return null;
         try {
             const nextName = JSON.parse(`"${decodedName.replace(/"/g, '\\"')}"`);
@@ -187,7 +187,7 @@ function structuredSensitiveFieldsAreRedacted(message: string): boolean {
     try {
         const parsedDiagnostic = JSON.parse(normalizedQuotes);
         if (!parsedDiagnostic || typeof parsedDiagnostic !== "object") return false;
-        let foundSensitiveField = false;
+        let foundSensitiveField: boolean = false;
         const pending = [parsedDiagnostic];
         while (pending.length > 0) {
             const current = pending.pop();
@@ -360,7 +360,7 @@ export class SshTransport {
         auditCommand(command, this.config.host, false);
 
         const conn = await this.pool.acquire();
-        let connectionReusable = true;
+        let connectionReusable: boolean = true;
         try {
             return await new Promise<SshResult>((resolve, reject) => {
                 const outputLimit = this.config.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
@@ -463,7 +463,7 @@ export class SshTransport {
 
     private async runSftpOperation(timeoutMs: number, operation: (sftp: SftpClient) => Promise<void>): Promise<void> {
         const conn = await this.pool.acquire();
-        let connectionReusable = true;
+        let connectionReusable: boolean = true;
         let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
         try {
             const operationPromise = openSftp(conn).then(async (sftp) => {

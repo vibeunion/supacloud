@@ -8,9 +8,9 @@ const B32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'
 
 /** Encode bytes as unpadded RFC 4648 base32 (the format authenticator apps expect). */
 export function base32Encode(bytes: Uint8Array): string {
-  let bits = 0
-  let value = 0
-  let out = ''
+  let bits: number = 0
+  let value: number = 0
+  let out: string = ''
   for (const b of bytes) {
     value = (value << 8) | b
     bits += 8
@@ -26,8 +26,8 @@ export function base32Encode(bytes: Uint8Array): string {
 /** Decode an unpadded/padded base32 string to bytes (case-insensitive). */
 export function base32Decode(input: string): Uint8Array {
   const clean = input.toUpperCase().replace(/=+$/, '').replace(/\s/g, '')
-  let bits = 0
-  let value = 0
+  let bits: number = 0
+  let value: number = 0
   const out: number[] = []
   for (const ch of clean) {
     const idx = B32_ALPHABET.indexOf(ch)
@@ -67,7 +67,7 @@ async function hotp(secret: Uint8Array, counter: number): Promise<string> {
   const msg = new Uint8Array(8)
   // 64-bit big-endian counter (safe integer range covers TOTP for millennia)
   let c = counter
-  for (let i = 7; i >= 0; i--) {
+  for (let i: number = 7; i >= 0; i--) {
     msg[i] = c & 0xff
     c = Math.floor(c / 256)
   }

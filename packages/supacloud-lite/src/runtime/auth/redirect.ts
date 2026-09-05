@@ -12,8 +12,8 @@
  * for URI_ALLOW_LIST entries.
  */
 function globToRegExp(pattern: string): RegExp {
-  let out = ''
-  for (let i = 0; i < pattern.length; i++) {
+  let out: string = ''
+  for (let i: number = 0; i < pattern.length; i++) {
     const c = pattern[i]
     if (c === '*') {
       if (pattern[i + 1] === '*') {

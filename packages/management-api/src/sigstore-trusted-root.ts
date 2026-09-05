@@ -100,7 +100,7 @@ export async function withSigstoreVerificationDirectory<T>(
 ): Promise<T> {
   const resources = createSigstoreVerificationDirectory();
   let operationOutput: T | undefined;
-  let operationFailed = false;
+  let operationFailed: boolean = false;
   let operationError: unknown;
   try {
     operationOutput = await operation(resources);
@@ -108,7 +108,7 @@ export async function withSigstoreVerificationDirectory<T>(
     operationFailed = true;
     operationError = error;
   }
-  let cleanupFailed = false;
+  let cleanupFailed: boolean = false;
   let cleanupError: unknown;
   try {
     rmSync(resources.directory, { recursive: true });

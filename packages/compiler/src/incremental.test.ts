@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { appendFile, mkdtemp, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDependencyGraphCache, createIncrementalCompiler, ModuleDependencyGraph } from "./incremental";
@@ -34,8 +34,9 @@ describe("createIncrementalCompiler", () => {
 
     await writeFile(join(rootDir, "src/plain.ts"), "export const value = 1;\n", "utf8");
     const fourth = await compiler.compile({ rootDir, outDir }, ["src/plain.ts"]);
-    expect(fourth.stats.cacheHit).toBe(true);
+    expect(fourth.stats.cacheHit).toBe(false);
     expect(fourth.stats.changedFiles).toEqual(["src/plain.ts"]);
+    expect(fourth.stats.reanalyzedModules).toEqual([]);
     expect(fourth.written).toEqual([]);
   });
 
@@ -140,5 +141,38 @@ describe("createIncrementalCompiler", () => {
     expect(second.stats.reanalyzedModules).toContain("audit");
     expect(second.stats.reanalyzedModules).toContain("case");
     expect(second.stats.reusedModules).toContain("health");
+  });
+
+  test("修改共享 token 文件会使引用它的模块重新分析", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "supacloud-compiler-shared-token-"));
+    await writeFixtureProject(rootDir, GOOD_PROJECT_FILES);
+    const outDir = join(rootDir, "generated");
+    const cache = createDependencyGraphCache();
+    const compiler = createIncrementalCompiler();
+
+    await compiler.compile({ rootDir, outDir, cache });
+    await appendFile(join(rootDir, "src/features/shared/tokens.ts"), "\n// token update\n", "utf8");
+
+    const result = await compiler.compile({ rootDir, outDir, cache });
+    expect(result.stats.changedFiles).toContain("src/features/shared/tokens.ts");
+    expect(result.stats.reanalyzedModules).toContain("audit");
+    expect(result.stats.reanalyzedModules).toContain("case");
+    expect(result.stats.reusedModules).toContain("health");
+  });
+
+  test("删除源文件会从快照中移除，且不会把项目外路径纳入快照", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "supacloud-compiler-delete-"));
+    await writeFixtureProject(rootDir, GOOD_PROJECT_FILES);
+    const outDir = join(rootDir, "generated");
+    const compiler = createIncrementalCompiler();
+    const extraFile = join(rootDir, "src/removed.ts");
+    await writeFile(extraFile, "export const removed = true;\n", "utf8");
+
+    await compiler.compile({ rootDir, outDir });
+    await rm(extraFile);
+    const result = await compiler.compile({ rootDir, outDir }, ["src/removed.ts", join(rootDir, "..", "outside.ts")]);
+
+    expect(result.stats.changedFiles).toContain("src/removed.ts");
+    expect(result.stats.changedFiles).not.toContain("../outside.ts");
   });
 });

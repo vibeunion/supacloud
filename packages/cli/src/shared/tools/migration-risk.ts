@@ -88,7 +88,7 @@ function lineCommentEnd(sql: string, start: number): number {
 }
 
 function blockCommentEnd(sql: string, start: number): number {
-    let depth = 1;
+    let depth: number = 1;
     let cursor = start + 2;
     while (cursor < sql.length && depth > 0) {
         if (sql.startsWith("/*", cursor)) {
@@ -137,8 +137,8 @@ function maskSql(
     sql: string,
     quotedIdentifier: typeof maskDoubleQuotedIdentifier,
 ): string {
-    let masked = "";
-    let cursor = 0;
+    let masked: string = "";
+    let cursor: number = 0;
     while (cursor < sql.length) {
         const protectedSpan = maskSqlSpan(sql, cursor, quotedIdentifier);
         if (protectedSpan) {
@@ -163,8 +163,8 @@ function maskSqlPolicyNoise(sql: string): string {
 export function splitSqlStatements(sql: string): string[] {
     const masked = maskSqlNoise(sql);
     const statements: string[] = [];
-    let lastIndex = 0;
-    let cursor = 0;
+    let lastIndex: number = 0;
+    let cursor: number = 0;
 
     while (cursor < masked.length) {
         if (masked[cursor] === ";") {
@@ -258,10 +258,10 @@ function topLevelDoBodies(sql: string): string[] {
 function splitTopLevelClauses(sql: string): string[] {
     const masked = maskSqlNoise(sql);
     const clauses: string[] = [];
-    let parenthesisDepth = 0;
-    let bracketDepth = 0;
-    let clauseStart = 0;
-    for (let cursor = 0; cursor < masked.length; cursor += 1) {
+    let parenthesisDepth: number = 0;
+    let bracketDepth: number = 0;
+    let clauseStart: number = 0;
+    for (let cursor: number = 0; cursor < masked.length; cursor += 1) {
         const character = masked[cursor];
         if (character === "(") parenthesisDepth += 1;
         else if (character === ")") parenthesisDepth -= 1;
@@ -719,10 +719,10 @@ export function analyzeMigrationFiles(
     files: Array<{ file: string; sql: string }>,
 ): MigrationRiskAnalysis {
     const fileRisks: MigrationFileRisk[] = [];
-    let highCount = 0;
-    let mediumCount = 0;
-    let lowCount = 0;
-    let transactionalPushBlockerCount = 0;
+    let highCount: number = 0;
+    let mediumCount: number = 0;
+    let lowCount: number = 0;
+    let transactionalPushBlockerCount: number = 0;
 
     for (const { file, sql } of files) {
         const risks = analyzeMigrationSql(sql);

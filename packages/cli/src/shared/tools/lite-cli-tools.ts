@@ -176,8 +176,8 @@ function spawnLiteCommand(
             rejectExecution(new Error("Lite CLI child process did not expose piped output"));
             return;
         }
-        let standardOutput = "";
-        let standardError = "";
+        let standardOutput: string = "";
+        let standardError: string = "";
         child.stdout.setEncoding("utf8");
         child.stderr.setEncoding("utf8");
         child.stdout.on("data", (chunk: string) => { standardOutput += chunk; });

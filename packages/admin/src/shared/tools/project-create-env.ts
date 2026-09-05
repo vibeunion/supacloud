@@ -346,7 +346,7 @@ function environmentFileContent(
 }
 
 async function sanitizeAndClose(openFile: ProjectEnvFileHandle): Promise<boolean> {
-    let sanitized = true;
+    let sanitized: boolean = true;
     try {
         await openFile.truncate(0);
         await openFile.sync();

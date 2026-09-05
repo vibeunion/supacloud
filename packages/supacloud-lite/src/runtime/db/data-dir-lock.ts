@@ -19,7 +19,7 @@ export async function acquireDataDirLock(dataDir?: string, engineName = 'databas
   await mkdir(dirname(absoluteDataDir), { recursive: true, mode: 0o700 })
   const nonce = crypto.randomUUID()
   const handle = await createDataDirLock(absoluteDataDir, lockPath, nonce, engineName)
-  let released = false
+  let released: boolean = false
   return async () => {
     if (released) return
     released = true
@@ -67,7 +67,7 @@ async function createDataDirLock(
   nonce: string,
   engineName: string
 ): Promise<FileHandle> {
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt: number = 0; attempt < 3; attempt++) {
     try {
       return await writeDataDirLock(lockPath, nonce)
     } catch (error) {

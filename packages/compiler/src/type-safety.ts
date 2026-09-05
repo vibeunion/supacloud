@@ -1,7 +1,6 @@
-import { Node, Project, SyntaxKind, type SourceFile } from "ts-morph";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-import { relative, sep } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import * as ts from "@typescript/typescript6";
 import type { Diagnostic, TypeSafetyOptions } from "./types";
 
 const DEFAULT_EXCLUDES = [
@@ -33,16 +32,21 @@ export function scanGeneratedArtifacts(
   artifacts: Record<string, string | undefined>,
   strict = true,
 ): Diagnostic[] {
-  const project = new Project({ useInMemoryFileSystem: true });
   const diagnostics: Diagnostic[] = [];
   for (const [file, content] of Object.entries(artifacts)) {
     if (content === undefined) continue;
-    const sourceFile = project.createSourceFile(file, content, { overwrite: true });
-    for (const node of sourceFile.getDescendantsOfKind(SyntaxKind.AnyKeyword)) {
+    const sourceFile = ts.createSourceFile(
+      file,
+      content,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS,
+    );
+    for (const node of descendantsOfKind(sourceFile, isAnyKeyword)) {
       diagnostics.push(makeDiagnostic(
         "generated-any",
         `生成产物 ${file} 包含 any；严格生成模式要求使用 unknown、具体接口或泛型约束。`,
-        file,
+        sourceFile,
         node,
         strict,
       ));
@@ -52,39 +56,66 @@ export function scanGeneratedArtifacts(
 }
 
 export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic[] {
-  const project = new Project({
-    ...(existsSync(join(options.rootDir, "tsconfig.json"))
-      ? { tsConfigFilePath: join(options.rootDir, "tsconfig.json") }
-      : {
-          compilerOptions: {
-            strict: true,
-            skipLibCheck: true,
-          },
-        }),
-    skipAddingFilesFromTsConfig: true,
-  });
+  const rootDir = resolve(options.rootDir);
+  const configPath = join(rootDir, "tsconfig.json");
+  const projectConfig: { options: ts.CompilerOptions; errors: readonly ts.Diagnostic[] } = existsSync(configPath)
+    ? readProjectConfig(configPath)
+    : {
+        options: {
+          strict: true,
+          skipLibCheck: true,
+          target: ts.ScriptTarget.ES2022,
+          module: ts.ModuleKind.ESNext,
+        },
+        errors: [],
+      };
   const include = options.include ?? ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"];
-  project.addSourceFilesAtPaths(include.map((pattern) => `${options.rootDir}/${pattern}`));
-  const outDir = options.outDir ? normalizeRelative(options.rootDir, options.outDir) : undefined;
+  const rootNames = ts.sys.readDirectory(
+    rootDir,
+    [".ts", ".tsx", ".mts", ".cts"],
+    ["node_modules", "dist"],
+    include,
+  ).filter((file) => isProductionSourcePath(
+    rootDir,
+    file,
+    [...DEFAULT_EXCLUDES, ...(options.exclude ?? [])],
+  ));
+  const compilerOptions: ts.CompilerOptions = { ...projectConfig.options, noEmit: true };
+  const host = ts.createCompilerHost(compilerOptions);
+  host.getCurrentDirectory = () => rootDir;
+  const program = ts.createProgram(rootNames, compilerOptions, host);
+  const outDir = options.outDir ? normalizeRelative(rootDir, options.outDir) : undefined;
   const excludes = [...DEFAULT_EXCLUDES, ...(options.exclude ?? [])];
-  const sourceFiles = project
+  const sourceFiles = program
     .getSourceFiles()
-    .filter((sourceFile) => isProductionSource(options.rootDir, sourceFile, excludes, outDir));
+    .filter((sourceFile) => isProductionSource(rootDir, sourceFile, excludes, outDir));
 
-  const diagnostics: Diagnostic[] = [];
+  const diagnostics: Diagnostic[] = [...projectConfig.errors, ...program.getOptionsDiagnostics()]
+    .map((diagnostic) => ({
+      severity: "error",
+      code: "source-config",
+      message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+      file: diagnostic.file ? normalizeRelative(rootDir, diagnostic.file.fileName) : normalizeRelative(rootDir, configPath),
+      line: diagnostic.file && diagnostic.start !== undefined
+        ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start).line + 1
+        : undefined,
+      errorCode: `TS${diagnostic.code}`,
+    }));
+  const checker = program.getTypeChecker();
   for (const sourceFile of sourceFiles) {
-    scanSourceFile(sourceFile, options.rootDir, diagnostics, options.strict ?? false);
+    scanSourceFile(sourceFile, checker, rootDir, diagnostics, options.strict ?? false);
   }
   return diagnostics;
 }
 
 function scanSourceFile(
-  sourceFile: SourceFile,
+  sourceFile: ts.SourceFile,
+  checker: ts.TypeChecker,
   rootDir: string,
   diagnostics: Diagnostic[],
   strict: boolean,
 ): void {
-  for (const node of sourceFile.getDescendantsOfKind(SyntaxKind.AnyKeyword)) {
+  for (const node of descendantsOfKind(sourceFile, isAnyKeyword)) {
     diagnostics.push(makeDiagnostic(
       "source-any",
       "生产源码使用了显式 any；请改用 unknown、具体接口或泛型约束。",
@@ -95,33 +126,33 @@ function scanSourceFile(
     ));
   }
 
-  for (const node of sourceFile.getDescendants()) {
-    if (Node.isAsExpression(node)) {
-      if (Node.isAsExpression(node.getParent()) || Node.isTypeAssertion(node.getParent())) continue;
-      const assertedType = node.getTypeNode()?.getText();
+  for (const node of descendants(sourceFile)) {
+    if (ts.isAsExpression(node)) {
+      if (ts.isAsExpression(node.parent) || ts.isTypeAssertionExpression(node.parent)) continue;
+      const assertedType = node.type.getText(sourceFile);
       if (assertedType === "const") continue;
       diagnostics.push(makeDiagnostic(
         "source-type-assertion",
-        `生产源码包含类型断言 ${node.getText()}；请优先使用类型守卫、satisfies 或显式边界解析。`,
+        `生产源码包含类型断言 ${node.getText(sourceFile)}；请优先使用类型守卫、satisfies 或显式边界解析。`,
         sourceFile,
         node,
         strict,
         rootDir,
       ));
-    } else if (Node.isTypeAssertion(node)) {
-      if (Node.isAsExpression(node.getParent()) || Node.isTypeAssertion(node.getParent())) continue;
+    } else if (ts.isTypeAssertionExpression(node)) {
+      if (ts.isAsExpression(node.parent) || ts.isTypeAssertionExpression(node.parent)) continue;
       diagnostics.push(makeDiagnostic(
         "source-type-assertion",
-        `生产源码包含类型断言 ${node.getText()}；请优先使用类型守卫、satisfies 或显式边界解析。`,
+        `生产源码包含类型断言 ${node.getText(sourceFile)}；请优先使用类型守卫、satisfies 或显式边界解析。`,
         sourceFile,
         node,
         strict,
         rootDir,
       ));
-    } else if (Node.isNonNullExpression(node)) {
+    } else if (ts.isNonNullExpression(node)) {
       diagnostics.push(makeDiagnostic(
         "source-non-null-assertion",
-        `生产源码包含非空断言 ${node.getText()}；请显式处理 null/undefined。`,
+        `生产源码包含非空断言 ${node.getText(sourceFile)}；请显式处理 null/undefined。`,
         sourceFile,
         node,
         strict,
@@ -130,45 +161,47 @@ function scanSourceFile(
     }
   }
 
-  for (const declaration of sourceFile.getVariableDeclarations()) {
-    const initializer = declaration.getInitializer();
-    if (!initializer || declaration.getTypeNode()) continue;
-    const declarationType = declaration.getType();
-    const initializerType = initializer.getType();
-    if (declarationType.isAny()) {
-      diagnostics.push(makeDiagnostic(
-        "source-any",
-        "生产源码中的变量被推断为 any；请为边界数据提供解析类型或显式 unknown。",
-        sourceFile,
-        declaration,
-        strict,
-        rootDir,
-      ));
-      continue;
+  for (const declaration of descendantsOfKind(sourceFile, ts.isVariableDeclaration)) {
+    const initializer = declaration.initializer;
+    if (!initializer || declaration.type) continue;
+    const declarationType = checker.getTypeAtLocation(declaration.name);
+    const initializerType = checker.getTypeAtLocation(initializer);
+    for (const name of bindingNames(declaration.name)) {
+      if (isAnyType(checker.getTypeAtLocation(name))) {
+        diagnostics.push(makeDiagnostic(
+          "source-any",
+          "生产源码中的变量被推断为 any；请为边界数据提供解析类型或显式 unknown。",
+          sourceFile,
+          name,
+          strict,
+          rootDir,
+        ));
+      }
     }
-    if (declaration.getVariableStatement()?.getDeclarationKind() === "let"
+    if (isAnyType(declarationType)) continue;
+    if (isLetDeclaration(declaration)
       && isLiteralSyntax(initializer)
-      && !declarationType.isLiteral()) {
+      && !isLiteralType(declarationType)) {
       diagnostics.push(makeDiagnostic(
         "source-implicit-widening",
-        `变量 ${declaration.getName()} 的字面量类型从 ${initializerType.getText()} 隐式宽化为 ${declarationType.getText()}；请补充类型或使用 const。`,
+        `变量 ${declaration.name.getText(sourceFile)} 的字面量类型从 ${checker.typeToString(initializerType, initializer)} 隐式宽化为 ${checker.typeToString(declarationType, declaration)}；请补充类型或使用 const。`,
         sourceFile,
         declaration,
         strict,
         rootDir,
       ));
     }
-    if (Node.isObjectLiteralExpression(initializer)
-      && declaration.getVariableStatement()?.getDeclarationKind() === "const"
-      && initializer.getText().length > 0
-      && initializer.getProperties().some((property) => {
-        return Node.isPropertyAssignment(property)
-          && property.getInitializer()?.getKind() !== SyntaxKind.AsExpression
-          && isLiteralExpression(property.getInitializer());
-      })) {
+    if (ts.isObjectLiteralExpression(initializer)
+      && isConstDeclaration(declaration)
+      && initializer.getText(sourceFile).length > 0
+      && initializer.properties.some((property) =>
+        ts.isPropertyAssignment(property)
+        && property.initializer !== undefined
+        && !ts.isAsExpression(property.initializer)
+        && isLiteralExpression(property.initializer))) {
       diagnostics.push(makeDiagnostic(
         "source-implicit-widening",
-        `常量对象 ${declaration.getName()} 的字面量属性会隐式宽化；请补充对象类型或使用 as const。`,
+        `常量对象 ${declaration.name.getText(sourceFile)} 的字面量属性会隐式宽化；请补充对象类型或使用 as const。`,
         sourceFile,
         declaration,
         strict,
@@ -177,82 +210,157 @@ function scanSourceFile(
     }
   }
 
-  for (const parameter of sourceFile.getDescendantsOfKind(SyntaxKind.Parameter)) {
-    if (!parameter.getTypeNode() && parameter.getType().isAny()) {
-      diagnostics.push(makeDiagnostic(
-        "source-any",
-        "生产源码中的参数被推断为 any；请补充参数类型。",
-        sourceFile,
-        parameter,
-        strict,
-        rootDir,
-      ));
+  for (const parameter of descendantsOfKind(sourceFile, ts.isParameter)) {
+    if (parameter.type) continue;
+    for (const name of bindingNames(parameter.name)) {
+      if (isAnyType(checker.getTypeAtLocation(name))) {
+        diagnostics.push(makeDiagnostic(
+          "source-any",
+          "生产源码中的参数被推断为 any；请补充参数类型。",
+          sourceFile,
+          name,
+          strict,
+          rootDir,
+        ));
+      }
     }
   }
+}
 
+function readProjectConfig(configPath: string): {
+  options: ts.CompilerOptions;
+  errors: readonly ts.Diagnostic[];
+} {
+  const config = ts.readConfigFile(configPath, (file) => readFileSync(file, "utf8"));
+  if (config.error) return { options: {}, errors: [config.error] };
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, dirname(configPath));
+  return { options: parsed.options, errors: parsed.errors };
 }
 
 function isProductionSource(
   rootDir: string,
-  sourceFile: SourceFile,
+  sourceFile: ts.SourceFile,
   excludes: string[],
   outDir?: string,
 ): boolean {
-  const relativePath = normalizeRelative(rootDir, sourceFile.getFilePath());
-  if (relativePath.startsWith("../") || relativePath.includes("node_modules/")) return false;
+  const relativePath = normalizeRelative(rootDir, sourceFile.fileName);
+  if (sourceFile.isDeclarationFile || relativePath.startsWith("../") || relativePath.includes("node_modules/")) return false;
   if (outDir && (relativePath === outDir || relativePath.startsWith(`${outDir}/`))) return false;
   return !excludes.some((pattern) => globMatches(relativePath, pattern));
+}
+
+function isProductionSourcePath(rootDir: string, filePath: string, excludes: string[]): boolean {
+  const relativePath = normalizeRelative(rootDir, filePath);
+  return !relativePath.startsWith("../")
+    && !relativePath.includes("node_modules/")
+    && !excludes.some((pattern) => globMatches(relativePath, pattern));
 }
 
 function globMatches(value: string, pattern: string): boolean {
   const escaped = pattern
     .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*\//g, "§/")
     .replace(/\*\*/g, "§§")
     .replace(/\*/g, "[^/]*")
-    .replace(/§§/g, ".*")
-    .replace(/\?/g, "[^/]");
-  const optionalRoot = escaped.startsWith(".*\\/") ? "(?:.*\\/)?"
-    : escaped;
-  return new RegExp(`^${optionalRoot === escaped ? escaped : optionalRoot + escaped.slice(3)}$`).test(value);
+    .replace(/\?/g, "[^/]")
+    .replace(/§\//g, "(?:.*/)?")
+    .replace(/§§/g, ".*");
+  return new RegExp(`^${escaped}$`).test(value);
 }
 
-function isLiteralExpression(node: Node | undefined): boolean {
+function bindingNames(name: ts.BindingName): ts.Identifier[] {
+  if (ts.isIdentifier(name)) return [name];
+  return name.elements.flatMap((element) =>
+    ts.isBindingElement(element) ? bindingNames(element.name) : [],
+  );
+}
+
+function isLiteralExpression(node: ts.Node | undefined): node is ts.Expression {
   if (!node) return false;
   return [
-    SyntaxKind.StringLiteral,
-    SyntaxKind.NumericLiteral,
-    SyntaxKind.TrueKeyword,
-    SyntaxKind.FalseKeyword,
-  ].includes(node.getKind());
+    ts.SyntaxKind.StringLiteral,
+    ts.SyntaxKind.NumericLiteral,
+    ts.SyntaxKind.TrueKeyword,
+    ts.SyntaxKind.FalseKeyword,
+  ].includes(node.kind);
 }
 
-function isLiteralSyntax(node: Node): boolean {
-  return Node.isStringLiteral(node)
-    || Node.isNumericLiteral(node)
-    || node.getKind() === SyntaxKind.TrueKeyword
-    || node.getKind() === SyntaxKind.FalseKeyword;
+function isLiteralSyntax(node: ts.Node): boolean {
+  return ts.isStringLiteral(node)
+    || ts.isNumericLiteral(node)
+    || node.kind === ts.SyntaxKind.TrueKeyword
+    || node.kind === ts.SyntaxKind.FalseKeyword;
+}
+
+function isLiteralType(type: ts.Type): boolean {
+  return (type.flags & (
+    ts.TypeFlags.StringLiteral
+    | ts.TypeFlags.NumberLiteral
+    | ts.TypeFlags.BooleanLiteral
+    | ts.TypeFlags.BigIntLiteral
+  )) !== 0;
+}
+
+function isAnyType(type: ts.Type): boolean {
+  return (type.flags & ts.TypeFlags.Any) !== 0;
+}
+
+function isLetDeclaration(declaration: ts.VariableDeclaration): boolean {
+  return ts.isVariableDeclarationList(declaration.parent)
+    && (declaration.parent.flags & ts.NodeFlags.Let) !== 0;
+}
+
+function isConstDeclaration(declaration: ts.VariableDeclaration): boolean {
+  return ts.isVariableDeclarationList(declaration.parent)
+    && (declaration.parent.flags & ts.NodeFlags.Const) !== 0;
+}
+
+function descendants(root: ts.Node): ts.Node[] {
+  const result: ts.Node[] = [];
+  const visit = (node: ts.Node): void => {
+    result.push(node);
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(root, visit);
+  return result;
+}
+
+function descendantsOfKind<T extends ts.Node>(
+  root: ts.Node,
+  predicate: (node: ts.Node) => node is T,
+): T[] {
+  const result: T[] = [];
+  const visit = (node: ts.Node): void => {
+    if (predicate(node)) result.push(node);
+    ts.forEachChild(node, visit);
+  };
+  ts.forEachChild(root, visit);
+  return result;
 }
 
 function makeDiagnostic(
   code: keyof typeof DIAGNOSTIC_META,
   message: string,
-  fileOrSourceFile: string | SourceFile,
-  node: Node,
+  fileOrSourceFile: string | ts.SourceFile,
+  node: ts.Node,
   strict: boolean,
   rootDir?: string,
 ): Diagnostic {
+  const sourceFile = typeof fileOrSourceFile === "string" ? undefined : fileOrSourceFile;
   const file = typeof fileOrSourceFile === "string"
     ? fileOrSourceFile
     : rootDir
-      ? normalizeRelative(rootDir, fileOrSourceFile.getFilePath())
-      : fileOrSourceFile.getFilePath();
+      ? normalizeRelative(rootDir, fileOrSourceFile.fileName)
+      : fileOrSourceFile.fileName;
   const meta = DIAGNOSTIC_META[code];
   return {
     severity: strict ? "error" : "warn",
     code,
     message,
     file,
-    line: node.getStartLineNumber(),
+    line: sourceFile
+      ? sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
+      : undefined,
     errorCode: meta.errorCode,
     docsUrl: meta.docsUrl,
   };
@@ -260,4 +368,8 @@ function makeDiagnostic(
 
 function normalizeRelative(rootDir: string, filePath: string): string {
   return relative(rootDir, filePath).split(sep).join("/").replace(/^\.\//, "");
+}
+
+function isAnyKeyword(node: ts.Node): node is ts.KeywordTypeNode {
+  return node.kind === ts.SyntaxKind.AnyKeyword;
 }

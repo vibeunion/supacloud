@@ -7,6 +7,7 @@ import {
   resolveProjectStudioHost,
   resolveProjectStudioUrl,
 } from "../utils/project-routing";
+import { normalizeFrontendCustomDomain } from "../utils/frontend-security";
 
 export interface ProjectDomains {
   apiDomain: string;
@@ -53,8 +54,9 @@ export class RouterService {
 
   async bindCustomDomain(projectRef: string, customDomain: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const apiDomain = resolveProjectApiHost(projectRef, { custom_domain: customDomain });
-      const studioDomain = resolveProjectStudioHost(projectRef, { custom_domain: customDomain });
+      const normalizedDomain = normalizeFrontendCustomDomain(customDomain);
+      const apiDomain = resolveProjectApiHost(projectRef, { custom_domain: normalizedDomain });
+      const studioDomain = resolveProjectStudioHost(projectRef, { custom_domain: normalizedDomain });
       await gatewayService.addProjectDomains(projectRef, [apiDomain], [studioDomain]);
       return { success: true };
     } catch (error: unknown) {
@@ -64,8 +66,9 @@ export class RouterService {
 
   async removeCustomDomain(projectRef: string, customDomain: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const apiDomain = resolveProjectApiHost(projectRef, { custom_domain: customDomain });
-      const studioDomain = resolveProjectStudioHost(projectRef, { custom_domain: customDomain });
+      const normalizedDomain = normalizeFrontendCustomDomain(customDomain);
+      const apiDomain = resolveProjectApiHost(projectRef, { custom_domain: normalizedDomain });
+      const studioDomain = resolveProjectStudioHost(projectRef, { custom_domain: normalizedDomain });
       await gatewayService.removeProjectDomains(projectRef, [apiDomain], [studioDomain]);
       return { success: true };
     } catch (error: unknown) {

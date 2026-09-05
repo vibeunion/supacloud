@@ -1,4 +1,5 @@
-import { mkdir, rename, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { access, mkdir, rename, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type {
   ApplicationGraph,
@@ -78,11 +79,13 @@ export interface CompiledModule {
     ctx: unknown,
     imported?: Record<string, Record<string, unknown>>,
   ): Record<string, unknown>;
+  destroyRequestScope?(scope: Record<string, unknown>): Promise<void>;
   createJobScope?(
     services: Record<string, unknown>,
     ctx: unknown,
     imported?: Record<string, Record<string, unknown>>,
   ): Record<string, unknown>;
+  destroyJobScope?(scope: Record<string, unknown>): Promise<void>;
   controllers: CompiledController[];
   commands: CompiledCommand[];
 }`;
@@ -98,6 +101,37 @@ function isFunction(value: unknown): value is (...args: unknown[]) => unknown {
 function resolveFactoryValue(value: unknown): unknown {
   if (!isRecord(value) || !isFunction(value.factory)) return undefined;
   return value.factory();
+}
+
+const scopeDestructions = new WeakMap<object, Promise<void>>();
+
+function destroyScopeInstances(
+  scope: Record<string, unknown>,
+  plan: readonly { key: string; index?: number }[],
+): Promise<void> {
+  const pending = scopeDestructions.get(scope);
+  if (pending) return pending;
+  const destruction = Promise.resolve().then(async () => {
+    const errors: unknown[] = [];
+    const seen = new Set<unknown>();
+    for (const entry of [...plan].reverse()) {
+      const value = scope[entry.key];
+      const instance = entry.index === undefined ? value
+        : Array.isArray(value) ? value[entry.index] : undefined;
+      if (seen.has(instance)) continue;
+      seen.add(instance);
+      try {
+        if (isRecord(instance) && isFunction(instance.onDestroy)) {
+          await instance.onDestroy();
+        }
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length > 0) throw new AggregateError(errors, "Scope destruction failed");
+  });
+  scopeDestructions.set(scope, destruction);
+  return destruction;
 }`;
 
 export interface GenerateOptions {
@@ -107,6 +141,8 @@ export interface GenerateOptions {
   generatePermissions?: boolean;
   /** Prune unused root providers from compiled output (Angular Ivy AOT tree-shaking). */
   treeShakeUnusedProviders?: boolean;
+  /** Incremental emitter state. Unchanged artifacts are not rewritten. */
+  artifactHashes?: Map<string, string>;
 }
 
 export interface RenderedArtifacts {
@@ -202,7 +238,7 @@ export function renderApplication(
     "",
   ].join("\n");
 
-  const manifest = {
+  const manifest: { version: number; modules: ModuleNode[]; externalTokens: string[] } = {
     version: 1,
     modules: graph.modules,
     externalTokens: graph.externalTokens,
@@ -232,21 +268,45 @@ export async function generateApplication(
   await mkdir(options.outDir, { recursive: true });
   const applicationPath = join(options.outDir, "application.ts");
   const manifestPath = join(options.outDir, "app.manifest.json");
-  await writeFileAtomic(applicationPath, rendered.applicationCode);
-  await writeFileAtomic(manifestPath, rendered.manifestJson);
-
-  const written = [applicationPath, manifestPath];
+  const written: string[] = [];
+  if (await writeFileIfChanged(applicationPath, rendered.applicationCode, options.artifactHashes)) {
+    written.push(applicationPath);
+  }
+  if (await writeFileIfChanged(manifestPath, rendered.manifestJson, options.artifactHashes)) {
+    written.push(manifestPath);
+  }
   if (rendered.clientCode) {
     const clientPath = join(options.outDir, "client.ts");
-    await writeFileAtomic(clientPath, rendered.clientCode);
-    written.push(clientPath);
+    if (await writeFileIfChanged(clientPath, rendered.clientCode, options.artifactHashes)) {
+      written.push(clientPath);
+    }
   }
   if (rendered.permissionsCode) {
     const permissionsPath = join(options.outDir, "permissions.ts");
-    await writeFileAtomic(permissionsPath, rendered.permissionsCode);
-    written.push(permissionsPath);
+    if (await writeFileIfChanged(permissionsPath, rendered.permissionsCode, options.artifactHashes)) {
+      written.push(permissionsPath);
+    }
   }
   return written;
+}
+
+async function writeFileIfChanged(
+  path: string,
+  content: string,
+  hashes?: Map<string, string>,
+): Promise<boolean> {
+  const hash = createHash("sha1").update(content).digest("hex");
+  if (hashes?.get(path) === hash) {
+    try {
+      await access(path);
+      return false;
+    } catch {
+      // The cache is stale because the artifact was removed externally.
+    }
+  }
+  await writeFileAtomic(path, content);
+  hashes?.set(path, hash);
+  return true;
 }
 
 async function writeFileAtomic(path: string, content: string): Promise<void> {
@@ -316,7 +376,7 @@ class ImportManager {
       if (entry.path === importPath && entry.exported === exported) return local;
     }
     let local = exported;
-    let counter = 2;
+    let counter: number = 2;
     while (this.entries.has(local)) {
       local = `${exported}${counter}`;
       counter += 1;
@@ -367,9 +427,11 @@ class ModuleGenerator {
     const sections: string[] = [this.renderServicesFactory()];
     if (this.hasFactoryContent("request")) {
       sections.push(this.renderScopeFactory("request"));
+      sections.push(this.renderScopeDestroyer("request"));
     }
     if (this.hasFactoryContent("job")) {
       sections.push(this.renderScopeFactory("job"));
+      sections.push(this.renderScopeDestroyer("job"));
     }
     return sections;
   }
@@ -382,9 +444,11 @@ class ModuleGenerator {
     ];
     if (this.hasFactoryContent("request")) {
       lines.push(`  createRequestScope: create${this.pascal}RequestScope,`);
+      lines.push(`  destroyRequestScope: destroy${this.pascal}RequestScope,`);
     }
     if (this.hasFactoryContent("job")) {
       lines.push(`  createJobScope: create${this.pascal}JobScope,`);
+      lines.push(`  destroyJobScope: destroy${this.pascal}JobScope,`);
     }
     lines.push(`  controllers: ${this.renderControllers()},`);
     lines.push(`  commands: ${JSON.stringify(this.module.commands)},`);
@@ -532,6 +596,29 @@ class ModuleGenerator {
     ].join("\n");
   }
 
+  private renderScopeDestroyer(kind: "request" | "job"): string {
+    const suffix = kind === "request" ? "RequestScope" : "JobScope";
+    const plan: Array<{ key: string; index?: number }> = [];
+    const multiIndices = new Map<string, number>();
+    for (const provider of orderProviders(this.module.providers.filter((p) => factoryOfScope(p.scope) === kind))) {
+      const index = provider.multi ? (multiIndices.get(provider.token) ?? 0) : undefined;
+      if (index !== undefined) multiIndices.set(provider.token, index + 1);
+      if (provider.kind !== "existing" && provider.hasOnDestroy) {
+        plan.push({ key: camelName(provider.token), index });
+      }
+    }
+    for (const controller of this.module.controllers) {
+      if (factoryOfScope(controller.scope) === kind && controller.hasOnDestroy) {
+        plan.push({ key: camelName(controller.className) });
+      }
+    }
+    return [
+      `async function destroy${this.pascal}${suffix}(scope: Record<string, unknown>): Promise<void> {`,
+      `  await destroyScopeInstances(scope, ${JSON.stringify(plan)});`,
+      `}`,
+    ].join("\n");
+  }
+
   /** Factory function body: instantiates providers and controllers for this scope in dependency topological order. */
   private renderFactoryBody(kind: FactoryKind): string {
     const providers = orderProviders(
@@ -636,7 +723,7 @@ class ModuleGenerator {
     if (existing) return existing;
     const base = camelName(token);
     let local = base;
-    let counter = 2;
+    let counter: number = 2;
     while ([...locals.values()].includes(local)) {
       local = `${base}${counter}`;
       counter += 1;

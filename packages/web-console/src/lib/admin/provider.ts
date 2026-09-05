@@ -133,7 +133,7 @@ export const chatProvider: ChatProvider = {
         throw new Error('No readable stream');
       }
 
-      let buffered = "";
+      let buffered: string = "";
 
       while (true) {
         const { done, value } = await reader.read();

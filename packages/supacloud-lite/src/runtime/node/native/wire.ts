@@ -95,9 +95,9 @@ export class PgWireClient {
       })
 
       // SCRAM handshake state, carried across the SASL message exchange
-      let clientNonce = ''
-      let clientFirstBare = ''
-      let serverSignature = ''
+      let clientNonce: string = ''
+      let clientFirstBare: string = ''
+      let serverSignature: string = ''
       const needPassword = (): boolean => {
         if (opts.password == null) {
           reject(new Error('the server requested a password but none was provided'))
@@ -266,9 +266,9 @@ export class PgWireClient {
           // RowDescription
           if (!p) break
           const count = payload.readInt16BE(0)
-          let off = 2
+          let off: number = 2
           const columns: Column[] = []
-          for (let i = 0; i < count; i++) {
+          for (let i: number = 0; i < count; i++) {
             const end = payload.indexOf(0, off)
             const name = payload.toString('utf8', off, end)
             off = end + 1
@@ -283,9 +283,9 @@ export class PgWireClient {
           // DataRow
           if (!p) break
           const count = payload.readInt16BE(0)
-          let off = 2
+          let off: number = 2
           const row: Record<string, unknown> = {}
-          for (let i = 0; i < count; i++) {
+          for (let i: number = 0; i < count; i++) {
             const len = payload.readInt32BE(off)
             off += 4
             let value: unknown = null
@@ -355,7 +355,7 @@ const sha256 = (b: Buffer): Buffer => createHash('sha256').update(b).digest()
 const md5Hex = (b: Buffer): string => createHash('md5').update(b).digest('hex')
 function xorBuffers(a: Buffer, b: Buffer): Buffer {
   const out = Buffer.alloc(a.length)
-  for (let i = 0; i < a.length; i++) out[i] = a[i] ^ b[i]
+  for (let i: number = 0; i < a.length; i++) out[i] = a[i] ^ b[i]
   return out
 }
 /** Parse SCRAM attribute strings like `r=…,s=…,i=…` into a map. */
@@ -390,7 +390,7 @@ const int32 = (n: number) => {
 
 function parseErrorFields(payload: Buffer): Map<string, string> {
   const fields = new Map<string, string>()
-  let off = 0
+  let off: number = 0
   while (off < payload.length && payload[off] !== 0) {
     const key = String.fromCharCode(payload[off])
     const end = payload.indexOf(0, off + 1)
@@ -453,14 +453,14 @@ export function decodeValue(text: string, oid: number): unknown {
 export function parsePgArray(text: string): (string | null)[] {
   const out: (string | null)[] = []
   if (text.length < 2) return out
-  let i = 1
+  let i: number = 1
   while (i < text.length - 1) {
     if (text[i] === ',') {
       i++
       continue
     }
     if (text[i] === '"') {
-      let value = ''
+      let value: string = ''
       i++
       while (text[i] !== '"') {
         if (text[i] === '\\') i++
@@ -469,7 +469,7 @@ export function parsePgArray(text: string): (string | null)[] {
       i++
       out.push(value)
     } else {
-      let value = ''
+      let value: string = ''
       while (i < text.length - 1 && text[i] !== ',') value += text[i++]
       out.push(value === 'NULL' ? null : value)
     }

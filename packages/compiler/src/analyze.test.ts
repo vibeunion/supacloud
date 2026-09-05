@@ -458,3 +458,69 @@ describe("analyzeProject：command 与 externalTokens", () => {
     expect(route?.queryBindings).toEqual(["format"]);
   });
 });
+
+describe("analyzeProject：Angular Provider 类型契约", () => {
+  test("useClass 与 InjectionToken<T> 不兼容时生成静态诊断", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-compiler-provider-class-type-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
+      "src/provider.ts": `
+        import { InjectionToken, Module } from "./runtime";
+
+        interface Repository {
+          find(id: string): Promise<string>;
+        }
+
+        const REPOSITORY = new InjectionToken<Repository>("repository");
+
+        class WrongRepository {
+          find(id: string): string {
+            return id;
+          }
+        }
+
+        @Module({
+          name: "provider",
+          providers: [{ provide: REPOSITORY, useClass: WrongRepository }],
+        })
+        export class ProviderModule {}
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    const diagnostic = analyzed.diagnostics?.find((item) => item.code === "provider-type-mismatch");
+    expect(diagnostic).toMatchObject({
+      severity: "error",
+      errorCode: "SC2010",
+      docsUrl: "https://supacloud.dev/errors/SC2010",
+    });
+    expect(diagnostic?.message).toContain("REPOSITORY");
+    expect(diagnostic?.message).toContain("useClass");
+  });
+
+  test("useValue 与 InjectionToken<T> 不兼容时生成静态诊断", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-compiler-provider-value-type-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
+      "src/provider.ts": `
+        import { InjectionToken, Module } from "./runtime";
+
+        const CONFIG = new InjectionToken<{ retries: number }>("config");
+
+        @Module({
+          name: "provider",
+          providers: [{ provide: CONFIG, useValue: { retries: "three" } }],
+        })
+        export class ProviderModule {}
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    const diagnostic = analyzed.diagnostics?.find((item) => item.code === "provider-type-mismatch");
+    expect(diagnostic?.severity).toBe("error");
+    expect(diagnostic?.message).toContain("CONFIG");
+    expect(diagnostic?.message).toContain("useValue");
+  });
+});

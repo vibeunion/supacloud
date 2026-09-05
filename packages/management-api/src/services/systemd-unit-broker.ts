@@ -10,8 +10,9 @@ const UNIT_DIRECTIVES = new Set([
 ]);
 const SERVICE_DIRECTIVES = new Set([
   "CPUWeight", "Environment", "EnvironmentFile", "ExecReload", "ExecStart",
-  "Group", "LimitNOFILE", "MemoryMax", "NoNewPrivileges", "ProtectHome",
-  "ProtectSystem", "ReadOnlyPaths", "Restart", "RestartSec", "SyslogIdentifier",
+  "AmbientCapabilities", "CapabilityBoundingSet", "Group", "LimitNOFILE", "LockPersonality",
+  "MemoryMax", "NoNewPrivileges", "PrivateTmp", "ProtectHome", "ProtectSystem",
+  "ReadOnlyPaths", "RestrictRealtime", "RestrictSUIDSGID", "Restart", "RestartSec", "SyslogIdentifier",
   "Type", "User", "WorkingDirectory",
 ]);
 const INSTALL_DIRECTIVES = new Set(["WantedBy"]);

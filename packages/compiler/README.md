@@ -1,6 +1,6 @@
 # @supacloud/compiler
 
-SupaCloud 应用静态编译器：读取 `@supacloud/app` 装饰器元数据的源码 AST（ts-morph），构建 ApplicationGraph，做静态校验，并生成**无反射、无容器**的工厂代码与 manifest。
+SupaCloud 应用静态编译器：读取 `@supacloud/app` 装饰器元数据的原生 TypeScript AST，构建 ApplicationGraph，做静态校验，并生成**无反射、无容器**的工厂代码与 manifest。
 
 本包不依赖 `@supacloud/app`：AST 只按装饰器名匹配（`Module`/`Injectable`/`Inject`/`Command`/`Query`/`Controller`/`Get`/`Post`/`Put`/`Patch`/`Delete`/`defineModule`/`InjectionToken`），不校验 import 来源。
 
@@ -65,6 +65,7 @@ interface ApplicationGraph {
 - `createCompiledModules()` 按 imports 拓扑序返回模块描述：`{ name, createServices, createRequestScope?, createJobScope?, controllers, commands }`。平台依赖统一由 `createApplication({ deps })` 传入生成工厂。
 - 每个模块一个 `create<Name>Services(deps, imported)`：实例化 application 级 provider；dep 解析顺序为本模块 services > imports 模块导出的 services（`imported.<module>.<key>`）> 平台注入（`deps.<camelName>`）。
 - 含 request 级 provider/controller 的模块额外生成 `create<Name>RequestScope(services, ctx)`：依赖 `REQUEST_CONTEXT`（或 token name `supacloud.request-context`）的参数传 `ctx`，其余经 `services` 解析（运行期负责把 imports 模块导出的 application 服务合并进 `services`）；job 级同理生成 `create<Name>JobScope`。
+- 含 request/job 级 provider 或 controller 的模块同时生成静态 `destroy<Name>RequestScope(scope)` / `destroy<Name>JobScope(scope)`，按编译期确定的逆创建顺序调用已知 `onDestroy` 方法；不会运行时扫描或解析 Token。
 - services 对象的 key 为 token 名的 camelCase：`CaseService → caseService`、`CASE_REPOSITORY → caseRepository`、`LOGGER → logger`。
 - controller 描述静态给出：`{ path, serviceKey, scope, routes: [{ method, path, handler, body?, params?, query?, response? }] }`，schema 直接引用 import 进来的对象。
 - 严格生成模式会对 `application.ts`、可选的 `client.ts` 和 `permissions.ts` 做 AST 扫描，禁止生成 `any`。
@@ -85,6 +86,7 @@ interface ApplicationGraph {
 | `duplicate-route` | error | 规范化后 HTTP method + path 冲突 |
 | `route-command-unresolved` | error | 路由绑定了本模块未声明的 command 类 |
 | `command-missing-permission` | error | `@Command` 未声明 permission |
+| `provider-type-mismatch` | error | Provider 的 useClass/useValue/useFactory/useExisting 不满足 InjectionToken 的静态类型契约 |
 | `missing-deps` | warn（strict 时 error） | 构造/工厂依赖无法静态解析 |
 | `generated-any` | warn（strict 时 error） | 生成的 TypeScript 产物包含 `any` |
 | `source-any` | warn（strict 时 error） | 未被排除的生产源码包含显式 `any` |

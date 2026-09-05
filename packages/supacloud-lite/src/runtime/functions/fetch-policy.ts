@@ -19,7 +19,7 @@ const policyStore = new AsyncLocalStorage<ReadonlySet<string>>()
 // functions legitimately call back into the Lite API / DB on loopback
 const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['localhost', '127.0.0.1', '::1'])
 
-let installed = false
+let installed: boolean = false
 
 function installFetchPolicyShim(): void {
   if (installed) return

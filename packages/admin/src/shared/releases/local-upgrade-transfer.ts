@@ -298,7 +298,7 @@ export function assertControlPlaneSafetyVersion(version: string): void {
     if (!requested.every(Number.isSafeInteger)) {
         throw new Error("Management version must be an exact stable version");
     }
-    for (let index = 0; index < requested.length; index += 1) {
+    for (let index: number = 0; index < requested.length; index += 1) {
         if (requested[index]! > MINIMUM_CONTROL_PLANE_SAFETY_VERSION[index]!) return;
         if (requested[index]! < MINIMUM_CONTROL_PLANE_SAFETY_VERSION[index]!) {
             throw new Error("Local artifact upgrades require Management 0.61.7 or newer with control-plane backup preflight safety");
@@ -770,7 +770,7 @@ export function buildAdoptDropScript(paths: RemoteUpgradePaths): string {
 
 export async function adoptRemoteDrop(ssh: SshTransport, paths: RemoteUpgradePaths): Promise<void> {
     let adoptionFailure: Error;
-    let adoptionOutcomeUncertain = false;
+    let adoptionOutcomeUncertain: boolean = false;
     try {
         const adopted = await ssh.exec(rootCommand(buildAdoptDropScript(paths)), 60_000);
         if (adopted.success) return;
@@ -807,7 +807,7 @@ function startUnitScript(paths: RemoteUpgradePaths): string {
 
 export async function startRemoteUpgrade(ssh: SshTransport, paths: RemoteUpgradePaths): Promise<void> {
     let startFailure: Error;
-    let startOutcomeUncertain = false;
+    let startOutcomeUncertain: boolean = false;
     try {
         const started = await ssh.exec(rootCommand(startUnitScript(paths)), 30_000);
         if (started.success) return;
@@ -915,7 +915,7 @@ async function observeRemoteState(
     observation: RemoteStateObservation,
 ): Promise<RemoteUpgradeState> {
     const readFailures: unknown[] = [];
-    for (let attempt = 1; attempt <= STATE_READ_ATTEMPTS; attempt += 1) {
+    for (let attempt: number = 1; attempt <= STATE_READ_ATTEMPTS; attempt += 1) {
         const remainingMs = observation.deadline === undefined
             ? REMOTE_STATE_READ_TIMEOUT_MS
             : observation.deadline - Date.now();
@@ -1170,7 +1170,7 @@ function assertObservableUpgradeState(state: RemoteUpgradeState, unitRunning: bo
 
 export async function awaitRemoteUpgrade(ssh: SshTransport, paths: RemoteUpgradePaths): Promise<string> {
     const observationDeadline = Date.now() + UPGRADE_OBSERVATION_TIMEOUT_MS;
-    let stoppedObservations = 0;
+    let stoppedObservations: number = 0;
     while (true) {
         const state = await observeRemoteState(ssh, paths, {
             deadline: observationDeadline,
@@ -1208,7 +1208,7 @@ export async function executeLocalUpgradeTransfer(ssh: SshTransport, request: Lo
     const paths = buildRemoteUpgradePaths(runId);
     const preflight = await remoteUpgradePreflight(ssh);
     const bundle = await prepareLocalUpgradeBundle({ ...preflight, ...request });
-    let adopted = false;
+    let adopted: boolean = false;
     let transferError: unknown;
     try {
         try {

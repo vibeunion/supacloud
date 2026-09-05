@@ -63,7 +63,7 @@ function hasOnlyKeys(record: Record<string, unknown>, allowedKeys: ReadonlySet<s
 }
 
 function hasWellFormedUnicode(text: string): boolean {
-    for (let index = 0; index < text.length; index++) {
+    for (let index: number = 0; index < text.length; index++) {
         const codeUnit = text.charCodeAt(index);
         if (codeUnit >= 0xD800 && codeUnit <= 0xDBFF) {
             if (index + 1 >= text.length) return false;

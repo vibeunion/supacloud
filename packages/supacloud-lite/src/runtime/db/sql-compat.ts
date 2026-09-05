@@ -33,8 +33,8 @@
 export function rewriteMigrationSql(sql: string): string {
   const out: string[] = []
   const n = sql.length
-  let i = 0
-  let stmtStart = 0
+  let i: number = 0
+  let stmtStart: number = 0
 
   while (i < n) {
     const c = sql[i]
@@ -137,7 +137,7 @@ function rewriteStatement(stmt: string): string {
 /** A dollar-quote tag guaranteed not to occur in `text`. */
 function pickTag(text: string, base: string): string {
   let tag = `$${base}$`
-  let k = 0
+  let k: number = 0
   while (text.includes(tag)) tag = `$${base}_${k++}$`
   return tag
 }

@@ -235,7 +235,7 @@ function postgresDownloadMirror(downloadMirror?: string): URL | undefined {
 
 async function fetchRelease(url: string): Promise<Response> {
   let lastError: unknown
-  for (let attempt = 1; attempt <= 3; attempt++) {
+  for (let attempt: number = 1; attempt <= 3; attempt++) {
     try {
       const response = await fetch(url)
       if (response.ok || response.status < 500) return response
@@ -310,8 +310,8 @@ export async function createNativeEngine(opts: NativeEngineOptions): Promise<DbE
         detached: false,
       }
     )
-    let postgresExited = false
-    let postgresStderr = ''
+    let postgresExited: boolean = false
+    let postgresStderr: string = ''
     postgres.stderr?.on('data', (chunk: Buffer) => {
       postgresStderr = (postgresStderr + chunk.toString()).slice(-4000)
     })

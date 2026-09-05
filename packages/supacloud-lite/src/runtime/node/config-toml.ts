@@ -80,7 +80,7 @@ function descend(root: ConfigTable, path: string[]): ConfigTable {
 /** Remove a `#` comment that isn't inside a quoted string. */
 function stripComment(line: string): string {
   let quote: string | null = null
-  for (let i = 0; i < line.length; i++) {
+  for (let i: number = 0; i < line.length; i++) {
     const c = line[i]
     if (quote) {
       if (c === quote) quote = null

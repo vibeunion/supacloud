@@ -6,7 +6,7 @@
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 15000;
 const SESSION_REFRESH_WINDOW_MS = 2 * 60 * 1000;
-let studioSessionExpiresAtMs = 0;
+let studioSessionExpiresAtMs: number = 0;
 type StudioSessionRefresh = { promise: Promise<StudioSessionState> };
 let studioSessionRefresh: StudioSessionRefresh | null = null;
 

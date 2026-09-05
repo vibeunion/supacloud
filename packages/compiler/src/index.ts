@@ -5,6 +5,11 @@ export { doctorProject, explainGraph, formatGraph, exportGraphDot, exportGraphMe
 export { createIncrementalCompiler } from "./incremental";
 export { createDependencyGraphCache } from "./incremental";
 export { ModuleDependencyGraph } from "./incremental";
+export { createIncrementalProgramSession } from "./program";
+export type { IncrementalProgramSession, ProgramUpdate } from "./program";
+export { compileTraits } from "./traits";
+export { TraitCompiler } from "./traits";
+export type { TraitCompilation, TraitHandler, TraitKind, TraitRecord } from "./traits";
 export { generateApplication, renderApplication } from "./generate";
 export type { GenerateOptions, RenderedArtifacts } from "./generate";
 export type { DoctorResult } from "./inspect";

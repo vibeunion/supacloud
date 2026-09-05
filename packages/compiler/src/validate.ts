@@ -56,6 +56,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "conflicting-route-method": { code: "SC3018", docsUrl: "https://supacloud.dev/errors/SC3018" },
   "missing-param-colon": { code: "SC3019", docsUrl: "https://supacloud.dev/errors/SC3019" },
   "missing-token-factory": { code: "SC2009", docsUrl: "https://supacloud.dev/errors/SC2009" },
+  "provider-type-mismatch": { code: "SC2010", docsUrl: "https://supacloud.dev/errors/SC2010" },
   "command-missing-permission": { code: "SC4001", docsUrl: "https://supacloud.dev/errors/SC4001" },
   "duplicate-command": { code: "SC4002", docsUrl: "https://supacloud.dev/errors/SC4002" },
   "route-command-unresolved": { code: "SC4003", docsUrl: "https://supacloud.dev/errors/SC4003" },
@@ -675,7 +676,8 @@ export function validateGraph(
           }
           if (!graph.externalTokens.includes(dep)) {
             if (globalProviders.has(dep)) {
-              const owner = globalProviders.get(dep)!;
+              const owner = globalProviders.get(dep);
+              if (!owner) continue;
               error(
                 "module-boundary",
                 `模块 ${module.name} 的 provider ${provider.token} 依赖 ${dep}，该 token 由模块 ${owner.module.name} 提供但未被 import`,
@@ -805,7 +807,8 @@ export function validateGraph(
           }
 
           if (rule.onlyDependOnLibsWithTags && rule.onlyDependOnLibsWithTags.length > 0) {
-            const hasAllowed = targetTags.some((t) => rule.onlyDependOnLibsWithTags!.includes(t));
+            const allowedTags = rule.onlyDependOnLibsWithTags;
+            const hasAllowed = targetTags.some((t) => allowedTags.includes(t));
             if (!hasAllowed && targetTags.length > 0) {
               error(
                 "module-boundary-violation",
@@ -932,8 +935,8 @@ function isRouteShadowed(earlierPath: string, laterPath: string): boolean {
     return false;
   }
 
-  let hasParamShadowing = false;
-  for (let i = 0; i < earlierSegments.length; i += 1) {
+  let hasParamShadowing: boolean = false;
+  for (let i: number = 0; i < earlierSegments.length; i += 1) {
     const e = earlierSegments[i];
     const l = laterSegments[i];
 
@@ -954,7 +957,7 @@ function routeMatchesTarget(routePattern: string, targetPath: string): boolean {
   const pSegs = routePattern.split("/").filter(Boolean);
   const tSegs = targetPath.split("/").filter(Boolean);
   if (pSegs.length !== tSegs.length) return false;
-  for (let i = 0; i < pSegs.length; i += 1) {
+  for (let i: number = 0; i < pSegs.length; i += 1) {
     if (pSegs[i].startsWith(":")) continue;
     if (pSegs[i] !== tSegs[i]) return false;
   }
@@ -1139,7 +1142,8 @@ function detectOrphanModules(graph: ApplicationGraph): Diagnostic[] {
   }
 
   while (queue.length > 0) {
-    const current = queue.shift()!;
+      const current = queue.shift();
+      if (!current) continue;
     const mod = moduleMap.get(current);
     if (!mod) continue;
     for (const imp of mod.imports) {

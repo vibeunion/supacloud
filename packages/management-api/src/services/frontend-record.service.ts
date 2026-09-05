@@ -6,6 +6,7 @@
  */
 import { $ } from "bun";
 import { logger } from "../utils/logger";
+import { maskFrontendBuildLog } from "../utils/frontend-security";
 import type { DeploymentRecord } from "../types/frontend";
 
 export class FrontendRecordService {
@@ -40,7 +41,7 @@ export class FrontendRecordService {
       commit_message: record.commit_message,
       branch: record.branch,
       triggered_by: record.triggered_by || "manual",
-      build_log: record.build_log,
+      build_log: maskFrontendBuildLog(record.build_log),
       started_at: new Date().toISOString(),
     };
 
@@ -68,6 +69,9 @@ export class FrontendRecordService {
       const updated = {
         ...record,
         ...updates,
+        ...(updates.build_log !== undefined
+          ? { build_log: maskFrontendBuildLog(updates.build_log) }
+          : {}),
         finished_at: updates.status === "success" || updates.status === "failed" 
           ? new Date().toISOString() 
           : undefined,

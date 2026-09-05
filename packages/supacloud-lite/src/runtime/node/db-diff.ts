@@ -35,7 +35,7 @@ export async function computeDbDiff(opts: DbDiffOptions): Promise<string[]> {
   let shadow: SupaCloudLiteBackend | undefined
   let live: SupaCloudLiteBackend | undefined
   let unclaimedLiveEngine = opts.liveEngine
-  let operationFailed = false
+  let operationFailed: boolean = false
 
   try {
     // shadow = migrations only, fresh
@@ -132,7 +132,7 @@ export async function pullSchema(opts: DbPullOptions): Promise<DbPullResult> {
   let shadow: SupaCloudLiteBackend | undefined
   let live: SupaCloudLiteBackend | undefined
   let unclaimedLiveEngine = opts.liveEngine
-  let operationFailed = false
+  let operationFailed: boolean = false
   try {
     shadow = await createBackend({
       engine: opts.makeShadowEngine ? await opts.makeShadowEngine() : undefined,

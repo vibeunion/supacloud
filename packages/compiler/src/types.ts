@@ -3,7 +3,7 @@
  * No runtime reflection or container; all metadata is explicitly represented here and in generated code.
  */
 
-import type { Project } from "ts-morph";
+import type { IncrementalProgramSession } from "./program";
 
 export type Scope = "application" | "request" | "job";
 
@@ -117,6 +117,8 @@ export interface ControllerNode {
   path: string;
   scope: Scope;
   deps: string[];
+  /** Class implements OnDestroy interface or onDestroy method. */
+  hasOnDestroy?: boolean;
   /** Parameter tokens marked @Optional(). */
   optionalDeps?: string[];
   selfDeps?: string[];
@@ -217,6 +219,11 @@ export interface CompileOptions {
   treeShakeUnusedProviders?: boolean;
   /** Incremental dependency graph cache. */
   cache?: DependencyGraphCache;
+  /**
+   * Changed source paths supplied by the watch/incremental driver.
+   * This is an implementation hint and does not change the public graph shape.
+   */
+  changedPaths?: string[];
   /** Type-safety gates for generated artifacts and production source. */
   typeSafety?: TypeSafetyOptions;
 }
@@ -346,10 +353,12 @@ export interface DependencyGraphCache {
   modules: Map<string, CachedModuleEntry>;
   /** Global file hashes by relative file path. */
   fileHashes: Map<string, string>;
-  /** Retained AST project for true incremental graph re-analysis. */
-  project?: Project;
+  /** Retained native TypeScript BuilderProgram session. */
+  programSession?: IncrementalProgramSession;
   /** Retained module dependency graph tracking imports and reverse dependents. */
   dependencyGraph?: DependencyGraphIndex;
+  /** Content hashes for generated artifacts, used by the incremental emitter. */
+  generatedHashes?: Map<string, string>;
   lastStats?: {
     reusedModules: string[];
     reanalyzedModules: string[];

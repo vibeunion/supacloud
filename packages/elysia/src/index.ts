@@ -47,6 +47,7 @@ export interface CompiledModule {
     ctx: unknown,
     imported?: Record<string, Record<string, unknown>>,
   ): Record<string, unknown>;
+  destroyRequestScope?(scope: Record<string, unknown>): Promise<void>;
   controllers: CompiledController[];
   commands?: CompiledCommand[];
 }
@@ -428,6 +429,20 @@ export function createModulePlugin(
   );
 
   const createRequestScope = compiled.createRequestScope;
+  const requestScopes = new WeakMap<Request, Record<string, unknown>>();
+  if (compiled.destroyRequestScope) {
+    const destroyRequestScope = compiled.destroyRequestScope;
+    plugin.onAfterResponse(async ({ request }) => {
+      const scope = requestScopes.get(request);
+      if (!scope) return;
+      requestScopes.delete(request);
+      try {
+        await destroyRequestScope(scope);
+      } catch (error) {
+        console.error(`supacloud: request scope cleanup failed for "${compiled.name}"`, error);
+      }
+    });
+  }
   plugin.resolve(async ({ request }) => {
     const requestContext = await ctxFactory(request);
     requestContexts.set(request, requestContext);
@@ -448,6 +463,7 @@ export function createModulePlugin(
         const requestScope = createRequestScope
           ? createRequestScope(services, requestContext, imported)
           : undefined;
+        if (requestScope && compiled.destroyRequestScope) requestScopes.set(ctx.request, requestScope);
         const source =
           controller.scope === "request" ? requestScope : services;
         const instance = source?.[controller.serviceKey] as

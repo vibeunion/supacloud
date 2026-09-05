@@ -6,7 +6,6 @@ interface ProjectConfig {
   tags?: string[];
   path: string;
   dependencies: string[];
-  devDependencies: string[];
 }
 
 interface BoundaryRule {
@@ -54,7 +53,13 @@ async function loadProjects(packagesDir: string): Promise<Map<string, ProjectCon
     const pkgJsonPath = join(pkgDirPath, "package.json");
     const projectJsonPath = join(pkgDirPath, "project.json");
 
-    let pkgJson: { name?: string; dependencies?: Record<string, string>; devDependencies?: Record<string, string> } = {};
+    let pkgJson: {
+      name?: string;
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+      optionalDependencies?: Record<string, string>;
+    } = {};
     try {
       pkgJson = JSON.parse(await readFile(pkgJsonPath, "utf8"));
     } catch {
@@ -70,12 +75,17 @@ async function loadProjects(packagesDir: string): Promise<Map<string, ProjectCon
     }
 
     const name = pkgJson.name ?? entry.name;
+    const dependencies = Object.keys({
+      ...(pkgJson.dependencies ?? {}),
+      ...(pkgJson.devDependencies ?? {}),
+      ...(pkgJson.peerDependencies ?? {}),
+      ...(pkgJson.optionalDependencies ?? {}),
+    });
     projects.set(name, {
       name,
       tags,
       path: pkgDirPath,
-      dependencies: Object.keys(pkgJson.dependencies ?? {}),
-      devDependencies: Object.keys(pkgJson.devDependencies ?? {}),
+      dependencies,
     });
   }
 
