@@ -21,22 +21,10 @@ import {
 import { migrateAuditChainSequences } from "./audit-chain-migration";
 import { migrateProjectMutationJournal } from "./project-mutation-migration";
 import { migrateLegacyEncryptedSecretsInTransaction } from "./secret-key-migration";
-import { GOTRUE_USER_ID_POSTGRES_PATTERN } from "../utils/project-user-lifecycle";
 import { withExpectedControlPlaneDatabaseTransaction } from "./control-plane-database-identity";
 
 function sqlStringLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
-}
-
-function taskAuthAuthorityBackfillStatement(): string {
-  const authorityRef = config.authRuntimeOwnerRef.trim();
-  if (!authorityRef) {
-    return "UPDATE project_tasks SET auth_authority_ref = project_ref WHERE auth_authority_ref IS NULL";
-  }
-  if (!/^[A-Za-z0-9_-]{1,20}$/.test(authorityRef)) {
-    throw new Error("SUPACLOUD_AUTH_RUNTIME_OWNER_REF must be a valid project ref");
-  }
-  return `UPDATE project_tasks SET auth_authority_ref = ${sqlStringLiteral(authorityRef)} WHERE auth_authority_ref IS NULL`;
 }
 
 async function backfillOpaqueApiKeys(sql: SQL): Promise<number> {
@@ -548,25 +536,6 @@ export async function initDatabase() {
       { statement: 'UPDATE project_tasks SET next_run_at = COALESCE(next_run_at, created_at, NOW())', description: "project_tasks.next_run_at backfill" },
       { statement: 'UPDATE project_tasks SET max_attempts = COALESCE(max_attempts, 3)', description: "project_tasks.max_attempts backfill" },
       { statement: 'UPDATE project_tasks SET attempt = COALESCE(attempt, retries, 0)', description: "project_tasks.attempt backfill" },
-      { statement: "UPDATE project_tasks SET payload = COALESCE(payload, '{}'::jsonb)", description: "project_tasks.payload backfill" },
-      {
-        statement: `
-          UPDATE project_tasks
-          SET invoker_user_id = BTRIM(payload->'auth'->>'invoker_user_id')::uuid
-          WHERE invoker_user_id IS NULL
-            AND BTRIM(payload->'auth'->>'invoker_user_id')
-              ~* '${GOTRUE_USER_ID_POSTGRES_PATTERN}'
-        `,
-        description: "project_tasks.invoker_user_id backfill",
-      },
-      {
-        statement: taskAuthAuthorityBackfillStatement(),
-        description: "project_tasks.auth_authority_ref backfill",
-      },
-      {
-        statement: 'ALTER TABLE project_tasks ALTER COLUMN auth_authority_ref SET NOT NULL',
-        description: "project_tasks.auth_authority_ref not null",
-      },
       { statement: 'CREATE INDEX IF NOT EXISTS idx_project_tasks_project_status ON project_tasks(project_ref, status)', description: "idx_project_tasks_project_status" },
       { statement: 'CREATE INDEX IF NOT EXISTS idx_project_tasks_project_created_desc ON project_tasks(project_ref, created_at DESC)', description: "idx_project_tasks_project_created_desc" },
       { statement: 'CREATE INDEX IF NOT EXISTS idx_project_tasks_next_run ON project_tasks(next_run_at)', description: "idx_project_tasks_next_run" },

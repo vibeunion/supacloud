@@ -11,14 +11,28 @@ import { config } from "../config";
 import { migrateProjectMutationJournal } from "./project-mutation-migration";
 import { executeSqlStatements } from "./sql-statements";
 
-function configuredAuthAuthoritySql(): { backfill: string; constant: string } {
+function configuredAuthAuthoritySql(): { backfill: string; expected: string; constant: string } {
   const authorityRef = config.authRuntimeOwnerRef.trim();
-  if (!authorityRef) return { backfill: "project_ref", constant: "NULL" };
+  if (!authorityRef) {
+    return {
+      backfill: "project_ref",
+      expected: "project_ref",
+      constant: "NULL",
+    };
+  }
   if (!/^[A-Za-z0-9_-]{1,20}$/.test(authorityRef)) {
     throw new Error("SUPACLOUD_AUTH_RUNTIME_OWNER_REF must be a valid project ref");
   }
   const literal = `'${authorityRef.replaceAll("'", "''")}'`;
-  return { backfill: literal, constant: literal };
+  return {
+    backfill: `CASE
+      WHEN status IN ('pending', 'leased', 'running', 'retry_scheduled')
+        THEN ${literal}
+      ELSE project_ref
+    END`,
+    expected: literal,
+    constant: literal,
+  };
 }
 
 /**
@@ -269,22 +283,6 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
 
     ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS invoker_user_id UUID;
     ALTER TABLE project_tasks ADD COLUMN IF NOT EXISTS auth_authority_ref VARCHAR(20);
-    UPDATE project_tasks
-    SET invoker_user_id = BTRIM(payload->'auth'->>'invoker_user_id')::uuid
-    WHERE invoker_user_id IS NULL
-      AND BTRIM(payload->'auth'->>'invoker_user_id') ~* '${GOTRUE_USER_ID_POSTGRES_PATTERN}';
-    UPDATE project_tasks
-    SET auth_authority_ref = ${authAuthoritySql.backfill}
-    WHERE auth_authority_ref IS NULL;
-    ALTER TABLE project_tasks ALTER COLUMN auth_authority_ref SET NOT NULL;
-    CREATE INDEX IF NOT EXISTS idx_project_tasks_invoker_active
-      ON project_tasks(project_ref, invoker_user_id, status)
-      WHERE invoker_user_id IS NOT NULL
-        AND status IN ('pending', 'leased', 'running', 'retry_scheduled');
-    CREATE INDEX IF NOT EXISTS idx_project_tasks_authority_invoker_active
-      ON project_tasks(auth_authority_ref, invoker_user_id, status)
-      WHERE invoker_user_id IS NOT NULL
-        AND status IN ('pending', 'leased', 'running', 'retry_scheduled');
 
     CREATE OR REPLACE FUNCTION enforce_project_user_deletion_fence() RETURNS trigger AS $$
     DECLARE
@@ -292,6 +290,12 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
       payload_invoker_user_id TEXT;
       normalized_payload_invoker_user_id UUID;
     BEGIN
+      -- Historical terminal rows may retain the authority that was valid for
+      -- their project. Only activation must match the current auth authority.
+      IF NEW.status NOT IN ('pending', 'leased', 'running', 'retry_scheduled') THEN
+        RETURN NEW;
+      END IF;
+
       IF NEW.auth_authority_ref IS NULL THEN
         NEW.auth_authority_ref := COALESCE(configured_authority_ref, NEW.project_ref);
       ELSIF NEW.auth_authority_ref IS DISTINCT FROM COALESCE(configured_authority_ref, NEW.project_ref) THEN
@@ -329,10 +333,6 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
           DETAIL = 'project_tasks.invoker_user_id must match payload.auth.invoker_user_id';
       END IF;
 
-      IF NEW.status NOT IN ('pending', 'leased', 'running', 'retry_scheduled') THEN
-        RETURN NEW;
-      END IF;
-
       PERFORM pg_advisory_xact_lock(hashtextextended(
         '${PROJECT_USER_LIFECYCLE_LOCK_NAMESPACE}:' || NEW.auth_authority_ref || ':' || NEW.invoker_user_id::text,
         0
@@ -354,6 +354,46 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
       RETURN NEW;
     END;
     $$ LANGUAGE plpgsql;
+
+    UPDATE project_tasks
+    SET payload = COALESCE(payload, '{}'::jsonb)
+    WHERE payload IS NULL;
+
+    UPDATE project_tasks
+    SET invoker_user_id = BTRIM(payload->'auth'->>'invoker_user_id')::uuid
+    WHERE invoker_user_id IS NULL
+      AND BTRIM(payload->'auth'->>'invoker_user_id') ~* '${GOTRUE_USER_ID_POSTGRES_PATTERN}'
+      AND status IN ('pending', 'leased', 'running', 'retry_scheduled');
+    UPDATE project_tasks
+    SET auth_authority_ref = ${authAuthoritySql.backfill}
+    WHERE auth_authority_ref IS NULL;
+
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM project_tasks
+        WHERE status IN ('pending', 'leased', 'running', 'retry_scheduled')
+          AND auth_authority_ref IS DISTINCT FROM ${authAuthoritySql.expected}
+      ) THEN
+        RAISE EXCEPTION USING
+          ERRCODE = 'P0001',
+          MESSAGE = 'TASK_AUTH_AUTHORITY_MISMATCH',
+          DETAIL = 'Active project_tasks rows must match the configured GoTrue authority';
+      END IF;
+    END;
+    $$;
+
+    ALTER TABLE project_tasks ALTER COLUMN auth_authority_ref SET NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_project_tasks_invoker_active
+      ON project_tasks(project_ref, invoker_user_id, status)
+      WHERE invoker_user_id IS NOT NULL
+        AND status IN ('pending', 'leased', 'running', 'retry_scheduled');
+    CREATE INDEX IF NOT EXISTS idx_project_tasks_authority_invoker_active
+      ON project_tasks(auth_authority_ref, invoker_user_id, status)
+      WHERE invoker_user_id IS NOT NULL
+        AND status IN ('pending', 'leased', 'running', 'retry_scheduled');
+
     DROP TRIGGER IF EXISTS project_tasks_user_deletion_fence ON project_tasks;
     CREATE TRIGGER project_tasks_user_deletion_fence
       BEFORE INSERT OR UPDATE OF status, payload, project_ref, invoker_user_id, auth_authority_ref ON project_tasks

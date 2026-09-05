@@ -131,6 +131,24 @@ describe("platform v2 schema contract", () => {
   });
 
   test("serializes task activation with durable GoTrue user deletion fences", () => {
+    const taskFenceTrigger = schema.slice(
+      schema.indexOf("CREATE OR REPLACE FUNCTION enforce_project_user_deletion_fence()"),
+      schema.indexOf("CREATE TABLE IF NOT EXISTS project_webhooks"),
+    );
+    const activeStatusGuard = "IF NEW.status NOT IN ('pending', 'leased', 'running', 'retry_scheduled')";
+    const payloadBackfillIndex = schema.indexOf(
+      "UPDATE project_tasks\n    SET payload = COALESCE(payload, '{}'::jsonb)",
+    );
+    const functionIndex = schema.indexOf(
+      "CREATE OR REPLACE FUNCTION enforce_project_user_deletion_fence()",
+    );
+    const invokerBackfillIndex = schema.indexOf(
+      "UPDATE project_tasks\n    SET invoker_user_id = BTRIM",
+    );
+    const triggerCreateIndex = schema.indexOf(
+      "CREATE TRIGGER project_tasks_user_deletion_fence",
+    );
+
     expect(schema).toContain("CREATE OR REPLACE FUNCTION enforce_project_user_deletion_fence()");
     expect(schema).toContain("pg_advisory_xact_lock(hashtextextended(");
     expect(schema).toContain("AND status IN ('requested', 'deleting', 'deleted')");
@@ -146,12 +164,39 @@ describe("platform v2 schema contract", () => {
     expect(schema).toContain("MESSAGE = 'TASK_INVOKER_MISMATCH'");
     expect(schema).toContain("BEFORE INSERT OR UPDATE OF status, payload, project_ref, invoker_user_id, auth_authority_ref ON project_tasks");
     expect(schema).toContain("MESSAGE = 'USER_DELETION_FENCED'");
+    expect(taskFenceTrigger.indexOf(activeStatusGuard)).toBeGreaterThanOrEqual(0);
+    expect(taskFenceTrigger.indexOf(activeStatusGuard)).toBeLessThan(
+      taskFenceTrigger.indexOf("IF NEW.auth_authority_ref IS NULL"),
+    );
+    expect(taskFenceTrigger.indexOf(activeStatusGuard)).toBeLessThan(
+      taskFenceTrigger.indexOf("MESSAGE = 'TASK_AUTH_AUTHORITY_MISMATCH'"),
+    );
+    expect(taskFenceTrigger.indexOf(activeStatusGuard)).toBeLessThan(
+      taskFenceTrigger.indexOf("payload_invoker_user_id :="),
+    );
+    expect(taskFenceTrigger).toContain(`${activeStatusGuard} THEN`);
+    expect(taskFenceTrigger).toContain("RETURN NEW;\n      END IF;");
+    expect(payloadBackfillIndex).toBeGreaterThanOrEqual(0);
+    expect(functionIndex).toBeLessThan(payloadBackfillIndex);
+    expect(payloadBackfillIndex).toBeLessThan(invokerBackfillIndex);
+    expect(payloadBackfillIndex).toBeLessThan(triggerCreateIndex);
+    expect(schema).toContain("auth_authority_ref IS DISTINCT FROM ${authAuthoritySql.expected}");
+    expect(schema).toContain(
+      "Active project_tasks rows must match the configured GoTrue authority",
+    );
+    expect(schema).toContain("SET auth_authority_ref = ${authAuthoritySql.backfill}");
+    expect(schema).toContain("WHEN status IN ('pending', 'leased', 'running', 'retry_scheduled')");
+    expect(schema).toContain("ELSE project_ref");
+    expect(schema).toContain("SET payload = COALESCE(payload, '{}'::jsonb)");
+    expect(schema).toContain("WHERE payload IS NULL;");
     expect(userSafetyService).toContain("projectUserLifecycleLockKey(projectRef, userId)");
     expect(userSafetyService).toContain("operation_expires_at > NOW() AS operation_active");
     expect(userSafetyService).toContain("AND operation_id = ${input.operationId}::uuid");
     expect(taskRepository).toContain("invoker_user_id = $6::uuid");
     expect(taskRepository).toContain("payload_invoker_user_id = $6::uuid");
-    expect(databaseInit).toContain("WHERE auth_authority_ref IS NULL");
+    expect(databaseInit).not.toContain("UPDATE project_tasks SET payload = COALESCE");
+    expect(databaseInit).not.toContain("UPDATE project_tasks SET auth_authority_ref");
+    expect(databaseInit).not.toContain("DROP TRIGGER IF EXISTS project_tasks_user_deletion_fence");
     expect(databaseInit).not.toContain("SET auth_authority_ref = project_ref\";");
   });
 });
