@@ -10,6 +10,7 @@ import type {
   DependencyGraphCache,
   Diagnostic,
   HandlerParamNode,
+  FunctionalInjectNode,
   ModuleNode,
   ProviderNode,
   QueryNode,
@@ -111,6 +112,10 @@ function hasMethod(cls: ts.ClassDeclaration, name: string): boolean {
     member.name !== undefined &&
     propertyName(member.name) === name,
   );
+}
+
+function hasDestroyHook(cls: ts.ClassDeclaration): boolean {
+  return hasMethod(cls, "onDestroy") || hasMethod(cls, "ngOnDestroy");
 }
 
 function descendantsOfKind<T extends ts.Node>(
@@ -338,7 +343,7 @@ export async function analyzeProject(
     if (!allRegisteredClasses.has(name)) {
       const injectable = parseInjectableOptions(classInfo.decl, ctx);
       if (injectable?.providedIn === "root") {
-        const { deps, optionalDeps, selfDeps, skipSelfDeps, hostDeps, missing } = classDeps(classInfo.decl, ctx);
+        const { deps, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing } = classDeps(classInfo.decl, ctx);
         const file = sourcePath(ctx.rootDir, classInfo.file);
         const line = lineOf(classInfo.decl);
         if (missing) {
@@ -355,8 +360,9 @@ export async function analyzeProject(
           selfDeps: selfDeps.length > 0 ? selfDeps : undefined,
           skipSelfDeps: skipSelfDeps.length > 0 ? skipSelfDeps : undefined,
           hostDeps: hostDeps.length > 0 ? hostDeps : undefined,
+          functionalInjects: functionalInjects.length > 0 ? functionalInjects : undefined,
           providedIn: "root",
-          hasOnDestroy: hasMethod(classInfo.decl, "onDestroy") || undefined,
+          hasOnDestroy: hasDestroyHook(classInfo.decl) || undefined,
           exported: true,
           file,
           line,
@@ -615,7 +621,23 @@ function parseModule(
   const exportsSet = new Set(exports);
 
   const providers: ProviderNode[] = [];
-  for (const el of arrayProp(options, "providers")) {
+  for (const el of expandProviderExpressions(arrayProp(options, "providers"), ctx)) {
+    const parsedProviders = parseFunctionalProvider(el, exportsSet, ctx);
+    if (parsedProviders) {
+      providers.push(...parsedProviders);
+      continue;
+    }
+    if (ts.isCallExpression(el)) {
+      const helper = nodeText(el.expression).split(".").pop() ?? nodeText(el.expression);
+      warn(
+        ctx,
+        "unsupported-provider-helper",
+        `无法静态展开 provider helper '${helper}'；请改用显式 Provider 或实现编译器支持的 helper`,
+        sourcePath(ctx.rootDir, el.getSourceFile().fileName),
+        lineOf(el),
+      );
+      continue;
+    }
     const provider = parseProvider(el, exportsSet, ctx);
     if (provider) providers.push(provider);
   }
@@ -714,9 +736,9 @@ function parseProvider(
     const decl = resolveDeclaration(unwrappedEl, ctx)[0];
     const cls = decl && ts.isClassDeclaration(decl) ? decl : undefined;
     const className = cls?.name?.text ?? unwrappedEl.text;
-    const { deps, optionalDeps, selfDeps, skipSelfDeps, hostDeps, missing } = cls
+    const { deps, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing } = cls
       ? classDeps(cls, ctx)
-      : { deps: [], optionalDeps: [], selfDeps: [], skipSelfDeps: [], hostDeps: [], missing: false };
+      : { deps: [], optionalDeps: [], selfDeps: [], skipSelfDeps: [], hostDeps: [], functionalInjects: [], missing: false };
     const injectable = cls ? parseInjectableOptions(cls, ctx) : undefined;
     if (missing) {
       warn(ctx, "missing-deps", `provider ${className} 的部分构造依赖无法静态解析`, file, line);
@@ -732,8 +754,9 @@ function parseProvider(
       selfDeps: selfDeps.length > 0 ? selfDeps : undefined,
       skipSelfDeps: skipSelfDeps.length > 0 ? skipSelfDeps : undefined,
       hostDeps: hostDeps.length > 0 ? hostDeps : undefined,
+      functionalInjects: functionalInjects.length > 0 ? functionalInjects : undefined,
       providedIn: injectable?.providedIn,
-      hasOnDestroy: cls ? hasMethod(cls, "onDestroy") || undefined : undefined,
+      hasOnDestroy: cls ? hasDestroyHook(cls) || undefined : undefined,
       exported: exportsSet.has(className),
       file,
       line,
@@ -764,13 +787,22 @@ function parseProvider(
     let selfDeps: string[] = [];
     let skipSelfDeps: string[] = [];
     let hostDeps: string[] = [];
-    if (deps.length === 0 && cls) {
+    let functionalInjects: FunctionalInjectNode[] = [];
+    if (cls) {
       const result = classDeps(cls, ctx);
-      deps = result.deps;
-      optionalDeps = result.optionalDeps;
-      selfDeps = result.selfDeps;
-      skipSelfDeps = result.skipSelfDeps;
-      hostDeps = result.hostDeps;
+      if (deps.length === 0) {
+        deps = result.deps;
+        optionalDeps = result.optionalDeps;
+        selfDeps = result.selfDeps;
+        skipSelfDeps = result.skipSelfDeps;
+        hostDeps = result.hostDeps;
+      } else {
+        optionalDeps = result.optionalDeps.filter((dep) => deps.includes(dep));
+        selfDeps = result.selfDeps.filter((dep) => deps.includes(dep));
+        skipSelfDeps = result.skipSelfDeps.filter((dep) => deps.includes(dep));
+        hostDeps = result.hostDeps.filter((dep) => deps.includes(dep));
+      }
+      functionalInjects = result.functionalInjects;
       if (result.missing) {
         warn(ctx, "missing-deps", `provider ${token} (useClass ${useClass}) 的部分构造依赖无法静态解析`, file, line);
       }
@@ -788,6 +820,7 @@ function parseProvider(
       selfDeps: selfDeps.length > 0 ? selfDeps : undefined,
       skipSelfDeps: skipSelfDeps.length > 0 ? skipSelfDeps : undefined,
       hostDeps: hostDeps.length > 0 ? hostDeps : undefined,
+      functionalInjects: functionalInjects.length > 0 ? functionalInjects : undefined,
       multi: multi ?? undefined,
       providedIn: injectable?.providedIn,
       hasOnDestroy: cls ? hasMethod(cls, "onDestroy") || undefined : undefined,
@@ -859,6 +892,212 @@ function parseProvider(
       file,
       line,
     };
+  }
+
+  return undefined;
+}
+
+/**
+ * Expands Angular-style standalone provider helpers into ordinary provider
+ * expressions before graph analysis. The generated application still contains
+ * only direct static providers.
+ */
+function expandProviderExpressions(
+  expressions: readonly Expression[],
+  ctx: AnalysisContext,
+  seen = new Set<string>(),
+): Expression[] {
+  const result: Expression[] = [];
+  for (const expression of expressions) {
+    if (ts.isSpreadElement(expression)) {
+      result.push(...expandProviderExpressions([expression.expression], ctx, seen));
+      continue;
+    }
+    if (ts.isIdentifier(expression)) {
+      const declaration = resolveDeclaration(expression, ctx)[0];
+      if (declaration && ts.isVariableDeclaration(declaration) && declaration.initializer) {
+        const key = `${declaration.getSourceFile().fileName}:${declaration.pos}`;
+        if (seen.has(key)) continue;
+        const initializer = declaration.initializer;
+        if (ts.isCallExpression(initializer) && isProviderHelper(initializer, "makeEnvironmentProviders")) {
+          const nested = initializer.arguments[0];
+          if (nested && ts.isArrayLiteralExpression(nested)) {
+            seen.add(key);
+            result.push(...expandProviderExpressions([...nested.elements], ctx, seen));
+            seen.delete(key);
+            continue;
+          }
+        }
+      }
+    }
+    if (ts.isCallExpression(expression) && isProviderHelper(expression, "makeEnvironmentProviders")) {
+      const nested = expression.arguments[0];
+      if (nested && ts.isArrayLiteralExpression(nested)) {
+        result.push(...expandProviderExpressions([...nested.elements], ctx, seen));
+        continue;
+      }
+    }
+    result.push(expression);
+  }
+  return result;
+}
+
+function isProviderHelper(expression: ts.CallExpression, name: string): boolean {
+  return nodeText(expression.expression).split(".").pop() === name;
+}
+
+function parseFunctionalProvider(
+  expression: Expression,
+  exportsSet: Set<string>,
+  ctx: AnalysisContext,
+): ProviderNode[] | undefined {
+  if (!ts.isCallExpression(expression)) return undefined;
+  const helper = nodeText(expression.expression).split(".").pop();
+  const args = expression.arguments;
+  const file = sourcePath(ctx.rootDir, expression.getSourceFile().fileName);
+  const line = lineOf(expression);
+
+  if (helper === "provideToken") {
+    const tokenExpr = args[0];
+    const valueExpr = args[1];
+    if (!tokenExpr || !valueExpr) return [];
+    const { name: token, kind: tokenKind } = tokenNameOf(tokenExpr, ctx);
+    validateProviderCompatibility(tokenExpr, valueExpr, "value", token, ctx, file, line);
+    return [{
+      token,
+      tokenKind,
+      kind: "value",
+      useValueExpr: nodeText(valueExpr),
+      scope: resolveScope({ tokenName: token }, ctx),
+      deps: [],
+      exported: exportsSet.has(token),
+      file,
+      line,
+      importPath: ts.isIdentifier(valueExpr) ? importPathOf(valueExpr, ctx) : undefined,
+    }];
+  }
+
+  if (helper === "provideAppInitializer" || helper === "provideEnvironmentInitializer") {
+    const initializer = args[0];
+    if (!initializer) return [];
+    const token = helper === "provideAppInitializer" ? "APP_INITIALIZER" : "ENVIRONMENT_INITIALIZER";
+    return [{
+      token,
+      tokenKind: "injection-token",
+      kind: "value",
+      useValueExpr: nodeText(initializer),
+      scope: "application",
+      deps: [],
+      multi: true,
+      exported: false,
+      file,
+      line,
+      importPath: ts.isIdentifier(initializer) ? importPathOf(initializer, ctx) : undefined,
+    }];
+  }
+
+  if (helper === "provideRouter") {
+    const providers: ProviderNode[] = [];
+    const routes = args[0];
+    if (routes) {
+      providers.push({
+        token: "ROUTE_CONFIG",
+        tokenKind: "injection-token",
+        kind: "value",
+        useValueExpr: nodeText(routes),
+        scope: "application",
+        deps: [],
+        exported: false,
+        file,
+        line,
+        importPath: ts.isIdentifier(routes) ? importPathOf(routes, ctx) : undefined,
+      });
+    }
+    for (const feature of args.slice(1)) {
+      if (!ts.isCallExpression(feature)) continue;
+      const featureName = nodeText(feature.expression).split(".").pop();
+      if (featureName === "withRouterConfig" && feature.arguments[0]) {
+        providers.push({
+          token: "ROUTER_CONFIGURATION",
+          tokenKind: "injection-token",
+          kind: "value",
+          useValueExpr: nodeText(feature.arguments[0]),
+          scope: "application",
+          deps: [],
+          exported: false,
+          file,
+          line,
+        });
+      } else if (featureName === "withTitleStrategy" && feature.arguments[0]) {
+        const strategy = feature.arguments[0];
+        const isClass = ts.isIdentifier(strategy) && Boolean(resolveDeclaration(strategy, ctx)
+          .find((declaration) => ts.isClassDeclaration(declaration)));
+        providers.push({
+          token: "TITLE_STRATEGY",
+          tokenKind: "injection-token",
+          kind: isClass ? "class" : "value",
+          ...(isClass ? { useClass: nodeText(strategy) } : { useValueExpr: nodeText(strategy) }),
+          scope: "application",
+          deps: [],
+          exported: false,
+          file,
+          line,
+          importPath: ts.isIdentifier(strategy) ? importPathOf(strategy, ctx) : undefined,
+        });
+      }
+    }
+    return providers;
+  }
+
+  if (helper === "provideHttpClient") {
+    const providers: ProviderNode[] = [{
+      token: "HttpClient",
+      tokenKind: "class",
+      kind: "class",
+      useClass: "HttpClient",
+      scope: "application",
+      deps: ["HTTP_CLIENT_CONFIG", "HTTP_INTERCEPTORS"],
+      optionalDeps: ["HTTP_CLIENT_CONFIG", "HTTP_INTERCEPTORS"],
+      exported: false,
+      file,
+      line,
+      importModule: "@supacloud/app",
+    }];
+    for (const feature of args) {
+      if (!ts.isCallExpression(feature)) continue;
+      const featureName = nodeText(feature.expression).split(".").pop();
+      if (featureName === "withInterceptors") {
+        for (const interceptorArg of feature.arguments) {
+          const values = ts.isArrayLiteralExpression(interceptorArg)
+            ? [...interceptorArg.elements]
+            : [interceptorArg];
+          for (const value of values) {
+            providers.push({
+              token: "HTTP_INTERCEPTORS",
+              tokenKind: "injection-token",
+              kind: "value",
+              useValueExpr: nodeText(value),
+              scope: "application",
+              deps: [],
+              multi: true,
+              exported: false,
+              file,
+              line,
+              importPath: ts.isIdentifier(value) ? importPathOf(value, ctx) : undefined,
+            });
+          }
+        }
+      } else if (featureName === "withFetch" && feature.arguments.length > 0) {
+        warn(
+          ctx,
+          "unsupported-provider-helper",
+          "provideHttpClient(withFetch(customFetch)) 需要显式声明 HTTP_CLIENT_CONFIG provider 才能保持静态生成",
+          file,
+          line,
+        );
+      }
+    }
+    return providers;
   }
 
   return undefined;
@@ -984,7 +1223,7 @@ function parseController(
     }
   }
 
-  const { deps, optionalDeps, selfDeps, skipSelfDeps, missing } = classDeps(decl, ctx);
+  const { deps, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing } = classDeps(decl, ctx);
   const file = sourcePath(ctx.rootDir, decl.getSourceFile().fileName);
   if (missing) {
     warn(ctx, "missing-deps", `controller ${decl.name?.text} 的部分构造依赖无法静态解析`, file, lineOf(decl));
@@ -1240,10 +1479,12 @@ function parseController(
     path,
     scope: injectable?.scope ?? "request",
     deps,
-    hasOnDestroy: hasMethod(decl, "onDestroy") || undefined,
+    hasOnDestroy: hasDestroyHook(decl) || undefined,
     optionalDeps: optionalDeps.length > 0 ? optionalDeps : undefined,
     selfDeps: selfDeps.length > 0 ? selfDeps : undefined,
     skipSelfDeps: skipSelfDeps.length > 0 ? skipSelfDeps : undefined,
+    hostDeps: hostDeps.length > 0 ? hostDeps : undefined,
+    functionalInjects: functionalInjects.length > 0 ? functionalInjects : undefined,
     standalone: standalone || undefined,
     routes,
     file,
@@ -1266,29 +1507,20 @@ function classDeps(
   selfDeps: string[];
   skipSelfDeps: string[];
   hostDeps: string[];
+  functionalInjects: FunctionalInjectNode[];
   missing: boolean;
 } {
   const injectable = parseInjectableOptions(cls, ctx);
-  if (injectable?.deps) {
-    return {
-      deps: injectable.deps,
-      optionalDeps: [],
-      selfDeps: [],
-      skipSelfDeps: [],
-      hostDeps: [],
-      missing: false,
-    };
-  }
-
   const ctor = cls.members.find(ts.isConstructorDeclaration);
-  const deps: string[] = [];
+  const deps: string[] = injectable?.deps ? [...injectable.deps] : [];
   const optionalDeps: string[] = [];
   const selfDeps: string[] = [];
   const skipSelfDeps: string[] = [];
   const hostDeps: string[] = [];
+  const functionalInjects: FunctionalInjectNode[] = [];
   let missing: boolean = false;
 
-  if (ctor && ctor.parameters.length > 0) {
+  if (!injectable?.deps && ctor && ctor.parameters.length > 0) {
     const injectParams = parseInjectParams(cls, ctx);
     const optionalIndices = parseOptionalParams(cls);
     const selfIndices = parseModifierParams(cls, "Self");
@@ -1310,7 +1542,7 @@ function classDeps(
     });
   }
 
-  // Property-level inject() calls (Angular functional DI syntax: private foo = inject(TOKEN))
+  // Property-level inject() calls (Angular functional DI syntax: private foo = inject(TOKEN)).
   for (const prop of cls.members.filter(ts.isPropertyDeclaration)) {
     const init = prop.initializer;
     if (init && ts.isCallExpression(init)) {
@@ -1319,33 +1551,56 @@ function classDeps(
         const [tokenArg, optionsArg] = init.arguments;
         if (tokenArg) {
           const tokenName = tokenText(tokenArg, ctx);
-          if (tokenName) {
-            if (!deps.includes(tokenName)) deps.push(tokenName);
-            if (optionsArg && ts.isObjectLiteralExpression(optionsArg)) {
-              const isOptional = booleanProp(optionsArg, "optional");
-              if (isOptional && !optionalDeps.includes(tokenName)) {
-                optionalDeps.push(tokenName);
+          const unwrappedToken = unwrapForwardRef(tokenArg);
+          const known = ts.isStringLiteral(unwrappedToken)
+            || (ts.isIdentifier(unwrappedToken)
+              && (ctx.tokensByName.has(tokenName) || ctx.classesByName.has(tokenName)));
+          if (!known) {
+            missing = true;
+            continue;
+          }
+          if (!deps.includes(tokenName)) deps.push(tokenName);
+          const options = optionsArg && ts.isObjectLiteralExpression(optionsArg)
+            ? {
+                optional: booleanProp(optionsArg, "optional") ?? false,
+                self: booleanProp(optionsArg, "self") ?? false,
+                skipSelf: booleanProp(optionsArg, "skipSelf") ?? false,
+                host: booleanProp(optionsArg, "host") ?? false,
               }
-              const isSelf = booleanProp(optionsArg, "self");
-              if (isSelf && !selfDeps.includes(tokenName)) {
-                selfDeps.push(tokenName);
-              }
-              const isSkipSelf = booleanProp(optionsArg, "skipSelf");
-              if (isSkipSelf && !skipSelfDeps.includes(tokenName)) {
-                skipSelfDeps.push(tokenName);
-              }
-              const isHost = booleanProp(optionsArg, "host");
-              if (isHost && !hostDeps.includes(tokenName)) {
-                hostDeps.push(tokenName);
-              }
-            }
+            : { optional: false, self: false, skipSelf: false, host: false };
+          if (options.optional && !optionalDeps.includes(tokenName)) optionalDeps.push(tokenName);
+          if (options.self && !selfDeps.includes(tokenName)) selfDeps.push(tokenName);
+          if (options.skipSelf && !skipSelfDeps.includes(tokenName)) skipSelfDeps.push(tokenName);
+          if (options.host && !hostDeps.includes(tokenName)) hostDeps.push(tokenName);
+          if (!functionalInjects.some((entry) => entry.token === tokenName)) {
+            functionalInjects.push({
+              token: tokenName,
+              expression: nodeText(unwrappedToken),
+              importPath: ts.isIdentifier(unwrappedToken)
+                ? (() => {
+                    const declaration = resolveDeclaration(unwrappedToken, ctx)[0];
+                    return declaration && isProjectSourcePath(declaration.getSourceFile().fileName, ctx.rootDir)
+                      ? modulePath(ctx.rootDir, declaration.getSourceFile().fileName)
+                      : undefined;
+                  })()
+                : undefined,
+              importModule: ts.isIdentifier(unwrappedToken)
+                ? (() => {
+                    const declaration = resolveDeclaration(unwrappedToken, ctx)[0];
+                    return declaration && !isProjectSourcePath(declaration.getSourceFile().fileName, ctx.rootDir)
+                      ? importModuleOf(unwrappedToken, ctx)
+                      : undefined;
+                  })()
+                : undefined,
+              ...options,
+            });
           }
         }
       }
     }
   }
 
-  return { deps, optionalDeps, selfDeps, skipSelfDeps, hostDeps, missing };
+  return { deps, optionalDeps, selfDeps, skipSelfDeps, hostDeps, functionalInjects, missing };
 }
 
 /** Fallback for constructor parameter type name: only used if type name references a known class or known InjectionToken variable. */
@@ -1506,6 +1761,23 @@ function resolveDeclaration(id: Identifier, ctx: AnalysisContext): ts.Declaratio
 function importPathOf(id: Identifier, ctx: AnalysisContext): string | undefined {
   const decl = resolveDeclaration(id, ctx)[0];
   if (decl) return modulePath(ctx.rootDir, decl.getSourceFile().fileName);
+  return undefined;
+}
+
+/** Package specifier for an imported symbol declared outside the project source tree. */
+function importModuleOf(id: Identifier, ctx: AnalysisContext): string | undefined {
+  const symbol = ctx.checker.getSymbolAtLocation(id);
+  const declarations = symbol?.declarations ?? [];
+  for (const declaration of declarations) {
+    let current: ts.Node | undefined = declaration;
+    while (current) {
+      if (ts.isImportDeclaration(current)) {
+        const moduleSpecifier = current.moduleSpecifier;
+        return ts.isStringLiteral(moduleSpecifier) ? moduleSpecifier.text : undefined;
+      }
+      current = current.parent;
+    }
+  }
   return undefined;
 }
 

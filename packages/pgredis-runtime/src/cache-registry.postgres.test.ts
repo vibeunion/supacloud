@@ -65,7 +65,7 @@ test.skipIf(!databaseUrl)("PostgreSQL commits notifications atomically and clear
     try {
       await first.cache.set("atomic:set", { version: 1 });
       await first.cache.delete("atomic:set");
-      expect(await first.cache.getset<{ version: number }>("atomic:swap", { version: 2 })).toBeNull();
+    expect(await first.cache.getset<{ version: number }>("atomic:swap", { version: 2 }, (value) => value as { version: number })).toBeNull();
       expect(await first.cache.getdel<{ version: number }>("atomic:swap")).toEqual({ version: 2 });
       await waitFor(() => notifications.filter(({ key }) => key?.startsWith("atomic:")).length === 4);
       expect(notifications.filter(({ key }) => key?.startsWith("atomic:"))).toEqual([

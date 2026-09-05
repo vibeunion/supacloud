@@ -443,6 +443,7 @@ export class SupaCloudApiError extends Error {
 }
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+type ResponseDecoder<T> = (value: unknown) => T;
 
 const TERMINAL_STATUSES = new Set<string>([
   "succeeded",
@@ -529,15 +530,273 @@ function normalizeMessageId(value: unknown): number {
 }
 
 function firstRpcValue(value: unknown): unknown {
-  return Array.isArray(value) ? value[0] : value;
+  return isUnknownArray(value) ? value[0] : value;
+}
+
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
+function valueRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const record: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) record[key] = item;
+  return record;
+}
+
+function responseRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid ${label} response`);
+  }
+  return valueRecord(value);
+}
+
+function responseString(
+  record: Record<string, unknown>,
+  key: string,
+  label: string,
+): string {
+  const value = record[key];
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`Invalid ${label} response: ${key} is required`);
+  }
+  return value;
+}
+
+function responseNumber(
+  record: Record<string, unknown>,
+  key: string,
+  label: string,
+): number {
+  const value = record[key];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`Invalid ${label} response: ${key} is required`);
+  }
+  return value;
+}
+
+function responseBoolean(
+  record: Record<string, unknown>,
+  key: string,
+  label: string,
+): boolean {
+  const value = record[key];
+  if (typeof value !== "boolean") {
+    throw new Error(`Invalid ${label} response: ${key} is required`);
+  }
+  return value;
+}
+
+function decodeVoid(value: unknown): void {
+  if (value !== undefined) throw new Error("Expected an empty response");
+}
+
+function decodeTaskDetail(value: unknown): SupaCloudTaskDetail {
+  const record = responseRecord(value, "task");
+  return {
+    ...record,
+    id: responseString(record, "id", "task"),
+    status: responseString(record, "status", "task"),
+  };
+}
+
+function decodeTaskDetails(value: unknown): SupaCloudTaskDetail[] {
+  if (!Array.isArray(value)) throw new Error("Invalid task list response");
+  return value.map(decodeTaskDetail);
+}
+
+function decodeQueueMessage(value: unknown): SupaCloudQueueMessage {
+  const record = responseRecord(value, "queue message");
+  const messageValue = record.message ?? record.payload;
+  const message = valueRecord(messageValue);
+  return {
+    ...record,
+    id: responseString(record, "id", "queue message"),
+    msg_id: responseNumber(record, "msg_id", "queue message"),
+    message,
+    payload: message,
+  };
+}
+
+function decodeQueueMessages(value: unknown): SupaCloudQueueMessage[] {
+  if (!Array.isArray(value)) throw new Error("Invalid queue message list response");
+  return value.map(decodeQueueMessage);
+}
+
+function decodeQueueStats(value: unknown): SupaCloudQueueStats {
+  const record = responseRecord(value, "queue stats");
+  return {
+    ...record,
+    queue_name: responseString(record, "queue_name", "queue stats"),
+    queue_length: responseNumber(record, "queue_length", "queue stats"),
+    newest_msg_age_sec: record.newest_msg_age_sec === null
+      ? null
+      : responseNumber(record, "newest_msg_age_sec", "queue stats"),
+    oldest_msg_age_sec: record.oldest_msg_age_sec === null
+      ? null
+      : responseNumber(record, "oldest_msg_age_sec", "queue stats"),
+    total_messages: responseNumber(record, "total_messages", "queue stats"),
+    scrape_time: responseString(record, "scrape_time", "queue stats"),
+  };
+}
+
+function decodeQueueSettings(value: unknown): SupaCloudQueueSettings {
+  const record = responseRecord(value, "queue settings");
+  return {
+    max_in_flight: responseNumber(record, "max_in_flight", "queue settings"),
+    default_visibility_timeout_sec: responseNumber(
+      record,
+      "default_visibility_timeout_sec",
+      "queue settings",
+    ),
+    max_attempts: responseNumber(record, "max_attempts", "queue settings"),
+    rate_limit_per_minute: responseNumber(record, "rate_limit_per_minute", "queue settings"),
+  };
+}
+
+function decodeQueueInfo(value: unknown): SupaCloudQueueInfo {
+  const record = responseRecord(value, "queue info");
+  return {
+    ...record,
+    queue_name: responseString(record, "queue_name", "queue info"),
+  };
+}
+
+function decodeQueueInfos(value: unknown): SupaCloudQueueInfo[] {
+  if (!Array.isArray(value)) throw new Error("Invalid queue info list response");
+  return value.map(decodeQueueInfo);
+}
+
+function decodeOAuthServerStatus(value: unknown): SupaCloudOAuthServerStatus {
+  const record = responseRecord(value, "OAuth Server");
+  return {
+    ...record,
+    project_ref: responseString(record, "project_ref", "OAuth Server"),
+    account_isolated: responseBoolean(record, "account_isolated", "OAuth Server"),
+    enabled: responseBoolean(record, "enabled", "OAuth Server"),
+    allow_dynamic_registration: responseBoolean(record, "allow_dynamic_registration", "OAuth Server"),
+    issuer: responseString(record, "issuer", "OAuth Server"),
+    discovery_url: responseString(record, "discovery_url", "OAuth Server"),
+    jwks_url: responseString(record, "jwks_url", "OAuth Server"),
+    authorization_endpoint: responseString(record, "authorization_endpoint", "OAuth Server"),
+    token_endpoint: responseString(record, "token_endpoint", "OAuth Server"),
+  };
+}
+
+function decodeOAuthClient(value: unknown): SupaCloudOAuthClient {
+  const record = responseRecord(value, "OAuth client");
+  return {
+    ...record,
+    client_id: responseString(record, "client_id", "OAuth client"),
+  };
+}
+
+function decodeOAuthClientList(value: unknown): SupaCloudOAuthClientList {
+  const record = responseRecord(value, "OAuth client list");
+  const clients = record.clients;
+  if (clients === undefined) return record;
+  if (!Array.isArray(clients)) throw new Error("Invalid OAuth client list response");
+  return { ...record, clients: clients.map(decodeOAuthClient) };
+}
+
+function decodeSupAuthStepResult(value: unknown): SupaCloudSupAuthStepResult {
+  const record = responseRecord(value, "SupAuth step");
+  return {
+    ...record,
+    step: responseString(record, "step", "SupAuth step"),
+    status: responseString(record, "status", "SupAuth step"),
+  };
+}
+
+function decodeSupAuthProvisionResult(value: unknown): SupaCloudSupAuthProvisionResult {
+  const record = responseRecord(value, "SupAuth provision");
+  const steps = record.steps;
+  if (steps !== undefined && !Array.isArray(steps)) {
+    throw new Error("Invalid SupAuth provision response");
+  }
+  return {
+    ...record,
+    projectRef: responseString(record, "projectRef", "SupAuth provision"),
+    status: responseString(record, "status", "SupAuth provision"),
+    ...(steps === undefined ? {} : { steps: steps.map(decodeSupAuthStepResult) }),
+  };
+}
+
+function decodeSupAuthReconcileResult(value: unknown): SupaCloudSupAuthReconcileResult {
+  const record = responseRecord(value, "SupAuth reconcile");
+  const steps = record.steps;
+  if (steps !== undefined && !Array.isArray(steps)) {
+    throw new Error("Invalid SupAuth reconcile response");
+  }
+  return {
+    ...record,
+    projectRef: responseString(record, "projectRef", "SupAuth reconcile"),
+    changed: responseBoolean(record, "changed", "SupAuth reconcile"),
+    ...(steps === undefined ? {} : { steps: steps.map(decodeSupAuthStepResult) }),
+  };
+}
+
+function decodeSupAuthRollbackResult(value: unknown): SupaCloudSupAuthRollbackResult {
+  const record = responseRecord(value, "SupAuth rollback");
+  const steps = record.steps;
+  if (steps !== undefined && !Array.isArray(steps)) {
+    throw new Error("Invalid SupAuth rollback response");
+  }
+  return {
+    ...record,
+    projectRef: responseString(record, "projectRef", "SupAuth rollback"),
+    status: responseString(record, "status", "SupAuth rollback"),
+    ...(steps === undefined ? {} : { steps: steps.map(decodeSupAuthStepResult) }),
+  };
+}
+
+function decodeSupAuthClientConfig(value: unknown): SupaCloudSupAuthClientConfig {
+  const record = responseRecord(value, "SupAuth client config");
+  return {
+    ...record,
+    projectRef: responseString(record, "projectRef", "SupAuth client config"),
+    supabaseUrl: responseString(record, "supabaseUrl", "SupAuth client config"),
+    authUrl: responseString(record, "authUrl", "SupAuth client config"),
+    restUrl: responseString(record, "restUrl", "SupAuth client config"),
+    storageUrl: responseString(record, "storageUrl", "SupAuth client config"),
+    realtimeUrl: responseString(record, "realtimeUrl", "SupAuth client config"),
+    functionsUrl: responseString(record, "functionsUrl", "SupAuth client config"),
+  };
+}
+
+function decodeSupAuthVerification(value: unknown): SupaCloudSupAuthVerification {
+  const record = responseRecord(value, "SupAuth verification");
+  const checks = record.checks;
+  if (!isUnknownArray(checks)) throw new Error("Invalid SupAuth verification response");
+  return {
+    ...record,
+    projectRef: responseString(record, "projectRef", "SupAuth verification"),
+    healthy: responseBoolean(record, "healthy", "SupAuth verification"),
+    checks: checks.map((check) => {
+      const record = responseRecord(check, "SupAuth check");
+      return {
+        ...record,
+        name: responseString(record, "name", "SupAuth check"),
+        status: responseString(record, "status", "SupAuth check"),
+      };
+    }),
+  };
+}
+
+function decodePurgeResult(value: unknown): { queue_name: string; purged: number } {
+  const record = responseRecord(value, "queue purge");
+  return {
+    queue_name: responseString(record, "queue_name", "queue purge"),
+    purged: responseNumber(record, "purged", "queue purge"),
+  };
 }
 
 function normalizeRpcMessage(queueName: string, value: unknown, status?: string): SupaCloudQueueMessage | null {
   const row = firstRpcValue(value);
   if (!row || typeof row !== "object") return null;
-  const record = row as Record<string, unknown>;
+  const record = valueRecord(row);
   const message = record.message && typeof record.message === "object" && !Array.isArray(record.message)
-    ? record.message as Record<string, unknown>
+    ? valueRecord(record.message)
     : {};
   const msgId = normalizeMessageId(record.msg_id ?? record.id);
   return {
@@ -553,7 +812,7 @@ function normalizeRpcMessage(queueName: string, value: unknown, status?: string)
 }
 
 function normalizeRpcMessages(queueName: string, value: unknown, status?: string): SupaCloudQueueMessage[] {
-  const rows = Array.isArray(value) ? value : value == null ? [] : [value];
+  const rows = isUnknownArray(value) ? value : value == null ? [] : [value];
   return rows
     .map((row) => normalizeRpcMessage(queueName, row, status))
     .filter((row): row is SupaCloudQueueMessage => Boolean(row));
@@ -562,20 +821,20 @@ function normalizeRpcMessages(queueName: string, value: unknown, status?: string
 function normalizeRpcMessageId(value: unknown): number {
   const row = firstRpcValue(value);
   if (row && typeof row === "object") {
-    const record = row as Record<string, unknown>;
+    const record = valueRecord(row);
     return normalizeMessageId(record.msg_id ?? record.send ?? record.send_batch ?? record.id);
   }
   return normalizeMessageId(row);
 }
 
 function normalizeRpcMessageIds(value: unknown): number[] {
-  const rows = Array.isArray(value) ? value : value == null ? [] : [value];
+  const rows = isUnknownArray(value) ? value : value == null ? [] : [value];
   return rows.map((row) => normalizeRpcMessageId(row)).filter((id) => id > 0);
 }
 
 function extractErrorCode(body: unknown): string | null {
   if (!body || typeof body !== "object") return null;
-  const code = (body as Record<string, unknown>).code;
+  const code = valueRecord(body).code;
   return typeof code === "string" ? code : null;
 }
 
@@ -583,7 +842,8 @@ async function readResponseBody(response: Response): Promise<unknown> {
   const text = await response.text();
   if (!text) return undefined;
   try {
-    return JSON.parse(text) as unknown;
+    const parsed: unknown = JSON.parse(text);
+    return parsed;
   } catch {
     return text;
   }
@@ -598,7 +858,7 @@ async function defaultAccessTokenResolver(
 }
 
 function normalizeTaskSnapshot(task: unknown): SupaCloudTaskSnapshot {
-  const value = (task ?? {}) as Record<string, unknown>;
+  const value = valueRecord(task ?? {});
   return {
     id: String(value.id ?? ""),
     status: String(value.status ?? "unknown"),
@@ -632,7 +892,12 @@ class SupaCloudManagementClient<TClient extends SupabaseClient = SupabaseClient>
     return token;
   }
 
-  protected async request<T>(path: string, method: HttpMethod, body?: unknown): Promise<T> {
+  protected async request<T>(
+    path: string,
+    method: HttpMethod,
+    body: unknown,
+    decode: ResponseDecoder<T>,
+  ): Promise<T> {
     const accessToken = await this.resolveAccessToken();
     const response = await fetch(`${this.options.managementApiUrl}${path}`, {
       method,
@@ -643,18 +908,19 @@ class SupaCloudManagementClient<TClient extends SupabaseClient = SupabaseClient>
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
 
-    if (response.status === 204) return undefined as T;
+    if (response.status === 204) return decode(undefined);
 
     const responseBody = await readResponseBody(response);
     if (!response.ok) {
+      const responseRecord = valueRecord(responseBody);
       const message =
-        responseBody && typeof responseBody === "object" && typeof (responseBody as Record<string, unknown>).message === "string"
-          ? String((responseBody as Record<string, unknown>).message)
+        typeof responseRecord.message === "string"
+          ? responseRecord.message
           : `SupaCloud request failed (${response.status})`;
       throw new SupaCloudApiError(message, response.status, responseBody);
     }
 
-    return responseBody as T;
+    return decode(responseBody);
   }
 }
 
@@ -687,15 +953,16 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       ...(options.businessTaskId ? { "x-supacloud-business-task-id": options.businessTaskId } : {}),
       ...(options.metadata ? { "x-supacloud-task-metadata": JSON.stringify(options.metadata) } : {}),
     };
-    const { data, error } = await this.options.supabase.functions.invoke(functionName, {
+    const invocation: { data: unknown; error: unknown } = await this.options.supabase.functions.invoke(functionName, {
       body,
       method,
       headers: invokeHeaders,
     });
+    const { data, error } = invocation;
 
     if (error) throw error;
 
-    const payload = (data ?? {}) as Record<string, unknown>;
+    const payload = valueRecord(data ?? {});
     const taskId =
       typeof payload.task_id === "string"
         ? payload.task_id
@@ -717,6 +984,8 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     return this.request<SupaCloudTaskDetail>(
       `/v1/projects/${this.options.projectRef}/tasks/${taskId}`,
       "GET",
+      undefined,
+      decodeTaskDetail,
     );
   }
 
@@ -724,6 +993,8 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     return this.request<SupaCloudTaskDetail[]>(
       `/v1/projects/${this.options.projectRef}/tasks${createQueryString(filters)}`,
       "GET",
+      undefined,
+      decodeTaskDetails,
     );
   }
 
@@ -731,6 +1002,8 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     return this.request<SupaCloudTaskDetail>(
       `/v1/projects/${this.options.projectRef}/tasks/${taskId}/cancel`,
       "POST",
+      undefined,
+      decodeTaskDetail,
     );
   }
 
@@ -738,6 +1011,8 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     return this.request<SupaCloudTaskDetail>(
       `/v1/projects/${this.options.projectRef}/tasks/${taskId}/retry`,
       "POST",
+      undefined,
+      decodeTaskDetail,
     );
   }
 
@@ -745,6 +1020,8 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     return this.request<SupaCloudTaskDetail[]>(
       `/v1/projects/${this.options.projectRef}/tasks/dlq?limit=${limit}`,
       "GET",
+      undefined,
+      decodeTaskDetails,
     );
   }
 
@@ -964,26 +1241,27 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
     return encodeURIComponent(this.name);
   }
 
-  private async rpc<T>(fn: string, params: Record<string, unknown>): Promise<T> {
-    const scopedClient = (this.options.supabase as unknown as {
-      schema: (name: string) => {
-        rpc: (fn: string, params: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
-      };
-    }).schema("pgmq_public");
-    const { data, error } = await scopedClient.rpc(fn, params);
+  private async rpc<T>(
+    fn: string,
+    params: Record<string, unknown>,
+    decode: ResponseDecoder<T>,
+  ): Promise<T> {
+    const scopedClient = this.options.supabase.schema("pgmq_public");
+    const rpcResult: { data: unknown; error: unknown } = await scopedClient.rpc(fn, params);
+    const { data, error } = rpcResult;
     if (error) throw error;
-    return data as T;
+    return decode(data);
   }
 
   async send(
     payload: Record<string, unknown> = {},
     options: SupaCloudQueueSendOptions = {},
   ): Promise<SupaCloudQueueSendResult> {
-    const msgId = normalizeRpcMessageId(await this.rpc("send", {
+    const msgId = await this.rpc("send", {
       queue_name: this.name,
       message: payload,
       sleep_seconds: normalizeSecondsFromOptions(options),
-    }));
+    }, normalizeRpcMessageId);
     return {
       id: String(msgId),
       msg_id: msgId,
@@ -997,11 +1275,11 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
     messages: Record<string, unknown>[],
     options: SupaCloudQueueSendOptions = {},
   ): Promise<SupaCloudQueueSendResult[]> {
-    const ids = normalizeRpcMessageIds(await this.rpc("send_batch", {
+    const ids = await this.rpc("send_batch", {
       queue_name: this.name,
       messages,
       sleep_seconds: normalizeSecondsFromOptions(options),
-    }));
+    }, normalizeRpcMessageIds);
     return ids.map((msgId, index) => ({
       id: String(msgId),
       msg_id: msgId,
@@ -1014,15 +1292,11 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
   async read(
     options: SupaCloudQueueReceiveOptions = {},
   ): Promise<SupaCloudQueueMessage[]> {
-    return normalizeRpcMessages(
-      this.name,
-      await this.rpc("read", {
-        queue_name: this.name,
-        sleep_seconds: normalizeSecondsFromOptions(options),
-        n: Math.max(1, Math.floor(options.n ?? options.count ?? 1)),
-      }),
-      "leased",
-    );
+    return this.rpc("read", {
+      queue_name: this.name,
+      sleep_seconds: normalizeSecondsFromOptions(options),
+      n: Math.max(1, Math.floor(options.n ?? options.count ?? 1)),
+    }, (value) => normalizeRpcMessages(this.name, value, "leased"));
   }
 
   async receive(
@@ -1033,17 +1307,16 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
   }
 
   async pop(): Promise<SupaCloudQueueMessage | null> {
-    return normalizeRpcMessage(
-      this.name,
-      await this.rpc("pop", { queue_name: this.name }),
-      "deleted",
-    );
+    return this.rpc("pop", { queue_name: this.name }, (value) =>
+      normalizeRpcMessage(this.name, value, "deleted"));
   }
 
   async list(filters: SupaCloudQueueListFilters = {}): Promise<SupaCloudQueueMessage[]> {
     return this.request<SupaCloudQueueMessage[]>(
       `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages${createQueueQueryString(filters)}`,
       "GET",
+      undefined,
+      decodeQueueMessages,
     );
   }
 
@@ -1059,6 +1332,8 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
     return this.request<SupaCloudQueueStats>(
       `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/stats`,
       "GET",
+      undefined,
+      decodeQueueStats,
     );
   }
 
@@ -1066,6 +1341,8 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
     return this.request<SupaCloudQueueSettings>(
       `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/settings`,
       "GET",
+      undefined,
+      decodeQueueSettings,
     );
   }
 
@@ -1074,15 +1351,16 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
       `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/settings`,
       "PATCH",
       settings,
+      decodeQueueSettings,
     );
   }
 
   async archive(messageId: string | number): Promise<SupaCloudQueueMutationResult> {
     const msgId = normalizeMessageId(messageId);
-    const success = Boolean(firstRpcValue(await this.rpc("archive", {
+    const success = await this.rpc("archive", {
       queue_name: this.name,
       message_id: msgId,
-    })));
+    }, (value) => Boolean(firstRpcValue(value)));
     return { id: String(msgId), msg_id: msgId, queue_name: this.name, status: "archived", success };
   }
 
@@ -1092,10 +1370,10 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
 
   async delete(messageId: string | number): Promise<SupaCloudQueueMutationResult> {
     const msgId = normalizeMessageId(messageId);
-    const success = Boolean(firstRpcValue(await this.rpc("delete", {
+    const success = await this.rpc("delete", {
       queue_name: this.name,
       message_id: msgId,
-    })));
+    }, (value) => Boolean(firstRpcValue(value)));
     return { id: String(msgId), msg_id: msgId, queue_name: this.name, status: "deleted", success };
   }
 
@@ -1110,6 +1388,7 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
         sleep_seconds: normalizeSecondsFromOptions(options),
         ...(options.error ? { error: options.error } : {}),
       },
+      decodeQueueMessage,
     );
   }
 
@@ -1117,6 +1396,8 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
     return this.request<{ queue_name: string; purged: number }>(
       `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/purge`,
       "POST",
+      undefined,
+      decodePurgeResult,
     );
   }
 
@@ -1138,6 +1419,8 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
     return this.request<SupaCloudQueueMessage>(
       `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}`,
       "GET",
+      undefined,
+      decodeQueueMessage,
     );
   }
 
@@ -1148,6 +1431,8 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
     return this.request<SupaCloudQueueMessage>(
       `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}/retry`,
       "POST",
+      undefined,
+      decodeQueueMessage,
     );
   }
 }
@@ -1157,6 +1442,8 @@ class SupaCloudQueuesClient<TClient extends SupabaseClient = SupabaseClient> ext
     return this.request<SupaCloudQueueInfo[]>(
       `/v1/projects/${this.options.projectRef}/tasks/queues`,
       "GET",
+      undefined,
+      decodeQueueInfos,
     );
   }
 
@@ -1165,6 +1452,7 @@ class SupaCloudQueuesClient<TClient extends SupabaseClient = SupabaseClient> ext
       `/v1/projects/${this.options.projectRef}/tasks/queues`,
       "POST",
       { queue_name: queueName, unlogged: options.unlogged },
+      decodeQueueInfo,
     );
   }
 
@@ -1172,6 +1460,8 @@ class SupaCloudQueuesClient<TClient extends SupabaseClient = SupabaseClient> ext
     await this.request<void>(
       `/v1/projects/${this.options.projectRef}/tasks/queues/${encodeURIComponent(queueName)}`,
       "DELETE",
+      undefined,
+      decodeVoid,
     );
   }
 }
@@ -1181,6 +1471,8 @@ class SupaCloudOAuthServerClient<TClient extends SupabaseClient = SupabaseClient
     return this.request<SupaCloudOAuthServerStatus>(
       `/v1/projects/${this.options.projectRef}/auth/oauth-server`,
       "GET",
+      undefined,
+      decodeOAuthServerStatus,
     );
   }
 
@@ -1197,6 +1489,7 @@ class SupaCloudOAuthServerClient<TClient extends SupabaseClient = SupabaseClient
           ? {}
           : { authorization_path: options.authorizationPath }),
       },
+      decodeOAuthServerStatus,
     );
   }
 
@@ -1204,14 +1497,16 @@ class SupaCloudOAuthServerClient<TClient extends SupabaseClient = SupabaseClient
     const status = await this.getStatus();
     const response = await fetch(status.discovery_url);
     if (!response.ok) throw new Error(`SupaCloud OIDC discovery failed (${response.status})`);
-    return await response.json() as Record<string, unknown>;
+    const payload: unknown = await response.json();
+    return valueRecord(payload);
   }
 
   async getJwks(): Promise<Record<string, unknown>> {
     const status = await this.getStatus();
     const response = await fetch(status.jwks_url);
     if (!response.ok) throw new Error(`SupaCloud JWKS fetch failed (${response.status})`);
-    return await response.json() as Record<string, unknown>;
+    const payload: unknown = await response.json();
+    return valueRecord(payload);
   }
 
   async buildAuthorizeUrl(options: SupaCloudAuthorizeUrlOptions): Promise<string> {
@@ -1236,6 +1531,8 @@ class SupaCloudOAuthClientsClient<TClient extends SupabaseClient = SupabaseClien
     return this.request<SupaCloudOAuthClientList>(
       `/v1/projects/${this.options.projectRef}/auth/oauth-clients`,
       "GET",
+      undefined,
+      decodeOAuthClientList,
     );
   }
 
@@ -1244,6 +1541,7 @@ class SupaCloudOAuthClientsClient<TClient extends SupabaseClient = SupabaseClien
       `/v1/projects/${this.options.projectRef}/auth/oauth-clients`,
       "POST",
       input,
+      decodeOAuthClient,
     );
   }
 
@@ -1251,6 +1549,8 @@ class SupaCloudOAuthClientsClient<TClient extends SupabaseClient = SupabaseClien
     return this.request<SupaCloudOAuthClient>(
       `/v1/projects/${this.options.projectRef}/auth/oauth-clients/${encodeURIComponent(clientId)}`,
       "GET",
+      undefined,
+      decodeOAuthClient,
     );
   }
 
@@ -1259,6 +1559,7 @@ class SupaCloudOAuthClientsClient<TClient extends SupabaseClient = SupabaseClien
       `/v1/projects/${this.options.projectRef}/auth/oauth-clients/${encodeURIComponent(clientId)}`,
       "PUT",
       patch,
+      decodeOAuthClient,
     );
   }
 
@@ -1266,6 +1567,8 @@ class SupaCloudOAuthClientsClient<TClient extends SupabaseClient = SupabaseClien
     await this.request<void>(
       `/v1/projects/${this.options.projectRef}/auth/oauth-clients/${encodeURIComponent(clientId)}`,
       "DELETE",
+      undefined,
+      decodeVoid,
     );
   }
 
@@ -1273,6 +1576,8 @@ class SupaCloudOAuthClientsClient<TClient extends SupabaseClient = SupabaseClien
     return this.request<SupaCloudOAuthClient>(
       `/v1/projects/${this.options.projectRef}/auth/oauth-clients/${encodeURIComponent(clientId)}/regenerate-secret`,
       "POST",
+      undefined,
+      decodeOAuthClient,
     );
   }
 }
@@ -1289,6 +1594,7 @@ class SupaCloudSupAuthClient<TClient extends SupabaseClient = SupabaseClient> ex
       `${this.basePath}/provision`,
       "POST",
       options,
+      decodeSupAuthProvisionResult,
     );
   }
 
@@ -1299,6 +1605,7 @@ class SupaCloudSupAuthClient<TClient extends SupabaseClient = SupabaseClient> ex
       `${this.basePath}/reconcile`,
       "POST",
       options,
+      decodeSupAuthReconcileResult,
     );
   }
 
@@ -1306,6 +1613,8 @@ class SupaCloudSupAuthClient<TClient extends SupabaseClient = SupabaseClient> ex
     return this.request<SupaCloudSupAuthRollbackResult>(
       `${this.basePath}/rollback`,
       "POST",
+      undefined,
+      decodeSupAuthRollbackResult,
     );
   }
 
@@ -1313,6 +1622,8 @@ class SupaCloudSupAuthClient<TClient extends SupabaseClient = SupabaseClient> ex
     return this.request<SupaCloudSupAuthClientConfig>(
       `${this.basePath}/client-config`,
       "GET",
+      undefined,
+      decodeSupAuthClientConfig,
     );
   }
 
@@ -1320,6 +1631,8 @@ class SupaCloudSupAuthClient<TClient extends SupabaseClient = SupabaseClient> ex
     return this.request<SupaCloudSupAuthVerification>(
       `${this.basePath}/verify`,
       "GET",
+      undefined,
+      decodeSupAuthVerification,
     );
   }
 }

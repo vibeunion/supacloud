@@ -39,8 +39,39 @@ function isAppliedDependentRefreshFailure({ response, payload }: OAuthApiRespons
 }
 
 function enabledOAuthServerStatus(payload: unknown): OAuthServerStatus | null {
-  if (!isRecord(payload) || payload.enabled !== true) return null;
-  return payload as OAuthServerStatus;
+  if (!isRecord(payload)
+    || payload.enabled !== true
+    || typeof payload.allow_dynamic_registration !== "boolean"
+    || typeof payload.issuer !== "string"
+    || typeof payload.discovery_url !== "string"
+    || typeof payload.oauth_authorization_server_metadata_url !== "string"
+    || typeof payload.jwks_url !== "string"
+    || typeof payload.authorization_endpoint !== "string"
+    || typeof payload.token_endpoint !== "string"
+    || typeof payload.registration_endpoint !== "string"
+    || typeof payload.signing_alg !== "string"
+    || typeof payload.oidc_id_token_ready !== "boolean"
+    || typeof payload.migration_status !== "string"
+    || (payload.warnings !== undefined
+      && (!Array.isArray(payload.warnings)
+        || !payload.warnings.every((warning: unknown) => typeof warning === "string")))) {
+    return null;
+  }
+  return {
+    enabled: payload.enabled,
+    allow_dynamic_registration: payload.allow_dynamic_registration,
+    issuer: payload.issuer,
+    discovery_url: payload.discovery_url,
+    oauth_authorization_server_metadata_url: payload.oauth_authorization_server_metadata_url,
+    jwks_url: payload.jwks_url,
+    authorization_endpoint: payload.authorization_endpoint,
+    token_endpoint: payload.token_endpoint,
+    registration_endpoint: payload.registration_endpoint,
+    signing_alg: payload.signing_alg,
+    oidc_id_token_ready: payload.oidc_id_token_ready,
+    migration_status: payload.migration_status,
+    ...(payload.warnings ? { warnings: payload.warnings.filter((warning): warning is string => typeof warning === "string") } : {}),
+  };
 }
 
 export async function migrateOAuthServerWithReadback(

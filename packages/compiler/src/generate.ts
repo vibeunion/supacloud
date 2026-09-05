@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type {
   ApplicationGraph,
   ControllerNode,
+  FunctionalInjectNode,
   ModuleNode,
   ProviderNode,
   Scope,
@@ -123,6 +124,8 @@ function destroyScopeInstances(
       try {
         if (isRecord(instance) && isFunction(instance.onDestroy)) {
           await instance.onDestroy();
+        } else if (isRecord(instance) && isFunction(instance.ngOnDestroy)) {
+          await instance.ngOnDestroy();
         }
       } catch (error) {
         errors.push(error);
@@ -167,12 +170,14 @@ export function renderApplication(
         for (const d of ctrl.optionalDeps ?? []) referencedTokens.add(d);
         for (const d of ctrl.selfDeps ?? []) referencedTokens.add(d);
         for (const d of ctrl.skipSelfDeps ?? []) referencedTokens.add(d);
+        for (const d of ctrl.hostDeps ?? []) referencedTokens.add(d);
       }
       for (const p of mod.providers) {
         for (const d of p.deps ?? []) referencedTokens.add(d);
         for (const d of p.optionalDeps ?? []) referencedTokens.add(d);
         for (const d of p.selfDeps ?? []) referencedTokens.add(d);
         for (const d of p.skipSelfDeps ?? []) referencedTokens.add(d);
+        for (const d of p.hostDeps ?? []) referencedTokens.add(d);
         if (p.useExisting) referencedTokens.add(p.useExisting);
       }
     }
@@ -207,13 +212,15 @@ export function renderApplication(
     "}",
     "",
     "export async function initializeApplication(services: Record<string, unknown>): Promise<void> {",
-    '  const initializers = services.appInitializer ?? services["supacloud.app-initializer"];',
-    "  if (Array.isArray(initializers)) {",
-    "    for (const init of initializers) {",
-    '      if (typeof init === "function") await init();',
+    '  const initializers = [services.environmentInitializer ?? services["supacloud.environment-initializer"], services.appInitializer ?? services["supacloud.app-initializer"]];',
+    "  for (const group of initializers) {",
+    "    if (Array.isArray(group)) {",
+    "      for (const init of group) {",
+    '        if (isFunction(init)) await init();',
+    "      }",
+    '    } else if (isFunction(group)) {',
+    "      await group();",
     "    }",
-    '  } else if (isFunction(initializers)) {',
-    "    await initializers();",
     "  }",
     "}",
     "",
@@ -230,6 +237,8 @@ export function renderApplication(
     "  for (const inst of instances.reverse()) {",
     '    if (isRecord(inst) && isFunction(inst.onDestroy)) {',
     "      await inst.onDestroy();",
+    '    } else if (isRecord(inst) && isFunction(inst.ngOnDestroy)) {',
+    "      await inst.ngOnDestroy();",
     "    }",
     "  }",
     "}",
@@ -363,17 +372,19 @@ function indent(text: string, spaces: number): string {
 
 /** Manages generated file imports: automatically aliases symbols with the same name from different sources. */
 class ImportManager {
-  private readonly entries = new Map<string, { path: string; exported: string }>();
+  private readonly entries = new Map<string, { path: string; exported: string; package: boolean }>();
 
   get size(): number {
     return this.entries.size;
   }
 
   /** Registers a symbol and returns local identifier for generated code. importPath is relative to rootDir without extension. */
-  add(exported: string, importPath?: string): string {
-    if (!importPath) return exported;
+  add(exported: string, importPath?: string, importModule?: string): string {
+    const path = importModule ?? importPath;
+    const packageImport = importModule !== undefined;
+    if (!path) return exported;
     for (const [local, entry] of this.entries) {
-      if (entry.path === importPath && entry.exported === exported) return local;
+      if (entry.path === path && entry.exported === exported && entry.package === packageImport) return local;
     }
     let local = exported;
     let counter: number = 2;
@@ -381,21 +392,23 @@ class ImportManager {
       local = `${exported}${counter}`;
       counter += 1;
     }
-    this.entries.set(local, { path: importPath, exported });
+    this.entries.set(local, { path, exported, package: packageImport });
     return local;
   }
 
   render(rootDir: string, outDir: string): string[] {
     const byPath = new Map<string, { exported: string; local: string }[]>();
     for (const [local, entry] of this.entries) {
-      const list = byPath.get(entry.path) ?? [];
+      const spec = entry.package
+        ? entry.path
+        : relativeImportPath(outDir, join(rootDir, `${entry.path}.ts`));
+      const list = byPath.get(spec) ?? [];
       list.push({ exported: entry.exported, local });
-      byPath.set(entry.path, list);
+      byPath.set(spec, list);
     }
     return [...byPath.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([path, symbols]) => {
-        const spec = relativeImportPath(outDir, join(rootDir, `${path}.ts`));
+      .map(([spec, symbols]) => {
         const names = symbols
           .sort((a, b) => a.exported.localeCompare(b.exported))
           .map((s) => (s.local === s.exported ? s.exported : `${s.exported} as ${s.local}`))
@@ -421,6 +434,12 @@ class ModuleGenerator {
     private readonly imports: ImportManager,
   ) {
     this.pascal = pascalName(module.name);
+    if (
+      module.providers.some((provider) => (provider.functionalInjects?.length ?? 0) > 0) ||
+      module.controllers.some((controller) => (controller.functionalInjects?.length ?? 0) > 0)
+    ) {
+      imports.add("runInInjectionContext", undefined, "@supacloud/app");
+    }
   }
 
   renderFactories(): string[] {
@@ -668,37 +687,48 @@ class ModuleGenerator {
     const key = camelName(provider.token);
     switch (provider.kind) {
       case "class": {
-        const useClass = this.imports.add(provider.useClass ?? provider.token, provider.importPath);
+        const useClass = this.imports.add(provider.useClass ?? provider.token, provider.importPath, provider.importModule);
         const args = provider.deps
-          .map((dep) => this.depExpr(dep, kind, provider.optionalDeps?.includes(dep)))
+          .map((dep) => this.depExpr(dep, kind, this.depOptions(provider, dep)))
           .join(", ");
         const local = this.localVar(isMulti ? (provider.useClass ?? `${provider.token}Item`) : provider.token, kind);
-        return { constLine: `const ${local} = new ${useClass}(${args});`, key, expr: local };
+        return {
+          constLine: `const ${local} = ${this.instantiate(useClass, args, kind, provider.functionalInjects)};`,
+          key,
+          expr: local,
+        };
       }
       case "value": {
-        const expr = provider.importPath
-          ? this.imports.add(provider.useValueExpr ?? "undefined", provider.importPath)
+        const expr = provider.importPath || provider.importModule
+          ? this.imports.add(provider.useValueExpr ?? "undefined", provider.importPath, provider.importModule)
           : (provider.useValueExpr ?? "undefined");
         const local = this.localVar(isMulti ? `${provider.token}Item` : provider.token, kind);
         return { constLine: `const ${local} = ${expr};`, key, expr: local };
       }
       case "factory": {
         if (provider.tokenKind === "injection-token" && !provider.useFactoryName) {
-          const tokenIdent = this.imports.add(provider.token, provider.importPath);
+          const tokenIdent = this.imports.add(provider.token, provider.importPath, provider.importModule);
           const local = this.localVar(isMulti ? `${provider.token}Item` : provider.token, kind);
           const constLine = `const ${local} = resolveFactoryValue(${tokenIdent});`;
           return { constLine, key, expr: local };
         }
-        const factory = this.imports.add(provider.useFactoryName ?? "", provider.importPath);
+        const factory = this.imports.add(provider.useFactoryName ?? "", provider.importPath, provider.importModule);
         const args = provider.deps
-          .map((dep) => this.depExpr(dep, kind, provider.optionalDeps?.includes(dep)))
+          .map((dep) => this.depExpr(dep, kind, this.depOptions(provider, dep)))
           .join(", ");
         const local = this.localVar(isMulti ? (provider.useFactoryName ?? `${provider.token}Item`) : provider.token, kind);
         return { constLine: `const ${local} = ${factory}(${args});`, key, expr: local };
       }
       case "existing": {
         // Alias provider: does not create a new instance, directly references target expression.
-        return { key, expr: this.depExpr(provider.useExisting ?? provider.token, kind, provider.optionalDeps?.includes(provider.token)) };
+        return {
+          key,
+          expr: this.depExpr(
+            provider.useExisting ?? provider.token,
+            kind,
+            this.depOptions(provider, provider.useExisting ?? provider.token),
+          ),
+        };
       }
     }
   }
@@ -709,11 +739,52 @@ class ModuleGenerator {
   ): { constLine: string; key: string; expr: string } {
     const className = this.imports.add(controller.className, controller.importPath);
     const args = controller.deps
-      .map((dep) => this.depExpr(dep, kind, controller.optionalDeps?.includes(dep)))
+      .map((dep) => this.depExpr(dep, kind, this.depOptions(controller, dep)))
       .join(", ");
     const key = camelName(controller.className);
     const local = this.localVar(controller.className, kind);
-    return { constLine: `const ${local} = new ${className}(${args});`, key, expr: local };
+    return {
+      constLine: `const ${local} = ${this.instantiate(className, args, kind, controller.functionalInjects)};`,
+      key,
+      expr: local,
+    };
+  }
+
+  /**
+   * Functional inject() property initializers execute during `new`.
+   * The compiler supplies a finite, generated token identity table for that
+   * constructor call; it never performs provider discovery or token lookup.
+   */
+  private instantiate(
+    className: string,
+    args: string,
+    kind: FactoryKind,
+    functionalInjects?: FunctionalInjectNode[],
+  ): string {
+    if (!functionalInjects || functionalInjects.length === 0) {
+      return `new ${className}(${args})`;
+    }
+
+    const clauses = functionalInjects.map((entry) => {
+      const token = this.imports.add(entry.expression, entry.importPath, entry.importModule);
+      const value = this.depExpr(entry.token, kind, {
+        optional: entry.optional,
+        self: entry.self,
+        skipSelf: entry.skipSelf,
+        host: entry.host,
+      });
+      return `if (token === ${token}) return ${value} as T;`;
+    });
+    const missing = `if (options?.optional) return undefined; throw new Error("Static inject token not available: " + String(token));`;
+    const injector = [
+      `{`,
+      `get<T>(token: unknown, options?: { optional?: boolean; self?: boolean; skipSelf?: boolean; host?: boolean }): T | undefined {`,
+      ...clauses,
+      missing,
+      `},`,
+      `}`,
+    ].join("\n");
+    return `runInInjectionContext(${injector}, () => new ${className}(${args}))`;
   }
 
   /** Token -> local variable name in factory (camelCase, suffixed with digits on conflict). */
@@ -738,25 +809,45 @@ class ModuleGenerator {
    * Services exported by imported modules (imported.<module>.<key>, accessed via services param in
    * request/job factories) > Platform deps (deps.<camelName>).
    */
-  private depExpr(token: string, kind: FactoryKind, isOptional = false): string {
+  private depOptions(
+    node: Pick<ProviderNode, "optionalDeps" | "selfDeps" | "skipSelfDeps" | "hostDeps"> | Pick<ControllerNode, "optionalDeps" | "selfDeps" | "skipSelfDeps">,
+    token: string,
+  ): { optional: boolean; self: boolean; skipSelf: boolean; host: boolean } {
+    return {
+      optional: node.optionalDeps?.includes(token) ?? false,
+      self: node.selfDeps?.includes(token) ?? false,
+      skipSelf: node.skipSelfDeps?.includes(token) ?? false,
+      host: "hostDeps" in node ? (node.hostDeps?.includes(token) ?? false) : false,
+    };
+  }
+
+  private depExpr(
+    token: string,
+    kind: FactoryKind,
+    options: { optional?: boolean; self?: boolean; skipSelf?: boolean; host?: boolean } = {},
+  ): string {
+    const isOptional = options.optional ?? false;
+    const isSelf = options.self ?? false;
+    const isSkipSelf = options.skipSelf ?? false;
     if (kind === "request" && isRequestContextToken(token, this.graph.tokenNames)) return "ctx";
     if (kind === "job" && isJobContextToken(token, this.graph.tokenNames)) return "ctx";
 
     const own = this.module.providers.find((p) => p.token === token);
-    if (own) {
+    const ownIsLocal = own && factoryOfScope(own.scope) === kind;
+    if (own && ownIsLocal && !isSkipSelf) {
       if (factoryOfScope(own.scope) === kind && own.kind !== "existing") {
         return this.locals[kind].get(token) ?? camelName(token);
       }
-      if (own.kind === "existing" && factoryOfScope(own.scope) === kind) {
-        return this.depExpr(own.useExisting ?? token, kind, isOptional);
+      if (own.kind === "existing") {
+        return this.depExpr(own.useExisting ?? token, kind, options);
       }
-      if (kind === "services") {
-        // Application factory referencing request/job provider: scope-violation, already flagged by validator.
-        return `services.${camelName(token)}`;
-      }
-      return `services.${camelName(token)}`;
+    }
+    if (isSelf) {
+      return isOptional ? "undefined" : `services.${camelName(token)}`;
     }
 
+    // @Host() is intentionally a no-op for EnvironmentInjector-style scopes:
+    // SupaCloud has no element-injector tree to impose a host boundary.
     for (const importName of this.module.imports) {
       const imported = this.graph.modules.find((m) => m.name === importName);
       if (!imported?.exports.includes(token)) continue;
@@ -775,6 +866,7 @@ class ModuleGenerator {
       return "undefined";
     }
 
+    if (isSelf) return isOptional ? "undefined" : `services.${camelName(token)}`;
     if (kind === "services") return isOptional ? `(deps.${camelName(token)} ?? undefined)` : `deps.${camelName(token)}`;
     // request/job factories have no deps parameter; platform/external tokens are also passed via services.
     return isOptional ? `(services.${camelName(token)} ?? undefined)` : `services.${camelName(token)}`;

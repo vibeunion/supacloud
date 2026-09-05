@@ -5,10 +5,10 @@ export interface MockModuleNode {
   file: string;
   line: number;
   imports: string[];
-  providers: any[];
-  controllers: any[];
-  commands: any[];
-  queries: any[];
+  providers: unknown[];
+  controllers: unknown[];
+  commands: unknown[];
+  queries: unknown[];
   exports: string[];
   [key: string]: unknown;
 }

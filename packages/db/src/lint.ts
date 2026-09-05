@@ -21,8 +21,8 @@ const CREATE_POLICY_RE = /\bcreate\s+policy\b/i;
 const DROP_POLICY_IF_EXISTS_RE = /\bdrop\s+policy\s+if\s+exists\b/i;
 
 function lineOf(sql: string, index: number): number {
-  let line = 1;
-  for (let i = 0; i < index; i += 1) {
+  let line: number = 1;
+  for (let i: number = 0; i < index; i += 1) {
     if (sql.charCodeAt(i) === 10) line += 1;
   }
   return line;

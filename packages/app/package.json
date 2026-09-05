@@ -40,6 +40,9 @@
     "url": "https://github.com/vibeunion/supacloud.git",
     "directory": "packages/app"
   },
+  "dependencies": {
+    "@angular/core": "^22.1.5"
+  },
   "devDependencies": {
     "@types/bun": "^1.4.0",
     "typescript": "^7.0.2"

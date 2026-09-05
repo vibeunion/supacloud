@@ -30,7 +30,11 @@ function parseEnvironmentFile(content: string): Record<string, string> {
     const value = rawValue.trim();
     if (value.startsWith('"')) {
       try {
-        values[key] = JSON.parse(value) as string;
+        const parsed: unknown = JSON.parse(value);
+        if (typeof parsed !== "string") {
+          throw new TenantConfigError("Tenant pgredis configuration is invalid", 503);
+        }
+        values[key] = parsed;
       } catch {
         throw new TenantConfigError("Tenant pgredis configuration is invalid", 503);
       }

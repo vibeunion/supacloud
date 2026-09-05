@@ -43,6 +43,16 @@ export interface BuildTableRowsResourceInput {
 
 const TABLE_ROW_ID_PREFIX = '__svadmin_row_id';
 
+function toRecord(value: object): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) result[key] = item;
+  return result;
+}
+
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
 const numericTypes = new Set([
   'smallint',
   'integer',
@@ -119,14 +129,14 @@ export function parseTableColumnsResponse(payload: unknown): TableColumnMetadata
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('Invalid table columns response');
   }
-  const data = (payload as Record<string, unknown>).data;
-  if (!Array.isArray(data)) throw new Error('Invalid table columns response');
+  const data = toRecord(payload).data;
+  if (!isUnknownArray(data)) throw new Error('Invalid table columns response');
 
   return data.map((candidate) => {
     if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
       throw new Error('Invalid table column metadata');
     }
-    const column = candidate as Record<string, unknown>;
+    const column = toRecord(candidate);
     if (
       typeof column.column_name !== 'string'
       || column.column_name.length === 0
@@ -161,7 +171,7 @@ export function buildTableRowsResource({
   const usesSyntheticIdentity = primaryKeyColumns.length !== 1;
   const identityKey = usesSyntheticIdentity
     ? syntheticTableRowIdentityKey(columns)
-    : primaryKeyColumns[0]!.column_name;
+    : primaryKeyColumns[0]?.column_name ?? syntheticTableRowIdentityKey(columns);
   const fields: FieldDefinition[] = columns.map((column) => ({
     key: column.column_name,
     label: column.column_name,

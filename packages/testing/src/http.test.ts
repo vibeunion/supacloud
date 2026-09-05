@@ -39,6 +39,17 @@ describe("testJson", () => {
       echoApp(201),
       "/cases?page=1",
       { method: "PUT" },
+      (value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) {
+          throw new Error("Expected JSON object");
+        }
+        const record: Record<string, unknown> = {};
+        for (const [key, item] of Object.entries(value)) record[key] = item;
+        if (typeof record.method !== "string" || typeof record.url !== "string") {
+          throw new Error("Expected method and url");
+        }
+        return { method: record.method, url: record.url };
+      },
     );
     expect(status).toBe(201);
     expect(body.method).toBe("PUT");

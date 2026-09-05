@@ -240,6 +240,14 @@ function hashText(text: string): string {
   return createHash("sha1").update(text).digest("hex");
 }
 
+function sourceVersion(fileName: string): string {
+  try {
+    return hashText(readFileSync(fileName, "utf8"));
+  } catch {
+    return "missing";
+  }
+}
+
 function sourceFileVersion(sourceFile: ts.SourceFile): string | undefined {
   const descriptor = Object.getOwnPropertyDescriptor(sourceFile, "version");
   return typeof descriptor?.value === "string" ? descriptor.value : undefined;

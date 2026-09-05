@@ -1,4 +1,5 @@
 import { InjectionToken } from "./token";
+import { DestroyRef as AngularDestroyRef, inject as angularInject } from "@angular/core";
 
 /**
  * Built-in token resolved from the request-context argument of a compiled
@@ -70,7 +71,16 @@ export interface DestroyRef {
  */
 export const DESTROY_REF = new InjectionToken<DestroyRef>("supacloud.destroy-ref", {
   scope: "application",
-  factory: () => createDestroyRef(),
+  factory: () => {
+    try {
+      const destroyRef = angularInject(AngularDestroyRef);
+      return destroyRef && typeof destroyRef.onDestroy === "function"
+        ? destroyRef
+        : createDestroyRef();
+    } catch {
+      return createDestroyRef();
+    }
+  },
 });
 
 /**

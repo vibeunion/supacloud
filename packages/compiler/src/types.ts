@@ -11,6 +11,21 @@ export type ProviderKind = "class" | "value" | "factory" | "existing";
 
 export type TokenKind = "injection-token" | "class";
 
+export interface FunctionalInjectNode {
+  /** Logical token name used by the application graph. */
+  token: string;
+  /** Source expression used to identify the runtime token. */
+  expression: string;
+  /** Relative source module path for the token expression. */
+  importPath?: string;
+  /** Package module specifier for a library token. */
+  importModule?: string;
+  optional?: boolean;
+  self?: boolean;
+  skipSelf?: boolean;
+  host?: boolean;
+}
+
 export interface Diagnostic {
   severity: "error" | "warn";
   code: string;
@@ -45,6 +60,8 @@ export interface ProviderNode {
   skipSelfDeps?: string[];
   /** Parameter tokens marked @Host(). */
   hostDeps?: string[];
+  /** Property-level Angular functional inject() calls compiled into a static context. */
+  functionalInjects?: FunctionalInjectNode[];
   /** When true, multiple providers can contribute to this token as an array of instances (Angular multi-providers). */
   multi?: boolean;
   /** Automatically provided in the root injector context without manual module declaration (Angular-style). */
@@ -56,6 +73,8 @@ export interface ProviderNode {
   line: number;
   /** Relative module path of useClass/useFactory/useValue symbol (for import generation). */
   importPath?: string;
+  /** Package module specifier for providers supplied by a library. */
+  importModule?: string;
 }
 
 export interface HandlerParamNode {
@@ -123,6 +142,10 @@ export interface ControllerNode {
   optionalDeps?: string[];
   selfDeps?: string[];
   skipSelfDeps?: string[];
+  /** Parameter tokens marked @Host(). */
+  hostDeps?: string[];
+  /** Property-level Angular functional inject() calls compiled into a static context. */
+  functionalInjects?: FunctionalInjectNode[];
   /** Automatically registered without manual module declaration (Angular standalone controller style). */
   standalone?: boolean;
   routes: RouteNode[];

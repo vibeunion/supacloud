@@ -209,6 +209,28 @@ describe("analyzeProject：command 与 externalTokens", () => {
     expect(prov?.deps).toContain("CONFIG");
     expect(prov?.deps).toContain("CACHE");
     expect(prov?.optionalDeps).toContain("CACHE");
+    expect(prov?.functionalInjects).toEqual([
+      {
+        token: "CONFIG",
+        expression: "CONFIG",
+        importPath: "src/test.service",
+        importModule: undefined,
+        optional: false,
+        self: false,
+        skipSelf: false,
+        host: false,
+      },
+      {
+        token: "CACHE",
+        expression: "CACHE",
+        importPath: "src/test.service",
+        importModule: undefined,
+        optional: true,
+        self: false,
+        skipSelf: false,
+        host: false,
+      },
+    ]);
   });
 
   test("analyzes canMatch guards, param transforms/defaults, and onDestroy hooks", async () => {
@@ -401,6 +423,46 @@ describe("analyzeProject：command 与 externalTokens", () => {
     expect(prov?.tokenKind).toBe("injection-token");
     expect(prov?.kind).toBe("factory");
     expect(prov?.importPath).toBe("src/tokens");
+  });
+
+  test("expands nested EnvironmentProviders and standalone provider helpers", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-environment-providers-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": GOOD_PROJECT_FILES["tsconfig.json"],
+      "src/runtime.ts": `${RUNTIME_SOURCE}
+export function makeEnvironmentProviders(providers: unknown[]) { return { ɵproviders: providers }; }
+export function provideToken(token: unknown, value: unknown) { return { token, value }; }
+export function provideEnvironmentInitializer(initializer: unknown) { return initializer; }
+`,
+      "src/config.ts": `
+        import { InjectionToken } from "./runtime";
+        export const CONFIG = new InjectionToken<{ mode: string }>("config");
+      `,
+      "src/app.module.ts": `
+        import { Module, makeEnvironmentProviders, provideEnvironmentInitializer, provideToken } from "./runtime";
+        import { CONFIG } from "./config";
+        const SHARED = makeEnvironmentProviders([
+          makeEnvironmentProviders([provideToken(CONFIG, { mode: "strict" })]),
+        ]);
+        @Module({
+          name: "app",
+          providers: [SHARED, provideEnvironmentInitializer(() => {})],
+          exports: [CONFIG],
+        })
+        export class AppModule {}
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    const app = analyzed.modules.find((module) => module.name === "app");
+    expect(app?.providers.map((provider) => provider.token)).toEqual([
+      "CONFIG",
+      "ENVIRONMENT_INITIALIZER",
+    ]);
+    expect(app?.providers.find((provider) => provider.token === "CONFIG")?.useValueExpr)
+      .toContain('{ mode: "strict" }');
+    expect(app?.providers.find((provider) => provider.token === "ENVIRONMENT_INITIALIZER")?.multi)
+      .toBe(true);
   });
 
   test("analyzes @Resolve decorator on controller methods", async () => {

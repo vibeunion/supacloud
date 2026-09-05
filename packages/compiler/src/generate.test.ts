@@ -105,6 +105,58 @@ describe("generate：application.ts 关键内容", () => {
     );
   });
 
+  test("property-level inject() uses a generated static token identity context", () => {
+    const rendered = renderApplication({
+      modules: [{
+        name: "functional",
+        className: "FunctionalModule",
+        file: "src/functional.module.ts",
+        line: 1,
+        imports: [],
+        providers: [{
+          token: "CONFIG",
+          tokenKind: "injection-token",
+          kind: "value",
+          useValueExpr: '{ mode: "strict" }',
+          scope: "application",
+          deps: [],
+          exported: false,
+          file: "src/functional.module.ts",
+          line: 1,
+        }, {
+          token: "FunctionalService",
+          tokenKind: "class",
+          kind: "class",
+          useClass: "FunctionalService",
+          scope: "application",
+          deps: ["CONFIG"],
+          functionalInjects: [{
+            token: "CONFIG",
+            expression: "CONFIG",
+            importPath: "src/functional.module",
+          }],
+          exported: false,
+          file: "src/functional.module.ts",
+          line: 1,
+          importPath: "src/functional.service",
+        }],
+        controllers: [],
+        commands: [],
+        queries: [],
+        exports: [],
+      }],
+      externalTokens: [],
+    }, {
+      rootDir: "/app",
+      outDir: "/app/generated",
+    });
+
+    expect(rendered.applicationCode).toContain('import { runInInjectionContext } from "@supacloud/app";');
+    expect(rendered.applicationCode).toContain("if (token === CONFIG) return config as T;");
+    expect(rendered.applicationCode).toContain("runInInjectionContext({");
+    expect(rendered.applicationCode).not.toContain("new StaticInjector");
+  });
+
   test("request 工厂：REQUEST_CONTEXT 传 ctx，其余从 services 解析", () => {
     expect(applicationCode).toContain("createCaseRequestScope");
     expect(applicationCode).toContain(

@@ -30,7 +30,7 @@ function parseRefreshBody(body: string, contentType: string): URLSearchParams | 
     let value: unknown;
     try { value = JSON.parse(body); } catch { return null; }
     if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-    const record = value as Record<string, unknown>;
+    const record = valueRecord(value);
     const refreshToken = typeof record.refresh_token === "string" ? record.refresh_token.trim() : "";
     if (!refreshToken) return null;
     const params = new URLSearchParams();
@@ -41,6 +41,13 @@ function parseRefreshBody(body: string, contentType: string): URLSearchParams | 
   }
   const params = new URLSearchParams(body);
   return params.get("refresh_token")?.trim() ? params : null;
+}
+
+function valueRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const record: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) record[key] = item;
+  return record;
 }
 
 function replacementRequest(

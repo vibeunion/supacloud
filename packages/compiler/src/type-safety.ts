@@ -6,6 +6,8 @@ import type { Diagnostic, TypeSafetyOptions } from "./types";
 const DEFAULT_EXCLUDES = [
   "**/*.test.ts",
   "**/*.spec.ts",
+  "**/test/**",
+  "**/tests/**",
   "**/__tests__/**",
   "**/fixtures/**",
   "**/generated/**",

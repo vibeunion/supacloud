@@ -425,6 +425,10 @@ describe("SupaCloud request context", () => {
     expect(context.identity.accessToken).toBe("signed-token");
     expect(context.idempotencyKey).toBe("idem-1");
     expect(JSON.stringify(context.identity)).not.toContain("signed-token");
+
+    const identity = requireTrustedIdentity(context);
+    expect(identity.subject).toBe("user-42");
+    expect(Object.keys(identity)).not.toContain("accessToken");
   });
 
   test("requires both verified identity and bearer credentials", async () => {

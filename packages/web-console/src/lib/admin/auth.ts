@@ -58,7 +58,10 @@ export const authProvider: AuthProvider = {
   },
   
   onError: async (error: unknown) => {
-    const status = (error as { status?: number })?.status;
+    const status = error !== null && typeof error === "object" && "status" in error
+      && typeof error.status === "number"
+      ? error.status
+      : undefined;
     if (status === 401 || status === 403) {
       return { logout: true, redirectTo: '/login' };
     }

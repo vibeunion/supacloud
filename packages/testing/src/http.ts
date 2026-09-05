@@ -22,9 +22,10 @@ export async function testJson<T = unknown>(
   app: HandleLike,
   path: string,
   init: RequestInit = {},
+  decode: (value: unknown) => T,
 ): Promise<{ status: number; body: T }> {
   const response = await testRequest(app, path, init);
-  const body = (await response.json()) as T;
+  const body = decode(await response.json());
   return { status: response.status, body };
 }
 
@@ -52,12 +53,23 @@ export async function testJsonError(
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     throw new Error("Expected JSON error response body to be an object");
   }
-  const error = body as Record<string, unknown>;
+  const error: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(body)) error[key] = value;
   if (response.status !== expected.status) {
     throw new Error(`Expected status ${expected.status}, received ${response.status}`);
   }
   if (error.ok !== false || error.code !== expected.code || typeof error.message !== "string") {
     throw new Error(`Expected error code ${expected.code}, received ${String(error.code)}`);
   }
-  return error as unknown as JsonErrorBody;
+  const code = error.code;
+  const message = error.message;
+  if (code !== expected.code || typeof message !== "string") {
+    throw new Error(`Expected error code ${expected.code}, received ${String(code)}`);
+  }
+  return {
+    ok: false,
+    code,
+    message,
+    ...(error.details === undefined ? {} : { details: error.details }),
+  };
 }
