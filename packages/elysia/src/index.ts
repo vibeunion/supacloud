@@ -423,7 +423,7 @@ export function createModulePlugin(
   ctxFactory: RequestContextFactory = defaultRequestContext,
   options: Pick<ApplicationOptions, "commandGovernance" | "commandExecutor" | "errorMapper"> = {},
   imported: Record<string, Record<string, unknown>> = {},
-) {
+): Elysia {
   const hasCommandRoutes = compiled.controllers.some((controller) =>
     controller.routes.some((route) => route.command !== undefined),
   );
@@ -572,7 +572,7 @@ export function createModulePlugin(
     return mapped ?? defaultErrorResponse(error, code);
   });
 
-  return plugin;
+  return plugin as unknown as Elysia;
 }
 
 export function defaultErrorResponse(
