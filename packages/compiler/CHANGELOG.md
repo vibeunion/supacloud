@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.5.0...compiler-v0.6.0) (2026-09-05)
+
+
+### Features
+
+* add statically compiled AOP boundaries and jobs ([#1160](https://github.com/vibeunion/supacloud/issues/1160)) ([66c962a](https://github.com/vibeunion/supacloud/commit/66c962a923ed6c4dbd3a354715346878793bb14c))
+* **compiler:** enforce generated type safety ([#1157](https://github.com/vibeunion/supacloud/issues/1157)) ([1c79d4a](https://github.com/vibeunion/supacloud/commit/1c79d4af99cd144c63787a7c69a60f142bcef94a))
+* migrate compiler and strengthen type safety ([81ffb9d](https://github.com/vibeunion/supacloud/commit/81ffb9dae9a09b5561f90e655f1503514d3fe1d7))
+
 ## [0.5.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.4.1...compiler-v0.5.0) (2026-09-04)
 
 

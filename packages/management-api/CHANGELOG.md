@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.73.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.72.0...management-api-v0.73.0) (2026-09-05)
+
+
+### Features
+
+* migrate compiler and strengthen type safety ([81ffb9d](https://github.com/vibeunion/supacloud/commit/81ffb9dae9a09b5561f90e655f1503514d3fe1d7))
+
+
+### Bug Fixes
+
+* **diagnostics:** respect embedded edge runtime mode ([#1158](https://github.com/vibeunion/supacloud/issues/1158)) ([e04ed1a](https://github.com/vibeunion/supacloud/commit/e04ed1af98e89ae58c9d748230de2d473ef4b5fd))
+
 ## [0.72.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.71.0...management-api-v0.72.0) (2026-09-04)
 
 
