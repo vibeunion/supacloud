@@ -20,6 +20,7 @@ import type {
   Scope,
   TokenKind,
 } from "./types";
+import { camelName } from "./util";
 
 const DEFAULT_INCLUDE = ["**/*.module.ts", "**/*.ts"];
 const ROUTE_DECORATORS: Record<string, RouteNode["method"]> = {
@@ -658,11 +659,13 @@ function parseModule(
     const decl = resolveDeclaration(el, ctx)[0];
     if (!decl || !ts.isClassDeclaration(decl)) continue;
     const className = decl.name?.text ?? el.text;
-    const registeredProvider = providers.find((provider) => provider.token === className);
+    const registeredProvider = providers.find((provider) =>
+      provider.token === className || provider.useClass === className,
+    );
     if (registeredProvider) continue;
     const deps = classDeps(decl, ctx);
     const injectable = parseInjectableOptions(decl, ctx);
-    const scope = injectable?.scope === "application" ? "application" : "job";
+    const scope = injectable?.scope ?? "job";
     providers.push({
       token: className,
       tokenKind: "class",
@@ -742,16 +745,33 @@ function parseModule(
       const meta = decoratorObjectArg(jobDec);
       if (meta) {
         const injectable = parseInjectableOptions(cls, ctx);
-        const provider = providers.find((candidate) => candidate.token === (cls.name?.text ?? "<anonymous>"));
+        const className = cls.name?.text ?? "<anonymous>";
+        const provider = providers.find((candidate) =>
+          candidate.token === className || candidate.useClass === className,
+        );
+        const scope = provider?.scope ?? injectable?.scope ?? "job";
+        if (scope === "request") {
+          ctx.diagnostics.push({
+            severity: "error",
+            code: "invalid-job-scope",
+            message: `job ${className} 不能使用 request scope；Job 只能使用 application 或 job scope`,
+            file: sourcePath(ctx.rootDir, cls.getSourceFile().fileName),
+            line: lineOf(cls),
+            suggestion: "移除 request scope，或改用 application/job scope。",
+            errorCode: "SC4007",
+            docsUrl: "https://supacloud.dev/errors/SC4007",
+          });
+        }
         const aspects = parseAspectRefs(
           getProp(meta, "aspects"),
           ctx,
-          `job ${cls.name?.text ?? "<anonymous>"}`,
+          `job ${className}`,
         );
         jobs.push({
-          className: cls.name?.text ?? "<anonymous>",
-          name: stringLiteralProp(meta, "name") ?? cls.name?.text ?? "<anonymous>",
-          scope: provider?.scope ?? (injectable?.scope === "application" ? "application" : "job"),
+          className,
+          name: stringLiteralProp(meta, "name") ?? className,
+          serviceKey: camelName(provider?.token ?? className),
+          scope,
           ...(aspects.length > 0 ? { aspects } : {}),
         });
       }

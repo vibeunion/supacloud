@@ -268,8 +268,8 @@ describe("analyzeProject：command 与 externalTokens", () => {
     expect(analyzed.diagnostics).toEqual([]);
     const jobs = analyzed.modules[0];
     expect(jobs?.jobs).toEqual([
-      { className: "RebuildJob", name: "case.rebuild", scope: "job" },
-      { className: "RefreshJob", name: "case.refresh", scope: "application" },
+      { className: "RebuildJob", name: "case.rebuild", serviceKey: "rebuildJob", scope: "job" },
+      { className: "RefreshJob", name: "case.refresh", serviceKey: "refreshJob", scope: "application" },
     ]);
     expect(jobs?.providers.map((provider) => ({
       token: provider.token,
@@ -279,6 +279,51 @@ describe("analyzeProject：command 与 externalTokens", () => {
       { token: "RebuildJob", scope: "job", useClass: "RebuildJob" },
       { token: "RefreshJob", scope: "application", useClass: "RefreshJob" },
     ]);
+  });
+
+  test("Job 使用自定义 useClass token 时复用该 provider，并拒绝 request scope", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-job-provider-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
+      "src/jobs.module.ts": `
+        import { Injectable, InjectionToken, Job, Module } from "./runtime";
+
+        export const JOB_TOKEN = new InjectionToken("job");
+
+        @Job({ name: "case.rebuild" })
+        export class RebuildJob {
+          run(input: string): string { return input; }
+        }
+
+        @Injectable({ scope: "request" })
+        @Job({ name: "case.invalid" })
+        export class InvalidJob {
+          run(input: string): string { return input; }
+        }
+
+        @Module({
+          name: "jobs",
+          providers: [
+            { provide: JOB_TOKEN, useClass: RebuildJob, scope: "job" },
+            InvalidJob,
+          ],
+          jobs: [RebuildJob, InvalidJob],
+        })
+        export class JobsModule {}
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    expect(analyzed.modules[0]?.jobs).toEqual([
+      { className: "RebuildJob", name: "case.rebuild", serviceKey: "jobToken", scope: "job" },
+      { className: "InvalidJob", name: "case.invalid", serviceKey: "invalidJob", scope: "request" },
+    ]);
+    expect(analyzed.modules[0]?.providers.filter((provider) => provider.useClass === "RebuildJob")).toHaveLength(1);
+    expect(analyzed.diagnostics?.find((diagnostic) => diagnostic.code === "invalid-job-scope")).toMatchObject({
+      severity: "error",
+      errorCode: "SC4007",
+    });
   });
 
   test("analyzes property-level inject() dependencies", async () => {

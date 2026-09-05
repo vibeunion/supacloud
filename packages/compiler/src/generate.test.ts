@@ -8,6 +8,7 @@ import { renderApplication } from "./generate";
 import { BAD_PROJECT_FILES } from "./fixtures/bad-project";
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
 import { writeFixtureProject } from "./fixtures/helpers";
+import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./fixtures/runtime-source";
 import { scanGeneratedArtifacts } from "./type-safety";
 import type { ApplicationGraph, CompileResult } from "./types";
 
@@ -214,6 +215,7 @@ describe("generate：application.ts 关键内容", () => {
         jobs: [{
           className: "RebuildJob",
           name: "aspect.rebuild",
+          serviceKey: "rebuildJob",
           scope: "job",
         }],
         queries: [],
@@ -238,6 +240,52 @@ describe("generate：application.ts 关键内容", () => {
     );
     expect(rendered.applicationCode).not.toContain("Reflect.get");
     expect(rendered.applicationCode).not.toContain("Proxy");
+  });
+
+  test("scope factory 在 provider 构造失败时回滚已创建实例", async () => {
+    const fixtureRoot = await mkdtemp(join(tmpdir(), "supacloud-job-rollback-"));
+    await writeFixtureProject(fixtureRoot, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
+      "src/jobs.module.ts": `
+        import { Injectable, Job, Module } from "./runtime";
+
+        @Injectable({ scope: "job" })
+        export class CreatedBeforeFailure {
+          onDestroy() {
+            (globalThis as Record<string, unknown>).__supacloudRollbackCount =
+              ((globalThis as Record<string, unknown>).__supacloudRollbackCount as number ?? 0) + 1;
+          }
+        }
+
+        @Injectable({ scope: "job" })
+        export class FailingProvider {
+          constructor() { throw new Error("factory failure"); }
+        }
+
+        @Job({ name: "jobs.rollback" })
+        export class RollbackJob {
+          constructor(_created: CreatedBeforeFailure, _failing: FailingProvider) {}
+          run(input: string) { return input; }
+        }
+
+        @Module({
+          name: "jobs",
+          providers: [CreatedBeforeFailure, FailingProvider],
+          jobs: [RollbackJob],
+        })
+        export class JobsModule {}
+      `,
+    });
+    const output = join(fixtureRoot, "generated");
+    const result = await compileProject({ rootDir: fixtureRoot, outDir: output });
+    expect(result.diagnostics).toEqual([]);
+    const generated = await import(pathToFileURL(join(output, "application.ts")).href);
+    const compiled = generated.createCompiledModules()[0];
+    (globalThis as Record<string, unknown>).__supacloudRollbackCount = 0;
+    await expect(compiled.createJobScope({}, {})).rejects.toThrow("factory failure");
+    expect((globalThis as Record<string, unknown>).__supacloudRollbackCount).toBe(1);
+    delete (globalThis as Record<string, unknown>).__supacloudRollbackCount;
   });
 });
 
@@ -266,7 +314,7 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
       services: RuntimeServices,
       ctx: unknown,
       imported?: Record<string, Partial<RuntimeServices>>,
-    ) => RuntimeServices;
+    ) => Promise<RuntimeServices>;
     destroyRequestScope?: (scope: RuntimeServices) => Promise<void>;
   };
   let compiled: {
@@ -316,7 +364,7 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
     expect(healthServices.healthService.status()).toBe("ok");
   });
 
-  test("request scope：ctx 注入且两次调用相互隔离", () => {
+  test("request scope：ctx 注入且两次调用相互隔离", async () => {
     const modules = compiled.createCompiledModules();
     const deps = { dbClient: {} };
     const caseModule = modules[1];
@@ -329,8 +377,8 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
     const imported = { audit: modules[0].createServices(deps, {}) };
     const createRequestScope = caseModule.createRequestScope;
     if (!createRequestScope) throw new Error("request scope factory is missing");
-    const scope1 = createRequestScope(services, ctx1, imported);
-    const scope2 = createRequestScope(services, ctx2, imported);
+    const scope1 = await createRequestScope(services, ctx1, imported);
+    const scope2 = await createRequestScope(services, ctx2, imported);
 
     expect(scope1.caseController.ctx).toBe(ctx1);
     expect(scope1.caseController.repository).toBe(services.caseRepository);
