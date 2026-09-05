@@ -151,8 +151,8 @@ jobs:
           - name: Project CLI
             working-directory: packages/cli
             script: |
-              bun --cwd ../compiler install --frozen-lockfile
-              bun --cwd ../compiler run build
+              bun install --cwd ../compiler --frozen-lockfile
+              bun run --cwd ../compiler build
               bun install --frozen-lockfile
               bun run typecheck
               bun test src
