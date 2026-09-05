@@ -50,6 +50,21 @@ describe("platform infrastructure health checks", () => {
     expect(body).not.toContain('{ unit: "patroni", label: "Patroni (PostgreSQL HA)" },');
   });
 
+  test("diagnostics check the standalone Edge Runtime unit only in external mode", () => {
+    const source = readRepoFile("src/diagnostics/checks/platform-service.ts");
+    const start = source.indexOf('id: "platform-service-status"');
+    const end = source.indexOf("// --- Port listener check ---", start);
+
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+
+    const body = source.slice(start, end);
+    expect(body).toContain('const { config } = await import("../../config");');
+    expect(body).toContain('if (config.edgeRuntimeMode === "external")');
+    expect(body).toContain('{ unit: "supacloud-edge-runtime", label: "Edge Runtime" }');
+    expect(body).toContain("Edge Runtime standalone unit (embedded in supacloud.service)");
+  });
+
   test("diagnostics only check PostgreSQL listener when configured DB is local", () => {
     const source = readRepoFile("src/diagnostics/checks/platform-service.ts");
     const start = source.indexOf('id: "platform-port-listeners"');
