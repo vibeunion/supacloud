@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/compiler",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Static compiler for @supacloud/app metadata: builds the application graph from AST, validates it, and generates reflection-free factory code",
   "type": "module",
   "main": "./dist/index.js",

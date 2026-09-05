@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/vibeunion/supacloud/compare/db-v0.3.1...db-v0.4.0) (2026-09-05)
+
+
+### Features
+
+* migrate compiler and strengthen type safety ([81ffb9d](https://github.com/vibeunion/supacloud/commit/81ffb9dae9a09b5561f90e655f1503514d3fe1d7))
+
 ## [0.3.1](https://github.com/vibeunion/supacloud/compare/db-v0.3.0...db-v0.3.1) (2026-09-04)
 
 

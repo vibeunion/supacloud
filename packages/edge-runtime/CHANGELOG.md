@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.21.3...edge-runtime-v0.22.0) (2026-09-05)
+
+
+### Features
+
+* migrate compiler and strengthen type safety ([81ffb9d](https://github.com/vibeunion/supacloud/commit/81ffb9dae9a09b5561f90e655f1503514d3fe1d7))
+
 ## [0.21.3](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.21.2...edge-runtime-v0.21.3) (2026-09-04)
 
 
