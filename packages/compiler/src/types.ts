@@ -3,6 +3,8 @@
  * No runtime reflection or container; all metadata is explicitly represented here and in generated code.
  */
 
+import type { Project } from "ts-morph";
+
 export type Scope = "application" | "request" | "job";
 
 export type ProviderKind = "class" | "value" | "factory" | "existing";
@@ -215,6 +217,17 @@ export interface CompileOptions {
   treeShakeUnusedProviders?: boolean;
   /** Incremental dependency graph cache. */
   cache?: DependencyGraphCache;
+  /** Type-safety gates for generated artifacts and production source. */
+  typeSafety?: TypeSafetyOptions;
+}
+
+export interface TypeSafetyOptions {
+  /** Reject the `any` keyword in generated TypeScript artifacts. */
+  noAnyInGenerated?: boolean;
+  /** Scan non-test production source for unsafe type escapes and widening. */
+  scanProductionSource?: boolean;
+  /** Additional relative glob patterns excluded from the production-source scan. */
+  exclude?: string[];
 }
 
 export interface ModuleBoundaryRule {
@@ -334,11 +347,15 @@ export interface DependencyGraphCache {
   /** Global file hashes by relative file path. */
   fileHashes: Map<string, string>;
   /** Retained AST project for true incremental graph re-analysis. */
-  project?: any;
+  project?: Project;
   /** Retained module dependency graph tracking imports and reverse dependents. */
-  dependencyGraph?: any;
+  dependencyGraph?: DependencyGraphIndex;
   lastStats?: {
     reusedModules: string[];
     reanalyzedModules: string[];
   };
+}
+
+export interface DependencyGraphIndex {
+  getAffectedModules(changedFiles: string[]): string[];
 }

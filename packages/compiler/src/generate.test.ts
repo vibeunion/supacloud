@@ -8,6 +8,7 @@ import { renderApplication } from "./generate";
 import { BAD_PROJECT_FILES } from "./fixtures/bad-project";
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
 import { writeFixtureProject } from "./fixtures/helpers";
+import { scanGeneratedArtifacts } from "./type-safety";
 import type { ApplicationGraph, CompileResult } from "./types";
 
 let rootDir: string;
@@ -30,6 +31,10 @@ describe("compileProject：总体结果", () => {
       join(outDir, "application.ts"),
       join(outDir, "app.manifest.json"),
     ]);
+  });
+
+  test("严格生成产物不包含 any", () => {
+    expect(scanGeneratedArtifacts({ "application.ts": applicationCode })).toEqual([]);
   });
 
   test("app.manifest.json 是 graph 的 JSON 序列化", async () => {
@@ -111,14 +116,41 @@ describe("generate：application.ts 关键内容", () => {
     expect(applicationCode).toContain('serviceKey: "caseController"');
     expect(applicationCode).toContain('path: "/cases"');
     expect(applicationCode).toContain(
-      '{ method: "POST", path: "/:caseId/accept", handler: "accept", body: CreateCaseBody, params: AcceptParams, response: AcceptResult, command: "AcceptCaseCommand", invoker: async (ctrl: any, req: any) => await (ctrl as any).accept(req) }',
+      'handler: "accept", body: CreateCaseBody, params: AcceptParams, response: AcceptResult, command: "AcceptCaseCommand", invoker: async (ctrl: unknown',
     );
   });
 });
 
 describe("generate：application.ts 可被 bun 直接执行", () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let compiled: any;
+  type RuntimeServices = {
+    auditConfig: { level: string };
+    logger: { level: string };
+    auditService: { config: unknown; logger: unknown };
+    caseRepository: { db: unknown };
+    caseService: { repository: unknown; audit: unknown };
+    acceptCaseCommand: { caseService: unknown };
+    healthService: { status: () => string };
+    caseController: { ctx: unknown; repository: unknown; audit: unknown };
+  };
+  type RuntimeModule = {
+    name: string;
+    commands: Array<{ className: string; name: string; permission: string }>;
+    controllers: Array<{
+      path: string;
+      serviceKey: string;
+      scope: string;
+      routes: Array<{ body?: unknown; params?: unknown; response?: unknown }>;
+    }>;
+    createServices: (deps: Record<string, unknown>, imported: Record<string, Partial<RuntimeServices>>) => RuntimeServices;
+    createRequestScope?: (
+      services: RuntimeServices,
+      ctx: unknown,
+      imported?: Record<string, Partial<RuntimeServices>>,
+    ) => RuntimeServices;
+  };
+  let compiled: {
+    createCompiledModules: () => RuntimeModule[];
+  };
 
   beforeAll(async () => {
     const url = pathToFileURL(join(outDir, "application.ts")).href;
@@ -173,8 +205,10 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
     const ctx1 = { requestId: "r1" };
     const ctx2 = { requestId: "r2" };
     const imported = { audit: modules[0].createServices(deps, {}) };
-    const scope1 = caseModule.createRequestScope(services, ctx1, imported);
-    const scope2 = caseModule.createRequestScope(services, ctx2, imported);
+    const createRequestScope = caseModule.createRequestScope;
+    if (!createRequestScope) throw new Error("request scope factory is missing");
+    const scope1 = createRequestScope(services, ctx1, imported);
+    const scope2 = createRequestScope(services, ctx2, imported);
 
     expect(scope1.caseController.ctx).toBe(ctx1);
     expect(scope1.caseController.repository).toBe(services.caseRepository);
@@ -587,7 +621,7 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     );
 
     expect(rendered.applicationCode).toContain('canDeactivate: ["UnsavedGuard"]');
-    expect(rendered.applicationCode).toContain('const apiUrl = typeof API_URL === "object" && API_URL && "factory" in API_URL');
+    expect(rendered.applicationCode).toContain("const apiUrl = resolveFactoryValue(API_URL);");
     expect(rendered.clientCode).toContain('"canDeactivate": [\n      "UnsavedGuard"\n    ]');
   });
 
@@ -762,7 +796,9 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
       rootDir: "/app",
       outDir: "/app/gen",
     });
-    expect(rendered.applicationCode).toContain("invoker: async (ctrl: any, req: any) => await (ctrl as any).getUser(");
+    expect(rendered.applicationCode).toContain("invoker: async (ctrl: unknown, req:");
+    expect(rendered.applicationCode).toContain('const handler = ctrl["getUser"];');
+    expect(rendered.applicationCode).toContain("Reflect.apply(handler, ctrl");
     expect(rendered.applicationCode).toContain('Number(req.params?.["id"])');
     expect(rendered.applicationCode).toContain('Number(req.query?.["limit"])');
     expect(rendered.applicationCode).toContain(": 20");

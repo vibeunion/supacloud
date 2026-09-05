@@ -381,7 +381,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
     };
 
     const diags = validateGraph(sampleGraph, {
-      moduleBoundaryPreset: "non-existent-preset" as any,
+      moduleBoundaryPreset: "non-existent-preset" as never,
     });
 
     const errors = diags.filter((d) => d.code === "invalid-boundary-preset");

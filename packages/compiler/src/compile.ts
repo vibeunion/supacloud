@@ -4,6 +4,7 @@ import type { CheckProjectResult, CompileOptions, CompileResult, Diagnostic } fr
 import { validateGraph } from "./validate";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
 
 /**
  * Complete compilation pipeline: AST analysis -> validation -> generate static factory code and manifest.
@@ -27,6 +28,30 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
     for (const diagnostic of diagnostics) {
       if (diagnostic.severity === "warn") diagnostic.severity = "error";
     }
+  }
+  const typeSafety = resolveTypeSafety(options);
+  const rendered = renderApplication(graph, {
+    rootDir: options.rootDir,
+    outDir: options.outDir,
+    generateClient: options.generateClient,
+    generatePermissions: options.generatePermissions,
+    treeShakeUnusedProviders: options.treeShakeUnusedProviders,
+  });
+  if (typeSafety.scanProductionSource) {
+    diagnostics.push(...scanProductionSource({
+      rootDir: options.rootDir,
+      include: options.include,
+      outDir: options.outDir,
+      strict: options.strict,
+      ...typeSafety,
+    }));
+  }
+  if (typeSafety.noAnyInGenerated) {
+    diagnostics.push(...scanGeneratedArtifacts({
+      "application.ts": rendered.applicationCode,
+      "client.ts": rendered.clientCode,
+      "permissions.ts": rendered.permissionsCode,
+    }, options.strict ?? false));
   }
   const hasErrors = diagnostics.some((diagnostic) => diagnostic.severity === "error");
   const written = !hasErrors || options.writeOnError !== false
@@ -74,6 +99,7 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
     }
   }
 
+  const typeSafety = resolveTypeSafety(options);
   const rendered = renderApplication(graph, {
     rootDir: options.rootDir,
     outDir: options.outDir,
@@ -81,6 +107,22 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
     generatePermissions: options.generatePermissions,
     treeShakeUnusedProviders: options.treeShakeUnusedProviders,
   });
+  if (typeSafety.scanProductionSource) {
+    diagnostics.push(...scanProductionSource({
+      rootDir: options.rootDir,
+      include: options.include,
+      outDir: options.outDir,
+      strict: options.strict,
+      ...typeSafety,
+    }));
+  }
+  if (typeSafety.noAnyInGenerated) {
+    diagnostics.push(...scanGeneratedArtifacts({
+      "application.ts": rendered.applicationCode,
+      "client.ts": rendered.clientCode,
+      "permissions.ts": rendered.permissionsCode,
+    }, options.strict ?? false));
+  }
 
   const expectedFiles: Record<string, string> = {
     "application.ts": rendered.applicationCode,
@@ -111,5 +153,13 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
     mismatches,
     diagnostics,
     graph,
+  };
+}
+
+function resolveTypeSafety(options: CompileOptions): NonNullable<CompileOptions["typeSafety"]> {
+  return {
+    noAnyInGenerated: options.typeSafety?.noAnyInGenerated ?? options.strict ?? false,
+    scanProductionSource: options.typeSafety?.scanProductionSource ?? options.strict ?? false,
+    exclude: options.typeSafety?.exclude,
   };
 }

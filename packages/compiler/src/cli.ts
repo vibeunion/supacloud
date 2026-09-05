@@ -29,7 +29,7 @@ Commands:
 Options:
   --root, -r <dir>    Application source root (default: current directory or first positional argument)
   --out, -o <dir>     Artifact output directory (default: <rootDir>/generated)
-  --strict            Treat all warnings as errors
+  --strict            Enable type-safety gates and treat all warnings as errors
   --client            Generate typed API client in client.ts
   --permissions       Generate typed permissions registry in permissions.ts
   --debounce <ms>     Debounce source changes in dev mode (default: 100)

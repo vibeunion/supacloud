@@ -153,6 +153,7 @@ function optionsKeyOf(options: CompileOptions): string {
     detectOrphanModules: options.detectOrphanModules,
     generateClient: options.generateClient,
     generatePermissions: options.generatePermissions,
+    typeSafety: options.typeSafety,
   });
 }
 
