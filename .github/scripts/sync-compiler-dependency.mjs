@@ -29,7 +29,13 @@ function comparePrecedence(leftVersion, rightVersion) {
   return 0;
 }
 
-function caretLowerBound(range, dependencyName) {
+function caretLowerBound(range, dependencyName, localPackage) {
+  if (typeof range === 'string' && range.startsWith('file:')) {
+    // Local workspace references are valid for development, but never for a
+    // published package. Force release synchronization to emit a registry range.
+    packageVersion(localPackage, dependencyName);
+    return [0n, 0n, 0n];
+  }
   if (typeof range !== 'string' || !range.startsWith('^')) {
     throw new Error(`${dependencyName} has an unsupported dependency range`);
   }
@@ -48,7 +54,11 @@ export function syncCompilerDependency({ cliPackage, compilerPackage }) {
   const compilerVersion = packageVersion(compilerPackage, '@supacloud/compiler');
   const compilerPrecedence = stableVersionPrecedence(compilerVersion, '@supacloud/compiler');
   const currentRange = cliPackage.dependencies['@supacloud/compiler'];
-  const currentPrecedence = caretLowerBound(currentRange, '@supacloud/compiler');
+  const currentPrecedence = caretLowerBound(
+    currentRange,
+    '@supacloud/compiler',
+    compilerPackage,
+  );
   const nextPackage = structuredClone(cliPackage);
   const comparison = comparePrecedence(compilerPrecedence, currentPrecedence);
 
