@@ -3,6 +3,14 @@ import type { EnvironmentProviders } from "./provider";
 import { flattenProviders } from "./provider";
 import type { Scope } from "./scope";
 import { DEFAULT_SCOPE } from "./scope";
+import {
+  Host as AngularHost,
+  Inject as AngularInject,
+  Injectable as AngularInjectable,
+  Optional as AngularOptional,
+  Self as AngularSelf,
+  SkipSelf as AngularSkipSelf,
+} from "@angular/core";
 import type { Aspect } from "./aspect";
 
 /**
@@ -190,6 +198,9 @@ function readOwnOrInherited<T>(target: object, key: string): T | undefined {
 
 export function Injectable(options: InjectableOptions = {}): ClassDecorator {
   return (target) => {
+    AngularInjectable({
+      providedIn: options.providedIn ?? null,
+    })(target);
     const prototype = (target as unknown as Type<unknown>).prototype as Record<string, unknown>;
     if (
       typeof prototype.ngOnDestroy !== "function" &&
@@ -227,6 +238,7 @@ export function Inject(token: Token): ParameterDecorator {
       throw new Error("@Inject() is only supported on constructor parameters");
     }
     const cls = target as Type<unknown>;
+    AngularInject(token as never)(target, propertyKey, parameterIndex);
     const meta: Record<number, Token> = {
       ...readOwnOrInherited<Record<number, Token>>(cls, INJECT_PARAMS_METADATA),
     };
@@ -249,6 +261,7 @@ export function Optional(): ParameterDecorator {
       throw new Error("@Optional() is only supported on constructor parameters");
     }
     const cls = target as Type<unknown>;
+    AngularOptional()(target, propertyKey, parameterIndex);
     const list = [...(readOwnOrInherited<number[]>(cls, OPTIONAL_PARAMS_METADATA) ?? [])];
     if (!list.includes(parameterIndex)) list.push(parameterIndex);
     defineMetadata(cls, OPTIONAL_PARAMS_METADATA, list);
@@ -269,6 +282,7 @@ export function Self(): ParameterDecorator {
       throw new Error("@Self() is only supported on constructor parameters");
     }
     const cls = target as Type<unknown>;
+    AngularSelf()(target, propertyKey, parameterIndex);
     const list = [...(readOwnOrInherited<number[]>(cls, SELF_PARAMS_METADATA) ?? [])];
     if (!list.includes(parameterIndex)) list.push(parameterIndex);
     defineMetadata(cls, SELF_PARAMS_METADATA, list);
@@ -289,6 +303,7 @@ export function SkipSelf(): ParameterDecorator {
       throw new Error("@SkipSelf() is only supported on constructor parameters");
     }
     const cls = target as Type<unknown>;
+    AngularSkipSelf()(target, propertyKey, parameterIndex);
     const list = [...(readOwnOrInherited<number[]>(cls, SKIP_SELF_PARAMS_METADATA) ?? [])];
     if (!list.includes(parameterIndex)) list.push(parameterIndex);
     defineMetadata(cls, SKIP_SELF_PARAMS_METADATA, list);
@@ -309,6 +324,7 @@ export function Host(): ParameterDecorator {
       throw new Error("@Host() is only supported on constructor parameters");
     }
     const cls = target as Type<unknown>;
+    AngularHost()(target, propertyKey, parameterIndex);
     const list = [...(readOwnOrInherited<number[]>(cls, HOST_PARAMS_METADATA) ?? [])];
     if (!list.includes(parameterIndex)) list.push(parameterIndex);
     defineMetadata(cls, HOST_PARAMS_METADATA, list);
