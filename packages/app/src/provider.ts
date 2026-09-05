@@ -79,27 +79,32 @@ export function isExistingProvider<T>(provider: Provider<T>): provider is Existi
 
 /**
  * Encapsulates a set of providers created by functional provideXxx APIs.
- * Modeled directly after Angular's EnvironmentProviders.
+ *
+ * This is intentionally a SupaCloud-owned representation. It is converted
+ * to Angular providers at the runtime boundary instead of exposing Angular's
+ * private provider-storage detail as a public contract.
  */
 export interface EnvironmentProviders {
-  ɵproviders: Array<Provider | EnvironmentProviders>;
+  readonly providers: Array<Provider | EnvironmentProviders>;
 }
 
 export function makeEnvironmentProviders(
   providers: Array<Provider | EnvironmentProviders>,
 ): EnvironmentProviders {
-  return { ɵproviders: providers };
+  return { providers };
 }
 
 export function isEnvironmentProviders(value: unknown): value is EnvironmentProviders {
-  return typeof value === "object" && value !== null && "ɵproviders" in value && Array.isArray((value as EnvironmentProviders).ɵproviders);
+  return typeof value === "object" && value !== null
+    && "providers" in value
+    && Array.isArray((value as EnvironmentProviders).providers);
 }
 
 export function flattenProviders(providers: Array<Provider | EnvironmentProviders>): Provider[] {
   const result: Provider[] = [];
   for (const p of providers) {
     if (isEnvironmentProviders(p)) {
-      result.push(...flattenProviders(p.ɵproviders));
+      result.push(...flattenProviders(p.providers));
     } else {
       result.push(p);
     }

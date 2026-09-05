@@ -50,7 +50,7 @@ const diagnostics = validateGraph(graph, /* strict */ false);
 
 ```ts
 interface ApplicationGraph {
-  modules: ModuleNode[];     // 模块：providers/controllers/commands/queries/exports/imports
+  modules: ModuleNode[];     // 模块：providers/controllers/commands/jobs/queries/aspects/exports/imports
   externalTokens: string[];  // 被依赖但无任何模块提供的 token（平台注入，如 DB_CLIENT、REQUEST_CONTEXT）
 }
 ```
@@ -68,6 +68,8 @@ interface ApplicationGraph {
 - 含 request 级 provider/controller 的模块额外生成 `create<Name>RequestScope(services, ctx)`：依赖 `REQUEST_CONTEXT`（或 token name `supacloud.request-context`）的参数传 `ctx`，其余经 `services` 解析（运行期负责把 imports 模块导出的 application 服务合并进 `services`）；job 级同理生成 `create<Name>JobScope`。
 - 含 request/job 级 provider 或 controller 的模块同时生成静态 `destroy<Name>RequestScope(scope)` / `destroy<Name>JobScope(scope)`，按编译期确定的逆创建顺序调用已知 `onDestroy` 方法；不会运行时扫描或解析 Token。
 - `@Host()` 在 EnvironmentInjector 作用域中保留元数据但不改变解析，因为 SupaCloud 没有 Angular 元素注入器树；`@Self()` / `@SkipSelf()` 由静态 factory 按当前 scope 与模块可见性执行。
+- AOP 只支持静态边界：`ModuleOptions.aspects`、`RouteOptions.aspects`、`CommandOptions.aspects` 和 `JobOptions.aspects` 必须是显式数组字面量，元素必须是可解析的函数标识符。生成器会直接 import aspect 并生成固定顺序的 onion chain，不使用 Proxy、Reflect 扫描、动态 pointcut 或运行时注册。
+- 执行顺序为 `module -> route -> command -> commandGovernance -> handler`；Job 使用 `module -> job -> executor -> run/execute`，并在 finally 中销毁 job scope。
 - services 对象的 key 为 token 名的 camelCase：`CaseService → caseService`、`CASE_REPOSITORY → caseRepository`、`LOGGER → logger`。
 - controller 描述静态给出：`{ path, serviceKey, scope, routes: [{ method, path, handler, body?, params?, query?, response? }] }`，schema 直接引用 import 进来的对象。
 - 严格生成模式会对 `application.ts`、可选的 `client.ts` 和 `permissions.ts` 做 AST 扫描，禁止生成 `any`。
@@ -90,6 +92,8 @@ interface ApplicationGraph {
 | `command-missing-permission` | error | `@Command` 未声明 permission |
 | `provider-type-mismatch` | error | Provider 的 useClass/useValue/useFactory/useExisting 不满足 InjectionToken 的静态类型契约 |
 | `unsupported-provider-helper` | warn（strict 时 error） | functional provider 的动态参数无法安全展开为静态 factory |
+| `dynamic-aspect-reference` | error | aspects 不是显式数组字面量，或包含 spread/表达式/字符串 pointcut |
+| `invalid-aspect-reference` | error | aspect 不是可静态解析的函数声明、箭头函数或函数表达式 |
 | `missing-deps` | warn（strict 时 error） | 构造/工厂依赖无法静态解析 |
 | `generated-any` | warn（strict 时 error） | 生成的 TypeScript 产物包含 `any` |
 | `source-any` | warn（strict 时 error） | 未被排除的生产源码包含显式 `any` |

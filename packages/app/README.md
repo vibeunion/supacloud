@@ -13,6 +13,39 @@ compatibility adapter. SupaCloud decorators retain module/compiler metadata,
 while production application factories remain compiler-generated and
 reflection-free.
 
+## Runtime Boundary
+
+Angular is the runtime DI engine: `InjectionToken`, hierarchical injectors,
+`inject()`, `DestroyRef`, provider caching and lifecycle execution are delegated
+to Angular public APIs. SupaCloud does not reimplement those mechanisms.
+
+SupaCloud still owns the application model that Angular does not define:
+`Module`, `Scope`, provider descriptors, controllers, commands, jobs, route
+metadata, static aspects, `ApplicationGraph` and compiler diagnostics. Use
+SupaCloud decorators for these semantics; they are compiler input, not Angular
+decorator aliases.
+
+## Static AOP
+
+Use one `around(context, next)` function for cross-cutting behavior at the
+module, route, command, or job boundary:
+
+```ts
+const auditAspect = async (context, next) => {
+  const result = await next();
+  await audit.write(context, result);
+  return result;
+};
+
+@Module({ name: "case", aspects: [auditAspect] })
+export class CaseModule {}
+```
+
+Aspect references must be explicit function identifiers. The compiler rejects
+variables, spread expressions, strings, dynamic pointcuts, Proxy, and runtime
+aspect registration. Angular remains the DI runtime; aspects are SupaCloud
+compiler metadata and generated execution order.
+
 ```ts
 import {
   Command,

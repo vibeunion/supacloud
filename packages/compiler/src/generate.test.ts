@@ -171,6 +171,74 @@ describe("generate：application.ts 关键内容", () => {
       'handler: "accept", body: CreateCaseBody, params: AcceptParams, response: AcceptResult, command: "AcceptCaseCommand", invoker: async (ctrl: unknown',
     );
   });
+
+  test("生成静态 aspect import 与固定调用列表", () => {
+    const rendered = renderApplication({
+      modules: [{
+        name: "aspect",
+        className: "AspectModule",
+        file: "src/aspect.module.ts",
+        line: 1,
+        imports: [],
+        providers: [],
+        controllers: [{
+          className: "AspectController",
+          path: "/aspect",
+          scope: "application",
+          deps: [],
+          routes: [{
+            method: "GET",
+            path: "/",
+            handler: "get",
+            aspects: [{
+              name: "routeAspect",
+              expression: "routeAspect",
+              importPath: "src/aspects",
+            }],
+          }],
+          file: "src/aspect.controller.ts",
+          importPath: "src/aspect.controller",
+        }],
+        commands: [{
+          className: "AspectCommand",
+          name: "aspect.run",
+          permission: "aspect.run",
+          transaction: "none",
+          idempotency: "none",
+          aspects: [{
+            name: "commandAspect",
+            expression: "commandAspect",
+            importPath: "src/aspects",
+          }],
+        }],
+        jobs: [{
+          className: "RebuildJob",
+          name: "aspect.rebuild",
+          scope: "job",
+        }],
+        queries: [],
+        aspects: [{
+          name: "moduleAspect",
+          expression: "moduleAspect",
+          importPath: "src/aspects",
+        }],
+        exports: [],
+      }],
+      externalTokens: [],
+    }, { rootDir: "/app", outDir: "/app/generated" });
+
+    expect(rendered.applicationCode).toContain(
+      'import { commandAspect, moduleAspect, routeAspect } from "../src/aspects";',
+    );
+    expect(rendered.applicationCode).toContain("aspects: [routeAspect]");
+    expect(rendered.applicationCode).toContain("aspects: [commandAspect]");
+    expect(rendered.applicationCode).toContain("aspects: [moduleAspect]");
+    expect(rendered.applicationCode).toContain(
+      'jobs: [{ className: "RebuildJob", name: "aspect.rebuild", serviceKey: "rebuildJob", scope: "job", }]',
+    );
+    expect(rendered.applicationCode).not.toContain("Reflect.get");
+    expect(rendered.applicationCode).not.toContain("Proxy");
+  });
 });
 
 describe("generate：application.ts 可被 bun 直接执行", () => {

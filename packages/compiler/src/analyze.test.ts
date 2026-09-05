@@ -186,6 +186,101 @@ describe("analyzeProject：command 与 externalTokens", () => {
     expect(graph.diagnostics ?? []).toEqual([]);
   });
 
+  test("静态 aspects 只接受可解析的显式函数引用", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-aspects-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
+      "src/aspects.ts": `
+        export function auditAspect(_ctx: unknown, next: () => unknown) { return next(); }
+      `,
+      "src/case.module.ts": `
+        import { Command, Module } from "./runtime";
+        import { auditAspect } from "./aspects";
+
+        @Command({ name: "case.accept", permission: "case.accept", aspects: [auditAspect] })
+        class AcceptCommand {}
+
+        @Module({ name: "case", commands: [AcceptCommand], aspects: [auditAspect] })
+        export class CaseModule {}
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    expect(analyzed.diagnostics).toEqual([]);
+    expect(analyzed.modules[0]?.aspects).toEqual([{
+      name: "auditAspect",
+      expression: "auditAspect",
+      importPath: "src/aspects",
+      importModule: undefined,
+    }]);
+    expect(analyzed.modules[0]?.commands[0]?.aspects).toEqual([{
+      name: "auditAspect",
+      expression: "auditAspect",
+      importPath: "src/aspects",
+      importModule: undefined,
+    }]);
+
+    await writeFixtureProject(root, {
+      "src/case.module.ts": `
+        import { Module } from "./runtime";
+        import { auditAspect } from "./aspects";
+        const aspects = [auditAspect];
+        @Module({ name: "case", aspects })
+        export class CaseModule {}
+      `,
+    });
+    const rejected = await analyzeProject(root);
+    expect((rejected.diagnostics ?? []).some((diagnostic) =>
+      diagnostic.code === "dynamic-aspect-reference"
+      && diagnostic.errorCode === "SC4010",
+    )).toBe(true);
+  });
+
+  test("@Job 静态生成 provider、scope 和 descriptor 元数据", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-jobs-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
+      "src/jobs.module.ts": `
+        import { Injectable, Job, Module } from "./runtime";
+
+        @Job({ name: "case.rebuild" })
+        export class RebuildJob {
+          run(input: string): string { return input; }
+        }
+
+        @Injectable({ scope: "application" })
+        @Job({ name: "case.refresh" })
+        export class RefreshJob {
+          run(input: string): string { return input; }
+        }
+
+        @Module({
+          name: "jobs",
+          jobs: [RebuildJob, RefreshJob],
+        })
+        export class JobsModule {}
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    expect(analyzed.diagnostics).toEqual([]);
+    const jobs = analyzed.modules[0];
+    expect(jobs?.jobs).toEqual([
+      { className: "RebuildJob", name: "case.rebuild", scope: "job" },
+      { className: "RefreshJob", name: "case.refresh", scope: "application" },
+    ]);
+    expect(jobs?.providers.map((provider) => ({
+      token: provider.token,
+      scope: provider.scope,
+      useClass: provider.useClass,
+    }))).toEqual([
+      { token: "RebuildJob", scope: "job", useClass: "RebuildJob" },
+      { token: "RefreshJob", scope: "application", useClass: "RefreshJob" },
+    ]);
+  });
+
   test("analyzes property-level inject() dependencies", async () => {
     const root = await mkdtemp(join(tmpdir(), "supacloud-inject-prop-"));
     await writeFixtureProject(root, {
@@ -430,7 +525,7 @@ describe("analyzeProject：command 与 externalTokens", () => {
     await writeFixtureProject(root, {
       "tsconfig.json": GOOD_PROJECT_FILES["tsconfig.json"],
       "src/runtime.ts": `${RUNTIME_SOURCE}
-export function makeEnvironmentProviders(providers: unknown[]) { return { ɵproviders: providers }; }
+export function makeEnvironmentProviders(providers: unknown[]) { return { providers }; }
 export function provideToken(token: unknown, value: unknown) { return { token, value }; }
 export function provideEnvironmentInitializer(initializer: unknown) { return initializer; }
 `,

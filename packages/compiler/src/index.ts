@@ -28,6 +28,7 @@ export {
 } from "./profiles";
 export type {
   ApplicationGraph,
+  AspectRefNode,
   CachedModuleEntry,
   CheckProjectResult,
   CommandExecutionCapabilities,
@@ -43,6 +44,7 @@ export type {
   ModuleBoundaryProfile,
   ModuleBoundaryRule,
   ModuleNode,
+  JobNode,
   ProviderKind,
   ProviderNode,
   QueryNode,
