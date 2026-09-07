@@ -155,6 +155,7 @@ jobs:
               bun run typecheck
               bun test src
               bun run build
+              bun run ../../scripts/check_app_starter.ts
               bun run ../../scripts/audit_dependencies.ts
           - name: Function Adapters
             working-directory: packages/function-adapter

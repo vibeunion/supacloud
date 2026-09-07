@@ -10,6 +10,11 @@ no runtime reflection and no `reflect-metadata` dependency.
 
 ## Zero-configuration start
 
+For a complete runnable project, use `supacloud-cli app init --root ./orders --name orders`,
+then `bun install`, `bun run check` and `bun run dev` inside `orders`.
+The template includes compiler, Elysia, environment isolation and governance tests
+without combining the three packages into a runtime dependency.
+
 The smallest application can contain only a controller:
 
 ```ts
@@ -29,6 +34,11 @@ discovers the controller under `src/`, writes artifacts to `generated/`, and
 enables strict checks by default. A module, provider, database client, or
 command governance configuration is only needed when the application uses
 that capability.
+
+`defineFeatureSpec` preserves literal state/event types and rejects transition
+endpoints outside `states` at type-check time. `FeatureState<typeof spec>` and
+`FeatureEvent<typeof spec>` expose those unions to application code. Runtime
+assertions and authoritative database checks are still required for external input.
 
 Runtime DI delegates to Angular's public `@angular/core` APIs through a small
 compatibility adapter. SupaCloud decorators retain module/compiler metadata,

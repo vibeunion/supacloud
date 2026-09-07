@@ -42,6 +42,59 @@ function createModule(): CompiledModule {
 }
 
 describe("createMemorySandbox", () => {
+  test("HTTP receipts exclude mutable scopes and tracing but retain business input", async () => {
+    let executions = 0;
+    let sandbox: MemorySandbox;
+    const module: CompiledModule = {
+      name: "receipt",
+      createServices: () => ({}),
+      createRequestScope: () => ({
+        mutableStore: sandbox.db,
+        controller: {
+          write(input: { body: { value: number }; params: { id: string } }) {
+            executions++;
+            sandbox.db.set("items", input.params.id, input.body);
+            return { executions };
+          },
+        },
+      }),
+      controllers: [{
+        path: "/items", serviceKey: "controller", scope: "request",
+        routes: [{
+          method: "POST", path: "/:id", handler: "write", command: "Write",
+          body: t.Object({ value: t.Number() }),
+          params: t.Object({ id: t.String() }),
+        }],
+      }],
+      commands: [{
+        className: "Write", name: "item.write", permission: "item.write",
+        transaction: "required", idempotency: "required", audit: "item.written",
+      }],
+    };
+    sandbox = createMemorySandbox({
+      modules: [module], memoryGovernance: true,
+      identity: { authenticated: true, subject: "user-1" },
+    });
+    sandbox.policy.grant("user-1", "item.write");
+    const request = (id: string, value: number, requestId: string, businessHeader = "same") =>
+      sandbox.request(`/items/${id}`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json", "idempotency-key": "once",
+          "x-request-id": requestId, "x-business-value": businessHeader,
+        },
+        body: JSON.stringify({ value }),
+      });
+    expect(await (await request("1", 1, "first")).json()).toEqual({ executions: 1 });
+    expect(await (await request("1", 1, "second")).json()).toEqual({ executions: 1 });
+    expect((await request("1", 2, "third")).status).toBe(409);
+    expect((await request("2", 1, "fourth")).status).toBe(409);
+    expect((await request("1", 1, "fifth", "different")).status).toBe(409);
+    sandbox.policy.revoke("user-1", "item.write");
+    expect((await request("1", 1, "sixth")).status).toBe(403);
+    expect(executions).toBe(1);
+  });
+
   test("provides deterministic request context and in-process HTTP", async () => {
     const sandbox = createMemorySandbox({
       modules: [createModule()],

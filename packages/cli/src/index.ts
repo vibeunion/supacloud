@@ -327,6 +327,7 @@ EXAMPLES
   ${preferredCommand} branch promote --branch_ref preview123 --plan_checksum <sha256>
   ${preferredCommand} ai show_skill
   ${preferredCommand} ai install_skill --dry_run
+  ${preferredCommand} app init --name my-service
   ${preferredCommand} app generate --kind module --name billing
   ${preferredCommand} app generate --kind command --module billing --name issue-invoice
   ${preferredCommand} app compile --root .

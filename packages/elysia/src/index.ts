@@ -129,6 +129,9 @@ export type CommandExecutor = (
   next: () => unknown | Promise<unknown>,
 ) => unknown | Promise<unknown>;
 
+export { assertFeatureTransition } from "./feature";
+export type { FeatureTransitionSpec } from "./feature";
+
 export interface ApplicationAspectContext {
   kind: "route" | "command" | "job";
   name: string;

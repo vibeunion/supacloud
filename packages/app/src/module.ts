@@ -2,9 +2,9 @@ import { Module } from "./decorators";
 import type { ModuleOptions } from "./decorators";
 import type { Type } from "./provider";
 
-export interface FeatureTransitionOptions {
-  from: string;
-  to: string;
+export interface FeatureTransitionOptions<State extends string = string> {
+  from: State;
+  to: State;
   permission?: string;
   command?: string;
   route?: string;
@@ -18,6 +18,9 @@ export interface FeatureSpecOptions {
   states: readonly string[];
   transitions: Readonly<Record<string, FeatureTransitionOptions>>;
 }
+
+export type FeatureState<Spec extends FeatureSpecOptions> = Spec["states"][number];
+export type FeatureEvent<Spec extends FeatureSpecOptions> = keyof Spec["transitions"] & string;
 
 export interface FeatureSliceOptions extends ModuleOptions {
   spec?: FeatureSpecOptions;
@@ -41,7 +44,11 @@ export function defineModule(options: ModuleOptions): Type<unknown> {
   return DefinedModule;
 }
 
-export function defineFeatureSpec<const T extends FeatureSpecOptions>(options: T): T {
+export function defineFeatureSpec<const T extends FeatureSpecOptions>(
+  options: T & {
+    transitions: Readonly<Record<string, FeatureTransitionOptions<NoInfer<T["states"][number]>>>>;
+  },
+): T {
   return options;
 }
 

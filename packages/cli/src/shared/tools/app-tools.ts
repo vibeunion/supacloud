@@ -3,19 +3,18 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { Type } from "@sinclair/typebox";
 import {
-    analyzeProject,
     checkProject,
     compileProject,
     compileOptionsFromConfig,
     loadSupacloudConfig,
     resolveSupacloudConfig,
-    validateGraph,
     type Diagnostic,
     type ModuleNode,
 } from "@supacloud/compiler";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import { buildToolDefinitions, type AppManifest } from "./app-tool-export";
+import { initializeAppProject } from "./app-starter";
 
 type ToolServer = {
     tool: (
@@ -27,7 +26,7 @@ type ToolServer = {
 };
 
 export interface AppToolArguments {
-    action: "generate" | "compile" | "check" | "graph" | "explain" | "export-tools";
+    action: "init" | "generate" | "compile" | "check" | "graph" | "explain" | "export-tools";
     kind?: "module" | "command" | "query" | "controller";
     name?: string;
     module?: string;
@@ -39,6 +38,19 @@ export interface AppToolArguments {
     strict?: boolean;
     format?: "text" | "json";
     target?: string;
+}
+
+async function initProject(args: AppToolArguments): Promise<ToolResult> {
+    if (args.force) throw new Error("app init never overwrites files; choose an empty directory");
+    const { root, name, files } = await initializeAppProject(args);
+    return textResult([
+        `Initialized ${name} in ${root} (${files.length} files).`,
+        `cd '${root.replaceAll("'", "'\\''")}'`,
+        "bun install",
+        "bun run check",
+        "bun run dev",
+        "Local demo only. Production requires persistent governance and identity adapters; see README.md.",
+    ].join("\n"));
 }
 
 interface ToolResult {
@@ -178,6 +190,13 @@ function parseInclude(include: string | undefined): string[] | undefined {
     return patterns && patterns.length > 0 ? patterns : undefined;
 }
 
+function sourceRoot(args: AppToolArguments, root: string, configured: string | undefined): string | undefined {
+    const hasConfig = ["ts", "mts", "js", "mjs"].some((extension) =>
+        existsSync(join(root, `supacloud.config.${extension}`)));
+    // Preserve the legacy explicit source-directory form in unconfigured projects.
+    return args.root && !hasConfig ? "." : configured;
+}
+
 async function runCompile(args: AppToolArguments): Promise<ToolResult> {
     const root = resolve(args.root || process.cwd());
     const loadedConfig = await loadSupacloudConfig(root);
@@ -185,11 +204,12 @@ async function runCompile(args: AppToolArguments): Promise<ToolResult> {
     const result = await compileProject({
         ...compileOptionsFromConfig({
             ...loadedConfig,
-            root: args.root ? "." : loadedConfig.root,
+            root: sourceRoot(args, root, loadedConfig.root),
             outDir: args.out_dir ? resolve(root, args.out_dir) : defaults.outDir,
             include: parseInclude(args.include) ?? loadedConfig.include,
             strict: args.strict ?? loadedConfig.strict ?? false,
         }, root),
+        writeOnError: false,
     });
     const hasError = result.diagnostics.some((diagnostic) => diagnostic.severity === "error");
     const text = [
@@ -207,27 +227,20 @@ async function runCheck(args: AppToolArguments): Promise<ToolResult> {
     const defaults = resolveSupacloudConfig(loadedConfig, root);
     const config = compileOptionsFromConfig({
         ...loadedConfig,
-        root: args.root ? "." : loadedConfig.root,
+        root: sourceRoot(args, root, loadedConfig.root),
         outDir: args.out_dir ? resolve(root, args.out_dir) : defaults.outDir,
         include: parseInclude(args.include) ?? loadedConfig.include,
         strict: args.strict ?? loadedConfig.strict ?? false,
     }, root);
-    const graph = await analyzeProject(config.rootDir, config.include);
-    const diagnostics: Diagnostic[] = [
-        ...(graph.diagnostics ?? []),
-        ...validateGraph(graph, {
-            strict: config.strict,
-            moduleBoundaryPreset: config.moduleBoundaryPreset,
-        }),
-    ];
-    if (config.strict) {
-        for (const diagnostic of diagnostics) {
-            if (diagnostic.severity === "warn") diagnostic.severity = "error";
-        }
-    }
-    const hasError = diagnostics.some((diagnostic) => diagnostic.severity === "error");
-    const summary = `checked ${graph.modules.length} module(s), no files written`;
-    return textResult(`${formatDiagnostics(diagnostics)}\n\n${summary}`, hasError);
+    const result = await checkProject(config);
+    const hasError = result.diagnostics.some((diagnostic) => diagnostic.severity === "error")
+        || result.mismatches.length > 0;
+    const summary = `checked ${result.graph.modules.length} module(s), no files written`;
+    return textResult([
+        formatDiagnostics(result.diagnostics),
+        ...result.mismatches.map((path) => `generated artifact mismatch: ${path}`),
+        "", summary,
+    ].join("\n"), hasError);
 }
 
 async function readManifest(root: string): Promise<AppManifest> {
@@ -422,15 +435,15 @@ async function runExportTools(args: AppToolArguments): Promise<ToolResult> {
 export function registerAppTools(server: ToolServer): void {
     server.tool(
         "app",
-        "Local @supacloud/app framework commands: scaffold, compile, check, graph, explain and export-tools. Actions: generate, compile, check, graph, explain, export-tools",
+        "Local @supacloud/app framework commands: init, scaffold, compile, check, graph, explain and export-tools. Actions: init, generate, compile, check, graph, explain, export-tools",
         {
-            action: withDescription(stringEnum(["generate", "compile", "check", "graph", "explain", "export-tools"]), "App action"),
+            action: withDescription(stringEnum(["init", "generate", "compile", "check", "graph", "explain", "export-tools"]), "App action"),
             kind: optional(stringEnum(["module", "command", "query", "controller"]), "[generate] Scaffold kind"),
-            name: optional(Type.String(), "[generate] Object name (module name / command / query name)"),
+            name: optional(Type.String(), "[init/generate] Project or object name"),
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
             dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
             force: optional(Type.Boolean(), "[generate] Overwrite existing files"),
-            root: optional(Type.String(), "[generate/compile/check/graph/explain/export-tools] Project root (default: current directory)"),
+            root: optional(Type.String(), "Project directory containing supacloud.config.ts (default: current directory)"),
             include: optional(Type.String(), "[compile/check] Comma-separated glob patterns for source files"),
             out_dir: optional(Type.String(), "[compile/export-tools] Output directory (default: <root>/generated)"),
             strict: optional(Type.Boolean(), "[compile/check] Promote warnings to errors"),
@@ -439,6 +452,7 @@ export function registerAppTools(server: ToolServer): void {
         },
         async (request) => {
             switch (request.action) {
+                case "init": return initProject(request);
                 case "generate": return generateScaffold(request);
                 case "compile": return runCompile(request);
                 case "check": return runCheck(request);

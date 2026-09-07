@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   ApplicationError, createApplication, requireIdempotencyKey,
-  type ApplicationOptions, type CommandGovernance, type TrustedRequestIdentity,
+  type ApplicationOptions, type CommandGovernance, type CommandInvocation, type TrustedRequestIdentity,
 } from "./index";
 import { createMemoryPolicy, type MemoryPolicy } from "./memory_policy";
 
@@ -255,7 +255,7 @@ export function createMemorySandbox(options: MemorySandboxOptions = {}): MemoryS
     idempotency(invocation, next) {
       return policy.runOnce(
         policy.subject(invocation.requestContext), invocation.command.name,
-        requireIdempotencyKey(invocation), invocation.input, next,
+        requireIdempotencyKey(invocation), memoryCommandInput(invocation), next,
       );
     },
     transaction(_invocation, next) {
@@ -310,6 +310,24 @@ export function createMemorySandbox(options: MemorySandboxOptions = {}): MemoryS
       policy.clear();
       audit.length = 0;
     },
+  };
+}
+
+function memoryCommandInput(invocation: CommandInvocation): unknown {
+  const input = invocation.input;
+  if (typeof input !== "object" || input === null) return input;
+  // Runtime scopes contain mutable services and must never enter a receipt key.
+  // Keep business input and headers, but exclude identity and tracing transport.
+  const ignoredHeaders = new Set(["authorization", "idempotency-key", "x-request-id", "traceparent", "tracestate"]);
+  const headers = Object.fromEntries([...invocation.request.headers.entries()]
+    .filter(([name]) => !ignoredHeaders.has(name)));
+  return {
+    method: invocation.request.method,
+    path: new URL(invocation.request.url).pathname,
+    body: "body" in input ? input.body : undefined,
+    params: "params" in input ? input.params : undefined,
+    query: "query" in input ? input.query : undefined,
+    headers,
   };
 }
 

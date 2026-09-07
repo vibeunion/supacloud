@@ -12,6 +12,11 @@ bun add @supacloud/compiler
 
 ## 零配置项目
 
+需要完整运行入口时，使用 `supacloud-cli app init --root ./orders --name orders`。
+模板将本包放在 `devDependencies`，预置状态规格、治理能力、类型检查和本地测试。
+编译产物的 HTTP method / scope 保留字面量联合类型，可直接传给 Elysia 适配器；
+跨运行时依赖字典使用构造器/工厂参数类型连接，局部依赖保留类型推断和错误检查。
+
 在项目根目录执行：
 
 ```bash
