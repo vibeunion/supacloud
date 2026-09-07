@@ -75,6 +75,21 @@ describe("buildResourceRegistry", () => {
     expect(tableResource?.canEdit).toBe(false);
   });
 
+  test("identifies public-schema tables by the key returned by the API", () => {
+    const tableResource = buildResourceRegistry(["alpha123"], englishLabels).find(
+      (resource) => resource.name === "v1/projects/alpha123/database/tables",
+    );
+    const rows: Record<string, unknown>[] = [
+      { table_schema: "public", table_name: "users" },
+      { table_schema: "public", table_name: "events" },
+    ];
+
+    expect(tableResource?.primaryKey).toBe("table_name");
+    const identities = rows.map((row) => row[tableResource?.primaryKey ?? "id"]);
+    expect(identities).toEqual(["users", "events"]);
+    expect(new Set(identities).size).toBe(rows.length);
+  });
+
   test("keeps Auth user actions on the dedicated page instead of API-like routes", () => {
     const [authUsers] = buildResourceRegistry(["alpha123"], englishLabels).filter(
       (resource) => resource.name === "v1/projects/alpha123/auth/users",

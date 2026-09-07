@@ -1,7 +1,8 @@
 <script lang="ts">
   import { t } from "svelte-i18n";
   import { goto } from "$app/navigation";
-  import { Button, TenantSwitcher } from "@svadmin/ui";
+  import Button from "@svadmin/ui/components/ui/button/button.svelte";
+  import TenantSwitcher from "@svadmin/ui/components/TenantSwitcher.svelte";
   import { Plus } from "lucide-svelte";
 
   interface ProjectSummary {

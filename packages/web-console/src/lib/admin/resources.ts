@@ -247,6 +247,8 @@ export const getTenantResources = (ref: string, labels: TenantResourceLabels): R
   {
     name: `v1/projects/${ref}/database/tables`,
     label: labels.tables,
+    // The endpoint lists public-schema tables and does not return an id field.
+    primaryKey: 'table_name',
     // Table creation uses the dedicated, migration-backed form on the Tables page.
     canCreate: false,
     canEdit: false,
