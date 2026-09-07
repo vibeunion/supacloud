@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { executionMode } from "../execution-policy";
@@ -205,6 +205,20 @@ describe("app tools", () => {
             .toContain('@Controller("/billing")');
     });
 
+    test("init creates an isolated, ready-to-run project template", async () => {
+        const initRoot = mkdtempSync(join(tmpdir(), "supacloud-init-"));
+        try {
+            const result = await app({ action: "init", root: initRoot, name: "orders" });
+            expect(result.isError).toBe(false);
+            expect(readFileSync(join(initRoot, "package.json"), "utf8")).toContain('"@supacloud/app"');
+            expect(readFileSync(join(initRoot, ".env.test"), "utf8")).toContain("APP_ENV=test");
+            expect(readFileSync(join(initRoot, ".env.production.example"), "utf8")).toContain("APP_ENV=production");
+            expect(readFileSync(join(initRoot, "src/application.ts"), "utf8")).toContain("createCompiledModules");
+        } finally {
+            rmSync(initRoot, { recursive: true, force: true });
+        }
+    });
+
     test("generate refuses to overwrite without --force and rejects duplicate controllers", async () => {
         const moduleFile = join(root, "src/features/billing/billing.module.ts");
         await expect(app({ action: "generate", kind: "module", name: "billing", root }))
@@ -222,9 +236,10 @@ describe("app tools", () => {
             .rejects.toThrow("手工合并");
     });
 
-    test("check analyzes without writing files", async () => {
+    test("check reports missing generated files without writing them", async () => {
         const result = await app({ action: "check", root });
-        expect(result.isError).toBe(false);
+        expect(result.isError).toBe(true);
+        expect(result.content[0].text).toContain("generated artifact mismatch");
         expect(result.content[0].text).toContain("no files written");
         expect(existsSync(join(root, "generated"))).toBe(false);
     });
@@ -234,8 +249,29 @@ describe("app tools", () => {
         expect(result.isError).toBe(false);
         expect(existsSync(join(root, "generated", "application.ts"))).toBe(true);
         expect(existsSync(join(root, "generated", "app.manifest.json"))).toBe(true);
+        expect((await app({ action: "check", root })).isError).toBe(false);
     });
 
+    test("check honors governance capabilities and rejects artifact drift without writing", async () => {
+        const configPath = join(root, "supacloud.config.mjs");
+        writeFileSync(configPath, 'export default { root: "src", commandCapabilities: { transaction: false } };\n');
+        const artifactPath = join(root, "generated/application.ts");
+        const original = readFileSync(artifactPath, "utf8");
+        try {
+            const result = await app({ action: "check", root });
+            expect(result.isError).toBe(true);
+            expect(result.content[0].text).toContain("command-transaction-unsupported");
+            expect(readFileSync(artifactPath, "utf8")).toBe(original);
+            const compiled = await app({ action: "compile", root });
+            expect(compiled.isError).toBe(true);
+            expect(readFileSync(artifactPath, "utf8")).toBe(original);
+        } finally {
+            rmSync(configPath);
+        }
+        writeFileSync(artifactPath, original + "\n// drift\n");
+        expect((await app({ action: "check", root })).isError).toBe(true);
+        writeFileSync(artifactPath, original);
+    });
     test("graph renders the module tree and json format", async () => {
         const textResult = await app({ action: "graph", root });
         expect(textResult.isError).toBe(false);

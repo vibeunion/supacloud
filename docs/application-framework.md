@@ -20,6 +20,11 @@ Angular 风格源代码（装饰器）
 
 ## 编写业务模块
 
+新项目可先执行 `supacloud app init --root ./orders --name orders`，再进入目录运行
+`bun install`、`bun run check`、`bun run dev`。模板预置严格编译、状态声明、静态切面、
+内存治理测试和隔离的环境配置；生产需要显式接入持久化与可信身份适配器。
+完整边界与验收见 [Application Starter](./application-starter.md)。
+
 ```ts
 // features/case/case.module.ts
 import { Module, DB_CLIENT } from "@supacloud/app";

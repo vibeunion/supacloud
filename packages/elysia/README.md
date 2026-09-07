@@ -116,6 +116,15 @@ once is rejected.
 Executes a compiler-emitted Job descriptor with its static aspect list and
 compiler-generated job scope.
 
+### `assertFeatureTransition(spec, state, event)`
+
+Checks a declared feature transition against an authoritative state and returns
+the destination state. Unknown events, stale/illegal states and inherited object
+members fail with HTTP 409 / `FEATURE_TRANSITION_CONFLICT`; malformed destinations
+fail with `FEATURE_SPEC_INVALID`. The helper is a matrix assertion, not a workflow
+engine, persistence or authorization layer. Call it inside the application's
+transaction and persist with a row lock or expected-version check.
+
 ### `ApplicationError`
 
 Lightweight error class carrying HTTP `status`, machine-readable `code`, and
@@ -134,3 +143,10 @@ adapters. The memory harness is limited to deterministic HTTP, key-value
 transaction and object-storage contract tests.
 `policy` supplies explicit permission grants/revocations and idempotency claims;
 `storage.failNext()` makes storage failure paths deterministic.
+
+Set `memoryGovernance: true` to enable test-only authorization, transaction,
+idempotency and audit adapters; permissions still require explicit grants.
+HTTP receipt fingerprints include route, body, params, query and business
+headers, not mutable request scopes/services or identity/tracing transport.
+Authorization runs again on a replay. Use durable application-owned adapters
+for production receipts, transactions and audits.

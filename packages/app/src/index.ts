@@ -119,8 +119,10 @@ export type {
 } from "./decorators";
 export { defineFeatureSlice, defineFeatureSpec, defineModule } from "./module";
 export type {
+  FeatureEvent,
   FeatureSliceOptions,
   FeatureSpecOptions,
+  FeatureState,
   FeatureTransitionOptions,
 } from "./module";
 export {

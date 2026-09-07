@@ -5,6 +5,33 @@ Project-scoped CLI for SupaCloud users.
 This package exposes only `supacloud-cli`. The bare `supacloud` name is reserved
 for the compiled server binary installed at `/usr/local/bin/supacloud`.
 
+## Application Starter
+
+```sh
+supacloud-cli app init --root ./orders --name orders
+cd orders
+bun install
+bun run check
+bun run dev
+```
+
+The initializer needs no platform credentials and never overwrites existing
+projects. It includes typed state declarations, static AOP, strict compilation,
+an Elysia service, memory governance tests and explicit development/test/staging/
+production environment wrappers. The compiler is a development dependency.
+The demo binds to loopback and cannot run in staging/production. Production
+identity, persistence and durable governance must be supplied by the application.
+See [Application Starter](../../docs/application-starter.md) for the full contract.
+
+`app compile` and `app check` resolve `supacloud.config.ts` from `--root` (the
+project directory). `app check` runs the complete compiler and artifact-drift
+gate without writing; compile once and commit `generated/` before using it in CI.
+Failed compilation preserves the previous generated artifacts.
+Without a config file, an explicit `--root` retains the legacy source-directory
+behavior.
+
+## Installation
+
 Install:
 
 ```bash
