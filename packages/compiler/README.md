@@ -257,6 +257,24 @@ bun test
 bun run build
 ```
 
+## Route Contract Policy
+
+Enable `requireRouteContracts: true` in `defineSupacloudConfig(...)` or
+`CompileOptions` to report `route-contract-required` errors in both compile and
+check (including JSON diagnostics). Changing this option invalidates incremental
+results. Combine it with `writeOnError: false` when programmatic compilation must
+not emit files on errors.
+
+`inspectRouteContracts(graph)` lists each route and its missing body, params,
+query, and response declarations. Required inputs are detected from handler
+bindings and controller/route path parameters. Responses always require an
+explicit declaration, including intentional void contracts.
+
+This checks declaration coverage only, not schema quality, handler/schema type
+equivalence, or database authorization. It deliberately does not auto-fix missing
+schemas with `unknown` placeholders. Consumers must define the actual contracts
+and test decoding separately. The policy defaults to false for existing projects.
+
 ## License
 
 MIT

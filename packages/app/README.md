@@ -183,3 +183,31 @@ export const CaseFeature = defineFeatureSlice({
 
 The compiler validates that feature states, commands, permissions, and transactions
 remain synchronized and detects architectural drift at build time.
+
+## Validated HTTP Contracts
+
+`HttpClient.execute(contract, input, options?)` infers input and result types from
+`HttpContract` decoders. Each decoder accepts `unknown` and must reject invalid
+values. A TypeBox, Zod, or application decoder can be used without a new runtime
+dependency.
+
+```ts
+import type { HttpContract } from "@supacloud/app";
+
+const saveItem: HttpContract<{ name: string }, { id: string }> = {
+  input: decodeItemInput,
+  result: decodeItemReceipt,
+  request: (input) => ({ method: "POST", url: "/items", body: input }),
+};
+const receipt = await http.execute(saveItem, { name: "Example" }, {
+  headers: { "Idempotency-Key": requestId },
+  signal: abortController.signal,
+});
+```
+
+Input decoding happens before transport. JSON parsing and receipt decoding happen
+after transport; invalid/empty successful responses reject with
+`HttpContractError` (`boundary: "request" | "response"`), without decoder causes or
+payloads. HTTP errors remain `HttpErrorResponse`. Contract execution does not
+retry; existing interceptors still control transport and must not replay an
+unknown-result write. This is opt-in and does not validate legacy generic calls.

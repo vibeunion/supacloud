@@ -285,3 +285,5 @@ export type {
   PipeMetadata,
   PipeTransform,
 } from "./pipe";
+export { HttpContractError, decodeHttpContract } from "./http_contract";
+export type { ContractDecoder, HttpContract } from "./http_contract";

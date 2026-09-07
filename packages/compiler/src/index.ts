@@ -78,3 +78,4 @@ export type {
   FeatureSpecNode,
   FeatureTransitionNode,
 } from "./types";
+export { inspectRouteContracts, validateRouteContracts } from "./route-contracts";
