@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/vibeunion/supacloud/compare/db-v0.4.0...db-v0.5.0) (2026-09-07)
+
+
+### Features
+
+* **db:** add decoder-inferred RPC contracts ([#1198](https://github.com/vibeunion/supacloud/issues/1198)) ([6c404e9](https://github.com/vibeunion/supacloud/commit/6c404e901ff64d3a72817410ffad1656b7274f7b))
+
 ## [0.4.0](https://github.com/vibeunion/supacloud/compare/db-v0.3.1...db-v0.4.0) (2026-09-05)
 
 

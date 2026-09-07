@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.8.0...elysia-v0.8.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* **elysia:** distinguish response contract failures and scope error mapping ([#1200](https://github.com/vibeunion/supacloud/issues/1200)) ([a6fd97b](https://github.com/vibeunion/supacloud/commit/a6fd97b95ec394098eedffbf0626785fff18ce8c))
+
 ## [0.8.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.7.0...elysia-v0.8.0) (2026-09-07)
 
 
