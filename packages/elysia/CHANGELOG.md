@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.7.0...elysia-v0.8.0) (2026-09-07)
+
+
+### Features
+
+* **cli:** add governed application starter ([#1193](https://github.com/vibeunion/supacloud/issues/1193)) ([f33561b](https://github.com/vibeunion/supacloud/commit/f33561bfb05e0a63ce08de0153a4fa95f02ac2d6))
+
 ## [0.7.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.6.0...elysia-v0.7.0) (2026-09-06)
 
 

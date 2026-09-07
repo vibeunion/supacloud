@@ -14,6 +14,14 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.49.0](https://github.com/vibeunion/supacloud/compare/cli-v0.48.2...cli-v0.49.0) (2026-09-07)
+
+
+### Features
+
+* **cli:** add governed application starter ([#1193](https://github.com/vibeunion/supacloud/issues/1193)) ([f33561b](https://github.com/vibeunion/supacloud/commit/f33561bfb05e0a63ce08de0153a4fa95f02ac2d6))
+* **cli:** add release scope rebind, inspect, and create controls ([#1195](https://github.com/vibeunion/supacloud/issues/1195)) ([285882f](https://github.com/vibeunion/supacloud/commit/285882ff6c56496a70413b660e21369fa2568ac5))
+
 ## [0.48.2](https://github.com/vibeunion/supacloud/compare/cli-v0.48.1...cli-v0.48.2) (2026-09-06)
 
 
