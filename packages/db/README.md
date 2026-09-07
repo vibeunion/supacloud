@@ -79,6 +79,40 @@ const userDb = await database.forUser(requireTrustedIdentity(requestContext));
 const workerDb = await database.forService("scheduled-worker");
 ```
 
+### Typed RPC boundary
+
+`createRpcClient(transport, contracts)` validates arguments before transport and results
+before returning them. Names, arguments and results are inferred from the registry;
+callers cannot supply an arbitrary result type. It uses the supplied client without
+changing its identity, RLS policy or credentials.
+
+```ts
+import { createRpcClient, defineRpcContract } from '@supacloud/db';
+
+const rpc = createRpcClient(userDb, {
+  case_create: defineRpcContract({
+    args: decodeCreateCaseArgs,
+    result: decodeCreatedCase,
+  }),
+});
+const result = await rpc.call('case_create', { title: 'Investigation' });
+if (result.ok) {
+  console.log(result.data);
+} else {
+  handleDatabaseFailure(result.error);
+}
+```
+
+Decoders must accept `unknown`, validate it at runtime and throw on invalid values.
+They may project extra fields away. Schema libraries such as TypeBox can supply
+these functions; this driver-independent package adds no schema-library dependency.
+Database failures bypass result decoding. Contract failures throw `RpcContractError`
+with a phase and no raw payload or decoder error. Calls are never retried automatically,
+including result-validation failures after a potentially committed command.
+
+This is an explicit contract boundary, not inference of JSONB fields from SQL,
+authorization, migration execution or automatic HTTP client generation.
+
 ## 诊断码
 
 ### 对账（reconcile）

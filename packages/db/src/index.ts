@@ -51,3 +51,15 @@ export {
   type DatabaseAccessBoundaryOptions,
   type DatabaseAccessErrorCode,
 } from './access.js';
+
+export {
+  createRpcClient,
+  defineRpcContract,
+  RpcContractError,
+  type RpcArgs,
+  type RpcCallResult,
+  type RpcContract,
+  type RpcDecoder,
+  type RpcResult,
+  type RpcTransport,
+} from './rpc.js';
