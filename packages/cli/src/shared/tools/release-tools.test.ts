@@ -1,4 +1,7 @@
 import { expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { registerReleaseTools } from "./release-tools";
 
 const PROJECT_REF = "proj";
@@ -74,8 +77,8 @@ function captureReleaseTool(
     return callback;
 }
 
-function payload(response: ToolResult): Record<string, unknown> {
-    return JSON.parse(response.content[0].text) as Record<string, unknown>;
+function payload(response: ToolResult): Record<string, any> {
+    return JSON.parse(response.content[0].text) as Record<string, any>;
 }
 
 test("logical backup list returns only the safe verified receipt projection", async () => {
@@ -585,4 +588,217 @@ test("an unsupported release action cannot issue a mutation", async () => {
 
     await expect(callback({ action: "delete_everything" })).rejects.toThrow("Unknown release control action");
     expect(postCalls).toBe(0);
+});
+
+test("scope_rebind updates single file baseCommit canonically and computes scope_sha256", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scope-rebind-single-"));
+    try {
+        const oldCommit = "1".repeat(40);
+        const newCommit = "2".repeat(40);
+        const scopePath = join(dir, "20260907-intake-p1-production.json");
+        const initialScope = {
+            baseCommit: oldCommit,
+            excludedFunctions: ["fa-worker"],
+            functions: ["fa-api"],
+            migrations: ["20260907120000_init"],
+            targetProjectRef: "vxmnblbzsxzutzrjntyu",
+            taskId: "FA-INTAKE-P1-PROD",
+            web: false,
+        };
+        writeFileSync(scopePath, JSON.stringify(initialScope, null, 2) + "\n", "utf8");
+
+        const callback = captureReleaseTool({});
+        const response = await callback({
+            action: "scope_rebind",
+            file: scopePath,
+            base_commit: newCommit,
+            cwd: dir,
+        });
+
+        const result = payload(response);
+        expect(result).toMatchObject({
+            ok: true,
+            operation: "release.scope_rebind",
+            base_commit: newCommit,
+            count: 1,
+            updated_count: 1,
+            scopes: [{
+                previous_base_commit: oldCommit,
+                new_base_commit: newCommit,
+                updated: true,
+            }],
+        });
+
+        const updatedContent = readFileSync(scopePath, "utf8");
+        const parsed = JSON.parse(updatedContent);
+        expect(parsed.baseCommit).toBe(newCommit);
+        expect(parsed.taskId).toBe("FA-INTAKE-P1-PROD");
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("scope_rebind handles dry_run and unchanged baseCommit", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scope-rebind-dry-"));
+    try {
+        const oldCommit = "3".repeat(40);
+        const newCommit = "4".repeat(40);
+        const scopePath = join(dir, "scope.json");
+        const initialScope = {
+            baseCommit: oldCommit,
+            excludedFunctions: [],
+            functions: [],
+            migrations: [],
+            targetProjectRef: "vxmnblbzsxzutzrjntyu",
+            taskId: "FA-TASK-1",
+            web: true,
+        };
+        writeFileSync(scopePath, JSON.stringify(initialScope, null, 2) + "\n", "utf8");
+
+        const callback = captureReleaseTool({});
+        const dryResponse = await callback({
+            action: "scope_rebind",
+            file: scopePath,
+            base_commit: newCommit,
+            dry_run: true,
+            cwd: dir,
+        });
+        const dryResult = payload(dryResponse);
+        expect(dryResult.dry_run).toBe(true);
+        expect(dryResult.updated_count).toBe(1);
+        expect(JSON.parse(readFileSync(scopePath, "utf8")).baseCommit).toBe(oldCommit);
+
+        const unchangedResponse = await callback({
+            action: "scope_rebind",
+            file: scopePath,
+            base_commit: oldCommit,
+            cwd: dir,
+        });
+        const unchangedResult = payload(unchangedResponse);
+        expect(unchangedResult.updated_count).toBe(0);
+        expect(unchangedResult.scopes[0].updated).toBe(false);
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("scope_rebind updates multiple files and scans directories by task", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scope-rebind-multi-"));
+    try {
+        const scopesDir = join(dir, "supacloud/fa/release-scopes");
+        mkdirSync(scopesDir, { recursive: true });
+        const oldCommit = "5".repeat(40);
+        const newCommit = "6".repeat(40);
+        const prodPath = join(scopesDir, "20260907-intake-p1-production.json");
+        const stagingPath = join(scopesDir, "20260907-intake-p1-staging.json");
+        writeFileSync(prodPath, JSON.stringify({
+            baseCommit: oldCommit,
+            excludedFunctions: [],
+            functions: [],
+            migrations: [],
+            targetProjectRef: "vxmnblbzsxzutzrjntyu",
+            taskId: "FA-INTAKE-P1-PROD",
+            web: false,
+        }, null, 2) + "\n", "utf8");
+        writeFileSync(stagingPath, JSON.stringify({
+            baseCommit: oldCommit,
+            excludedFunctions: [],
+            functions: [],
+            migrations: [],
+            targetProjectRef: "stagingprojectref1234",
+            taskId: "FA-INTAKE-P1-STAGING",
+            web: false,
+        }, null, 2) + "\n", "utf8");
+
+        const callback = captureReleaseTool({});
+        const response = await callback({
+            action: "scope_rebind",
+            task: "20260907-intake-p1",
+            base_commit: newCommit,
+            cwd: dir,
+        });
+
+        const result = payload(response);
+        expect(result.count).toBe(2);
+        expect(result.updated_count).toBe(2);
+        expect(JSON.parse(readFileSync(prodPath, "utf8")).baseCommit).toBe(newCommit);
+        expect(JSON.parse(readFileSync(stagingPath, "utf8")).baseCommit).toBe(newCommit);
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("scope_inspect verifies structure and computes canonical scope_sha256", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scope-inspect-"));
+    try {
+        const commit = "7".repeat(40);
+        const scopePath = join(dir, "scope.json");
+        writeFileSync(scopePath, JSON.stringify({
+            baseCommit: commit,
+            excludedFunctions: ["fa-b"],
+            functions: ["fa-a"],
+            migrations: ["20260907120000_test"],
+            targetProjectRef: "vxmnblbzsxzutzrjntyu",
+            taskId: "FA-TASK-INSPECT",
+            web: false,
+        }, null, 2) + "\n", "utf8");
+
+        const callback = captureReleaseTool({});
+        const response = await callback({
+            action: "scope_inspect",
+            file: scopePath,
+            cwd: dir,
+        });
+
+        const result = payload(response);
+        expect(result.ok).toBe(true);
+        expect(result.operation).toBe("release.scope_inspect");
+        expect(result.scope.task_id).toBe("FA-TASK-INSPECT");
+        expect(result.scope.base_commit).toBe(commit);
+        expect(typeof result.scope.scope_sha256).toBe("string");
+        expect(result.scope.scope_sha256).toHaveLength(64);
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("scope_create scaffolds a canonical scope manifest with resolved baseCommit", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scope-create-"));
+    try {
+        const commit = "8".repeat(40);
+        const scopePath = join(dir, "supacloud/fa/release-scopes/20260907-new.json");
+
+        const callback = captureReleaseTool({});
+        const response = await callback({
+            action: "scope_create",
+            file: scopePath,
+            task: "FA-NEW-TASK",
+            ref: "vxmnblbzsxzutzrjntyu",
+            base_commit: commit,
+            functions: "fa-api, fa-worker",
+            migrations: "20260907120000_first, 20260907130000_second",
+            web: true,
+            cwd: dir,
+        });
+
+        const result = payload(response);
+        expect(result.ok).toBe(true);
+        expect(result.operation).toBe("release.scope_create");
+        expect(result.base_commit).toBe(commit);
+        expect(typeof result.scope_sha256).toBe("string");
+        expect(result.scope_sha256).toHaveLength(64);
+
+        const created = JSON.parse(readFileSync(scopePath, "utf8"));
+        expect(created).toEqual({
+            baseCommit: commit,
+            excludedFunctions: [],
+            functions: ["fa-api", "fa-worker"],
+            migrations: ["20260907120000_first", "20260907130000_second"],
+            targetProjectRef: "vxmnblbzsxzutzrjntyu",
+            taskId: "FA-NEW-TASK",
+            web: true,
+        });
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
 });

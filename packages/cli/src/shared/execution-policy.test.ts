@@ -233,6 +233,13 @@ describe("CLI execution policy", () => {
         expect(executionMode("release", "postgrest_restart", {})).toBe("write");
         expect(executionMode("release", "release_canary_fixture_stage_replay", {})).toBe("write");
         expect(executionMode("release", "release_canary_fixture_disable_replay", {})).toBe("write");
+        expect(executionMode("release", "scope_inspect", {})).toBe("local");
+        expect(executionMode("release", "scope_rebind", {})).toBe("local");
+        expect(executionMode("release", "scope_create", {})).toBe("local");
+        expect(() => authorizeExecution("release", { action: "scope_rebind" }, { context: context() })).not.toThrow();
+        expect(() => authorizeExecution("release", { action: "scope_rebind" }, {
+            context: context({ production: false, environment: "test", readOnly: true }),
+        })).not.toThrow();
         expect(() => authorizeExecution("release", { action: "logical_backup_create" }, {
             context: context(),
         })).toThrow("--confirm-production prod-ref");

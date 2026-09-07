@@ -307,6 +307,8 @@ EXAMPLES
   ${preferredCommand} release postgrest_restart --ref abc123
   ${preferredCommand} release release_canary_fixture_stage_replay --ref abc123 --subject <uuid> --request_id <uuid>
   ${preferredCommand} release release_canary_fixture_disable_replay --ref abc123 --fixture_id <uuid> --disable_request_id <uuid> --issuer <issuer-url> --subject <uuid>
+  ${preferredCommand} release scope_rebind --file supacloud/fa/release-scopes/20260907-intake-p1-production.json
+  ${preferredCommand} release scope_inspect --file supacloud/fa/release-scopes/20260907-intake-p1-production.json
   ${preferredCommand} queue stats --queue emails
   ${preferredCommand} queue dlq --queue emails --limit 20
   ${preferredCommand} frontend list --ref abc123
@@ -473,6 +475,10 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         };
         Object.assign(tools, captureTools((server) => registerDatabaseTools(server as any, undefined, {
             localOnly: true,
+        })));
+        Object.assign(tools, captureTools((server) => registerReleaseTools(server as any, undefined, {
+            localOnly: true,
+            projectRef: context.projectRef || undefined,
         })));
         Object.assign(tools, captureTools((server) => registerRemoteDevTools(server as any, {
             cwd: process.cwd(),
