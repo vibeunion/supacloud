@@ -236,11 +236,16 @@ describe("createApplication", () => {
     expect(res.status).toBe(422);
   });
 
-  test("rejects invalid responses with 422 via Elysia response validation", async () => {
+  test("classifies invalid responses as server contract failures without leaking output", async () => {
     const app = createApp({});
 
     const res = await testRequest(app, "/cases/invalid-response");
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({
+      ok: false,
+      code: "RESPONSE_VALIDATION_ERROR",
+      message: "Response validation failed",
+    });
   });
 
   test("uses the compiler-emitted positional invoker after schema decoding", async () => {
@@ -580,6 +585,28 @@ describe("SupaCloud request context", () => {
 });
 
 describe("defaultErrorResponse", () => {
+  test("keeps request validation at 422 and ignores payload-bearing framework details", async () => {
+    for (const type of ["body", "params", "query", "headers", "cookie"]) {
+      const response = defaultErrorResponse(Object.assign(new Error("private input"), {
+        type, value: { password: "private" },
+      }), "VALIDATION");
+      expect(response.status).toBe(422);
+      expect(await response.json()).toEqual({
+        ok: false, code: "VALIDATION_ERROR", message: "Request validation failed",
+      });
+    }
+    expect(defaultErrorResponse({ type: "response" }, "UNKNOWN").status).toBe(500);
+  });
+
+  test("preserves explicitly exposed business errors even when their type is response", async () => {
+    const error = Object.assign(new ApplicationError("Version conflict", {
+      status: 409, code: "VERSION_CONFLICT",
+    }), { type: "response" });
+    const response = defaultErrorResponse(error, "VALIDATION");
+    expect(response.status).toBe(409);
+    expect((await response.json()).code).toBe("VERSION_CONFLICT");
+  });
+
   test("accepts structural public errors from platform packages", async () => {
     const error = Object.assign(new Error("Service role reason is not allowed"), {
       expose: true as const,
