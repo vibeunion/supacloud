@@ -26,7 +26,8 @@ Runtime adapter that turns `@supacloud/compiler` output into a production-ready
   performed.
 - **Public error mapping**: transforms framework / application errors via
   `errorMapper` with standard `ApplicationError` envelope support, preserving
-  Elysia's default behavior (422) for schema validation errors.
+  HTTP 422 for request validation and HTTP 500 / `RESPONSE_VALIDATION_ERROR`
+  for invalid handler output, without exposing payloads or schema internals.
 
 ## Installation
 
@@ -83,8 +84,15 @@ sandbox.reset();
 
 Route `body`, `params`, `query`, and `response` schemas are enforced by
 Elysia before and after the handler. Invalid input returns the standard `422`
-validation response; invalid handler output is rejected before it reaches the
-client.
+validation response; invalid structured handler output returns HTTP 500 with
+`RESPONSE_VALIDATION_ERROR`. A response validation failure can occur **after a
+command has committed**; it does not imply rollback and must not trigger a blind
+write retry. Confirm the outcome using the application's durable receipt or
+read-back protocol. A custom `errorMapper` can override this public envelope.
+
+Native `Response` objects are passed through by Elysia, including JSON responses.
+Handlers returning a native `Response` must validate their JSON payload before
+constructing it. The adapter does not consume or parse binary/streaming responses.
 
 Jobs are executed explicitly with `executeJob(compiledModule, services, job,
 input, requestContext)`. The asynchronous compiler-generated job scope is

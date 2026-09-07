@@ -568,6 +568,17 @@ export function createModulePlugin(
     return { requestContext };
   });
 
+  // Bind before routes and keep the handler local to its module's request context.
+  plugin.onError(async ({ code, error, request }) => {
+    const context: ErrorContext = {
+      request,
+      requestContext: requestContexts.get(request),
+      frameworkCode: code,
+    };
+    const mapped = await options.errorMapper?.(error, context);
+    return mapped ?? defaultErrorResponse(error, code);
+  });
+
   for (const controller of compiled.controllers) {
     for (const route of controller.routes) {
       const path = joinPaths(controller.path, route.path);
@@ -695,16 +706,6 @@ export function createModulePlugin(
     }
   }
 
-  plugin.onError({ as: "global" }, async ({ code, error, request }) => {
-    const context: ErrorContext = {
-      request,
-      requestContext: requestContexts.get(request),
-      frameworkCode: code,
-    };
-    const mapped = await options.errorMapper?.(error, context);
-    return mapped ?? defaultErrorResponse(error, code);
-  });
-
   return plugin as unknown as Elysia;
 }
 
@@ -785,6 +786,14 @@ export function defaultErrorResponse(
     }, { status: error.status });
   }
   if (frameworkCode === "VALIDATION") {
+    // A response failure can occur after a command commits; it is not invalid input.
+    if (isRecord(error) && error.type === "response") {
+      return Response.json({
+        ok: false,
+        code: "RESPONSE_VALIDATION_ERROR",
+        message: "Response validation failed",
+      }, { status: 500 });
+    }
     return Response.json({
       ok: false,
       code: "VALIDATION_ERROR",
