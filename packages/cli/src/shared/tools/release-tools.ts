@@ -1,3 +1,7 @@
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import { Type } from "@sinclair/typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
@@ -21,7 +25,10 @@ type ReleaseOperation =
     | "release.postgrest.status"
     | "release.postgrest.restart"
     | "release.release_canary.fixture_stage_replay"
-    | "release.release_canary.fixture_disable_replay";
+    | "release.release_canary.fixture_disable_replay"
+    | "release.scope_inspect"
+    | "release.scope_rebind"
+    | "release.scope_create";
 
 type ReleaseCanaryStageReceipt = {
     fixtureId: string;
@@ -368,19 +375,372 @@ async function applicationOriginMatches(http: HttpTransport, projectRef: string,
     return projectApiOrigins(endpointRead, projectRef)?.includes(applicationOrigin) === true;
 }
 
+function canonicalValue(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(canonicalValue);
+    if (!value || typeof value !== "object") return value;
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, item]) => [key, canonicalValue(item)]));
+}
+
+function genericScopedReleaseScopeJson(scope: unknown): string {
+    return JSON.stringify(canonicalValue(scope));
+}
+
+function genericScopedReleaseScopeSha256(scope: unknown): string {
+    return createHash("sha256").update(genericScopedReleaseScopeJson(scope)).digest("hex");
+}
+
+function resolveGitBaseCommit(cwd: string, explicitRef?: unknown): string {
+    if (typeof explicitRef === "string" && explicitRef.trim()) {
+        const trimmed = explicitRef.trim();
+        if (/^[0-9a-f]{40}$/.test(trimmed)) {
+            try {
+                const verified = execFileSync("git", ["rev-parse", "--verify", `${trimmed}^{commit}`], {
+                    cwd,
+                    encoding: "utf8",
+                    stdio: ["ignore", "pipe", "pipe"],
+                }).trim();
+                if (/^[0-9a-f]{40}$/.test(verified)) return verified;
+            } catch {
+                return trimmed;
+            }
+            return trimmed;
+        }
+        try {
+            const sha = execFileSync("git", ["rev-parse", "--verify", `${trimmed}^{commit}`], {
+                cwd,
+                encoding: "utf8",
+                stdio: ["ignore", "pipe", "pipe"],
+            }).trim();
+            if (/^[0-9a-f]{40}$/.test(sha)) return sha;
+        } catch {
+            throw new Error(`Unable to resolve base commit from git ref '${trimmed}'`);
+        }
+    }
+    const candidateRefs = ["origin/main", "main", "HEAD^", "HEAD"];
+    for (const candidate of candidateRefs) {
+        try {
+            const sha = execFileSync("git", ["rev-parse", "--verify", `${candidate}^{commit}`], {
+                cwd,
+                encoding: "utf8",
+                stdio: ["ignore", "pipe", "pipe"],
+            }).trim();
+            if (/^[0-9a-f]{40}$/.test(sha)) return sha;
+        } catch {
+            continue;
+        }
+    }
+    throw new Error("Unable to resolve git base commit. Pass --base_commit explicitly.");
+}
+
+function gitCommitInfo(cwd: string): { head: string | null; originMain: string | null; parent: string | null } {
+    let head: string | null = null;
+    let originMain: string | null = null;
+    let parent: string | null = null;
+    try {
+        head = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    } catch {}
+    try {
+        originMain = execFileSync("git", ["rev-parse", "--verify", "origin/main^{commit}"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    } catch {}
+    try {
+        parent = execFileSync("git", ["rev-parse", "HEAD^"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+    } catch {}
+    return { head, originMain, parent };
+}
+
+function collectScopeFiles(
+    cwd: string,
+    file?: unknown,
+    files?: unknown,
+    dir?: unknown,
+    task?: unknown,
+): string[] {
+    const results: string[] = [];
+    const resolvePathWithFallbacks = (filePath: string): string => {
+        const trimmed = filePath.trim();
+        const resolved = resolve(cwd, trimmed);
+        if (existsSync(resolved)) return resolved;
+        const candidates = [
+            resolve(cwd, "supacloud/fa/release-scopes", trimmed),
+            resolve(cwd, "release-scopes", trimmed),
+            resolve(cwd, "scopes", trimmed),
+        ];
+        const found = candidates.find(existsSync);
+        if (found) return found;
+        throw new Error(`Scope file not found: ${filePath}`);
+    };
+    if (typeof file === "string" && file.trim()) {
+        results.push(resolvePathWithFallbacks(file));
+    }
+    if (typeof files === "string" && files.trim()) {
+        const parts = files.split(",").map((s) => s.trim()).filter(Boolean);
+        for (const part of parts) {
+            results.push(resolvePathWithFallbacks(part));
+        }
+    }
+    if (results.length > 0) {
+        return [...new Set(results)];
+    }
+
+    const taskFilter = typeof task === "string" && task.trim() ? task.trim().toLowerCase() : null;
+    if (!taskFilter && (!dir || typeof dir !== "string" || !dir.trim())) {
+        throw new Error("At least one of --file, --files, or --task is required for scope_rebind");
+    }
+
+    const candidates = typeof dir === "string" && dir.trim()
+        ? [resolve(cwd, dir.trim())]
+        : [
+            resolve(cwd, "supacloud/fa/release-scopes"),
+            resolve(cwd, "release-scopes"),
+            resolve(cwd, "scopes"),
+        ];
+
+    for (const directory of candidates) {
+        if (existsSync(directory)) {
+            try {
+                const entries = readdirSync(directory, { withFileTypes: true });
+                for (const entry of entries) {
+                    if (entry.isFile() && entry.name.endsWith(".json")) {
+                        const fullPath = join(directory, entry.name);
+                        if (!taskFilter) {
+                            results.push(fullPath);
+                        } else if (entry.name.toLowerCase().includes(taskFilter)) {
+                            results.push(fullPath);
+                        } else {
+                            try {
+                                const parsed = JSON.parse(readFileSync(fullPath, "utf8"));
+                                if (typeof parsed?.taskId === "string" && parsed.taskId.toLowerCase() === taskFilter) {
+                                    results.push(fullPath);
+                                }
+                            } catch {}
+                        }
+                    }
+                }
+                if (results.length > 0) break;
+            } catch {}
+        }
+    }
+    if (results.length === 0) {
+        throw new Error("No release scope files found to rebind");
+    }
+    return [...new Set(results)];
+}
+
+interface ScopeRebindItem {
+    file: string;
+    task_id: string;
+    target_project_ref: string;
+    previous_base_commit: string;
+    new_base_commit: string;
+    scope_sha256: string;
+    updated: boolean;
+}
+
+function handleScopeRebind(args: Record<string, unknown>): ReleaseControlToolResponse {
+    const cwd = typeof args.cwd === "string" && args.cwd.trim() ? resolve(args.cwd.trim()) : process.cwd();
+    const targetBaseCommit = resolveGitBaseCommit(cwd, args.base_commit);
+    const scopeFiles = collectScopeFiles(cwd, args.file, args.files, args.dir, args.task);
+    const dryRun = args.dry_run === true;
+
+    const scopes: ScopeRebindItem[] = [];
+    for (const filePath of scopeFiles) {
+        let content: string;
+        try {
+            content = readFileSync(filePath, "utf8");
+        } catch (cause) {
+            throw new Error(`Failed to read scope file '${filePath}': ${cause instanceof Error ? cause.message : String(cause)}`);
+        }
+        let parsed: Record<string, unknown>;
+        try {
+            parsed = JSON.parse(content);
+        } catch {
+            throw new Error(`Scope file '${filePath}' is not valid JSON`);
+        }
+        if (!isRecord(parsed) || typeof parsed.baseCommit !== "string" || !/^[0-9a-f]{40}$/.test(parsed.baseCommit)) {
+            throw new Error(`Scope file '${filePath}' has missing or invalid baseCommit`);
+        }
+        const previousBaseCommit = parsed.baseCommit;
+        const updated = previousBaseCommit !== targetBaseCommit;
+        if (updated) {
+            parsed.baseCommit = targetBaseCommit;
+        }
+        const canonicalJson = genericScopedReleaseScopeJson(parsed);
+        const scopeSha256 = genericScopedReleaseScopeSha256(parsed);
+        if (updated && !dryRun) {
+            const formatted = JSON.stringify(canonicalValue(parsed), null, 2) + "\n";
+            writeFileSync(filePath, formatted, "utf8");
+        }
+        scopes.push({
+            file: relative(cwd, filePath),
+            task_id: typeof parsed.taskId === "string" ? parsed.taskId : "",
+            target_project_ref: typeof parsed.targetProjectRef === "string" ? parsed.targetProjectRef : "",
+            previous_base_commit: previousBaseCommit,
+            new_base_commit: targetBaseCommit,
+            scope_sha256: scopeSha256,
+            updated,
+        });
+    }
+
+    return releaseControlSuccess("release.scope_rebind", {
+        base_commit: targetBaseCommit,
+        dry_run: dryRun,
+        count: scopes.length,
+        updated_count: scopes.filter((s) => s.updated).length,
+        scopes,
+    });
+}
+
+function handleScopeInspect(args: Record<string, unknown>): ReleaseControlToolResponse {
+    const cwd = typeof args.cwd === "string" && args.cwd.trim() ? resolve(args.cwd.trim()) : process.cwd();
+    if (typeof args.file !== "string" || !args.file.trim()) {
+        throw new Error("'file' is required for scope_inspect");
+    }
+    const trimmed = args.file.trim();
+    let filePath = resolve(cwd, trimmed);
+    if (!existsSync(filePath)) {
+        const candidates = [
+            resolve(cwd, "supacloud/fa/release-scopes", trimmed),
+            resolve(cwd, "release-scopes", trimmed),
+            resolve(cwd, "scopes", trimmed),
+        ];
+        const found = candidates.find(existsSync);
+        if (found) filePath = found;
+        else throw new Error(`Scope file not found: ${args.file}`);
+    }
+    let content: string;
+    try {
+        content = readFileSync(filePath, "utf8");
+    } catch (cause) {
+        throw new Error(`Failed to read scope file '${args.file}': ${cause instanceof Error ? cause.message : String(cause)}`);
+    }
+    let parsed: Record<string, unknown>;
+    try {
+        parsed = JSON.parse(content);
+    } catch {
+        throw new Error(`Scope file '${args.file}' is not valid JSON`);
+    }
+    if (!isRecord(parsed) || typeof parsed.baseCommit !== "string" || !/^[0-9a-f]{40}$/.test(parsed.baseCommit)) {
+        throw new Error(`Scope file '${args.file}' has missing or invalid baseCommit`);
+    }
+    const scopeSha256 = genericScopedReleaseScopeSha256(parsed);
+    const git = gitCommitInfo(cwd);
+
+    return releaseControlSuccess("release.scope_inspect", {
+        file: relative(cwd, filePath),
+        scope: {
+            task_id: parsed.taskId,
+            target_project_ref: parsed.targetProjectRef,
+            base_commit: parsed.baseCommit,
+            functions: parsed.functions,
+            excluded_functions: parsed.excludedFunctions,
+            migrations: parsed.migrations,
+            deferred_migrations: parsed.deferredMigrations,
+            baseline_migrations: parsed.baselineMigrations,
+            web: parsed.web,
+            scope_sha256: scopeSha256,
+        },
+        git: {
+            matches_head: git.head !== null && parsed.baseCommit === git.head,
+            matches_origin_main: git.originMain !== null && parsed.baseCommit === git.originMain,
+            matches_parent: git.parent !== null && parsed.baseCommit === git.parent,
+            current_head: git.head,
+            origin_main: git.originMain,
+        },
+    });
+}
+
+function parseCommaList(value: unknown): string[] {
+    if (!value) return [];
+    if (Array.isArray(value)) {
+        return [...new Set(value.map(String).map((s) => s.trim()).filter(Boolean))].sort();
+    }
+    if (typeof value === "string") {
+        return [...new Set(value.split(",").map((s) => s.trim()).filter(Boolean))].sort();
+    }
+    return [];
+}
+
+function handleScopeCreate(args: Record<string, unknown>, fallbackRef?: string): ReleaseControlToolResponse {
+    const cwd = typeof args.cwd === "string" && args.cwd.trim() ? resolve(args.cwd.trim()) : process.cwd();
+    if (typeof args.file !== "string" || !args.file.trim()) {
+        throw new Error("'file' is required for scope_create");
+    }
+    if (typeof args.task !== "string" || !args.task.trim()) {
+        throw new Error("'task' is required for scope_create");
+    }
+    const projectRef = (typeof args.ref === "string" && args.ref.trim()) || fallbackRef;
+    if (!projectRef) {
+        throw new Error("'ref' is required for scope_create");
+    }
+    if (!validProjectRef(projectRef)) {
+        throw new Error("'ref' is invalid for release controls");
+    }
+    const targetBaseCommit = resolveGitBaseCommit(cwd, args.base_commit);
+    const filePath = resolve(cwd, args.file.trim());
+    mkdirSync(dirname(filePath), { recursive: true });
+
+    const scope = {
+        baseCommit: targetBaseCommit,
+        excludedFunctions: parseCommaList(args.excluded_functions),
+        functions: parseCommaList(args.functions),
+        migrations: parseCommaList(args.migrations),
+        targetProjectRef: projectRef,
+        taskId: String(args.task).trim(),
+        web: Boolean(args.web),
+    };
+
+    const canonicalJson = genericScopedReleaseScopeJson(scope);
+    const scopeSha256 = genericScopedReleaseScopeSha256(scope);
+    const formatted = JSON.stringify(canonicalValue(scope), null, 2) + "\n";
+    writeFileSync(filePath, formatted, "utf8");
+
+    return releaseControlSuccess("release.scope_create", {
+        file: relative(cwd, filePath),
+        task_id: scope.taskId,
+        target_project_ref: projectRef,
+        base_commit: targetBaseCommit,
+        scope_sha256: scopeSha256,
+        scope,
+    });
+}
+
 export function registerReleaseTools(
     server: ToolServer,
-    http: HttpTransport,
-    options: { projectRef?: string; applicationHttp?: HttpTransport; applicationOrigin?: string } = {},
+    http?: HttpTransport,
+    options: {
+        localOnly?: boolean;
+        projectRef?: string;
+        applicationHttp?: HttpTransport;
+        applicationOrigin?: string;
+    } = {},
 ): void {
+    const localActions = ["scope_inspect", "scope_rebind", "scope_create"] as const;
+    const remoteActions = [
+        "logical_backup_list", "logical_backup_create", "logical_backup_restore",
+        "postgrest_status", "postgrest_restart",
+        "release_canary_fixture_stage_replay", "release_canary_fixture_disable_replay",
+    ] as const;
+    const allActions = [...remoteActions, ...localActions] as const;
+
     server.tool(
         "release",
-        "Verified release controls. Management actions use the Management API; release canary stage/disable replay additionally require the selected project's SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
+        "Verified release controls. Scope management actions operate locally; management actions use the Management API; release canary stage/disable replay additionally require the selected project's SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
         {
-            action: withDescription(stringEnum([
-                "logical_backup_list", "logical_backup_create", "logical_backup_restore", "postgrest_status", "postgrest_restart", "release_canary_fixture_stage_replay", "release_canary_fixture_disable_replay",
-            ]), "Release control action"),
+            action: withDescription(stringEnum(allActions as unknown as [string, ...string[]]), "Release control action"),
             ref: optional(Type.String(), options.projectRef ? "Optional override when not auto-linked" : "Project ref"),
+            file: optional(Type.String(), "[scope_inspect/scope_rebind/scope_create] Path to release scope JSON file"),
+            files: optional(Type.String(), "[scope_rebind] Comma-separated list of release scope JSON files"),
+            dir: optional(Type.String(), "[scope_rebind] Directory containing release scope JSON files (defaults to supacloud/fa/release-scopes, release-scopes, or scopes)"),
+            task: optional(Type.String(), "[scope_rebind/scope_create] Task ID or prefix filter for scope files"),
+            base_commit: optional(Type.String(), "[scope_rebind/scope_create] Target 40-character base commit SHA or git ref (defaults to origin/main -> main -> HEAD^ -> HEAD)"),
+            functions: optional(Type.String(), "[scope_create] Comma-separated list of functions to deploy"),
+            excluded_functions: optional(Type.String(), "[scope_create] Comma-separated list of functions to exclude"),
+            migrations: optional(Type.String(), "[scope_create] Comma-separated list of migrations to apply"),
+            web: optional(Type.Boolean(), "[scope_create] Whether web assets are included in release scope"),
+            dry_run: optional(Type.Boolean(), "[scope_rebind] Perform calculation and validation without writing files"),
+            cwd: optional(Type.String(), "[scope_inspect/scope_rebind/scope_create] Base directory for relative file and git resolution"),
             backup_id: optional(Type.String(), "[logical_backup_restore] Exact verified logical-full backup ID from the selected project inventory"),
             expected_sha256: optional(Type.String(), "[logical_backup_restore] Exact lowercase SHA-256 from the selected project inventory"),
             restore_confirmation: optional(Type.String(), "[logical_backup_restore] Exact RESTORE_PROJECT:<ref>:<backup_id>:<sha256> confirmation"),
@@ -390,7 +750,31 @@ export function registerReleaseTools(
             disable_request_id: optional(Type.String(), "[release_canary_fixture_disable_replay] Exact idempotent disable request UUID"),
             issuer: optional(Type.String(), "[release_canary_fixture_disable_replay] Exact HTTP(S) issuer"),
         },
-        async ({ action, ref, backup_id, expected_sha256, restore_confirmation, subject, request_id, fixture_id, disable_request_id, issuer }) => {
+        async (args: any) => {
+            const { action } = args;
+            if (action === "scope_rebind") {
+                return handleScopeRebind(args);
+            }
+            if (action === "scope_inspect") {
+                return handleScopeInspect(args);
+            }
+            if (action === "scope_create") {
+                return handleScopeCreate(args, options.projectRef);
+            }
+
+            if (options.localOnly || !http) {
+                return {
+                    isError: true,
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: "⚠️ This command requires Management API context. Run `supacloud-cli status` to inspect current detection.",
+                        },
+                    ],
+                };
+            }
+
+            const { ref, backup_id, expected_sha256, restore_confirmation, subject, request_id, fixture_id, disable_request_id, issuer } = args;
             const projectRef = typeof ref === "string" && ref || options.projectRef;
             if (!projectRef) throw new Error("'ref' is required for release controls");
             if (!validProjectRef(projectRef)) throw new Error("'ref' is invalid for release controls");
