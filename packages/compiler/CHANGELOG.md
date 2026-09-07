@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.10.0...compiler-v0.11.0) (2026-09-07)
+
+
+### Features
+
+* **app:** validate HTTP contracts and require route declarations ([#1201](https://github.com/vibeunion/supacloud/issues/1201)) ([6fc047b](https://github.com/vibeunion/supacloud/commit/6fc047b2349bc04fbbe0ff134558d6e45dc275eb))
+
 ## [0.10.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.9.0...compiler-v0.10.0) (2026-09-07)
 
 
