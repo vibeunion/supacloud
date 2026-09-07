@@ -6,6 +6,7 @@ import { type HttpInterceptorFn, type HttpRequestPayload } from "./interceptor";
 import { InjectionToken } from "./token";
 import { inject, injectAll } from "./inject";
 import { makeEnvironmentProviders, type EnvironmentProviders, type Provider } from "./provider";
+import { decodeHttpContract, HttpContractError, type HttpContract } from "./http_contract";
 
 export interface HttpClientConfig {
   baseUrl?: string;
@@ -144,6 +145,34 @@ export class HttpClient {
 
   patch<T = unknown>(url: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
     return this.request<T>("PATCH", url, { ...options, body });
+  }
+
+  /** Decoders own the input/result types; this entry never retries a failed command. */
+  async execute<Input, Result>(
+    contract: HttpContract<Input, Result>,
+    input: NoInfer<Input>,
+    options?: Omit<HttpRequestOptions, "body" | "observe" | "responseType">,
+  ): Promise<Result> {
+    const request = contract.request(decodeHttpContract(contract.input, input, "request"));
+    const response = await this.request<Response>(request.method, request.url, {
+      ...options, body: request.body, observe: "response",
+    });
+    if (!response.ok) {
+      throw new HttpErrorResponse({
+        url: response.url || request.url,
+        status: response.status,
+        statusText: response.statusText,
+        error: await response.json().catch(() => null),
+      });
+    }
+    let value: unknown;
+    try {
+      value = await response.json();
+    } catch {
+      // A successful HTTP status does not establish a valid JSON receipt.
+      throw new HttpContractError("response");
+    }
+    return decodeHttpContract(contract.result, value, "response");
   }
 
   async request<T = unknown>(method: string, url: string, options?: HttpRequestOptions): Promise<T> {

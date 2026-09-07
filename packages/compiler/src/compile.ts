@@ -5,6 +5,7 @@ import { validateGraph } from "./validate";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
+import { validateRouteContracts } from "./route-contracts";
 
 /**
  * Complete compilation pipeline: AST analysis -> validation -> generate static factory code and manifest.
@@ -30,6 +31,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
     }
   }
   const typeSafety = resolveTypeSafety(options);
+  if (options.requireRouteContracts) diagnostics.push(...validateRouteContracts(graph));
   const rendered = renderApplication(graph, {
     rootDir: options.rootDir,
     outDir: options.outDir,
@@ -103,6 +105,7 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
   }
 
   const typeSafety = resolveTypeSafety(options);
+  if (options.requireRouteContracts) diagnostics.push(...validateRouteContracts(graph));
   const rendered = renderApplication(graph, {
     rootDir: options.rootDir,
     outDir: options.outDir,

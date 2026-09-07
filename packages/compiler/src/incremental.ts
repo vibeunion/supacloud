@@ -159,6 +159,7 @@ function optionsKeyOf(options: CompileOptions): string {
     allowRouteCommandBindings: options.allowRouteCommandBindings,
     commandCapabilities: options.commandCapabilities,
     disallowControllerDirectDb: options.disallowControllerDirectDb,
+    requireRouteContracts: options.requireRouteContracts,
     detectOrphanModules: options.detectOrphanModules,
     generateClient: options.generateClient,
     generatePermissions: options.generatePermissions,

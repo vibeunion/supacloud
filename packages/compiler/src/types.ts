@@ -317,6 +317,8 @@ export interface ApplicationGraph {
 }
 
 export interface CompileOptions {
+  /** Require schemas for bound route inputs and responses. Does not prove runtime validation. */
+  requireRouteContracts?: boolean;
   /** Project root directory (containing tsconfig). */
   rootDir: string;
   /** Glob patterns, defaults to ['**\/*.module.ts', '**\/*.ts']. */

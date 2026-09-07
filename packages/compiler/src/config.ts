@@ -12,6 +12,7 @@ export interface SupaCloudConfig {
   outDir?: string;
   include?: string[];
   strict?: boolean;
+  requireRouteContracts?: boolean;
   generateClient?: boolean;
   generatePermissions?: boolean;
   moduleBoundaryPreset?: ModuleBoundaryPresetName;
@@ -30,6 +31,7 @@ export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
   outDir: "generated",
   include: ["**/*.module.ts", "**/*.ts"],
   strict: true,
+  requireRouteContracts: false,
   generateClient: true,
   generatePermissions: true,
   treeShakeUnusedProviders: true,
@@ -52,6 +54,7 @@ export function resolveSupacloudConfig(
   outDir: string;
   include: string[];
   strict: boolean;
+  requireRouteContracts: boolean;
   generateClient: boolean;
   generatePermissions: boolean;
   moduleBoundaryPreset: ModuleBoundaryPresetName;
@@ -64,6 +67,7 @@ export function resolveSupacloudConfig(
     outDir: resolve(cwd, resolved.outDir ?? DEFAULT_SUPACLOUD_CONFIG.outDir),
     include: resolved.include ?? [...DEFAULT_SUPACLOUD_CONFIG.include],
     strict: resolved.strict ?? DEFAULT_SUPACLOUD_CONFIG.strict,
+    requireRouteContracts: resolved.requireRouteContracts ?? DEFAULT_SUPACLOUD_CONFIG.requireRouteContracts,
     generateClient: resolved.generateClient ?? DEFAULT_SUPACLOUD_CONFIG.generateClient,
     generatePermissions: resolved.generatePermissions ?? DEFAULT_SUPACLOUD_CONFIG.generatePermissions,
     moduleBoundaryPreset: resolved.moduleBoundaryPreset ?? DEFAULT_SUPACLOUD_CONFIG.moduleBoundaryPreset,
@@ -97,6 +101,7 @@ export function compileOptionsFromConfig(
     outDir: resolved.outDir,
     include: resolved.include,
     strict: resolved.strict,
+    requireRouteContracts: resolved.requireRouteContracts,
     generateClient: resolved.generateClient,
     generatePermissions: resolved.generatePermissions,
     moduleBoundaryPreset: resolved.moduleBoundaryPreset,
