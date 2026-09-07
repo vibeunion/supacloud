@@ -1,7 +1,8 @@
 <script lang="ts">
   import { apiClient } from "$lib/api";
   import { page } from "$app/state";
-  import { AutoTable, Button } from "@svadmin/ui";
+  import AutoTable from "@svadmin/ui/components/AutoTable.svelte";
+  import Button from "@svadmin/ui/components/ui/button/button.svelte";
   import { t } from "svelte-i18n";
   import { Mail, UserPlus } from "lucide-svelte";
   import { createMutation } from "@tanstack/svelte-query";

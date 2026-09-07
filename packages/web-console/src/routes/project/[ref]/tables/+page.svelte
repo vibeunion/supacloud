@@ -1,7 +1,7 @@
 <script lang="ts">
   import { page } from "$app/state";
   import { resolve } from "$app/paths";
-  import { AutoTable } from "@svadmin/ui";
+  import AutoTable from "@svadmin/ui/components/AutoTable.svelte";
   import { apiClient } from "$lib/api";
   import { tableRowsRouteParams } from "$lib/admin/resources";
   import { createMutation } from "@tanstack/svelte-query";

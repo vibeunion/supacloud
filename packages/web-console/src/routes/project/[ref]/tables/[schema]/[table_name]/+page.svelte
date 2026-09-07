@@ -13,7 +13,7 @@
     provideAdminContext,
     type ResourceDefinition,
   } from "@svadmin/core";
-  import { AutoTable } from "@svadmin/ui";
+  import AutoTable from "@svadmin/ui/components/AutoTable.svelte";
   import { ChevronRight, Database, Table as TableIcon } from "lucide-svelte";
 
   const parentAdminContext = captureAdminContext();

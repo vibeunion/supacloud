@@ -32,13 +32,11 @@
     setTheme,
   } from "@svadmin/core";
   import { createSvelteKitRouterProvider } from "@svadmin/sveltekit";
-  import {
-    Button,
-    DevTools,
-    Header,
-    PageSkeleton,
-    Toast as SvadminToast,
-  } from "@svadmin/ui";
+  import Button from "@svadmin/ui/components/ui/button/button.svelte";
+  import DevTools from "@svadmin/ui/components/DevTools.svelte";
+  import Header from "@svadmin/ui/components/Header.svelte";
+  import PageSkeleton from "@svadmin/ui/components/PageSkeleton.svelte";
+  import SvadminToast from "@svadmin/ui/components/Toast.svelte";
   import { ChatDialog } from "@svadmin/ai-elements";
   import { QueryClient, QueryClientProvider } from "@tanstack/svelte-query";
   import { Menu, Plug, X } from "lucide-svelte";

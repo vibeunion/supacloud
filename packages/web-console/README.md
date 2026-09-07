@@ -29,6 +29,62 @@ bun run build
 
 The production build outputs to `build/` directory. In production, the Management API serves these assets as embedded SPA.
 
+## SVAdmin Styles
+
+The console uses `@svadmin/ui@0.69.0`, `@svadmin/core@0.49.1`,
+`@svadmin/ai-elements@0.4.1`, and `@svadmin/sveltekit@0.10.6`.
+`@svadmin/elysia` stays on npm's published `0.11.0`; a newer GitHub release
+alone is not an installable dependency.
+
+Tailwind v4 configuration lives in `src/app.css`. Import
+`@svadmin/ui/app.theme.css` once after Tailwind, not alongside
+`@svadmin/ui/app.css`. This entry includes precompiled component styles and
+semantic theme metadata, so the host does not scan UI package sources.
+AI elements retain their separate stylesheet and source scan.
+
+Use public component entries such as
+`@svadmin/ui/components/AutoTable.svelte`. The root UI entry re-exports
+`AdminApp`, which imports the default stylesheet as a side effect in development.
+The hybrid layout does not use `AdminApp`; importing individual components
+avoids a second stylesheet overriding the host palette.
+
+Theme overrides use complete CSS colors such as `--background: hsl(0 0% 100%)`,
+not bare HSL channels. The UI stylesheet provides the `--color-*` aliases;
+the console preserves its existing light/dark palette and class-based dark mode.
+
+Migration acceptance:
+
+```gherkin
+Scenario: Existing provider behavior
+  Given the upgraded console uses the existing authenticated providers
+  When users load project resources or stream an assistant response
+  Then the resource envelopes, tenant scope, and streaming behavior remain unchanged
+
+Scenario: Table list identity
+  Given the table-list API returns public-schema table names without an id field
+  When the list contains multiple tables
+  Then each row uses table_name as its identity without duplicate-key errors
+
+Scenario: Persistent column visibility
+  Given a table contains an Email column
+  When the user hides the column and remounts the table
+  Then the column stays hidden in desktop and mobile views and can be restored
+
+Scenario: Precompiled component styles
+  Given the host does not scan SVAdmin UI sources
+  When the console stylesheet is compiled
+  Then the table utility aliases and semantic component styles are included
+
+Scenario: Theme compatibility
+  Given the console uses complete semantic color values
+  When the user switches between light and dark mode
+  Then both host utilities and SVAdmin components use valid colors
+```
+
+Run `bun test`, `bun run check`, and `bun run build` from this package.
+Browser checks with mocked API responses verify rendering only, not live backend
+authorization or deployment acceptance.
+
 ## Tech Stack
 
 - [SvelteKit](https://kit.svelte.dev/) - SPA application framework used with `adapter-static`

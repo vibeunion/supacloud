@@ -5,7 +5,7 @@
   import { t } from "svelte-i18n";
   import { Loader2, Activity, Server, Pause, RotateCw, Trash2, AlertTriangle, Globe, CheckCircle2, XCircle } from "lucide-svelte";
   import { toast } from "svelte-sonner";
-  import { AutoForm } from "@svadmin/ui";
+  import AutoForm from "@svadmin/ui/components/AutoForm.svelte";
   import { useShow } from "@svadmin/core";
   import { useQueryClient, createMutation, createQuery } from "@tanstack/svelte-query";
 

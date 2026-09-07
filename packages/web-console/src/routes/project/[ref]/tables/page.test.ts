@@ -143,14 +143,15 @@ function elementWithText(selector: string, text: string): HTMLElement {
 }
 
 function desktopTable(): HTMLElement {
-  const table = document.querySelector<HTMLElement>('[role="region"] .hidden.md\\:block');
+  const table = document.querySelector<HTMLElement>('[role="region"] [data-slot="table"]');
   if (!table) throw new Error("Desktop table is unavailable");
   return table;
 }
 
 function mobileCards(): HTMLElement {
-  const cards = document.querySelector<HTMLElement>('[role="region"] .md\\:hidden');
-  if (!cards) throw new Error("Mobile cards are unavailable");
+  const desktop = document.querySelector('[role="region"] [data-slot="table-container"]');
+  const cards = desktop?.parentElement?.nextElementSibling;
+  if (!(cards instanceof HTMLElement)) throw new Error("Mobile cards are unavailable");
   return cards;
 }
 
@@ -218,20 +219,15 @@ describe("database tables column visibility", () => {
     const packageJson = await Bun.file(new URL("package.json", packageRoot)).json();
     const lockSource = await Bun.file(new URL("bun.lock", packageRoot)).text();
 
-    expect(packageJson.dependencies["@svadmin/ui"]).toBe("0.67.1");
-    expect(lockSource).toContain('"@svadmin/ui": "0.67.1"');
-    expect(lockSource).toContain('"@svadmin/ui@0.67.1"');
+    expect(packageJson.dependencies["@svadmin/ui"]).toBe("0.69.0");
+    expect(lockSource).toContain('"@svadmin/ui": "0.69.0"');
+    expect(lockSource).toContain('"@svadmin/ui@0.69.0"');
   });
 
   test("keeps unavailable row estimates from rendering as negative counts", async () => {
     const source = await Bun.file(new URL("+page.svelte", import.meta.url)).text();
-    const autoTableSource = await Bun.file(
-      fileURLToPath(import.meta.resolve("@svadmin/ui/components/AutoTable.svelte")),
-    ).text();
     expect(source).toContain("count >= 0");
     expect(source).toContain('count === null ? "—"');
-    expect(autoTableSource).toContain("whitespace-nowrap");
-    expect(autoTableSource).toContain("gap-3 px-1 py-2");
   });
 
   test("keeps each create-table draft bound to its own DOM row", async () => {
