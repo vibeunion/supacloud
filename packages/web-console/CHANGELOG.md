@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.37.0...web-console-v0.38.0) (2026-09-07)
+
+
+### Features
+
+* **web-console:** upgrade SVAdmin dependencies and Tailwind v4 theme styles ([#1191](https://github.com/vibeunion/supacloud/issues/1191)) ([67fa640](https://github.com/vibeunion/supacloud/commit/67fa640ccc617c7131f49132a92b346151aeb711))
+
 ## [0.37.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.36.2...web-console-v0.37.0) (2026-09-05)
 
 
