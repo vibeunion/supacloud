@@ -1476,6 +1476,47 @@ describe("CaddyGatewayProvider", () => {
         restore();
     });
 
+    test.each(["tenant-cors", "frontend", "dependent-frontend"])(
+        "%s reconciliation preserves custom route CORS ownership",
+        async (operation) => {
+            const calls: Array<{ url: string; method: string; body: any }> = [];
+            const restore = captureFetch(calls);
+            const originalOwner = config.authRuntimeOwnerRef;
+            try {
+                const provider = new CaddyGatewayProvider();
+                config.authRuntimeOwnerRef = operation === "dependent-frontend" ? "proj123" : "";
+                expect((await provider.setupUpstream("proj123", 3000, 9999)).success).toBe(true);
+                expect((await provider.configureCustomGatewayRoutes("proj123", [
+                    { id: "public-font", hosts: ["static.example.com"], path: "/font.woff2", static_root: "/srv/fonts", cors: ["*"] },
+                    { id: "private-docs", hosts: ["docs.example.com"], path: "/*", static_root: "/srv/docs", cors: ["https://reader.example.com"] },
+                    { id: "no-cors", hosts: ["download.example.com"], path: "/*", static_root: "/srv/download" },
+                ])).success).toBe(true);
+                const loadedRoutes = () => calls.filter((call) => call.method === "POST" && call.url.endsWith("/load"))
+                    .at(-1)?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
+                const customRoutes = () => loadedRoutes().filter((route: any) =>
+                    route["@id"].startsWith("route-custom-gateway-proj123-"));
+                const before = structuredClone(customRoutes());
+                expect(before).toHaveLength(3);
+                if (operation === "tenant-cors") {
+                    await provider.setCors("proj123", ["https://tenant.example.com"]);
+                } else {
+                    await provider.configureFrontendRoute({
+                        projectRef: operation === "dependent-frontend" ? "dependent" : "proj123",
+                        deploymentId: "web", hosts: ["new-app.example.com"], mode: "static", root: "/srv/app",
+                    });
+                }
+                expect(customRoutes()).toEqual(before);
+                const rest = loadedRoutes().find((route: any) => route["@id"] === "route-project-proj123-rest");
+                const cors = JSON.stringify(findCorsSubroute(rest));
+                expect(cors).toContain(operation === "tenant-cors" ? "https://tenant.example.com" : "new-app.example.com");
+                expect(cors).not.toContain('"Origin":["*"]');
+            } finally {
+                config.authRuntimeOwnerRef = originalOwner;
+                restore();
+            }
+        },
+    );
+
     test("configureCustomGatewayRoutes resolves managed functions on every reconcile", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restoreFetch = captureFetch(calls);
