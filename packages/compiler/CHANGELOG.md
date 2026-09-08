@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.11.0...compiler-v0.12.0) (2026-09-08)
+
+
+### Features
+
+* add SupAuth identity and FA-driven command governance ([#1220](https://github.com/vibeunion/supacloud/issues/1220)) ([66a77ca](https://github.com/vibeunion/supacloud/commit/66a77caea086bb1282772dd9401bd2adb9c04342))
+
 ## [0.11.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.10.0...compiler-v0.11.0) (2026-09-07)
 
 
