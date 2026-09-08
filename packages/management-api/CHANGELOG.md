@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.76.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.75.1...management-api-v0.76.0) (2026-09-08)
+
+
+### Features
+
+* **observability:** trace request and background function execution ([#1212](https://github.com/vibeunion/supacloud/issues/1212)) ([589b1e8](https://github.com/vibeunion/supacloud/commit/589b1e8ac07ea9e91f4a486221a90bf952b2d92d))
+
+
+### Bug Fixes
+
+* **gateway:** preserve custom route CORS during reconciliation ([#1213](https://github.com/vibeunion/supacloud/issues/1213)) ([9fbfdd9](https://github.com/vibeunion/supacloud/commit/9fbfdd9e82ec29ace7034d429453512ab7952978))
+
 ## [0.75.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.75.0...management-api-v0.75.1) (2026-09-08)
 
 
