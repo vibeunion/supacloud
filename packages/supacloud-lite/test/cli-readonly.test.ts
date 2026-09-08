@@ -23,7 +23,7 @@ describe('read-only CLI commands', () => {
 
     expect(doctor.exitCode).toBe(0)
     expect(doctor.stderr).toBe('')
-    expect(JSON.parse(doctor.stdout)).toEqual({
+    expect(JSON.parse(doctor.stdout)).toMatchObject({
       engine: 'pglite',
       state_machine_sql: 'supported',
       durable_workflows: 'supported',

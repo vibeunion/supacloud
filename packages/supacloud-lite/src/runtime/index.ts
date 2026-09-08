@@ -28,6 +28,9 @@ import { NetService, type NetDelivery } from './net/service.js'
 import { RetentionService } from './retention/service.js'
 import type { BackendConfig, Mailer, MigrationFile, RequestContext, SmsSender } from './types.js'
 import { assertSecretsSafe, isNetworkExposed } from './security.js'
+import { GraphqlHandler, inspectGraphql, type GraphqlCapability } from './graphql.js'
+import { runtimeMode } from './functions/profile.js'
+import { ApiError } from './types.js'
 
 export * from './types.js'
 export { Database } from './db/database.js'
@@ -71,6 +74,7 @@ export { inspectDb, type TableInfo } from './db/inspect.js'
  * Returned by {@link createBackend}.
  */
 export interface SupaCloudLiteBackend {
+  graphql: GraphqlCapability
   /** The whole backend as a fetch handler. Pass to supabase-js as global.fetch for in-process use. */
   fetch: typeof fetch
   /** The database engine wrapper - run raw SQL, inspect schema, apply migrations. */
@@ -130,6 +134,7 @@ const CORS_HEADERS: Record<string, string> = {
  *   host with a weak/default JWT secret or a derived vault key.
  */
 export async function createBackend(config: BackendConfig = {}): Promise<SupaCloudLiteBackend> {
+  const mode = runtimeMode(config.runtimeMode)
   const jwtSecret = config.jwtSecret ?? randomSecret()
   const apiUrl = config.apiUrl ?? 'http://localhost:54321'
   const siteUrl = config.siteUrl ?? apiUrl
@@ -156,7 +161,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
 
   const engine = config.engine
 
-  const db = await Database.create(engine ?? config.dataDir, { vaultKey })
+  const db = await Database.create(engine ?? config.dataDir, { vaultKey, strict: mode === 'strict' })
 
   // Anything created after the engine (a running native Postgres child, the
   // realtime LISTEN, background timers) must be torn down if a later step throws
@@ -176,6 +181,14 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
   } catch (e) {
     await failStartup(e)
   }
+
+  const graphqlCapability: GraphqlCapability = config.graphql?.enabled === false
+    ? { status: 'disabled', extension: 'pg_graphql' }
+    : await inspectGraphql(db.engine).catch(failStartup)
+  if (config.graphql?.enabled === true && graphqlCapability.status !== 'supported') {
+    await failStartup(new Error(`${graphqlCapability.reason}: GraphQL requires an installed pg_graphql extension with graphql.resolve; PGlite and stock native binaries do not bundle it`))
+  }
+  const graphql = await Promise.resolve().then(() => new GraphqlHandler(db, graphqlCapability, config.graphql, config.dbSchemas)).catch(failStartup)
 
   const pgredis = await PgredisCache.create(db).catch(failStartup)
 
@@ -231,7 +244,12 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
   })
   cleanup.push(() => auth.stop())
 
-  const realtime = new RealtimeEngine(db, jwtSecret)
+  const realtime = new RealtimeEngine(db, jwtSecret, config.externalIdentity ? async (token) => {
+    const request = new Request(`${apiUrl}/realtime/v1`, { headers: { authorization: `Bearer ${token}` } })
+    const context = await resolveContext(request, new URL(request.url))
+    if (context instanceof Response) throw new Error('Realtime authentication denied')
+    return context
+  } : undefined)
   const webhooks = new WebhooksService(
     db,
     config.webhookFetch,
@@ -282,7 +300,9 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
   } catch (error) {
     await failStartup(error)
   }
-  const functions = new FunctionsHandler(fnMap as Map<string, FunctionRegistryValue>, fnEnv, pgredis)
+  const functions = await Promise.resolve().then(() =>
+    new FunctionsHandler(fnMap as Map<string, FunctionRegistryValue>, fnEnv, pgredis, mode)
+  ).catch(failStartup)
 
   async function resolveContext(req: Request, url: URL): Promise<RequestContext | Response> {
     const authz = req.headers.get('authorization')
@@ -296,7 +316,19 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
         })
       )
     }
-    const claims = await verifyJwt(token, jwtSecret)
+    let claims = await verifyJwt(token, jwtSecret)
+    if (config.externalIdentity && token !== anonKey && token !== serviceRoleKey) {
+      try {
+        claims = await config.externalIdentity(req)
+        if (claims.role !== 'authenticated' || typeof claims.sub !== 'string' || !claims.sub ||
+          !Number.isSafeInteger(claims.exp) || claims.exp! * 1000 <= Date.now()) {
+          throw new ApiError(401, { message: 'Invalid external identity' })
+        }
+      } catch (error) {
+        const status = error instanceof ApiError && [401, 403, 503].includes(error.status) ? error.status : 503
+        return withCors(Response.json({ message: status === 503 ? 'Identity verification unavailable' : 'External access denied' }, { status }))
+      }
+    }
     if (!claims) {
       return withCors(
         new Response(JSON.stringify({ message: 'Invalid API key' }), {
@@ -354,7 +386,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
         return withCors(await storage.handle(req, { role: 'anon', claims: null }, url))
       }
     }
-    if (config.authEnabled === false && path.startsWith('/auth/v1')) {
+    if ((config.authEnabled === false || config.externalIdentity) && path.startsWith('/auth/v1')) {
       return withCors(
         new Response(JSON.stringify({ message: 'Auth service is disabled' }), {
           status: 404,
@@ -397,6 +429,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
     if (ctx instanceof Response) return ctx
 
     if (path.startsWith('/rest/v1')) return withCors(await rest.handle(req, ctx, url))
+    if (path === '/graphql/v1' || path === '/graphql/v1/') return withCors(await graphql.handle(req, ctx))
     if (path.startsWith('/functions/v1')) return withCors(await functions.handle(req, ctx, url))
     if (path.startsWith('/storage/v1')) return withCors(await storage.handle(req, ctx, url))
     if (path.startsWith('/realtime/v1')) {
@@ -459,6 +492,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
   )
 
   return {
+    graphql: graphqlCapability,
     fetch: publicFetch,
     db,
     realtime,
@@ -473,7 +507,16 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
     logs,
     inbox,
     smsInbox,
-    migrate: (migrations, seedSql) => db.runMigrations(migrations, seedSql),
+    migrate: async (migrations, seedSql) => {
+      const applied = await db.runMigrations(migrations, seedSql)
+      if (config.graphql?.enabled !== false) {
+        const capability = await inspectGraphql(db.engine)
+        delete graphqlCapability.version
+        delete graphqlCapability.reason
+        Object.assign(graphqlCapability, capability)
+      }
+      return applied
+    },
     close: () => {
       closePromise ??= (async () => {
         let firstError: unknown

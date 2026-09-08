@@ -3,7 +3,7 @@ import { dirname, join, parse, relative, resolve, sep } from 'node:path'
 import { create as createTar, extract as extractTar } from 'tar'
 import type { ConfiguredStorageBackend, DatabaseEngine, ProjectPaths } from './project-runtime.js'
 import { recoverStaleDataDirLock } from './runtime/db/data-dir-lock.js'
-import { NATIVE_POSTGRES_MAJOR } from './runtime/node/native/engine.js'
+import { nativePostgresMajor } from './runtime/node/native/engine.js'
 
 const SNAPSHOT_FORMAT = 'supacloud-lite-snapshot'
 const SNAPSHOT_VERSION = 1
@@ -31,6 +31,7 @@ export interface CreateSnapshotOptions {
 }
 
 export interface RestoreSnapshotOptions {
+  postgresDir?: string
   paths: ProjectPaths
   storageBackend: ConfiguredStorageBackend
   input: string
@@ -139,7 +140,10 @@ export async function restoreSnapshot(options: RestoreSnapshotOptions): Promise<
         'restore with the matching --storage-backend value'
       )
     }
-    assertDatabaseSnapshotCompatible(manifest, paths)
+    assertDatabaseSnapshotCompatible(manifest, paths, options.postgresDir)
+    if (manifest.databaseEngine === 'native' && await readPostgresMajor(join(payloadRoot, 'database')) !== manifest.postgresMajor) {
+      throw new Error('native PostgreSQL snapshot payload does not match its declared major version')
+    }
     if (manifest.includesDatabase !== Boolean(paths.dataDir)) {
       throw new Error('snapshot database mode does not match the target; do not restore a persistent snapshot into --memory')
     }
@@ -304,7 +308,7 @@ function isSnapshotManifest(value: unknown): value is SnapshotManifest {
     (candidate.postgresMajor === undefined || typeof candidate.postgresMajor === 'string')
 }
 
-function assertDatabaseSnapshotCompatible(manifest: SnapshotManifest, paths: ProjectPaths): void {
+function assertDatabaseSnapshotCompatible(manifest: SnapshotManifest, paths: ProjectPaths, postgresDir?: string): void {
   const sourceEngine = manifest.databaseEngine ?? 'pglite'
   if (sourceEngine !== paths.databaseEngine) {
     throw new Error(`snapshot database engine is ${sourceEngine}, but the target uses ${paths.databaseEngine}`)
@@ -317,10 +321,11 @@ function assertDatabaseSnapshotCompatible(manifest: SnapshotManifest, paths: Pro
         `target is ${process.platform}/${process.arch}`
     )
   }
-  if (manifest.postgresMajor !== NATIVE_POSTGRES_MAJOR) {
+  const expectedMajor = nativePostgresMajor(postgresDir)
+  if (manifest.postgresMajor !== expectedMajor) {
     throw new Error(
       `native PostgreSQL snapshot major is ${manifest.postgresMajor ?? 'unknown'}, ` +
-        `but this Lite build uses ${NATIVE_POSTGRES_MAJOR}`
+        `but the selected PostgreSQL installation uses ${expectedMajor}`
     )
   }
 }

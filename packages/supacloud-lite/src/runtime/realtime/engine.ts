@@ -50,6 +50,7 @@ interface PostgresBinding {
 }
 
 interface Channel {
+  expiryTimer?: ReturnType<typeof setTimeout>
   /** Phoenix topic, e.g. `realtime:room-1` */
   topic: string
   /** the join message's ref, echoed back on replies for this channel */
@@ -95,12 +96,14 @@ export class RealtimeEngine {
 
   constructor(
     private db: Database,
-    private jwtSecret?: string
+    private jwtSecret?: string,
+    private resolveExternalToken?: (token: string) => Promise<RequestContext>
   ) {}
 
   /** Resolve a subscriber's access token to a role/claims context. */
   private async contextFromToken(token: string | undefined): Promise<RequestContext> {
     if (!token || !this.jwtSecret) return { role: 'anon', claims: null }
+    if (this.resolveExternalToken) return this.resolveExternalToken(token)
     const claims = await verifyJwt(token, this.jwtSecret)
     if (!claims) return { role: 'anon', claims: null }
     const role = typeof claims.role === 'string' ? claims.role : 'authenticated'
@@ -190,7 +193,10 @@ export class RealtimeEngine {
     const stopDbBroadcast = this.stopDbBroadcast
     this.stopCdc = null
     this.stopDbBroadcast = null
-    for (const conn of this.connections) conn.socket.close(1001, 'server shutting down')
+    for (const conn of this.connections) {
+      for (const topic of conn.channels.keys()) this.leaveChannel(conn, topic)
+      conn.socket.close(1001, 'server shutting down')
+    }
     this.connections.clear()
     const [cdcStop, broadcastStop] = await Promise.allSettled([
       Promise.resolve().then(() => stopCdc?.()),
@@ -290,10 +296,23 @@ export class RealtimeEngine {
         case 'access_token':
           {
             // supabase-js setAuth() refreshes the subscriber's token; re-derive ctx
-            const ctx = await this.contextFromToken(msg.payload?.access_token as string | undefined)
-            const channel = conn.channels.get(msg.topic)
-            if (channel) channel.ctx = ctx
-            else for (const c of conn.channels.values()) c.ctx = ctx
+            const selected = conn.channels.get(msg.topic)
+            const channels = selected ? [selected] : [...conn.channels.values()]
+            try {
+              const ctx = await this.contextFromToken(msg.payload?.access_token as string | undefined)
+              for (const channel of channels) {
+                if (this.resolveExternalToken && channel.private) {
+                  const access = await this.authorizePrivate(channel.topic.replace(/^realtime:/, ''), ctx)
+                  if (!access.read) throw new Error('Realtime authentication denied')
+                  channel.canBroadcast = access.write
+                }
+                channel.ctx = ctx
+                this.scheduleExternalExpiry(conn, channel)
+              }
+            } catch (error) {
+              if (this.resolveExternalToken) for (const channel of channels) this.leaveChannel(conn, channel.topic)
+              throw error
+            }
           }
           break
         default:
@@ -369,7 +388,9 @@ export class RealtimeEngine {
       private: isPrivate,
       canBroadcast,
     }
+    if (this.resolveExternalToken) this.leaveChannel(conn, msg.topic)
     conn.channels.set(msg.topic, channel)
+    this.scheduleExternalExpiry(conn, channel)
 
     this.reply(conn, msg, 'ok', {
       postgres_changes: bindings.map((b) => ({
@@ -409,6 +430,7 @@ export class RealtimeEngine {
   private leaveChannel(conn: Connection, topic: string): void {
     const channel = conn.channels.get(topic)
     if (!channel) return
+    if (channel.expiryTimer) clearTimeout(channel.expiryTimer)
     conn.channels.delete(topic)
     // presence leave
     const state = this.presence.get(topic)
@@ -423,6 +445,18 @@ export class RealtimeEngine {
         ref: null,
       })
     }
+  }
+
+  private scheduleExternalExpiry(conn: Connection, channel: Channel): void {
+    if (channel.expiryTimer) clearTimeout(channel.expiryTimer)
+    const expires = channel.ctx.claims?.exp
+    if (!this.resolveExternalToken || typeof expires !== 'number') return
+    channel.expiryTimer = setTimeout(() => {
+      if (expires * 1000 > Date.now()) return this.scheduleExternalExpiry(conn, channel)
+      this.leaveChannel(conn, channel.topic)
+      this.send(conn, { topic: channel.topic, event: 'phx_error', payload: { reason: 'token expired' }, ref: null })
+    }, Math.max(0, Math.min(expires * 1000 - Date.now(), 2_147_483_647)))
+    channel.expiryTimer.unref?.()
   }
 
   /**

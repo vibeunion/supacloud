@@ -14,6 +14,7 @@ import { runWithDenoEnv } from './deno-shim.js'
 import { runWithBackgroundTasks } from './edge-runtime-shim.js'
 import { runWithFetchPolicy } from './fetch-policy.js'
 import { type PgredisCache, runWithPgredisCache } from './pgredis.js'
+import { strictFunction, type RuntimeMode } from './profile.js'
 
 /** An edge function: a fetch handler invoked with the resolved request context. */
 export type EdgeFunction = (req: Request, ctx: FunctionContext) => Response | Promise<Response>
@@ -165,11 +166,15 @@ export class FunctionsHandler {
   constructor(
     private functions: Map<string, FunctionRegistryValue>,
     private env: FunctionContext['env'],
-    private pgredis: PgredisCache
-  ) {}
+    private pgredis: PgredisCache,
+    private mode: RuntimeMode = 'development'
+  ) {
+    if (mode === 'strict') for (const entry of functions.values()) strictFunction(normalizeEntry(entry))
+  }
 
   /** Register (or replace) a function under `name`, served at /functions/v1/<name>. */
   register(name: string, fn: FunctionRegistryValue): void {
+    if (this.mode === 'strict') strictFunction(normalizeEntry(fn))
     this.functions.set(name, fn)
   }
 
@@ -194,7 +199,7 @@ export class FunctionsHandler {
     if (!value) {
       return json(404, { error: `function "${name}" not found` })
     }
-    const entry = normalizeEntry(value)
+    const entry = this.mode === 'strict' ? strictFunction(normalizeEntry(value)) : normalizeEntry(value)
     const limits = entry.limits
     const capabilities = entry.capabilities
 

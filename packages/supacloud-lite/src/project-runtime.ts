@@ -1,5 +1,6 @@
 import { chmod, link, lstat, mkdir, readFile, realpath, unlink, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join, parse, relative, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { createBackend, type SupaCloudLiteBackend } from './runtime/index.js'
 import { mintProjectApiKeys } from './runtime/jwt.js'
 import type { WebhookConfig } from './runtime/webhooks/service.js'
@@ -17,6 +18,10 @@ import { loadSupabaseProject } from './runtime/node/project.js'
 import { MemoryStorageDriver } from './runtime/storage/driver.js'
 import { S3StorageDriver, type S3StorageDriverOptions } from './runtime/storage/s3-driver.js'
 import type { SmsSender, StorageDriver } from './runtime/types.js'
+import type { ExternalIdentityVerifier } from './runtime/identity.js'
+import type { RuntimeMode } from './runtime/functions/profile.js'
+import type { GraphqlOptions } from './runtime/graphql.js'
+import type { SeedOptions } from './runtime/node/project.js'
 
 const RESET_INITIALIZATION_ERROR = 'db reset requires initialized state; run "supacloud-lite migrate" first'
 const RESET_INVALID_SECRETS_ERROR = 'db reset requires a valid project secrets marker; restore the state before retrying'
@@ -37,6 +42,12 @@ export interface ProjectPaths {
 }
 
 export interface ProjectRuntimeOptions {
+  runtimeMode?: RuntimeMode
+  graphql?: GraphqlOptions
+  externalIdentity?: ExternalIdentityVerifier
+  identityModule?: string
+  postgresDir?: string
+  migrationBindings?: SeedOptions['bindings']
   projectDir?: string
   stateDir?: string
   dataDir?: string
@@ -63,11 +74,13 @@ export interface ProjectRuntimeOptions {
   includeFunctions?: boolean
   includeWebhooks?: boolean
   includeSeed?: boolean
+  includeIdentity?: boolean
   startRuntimeServices?: boolean
   log?: (message: string) => void
 }
 
 export interface ProjectBackend {
+  bindingAttestation?: Awaited<ReturnType<typeof loadSupabaseProject>>['bindingAttestation']
   backend: SupaCloudLiteBackend
   config: ProjectConfig
   paths: ProjectPaths
@@ -262,12 +275,17 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
   const host = options.host ?? process.env.SUPACLOUD_LITE_HOST ?? '127.0.0.1'
   const port = options.port ?? parsePort(process.env.SUPACLOUD_LITE_PORT ?? process.env.PORT, 54321)
   const url = options.apiUrl ?? process.env.SUPACLOUD_LITE_API_URL ?? `http://${displayHost(host)}:${port}`
-  const config = loadProjectConfig(paths.projectDir)
+  const config = loadProjectConfig(paths.projectDir, process.env, options.runtimeMode)
+  const bindings = options.migrationBindings ?? await loadProjectBindings(paths.projectDir, config)
   const project = await loadSupabaseProject(paths.projectDir, {
     enabled: options.includeSeed === false ? false : config.seed.enabled,
     paths: config.seed.paths,
+    bindings,
   })
-  const functions = options.includeFunctions === false ? new Map() : await loadFunctions(paths.projectDir, config.functions)
+  const externalIdentity = options.externalIdentity ?? (options.includeIdentity !== false
+    ? await loadProjectIdentity(paths.projectDir, options.identityModule ?? config.lite.identityModule)
+    : undefined)
+  const functions = options.includeFunctions === false ? new Map() : await loadFunctions(paths.projectDir, config.functions, config.lite.runtimeMode)
   const functionEnv = options.includeFunctions === false ? {} : await loadFunctionEnv(paths.projectDir)
   const secrets = await ensureProjectSecrets(paths)
   const webhooks = options.includeWebhooks === false ? [] : await loadWebhooks(paths.projectDir)
@@ -285,12 +303,15 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
 
   const storageDriver = options.storageDriver ?? createStorageDriver(configuredStorageBackend, paths.storageDir, options.s3)
   const engine = databaseEngine === 'native'
-    ? await createNativeEngine({ dataDir: paths.dataDir!, log: options.log, replication })
+    ? await createNativeEngine({ dataDir: paths.dataDir!, installDir: options.postgresDir, log: options.log, replication })
     : undefined
   let backend: SupaCloudLiteBackend | undefined
   try {
     backend = await createBackend({
       engine,
+      runtimeMode: config.lite.runtimeMode,
+      graphql: options.graphql ?? config.lite.graphql,
+      externalIdentity,
       dataDir: databaseEngine === 'pglite' ? paths.dataDir : undefined,
       jwtSecret: secrets.jwtSecret,
       vaultKey: secrets.vaultKey,
@@ -343,6 +364,7 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
   }
 
   return {
+    bindingAttestation: project.bindingAttestation,
     backend,
     config,
     paths,
@@ -356,6 +378,23 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
     databaseEngine,
     replicationProfile: replication?.profile,
   }
+}
+
+export async function loadProjectBindings(projectDir: string, config: ProjectConfig): Promise<SeedOptions['bindings']> {
+  const bindings = config.lite.migrationBindings
+  if (!bindings) return undefined
+  return {
+    manifest: JSON.parse(await readFile(resolve(projectDir, bindings.manifest), 'utf8')),
+    target: { environment: bindings.environment, projectRef: bindings.projectRef },
+    values: process.env,
+  }
+}
+
+async function loadProjectIdentity(projectDir: string, module?: string): Promise<ExternalIdentityVerifier | undefined> {
+  if (!module) return undefined
+  const imported = await import(pathToFileURL(resolve(projectDir, module)).href) as { default?: unknown }
+  if (typeof imported.default !== 'function') throw new Error('Lite identity module must default-export an external identity verifier')
+  return imported.default as ExternalIdentityVerifier
 }
 
 export function resolveNativeReplicationOptions(

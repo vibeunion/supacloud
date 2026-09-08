@@ -127,6 +127,45 @@ describe('project runtime', () => {
     }
   })
 
+  test('embedded fetch retains configured identity without background services', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-embedded-identity-'))
+    temporaryDirectories.push(projectDir)
+    await mkdir(join(projectDir, 'supabase'), { recursive: true })
+    await writeFile(join(projectDir, 'supabase', 'config.toml'), '[lite.identity]\nmodule = "identity.ts"\n')
+    await writeFile(join(projectDir, 'identity.ts'), 'export default async () => { throw new Error("identity unavailable") }\n')
+    const project = await createProjectBackend({
+      projectDir, memory: true, includeFunctions: false, includeWebhooks: false,
+      startRuntimeServices: false, log: () => {},
+    })
+    try {
+      expect((await project.backend.fetch('http://local/auth/v1/health')).status).toBe(404)
+      expect((await project.backend.fetch('http://local/rest/v1/items', {
+        headers: { authorization: 'Bearer external-token' },
+      })).status).toBe(503)
+    } finally {
+      await project.backend.close()
+    }
+  })
+
+  test('embedded fetch enforces required GraphQL while maintenance can explicitly opt out', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-embedded-graphql-'))
+    temporaryDirectories.push(projectDir)
+    await mkdir(join(projectDir, 'supabase'), { recursive: true })
+    await writeFile(join(projectDir, 'supabase', 'config.toml'), '[lite.graphql]\nenabled = true\n')
+    const options = {
+      projectDir, memory: true, includeFunctions: false, includeWebhooks: false,
+      startRuntimeServices: false, log: () => {},
+    }
+    await expect(createProjectBackend(options)).rejects.toThrow('PG_GRAPHQL_NOT_INSTALLED')
+    await writeFile(join(projectDir, 'supabase', 'config.toml'),
+      '[lite.graphql]\nenabled = true\n[lite.identity]\nmodule = "missing-identity.ts"\n')
+    const maintenance = await createProjectBackend({
+      ...options, includeIdentity: false, graphql: { enabled: false },
+    })
+    await maintenance.backend.close()
+    await expect(createProjectBackend({ ...options, graphql: { enabled: false } })).rejects.toThrow()
+  })
+
   test('selects explicit and custom storage backends', async () => {
     const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-storage-backend-'))
     temporaryDirectories.push(projectDir)

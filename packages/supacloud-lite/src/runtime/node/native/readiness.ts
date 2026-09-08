@@ -1,4 +1,6 @@
 import type { DbEngine } from '../../db/engine.js'
+import type { GraphqlCapability } from '../../graphql.js'
+import type { RuntimeMode } from '../../functions/profile.js'
 import {
   POWERSYNC_PUBLICATION,
   POWERSYNC_REPLICATION_ROLE,
@@ -8,6 +10,11 @@ import {
 export type LiteCapabilityStatus = 'supported' | 'static' | 'disabled' | 'unsupported'
 
 export interface LiteDoctorReport {
+  graphql: GraphqlCapability
+  runtime_mode: RuntimeMode
+  identity: { mode: 'local' | 'external'; verification: 'built-in' | 'unverified' }
+  migrations: { formats: string[]; content_check: 'supported'; target_bindings: 'supported' }
+  project_release_manifests: 'unsupported'
   engine: 'pglite' | 'native'
   state_machine_sql: 'supported'
   durable_workflows: 'supported'
@@ -72,8 +79,16 @@ export function liteCapabilities(
   engine: 'pglite' | 'native',
   replicationProfile?: 'powersync',
 ): LiteDoctorReport {
+  const common = {
+    graphql: { status: 'unverified', extension: 'pg_graphql', reason: 'DATABASE_NOT_INSPECTED' } as GraphqlCapability,
+    runtime_mode: 'development' as const,
+    identity: { mode: 'local' as const, verification: 'built-in' as const },
+    migrations: { formats: ['flat-sql', 'timestamp-folder'], content_check: 'supported' as const, target_bindings: 'supported' as const },
+    project_release_manifests: 'unsupported' as const,
+  }
   if (engine === 'pglite') {
     return {
+      ...common,
       engine,
       state_machine_sql: 'supported',
       durable_workflows: 'supported',
@@ -85,6 +100,7 @@ export function liteCapabilities(
     }
   }
   return {
+    ...common,
     engine,
     state_machine_sql: 'supported',
     durable_workflows: 'supported',
