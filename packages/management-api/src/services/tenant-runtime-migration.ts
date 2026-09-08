@@ -1,4 +1,5 @@
 import { SQL_MODULES } from "../db/sql-modules";
+import { TENANT_PUBLIC_SCHEMA_ACCESS_SQL } from "./tenant-public-schema-access";
 
 // Tenant schema migration SQL (sourced from migrate-tenant-schema.ts)
 export const ALTER_TENANT_SQL = `
@@ -307,12 +308,8 @@ GRANT USAGE, CREATE ON SCHEMA realtime TO supabase_admin, supabase_realtime_admi
 
 GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin;
 
--- 10a. service_role must be able to administer existing application tables.
--- BYPASSRLS is not enough when PostgREST checks table privileges first.
-GRANT USAGE ON SCHEMA public TO service_role;
-GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO service_role;
-GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO service_role;
-GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public TO service_role;
+-- 10a. Preserve application-managed object privileges during runtime maintenance.
+${TENANT_PUBLIC_SCHEMA_ACCESS_SQL}
 
 -- 10. Functions Schema (Webhooks)
 CREATE SCHEMA IF NOT EXISTS supabase_functions;
