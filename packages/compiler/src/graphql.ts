@@ -19,7 +19,6 @@ import {
   type IntrospectionQuery,
 } from "graphql";
 import { codegen } from "@graphql-codegen/core";
-import * as typescript from "@graphql-codegen/typescript";
 import * as operations from "@graphql-codegen/typescript-operations";
 import type { CompileOptions, Diagnostic, GraphqlContractSummary } from "./types";
 import { GRAPHQL_CLIENT_SOURCE } from "./graphql-client";
@@ -130,23 +129,23 @@ export async function renderGraphql(options: CompileOptions): Promise<GraphqlArt
   try {
     const config = {
       useTypeImports: true,
-      skipTypename: true,
-      enumsAsTypes: true,
-      onlyOperationTypes: true,
+      nonOptionalTypename: false,
+      enumType: "string-literal",
       namingConvention: "keep",
       dedupeOperationSuffix: false,
       omitOperationSuffix: false,
       defaultScalarType: "unknown",
       scalars: { ID: { input: "string", output: "string" }, ...options.graphql.scalars },
-    };
+    } satisfies operations.TypeScriptDocumentsPluginConfig;
     const generated = await codegen({
       filename: "graphql.ts",
       schema: parse(printSchema(schema)),
       schemaAst: schema,
       documents,
       config,
-      plugins: [{ typescript: {} }, { operations: {} }],
-      pluginMap: { typescript, operations },
+      // Operations v6 owns referenced enums and inputs as well as operation types.
+      plugins: [{ operations: {} }],
+      pluginMap: { operations },
     });
     const separated = separateOperations(combined);
     const methods = Object.entries(separated).sort(([a], [b]) => a.localeCompare(b)).map(([name, document]) => {
@@ -175,8 +174,8 @@ ${methods.join(",\n")}
         schemaAst: schema,
         documents,
         config,
-        plugins: [{ typescript: {} }, { operations: {} }, { typedDocuments: {} }],
-        pluginMap: { typescript, operations, typedDocuments },
+        plugins: [{ operations: {} }, { typedDocuments: {} }],
+        pluginMap: { operations, typedDocuments },
       });
     }
     result.files["graphql.manifest.json"] = JSON.stringify({

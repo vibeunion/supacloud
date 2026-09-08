@@ -228,7 +228,7 @@ result.order?.internal;
     options.graphql = { schema, scalars: { BigInt: "string" } };
     const result = await renderGraphql(options);
     expect(result.diagnostics).toEqual([]);
-    expect(result.files["graphql.ts"]).toContain("BigInt: { input: string; output: string;");
+    expect(result.files["graphql.ts"]).toContain("total: string | null");
   });
 
   test("missing/broken schema and empty document inventory are structured failures", async () => {
