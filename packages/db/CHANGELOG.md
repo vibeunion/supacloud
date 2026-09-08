@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/vibeunion/supacloud/compare/db-v0.5.0...db-v0.6.0) (2026-09-08)
+
+
+### Features
+
+* **db:** add target-bound migration template rendering ([#1207](https://github.com/vibeunion/supacloud/issues/1207)) ([9af38ae](https://github.com/vibeunion/supacloud/commit/9af38aef91351cf576869a2cbb7dc8c85c2442de))
+
 ## [0.5.0](https://github.com/vibeunion/supacloud/compare/db-v0.4.0...db-v0.5.0) (2026-09-07)
 
 
