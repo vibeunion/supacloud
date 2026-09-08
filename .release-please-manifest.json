@@ -10,7 +10,7 @@
   "packages/function-adapter": "0.3.0",
   "packages/supacloud-lite": "0.13.0",
   "packages/app": "0.11.0",
-  "packages/compiler": "0.13.0",
+  "packages/compiler": "0.13.1",
   "packages/elysia": "0.10.0",
   "packages/db": "0.6.0",
   "packages/testing": "0.5.0"
