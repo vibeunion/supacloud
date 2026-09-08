@@ -11,6 +11,7 @@
     "realtime:reconcile-schema": "bun run scripts/reconcile-realtime-schema-privileges.ts",
     "tsc": "tsc",
     "typecheck": "tsc --noEmit",
+    "typecheck:caddy-tests": "tsc --project tsconfig.caddy-tests.json",
     "test": "bun run test:local",
     "test:local": "bun run sql:check && bun run test:unit && bun run test:integration",
     "test:unit": "bun run scripts/run-unit-tests.ts",
