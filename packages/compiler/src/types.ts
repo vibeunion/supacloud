@@ -27,6 +27,8 @@ export interface FunctionalInjectNode {
 }
 
 export interface AspectRefNode {
+  /** Exact project-local source path for context packs. */
+  file?: string;
   /** Exported symbol name used in the generated static import. */
   name: string;
   /** Source expression retained for diagnostics and manifest inspection. */
@@ -58,6 +60,15 @@ export interface Diagnostic {
  * than raw text offsets so fixes remain valid after unrelated edits.
  */
 export type DiagnosticFix =
+  | {
+      type: "set_command_mode";
+      targetFile: string;
+      command: string;
+      property: "transaction" | "idempotency";
+      expectedExpression: string;
+      /** Must be selected by the caller; never infer weaker governance. */
+      value?: "required" | "none";
+    }
   | {
       type: "add_module_import";
       targetFile: string;
@@ -154,6 +165,13 @@ export interface HandlerParamNode {
 }
 
 export interface RouteNode {
+  contract?: {
+    body?: "framework" | "domain";
+    response?: "framework" | "native-json" | "binary" | "stream";
+    evidence?: string;
+  };
+  schemaKinds?: Partial<Record<"body" | "params" | "query" | "response", "opaque" | "declared">>;
+  nativeResponse?: boolean;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   path: string;
   handler: string;
@@ -226,6 +244,7 @@ export interface ControllerNode {
 }
 
 export interface CommandNode {
+  rpc?: string;
   className: string;
   name: string;
   permission?: string;
@@ -339,7 +358,7 @@ export interface CompileOptions {
   disallowControllerDirectDb?: boolean;
   /** Detect modules declared in the project that are unreachable from any root module. */
   detectOrphanModules?: boolean;
-  /** Write generated artifacts even when error-level diagnostics exist (default: true). */
+  /** Explicit unsafe opt-in to emit artifacts with errors (default: false). */
   writeOnError?: boolean;
   /** Generate typed API client in client.ts (default: false). */
   generateClient?: boolean;
@@ -408,6 +427,8 @@ export interface ValidateOptions {
 
 /** Runtime capabilities declared by the Command executor. */
 export interface CommandExecutionCapabilities {
+  /** Explicit named adapters; declarations must also be tested against the database. */
+  rpc?: Record<string, { audit?: boolean; idempotency?: boolean; transaction?: boolean }>;
   /** Whether runtime permission checks are supported. */
   permission?: boolean;
   /** Whether runtime audit persistence is supported. */

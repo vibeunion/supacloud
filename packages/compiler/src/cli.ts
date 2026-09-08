@@ -150,7 +150,7 @@ async function run(): Promise<void> {
   if (command === "fix") {
     if (!query) throw new Error("fix requires a JSON file containing one DiagnosticFix");
     const fix = JSON.parse(await readFile(resolve(process.cwd(), query), "utf8"));
-    const result = await applyDiagnosticFix(fix, { rootDir: process.cwd(), dryRun });
+    const result = await applyDiagnosticFix(fix, { rootDir: resolvedRoot, dryRun });
     console.log(JSON.stringify({ ok: true, ...result }, null, 2));
   } else if (command === "compile") {
     const result = await compileProject(compileDefaults);
@@ -259,8 +259,8 @@ async function run(): Promise<void> {
       process.exit(1);
     }
     try {
-      const graph = await analyzeProject(resolvedRoot);
-      const pack = createContextPack(graph, query);
+      const result = await checkProject(compileDefaults);
+      const pack = createContextPack({ ...result.graph, diagnostics: result.diagnostics }, query);
       if (json) {
         console.log(JSON.stringify(pack, null, 2));
       } else {
@@ -271,6 +271,8 @@ async function run(): Promise<void> {
           `  external tokens: ${pack.externalTokens.join(", ") || "-"}`,
           `  imports: ${pack.relatedModules.imports.join(", ") || "-"}`,
           `  imported by: ${pack.relatedModules.importedBy.join(", ") || "-"}`,
+          ...pack.executionPlans.map((plan) => `  execution ${plan.name}: ${plan.stages.join(" -> ")}`),
+          ...pack.diagnostics.map((diagnostic) => `  ${diagnostic.code}: ${diagnostic.message}`),
         ].join("\n"));
       }
     } catch (error) {

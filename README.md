@@ -8,7 +8,18 @@ The English README is canonical. See the [translation policy](docs/translation-p
 
 ## English
 
-**SupaCloud** is a next-generation, ultra-lightweight multi-tenant PaaS for self-hosting Supabase. Built on **Pigsty**, it enables you to run multiple isolated Supabase projects efficiently on a single server.
+**SupaCloud** is an application engineering foundation for AI-assisted development, with a multi-tenant platform for self-hosting Supabase-style projects on **Pigsty**.
+
+### Engineering Goals
+
+- **Reliable foundations**: consolidate recurring execution, persistence and governance mechanics behind tested contracts.
+- **Convenient vibe coding**: provide a standard starter, focused application context, actionable compiler diagnostics and a fast local verification loop.
+- **Earlier error detection**: use types, static compilation and runtime schemas together; successful compilation is not proof of business correctness.
+- **Maintainable large applications**: combine explicit module ownership with statically declared AOP for cross-cutting behavior.
+
+The application framework (`@supacloud/app`, `@supacloud/compiler`, `@supacloud/elysia`) owns application structure and execution contracts. The hosting platform owns project isolation, infrastructure integration and delivery. **SupAuth is the external unified user-center dependency for enterprise applications**, not a user system to rebuild inside each application. Business relationships and object-level authorization remain application-owned.
+
+See [Engineering Goals](docs/engineering-goals.md) for ownership, existing foundations, remaining work and acceptance criteria.
 
 ### Key Features
 

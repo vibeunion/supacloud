@@ -40,6 +40,19 @@ test("declared contracts have no missing-schema diagnostic without claiming runt
   expect(inspectRouteContracts(declared)[0]).not.toHaveProperty("runtimeValidated");
 });
 
+test("binary/stream declarations require transport evidence, not a JSON schema", () => {
+  for (const response of ["binary", "stream"] as const) {
+    const declared = structuredClone(graph);
+    Object.assign(declared.modules[0]!.controllers[0]!.routes[0]!, {
+      body: "Input", params: "Params", query: "Query", contract: { response },
+    });
+    expect(validateRouteContracts(declared)).toEqual([]);
+    const report = inspectRouteContracts(declared)[0]!;
+    expect(report.validation).toMatchObject({ response, verified: false });
+    expect(report.validation.obligations).toContain("Test transport headers, access and bytes without JSON decoding.");
+  }
+});
+
 test("config policy reaches compile/check and invalidates a prior incremental result", async () => {
   const rootDir = await mkdtemp(join(tmpdir(), "supacloud-route-contracts-"));
   try {

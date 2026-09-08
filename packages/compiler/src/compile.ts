@@ -9,7 +9,7 @@ import { validateRouteContracts } from "./route-contracts";
 
 /**
  * Complete compilation pipeline: AST analysis -> validation -> generate static factory code and manifest.
- * Files are emitted even when error-level diagnostics exist; caller decides adoption based on diagnostics.
+ * Errors preserve the last working artifacts unless writeOnError is explicitly enabled.
  */
 export async function compileProject(options: CompileOptions): Promise<CompileResult> {
   const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths);
@@ -64,7 +64,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
     treeShakeUnusedProviders: options.treeShakeUnusedProviders,
     artifactHashes: options.cache?.generatedHashes,
   };
-  const written = !hasErrors || options.writeOnError !== false
+  const written = !hasErrors || options.writeOnError === true
     ? await generateApplication(graph, generatedOptions)
     : [];
   const stats = graph.cacheStats
