@@ -1,6 +1,6 @@
 import { Elysia, t, status } from "elysia";
 import { projectService } from "../services";
-import { requireProjectOrAdminAuth } from "../middleware/auth";
+import { requireProjectOrAdminAuth, getVerifiedRequestPrincipal } from "../middleware/auth";
 import { isUserManagedFunctionSecretName } from "../utils/project-secret-visibility";
 import {
   activeFunctionVersionNumber,
@@ -227,6 +227,57 @@ function activationConflict(error: unknown) {
 }
 
 export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
+  .get("/:ref/function-releases", async ({ params, request }) => {
+    const denied = await requireFunctionManagementAuth(request, params.ref);
+    if (denied) return denied;
+    const { projectReleaseService } = await import("../services/project-release.service");
+    return projectReleaseService.status(params.ref);
+  })
+  .get("/:ref/function-releases/:mutationId", async ({ params, request }) => {
+    const denied = await requireFunctionManagementAuth(request, params.ref);
+    if (denied) return denied;
+    const { projectReleaseService } = await import("../services/project-release.service");
+    return projectReleaseService.status(params.ref, params.mutationId);
+  })
+  .post("/:ref/function-releases", async ({ params, request, body }) => {
+    const denied = await requireFunctionManagementAuth(request, params.ref);
+    if (denied) return denied;
+    const principal = await getVerifiedRequestPrincipal(request);
+    if (!principal) return status(401, { error: "Verified release principal is required" });
+    const { projectReleaseService } = await import("../services/project-release.service");
+    return projectReleaseService.publish({
+      projectRef: params.ref, mutationId: body.mutation_id,
+      expectedReleaseId: body.expected_release_id, functions: body.functions, principal,
+    });
+  }, {
+    body: t.Object({
+      mutation_id: t.String({ format: "uuid" }),
+      expected_release_id: t.Union([t.Null(), t.String({ format: "uuid" })]),
+      functions: t.Array(t.Object({
+        slug: t.String({ pattern: "^[A-Za-z0-9_-]{1,128}$" }),
+        version: functionVersionSchema, expected_activation_id: expectedActivationIdSchema,
+      }, { additionalProperties: false }), { minItems: 1, maxItems: 128 }),
+    }, { additionalProperties: false }),
+    detail: { tags: ["frontend"], summary: "Publish an atomic multi-function release manifest" },
+  })
+  .post("/:ref/functions/:slug/stage", async ({ params, request, body }) => {
+    const denied = await requireFunctionManagementAuth(request, params.ref);
+    if (denied) return denied;
+    const { edgeFunctionService } = await import("../services/edge-function.service");
+    return edgeFunctionService.stageVersion({
+      ref: params.ref, slug: params.slug, code: body.code, config: body.config,
+    });
+  }, {
+    body: t.Object({
+      code: t.String({ minLength: 1, maxLength: 10 * 1024 * 1024 }),
+      config: t.Optional(t.Object({
+        verify_jwt: t.Optional(t.Boolean()), framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
+        background_routes: t.Optional(t.Array(t.String(), { maxItems: 128 })),
+        capabilities: t.Optional(functionCapabilitiesSchema), limits: t.Optional(functionLimitsSchema),
+      }, { additionalProperties: false })),
+    }, { additionalProperties: false }),
+    detail: { tags: ["frontend"], summary: "Stage an immutable function version without activation" },
+  })
   .get(
     "/:ref/functions",
     async ({ params, request }) => {

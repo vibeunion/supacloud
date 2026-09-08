@@ -10,6 +10,8 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { releaseAuthority, PROJECT_RELEASE_FILE, type ProjectRelease } from "../management-api/src/services/project-release-contract";
+import { replaceEdgeFunctionActivationManifest } from "../management-api/src/services/edge-function-activation-manifest";
 
 setDefaultTimeout(30_000);
 
@@ -424,6 +426,42 @@ afterAll(async () => {
 });
 
 describe("Edge Runtime function config boundary", () => {
+  test("advertises project release capability and fails closed on corrupt project authority", async () => {
+    const capability = await fetch(`${edgeBaseUrl}/internal/runtime-activation-epoch`, {
+      headers: { "x-supacloud-internal-auth": INTERNAL_TOKEN },
+    });
+    expect((await capability.json()).project_release_schema).toBe("supacloud.project-function-release.v1");
+    await writeLegacyFunction("release_corrupt", "must-not-run");
+    await writeFile(join(projectRoot, PROJECT_RELEASE_FILE), "{invalid");
+    try { await expectActivationFailsClosed("release_corrupt", "must-not-run"); }
+    finally { await rm(join(projectRoot, PROJECT_RELEASE_FILE)); }
+  });
+
+  test.skipIf(process.platform !== "linux")("resolves both release members after one authority rename and runtime restart", async () => {
+    const first = await installActivationCandidate({ slug: "release_first", version: "1", source: functionSource("first") });
+    const second = await installActivationCandidate({ slug: "release_second", version: "1", source: functionSource("second") });
+    const members = Object.fromEntries([["release_first", first], ["release_second", second]].map(([slug, entry]) => {
+      const raw = JSON.parse((entry as ActivationCandidate).manifest);
+      const { _supacloud_activation: authority, ...config } = raw;
+      return [slug, { config, authority }];
+    }));
+    const release: ProjectRelease = {
+      schema: "supacloud.project-function-release.v1", project_ref: PROJECT_REF,
+      mutation_id: randomUUID(), request_fingerprint: "a".repeat(64), members,
+    };
+    const manifestPath = join(projectRoot, PROJECT_RELEASE_FILE);
+    await replaceEdgeFunctionActivationManifest({ manifestPath, config: release, authority: releaseAuthority(release, null) });
+    try {
+      await expectValidFunctionResponse("release_first", "first", "1");
+      await expectValidFunctionResponse("release_second", "second", "1");
+      await stopEdgeRuntime();
+      await Promise.all([edgeStdout, edgeStderr]);
+      startEdgeRuntime(managementServer!.port);
+      await waitForEdgeRuntime();
+      await expectValidFunctionResponse("release_first", "first", "1");
+      await expectValidFunctionResponse("release_second", "second", "1");
+    } finally { await rm(manifestPath); }
+  });
   test("fails closed for malformed config without executing stale aliases", async () => {
     const invalidConfigs = [
       ["numeric", '{"verify_jwt":false,"version":1}'],

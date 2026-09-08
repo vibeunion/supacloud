@@ -1,4 +1,5 @@
 import "./url-import-plugin";
+import { projectReleaseFunctionManifest } from "./project-release";
 import { Elysia } from "elysia";
 import cors from "@elysiajs/cors";
 import {
@@ -772,6 +773,9 @@ async function getFunctionConfig(
   projectRoot: string,
 ): Promise<FunctionConfig> {
   const key = `${projectRef}/${functionName}`;
+  if (await projectReleaseFunctionManifest(projectRoot, functionName)) {
+    return activeFunctionConfig(projectRoot, functionName);
+  }
   const cached = configCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
     return {
@@ -978,6 +982,8 @@ async function activeActivationManifest(
   projectRoot: string,
   functionName: string,
 ): Promise<EdgeFunctionActivationManifest> {
+  const releaseMember = await projectReleaseFunctionManifest(projectRoot, functionName);
+  if (releaseMember) return releaseMember;
   const configPath = path.resolve(projectRoot, `${functionName}.config.json`);
   return await readFunctionActivationManifest(configPath, projectRoot)
     ?? parseEdgeFunctionActivationManifest("{}");
@@ -1582,6 +1588,7 @@ const app = new Elysia()
     const authError = requireInternalAuth(c.request);
     if (authError) return authError;
     return {
+      project_release_schema: "supacloud.project-function-release.v1",
       runtime_instance_id: RUNTIME_INSTANCE_ID,
       foreground_generation: pool.generation,
       background_generation: backgroundPool.generation,

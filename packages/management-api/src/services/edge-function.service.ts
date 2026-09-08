@@ -1,11 +1,15 @@
 import { logger } from "../utils/logger";
 import { config } from "../config";
-import { ServiceUnavailableError } from "../utils/errors";
+import { ConflictError, ServiceUnavailableError } from "../utils/errors";
 import { normalizeEdgeRuntimeBundle } from "./edge-runtime-bundle";
 import path from "path";
 import fs from "fs/promises";
 import type { Dirent } from "node:fs";
 import { acquireSupaCloudUpgradeLock, type SupaCloudUpgradeLock } from "../upgrade-lock";
+import {
+  parseProjectRelease, PROJECT_RELEASE_FILE, PROJECT_RELEASE_SLUG,
+  type ProjectReleaseSnapshot, type ReleaseMember,
+} from "./project-release-contract";
 import { isSystemManagedProjectSecretName } from "../utils/project-secret-visibility";
 import {
   validateEdgeRuntimePreheat,
@@ -424,7 +428,17 @@ async function preflightAndAcquireFunctionDeployLock(
   slug: string,
 ): Promise<() => void> {
   await preflightFunctionMutation(ref, slug);
-  return acquireFunctionDeployLock(ref, slug);
+  const release = await acquireFunctionDeployLock(ref, slug);
+  try {
+    const manifest = await readProjectFunctionRelease(ref);
+    if (manifest && Object.hasOwn(manifest.release.members, slug)) {
+      throw new ConflictError("Function belongs to a project release; stage a version and publish a release manifest");
+    }
+    return release;
+  } catch (error) {
+    release();
+    throw error;
+  }
 }
 
 function getFunctionsRoot(): string {
@@ -771,6 +785,11 @@ async function readFunctionManifestState(
   slug: string,
 ): Promise<FunctionManifestState> {
   try {
+    const release = await readProjectFunctionRelease(ref);
+    const member = release && Object.hasOwn(release.release.members, slug) ? release.release.members[slug] : undefined;
+    if (member) return {
+      config: validatedFunctionConfig(member.config), authority: member.authority, hadManifest: true,
+    };
     const raw = await Bun.file(getConfigPath(ref, slug)).text();
     const manifest = parseEdgeFunctionActivationManifest(raw);
     return {
@@ -2631,7 +2650,99 @@ async function deployLatestFunctionRelease(
   }
 }
 
+export async function readProjectFunctionRelease(ref: string): Promise<ProjectReleaseSnapshot | null> {
+  const manifestPath = path.join(getFuncDir(ref), PROJECT_RELEASE_FILE);
+  try {
+    const metadata = await fs.lstat(manifestPath);
+    if (!metadata.isFile() || metadata.nlink !== 1 || (metadata.mode & 0o022) !== 0) {
+      throw new Error("Project release authority must be a trusted regular file");
+    }
+    return parseProjectRelease(await fs.readFile(manifestPath, "utf8"), ref);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+}
+
+export function projectFunctionDirectory(ref: string): string { return getFuncDir(ref); }
+
+export async function withProjectFunctionReleaseLock<T>(
+  ref: string, slugs: string[], operation: () => Promise<T>,
+): Promise<T> {
+  const releases: Array<() => void> = [];
+  try {
+    for (const slug of [PROJECT_RELEASE_SLUG, ...[...new Set(slugs)].sort()]) {
+      await preflightFunctionMutation(ref, slug);
+      releases.push(await acquireFunctionDeployLock(ref, slug));
+    }
+    return await operation();
+  } finally {
+    for (const release of releases.reverse()) release();
+  }
+}
+
+export async function prepareProjectReleaseMembers(
+  ref: string,
+  functions: Array<{ slug: string; version: string; expected_activation_id: string }>,
+): Promise<Record<string, ReleaseMember>> {
+  const epoch = async () => {
+    const response = await fetch(`http://${config.edgeRuntimeInternal}/internal/runtime-activation-epoch`, {
+      headers: runtimeInternalHeaders(), redirect: "error", signal: AbortSignal.timeout(5000),
+    });
+    const body = await readRuntimeControlBody(response);
+    if (!response.ok || body.project_release_schema !== "supacloud.project-function-release.v1") {
+      throw new Error("Edge Runtime does not support project release manifests");
+    }
+    return body;
+  };
+  const before = await epoch();
+  const members: Record<string, ReleaseMember> = Object.create(null);
+  for (const entry of functions) {
+    const state = await readFunctionManifestState(ref, entry.slug);
+    if (publicActivationId(state.authority) !== entry.expected_activation_id) {
+      throw new ConflictError("Release member activation CAS conflict");
+    }
+    await settleRuntimeFunctionActivation(ref, entry.slug, state);
+    const metadata = await readFunctionVersionMetadata(ref, entry.slug, entry.version);
+    const bundle = await readVersionedFunctionCode(ref, entry.slug, entry.version);
+    if (bundle === null || await sha256Hex(bundle) !== metadata.artifact_sha256) {
+      throw new Error("Release artifact does not match immutable metadata");
+    }
+    const nextConfig = validatedFunctionConfig({ ...restoredFunctionConfig({ verify_jwt: true }, metadata) });
+    const readiness = await preheatRuntimeFunction({
+      projectRef: ref, functionSlug: entry.slug, requestedVersion: entry.version,
+      resolvedVersion: entry.version, artifactSha256: metadata.artifact_sha256,
+      verifyJwt: nextConfig.verify_jwt, activationId: null,
+    });
+    const proof = requiredPreheatAttestation(readiness, "project release readiness");
+    if (proof.identity.runtimeInstanceId !== before.runtime_instance_id) {
+      throw new Error("Runtime restarted during project release preheat");
+    }
+    members[entry.slug] = {
+      config: activationConfigRecord(nextConfig),
+      authority: nextFunctionActivationAuthority(state, metadata.artifact_sha256),
+    };
+  }
+  const after = await epoch();
+  if (after.runtime_instance_id !== before.runtime_instance_id
+    || after.foreground_generation !== before.foreground_generation
+    || after.background_generation !== before.background_generation) {
+    throw new Error("Runtime pools changed during project release preheat");
+  }
+  return members;
+}
+
 export const edgeFunctionService = {
+  async stageVersion(request: EdgeFunctionReleaseRequest) {
+    await preflightFunctionMutation(request.ref, request.slug);
+    const unlock = await acquireFunctionDeployLock(request.ref, request.slug);
+    try {
+      const state = await readFunctionManifestState(request.ref, request.slug);
+      const version = await computeNextFunctionVersion(request.ref, request.slug);
+      const staged = await immutableFunctionVersion(request, version, state.config);
+      return { version, artifact_sha256: staged.prepared.artifactSha256 };
+    } finally { unlock(); }
+  },
   async getActiveVersion(ref: string, slug: string): Promise<EdgeFunctionActiveVersion> {
     return activeFunctionVersion(ref, slug);
   },

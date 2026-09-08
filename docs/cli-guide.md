@@ -518,12 +518,13 @@ Version `0` is reserved for a listed legacy Function's active-version CAS token.
 The public CLI and Management API accept it only as the expected active version;
 immutable source reads and activation targets still require positive versions.
 
-Multi-Function atomic deployment is not currently available. Release runners
-must deploy each Function with its observed version and activation identity,
-stop on `OUTCOME_UNKNOWN`, and reconcile with `edge_functions list` plus an
-immutable `source --version <N>` read before retrying or applying reverse-order
-CAS compensation. The `edge_functions deploy_manifest --atomic` interface in
-the release-control automation specification is a proposed contract.
+Multi-Function release units are available through the opt-in Management
+`function-releases` API; see [project release manifests](project-release-manifest.md)
+for staging, atomic authority switching, recovery and in-flight semantics.
+The CLI `edge_functions deploy_manifest --atomic` interface remains proposed.
+Existing per-function runners must still stop on `OUTCOME_UNKNOWN` and
+reconcile with `edge_functions list` plus immutable version reads. They cannot
+mutate members already enrolled in a project release individually.
 
 The readback contract stays simple for automation: `edge_functions list`
 prints a JSON array whose entries have a string `slug` and a non-negative safe
