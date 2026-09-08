@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.75.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.75.0...management-api-v0.75.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **management-api:** keep request latency histogram cumulative ([#1209](https://github.com/vibeunion/supacloud/issues/1209)) ([1c137db](https://github.com/vibeunion/supacloud/commit/1c137db3fd3c7c88e8d20e94e00327d29c7baf17))
+
 ## [0.75.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.74.0...management-api-v0.75.0) (2026-09-06)
 
 
