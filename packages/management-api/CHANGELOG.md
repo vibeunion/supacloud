@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.77.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.76.0...management-api-v0.77.0) (2026-09-08)
+
+
+### Features
+
+* **backup:** add isolated project restore drills and signed evidence ([#1217](https://github.com/vibeunion/supacloud/issues/1217)) ([e74b007](https://github.com/vibeunion/supacloud/commit/e74b0076d811df5f3d74b20703a88b596ecb7407))
+* **functions:** publish atomic project release manifests ([#1215](https://github.com/vibeunion/supacloud/issues/1215)) ([e4c582f](https://github.com/vibeunion/supacloud/commit/e4c582f55a88e47cf4795cfe8e42b8672791dce8))
+
+
+### Bug Fixes
+
+* **management-api:** preserve application ACLs during runtime maintenance ([#1218](https://github.com/vibeunion/supacloud/issues/1218)) ([c60eb45](https://github.com/vibeunion/supacloud/commit/c60eb452f0e9ad713a74f9f2f95ee88a5310ce22))
+
 ## [0.76.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.75.1...management-api-v0.76.0) (2026-09-08)
 
 

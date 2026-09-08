@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.23.0...edge-runtime-v0.24.0) (2026-09-08)
+
+
+### Features
+
+* **functions:** publish atomic project release manifests ([#1215](https://github.com/vibeunion/supacloud/issues/1215)) ([e4c582f](https://github.com/vibeunion/supacloud/commit/e4c582f55a88e47cf4795cfe8e42b8672791dce8))
+
 ## [0.23.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.22.0...edge-runtime-v0.23.0) (2026-09-08)
 
 
