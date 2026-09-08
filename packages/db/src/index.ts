@@ -37,6 +37,18 @@ export { planModule, type ModulePlan, type PlanStep } from './plan.js';
 export { applyModulePlan, type ApplyResult } from './apply.js';
 
 export {
+  migrationBindingSha256,
+  parseMigrationBindingManifest,
+  renderMigrationBindings,
+  type MigrationBindingManifest,
+  type MigrationBindingParameter,
+  type MigrationBindingSource,
+  type MigrationBindingTarget,
+  type MigrationBindingTemplate,
+  type MigrationBindingType,
+} from './migration-bindings.js';
+
+export {
   buildDatabaseManifest,
   explainObject,
   type DatabaseManifest,

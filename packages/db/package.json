@@ -15,7 +15,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "MIGRATION_BINDINGS.md"
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
