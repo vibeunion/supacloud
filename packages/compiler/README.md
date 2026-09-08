@@ -72,6 +72,41 @@ Consumers of that optional file must install `@graphql-typed-document-node/core`
 it provides `ResultOf` and `VariablesOf` for operation-level inference. The default
 fetch client still needs no GraphQL runtime dependency.
 
+Both outputs use the operation plugin as the single owner of referenced enums
+and input objects. Regenerate both files after upgrading the compiler; do not
+deduplicate declarations by editing generated files. Scalar mappings are applied
+directly to operation/input fields, and types unused by queries are not emitted.
+
+Consumer acceptance tests cover both SDK and TypedDocumentNode output:
+
+```gherkin
+Scenario: Shared enum types
+  Given multiple queries share an enum in variables and selected fields
+  When the compiler generates the client artifacts
+  Then each artifact declares the enum once and passes strict TypeScript checks
+
+Scenario: Nested input objects
+  Given recursive input objects contain enum lists, defaults and custom scalars
+  When the compiler generates the client artifacts
+  Then input declarations are unique and valid variables retain their types
+
+Scenario: Invalid consumer code
+  Given generated query contracts
+  When a consumer supplies invalid variables or reads an unselected field
+  Then TypeScript rejects the consumer code
+
+Scenario: Release package acceptance
+  Given an installed compiler package
+  When its CLI runs the same consumer acceptance suite
+  Then both artifact formats pass without editing generated files
+```
+
+Run `bun test src/graphql-package.test.ts` from this package. To test an installed
+tarball or registry release with the same suite, set
+`SUPACLOUD_COMPILER_TEST_CLI` to its absolute `dist/cli.js` path.
+`bun run test:package` checks the built CLI and runs automatically after the build
+in `prepublishOnly`, blocking publication when generated consumer types fail.
+
 ```ts
 import { createGraphqlClient } from "./generated/graphql";
 const queries = createGraphqlClient({
