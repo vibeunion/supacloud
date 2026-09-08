@@ -329,7 +329,7 @@ export async function generateApplication(
   return written;
 }
 
-async function writeFileIfChanged(
+export async function writeFileIfChanged(
   path: string,
   content: string,
   hashes?: Map<string, string>,

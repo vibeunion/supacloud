@@ -67,6 +67,22 @@ try {
   const context = JSON.parse(await run([compiler, "context", "review", "--json"]));
   assert.ok(context.executionPlans.some((plan: { stages: string[] }) => plan.stages.includes("authorize")));
   assert.ok(context.files.some((file: string) => file.endsWith("review.ts")));
+  assert.ok(context.graphql.operations.some((operation: { name: string }) => operation.name === "ReviewList"));
+  assert.ok(context.files.some((file: string) => file.endsWith("reviews.graphql")));
+
+  const query = join(project, "src/review/reviews.graphql");
+  const validQuery = await readFile(query, "utf8");
+  const queryArtifact = join(project, "generated/graphql.ts");
+  const originalQueryArtifact = await readFile(queryArtifact, "utf8");
+  await writeFile(query, validQuery.replace("id state version", "id missingField version"));
+  const queryFailure = JSON.parse(await run([compiler, "compile", "--json"], project, false));
+  assert.ok(queryFailure.diagnostics.some((item: { code: string }) => item.code === "graphql-validation"));
+  assert.equal(await readFile(queryArtifact, "utf8"), originalQueryArtifact);
+  await writeFile(query, validQuery.replace("id state version", "id version"));
+  await run(["run", "check:generated"], project, false);
+  await writeFile(query, validQuery);
+  await run(["run", "check:generated"]);
+  console.log("Starter: default GraphQL contracts, AI query context and artifact preservation passed");
 
   // Exercise the actual JSON diagnosis -> reviewed fix -> compile loop with a
   // configured src root, not only the programmatic repair API.

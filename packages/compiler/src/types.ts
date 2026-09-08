@@ -314,6 +314,8 @@ export interface ModuleNode {
 }
 
 export interface ApplicationGraph {
+  /** Offline query inventory for AI context. Kept in graphql.manifest.json, not app.manifest.json. */
+  graphql?: GraphqlContractSummary;
   modules: ModuleNode[];
   /** Depended token names provided by platform injection rather than any module. */
   externalTokens: string[];
@@ -336,6 +338,8 @@ export interface ApplicationGraph {
 }
 
 export interface CompileOptions {
+  /** Opt-in, offline GraphQL query contracts backed by a role-scoped schema snapshot. */
+  graphql?: GraphqlOptions;
   /** Require schemas for bound route inputs and responses. Does not prove runtime validation. */
   requireRouteContracts?: boolean;
   /** Project root directory (containing tsconfig). */
@@ -375,6 +379,26 @@ export interface CompileOptions {
   changedPaths?: string[];
   /** Type-safety gates for generated artifacts and production source. */
   typeSafety?: TypeSafetyOptions;
+}
+
+export interface GraphqlOptions {
+  // Database First is the sole server-schema model, not a selectable configuration mode.
+  /** Additionally emit standard TypedDocumentNode artifacts for GraphQL ecosystem clients. */
+  typedDocuments?: boolean;
+  /** Exported role-scoped database snapshot (.graphql/.gql/.json), never authored SDL or executable code.
+   * Relative to rootDir for the programmatic API. Offline compilation does not attest its origin. */
+  schema: string;
+  /** Query/fragment globs relative to rootDir. Defaults to all .graphql and .gql files. */
+  documents?: string[];
+  /** Explicit wire types for custom scalars. Unmapped scalars remain unknown. */
+  scalars?: Record<string, string | { input: string; output: string }>;
+}
+
+export interface GraphqlContractSummary {
+  schema: string;
+  schemaHash?: string;
+  documents: string[];
+  operations: Array<{ name: string; file: string; line: number }>;
 }
 
 export interface TypeSafetyOptions {

@@ -53,6 +53,26 @@ test("compiler dependencies and demo adapters stay outside the production entry"
     expect(files[".gitignore"]).not.toContain("generated");
 });
 
+test("framework starters include default query contracts and an offline client test", () => {
+    const files = appStarterFiles("example");
+    expect(files["supacloud.config.ts"]).toContain('graphql: { schema: "graphql/schema.graphql" }');
+    expect(files["graphql/schema.graphql"]).toContain("not a deployed database schema");
+    expect(files["src/review/reviews.graphql"]).toContain("query ReviewList");
+    expect(files["tests/graphql.test.ts"]).toContain('from "../generated/graphql"');
+    expect(files["tests/graphql.test.ts"]).toContain("ReviewListQuery");
+});
+
+test("starter documents Database First without representing its synthetic fixture as a deployed schema", () => {
+    const files = appStarterFiles("example");
+    expect(files["graphql/schema.graphql"]).toContain("SYNTHETIC TEST FIXTURE ONLY");
+    expect(files["README.md"]).toContain("Database First as its only GraphQL server-schema model");
+    expect(files["README.md"]).toContain("Do not hand-edit graphql/schema.graphql");
+    expect(files["README.md"]).toContain("--check --json");
+    expect(files["README.md"]).toContain("role/RLS tests");
+    expect(files["supacloud.config.ts"]).not.toContain("autoSchemaFile");
+    expect(files["supacloud.config.ts"]).not.toContain("typePaths");
+});
+
 test("the generated environment test suite runs without installing dependencies", async () => {
     const root = await directory();
     const files = appStarterFiles("example");

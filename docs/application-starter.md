@@ -33,6 +33,8 @@ The template contains:
 
 - three separated framework packages, TypeScript configuration and strict compiler capabilities;
 - a typed review feature with a state specification, route schemas and static AOP;
+- Database First GraphQL query contracts as the recommended read path, a synthetic offline schema fixture, generated typed
+  client and a deterministic client test (see [GraphQL Query Contracts](./graphql-query-contracts.md));
 - a loopback-only memory demo and regression tests for permissions, idempotency,
   transaction rollback, state/version conflicts and absent runtime adapters;
 - semantic watch/recompile/restart, with the last good artifacts preserved on errors;
@@ -44,6 +46,14 @@ CLI build time, so release version changes do not leave stale template literals.
 New compiler and runtime fixes must be published with the CLI feature. Before
 publication, `bun run scripts/check_app_starter.ts` tests locally packed artifacts
 together; this is not evidence that those versions already exist on npm.
+
+Database First is the only GraphQL server-schema model. The fixture is not an
+application-owned server SDL: change Drizzle/SQL declarations, migrate, then
+replace it with an intended-role database export before integration. Do not
+hand-edit exported schemas or add GraphQL resolver classes. After database/grant
+changes and before promotion, use `graphql-schema --check` against the selected
+database, then refresh intentionally and run generated-artifact, type and RLS
+checks. Offline compilation does not attest database provenance or freshness.
 
 ## Environment Contract
 

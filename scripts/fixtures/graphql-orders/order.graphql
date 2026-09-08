@@ -1,0 +1,19 @@
+query OrderDetail($id: Int!) {
+  ordersCollection(filter: { id: { eq: $id } }, first: 1) {
+    edges {
+      node {
+        id
+        number
+        status
+        totalCents
+        customer { id name email }
+        items(first: 20, orderBy: [{ id: AscNullsLast }]) {
+          edges { node { id sku description quantity unitPriceCents } }
+        }
+        deliveries(first: 10, orderBy: [{ id: AscNullsLast }]) {
+          edges { node { id carrier tracking status } }
+        }
+      }
+    }
+  }
+}

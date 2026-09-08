@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { access, readdir, readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { compileProject } from "./compile";
+import { graphqlInputPaths } from "./graphql-inputs";
 import type {
   CompileOptions,
   CompileResult,
@@ -43,7 +44,7 @@ export function createIncrementalCompiler(): IncrementalCompiler {
   return {
     async compile(options, changedPaths): Promise<IncrementalCompileResult> {
       const optionsKey = optionsKeyOf(options);
-      const snapshot = changedPaths && previousSnapshot && previousSnapshot.optionsKey === optionsKey
+      const snapshot = !options.graphql && changedPaths && previousSnapshot && previousSnapshot.optionsKey === optionsKey
         ? await updateSnapshot(previousSnapshot, options, changedPaths)
         : await createSnapshot(options);
       const changedFiles = changedPaths && previousSnapshot
@@ -144,6 +145,14 @@ async function createSnapshot(options: CompileOptions): Promise<Snapshot> {
     const content = await readFile(path);
     files[relative(rootDir, path).split(sep).join("/")] = createHash("sha256").update(content).digest("hex");
   }
+  for (const path of graphqlInputPaths(options)) {
+    const key = relative(rootDir, path).split(sep).join("/");
+    try {
+      files[key] = createHash("sha256").update(await readFile(path)).digest("hex");
+    } catch {
+      files[key] = "missing";
+    }
+  }
   return { files, optionsKey: optionsKeyOf(options) };
 }
 
@@ -165,6 +174,7 @@ function optionsKeyOf(options: CompileOptions): string {
     generatePermissions: options.generatePermissions,
     typeSafety: options.typeSafety,
     treeShakeUnusedProviders: options.treeShakeUnusedProviders,
+    graphql: options.graphql,
   });
 }
 
