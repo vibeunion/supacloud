@@ -25,8 +25,9 @@
     "build:js": "bun build src/index.ts src/cli.ts --outdir dist --target node --external @typescript/typescript6 --external graphql --external '@graphql-codegen/*'",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
-    "prepublishOnly": "bun run build",
+    "prepublishOnly": "bun run build && bun run test:package",
     "test": "bun test",
+    "test:package": "SUPACLOUD_COMPILER_TEST_CLI=\"$PWD/dist/cli.js\" bun test src/graphql-package.test.ts",
     "benchmark": "bun run src/benchmark.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit"
@@ -47,7 +48,6 @@
   "dependencies": {
     "@graphql-codegen/core": "^6.2.0",
     "@graphql-codegen/typed-document-node": "^7.1.0",
-    "@graphql-codegen/typescript": "^6.1.0",
     "@graphql-codegen/typescript-operations": "^6.1.6",
     "@graphql-typed-document-node/core": "^3.2.0",
     "@typescript/typescript6": "^6.0.2",

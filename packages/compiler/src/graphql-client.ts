@@ -50,7 +50,7 @@ export function createGraphqlClient(options: GraphqlClientOptions) {
       method: "POST",
       headers,
       body: JSON.stringify({ query, variables }),
-      signal: request?.signal,
+      ...(request?.signal ? { signal: request.signal } : {}),
       redirect: "error",
     });
     if (!response.ok) {
