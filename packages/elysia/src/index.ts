@@ -253,6 +253,40 @@ export class ApplicationError extends Error implements PublicApplicationError {
   }
 }
 
+export type JsonResponseValidator<T> = (value: unknown) => value is T;
+
+/**
+ * Validate the serialized JSON snapshot before creating a native Response.
+ * Validators must be synchronous and side-effect free; response failures do not
+ * imply that application writes were rolled back.
+ */
+export function validatedJsonResponse<T>(
+  validate: JsonResponseValidator<T>,
+  value: NoInfer<T>,
+  init?: ResponseInit,
+): Response {
+  if (init?.status === 204 || init?.status === 205 || init?.status === 304) {
+    throw new TypeError("JSON responses cannot use a null-body status");
+  }
+  let body: string;
+  try {
+    const serialized = JSON.stringify(value);
+    if (serialized === undefined || validate(JSON.parse(serialized)) !== true) {
+      throw new Error("Invalid JSON response");
+    }
+    body = serialized;
+  } catch {
+    throw new ApplicationError("Response validation failed", {
+      status: 500,
+      code: "RESPONSE_VALIDATION_ERROR",
+    });
+  }
+
+  const headers = new Headers(init?.headers);
+  if (!headers.has("content-type")) headers.set("content-type", "application/json");
+  return new Response(body, { ...init, headers });
+}
+
 export interface ErrorContext {
   request: Request;
   requestContext: unknown;
