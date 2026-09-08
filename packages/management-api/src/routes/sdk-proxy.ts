@@ -17,6 +17,7 @@ import { verifyProjectJwtPayload } from "../utils/project-jwt";
 import { resolveProjectServiceRoleKey } from "../utils/service-role";
 import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
 import { GOTRUE_USER_ID_PATTERN } from "../utils/project-user-lifecycle";
+import { beginRequestObservability } from "../utils/observability";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
 type SdkProxySql = (
@@ -268,7 +269,12 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
         headers[key] = value;
     });
 
-    const traceId = request.headers.get("x-request-id") || randomUUID();
+    const trace = beginRequestObservability(request);
+    const traceId = trace.traceId;
+    delete headers.tracestate;
+    delete headers.baggage;
+    headers.traceparent = trace.traceparent;
+    headers["x-supacloud-trace-id"] = traceId;
     const idempotencyKey = request.headers.get("x-supacloud-idempotency-key")?.trim() || null;
     const authorization = request.headers.get("authorization");
     const apikey = request.headers.get("apikey");
@@ -301,6 +307,7 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
         idempotencyKey,
         traceId,
         envelope: {
+            trace: { project_ref: ref, traceparent: trace.traceparent, request_id: trace.requestId },
             method: request.method,
             path: restPath.length > 0 ? `/${restPath.join("/")}` : "",
             query: url.search,
@@ -583,6 +590,12 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: P
         const body = ["GET", "HEAD"].includes(request.method) ? undefined : request.body;
         
         const reqHeaders = new Headers(request.headers);
+        const trace = beginRequestObservability(request);
+        reqHeaders.set("traceparent", trace.traceparent);
+        reqHeaders.set("x-request-id", trace.requestId);
+        reqHeaders.set("x-supacloud-trace-id", trace.traceId);
+        reqHeaders.delete("baggage");
+        reqHeaders.delete("tracestate");
         if (!(await translateOpaqueApiKeyHeaders(
             reqHeaders,
             interceptors.ref || "",

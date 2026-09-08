@@ -23,6 +23,9 @@ import {
   tenantBuiltinSpecifier,
 } from "./deno-compat";
 import { installEdgeFetchTlsPolicy, resolveEdgeFetchTlsPolicy } from "./fetch-tls-policy";
+import { createFunctionTrace, installFunctionTracingFetch, runFunctionTrace, traceHeaders } from "./tracing";
+
+installFunctionTracingFetch();
 import type { EdgeFetchTlsPolicy } from "./fetch-tls-policy";
 import { runWithPgredisBinding } from "./internal-bindings";
 import {
@@ -787,7 +790,9 @@ async function onParentMessage(msg: unknown): Promise<void> {
     }
     postToParent({ type: "execution_started", functionId });
     const handler = moduleLoad.handler;
-    await runWithPgredisBinding(internalBindings
+    const trace = projectRef ? createFunctionTrace(projectRef, new Headers(headers as Record<string, string>)) : undefined;
+    let traceStatus = 500;
+    await runFunctionTrace(trace, () => runWithPgredisBinding(internalBindings
       ? { ...internalBindings, signal: requestAbortController.signal }
       : undefined, async () => {
         const handlerUrl = (msg.framework && msg.framework !== "fetch") || isFrameworkRouterHandler(handler)
@@ -795,12 +800,17 @@ async function onParentMessage(msg: unknown): Promise<void> {
           : url;
         const req = new Request(handlerUrl, {
           method,
-          headers: new Headers(headers as Record<string, string>),
+          headers: trace ? traceHeaders(trace, headers as Record<string, string>) : new Headers(headers as Record<string, string>),
           body: body ? Buffer.from(body) : undefined,
           signal: requestAbortController.signal,
         });
 
-        const response = await executeFunction(handler, req);
+        const result = await executeFunction(handler, req);
+        const response = trace ? new Response(result.body, {
+          status: result.status, statusText: result.statusText,
+          headers: traceHeaders(trace, result.headers),
+        }) : result;
+        traceStatus = response.status;
         const maxResponseBody = msg.limits?.max_response_body_bytes;
 
         if (
@@ -843,6 +853,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
               });
             }
           } catch (err: any) {
+            traceStatus = 500;
             postToParent({
               type: "stream_chunk",
               streamId,
@@ -851,6 +862,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
             });
           }
 
+          await flushWaitUntilTasks(functionId);
           return;
         }
 
@@ -882,7 +894,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
           moduleCacheSize: moduleLoad.moduleCacheSize,
         });
         await flushWaitUntilTasks(functionId);
-      });
+      }), () => traceStatus);
   } catch (err: any) {
     const aborted = currentAbortController?.signal.aborted || err?.name === "AbortError";
     const message = err instanceof Error ? err.message : String(err);

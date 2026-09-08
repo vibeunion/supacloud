@@ -288,9 +288,8 @@ const app = new Elysia({ strictPath: false })
     applyObservabilityHeaders(set.headers, context);
   })
   .onError({ as: "global" }, ({ request, code, error, set }) => {
-    const observation = recordRequestObservation(request, Number(set.status || 500));
     set.headers ??= {};
-    applyObservabilityHeaders(set.headers, observation.context);
+    applyObservabilityHeaders(set.headers, beginRequestObservability(request));
     if (code === "VALIDATION") {
       return validationErrorResponse(set);
     }
@@ -392,15 +391,19 @@ const app = new Elysia({ strictPath: false })
 
   // Rate limit headers + API version (Studio compatibility)
   .onAfterHandle(({ request, set }) => {
-    const observation = recordRequestObservation(request, Number(set.status || 200));
     set.headers ??= {};
-    applyObservabilityHeaders(set.headers, observation.context);
+    applyObservabilityHeaders(set.headers, beginRequestObservability(request));
     set.headers["x-ratelimit-limit"] ??= "1000";
     set.headers["x-ratelimit-remaining"] ??= "999";
     set.headers["x-ratelimit-reset"] ??= String(
       Math.ceil(Date.now() / 60000) * 60,
     );
     set.headers["x-supabase-api-version"] = "2024-01-01";
+  })
+  .onAfterResponse({ as: "global" }, ({ request, response, set }) => {
+    const observation = recordRequestObservation(
+      request, response instanceof Response ? response.status : Number(set.status || 200),
+    );
     if (observation.slow) {
       logger.warn("[Observability] Slow Management API request", {
         requestId: observation.context.requestId,

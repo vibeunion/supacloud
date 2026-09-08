@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { parseTaskTraceparent } from "./task-trace";
+import { renderBackgroundMetrics } from "./background-observability";
 
 const TRACE_ID_PATTERN = /^[0-9a-f]{32}$/;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
@@ -11,6 +13,8 @@ export interface RequestObservabilityContext {
   traceId: string;
   correlationId: string;
   startedAt: number;
+  traceparent: string;
+  parentSpanId: string | null;
 }
 
 interface RequestMetricState {
@@ -22,6 +26,7 @@ interface RequestMetricState {
 }
 
 const requestContexts = new WeakMap<Request, RequestObservabilityContext>();
+const observations = new WeakMap<Request, { context: RequestObservabilityContext; durationMs: number; slow: boolean }>();
 const metricState: RequestMetricState = {
   requests: 0,
   errors: 0,
@@ -40,8 +45,7 @@ function validRequestId(value: string | null): string | undefined {
 }
 
 function traceIdFromTraceparent(value: string | null): string | undefined {
-  const match = value?.match(/^[\da-f]{2}-([\da-f]{32})-[\da-f]{16}-[\da-f]{2}$/i);
-  return match && TRACE_ID_PATTERN.test(match[1]!) ? match[1]!.toLowerCase() : undefined;
+  return parseTaskTraceparent(value)?.traceId;
 }
 
 export function beginRequestObservability(request: Request): RequestObservabilityContext {
@@ -53,11 +57,17 @@ export function beginRequestObservability(request: Request): RequestObservabilit
     ?? randomHex(16);
   const suppliedTraceId = request.headers.get("x-supacloud-trace-id");
   const traceId = traceIdFromTraceparent(request.headers.get("traceparent"))
-    ?? (suppliedTraceId && TRACE_ID_PATTERN.test(suppliedTraceId) ? suppliedTraceId.toLowerCase() : randomHex(16));
+    ?? (suppliedTraceId && TRACE_ID_PATTERN.test(suppliedTraceId) && !/^0+$/.test(suppliedTraceId) ? suppliedTraceId : randomHex(16));
   const correlationId = validRequestId(request.headers.get("x-supacloud-correlation-id"))
     ?? requestId;
 
-  const context = { requestId, traceId, correlationId, startedAt: performance.now() };
+  const parent = parseTaskTraceparent(request.headers.get("traceparent"));
+  const rate = Number(process.env.SUPACLOUD_TRACE_SAMPLE_RATE ?? "0.1");
+  const sampled = Number.isFinite(rate) && rate >= 0 && rate <= 1
+    && parseInt(traceId.slice(0, 8), 16) / 0x1_0000_0000 < rate
+    && (parent ? parent.flags === "01" : true);
+  const traceparent = `00-${traceId}-${randomHex(8)}-${sampled ? "01" : "00"}`;
+  const context = { requestId, traceId, correlationId, traceparent, parentSpanId: parent?.spanId ?? null, startedAt: performance.now() };
   requestContexts.set(request, context);
   return context;
 }
@@ -69,12 +79,15 @@ export function applyObservabilityHeaders(
   headers["x-request-id"] ??= context.requestId;
   headers["x-supacloud-trace-id"] ??= context.traceId;
   headers["x-supacloud-correlation-id"] ??= context.correlationId;
+  headers.traceparent ??= context.traceparent;
 }
 
 export function recordRequestObservation(
   request: Request,
   status: number,
 ): { context: RequestObservabilityContext; durationMs: number; slow: boolean } {
+  const existing = observations.get(request);
+  if (existing) return existing;
   const context = beginRequestObservability(request);
   const durationMs = Math.max(0, performance.now() - context.startedAt);
   metricState.requests += 1;
@@ -84,7 +97,15 @@ export function recordRequestObservation(
   for (const [index, bucket] of latencyBuckets.entries()) {
     if (durationMs <= bucket) metricState.durationBuckets[index]! += 1;
   }
-  return { context, durationMs, slow: durationMs >= SLOW_REQUEST_MS };
+  const observation = { context, durationMs, slow: durationMs >= SLOW_REQUEST_MS };
+  observations.set(request, observation);
+  const trace = parseTaskTraceparent(context.traceparent)!;
+  if (trace.flags === "01") console.info(JSON.stringify({
+    schema: "supacloud.trace-span.v1", operation: "management.request",
+    traceId: context.traceId, spanId: trace.spanId, parentSpanId: context.parentSpanId,
+    requestId: context.requestId, durationMs, status,
+  }));
+  return observation;
 }
 
 export function renderRequestMetrics(): string {
@@ -113,7 +134,7 @@ export function renderRequestMetrics(): string {
     `${durationMetric}_sum ${metricState.durationSum}`,
     `${durationMetric}_count ${metricState.requests}`,
   );
-  return `${lines.join("\n")}\n`;
+  return `${lines.join("\n")}\n${renderBackgroundMetrics()}`;
 }
 
 export function resetRequestMetricsForTests(): void {

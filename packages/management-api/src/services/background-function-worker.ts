@@ -19,6 +19,8 @@ import {
   normalizedGoTrueUserId,
 } from "../utils/project-user-lifecycle";
 import { getAuthRuntimeDescriptor } from "./auth-runtime.service";
+import { parseTaskTraceparent, taskAttemptTrace } from "../utils/task-trace";
+import { recordBackgroundObservation } from "../utils/background-observability";
 
 interface InvocationEnvelope {
   method?: string;
@@ -298,7 +300,14 @@ export function buildInvocationRequest(task: ProjectTask): Request {
 
   headers.set("x-project-ref", task.project_ref);
   headers.set("x-supacloud-task-id", task.id);
-  if (task.trace_id) headers.set("x-supacloud-trace-id", task.trace_id);
+  try {
+    const trace = taskAttemptTrace(task);
+    trace.forEach((value, name) => headers.set(name, value));
+  } catch {
+    throw new NonRetryableBackgroundInvocationError("Background trace identity is inconsistent", 422);
+  }
+  headers.delete("tracestate");
+  headers.delete("baggage");
   headers.set("x-supacloud-background", "true");
   headers.set("x-supacloud-attempt", String(attempt));
   headers.set("x-supacloud-function-version", task.function_version || "1");
@@ -584,6 +593,8 @@ export class BackgroundFunctionWorker {
 
     const heartbeat = scheduleLeaseHeartbeat(task.id, leaseSeconds);
     const startedAt = Date.now();
+    let invocationRequest: Request | undefined;
+    let invocationStatus = 500;
     const logs: Array<{
       timestamp: string;
       stream: "stdout" | "stderr";
@@ -593,6 +604,7 @@ export class BackgroundFunctionWorker {
 
     try {
       const request = buildInvocationRequest(task);
+      invocationRequest = request;
       const { dispatchBackgroundFunction } = await importDispatcher();
       const response = await dispatchBackgroundFunction({
         projectRef: task.project_ref,
@@ -603,6 +615,7 @@ export class BackgroundFunctionWorker {
           if (logs.length > 200) logs.shift();
         },
       });
+      invocationStatus = response.status;
 
       const result = {
         status: response.status,
@@ -720,6 +733,22 @@ export class BackgroundFunctionWorker {
         error: message,
       });
     } finally {
+      const parent = parseTaskTraceparent(invocationRequest?.headers.get("traceparent"));
+      if (invocationRequest) {
+        recordBackgroundObservation(
+          (startedAt - new Date(task.created_at).valueOf()) / 1000,
+          invocationStatus >= 400,
+        );
+      }
+      if (parent?.flags === "01") {
+        const origin = parseTaskTraceparent((task.payload?.trace as { traceparent?: string } | undefined)?.traceparent);
+        logger.info("[Trace] background attempt", {
+          schema: "supacloud.trace-span.v1", projectRef: task.project_ref,
+          traceId: parent.traceId, spanId: parent.spanId, parentSpanId: origin?.spanId ?? null,
+          operation: "background.attempt", taskId: task.id, attempt: task.attempt || 1,
+          durationMs: Math.max(0, Date.now() - startedAt), status: invocationStatus,
+        });
+      }
       await cleanupBackgroundTaskMirrorEvidence(task);
     }
   }
