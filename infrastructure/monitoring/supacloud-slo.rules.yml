@@ -1,0 +1,43 @@
+groups:
+  - name: supacloud-service-objectives
+    rules:
+      - alert: SupaCloudManagementErrorBudget
+        expr: |
+          (sum(rate(supacloud_management_http_errors_total[5m])) / clamp_min(sum(rate(supacloud_management_http_requests_total[5m])), 0.001) > 0.01)
+          and (sum(increase(supacloud_management_http_requests_total[5m])) >= 20)
+        for: 5m
+        labels:
+          severity: warning
+          service: management-api
+        annotations:
+          summary: Management API error ratio exceeds one percent
+          runbook: docs/request-task-tracing.md#management-errors
+      - alert: SupaCloudManagementLatency
+        expr: histogram_quantile(0.95, sum by (le) (rate(supacloud_management_http_request_duration_ms_bucket[5m]))) > 500
+        for: 10m
+        labels:
+          severity: warning
+          service: management-api
+        annotations:
+          summary: Management API p95 exceeds 500 milliseconds
+          runbook: docs/request-task-tracing.md#management-latency
+      - alert: SupaCloudBackgroundFailures
+        expr: |
+          (sum(rate(supacloud_background_failures_total[5m])) / clamp_min(sum(rate(supacloud_background_attempts_total[5m])), 0.001) > 0.02)
+          and (sum(increase(supacloud_background_attempts_total[5m])) >= 20)
+        for: 5m
+        labels:
+          severity: warning
+          service: background-worker
+        annotations:
+          summary: Background function attempt failure ratio exceeds two percent
+          runbook: docs/request-task-tracing.md#background-failures
+      - alert: SupaCloudBackgroundQueueDelay
+        expr: histogram_quantile(0.95, sum by (le) (rate(supacloud_background_queue_wait_seconds_bucket[15m]))) > 300
+        for: 10m
+        labels:
+          severity: warning
+          service: background-worker
+        annotations:
+          summary: Dispatched background task p95 age exceeds five minutes
+          runbook: docs/request-task-tracing.md#queue-delay
