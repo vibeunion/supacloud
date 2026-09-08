@@ -14,6 +14,18 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.51.0](https://github.com/vibeunion/supacloud/compare/cli-v0.50.0...cli-v0.51.0) (2026-09-08)
+
+
+### Features
+
+* **compiler:** add database-first GraphQL query contracts ([#1224](https://github.com/vibeunion/supacloud/issues/1224)) ([a10e0d5](https://github.com/vibeunion/supacloud/commit/a10e0d54f87bee79c0a3a34f9b8685a994eb444b))
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#1223](https://github.com/vibeunion/supacloud/issues/1223)) ([6de79e2](https://github.com/vibeunion/supacloud/commit/6de79e20cf3133b45cc8f5f475245cced4841730))
+
 ## [0.50.0](https://github.com/vibeunion/supacloud/compare/cli-v0.49.2...cli-v0.50.0) (2026-09-08)
 
 
