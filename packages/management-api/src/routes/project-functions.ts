@@ -232,12 +232,16 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
     if (denied) return denied;
     const { projectReleaseService } = await import("../services/project-release.service");
     return projectReleaseService.status(params.ref);
+  }, {
+    detail: { tags: ["frontend"], summary: "Get the current function release status for a project" },
   })
   .get("/:ref/function-releases/:mutationId", async ({ params, request }) => {
     const denied = await requireFunctionManagementAuth(request, params.ref);
     if (denied) return denied;
     const { projectReleaseService } = await import("../services/project-release.service");
     return projectReleaseService.status(params.ref, params.mutationId);
+  }, {
+    detail: { tags: ["frontend"], summary: "Get a specific function release mutation status" },
   })
   .post("/:ref/function-releases", async ({ params, request, body }) => {
     const denied = await requireFunctionManagementAuth(request, params.ref);
