@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { SQL_MODULES } from "../../src/db/sql-modules";
 import { ALTER_TENANT_SQL } from "../../src/services/tenant-runtime-migration";
+import { TENANT_PUBLIC_SCHEMA_ACCESS_SQL } from "../../src/services/tenant-public-schema-access";
 
 function readRepoFile(relativePath: string): string {
   return readFileSync(resolve(import.meta.dir, "../..", relativePath), "utf8");
@@ -13,6 +14,21 @@ function sqlModuleInterpolation(name: keyof typeof SQL_MODULES): string {
 }
 
 describe("supabase bootstrap schema", () => {
+  test("runtime maintenance preserves application object ACLs in both migration entry points", () => {
+    expect(TENANT_PUBLIC_SCHEMA_ACCESS_SQL.trim()).toBe("GRANT USAGE ON SCHEMA public TO service_role;");
+    expect(ALTER_TENANT_SQL).toContain(TENANT_PUBLIC_SCHEMA_ACCESS_SQL);
+    for (const source of [
+      ALTER_TENANT_SQL,
+      readRepoFile("src/services/tenant-runtime-migration.ts"),
+      readRepoFile("src/scripts/migrate-tenant-schema.ts"),
+    ]) {
+      expect(source).not.toMatch(/GRANT\s+[^;]*ON\s+ALL\s+(?:TABLES|SEQUENCES|ROUTINES|FUNCTIONS)\s+IN\s+SCHEMA\s+"?public"?\s+TO\s+[^;]*\bservice_role\b/i);
+      expect(source).not.toMatch(/ALTER\s+DEFAULT\s+PRIVILEGES[^;]*IN\s+SCHEMA\s+public[^;]*TO\s+service_role/i);
+    }
+    expect(readRepoFile("src/scripts/migrate-tenant-schema.ts"))
+      .toContain("${TENANT_PUBLIC_SCHEMA_ACCESS_SQL}");
+  });
+
   test("exports the extracted tenant runtime migration used by the service", () => {
     const service = readRepoFile("src/services/tenant-runtime.service.ts");
 

@@ -71,6 +71,21 @@ The runtime reconcile worker periodically compares desired state with systemd ac
 
 The worker does not implement idle auto-shrink. That is intentional for the first version because it avoids request-path cold starts and avoids per-tenant access-time tracking complexity.
 
+### Application Permissions
+
+Runtime preparation and the existing-tenant schema maintenance script only ensure
+`service_role` has `USAGE` on `public`. They must not grant privileges on all
+application tables, sequences, or routines. Application migrations own those
+object-level `GRANT` and `REVOKE` decisions; `BYPASSRLS` is not a substitute for
+object privileges or authorization through command functions.
+
+This change prevents future runtime maintenance from broadening application
+permissions. It does not infer or revoke grants introduced by older releases:
+operators must review their application's expected ACLs and restore them through
+an explicit forward migration. Keep intentionally authorized RPCs and direct data
+access working. New-project bootstrap and branch-restore privilege policies are
+separate from this runtime-maintenance change.
+
 ## Systemd Units
 
 PostgREST remains one physical systemd unit per project:
