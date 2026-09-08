@@ -1,5 +1,9 @@
 # @supacloud/db
 
+For reviewed deployment-time public SQL parameters, see
+[Controlled Migration Bindings](./MIGRATION_BINDINGS.md). This opt-in API preserves
+Drizzle v1 source/snapshot ownership and the existing executor's migration ledger.
+
 SupaCloud 的数据库治理层：把 RLS 策略、RPC 函数、触发器、授权（grant）作为**一等资源**做声明式管理，并与 PostgreSQL 真实 Catalog 对账。
 
 定位：它是 Drizzle（schema/迁移）之上的治理层 —— Drizzle 负责表结构，本包负责表结构之外的安全与业务对象（策略、函数、权限）的声明、静态检查与漂移检测。**driver 无关**：所有 Catalog 读取都通过注入的 `QueryExecutor` 完成，不依赖任何数据库客户端，也不 import drizzle-orm（仅类型层兼容 drizzle Table 的内部形状）。
