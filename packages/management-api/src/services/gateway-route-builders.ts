@@ -418,6 +418,9 @@ export function routePreservesUpstreamCors(route: CaddyRoute): boolean {
 }
 
 export function setRouteCors(route: CaddyRoute, origins: string[]): void {
+    // Custom routes own their policy, including deliberately omitting CORS.
+    // Tenant/frontend reconciliation must not replace that persisted policy.
+    if (String(route["@id"] || "").startsWith("route-custom-gateway-")) return;
     // Routes that preserve upstream CORS (functions, storage) answer preflight
     // themselves; never re-attach the gateway CORS subroute to them.
     if (routePreservesUpstreamCors(route)) return;

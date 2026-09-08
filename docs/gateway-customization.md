@@ -286,6 +286,8 @@ curl -X PUT "$HOST/v1/projects/$REF/gateway/custom-rate-limits" \
 SupaCloud 会自动为每个项目生成多个域名：API 主域（`<ref>.<base_domain>`）、Auth 域、Studio 域，并为这些域名构建租户级 CORS origins（`buildTenantCorsOrigins`）。自定义路由与这套自动 CORS 体系是**正交**的：
 
 - 自定义路由的 `cors` 字段只作用于该路由本身，不会影响系统路由的 CORS。
+  项目级 CORS 更新、前端部署和共享认证入口重建均保留该策略；
+  未配置 `cors` 的自定义路由也不会自动继承项目的来源列表。
 - `gateway/config` 的 `cors_origins` 会更新该项目所有系统路由的 CORS。
 - `addCorsOriginsForHosts`（内部接口）会把自定义域名并入租户 CORS 计算，用于绑定自定义前端域名时。
 
