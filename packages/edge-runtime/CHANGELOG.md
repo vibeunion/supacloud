@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.22.0...edge-runtime-v0.23.0) (2026-09-08)
+
+
+### Features
+
+* **observability:** trace request and background function execution ([#1212](https://github.com/vibeunion/supacloud/issues/1212)) ([589b1e8](https://github.com/vibeunion/supacloud/commit/589b1e8ac07ea9e91f4a486221a90bf952b2d92d))
+
 ## [0.22.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.21.3...edge-runtime-v0.22.0) (2026-09-05)
 
 
