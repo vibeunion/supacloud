@@ -57,6 +57,9 @@ authenticated Management `/metrics` scrape endpoint. No telemetry collector,
 public port or database log table is introduced. This PR does not install rules
 on a server or claim that alert delivery has been exercised there.
 
+Run `promtool test rules infrastructure/monitoring/supacloud-slo.rules.test.yml`
+to verify all four sustained-failure alerts and their healthy non-firing cases.
+
 Background counters describe dispatched attempts, not unique jobs. Queue wait
 is age since original task creation, including prior retries. Sampling affects
 logs, not these counters. Silent/stalled queues with no dispatched attempts
