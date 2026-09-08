@@ -3,6 +3,7 @@ import { withRetry } from "../utils/retry";
 import { encryptSecretIfNeeded } from "../utils/secret-crypto";
 import { normalizedGoTrueUserId } from "../utils/project-user-lifecycle";
 import { getAuthRuntimeDescriptor } from "./auth-runtime.service";
+import type { TaskTraceEnvelope } from "../utils/task-trace";
 
 export interface BackgroundFunctionAuthContext {
   kind: "jwt" | "apikey" | "none";
@@ -14,6 +15,7 @@ export interface BackgroundFunctionAuthContext {
 }
 
 export interface BackgroundFunctionInvocationEnvelope {
+  trace?: TaskTraceEnvelope;
   method: string;
   path: string;
   query: string;

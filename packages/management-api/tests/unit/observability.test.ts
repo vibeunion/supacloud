@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { Elysia } from "elysia";
 import {
   applyObservabilityHeaders,
   beginRequestObservability,
@@ -7,6 +8,7 @@ import {
   resetRequestMetricsForTests,
 } from "../../src/utils/observability";
 
+beforeEach(() => { spyOn(console, "info").mockImplementation(() => {}); });
 afterEach(() => {
   mock.restore();
   resetRequestMetricsForTests();
@@ -28,6 +30,30 @@ function observeDuration(durationMs: number, status = 200): void {
 }
 
 describe("request observability", () => {
+  test("after-response lifecycle records native statuses and error statuses exactly once", async () => {
+    const app = new Elysia()
+      .onRequest(({ request }) => { beginRequestObservability(request); })
+      .onError(({ set }) => { set.status = 422; return { code: "REJECTED" }; })
+      .onAfterResponse(({ request, response, set }) => {
+        recordRequestObservation(request, response instanceof Response ? response.status : Number(set.status || 200));
+      })
+      .get("/native", () => new Response("unavailable", { status: 503 }))
+      .get("/error", () => { throw new Error("private"); });
+    expect((await app.handle(new Request("http://localhost/native"))).status).toBe(503);
+    expect((await app.handle(new Request("http://localhost/error"))).status).toBe(422);
+    await Bun.sleep(0);
+    const metrics = renderRequestMetrics();
+    expect(metrics).toContain("supacloud_management_http_requests_total 2\n");
+    expect(metrics).toContain('supacloud_management_http_responses_total{status="503"} 1');
+    expect(metrics).toContain('supacloud_management_http_responses_total{status="422"} 1');
+  });
+  test("rejects all-zero fallback IDs and records each request only once", () => {
+    const request = new Request("http://localhost/", { headers: { "x-supacloud-trace-id": "0".repeat(32) } });
+    expect(beginRequestObservability(request).traceId).not.toBe("0".repeat(32));
+    recordRequestObservation(request, 422);
+    recordRequestObservation(request, 422);
+    expect(renderRequestMetrics()).toContain("supacloud_management_http_requests_total 1\n");
+  });
   test("preserves a valid inbound request and trace identity", () => {
     const request = new Request("http://localhost/health", {
       headers: {
@@ -48,6 +74,7 @@ describe("request observability", () => {
       "x-request-id": "req-123",
       "x-supacloud-trace-id": "0123456789abcdef0123456789abcdef",
       "x-supacloud-correlation-id": "workflow-123",
+      traceparent: context.traceparent,
     });
   });
 
