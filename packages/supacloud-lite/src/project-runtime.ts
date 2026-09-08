@@ -18,7 +18,9 @@ import { loadSupabaseProject } from './runtime/node/project.js'
 import { MemoryStorageDriver } from './runtime/storage/driver.js'
 import { S3StorageDriver, type S3StorageDriverOptions } from './runtime/storage/s3-driver.js'
 import type { SmsSender, StorageDriver } from './runtime/types.js'
-import type { ExternalIdentityVerifier } from './runtime/identity.js'
+import { validateExternalIdentityClaims, type ExternalIdentityVerifier } from './runtime/identity.js'
+import { isRecord } from './runtime/validation.js'
+import type { DbEngine } from './runtime/db/engine.js'
 import type { RuntimeMode } from './runtime/functions/profile.js'
 import type { GraphqlOptions } from './runtime/graphql.js'
 import type { SeedOptions } from './runtime/node/project.js'
@@ -302,9 +304,12 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
   await chmod(paths.storageDir, 0o700)
 
   const storageDriver = options.storageDriver ?? createStorageDriver(configuredStorageBackend, paths.storageDir, options.s3)
-  const engine = databaseEngine === 'native'
-    ? await createNativeEngine({ dataDir: paths.dataDir!, installDir: options.postgresDir, log: options.log, replication })
-    : undefined
+  let engine: DbEngine | undefined
+  if (databaseEngine === 'native') {
+    const dataDir = paths.dataDir
+    if (dataDir === undefined) throw new Error('native PostgreSQL requires a data directory')
+    engine = await createNativeEngine({ dataDir, installDir: options.postgresDir, log: options.log, replication })
+  }
   let backend: SupaCloudLiteBackend | undefined
   try {
     backend = await createBackend({
@@ -383,8 +388,9 @@ export async function createProjectBackend(options: ProjectRuntimeOptions = {}):
 export async function loadProjectBindings(projectDir: string, config: ProjectConfig): Promise<SeedOptions['bindings']> {
   const bindings = config.lite.migrationBindings
   if (!bindings) return undefined
+  const manifest: unknown = JSON.parse(await readFile(resolve(projectDir, bindings.manifest), 'utf8'))
   return {
-    manifest: JSON.parse(await readFile(resolve(projectDir, bindings.manifest), 'utf8')),
+    manifest,
     target: { environment: bindings.environment, projectRef: bindings.projectRef },
     values: process.env,
   }
@@ -392,9 +398,15 @@ export async function loadProjectBindings(projectDir: string, config: ProjectCon
 
 async function loadProjectIdentity(projectDir: string, module?: string): Promise<ExternalIdentityVerifier | undefined> {
   if (!module) return undefined
-  const imported = await import(pathToFileURL(resolve(projectDir, module)).href) as { default?: unknown }
-  if (typeof imported.default !== 'function') throw new Error('Lite identity module must default-export an external identity verifier')
-  return imported.default as ExternalIdentityVerifier
+  const imported: unknown = await import(pathToFileURL(resolve(projectDir, module)).href)
+  if (!isRecord(imported) || typeof imported['default'] !== 'function') {
+    throw new Error('Lite identity module must default-export an external identity verifier')
+  }
+  const verify = imported['default']
+  return async (request) => {
+    const claims: unknown = await verify(request)
+    return validateExternalIdentityClaims(claims)
+  }
 }
 
 export function resolveNativeReplicationOptions(

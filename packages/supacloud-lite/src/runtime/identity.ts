@@ -1,7 +1,28 @@
 import { ApiError } from './types.js'
 import { decodeJwt, type JwtClaims } from './jwt.js'
+import { errorProperty, isRecord } from './validation.js'
 
 export type ExternalIdentityVerifier = (request: Request) => Promise<JwtClaims>
+
+export function validateExternalIdentityClaims(value: unknown): JwtClaims {
+  if (!isRecord(value) || value['role'] !== 'authenticated' ||
+    typeof value['sub'] !== 'string' || !value['sub'] ||
+    typeof value['exp'] !== 'number' || !Number.isSafeInteger(value['exp']) ||
+    value['exp'] * 1000 <= Date.now()) {
+    throw new ApiError(401, { message: 'Invalid external identity' })
+  }
+  for (const key of ['iss', 'aud', 'email']) {
+    if (key in value && typeof value[key] !== 'string') throw new ApiError(401, { message: 'Invalid external identity' })
+  }
+  if (('iat' in value && (typeof value['iat'] !== 'number' || !Number.isSafeInteger(value['iat']))) ||
+    ('aal' in value && value['aal'] !== 'aal1' && value['aal'] !== 'aal2') ||
+    ('amr' in value && (!Array.isArray(value['amr']) || !value['amr'].every((entry: unknown) =>
+      isRecord(entry) && typeof entry['method'] === 'string' &&
+      typeof entry['timestamp'] === 'number' && Number.isFinite(entry['timestamp']))))) {
+    throw new ApiError(401, { message: 'Invalid external identity' })
+  }
+  return value
+}
 
 /** Structurally compatible with @supacloud/elysia's SupAuthRequestContext. */
 export interface VerifiedSupAuthContext {
@@ -36,7 +57,7 @@ export function createSupAuthLiteIdentity(options: {
       // The context verifier has already authenticated this exact bearer token.
       const bearer = request.headers.get('authorization')?.match(/^Bearer ([^\s]+)$/i)?.[1]
       const payload = bearer ? decodeJwt(bearer) : null
-      if (typeof payload?.exp !== 'number' || payload.exp * 1000 <= Date.now()) {
+      if (typeof payload?.exp !== 'number' || !Number.isSafeInteger(payload.exp) || payload.exp * 1000 <= Date.now()) {
         throw new ApiError(401, { message: 'External identity expired' })
       }
       return {
@@ -47,7 +68,7 @@ export function createSupAuthLiteIdentity(options: {
       }
     } catch (error) {
       if (error instanceof ApiError) throw error
-      const status = (error as { status?: number })?.status
+      const status = errorProperty(error, 'status')
       throw new ApiError(status === 401 || status === 403 ? status : 503, {
         message: status === 401 ? 'Authentication required' : status === 403 ? 'Application access denied' : 'Identity verification unavailable',
       })

@@ -6,6 +6,15 @@ import { createBackend } from '../src/runtime/index.js'
 import { strictFunction } from '../src/runtime/functions/profile.js'
 import { loadProjectConfig } from '../src/runtime/node/load-config.js'
 import { loadFunctions } from '../src/runtime/node/load-functions.js'
+import assert from 'node:assert/strict'
+import { record } from './support/contracts.js'
+
+function waitUntil(promise: Promise<unknown>): void {
+  const runtime = record(record(globalThis)['EdgeRuntime'])
+  const wait = runtime['waitUntil']
+  assert(typeof wait === 'function')
+  wait.call(runtime, promise)
+}
 
 test('strict defaults and invalid limits are deterministic', () => {
   const entry = strictFunction({ handler: () => Response.json({ ok: true }) })
@@ -20,9 +29,9 @@ test('strict mode denies undeclared background work and retains explicit opt-in'
   const backend = await createBackend({
     runtimeMode: 'strict', startRuntimeServices: false,
     functions: {
-      denied: () => { (globalThis as any).EdgeRuntime.waitUntil(Promise.resolve()); return new Response('ok') },
+      denied: () => { waitUntil(Promise.resolve()); return new Response('ok') },
       allowed: { capabilities: { background: true }, handler: () => {
-        (globalThis as any).EdgeRuntime.waitUntil(Promise.resolve()); return new Response('ok')
+        waitUntil(Promise.resolve()); return new Response('ok')
       } },
     },
   })

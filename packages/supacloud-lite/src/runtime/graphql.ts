@@ -1,6 +1,6 @@
-import type { DbEngine } from './db/engine.js'
 import type { Database } from './db/database.js'
 import { ApiError, type RequestContext } from './types.js'
+import { errorProperty, isRecord } from './validation.js'
 
 export interface GraphqlCapability {
   status: 'supported' | 'unsupported' | 'disabled' | 'unverified'
@@ -16,8 +16,10 @@ export interface GraphqlOptions {
   statementTimeoutMs?: number
 }
 
-export async function inspectGraphql(engine: DbEngine): Promise<GraphqlCapability> {
-  const result = await engine.query<{ extversion: string; resolver: boolean }>(`
+type GraphqlProbe = { query(sql: string): Promise<{ rows: unknown[] }> }
+
+export async function inspectGraphql(engine: GraphqlProbe): Promise<GraphqlCapability> {
+  const result = await engine.query(`
     select e.extversion, exists (
       select 1 from pg_proc p
       join pg_namespace n on n.oid = p.pronamespace
@@ -28,18 +30,30 @@ export async function inspectGraphql(engine: DbEngine): Promise<GraphqlCapabilit
     ) as resolver from pg_extension e where e.extname = 'pg_graphql'
   `)
   const row = result.rows[0]
-  if (row?.resolver) {
+  if (row === undefined) {
+    return { status: 'unsupported', extension: 'pg_graphql', reason: 'PG_GRAPHQL_NOT_INSTALLED' }
+  }
+  if (!isRecord(row) || typeof row['extversion'] !== 'string' || !row['extversion'] ||
+    typeof row['resolver'] !== 'boolean' || result.rows.length !== 1) {
+    return { status: 'unsupported', extension: 'pg_graphql', reason: 'PG_GRAPHQL_INVALID_CATALOG' }
+  }
+  const version = row['extversion']
+  if (row['resolver']) {
     try {
       // Load the real extension library too; a catalog entry alone cannot prove ABI availability.
-      await engine.query(`select graphql.resolve('{ __typename }', '{}'::jsonb, null, '{}'::jsonb)`)
+      const probe = await engine.query(`select graphql.resolve('{ __typename }', '{}'::jsonb, null, '{}'::jsonb) as result`)
+      const probeRow = probe.rows[0]
+      if (probe.rows.length !== 1 || !isRecord(probeRow) || !isGraphqlEnvelope(probeRow['result'])) {
+        throw new Error('Invalid GraphQL probe response')
+      }
     } catch {
-      return { status: 'unsupported', extension: 'pg_graphql', version: row.extversion, reason: 'PG_GRAPHQL_RESOLVER_FAILED' }
+      return { status: 'unsupported', extension: 'pg_graphql', version, reason: 'PG_GRAPHQL_RESOLVER_FAILED' }
     }
   }
-  return row?.resolver
-    ? { status: 'supported', extension: 'pg_graphql', version: row.extversion }
+  return row['resolver']
+    ? { status: 'supported', extension: 'pg_graphql', version }
     : { status: 'unsupported', extension: 'pg_graphql',
-        reason: row ? 'PG_GRAPHQL_RESOLVER_UNAVAILABLE' : 'PG_GRAPHQL_NOT_INSTALLED' }
+        reason: 'PG_GRAPHQL_RESOLVER_UNAVAILABLE' }
 }
 
 export class GraphqlHandler {
@@ -71,22 +85,25 @@ export class GraphqlHandler {
         throw new ApiError(400, { message: 'Invalid GraphQL request' })
       }
       const result = await this.db.withContext(context, async (query) => {
-        await query(`select set_config('statement_timeout', $1, true)`, [String(this.timeoutMs)])
-        await query(`select set_config('search_path', $1, true)`, [
+        await query<unknown>(`select set_config('statement_timeout', $1, true)`, [String(this.timeoutMs)])
+        await query<unknown>(`select set_config('search_path', $1, true)`, [
           this.schemas.map((schema) => `"${schema.replaceAll('"', '""')}"`).join(','),
         ])
-        return query<{ result: unknown }>(
+        return query<unknown>(
           'select graphql.resolve($1::text, $2::jsonb, $3::text, $4::jsonb) as result',
           [body.query, JSON.stringify(body.variables ?? {}), body.operationName ?? null, JSON.stringify(body.extensions ?? {})]
         )
       })
-      return response(200, result.rows[0]?.result)
+      const row = result.rows[0]
+      if (result.rows.length !== 1 || !isRecord(row) || !isGraphqlEnvelope(row['result'])) {
+        throw new Error('Invalid GraphQL resolver response')
+      }
+      return response(200, row['result'])
     } catch (error) {
       if (error instanceof ApiError) return response(error.status, { errors: [{ message: error.message }] })
       if (error instanceof SyntaxError) return response(400, { errors: [{ message: 'Invalid JSON request' }] })
       // Never return SQL, connection details or database exception text to callers.
-      const databaseError = error as { code?: string; errno?: string }
-      const code = databaseError.errno ?? databaseError.code
+      const code = errorProperty(error, 'errno') ?? errorProperty(error, 'code')
       const status = code === '42501' ? 403 : code === '57014' ? 504 : 500
       return response(status, { errors: [{ message: 'GraphQL execution failed',
         extensions: { code: status === 403 ? 'GRAPHQL_ACCESS_DENIED' : status === 504 ? 'GRAPHQL_TIMEOUT' : 'GRAPHQL_EXECUTION_FAILED' } }] })
@@ -117,6 +134,17 @@ async function boundedBody(request: Request, limit: number): Promise<string> {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+function isGraphqlEnvelope(value: unknown): boolean {
+  if (!isRecord(value) || (!('data' in value) && !('errors' in value))) return false
+  if ('data' in value && value['data'] !== null && !isRecord(value['data'])) return false
+  if ('extensions' in value && !isRecord(value['extensions'])) return false
+  if ('errors' in value) {
+    const errors: unknown = value['errors']
+    if (!Array.isArray(errors) || errors.length === 0 ||
+      !errors.every((error: unknown) => isRecord(error) && typeof error['message'] === 'string')) return false
+  }
+  return true
 }
 function positive(value: number): number {
   if (!Number.isSafeInteger(value) || value <= 0 || value > 2_147_483_647) throw new Error('GraphQL limits must be positive bounded integers')

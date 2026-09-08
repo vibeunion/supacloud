@@ -166,6 +166,25 @@ describe('project runtime', () => {
     await expect(createProjectBackend({ ...options, graphql: { enabled: false } })).rejects.toThrow()
   })
 
+  test('dynamic identity modules must return validated claims before data access', async () => {
+    const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-invalid-identity-'))
+    temporaryDirectories.push(projectDir)
+    await writeFile(join(projectDir, 'identity.ts'), 'export default async () => ({ role: "authenticated", sub: 42, exp: 4102444800 })\n')
+    const project = await createProjectBackend({
+      projectDir, memory: true, identityModule: 'identity.ts',
+      includeFunctions: false, includeWebhooks: false, startRuntimeServices: false, log: () => {},
+    })
+    try {
+      const response = await project.backend.fetch('http://local/rest/v1/items', {
+        headers: { authorization: 'Bearer external-token' },
+      })
+      expect(response.status).toBe(401)
+      expect(await response.text()).not.toContain('42')
+    } finally {
+      await project.backend.close()
+    }
+  })
+
   test('selects explicit and custom storage backends', async () => {
     const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-storage-backend-'))
     temporaryDirectories.push(projectDir)

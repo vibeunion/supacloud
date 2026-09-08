@@ -299,7 +299,9 @@ export class RealtimeEngine {
             const selected = conn.channels.get(msg.topic)
             const channels = selected ? [selected] : [...conn.channels.values()]
             try {
-              const ctx = await this.contextFromToken(msg.payload?.access_token as string | undefined)
+              const token: unknown = msg.payload?.access_token
+              if (token !== undefined && typeof token !== 'string') throw new Error('Invalid Realtime access token')
+              const ctx = await this.contextFromToken(token)
               for (const channel of channels) {
                 if (this.resolveExternalToken && channel.private) {
                   const access = await this.authorizePrivate(channel.topic.replace(/^realtime:/, ''), ctx)
@@ -331,7 +333,9 @@ export class RealtimeEngine {
       postgres_changes?: { event?: string; schema?: string; table?: string; filter?: string }[]
     }
 
-    const ctx = await this.contextFromToken(msg.payload?.access_token as string | undefined)
+    const token: unknown = msg.payload?.access_token
+    if (token !== undefined && typeof token !== 'string') throw new Error('Invalid Realtime access token')
+    const ctx = await this.contextFromToken(token)
     const isPrivate = config.private === true
     let canBroadcast: boolean = true
     // Private channels are RLS-authorized against realtime.messages (skipped on

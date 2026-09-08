@@ -240,7 +240,11 @@ bun run benchmark --native
 The GraphQL test uses Lite's real native wire implementation against an isolated
 PostgreSQL container, checking extension ownership/version, role-scoped
 introspection, nested RLS, mutation denial and concurrent caller isolation.
-The starter test generates and compiles the current application starter, loads
+Catalog records, resolver envelopes and dynamically loaded identity claims are
+validated before use; malformed values fail closed. Boundary tests use unknown
+values and observable behavior instead of unchecked casts into private state.
+The starter test generates the current application starter, compiles it with
+the declared compiler development dependency, and loads
 its real Elysia function through Lite's bundler, and checks HTTP contracts,
 authorization, idempotent replay and native validated JSON responses. Its
 in-memory governance fixture is test-only, not production SQL acceptance.
@@ -250,6 +254,12 @@ The benchmark reports startup and warm REST/RPC/function latency percentiles for
 memory is not included. Cold downloads, network transport, sustained
 concurrency and production-scale workloads require separate measurement.
 No universal speedup, memory saving or production SLA is claimed.
+
+Type checks include the package's source, scripts and tests under `strict`,
+`noImplicitOverride` and `noFallthroughCasesInSwitch`. This compatibility change
+does not claim repository-wide type-safety migration: existing unchecked-index,
+exact-optional-property and dependency-declaration checking gaps remain separate
+work. No compiler diagnostics are disabled to pass the package gates.
 
 `doctor --json` never creates project state or applies migrations. An existing,
 stopped database can be inspected; running databases retain exclusive ownership

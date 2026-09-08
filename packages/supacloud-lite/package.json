@@ -57,6 +57,7 @@
   },
   "devDependencies": {
     "@supacloud/app": "^0.11.0",
+    "@supacloud/compiler": "^0.13.1",
     "@supacloud/elysia": "^0.10.0",
     "@supabase/supabase-js": "^2.115.0",
     "@types/bun": "^1.4.0",

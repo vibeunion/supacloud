@@ -1,9 +1,10 @@
 import { expect, test } from 'bun:test'
 import { createLocalJWKSet, exportJWK, generateKeyPair, SignJWT } from 'jose'
 import { createSupAuthRequestContext } from '@supacloud/elysia'
-import { createSupAuthLiteIdentity } from '../src/runtime/identity.js'
+import { createSupAuthLiteIdentity, validateExternalIdentityClaims } from '../src/runtime/identity.js'
 import { createBackend } from '../src/runtime/index.js'
 import { signJwt } from '../src/runtime/jwt.js'
+import { readJson, record } from './support/contracts.js'
 
 const issuer = 'https://identity.example/auth/v1'
 const subject = '00000000-0000-0000-0000-000000000001'
@@ -49,9 +50,9 @@ test('real asymmetric SupAuth verification maps only trusted local RLS claims', 
   })
   try {
     const token = await identity.token({ tenant_id: 'tenant-b', permissions: ['admin'] })
-    expect(await (await request('/rest/v1/private_items?select=id', token)).json()).toEqual([{ id: 1 }])
-    expect(await (await request('/rest/v1/rpc/identity_subject', token)).json()).toBe(subject)
-    const claims = await (await request('/functions/v1/who', token)).json()
+    expect(await readJson(await request('/rest/v1/private_items?select=id', token))).toEqual([{ id: 1 }])
+    expect(await readJson(await request('/rest/v1/rpc/identity_subject', token))).toBe(subject)
+    const claims = await readJson(await request('/functions/v1/who', token))
     expect(claims).toMatchObject({ sub: subject, external_sub: 'external-person', tenant_id: 'tenant-a', permissions: ['read'], role: 'authenticated' })
     expect((await request('/auth/v1/user', token)).status).toBe(404)
     for (const invalid of [
@@ -85,10 +86,14 @@ test('unmapped identity and verification outage fail closed without leaking erro
 test('Realtime rejects invalid external tokens and removes channels after a failed refresh', async () => {
   const identity = await fixture()
   const backend = await createBackend({ externalIdentity: identity.externalIdentity, startRuntimeServices: false })
-  const messages: any[] = []
+  const messages: Record<string, unknown>[] = []
   let notify: (() => void) | undefined
   const connection = backend.realtime.connect({
-    send: (text) => { messages.push(JSON.parse(text as string)); notify?.() },
+    send: (text) => {
+      const message: unknown = JSON.parse(typeof text === 'string' ? text : new TextDecoder().decode(text))
+      messages.push(record(message))
+      notify?.()
+    },
     close: () => {},
   })
   const exchange = async (message: unknown) => {
@@ -96,21 +101,40 @@ test('Realtime rejects invalid external tokens and removes channels after a fail
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error('Realtime fixture reply timed out')), 2000)
       notify = () => {
-        if (messages.slice(start).some((value) => value.event === 'phx_reply')) {
+        if (messages.slice(start).some((value) => value['event'] === 'phx_reply')) {
           clearTimeout(timeout); notify = undefined; resolve()
         }
       }
       connection.onMessage(JSON.stringify(message))
     })
-    return messages.slice(start).find((value) => value.event === 'phx_reply')
+    return record(messages.slice(start).find((value) => value['event'] === 'phx_reply'))
   }
   try {
-    const join = (token: string, ref: string) => ({ topic: 'realtime:room', event: 'phx_join', ref, payload: { access_token: token } })
-    expect((await exchange(join('invalid', '1'))).payload.status).toBe('error')
-    expect((await exchange(join(await identity.token(), '2'))).payload.status).toBe('ok')
+    const join = (token: string, ref: string) => ({
+      topic: 'realtime:room', event: 'phx_join', ref,
+      payload: { access_token: token, config: { broadcast: { self: true, ack: true } } },
+    })
+    expect(record((await exchange(join('invalid', '1')))['payload'])['status']).toBe('error')
+    expect(record((await exchange(join(await identity.token(), '2')))['payload'])['status']).toBe('ok')
+    const broadcast = { topic: 'realtime:room', event: 'broadcast', ref: 'before', payload: { event: 'probe', payload: {} } }
+    await exchange(broadcast)
+    expect(messages.some((message) => message['event'] === 'broadcast')).toBe(true)
     const refresh = await exchange({ topic: 'realtime:room', event: 'access_token', ref: '3', payload: { access_token: 'invalid' } })
-    expect(refresh.payload.status).toBe('error')
-    const connections = (backend.realtime as unknown as { connections: Set<{ channels: Map<string, unknown> }> }).connections
-    expect([...connections][0]!.channels.size).toBe(0)
+    expect(record(refresh['payload'])['status']).toBe('error')
+    const count = messages.length
+    connection.onMessage(JSON.stringify({ ...broadcast, ref: 'after' }))
+    // A subsequent heartbeat is a processing barrier; an unjoined channel cannot broadcast.
+    await exchange({ topic: 'phoenix', event: 'heartbeat', ref: 'barrier', payload: {} })
+    expect(messages.slice(count).some((message) => message['event'] === 'broadcast')).toBe(false)
   } finally { connection.onClose(); await backend.close() }
+})
+
+test('external identity boundary rejects malformed claims without coercion', () => {
+  const valid = { role: 'authenticated', sub: subject, exp: Math.floor(Date.now() / 1000) + 60 }
+  for (const value of [
+    null, [], {}, { ...valid, role: 'service_role' }, { ...valid, sub: 42 },
+    { ...valid, exp: String(valid.exp) }, { ...valid, exp: Number.NaN },
+    { ...valid, exp: 1 }, { ...valid, email: 42 }, { ...valid, amr: [{}] },
+  ]) expect(() => validateExternalIdentityClaims(value)).toThrow('Invalid external identity')
+  expect(validateExternalIdentityClaims(valid)).toEqual(valid)
 })

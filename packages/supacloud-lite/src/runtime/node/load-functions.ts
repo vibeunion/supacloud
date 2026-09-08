@@ -6,6 +6,7 @@ import type { EdgeFunction, FrameworkObjectHandler, FunctionFramework, LoadedFun
 import { installDenoShim, resetCapturedHandler, takeCapturedHandler } from '../functions/deno-shim.js'
 import { bundleFunction } from './bundle-function.js'
 import type { RuntimeMode } from '../functions/profile.js'
+import { errorProperty } from '../validation.js'
 
 /**
  * Load edge-function secrets from supabase/functions/.env (KEY=VALUE lines,
@@ -111,7 +112,7 @@ async function loadFunctionsUnlocked(
   try {
     entries = await readdir(root)
   } catch (error) {
-    if (mode === 'strict' && (error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    if (mode === 'strict' && errorProperty(error, 'code') !== 'ENOENT') throw error
     if (mode === 'strict' && Object.values(options).some((option) => option.enabled !== false)) {
       throw new Error('declared function directory is missing')
     }

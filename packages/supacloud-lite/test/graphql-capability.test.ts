@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createBackend } from '../src/runtime/index.js'
 import { GraphqlHandler, inspectGraphql } from '../src/runtime/graphql.js'
+import { readJson, record } from './support/contracts.js'
 
 test('PGlite truthfully reports missing pg_graphql and rejects required startup', async () => {
   const backend = await createBackend({ startRuntimeServices: false })
@@ -13,7 +14,9 @@ test('PGlite truthfully reports missing pg_graphql and rejects required startup'
       method: 'POST', headers: { apikey: backend.anonKey }, body: '{}',
     })
     expect(response.status).toBe(501)
-    expect((await response.json()).errors[0].extensions.code).toBe('PG_GRAPHQL_NOT_INSTALLED')
+    expect(await readJson(response)).toMatchObject({
+      errors: [{ extensions: { code: 'PG_GRAPHQL_NOT_INSTALLED' } }],
+    })
     await backend.db.exec('create schema graphql; create function graphql.resolve(text, jsonb, text, jsonb) returns jsonb language sql as $$ select \'{}\'::jsonb $$')
     expect((await inspectGraphql(backend.db.engine)).status).toBe('unsupported')
   } finally { await backend.close() }
@@ -35,6 +38,25 @@ test('GraphQL adapter rejects malformed and oversized requests before database e
       expect((await handler.handle(request(body), ctx)).status).toBe(400)
     }
     expect((await handler.handle(request(JSON.stringify({ query: 'x'.repeat(100) })), ctx)).status).toBe(413)
+    // Validate a malformed resolver payload without advertising it as a real extension.
+    await backend.db.exec(`
+      create schema graphql;
+      create function graphql.resolve(text,jsonb,text,jsonb) returns jsonb
+        language sql as $$ select '42'::jsonb $$;
+      grant usage on schema graphql to anon;
+      grant execute on all functions in schema graphql to anon;
+    `)
+    for (const payload of ['42', '{"data":42}', '{"errors":[{}]}', '{"data":null,"extensions":[]}']) {
+      await backend.db.exec(`
+        create or replace function graphql.resolve(text,jsonb,text,jsonb) returns jsonb
+          language sql as $$ select '${payload}'::jsonb $$;
+      `)
+      const malformed = await handler.handle(request('{"query":"{ __typename }"}'), ctx)
+      expect(malformed.status).toBe(500)
+      expect(await readJson(malformed)).toMatchObject({
+        errors: [{ extensions: { code: 'GRAPHQL_EXECUTION_FAILED' } }],
+      })
+    }
   } finally { await backend.close() }
 })
 
@@ -47,34 +69,37 @@ test('doctor reports unverified capability without initializing state and fails 
       })
       const [code, text, error] = await Promise.all([proc.exited, new Response(proc.stdout).text(), new Response(proc.stderr).text()])
       expect(error).toBe('')
-      return { code, report: JSON.parse(text) }
+      const report: unknown = JSON.parse(text)
+      return { code, report: record(report) }
     }
     const initial = await run()
     expect(initial.code).toBe(0)
-    expect(initial.report.graphql.status).toBe('unverified')
+    expect(record(initial.report['graphql'])['status']).toBe('unverified')
     expect(await readdir(root)).toEqual([])
     await mkdir(join(root, 'supabase'))
     await writeFile(join(root, 'supabase/config.toml'),
       '[lite.graphql]\nenabled = true\n[lite.identity]\nmodule = "missing-identity.ts"\n')
     const required = await run()
     expect(required.code).toBe(1)
-    expect(required.report.graphql.status).toBe('unverified')
+    expect(record(required.report['graphql'])['status']).toBe('unverified')
     expect(await readdir(root)).toEqual(['supabase'])
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
 test('catalog membership alone does not advertise a missing extension library', async () => {
-  const backend = await createBackend({ startRuntimeServices: false })
-  try {
     const engine = {
-      ...backend.db.engine,
-      query: async <T>(sql: string) => {
-        if (sql.includes('pg_extension e')) return { rows: [{ extversion: 'test', resolver: true }] as T[] }
+      query: async (sql: string) => {
+        if (sql.includes('pg_extension e')) return { rows: [{ extversion: 'test', resolver: true }] }
         throw new Error('private dynamic library path')
       },
     }
     expect(await inspectGraphql(engine)).toEqual({
       status: 'unsupported', extension: 'pg_graphql', version: 'test', reason: 'PG_GRAPHQL_RESOLVER_FAILED',
     })
-  } finally { await backend.close() }
+})
+
+test('invalid catalog records cannot advertise GraphQL support', async () => {
+  for (const row of [null, [], { extversion: '1.6.1', resolver: 'true' }, { extversion: 1, resolver: true }]) {
+    expect((await inspectGraphql({ query: async () => ({ rows: [row] }) })).reason).toBe('PG_GRAPHQL_INVALID_CATALOG')
+  }
 })

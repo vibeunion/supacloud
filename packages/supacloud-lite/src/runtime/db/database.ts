@@ -16,6 +16,7 @@ const DEFAULT_SEARCH_PATH_SQL = `set search_path to "$user", public, extensions`
 import { createPgliteEngine } from './pglite-engine.js'
 import type { DbEngine, EngineResults, EngineTx, EngineUnsubscribe } from './engine.js'
 import { Mutex } from './engine.js'
+import { isRecord } from '../validation.js'
 import type { MigrationFile, RequestContext } from '../types.js'
 
 /** One column of an introspected table. */
@@ -202,10 +203,18 @@ export class Database {
     const sorted = [...migrations].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
     // Validate the entire history before executing any new migration.
     const versions = new Set<string>()
-    const history = await this.engine.query<{ version: string; statements: string[] | null }>(
+    const history = await this.engine.query<unknown>(
       'select version, statements from supabase_migrations.schema_migrations'
     )
-    const recorded = new Map(history.rows.map((row) => [row.version, row.statements]))
+    const recorded = new Map<string, string[] | null>()
+    for (const row of history.rows) {
+      if (!isRecord(row) || typeof row['version'] !== 'string') throw new Error('invalid migration history record')
+      const statements: unknown = row['statements']
+      if (statements !== null && (!Array.isArray(statements) || !statements.every((sql: unknown) => typeof sql === 'string'))) {
+        throw new Error(`invalid migration history SQL: ${row['version']}`)
+      }
+      recorded.set(row['version'], statements)
+    }
     for (const migration of sorted) {
       const version = migration.name.match(/^(\d+)/)?.[1] ?? migration.name
       if (versions.has(version)) throw new Error(`duplicate migration version: ${version}`)
