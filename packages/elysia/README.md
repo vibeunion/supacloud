@@ -91,8 +91,9 @@ write retry. Confirm the outcome using the application's durable receipt or
 read-back protocol. A custom `errorMapper` can override this public envelope.
 
 Native `Response` objects are passed through by Elysia, including JSON responses.
-Handlers returning a native `Response` must validate their JSON payload before
-constructing it. The adapter does not consume or parse binary/streaming responses.
+Use `validatedJsonResponse` to opt into validation when constructing a native
+JSON response. Otherwise handlers must validate their JSON payload themselves.
+The adapter does not consume or parse binary/streaming responses.
 
 Jobs are executed explicitly with `executeJob(compiledModule, services, job,
 input, requestContext)`. The asynchronous compiler-generated job scope is
@@ -100,6 +101,39 @@ destroyed after execution, including when the job throws or scope construction
 fails partway through.
 
 ## API
+
+### `validatedJsonResponse(validate, value, init?): Response`
+
+Constructs a native JSON response after a synchronous, caller-owned type guard
+validates the actual serialized JSON snapshot. The value type is inferred from
+the guard; compatible extra fields are preserved. For a TypeBox contract, the
+guard can delegate to `Value.Check(schema, value)` or a compiled validator.
+No additional schema dependency is required by the adapter.
+
+```ts
+import { validatedJsonResponse } from "@supacloud/elysia";
+import { isReportReceipt } from "./contracts";
+
+return validatedJsonResponse(isReportReceipt, receipt, {
+  status: 201,
+  headers: { "x-request-id": requestId },
+});
+```
+
+The helper serializes once, validates that wire snapshot, and sends those same
+bytes. Validation cannot mutate the outgoing body; it is not a transform or
+coercion hook. Guards must be synchronous and side-effect free. Serialization
+failures and invalid receipts throw a sanitized `ApplicationError` with HTTP 500
+and `RESPONSE_VALIDATION_ERROR`, without retaining payloads or validator causes.
+The application's `errorMapper` can map this to its outcome-confirmation
+protocol. The helper never retries a command or implies rollback.
+
+`init` uses native `Response` options. The helper explicitly rejects null-body
+statuses 204, 205 and 304, including on runtimes that otherwise accept a body
+with those statuses. The default content type is
+`application/json`, and explicitly supplied headers are preserved. This helper
+is for bounded JSON payloads, not files or streams. Existing native `Response`
+passthrough is unchanged.
 
 ### `createApplication(options: ApplicationOptions): Elysia`
 

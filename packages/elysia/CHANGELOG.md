@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.8.1...elysia-v0.9.0) (2026-09-08)
+
+
+### Features
+
+* **elysia:** add validated native JSON responses ([#1210](https://github.com/vibeunion/supacloud/issues/1210)) ([28e73fe](https://github.com/vibeunion/supacloud/commit/28e73feff26d77010c23fd439c31b334a7705885))
+
 ## [0.8.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.8.0...elysia-v0.8.1) (2026-09-07)
 
 
