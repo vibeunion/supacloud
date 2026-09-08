@@ -19,7 +19,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts --outdir dist --target node --external elysia",
+    "build:js": "bun build src/index.ts --outdir dist --target node --external elysia --external jose",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
@@ -39,6 +39,9 @@
     "type": "git",
     "url": "https://github.com/vibeunion/supacloud.git",
     "directory": "packages/elysia"
+  },
+  "dependencies": {
+    "jose": "^6.2.11"
   },
   "peerDependencies": {
     "elysia": "^1.4.30"

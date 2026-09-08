@@ -1,5 +1,10 @@
 # @supacloud/compiler
 
+FA-derived direct-command RPC ownership, contract inspection and POST command
+protocol migration are documented in `docs/fa-consumer-governance.md` in the
+repository. `context <module> --json` reports `routeContracts` and standalone
+command execution plans; these are declarations and obligations, not runtime proof.
+
 SupaCloud 应用静态编译器：读取 `@supacloud/app` 装饰器元数据的原生 TypeScript AST，构建 ApplicationGraph，做静态校验，并生成**无反射、无容器**的工厂代码与 manifest。
 
 本包不依赖 `@supacloud/app`：AST 只按装饰器名匹配（`Module`/`Injectable`/`Inject`/`Command`/`Query`/`Controller`/`Get`/`Post`/`Put`/`Patch`/`Delete`/`defineModule`/`InjectionToken`），不校验 import 来源。
@@ -185,6 +190,7 @@ IDE 和 AI agent 做状态机漂移检查。
 | `unsupported-provider-helper` | warn（strict 时 error） | functional provider 的动态参数无法安全展开为静态 factory |
 | `dynamic-aspect-reference` | error | aspects 不是显式数组字面量，或包含 spread/表达式/字符串 pointcut |
 | `invalid-aspect-reference` | error | aspect 不是可静态解析的函数声明、箭头函数或函数表达式 |
+| `invalid-command-mode` | error | transaction/idempotency 必须显式为 `"required"` 或 `"none"`，不允许拼写错误或动态值悄悄关闭治理（SC4012） |
 | `missing-deps` | warn（strict 时 error） | 构造/工厂依赖无法静态解析 |
 | `generated-any` | warn（strict 时 error） | 生成的 TypeScript 产物包含 `any` |
 | `source-any` | warn（strict 时 error） | 未被排除的生产源码包含显式 `any` |
@@ -238,6 +244,20 @@ supacloud-compiler context case --root ./app --json
 `supacloud-compiler fix ./fix.json --dry-run` 调用；CLI 默认预览，需显式
 使用 `--write` 才写盘。写盘前会重新解析 AST，
 前置条件不满足时拒绝修改，并通过临时文件原子替换。
+CLI 修复的 `targetFile` 相对于配置的源码根目录解析，也可以用 `--root` 显式指定；
+JSON 修复文件本身仍相对于当前工作目录读取。
+
+上下游分别沿单一方向遍历，不会经过共享基础模块再扩散到无关兄弟业务。
+上下文包还包含准确的切面源文件、校验诊断和 `executionPlans`；`explain <module>`
+也展示静态执行计划。计划描述标准命令治理；自定义 executor 的内部实现和短路行为
+仍需运行时追踪验证。成功审计在 handler 返回后执行，而非 handler 之前。
+
+例如 `@Command({ transaction: "requried" })` 会报告 `invalid-command-mode`，
+并输出 `set_command_mode` 修复建议。必须显式给 fix 的 `value` 选择 `"required"`
+或 `"none"` 才能预览或写入；不会推断较弱权限。若诊断后的源表达式变化，修复拒绝写盘。
+
+`compileProject()` 现在默认在存在 error 时保留已有产物。仅诊断/迁移工具可以显式
+设置 `writeOnError: true` 导出错误版本；这些产物不应被部署或视为可执行成功产物。
 
 ## 编译基准
 

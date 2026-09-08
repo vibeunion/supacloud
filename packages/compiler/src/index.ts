@@ -6,6 +6,7 @@ export { checkProject, compileProject } from "./compile";
 export { watchProject } from "./watch";
 export {
   createContextPack,
+  createExecutionPlans,
   doctorProject,
   explainGraph,
   formatGraph,
@@ -22,7 +23,7 @@ export { TraitCompiler } from "./traits";
 export type { TraitCompilation, TraitHandler, TraitKind, TraitRecord } from "./traits";
 export { generateApplication, renderApplication } from "./generate";
 export type { GenerateOptions, RenderedArtifacts } from "./generate";
-export type { ContextPack, DoctorResult } from "./inspect";
+export type { ContextPack, DoctorResult, ExecutionPlan } from "./inspect";
 export { validateGraph, COMPILER_DIAGNOSTIC_CODES } from "./validate";
 export { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
 export type { TypeSafetyScanOptions } from "./type-safety";

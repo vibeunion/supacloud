@@ -72,6 +72,10 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "invalid-job-scope": { code: "SC4007", docsUrl: "https://supacloud.dev/errors/SC4007" },
   "dynamic-aspect-reference": { code: "SC4010", docsUrl: "https://supacloud.dev/errors/SC4010" },
   "invalid-aspect-reference": { code: "SC4011", docsUrl: "https://supacloud.dev/errors/SC4011" },
+  "invalid-command-mode": { code: "SC4012", docsUrl: "https://supacloud.dev/errors/SC4012" },
+  "invalid-command-rpc": { code: "SC4013", docsUrl: "https://supacloud.dev/errors/SC4013" },
+  "command-rpc-unavailable": { code: "SC4014", docsUrl: "https://supacloud.dev/errors/SC4014" },
+  "invalid-route-contract": { code: "SC3020", docsUrl: "https://supacloud.dev/errors/SC3020" },
   "unused-root-provider": { code: "SC5001", docsUrl: "https://supacloud.dev/errors/SC5001" },
   "invalid-feature-states": { code: "SC6001", docsUrl: "https://supacloud.dev/errors/SC6001" },
   "duplicate-feature-transition": { code: "SC6002", docsUrl: "https://supacloud.dev/errors/SC6002" },
@@ -831,8 +835,17 @@ export function validateGraph(
         );
       }
 
+      if (command.rpc && (typeof options !== "object" ||
+        !Object.hasOwn(options.commandCapabilities?.rpc ?? {}, command.rpc))) {
+        error("command-rpc-unavailable", `Command ${command.name} requires configured RPC adapter '${command.rpc}'.`, module.file, module.line);
+      }
       if (typeof options === "object" && options.commandCapabilities) {
-        const caps = options.commandCapabilities;
+        const hostCaps = options.commandCapabilities;
+        const rpcCaps = command.rpc && Object.hasOwn(hostCaps.rpc ?? {}, command.rpc) ? hostCaps.rpc?.[command.rpc] : undefined;
+        const caps = command.rpc
+          ? { permission: hostCaps.permission, audit: rpcCaps?.audit === true,
+            transaction: rpcCaps?.transaction === true, idempotency: rpcCaps?.idempotency === true }
+          : hostCaps;
         const location = `${command.className} (${module.file})`;
         if (command.permission && caps.permission === false) {
           error(

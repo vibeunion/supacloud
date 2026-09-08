@@ -10,11 +10,30 @@ export function inspectRouteContracts(graph: ApplicationGraph) {
         || route.handlerParams?.some((param) => param.kind === "param")
         || /:[^/]+/.test(`${controller.path}/${route.path}`)) && !route.params) missing.push("params");
       if ((route.queryBindings?.length || route.handlerParams?.some((param) => param.kind === "query")) && !route.query) missing.push("query");
-      if (!route.response) missing.push("response");
+      if (!route.response && !["binary", "stream"].includes(route.contract?.response ?? "")) missing.push("response");
+      const body = !route.body ? "missing" : route.contract?.body === "domain" ? "domain"
+        : route.schemaKinds?.body === "opaque" ? "opaque" : "framework-declared";
+      const response = route.contract?.response ?? (route.nativeResponse ? "native-response-unclassified"
+        : route.schemaKinds?.response === "opaque" ? "opaque" : !route.response ? "missing" : "framework-declared");
       return {
         module: module.name, controller: controller.className, handler: route.handler,
         method: route.method, path: `${controller.path}${route.path}`, file: controller.file,
         missing,
+        validation: {
+          body,
+          response,
+          schemas: route.schemaKinds ?? {},
+          evidence: route.contract?.evidence ?? null,
+          verified: false as const,
+          obligations: [
+            "Exercise actual HTTP request and response boundaries.",
+            ...(response === "opaque" ? ["Decode the response's business fields; an opaque schema accepts unvalidated output."] : []),
+            ...(body === "domain" || body === "opaque" ? ["Prove invalid input is rejected by the domain before writes."] : []),
+            ...(response === "native-json" || response === "native-response-unclassified"
+              ? ["Validate serialized JSON explicitly; native Response bypasses framework response schemas."] : []),
+            ...(["binary", "stream"].includes(response) ? ["Test transport headers, access and bytes without JSON decoding."] : []),
+          ],
+        },
       };
     }),
   ));

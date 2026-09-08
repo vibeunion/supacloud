@@ -7,6 +7,11 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./contracts": {
+      "types": "./dist/contract_client.d.ts",
+      "import": "./dist/contract_client.js",
+      "default": "./dist/contract_client.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
@@ -19,7 +24,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts --outdir dist --target node",
+    "build:js": "bun build src/index.ts --outdir dist --target node && bun build src/contract_client.ts --outdir dist --target browser",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",

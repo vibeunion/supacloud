@@ -125,22 +125,27 @@ export function createDemo() {
   return sandbox;
 }
 `,
-        "src/application.ts": `import { createApplication, type ApplicationOptions, type CommandGovernance } from "@supacloud/elysia";
+        "src/application.ts": `import { createApplication, createSupAuthRequestContext, type SupAuthContextOptions, type ApplicationOptions, type CommandGovernance } from "@supacloud/elysia";
 import { createCompiledModules } from "../generated/application";
 
 export interface AppAdapters {
   deps: NonNullable<ApplicationOptions["deps"]>;
   requestContext: NonNullable<ApplicationOptions["requestContext"]>;
   commandGovernance: CommandGovernance;
+  onExecution?: ApplicationOptions["onExecution"];
 }
 
-// Supply trusted identity, persistent storage and durable governance in the host.
+// The host verifies external identity (SupAuth for unified login) before creating requestContext.
 export function createApp(adapters: AppAdapters) {
   return createApplication({
     ...adapters,
     name: ${JSON.stringify(name)},
     modules: createCompiledModules(),
   });
+}
+
+export function createSupAuthApp(identity: SupAuthContextOptions, adapters: Omit<AppAdapters, "requestContext">) {
+  return createApp({ ...adapters, requestContext: createSupAuthRequestContext(identity) });
 }
 `,
         "src/review/review.ts": `import {
@@ -363,6 +368,46 @@ authoritative database must lock or compare row versions, enforce authorization,
 and commit transition, idempotency receipt and audit atomically. For distributed
 side effects use a transactional outbox. Client state machines are projections,
 not a security boundary. Missing declared runtime adapters return an error.
+
+## Unified User Center
+
+For enterprise unified login, use SupAuth as the external user center. This
+starter exports createSupAuthApp(identity, adapters) from dist/application.js.
+Supply issuer, audience, clientId, projectId, an explicit HTTPS jwksUrl and resolveAccess
+that reads current application-local access. The runtime verifies credential
+signatures, configured issuer and audience, allowed asymmetric algorithms/keys
+and expiry before constructing requestContext. The token must have the
+authenticated user role and matching client_id/azp application binding.
+Invalid credentials return 401; verification service failures return 503.
+It does not create a user center.
+
+Map the verified issuer and subject to application-local membership and
+permissions. A unified user does not automatically have access to every project.
+Never trust a body-supplied actor or an unverified decoded token. When identity
+cannot be verified, deny protected access; never fall back to the demo identity,
+local login or a service-role bypass. Do not duplicate passwords or token issuance
+in business modules. Recheck business authorization on idempotent replay.
+
+Local compilation and deterministic tests do not require SupAuth credentials.
+Before production acceptance, test legitimate SupAuth sessions across two
+applications, cross-project denial, invalid/expired credentials and permission
+revocation. The local memory tests are not proof of these integration guarantees.
+
+## Inspection And Repair
+
+\`\`\`sh
+bunx supacloud-compiler context review --root src --json
+bunx supacloud-compiler explain review --root src
+bunx supacloud-compiler check --json
+bunx supacloud-compiler fix ./fix.json --dry-run
+\`\`\`
+
+Context packs include directional dependencies, relevant aspect files, diagnostics
+and static execution plans. Share these rather than credentials or production
+data. Fixes default to preview; use --write only after reviewing the selected
+policy. Invalid transaction/idempotency modes fail compilation instead of
+silently disabling governance. onExecution receives metadata-only trace events;
+durable audit still belongs to the command governance adapter.
 
 ## CI
 

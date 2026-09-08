@@ -69,3 +69,18 @@ test("the generated environment test suite runs without installing dependencies"
     ]);
     expect({ status, output: status === 0 ? "" : stdout + stderr }).toEqual({ status: 0, output: "" });
 });
+
+test("starter documents external unified identity without adding an identity runtime", () => {
+    const files = appStarterFiles("example");
+    const readme = files["README.md"];
+    expect(readme).toContain("use SupAuth as the external user center");
+    expect(readme).toContain("exports createSupAuthApp(identity, adapters)");
+    expect(files["src/application.ts"]).toContain("requestContext: createSupAuthRequestContext(identity)");
+    expect(readme).toContain("configured issuer and audience");
+    expect(readme).toContain("application-local membership");
+    expect(readme).toContain("never fall back to the demo identity");
+    expect(readme).toContain("Recheck business authorization on idempotent replay");
+    expect(readme).toContain("tests do not require SupAuth credentials");
+    const manifest = JSON.parse(files["package.json"]);
+    expect(Object.keys(manifest.dependencies).some((name) => name.startsWith("@supauth/"))).toBe(false);
+});

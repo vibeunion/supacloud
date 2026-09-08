@@ -63,6 +63,29 @@ try {
   const original = await readFile(artifact, "utf8");
   const source = join(project, "src/review/review.ts");
   const validSource = await readFile(source, "utf8");
+  const compiler = "node_modules/@supacloud/compiler/dist/cli.js";
+  const context = JSON.parse(await run([compiler, "context", "review", "--json"]));
+  assert.ok(context.executionPlans.some((plan: { stages: string[] }) => plan.stages.includes("authorize")));
+  assert.ok(context.files.some((file: string) => file.endsWith("review.ts")));
+
+  // Exercise the actual JSON diagnosis -> reviewed fix -> compile loop with a
+  // configured src root, not only the programmatic repair API.
+  await writeFile(source, validSource.replaceAll('transaction: "required"', 'transaction: "requried"'));
+  const diagnosis = JSON.parse(await run([compiler, "check", "--json"], project, false));
+  const modeFix = diagnosis.diagnostics.find((item: { code: string }) => item.code === "invalid-command-mode")?.fix;
+  assert.ok(modeFix);
+  await writeFile(join(project, "fix.json"), JSON.stringify({ ...modeFix, value: "required" }));
+  await run([compiler, "fix", "fix.json", "--dry-run"]);
+  assert.ok((await readFile(source, "utf8")).includes('"requried"'));
+  await run([compiler, "fix", "fix.json", "--write"]);
+  // The feature specification also contains a policy literal. Restore it after
+  // proving the command-scoped fix only changed the intended declaration.
+  const fixed = await readFile(source, "utf8");
+  assert.ok(fixed.includes('transaction: "required"'));
+  await writeFile(source, validSource);
+  await run([compiler, "compile"]);
+  console.log("Starter: context plans and JSON diagnostic/preview/write repair passed");
+
   await writeFile(source, validSource.replace('to: "approved", command:', 'to: "missing", command:'));
   await run(["run", "compile"], project, false);
   assert.equal(await readFile(artifact, "utf8"), original, "Invalid compile replaced the working artifact");

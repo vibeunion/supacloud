@@ -55,6 +55,7 @@ const INTERFACES = `export interface CompiledRoute {
 }
 
 export interface CompiledCommand {
+  rpc?: string;
   className: string;
   name: string;
   permission: string;
@@ -637,6 +638,7 @@ class ModuleGenerator {
         `transaction: ${JSON.stringify(command.transaction)}`,
         ...(command.audit ? [`audit: ${JSON.stringify(command.audit)}`] : []),
         `idempotency: ${JSON.stringify(command.idempotency)}`,
+        ...(command.rpc ? [`rpc: ${JSON.stringify(command.rpc)}`] : []),
         ...(command.standalone ? ["standalone: true"] : []),
         ...(command.aspects && command.aspects.length > 0
           ? [`aspects: ${this.renderAspects(command.aspects)}`]

@@ -399,9 +399,10 @@ export async function analyzeProject(
             className: classInfo.decl.name?.text ?? name,
             name: stringLiteralProp(meta, "name") ?? classInfo.decl.name?.text ?? name,
             permission: stringLiteralProp(meta, "permission"),
-            transaction: commandModeProp(meta, "transaction") ?? "none",
+            rpc: checkedRpc(meta, ctx),
+            transaction: checkedCommandMode(meta, "transaction", ctx, classInfo.decl.name?.text ?? name) ?? "none",
             audit: stringLiteralProp(meta, "audit"),
-            idempotency: commandModeProp(meta, "idempotency") ?? "none",
+            idempotency: checkedCommandMode(meta, "idempotency", ctx, classInfo.decl.name?.text ?? name) ?? "none",
             standalone: true,
             aspects: parseAspectRefs(
               getProp(meta, "aspects"),
@@ -740,9 +741,10 @@ function parseModule(
           className: cls.name?.text ?? "<anonymous>",
           name: stringLiteralProp(meta, "name") ?? cls.name?.text ?? "<anonymous>",
           permission: stringLiteralProp(meta, "permission"),
-          transaction: commandModeProp(meta, "transaction") ?? "none",
+          rpc: checkedRpc(meta, ctx),
+          transaction: checkedCommandMode(meta, "transaction", ctx, cls.name?.text ?? "<anonymous>") ?? "none",
           audit: stringLiteralProp(meta, "audit"),
-          idempotency: commandModeProp(meta, "idempotency") ?? "none",
+          idempotency: checkedCommandMode(meta, "idempotency", ctx, cls.name?.text ?? "<anonymous>") ?? "none",
           ...(booleanProp(meta, "standalone") ? { standalone: true } : {}),
           ...(aspects.length > 0 ? { aspects } : {}),
         });
@@ -889,6 +891,37 @@ function commandModeProp(
 ): "required" | "none" | undefined {
   const value = stringLiteralProp(object, name);
   return value === "required" || value === "none" ? value : undefined;
+}
+
+function checkedCommandMode(
+  object: ObjectLiteralExpression,
+  property: "transaction" | "idempotency",
+  ctx: AnalysisContext,
+  command: string,
+): "required" | "none" | undefined {
+  const expression = getProp(object, property);
+  const value = commandModeProp(object, property);
+  if (expression && value === undefined) {
+    const file = sourcePath(ctx.rootDir, expression.getSourceFile().fileName);
+    ctx.diagnostics.push({
+      severity: "error",
+      code: "invalid-command-mode",
+      errorCode: "SC4012",
+      docsUrl: "https://supacloud.dev/errors/SC4012",
+      message: `${command}.${property} must be the explicit literal "required" or "none"; invalid governance cannot be disabled silently.`,
+      file,
+      line: lineOf(expression),
+      suggestion: `Choose the intended ${property} policy explicitly; use set_command_mode with value "required" or "none".`,
+      fix: {
+        type: "set_command_mode",
+        targetFile: file,
+        command,
+        property,
+        expectedExpression: nodeText(expression),
+      },
+    });
+  }
+  return value;
 }
 
 function parseProvider(
@@ -1423,6 +1456,9 @@ function parseController(
         path: routePath,
         handler: propertyName(method.name),
       };
+      const signature = ctx.checker.getSignatureFromDeclaration(method);
+      const resultType = signature && ctx.checker.typeToString(signature.getReturnType());
+      if (resultType && /\bResponse\b/.test(resultType)) route.nativeResponse = true;
       const pathParams: string[] = [];
       const paramRegex = /:([a-zA-Z0-9_]+)/g;
       let match: RegExpExecArray | null;
@@ -1562,12 +1598,32 @@ function parseController(
 
       const optionsArg = args[1];
       if (optionsArg && ts.isObjectLiteralExpression(optionsArg)) {
+        const contract = getProp(optionsArg, "contract");
+        if (contract && ts.isObjectLiteralExpression(contract)) {
+          route.contract = {};
+          for (const field of ["body", "response", "evidence"] as const) {
+            const value = stringLiteralProp(contract, field);
+            const allowed = field === "body" ? ["framework", "domain"]
+              : field === "response" ? ["framework", "native-json", "binary", "stream"] : undefined;
+            if (getProp(contract, field) && (!value || (allowed && !allowed.includes(value)))) {
+              ctx.diagnostics.push({ severity: "error", code: "invalid-route-contract", file,
+                message: `Invalid contract.${field} on ${route.handler}; use an explicit supported string literal.` });
+            } else if (value) Object.assign(route.contract, { [field]: value });
+          }
+        }
         for (const field of ["body", "params", "query", "response"] as const) {
           const schemaExpr = getProp(optionsArg, field);
           if (schemaExpr && ts.isIdentifier(schemaExpr)) {
             route[field] = nodeText(schemaExpr);
             const importPath = importPathOf(schemaExpr, ctx);
             if (importPath) schemaImports[schemaExpr.text] = importPath;
+            const declaration = resolveDeclaration(schemaExpr, ctx)[0];
+            const typeName = ctx.checker.typeToString(ctx.checker.getTypeAtLocation(schemaExpr));
+            const initializer = declaration && ts.isVariableDeclaration(declaration) ? declaration.initializer : undefined;
+            const opaque = /\bT(?:Unknown|Any)\b/.test(typeName) ||
+              (initializer && ts.isCallExpression(initializer) && ts.isPropertyAccessExpression(initializer.expression) &&
+                ["Unknown", "Any"].includes(initializer.expression.name.text));
+            (route.schemaKinds ??= {})[field] = opaque ? "opaque" : "declared";
           }
         }
         const commandExpr = getProp(optionsArg, "command");
@@ -1666,6 +1722,18 @@ function parseController(
     importPath: modulePath(ctx.rootDir, decl.getSourceFile().fileName),
     schemaImports: Object.keys(schemaImports).length > 0 ? schemaImports : undefined,
   };
+}
+
+function checkedRpc(meta: ObjectLiteralExpression, ctx: AnalysisContext): string | undefined {
+  const expression = getProp(meta, "rpc");
+  if (!expression) return undefined;
+  const value = stringLiteralProp(meta, "rpc");
+  if (value?.trim()) return value;
+  ctx.diagnostics.push({ severity: "error", code: "invalid-command-rpc",
+    file: sourcePath(ctx.rootDir, meta.getSourceFile().fileName), line: lineOf(meta),
+    message: "Command rpc must be a non-empty string literal identifying a configured adapter.",
+    suggestion: "Declare a named RPC adapter and its tested persistence capabilities." });
+  return undefined;
 }
 
 /**
@@ -2078,6 +2146,7 @@ function parseAspectRefs(
     const declaredFile = declaration.getSourceFile().fileName;
     const projectLocal = isProjectSourcePath(declaredFile, ctx.rootDir);
     refs.push({
+      ...(projectLocal ? { file: sourcePath(ctx.rootDir, declaredFile) } : {}),
       name,
       expression: element.text,
       importPath: projectLocal ? modulePath(ctx.rootDir, declaredFile) : undefined,

@@ -1,4 +1,7 @@
 import { Elysia } from "elysia";
+import { executionRequestId, observeExecution, type ExecutionObserver } from "./execution";
+
+export type { ExecutionEvent, ExecutionObserver } from "./execution";
 
 // ---------------------------------------------------------------------------
 // Compiled module contract (mirrors @supacloud/compiler output)
@@ -32,6 +35,7 @@ export interface CompiledRoute {
 }
 
 export interface CompiledCommand {
+  rpc?: string;
   className: string;
   name: string;
   permission?: string;
@@ -91,6 +95,9 @@ export interface CompiledModule {
 export type RequestContextFactory = (
   request: Request,
 ) => unknown | Promise<unknown>;
+
+export { createSupAuthRequestContext } from "./identity";
+export type { SupAuthIdentity, SupAuthAccess, SupAuthRequestContext, SupAuthContextOptions } from "./identity";
 
 export const VERIFIED_JWT_SUBJECT_HEADER = "x-supacloud-jwt-sub";
 export const EXECUTION_ID_HEADER = "x-sb-execution-id";
@@ -173,6 +180,20 @@ export function composeAspects(
   };
 }
 
+function observedAspects(
+  aspects: ApplicationAspect[],
+  boundary: string,
+  observer?: ExecutionObserver,
+): ApplicationAspect {
+  return composeAspects(...aspects.map((aspect, index): ApplicationAspect =>
+    (context, next) => observeExecution(observer, {
+      kind: context.kind,
+      operation: context.name,
+      stage: `${boundary}.aspect[${index}]:${aspect.name || "anonymous"}`,
+      requestId: executionRequestId(context.requestContext),
+    }, () => aspect(context, next))));
+}
+
 export type CommandAuthorizer = (
   invocation: CommandInvocation,
 ) => void | Promise<void>;
@@ -188,6 +209,11 @@ export interface CommandAudit {
 }
 
 export interface CommandGovernance {
+  /** Application-owned adapters: a single RPC owns all declared persistence. */
+  rpc?: Record<string, {
+    capabilities: { audit?: boolean; transaction?: boolean; idempotency?: boolean };
+    execute: CommandMiddleware;
+  }>;
   authorize: CommandAuthorizer;
   idempotency?: CommandMiddleware;
   transaction?: CommandMiddleware;
@@ -312,6 +338,8 @@ export interface ApplicationOptions {
   commandExecutor?: CommandExecutor;
   /** Maps framework or application failures to the public HTTP contract. */
   errorMapper?: ErrorMapper;
+  /** Best-effort execution metadata only; durable audit belongs to governance. */
+  onExecution?: ExecutionObserver;
 }
 
 export interface JobInvocation {
@@ -372,8 +400,8 @@ function bearerToken(request: Request): string | undefined {
  * Runtime. The runtime strips incoming x-supacloud-jwt-sub values and writes
  * the header only after JWT verification.
  */
-export const createSupaCloudRequestContext: RequestContextFactory = (
-  request,
+export const createSupaCloudRequestContext = (
+  request: Request,
 ): SupaCloudRequestContext => {
   const subject = safeHeaderValue(
     request.headers.get(VERIFIED_JWT_SUBJECT_HEADER),
@@ -437,9 +465,28 @@ function missingGovernanceAdapter(
  */
 export function createCommandExecutor(
   governance: CommandGovernance,
+  observer?: ExecutionObserver,
 ): CommandExecutor {
   return async (invocation, next) => {
     const { command } = invocation;
+    for (const mode of [command.transaction, command.idempotency]) {
+      if (mode !== undefined && mode !== "required" && mode !== "none") {
+        throw new ApplicationError("Invalid command governance mode", { code: "COMMAND_MODE_INVALID" });
+      }
+    }
+    if (command.rpc !== undefined) {
+      const adapter = Object.hasOwn(governance.rpc ?? {}, command.rpc) ? governance.rpc?.[command.rpc] : undefined;
+      if (!adapter) throw new ApplicationError("RPC governance adapter unavailable", { code: "COMMAND_RPC_UNAVAILABLE", status: 501 });
+      for (const capability of ["audit", "transaction", "idempotency"] as const) {
+        const required = capability === "audit" ? !!command.audit : command[capability] === "required";
+        if (required && adapter.capabilities[capability] !== true) throw missingGovernanceAdapter(command, capability);
+      }
+      const event = { kind: "command" as const, operation: command.name,
+        requestId: executionRequestId(invocation.requestContext) };
+      await observeExecution(observer, { ...event, stage: "authorize" }, () => governance.authorize(invocation));
+      return observeExecution(observer, { ...event, stage: `rpc:${command.rpc}` },
+        () => adapter.execute(invocation, once(next)));
+    }
     const audit = command.audit ? governance.audit : undefined;
     const transaction = command.transaction === "required"
       ? governance.transaction
@@ -459,27 +506,81 @@ export function createCommandExecutor(
     }
 
     try {
-      await governance.authorize(invocation);
+      const observe = <T>(stage: string, next: () => T | Promise<T>) =>
+        observeExecution(observer, {
+          kind: "command", operation: command.name, stage,
+          requestId: executionRequestId(invocation.requestContext),
+        }, next);
+      await observe("authorize", () => governance.authorize(invocation));
       let execute = async () => {
-        const result = await next();
-        if (audit) await audit.succeeded.call(audit, invocation, result);
+        const result = await observe("handler", invokeOnce);
+        if (audit) await observe("audit", () => audit.succeeded.call(audit, invocation, result));
         return result;
       };
+      const invokeOnce = once(next);
       if (command.transaction === "required") {
         if (!transaction) throw missingGovernanceAdapter(command, "transaction");
         const inner = execute;
-        execute = () => Promise.resolve(transaction.call(governance, invocation, inner));
+        execute = () => observe("transaction", () => transaction.call(governance, invocation, once(inner)));
       }
       if (command.idempotency === "required") {
         if (!idempotency) throw missingGovernanceAdapter(command, "idempotency");
         const inner = execute;
-        execute = () => Promise.resolve(idempotency.call(governance, invocation, inner));
+        execute = () => observe("idempotency", () => idempotency.call(governance, invocation, once(inner)));
       }
       return await execute();
     } catch (error) {
       if (audit) await audit.failed.call(audit, invocation, error);
       throw error;
     }
+  };
+}
+
+/** Execute at the business-selected boundary without binding or re-entering an HTTP route. */
+export async function executeCompiledCommand<Input, Result>(options: {
+  module: Pick<CompiledModule, "name" | "commands" | "aspects">;
+  command: string;
+  input: Input;
+  request: Request;
+  requestContext: unknown;
+  services?: Record<string, unknown>;
+  scope?: Record<string, unknown>;
+  governance: CommandGovernance;
+  observer?: ExecutionObserver;
+  handler: (input: Input) => Result | Promise<Result>;
+  decode: (value: unknown) => Result;
+}): Promise<Result> {
+  const matches = options.module.commands?.filter((item) => item.className === options.command) ?? [];
+  if (matches.length !== 1) throw new ApplicationError("Command descriptor missing or ambiguous", { code: "COMMAND_NOT_REGISTERED" });
+  const command = matches[0]!;
+  const invocation: CommandInvocation = {
+    command, input: { body: options.input, params: {}, query: {} },
+    request: options.request, requestContext: options.requestContext,
+    services: options.services ?? {}, scope: options.scope,
+  };
+  const aspects = composeAspects(
+    observedAspects(options.module.aspects ?? [], `module:${options.module.name}`, options.observer),
+    observedAspects(command.aspects ?? [], "command", options.observer),
+  );
+  // Authorization encloses aspects so denied calls cannot trigger their side effects.
+  const value = await createCommandExecutor(options.governance, options.observer)(invocation,
+    once(() => aspects({ kind: "command", name: command.name, input: options.input,
+      request: options.request, requestContext: options.requestContext,
+      services: invocation.services, scope: invocation.scope, metadata: command },
+    once(() => options.handler(options.input)))));
+  return options.decode(value);
+}
+
+function once(next: () => unknown | Promise<unknown>): () => Promise<unknown> {
+  let called = false;
+  return async () => {
+    if (called) {
+      throw new ApplicationError("Command continuation called multiple times", {
+        code: "COMMAND_CONTINUATION_REUSED",
+      });
+    }
+    called = true;
+    return await next();
   };
 }
 
@@ -544,7 +645,7 @@ export function createModulePlugin(
   compiled: CompiledModule,
   services: Record<string, unknown>,
   ctxFactory: RequestContextFactory = defaultRequestContext,
-  options: Pick<ApplicationOptions, "commandGovernance" | "commandExecutor" | "errorMapper"> = {},
+  options: Pick<ApplicationOptions, "commandGovernance" | "commandExecutor" | "errorMapper" | "onExecution"> = {},
   imported: Record<string, Record<string, unknown>> = {},
 ): Elysia {
   const hasCommandRoutes = compiled.controllers.some((controller) =>
@@ -570,7 +671,7 @@ export function createModulePlugin(
   }
   const requestContexts = new WeakMap<Request, unknown>();
   const governanceExecutor = options.commandGovernance
-    ? createCommandExecutor(options.commandGovernance)
+    ? createCommandExecutor(options.commandGovernance, options.onExecution)
     : undefined;
   const commandExecutor = options.commandExecutor && governanceExecutor
     ? composeCommandExecutors(options.commandExecutor, governanceExecutor)
@@ -647,9 +748,16 @@ export function createModulePlugin(
           scope: requestScope,
           requestContext,
         };
-        const invoke = () => route.invoker
+        const handlerCall = () => route.invoker
           ? route.invoker(instance, input)
           : Reflect.apply(method, instance, [input]);
+        const invoke = once(() => route.command && options.commandGovernance ? handlerCall()
+          : observeExecution(options.onExecution, {
+            kind: route.command ? "command" : "route",
+            operation: route.command ?? `${route.method} ${path}`,
+            stage: "handler",
+            requestId: executionRequestId(requestContext),
+          }, handlerCall));
         const routeContext: ApplicationAspectContext = {
           kind: "route",
           name: `${route.method} ${path}`,
@@ -676,9 +784,9 @@ export function createModulePlugin(
         const commandAspects = route.command
           ? commandsByClassName.get(route.command)?.aspects ?? []
           : [];
-        const routePipeline = composeAspects(...(route.aspects ?? []));
-        const commandPipeline = composeAspects(...commandAspects);
-        const modulePipeline = composeAspects(...(compiled.aspects ?? []));
+        const routePipeline = observedAspects(route.aspects ?? [], "route", options.onExecution);
+        const commandPipeline = observedAspects(commandAspects, "command", options.onExecution);
+        const modulePipeline = observedAspects(compiled.aspects ?? [], `module:${compiled.name}`, options.onExecution);
         const invokeRoute = () => routePipeline(
           routeContext,
           () => route.command
@@ -706,7 +814,10 @@ export function createModulePlugin(
             scope: requestScope,
             services,
           };
-          return commandExecutor(invocation, invoke);
+          return observeExecution(options.onExecution, {
+            kind: "command", operation: command.name, stage: "commandExecutor",
+            requestId: executionRequestId(requestContext),
+          }, () => commandExecutor(invocation, invoke));
         };
         return modulePipeline(
           route.command ? commandContext : routeContext,
@@ -758,6 +869,7 @@ export async function executeJob(
   requestContext: unknown,
   imported: Record<string, Record<string, unknown>> = {},
   executor?: JobExecutor,
+  observer?: ExecutionObserver,
 ): Promise<unknown> {
   const jobScope = job.scope === "job" && compiled.createJobScope
     ? await compiled.createJobScope(services, requestContext, imported)
@@ -790,15 +902,19 @@ export async function executeJob(
       services,
       metadata: job,
     };
-    const invoke = () => Reflect.apply(method, instance, [input]);
-    const pipeline = composeAspects(
-      ...(compiled.aspects ?? []),
-      ...(job.aspects ?? []),
-    );
+    const invoke = once(() => observeExecution(observer, {
+      kind: "job", operation: job.name, stage: "handler",
+      requestId: executionRequestId(requestContext),
+    }, () => Reflect.apply(method, instance, [input])));
+    const pipeline = observedAspects(compiled.aspects ?? [], `module:${compiled.name}`, observer);
+    const jobPipeline = observedAspects(job.aspects ?? [], "job", observer);
 
     return await pipeline(
       context,
-      executor ? () => executor(invocation, invoke) : invoke,
+      () => jobPipeline(context, () => observeExecution(observer, {
+        kind: "job", operation: job.name, stage: "jobExecutor",
+        requestId: executionRequestId(requestContext),
+      }, executor ? () => executor(invocation, invoke) : invoke)),
     );
   } finally {
     if (jobScope && compiled.destroyJobScope) {
@@ -879,6 +995,7 @@ export function createApplication(options: ApplicationOptions): Elysia {
       commandGovernance: options.commandGovernance,
       commandExecutor: options.commandExecutor,
       errorMapper: options.errorMapper,
+      onExecution: options.onExecution,
     }, imported));
   }
 

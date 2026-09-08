@@ -4,6 +4,12 @@ This guide recommends a scalable application layout for teams building a domain-
 
 The examples use `supabase/` because it is the standard CLI root. A project whose established deployment tooling requires `supacloud/` can use that name instead, but it must have one authoritative platform root.
 
+The [Engineering Goals](engineering-goals.md) define framework/platform ownership,
+static AOP and verification priorities. Enterprise applications use external
+SupAuth for a unified user center; verified identity enters through a trusted
+host adapter, while object relationships and workflow authorization stay local.
+Do not build another login or user-center subsystem under `_shared`.
+
 ## Recommended Monorepo Layout
 
 ```text

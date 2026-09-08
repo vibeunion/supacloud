@@ -1,0 +1,92 @@
+diff --git a/supacloud/fa/app/features/config/config.controller.ts b/supacloud/fa/app/features/config/config.controller.ts
+--- a/supacloud/fa/app/features/config/config.controller.ts
++++ b/supacloud/fa/app/features/config/config.controller.ts
+@@ -12,1 +12,1 @@
+-import { Body, Controller, Delete, Get, Param, Post } from '@supacloud/app';
++import { Body, Controller, Get, Param, Post } from '@supacloud/app';
+@@ -134,12 +134,16 @@
+-  /** 删除未使用的人员资质（旧 deleteQualificationResource；body 由框架解析后经 context 传入）。 */
+-  @Delete('/qualifications/:qualificationId', {
++  /** 删除命令使用 POST 与显式请求体，不保留旧 DELETE 协议。 */
++  @Post('/qualifications/:qualificationId/delete', {
++    body: DomainValidatedBody,
++    contract: { body: 'domain', response: 'native-json', evidence: 'config.test.ts' },
+     params: ConfigQualificationParams,
+     response: ConfigCommandResponse,
+   })
+   deleteQualificationEndpoint(
+     @Param('qualificationId') qualificationId: string,
+-    context: Pick<FaAppRequestContext, 'request'> & { body?: unknown },
++    @Body() body: unknown,
++    context: Pick<FaAppRequestContext, 'request'>,
+   ): Promise<Response> {
+-    const { request, body } = context;
++    const { request } = context;
+     return this.respond(request, () => this.deleteQualification.execute({
+diff --git a/app/fa-web/src/lib/case-workspace-api.ts b/app/fa-web/src/lib/case-workspace-api.ts
+--- a/app/fa-web/src/lib/case-workspace-api.ts
++++ b/app/fa-web/src/lib/case-workspace-api.ts
+@@ -762,4 +762,4 @@
+ ): Promise<Record<string, unknown>> {
+-  return faApiDelete(
+-    `/functions/v1/fa-api/config/qualifications/${encodeURIComponent(qualificationId)}`,
++  return faApiPost(
++    `/functions/v1/fa-api/config/qualifications/${encodeURIComponent(qualificationId)}/delete`,
+     { expectedRowVersion, reason },
+diff --git a/supacloud/fa/app/features/config/config.test.ts b/supacloud/fa/app/features/config/config.test.ts
+--- a/supacloud/fa/app/features/config/config.test.ts
++++ b/supacloud/fa/app/features/config/config.test.ts
+@@ -532,1 +532,1 @@
+-  test('DELETE /config/qualifications/:id：200 + RPC 参数；非管理员 → 403', async () => {
++  test('POST /config/qualifications/:id/delete：200 + RPC 参数；非管理员 → 403', async () => {
+@@ -537,3 +537,3 @@
+-      `http://test.local/config/qualifications/${QUALIFICATION_ID}`,
++      `http://test.local/config/qualifications/${QUALIFICATION_ID}/delete`,
+       {
+-        method: 'DELETE',
++        method: 'POST',
+@@ -555,3 +555,3 @@
+-      `http://test.local/config/qualifications/${QUALIFICATION_ID}`,
++      `http://test.local/config/qualifications/${QUALIFICATION_ID}/delete`,
+       {
+-        method: 'DELETE',
++        method: 'POST',
+@@ -572,1 +572,1 @@
+-  test('DELETE /config/qualifications/:id：body 超字段 → 400 FA_CONFIG_QUALIFICATION_DELETE_INVALID', async () => {
++  test('POST /config/qualifications/:id/delete：body 超字段 → 400 FA_CONFIG_QUALIFICATION_DELETE_INVALID', async () => {
+@@ -575,3 +575,3 @@
+-      `http://test.local/config/qualifications/${QUALIFICATION_ID}`,
++      `http://test.local/config/qualifications/${QUALIFICATION_ID}/delete`,
+       {
+-        method: 'DELETE',
++        method: 'POST',
+@@ -617,1 +617,2 @@
+-    expect(isFaAppRoute(['config', 'qualifications', 'x'])).toBe(true);
++    expect(isFaAppRoute(['config', 'qualifications', 'x', 'delete'])).toBe(true);
++    expect(isFaAppRoute(['config', 'qualifications', 'x'])).toBe(false);
+diff --git a/scripts/fa-app-framework-compile.ts b/scripts/fa-app-framework-compile.ts
+--- a/scripts/fa-app-framework-compile.ts
++++ b/scripts/fa-app-framework-compile.ts
+@@ -370,2 +370,0 @@
+-  postProcessGeneratedArtifacts(targetOutDir);
+-
+@@ -434,20 +432,0 @@
+-/**
+- * 编译器后处理：修复特定路由与上游编译器 0.9.0 规则之间的调用适配。
+- * 上游 @supacloud/compiler 0.9.0 引入 SC3016（disallowed-body-on-get-delete），
+- * 严禁在 DELETE 路由声明 @Body()。但 DELETE /config/qualifications/:id 包含
+- * expectedRowVersion 与 reason 的业务校验需求。上游 @supacloud/elysia 0.7.0
+- * 在分发时会将已解析请求体挂载至 input.body。此处在生成的 invoker 中将 input.body
+- * 透传至 context，供 controller 内安全读取，避免二次读取或 clone() 已锁定的流。
+- */
+-export function postProcessGeneratedArtifacts(dir: string): void {
+-  const applicationFile = join(dir, 'application.ts');
+-  if (!existsSync(applicationFile)) return;
+-  const content = readFileSync(applicationFile, 'utf8');
+-  const targetPattern = 'const handler = ctrl["deleteQualificationEndpoint"]; if (typeof handler !== "function") throw new TypeError("Route handler deleteQualificationEndpoint is not callable"); return await Reflect.apply(handler, ctrl, [(req.params?.["qualificationId"] !== undefined ? req.params?.["qualificationId"] : undefined), (req.context ?? req)]);';
+-  const patchedPattern = 'const handler = ctrl["deleteQualificationEndpoint"]; if (typeof handler !== "function") throw new TypeError("Route handler deleteQualificationEndpoint is not callable"); return await Reflect.apply(handler, ctrl, [(req.params?.["qualificationId"] !== undefined ? req.params?.["qualificationId"] : undefined), (req.context && typeof req.context === "object" ? Object.assign(req.context, { body: req.body }) : req)]);';
+-  if (content.includes(targetPattern)) {
+-    writeFileSync(applicationFile, content.replace(targetPattern, patchedPattern), 'utf8');
+-  }
+-}
+-

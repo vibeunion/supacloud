@@ -102,6 +102,66 @@ fails partway through.
 
 ## API
 
+### External SupAuth Identity
+
+`createSupAuthRequestContext(options)` supplies the trusted host adapter for an
+external SupAuth user center. It uses `jose` signature verification, requires
+configured HTTPS issuer/JWKS endpoints, audience, subject, expiry and issued-at,
+and accepts only ES256/RS256. It does not implement login, sessions or token issuance.
+
+```ts
+import { createSupAuthRequestContext } from "@supacloud/elysia";
+
+const requestContext = createSupAuthRequestContext({
+  issuer: "https://identity.example/auth/v1",
+  audience: "authenticated",
+  clientId: "orders-oauth-client",
+  projectId: "orders",
+  jwksUrl: "https://identity.example/auth/v1/.well-known/jwks.json",
+  resolveAccess: async (identity) =>
+    accessRepository.findCurrentAccess(identity.issuer, identity.subject, "orders"),
+});
+```
+
+`accessRepository` is application-owned and must return `{ projectId, tenantId,
+permissions }` or `null` from authoritative local data. The factory rejects
+missing/wrong-project access, ignores forwarded subject/tenant headers and
+returns a frozen identity/access snapshot. Commands must still authorize current
+object relationships within their durable transaction; a permission snapshot is
+not an RLS replacement. The bearer credential is non-enumerable on identity.
+Never log the complete request/context.
+
+The adapter protects all routes using that context factory, including health
+routes; mount intentionally public routes separately. Invalid credentials and
+invalid signing keys fail closed with sanitized 401 responses. Tokens must have
+`role: "authenticated"` and a matching `client_id` or `azp`; when both exist they
+must match each other and the configured `clientId`. Verification service failures
+return sanitized 503 `AUTHENTICATION_UNAVAILABLE`, never an identity fallback. Remote
+JWKS uses bounded fetch timeout and the library's key cache; no token-provided key
+URL or local identity fallback is accepted. `keyResolver` is a trusted host
+override for pinned key sets/testing, never request input.
+
+### Execution Inspection
+
+Set `createApplication({ onExecution })` for metadata-only events: operation,
+stage, kind, phase, elapsed time and a bounded request correlation ID. Module,
+route and command aspects retain declared order. Standard governance exposes
+authorization, idempotency, transaction, handler and successful audit stages.
+Pass the final optional observer argument to `executeJob` for job traces.
+No request input, token, result or error cause is sent to the observer.
+The boundary and aspect index identify the static declaration; JavaScript
+function names are display hints and may change when consumers minify a bundle.
+
+Observer failures are isolated from business results; this is best-effort
+telemetry, not durable audit. Use command governance for mandatory audit.
+An inner successful stage does not prove the enclosing transaction committed.
+The compiler's `context`/`explain` commands show the corresponding static plan.
+
+Command transaction/idempotency continuations, custom route executors and job
+handlers reject repeated invocation. This prevents accidental adapter retries
+inside one invocation; cross-request/process deduplication still requires a
+durable idempotency adapter.
+
 ### `validatedJsonResponse(validate, value, init?): Response`
 
 Constructs a native JSON response after a synchronous, caller-owned type guard

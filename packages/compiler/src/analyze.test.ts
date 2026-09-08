@@ -127,6 +127,7 @@ describe("analyzeProject：controller 与路由", () => {
       body: "CreateCaseBody",
       params: "AcceptParams",
       response: "AcceptResult",
+      schemaKinds: { body: "declared", params: "declared", response: "declared" },
       command: "AcceptCaseCommand",
       pathParams: ["caseId"],
     });
@@ -209,12 +210,14 @@ describe("analyzeProject：command 与 externalTokens", () => {
     const analyzed = await analyzeProject(root);
     expect(analyzed.diagnostics).toEqual([]);
     expect(analyzed.modules[0]?.aspects).toEqual([{
+      file: "src/aspects.ts",
       name: "auditAspect",
       expression: "auditAspect",
       importPath: "src/aspects",
       importModule: undefined,
     }]);
     expect(analyzed.modules[0]?.commands[0]?.aspects).toEqual([{
+      file: "src/aspects.ts",
       name: "auditAspect",
       expression: "auditAspect",
       importPath: "src/aspects",

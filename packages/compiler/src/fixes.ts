@@ -36,6 +36,19 @@ export async function applyDiagnosticFix(
   let content: string;
 
   switch (fix.type) {
+    case "set_command_mode": {
+      if ((fix.property !== "transaction" && fix.property !== "idempotency") ||
+        (fix.value !== "required" && fix.value !== "none")) {
+        throw new Error("Command mode fix requires an explicit property and policy value");
+      }
+      const object = decoratorObject(findClass(source, fix.command), "Command");
+      const current = property(object, fix.property);
+      if (!current || current.initializer.getText(source) !== fix.expectedExpression) {
+        throw new Error("Command mode changed since diagnosis; analyze the project again");
+      }
+      content = replaceProperty(source, object, fix.property, ts.factory.createStringLiteral(fix.value));
+      break;
+    }
     case "add_module_import": {
       if (!fix.importPath || !fix.symbol) throw new Error("Module fix requires importPath and symbol");
       identifier(fix.symbol);

@@ -1,0 +1,67 @@
+// Copied to the isolated consumer's tests directory by check_fa_consumer.ts.
+import { expect, test } from "bun:test";
+import { createContractCommandClient } from "@supacloud/app/contracts";
+import { executeCompiledCommand } from "@supacloud/elysia";
+import { createContextPack } from "@supacloud/compiler";
+import { createCompiledModules } from "../supacloud/fa/app/generated/application";
+import { decodeFAContract } from "../packages/fa-contracts/src/command-contract";
+import { FAReportReworkAnalystAssignmentContract as contract } from "../packages/fa-contracts/src/report-rework-assignment";
+
+test("packed browser helper consumes FA schemas and confirms a lost response once", async () => {
+  const id = "10000000-0000-4000-8000-000000000001";
+  const input = { reworkRequestId: id, analystMembershipId: id, expectedRowVersion: 1, handlingReason: "assign" };
+  const receipt = { reworkRequestId: id, reportVersionId: id, targetCaseId: id,
+    assignedAnalystMembershipId: id, status: "in_progress", rowVersion: 3, idempotent: false };
+  let sends = 0, reads = 0;
+  const client = createContractCommandClient({
+    input: (value) => decodeFAContract(contract.input, value, "request"),
+    result: (value) => decodeFAContract(contract.result, value, "response"),
+  }, {
+    send: async () => { sends++; throw Error("response lost"); },
+    lookup: async () => { reads++; return receipt; },
+    matches: (request, result) => request.reworkRequestId === result.reworkRequestId &&
+      request.analystMembershipId === result.assignedAnalystMembershipId,
+  });
+  expect(await client(input)).toEqual({ status: "confirmed", source: "lookup", result: receipt });
+  expect([sends, reads]).toEqual([1, 1]);
+});
+
+test("direct execution consumes a real FA descriptor without an HTTP command binding", async () => {
+  const module = createCompiledModules().find((module) =>
+    module.commands.some((command) => command.className === "SetPermissionRolesCommand"))!;
+  expect(module).toBeDefined();
+  expect(module.controllers.every((controller) => controller.routes.every((route) => !route.command))).toBe(true);
+  const order: string[] = [];
+  const options = {
+    module, command: "SetPermissionRolesCommand",
+    input: { membershipId: "test-member", body: {} },
+    request: new Request("https://local.invalid/"), requestContext: {},
+    governance: { authorize: (invocation: { command: { permission?: string } }) => {
+      expect(invocation.command.permission).toBe("permissions:member.roles.set");
+      order.push("authorize");
+    } },
+    handler: () => { order.push("handler"); return { ok: true }; },
+    decode: (value: unknown) => {
+      if (!value || typeof value !== "object" || !("ok" in value) || value.ok !== true) throw Error("invalid receipt");
+      return { ok: true };
+    },
+  };
+  expect(await executeCompiledCommand(options)).toEqual({ ok: true });
+  expect(order).toEqual(["authorize", "handler"]);
+  await expect(executeCompiledCommand({ ...options,
+    governance: { authorize: () => { throw Error("denied"); } },
+  })).rejects.toThrow("denied");
+  expect(order).toEqual(["authorize", "handler"]);
+});
+
+test("real FA context exposes opaque/native contracts and no legacy delete route", async () => {
+  const graph = await Bun.file(new URL("../supacloud/fa/app/generated/app.manifest.json", import.meta.url)).json();
+  const module = graph.modules.find((item: { controllers: { className: string }[] }) =>
+    item.controllers.some((controller) => controller.className === "ConfigController"));
+  const pack = createContextPack(graph, module.name);
+  const route = pack.routeContracts.find((route) => route.handler === "deleteQualificationEndpoint")!;
+  expect(route.method).toBe("POST");
+  expect(route.path).toEndWith("/delete");
+  expect(route.validation).toMatchObject({ body: "domain", response: "native-json", verified: false });
+  expect(pack.routeContracts.some((route) => route.validation.schemas.body === "opaque")).toBe(true);
+});

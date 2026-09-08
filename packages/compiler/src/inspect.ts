@@ -1,6 +1,16 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import type { ApplicationGraph, Diagnostic, ModuleNode, ProviderNode } from "./types";
+import type { ApplicationGraph, AspectRefNode, Diagnostic, ModuleNode, ProviderNode } from "./types";
+import { inspectRouteContracts } from "./route-contracts";
+
+export interface ExecutionPlan {
+  module: string;
+  kind: "route" | "command" | "job";
+  name: string;
+  command?: string;
+  /** Standard governance contract. Audit success follows the handler; custom executors may short-circuit. */
+  stages: string[];
+}
 
 export interface ContextPack {
   version: 1;
@@ -8,6 +18,9 @@ export interface ContextPack {
   modules: ModuleNode[];
   files: string[];
   externalTokens: string[];
+  executionPlans: ExecutionPlan[];
+  routeContracts: ReturnType<typeof inspectRouteContracts>;
+  diagnostics: Diagnostic[];
   relatedModules: {
     importedBy: string[];
     imports: string[];
@@ -69,23 +82,25 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
 
   const byName = new Map(graph.modules.map((module) => [module.name, module]));
   const selected = new Set<string>([subjectModule.name]);
-  const queue = [subjectModule.name];
-
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (!current) continue;
-    const module = byName.get(current);
-    if (!module) continue;
-    const neighbors = [
-      ...module.imports,
-      ...graph.modules
+  // Traverse each direction independently. Switching direction at a shared
+  // infrastructure module pulls unrelated sibling features into the pack.
+  for (const direction of ["imports", "dependents"] as const) {
+    const visited = new Set<string>([subjectModule.name]);
+    const queue = [subjectModule.name];
+    while (queue.length > 0) {
+      const current = queue.shift();
+      if (!current) continue;
+      const module = byName.get(current);
+      if (!module) continue;
+      const neighbors = direction === "imports" ? module.imports : graph.modules
         .filter((candidate) => candidate.imports.includes(module.name))
-        .map((candidate) => candidate.name),
-    ];
-    for (const neighbor of neighbors) {
-      if (!selected.has(neighbor) && byName.has(neighbor)) {
-        selected.add(neighbor);
-        queue.push(neighbor);
+        .map((candidate) => candidate.name);
+      for (const neighbor of neighbors) {
+        if (!visited.has(neighbor) && byName.has(neighbor)) {
+          visited.add(neighbor);
+          selected.add(neighbor);
+          queue.push(neighbor);
+        }
       }
     }
   }
@@ -95,6 +110,7 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
     module.file,
     ...module.providers.map((provider) => provider.file),
     ...module.controllers.map((controller) => controller.file),
+    ...allAspects(module).flatMap((aspect) => aspect.file ? [aspect.file] : []),
   ]))].sort();
   const referencedTokens = new Set<string>();
   for (const module of modules) {
@@ -112,6 +128,10 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
     modules,
     files,
     externalTokens: graph.externalTokens.filter((token) => referencedTokens.has(token)),
+    executionPlans: createExecutionPlans({ ...graph, modules }),
+    routeContracts: inspectRouteContracts({ ...graph, modules }),
+    diagnostics: (graph.diagnostics ?? []).filter((diagnostic) =>
+      diagnostic.file === undefined || files.includes(diagnostic.file)),
     relatedModules: {
       imports: subjectModule.imports.filter((name) => selected.has(name)),
       importedBy: graph.modules
@@ -120,6 +140,64 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
         .sort(),
     },
   };
+}
+
+function allAspects(module: ModuleNode): AspectRefNode[] {
+  return [
+    ...(module.aspects ?? []),
+    ...module.controllers.flatMap((controller) => controller.routes.flatMap((route) => route.aspects ?? [])),
+    ...module.commands.flatMap((command) => command.aspects ?? []),
+    ...(module.jobs ?? []).flatMap((job) => job.aspects ?? []),
+  ];
+}
+
+/** Static plan, not runtime discovery; custom executors remain explicit boundaries. */
+export function createExecutionPlans(graph: ApplicationGraph): ExecutionPlan[] {
+  const aspects = (boundary: string, refs: AspectRefNode[] = []) =>
+    refs.map((ref, index) => `${boundary}.aspect[${index}]:${ref.name}`);
+  return graph.modules.flatMap((module): ExecutionPlan[] => [
+    ...module.controllers.flatMap((controller) => controller.routes.map((route): ExecutionPlan => {
+      const command = module.commands.find((item) => item.className === route.command);
+      const path = `${controller.path}/${route.path}`.replace(/\/+/g, "/");
+      return {
+        module: module.name,
+        kind: "route",
+        name: `${route.method} ${path.length > 1 ? path.replace(/\/+$/, "") : path}`,
+        ...(command ? { command: command.name } : {}),
+        stages: [
+          ...aspects(`module:${module.name}`, module.aspects),
+          ...aspects("route", route.aspects),
+          ...aspects("command", command?.aspects),
+          ...(command ? [
+            "commandExecutor",
+            "authorize",
+            ...(command.rpc ? [`rpc:${command.rpc}`] : [
+              ...(command.idempotency === "required" ? ["idempotency"] : []),
+              ...(command.transaction === "required" ? ["transaction"] : []),
+            ]),
+          ] : []),
+          "handler",
+          ...(command?.audit && !command.rpc ? ["audit"] : []),
+        ],
+      };
+    })),
+    ...module.commands.map((command): ExecutionPlan => ({
+      module: module.name, kind: "command", name: command.name, command: command.name,
+      stages: ["authorize",
+        ...(command.rpc ? [`rpc:${command.rpc}`] : [
+          ...(command.idempotency === "required" ? ["idempotency"] : []),
+          ...(command.transaction === "required" ? ["transaction"] : []),
+        ]),
+        ...aspects(`module:${module.name}`, module.aspects), ...aspects("command", command.aspects),
+        "handler", ...(command.audit && !command.rpc ? ["audit"] : [])],
+    })),
+    ...(module.jobs ?? []).map((job): ExecutionPlan => ({
+      module: module.name,
+      kind: "job",
+      name: job.name,
+      stages: [...aspects(`module:${module.name}`, module.aspects), ...aspects("job", job.aspects), "jobExecutor", "handler"],
+    })),
+  ]);
 }
 
 export function doctorProject(
@@ -169,6 +247,8 @@ function explainModule(graph: ApplicationGraph, module: ModuleNode): string {
     `  providers: ${module.providers.length > 0 ? module.providers.map((provider) => provider.token).join(", ") : "-"}`,
     `  controllers: ${module.controllers.length > 0 ? module.controllers.map((controller) => controller.className).join(", ") : "-"}`,
     `  commands: ${module.commands.length > 0 ? module.commands.map((command) => command.name).join(", ") : "-"}`,
+    ...createExecutionPlans({ ...graph, modules: [module] })
+      .map((plan) => `  execution ${plan.name}: ${plan.stages.join(" -> ")}`),
   ].join("\n");
 }
 

@@ -6,7 +6,18 @@
 
 ## Español
 
-**SupaCloud** es una plataforma PaaS multi-tenant ultrapotente y de próxima generación para el autoalojamiento de Supabase. Construida sobre **Pigsty**, permite ejecutar múltiples proyectos Supabase aislados de forma eficiente en un único servidor.
+**SupaCloud** es una base de ingeniería de aplicaciones para el desarrollo asistido por IA, con una plataforma multi-tenant para autoalojar proyectos de estilo Supabase sobre **Pigsty**.
+
+### Objetivos de Ingeniería
+
+- **Bases fiables**: mecanismos compartidos de ejecución, persistencia y gobernanza con contratos probados.
+- **Vibe coding práctico**: plantilla estándar, contexto localizado, diagnósticos accionables y verificación local rápida.
+- **Detección temprana**: tipos, compilación estática y esquemas en ejecución; compilar no demuestra la corrección del negocio.
+- **Aplicaciones grandes mantenibles**: módulos con responsabilidades explícitas y AOP declarado estáticamente.
+
+El framework (`@supacloud/app`, `@supacloud/compiler`, `@supacloud/elysia`) define la estructura y los contratos de ejecución; la plataforma gestiona aislamiento, infraestructura y entrega. **SupAuth es la dependencia externa de identidad unificada para aplicaciones empresariales**. Las relaciones de negocio y la autorización por objeto siguen siendo responsabilidad de cada aplicación.
+
+Consulte [Engineering Goals](docs/engineering-goals.md) para responsabilidades, bases existentes, trabajo pendiente y criterios de aceptación.
 
 ### Características Clave
 

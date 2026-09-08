@@ -287,3 +287,5 @@ export type {
 } from "./pipe";
 export { HttpContractError, decodeHttpContract } from "./http_contract";
 export type { ContractDecoder, HttpContract } from "./http_contract";
+export { createContractCommandClient } from "./contract_client";
+export type { CommandContract, CommandOutcome } from "./contract_client";

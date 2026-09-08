@@ -79,6 +79,20 @@ signals and exit codes. They do not deploy.
 
 ## Production Integration
 
+For enterprise unified identity, integrate the external SupAuth user center in
+the trusted host. The production bundle exports `createSupAuthApp(identity, adapters)`,
+using the runtime's `createSupAuthRequestContext` verifier. Configure HTTPS issuer,
+JWKS endpoint, audience and project ID, and supply `resolveAccess` against current
+application data. It constructs `requestContext` after credential verification; resolve
+application-local membership and permissions separately. Never replace an
+unverifiable identity with the local demo user or a service-role credential.
+See [Engineering Goals](engineering-goals.md#unified-identity-contract) for
+issuer/audience validation, failure behavior and cross-application acceptance.
+Local compilation and deterministic tests must remain independent of SupAuth.
+Use `onExecution` for metadata-only execution traces and compiler `context`/`explain`
+for static plans. Real SupAuth sessions and durable database integration remain
+deployment acceptance gates, not properties established by the memory demo.
+
 `bun run build` produces `dist/application.js`, not a deployed service. Its
 `createApp(adapters)` factory requires trusted request identity, a persistent
 repository and command governance. The compiler and demo entry are not part of

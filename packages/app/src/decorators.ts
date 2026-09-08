@@ -88,6 +88,8 @@ export interface ModuleMeta extends Required<Omit<ModuleOptions, "exports" | "ta
 
 export interface CommandOptions {
   name: string;
+  /** Named RPC adapter owns declared persistence; application still owns permission timing. */
+  rpc?: string;
   /** Permission identifier required to execute (e.g. "case.create"). */
   permission: string;
   /** Transaction requirement for the underlying write, e.g. "required". */
@@ -147,6 +149,12 @@ export type ResolveFn<T = any, TContext = any> = (ctx: TContext) => T | Promise<
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
 export interface RouteOptions {
+  /** Declared validation owner/transport; these labels are not runtime proof. */
+  contract?: {
+    body?: "framework" | "domain";
+    response?: "framework" | "native-json" | "binary" | "stream";
+    evidence?: string;
+  };
   /** TypeBox schema (or compatible) for the request body. */
   body?: unknown;
   /** TypeBox schema for path params. */
