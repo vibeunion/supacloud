@@ -1,5 +1,5 @@
-import { watch } from "node:fs";
-import { relative, resolve } from "node:path";
+import { existsSync, watch } from "node:fs";
+import { dirname, relative, resolve, sep } from "node:path";
 import { createIncrementalCompiler } from "./incremental";
 import type { WatchEvent, WatchHandle, WatchOptions } from "./types";
 
@@ -16,6 +16,8 @@ export function watchProject(options: WatchOptions): WatchHandle {
   let pending: boolean = false;
   const pendingPaths = new Set<string>();
   let watcher: ReturnType<typeof watch> | undefined;
+  let schemaWatcher: ReturnType<typeof watch> | undefined;
+  const schemaPath = options.graphql ? resolve(rootDir, options.graphql.schema) : undefined;
   const incremental = createIncrementalCompiler();
   let initialEvent: WatchEvent | undefined;
   let resolveReady: (event: WatchEvent) => void = () => undefined;
@@ -90,8 +92,18 @@ export function watchProject(options: WatchOptions): WatchHandle {
         const changedPath = resolve(rootDir, filename.toString());
         const relativePath = relative(outDir, changedPath);
         if (!relativePath.startsWith("..") && relativePath !== "") return;
-        if (/\.(tsx?|mts|cts)$/.test(changedPath)) schedule(relative(rootDir, changedPath));
+        if (/\.(tsx?|mts|cts)$/.test(changedPath)
+          || (options.graphql && (/\.(graphql|gql)$/.test(changedPath) || changedPath === schemaPath))) {
+          schedule(relative(rootDir, changedPath));
+        }
       });
+      if (schemaPath && relative(rootDir, schemaPath).startsWith(`..${sep}`)) {
+        let directory = dirname(schemaPath);
+        while (!existsSync(directory) && dirname(directory) !== directory) directory = dirname(directory);
+        schemaWatcher = watch(directory, { recursive: true }, (_eventType, filename) => {
+          if (!filename || resolve(directory, filename.toString()) === schemaPath) schedule(schemaPath);
+        });
+      }
       if (initialEvent) resolveReady(initialEvent);
     })
     .catch(() => undefined);
@@ -102,6 +114,7 @@ export function watchProject(options: WatchOptions): WatchHandle {
       closed = true;
       if (timer) clearTimeout(timer);
       watcher?.close();
+      schemaWatcher?.close();
       await ready.catch(() => undefined);
     },
   };

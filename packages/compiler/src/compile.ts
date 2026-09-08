@@ -1,11 +1,18 @@
 import { analyzeProject } from "./analyze";
-import { generateApplication, renderApplication } from "./generate";
+import { generateApplication, renderApplication, writeFileIfChanged } from "./generate";
 import type { CheckProjectResult, CompileOptions, CompileResult, Diagnostic } from "./types";
 import { validateGraph } from "./validate";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
 import { validateRouteContracts } from "./route-contracts";
+import type { GraphqlArtifacts } from "./graphql";
+
+async function renderOptionalGraphql(options: CompileOptions): Promise<GraphqlArtifacts> {
+  return options.graphql
+    ? (await import("./graphql")).renderGraphql(options)
+    : { diagnostics: [], files: {} };
+}
 
 /**
  * Complete compilation pipeline: AST analysis -> validation -> generate static factory code and manifest.
@@ -31,6 +38,9 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
     }
   }
   const typeSafety = resolveTypeSafety(options);
+  const graphql = await renderOptionalGraphql(options);
+  if (graphql.contract) graph.graphql = graphql.contract;
+  diagnostics.push(...graphql.diagnostics);
   if (options.requireRouteContracts) diagnostics.push(...validateRouteContracts(graph));
   const rendered = renderApplication(graph, {
     rootDir: options.rootDir,
@@ -53,6 +63,8 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
       "application.ts": rendered.applicationCode,
       "client.ts": rendered.clientCode,
       "permissions.ts": rendered.permissionsCode,
+      "graphql.ts": graphql.files["graphql.ts"],
+      "graphql.documents.ts": graphql.files["graphql.documents.ts"],
     }, options.strict ?? false));
   }
   const hasErrors = diagnostics.some((diagnostic) => diagnostic.severity === "error");
@@ -67,6 +79,12 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
   const written = !hasErrors || options.writeOnError === true
     ? await generateApplication(graph, generatedOptions)
     : [];
+  if (!hasErrors) {
+    for (const [filename, content] of Object.entries(graphql.files)) {
+      const path = join(options.outDir, filename);
+      if (await writeFileIfChanged(path, content, options.cache?.generatedHashes)) written.push(path);
+    }
+  }
   const stats = graph.cacheStats
     ? {
         cacheHit: graph.cacheStats.reanalyzedModules.length === 0,
@@ -105,6 +123,9 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
   }
 
   const typeSafety = resolveTypeSafety(options);
+  const graphql = await renderOptionalGraphql(options);
+  if (graphql.contract) graph.graphql = graphql.contract;
+  diagnostics.push(...graphql.diagnostics);
   if (options.requireRouteContracts) diagnostics.push(...validateRouteContracts(graph));
   const rendered = renderApplication(graph, {
     rootDir: options.rootDir,
@@ -127,10 +148,13 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
       "application.ts": rendered.applicationCode,
       "client.ts": rendered.clientCode,
       "permissions.ts": rendered.permissionsCode,
+      "graphql.ts": graphql.files["graphql.ts"],
+      "graphql.documents.ts": graphql.files["graphql.documents.ts"],
     }, options.strict ?? false));
   }
 
   const expectedFiles: Record<string, string> = {
+    ...graphql.files,
     "application.ts": rendered.applicationCode,
     "app.manifest.json": rendered.manifestJson,
   };

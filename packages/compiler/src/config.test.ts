@@ -15,7 +15,18 @@ describe("SupaCloud default configuration", () => {
       generatePermissions: true,
       treeShakeUnusedProviders: true,
       moduleBoundaryPreset: "modular-monolith",
+      graphql: false,
     });
+  });
+
+  test("existing projects remain optional while configured query contracts are preserved", () => {
+    expect(compileOptionsFromConfig({}, "/workspace").graphql).toBeUndefined();
+    expect(compileOptionsFromConfig({
+      graphql: { schema: "graphql/schema.graphql" },
+    }, "/workspace").graphql).toEqual({
+      schema: "/workspace/graphql/schema.graphql",
+    });
+    expect(compileOptionsFromConfig({ graphql: false }, "/workspace").graphql).toBeUndefined();
   });
 
   test("allows explicit values to override safe defaults", () => {
