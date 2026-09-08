@@ -469,11 +469,11 @@ describe("runtime companion version assets", () => {
     expect(systemdBrokerUnit).toContain("ProtectSystem=strict");
     expect(serviceRenderer).not.toContain("/opt/supacloud/config.env");
     expect(serviceRenderer).toContain("/etc/supabase/management-api.env");
-    expect(installer).toContain('XCADDY_VERSION="${XCADDY_VERSION:-v0.4.5}"');
+    expect(installer).toContain('XCADDY_VERSION="${XCADDY_VERSION:-v0.4.7}"');
     expect(installer).toContain('xcaddy/cmd/xcaddy@${XCADDY_VERSION}');
-    expect(workflow).toContain('XCADDY_VERSION: "v0.4.5"');
+    expect(workflow).toContain('XCADDY_VERSION: "v0.4.7"');
     expect(workflow).toContain('xcaddy/cmd/xcaddy@${XCADDY_VERSION}');
-    expect(caddyBuilder).toContain('XCADDY_VERSION="${XCADDY_VERSION:-v0.4.5}"');
+    expect(caddyBuilder).toContain('XCADDY_VERSION="${XCADDY_VERSION:-v0.4.7}"');
     expect(caddyBuilder).toContain('xcaddy/cmd/xcaddy@${XCADDY_VERSION}');
     expect(installer).not.toContain("xcaddy/cmd/xcaddy@latest");
     expect(workflow).not.toContain("xcaddy/cmd/xcaddy@latest");

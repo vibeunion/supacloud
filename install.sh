@@ -63,7 +63,8 @@ PGREDIS_INSTALL_TRANSACTION_DIR=""
 CREDENTIALS_FILE="${SUPACLOUD_CREDENTIALS_FILE:-/etc/supabase/supacloud-credentials.env}"
 MASTER_TOKEN_FILE="${SUPACLOUD_MASTER_TOKEN_FILE:-/etc/supabase/master-token.env}"
 BUN_VERSION="${BUN_VERSION:-1.4.0}"
-XCADDY_VERSION="${XCADDY_VERSION:-v0.4.5}"
+GO_VERSION="${GO_VERSION:-1.27.1}"
+XCADDY_VERSION="${XCADDY_VERSION:-v0.4.7}"
 
 # shellcheck source=scripts/lib/install_config.sh
 source "${SCRIPT_DIR}/scripts/lib/install_config.sh"
@@ -2046,10 +2047,9 @@ install_caddy_gateway() {
         chmod 0755 "$target"
     elif [[ -x "${SCRIPT_DIR}/scripts/build_supacloud_caddy.sh" ]] && command -v go >/dev/null 2>&1; then
         log_info "Building supacloud-caddy locally with xcaddy and the rate-limit module..."
-        if ! command -v xcaddy >/dev/null 2>&1; then
-            GOBIN=/usr/local/bin go install "github.com/caddyserver/xcaddy/cmd/xcaddy@${XCADDY_VERSION}"
-        fi
-        OUT_DIR=/tmp/supacloud-caddy-build "${SCRIPT_DIR}/scripts/build_supacloud_caddy.sh"
+        GOTOOLCHAIN="go${GO_VERSION}" GOBIN=/usr/local/bin go install "github.com/caddyserver/xcaddy/cmd/xcaddy@${XCADDY_VERSION}"
+        PATH="/usr/local/bin:$PATH" GO_VERSION="$GO_VERSION" XCADDY_VERSION="$XCADDY_VERSION" \
+            OUT_DIR=/tmp/supacloud-caddy-build "${SCRIPT_DIR}/scripts/build_supacloud_caddy.sh"
         install -m 0755 "/tmp/supacloud-caddy-build/supacloud-caddy-linux-${arch}" "$target"
         rm -rf /tmp/supacloud-caddy-build
     elif [[ "${SUPACLOUD_ALLOW_STOCK_CADDY_FALLBACK:-false}" == "true" ]]; then

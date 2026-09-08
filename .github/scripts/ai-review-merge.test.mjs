@@ -147,7 +147,7 @@ describe('trusted review workflow', () => {
     assert.match(readFileSync(new URL('../../scripts/audit_dependencies.ts', import.meta.url), 'utf8'), /\["audit", "--audit-level", "high"\]/);
     assert.match(workflow, /bun run \.\.\/\.\.\/scripts\/audit_dependencies\.ts/);
     assert.match(workflow, /anchore\/sbom-action@/);
-    assert.match(workflow, /XCADDY_VERSION:\s*["']v0\.4\.5["']/);
+    assert.match(workflow, /XCADDY_VERSION:\s*["']v0\.4\.7["']/);
     assert.match(workflow, /xcaddy\/cmd\/xcaddy@\$\{XCADDY_VERSION\}/);
     assert.doesNotMatch(workflow, /xcaddy\/cmd\/xcaddy@latest/);
     for (const contents of [workflow, releaseWorkflow]) {

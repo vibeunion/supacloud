@@ -212,7 +212,7 @@ bun --cwd packages/pgredis-runtime run build:linux
 bun --cwd packages/web-console install --frozen-lockfile
 bun --cwd packages/web-console run build
 mkdir -p .local/bin dist
-GOBIN="$PWD/.local/bin" go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.5
+GOTOOLCHAIN=go1.27.1 GOBIN="$PWD/.local/bin" go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.7
 PATH="$PWD/.local/bin:$PATH" OUT_DIR="$PWD/dist" bash scripts/build_supacloud_caddy.sh
 
 # 3. Configurar e instalar desde las salidas de construcción local validadas
@@ -222,6 +222,10 @@ sudo env SUPACLOUD_SETUP_ARTIFACT_MODE=local \
 # 4. Habilitar CLI
 source /etc/profile.d/supacloud.sh
 ```
+
+Las compilaciones locales, Docker y de publicación usan Caddy 2.11.4, xcaddy
+0.4.7 y Go 1.27.1. Go 1.21 o posterior descarga automáticamente el compilador
+fijado sin cambiar la instalación predeterminada de Go del equipo.
 
 **Actualizaciones de producción**
 

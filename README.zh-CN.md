@@ -214,7 +214,7 @@ bun --cwd packages/pgredis-runtime run build:linux
 bun --cwd packages/web-console install --frozen-lockfile
 bun --cwd packages/web-console run build
 mkdir -p .local/bin dist
-GOBIN="$PWD/.local/bin" go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.5
+GOTOOLCHAIN=go1.27.1 GOBIN="$PWD/.local/bin" go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.7
 PATH="$PWD/.local/bin:$PATH" OUT_DIR="$PWD/dist" bash scripts/build_supacloud_caddy.sh
 
 # 3. 显式使用本地产物安装（参数会持久化到 /etc/supabase/install.env）
@@ -224,6 +224,9 @@ sudo env SUPACLOUD_SETUP_ARTIFACT_MODE=local \
 # 4. 启用命令行工具
 source /etc/profile.d/supacloud.sh
 ```
+
+源码、Docker 和发布构建统一使用 Caddy 2.11.4、xcaddy 0.4.7 和 Go 1.27.1。
+已安装 Go 1.21 或更高版本时会自动下载指定编译器，不修改主机默认 Go 安装。
 
 **生产环境升级**
 
