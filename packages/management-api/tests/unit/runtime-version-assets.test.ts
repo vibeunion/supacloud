@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { Type } from "@sinclair/typebox";
+import { Value } from "@sinclair/typebox/value";
 import {
   SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256,
   SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SIZE,
@@ -12,6 +14,8 @@ import {
 } from "../../src/sigstore-trusted-root";
 
 const repoRoot = join(import.meta.dir, "../../..", "..");
+const commandPath = process.env["PATH"];
+if (!commandPath) throw new Error("PATH is required for runtime asset tests");
 setDefaultTimeout(60_000);
 
 function readRepoFile(path: string): string {
@@ -19,9 +23,9 @@ function readRepoFile(path: string): string {
 }
 
 function readShellConstant(script: string, name: string): string {
-  const assignment = script.match(new RegExp(`^${name}="([^"]+)"$`, "m"));
+  const assignment = script.match(new RegExp(`^${name}="([^"]+)"$`, "m"))?.[1];
   if (!assignment) throw new Error(`Missing shell constant: ${name}`);
-  return assignment[1];
+  return assignment;
 }
 
 function readDocumentedComponentVersion(notes: string, component: string): string {
@@ -37,9 +41,9 @@ function systemdDirectiveSections(source: string, directive: string): string[] {
   const sections: string[] = [];
   for (const rawLine of source.split(/\r?\n/)) {
     const line = rawLine.trim();
-    const sectionMatch = line.match(/^\[([A-Za-z]+)\]$/);
+    const sectionMatch = line.match(/^\[([A-Za-z]+)\]$/)?.[1];
     if (sectionMatch) {
-      section = sectionMatch[1]!;
+      section = sectionMatch;
       continue;
     }
     if (line.startsWith(`${directive}=`)) sections.push(section);
@@ -95,7 +99,11 @@ describe("runtime companion version assets", () => {
     );
 
     expect(result.status, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout).tag_name).toBe("management-api-v0.38.0");
+    const release: unknown = JSON.parse(result.stdout);
+    if (!Value.Check(Type.Object({ tag_name: Type.String() }), release)) {
+      throw new Error("Release resolver returned an invalid tag");
+    }
+    expect(release.tag_name).toBe("management-api-v0.38.0");
   });
 
   test("missing release asset URL returns a non-zero status", () => {
@@ -190,7 +198,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${tools}:${process.env.PATH}`,
+          PATH: `${tools}:${commandPath}`,
           ROOT: dir,
           TARGET: target,
           MANAGEMENT_ASSET: managementAsset,
@@ -216,7 +224,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${tools}:${process.env.PATH}`,
+          PATH: `${tools}:${commandPath}`,
           ROOT: dir,
           MANAGEMENT_ASSET: managementAsset,
           EDGE_ASSET: edgeAsset,
@@ -235,7 +243,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${tools}:${process.env.PATH}`,
+          PATH: `${tools}:${commandPath}`,
           ROOT: dir,
           MANAGEMENT_ASSET: managementAsset,
           EDGE_ASSET: edgeAsset,
@@ -604,7 +612,7 @@ describe("runtime companion version assets", () => {
         SUPACLOUD_INSTALL_DIR: installDir,
         SUPACLOUD_SETUP_BRANCH: "main",
         SUPACLOUD_TEST_REMOTE_URL: reportedOrigin,
-        PATH: `${fakeBin}:${process.env.PATH}`,
+        PATH: `${fakeBin}:${commandPath}`,
         GIT_TERMINAL_PROMPT: "0",
       },
       encoding: "utf8",
@@ -698,7 +706,11 @@ describe("runtime companion version assets", () => {
       .toBe(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256);
     expect(trustedRoot.endsWith("\n")).toBe(true);
     expect(trustedRoot.slice(0, -1)).not.toContain("\n");
-    expect(JSON.parse(trustedRoot).mediaType)
+    const parsedRoot: unknown = JSON.parse(trustedRoot);
+    if (!Value.Check(Type.Object({ mediaType: Type.String() }), parsedRoot)) {
+      throw new Error("Trusted root has an invalid media type");
+    }
+    expect(parsedRoot.mediaType)
       .toBe("application/vnd.dev.sigstore.trustedroot+json;version=0.1");
     expect(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_TUF_TARGET_SHA256)
       .toBe("6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66");
@@ -761,7 +773,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${dir}:${process.env.PATH}`,
+          PATH: `${dir}:${commandPath}`,
           GH_FAKE_VERSION: version,
           GH_HELP_TEXT: helpText,
         },
@@ -812,7 +824,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${fakeTools}:${process.env.PATH}`,
+          PATH: `${fakeTools}:${commandPath}`,
           ARCHIVE: archive,
           CHECKSUM: checksum,
           TARGET: target,
@@ -902,7 +914,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${fakeBin}:${process.env.PATH}`,
+          PATH: `${fakeBin}:${commandPath}`,
           ARTIFACT: artifact,
           GH_BUNDLE_ARGUMENT_RECORD: bundleArgumentRecord,
           TMPDIR: dir,
@@ -957,7 +969,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${fakeBin}:${process.env.PATH}`,
+          PATH: `${fakeBin}:${commandPath}`,
           ARTIFACT: artifact,
           GH_BUNDLE_ARGUMENT_RECORD: bundleArgumentRecord,
           GH_SOURCE_REF_ARGUMENT_RECORD: sourceRefArgumentRecord,
@@ -1183,7 +1195,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${fakeTools}:${process.env.PATH}`,
+          PATH: `${fakeTools}:${commandPath}`,
           ARCHIVE: archive,
           CHECKSUM: checksum,
           TAR_LOG: tarLog,
@@ -1224,7 +1236,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${fakeTools}:${process.env.PATH}`,
+          PATH: `${fakeTools}:${commandPath}`,
           ARCHIVE: archive,
           ARCH: arch,
           CHECKSUM: checksum,

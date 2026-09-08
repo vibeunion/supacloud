@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+const commandPath = process.env["PATH"];
+if (!commandPath) throw new Error("PATH is required for Caddy build tests");
+
 const builder = readFileSync(
   new URL("../../../../scripts/build_supacloud_caddy.sh", import.meta.url),
   "utf8",
@@ -108,7 +111,7 @@ exit 1
         {
           env: {
             ...process.env,
-            PATH: `${dir}:${process.env.PATH}`,
+            PATH: `${dir}:${commandPath}`,
             GO_VERSION: goVersion,
             GOTOOLCHAIN: "local",
             XCADDY_VERSION: "",
