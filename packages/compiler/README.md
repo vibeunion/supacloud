@@ -9,6 +9,87 @@ SupaCloud 应用静态编译器：读取 `@supacloud/app` 装饰器元数据的�
 
 本包不依赖 `@supacloud/app`：AST 只按装饰器名匹配（`Module`/`Injectable`/`Inject`/`Command`/`Query`/`Controller`/`Get`/`Post`/`Put`/`Patch`/`Delete`/`defineModule`/`InjectionToken`），不校验 import 来源。
 
+## Recommended GraphQL Query Contracts
+
+**Database First is the only server-schema model.** Drizzle and SQL declarations
+are migrated to PostgreSQL; `pg_graphql` reflects the actual database, and
+`graphql-schema` exports the intended role's snapshot. Author queries/fragments,
+not GraphQL resolver classes or a separate server SDL. `graphql.schema` accepts
+only local `.graphql`, `.gql` or `.json` snapshots; executable sources, URLs and
+schema-authoring options such as `autoSchemaFile`, `typePaths`, `resolvers` or
+`mode` are rejected. Snapshot formats and TypedDocumentNode output are not
+alternative authoring modes.
+
+Do not edit exported snapshots. Change database declarations, apply migrations,
+export again and compile. Offline compilation cannot attest a snapshot's origin;
+`graphql-schema --check` against the intended database detects local/remote drift.
+The starter's synthetic SDL is solely an offline test fixture, not a deployed
+schema. Replace it with a database export before integration.
+
+New `supacloud app init` projects preconfigure GraphQL query contracts and include
+an offline example. Existing REST, Command-only and background-task projects
+remain unchanged: general App/CLI configuration and `compileProject(options)`
+only enable this pipeline when `graphql` is explicitly configured. Enabled
+contracts always reject invalid queries and missing schemas, even with
+`strict: false` or `--no-strict`. Choosing `graphql: false` (or `--no-graphql` for
+one compiler run) disables adoption, not just validation of individual queries.
+The platform extension is still opt-in; compilation changes no database grants,
+extensions or production introspection settings.
+
+```ts
+export default defineSupacloudConfig({
+  root: "src",
+  graphql: { schema: "graphql/schema.graphql" },
+});
+```
+
+The schema path is configuration-relative, query globs are source-root-relative.
+Normal `compile`, `check`, `dev` and `context` handle the local snapshot and
+queries offline. Invalid fields/variables, unnamed operations, mutations and
+subscriptions produce structured diagnostics; failures preserve working output.
+GraphQL.js and GraphQL Code Generator own parsing, validation and operation types.
+Unknown custom scalars stay `unknown` unless explicitly mapped via `graphql.scalars`.
+
+```sh
+supacloud-compiler graphql-schema --url https://your-project.example \
+  --key-env SUPACLOUD_PUBLISHABLE_KEY --token-env APP_USER_ACCESS_TOKEN
+supacloud-compiler compile
+supacloud-compiler check --json
+```
+
+Export is explicit and requires introspection already enabled in the selected
+development project. Flags name environment variables, not secrets. Use the
+intended caller role, never a privileged service-role schema for browser queries.
+After migrations, use the same export command with `--check --json` to detect
+remote schema drift without overwriting the local snapshot (exit 1 on drift).
+Refresh intentionally, then run compile/check and the application's typecheck
+and role/RLS tests. This remote gate requires development introspection; offline
+compilation does not require production introspection.
+
+Set `graphql.typedDocuments: true` to additionally generate
+`graphql.documents.ts` using the standard TypedDocumentNode Codegen plugin.
+Consumers of that optional file must install `@graphql-typed-document-node/core`;
+it provides `ResultOf` and `VariablesOf` for operation-level inference. The default
+fetch client still needs no GraphQL runtime dependency.
+
+```ts
+import { createGraphqlClient } from "./generated/graphql";
+const queries = createGraphqlClient({
+  url: projectUrl,
+  publishableKey,
+  getAccessToken: readCurrentUserToken,
+});
+const result = await queries.ReviewList({ first: 20 });
+```
+
+Method names and types come from named operations. The generated client is
+dependency-free and refreshes identity per request; `getSdk(requester)` integrates
+an existing transport. It rejects HTTP errors, GraphQL errors and malformed
+response envelopes, but does not runtime-decode selected field values.
+`graphql.manifest.json` records query locations and the schema hash; context packs
+include colocated queries. RLS/grants, real database acceptance and query resource
+limits remain deployment responsibilities. Business writes stay in Commands.
+
 ## 安装
 
 ```bash
@@ -217,7 +298,7 @@ supacloud-compiler check --root ./app --out ./app/generated --strict
 supacloud-compiler dev --root . --out ./generated
 ```
 
-开发模式默认对源码变化做 100ms 防抖，并只监听 TypeScript 文件。编译器会复用进程内的源码快照：相同输入直接命中缓存；只改动普通实现文件时复用既有依赖图和生成物；只有 SupaCloud 元数据、模块声明或依赖相关文件变化时才重建图。编译失败时不会覆盖最后一次成功的 `application.ts` 和 `app.manifest.json`；修复错误后会自动生成新产物。`--debounce <ms>` 可调整防抖时间。
+开发模式默认对源码变化做 100ms 防抖，监听 TypeScript 文件；启用 GraphQL 后，还监听查询文件和配置的 Schema 快照。编译器会复用进程内的源码快照：相同输入直接命中缓存；只改动普通实现文件时复用既有依赖图和生成物；只有 SupaCloud 元数据、模块声明或依赖相关文件变化时才重建图。编译失败时不会覆盖最后一次成功的 `application.ts` 和 `app.manifest.json`；修复错误后会自动生成新产物。`--debounce <ms>` 可调整防抖时间。
 
 ## 图谱与诊断
 

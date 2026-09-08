@@ -59,7 +59,52 @@ export default defineSupacloudConfig({
   root: "src",
   outDir: "generated",
   strict: true,
+  graphql: { schema: "graphql/schema.graphql" },
   commandCapabilities: { permission: true, transaction: true, idempotency: true, audit: true },
+});
+`,
+        "graphql/schema.graphql": `# Offline query-contract example, not a deployed database schema.
+# SYNTHETIC TEST FIXTURE ONLY. Database First is the sole server-schema model.
+# Do not extend this fixture as a server schema; change database declarations and export.
+# Replace using a snapshot exported with the intended caller role before integration.
+type Query {
+  reviewCollection(first: Int): ReviewConnection!
+}
+type ReviewConnection {
+  edges: [ReviewEdge!]!
+}
+type ReviewEdge {
+  node: Review!
+}
+type Review {
+  id: ID!
+  state: String!
+  version: Int!
+}
+`,
+        "src/review/reviews.graphql": `query ReviewList($first: Int = 20) {
+  reviewCollection(first: $first) {
+    edges { node { id state version } }
+  }
+}
+`,
+        "tests/graphql.test.ts": `import { expect, test } from "bun:test";
+import { createGraphqlClient, type ReviewListQuery } from "../generated/graphql";
+
+test("generated query client preserves its read contract without a live database", async () => {
+  const data: ReviewListQuery = {
+    reviewCollection: { edges: [{ node: { id: "demo", state: "draft", version: 1 } }] },
+  };
+  const queries = createGraphqlClient({
+    url: "https://project.example.test",
+    getAccessToken: async () => "synthetic-user-token",
+    fetch: async (_url, request) => {
+      expect(new Headers(request?.headers).get("Authorization")).toBe("Bearer synthetic-user-token");
+      expect(JSON.parse(String(request?.body)).variables).toEqual({ first: 10 });
+      return Response.json({ data });
+    },
+  });
+  expect(await queries.ReviewList({ first: 10 })).toEqual(data);
 });
 `,
         "scripts/environment.ts": STARTER_ENVIRONMENT,
@@ -327,6 +372,49 @@ The included feature demonstrates a declared draft-to-approved transition,
 compiler-checked command/route/governance bindings, an explicit AOP function,
 HTTP schemas, permission denial, transaction rollback, idempotency and audit.
 It is not a complete Maker-Checker workflow or a production authorization policy.
+
+## Typed Queries
+
+This starter uses Database First as its only GraphQL server-schema model.
+Drizzle and reviewed SQL define the database; pg_graphql reflects the migrated
+database under the caller's role. Do not add GraphQL resolver/decorator classes
+or independently authored server SDL. Business writes continue through Commands.
+
+GraphQL is preconfigured as the recommended read path. Edit src/review/reviews.graphql;
+compile, check and dev validate it against graphql/schema.graphql and generate
+generated/graphql.ts. Import createGraphqlClient from that file and call
+queries.ReviewList({ first: 20 }). Its variables and selected results are typed.
+Pass a public project key and a getAccessToken callback that reads the current
+user session. Never pass a service-role key to browser code.
+
+The included schema is a synthetic offline test fixture, not a deployed database.
+Do not hand-edit graphql/schema.graphql to add application fields. Change database
+declarations, apply migrations and export the actual schema. Replace the fixture
+with a snapshot exported under the intended caller role before real integration:
+
+\`\`\`sh
+bun node_modules/@supacloud/compiler/dist/cli.js graphql-schema \\
+  --url https://your-project.example \\
+  --key-env SUPACLOUD_PUBLISHABLE_KEY --token-env APP_USER_ACCESS_TOKEN
+\`\`\`
+
+After migrations or grants change, and before promotion, run the same command
+with --check --json to detect drift without writing. If it fails, explicitly
+re-export, review the snapshot diff, compile and run application typechecks and
+role/RLS tests. Normal compile/check/dev remain offline; they cannot prove that
+a snapshot came from a database or is current. Keep the exported snapshot and
+generated types in version control.
+
+The flags name environment variables, not credential values. Export requires
+GraphQL and introspection already enabled on the selected development project.
+The compiler does not enable extensions or alter database permissions.
+Production introspection may remain disabled. Queries do not pass through
+application Command/AOP; RLS and grants remain mandatory. Business writes stay
+in Commands. Existing projects without GraphQL configuration remain unaffected.
+Enabled contracts always reject invalid queries, including with strict: false.
+To opt this starter out entirely, set graphql: false and remove its example
+query test and unused generated client; do not replace checked queries with
+untyped calls to bypass validation.
 
 ## Environments
 

@@ -8,6 +8,7 @@ import { watchProject } from "./watch";
 import type { Diagnostic, ModuleBoundaryPresetName } from "./types";
 import { compileOptionsFromConfig, loadSupacloudConfig, resolveSupacloudConfig } from "./config";
 import { applyDiagnosticFix } from "./fixes";
+import { GraphqlConfigurationError } from "./graphql-options";
 
 function isModuleBoundaryPresetName(value: string | undefined): value is ModuleBoundaryPresetName {
   return value === "modular-monolith"
@@ -32,6 +33,7 @@ Usage:
   supacloud-compiler context <module> [rootDir] [options]
   supacloud-compiler doctor  [rootDir] [options]
   supacloud-compiler fix     <fix.json> [options]
+  supacloud-compiler graphql-schema --url <project-url> --key-env <name> [--token-env <name>]
 
 Commands:
   compile             Compile application modules and generate artifacts
@@ -41,6 +43,7 @@ Commands:
   explain             Explain a module, provider, or external token
   context             Extract an AI-sized module context pack
   doctor              Run project and generated-artifact health checks
+  graphql-schema      Explicitly export a caller-scoped schema to the configured local file
 
 Options:
   --root, -r <dir>    Application source root (default: ./src, or first positional argument)
@@ -51,6 +54,11 @@ Options:
   --no-client         Do not generate client.ts
   --permissions       Generate typed permissions registry (default)
   --no-permissions    Do not generate permissions.ts
+  --no-graphql        Explicitly disable configured GraphQL contracts for this run
+  --url <url>         Project base URL for graphql-schema (HTTPS outside loopback)
+  --key-env <name>    Environment variable holding a public project key; never the key itself
+  --token-env <name>  Environment variable holding the intended user's access token
+  --check             graphql-schema: compare the remote schema without changing the snapshot
   --debounce <ms>     Debounce source changes in dev mode (default: 100)
   --json              Print machine-readable output for compile/check/graph/explain/context/doctor
   --dry-run           Preview a fix without writing the target file
@@ -68,7 +76,7 @@ async function run(): Promise<void> {
   }
 
   const command = args[0];
-  if (!["compile", "check", "dev", "graph", "explain", "context", "doctor", "fix"].includes(command)) {
+  if (!["compile", "check", "dev", "graph", "explain", "context", "doctor", "fix", "graphql-schema"].includes(command)) {
     console.error(`Error: unknown command "${command}"`);
     printUsage();
     process.exit(1);
@@ -84,6 +92,11 @@ async function run(): Promise<void> {
   let query: string | undefined;
   let json: boolean = false;
   let dryRun = true;
+  let noGraphql = false;
+  let projectUrl: string | undefined;
+  let keyEnv: string | undefined;
+  let tokenEnv: string | undefined;
+  let checkSchema = false;
 
   for (let i: number = 1; i < args.length; i++) {
     const arg = args[i];
@@ -103,6 +116,16 @@ async function run(): Promise<void> {
       generatePermissions = true;
     } else if (arg === "--no-permissions") {
       generatePermissions = false;
+    } else if (arg === "--no-graphql") {
+      noGraphql = true;
+    } else if (arg === "--check") {
+      checkSchema = true;
+    } else if (arg === "--url" || arg === "--key-env" || arg === "--token-env") {
+      const value = args[++i];
+      if (!value || value.startsWith("--")) throw new Error(`${arg} requires a value`);
+      if (arg === "--url") projectUrl = value;
+      else if (arg === "--key-env") keyEnv = value;
+      else tokenEnv = value;
     } else if (arg === "--debounce") {
       debounceMs = Number(args[++i]);
       if (!Number.isFinite(debounceMs) || debounceMs < 0) {
@@ -131,6 +154,7 @@ async function run(): Promise<void> {
   }
 
   const loadedConfig = await loadSupacloudConfig(process.cwd());
+  if (checkSchema && command !== "graphql-schema") throw new Error("--check is only supported by graphql-schema");
   const defaults = resolveSupacloudConfig(loadedConfig, process.cwd());
   const resolvedRoot = rootDir ? resolve(process.cwd(), rootDir) : defaults.rootDir;
   const resolvedOut = outDir ? resolve(process.cwd(), outDir) : defaults.outDir;
@@ -141,13 +165,36 @@ async function run(): Promise<void> {
     strict: strict ?? loadedConfig.strict,
     generateClient: generateClient ?? loadedConfig.generateClient,
     generatePermissions: generatePermissions ?? loadedConfig.generatePermissions,
+    graphql: noGraphql ? false : loadedConfig.graphql,
   }, process.cwd());
   const compileDefaults = {
     ...configured,
     moduleBoundaryPreset: preset ?? configured.moduleBoundaryPreset,
   };
 
-  if (command === "fix") {
+  if (command === "graphql-schema") {
+    if (!projectUrl) throw new Error("graphql-schema requires --url with an explicit project URL");
+    if (!compileDefaults.graphql) throw new Error("graphql-schema requires graphql configuration");
+    const credential = (name: string | undefined): string | undefined => {
+      if (!name) return undefined;
+      const value = process.env[name];
+      if (!value) throw new Error(`Required environment variable ${name} is empty`);
+      return value;
+    };
+    const { pullGraphqlSchema } = await import("./graphql-schema");
+    const result = await pullGraphqlSchema({
+      url: projectUrl,
+      output: compileDefaults.graphql.schema,
+      publishableKey: credential(keyEnv),
+      accessToken: credential(tokenEnv),
+      check: checkSchema,
+    });
+    console.log(json ? JSON.stringify({ ok: result.upToDate, ...result }, null, 2)
+      : result.written ? `GraphQL schema written: ${result.path}`
+      : result.upToDate ? `GraphQL schema matches: ${result.path}`
+      : `GraphQL schema drift: ${result.path}. Export the role-scoped snapshot and compile before promotion.`);
+    if (!result.upToDate) process.exit(1);
+  } else if (command === "fix") {
     if (!query) throw new Error("fix requires a JSON file containing one DiagnosticFix");
     const fix = JSON.parse(await readFile(resolve(process.cwd(), query), "utf8"));
     const result = await applyDiagnosticFix(fix, { rootDir: resolvedRoot, dryRun });
@@ -271,6 +318,10 @@ async function run(): Promise<void> {
           `  external tokens: ${pack.externalTokens.join(", ") || "-"}`,
           `  imports: ${pack.relatedModules.imports.join(", ") || "-"}`,
           `  imported by: ${pack.relatedModules.importedBy.join(", ") || "-"}`,
+          ...(pack.graphql ? [
+            `  graphql schema: ${pack.graphql.schema}`,
+            `  graphql queries: ${pack.graphql.operations.map((operation) => operation.name).join(", ") || "-"}`,
+          ] : []),
           ...pack.executionPlans.map((plan) => `  execution ${plan.name}: ${plan.stages.join(" -> ")}`),
           ...pack.diagnostics.map((diagnostic) => `  ${diagnostic.code}: ${diagnostic.message}`),
         ].join("\n"));
@@ -311,6 +362,20 @@ function printDiagnostics(diagnostics: Diagnostic[]): void {
 }
 
 run().catch((err: unknown) => {
+  if (err instanceof GraphqlConfigurationError) {
+    const diagnostic: Diagnostic = {
+      code: err.code,
+      severity: "error",
+      message: err.message,
+      suggestion: "Configure a local role-scoped snapshot exported by graphql-schema; author only queries and fragments.",
+    };
+    if (process.argv.slice(2).includes("--json")) {
+      console.log(JSON.stringify({ ok: false, diagnostics: [diagnostic], written: [] }, null, 2));
+    } else {
+      printDiagnostics([diagnostic]);
+    }
+    process.exit(1);
+  }
   console.error("Unhandled error:", err);
   process.exit(1);
 });

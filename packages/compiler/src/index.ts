@@ -78,5 +78,9 @@ export type {
   WatchOptions,
   FeatureSpecNode,
   FeatureTransitionNode,
+  GraphqlOptions,
+  GraphqlContractSummary,
 } from "./types";
 export { inspectRouteContracts, validateRouteContracts } from "./route-contracts";
+export { pullGraphqlSchema } from "./graphql-schema";
+export type { PullGraphqlSchemaOptions } from "./graphql-schema";

@@ -249,6 +249,7 @@ describe("app tools", () => {
         expect(result.isError).toBe(false);
         expect(existsSync(join(root, "generated", "application.ts"))).toBe(true);
         expect(existsSync(join(root, "generated", "app.manifest.json"))).toBe(true);
+        expect(existsSync(join(root, "generated", "graphql.ts"))).toBe(false);
         expect((await app({ action: "check", root })).isError).toBe(false);
     });
 

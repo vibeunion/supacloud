@@ -22,7 +22,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/cli.ts --outdir dist --target node --external @typescript/typescript6",
+    "build:js": "bun build src/index.ts src/cli.ts --outdir dist --target node --external @typescript/typescript6 --external graphql --external '@graphql-codegen/*'",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
@@ -45,7 +45,13 @@
     "directory": "packages/compiler"
   },
   "dependencies": {
-    "@typescript/typescript6": "^6.0.2"
+    "@graphql-codegen/core": "^6.2.0",
+    "@graphql-codegen/typed-document-node": "^7.1.0",
+    "@graphql-codegen/typescript": "^6.1.0",
+    "@graphql-codegen/typescript-operations": "^6.1.6",
+    "@graphql-typed-document-node/core": "^3.2.0",
+    "@typescript/typescript6": "^6.0.2",
+    "graphql": "^16"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",

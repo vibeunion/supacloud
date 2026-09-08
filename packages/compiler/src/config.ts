@@ -1,13 +1,17 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { assertGraphqlOptions } from "./graphql-options";
 import type {
   CommandExecutionCapabilities,
   CompileOptions,
+  GraphqlOptions,
   ModuleBoundaryPresetName,
 } from "./types";
 
 export interface SupaCloudConfig {
+  /** Opt-in outside app init. Schema is configuration-relative; documents are root-relative. */
+  graphql?: GraphqlOptions | false;
   root?: string;
   outDir?: string;
   include?: string[];
@@ -27,6 +31,7 @@ export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
   include: string[];
   moduleBoundaryPreset: ModuleBoundaryPresetName;
 } = {
+  graphql: false,
   root: "src",
   outDir: "generated",
   include: ["**/*.module.ts", "**/*.ts"],
@@ -39,10 +44,12 @@ export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
 };
 
 export function defineSupacloudConfig(config: SupaCloudConfig = {}): SupaCloudConfig {
+  if (config.graphql !== undefined && config.graphql !== false) assertGraphqlOptions(config.graphql);
   return {
     ...DEFAULT_SUPACLOUD_CONFIG,
     ...config,
     include: config.include ?? [...DEFAULT_SUPACLOUD_CONFIG.include],
+    graphql: config.graphql ?? DEFAULT_SUPACLOUD_CONFIG.graphql,
   };
 }
 
@@ -60,6 +67,7 @@ export function resolveSupacloudConfig(
   moduleBoundaryPreset: ModuleBoundaryPresetName;
   commandCapabilities?: CommandExecutionCapabilities;
   treeShakeUnusedProviders: boolean;
+  graphql?: GraphqlOptions;
 } {
   const resolved = defineSupacloudConfig(config);
   return {
@@ -73,6 +81,10 @@ export function resolveSupacloudConfig(
     moduleBoundaryPreset: resolved.moduleBoundaryPreset ?? DEFAULT_SUPACLOUD_CONFIG.moduleBoundaryPreset,
     commandCapabilities: resolved.commandCapabilities,
     treeShakeUnusedProviders: resolved.treeShakeUnusedProviders ?? DEFAULT_SUPACLOUD_CONFIG.treeShakeUnusedProviders,
+    graphql: resolved.graphql ? {
+      ...resolved.graphql,
+      schema: resolve(cwd, resolved.graphql.schema),
+    } : undefined,
   };
 }
 
@@ -107,5 +119,6 @@ export function compileOptionsFromConfig(
     moduleBoundaryPreset: resolved.moduleBoundaryPreset,
     commandCapabilities: resolved.commandCapabilities,
     treeShakeUnusedProviders: resolved.treeShakeUnusedProviders,
+    graphql: resolved.graphql,
   };
 }

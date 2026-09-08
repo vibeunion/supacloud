@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import type { ApplicationGraph, AspectRefNode, Diagnostic, ModuleNode, ProviderNode } from "./types";
 import { inspectRouteContracts } from "./route-contracts";
 
@@ -25,6 +25,7 @@ export interface ContextPack {
     importedBy: string[];
     imports: string[];
   };
+  graphql?: ApplicationGraph["graphql"];
 }
 
 export interface DoctorResult {
@@ -106,12 +107,21 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
   }
 
   const modules = graph.modules.filter((module) => selected.has(module.name));
+  const queryDocuments = graph.graphql?.documents.filter((file) => modules.some((module) => {
+    const path = relative(dirname(module.file), file);
+    return path !== ".." && !path.startsWith(`..${sep}`);
+  })) ?? [];
+  const graphql = graph.graphql ? {
+    ...graph.graphql,
+    documents: queryDocuments,
+    operations: graph.graphql.operations.filter((operation) => queryDocuments.includes(operation.file)),
+  } : undefined;
   const files = [...new Set(modules.flatMap((module) => [
     module.file,
     ...module.providers.map((provider) => provider.file),
     ...module.controllers.map((controller) => controller.file),
     ...allAspects(module).flatMap((aspect) => aspect.file ? [aspect.file] : []),
-  ]))].sort();
+  ]).concat(graphql ? [graphql.schema, ...queryDocuments] : []))].sort();
   const referencedTokens = new Set<string>();
   for (const module of modules) {
     for (const provider of module.providers) {
@@ -130,6 +140,7 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
     externalTokens: graph.externalTokens.filter((token) => referencedTokens.has(token)),
     executionPlans: createExecutionPlans({ ...graph, modules }),
     routeContracts: inspectRouteContracts({ ...graph, modules }),
+    ...(graphql ? { graphql } : {}),
     diagnostics: (graph.diagnostics ?? []).filter((diagnostic) =>
       diagnostic.file === undefined || files.includes(diagnostic.file)),
     relatedModules: {

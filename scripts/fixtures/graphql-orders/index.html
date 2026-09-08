@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Order Detail | SupaCloud Pilot</title>
+  <link rel="icon" href="/refresh.svg" type="image/svg+xml">
+  <style>
+    :root { font-family: system-ui, sans-serif; color: #20242a; background: #f5f6f8; letter-spacing: 0; }
+    * { box-sizing: border-box; }
+    body { margin: 0; }
+    header { background: #fff; border-bottom: 1px solid #dce0e6; padding: 18px 28px; display: flex; gap: 16px; align-items: center; }
+    header strong { font-size: 17px; } header span { font-size: 12px; color: #606775; }
+    main { max-width: 1100px; margin: 0 auto; padding: 28px; }
+    .toolbar { display: flex; align-items: end; gap: 14px; flex-wrap: wrap; padding-bottom: 24px; }
+    label { display: grid; gap: 6px; font-size: 12px; color: #59616c; }
+    select, button { height: 38px; padding: 0 12px; border: 1px solid #c9ced7; border-radius: 4px; background: #fff; color: #20242a; font: inherit; }
+    select { min-width: 195px; } button { background: #246850; color: #fff; border-color: #246850; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: progress; }
+    #refresh { width: 38px; flex: 0 0 38px; padding: 8px; background: #fff; }
+    #refresh img { display: block; width: 20px; height: 20px; }
+    h1 { font-size: 27px; line-height: 1.25; margin: 0; overflow-wrap: anywhere; }
+    h2 { font-size: 17px; margin: 0 0 16px; }
+    .heading { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; margin-bottom: 24px; min-height: 38px; }
+    .status { font-size: 12px; color: #216145; padding: 4px 8px; background: #e2f0e9; border-radius: 4px; }
+    .summary { display: grid; grid-template-columns: 2fr 1fr 1fr; border-top: 1px solid #dce0e6; border-bottom: 1px solid #dce0e6; padding: 20px 0; gap: 24px; }
+    .summary dt { font-size: 12px; color: #69727e; margin-bottom: 8px; }
+    .summary dd { margin: 0; font-size: 17px; overflow-wrap: anywhere; }
+    #email { display: block; font-size: 13px; color: #69727e; margin-top: 4px; }
+    section { margin-top: 30px; }
+    .table-scroll { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; background: #fff; }
+    th { text-align: left; color: #69727e; font-weight: 500; background: #edf0f4; }
+    td, th { padding: 13px 16px; border-bottom: 1px solid #e5e8ed; white-space: nowrap; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .muted { color: #69727e; } #message { padding: 36px 0; color: #5c6470; }
+    [hidden] { display: none !important; }
+    #error { color: #a32d3a; padding: 16px 0; } footer { font-size: 12px; color: #69727e; padding-top: 24px; }
+    @media (max-width: 600px) {
+      header { padding: 16px; } main { padding: 20px 16px; }
+      .toolbar label { flex: 1; min-width: 0; } select { min-width: 0; width: 100%; }
+      .summary { grid-template-columns: 1fr 1fr; gap: 20px; }
+      .summary div:first-child { grid-column: 1 / -1; }
+    }
+  </style>
+</head>
+<body>
+  <header><strong>SupaCloud / Orders</strong><span>LOCAL PILOT</span></header>
+  <main>
+    <form class="toolbar" id="filters">
+      <label>Workspace<select id="tenant"><option value="a">Northwind Devices</option><option value="b">Contoso Robotics</option></select></label>
+      <label>Order<select id="order"><option value="1">SO-000001</option><option value="1001">SO-001001</option><option value="90001">Cross-link fixture</option></select></label>
+      <button id="refresh" type="submit" aria-label="Reload order" title="Reload order"><img src="/refresh.svg" alt="" width="20" height="20"></button>
+    </form>
+    <div id="message" role="status">Loading order...</div>
+    <div id="error" role="alert" hidden></div>
+    <article id="detail" hidden>
+      <div class="heading"><h1 id="number"></h1><span id="status" class="status"></span></div>
+      <dl class="summary">
+        <div><dt>Customer</dt><dd id="customer"></dd><span id="email"></span></div>
+        <div><dt>Order total</dt><dd id="total"></dd></div>
+        <div><dt>Line items</dt><dd id="count"></dd></div>
+      </dl>
+      <section>
+        <h2>Line items</h2>
+        <div class="table-scroll"><table><thead><tr><th>SKU</th><th>Description</th><th class="num">Quantity</th><th class="num">Unit price</th><th class="num">Amount</th></tr></thead><tbody id="items"></tbody></table></div>
+      </section>
+      <section>
+        <h2>Deliveries</h2>
+        <div class="table-scroll"><table><thead><tr><th>Carrier</th><th>Tracking</th><th>Status</th></tr></thead><tbody id="deliveries"></tbody></table></div>
+      </section>
+      <footer id="timing"></footer>
+    </article>
+  </main>
+  <script type="module" src="/client.js"></script>
+</body>
+</html>
