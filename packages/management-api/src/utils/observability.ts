@@ -4,6 +4,7 @@ const TRACE_ID_PATTERN = /^[0-9a-f]{32}$/;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
 const SLOW_REQUEST_MS = 1000;
 const latencyBuckets = [10, 50, 100, 250, 500, 1000, 5000];
+const durationMetric = "supacloud_management_http_request_duration_ms";
 
 export interface RequestObservabilityContext {
   requestId: string;
@@ -15,7 +16,8 @@ export interface RequestObservabilityContext {
 interface RequestMetricState {
   requests: number;
   errors: number;
-  durations: number[];
+  durationBuckets: number[];
+  durationSum: number;
   status: Map<number, number>;
 }
 
@@ -23,7 +25,8 @@ const requestContexts = new WeakMap<Request, RequestObservabilityContext>();
 const metricState: RequestMetricState = {
   requests: 0,
   errors: 0,
-  durations: [],
+  durationBuckets: latencyBuckets.map(() => 0),
+  durationSum: 0,
   status: new Map(),
 };
 
@@ -77,8 +80,10 @@ export function recordRequestObservation(
   metricState.requests += 1;
   if (status >= 500) metricState.errors += 1;
   metricState.status.set(status, (metricState.status.get(status) ?? 0) + 1);
-  metricState.durations.push(durationMs);
-  if (metricState.durations.length > 10_000) metricState.durations.shift();
+  metricState.durationSum += durationMs;
+  for (const [index, bucket] of latencyBuckets.entries()) {
+    if (durationMs <= bucket) metricState.durationBuckets[index]! += 1;
+  }
   return { context, durationMs, slow: durationMs >= SLOW_REQUEST_MS };
 }
 
@@ -94,14 +99,19 @@ export function renderRequestMetrics(): string {
   for (const [status, count] of metricState.status) {
     lines.push(`supacloud_management_http_responses_total{status="${status}"} ${count}`);
   }
-  for (const bucket of latencyBuckets) {
+  lines.push(
+    `# HELP ${durationMetric} Management API request duration in milliseconds.`,
+    `# TYPE ${durationMetric} histogram`,
+  );
+  for (const [index, bucket] of latencyBuckets.entries()) {
     lines.push(
-      `supacloud_management_http_request_duration_ms_bucket{le="${bucket}"} `
-      + `${metricState.durations.filter((duration) => duration <= bucket).length}`,
+      `${durationMetric}_bucket{le="${bucket}"} ${metricState.durationBuckets[index]}`,
     );
   }
   lines.push(
-    `supacloud_management_http_request_duration_ms_bucket{le="+Inf"} ${metricState.durations.length}`,
+    `${durationMetric}_bucket{le="+Inf"} ${metricState.requests}`,
+    `${durationMetric}_sum ${metricState.durationSum}`,
+    `${durationMetric}_count ${metricState.requests}`,
   );
   return `${lines.join("\n")}\n`;
 }
@@ -109,6 +119,7 @@ export function renderRequestMetrics(): string {
 export function resetRequestMetricsForTests(): void {
   metricState.requests = 0;
   metricState.errors = 0;
-  metricState.durations = [];
+  metricState.durationBuckets.fill(0);
+  metricState.durationSum = 0;
   metricState.status.clear();
 }
