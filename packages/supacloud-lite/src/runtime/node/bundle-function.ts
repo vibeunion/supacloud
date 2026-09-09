@@ -64,8 +64,9 @@ function remotePlugin(): Bun.BunPlugin {
 export async function bundleFunction(entryPath: string, name: string): Promise<string> {
   const outDir = join(tmpdir(), 'supacloud-lite-fn-bundle', name)
   await mkdir(outDir, { recursive: true })
+  let buildOutput: Awaited<ReturnType<typeof Bun.build>>
   try {
-    const buildOutput = await Bun.build({
+    buildOutput = await Bun.build({
       entrypoints: [entryPath],
       format: 'esm',
       target: 'bun',
@@ -73,6 +74,20 @@ export async function bundleFunction(entryPath: string, name: string): Promise<s
       naming: `${name}-[hash].[ext]`,
       plugins: [remotePlugin()],
     })
+  } catch (buildThrow) {
+    // Bun.build throws an AggregateError("Bundle failed") whose sub-errors carry
+    // the actual diagnostics; surface them so CI logs are actionable.
+    const details = buildThrow instanceof AggregateError
+      ? buildThrow.errors.map((item) => (item as Error)?.message ?? String(item)).filter(Boolean).join('\n')
+      : buildThrow instanceof Error ? buildThrow.message : String(buildThrow)
+    try {
+      await rm(outDir, { recursive: true, force: true })
+    } catch (cleanupError) {
+      throw new AggregateError([buildThrow, cleanupError], `failed to clean function bundle directory ${outDir}`)
+    }
+    throw new Error(`failed to bundle ${entryPath}\n${details}`, { cause: buildThrow })
+  }
+  try {
     if (!buildOutput.success || buildOutput.outputs.length === 0) {
       throw new Error(buildOutput.logs.map((item) => item.message).join('\n') || `failed to bundle ${entryPath}`)
     }
