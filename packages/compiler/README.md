@@ -1,5 +1,18 @@
 # @supacloud/compiler
 
+## Persistent Execution Policy
+
+Set `commandCapabilities.requirePersistentAdapters: true` to require named adapters
+with explicit `database`/`external` boundaries, permission, audit and idempotency.
+Database commands require transactional capability and `transaction: "required"`.
+External adapters cannot satisfy a required database transaction: use durable
+intent and read-only reconciliation instead.
+
+`command-persistence-required` and `command-external-transaction` diagnostics include
+recovery suggestions and participate in JSON output and the existing no-write-on-error
+gate. These checks validate declared policy, not the implementation of a custom
+adapter. See [configuration and migration](../../docs/command-migration.md).
+
 FA-derived direct-command RPC ownership, contract inspection and POST command
 protocol migration are documented in `docs/fa-consumer-governance.md` in the
 repository. `context <module> --json` reports `routeContracts` and standalone

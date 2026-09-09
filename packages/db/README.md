@@ -1,5 +1,31 @@
 # @supacloud/db
 
+## Durable Commands
+
+`createPostgresCommandStore(database)` implements the protocol's storage ports.
+Use `createBunCommandDatabase` from `@supacloud/db/bun` for a native Bun SQL pool.
+This package contains transaction/receipt SQL, Workflow binding, row validation
+and input redaction. It does not own a recovery polling queue.
+
+Execution factories moved to `@supacloud/commands`; pass `store` instead of
+`database`. Errors moved to `CommandError` in `@supacloud/contracts`. Neither
+remote sending nor command orchestration is re-exported here. The DB package
+does not depend on the command runtime, including through its tests.
+
+Install the existing PGMQ/Workflow runtime and updated commands-public SQL module,
+then `COMMAND_PERSISTENCE_SQL` through a privileged application migration.
+Existing unreleased v1 tables require `COMMAND_PERSISTENCE_UPGRADE_SQL`, with old
+writers stopped; preserve operation identifiers during cutover.
+The upgrade enqueues pending recovery using existing Workflow and removes prototype
+lease/backoff columns. Use `createPostgresCommandStore(database, { submission })`
+inside a submitted command's execute step to preserve its command ID and atomically
+advance to reconciliation (external) or complete its Workflow (transactional).
+`submission` carries commandId, stepId, messageId, attempt and workerId. The adapter
+checks the current attempt, recorded tenant/actor/command, and original input.
+Keep its schema private and supply domain authorization, JSON-stable input/result
+decoders and a single-connection transaction adapter. Metadata cannot provide a
+distributed transaction. See [migration, deployment and recovery](../../docs/command-migration.md).
+
 For reviewed deployment-time public SQL parameters, see
 [Controlled Migration Bindings](./MIGRATION_BINDINGS.md). This opt-in API preserves
 Drizzle v1 source/snapshot ownership and the existing executor's migration ledger.

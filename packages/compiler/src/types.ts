@@ -451,8 +451,10 @@ export interface ValidateOptions {
 
 /** Runtime capabilities declared by the Command executor. */
 export interface CommandExecutionCapabilities {
+  /** Require named persistent adapters and explicit audit/idempotency declarations. */
+  requirePersistentAdapters?: boolean;
   /** Explicit named adapters; declarations must also be tested against the database. */
-  rpc?: Record<string, { audit?: boolean; idempotency?: boolean; transaction?: boolean }>;
+  rpc?: Record<string, { audit?: boolean; idempotency?: boolean; transaction?: boolean; boundary?: "database" | "external" }>;
   /** Whether runtime permission checks are supported. */
   permission?: boolean;
   /** Whether runtime audit persistence is supported. */

@@ -1,0 +1,6 @@
+{
+  "name": "@supacloud/app-svelte",
+  "tags": ["scope:core", "type:client"],
+  "projectType": "library",
+  "sourceRoot": "packages/app-svelte/src"
+}

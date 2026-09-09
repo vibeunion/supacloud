@@ -1514,7 +1514,9 @@ function parseController(
             paramNode = { name: pName, kind: "body" };
           } else if (dName === "Headers") {
             hasBindingDecorator = true;
-            paramNode = { name: pName, kind: "headers" };
+            const argument = dArgs[0];
+            const bindingName = argument !== undefined && ts.isStringLiteral(argument) ? argument.text : undefined;
+            paramNode = { name: pName, kind: "headers", ...(bindingName === undefined ? {} : { bindingName }) };
           }
         }
         // Automatic route parameter binding (Angular withComponentInputBinding pattern):

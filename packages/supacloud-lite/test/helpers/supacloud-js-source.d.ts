@@ -1,3 +1,5 @@
+import type { SupaCloudCommandsClient } from "../../../supacloud-js/src/commands";
+
 interface QueueMessage {
   msg_id: number
   payload: Record<string, unknown>
@@ -34,18 +36,6 @@ interface WorkflowRun {
   }>
 }
 
-interface CommandReceipt {
-  commandId: string
-  commandType: string
-  idempotent: boolean
-  workflow: WorkflowRun & { output?: Record<string, unknown> }
-}
-
-interface CommandClient {
-  submit(request: Record<string, unknown>): Promise<CommandReceipt>
-  get(commandId: string): Promise<CommandReceipt | null>
-}
-
 interface Artifact {
   artifactId: string
   objectVersion: string
@@ -78,6 +68,6 @@ export function createSupaCloudClient(options: {
 }): {
   queue(name: string): QueueClient
   workflows: WorkflowClient
-  commands: CommandClient
+  commands: SupaCloudCommandsClient
   artifacts: ArtifactClient
 }

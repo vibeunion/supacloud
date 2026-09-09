@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler",
+    "strict": true, "noUncheckedIndexedAccess": true, "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true, "noPropertyAccessFromIndexSignature": true,
+    "noFallthroughCasesInSwitch": true, "skipLibCheck": false,
+    "outDir": "dist", "rootDir": "src", "declaration": true
+  },
+  "include": ["src/index.ts"],
+  "exclude": ["node_modules", "dist"]
+}

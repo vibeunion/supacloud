@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": false,
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": true,
+    "types": ["bun"],
+    "typeRoots": ["../packages/compiler/node_modules/@types"]
+  },
+  "include": [
+    "verify-command-migration.ts",
+    "build-command-dependencies.ts",
+    "prepare-command-test-database.ts",
+    "../.github/scripts/prepare-command-package.mjs",
+    "../.github/scripts/prepare-command-package.test.mjs",
+    "../.github/scripts/package-validation.mjs"
+  ]
+}

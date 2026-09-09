@@ -39,15 +39,21 @@ try {
   const manifestPath = join(project, "package.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   // Test the release artifacts together before they exist on the public registry.
-  for (const name of ["app", "compiler", "elysia"]) {
+  manifest.overrides = { ...manifest.overrides };
+  for (const name of ["contracts", "commands", "db", "app", "compiler", "elysia"]) {
     const directory = join(repo, "packages", name);
     await run(["install", "--frozen-lockfile"], directory);
     await run(["run", "build"], directory);
     await run(["pm", "pack", "--destination", root], directory);
     const tarball = (await readdir(root)).find((file) => file.startsWith(`supacloud-${name}-`) && file.endsWith(".tgz"));
     assert.ok(tarball);
-    const dependencies = name === "compiler" ? manifest.devDependencies : manifest.dependencies;
-    dependencies[`@supacloud/${name}`] = `file:${join(root, tarball)}`;
+    const tarballPath = `file:${join(root, tarball)}`;
+    if (name === "compiler") {
+      manifest.devDependencies[`@supacloud/${name}`] = tarballPath;
+    } else if (name === "app" || name === "elysia") {
+      manifest.dependencies[`@supacloud/${name}`] = tarballPath;
+    }
+    manifest.overrides[`@supacloud/${name}`] = tarballPath;
   }
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
   await run(["install", "--ignore-scripts"]);
