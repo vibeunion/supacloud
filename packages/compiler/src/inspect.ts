@@ -83,19 +83,29 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
 
   const byName = new Map(graph.modules.map((module) => [module.name, module]));
   const selected = new Set<string>([subjectModule.name]);
+  const reverseDependents = new Map<string, string[]>();
+  for (const mod of graph.modules) {
+    for (const imp of mod.imports) {
+      const list = reverseDependents.get(imp);
+      if (list) list.push(mod.name);
+      else reverseDependents.set(imp, [mod.name]);
+    }
+  }
+
   // Traverse each direction independently. Switching direction at a shared
   // infrastructure module pulls unrelated sibling features into the pack.
   for (const direction of ["imports", "dependents"] as const) {
     const visited = new Set<string>([subjectModule.name]);
     const queue = [subjectModule.name];
-    while (queue.length > 0) {
-      const current = queue.shift();
+    let head = 0;
+    while (head < queue.length) {
+      const current = queue[head++];
       if (!current) continue;
       const module = byName.get(current);
       if (!module) continue;
-      const neighbors = direction === "imports" ? module.imports : graph.modules
-        .filter((candidate) => candidate.imports.includes(module.name))
-        .map((candidate) => candidate.name);
+      const neighbors = direction === "imports"
+        ? module.imports
+        : (reverseDependents.get(module.name) ?? []);
       for (const neighbor of neighbors) {
         if (!visited.has(neighbor) && byName.has(neighbor)) {
           visited.add(neighbor);

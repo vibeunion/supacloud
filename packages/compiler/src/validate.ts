@@ -107,8 +107,8 @@ export function validateGraph(
   if (typeof options === "object") {
     try {
       moduleBoundaries = resolveModuleBoundaries({
-        preset: options.moduleBoundaryPreset,
-        rules: options.moduleBoundaries,
+        ...(options.moduleBoundaryPreset ? { preset: options.moduleBoundaryPreset } : {}),
+        ...(options.moduleBoundaries ? { rules: options.moduleBoundaries } : {}),
       });
     } catch (err) {
       const meta = COMPILER_DIAGNOSTIC_CODES["invalid-boundary-preset"];
@@ -116,10 +116,8 @@ export function validateGraph(
         severity: "error",
         code: "invalid-boundary-preset",
         message: err instanceof Error ? err.message : String(err),
-        file: graph.modules[0]?.file,
-        line: graph.modules[0]?.line,
-        errorCode: meta?.code,
-        docsUrl: meta?.docsUrl,
+        ...(graph.modules[0] ? { file: graph.modules[0].file, line: graph.modules[0].line } : {}),
+        ...(meta ? { errorCode: meta.code, docsUrl: meta.docsUrl } : {}),
       });
     }
   }
@@ -172,12 +170,11 @@ export function validateGraph(
       severity: "error",
       code,
       message,
-      file,
-      line,
-      suggestion,
-      errorCode: meta?.code,
-      docsUrl: meta?.docsUrl,
-      fix,
+      ...(file === undefined ? {} : { file }),
+      ...(line === undefined ? {} : { line }),
+      ...(suggestion === undefined ? {} : { suggestion }),
+      ...(meta ? { errorCode: meta.code, docsUrl: meta.docsUrl } : {}),
+      ...(fix === undefined ? {} : { fix }),
     });
   };
   const warn = (
@@ -193,12 +190,11 @@ export function validateGraph(
       severity: strict ? "error" : "warn",
       code,
       message,
-      file,
-      line,
-      suggestion,
-      errorCode: meta?.code,
-      docsUrl: meta?.docsUrl,
-      fix,
+      ...(file === undefined ? {} : { file }),
+      ...(line === undefined ? {} : { line }),
+      ...(suggestion === undefined ? {} : { suggestion }),
+      ...(meta ? { errorCode: meta.code, docsUrl: meta.docsUrl } : {}),
+      ...(fix === undefined ? {} : { fix }),
     });
   };
 
@@ -211,7 +207,7 @@ export function validateGraph(
     if (module.featureSpec) {
       for (const diagnostic of validateFeatureSpec(module.featureSpec, module)) {
         const meta = COMPILER_DIAGNOSTIC_CODES[diagnostic.code];
-        diagnostics.push({ ...diagnostic, errorCode: meta?.code, docsUrl: meta?.docsUrl });
+        diagnostics.push({ ...diagnostic, ...(meta ? { errorCode: meta.code, docsUrl: meta.docsUrl } : {}) });
       }
     }
     const previousModule = modulesByName.get(module.name);
@@ -326,7 +322,10 @@ export function validateGraph(
             );
           }
         }
-        declaredRoutes.push({ method: route.method, path: route.path, fullPath, rawFullPath, controller, module, handler: route.handler, redirectTo: route.redirectTo });
+        declaredRoutes.push({
+          method: route.method, path: route.path, fullPath, rawFullPath, controller, module, handler: route.handler,
+          ...(route.redirectTo === undefined ? {} : { redirectTo: route.redirectTo }),
+        });
 
         if (route.command && !module.commands.some((command) => command.className === route.command)) {
           error(
@@ -736,8 +735,8 @@ export function validateGraph(
       for (const dep of provider.deps) {
         const isOptional = provider.optionalDeps?.includes(dep);
         const resolved = resolveDep(module, dep, {
-          self: provider.selfDeps?.includes(dep),
-          skipSelf: provider.skipSelfDeps?.includes(dep),
+          self: provider.selfDeps?.includes(dep) ?? false,
+          skipSelf: provider.skipSelfDeps?.includes(dep) ?? false,
         });
         if (!resolved) {
           if (isOptional) {
@@ -1070,6 +1069,7 @@ function isRouteShadowed(earlierPath: string, laterPath: string): boolean {
   for (let i: number = 0; i < earlierSegments.length; i += 1) {
     const e = earlierSegments[i];
     const l = laterSegments[i];
+    if (e === undefined || l === undefined) return false;
 
     if (e === l) {
       continue;
@@ -1089,7 +1089,7 @@ function routeMatchesTarget(routePattern: string, targetPath: string): boolean {
   const tSegs = targetPath.split("/").filter(Boolean);
   if (pSegs.length !== tSegs.length) return false;
   for (let i: number = 0; i < pSegs.length; i += 1) {
-    if (pSegs[i].startsWith(":")) continue;
+    if (pSegs[i]?.startsWith(":")) continue;
     if (pSegs[i] !== tSegs[i]) return false;
   }
   return true;
@@ -1135,8 +1135,7 @@ function detectCycles(
           file: ref.provider.file,
           line: ref.provider.line,
           suggestion: "Break the cycle by extracting common dependencies into a separate service or injecting @Optional().",
-          errorCode: meta?.code,
-          docsUrl: meta?.docsUrl,
+          ...(meta ? { errorCode: meta.code, docsUrl: meta.docsUrl } : {}),
         });
       }
       return;
@@ -1145,8 +1144,8 @@ function detectCycles(
     stack.push(ref);
     for (const dep of ref.provider.deps) {
       const resolved = resolveDep(ref.module, dep, {
-        self: ref.provider.selfDeps?.includes(dep),
-        skipSelf: ref.provider.skipSelfDeps?.includes(dep),
+        self: ref.provider.selfDeps?.includes(dep) ?? false,
+        skipSelf: ref.provider.skipSelfDeps?.includes(dep) ?? false,
       });
       if (resolved) visit(resolved);
     }
@@ -1194,8 +1193,7 @@ function detectExistingAliasCycles(
             file: start.provider.file,
             line: start.provider.line,
             suggestion: "Break the alias cycle by pointing useExisting to a concrete provider instead of a circular alias.",
-            errorCode: meta?.code,
-            docsUrl: meta?.docsUrl,
+            ...(meta ? { errorCode: meta.code, docsUrl: meta.docsUrl } : {}),
           });
         }
         break;
@@ -1231,11 +1229,9 @@ function detectModuleCycles(graph: ApplicationGraph): Diagnostic[] {
           severity: "error",
           code: "circular-module-import",
           message: `Module circular import detected: ${cycle.join(" -> ")}`,
-          file: mod?.file,
-          line: mod?.line,
+          ...(mod ? { file: mod.file, line: mod.line } : {}),
           suggestion: "Refactor module imports into a unidirectional acyclic graph.",
-          errorCode: meta?.code,
-          docsUrl: meta?.docsUrl,
+          ...(meta ? { errorCode: meta.code, docsUrl: meta.docsUrl } : {}),
         });
       }
       return;
@@ -1279,9 +1275,10 @@ function detectOrphanModules(graph: ApplicationGraph): Diagnostic[] {
     reachable.add(root.name);
   }
 
-  while (queue.length > 0) {
-      const current = queue.shift();
-      if (!current) continue;
+  let head = 0;
+  while (head < queue.length) {
+    const current = queue[head++];
+    if (!current) continue;
     const mod = moduleMap.get(current);
     if (!mod) continue;
     for (const imp of mod.imports) {
@@ -1301,8 +1298,7 @@ function detectOrphanModules(graph: ApplicationGraph): Diagnostic[] {
         message: `Module '${mod.name}' is declared but not reachable from any root module (${rootModules.map((r) => r.name).join(", ")})`,
         file: mod.file,
         line: mod.line,
-        errorCode: meta?.code,
-        docsUrl: meta?.docsUrl,
+        ...(meta ? { errorCode: meta.code, docsUrl: meta.docsUrl } : {}),
       });
     }
   }
