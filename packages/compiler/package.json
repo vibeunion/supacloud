@@ -18,7 +18,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "DELIVERY.md"
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
@@ -46,6 +47,7 @@
     "directory": "packages/compiler"
   },
   "dependencies": {
+    "@sinclair/typebox": "^0.34.52",
     "@graphql-codegen/core": "^6.2.0",
     "@graphql-codegen/typed-document-node": "^7.1.0",
     "@graphql-codegen/typescript-operations": "^6.1.6",

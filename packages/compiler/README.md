@@ -1,5 +1,12 @@
 # @supacloud/compiler
 
+## Local Delivery
+
+`supacloud-compiler plan --json` previews workload targets and route ownership.
+`supacloud-compiler build-delivery --json` creates independent local factory bundles
+and an atomic inspection manifest, reusing unchanged artifacts without deployment.
+See [local delivery](./DELIVERY.md) for configuration, contracts, and limitations.
+
 ## Persistent Execution Policy
 
 Set `commandCapabilities.requirePersistentAdapters: true` to require named adapters
