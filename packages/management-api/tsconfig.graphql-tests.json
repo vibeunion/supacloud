@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "skipLibCheck": false,
+    "types": ["bun"]
+  },
+  "include": [
+    "tests/helpers/graphql-postgres.ts",
+    "tests/integration/extension-graphql.local.test.ts",
+    "tests/unit/extension.service.test.ts"
+  ]
+}
