@@ -410,7 +410,9 @@ jobs:
 
       - name: Install dependencies
         working-directory: packages/supacloud-lite
-        run: bun install --frozen-lockfile
+        run: |
+          bun run ../../scripts/build-command-dependencies.ts supacloud-lite
+          bun install --frozen-lockfile
 
       - name: Build Linux x64 standalone binary
         working-directory: packages/supacloud-lite
