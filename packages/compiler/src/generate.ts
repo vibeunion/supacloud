@@ -289,8 +289,8 @@ export function renderApplication(
   return {
     applicationCode: code,
     manifestJson: JSON.stringify(manifest, null, 2) + "\n",
-    clientCode,
-    permissionsCode,
+    ...(clientCode === undefined ? {} : { clientCode }),
+    ...(permissionsCode === undefined ? {} : { permissionsCode }),
   };
 }
 
@@ -307,26 +307,23 @@ export async function generateApplication(
   await mkdir(options.outDir, { recursive: true });
   const applicationPath = join(options.outDir, "application.ts");
   const manifestPath = join(options.outDir, "app.manifest.json");
-  const written: string[] = [];
-  if (await writeFileIfChanged(applicationPath, rendered.applicationCode, options.artifactHashes)) {
-    written.push(applicationPath);
-  }
-  if (await writeFileIfChanged(manifestPath, rendered.manifestJson, options.artifactHashes)) {
-    written.push(manifestPath);
-  }
+  const writeCandidates: Array<{ path: string; content: string }> = [
+    { path: applicationPath, content: rendered.applicationCode },
+    { path: manifestPath, content: rendered.manifestJson },
+  ];
   if (rendered.clientCode) {
-    const clientPath = join(options.outDir, "client.ts");
-    if (await writeFileIfChanged(clientPath, rendered.clientCode, options.artifactHashes)) {
-      written.push(clientPath);
-    }
+    writeCandidates.push({ path: join(options.outDir, "client.ts"), content: rendered.clientCode });
   }
   if (rendered.permissionsCode) {
-    const permissionsPath = join(options.outDir, "permissions.ts");
-    if (await writeFileIfChanged(permissionsPath, rendered.permissionsCode, options.artifactHashes)) {
-      written.push(permissionsPath);
-    }
+    writeCandidates.push({ path: join(options.outDir, "permissions.ts"), content: rendered.permissionsCode });
   }
-  return written;
+  const results = await Promise.all(
+    writeCandidates.map(async (candidate) => {
+      const changed = await writeFileIfChanged(candidate.path, candidate.content, options.artifactHashes);
+      return changed ? candidate.path : undefined;
+    }),
+  );
+  return results.filter((p): p is string => p !== undefined);
 }
 
 export async function writeFileIfChanged(
@@ -351,7 +348,11 @@ export async function writeFileIfChanged(
 async function writeFileAtomic(path: string, content: string): Promise<void> {
   const temporaryPath = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2)}`;
   try {
-    await writeFile(temporaryPath, content, "utf8");
+    if (typeof Bun !== "undefined" && typeof Bun.write === "function") {
+      await Bun.write(temporaryPath, content);
+    } else {
+      await writeFile(temporaryPath, content, "utf8");
+    }
     await rename(temporaryPath, path);
   } catch (error) {
     await unlink(temporaryPath).catch(() => undefined);
@@ -403,6 +404,7 @@ function indent(text: string, spaces: number): string {
 /** Manages generated file imports: automatically aliases symbols with the same name from different sources. */
 class ImportManager {
   private readonly entries = new Map<string, { path: string; exported: string; package: boolean }>();
+  private readonly lookup = new Map<string, string>();
 
   get size(): number {
     return this.entries.size;
@@ -413,9 +415,9 @@ class ImportManager {
     const path = importModule ?? importPath;
     const packageImport = importModule !== undefined;
     if (!path) return exported;
-    for (const [local, entry] of this.entries) {
-      if (entry.path === path && entry.exported === exported && entry.package === packageImport) return local;
-    }
+    const key = `${packageImport ? "p" : "r"}:${path}:${exported}`;
+    const existing = this.lookup.get(key);
+    if (existing !== undefined) return existing;
     let local = exported;
     let counter: number = 2;
     while (this.entries.has(local)) {
@@ -423,6 +425,7 @@ class ImportManager {
       counter += 1;
     }
     this.entries.set(local, { path, exported, package: packageImport });
+    this.lookup.set(key, local);
     return local;
   }
 
@@ -602,7 +605,8 @@ class ModuleGenerator {
             return `(${accessor} !== undefined ? ${accessor} : ${fallback})`;
           }
           if (hp.kind === "body") return "req.body";
-          if (hp.kind === "headers") return "req.headers";
+          if (hp.kind === "headers") return hp.bindingName === undefined
+            ? "req.headers" : `req.headers?.[${JSON.stringify(hp.bindingName.toLowerCase())}]`;
           if (hp.kind === "context") return "(req.context ?? req)";
           return "undefined";
         });
@@ -700,7 +704,7 @@ class ModuleGenerator {
       const index = provider.multi ? (multiIndices.get(provider.token) ?? 0) : undefined;
       if (index !== undefined) multiIndices.set(provider.token, index + 1);
       if (provider.kind !== "existing" && provider.hasOnDestroy) {
-        plan.push({ key: camelName(provider.token), index });
+        plan.push({ key: camelName(provider.token), ...(index === undefined ? {} : { index }) });
       }
     }
     for (const controller of this.module.controllers) {
@@ -859,12 +863,7 @@ class ModuleGenerator {
 
     const clauses = functionalInjects.map((entry) => {
       const token = this.imports.add(entry.expression, entry.importPath, entry.importModule);
-      const value = this.depExpr(entry.token, kind, {
-        optional: entry.optional,
-        self: entry.self,
-        skipSelf: entry.skipSelf,
-        host: entry.host,
-      });
+      const value = this.depExpr(entry.token, kind, entry);
       return `if (token === ${token}) return ${value} as T;`;
     });
     const missing = `if (options?.optional) return undefined; throw new Error("Static inject token not available: " + String(token));`;
@@ -999,10 +998,11 @@ function orderProviders(providers: ProviderNode[]): ProviderNode[] {
       break;
     }
     const [provider] = remaining.splice(index, 1);
-  emitted.add(provider.token);
-  result.push(provider);
-}
-return result;
+    if (!provider) throw new Error("Provider ordering selected an unavailable provider");
+    emitted.add(provider.token);
+    result.push(provider);
+  }
+  return result;
 }
 
 /**
@@ -1043,27 +1043,24 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
           path: fullPath,
           controller: controller.className,
           handler: route.handler,
-          command: route.command,
-          guards: route.guards,
-          canMatch: route.canMatch,
-          canDeactivate: route.canDeactivate,
-          resolvers: route.resolvers,
-          redirectTo: route.redirectTo,
-          pathMatch: route.pathMatch,
-          paramTransforms: route.paramTransforms,
-          paramDefaults: route.paramDefaults,
-          queryTransforms: route.queryTransforms,
-          queryDefaults: route.queryDefaults,
-          title: route.title,
-          data: route.data,
+          ...(route.command === undefined ? {} : { command: route.command }),
+          ...(route.guards === undefined ? {} : { guards: route.guards }),
+          ...(route.canMatch === undefined ? {} : { canMatch: route.canMatch }),
+          ...(route.canDeactivate === undefined ? {} : { canDeactivate: route.canDeactivate }),
+          ...(route.resolvers === undefined ? {} : { resolvers: route.resolvers }),
+          ...(route.redirectTo === undefined ? {} : { redirectTo: route.redirectTo }),
+          ...(route.pathMatch === undefined ? {} : { pathMatch: route.pathMatch }),
+          ...(route.paramTransforms === undefined ? {} : { paramTransforms: route.paramTransforms }),
+          ...(route.paramDefaults === undefined ? {} : { paramDefaults: route.paramDefaults }),
+          ...(route.queryTransforms === undefined ? {} : { queryTransforms: route.queryTransforms }),
+          ...(route.queryDefaults === undefined ? {} : { queryDefaults: route.queryDefaults }),
+          ...(route.title === undefined ? {} : { title: route.title }),
+          ...(route.data === undefined ? {} : { data: route.data }),
         });
 
-        const routeParams = (route.pathParams && route.pathParams.length > 0)
-          || (fullPath.match(/:([a-zA-Z0-9_]+)/g) ?? []).length > 0
-          ? `{ ${((route.pathParams && route.pathParams.length > 0
-            ? route.pathParams
-            : (fullPath.match(/:([a-zA-Z0-9_]+)/g) ?? []).map((p) => p.slice(1))))
-            .map((p) => `${p}: string | number`).join("; ")} }`
+        const paramNames = [...new Set((fullPath.match(/:([a-zA-Z0-9_]+)/g) ?? []).map((p) => p.slice(1)))];
+        const routeParams = paramNames.length > 0
+          ? `{ ${paramNames.map((p) => `${/^[a-zA-Z_$]/.test(p) ? p : JSON.stringify(p)}: string | number`).join("; ")} }`
           : "Record<string, string | number>";
         routeMethods.push(`
     ${route.handler}: makeRoute<{ params${routeParams.startsWith("{") ? "" : "?"}: ${routeParams}; query?: Record<string, unknown>; body?: unknown; headers?: Record<string, string> }>(${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}),`);
@@ -1089,8 +1086,7 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     "",
     "export type RouteMethod<Options extends ClientRequestOptions = ClientRequestOptions> = {",
     "  <T>(options: Options, decode: ResponseDecoder<T>): Promise<T>;",
-    "  (options?: Options): Promise<unknown>;",
-    "};",
+    "} & ((...args: {} extends Options ? [options?: Options] : [options: Options]) => Promise<unknown>);",
     "",
     "export type HttpInterceptorFn = (",
     "  req: { method: string; url: string; headers: Record<string, string>; body?: unknown },",
@@ -1116,12 +1112,11 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     "  params?: Record<string, string | number>,",
     "  query?: Record<string, unknown>,",
     "): string {",
-    "  let url = path;",
-    "  if (params) {",
-    "    for (const [key, value] of Object.entries(params)) {",
-    "      url = url.replace(`:${key}`, encodeURIComponent(String(value)));",
-    "    }",
-    "  }",
+    '  let url = path.replace(/:([a-zA-Z0-9_]+)/g, (_match, key: string) => {',
+    "    const value = params && Object.hasOwn(params, key) ? params[key] : undefined;",
+    '    if (typeof value !== "string" && typeof value !== "number") throw new TypeError(`Missing route parameter: ${key}`);',
+    "    return encodeURIComponent(String(value));",
+    "  });",
     "  if (query) {",
     "    const searchParams = new URLSearchParams();",
     "    for (const [k, v] of Object.entries(query)) {",
@@ -1154,20 +1149,7 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     "    options: ClientRequestOptions = {},",
     "    decode?: ResponseDecoder<T>,",
     "  ): Promise<T | unknown> {",
-    "    let url = `${baseUrl}${path}`;",
-    "    if (options.params) {",
-    "      for (const [key, value] of Object.entries(options.params)) {",
-    "        url = url.replace(`:${key}`, encodeURIComponent(String(value)));",
-    "      }",
-    "    }",
-    "    if (options.query) {",
-    "      const searchParams = new URLSearchParams();",
-    "      for (const [k, v] of Object.entries(options.query)) {",
-    "        if (v !== undefined && v !== null) searchParams.set(k, String(v));",
-    "      }",
-    "      const qs = searchParams.toString();",
-    '      if (qs) url += (url.includes("?") ? "&" : "?") + qs;',
-    "    }",
+    "    const url = `${baseUrl}${buildRouteUrl(path, options.params, options.query)}`;",
     '    const customHeaders = typeof config.headers === "function" ? await config.headers() : config.headers;',
     "    const headers: Record<string, string> = {",
     '      "content-type": "application/json",',
@@ -1179,13 +1161,14 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     "      index: number,",
     "      reqPayload: { method: string; url: string; headers: Record<string, string>; body?: unknown },",
     "    ): Promise<Response> => {",
-    "      if (index < interceptors.length) {",
-    "        return interceptors[index](reqPayload, (nextPayload) => executeChain(index + 1, nextPayload));",
+    "      const interceptor = interceptors[index];",
+    "      if (interceptor) {",
+    "        return interceptor(reqPayload, (nextPayload) => executeChain(index + 1, nextPayload));",
     "      }",
     "      return fetcher(reqPayload.url, {",
     "        method: reqPayload.method,",
     "        headers: reqPayload.headers,",
-    "        body: reqPayload.body !== undefined ? JSON.stringify(reqPayload.body) : undefined,",
+    "        ...(reqPayload.body === undefined ? {} : { body: JSON.stringify(reqPayload.body) }),",
     "      });",
     "    };",
     "    const response = await executeChain(0, { method, url, headers, body: options.body });",
@@ -1257,8 +1240,8 @@ export function renderPermissions(graph: ApplicationGraph): string {
           path: joinRoutePaths(controller.path, route.path),
           controller: controller.className,
           handler: route.handler,
-          command: route.command,
-          permission: perm,
+          ...(route.command === undefined ? {} : { command: route.command }),
+          ...(perm === undefined ? {} : { permission: perm }),
         });
       }
     }

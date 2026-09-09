@@ -2,7 +2,7 @@ import { analyzeProject } from "./analyze";
 import { generateApplication, renderApplication, writeFileIfChanged } from "./generate";
 import type { CheckProjectResult, CompileOptions, CompileResult, Diagnostic } from "./types";
 import { validateGraph } from "./validate";
-import { existsSync, readFileSync } from "node:fs";
+import { access, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
 import { validateRouteContracts } from "./route-contracts";
@@ -22,15 +22,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
   const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths);
   const diagnostics: Diagnostic[] = [
     ...(graph.diagnostics ?? []),
-    ...validateGraph(graph, {
-      strict: options.strict,
-      moduleBoundaryPreset: options.moduleBoundaryPreset,
-      moduleBoundaries: options.moduleBoundaries,
-      allowRouteCommandBindings: options.allowRouteCommandBindings,
-      commandCapabilities: options.commandCapabilities,
-      disallowControllerDirectDb: options.disallowControllerDirectDb,
-      detectOrphanModules: options.detectOrphanModules,
-    }),
+    ...validateGraph(graph, options),
   ];
   if (options.strict) {
     for (const diagnostic of diagnostics) {
@@ -42,19 +34,10 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
   if (graphql.contract) graph.graphql = graphql.contract;
   diagnostics.push(...graphql.diagnostics);
   if (options.requireRouteContracts) diagnostics.push(...validateRouteContracts(graph));
-  const rendered = renderApplication(graph, {
-    rootDir: options.rootDir,
-    outDir: options.outDir,
-    generateClient: options.generateClient,
-    generatePermissions: options.generatePermissions,
-    treeShakeUnusedProviders: options.treeShakeUnusedProviders,
-  });
+  const rendered = renderApplication(graph, options);
   if (typeSafety.scanProductionSource) {
     diagnostics.push(...scanProductionSource({
-      rootDir: options.rootDir,
-      include: options.include,
-      outDir: options.outDir,
-      strict: options.strict,
+      ...options,
       ...typeSafety,
     }));
   }
@@ -69,12 +52,8 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
   }
   const hasErrors = diagnostics.some((diagnostic) => diagnostic.severity === "error");
   const generatedOptions = {
-    rootDir: options.rootDir,
-    outDir: options.outDir,
-    generateClient: options.generateClient,
-    generatePermissions: options.generatePermissions,
-    treeShakeUnusedProviders: options.treeShakeUnusedProviders,
-    artifactHashes: options.cache?.generatedHashes,
+    ...options,
+    ...(options.cache ? { artifactHashes: options.cache.generatedHashes } : {}),
   };
   const written = !hasErrors || options.writeOnError === true
     ? await generateApplication(graph, generatedOptions)
@@ -94,7 +73,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
         reusedModules: graph.cacheStats.reusedModules,
       }
     : undefined;
-  return { diagnostics, graph, written, stats };
+  return { diagnostics, graph, written, ...(stats ? { stats } : {}) };
 }
 
 
@@ -106,15 +85,7 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
   const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths);
   const diagnostics: Diagnostic[] = [
     ...(graph.diagnostics ?? []),
-    ...validateGraph(graph, {
-      strict: options.strict,
-      moduleBoundaryPreset: options.moduleBoundaryPreset,
-      moduleBoundaries: options.moduleBoundaries,
-      allowRouteCommandBindings: options.allowRouteCommandBindings,
-      commandCapabilities: options.commandCapabilities,
-      disallowControllerDirectDb: options.disallowControllerDirectDb,
-      detectOrphanModules: options.detectOrphanModules,
-    }),
+    ...validateGraph(graph, options),
   ];
   if (options.strict) {
     for (const diagnostic of diagnostics) {
@@ -127,19 +98,10 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
   if (graphql.contract) graph.graphql = graphql.contract;
   diagnostics.push(...graphql.diagnostics);
   if (options.requireRouteContracts) diagnostics.push(...validateRouteContracts(graph));
-  const rendered = renderApplication(graph, {
-    rootDir: options.rootDir,
-    outDir: options.outDir,
-    generateClient: options.generateClient,
-    generatePermissions: options.generatePermissions,
-    treeShakeUnusedProviders: options.treeShakeUnusedProviders,
-  });
+  const rendered = renderApplication(graph, options);
   if (typeSafety.scanProductionSource) {
     diagnostics.push(...scanProductionSource({
-      rootDir: options.rootDir,
-      include: options.include,
-      outDir: options.outDir,
-      strict: options.strict,
+      ...options,
       ...typeSafety,
     }));
   }
@@ -165,18 +127,24 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
     expectedFiles["permissions.ts"] = rendered.permissionsCode;
   }
 
-  const mismatches: string[] = [];
-  for (const [filename, expectedContent] of Object.entries(expectedFiles)) {
-    const diskPath = join(options.outDir, filename);
-    if (!existsSync(diskPath)) {
-      mismatches.push(`${filename}: generated artifact is missing from disk`);
-      continue;
-    }
-    const diskContent = readFileSync(diskPath, "utf8");
-    if (diskContent !== expectedContent) {
-      mismatches.push(`${filename}: disk artifact differs from current compiler output`);
-    }
-  }
+  const mismatchResults = await Promise.all(
+    Object.entries(expectedFiles).map(async ([filename, expectedContent]) => {
+      const diskPath = join(options.outDir, filename);
+      try {
+        await access(diskPath);
+        const diskContent = typeof Bun !== "undefined" && typeof Bun.file === "function"
+          ? await Bun.file(diskPath).text()
+          : await readFile(diskPath, "utf8");
+        if (diskContent !== expectedContent) {
+          return `${filename}: disk artifact differs from current compiler output`;
+        }
+      } catch {
+        return `${filename}: generated artifact is missing from disk`;
+      }
+      return undefined;
+    }),
+  );
+  const mismatches = mismatchResults.filter((item): item is string => item !== undefined);
 
   return {
     upToDate: mismatches.length === 0,
@@ -190,6 +158,6 @@ function resolveTypeSafety(options: CompileOptions): NonNullable<CompileOptions[
   return {
     noAnyInGenerated: options.typeSafety?.noAnyInGenerated ?? options.strict ?? false,
     scanProductionSource: options.typeSafety?.scanProductionSource ?? options.strict ?? false,
-    exclude: options.typeSafety?.exclude,
+    ...(options.typeSafety?.exclude ? { exclude: options.typeSafety.exclude } : {}),
   };
 }

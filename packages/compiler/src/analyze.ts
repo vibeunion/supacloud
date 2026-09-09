@@ -363,13 +363,13 @@ export async function analyzeProject(
           useClass: name,
           scope: injectable.scope ?? "application",
           deps,
-          optionalDeps: optionalDeps.length > 0 ? optionalDeps : undefined,
-          selfDeps: selfDeps.length > 0 ? selfDeps : undefined,
-          skipSelfDeps: skipSelfDeps.length > 0 ? skipSelfDeps : undefined,
-          hostDeps: hostDeps.length > 0 ? hostDeps : undefined,
-          functionalInjects: functionalInjects.length > 0 ? functionalInjects : undefined,
+          ...(optionalDeps.length > 0 ? { optionalDeps } : {}),
+          ...(selfDeps.length > 0 ? { selfDeps } : {}),
+          ...(skipSelfDeps.length > 0 ? { skipSelfDeps } : {}),
+          ...(hostDeps.length > 0 ? { hostDeps } : {}),
+          ...(functionalInjects.length > 0 ? { functionalInjects } : {}),
           providedIn: "root",
-          hasOnDestroy: hasDestroyHook(classInfo.decl) || undefined,
+          ...(hasDestroyHook(classInfo.decl) ? { hasOnDestroy: true } : {}),
           exported: true,
           file,
           line,
@@ -395,13 +395,16 @@ export async function analyzeProject(
       if (commandDec) {
         const meta = decoratorObjectArg(commandDec);
         if (meta && booleanProp(meta, "standalone")) {
+          const permission = stringLiteralProp(meta, "permission");
+          const rpc = checkedRpc(meta, ctx);
+          const audit = stringLiteralProp(meta, "audit");
           standaloneCommands.push({
             className: classInfo.decl.name?.text ?? name,
             name: stringLiteralProp(meta, "name") ?? classInfo.decl.name?.text ?? name,
-            permission: stringLiteralProp(meta, "permission"),
-            rpc: checkedRpc(meta, ctx),
+            ...(permission === undefined ? {} : { permission }),
+            ...(rpc === undefined ? {} : { rpc }),
             transaction: checkedCommandMode(meta, "transaction", ctx, classInfo.decl.name?.text ?? name) ?? "none",
-            audit: stringLiteralProp(meta, "audit"),
+            ...(audit === undefined ? {} : { audit }),
             idempotency: checkedCommandMode(meta, "idempotency", ctx, classInfo.decl.name?.text ?? name) ?? "none",
             standalone: true,
             aspects: parseAspectRefs(
@@ -481,7 +484,7 @@ export async function analyzeProject(
     externalTokens,
     diagnostics: ctx.diagnostics,
     tokenNames,
-    cacheStats: cache ? { reusedModules, reanalyzedModules } : undefined,
+    ...(cache ? { cacheStats: { reusedModules, reanalyzedModules } } : {}),
   };
 }
 
@@ -505,8 +508,10 @@ function collectModuleSourceClosure(module: ModuleNode, ctx: AnalysisContext): S
 
   const ownedFiles = new Set<string>();
   const queue = [...seeds];
-  while (queue.length > 0) {
-    const fileName = queue.shift();
+  const enqueued = new Set<string>(seeds);
+  let head = 0;
+  while (head < queue.length) {
+    const fileName = queue[head++];
     if (!fileName) continue;
     const sourceFile = ctx.program.getSourceFile(fileName);
     if (!sourceFile || sourceFile.isDeclarationFile || !isProjectSourceFile(sourceFile, ctx.rootDir)) continue;
@@ -532,7 +537,10 @@ function collectModuleSourceClosure(module: ModuleNode, ctx: AnalysisContext): S
         ctx.program.getCompilerOptions(),
         ts.sys,
       ).resolvedModule?.resolvedFileName;
-      if (resolved && isProjectSourcePath(resolved, ctx.rootDir)) queue.push(resolved);
+      if (resolved && isProjectSourcePath(resolved, ctx.rootDir) && !enqueued.has(resolved)) {
+        enqueued.add(resolved);
+        queue.push(resolved);
+      }
     }
   }
   return ownedFiles;
@@ -682,12 +690,12 @@ function parseModule(
       useClass: className,
       scope,
       deps: deps.deps,
-      optionalDeps: deps.optionalDeps.length > 0 ? deps.optionalDeps : undefined,
-      selfDeps: deps.selfDeps.length > 0 ? deps.selfDeps : undefined,
-      skipSelfDeps: deps.skipSelfDeps.length > 0 ? deps.skipSelfDeps : undefined,
-      hostDeps: deps.hostDeps.length > 0 ? deps.hostDeps : undefined,
-      functionalInjects: deps.functionalInjects.length > 0 ? deps.functionalInjects : undefined,
-      hasOnDestroy: hasDestroyHook(decl) || undefined,
+      ...(deps.optionalDeps.length > 0 ? { optionalDeps: deps.optionalDeps } : {}),
+      ...(deps.selfDeps.length > 0 ? { selfDeps: deps.selfDeps } : {}),
+      ...(deps.skipSelfDeps.length > 0 ? { skipSelfDeps: deps.skipSelfDeps } : {}),
+      ...(deps.hostDeps.length > 0 ? { hostDeps: deps.hostDeps } : {}),
+      ...(deps.functionalInjects.length > 0 ? { functionalInjects: deps.functionalInjects } : {}),
+      ...(hasDestroyHook(decl) ? { hasOnDestroy: true } : {}),
       exported: exportsSet.has(className),
       file: sourcePath(ctx.rootDir, decl.getSourceFile().fileName),
       line: lineOf(decl),
@@ -737,13 +745,16 @@ function parseModule(
           ctx,
           `command ${cls.name?.text ?? "<anonymous>"}`,
         );
+        const permission = stringLiteralProp(meta, "permission");
+        const rpc = checkedRpc(meta, ctx);
+        const audit = stringLiteralProp(meta, "audit");
         commands.push({
           className: cls.name?.text ?? "<anonymous>",
           name: stringLiteralProp(meta, "name") ?? cls.name?.text ?? "<anonymous>",
-          permission: stringLiteralProp(meta, "permission"),
-          rpc: checkedRpc(meta, ctx),
+          ...(permission === undefined ? {} : { permission }),
+          ...(rpc === undefined ? {} : { rpc }),
           transaction: checkedCommandMode(meta, "transaction", ctx, cls.name?.text ?? "<anonymous>") ?? "none",
-          audit: stringLiteralProp(meta, "audit"),
+          ...(audit === undefined ? {} : { audit }),
           idempotency: checkedCommandMode(meta, "idempotency", ctx, cls.name?.text ?? "<anonymous>") ?? "none",
           ...(booleanProp(meta, "standalone") ? { standalone: true } : {}),
           ...(aspects.length > 0 ? { aspects } : {}),
@@ -801,7 +812,7 @@ function parseModule(
   return {
     name,
     className,
-    tags: tags.length > 0 ? tags : undefined,
+    ...(tags.length > 0 ? { tags } : {}),
     file: sourcePath(ctx.rootDir, file),
     line,
     imports,
@@ -859,7 +870,11 @@ function parseFeatureSpec(
     input.properties.some((property) => !ts.isPropertyAssignment(property))) {
     return invalid();
   }
-  const states = statesExpr.elements.map((state) => (state as ts.StringLiteral).text);
+  const states: string[] = [];
+  for (const state of statesExpr.elements) {
+    if (!ts.isStringLiteral(state)) return invalid();
+    states.push(state.text);
+  }
   const transitions: FeatureTransitionNode[] = [];
   for (const property of transitionObject.properties) {
     if (!ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name) ||
@@ -872,14 +887,20 @@ function parseFeatureSpec(
       ["transaction", "idempotency"].some((key) => getProp(options, key) && !commandModeProp(options, key))) {
       return invalid();
     }
+    const permission = stringLiteralProp(options, "permission");
+    const command = stringLiteralProp(options, "command");
+    const route = stringLiteralProp(options, "route");
+    const transaction = commandModeProp(options, "transaction");
+    const idempotency = commandModeProp(options, "idempotency");
+    const audit = stringLiteralProp(options, "audit");
     transitions.push({
       name: propertyName(property.name), from, to,
-      permission: stringLiteralProp(options, "permission"),
-      command: stringLiteralProp(options, "command"),
-      route: stringLiteralProp(options, "route"),
-      transaction: commandModeProp(options, "transaction"),
-      idempotency: commandModeProp(options, "idempotency"),
-      audit: stringLiteralProp(options, "audit"),
+      ...(permission === undefined ? {} : { permission }),
+      ...(command === undefined ? {} : { command }),
+      ...(route === undefined ? {} : { route }),
+      ...(transaction === undefined ? {} : { transaction }),
+      ...(idempotency === undefined ? {} : { idempotency }),
+      ...(audit === undefined ? {} : { audit }),
     });
   }
   return { name, states, transitions, file: sourcePath(ctx.rootDir, input.getSourceFile().fileName), line: lineOf(input) };
@@ -950,19 +971,19 @@ function parseProvider(
       tokenKind: "class",
       kind: "class",
       useClass: className,
-      scope: resolveScope({ cls, tokenName: className }, ctx),
+      scope: resolveScope({ ...(cls ? { cls } : {}), tokenName: className }, ctx),
       deps,
-      optionalDeps: optionalDeps.length > 0 ? optionalDeps : undefined,
-      selfDeps: selfDeps.length > 0 ? selfDeps : undefined,
-      skipSelfDeps: skipSelfDeps.length > 0 ? skipSelfDeps : undefined,
-      hostDeps: hostDeps.length > 0 ? hostDeps : undefined,
-      functionalInjects: functionalInjects.length > 0 ? functionalInjects : undefined,
-      providedIn: injectable?.providedIn,
-      hasOnDestroy: cls ? hasDestroyHook(cls) || undefined : undefined,
+      ...(optionalDeps.length > 0 ? { optionalDeps } : {}),
+      ...(selfDeps.length > 0 ? { selfDeps } : {}),
+      ...(skipSelfDeps.length > 0 ? { skipSelfDeps } : {}),
+      ...(hostDeps.length > 0 ? { hostDeps } : {}),
+      ...(functionalInjects.length > 0 ? { functionalInjects } : {}),
+      ...(injectable?.providedIn ? { providedIn: injectable.providedIn } : {}),
+      ...(cls && hasDestroyHook(cls) ? { hasOnDestroy: true } : {}),
       exported: exportsSet.has(className),
       file,
       line,
-      importPath: cls ? modulePath(ctx.rootDir, cls.getSourceFile().fileName) : undefined,
+      ...(cls ? { importPath: modulePath(ctx.rootDir, cls.getSourceFile().fileName) } : {}),
     };
   }
 
@@ -1016,39 +1037,40 @@ function parseProvider(
       tokenKind,
       kind: "class",
       useClass,
-      scope: resolveScope({ explicit: explicitScope, cls, tokenName: token }, ctx),
+      scope: resolveScope({
+        ...(explicitScope ? { explicit: explicitScope } : {}), ...(cls ? { cls } : {}), tokenName: token,
+      }, ctx),
       deps,
-      optionalDeps: optionalDeps.length > 0 ? optionalDeps : undefined,
-      selfDeps: selfDeps.length > 0 ? selfDeps : undefined,
-      skipSelfDeps: skipSelfDeps.length > 0 ? skipSelfDeps : undefined,
-      hostDeps: hostDeps.length > 0 ? hostDeps : undefined,
-      functionalInjects: functionalInjects.length > 0 ? functionalInjects : undefined,
-      multi: multi ?? undefined,
-      providedIn: injectable?.providedIn,
-      hasOnDestroy: cls ? hasMethod(cls, "onDestroy") || undefined : undefined,
+      ...(optionalDeps.length > 0 ? { optionalDeps } : {}),
+      ...(selfDeps.length > 0 ? { selfDeps } : {}),
+      ...(skipSelfDeps.length > 0 ? { skipSelfDeps } : {}),
+      ...(hostDeps.length > 0 ? { hostDeps } : {}),
+      ...(functionalInjects.length > 0 ? { functionalInjects } : {}),
+      ...(multi === undefined ? {} : { multi }),
+      ...(injectable?.providedIn ? { providedIn: injectable.providedIn } : {}),
+      ...(cls && hasMethod(cls, "onDestroy") ? { hasOnDestroy: true } : {}),
       exported: exportsSet.has(token),
       file,
       line,
-      importPath: cls ? modulePath(ctx.rootDir, cls.getSourceFile().fileName) : undefined,
+      ...(cls ? { importPath: modulePath(ctx.rootDir, cls.getSourceFile().fileName) } : {}),
     };
   }
 
   if (useValueExpr) {
     validateProviderCompatibility(provideExpr, useValueExpr, "value", token, ctx, file, line);
+    const importPath = ts.isIdentifier(useValueExpr) ? importPathOf(useValueExpr, ctx) : undefined;
     return {
       token,
       tokenKind,
       kind: "value",
       useValueExpr: nodeText(useValueExpr),
-      scope: resolveScope({ explicit: explicitScope, tokenName: token }, ctx),
+      scope: resolveScope({ ...(explicitScope ? { explicit: explicitScope } : {}), tokenName: token }, ctx),
       deps: [],
-      multi: multi ?? undefined,
+      ...(multi === undefined ? {} : { multi }),
       exported: exportsSet.has(token),
       file,
       line,
-      importPath: ts.isIdentifier(useValueExpr)
-        ? importPathOf(useValueExpr, ctx)
-        : undefined,
+      ...(importPath === undefined ? {} : { importPath }),
     };
   }
 
@@ -1062,20 +1084,19 @@ function parseProvider(
         })()
       : nodeText(useFactoryExpr);
     validateProviderCompatibility(provideExpr, useFactoryExpr, "factory", token, ctx, file, line);
+    const importPath = ts.isIdentifier(useFactoryExpr) ? importPathOf(useFactoryExpr, ctx) : undefined;
     return {
       token,
       tokenKind,
       kind: "factory",
       useFactoryName: factoryName,
-      scope: resolveScope({ explicit: explicitScope, tokenName: token }, ctx),
+      scope: resolveScope({ ...(explicitScope ? { explicit: explicitScope } : {}), tokenName: token }, ctx),
       deps: explicitDeps,
-      multi: multi ?? undefined,
+      ...(multi === undefined ? {} : { multi }),
       exported: exportsSet.has(token),
       file,
       line,
-      importPath: ts.isIdentifier(useFactoryExpr)
-        ? importPathOf(useFactoryExpr, ctx)
-        : undefined,
+      ...(importPath === undefined ? {} : { importPath }),
     };
   }
 
@@ -1087,9 +1108,9 @@ function parseProvider(
       tokenKind,
       kind: "existing",
       useExisting: target,
-      scope: resolveScope({ explicit: explicitScope, tokenName: token }, ctx),
+      scope: resolveScope({ ...(explicitScope ? { explicit: explicitScope } : {}), tokenName: token }, ctx),
       deps: [target],
-      multi: multi ?? undefined,
+      ...(multi === undefined ? {} : { multi }),
       exported: exportsSet.has(token),
       file,
       line,
@@ -1165,6 +1186,7 @@ function parseFunctionalProvider(
     if (!tokenExpr || !valueExpr) return [];
     const { name: token, kind: tokenKind } = tokenNameOf(tokenExpr, ctx);
     validateProviderCompatibility(tokenExpr, valueExpr, "value", token, ctx, file, line);
+    const importPath = ts.isIdentifier(valueExpr) ? importPathOf(valueExpr, ctx) : undefined;
     return [{
       token,
       tokenKind,
@@ -1175,7 +1197,7 @@ function parseFunctionalProvider(
       exported: exportsSet.has(token),
       file,
       line,
-      importPath: ts.isIdentifier(valueExpr) ? importPathOf(valueExpr, ctx) : undefined,
+      ...(importPath === undefined ? {} : { importPath }),
     }];
   }
 
@@ -1183,6 +1205,7 @@ function parseFunctionalProvider(
     const initializer = args[0];
     if (!initializer) return [];
     const token = helper === "provideAppInitializer" ? "APP_INITIALIZER" : "ENVIRONMENT_INITIALIZER";
+    const importPath = ts.isIdentifier(initializer) ? importPathOf(initializer, ctx) : undefined;
     return [{
       token,
       tokenKind: "injection-token",
@@ -1194,7 +1217,7 @@ function parseFunctionalProvider(
       exported: false,
       file,
       line,
-      importPath: ts.isIdentifier(initializer) ? importPathOf(initializer, ctx) : undefined,
+      ...(importPath === undefined ? {} : { importPath }),
     }];
   }
 
@@ -1202,6 +1225,7 @@ function parseFunctionalProvider(
     const providers: ProviderNode[] = [];
     const routes = args[0];
     if (routes) {
+      const importPath = ts.isIdentifier(routes) ? importPathOf(routes, ctx) : undefined;
       providers.push({
         token: "ROUTE_CONFIG",
         tokenKind: "injection-token",
@@ -1212,7 +1236,7 @@ function parseFunctionalProvider(
         exported: false,
         file,
         line,
-        importPath: ts.isIdentifier(routes) ? importPathOf(routes, ctx) : undefined,
+        ...(importPath === undefined ? {} : { importPath }),
       });
     }
     for (const feature of args.slice(1)) {
@@ -1234,6 +1258,7 @@ function parseFunctionalProvider(
         const strategy = feature.arguments[0];
         const isClass = ts.isIdentifier(strategy) && Boolean(resolveDeclaration(strategy, ctx)
           .find((declaration) => ts.isClassDeclaration(declaration)));
+        const importPath = ts.isIdentifier(strategy) ? importPathOf(strategy, ctx) : undefined;
         providers.push({
           token: "TITLE_STRATEGY",
           tokenKind: "injection-token",
@@ -1244,7 +1269,7 @@ function parseFunctionalProvider(
           exported: false,
           file,
           line,
-          importPath: ts.isIdentifier(strategy) ? importPathOf(strategy, ctx) : undefined,
+          ...(importPath === undefined ? {} : { importPath }),
         });
       }
     }
@@ -1274,6 +1299,7 @@ function parseFunctionalProvider(
             ? [...interceptorArg.elements]
             : [interceptorArg];
           for (const value of values) {
+            const importPath = ts.isIdentifier(value) ? importPathOf(value, ctx) : undefined;
             providers.push({
               token: "HTTP_INTERCEPTORS",
               tokenKind: "injection-token",
@@ -1285,7 +1311,7 @@ function parseFunctionalProvider(
               exported: false,
               file,
               line,
-              importPath: ts.isIdentifier(value) ? importPathOf(value, ctx) : undefined,
+              ...(importPath === undefined ? {} : { importPath }),
             });
           }
         }
@@ -1463,7 +1489,7 @@ function parseController(
       const paramRegex = /:([a-zA-Z0-9_]+)/g;
       let match: RegExpExecArray | null;
       while ((match = paramRegex.exec(routePath)) !== null) {
-        pathParams.push(match[1]);
+        if (match[1] !== undefined) pathParams.push(match[1]);
       }
       if (pathParams.length > 0) route.pathParams = pathParams;
 
@@ -1492,7 +1518,7 @@ function parseController(
               name: pName,
               kind: "param",
               bindingName: parsed.name,
-              transform: parsed.transform,
+              ...(parsed.transform ? { transform: parsed.transform } : {}),
               default: parsed.default,
             };
           } else if (dName === "Query") {
@@ -1505,7 +1531,7 @@ function parseController(
               name: pName,
               kind: "query",
               bindingName: parsed.name,
-              transform: parsed.transform,
+              ...(parsed.transform ? { transform: parsed.transform } : {}),
               default: parsed.default,
             };
           } else if (dName === "Body") {
@@ -1514,7 +1540,9 @@ function parseController(
             paramNode = { name: pName, kind: "body" };
           } else if (dName === "Headers") {
             hasBindingDecorator = true;
-            paramNode = { name: pName, kind: "headers" };
+            const argument = dArgs[0];
+            const bindingName = argument !== undefined && ts.isStringLiteral(argument) ? argument.text : undefined;
+            paramNode = { name: pName, kind: "headers", ...(bindingName === undefined ? {} : { bindingName }) };
           }
         }
         // Automatic route parameter binding (Angular withComponentInputBinding pattern):
@@ -1535,7 +1563,7 @@ function parseController(
             name: pName,
             kind: "param",
             bindingName: pName,
-            transform: inferredTransform,
+            ...(inferredTransform ? { transform: inferredTransform } : {}),
           };
         } else if (!hasBindingDecorator) {
           if (pName === "req" || pName === "ctx" || pName === "context") {
@@ -1710,17 +1738,17 @@ function parseController(
     path,
     scope: injectable?.scope ?? "request",
     deps,
-    hasOnDestroy: hasDestroyHook(decl) || undefined,
-    optionalDeps: optionalDeps.length > 0 ? optionalDeps : undefined,
-    selfDeps: selfDeps.length > 0 ? selfDeps : undefined,
-    skipSelfDeps: skipSelfDeps.length > 0 ? skipSelfDeps : undefined,
-    hostDeps: hostDeps.length > 0 ? hostDeps : undefined,
-    functionalInjects: functionalInjects.length > 0 ? functionalInjects : undefined,
-    standalone: standalone || undefined,
+    ...(hasDestroyHook(decl) ? { hasOnDestroy: true } : {}),
+    ...(optionalDeps.length > 0 ? { optionalDeps } : {}),
+    ...(selfDeps.length > 0 ? { selfDeps } : {}),
+    ...(skipSelfDeps.length > 0 ? { skipSelfDeps } : {}),
+    ...(hostDeps.length > 0 ? { hostDeps } : {}),
+    ...(functionalInjects.length > 0 ? { functionalInjects } : {}),
+    ...(standalone ? { standalone: true } : {}),
     routes,
     file,
     importPath: modulePath(ctx.rootDir, decl.getSourceFile().fileName),
-    schemaImports: Object.keys(schemaImports).length > 0 ? schemaImports : undefined,
+    ...(Object.keys(schemaImports).length > 0 ? { schemaImports } : {}),
   };
 }
 
@@ -1816,25 +1844,16 @@ function classDeps(
           if (options.skipSelf && !skipSelfDeps.includes(tokenName)) skipSelfDeps.push(tokenName);
           if (options.host && !hostDeps.includes(tokenName)) hostDeps.push(tokenName);
           if (!functionalInjects.some((entry) => entry.token === tokenName)) {
+            const declaration = ts.isIdentifier(unwrappedToken) ? resolveDeclaration(unwrappedToken, ctx)[0] : undefined;
+            const localFile = declaration && isProjectSourcePath(declaration.getSourceFile().fileName, ctx.rootDir)
+              ? declaration.getSourceFile().fileName : undefined;
+            const importModule = declaration && !localFile && ts.isIdentifier(unwrappedToken)
+              ? importModuleOf(unwrappedToken, ctx) : undefined;
             functionalInjects.push({
               token: tokenName,
               expression: nodeText(unwrappedToken),
-              importPath: ts.isIdentifier(unwrappedToken)
-                ? (() => {
-                    const declaration = resolveDeclaration(unwrappedToken, ctx)[0];
-                    return declaration && isProjectSourcePath(declaration.getSourceFile().fileName, ctx.rootDir)
-                      ? modulePath(ctx.rootDir, declaration.getSourceFile().fileName)
-                      : undefined;
-                  })()
-                : undefined,
-              importModule: ts.isIdentifier(unwrappedToken)
-                ? (() => {
-                    const declaration = resolveDeclaration(unwrappedToken, ctx)[0];
-                    return declaration && !isProjectSourcePath(declaration.getSourceFile().fileName, ctx.rootDir)
-                      ? importModuleOf(unwrappedToken, ctx)
-                      : undefined;
-                  })()
-                : undefined,
+              ...(localFile ? { importPath: modulePath(ctx.rootDir, localFile) } : {}),
+              ...(importModule === undefined ? {} : { importModule }),
               ...options,
             });
           }
@@ -1872,11 +1891,9 @@ function parseInjectableOptions(
   const providedIn = stringLiteralProp(obj, "providedIn");
   const depsExpr = getProp(obj, "deps");
   return {
-    scope: scope && isScope(scope) ? scope : undefined,
-    providedIn: providedIn === "root" ? "root" : undefined,
-    deps: depsExpr
-      ? arrayProp(obj, "deps").map((el) => (ctx ? tokenNameOf(el, ctx).name : nodeText(el)))
-      : undefined,
+    ...(scope && isScope(scope) ? { scope } : {}),
+    ...(providedIn === "root" ? { providedIn } : {}),
+    ...(depsExpr ? { deps: arrayProp(obj, "deps").map((el) => (ctx ? tokenNameOf(el, ctx).name : nodeText(el))) } : {}),
   };
 }
 
@@ -2065,8 +2082,8 @@ function toCompilerDiagnostic(diagnostic: ts.Diagnostic, rootDir: string): Diagn
     code: `typescript-${diagnostic.code}`,
     errorCode: `TS${diagnostic.code}`,
     message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
-    file: file ? sourcePath(rootDir, file.fileName) : undefined,
-    line: position ? position.line + 1 : undefined,
+    ...(file ? { file: sourcePath(rootDir, file.fileName) } : {}),
+    ...(position ? { line: position.line + 1 } : {}),
   };
 }
 
@@ -2145,12 +2162,13 @@ function parseAspectRefs(
     if (!name) continue;
     const declaredFile = declaration.getSourceFile().fileName;
     const projectLocal = isProjectSourcePath(declaredFile, ctx.rootDir);
+    const importModule = projectLocal ? undefined : importModuleOf(element, ctx);
     refs.push({
       ...(projectLocal ? { file: sourcePath(ctx.rootDir, declaredFile) } : {}),
       name,
       expression: element.text,
-      importPath: projectLocal ? modulePath(ctx.rootDir, declaredFile) : undefined,
-      importModule: projectLocal ? undefined : importModuleOf(element, ctx),
+      ...(projectLocal ? { importPath: modulePath(ctx.rootDir, declaredFile) } : {}),
+      ...(importModule === undefined ? {} : { importModule }),
     });
   }
   return refs;
@@ -2215,7 +2233,7 @@ function parseBindingOptions(args: readonly Expression[], defaultName: string): 
     }
   }
 
-  return { name, transform, default: defaultValue };
+  return { name, ...(transform ? { transform } : {}), default: defaultValue };
 }
 
 function parseLiteralValue(node: AstNode): unknown {
@@ -2263,5 +2281,8 @@ function warn(
   file?: string,
   line?: number,
 ): void {
-  ctx.diagnostics.push({ severity: "warn", code, message, file, line });
+  ctx.diagnostics.push({
+    severity: "warn", code, message,
+    ...(file === undefined ? {} : { file }), ...(line === undefined ? {} : { line }),
+  });
 }

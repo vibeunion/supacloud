@@ -11,10 +11,21 @@ export default defineConfig({
 		external: ['bun', 'bun:sql', 'monaco-editor']
 	},
 	optimizeDeps: {
+		include: [
+			'@tanstack/svelte-query',
+			'clsx',
+			'tailwind-merge',
+			'marked',
+			'svelte-i18n',
+			'mode-watcher',
+			'next-themes'
+		],
 		// @svadmin/core publishes Svelte TypeScript source code; bypass pre-bundling and pass to Svelte compiler.
 		exclude: ['bun', 'bun:sql', 'monaco-editor', '@svadmin/core']
 	},
 	build: {
+		target: 'esnext',
+		cssMinify: 'esbuild',
 		rollupOptions: {
 			external: ['bun', 'bun:sql', 'monaco-editor']
 		}

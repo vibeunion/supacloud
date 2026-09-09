@@ -51,12 +51,13 @@ export function createIncrementalCompiler(): IncrementalCompiler {
         ? diffFiles(previousSnapshot.files, snapshot.files)
         : diffFiles(previousSnapshot?.files, snapshot.files);
       const activeCache = options.cache ?? cache;
+      // Type gates may depend on enclosing configs and imports outside the watched root.
       const cacheHit = Boolean(
         previousSnapshot
         && previousSnapshot.optionsKey === snapshot.optionsKey
         && previousCache === activeCache
         && changedFiles.length === 0,
-      );
+      ) && !(options.typeSafety?.scanProductionSource ?? options.strict ?? false);
 
       if (cacheHit && previousResult) {
         return {
@@ -106,7 +107,7 @@ export function createIncrementalCompiler(): IncrementalCompiler {
       cache.modules.clear();
       cache.fileHashes.clear();
       cache.generatedHashes?.clear();
-      cache.dependencyGraph = undefined;
+      delete cache.dependencyGraph;
       cache.programSession?.reset();
     },
     getCache(): DependencyGraphCache {
@@ -115,24 +116,33 @@ export function createIncrementalCompiler(): IncrementalCompiler {
   };
 }
 
+async function readSourceBytes(path: string): Promise<Uint8Array | Buffer> {
+  if (typeof Bun !== "undefined" && typeof Bun.file === "function") {
+    return Bun.file(path).bytes();
+  }
+  return readFile(path);
+}
+
 async function updateSnapshot(previous: Snapshot, options: CompileOptions, changedPaths: string[]): Promise<Snapshot> {
   const rootDir = resolve(options.rootDir);
   const outDir = resolve(options.outDir);
   const files = { ...previous.files };
-  for (const changedPath of changedPaths) {
-    const absolutePath = isAbsolute(changedPath) ? resolve(changedPath) : resolve(rootDir, changedPath);
-    const relativeChangedPath = relative(rootDir, absolutePath);
-    if (relativeChangedPath === ".." || relativeChangedPath.startsWith(`..${sep}`)) continue;
-    if (absolutePath === outDir || absolutePath.startsWith(`${outDir}/`)) continue;
-    const relativePath = relative(rootDir, absolutePath).split(sep).join("/");
-    try {
-      await access(absolutePath);
-      const content = await readFile(absolutePath);
-      files[relativePath] = createHash("sha256").update(content).digest("hex");
-    } catch {
-      delete files[relativePath];
-    }
-  }
+  await Promise.all(
+    changedPaths.map(async (changedPath) => {
+      const absolutePath = isAbsolute(changedPath) ? resolve(changedPath) : resolve(rootDir, changedPath);
+      const relativeChangedPath = relative(rootDir, absolutePath);
+      if (relativeChangedPath === ".." || relativeChangedPath.startsWith(`..${sep}`)) return;
+      if (absolutePath === outDir || absolutePath.startsWith(`${outDir}/`)) return;
+      const relativePath = relative(rootDir, absolutePath).split(sep).join("/");
+      try {
+        await access(absolutePath);
+        const content = await readSourceBytes(absolutePath);
+        files[relativePath] = createHash("sha256").update(content).digest("hex");
+      } catch {
+        delete files[relativePath];
+      }
+    }),
+  );
   return { files, optionsKey: optionsKeyOf(options) };
 }
 
@@ -141,14 +151,19 @@ async function createSnapshot(options: CompileOptions): Promise<Snapshot> {
   const outDir = resolve(options.outDir);
   const paths = await listSourceFiles(rootDir, outDir);
   const files: Record<string, string> = {};
-  for (const path of paths) {
-    const content = await readFile(path);
-    files[relative(rootDir, path).split(sep).join("/")] = createHash("sha256").update(content).digest("hex");
-  }
+  const entries = await Promise.all(
+    paths.map(async (path) => {
+      const content = await readSourceBytes(path);
+      const key = relative(rootDir, path).split(sep).join("/");
+      return [key, createHash("sha256").update(content).digest("hex")] as const;
+    }),
+  );
+  for (const [key, hash] of entries) files[key] = hash;
   for (const path of graphqlInputPaths(options)) {
     const key = relative(rootDir, path).split(sep).join("/");
     try {
-      files[key] = createHash("sha256").update(await readFile(path)).digest("hex");
+      const content = await readSourceBytes(path);
+      files[key] = createHash("sha256").update(content).digest("hex");
     } catch {
       files[key] = "missing";
     }
@@ -282,8 +297,9 @@ export class ModuleDependencyGraph {
 
     const affected = new Set(directlyAffected);
     const queue = Array.from(directlyAffected);
-    while (queue.length > 0) {
-      const current = queue.shift();
+    let head = 0;
+    while (head < queue.length) {
+      const current = queue[head++];
       if (!current) continue;
       const dependents = this.dependents.get(current);
       if (dependents) {

@@ -14,6 +14,11 @@ on:
       - "packages/cli/**"
       - "packages/supacloud/**"
       - "packages/function-adapter/**"
+      - "packages/app/**"
+      - "packages/compiler/**"
+      - "packages/elysia/**"
+      - "packages/db/**"
+      - "packages/testing/**"
       - "docker/**"
       - "scripts/**"
       - "infrastructure/realtime/**"
@@ -45,7 +50,8 @@ concurrency:
 env:
   NODE_VERSION: "24.x"
   BUN_VERSION: "1.4.0"
-  XCADDY_VERSION: "v0.4.5"
+  GO_VERSION: "1.27.1"
+  XCADDY_VERSION: "v0.4.7"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   # noqa: hardcoded-jwt — these are the Supabase public demo keys used for local/CI testing only
   # Source: https://supabase.com/docs/guides/self-hosting/docker#generate-api-keys
@@ -933,7 +939,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version: stable
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Install edge-runtime dependencies
         working-directory: packages/edge-runtime
@@ -1020,7 +1026,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version: stable
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Show runtime versions
         run: |
