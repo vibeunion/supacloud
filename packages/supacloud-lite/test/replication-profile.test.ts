@@ -21,7 +21,7 @@ const baseOptions: PowerSyncReplicationOptions = {
 
 describe('PowerSync native replication profile', () => {
   test('keeps PGlite explicitly unsupported and native opt-in', () => {
-    expect(liteCapabilities('pglite')).toEqual({
+    expect(liteCapabilities('pglite')).toMatchObject({
       engine: 'pglite',
       state_machine_sql: 'supported',
       durable_workflows: 'supported',

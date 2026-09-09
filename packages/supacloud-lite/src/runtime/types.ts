@@ -20,6 +20,10 @@ export interface MigrationFile {
  * the project's migrations/functions/seed.
  */
 export interface BackendConfig {
+  runtimeMode?: import('./functions/profile.js').RuntimeMode
+  graphql?: import('./graphql.js').GraphqlOptions
+  /** Trusted application verifier. External mode disables local login and local user tokens. */
+  externalIdentity?: import('./identity.js').ExternalIdentityVerifier
   /**
    * PGlite data directory. Node: a filesystem path. Browser: "idb://name" or
    * "opfs-ahp://name". Omit for in-memory. Ignored when `engine` is set.

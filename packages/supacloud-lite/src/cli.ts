@@ -9,9 +9,14 @@ import { checkDatabaseModules, formatDatabaseModuleCheck } from './runtime/node/
 import { assertDataDirUnlocked } from './runtime/db/data-dir-lock.js'
 import { createNativeEngine } from './runtime/node/native/engine.js'
 import { inspectPowerSyncReadiness, liteCapabilities } from './runtime/node/native/readiness.js'
+import { createPgliteEngine } from './runtime/db/pglite-engine.js'
+import { inspectGraphql } from './runtime/graphql.js'
+import { loadProjectConfig } from './runtime/node/load-config.js'
+import { runtimeMode } from './runtime/functions/profile.js'
 import { loadSupabaseProject } from './runtime/node/project.js'
 import {
   createProjectBackend,
+  loadProjectBindings,
   assertResetPathsSafe,
   ensureProjectSecrets,
   mintProjectKeys,
@@ -70,6 +75,9 @@ function parseArgs(argv: string[]): CliOptions {
     else if (argument === '--storage-backend') options.storageBackend = next() as ProjectRuntimeOptions['storageBackend']
     else if (argument === '--s3-prefix') options.s3 = { ...options.s3, prefix: next() }
     else if (argument === '--engine') options.engine = next() as ProjectRuntimeOptions['engine']
+    else if (argument === '--runtime-mode') options.runtimeMode = runtimeMode(next())
+    else if (argument === '--postgres-dir') options.postgresDir = resolve(next())
+    else if (argument === '--identity-module') options.identityModule = resolve(next())
     else if (argument === '--replication-profile') {
       options.replicationProfile = next() as ProjectRuntimeOptions['replicationProfile']
     }
@@ -142,6 +150,8 @@ async function main(): Promise<void> {
       applyMigrations: false,
       includeFunctions: false,
       includeWebhooks: false,
+      includeIdentity: false,
+      graphql: { enabled: false },
       startRuntimeServices: false,
       log: quietLog,
     })
@@ -164,6 +174,8 @@ async function main(): Promise<void> {
       applyMigrations: false,
       includeFunctions: false,
       includeWebhooks: false,
+      includeIdentity: false,
+      graphql: { enabled: false },
       startRuntimeServices: false,
       log: quietLog,
     })
@@ -176,21 +188,31 @@ async function main(): Promise<void> {
   }
 
   if (options.command === 'doctor') {
+    const config = loadProjectConfig(paths.projectDir, process.env, options.runtimeMode)
     const replication = resolveNativeReplicationOptions(options, paths.databaseEngine)
     const report = liteCapabilities(paths.databaseEngine, replication?.profile)
-    if (paths.databaseEngine === 'native' && replication) {
-      if (!paths.dataDir || !existsSync(join(paths.dataDir, 'PG_VERSION'))) {
-        throw new Error('PowerSync readiness requires an initialized native database; run migrate first')
-      }
-      const engine = await createNativeEngine({ dataDir: paths.dataDir, log: quietLog, replication })
+    report.runtime_mode = config.lite.runtimeMode
+    if (options.identityModule ?? config.lite.identityModule) {
+      report.identity = { mode: 'external', verification: 'unverified' }
+    }
+    if (paths.dataDir && existsSync(join(paths.dataDir, 'PG_VERSION'))) {
+      const engine = paths.databaseEngine === 'native'
+        ? await createNativeEngine({ dataDir: paths.dataDir, installDir: options.postgresDir, log: quietLog, replication })
+        : await createPgliteEngine(paths.dataDir)
       try {
-        report.powersync_readiness = await inspectPowerSyncReadiness(engine, replication)
+        report.graphql = await inspectGraphql(engine)
+        if (replication) report.powersync_readiness = await inspectPowerSyncReadiness(engine, replication)
       } finally {
         await engine.close()
       }
+    } else if (replication) {
+      throw new Error('PowerSync readiness requires an initialized native database; run migrate first')
     }
+    if (config.lite.graphql.enabled === false) report.graphql = { status: 'disabled', extension: 'pg_graphql' }
     if (options.json) await writeStandardOutput(`${JSON.stringify(report, null, 2)}\n`)
     else await printDoctor(report)
+    if (config.lite.graphql.enabled === true && report.graphql.status !== 'supported') process.exitCode = 1
+    if (report.powersync_readiness?.ready === false) process.exitCode = 1
     return
   }
 
@@ -201,11 +223,20 @@ async function main(): Promise<void> {
       includeFunctions: false,
       includeWebhooks: false,
       includeSeed: options.command === 'migrate',
+      includeIdentity: false,
+      graphql: { enabled: false },
       startRuntimeServices: false,
       log: quietLog,
     })
     try {
       const applied = await project.backend.db.listAppliedMigrations()
+      if (options.json) {
+        await writeStandardOutput(`${JSON.stringify({
+          schema: 'supacloud.lite-migrations.v1', command: options.command,
+          applied, binding_attestation: project.bindingAttestation ?? null,
+        }, null, 2)}\n`)
+        return
+      }
       const output = options.command === 'migrate'
         ? `${applied.length} migration(s) applied.`
         : applied.length === 0
@@ -256,6 +287,8 @@ async function runDbCommand(options: CliOptions): Promise<void> {
       ...options,
       includeFunctions: false,
       includeWebhooks: false,
+      includeIdentity: false,
+      graphql: { enabled: false },
       startRuntimeServices: false,
       log: quietLog,
     })
@@ -268,11 +301,17 @@ async function runDbCommand(options: CliOptions): Promise<void> {
     return
   }
 
-  const project = await loadSupabaseProject(resolve(options.projectDir ?? process.cwd()))
+  const projectDir = resolve(options.projectDir ?? process.cwd())
+  const config = loadProjectConfig(projectDir, process.env, options.runtimeMode)
+  const project = await loadSupabaseProject(projectDir, {
+    enabled: false,
+    bindings: options.migrationBindings ?? await loadProjectBindings(projectDir, config),
+  })
   if (subcommand === 'diff') {
     const liveEngine = paths.databaseEngine === 'native'
       ? await createNativeEngine({
           dataDir: paths.dataDir!,
+          installDir: options.postgresDir,
           log: quietLog,
           replication: resolveNativeReplicationOptions(options, paths.databaseEngine),
         })
@@ -281,7 +320,8 @@ async function runDbCommand(options: CliOptions): Promise<void> {
       liveDataDir: paths.databaseEngine === 'pglite' ? paths.dataDir : undefined,
       liveEngine,
       migrations: project.migrations,
-      makeShadowEngine: paths.databaseEngine === 'native' ? createTemporaryNativeEngine : undefined,
+      makeShadowEngine: paths.databaseEngine === 'native' ? () => createTemporaryNativeEngine(options.postgresDir) : undefined,
+      runtimeMode: config.lite.runtimeMode,
     })
     if (ddl.length === 0) {
       await writeStandardError('No schema changes found.\n')
@@ -302,6 +342,7 @@ async function runDbCommand(options: CliOptions): Promise<void> {
     const liveEngine = paths.databaseEngine === 'native'
       ? await createNativeEngine({
           dataDir: paths.dataDir!,
+          installDir: options.postgresDir,
           log: quietLog,
           replication: resolveNativeReplicationOptions(options, paths.databaseEngine),
         })
@@ -310,7 +351,8 @@ async function runDbCommand(options: CliOptions): Promise<void> {
       liveDataDir: paths.databaseEngine === 'pglite' ? paths.dataDir : undefined,
       liveEngine,
       migrations: project.migrations,
-      makeShadowEngine: paths.databaseEngine === 'native' ? createTemporaryNativeEngine : undefined,
+      makeShadowEngine: paths.databaseEngine === 'native' ? () => createTemporaryNativeEngine(options.postgresDir) : undefined,
+      runtimeMode: config.lite.runtimeMode,
       migrationsDir: join(paths.projectDir, 'supabase', 'migrations'),
       name: options.positionals[1] ?? 'remote_schema',
     })
@@ -326,6 +368,8 @@ async function runDbCommand(options: CliOptions): Promise<void> {
       applyMigrations: false,
       includeFunctions: false,
       includeWebhooks: false,
+      includeIdentity: false,
+      graphql: { enabled: false },
       startRuntimeServices: false,
       log: quietLog,
     })
@@ -366,7 +410,7 @@ async function runSnapshotCommand(options: CliOptions): Promise<void> {
   if (subcommand === 'restore') {
     const input = options.positionals[1]
     if (!input) throw new Error('snapshot restore requires a snapshot file')
-    const result = await restoreSnapshot({ paths, storageBackend, input, force: options.force })
+    const result = await restoreSnapshot({ paths, storageBackend, input, force: options.force, postgresDir: options.postgresDir })
     const rollbackLines = result.rollbackPaths.map((rollbackPath) => `Previous state retained at ${rollbackPath}`)
     const reconnectLine = result.manifest.storageBackend === 's3'
       ? ['Reconnect the original S3 bucket/prefix before starting Lite.']
@@ -398,6 +442,8 @@ async function runUpgradeCommand(options: CliOptions): Promise<void> {
       includeFunctions: false,
       includeWebhooks: false,
       includeSeed: true,
+      includeIdentity: false,
+      graphql: { enabled: false },
       startRuntimeServices: false,
       log: quietLog,
     })
@@ -434,6 +480,9 @@ async function printDoctor(report: ReturnType<typeof liteCapabilities>): Promise
   const output = Object.entries(report)
     .filter(([, value]) => typeof value !== 'object')
     .map(([name, value]) => `${name}: ${value}`)
+  output.push(`graphql: ${report.graphql.status} (${report.graphql.version ?? report.graphql.reason ?? 'pg_graphql'})`)
+  output.push(`identity: ${report.identity.mode} (${report.identity.verification})`)
+  output.push(`migration_formats: ${report.migrations.formats.join(', ')}`)
   if (report.powersync_readiness) {
     output.push(`powersync_ready: ${report.powersync_readiness.ready}`)
     for (const blocker of report.powersync_readiness.blockers) output.push(`blocker: ${blocker}`)
@@ -505,7 +554,10 @@ Options:
       --replication-tls-cert <p> PostgreSQL TLS certificate
       --replication-tls-key <p> PostgreSQL TLS private key
       --memory            use an in-memory PGlite database
-      --json              emit machine-readable doctor output
+      --json              emit machine-readable doctor/migrate/status output
+      --runtime-mode      development (default) or strict
+      --postgres-dir      operator-managed PostgreSQL installation (native only)
+      --identity-module   trusted external identity bridge module
   -o, --output <p>        output file for gen types
   -f, --file <name>       migration suffix for db diff
       --module-file <p>   database module manifest for db check (default supabase/db/modules.ts)
@@ -532,4 +584,4 @@ try {
   await writeStandardError(`${error instanceof Error ? error.message : String(error)}\n`)
   exitCode = 1
 }
-process.exit(exitCode)
+process.exit(exitCode || Number(process.exitCode ?? 0))

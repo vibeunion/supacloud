@@ -39,6 +39,8 @@
     "start": "bun run src/cli.ts start",
     "test": "bun test --timeout 20000",
     "test:native": "SUPACLOUD_LITE_TEST_NATIVE=1 bun test test/native-engine.test.ts test/qauth-workflow-matrix.test.ts test/maker-checker-workflow.test.ts test/commands-artifacts.test.ts --timeout 180000",
+    "test:graphql": "SUPACLOUD_LITE_TEST_GRAPHQL=1 bun test test/graphql-native.test.ts --timeout 180000",
+    "benchmark": "bun run scripts/benchmark.ts",
     "parity": "bun run parity/harness.ts",
     "parity:native": "SUPACLOUD_LITE_TEST_NATIVE=1 bun run parity/harness.ts --engine native",
     "check:native": "bun run test:native && bun run parity:native",
@@ -50,13 +52,17 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.8",
-    "@supacloud/db": "^0.2.0",
+    "@supacloud/db": "^0.6.0",
     "tar": "^7.5.22"
   },
   "devDependencies": {
+    "@supacloud/app": "^0.11.0",
+    "@supacloud/compiler": "^0.13.1",
+    "@supacloud/elysia": "^0.10.0",
     "@supabase/supabase-js": "^2.115.0",
     "@types/bun": "^1.4.0",
     "elysia": "^1.4.30",
+    "jose": "^6.2.11",
     "typescript": "^7.0.2"
   },
   "engines": {

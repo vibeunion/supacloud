@@ -27,6 +27,14 @@ const POSTGRES_MIRROR_URL_ERROR =
   'SUPACLOUD_LITE_POSTGRES_MIRROR must be an absolute HTTPS URL or a loopback HTTP URL'
 export const NATIVE_POSTGRES_MAJOR = DEFAULT_PG_VERSION.split('.')[0]!
 
+export function nativePostgresMajor(installDir = process.env.SUPACLOUD_LITE_POSTGRES_DIR): string {
+  if (!installDir) return NATIVE_POSTGRES_MAJOR
+  const version = execFileSync(join(installDir, 'bin', 'postgres'), ['--version'], { encoding: 'utf8', timeout: 10_000 })
+    .match(/PostgreSQL\)\s+(\d+)/)?.[1]
+  if (!version) throw new Error('unable to identify the PostgreSQL installation major version')
+  return version
+}
+
 const GLIBC_DYNAMIC_LOADERS = {
   x64: [
     '/lib64/ld-linux-x86-64.so.2',
@@ -47,6 +55,8 @@ export interface GlibcRuntimeEvidence {
 
 /** Options for {@link createNativeEngine}. */
 export interface NativeEngineOptions {
+  /** Operator-managed PostgreSQL installation containing bin/postgres and bin/initdb. */
+  installDir?: string
   /** Postgres data directory (created + initdb'd if missing). */
   dataDir: string
   /** Postgres version tag from theseus-rs/postgresql-binaries. */
@@ -237,7 +247,7 @@ async function fetchRelease(url: string): Promise<Response> {
   let lastError: unknown
   for (let attempt: number = 1; attempt <= 3; attempt++) {
     try {
-      const response = await fetch(url)
+      const response = await fetch(url, { signal: AbortSignal.timeout(30_000) })
       if (response.ok || response.status < 500) return response
       lastError = new Error(`failed to download ${url}: HTTP ${response.status}`)
     } catch (error) {
@@ -271,8 +281,17 @@ export async function createNativeEngine(opts: NativeEngineOptions): Promise<DbE
   let postgres: ChildProcess | undefined
   let removeExitHandler: (() => void) | undefined
   try {
-    const installDir = await ensurePostgres(opts.version, opts.cacheDir, opts.log, opts.downloadMirror)
+    const installDir = opts.installDir ?? process.env.SUPACLOUD_LITE_POSTGRES_DIR ??
+      await ensurePostgres(opts.version, opts.cacheDir, opts.log, opts.downloadMirror)
     const bin = (name: string) => join(installDir, 'bin', name)
+    if (!existsSync(bin('postgres')) || !existsSync(bin('initdb'))) {
+      throw new Error('PostgreSQL installation requires bin/postgres and bin/initdb')
+    }
+    const serverVersion = nativePostgresMajor(installDir)
+    const storedMajor = existsSync(join(opts.dataDir, 'PG_VERSION')) ? readFileSync(join(opts.dataDir, 'PG_VERSION'), 'utf8').trim() : undefined
+    if (!serverVersion || (storedMajor && storedMajor !== serverVersion)) {
+      throw new Error('PostgreSQL installation major version does not match the data directory; use a logical migration')
+    }
 
     if (!existsSync(join(opts.dataDir, 'PG_VERSION'))) {
       mkdirSync(opts.dataDir, { recursive: true })

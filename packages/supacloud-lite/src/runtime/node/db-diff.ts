@@ -15,6 +15,7 @@ import type { MigrationFile } from '../types.js'
 
 /** Inputs for {@link computeDbDiff}: how to reach the live db plus the migrations that define the shadow. */
 export interface DbDiffOptions {
+  runtimeMode?: import('../functions/profile.js').RuntimeMode
   /** the live project's data dir (wasm) or undefined when a native engine is passed */
   liveDataDir?: string
   /** an already-open live engine; takes precedence over `liveDataDir` when set */
@@ -40,6 +41,7 @@ export async function computeDbDiff(opts: DbDiffOptions): Promise<string[]> {
   try {
     // shadow = migrations only, fresh
     shadow = await createBackend({
+      runtimeMode: opts.runtimeMode,
       engine: opts.makeShadowEngine ? await opts.makeShadowEngine() : undefined,
       migrations: opts.migrations,
       startRuntimeServices: false,
@@ -50,6 +52,7 @@ export async function computeDbDiff(opts: DbDiffOptions): Promise<string[]> {
     const liveEngine = unclaimedLiveEngine
     unclaimedLiveEngine = undefined
     live = await createBackend({
+      runtimeMode: opts.runtimeMode,
       engine: liveEngine,
       dataDir: liveEngine ? undefined : opts.liveDataDir,
       migrations: opts.migrations,
@@ -75,11 +78,11 @@ export function shadowNativeDataDir(): string {
   return join(mkdtempSync(join(tmpdir(), 'supacloud-lite-shadow-')), 'pg')
 }
 
-export async function createTemporaryNativeEngine(): Promise<import('../db/engine.js').DbEngine> {
+export async function createTemporaryNativeEngine(installDir?: string): Promise<import('../db/engine.js').DbEngine> {
   const dataDir = shadowNativeDataDir()
   let engine: import('../db/engine.js').DbEngine
   try {
-    engine = await createNativeEngine({ dataDir })
+    engine = await createNativeEngine({ dataDir, installDir })
   } catch (error) {
     try {
       await rm(dirname(dataDir), { recursive: true, force: true })
@@ -135,6 +138,7 @@ export async function pullSchema(opts: DbPullOptions): Promise<DbPullResult> {
   let operationFailed: boolean = false
   try {
     shadow = await createBackend({
+      runtimeMode: opts.runtimeMode,
       engine: opts.makeShadowEngine ? await opts.makeShadowEngine() : undefined,
       migrations: opts.migrations,
       startRuntimeServices: false,
@@ -142,6 +146,7 @@ export async function pullSchema(opts: DbPullOptions): Promise<DbPullResult> {
     const liveEngine = unclaimedLiveEngine
     unclaimedLiveEngine = undefined
     live = await createBackend({
+      runtimeMode: opts.runtimeMode,
       engine: liveEngine,
       dataDir: liveEngine ? undefined : opts.liveDataDir,
       migrations: opts.migrations,

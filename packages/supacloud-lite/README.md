@@ -12,8 +12,8 @@ V1 的目标不是复刻完整 Supabase 平台控制面，而是让现有应用�
 
 ### 状态
 
-- 运行时：npm 包需要 Bun 1.3+；单二进制发行版已内嵌 Bun 和 PGlite 资源
-- 数据库：PGlite 0.5.4
+- 运行时：npm 包需要 Bun 1.4+；单二进制发行版已内嵌 Bun 和 PGlite 资源
+- 数据库：PGlite 0.5.8，或 native PostgreSQL
 - 项目模型：单进程、单项目，内部 project ref 固定为 `local`
 - 客户端：直接使用官方 `@supabase/supabase-js`
 - 数据目录：`.supacloud-lite/db`
@@ -141,6 +141,16 @@ enabled = false
 在 loopback 地址启动时，Lite 会启用兼容 `signInWithOtp({ phone })` / `verifyOtp({ type: 'sms' })` 的本地短信收件箱，可在 `/sms-inbox` 查看验证码。短信收件箱与邮件收件箱独立、内存有界，绑定到非 loopback 地址时绝不会挂载。网络暴露的嵌入式用法必须显式注入 `BackendConfig.smsSender`；Lite 没有会把验证码写入控制台的生产 fallback。
 
 手机号必须是 E.164 格式。短信验证码在数据库中保存为域分离的 keyed-HMAC，单次兑换、最多五次错误、按可信连接 IP/手机号指纹限流，并默认对同一手机号执行 60 秒持久化发送冷却。自定义 sender 的异常只返回净化错误，不记录手机号、验证码、短信正文或供应商响应。
+
+### 新版应用兼容
+
+Lite 支持平铺 SQL 与 `时间戳目录/migration.sql`，执行前检查重复版本和已应用 SQL 的内容漂移；目标绑定复用 `@supacloud/db`，`migrate --json` 可输出不含参数值的校验记录。`--runtime-mode strict` 对齐函数默认限制并拒绝无效配置、缺失函数和未声明的后台任务。
+
+`/graphql/v1` 使用真正的 `pg_graphql` 扩展和调用者的数据库角色/RLS，不模拟扩展。默认 PGlite 和标准 native 下载包均不包含该扩展；native 可通过 `--postgres-dir` 选择已经安装匹配扩展的 PostgreSQL。配置 `[lite.graphql] enabled = true` 会在运行时启动前验证扩展，`doctor --json` 区分已支持、缺失与尚未验证。
+
+外部 SupAuth 可通过 `createSupAuthLiteIdentity` 复用 `@supacloud/elysia` 的验证和业务侧本地用户映射；本地 Auth 仍是默认模式。外部模式不会把本地令牌降级当成 SupAuth，也不会根据请求头授予权限。
+
+完整配置、边界和回归方法见仓库文档 `docs/lite-runtime-compatibility.md`。性能基线可在源码目录运行 `bun run benchmark`，native 模式加 `--native`。
 
 ### CLI
 
@@ -463,8 +473,8 @@ The goal of V1 is not to replicate the full Supabase platform control plane, but
 
 ### Status
 
-- Runtime: the npm package requires Bun 1.3+; the single-binary release embeds Bun and PGlite assets
-- Database: PGlite 0.5.4
+- Runtime: the npm package requires Bun 1.4+; the single-binary release embeds Bun and PGlite assets
+- Database: PGlite 0.5.8, or native PostgreSQL
 - Project model: single process, single project, with an internal project ref fixed as `local`
 - Client: uses the official `@supabase/supabase-js` directly
 - Data directory: `.supacloud-lite/db`
@@ -700,6 +710,25 @@ When using custom `--state-dir`, `--data-dir`, or `--storage-dir`, the same argu
 Snapshots in S3 mode only contain the Storage metadata and secrets in the database; they do not copy remote objects, nor do they read or save S3 credentials. When restoring, you must pass `--storage-backend s3` and re-provide the environment variables for the original bucket/prefix; cross-bucket migration still requires the object storage's own replication tool.
 
 In-memory databases have no persistable data, so `snapshot` and `upgrade` reject `--memory`.
+
+### Application Compatibility
+
+Lite accepts flat SQL and timestamp folders containing `migration.sql`, validates
+duplicate versions and applied SQL drift before pending migrations, and reuses
+`@supacloud/db` for reviewed target bindings. `migrate --json` emits a hash-only
+binding attestation. Strict mode enforces bounded function defaults and rejects
+invalid declarations, missing functions and undeclared background work.
+
+`/graphql/v1` requires real `pg_graphql` and uses the caller's role/RLS. Neither
+bundled PGlite nor stock native downloads include the extension. Native can use
+an operator-managed installation selected with `--postgres-dir`. Required
+GraphQL fails startup when missing; `doctor --json` reports actual or unverified
+capability. External SupAuth can reuse the shared Elysia verifier through
+`createSupAuthLiteIdentity` and an explicit application-owned local user mapping.
+
+See repository document `docs/lite-runtime-compatibility.md` for configuration
+and acceptance boundaries. Run `bun run benchmark` (or add `--native`) in the
+source package for a synthetic baseline, not a production performance claim.
 
 ### Compatibility Scope
 

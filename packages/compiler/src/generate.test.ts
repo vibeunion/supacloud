@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { checkProject, compileProject } from "./compile";
 import { renderApplication } from "./generate";
+import { relativeImportPath } from "./util";
 import { BAD_PROJECT_FILES } from "./fixtures/bad-project";
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
 import { writeFixtureProject } from "./fixtures/helpers";
@@ -1130,5 +1131,29 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     expect(rendered.applicationCode).toContain(
       'await destroyScopeInstances(scope, [{"key":"requestResource"},{"key":"scopedController"}]);',
     );
+  });
+
+  test("relativeImportPath 跨平台与反斜杠路径解析", () => {
+    expect(
+      relativeImportPath(
+        "D:\\a\\supacloud\\supacloud\\packages\\supacloud-lite\\test\\fixtures\\starter\\generated",
+        "D:\\a\\supacloud\\supacloud\\packages\\supacloud-lite\\test\\fixtures\\starter\\src\\review\\review.service.ts",
+      ),
+    ).toBe("../src/review/review.service");
+
+    expect(
+      relativeImportPath(
+        "c:\\project\\generated",
+        "C:\\project\\src\\service.ts",
+      ),
+    ).toBe("../src/service");
+
+    expect(
+      relativeImportPath("/project/generated", "/project/src/service.ts"),
+    ).toBe("../src/service");
+
+    expect(
+      relativeImportPath("/project/src", "/project/src/service.ts"),
+    ).toBe("./service");
   });
 });

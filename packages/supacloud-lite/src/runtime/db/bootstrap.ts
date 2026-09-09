@@ -259,14 +259,17 @@ alter role anon set search_path to "$user", public, extensions;
 alter role authenticated set search_path to "$user", public, extensions;
 alter role service_role set search_path to "$user", public, extensions;
 
-grant usage on schema public to anon, authenticated, service_role;
-grant all on all tables in schema public to anon, authenticated, service_role;
-grant all on all sequences in schema public to anon, authenticated, service_role;
-
-alter default privileges in schema public
-  grant all on tables to anon, authenticated, service_role;
-alter default privileges in schema public
-  grant all on sequences to anon, authenticated, service_role;
+-- Initialize defaults once. Restart/maintenance must not undo application ACLs.
+do $$
+begin
+  if to_regclass('supabase_migrations.schema_migrations') is null then
+    grant usage on schema public to anon, authenticated, service_role;
+    alter default privileges in schema public
+      grant all on tables to anon, authenticated, service_role;
+    alter default privileges in schema public
+      grant all on sequences to anon, authenticated, service_role;
+  end if;
+end $$;
 
 -- PostgreSQL already grants EXECUTE on new functions to PUBLIC. Keep that
 -- default so project migrations can revoke PUBLIC and grant only selected
