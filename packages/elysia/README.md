@@ -1,5 +1,28 @@
 # @supacloud/elysia
 
+## Persistent Command Adapters
+
+`createPersistentCommandAdapter(command, { identity, input })` binds a
+`createTransactionalCommand` or `createExternalCommand` from `@supacloud/commands`
+to `commandGovernance.rpc`.
+Its capabilities distinguish `database` from `external` boundaries. It owns the
+single write entry point and never invokes a second route handler or audit.
+Resolve identity from a verified host context; all durable receipt reads and replays
+must still pass domain authorization.
+
+`createApplication({ normalize: false, ... })` rejects extra schema properties rather
+than silently stripping them. Use shared schemas at domain and HTTP boundaries.
+
+Alternatively, a meaningful Controller can call its injected Command directly,
+with no route-level `command:` binding. `src/fixtures/webhook` follows this pattern.
+`bun run generate:example` generates its factories; `src/webhook-migration-example.ts`
+loads those artifacts for native HTTP/PostgreSQL acceptance. Tests reject stale
+artifacts and cover writes, authorization, audit rollback and receipt recovery.
+The runtime maps protocol errors without importing DB: explicit denial is 403,
+authorization infrastructure failure is 503, and redacted-input lookup is 410.
+See [the migration plan](../../docs/command-migration.md) for compiler policy,
+authentication replay changes, deployment order and rollback limitations.
+
 Runtime adapter that turns `@supacloud/compiler` output into a production-ready
 [Elysia](https://elysiajs.com/) application.
 
@@ -252,3 +275,15 @@ HTTP receipt fingerprints include route, body, params, query and business
 headers, not mutable request scopes/services or identity/tracing transport.
 Authorization runs again on a replay. Use durable application-owned adapters
 for production receipts, transactions and audits.
+
+### Shared Schema Decoders
+
+`createSchemaDecoder(schema)` derives a decoder's output type from a TypeBox
+schema, including transforms. Invalid values throw a sanitized
+`SchemaContractError`. `defineJsonContract({ body, response }, request)` creates
+decoders compatible with `HttpClient.execute` while retaining the same schemas
+for route registration. Keep schemas independently importable and reference
+their identifiers explicitly in compiler-analyzed route decorators.
+
+See [command migration](../../docs/command-migration.md) for examples and
+the distinction between contract declarations and runtime verification.

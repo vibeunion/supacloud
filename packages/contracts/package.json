@@ -1,0 +1,26 @@
+{
+  "name": "@supacloud/contracts",
+  "version": "0.1.0",
+  "description": "SupaCloud command protocol with optional client and browser entrypoints",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "default": "./dist/index.js" },
+    "./client": { "types": "./dist/client.d.ts", "import": "./dist/client.js" },
+    "./browser": { "types": "./dist/browser.d.ts", "import": "./dist/browser.js" }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "bun run build:js && bun run build:types",
+    "build:js": "bun build src/index.ts src/client.ts src/browser.ts --outdir dist --target browser --splitting",
+    "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
+  },
+  "devDependencies": { "@types/bun": "1.4.0", "typescript": "7.0.2" },
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/vibeunion/supacloud.git", "directory": "packages/contracts" }
+}

@@ -4,8 +4,11 @@
   "workspaces": {
     "": {
       "name": "@supacloud/app",
-      "devDependencies": {
+      "dependencies": {
         "@angular/core": "^22.1.5",
+        "@supacloud/contracts": "file:../contracts",
+      },
+      "devDependencies": {
         "@types/bun": "^1.4.0",
         "typescript": "^7.0.2",
       },
@@ -13,6 +16,8 @@
   },
   "packages": {
     "@angular/core": ["@angular/core@22.1.5", "https://registry.npmmirror.com/@angular/core/-/core-22.1.5.tgz", { "dependencies": { "tslib": "^2.3.0" }, "peerDependencies": { "@angular/compiler": "22.1.5", "rxjs": "^6.5.3 || ^7.4.0", "zone.js": "~0.15.0 || ~0.16.0" }, "optionalPeers": ["@angular/compiler", "zone.js"] }, "sha512-uiL+xVL4264NEuc3E5ILd6meSv9I4Xt82VQHvYlAVYlcjHlWY49yVe0/apzncUOGxUKzvK8/GDbyFEH7WfJYFw=="],
+
+    "@supacloud/contracts": ["@supacloud/contracts@file:../contracts", { "devDependencies": { "@types/bun": "1.4.0", "typescript": "7.0.2" } }],
 
     "@types/bun": ["@types/bun@1.4.0", "https://registry.npmmirror.com/@types/bun/-/bun-1.4.0.tgz", { "dependencies": { "bun-types": "1.4.0" } }, "sha512-K+lZULY23vRgK/CfTjFIV+tyifaNdSMlPh9j+6mQ/cLfpOznLyAuzgV/JQysyECpkBQLVMSyvjlr2fBUSA9wFQ=="],
 

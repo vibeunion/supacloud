@@ -62,6 +62,7 @@ export function defineSupacloudConfig(config: SupaCloudConfig = {}): SupaCloudCo
 
 /** Configuration modules are executable inputs; reject invalid new rule options before compiling. */
 function validateGovernanceConfig(config: {
+  commandCapabilities?: unknown;
   moduleBoundaries?: unknown;
   typeSafety?: unknown;
   allowRouteCommandBindings?: unknown;
@@ -72,6 +73,35 @@ function validateGovernanceConfig(config: {
     value !== null && typeof value === "object" && !Array.isArray(value);
   const isStrings = (value: unknown): value is string[] =>
     Array.isArray(value) && Array.from(value).every((item: unknown) => typeof item === "string" && item.trim().length > 0);
+  if (config.commandCapabilities !== undefined) {
+    const capabilities = config.commandCapabilities;
+    if (!isRecord(capabilities) || Object.keys(capabilities).some((key) =>
+      !["permission", "audit", "idempotency", "transaction", "rpc", "requirePersistentAdapters"].includes(key))) {
+      throw new Error("Invalid commandCapabilities.");
+    }
+    for (const key of ["permission", "audit", "idempotency", "requirePersistentAdapters"]) {
+      if (capabilities[key] !== undefined && typeof capabilities[key] !== "boolean") throw new Error(`commandCapabilities.${key} must be boolean.`);
+    }
+    if (capabilities["transaction"] !== undefined && typeof capabilities["transaction"] !== "boolean"
+      && capabilities["transaction"] !== "rpc-only") throw new Error("Invalid transaction capability.");
+    const adapters = capabilities["rpc"];
+    if (adapters !== undefined) {
+      if (!isRecord(adapters)) throw new Error("commandCapabilities.rpc must contain named adapters.");
+      for (const [name, adapter] of Object.entries(adapters)) {
+        if (!name.trim() || !isRecord(adapter) || Object.keys(adapter).some((key) =>
+          !["audit", "idempotency", "transaction", "boundary"].includes(key))) throw new Error("Invalid command adapter.");
+        for (const key of ["audit", "idempotency", "transaction"]) {
+          if (adapter[key] !== undefined && typeof adapter[key] !== "boolean") throw new Error("Invalid command adapter capability.");
+        }
+        if (adapter["boundary"] !== undefined && adapter["boundary"] !== "database" && adapter["boundary"] !== "external") {
+          throw new Error("Invalid command adapter boundary.");
+        }
+        if (adapter["boundary"] === "external" && adapter["transaction"] === true) {
+          throw new Error("External command adapters cannot claim database transactions.");
+        }
+      }
+    }
+  }
   if (config.moduleBoundaries !== undefined) {
     if (!Array.isArray(config.moduleBoundaries)) throw new Error("moduleBoundaries must be an array of module tag rules.");
     const rules: readonly unknown[] = config.moduleBoundaries;

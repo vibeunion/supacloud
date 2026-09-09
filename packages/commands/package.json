@@ -1,0 +1,23 @@
+{
+  "name": "@supacloud/commands",
+  "version": "0.1.0",
+  "description": "Storage-independent durable command execution and recovery",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "bun run build:js && bun run build:types",
+    "build:js": "bun build src/index.ts --outdir dist --target node --external @supacloud/contracts",
+    "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
+  },
+  "dependencies": { "@supacloud/contracts": "file:../contracts" },
+  "devDependencies": { "@types/bun": "1.4.0", "typescript": "7.0.2" },
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/vibeunion/supacloud.git", "directory": "packages/commands" }
+}

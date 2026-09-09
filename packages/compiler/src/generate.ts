@@ -602,7 +602,8 @@ class ModuleGenerator {
             return `(${accessor} !== undefined ? ${accessor} : ${fallback})`;
           }
           if (hp.kind === "body") return "req.body";
-          if (hp.kind === "headers") return "req.headers";
+          if (hp.kind === "headers") return hp.bindingName === undefined
+            ? "req.headers" : `req.headers?.[${JSON.stringify(hp.bindingName.toLowerCase())}]`;
           if (hp.kind === "context") return "(req.context ?? req)";
           return "undefined";
         });

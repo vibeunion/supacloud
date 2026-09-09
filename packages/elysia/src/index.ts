@@ -1,7 +1,11 @@
 import { Elysia } from "elysia";
+import { CommandError } from "@supacloud/contracts";
+import { commandErrorStatus } from "./command-errors";
 import { executionRequestId, observeExecution, type ExecutionObserver } from "./execution";
 
 export type { ExecutionEvent, ExecutionObserver } from "./execution";
+export { createSchemaDecoder, defineJsonContract, SchemaContractError } from "./schema_contract";
+export { createPersistentCommandAdapter, type PersistentCommandHandler } from "./persistent-command";
 
 // ---------------------------------------------------------------------------
 // Compiled module contract (mirrors @supacloud/compiler output)
@@ -211,7 +215,7 @@ export interface CommandAudit {
 export interface CommandGovernance {
   /** Application-owned adapters: a single RPC owns all declared persistence. */
   rpc?: Record<string, {
-    capabilities: { audit?: boolean; transaction?: boolean; idempotency?: boolean };
+    capabilities: { audit?: boolean; transaction?: boolean; idempotency?: boolean; boundary?: "database" | "external" };
     execute: CommandMiddleware;
   }>;
   authorize: CommandAuthorizer;
@@ -326,6 +330,8 @@ export type ErrorMapper = (
 
 export interface ApplicationOptions {
   name?: string;
+  /** false rejects extra schema properties instead of silently removing them. */
+  normalize?: boolean;
   /** Modules in topological import order. */
   modules?: CompiledModule[];
   /** Platform-level dependencies (db client etc.), passed to createServices. */
@@ -645,7 +651,7 @@ export function createModulePlugin(
   compiled: CompiledModule,
   services: Record<string, unknown>,
   ctxFactory: RequestContextFactory = defaultRequestContext,
-  options: Pick<ApplicationOptions, "commandGovernance" | "commandExecutor" | "errorMapper" | "onExecution"> = {},
+  options: Pick<ApplicationOptions, "commandGovernance" | "commandExecutor" | "errorMapper" | "onExecution" | "normalize"> = {},
   imported: Record<string, Record<string, unknown>> = {},
 ): Elysia {
   const hasCommandRoutes = compiled.controllers.some((controller) =>
@@ -677,7 +683,7 @@ export function createModulePlugin(
     ? composeCommandExecutors(options.commandExecutor, governanceExecutor)
     : (options.commandExecutor ?? governanceExecutor);
 
-  const plugin = new Elysia({ name: `supacloud:${compiled.name}` }).decorate(
+  const plugin = new Elysia({ name: `supacloud:${compiled.name}`, normalize: options.normalize ?? true }).decorate(
     "services",
     services,
   );
@@ -927,6 +933,11 @@ export function defaultErrorResponse(
   error: unknown,
   frameworkCode?: string | number,
 ): Response {
+  if (error instanceof CommandError) {
+    return Response.json({ ok: false, code: error.code, message: error.code }, {
+      status: commandErrorStatus(error.code),
+    });
+  }
   if (isPublicApplicationError(error)) {
     return Response.json({
       ok: false,
@@ -976,7 +987,7 @@ function isPublicApplicationError(error: unknown): error is PublicApplicationErr
  * created modules, keyed by module name.
  */
 export function createApplication(options: ApplicationOptions): Elysia {
-  const app = new Elysia({ name: options.name ?? "supacloud:app" });
+  const app = new Elysia({ name: options.name ?? "supacloud:app", normalize: options.normalize ?? true });
   const configuredContextFactory = options.requestContext ?? defaultRequestContext;
   const contextCache = new WeakMap<Request, Promise<unknown>>();
   const ctxFactory: RequestContextFactory = (request) => {
@@ -992,6 +1003,7 @@ export function createApplication(options: ApplicationOptions): Elysia {
     const services = module.createServices(options.deps ?? {}, imported);
     imported[module.name] = services;
     app.use(createModulePlugin(module, services, ctxFactory, {
+      normalize: options.normalize,
       commandGovernance: options.commandGovernance,
       commandExecutor: options.commandExecutor,
       errorMapper: options.errorMapper,

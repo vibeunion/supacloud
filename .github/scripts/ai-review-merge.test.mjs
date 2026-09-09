@@ -157,11 +157,9 @@ describe('trusted review workflow', () => {
         assert.match(line, /bun install --frozen-lockfile/);
       }
       if (contents === releaseWorkflow) {
-        assert.deepEqual(lockfileGenerationLines, [
+        assert.deepEqual(lockfileGenerationLines, Array.from({ length: 8 }, () =>
           '          bun install --lockfile-only --registry https://registry.npmjs.org',
-          '          bun install --lockfile-only --registry https://registry.npmjs.org',
-          '          bun install --lockfile-only --registry https://registry.npmjs.org',
-        ]);
+        ));
       } else {
         assert.deepEqual(lockfileGenerationLines, []);
       }
@@ -170,7 +168,7 @@ describe('trusted review workflow', () => {
     assert.match(releaseWorkflow, /npm --version/);
     assert.equal(
       releaseWorkflow.match(/node "\$GITHUB_WORKSPACE\/\.github\/scripts\/publish-npm-package\.mjs"/g)?.length,
-      11,
+      14,
       'all npm packages must use the retry-safe publisher',
     );
     assert.doesNotMatch(releaseWorkflow, /^\s+npm publish/m);

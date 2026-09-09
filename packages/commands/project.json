@@ -1,0 +1,6 @@
+{
+  "name": "@supacloud/commands",
+  "tags": ["scope:core", "type:runtime"],
+  "projectType": "library",
+  "sourceRoot": "packages/commands/src"
+}

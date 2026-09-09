@@ -1,5 +1,23 @@
 # @supacloud/db
 
+## Durable Commands
+
+`createPostgresCommandStore(database)` implements the protocol's storage ports.
+Use `createBunCommandDatabase` from `@supacloud/db/bun` for a native Bun SQL pool.
+This package contains SQL, leases, row validation and input redaction only.
+
+Execution factories moved to `@supacloud/commands`; pass `store` instead of
+`database`. Errors moved to `CommandError` in `@supacloud/contracts`. Neither
+remote sending nor command orchestration is re-exported here. The DB package
+does not depend on the command runtime, including through its tests.
+
+Install `COMMAND_PERSISTENCE_SQL` through a privileged application migration.
+Existing unreleased v1 tables require `COMMAND_PERSISTENCE_UPGRADE_SQL`, with old
+writers stopped; preserve operation identifiers during cutover.
+Keep its schema private and supply domain authorization, JSON-stable input/result
+decoders and a single-connection transaction adapter. Metadata cannot provide a
+distributed transaction. See [migration, deployment and recovery](../../docs/command-migration.md).
+
 For reviewed deployment-time public SQL parameters, see
 [Controlled Migration Bindings](./MIGRATION_BINDINGS.md). This opt-in API preserves
 Drizzle v1 source/snapshot ownership and the existing executor's migration ledger.

@@ -210,4 +210,143 @@ after transport; invalid/empty successful responses reject with
 `HttpContractError` (`boundary: "request" | "response"`), without decoder causes or
 payloads. HTTP errors remain `HttpErrorResponse`. Contract execution does not
 retry; existing interceptors still control transport and must not replay an
-unknown-result write. This is opt-in and does not validate legacy generic calls.
+unknown-result write. Raw JSON methods return `unknown` and no longer accept
+caller-supplied result generics. Text, Blob and full Response modes have precise
+overloads; use `execute` to obtain a checked business result.
+
+### Authoritative Command Confirmation
+
+Use the independent `@supacloud/contracts` package for `createAuthoritativeCommandClient`.
+`@supacloud/app/contracts` is now a thin migration re-export.
+Use it when a successful write acknowledgement does not prove the intended
+resource state. The existing `createContractCommandClient` entry remains
+available for response-first confirmation.
+
+```ts
+import { createAuthoritativeCommandClient } from "@supacloud/contracts/client";
+import {
+  decodeUpdate,
+  decodeAcknowledgement,
+  decodeWebhookState,
+} from "./webhook-contracts";
+import { adminApi } from "./admin-api";
+
+const updateWebhook = createAuthoritativeCommandClient({
+  input: decodeUpdate,
+  acknowledgement: decodeAcknowledgement,
+  authority: decodeWebhookState,
+  matches: (input, state) =>
+    input.id === state.id && input.enabled === state.enabled,
+}, {
+  send: (input) => adminApi.updateWebhook(input),
+  lookup: (input) => adminApi.getWebhook(input.id),
+});
+
+const outcome = await updateWebhook({ id: "webhook-1", enabled: true });
+// Only outcome.status === "confirmed" supplies outcome.authority.
+```
+
+The input decoder accepts untrusted data and supplies the typed input to both
+transport methods. Acknowledgement and authority decoders operate on their own
+raw network results, never on each other's transformed values. The default
+`confirmation: "lookup"` performs one write and at most one automatic lookup,
+even after a valid acknowledgement. Failed lookups are not retried. Each
+invocation has independent state.
+
+The optional third argument `{ confirmation: "response" }` allows the raw
+write response to confirm the operation, but only after it passes both the
+acknowledgement and authority decoders and the domain matcher. An invalid or
+mismatched response falls back to one lookup.
+
+Outcomes are discriminated by `status`:
+
+- `invalid`: input validation failed before any transport call.
+- `denied`: `isDefinitiveWriteFailure` explicitly classified a send rejection.
+- `confirmed`: validated authority matches the intended state.
+- `unknown`: no matching authority was obtained; this never permits a retry.
+
+`diagnostics` contains fixed stage/code pairs, without exception messages,
+payloads, tokens or URLs. Acknowledgements are either `unavailable` or
+`validated` with a typed value. Domain schemas still own redaction of returned
+business data. No HTTP status, including 401/403/409, proves denial by default.
+Decoder, matcher and lookup failures never enter write-denial classification.
+The legacy client now applies its denial classifier only to send failures too.
+
+This is state confirmation, not durable server receipts, transactional audit,
+or cross-client exactly-once execution. The transport must itself prevent
+hidden write replay. Domain version matching, page disposal, durable locks,
+pagination completeness and manual recovery remain application responsibilities.
+Installing `@supacloud/contracts` alone does not install Angular or the app package.
+Use `@supacloud/app-svelte` for Svelte lifecycle binding. The app package itself
+continues to install its declared Angular DI dependency.
+See [the architecture and migration guide](../../docs/command-migration.md).
+
+### HTTP Replay Safety
+
+`HttpClient` now defaults writes (including PUT and DELETE) to one call to its
+configured fetch transport. Its final send boundary blocks repeated interceptor
+calls with `HttpReplayError` (`code: "HTTP_REPLAY_BLOCKED"`), including an
+authentication interceptor's attempt to resend after a 401. Token acquisition
+before the initial send is unchanged. Read authentication refresh remains
+available; `replay: { mode: "never" }` disables repeat sends for reads too.
+
+`createRetryInterceptor(maxRetries, delayMs)` retries only transient HTTP
+408/429/500/502/503/504 responses or non-abort transport exceptions, and only
+for GET/HEAD/OPTIONS by default. It does not refresh authentication or retry
+401/403 responses. Cancellation stops retries and interrupts backoff. Existing
+call sites that relied on retrying every method/status must adopt an explicit
+policy rather than silently retaining that behavior.
+
+Only opt in after the server implements durable, appropriately scoped
+idempotency and rejects reuse of a key with different operation input:
+
+```ts
+await http.post("/commands/update", input, {
+  replay: { mode: "idempotent", idempotencyKey: operationId },
+});
+```
+
+The key is sent as `Idempotency-Key` and must contain 1-200 ASCII letters,
+digits, dots, underscores, colons or hyphens. A header alone does not authorize
+replay. Conflicting keys are rejected before sending. Opted-in requests require
+an immutable body (serialized JSON/text, Blob or no body); FormData, streams,
+URLSearchParams and binary views must not be blindly replayed. Subsequent sends
+must retain the same method, URL, body, key and non-Authorization headers.
+The server must still authorize every attempt and scope receipts to the actor
+and tenant; a refreshed bearer token alone is not proof of the same identity.
+
+Native fetch redirects are disabled for writes and requests with an explicit
+replay policy, preventing a 307/308 from resending outside the interceptor
+pipeline. Use the final API URL. These guards cannot govern retries hidden
+inside a custom fetch implementation, a service worker, proxy or remote service.
+An SSO client that internally resends requests must be adapted to expose token
+acquisition separately and use a single-attempt transport. A blocked replay or
+aborted request does not mean the server rolled back the first write.
+
+The regression acceptance scenarios for this first migration stage are:
+
+```gherkin
+Scenario: Acknowledgement is not authority
+  Given a write returns a valid acknowledgement
+  When the required authority lookup fails
+  Then the outcome is unknown and no second write or lookup is sent
+
+Scenario: Post-commit authentication failure
+  Given the server applies the write and then returns 401
+  When an authentication interceptor tries to resend the default write
+  Then the second send is blocked and a matching authority lookup can confirm the result
+
+Scenario: Explicitly idempotent replay
+  Given the server implements durable idempotency and the caller opts in with an operation key
+  When a transient response triggers retry
+  Then every send retains its key, target, payload and request preconditions
+
+Scenario: Cancellation during backoff
+  Given a read is waiting to retry
+  When the caller aborts its signal
+  Then backoff stops and no further request is sent
+```
+
+These tests include a local HTTP server counting actual requests and a browser
+bundle dependency-graph check. They are not authenticated customer acceptance,
+proof of lower production incident rates, or a completed module migration.

@@ -24,7 +24,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts --outdir dist --target node && bun build src/contract_client.ts --outdir dist --target browser",
+    "build:js": "bun build src/index.ts --outdir dist --target node --external @supacloud/contracts && bun build src/contract_client.ts --outdir dist --target browser --external @supacloud/contracts",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
@@ -46,6 +46,7 @@
     "directory": "packages/app"
   },
   "dependencies": {
+    "@supacloud/contracts": "file:../contracts",
     "@angular/core": "^22.1.5"
   },
   "devDependencies": {

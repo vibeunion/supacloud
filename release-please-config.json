@@ -61,6 +61,24 @@
       "component": "supacloud",
       "changelog-path": "CHANGELOG.md"
     },
+    "packages/contracts": {
+      "release-type": "node",
+      "component": "contracts",
+      "initial-version": "0.1.0",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "packages/commands": {
+      "release-type": "node",
+      "component": "commands",
+      "initial-version": "0.1.0",
+      "changelog-path": "CHANGELOG.md"
+    },
+    "packages/app-svelte": {
+      "release-type": "node",
+      "component": "app-svelte",
+      "initial-version": "0.1.0",
+      "changelog-path": "CHANGELOG.md"
+    },
     "packages/app": {
       "release-type": "node",
       "component": "app",

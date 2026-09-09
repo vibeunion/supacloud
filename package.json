@@ -1,6 +1,7 @@
 {
   "version": "0.0.2",
   "scripts": {
+    "verify:commands": "bun run scripts/verify-command-migration.ts",
     "check:boundaries": "bun run scripts/check_workspace_boundaries.ts",
     "check:invariants": "bun run scripts/check_business_invariants.ts"
   },

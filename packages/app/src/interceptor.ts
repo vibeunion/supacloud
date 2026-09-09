@@ -1,4 +1,5 @@
 import type { HttpContext } from "./http_context";
+import { allowsHttpReplay, replayHeaders, validateReplayPolicy, type HttpReplayPolicy } from "./http_replay";
 
 /**
  * Angular-inspired functional HTTP interceptor pipeline.
@@ -11,6 +12,8 @@ export interface HttpRequestPayload {
   headers: Record<string, string>;
   body?: unknown;
   context?: HttpContext;
+  replay?: HttpReplayPolicy;
+  signal?: AbortSignal;
 }
 
 export type HttpInterceptorFn = (
@@ -79,23 +82,50 @@ export function createTimeoutInterceptor(timeoutMs: number): HttpInterceptorFn {
 }
 
 /**
- * Creates an interceptor that retries on failed requests up to maxRetries.
+ * Retries transient read failures. Writes require an explicit idempotency contract.
+ * Authentication/authorization failures and cancelled requests are never retried.
  */
 export function createRetryInterceptor(maxRetries: number, delayMs = 50): HttpInterceptorFn {
+  if (!Number.isSafeInteger(maxRetries) || maxRetries < 0
+    || !Number.isFinite(delayMs) || delayMs < 0 || delayMs > 2_147_483_647) {
+    throw new RangeError("Invalid HTTP retry limits");
+  }
   return async (req, next) => {
-    let lastError: unknown;
+    const replay = validateReplayPolicy(req.replay);
+    const allowed = allowsHttpReplay(req.method, replay);
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      req.signal?.throwIfAborted();
+      req.headers = replayHeaders(req.headers, replay);
       try {
         const res = await next(req);
-        if (res.ok || attempt === maxRetries) return res;
+        if (!allowed || attempt === maxRetries || ![408, 429, 500, 502, 503, 504].includes(res.status)) return res;
+        // Custom stream cancellation must not block backoff or signal handling.
+        void res.body?.cancel().catch(() => undefined);
       } catch (err) {
-        lastError = err;
-        if (attempt === maxRetries) throw err;
+        if (!allowed || attempt === maxRetries || req.signal?.aborted
+          || (err instanceof Error && (err.name === "AbortError" || err.name === "HttpReplayError"))) throw err;
       }
       if (delayMs > 0) {
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
+        await retryDelay(delayMs, req.signal);
       }
     }
-    throw lastError;
+    throw new Error("HTTP retry budget exhausted");
   };
+}
+
+function retryDelay(delayMs: number, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      signal?.removeEventListener("abort", abort);
+      resolve();
+    };
+    const timer = setTimeout(finish, delayMs);
+    const abort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
+      reject(new DOMException("HTTP request aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", abort, { once: true });
+    if (signal?.aborted) abort();
+  });
 }

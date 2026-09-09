@@ -842,6 +842,23 @@ export function validateGraph(
       if (typeof options === "object" && options.commandCapabilities) {
         const hostCaps = options.commandCapabilities;
         const rpcCaps = command.rpc && Object.hasOwn(hostCaps.rpc ?? {}, command.rpc) ? hostCaps.rpc?.[command.rpc] : undefined;
+        if (hostCaps.requirePersistentAdapters && (
+          !rpcCaps?.boundary || rpcCaps.audit !== true || rpcCaps.idempotency !== true
+          || hostCaps.permission !== true || !command.permission
+          || !command.audit || command.idempotency !== "required"
+          || (rpcCaps.boundary === "database" && (rpcCaps.transaction !== true || command.transaction !== "required"))
+        )) {
+          error("command-persistence-required",
+            `Command ${command.name} requires an explicit persistent adapter, permission, audit and idempotency policy.`,
+            module.file, module.line,
+            "Register a named database/external adapter, enable permission checks and declare permission, audit and required idempotency on the command.");
+        }
+        if (rpcCaps?.boundary === "external" && (command.transaction === "required" || rpcCaps.transaction === true)) {
+          error("command-external-transaction",
+            `Command ${command.name} calls an external service; use durable intent and reconciliation, not transaction: 'required'.`,
+            module.file, module.line,
+            "Use transaction: 'none' with createExternalCommand; recover with read-only reconciliation. Do not claim a database transaction covers a remote request.");
+        }
         const caps = command.rpc
           ? { permission: hostCaps.permission, audit: rpcCaps?.audit === true,
             transaction: rpcCaps?.transaction === true, idempotency: rpcCaps?.idempotency === true }

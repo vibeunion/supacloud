@@ -185,6 +185,7 @@ jobs:
           - name: App Framework Metadata
             working-directory: packages/app
             script: |
+              bun run ../../scripts/build-command-dependencies.ts app
               bun install --frozen-lockfile
               bun run typecheck
               bun run typecheck:test
@@ -203,7 +204,9 @@ jobs:
           - name: Elysia Adapter
             working-directory: packages/elysia
             script: |
+              bun run ../../scripts/build-command-dependencies.ts elysia
               bun install --frozen-lockfile
+              bun run generate:example
               bun run typecheck
               bun run typecheck:test
               bun test
@@ -212,6 +215,36 @@ jobs:
           - name: Database Governance
             working-directory: packages/db
             script: |
+              bun run ../../scripts/build-command-dependencies.ts db
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun run typecheck:test
+              bun test
+              bun run build
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Command Contracts
+            working-directory: packages/contracts
+            script: |
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun run typecheck:test
+              bun test
+              bun run build
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Durable Commands
+            working-directory: packages/commands
+            script: |
+              bun run ../../scripts/build-command-dependencies.ts commands
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun run typecheck:test
+              bun test
+              bun run build
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Svelte Command Lifecycle
+            working-directory: packages/app-svelte
+            script: |
+              bun run ../../scripts/build-command-dependencies.ts app-svelte
               bun install --frozen-lockfile
               bun run typecheck
               bun run typecheck:test
