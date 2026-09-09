@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.14.0...compiler-v0.15.0) (2026-09-09)
+
+
+### Features
+
+* **lite:** align runtime contracts and support real pg_graphql ([#1231](https://github.com/vibeunion/supacloud/issues/1231)) ([9dec0ce](https://github.com/vibeunion/supacloud/commit/9dec0ceca8f0457cd8f514506c4660b5148226b3))
+
 ## [0.14.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.13.1...compiler-v0.14.0) (2026-09-09)
 
 
