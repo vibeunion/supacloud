@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.16.0...compiler-v0.17.0) (2026-09-09)
+
+
+### Features
+
+* **compiler:** add local delivery planning and independent builds ([#1245](https://github.com/vibeunion/supacloud/issues/1245)) ([fd860ac](https://github.com/vibeunion/supacloud/commit/fd860ac82834f28df733ca5c91f3a3314a8ca748))
+
+
+### Performance Improvements
+
+* **compiler,web-console:** optimize I/O with Bun APIs, Vite pre-bundling, and graph algorithms ([#1246](https://github.com/vibeunion/supacloud/issues/1246)) ([1db9458](https://github.com/vibeunion/supacloud/commit/1db9458bb620c32476597c5bf795d00e63700559))
+
 ## [0.16.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.15.0...compiler-v0.16.0) (2026-09-09)
 
 
