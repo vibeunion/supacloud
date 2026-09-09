@@ -20,13 +20,18 @@ export function camelName(token: string): string {
 
 /** Computes relative import path from fromDir to toFile (stripping extension, ensuring ./ or ../ prefix). */
 export function relativeImportPath(fromDir: string, toFile: string): string {
-  const fromParts = fromDir.split("/").filter(Boolean);
-  const toParts = toFile.split("/").filter(Boolean);
+  const fromParts = fromDir.split(/[\\/]/).filter(Boolean);
+  const toParts = toFile.split(/[\\/]/).filter(Boolean);
+  const isWindows =
+    process.platform === "win32" ||
+    /^[a-zA-Z]:/.test(fromParts[0] ?? "") ||
+    /^[a-zA-Z]:/.test(toParts[0] ?? "");
   let common: number = 0;
   while (
     common < fromParts.length &&
     common < toParts.length &&
-    fromParts[common] === toParts[common]
+    (fromParts[common] === toParts[common] ||
+      (isWindows && fromParts[common]!.toLowerCase() === toParts[common]!.toLowerCase()))
   ) {
     common += 1;
   }

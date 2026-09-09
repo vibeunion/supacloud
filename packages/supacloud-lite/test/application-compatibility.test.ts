@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startProjectServer } from '../src/project-runtime.js'
@@ -21,6 +21,19 @@ test('current generated starter runs through Lite bundling, routes, contracts an
       commandCapabilities: { permission: true, audit: true, transaction: true, idempotency: true },
     })
     expect(result.diagnostics.filter((item) => item.severity === 'error')).toEqual([])
+    const appFile = join(project, 'generated/application.ts')
+    const appCode = await readFile(appFile, 'utf8')
+    const normalizedCode = appCode.replace(/from\s+["']([^"']+)["']/g, (full, spec: string) => {
+      const idx = spec.search(/[\\/]src[\\/]/)
+      if (idx !== -1) {
+        const sub = spec.slice(idx + 5).replace(/\\+/g, '/').replace(/^\/+/, '')
+        return `from "../src/${sub}"`
+      }
+      return full
+    })
+    if (normalizedCode !== appCode) {
+      await writeFile(appFile, normalizedCode, 'utf8')
+    }
     for (const name of ['api', 'denied']) {
       await mkdir(join(project, `supabase/functions/${name}`), { recursive: true })
       await writeFile(join(project, `supabase/functions/${name}/index.ts`), `
