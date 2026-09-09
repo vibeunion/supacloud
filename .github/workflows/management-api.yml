@@ -155,6 +155,7 @@ jobs:
           - name: Project CLI
             working-directory: packages/cli
             script: |
+              bun run ../../scripts/build-command-dependencies.ts elysia
               bun install --frozen-lockfile
               bun run typecheck
               bun test src
