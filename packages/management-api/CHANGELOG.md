@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.77.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.77.0...management-api-v0.77.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* **management-api:** reconcile pg_graphql project entrypoint atomically ([#1234](https://github.com/vibeunion/supacloud/issues/1234)) ([4b6ba7d](https://github.com/vibeunion/supacloud/commit/4b6ba7d1e1b6eb8d836d4ff3c95cb221f2d9db32))
+
 ## [0.77.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.76.0...management-api-v0.77.0) (2026-09-08)
 
 
