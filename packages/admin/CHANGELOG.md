@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.1](https://github.com/vibeunion/supacloud/compare/admin-v0.21.0...admin-v0.21.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* **admin:** resolve upgrade release versions with valid jq patterns ([#1237](https://github.com/vibeunion/supacloud/issues/1237)) ([45a26d2](https://github.com/vibeunion/supacloud/commit/45a26d2bfb1709ed9acad2c9220e577ae4355fa5))
+
 ## [0.21.0](https://github.com/vibeunion/supacloud/compare/admin-v0.20.1...admin-v0.21.0) (2026-09-05)
 
 
