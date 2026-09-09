@@ -1,4 +1,4 @@
-import { decodeHttpContract, type ContractDecoder } from "./http_contract";
+import { decodeHttpContract, type ContractDecoder } from "./http_contract.js";
 
 export interface AuthoritativeCommandContract<Input, Acknowledgement, Authority> {
   input: ContractDecoder<Input>;

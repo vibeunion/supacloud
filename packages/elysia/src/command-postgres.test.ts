@@ -2,8 +2,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { SQL } from "bun";
 import { createBunCommandDatabase } from "@supacloud/db/bun";
 import { COMMAND_PERSISTENCE_SQL, COMMAND_PERSISTENCE_UPGRADE_SQL } from "@supacloud/db";
-import { createTransactionalCommand, createExternalCommand, createCommandRecoveryJob, plaintextCommandInput } from "@supacloud/commands";
-import { createPostgresCommandStore, type CommandTransaction } from "@supacloud/db";
+import { createTransactionalCommand, createExternalCommand, createCommandRecoveryHandler, plaintextCommandInput, type CommandWorkflowPort } from "@supacloud/commands";
+import { decodeCommandStatus } from "@supacloud/contracts";
+import { createPostgresCommandStore, type CommandTransaction, type CommandSubmissionBinding } from "@supacloud/db";
 
 const connection = process.env["SUPACLOUD_COMMAND_TEST_URL"];
 const suite = connection ? describe : describe.skip;
@@ -235,37 +236,92 @@ suite("native PostgreSQL durable command boundaries", () => {
     expect(sends).toBe(0);
   });
 
-  test("recovery leases exclude other workers and stale release cannot clear a newer lease", async () => {
-    const store = createPostgresCommandStore(createBunCommandDatabase(sql));
-    const actor = { tenantId: crypto.randomUUID(), actorId: "actor" };
-    const command = createExternalCommand({
-      store, inputCodec: plaintextCommandInput, name: "lease.test", input: decodeInput, result: decodeResult,
-      authorize: () => "allow", send: async () => {}, lookup: async () => null, matches: () => true,
-      audit: { event: "changed", details: () => ({}) },
+  async function rpc(name: "get" | "submit" | "claim" | "complete" | "retry" | "fail", request: object): Promise<unknown> {
+    const fn = name === "get" || name === "submit" ? `supacloud_command_${name}` : `supacloud_workflow_${name}`;
+    const rows: unknown = await sql.unsafe<unknown>(`SELECT public.${fn}($1::text::jsonb) AS result`, [JSON.stringify(request)]);
+    if (!Array.isArray(rows)) throw new Error("Invalid RPC rows");
+    const row: unknown = rows[0];
+    if (!row || typeof row !== "object" || !("result" in row)) throw new Error("Invalid RPC result");
+    return row.result;
+  }
+  const workflows: CommandWorkflowPort = {
+    complete: (request) => rpc("complete", request),
+    retry: (request) => rpc("retry", request),
+    fail: (request) => rpc("fail", request),
+  };
+  async function selectRun(runId: string) {
+    // Isolate delivery visibility inside this disposable test database only.
+    await sql.unsafe(`SELECT pgmq.set_vt('supacloud_internal_workflows',queue_message_id,
+      CASE WHEN run_id=$1::uuid THEN 0 ELSE 3600 END) FROM supacloud_workflows.steps
+      WHERE status IN ('queued','running')`, [runId]);
+  }
+  function submissionBinding(raw: unknown): CommandSubmissionBinding {
+    if (!raw || typeof raw !== "object" || !("runId" in raw) || typeof raw.runId !== "string"
+      || !("stepId" in raw) || typeof raw.stepId !== "string"
+      || !("messageId" in raw) || typeof raw.messageId !== "string"
+      || !("workerId" in raw) || typeof raw.workerId !== "string"
+      || !("attempt" in raw) || typeof raw.attempt !== "number") throw new Error("Invalid test claim");
+    return { commandId: raw.runId, stepId: raw.stepId, messageId: raw.messageId, workerId: raw.workerId, attempt: raw.attempt };
+  }
+  test("submitted external execution reuses its command ID and advances the existing workflow to reconciliation", async () => {
+    const commandId = crypto.randomUUID(), input = await fixture();
+    const actor = { tenantId: crypto.randomUUID(), actorId: crypto.randomUUID() };
+    const request = { commandId, commandType: "submitted.remote", targetType: "webhook", targetId: input.id, ...actor, payload: input };
+    await rpc("submit", request);
+    await selectRun(commandId);
+    const submission = submissionBinding(await rpc("claim", { workerId: "worker", visibilityTimeoutSeconds: 60 }));
+    const database = createBunCommandDatabase(sql);
+    const store = createPostgresCommandStore(database, { submission });
+    let sends = 0, ready = false;
+    const definition = {
+      inputCodec: plaintextCommandInput, name: "submitted.remote", input: decodeInput, result: decodeResult,
+      authorize: (): "allow" => "allow", authorizeRecovery: (): "allow" => "allow",
+      send: async () => { sends++; }, lookup: async (value: ReturnType<typeof decodeInput>) => ready ? value : null,
+      matches: () => true, audit: { event: "changed", details: () => ({}) },
+    };
+    const command = createExternalCommand({ ...definition, store });
+    await expect(command.execute({ ...actor, tenantId: "foreign" }, commandId, input)).rejects.toThrow();
+    await expect(command.execute(actor, commandId, { ...input, enabled: false })).rejects.toMatchObject({ code: "COMMAND_IDEMPOTENCY_CONFLICT" });
+    expect(sends).toBe(0);
+    const receipt = await command.execute(actor, commandId, input);
+    expect(receipt).toMatchObject({ operationId: commandId, dispatchKey: commandId, status: "unknown" });
+    expect(decodeCommandStatus(await rpc("submit", request))).toMatchObject({ kind: "execution", commandId, execution: { status: "unknown" } });
+    ready = true;
+    const handler = createCommandRecoveryHandler({
+      workflows, tenantId: actor.tenantId, principal: { subject: "worker" }, authorize: () => "allow", retryDelaySeconds: 0,
+      commands: { "submitted.remote": createExternalCommand({ ...definition, store: createPostgresCommandStore(database) }) },
     });
-    const input = await fixture();
-    await command.execute(actor, "one", input);
-    await command.execute(actor, "two", input);
-    await command.execute({ ...actor, tenantId: crypto.randomUUID() }, "foreign", input);
-    const now = Date.now() + 1000;
-    const scope = { tenantId: actor.tenantId, commands: ["lease.test"], now, limit: 1, leaseMs: 100 };
-    const [a, b] = await Promise.all([store.claim(scope), store.claim(scope)]);
-    expect(a).toHaveLength(1); expect(b).toHaveLength(1);
-    const first = a[0], second = b[0];
-    if (!first || !second) throw new Error("Missing leases");
-    expect(first.operationId).not.toBe(second.operationId);
-    expect(first.tenantId).toBe(actor.tenantId);
-    expect(await store.claim(scope)).toEqual([]);
-    const renewed = await store.claim({ ...scope, now: now + 101, limit: 2 });
-    expect(renewed).toHaveLength(2);
-    await store.release(first, now);
-    expect(await store.claim({ ...scope, now: now + 101 })).toEqual([]);
-    for (const lease of renewed) await store.release(lease, now + 1000);
-    expect(await store.claim({ ...scope, now: now + 500 })).toEqual([]);
-    expect(await store.claim({ ...scope, now: now + 1001, limit: 2 })).toHaveLength(2);
+    const recovery = await rpc("claim", { workerId: "worker", visibilityTimeoutSeconds: 60 });
+    expect(recovery).toMatchObject({ runId: commandId, stepKey: "reconcile" });
+    expect(await handler.run(recovery)).toBe("completed");
+    expect(decodeCommandStatus(await rpc("get", { commandId }))).toMatchObject({
+      kind: "execution", commandId, execution: { status: "confirmed", audit: "complete" }, workflow: { status: "completed" },
+    });
+    expect(sends).toBe(1);
   });
-
-  test("native recovery uses independent worker authorization and never dispatches again", async () => {
+  test("submitted database execution commits business, audit and workflow completion together", async () => {
+    const commandId = crypto.randomUUID(), input = await fixture();
+    const actor = { tenantId: crypto.randomUUID(), actorId: crypto.randomUUID() };
+    await rpc("submit", { commandId, commandType: "submitted.db", targetType: "webhook", targetId: input.id, ...actor, payload: input });
+    await selectRun(commandId);
+    const submission = submissionBinding(await rpc("claim", { workerId: "worker", visibilityTimeoutSeconds: 60 }));
+    let auditAvailable = false;
+    const command = createTransactionalCommand({
+      store: createPostgresCommandStore(createBunCommandDatabase(sql), { submission }),
+      inputCodec: plaintextCommandInput, name: "submitted.db", input: decodeInput, result: decodeResult,
+      authorize: () => "allow", execute: update,
+      audit: { event: "changed", details: () => ({}), write: async () => { if (!auditAvailable) throw new Error("audit unavailable"); } },
+    });
+    await expect(command.execute(actor, commandId, input)).rejects.toThrow();
+    expect(await writes(input.id)).toBe(0);
+    expect(decodeCommandStatus(await rpc("get", { commandId }))).toMatchObject({ kind: "submission", workflow: { status: "running" } });
+    auditAvailable = true;
+    expect(await command.execute(actor, commandId, input)).toMatchObject({ dispatchKey: commandId, status: "confirmed" });
+    expect(await command.execute(actor, commandId, input)).toMatchObject({ dispatchKey: commandId, status: "confirmed" });
+    expect(await writes(input.id)).toBe(1);
+    expect(decodeCommandStatus(await rpc("get", { commandId }))).toMatchObject({ kind: "execution", workflow: { status: "completed" } });
+  });
+  test("native Workflow recovery uses independent authorization and never dispatches again", async () => {
     const store = createPostgresCommandStore(createBunCommandDatabase(sql));
     const actor = { tenantId: crypto.randomUUID(), actorId: "original-actor" };
     let ready = false, allowed = true, sends = 0, recoveryAllowed = true;
@@ -278,19 +334,118 @@ suite("native PostgreSQL durable command boundaries", () => {
       audit: { event: "changed", details: () => ({}) },
     });
     const input = await fixture();
-    await command.execute(actor, "recover", input);
+    const original = await command.execute(actor, "recover", input);
+    await selectRun(original.dispatchKey);
     allowed = false; ready = true; recoveryAllowed = false;
-    let now = Date.now() + 1000;
-    const job = createCommandRecoveryJob({
-      store, tenantId: actor.tenantId, principal: { subject: "worker" }, authorize: () => "allow",
-      commands: { "worker.test": command }, batchSize: 10, leaseMs: 1000, retryAfterMs: 100,
-      alertAfterMs: 100, inputRetentionMs: 60_000, now: () => now,
+    const handler = createCommandRecoveryHandler({
+      workflows, tenantId: actor.tenantId, principal: { subject: "worker" }, authorize: () => "allow",
+      commands: { "worker.test": command }, retryDelaySeconds: 0,
     });
-    expect(await job.run()).toMatchObject({ failed: 1, completed: 0 });
-    recoveryAllowed = true; now += 101;
-    expect(await job.run()).toMatchObject({ failed: 0, completed: 1 });
-    expect(await job.run()).toMatchObject({ claimed: 0 });
+    const first = await rpc("claim", { workerId: "worker", visibilityTimeoutSeconds: 60 });
+    expect(await handler.run(first)).toBe("retry");
+    recoveryAllowed = true;
+    const second = await rpc("claim", { workerId: "worker", visibilityTimeoutSeconds: 60 });
+    expect(await handler.run(second)).toBe("completed");
+    expect(decodeCommandStatus(await rpc("get", { commandId: original.dispatchKey })))
+      .toMatchObject({ kind: "execution", execution: { status: "confirmed", audit: "complete" }, workflow: { status: "completed" } });
+    expect(await rpc("claim", { workerId: "worker", visibilityTimeoutSeconds: 60 })).toBeNull();
     await expect(command.lookupByReference(actor, "recover")).rejects.toMatchObject({ code: "COMMAND_REJECTED" });
+    expect(sends).toBe(1);
+  });
+
+  test("Workflow redelivery rejects stale acknowledgement while audit remains exactly once", async () => {
+    const store = createPostgresCommandStore(createBunCommandDatabase(sql));
+    const actor = { tenantId: crypto.randomUUID(), actorId: "actor" };
+    let sends = 0, audits = 0, ready = false;
+    const command = createExternalCommand({
+      store, inputCodec: plaintextCommandInput, name: "stale.test", input: decodeInput, result: decodeResult,
+      authorize: () => "allow", authorizeRecovery: () => "allow",
+      send: async () => { sends++; }, lookup: async (input) => ready ? input : null, matches: () => true,
+      audit: { event: "changed", details: () => ({}), write: async () => { audits++; } },
+    });
+    const original = await command.execute(actor, "stale", await fixture());
+    await selectRun(original.dispatchKey);
+    const first = await rpc("claim", { workerId: "worker", visibilityTimeoutSeconds: 60 });
+    expect(await rpc("claim", { workerId: "worker", visibilityTimeoutSeconds: 60 })).toBeNull();
+    await selectRun(original.dispatchKey);
+    const second = await rpc("claim", { workerId: "worker", visibilityTimeoutSeconds: 60 });
+    ready = true;
+    const handler = createCommandRecoveryHandler({ workflows, tenantId: actor.tenantId, principal: { subject: "worker" },
+      authorize: () => "allow", commands: { "stale.test": command }, retryDelaySeconds: 0 });
+    await expect(handler.run(first)).rejects.toThrow();
+    expect(await handler.run(second)).toBe("completed");
+    expect([sends, audits]).toEqual([1, 1]);
+  });
+
+  test("enqueue failure rolls back intent and prevents all external sending", async () => {
+    let sends = 0;
+    await expect(sql.begin(async (tx) => {
+      await tx.unsafe(`CREATE FUNCTION supacloud_commands.reject_test_enqueue() RETURNS trigger
+        LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'enqueue unavailable'; END $$;
+        CREATE TRIGGER reject_test_enqueue BEFORE INSERT ON supacloud_workflows.runs
+        FOR EACH ROW EXECUTE FUNCTION supacloud_commands.reject_test_enqueue()`);
+      const store = createPostgresCommandStore({ transaction: (run) => run({
+        query: async (query, parameters) => {
+          const result: unknown = await tx.unsafe<unknown>(query, parameters === undefined ? [] : [...parameters]);
+          return result;
+        },
+      }) });
+      const command = createExternalCommand({
+        store, inputCodec: plaintextCommandInput, name: "enqueue.fail", input: decodeInput, result: decodeResult,
+        authorize: () => "allow", send: async () => { sends++; }, lookup: async () => null, matches: () => true,
+        audit: { event: "changed", details: () => ({}) },
+      });
+      await command.execute(identity, "enqueue.fail", { id: "test", enabled: true });
+    })).rejects.toMatchObject({ code: "COMMAND_OUTCOME_UNKNOWN" });
+    expect(sends).toBe(0);
+    expect(await rpc("get", { ...identity, command: "enqueue.fail", operationId: "enqueue.fail" })).toBeNull();
+  });
+
+  test("legacy submissions and executions share a validated lookup without confusing queue and effect state", async () => {
+    const commandId = crypto.randomUUID();
+    expect(decodeCommandStatus(await rpc("submit", {
+      commandId, commandType: "legacy.test", targetType: "test", targetId: "one", payload: {},
+    }))).toMatchObject({ kind: "submission", commandId, execution: null, workflow: { status: "queued" } });
+    const command = transactionCommand(), input = await fixture(), key = crypto.randomUUID();
+    const execution = await command.execute(identity, key, input);
+    const byId = decodeCommandStatus(await rpc("get", { commandId: execution.dispatchKey }));
+    const byReference = decodeCommandStatus(await rpc("get", { ...identity, command: "webhook.update.v1", operationId: key }));
+    expect(byId).toEqual(byReference);
+    expect(decodeCommandStatus(await rpc("get", { commandId: execution.dispatchKey.toUpperCase() }))).toEqual(byId);
+    expect(byId).toMatchObject({ kind: "execution", workflow: null, execution: { status: "confirmed", audit: "complete" } });
+    expect(await rpc("get", { ...identity, tenantId: "other", command: "webhook.update.v1", operationId: key })).toBeNull();
+    for (const invalid of [{}, { commandId: execution.dispatchKey, tenantId: identity.tenantId },
+      { ...identity, command: "webhook.update.v1", operationId: key, unexpected: true }]) {
+      await expect(rpc("get", invalid)).rejects.toThrow();
+    }
+    await expect(rpc("submit", {
+      commandId: execution.dispatchKey, commandType: "different", targetType: "test", targetId: "one", payload: {},
+    })).rejects.toMatchObject({ errno: "23505" });
+    await expect(sql.begin(async (tx) => {
+      await tx.unsafe("SET LOCAL ROLE authenticated");
+      await tx.unsafe("SELECT public.supacloud_command_get($1::text::jsonb)", [JSON.stringify({ commandId })]);
+    })).rejects.toThrow();
+  });
+
+  test("exhausted Workflow retries leave the business outcome unknown and never resend", async () => {
+    const actor = { tenantId: crypto.randomUUID(), actorId: "actor" };
+    let sends = 0;
+    const command = createExternalCommand({
+      store: createPostgresCommandStore(createBunCommandDatabase(sql)), inputCodec: plaintextCommandInput,
+      name: "exhausted", input: decodeInput, result: decodeResult, authorize: () => "allow", authorizeRecovery: () => "allow",
+      send: async () => { sends++; }, lookup: async () => null, matches: () => true,
+      audit: { event: "changed", details: () => ({}) },
+    });
+    const receipt = await command.execute(actor, "exhausted", await fixture());
+    await sql.unsafe("UPDATE supacloud_workflows.steps SET max_attempts=1 WHERE run_id=$1::uuid", [receipt.dispatchKey]);
+    await selectRun(receipt.dispatchKey);
+    const handler = createCommandRecoveryHandler({
+      workflows, tenantId: actor.tenantId, principal: { subject: "worker" }, authorize: () => "allow",
+      commands: { exhausted: command }, retryDelaySeconds: 0,
+    });
+    expect(await handler.run(await rpc("claim", { workerId: "worker", visibilityTimeoutSeconds: 60 }))).toBe("retry");
+    expect(decodeCommandStatus(await rpc("get", { commandId: receipt.dispatchKey })))
+      .toMatchObject({ kind: "execution", execution: { status: "unknown", audit: "pending" }, workflow: { status: "failed" } });
     expect(sends).toBe(1);
   });
 
@@ -344,6 +499,21 @@ suite("native PostgreSQL durable command boundaries", () => {
     await sql.unsafe("UPDATE supacloud_commands.execution_receipts SET input_payload='tampered' WHERE operation_key=$1", [key]);
     await expect(command.lookupByReference(identity, key)).rejects.toMatchObject({ code: "COMMAND_UNAVAILABLE" });
   });
+  test("completed input retention does not break a delayed recovery acknowledgement", async () => {
+    const store = createPostgresCommandStore(createBunCommandDatabase(sql));
+    const actor = { tenantId: crypto.randomUUID(), actorId: "actor" };
+    const command = createExternalCommand({
+      store, inputCodec: plaintextCommandInput, name: "retention.ack", input: decodeInput, result: decodeResult,
+      authorize: () => "allow", authorizeRecovery: () => "allow",
+      send: async () => {}, lookup: async (input) => input, matches: () => true, audit: { event: "changed", details: () => ({}) },
+    });
+    const receipt = await command.execute(actor, "retained", await fixture());
+    await selectRun(receipt.dispatchKey);
+    expect(await store.redactCompleted({ tenantId: actor.tenantId, commands: ["retention.ack"], before: Date.now() + 1000, limit: 10 })).toBe(1);
+    const handler = createCommandRecoveryHandler({ workflows, tenantId: actor.tenantId, principal: { subject: "worker" },
+      authorize: () => "allow", commands: { "retention.ack": command }, retryDelaySeconds: 0 });
+    expect(await handler.run(await rpc("claim", { workerId: "worker", visibilityTimeoutSeconds: 60 }))).toBe("completed");
+  });
 
   test("v1 upgrade preserves operation identity, canonical input and fingerprint constraints", async () => {
     // All schema changes and fixture cleanup roll back on this isolated test connection.
@@ -351,9 +521,17 @@ suite("native PostgreSQL durable command boundaries", () => {
       await tx.unsafe("TRUNCATE supacloud_commands.execution_receipts, supacloud_commands.execution_audit");
       await tx.unsafe("ALTER TABLE supacloud_commands.execution_receipts DROP COLUMN input_fingerprint");
       await tx.unsafe("ALTER TABLE supacloud_commands.execution_receipts RENAME COLUMN input_payload TO input_key");
+      await tx.unsafe(`ALTER TABLE supacloud_commands.execution_receipts
+        ADD COLUMN lease_id uuid, ADD COLUMN lease_until timestamptz,
+        ADD COLUMN next_attempt_at timestamptz DEFAULT now(),
+        ADD COLUMN recovery_attempts integer DEFAULT 7`);
+      await tx.unsafe("DROP TRIGGER execution_recovery_enqueue ON supacloud_commands.execution_receipts");
       await tx.unsafe(`INSERT INTO supacloud_commands.execution_receipts
         (tenant_id,actor_id,command,operation_key,kind,input_key,status,audit_state)
         VALUES ('migration','actor','remote.v1','original-key','external','{"enabled":true}','pending','pending')`);
+      const before: unknown = await tx.unsafe<unknown>(`SELECT w.id FROM supacloud_workflows.runs w
+        JOIN supacloud_commands.execution_receipts r ON r.dispatch_key=w.id`);
+      expect(before).toHaveLength(0);
       await tx.unsafe(COMMAND_PERSISTENCE_UPGRADE_SQL);
       await tx.unsafe(COMMAND_PERSISTENCE_UPGRADE_SQL);
       const records: unknown = await tx.unsafe<unknown>(`SELECT operation_key,input_payload,
@@ -367,6 +545,15 @@ suite("native PostgreSQL durable command boundaries", () => {
       if (!Array.isArray(constraints)) throw new Error("Invalid constraints");
       const constraint: unknown = constraints[0];
       expect(constraint).toEqual({ conname: "execution_receipts_input_fingerprint_check" });
+      const workflows: unknown = await tx.unsafe<unknown>(`SELECT count(*)::integer AS count FROM supacloud_workflows.runs w
+        JOIN supacloud_commands.execution_receipts r ON w.id=r.dispatch_key`);
+      if (!Array.isArray(workflows)) throw new Error("Invalid workflow rows");
+      const workflowCount: unknown = workflows[0];
+      expect(workflowCount).toEqual({ count: 1 });
+      const oldColumns: unknown = await tx.unsafe<unknown>(`SELECT column_name FROM information_schema.columns
+        WHERE table_schema='supacloud_commands' AND table_name='execution_receipts'
+        AND column_name IN ('lease_id','lease_until','next_attempt_at','recovery_attempts')`);
+      expect(oldColumns).toHaveLength(0);
       throw new Error("Rollback migration test");
     })).rejects.toThrow("Rollback migration test");
   });

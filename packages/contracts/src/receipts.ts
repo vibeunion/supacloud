@@ -1,4 +1,4 @@
-import type { ContractDecoder } from "./http_contract";
+import type { ContractDecoder } from "./http_contract.js";
 
 export type CommandJson = null | boolean | number | string | CommandJson[] | { [key: string]: CommandJson };
 

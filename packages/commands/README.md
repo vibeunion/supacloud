@@ -10,9 +10,9 @@ no SQL driver, HTTP server, Svelte lifecycle or scheduler is bundled.
   for every local business/audit write.
 - `createExternalCommand`: commits intent before one send. Duplicate execution,
   reconciliation, audit recovery and background recovery never resend.
-- `createCommandRecoveryJob`: bounded `run()` handler for the host's existing Job
-  executor. Explicit tenant, named handlers, worker authorization, leases,
-  backoff, sanitized alerts and completed-input retention.
+- `createCommandRecoveryHandler`: handles one already-claimed Workflow recovery
+  step. Explicit tenant, named handlers and worker authorization; no claim loop,
+  independent leases, retention scheduler or business redispatch.
 
 All factories require a `store`, domain input/result decoders, an `inputCodec`,
 an explicit `"allow"` / `"deny"` policy and domain audit metadata. A thrown or
@@ -33,14 +33,17 @@ independent `authorizeRecovery(principal, reference, transaction)` and keeps
 the original receipt identity. No recovery policy means denial. Neither method
 assumes that a cancelled or failed request rolled back.
 
-The Job handler returns a report; the host must schedule runs and send its alerts
-to existing monitoring. Bound lookup duration at the transport layer. Lease expiry
-can duplicate read-only queries, not dispatches. Pending/unknown/audit-pending
-inputs are never removed by completed-input retention.
+Pass `supacloud.workflows` as the handler's `workflows` port. The existing dispatcher
+routes reconcile steps to `run(claim)` and other steps to their registered handlers.
+PGMQ/Workflow owns delivery, visibility, attempts and dead-letter state. Completion
+requires confirmed business output and complete audit, not merely a successful
+lookup call. Bound lookup duration and monitor failed/unknown operations.
 
 Redaction keeps fingerprints and receipts: same-input explicit replay deduplicates;
 different input conflicts; reference-only lookup returns `COMMAND_INPUT_EXPIRED`.
 Never issue a new operation just because the old input expired.
+Already confirmed/audited receipts can still acknowledge a delayed recovery step
+after input redaction. Retention is a separate maintenance operation.
 
 See [breaking changes, schema upgrade, release and rollback](../../docs/command-migration.md).
 Run `bun run typecheck`, `bun run typecheck:test`, `bun test` and `bun run build`.

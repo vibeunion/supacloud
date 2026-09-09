@@ -5,7 +5,7 @@ import { createBunCommandDatabase } from "@supacloud/db/bun";
 import { decodeDurableCommandReceipt } from "@supacloud/contracts";
 import { checkProject } from "@supacloud/compiler";
 import { ApplicationError, executeJob } from "./index";
-import { createCommandRecoveryJob } from "@supacloud/commands";
+import { createCommandRecoveryHandler } from "@supacloud/commands";
 import { webhookCompileOptions } from "./generate-webhook-example";
 import { createWebhookMigrationExample, decodeWebhookInput, WEBHOOK_EXAMPLE_SQL } from "./webhook-migration-example";
 
@@ -14,20 +14,25 @@ const suite = connection ? describe : describe.skip;
 test("Webhook acceptance runs current compiler-generated factories and real controller invokers", async () => {
   expect((await checkProject(webhookCompileOptions)).upToDate).toBe(true);
 });
-test("bounded recovery uses the existing Job execution path", async () => {
-  const handler = createCommandRecoveryJob({
-    store: { claim: async () => [], release: async () => {}, redactCompleted: async () => 0 },
+test("a Workflow recovery delivery uses the existing Job execution path", async () => {
+  let retries = 0;
+  const handler = createCommandRecoveryHandler({
+    workflows: { complete: async () => {}, retry: async () => { retries++; }, fail: async () => {} },
     tenantId: "tenant", principal: { subject: "worker" }, authorize: () => "allow",
     commands: { "remote.update.v1": { recover: async () => null } },
-    batchSize: 10, leaseMs: 60_000, retryAfterMs: 60_000, alertAfterMs: 3600_000, inputRetentionMs: 86400_000,
+    retryDelaySeconds: 60,
   });
   const services = { recovery: handler };
   const report = await executeJob(
     { name: "recovery", createServices: () => services, controllers: [] }, services,
     { name: "command.recovery", className: "Recovery", serviceKey: "recovery", scope: "application" },
-    undefined, { subject: "worker" },
+    { status: "claimed", workflowName: "supacloud.command.reconcile", workflowVersion: "1",
+      runId: "operation", stepKey: "reconcile", stepId: "step", messageId: "1", attempt: 1, workerId: "worker",
+      input: { commandId: "operation", tenantId: "tenant", actorId: "actor", command: "remote.update.v1", operationId: "key" } },
+    { subject: "worker" },
   );
-  expect(report).toMatchObject({ claimed: 0, failed: 0, redacted: 0 });
+  expect(report).toBe("retry");
+  expect(retries).toBe(1);
 });
 suite("Webhook full module migration with native PostgreSQL", () => {
   let sql: SQL;

@@ -20,7 +20,7 @@
   "scripts": {
     "test": "bun test",
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts --outdir dist --target node",
+    "build:js": "bun build src/index.ts --outdir dist --target node --external @supacloud/contracts",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
@@ -43,6 +43,9 @@
   },
   "peerDependencies": {
     "@supabase/supabase-js": "^2.115.0"
+  },
+  "dependencies": {
+    "@supacloud/contracts": "file:../contracts"
   },
   "devDependencies": {
     "@types/bun": "^1.4.0",

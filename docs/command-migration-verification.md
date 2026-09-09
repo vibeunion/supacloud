@@ -1,5 +1,9 @@
 # Command 迁移能力验收记录
 
+> 历史记录：对应收敛前提交 `18374b58`。后续已接入既有 Workflow/PGMQ，
+> 当前验收以 [Command / Workflow Verification](./command-workflow-verification.md) 为准。
+> 本地日志目录会被新版验收入口覆盖，下文日志编号仅描述当时的运行。
+
 日期：2026-09-09。范围为基于 main `18f84be7` 的本地 SupaCloud 隔离工作区，
 不包含原共享工作区其他任务的改动，也不是客户项目或生产验收。
 对应方案：[架构、迁移与恢复](./command-migration.md)。

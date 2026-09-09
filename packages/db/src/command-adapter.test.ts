@@ -26,16 +26,16 @@ test("connection acquisition failure differs from an uncertain transaction compl
   await expect(store.transaction(async () => { throw new CommandError("COMMAND_REJECTED"); }))
     .rejects.toMatchObject({ code: "COMMAND_REJECTED" });
 });
-test("recovery SQL is bounded and tenant scoped before executing", async () => {
+test("retention SQL is bounded and tenant scoped before executing", async () => {
   let queries = 0;
   const store = createPostgresCommandStore({
     transaction: (run) => run({ query: async () => { queries++; return []; } }),
   });
   for (const limit of [0, 1001, 1.2]) {
-    await expect(store.claim({ tenantId: "tenant", commands: ["remote"], now: 1000, leaseMs: 100, limit }))
+    await expect(store.redactCompleted({ tenantId: "tenant", commands: ["remote"], before: 1000, limit }))
       .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
   }
-  await expect(store.claim({ tenantId: "tenant", commands: [], now: 1000, leaseMs: 100, limit: 1 }))
+  await expect(store.redactCompleted({ tenantId: "tenant", commands: [], before: 1000, limit: 1 }))
     .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
   expect(queries).toBe(0);
 });

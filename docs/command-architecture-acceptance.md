@@ -9,7 +9,7 @@
 
 - contracts 根入口：协议、解码、错误；`/client` 与 `/browser` 显式选择。
 - commands：依赖协议与抽象存储，不依赖数据库、Svelte、HTTP。
-- db：PostgreSQL 存储与事务适配，包含恢复租约及输入保留。
+- db：PostgreSQL 存储、提交身份绑定、事务内入队及输入保留。
 - elysia：依赖统一命令接口与错误；通过现有 Job 执行恢复批次。
 - app-svelte：可选的目标失效与卸载绑定，不自动清持久锁。
 
@@ -28,9 +28,9 @@ Scenario: 页面组件复用
 
 Scenario: 恢复进程重启
   Given 外部操作已确认但审计未完成
-  When 已授权的 Job 重新领取待处理回执
+  When 现有 Workflow 重新投递恢复步骤
   Then 仅补审计且保留原操作人
-  And 并发 Job 不重复领取同一有效租约
+  And 原 Workflow attempt 控制步骤确认，事务锁保护业务回执
 
 Scenario: 数据保留期到达
   Given 已确认且审计完成的操作超过输入保留期

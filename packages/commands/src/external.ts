@@ -1,5 +1,5 @@
-import { CommandError, canonicalCommandJson, type CommandIdentity } from "@supacloud/contracts";
-import { commandContext, type PersistentCommandDefinition, type RecoveryPrincipal } from "./context";
+import { CommandError, canonicalCommandJson, decodeDurableCommandReceipt, type CommandIdentity } from "@supacloud/contracts";
+import { checkAuthorization, commandContext, type PersistentCommandDefinition, type RecoveryPrincipal } from "./context";
 import type { OperationReference } from "./store";
 
 export interface ExternalDispatch { idempotencyKey: string }
@@ -92,6 +92,17 @@ export function createExternalCommand<Input, Result, Transaction>(
     },
     async recover(principal: RecoveryPrincipal, reference: OperationReference) {
       if (reference.command !== definition.name) throw new CommandError("COMMAND_REJECTED");
+      const completed = await context.transaction(async (session) => {
+        await session.lock(reference);
+        const authorize = definition.authorizeRecovery;
+        if (!authorize) throw new CommandError("COMMAND_REJECTED");
+        await checkAuthorization(() => authorize(principal, reference, session.transaction));
+        const stored = await session.read(reference);
+        if (stored?.receipt.status !== "confirmed" || stored.receipt.audit !== "complete") return null;
+        if (stored.kind !== "external") throw new CommandError("COMMAND_RECEIPT_INVALID");
+        return decodeDurableCommandReceipt(stored.receipt, definition.result);
+      });
+      if (completed !== null) return completed;
       const request = await context.restore(reference, reference.operationId, principal);
       return request === null ? null : reconcile(reference, reference.operationId, request.input, principal);
     },

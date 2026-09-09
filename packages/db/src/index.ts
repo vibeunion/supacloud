@@ -78,5 +78,5 @@ export {
 
 export { COMMAND_PERSISTENCE_SQL, COMMAND_PERSISTENCE_UPGRADE_SQL } from "./command-schema";
 export {
-  createPostgresCommandStore, type CommandDatabase, type CommandTransaction,
+  createPostgresCommandStore, type CommandDatabase, type CommandTransaction, type CommandSubmissionBinding,
 } from "./command-adapter";

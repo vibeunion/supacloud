@@ -1,7 +1,8 @@
-export * from "./http_contract";
-export * from "./receipts";
-export * from "./command_error";
+export * from "./http_contract.js";
+export * from "./receipts.js";
+export * from "./command_error.js";
+export * from "./command_status.js";
 export type {
   OperationReference, StoredCommand, CommandStoreSession, CommandStore,
-  RecoveryClaim, RecoveryScope, CommandRecoveryStore,
-} from "./command_store";
+  RecoveryScope, CommandRetentionStore,
+} from "./command_store.js";

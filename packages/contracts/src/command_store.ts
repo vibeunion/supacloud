@@ -1,4 +1,4 @@
-import type { CommandIdentity, DurableCommandReceipt } from "./receipts";
+import type { CommandIdentity, DurableCommandReceipt } from "./receipts.js";
 
 export interface OperationReference extends CommandIdentity {
   command: string;
@@ -25,18 +25,11 @@ export interface CommandStore<Transaction> {
   transaction<T>(run: (session: CommandStoreSession<Transaction>) => Promise<T>): Promise<T>;
 }
 
-export interface RecoveryClaim extends OperationReference {
-  leaseId: string;
-  createdAt: number;
-  attempts: number;
-}
 export interface RecoveryScope {
   tenantId: string;
   commands: readonly string[];
 }
-export interface CommandRecoveryStore {
-  claim(scope: RecoveryScope & { now: number; limit: number; leaseMs: number }): Promise<RecoveryClaim[]>;
-  release(claim: RecoveryClaim, nextAttemptAt: number): Promise<void>;
+export interface CommandRetentionStore {
   /** Retains receipt and fingerprint; never redacts pending or unaudited operations. */
   redactCompleted(scope: RecoveryScope & { before: number; limit: number }): Promise<number>;
 }

@@ -1,88 +1,103 @@
 import { CommandError, commandIdentifier, decodeCommandJson, decodeDurableCommandReceipt, type CommandAuthorization, type DurableCommandReceipt } from "@supacloud/contracts";
 import { checkAuthorization, type RecoveryPrincipal } from "./context";
-import type { CommandRecoveryStore, OperationReference } from "./store";
+import type { OperationReference } from "./store";
 
 export interface RecoverableCommand {
   recover(principal: RecoveryPrincipal, reference: OperationReference): Promise<DurableCommandReceipt<unknown> | null>;
 }
-export interface RecoveryAlert {
-  code: "COMMAND_RECOVERY_REQUIRED" | "COMMAND_RECOVERY_FAILED";
-  reference: OperationReference;
+export interface CommandWorkflowAttempt {
+  stepId: string;
+  messageId: string;
+  attempt: number;
+  workerId: string;
 }
-export interface CommandRecoveryReport {
-  claimed: number;
-  completed: number;
-  unresolved: number;
-  failed: number;
-  redacted: number;
-  alerts: RecoveryAlert[];
+/** Structurally implemented by supacloud.workflows. Delivery remains host-owned. */
+export interface CommandWorkflowPort {
+  complete(request: CommandWorkflowAttempt & { stepOutput: Record<string, unknown>; runOutput: Record<string, unknown> }): Promise<unknown>;
+  retry(request: CommandWorkflowAttempt & { errorMessage: string; delaySeconds: number }): Promise<unknown>;
+  fail(request: CommandWorkflowAttempt & { errorMessage: string }): Promise<unknown>;
 }
 
-/** A bounded Job handler, not a timer or a new queue. No code path dispatches a write. */
-export function createCommandRecoveryJob(options: {
-  store: CommandRecoveryStore;
+function decodeClaim(value: unknown) {
+  if (!value || typeof value !== "object" || !("status" in value) || value.status !== "claimed"
+    || !("workflowName" in value)
+    || !("workflowVersion" in value) || value.workflowVersion !== "1"
+    || !("stepKey" in value) || value.stepKey !== "reconcile"
+    || !("runId" in value) || !("input" in value) || !("stepId" in value)
+    || !("messageId" in value) || !("attempt" in value) || !("workerId" in value)
+    || typeof value.attempt !== "number" || !Number.isSafeInteger(value.attempt) || value.attempt < 1
+    || typeof value.messageId !== "string" || !/^[1-9][0-9]*$/.test(value.messageId)) {
+    throw new TypeError("Invalid command recovery claim");
+  }
+  const input = value.input;
+  if (!input || typeof input !== "object" || !("tenantId" in input) || !("actorId" in input)
+    || !("command" in input) || !("operationId" in input) || !("commandId" in input)) {
+    throw new TypeError("Invalid command recovery reference");
+  }
+  const commandId = commandIdentifier(input.commandId);
+  if (value.runId !== commandId) throw new TypeError("Mismatched command workflow");
+  const reference: OperationReference = {
+    tenantId: commandIdentifier(input.tenantId), actorId: commandIdentifier(input.actorId),
+    command: commandIdentifier(input.command), operationId: commandIdentifier(input.operationId),
+  };
+  if (value.workflowName !== "supacloud.command.reconcile" && value.workflowName !== `command.${reference.command}`) {
+    throw new TypeError("Invalid recovery workflow");
+  }
+  const attempt: CommandWorkflowAttempt = {
+    stepId: commandIdentifier(value.stepId), messageId: value.messageId, attempt: value.attempt,
+    workerId: commandIdentifier(value.workerId),
+  };
+  return { commandId, reference, attempt };
+}
+
+/** Handles one already-claimed recovery step. No polling, leases or business sends. */
+export function createCommandRecoveryHandler(options: {
+  workflows: CommandWorkflowPort;
   principal: RecoveryPrincipal;
   tenantId: string;
   commands: Readonly<Record<string, RecoverableCommand>>;
   authorize(): CommandAuthorization | Promise<CommandAuthorization>;
-  batchSize: number;
-  leaseMs: number;
-  retryAfterMs: number;
-  alertAfterMs: number;
-  inputRetentionMs: number;
-  now?: () => number;
+  retryDelaySeconds: number;
 }) {
-  options = { ...options, principal: { ...options.principal }, commands: { ...options.commands } };
   const tenantId = commandIdentifier(options.tenantId);
-  commandIdentifier(options.principal.subject);
-  const names = Object.keys(options.commands).map(commandIdentifier);
-  if (names.length === 0) throw new TypeError("Recovery requires named commands");
-  for (const value of [options.batchSize, options.leaseMs, options.retryAfterMs, options.alertAfterMs, options.inputRetentionMs]) {
-    if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError("Invalid recovery policy");
-  }
-  if (options.batchSize > 1000) throw new TypeError("Recovery batches are bounded to 1000");
-  const scope = { tenantId, commands: names };
+  const principal = { subject: commandIdentifier(options.principal.subject) };
+  const commands = { ...options.commands }, workflows = options.workflows, authorize = options.authorize;
+  const delaySeconds = options.retryDelaySeconds;
+  if (!Number.isSafeInteger(delaySeconds) || delaySeconds < 0 || delaySeconds > 86400) throw new TypeError("Invalid recovery delay");
   return {
-    async run(): Promise<CommandRecoveryReport> {
-      await checkAuthorization(options.authorize);
-      const now = (options.now ?? Date.now)();
-      if (!Number.isSafeInteger(now) || now < 0) throw new TypeError("Invalid recovery clock");
-      if (!Number.isSafeInteger(now + options.leaseMs) || !Number.isSafeInteger(now + options.retryAfterMs)) {
-        throw new TypeError("Recovery timestamp overflow");
-      }
-      const claims = await options.store.claim({ ...scope, now, limit: options.batchSize, leaseMs: options.leaseMs });
-      const report: CommandRecoveryReport = { claimed: claims.length, completed: 0, unresolved: 0, failed: 0, redacted: 0, alerts: [] };
-      for (const claim of claims) {
-        if (claim.tenantId !== tenantId || !names.includes(claim.command)) throw new CommandError("COMMAND_RECEIPT_INVALID");
-        const reference: OperationReference = {
-          tenantId: claim.tenantId, actorId: claim.actorId, command: claim.command, operationId: claim.operationId,
-        };
-        try {
-          const command = Object.hasOwn(options.commands, claim.command) ? options.commands[claim.command] : undefined;
-          if (!command) throw new CommandError("COMMAND_RECEIPT_INVALID");
-          const raw = await command.recover({ ...options.principal }, reference);
-          const receipt = raw === null ? null : decodeDurableCommandReceipt(raw, decodeCommandJson);
-          if (receipt !== null) {
-            for (const key of ["tenantId", "actorId", "command", "operationId"] as const) {
-              if (receipt[key] !== reference[key]) throw new CommandError("COMMAND_RECEIPT_INVALID");
-            }
+    async run(value: unknown): Promise<"completed" | "retry" | "failed"> {
+      const { commandId, reference, attempt } = decodeClaim(value);
+      if (reference.tenantId !== tenantId || attempt.workerId !== principal.subject
+        || !Object.hasOwn(commands, reference.command)) throw new CommandError("COMMAND_REJECTED");
+      await checkAuthorization(authorize);
+      const command = commands[reference.command];
+      if (!command) throw new CommandError("COMMAND_REJECTED");
+      let receipt: DurableCommandReceipt<unknown> | null;
+      try {
+        const raw = await command.recover({ ...principal }, { ...reference });
+        receipt = raw === null ? null : decodeDurableCommandReceipt(raw, decodeCommandJson);
+        if (receipt !== null) {
+          if (receipt.dispatchKey !== commandId) throw new CommandError("COMMAND_RECEIPT_INVALID");
+          for (const key of ["tenantId", "actorId", "command", "operationId"] as const) {
+            if (receipt[key] !== reference[key]) throw new CommandError("COMMAND_RECEIPT_INVALID");
           }
-          if (receipt?.status === "confirmed" && receipt.audit === "complete") report.completed++;
-          else {
-            report.unresolved++;
-            if (now - claim.createdAt >= options.alertAfterMs) report.alerts.push({ code: "COMMAND_RECOVERY_REQUIRED", reference });
-          }
-        } catch {
-          report.failed++;
-          report.alerts.push({ code: "COMMAND_RECOVERY_FAILED", reference });
-        } finally {
-          await options.store.release(claim, now + options.retryAfterMs);
         }
+      } catch (error) {
+        if (error instanceof CommandError && (error.code === "COMMAND_INPUT_EXPIRED" || error.code === "COMMAND_RECEIPT_INVALID")) {
+          await workflows.fail({ ...attempt, errorMessage: error.code });
+          return "failed";
+        }
+        await workflows.retry({ ...attempt, errorMessage: "COMMAND_RECOVERY_FAILED", delaySeconds });
+        return "retry";
       }
-      report.redacted = await options.store.redactCompleted({
-        ...scope, before: Math.max(0, now - options.inputRetentionMs), limit: options.batchSize,
-      });
-      return report;
+      // Acknowledgement failures propagate. Redelivery only repeats safe recovery.
+      if (receipt?.status === "confirmed" && receipt.audit === "complete") {
+        const output = { commandId, status: "confirmed", audit: "complete" };
+        await workflows.complete({ ...attempt, stepOutput: output, runOutput: output });
+        return "completed";
+      }
+      await workflows.retry({ ...attempt, errorMessage: "COMMAND_RECOVERY_REQUIRED", delaySeconds });
+      return "retry";
     },
   };
 }

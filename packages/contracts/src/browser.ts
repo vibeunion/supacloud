@@ -1,1 +1,1 @@
-export * from "./durable_locks";
+export * from "./durable_locks.js";

@@ -2,7 +2,7 @@
 
 日期：2026-09-09。本文描述 SupaCloud 仓库内的实现和验收，不代表 npm
 已经发布、客户已经迁移或生产环境已经验证。允许协议升级，不以维持旧行为为目标。
-本地检查范围与结果见[验收记录](./command-migration-verification.md)。
+本地检查范围与结果见[当前验收记录](./command-workflow-verification.md)。
 
 ## 目标与边界
 
@@ -13,9 +13,10 @@ Module、Controller、Command 只是组织方式，不提供跨远程服务的�
 | --- | --- | --- |
 | `@supacloud/contracts` | 根入口仅协议、回执、错误码与存储端口类型 | DI、认证服务、数据库、页面 |
 | `@supacloud/contracts/client` 与 `/browser` | 可选客户端发送/作用域；可选浏览器锁协调器 | 领域锁策略、自动清锁 |
-| `@supacloud/commands` | 不依赖 SQL/HTTP/Svelte 的事务执行、外部对账、有限批次恢复 | 领域规则、新任务队列、跨服务原子性 |
+| `@supacloud/commands` | 不依赖 SQL/HTTP/Svelte 的事务执行、外部对账、单次恢复处理 | 消息领取、调度/退避队列、跨服务原子性 |
+| `@supacloud/js` / 现有 Workflow、PGMQ | 统一命令状态查询、步骤投递、领取、重试预算、失败处理 | 将入队或 Workflow 完成视为业务已确认 |
 | `@supacloud/app-svelte` | 将通用作用域接入卸载、目标变化、宿主导航钩子 | 自动解锁、替换 SvelteKit 或认证体系 |
-| `@supacloud/db` | 实现协议存储端口：同连接事务、回执/审计 SQL、租约、输入清理 | 业务执行器、远程发送、恢复策略 |
+| `@supacloud/db` | 同连接事务、执行回执、原提交身份绑定、事务内入队、输入清理 | 第二套恢复领取队列、远程发送 |
 | `@supacloud/elysia` | 真实 Controller 调用、协议错误映射、可选持久化 RPC 适配器 | 依赖 DB 错误类、第二次执行或审计 |
 | `@supacloud/compiler` | 检查命令策略与已声明执行边界 | 凭声明证明远程适配器真实可靠 |
 
@@ -46,7 +47,8 @@ Command，不强迫整个应用换框架。旧 app 路径目前只做重导出�
 
 ## 同库事务
 
-1. 通过应用迁移流程安装 `COMMAND_PERSISTENCE_SQL`，不要在 HTTP 请求中建表。
+1. 先安装平台现有 PGMQ、`workflows-public`、新版 `commands-public` SQL 模块，
+   再通过应用迁移安装 `COMMAND_PERSISTENCE_SQL`。不要在 HTTP 请求中建表。
 2. 使用 `createBunCommandDatabase(sql)`，从 `@supacloud/db/bun` 导入。
 3. 用 `createPostgresCommandStore(database)` 提供存储端口，再调用 commands 包的执行器。
    业务更新、授权查询、领域审计必须使用执行器传入的 `tx`，不能独立请求远程审计服务。
@@ -86,7 +88,7 @@ try {
 `createExternalCommand` 的顺序是：
 
 ```text
-提交 pending 意图 -> 单次 send -> 只读 lookup 与领域 matches
+同事务提交 pending 意图与 Workflow 恢复步骤 -> 单次 send -> 只读 lookup 与领域 matches
   -> 提交 confirmed 结果 -> 独立事务补审计
 ```
 
@@ -105,20 +107,23 @@ try {
 交互式恢复重新校验用户权限；后台恢复使用独立 `authorizeRecovery`，不冒充已经撤销的
 用户会话，回执仍保留原始 actorId。未提供后台授权回调时，恢复默认拒绝。
 
-### 有限批次恢复
+### Workflow 恢复
 
-`createCommandRecoveryJob` 返回普通 `run()` 处理器，可接入宿主现有 `@Job` / `executeJob`
-或队列调度。它不是新调度器，也不会启动隐藏定时器。
+`createCommandRecoveryHandler` 提供 `run(claim)`，接收现有 Workflow dispatcher 已领取的
+`reconcile` 步骤。传入 `workflows: supacloud.workflows`，按租户注册命令、服务身份、
+独立授权和 `retryDelaySeconds`。它不自行 claim，不扫描回执表，也不创建定时器。
 
-- 明确配置 tenantId、命名 commands、服务身份 principal，以及每批次 authorize。
-- 使用 `FOR UPDATE SKIP LOCKED` 领取有期限的租约；旧租约释放不能清掉新租约。
-- 每批最多 1000 条；每条调用 `recover`，失败后退避，永不调用 `send`。
-- 超龄 unknown 和恢复失败以 `report.alerts` 返回，不含原始输入、密钥或数据库异常。
-  宿主必须接入现有告警通道；任务级失败也必须由宿主监控。
-- 租约到期可能造成重复只读查询，但审计仍受事务锁/回执约束。宿主必须给下游只读查询
-  设置超时，确保单次 Job 可结束；租约本身不会中止网络请求。
-- 定期清除超过 `inputRetentionMs` 的 confirmed/audit-complete 输入，保留回执与指纹。
-  pending、unknown、待补审计不能按该策略删除。
+- 直接外部执行使用 `supacloud.command.reconcile`；原提交命令继续原 `command.<name>` Workflow。
+- 任务只包含操作引用，不复制加密输入；初始恢复预算为 20 次，耗尽由现有 Workflow 死信处理。
+- `run` 返回 `completed`、`retry` 或 `failed`；只有业务 confirmed 且审计 complete 才完成步骤。
+- 领取、可见性超时、重试计数和旧 attempt 拒绝全部复用 Workflow/PGMQ。
+- 传输或确认响应丢失时保留重投能力，但重投只运行对账和补审计，永不调用 send。
+- 宿主 dispatcher 必须识别其他 Workflow，不能把不认识的任务当作恢复任务丢弃或确认。
+- 继续在下游只读传输层设置超时，并监控 Workflow 失败/死信及回执 unknown 年龄。
+- 输入清理独立调用 `store.redactCompleted`，由现有维护任务调度；不再捆绑进恢复循环。
+  已完成输入清理后，后台仍可读取已确认回执以完成迟到的 Workflow 确认。
+
+完整身份绑定、SDK 返回值升级、部署顺序见 [Workflow 收敛方案](./command-workflow-convergence.md)。
 
 不能隐瞒的窗口：进程可能在意图提交后、实际 send 前崩溃。这时不会丢失意图，但也不会
 保证自动完成业务。查询不到结果不等于未发生；无可靠下游回执时保持 unknown，人工决策。
@@ -150,14 +155,15 @@ try {
 
 没有旧表时仅安装 `COMMAND_PERSISTENCE_SQL`。使用过未发布 v1 原型的应用应先停止旧写入
 和旧恢复进程，在迁移事务内执行 `COMMAND_PERSISTENCE_UPGRADE_SQL`，再启动新版。
-它将原 `input_key` 转为 `input_payload`，计算指纹，增加租约字段和约束，不删除操作号。
+它将原 `input_key` 转为 `input_payload`，计算指纹，为未完成操作补入 Workflow，
+删除旧恢复租约/退避字段，不删除 operationId、dispatchKey 或业务回执。
 不能把 `CREATE TABLE IF NOT EXISTS` 当作表升级；旧二进制不兼容新列。
 
 迁移后的旧 payload 仍是明文。首次切换可以显式使用 `plaintextCommandInput` 读取这些
 非敏感数据；需要加密时由宿主完成带版本 codec 和离线数据回填后再切换，不能直接用
 新密钥尝试解密旧明文。迁移测试验证原始操作号、输入、指纹约束及重复执行。
 
-清理输入后，按编号恢复会返回 `COMMAND_INPUT_EXPIRED` / HTTP 410；提供原输入的授权
+清理输入后，交互式按编号恢复会返回 `COMMAND_INPUT_EXPIRED` / HTTP 410；提供原输入的授权
 重放仍能返回同一回执，同键不同输入仍报冲突。前端不要因 410 删除锁或生成新操作号。
 需要长期按编号查阅时，应调整保留期或提供领域自己的只读归档入口。
 

@@ -3,7 +3,7 @@ import {
 } from "@supacloud/contracts";
 import type {
   CommandStore, CommandStoreSession, StoredCommand, OperationReference,
-  CommandRecoveryStore, RecoveryClaim, RecoveryScope,
+  CommandRetentionStore, RecoveryScope,
 } from "@supacloud/contracts";
 
 export interface CommandTransaction {
@@ -11,6 +11,13 @@ export interface CommandTransaction {
 }
 export interface CommandDatabase {
   transaction<T>(run: (transaction: CommandTransaction) => Promise<T>): Promise<T>;
+}
+export interface CommandSubmissionBinding {
+  commandId: string;
+  stepId: string;
+  messageId: string;
+  attempt: number;
+  workerId: string;
 }
 const where = "tenant_id=$1 AND actor_id=$2 AND command=$3 AND operation_key=$4";
 const keys = (ref: OperationReference) => [ref.tenantId, ref.actorId, ref.command, ref.operationId].map(commandIdentifier);
@@ -36,7 +43,32 @@ const projection = `tenant_id AS "tenantId", actor_id AS "actorId", command,
   status, audit_state AS audit, result::text AS result_json, input_fingerprint,input_payload,kind`;
 
 /** PostgreSQL only: no remote sending, domain matching or recovery policy lives here. */
-export function createPostgresCommandStore(database: CommandDatabase): CommandStore<CommandTransaction> & CommandRecoveryStore {
+export function createPostgresCommandStore(
+  database: CommandDatabase,
+  options: { submission?: CommandSubmissionBinding } = {},
+): CommandStore<CommandTransaction> & CommandRetentionStore {
+  const submission = options.submission === undefined ? undefined : { ...options.submission };
+  if (submission !== undefined && (
+    !/^[0-9a-f-]{36}$/.test(submission.commandId) || !/^[0-9a-f-]{36}$/.test(submission.stepId)
+    || !/^[1-9][0-9]*$/.test(submission.messageId) || !Number.isSafeInteger(submission.attempt)
+    || submission.attempt < 1 || !commandIdentifier(submission.workerId)
+  )) throw new CommandError("COMMAND_INPUT_INVALID");
+  const submittedPayload = async (tx: CommandTransaction, ref: OperationReference, inserting: boolean): Promise<unknown> => {
+    if (submission === undefined) throw new CommandError("COMMAND_INPUT_INVALID");
+    if (ref.operationId !== submission.commandId) throw new CommandError("COMMAND_IDEMPOTENCY_CONFLICT");
+    const found = rows(await tx.query(`SELECT c.command_type,c.actor_id::text,c.tenant_id,c.payload::text AS payload_json,
+      s.step_key,s.status FROM supacloud_commands.receipts c
+      JOIN LATERAL supacloud_workflows.lock_step_attempt($2::uuid,$3::bigint,$4::integer,$5) s
+      ON s.run_id=c.id WHERE c.id=$1::uuid`,
+    [submission.commandId, submission.stepId, submission.messageId, submission.attempt, submission.workerId]));
+    const row = found[0];
+    if (found.length !== 1 || row === undefined || row["command_type"] !== ref.command || row["actor_id"] !== ref.actorId
+      || row["tenant_id"] !== ref.tenantId || row["step_key"] !== "execute"
+      || (row["status"] !== "running" && (inserting || row["status"] !== "completed"))
+      || typeof row["payload_json"] !== "string") throw new CommandError("COMMAND_REJECTED");
+    const payload: unknown = JSON.parse(row["payload_json"]);
+    return payload;
+  };
   const transaction = async <T>(run: (tx: CommandTransaction) => Promise<T>): Promise<T> => {
     let started = false;
     try {
@@ -48,7 +80,10 @@ export function createPostgresCommandStore(database: CommandDatabase): CommandSt
   };
   const session = (tx: CommandTransaction): CommandStoreSession<CommandTransaction> => ({
     transaction: tx,
-    async lock(ref) { await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [JSON.stringify(keys(ref))]); },
+    async lock(ref) {
+      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [JSON.stringify(keys(ref))]);
+      if (submission !== undefined) await submittedPayload(tx, ref, false);
+    },
     async read(ref) {
       const found = rows(await tx.query(`SELECT ${projection} FROM supacloud_commands.execution_receipts WHERE ${where}`, keys(ref)));
       if (found.length > 1) throw new CommandError("COMMAND_RECEIPT_INVALID");
@@ -56,12 +91,32 @@ export function createPostgresCommandStore(database: CommandDatabase): CommandSt
       return row === undefined ? null : decodeStored(row);
     },
     async insert(record) {
-      const receipt = record.receipt;
+      const receipt = submission === undefined ? record.receipt : { ...record.receipt, dispatchKey: submission.commandId };
+      if (submission !== undefined) {
+        const payload = await submittedPayload(tx, receipt, true);
+        const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalCommandJson(payload)));
+        const fingerprint = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+        if (fingerprint !== record.inputFingerprint) throw new CommandError("COMMAND_IDEMPOTENCY_CONFLICT");
+      }
       const result = receipt.status === "confirmed" ? canonicalCommandJson(receipt.result) : null;
       await tx.query(`INSERT INTO supacloud_commands.execution_receipts
         (tenant_id,actor_id,command,operation_key,dispatch_key,kind,input_fingerprint,input_payload,status,audit_state,result)
         VALUES ($1,$2,$3,$4,$5::uuid,$6,$7,$8,$9,$10,$11::text::jsonb)`,
       [...keys(receipt), receipt.dispatchKey, record.kind, record.inputFingerprint, record.inputPayload, receipt.status, receipt.audit, result]);
+      if (submission !== undefined) {
+        const attempt = { stepId: submission.stepId, messageId: submission.messageId, attempt: submission.attempt, workerId: submission.workerId };
+        const commandId = submission.commandId;
+        if (record.kind === "external") {
+          await tx.query("SELECT public.supacloud_workflow_advance($1::text::jsonb)", [JSON.stringify({
+            ...attempt, output: { commandId, status: "intent-recorded" }, nextStepKey: "reconcile",
+            nextInput: { commandId, tenantId: receipt.tenantId, actorId: receipt.actorId, command: receipt.command, operationId: receipt.operationId },
+            nextMaxAttempts: 20,
+          })]);
+        } else {
+          const output = { commandId, status: "confirmed", audit: "complete" };
+          await tx.query("SELECT public.supacloud_workflow_complete($1::text::jsonb)", [JSON.stringify({ ...attempt, stepOutput: output, runOutput: output })]);
+        }
+      }
     },
     async confirm(ref, result) {
       await tx.query(`UPDATE supacloud_commands.execution_receipts SET status='confirmed',result=$5::text::jsonb,updated_at=now()
@@ -92,45 +147,11 @@ export function createPostgresCommandStore(database: CommandDatabase): CommandSt
   const join = `r.tenant_id=c.tenant_id AND r.actor_id=c.actor_id AND r.command=c.command AND r.operation_key=c.operation_key`;
   return {
     transaction: (run) => transaction((tx) => run(session(tx))),
-    async claim(options) {
-      const found = await transaction(async (tx) => rows(await tx.query(`WITH candidates AS (
-        SELECT tenant_id,actor_id,command,operation_key FROM supacloud_commands.execution_receipts
-        WHERE ${selected} AND (status<>'confirmed' OR audit_state<>'complete')
-          AND next_attempt_at<=to_timestamp($3::double precision/1000)
-          AND (lease_until IS NULL OR lease_until<=to_timestamp($3::double precision/1000))
-        ORDER BY created_at,actor_id,operation_key LIMIT $4 FOR UPDATE SKIP LOCKED
-      ) UPDATE supacloud_commands.execution_receipts r
-        SET lease_id=gen_random_uuid(),lease_until=to_timestamp(($3::double precision+$5)/1000),recovery_attempts=recovery_attempts+1
-        FROM candidates c WHERE ${join}
-        RETURNING r.tenant_id AS "tenantId",r.actor_id AS "actorId",r.command,r.operation_key AS "operationId",
-          r.lease_id::text AS "leaseId",extract(epoch from r.created_at)::double precision*1000 AS "createdAt",
-          r.recovery_attempts AS attempts`,
-      [...scopeKeys(options), integer(options.now, 0), integer(options.limit, 1, 1000), integer(options.leaseMs, 1)])));
-      return found.map((row): RecoveryClaim => {
-        const createdAt = row["createdAt"], attempts = row["attempts"];
-        if (typeof createdAt !== "number" || !Number.isFinite(createdAt) || typeof attempts !== "number" || !Number.isSafeInteger(attempts)) {
-          throw new CommandError("COMMAND_RECEIPT_INVALID");
-        }
-        return {
-          tenantId: commandIdentifier(row["tenantId"]), actorId: commandIdentifier(row["actorId"]),
-          command: commandIdentifier(row["command"]), operationId: commandIdentifier(row["operationId"]),
-          leaseId: commandIdentifier(row["leaseId"]), createdAt, attempts,
-        };
-      });
-    },
-    async release(claim, nextAttemptAt) {
-      await transaction(async (tx) => {
-        await tx.query(`UPDATE supacloud_commands.execution_receipts SET lease_id=NULL,lease_until=NULL,
-          next_attempt_at=to_timestamp($6::double precision/1000) WHERE ${where} AND lease_id=$5::uuid`,
-        [...keys(claim), commandIdentifier(claim.leaseId), integer(nextAttemptAt, 0)]);
-      });
-    },
     async redactCompleted(options) {
       return transaction(async (tx) => rows(await tx.query(`WITH candidates AS (
         SELECT tenant_id,actor_id,command,operation_key FROM supacloud_commands.execution_receipts
         WHERE ${selected} AND status='confirmed' AND audit_state='complete' AND input_payload IS NOT NULL
           AND updated_at<to_timestamp($3::double precision/1000)
-          AND (lease_id IS NULL OR lease_until<to_timestamp($3::double precision/1000))
         ORDER BY updated_at LIMIT $4 FOR UPDATE SKIP LOCKED
       ) UPDATE supacloud_commands.execution_receipts r SET input_payload=NULL FROM candidates c
         WHERE ${join} RETURNING r.operation_key`,

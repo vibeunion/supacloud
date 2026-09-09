@@ -41,11 +41,11 @@ describe(`Transactional commands and artifact registry (${nativeMode ? 'native' 
       }
       expect(await client.commands.submit(commandRequest)).toMatchObject({
         commandId,
-        commandType: 'report.issue',
-        idempotent: false,
+        kind: 'submission',
+        execution: null,
         workflow: { status: 'queued' },
       })
-      expect((await client.commands.submit(commandRequest)).idempotent).toBe(true)
+      expect(await client.commands.submit(commandRequest)).toMatchObject({ commandId, kind: 'submission', execution: null })
       await expect(client.commands.submit({
         ...commandRequest,
         payload: { reportId: 'changed' },
@@ -67,7 +67,9 @@ describe(`Transactional commands and artifact registry (${nativeMode ? 'native' 
       })
       expect(await client.commands.get(commandId)).toMatchObject({
         commandId,
-        workflow: { status: 'completed', output: { reportVersion: 2 } },
+        kind: 'submission',
+        execution: null,
+        workflow: { status: 'completed' },
       })
 
       await backend.db.query(`insert into storage.buckets (id, name, public) values ('reports', 'reports', false)`)

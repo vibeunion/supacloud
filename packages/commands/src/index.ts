@@ -1,8 +1,8 @@
 export { createTransactionalCommand } from "./transactional";
 export { createExternalCommand, type ExternalDispatch } from "./external";
 export { plaintextCommandInput, type CommandInputCodec, type PersistentCommandDefinition, type RecoveryPrincipal } from "./context";
-export { createCommandRecoveryJob, type RecoverableCommand, type CommandRecoveryReport, type RecoveryAlert } from "./recovery";
+export { createCommandRecoveryHandler, type RecoverableCommand, type CommandWorkflowPort, type CommandWorkflowAttempt } from "./recovery";
 export type {
   CommandStore, CommandStoreSession, StoredCommand, OperationReference,
-  CommandRecoveryStore, RecoveryClaim, RecoveryScope,
+  CommandRetentionStore, RecoveryScope,
 } from "./store";

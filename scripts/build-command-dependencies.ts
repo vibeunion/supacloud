@@ -2,6 +2,8 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
 const dependencies: Readonly<Record<string, readonly string[]>> = {
+  "supacloud-js": ["contracts"],
+  "supacloud-lite": ["contracts", "supacloud-js"],
   app: ["contracts"],
   db: ["contracts"],
   commands: ["contracts"],

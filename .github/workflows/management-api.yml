@@ -122,7 +122,9 @@ jobs:
           - name: SupaCloud JS SDK
             working-directory: packages/supacloud-js
             script: |
+              bun run ../../scripts/build-command-dependencies.ts supacloud-js
               bun install --frozen-lockfile
+              bun x --no-install tsc -p tsconfig.commands.json
               bun run typecheck
               bun run typecheck:test
               bun run build
@@ -146,6 +148,7 @@ jobs:
           - name: SupaCloud Lite
             working-directory: packages/supacloud-lite
             script: |
+              bun run ../../scripts/build-command-dependencies.ts supacloud-lite
               bun install --frozen-lockfile
               bun run check
               bun run ../../scripts/audit_dependencies.ts
@@ -217,6 +220,7 @@ jobs:
             script: |
               bun run ../../scripts/build-command-dependencies.ts db
               bun install --frozen-lockfile
+              bun x --no-install tsc -p tsconfig.commands.json
               bun run typecheck
               bun run typecheck:test
               bun test
@@ -317,6 +321,34 @@ jobs:
           output-file: supacloud-sbom.cdx.json
           upload-artifact: true
 
+  command-workflow-integration:
+    name: Command Workflow Integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: ghcr.io/pgmq/pg18-pgmq:v1.10.0
+        env:
+          POSTGRES_PASSWORD: local-command-test-only
+          POSTGRES_DB: supacloud_commands_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d supacloud_commands_test"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Verify native command and Workflow boundaries
+        env:
+          SUPACLOUD_COMMAND_TEST_URL: postgres://postgres:local-command-test-only@127.0.0.1:5432/supacloud_commands_test
+        run: bun run verify:commands
+
   supacloud-lite-windows:
     name: SupaCloud Lite (Windows)
     runs-on: windows-latest
@@ -345,6 +377,8 @@ jobs:
         shell: pwsh
         working-directory: packages/supacloud-lite
         run: |
+          bun run ../../scripts/build-command-dependencies.ts supacloud-lite
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun install --frozen-lockfile
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun run check
@@ -995,6 +1029,7 @@ jobs:
     needs:
       - lint-and-typecheck
       - package-checks
+      - command-workflow-integration
       - supacloud-lite-windows
       - docker-and-scripts-checks
       - unit-test
@@ -1011,6 +1046,7 @@ jobs:
         env:
           LINT_AND_TYPECHECK: ${{ needs.lint-and-typecheck.result }}
           PACKAGE_CHECKS: ${{ needs.package-checks.result }}
+          COMMAND_WORKFLOW: ${{ needs.command-workflow-integration.result }}
           SUPACLOUD_LITE_WINDOWS: ${{ needs.supacloud-lite-windows.result }}
           DOCKER_AND_SCRIPTS: ${{ needs.docker-and-scripts-checks.result }}
           UNIT_TESTS: ${{ needs.unit-test.result }}
@@ -1023,6 +1059,7 @@ jobs:
           for result in \
             "$LINT_AND_TYPECHECK" \
             "$PACKAGE_CHECKS" \
+            "$COMMAND_WORKFLOW" \
             "$SUPACLOUD_LITE_WINDOWS" \
             "$DOCKER_AND_SCRIPTS" \
             "$UNIT_TESTS" \

@@ -25,15 +25,18 @@ async function run(cwd: string, args: string[], executable = process.execPath) {
   if (status !== 0) throw new Error(`Command migration gate failed in ${cwd}: ${args.join(" ")}`);
 }
 
-for (const name of ["contracts", "commands", "db", "app", "compiler", "app-svelte", "elysia"]) {
+await run(root, ["scripts/prepare-command-test-database.ts"]);
+for (const name of ["contracts", "commands", "db", "app", "compiler", "app-svelte", "supacloud-js", "elysia"]) {
   const cwd = resolve(root, "packages", name);
   // Bun copies file dependencies; refresh them after upstream builds.
   await run(cwd, ["install", "--force", "--ignore-scripts", "--frozen-lockfile"]);
   if (name === "elysia") await run(cwd, ["run", "generate:example"]);
   await run(cwd, ["run", "typecheck"]);
   await run(cwd, ["run", "typecheck:test"]);
+  if (name === "db" || name === "supacloud-js") await run(cwd, ["-p", "tsconfig.commands.json"], resolve(cwd, "node_modules/.bin/tsc"));
   await run(cwd, ["test"]);
   await run(cwd, ["run", "build"]);
+  if (name === "supacloud-js") await run(cwd, ["run", "typecheck:consumer"]);
 }
 await run(root, ["run", "check:boundaries"]);
 const node = Bun.which("node");

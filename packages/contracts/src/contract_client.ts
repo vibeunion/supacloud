@@ -1,13 +1,13 @@
-import { decodeHttpContract, type ContractDecoder } from "./http_contract";
+import { decodeHttpContract, type ContractDecoder } from "./http_contract.js";
 
-export { createAuthoritativeCommandClient } from "./authoritative_command";
+export { createAuthoritativeCommandClient } from "./authoritative_command.js";
 export type {
   AuthoritativeCommandContract,
   AuthoritativeCommandOutcome,
   AuthoritativeCommandTransport,
   CommandAcknowledgement,
   CommandDiagnostic,
-} from "./authoritative_command";
+} from "./authoritative_command.js";
 
 export interface CommandContract<Input, Result> {
   input: ContractDecoder<Input>;

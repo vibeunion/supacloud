@@ -7,7 +7,9 @@ import { isRecord, packageVersion, stableVersionPrecedence } from './package-val
 
 const root = fileURLToPath(new URL('../../packages/', import.meta.url));
 const run = promisify(execFile);
-const directories = ['contracts', 'commands', 'db', 'app', 'app-svelte', 'compiler', 'elysia'];
+const directories = ['contracts', 'commands', 'db', 'app', 'app-svelte', 'compiler', 'elysia', 'supacloud-js'];
+/** @param {string} directory */
+const packageName = (directory) => directory === 'supacloud-js' ? '@supacloud/js' : `@supacloud/${directory}`;
 
 /**
  * Resolve development-only sibling references before packing. Exact versions
@@ -48,12 +50,12 @@ async function readJson(path) { return JSON.parse(await readFile(path, 'utf8'));
 async function prepare(directory = process.cwd()) {
   const path = resolve(directory, 'package.json');
   const candidate = await readJson(path);
-  if (!isRecord(candidate) || !directories.some((name) => candidate['name'] === `@supacloud/${name}`)) {
+  if (!isRecord(candidate) || !directories.some((name) => candidate['name'] === packageName(name))) {
     throw new Error('Not a managed command package');
   }
   /** @type {Map<string, unknown>} */
   const siblings = new Map();
-  for (const name of directories) siblings.set(`@supacloud/${name}`, await readJson(resolve(root, name, 'package.json')));
+  for (const name of directories) siblings.set(packageName(name), await readJson(resolve(root, name, 'package.json')));
   const result = prepareCommandPackage(candidate, siblings);
   for (const spec of result.required) {
     const { stdout } = await run('npm', ['view', spec, 'version', '--json', '--registry=https://registry.npmjs.org']);

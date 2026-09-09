@@ -43,7 +43,8 @@ test('release order and preparation cover every package using local command depe
   const svelte = workflow.indexOf('name: Publish Svelte lifecycle');
   const elysia = workflow.indexOf('name: Publish elysia adapter');
   assert.ok(contracts > 0 && commands > contracts && database > commands && app > database && svelte > contracts && elysia > database);
-  for (const name of ['commands', 'app', 'app-svelte', 'db', 'elysia']) {
+  assert.ok(contracts < workflow.indexOf('name: Publish supacloud-js'));
+  for (const name of ['commands', 'app', 'app-svelte', 'db', 'elysia', 'supacloud-js']) {
     const block = workflow.split(`working-directory: packages/${name}\n`)[1]?.split('\n      - name:')[0];
     assert.ok(block);
     assert.match(block, /prepare-command-package\.mjs[\s\S]*bun install --lockfile-only[\s\S]*bun install --frozen-lockfile/);
@@ -65,7 +66,7 @@ test('clean CI builds local dependencies before checking command consumers', () 
   for (const name of ['contracts', 'commands', 'app-svelte']) {
     assert.ok(workflow.includes(`working-directory: packages/${name}\n`));
   }
-  for (const name of ['app', 'db', 'commands', 'app-svelte', 'elysia']) {
+  for (const name of ['app', 'db', 'commands', 'app-svelte', 'elysia', 'supacloud-js']) {
     const block = workflow.split(`working-directory: packages/${name}\n`)[1]?.split('\n          - name:')[0];
     assert.ok(block);
     assert.match(block, new RegExp(`build-command-dependencies\\.ts ${name}[\\s\\S]*bun install --frozen-lockfile`));
