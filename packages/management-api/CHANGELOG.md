@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.78.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.77.1...management-api-v0.78.0) (2026-09-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **commands:** HTTP JSON methods return unknown unless decoded through a contract; writes default to no replay. Durable adapters require explicit authorization and input codecs. See docs/command-migration.md for import, auth, schema, and deployment migration steps.
+
+### Features
+
+* **commands:** unify durable execution with existing workflows ([#1243](https://github.com/vibeunion/supacloud/issues/1243)) ([6da15d4](https://github.com/vibeunion/supacloud/commit/6da15d459e1883ab94e240834200a57e9a41676b))
+
 ## [0.77.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.77.0...management-api-v0.77.1) (2026-09-09)
 
 
