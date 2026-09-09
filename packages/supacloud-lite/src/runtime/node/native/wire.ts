@@ -66,15 +66,22 @@ export class PgWireClient {
   /** Open a connection and complete the auth + startup handshake before resolving. */
   static async connect(opts: ConnectOpts) {
     const client = new PgWireClient()
-    await client.open(opts)
+    try {
+      await client.open(opts)
+    } catch (error) {
+      client.socket.destroy()
+      throw error
+    }
     return client
   }
 
   private open(opts: ConnectOpts) {
     return new Promise<void>((resolve, reject) => {
+      let startupComplete = false
       this.socket = opts.socketPath
         ? createConnection(opts.socketPath)
         : createConnection(opts.port ?? 5432, opts.host ?? '127.0.0.1')
+      this.socket.setTimeout(10_000, () => this.socket.destroy(new Error('PostgreSQL handshake timed out')))
       this.socket.on('error', (e) => {
         if (this.pending) this.pending.reject(e)
         reject(e)
@@ -82,6 +89,7 @@ export class PgWireClient {
       this.socket.on('close', () => {
         this.closed = true
         this.pending?.reject(new Error('connection closed'))
+        if (!startupComplete) reject(new Error('connection closed during PostgreSQL handshake'))
       })
       this.socket.on('connect', () => {
         // StartupMessage: length, protocol 196608, key/value pairs
@@ -178,6 +186,8 @@ export class PgWireClient {
             return
           } else if (type === 0x5a) {
             // ReadyForQuery
+            startupComplete = true
+            this.socket.setTimeout(0)
             this.socket.off('data', startupHandler)
             this.socket.on('data', (c: Buffer) => {
               this.buffer = Buffer.concat([this.buffer, c])

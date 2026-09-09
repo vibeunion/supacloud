@@ -5,6 +5,8 @@ import { pathToFileURL } from 'node:url'
 import type { EdgeFunction, FrameworkObjectHandler, FunctionFramework, LoadedFunction } from '../functions/handler.js'
 import { installDenoShim, resetCapturedHandler, takeCapturedHandler } from '../functions/deno-shim.js'
 import { bundleFunction } from './bundle-function.js'
+import type { RuntimeMode } from '../functions/profile.js'
+import { errorProperty } from '../validation.js'
 
 /**
  * Load edge-function secrets from supabase/functions/.env (KEY=VALUE lines,
@@ -60,9 +62,10 @@ export interface LoadFunctionOptions {
 
 const FUNCTION_FRAMEWORKS: ReadonlySet<string> = new Set(['fetch', 'elysia', 'hono'])
 
-function resolveFramework(name: string, value: string | undefined): FunctionFramework | undefined {
+function resolveFramework(name: string, value: string | undefined, mode: RuntimeMode): FunctionFramework | undefined {
   if (value === undefined) return undefined
   if (FUNCTION_FRAMEWORKS.has(value)) return value as FunctionFramework
+  if (mode === 'strict') throw new Error(`invalid framework for function "${name}"`)
   console.warn(`  warning: function "${name}" has unsupported framework "${value}", expected one of fetch/elysia/hono; falling back to fetch`)
   return undefined
 }
@@ -81,7 +84,8 @@ let loadQueue: Promise<void> = Promise.resolve()
  */
 export async function loadFunctions(
   projectDir: string,
-  options: Record<string, LoadFunctionOptions> = {}
+  options: Record<string, LoadFunctionOptions> = {},
+  mode: RuntimeMode = 'development',
 ): Promise<Map<string, LoadedFunction>> {
   let releaseQueue!: () => void
   const previous = loadQueue
@@ -90,7 +94,7 @@ export async function loadFunctions(
   })
   await previous
   try {
-    return await loadFunctionsUnlocked(projectDir, options)
+    return await loadFunctionsUnlocked(projectDir, options, mode)
   } finally {
     releaseQueue()
   }
@@ -98,7 +102,8 @@ export async function loadFunctions(
 
 async function loadFunctionsUnlocked(
   projectDir: string,
-  options: Record<string, LoadFunctionOptions>
+  options: Record<string, LoadFunctionOptions>,
+  mode: RuntimeMode,
 ): Promise<Map<string, LoadedFunction>> {
   const functions = new Map<string, LoadedFunction>()
   const root = join(projectDir, 'supabase', 'functions')
@@ -106,7 +111,11 @@ async function loadFunctionsUnlocked(
   let entries: string[] = []
   try {
     entries = await readdir(root)
-  } catch {
+  } catch (error) {
+    if (mode === 'strict' && errorProperty(error, 'code') !== 'ENOENT') throw error
+    if (mode === 'strict' && Object.values(options).some((option) => option.enabled !== false)) {
+      throw new Error('declared function directory is missing')
+    }
     return functions
   }
 
@@ -181,14 +190,16 @@ async function loadFunctionsUnlocked(
               : undefined
           functions.set(name, {
             handler,
-            framework: resolveFramework(name, opts?.framework),
+            framework: resolveFramework(name, opts?.framework, mode),
             ...(limits ? { limits } : {}),
             ...(capabilities ? { capabilities } : {}),
           })
         } else {
+          if (mode === 'strict') throw new Error(`function "${name}" has no handler`)
           console.warn(`  warning: function "${name}" has no default function, handle/fetch object, or Deno.serve() handler, skipped`)
         }
       } catch (e) {
+        if (mode === 'strict') throw new Error(`failed to load strict function "${name}"`, { cause: e })
         const msg = e instanceof Error ? e.message : String(e)
         if (/Unknown file extension|Cannot find module/.test(msg)) {
           console.warn(`  warning: function "${name}" could not be bundled by Bun: ${msg}`)
@@ -199,6 +210,12 @@ async function loadFunctionsUnlocked(
         if (bundledPath) await rm(dirname(bundledPath), { recursive: true, force: true }).catch(() => {})
       }
       break
+    }
+    if (mode === 'strict' && !functions.has(name)) throw new Error(`function "${name}" has no loadable entrypoint`)
+  }
+  if (mode === 'strict') {
+    for (const [name, option] of Object.entries(options)) {
+      if (option.enabled !== false && !functions.has(name)) throw new Error(`declared function "${name}" was not loaded`)
     }
   }
   return functions

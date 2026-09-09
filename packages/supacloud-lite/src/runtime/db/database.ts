@@ -15,6 +15,8 @@ import { rewriteMigrationSql } from './sql-compat.js'
 const DEFAULT_SEARCH_PATH_SQL = `set search_path to "$user", public, extensions`
 import { createPgliteEngine } from './pglite-engine.js'
 import type { DbEngine, EngineResults, EngineTx, EngineUnsubscribe } from './engine.js'
+import { Mutex } from './engine.js'
+import { isRecord } from '../validation.js'
 import type { MigrationFile, RequestContext } from '../types.js'
 
 /** One column of an introspected table. */
@@ -106,6 +108,7 @@ export interface CdcEvent {
  * application, schema introspection (cached), and the realtime CDC pipeline.
  */
 export class Database {
+  private migrationMutex = new Mutex()
   private schemaCache = new Map<string, SchemaInfo>()
   private fnCache = new Map<string, FunctionInfo[]>()
   private cdcListeners = new Set<(e: CdcEvent) => void>()
@@ -113,10 +116,10 @@ export class Database {
   private cdcStopping: Promise<void> | null = null
   private cdcUnsubscribe: EngineUnsubscribe | null = null
 
-  private constructor(public engine: DbEngine) {}
+  private constructor(public engine: DbEngine, private strict = false) {}
 
   /** Create a Database on PGlite (default) or any custom DbEngine. */
-  static async create(dataDirOrEngine?: string | DbEngine, opts?: { vaultKey?: string }): Promise<Database> {
+  static async create(dataDirOrEngine?: string | DbEngine, opts?: { vaultKey?: string; strict?: boolean }): Promise<Database> {
     const engine =
       dataDirOrEngine && typeof dataDirOrEngine === 'object'
         ? dataDirOrEngine
@@ -136,7 +139,7 @@ export class Database {
           await engine.query(`select set_config('app.settings.vault_key', $1, false)`, [opts.vaultKey])
         }
       }
-      return new Database(engine)
+      return new Database(engine, opts?.strict)
     } catch (error) {
       try {
         await engine.close()
@@ -189,18 +192,47 @@ export class Database {
    *   unsupported migration is skipped with a warning instead of aborting.
    */
   async runMigrations(migrations: MigrationFile[], seedSql?: string): Promise<string[]> {
+    return this.migrationMutex.run(() => this.applyMigrations(migrations, seedSql))
+  }
+
+  private async applyMigrations(migrations: MigrationFile[], seedSql?: string): Promise<string[]> {
     const applied: string[] = []
     // Plain code-unit comparison (not localeCompare, which is locale-dependent
     // and can reorder `_`/digits) so migrations apply in the same order on every
     // machine, matching the Supabase CLI's lexicographic version ordering.
     const sorted = [...migrations].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+    // Validate the entire history before executing any new migration.
+    const versions = new Set<string>()
+    const history = await this.engine.query<unknown>(
+      'select version, statements from supabase_migrations.schema_migrations'
+    )
+    const recorded = new Map<string, string[] | null>()
+    for (const row of history.rows) {
+      if (!isRecord(row) || typeof row['version'] !== 'string') throw new Error('invalid migration history record')
+      const statements: unknown = row['statements']
+      if (statements !== null && (!Array.isArray(statements) || !statements.every((sql: unknown) => typeof sql === 'string'))) {
+        throw new Error(`invalid migration history SQL: ${row['version']}`)
+      }
+      recorded.set(row['version'], statements)
+    }
+    for (const migration of sorted) {
+      const version = migration.name.match(/^(\d+)/)?.[1] ?? migration.name
+      if (versions.has(version)) throw new Error(`duplicate migration version: ${version}`)
+      versions.add(version)
+    }
+    for (const migration of sorted) {
+      const version = migration.name.match(/^(\d+)/)?.[1] ?? migration.name
+      if (recorded.has(version)) {
+        const statements = recorded.get(version)
+        if (!statements?.length) throw new Error(`migration history has no verifiable SQL: ${version}`)
+        if (statements.join('\n') !== migration.sql) {
+          throw new Error(`applied migration content mismatch: ${version}; add a forward migration instead`)
+        }
+      }
+    }
     for (const m of sorted) {
       const version = m.name.match(/^(\d+)/)?.[1] ?? m.name
-      const seen = await this.engine.query(
-        `select 1 from supabase_migrations.schema_migrations where version = $1`,
-        [version]
-      )
-      if (seen.rows.length > 0) continue
+      if (recorded.has(version)) continue
       const applyMigration = () =>
         this.engine.transaction(async (tx) => {
           // The Supabase CLI applies each migration on a fresh connection, so a
@@ -209,7 +241,7 @@ export class Database {
           // default first - otherwise a hardened migration's search_path change
           // breaks unqualified calls (e.g. gen_random_bytes) in later files.
           await tx.exec(DEFAULT_SEARCH_PATH_SQL)
-          await tx.exec(rewriteMigrationSql(m.sql))
+          await tx.exec(rewriteMigrationSql(m.sql, this.strict))
           await tx.query(
             `insert into supabase_migrations.schema_migrations (version, name, statements)
              values ($1, $2, $3)`,
@@ -241,7 +273,7 @@ export class Database {
       if (seen.rows.length === 0) {
         await this.engine.transaction(async (tx) => {
           await tx.exec(DEFAULT_SEARCH_PATH_SQL)
-          await tx.exec(rewriteMigrationSql(seedSql))
+          await tx.exec(rewriteMigrationSql(seedSql, this.strict))
           await tx.query(
             `insert into supabase_migrations.seed_files (path, hash) values ('supabase/seed.sql', $1)
              on conflict (path) do update set hash = excluded.hash, applied_at = now()`,

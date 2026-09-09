@@ -12,6 +12,8 @@ import type { AuthSettings } from '../auth/settings.js'
 import type { OAuthProviderConfig } from '../auth/oauth.js'
 import type { RateLimitRule } from '../auth/rate-limit.js'
 import type { BucketSeed } from '../types.js'
+import { runtimeMode, type RuntimeMode } from '../functions/profile.js'
+import type { GraphqlOptions } from '../graphql.js'
 import {
   loadConfigToml,
   tableAt,
@@ -27,6 +29,12 @@ import {
 
 /** The project's config.toml, projected into the shapes SupaCloud Lite consumes. */
 export interface ProjectConfig {
+  lite: {
+    runtimeMode: RuntimeMode
+    graphql: GraphqlOptions
+    identityModule?: string
+    migrationBindings?: { manifest: string; environment: string; projectRef: string }
+  }
   /** the [auth] slice: settings, redirects, sessions, rate limits, OAuth */
   auth: AuthConfig
   /** the [api] slice: exposed schemas and row cap */
@@ -112,15 +120,48 @@ export interface FunctionOptions {
 }
 
 /** Parse supabase/config.toml once and project it into a {@link ProjectConfig}. */
-export function loadProjectConfig(projectDir: string, env: Environment = process.env): ProjectConfig {
+export function loadProjectConfig(projectDir: string, env: Environment = process.env, modeOverride?: RuntimeMode): ProjectConfig {
   const root = loadConfigToml(projectDir, env)
+  const mode = runtimeMode(modeOverride ?? env.SUPACLOUD_LITE_RUNTIME_MODE ?? getString(tableAt(root, 'lite'), 'runtime_mode'))
   return {
+    lite: readLite(root, mode),
     auth: readAuth(root, env),
     api: readApi(root),
     storage: readStorage(root),
     seed: readSeed(root),
-    functions: readFunctions(root),
+    functions: readFunctions(root, mode),
   }
+}
+
+function readLite(root: ConfigTable, mode: RuntimeMode): ProjectConfig['lite'] {
+  const graphql = tableAt(root, 'lite.graphql')
+  const bindings = tableAt(root, 'lite.migration_bindings')
+  const out: ProjectConfig['lite'] = {
+    runtimeMode: mode,
+    graphql: {
+      enabled: getBool(graphql, 'enabled'),
+      maxRequestBodyBytes: getInt(graphql, 'max_request_body_bytes'),
+      statementTimeoutMs: getInt(graphql, 'statement_timeout_ms'),
+    },
+    identityModule: getString(tableAt(root, 'lite.identity'), 'module'),
+  }
+  for (const key of ['max_request_body_bytes', 'statement_timeout_ms']) {
+    const value = graphql?.values.get(key)
+    if (value !== undefined && (typeof value !== 'string' || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) <= 0)) {
+      throw new Error(`invalid GraphQL option: ${key}`)
+    }
+  }
+  if (graphql?.values.has('enabled') && getBool(graphql, 'enabled') === undefined) throw new Error('invalid GraphQL enabled option')
+  const identity = tableAt(root, 'lite.identity')
+  if (identity && !out.identityModule) throw new Error('Lite identity configuration requires a module')
+  if (bindings) {
+    const manifest = getString(bindings, 'manifest')
+    const environment = getString(bindings, 'environment')
+    const projectRef = getString(bindings, 'project_ref')
+    if (!manifest || !environment || !projectRef) throw new Error('Lite migration bindings require manifest, environment and project_ref')
+    out.migrationBindings = { manifest, environment, projectRef }
+  }
+  return out
 }
 
 // ── [auth] ─────────────────────────────────────────────────────────────────
@@ -337,7 +378,7 @@ function readSeed(root: ConfigTable): SeedConfig {
 
 // ── [functions.<name>] ───────────────────────────────────────────────────
 
-function readFunctions(root: ConfigTable): Record<string, FunctionOptions> {
+function readFunctions(root: ConfigTable, mode: RuntimeMode): Record<string, FunctionOptions> {
   const fns = tableAt(root, 'functions')
   const out: Record<string, FunctionOptions> = {}
   if (!fns) return out
@@ -354,7 +395,24 @@ function readFunctions(root: ConfigTable): Record<string, FunctionOptions> {
       if (framework === 'fetch' || framework === 'elysia' || framework === 'hono') {
         opts.framework = framework
       } else {
+        if (mode === 'strict') throw new Error(`invalid framework for function "${name}"`)
         console.warn(`  warning: [functions.${name}] framework "${framework}" is not one of fetch/elysia/hono; falling back to fetch`)
+      }
+    }
+    if (mode === 'strict') {
+      for (const key of ['timeout_ms', 'max_request_body_bytes', 'max_response_body_bytes', 'wait_until_timeout_ms']) {
+        if (t.values.has(key)) {
+          const value = t.values.get(key)
+          if (typeof value !== 'string' || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) <= 0) {
+            throw new Error(`invalid strict function limit: ${name}.${key}`)
+          }
+        }
+      }
+      for (const key of ['background', 'enabled', 'verify_jwt']) {
+        if (t.values.has(key) && getBool(t, key) === undefined) throw new Error(`invalid strict function option: ${name}.${key}`)
+      }
+      for (const key of ['secrets', 'outbound_hosts']) {
+        if (t.values.has(key) && getStringArray(t, key) === undefined) throw new Error(`invalid strict function option: ${name}.${key}`)
       }
     }
     const timeoutMs = getInt(t, 'timeout_ms')

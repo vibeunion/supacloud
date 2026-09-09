@@ -30,7 +30,8 @@
  * Rewrite user migration / seed SQL for the local engine: make CREATE/DROP
  * EXTENSION tolerant, and strip CONCURRENTLY from index statements.
  */
-export function rewriteMigrationSql(sql: string): string {
+export function rewriteMigrationSql(sql: string, strict = false): string {
+  if (strict) return sql
   const out: string[] = []
   const n = sql.length
   let i: number = 0
@@ -114,6 +115,7 @@ function rewriteStatement(stmt: string): string {
 
   // CREATE/DROP EXTENSION → wrap so an unavailable extension is skipped
   if (/^(?:create|drop)\s+extension\b/i.test(rest)) {
+    if (extensionName(rest) === 'pg_graphql') return stmt
     const semi = rest.lastIndexOf(';')
     const bare = (semi !== -1 && rest.slice(semi + 1).trim() === '' ? rest.slice(0, semi) : rest).trim()
     if (!bare) return stmt
@@ -132,6 +134,25 @@ function rewriteStatement(stmt: string): string {
   }
 
   return stmt
+}
+
+function extensionName(statement: string): string | undefined {
+  let rest = statement
+  const tokens: string[] = []
+  while (tokens.length < 6) {
+    rest = rest.slice(LEADING_TRIVIA.exec(rest)?.[0].length ?? 0)
+    const token = /^(?:"((?:""|[^"])*)"|([A-Za-z_][A-Za-z_0-9]*))/.exec(rest)
+    if (!token) break
+    const quoted = token[1]
+    const bare = token[2]
+    if (quoted !== undefined) tokens.push(quoted.replaceAll('""', '"'))
+    else if (bare !== undefined) tokens.push(bare.toLowerCase())
+    else throw new Error('invalid migration SQL token')
+    rest = rest.slice(token[0].length)
+  }
+  return tokens[2] === 'if'
+    ? tokens[tokens[3] === 'not' ? 5 : 4]
+    : tokens[2]
 }
 
 /** A dollar-quote tag guaranteed not to occur in `text`. */

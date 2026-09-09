@@ -4,6 +4,8 @@
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "strict": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
