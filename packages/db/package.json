@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/db",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Database governance layer for SupaCloud: RLS policies, RPC functions and grants as first-class resources, with manifest/catalog reconciliation",
   "type": "module",
   "main": "./dist/index.js",
@@ -49,6 +49,10 @@
     "@types/bun": "^1.4.0",
     "typescript": "^7.0.2"
   },
-  "dependencies": { "@supacloud/contracts": "file:../contracts" },
-  "overrides": { "@supacloud/contracts": "file:../contracts" }
+  "dependencies": {
+    "@supacloud/contracts": "file:../contracts"
+  },
+  "overrides": {
+    "@supacloud/contracts": "file:../contracts"
+  }
 }

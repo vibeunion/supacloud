@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/elysia",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Elysia runtime adapter for SupaCloud compiled modules: application/request scopes, route registration and validation",
   "type": "module",
   "main": "./dist/index.js",
@@ -45,7 +45,10 @@
     "@supacloud/contracts": "file:../contracts",
     "jose": "^6.2.11"
   },
-  "overrides": { "@supacloud/contracts": "file:../contracts", "@supacloud/commands": "file:../commands" },
+  "overrides": {
+    "@supacloud/contracts": "file:../contracts",
+    "@supacloud/commands": "file:../commands"
+  },
   "peerDependencies": {
     "elysia": "^1.4.30"
   },
