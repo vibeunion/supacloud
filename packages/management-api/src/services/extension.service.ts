@@ -1,6 +1,9 @@
 import { $ } from "bun";
+import { Type, type Static } from "@sinclair/typebox";
+import { Value } from "@sinclair/typebox/value";
 import { getProjectDb, resolveDbName } from "../db";
 import { notifyPostgrestSchemaReload } from "./database-schema-notify";
+import { reconcileGraphqlEntrypoint } from "./graphql-extension";
 
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
 type SystemExtensionInfo = { name: string; version: string; status: string; description: string };
@@ -12,13 +15,15 @@ function validatePgIdentifier(name: string, label: string): string {
     return name;
 }
 
-export interface ExtensionInfo {
-    name: string;
-    default_version: string;
-    installed_version: string | null;
-    comment: string;
-    is_installed: boolean;
-}
+const ExtensionInfoSchema = Type.Object({
+    name: Type.String(),
+    default_version: Type.String(),
+    installed_version: Type.Union([Type.String(), Type.Null()]),
+    comment: Type.String(),
+    is_installed: Type.Boolean(),
+});
+export type ExtensionInfo = Static<typeof ExtensionInfoSchema>;
+const ExtensionResultSchema = Type.Array(ExtensionInfoSchema, { minItems: 1, maxItems: 1 });
 
 export function parsePigExtensionList(text: string): SystemExtensionInfo[] {
     const hasStatusVersionHeader = text
@@ -97,35 +102,30 @@ export class ExtensionService {
         const safeSchema = schema ? validatePgIdentifier(schema, 'schema') : null;
         const dbName = await resolveDbName(projectRef);
         const db = getProjectDb(dbName);
-        await db.begin(async (transaction) => {
-            if (safeExt === "pg_graphql") {
-                const installedRows = await transaction`
-                    SELECT installed_version
-                    FROM pg_available_extensions
-                    WHERE name = 'pg_graphql'
-                `;
-                const isInstalled = installedRows.some((row: { installed_version?: string | null }) => row.installed_version);
-                if (!isInstalled) {
-                    await transaction.unsafe(`
-                        DROP FUNCTION IF EXISTS graphql_public.graphql(text, text, jsonb, jsonb);
-                        DROP FUNCTION IF EXISTS graphql_public.graphql(text, text, jsonb);
-                    `);
-                }
-            }
+        return db.begin(async (transaction) => {
             let sql = `CREATE EXTENSION IF NOT EXISTS "${safeExt}"`;
             if (safeSchema) sql += ` SCHEMA "${safeSchema}"`;
             if (version) sql += ` VERSION '${version.replace(/'/g, "''")}'`;
             sql += ` CASCADE`;
             await transaction.unsafe(sql);
+            if (safeExt === "pg_graphql") {
+                await reconcileGraphqlEntrypoint(transaction);
+            }
+            const rows: unknown = await transaction`
+                SELECT name, default_version, installed_version, coalesce(comment, '') AS comment,
+                    installed_version IS NOT NULL AS is_installed
+                FROM pg_available_extensions WHERE name = ${extension}
+            `;
+            if (!Value.Check(ExtensionResultSchema, rows)) {
+                throw new Error(`Invalid installed extension state: ${extension}`);
+            }
+            const result = rows[0];
+            if (!result || !result.is_installed || result.installed_version === null || result.name !== extension) {
+                throw new Error(`Missing installed extension state: ${extension}`);
+            }
             await notifyPostgrestSchemaReload(transaction, projectRef);
+            return result;
         });
-
-        const rows = await db`
-            SELECT name, default_version, installed_version, comment,
-                installed_version IS NOT NULL AS is_installed
-            FROM pg_available_extensions WHERE name = ${extension}
-        `;
-        return (rows[0] as ExtensionInfo) || { name: extension, default_version: version || '', installed_version: version || null, comment: '', is_installed: true };
     }
 
     async disableExtension(projectRef: string, extension: string): Promise<ExtensionInfo> {
