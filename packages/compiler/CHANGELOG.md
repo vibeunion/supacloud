@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.13.1...compiler-v0.14.0) (2026-09-09)
+
+
+### Features
+
+* **compiler:** validate GraphQL results and expose governance config ([#1232](https://github.com/vibeunion/supacloud/issues/1232)) ([a238d56](https://github.com/vibeunion/supacloud/commit/a238d564050ba2927da426781377ce7d5bb30ab3))
+
 ## [0.13.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.13.0...compiler-v0.13.1) (2026-09-08)
 
 
