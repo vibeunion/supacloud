@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { assertGraphqlOptions } from "./graphql-options";
+import { parseDeliveryOptions, type DeliveryOptions } from "./delivery-schema";
 import type {
   CommandExecutionCapabilities,
   CompileOptions,
@@ -10,6 +11,8 @@ import type {
 } from "./types";
 
 export interface SupaCloudConfig {
+  /** Local delivery configuration; does not authorize deployment. */
+  delivery?: DeliveryOptions;
   /** Opt-in outside app init. Schema is configuration-relative; documents are root-relative. */
   graphql?: GraphqlOptions | false;
   root?: string;
@@ -31,7 +34,7 @@ export interface SupaCloudConfig {
 
 export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
   SupaCloudConfig,
-  "include" | "moduleBoundaryPreset" | "commandCapabilities" | "moduleBoundaries" | "typeSafety"
+  "include" | "moduleBoundaryPreset" | "commandCapabilities" | "moduleBoundaries" | "typeSafety" | "delivery"
   | "allowRouteCommandBindings" | "disallowControllerDirectDb" | "detectOrphanModules"
 >> & {
   include: string[];
@@ -50,6 +53,7 @@ export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
 };
 
 export function defineSupacloudConfig(config: SupaCloudConfig = {}): SupaCloudConfig {
+  if (config.delivery !== undefined) parseDeliveryOptions(config.delivery);
   if (config.graphql !== undefined && config.graphql !== false) assertGraphqlOptions(config.graphql);
   validateGovernanceConfig(config);
   return {
