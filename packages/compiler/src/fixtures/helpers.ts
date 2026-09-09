@@ -1,6 +1,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
+export function requireValue<T>(value: T | undefined): T {
+  if (value === undefined) throw new Error("Required fixture value was not found");
+  return value;
+}
+
 /** Writes fixture files map to directory (auto-creates parent directories). */
 export async function writeFixtureProject(
   rootDir: string,
