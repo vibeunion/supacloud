@@ -37,11 +37,11 @@ export function createGraphqlClient(options: GraphqlClientOptions) {
   }
   endpoint.pathname = endpoint.pathname.replace(/\\/$/, "") + "/graphql/v1";
   const fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
-  return getSdk<GraphqlRequestOptions>(async <R, V>(
+  return getSdk<GraphqlRequestOptions>(async (
     query: string,
-    variables?: V,
+    variables?: unknown,
     request?: GraphqlRequestOptions,
-  ): Promise<R> => {
+  ): Promise<unknown> => {
     const headers = new Headers({ "Content-Type": "application/json", Accept: "application/json" });
     if (options.publishableKey) headers.set("apikey", options.publishableKey);
     const token = await options.getAccessToken?.();
@@ -76,8 +76,8 @@ export function createGraphqlClient(options: GraphqlClientOptions) {
     if (!("data" in envelope) || !envelope.data || typeof envelope.data !== "object" || Array.isArray(envelope.data)) {
       throw new GraphqlRequestError("invalid-response", "GraphQL returned no result object.", response.status);
     }
-    // Operation types describe the schema snapshot, not runtime response validation.
-    return envelope.data as R;
+    // The operation-specific parser in getSdk validates selected field values.
+    return envelope.data;
   });
 }
 `;
