@@ -337,7 +337,7 @@ function componentBootstrapCommands(request: UpgradeRequest): string[] {
         `MANAGEMENT_RELEASE=$(supacloud_fetch_component_release management-api ${quoteEnvValue(managementVersion)} "$MANAGEMENT_ASSET" web-console-build.tar.gz)`,
         `supacloud_download_release_asset "$MANAGEMENT_RELEASE" "$MANAGEMENT_ASSET" "$STAGED_MANAGEMENT" binary`,
         `chmod 0755 "$STAGED_MANAGEMENT"`,
-        `TARGET_MANAGEMENT_VERSION=$(jq -er '.tag_name | capture("^management-api-v(?<version>(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*))$").version' <<< "$MANAGEMENT_RELEASE")`,
+        `TARGET_MANAGEMENT_VERSION=$(jq -er '.tag_name | capture("^management-api-v(?<version>(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*))$").version' <<< "$MANAGEMENT_RELEASE")`,
         `STAGED_VERSION=$(timeout 5s "$STAGED_MANAGEMENT" --version 2>&1 | grep -Eo '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1 || true)`,
         `test "$STAGED_VERSION" = "$TARGET_MANAGEMENT_VERSION" || { echo 'Target Management binary version does not match its verified release' >&2; exit 1; }`,
         `supacloud_version_at_least "$STAGED_VERSION" ${quoteEnvValue(MINIMUM_COMPONENT_UPGRADE_VERSION)} || { echo 'Target Management release lacks component transaction capability' >&2; exit 1; }`,
