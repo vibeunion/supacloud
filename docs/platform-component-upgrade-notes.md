@@ -13,6 +13,20 @@
 | JuiceFS | 1.2.2 | 1.4.0 | 1.4 是 LTS；启用 storage tiers 时所有客户端必须先到 1.4.0；元数据备份默认清理两年以上备份；1.4 包含 SQL 元数据字段类型调整 | 本平台只使用单一 gateway 和 Postgres metadata；不启用 storage tiers。已有 `juicefs` metadata 在生产升级前必须做 `juicefs dump`/pg_dump 并保留回滚副本 |
 | Docker Compose | v2.29.2 | v5.3.1 | v5 删除内部构建器，`compose build` 改走 Docker Bake，并要求 Docker Buildx >= 0.17；这是唯一需要额外运行时前置条件的主版本更新 | CI 已使用 Docker Buildx；安装器的 Podman 路径只负责 `pull/up`，不把 Compose v5 当作 Podman 的构建器。Podman 用户构建镜像应使用 Podman build/兼容的 Buildx，或先提供已构建镜像 |
 
+## Caddy 构建工具链补充
+
+Caddy 保持 v2.11.4，xcaddy 从 v0.4.5 升级至 v0.4.7，Go 编译器统一固定为
+1.27.1。源码脚本和 Docker builder 显式使用 `GOTOOLCHAIN=go1.27.1`，发布与 CI
+通过 `GO_VERSION` 选择相同版本，不再使用浮动的 `stable`。Docker 基础镜像摘要与
+限流插件提交保持不变；源码安装器始终安装指定 xcaddy，避免复用主机旧版本。
+
+Go 1.21 或更高版本可自动下载该工具链，离线构建需要提前缓存。源码构建可通过
+`GO_VERSION` 显式选择回滚版本；Docker 和发布回滚仍应使用已验证的旧产物，
+不要仅根据 Caddy 的版本字符串判断编译器是否升级，应读取 `go version -m <binary>`。
+
+Docker 构建默认使用官方 Go 模块代理；网络受限时可通过 `--build-arg GOPROXY=...`
+显式指定可信代理，不关闭 Go 模块校验。
+
 ## PostgreSQL 18 边界
 
 SupaCloud 的实际部署、Dockerfile 和 self-host Compose 继续使用 `postgres:18-bookworm`。CI 中的 `supabase/postgres:17.6.1.143` 只是上游 Supabase 兼容 fixture，用于验证 Supabase schema/Realtime 迁移，不表示部署回退到 PostgreSQL 17。跨 PostgreSQL 大版本升级仍然是独立的备份、迁移和回滚任务，本轮没有执行。

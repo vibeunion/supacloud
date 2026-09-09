@@ -119,11 +119,48 @@ const result = await queries.ReviewList({ first: 20 });
 
 Method names and types come from named operations. The generated client is
 dependency-free and refreshes identity per request; `getSdk(requester)` integrates
-an existing transport. It rejects HTTP errors, GraphQL errors and malformed
-response envelopes, but does not runtime-decode selected field values.
+an existing transport returning `Promise<unknown>`. It rejects HTTP errors,
+GraphQL errors, malformed response envelopes and invalid selected field values.
+Both clients run generated operation parsers before returning typed data. No
+customer TypeScript-to-TypeBox postprocessor or extra runtime dependency is needed.
+The same module exports `parseReviewListQuery(value: unknown)` and
+`isReviewListQuery(value: unknown)` for other integration boundaries (names follow
+your operations). Validation follows the generated selected JSON shape, including
+aliases, fragments, enums, lists, nullability and optional conditional fields.
+Unmapped scalars remain `unknown`; scalar domain formats and authorization still
+need business validation. Non-JSON scalar mappings such as `Date` fail compilation;
+map the wire value to `string` and convert it after validation instead.
+Generic application adapters can use `GraphqlQueryResults[Name]`,
+`parseGraphqlResult(name, value)` and `isGraphqlResult(name, value)` instead of
+maintaining their own result-type registry. Registry keys are operation names
+such as `"ReviewList"`, without the `Query` type suffix.
 `graphql.manifest.json` records query locations and the schema hash; context packs
 include colocated queries. RLS/grants, real database acceptance and query resource
 limits remain deployment responsibilities. Business writes stay in Commands.
+
+Use project configuration instead of a custom compile wrapper for shared rules:
+
+```ts
+export default defineSupacloudConfig({
+  root: "src",
+  graphql: { schema: "graphql/schema.graphql" },
+  moduleBoundaries: [{
+    sourceTag: "type:feature",
+    bannedDependenciesWithTags: ["type:feature"],
+  }],
+  typeSafety: { scanProductionSource: true, noAnyInGenerated: true },
+  allowRouteCommandBindings: false,
+});
+```
+
+`compile`, `check` and `dev` apply these options through the same compiler pipeline.
+`check` also compares generated validators without temporary directories or writes.
+`allowRouteCommandBindings: false` prevents duplicate governance when an application
+executes Commands inside its own service boundary. `disallowControllerDirectDb`
+and `detectOrphanModules` expose the existing optional architecture checks too.
+Keep application-specific governance and business queries in the application.
+See `docs/compiler-consumer-simplification.md` in the repository for the ownership
+checklist and migration boundaries.
 
 ## 安装
 
