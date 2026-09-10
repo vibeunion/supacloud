@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.38.0...web-console-v0.38.1) (2026-09-09)
+
+
+### Performance Improvements
+
+* **compiler,web-console:** optimize I/O with Bun APIs, Vite pre-bundling, and graph algorithms ([#1246](https://github.com/vibeunion/supacloud/issues/1246)) ([1db9458](https://github.com/vibeunion/supacloud/commit/1db9458bb620c32476597c5bf795d00e63700559))
+
 ## [0.38.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.37.0...web-console-v0.38.0) (2026-09-07)
 
 
