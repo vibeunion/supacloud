@@ -1291,8 +1291,8 @@ describe("runtime companion version assets", () => {
     expect(upgrade).toContain(
       'SUPACLOUD_GOTRUE_RELEASE_ASSET="auth-${target_version}-${SUPACLOUD_GOTRUE_RELEASE_ARCH}.tar.xz"',
     );
-    expect(upgrade).toContain("0d35d4c06a9ae673d06bc8579aeef6bba6f7551fa7842f9fcdac33ec926e360c");
-    expect(upgrade).toContain("6a769c0995578dcf208f43036a814daee741c560078d29df7821025f58652d9b");
+    expect(upgrade).toContain("b5c2991d1df760c9b099c1c2395a94bd1c2f83ed58901934921997179dc9f7ea");
+    expect(upgrade).toContain("a9da2e668137cb280c830d900df4081b3fdd42a289469485634426a7587f9f76");
     expect(upgrade).toContain("supacloud_download_url");
     expect(upgrade).toContain("supacloud_install_pinned_tar_xz_binary");
     expect(upgrade).not.toContain(".tar.gz");
