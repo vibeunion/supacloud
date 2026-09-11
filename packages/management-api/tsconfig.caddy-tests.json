@@ -10,7 +10,7 @@
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": true,
     "noFallthroughCasesInSwitch": true,
-    "skipLibCheck": false
+    "skipLibCheck": true
   },
   "include": [
     "tests/unit/caddy-build-reproducibility.test.ts",

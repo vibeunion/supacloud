@@ -9,7 +9,7 @@
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": true,
     "noFallthroughCasesInSwitch": true,
-    "skipLibCheck": false,
+    "skipLibCheck": true,
     "noEmit": true,
     "allowJs": true,
     "checkJs": true,

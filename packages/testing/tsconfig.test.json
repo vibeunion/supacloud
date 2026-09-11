@@ -5,7 +5,7 @@
     "types": ["bun"]
   },
   "include": [
-    "src/**/*.test.ts",
-    "src/**/*.d.ts"
-  ]
+    "src/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
 }
