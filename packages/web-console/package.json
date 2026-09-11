@@ -41,7 +41,7 @@
     "vite": "8.2.2"
   },
   "dependencies": {
-    "@svadmin/ai-elements": "0.4.1",
+    "@svadmin/ai-elements": "0.5.1",
     "@svadmin/core": "^0.49.1",
     "@svadmin/elysia": "^0.11.0",
     "@svadmin/sveltekit": "^0.10.6",
