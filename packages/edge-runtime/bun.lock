@@ -9,7 +9,7 @@
         "@sinclair/typebox": "^0.34.52",
         "@supabase/supabase-js": "^2.116.0",
         "elysia": "^1.4.30",
-        "es-module-lexer": "2.3.2",
+        "es-module-lexer": "3.0.2",
         "jose": "^6.2.12",
       },
       "devDependencies": {
@@ -96,7 +96,7 @@
 
     "elysia": ["elysia@1.4.30", "https://registry.npmmirror.com/elysia/-/elysia-1.4.30.tgz", { "dependencies": { "cookie": "^1.1.1", "exact-mirror": "^0.2.7", "fast-decode-uri-component": "^1.0.1", "memoirist": "^0.4.0" }, "peerDependencies": { "@sinclair/typebox": ">= 0.34.0 < 1", "@types/bun": ">= 1.2.0", "file-type": ">= 20.0.0", "openapi-types": ">= 12.0.0", "typescript": ">= 5.0.0" }, "optionalPeers": ["@types/bun", "typescript"] }, "sha512-S2qqV0CbM4faB1hQQ5IYoeYnAUinjHlzRduxaBc4OoNqh0GjOc8k6tt3hv5ozWcG6Svr6hugw6JL4zNke4jwfA=="],
 
-    "es-module-lexer": ["es-module-lexer@2.3.2", "https://registry.npmmirror.com/es-module-lexer/-/es-module-lexer-2.3.2.tgz", {}, "sha512-poHGpORABojJJucnV9KbOavETW8lBVnphkW77ER5/BQ5Fz7oXSoCNek7IH3vR5nRjdsEz926ibFYX8KtLQmdyw=="],
+    "es-module-lexer": ["es-module-lexer@3.0.2", "", {}, "sha512-BuIB67FngDSyQ/dpQNOZybwdEBDUGJQvOqwWr4ha/ufYiqzuEwPkKO2zLhRAgay28tStRIHUeWmszZAJo3GCOg=="],
 
     "exact-mirror": ["exact-mirror@0.2.7", "https://registry.npmmirror.com/exact-mirror/-/exact-mirror-0.2.7.tgz", { "peerDependencies": { "@sinclair/typebox": "^0.34.15" }, "optionalPeers": ["@sinclair/typebox"] }, "sha512-+MeEmDcLA4o/vjK2zujgk+1VTxPR4hdp23qLqkWfStbECtAq9gmsvQa3LW6z/0GXZyHJobrCnmy1cdeE7BjsYg=="],
 
