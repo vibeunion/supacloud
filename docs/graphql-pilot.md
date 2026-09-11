@@ -22,7 +22,7 @@ Prerequisites: Bun, Docker, and installed compiler dependencies. From the reposi
 
 ```sh
 docker build -t supacloud-graphql-test:pg18 docker/graphql-test
-docker pull postgrest/postgrest:v16.2
+docker pull postgrest/postgrest:v16.3
 bun run scripts/check_graphql_pilot.ts
 # Run the same acceptance suite and retain the local page until Ctrl-C:
 bun run scripts/check_graphql_pilot.ts --serve
