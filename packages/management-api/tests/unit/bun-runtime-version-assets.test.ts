@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const BUN_VERSION = "1.4.0";
+const BUN_VERSION = "1.4.2";
 const repoRoot = join(import.meta.dir, "../../../..");
 const readRepoFile = (relativePath: string) => readFileSync(join(repoRoot, relativePath), "utf8");
 

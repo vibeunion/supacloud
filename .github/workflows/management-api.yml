@@ -49,7 +49,7 @@ concurrency:
 # gitleaks:allow
 env:
   NODE_VERSION: "24.x"
-  BUN_VERSION: "1.4.0"
+  BUN_VERSION: "1.4.2"
   GO_VERSION: "1.27.1"
   XCADDY_VERSION: "v0.4.7"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -764,7 +764,7 @@ jobs:
             --publish 9001:9000 \
             --env MINIO_ROOT_USER=minioadmin \
             --env MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio:latest server /data
+            quay.io/minio/minio:latest server /data
 
       # Management refuses to serve until the Caddy Admin API is reachable and
       # accepts its canonical JSON config, so this job needs a real Caddy. The

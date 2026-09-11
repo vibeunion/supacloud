@@ -41,7 +41,7 @@
     "directory": "packages/testing"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.0",
+    "@types/bun": "^1.4.2",
     "typescript": "^7.0.2"
   }
 }

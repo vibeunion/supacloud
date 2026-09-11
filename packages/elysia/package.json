@@ -57,7 +57,7 @@
     "@supacloud/compiler": "file:../compiler",
     "@supacloud/commands": "file:../commands",
     "@supacloud/db": "file:../db",
-    "@types/bun": "^1.4.0",
+    "@types/bun": "^1.4.2",
     "elysia": "^1.4.30",
     "typescript": "^7.0.2"
   }
