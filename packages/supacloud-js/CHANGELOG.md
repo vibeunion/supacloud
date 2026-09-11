@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.26.0...supacloud-js-v0.27.0) (2026-09-11)
+
+
+### Features
+
+* freeze authored type-safety merge gate ([25e07ea](https://github.com/vibeunion/supacloud/commit/25e07ea1de16cc01a24ed6f001b9bdc729b5ee5e))
+
 ## [0.26.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.25.0...supacloud-js-v0.26.0) (2026-09-09)
 
 
