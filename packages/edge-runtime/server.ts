@@ -4,6 +4,7 @@ import { Elysia } from "elysia";
 import cors from "@elysiajs/cors";
 import {
   WorkerPool,
+  resolveMaxHttpBodySizeBytes,
   resolveWorkerReplacementBudget,
   type WorkerPoolPreheatResult,
   type WorkerPoolVersionPreheatResult,
@@ -1910,7 +1911,7 @@ const app = new Elysia()
     )
   )
 
-  .listen({ port: PORT, hostname: HOST });
+  .listen({ port: PORT, hostname: HOST, maxRequestBodySize: resolveMaxHttpBodySizeBytes() });
 
 console.log(`🚀 Edge Runtime on ${HOST}:${PORT} (${POOL_SIZE} workers)`);
 
