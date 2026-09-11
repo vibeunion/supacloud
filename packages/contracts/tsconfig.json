@@ -3,7 +3,7 @@
     "target": "ES2022", "module": "ESNext", "moduleResolution": "bundler",
     "strict": true, "noUncheckedIndexedAccess": true, "exactOptionalPropertyTypes": true,
     "noImplicitOverride": true, "noPropertyAccessFromIndexSignature": true,
-    "noFallthroughCasesInSwitch": true, "skipLibCheck": false,
+    "noFallthroughCasesInSwitch": true, "skipLibCheck": true,
     "outDir": "dist", "rootDir": "src", "declaration": true
   },
   "include": ["src/**/*.ts"],
