@@ -1,13 +1,26 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, symlinkSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { discoverTypeSafetyProjects, inspectTypeSafetyProject } from "./type_safety_inventory";
 
 const root = resolve(import.meta.dir, "..");
 const args = process.argv.slice(2);
 if (args.some((arg) => !["--test", "--inventory", "--json"].includes(arg))) {
   throw new Error("Usage: bun run scripts/check_type_safety.ts [--test] [--inventory] [--json]");
 }
+
+const compilerTypeScript = join(
+  root, "packages", "compiler", "node_modules", "@typescript", "typescript6", "lib", "typescript.js",
+);
+if (!existsSync(compilerTypeScript)) {
+  const install = spawnSync("bun", ["install", "--frozen-lockfile"], {
+    cwd: join(root, "packages", "compiler"), encoding: "utf8",
+  });
+  if (install.status !== 0) {
+    throw new Error(`${install.stdout ?? ""}${install.stderr ?? ""}${install.error?.message ?? ""}`);
+  }
+}
+
+const { discoverTypeSafetyProjects, inspectTypeSafetyProject } = await import("./type_safety_inventory");
 
 type Manifest = {
   scripts?: Record<string, string>;
@@ -62,6 +75,19 @@ function readManifest(directory: string): Manifest {
   return JSON.parse(readFileSync(join(directory, "package.json"), "utf8")) as Manifest;
 }
 
+function resolveExecutable(directory: string, executable: string): string | undefined {
+  const candidates = [
+    join(directory, "node_modules", ".bin", executable),
+    join(directory, "node_modules", "typescript", "bin", executable),
+    join(root, "packages", "compiler", "node_modules", "typescript", "bin", executable),
+  ];
+  return candidates.find((candidate) => existsSync(candidate));
+}
+
+function resolveTypeScript(directory: string): string | undefined {
+  return resolveExecutable(directory, "tsc");
+}
+
 function ensureInstall(project: string, directory: string) {
   if (existsSync(join(directory, "node_modules"))) return;
   execute(project, directory, "install", "bun", ["install", "--frozen-lockfile"]);
@@ -100,7 +126,10 @@ function ensureWorkspaceBuilds(project: string, directory: string) {
     ensureInstall(depName, depDir);
     ensureWorkspaceBuilds(depName, depDir);
     if (typeof dep.scripts?.build === "string" && !built.has(depDir) && !packageReady(depDir)) {
-      if (!execute(depName, depDir, "build", "bun", ["run", "build"])) continue;
+      const tsc = resolveTypeScript(depDir);
+      if (!tsc || !execute(depName, depDir, "build:types", tsc, [
+        "-p", "tsconfig.json", "--emitDeclarationOnly",
+      ])) continue;
     }
     built.add(depDir);
     linkBuiltDist(depDir);
@@ -110,8 +139,13 @@ function ensureWorkspaceBuilds(project: string, directory: string) {
 for (const project of projects) {
   if (!project.svelte) continue;
   ensureInstall(project.name, project.directory);
-  const svelteKit = join(project.directory, "node_modules", ".bin", "svelte-kit");
-  if (existsSync(svelteKit)) spawnSync(svelteKit, ["sync"], { cwd: project.directory, encoding: "utf8" });
+  const svelteKit = resolveExecutable(project.directory, "svelte-kit");
+  if (!svelteKit) {
+    failed = true;
+    if (!args.includes("--json")) console.error(`[${project.name}] svelte-kit is not installed`);
+    continue;
+  }
+  execute(project.name, project.directory, "sync", svelteKit, ["sync"]);
 }
 
 const inventory = projects.map(inspectTypeSafetyProject);
@@ -127,26 +161,55 @@ for (const item of inventory) {
 if (!args.includes("--inventory")) {
   for (const project of projects) {
     if (project.name === "workspace-tools") {
-      execute(project.name, join(root, "scripts"), "tsconfig.commands.json",
-        join(root, "packages", "compiler", "node_modules", ".bin", "tsc"),
-        ["--noEmit", "-p", "tsconfig.commands.json"]);
+      const tsc = resolveTypeScript(join(root, "scripts"));
+      if (!tsc) {
+        failed = true;
+        if (!args.includes("--json")) console.error(`[${project.name}] tsc is not installed`);
+      } else {
+        execute(project.name, join(root, "scripts"), "tsconfig.commands.json", tsc,
+          ["--noEmit", "-p", "tsconfig.commands.json"]);
+      }
       continue;
     }
     ensureInstall(project.name, project.directory);
     ensureWorkspaceBuilds(project.name, project.directory);
     const scripts = readManifest(project.directory).scripts ?? {};
     if (project.svelte && typeof scripts.check === "string") {
-      execute(project.name, project.directory, "check", "bun", ["run", "check"], true);
+      const svelteCheck = resolveExecutable(project.directory, "svelte-check");
+      if (!svelteCheck) {
+        failed = true;
+        if (!args.includes("--json")) console.error(`[${project.name}] svelte-check is not installed`);
+      } else {
+        execute(project.name, project.directory, "check", svelteCheck,
+          ["--tsgo-experimental-api", "--tsconfig", "./tsconfig.json"], true);
+      }
       continue;
     }
     if (typeof scripts.typecheck === "string") {
-      execute(project.name, project.directory, "typecheck", "bun", ["run", "typecheck"]);
+      const tsc = resolveTypeScript(project.directory);
+      if (!tsc) {
+        failed = true;
+        if (!args.includes("--json")) console.error(`[${project.name}] tsc is not installed`);
+      } else {
+        execute(project.name, project.directory, "typecheck", tsc,
+          ["--noEmit", "-p", "tsconfig.json"]);
+      }
     }
     if (typeof scripts["typecheck:consumer"] === "string") {
       if (typeof scripts.build === "string" && !packageReady(project.directory)) {
-        execute(project.name, project.directory, "build", "bun", ["run", "build"]);
+        const tsc = resolveTypeScript(project.directory);
+        if (!tsc || !execute(project.name, project.directory, "build:types", tsc, [
+          "-p", "tsconfig.json", "--emitDeclarationOnly",
+        ])) continue;
       }
-      execute(project.name, project.directory, "typecheck:consumer", "bun", ["run", "typecheck:consumer"]);
+      const tsc = resolveTypeScript(project.directory);
+      if (!tsc) {
+        failed = true;
+        if (!args.includes("--json")) console.error(`[${project.name}] tsc is not installed`);
+      } else {
+        execute(project.name, project.directory, "typecheck:consumer", tsc,
+          ["--noEmit", "-p", "tsconfig.consumer.json"]);
+      }
     }
   }
 }
