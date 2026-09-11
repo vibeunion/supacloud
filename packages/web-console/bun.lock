@@ -9,7 +9,7 @@
         "@svadmin/core": "^0.49.1",
         "@svadmin/elysia": "^0.11.0",
         "@svadmin/sveltekit": "^0.10.6",
-        "@svadmin/ui": "0.69.0",
+        "@svadmin/ui": "0.70.0",
         "@tanstack/svelte-query": "^6.1.48",
         "highlight.js": "^11.12.0",
         "isomorphic-dompurify": "^4.1.0",
@@ -265,7 +265,7 @@
 
     "@svadmin/sveltekit": ["@svadmin/sveltekit@0.10.6", "", { "peerDependencies": { "@svadmin/core": ">=0.32.2 <0.50.0", "@sveltejs/kit": "^2.70.3", "svelte": "^5.56.10" }, "optionalPeers": ["@svadmin/core", "@sveltejs/kit", "svelte"] }, "sha512-iCTqc9JVlLp6YRWM87RUG/7icp8VON4xsCS7Bp+V3+VCrUPARabWF1qNbMYdqfAokwgxbEqStFAz7qSb48sLsw=="],
 
-    "@svadmin/ui": ["@svadmin/ui@0.69.0", "", { "dependencies": { "@floating-ui/dom": "^1.8.0", "@lucide/svelte": "^1.35.0", "@tanstack/svelte-store": "^0.12.1", "@tanstack/svelte-table": "^9.2.3", "@tanstack/table-core": "^9.2.3", "bits-ui": "^2.19.0", "cn": "^0.2.4", "svelte-sonner": "^1.2.1" }, "peerDependencies": { "@svadmin/core": "^0.49.1", "@svadmin/editor": "*", "@tanstack/svelte-query": "^6.1.48", "isomorphic-dompurify": "^3.23.0", "svelte": "^5.56.10" }, "optionalPeers": ["@svadmin/core", "@svadmin/editor", "@tanstack/svelte-query", "isomorphic-dompurify", "svelte"] }, "sha512-d7FRpz9kuIUebl+E+wlDP6MknF9mGc82SLku42lfLbvsW4UJHY1CbP/5f6TAxDrsm5sxXbpCPim1uqhGgiyaZQ=="],
+    "@svadmin/ui": ["@svadmin/ui@0.70.0", "", { "dependencies": { "@floating-ui/dom": "^1.8.0", "@lucide/svelte": "^1.35.0", "@tanstack/svelte-store": "^0.12.1", "@tanstack/svelte-table": "^9.2.3", "@tanstack/table-core": "^9.2.3", "bits-ui": "^2.19.0", "cn": "^0.2.4", "svelte-sonner": "^1.2.1" }, "peerDependencies": { "@svadmin/core": "^0.50.0", "@svadmin/editor": "*", "@tanstack/svelte-query": "^6.1.48", "isomorphic-dompurify": "^3.23.0", "svelte": "^5.56.10" }, "optionalPeers": ["@svadmin/core", "@svadmin/editor", "@tanstack/svelte-query", "isomorphic-dompurify", "svelte"] }, "sha512-4mO/wIBH6xaaMlGOnfR+MPQ5F0ZT+0+QObBrZCwgMI8yN88mgLxNqNGBKH9giHyiT4dAojWXIN+288SOESTRZQ=="],
 
     "@svelte-put/shortcut": ["@svelte-put/shortcut@4.2.0", "", { "peerDependencies": { "svelte": "^5.1.0" } }, "sha512-hqNLo4yEc++SLgAkZUvuwMxIAsii9qjQtTuzfcYVf3xRxa+0HFcfaWFK7LdU3l+15s9SYVNbPB0qQj9CHFqSuw=="],
 
