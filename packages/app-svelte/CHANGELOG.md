@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/vibeunion/supacloud/compare/app-svelte-v0.2.0...app-svelte-v0.3.0) (2026-09-11)
+
+
+### Features
+
+* freeze authored type-safety merge gate ([25e07ea](https://github.com/vibeunion/supacloud/commit/25e07ea1de16cc01a24ed6f001b9bdc729b5ee5e))
+
 ## [0.2.0](https://github.com/vibeunion/supacloud/compare/app-svelte-v0.1.0...app-svelte-v0.2.0) (2026-09-09)
 
 
