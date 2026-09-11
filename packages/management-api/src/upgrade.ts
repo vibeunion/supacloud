@@ -3078,7 +3078,7 @@ function upgradeConfirmationMessage(plan: UpgradeReleasePlan): string {
 async function confirmUpgrade(plan: UpgradeReleasePlan, forceYes?: boolean): Promise<boolean> {
     if (forceYes) return true;
     const confirmation = await p.confirm({ message: upgradeConfirmationMessage(plan), initialValue: true });
-    return !p.isCancel(confirmation) && confirmation;
+    return typeof confirmation === "boolean" ? confirmation : false;
 }
 
 function createUpgradeExecutionState(plan: UpgradeReleasePlan): UpgradeExecutionState {
