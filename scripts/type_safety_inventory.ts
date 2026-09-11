@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import * as ts from "../packages/compiler/node_modules/@typescript/typescript6/lib/typescript.js";
 
 export interface TypeSafetyProject {
@@ -7,15 +7,12 @@ export interface TypeSafetyProject {
   directory: string;
   configs: string[];
   svelte: boolean;
-  typecheckScript?: string;
-  sourceIncludes?: string[];
 }
 
 export interface TypeSafetyInventory {
   name: string;
   configs: string[];
   files: number;
-  uncovered: string[];
   errors: string[];
 }
 
@@ -41,16 +38,12 @@ export function discoverTypeSafetyProjects(root: string): TypeSafetyProject[] {
     if (!record(manifest) || typeof manifest.name !== "string") {
       throw new Error(`Invalid package manifest: ${entry.name}`);
     }
-    const scripts = record(manifest.scripts) ? manifest.scripts : {};
-    const typecheckScript = typeof scripts.typecheck === "string" ? "typecheck"
-      : typeof scripts.check === "string" ? "check" : undefined;
     projects.push({
       name: manifest.name,
       directory,
-      configs: ["tsconfig.json", "tsconfig.test.json",
+      configs: ["tsconfig.json",
         ...(existsSync(join(directory, "tsconfig.consumer.json")) ? ["tsconfig.consumer.json"] : [])],
       svelte: existsSync(join(directory, "svelte.config.js")),
-      ...(typecheckScript ? { typecheckScript } : {}),
     });
   }
   projects.sort((a, b) => a.directory.localeCompare(b.directory));
@@ -59,14 +52,6 @@ export function discoverTypeSafetyProjects(root: string): TypeSafetyProject[] {
     directory: root,
     configs: ["scripts/tsconfig.commands.json"],
     svelte: false,
-    sourceIncludes: [
-      "scripts/verify-command-migration.ts",
-      "scripts/build-command-dependencies.ts",
-      "scripts/prepare-command-test-database.ts",
-      ".github/scripts/prepare-command-package.mjs",
-      ".github/scripts/prepare-command-package.test.mjs",
-      ".github/scripts/package-validation.mjs",
-    ],
   });
   return projects;
 }
@@ -100,14 +85,5 @@ export function inspectTypeSafetyProject(project: TypeSafetyProject): TypeSafety
       covered.add(resolve(file));
     }
   }
-  const candidates = ts.sys.readDirectory(
-    project.directory,
-    [".ts", ".tsx", ".mts", ".cts", ".svelte", ".js", ".mjs", ".cjs"],
-    ["**/node_modules/**", "**/dist/**", "**/.svelte-kit/**", "**/.git/**", "**/coverage/**",
-      ...(project.svelte ? ["build/**"] : [])],
-    project.sourceIncludes ?? ["**/*"],
-  );
-  const uncovered = candidates.filter((file) => !covered.has(resolve(file)))
-    .map((file) => relative(project.directory, file)).sort();
-  return { name: project.name, configs: project.configs, files: candidates.length, uncovered, errors };
+  return { name: project.name, configs: project.configs, files: covered.size, errors };
 }

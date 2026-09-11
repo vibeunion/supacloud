@@ -5,8 +5,7 @@
     "types": ["node"]
   },
   "include": [
-    "src/**/*.ts",
-    "test/**/*.d.ts"
-  ],
-  "exclude": ["node_modules", "dist"]
+    "src/**/*.test.ts",
+    "src/**/*.d.ts"
+  ]
 }

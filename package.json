@@ -4,8 +4,8 @@
     "verify:commands": "bun run scripts/verify-command-migration.ts",
     "check:boundaries": "bun run scripts/check_workspace_boundaries.ts",
     "check:invariants": "bun run scripts/check_business_invariants.ts",
-    "check:type-safety": "bun run scripts/check_type_safety.ts",
-    "test:type-safety": "bun run scripts/check_type_safety.ts --test"
+    "check:type-safety": "bun install --cwd packages/compiler --frozen-lockfile && bun run scripts/check_type_safety.ts",
+    "test:type-safety": "bun install --cwd packages/compiler --frozen-lockfile && bun run scripts/check_type_safety.ts --test"
   },
   "dependencies": {
     "@types/ws": "^8.18.1",

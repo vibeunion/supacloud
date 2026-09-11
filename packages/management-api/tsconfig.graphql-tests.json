@@ -3,7 +3,7 @@
   "compilerOptions": {
     "rootDir": ".",
     "noEmit": true,
-    "skipLibCheck": true,
+    "skipLibCheck": false,
     "types": ["bun"]
   },
   "include": [

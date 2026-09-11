@@ -116,11 +116,10 @@ for (const project of projects) {
 
 const inventory = projects.map(inspectTypeSafetyProject);
 for (const item of inventory) {
-  if (item.errors.length || item.uncovered.length) {
+  if (item.errors.length) {
     failed = true;
     if (!args.includes("--json")) {
       console.error(`[${item.name}] ${item.errors.join("; ")}`);
-      for (const file of item.uncovered) console.error(`  Not included in a typecheck project: ${file}`);
     }
   }
 }

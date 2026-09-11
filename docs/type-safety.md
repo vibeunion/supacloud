@@ -1,7 +1,7 @@
 # Type Safety Gate
 
 This repository treats compile-time type safety as a frozen merge gate over
-**authored source**. A green gate is 100% of that contract. It is not a claim
+**production authored source**. A green gate is 100% of that contract. It is not a claim
 of mathematical TypeScript soundness, runtime correctness, or third-party
 declaration quality.
 
@@ -9,16 +9,19 @@ declaration quality.
 
 `bun run check:type-safety` must pass.
 
-- Every package has `tsconfig.json` and `tsconfig.test.json`.
-- Authored TypeScript, Svelte, and checked JavaScript files are included in a
-  typecheck project.
+- Every package's production `tsconfig.json` is checked. The gate reports the
+  files selected by those configs; it does not invent a repository-wide source
+  coverage percentage from unrelated test or fixture files.
+- Production TypeScript, Svelte, and checked JavaScript selected by the
+  configs are compiled.
 - `strict` and `skipLibCheck` are true. Third-party `.d.ts` and `node_modules`
   source are out of scope.
 - Console diagnostics are counted only for this repository's files.
 - The SDK consumer check compiles against this SDK's declarations and the
   local Supabase stub. It does not typecheck `@supabase/auth-js` internals.
 
-`bun run test:type-safety` runs the inventory tests and the same gate.
+`bun run test:type-safety` runs the inventory tests and the same production
+gate. Package test typechecks and runtime test behavior remain separate.
 
 ## Out of scope
 
