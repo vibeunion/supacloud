@@ -103,7 +103,7 @@ Prepare the same images used by the GraphQL pilot (the test never pulls images):
 
 ```sh
 docker build -t supacloud-graphql-test:pg18 docker/graphql-test
-docker pull postgrest/postgrest:v16.2
+docker pull postgrest/postgrest:v16.3
 cd packages/management-api
 bun install --frozen-lockfile
 bun test tests/unit/extension.service.test.ts

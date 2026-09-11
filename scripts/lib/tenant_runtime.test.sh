@@ -7,9 +7,9 @@ RUNTIME_SCRIPT="${SCRIPT_DIR}/tenant_runtime.sh"
 
 grep -Eq '^umask 077$' "$RUNTIME_SCRIPT"
 grep -Fq 'PGPASSWORD="$db_password" psql' "$RUNTIME_SCRIPT"
-grep -Fq 'v16.2' "$RUNTIME_SCRIPT"
-grep -Fq '4712595baae0f5d84a527d55a11166d6bf4d9b0f1d102505c5e9d59219787f08' "$RUNTIME_SCRIPT"
-grep -Fq '4c83974272acb56e6091e969ba4ee345fbc053cde457b0c8a9399e0d2a12c32d' "$RUNTIME_SCRIPT"
+grep -Fq 'v16.3' "$RUNTIME_SCRIPT"
+grep -Fq '4eb414eb948c8800863cc8c9896a17b611b2dccf9ff581f4d57f42ec9ccee40d' "$RUNTIME_SCRIPT"
+grep -Fq '25bb1eab438f92c26514ff126104400562b8560d0352f128606c3fb726eac242' "$RUNTIME_SCRIPT"
 grep -Fq 'v2.197.0' "$RUNTIME_SCRIPT"
 grep -Fq 'GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS' "$RUNTIME_SCRIPT"
 grep -Fq 'run the explicit SupaCloud installer/upgrade' "$RUNTIME_SCRIPT"
@@ -174,7 +174,7 @@ unset GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN
 (
     mkdir -p "$tmp_dir/postgrest-bin"
     fake_postgrest="$tmp_dir/postgrest-bin/postgrest"
-    printf '#!/bin/sh\nprintf "PostgREST 16.2\\n"\n' > "$fake_postgrest"
+    printf '#!/bin/sh\nprintf "PostgREST 16.3\\n"\n' > "$fake_postgrest"
     chmod 755 "$fake_postgrest"
     PATH="$tmp_dir/postgrest-bin:$PATH"
     POSTGREST_BIN="$fake_postgrest"
@@ -185,7 +185,7 @@ unset GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN
         echo "tenant start accepted an outdated PostgREST binary" >&2
         exit 1
     fi
-    POSTGREST_VERSION=16.2
+    POSTGREST_VERSION=16.3
     if ensure_postgrest >/dev/null 2>&1; then
         echo "tenant start accepted a PostgREST version without the v prefix" >&2
         exit 1
@@ -249,12 +249,12 @@ fi
 unset -f curl
 unset SUPACLOUD_GITHUB_PROXY
 
-if resolve_release_sha256 "PostgREST" "v99.0.0" "v16.2" "default-digest" "" >/dev/null 2>&1; then
+if resolve_release_sha256 "PostgREST" "v99.0.0" "v16.3" "default-digest" "" >/dev/null 2>&1; then
     echo "non-default PostgREST version reused the default digest" >&2
     exit 1
 fi
 explicit_digest=$(printf 'e%.0s' {1..64})
-[[ "$(resolve_release_sha256 "PostgREST" "v99.0.0" "v16.2" "$(printf 'd%.0s' {1..64})" "$explicit_digest")" == "$explicit_digest" ]]
+[[ "$(resolve_release_sha256 "PostgREST" "v99.0.0" "v16.3" "$(printf 'd%.0s' {1..64})" "$explicit_digest")" == "$explicit_digest" ]]
 
 # Archive validation rejects digest mismatches and link/special-file payloads.
 mkdir -p "$tmp_dir/archive/valid" "$tmp_dir/archive/link"
