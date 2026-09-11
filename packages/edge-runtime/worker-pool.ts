@@ -65,12 +65,16 @@ type QueuedDispatch = {
 const DEFAULT_MAX_BODY_SIZE_MB = 30;
 const FUNCTION_VERSION_HEADER = "x-supacloud-function-version";
 
-function resolveMaxBodySizeBytes(value = process.env.EDGE_MAX_BODY_SIZE_MB): number {
+export function resolveMaxBodySizeBytes(value = process.env.EDGE_MAX_BODY_SIZE_MB): number {
   const configuredMb = Number(value);
   const maxBodySizeMb = Number.isFinite(configuredMb) && configuredMb > 0
     ? configuredMb
     : DEFAULT_MAX_BODY_SIZE_MB;
   return maxBodySizeMb * 1024 * 1024;
+}
+
+export function resolveMaxHttpBodySizeBytes(value = process.env.EDGE_MAX_BODY_SIZE_MB): number {
+  return Math.max(128 * 1024 * 1024, resolveMaxBodySizeBytes(value));
 }
 
 function formatBodyLimit(bytes: number): string {
