@@ -98,7 +98,7 @@ try {
     "-e", "PGRST_DB_URI", "-e", "PGRST_JWT_SECRET", "-e", "PGRST_DB_SCHEMAS=public,graphql_public",
     "-e", "PGRST_DB_ANON_ROLE=anon", "-e", "PGRST_DB_EXTRA_SEARCH_PATH=public",
     "-e", "PGRST_DB_POOL=4", "-e", "PGRST_DB_MAX_ROWS=100",
-    "postgrest/postgrest:v16.2"], undefined, {
+    "postgrest/postgrest:v16.3"], undefined, {
       PGRST_DB_URI: `postgres://authenticator:${password}@${pg}:5432/graphql_pilot`,
       PGRST_JWT_SECRET: secret,
     });
