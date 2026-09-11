@@ -46,7 +46,7 @@ export async function startGraphqlPostgres() {
     }
     try {
         await command(["image", "inspect", "supacloud-graphql-test:pg18"]);
-        await command(["image", "inspect", "postgrest/postgrest:v16.2"]);
+        await command(["image", "inspect", "postgrest/postgrest:v16.3"]);
         await command(["network", "create", name]);
         networkCreated = true;
         await command(["run", "--pull=never", "-d", "--name", name, "--network", name,
@@ -108,7 +108,7 @@ export async function startGraphqlPostgres() {
             await command(["run", "--pull=never", "-d", "--name", restName, "--network", name,
                 "-p", "127.0.0.1::3000", "-e", "PGRST_DB_URI", "-e", "PGRST_JWT_SECRET",
                 "-e", "PGRST_DB_SCHEMAS=public,graphql_public", "-e", "PGRST_DB_ANON_ROLE=anon",
-                "-e", "PGRST_DB_EXTRA_SEARCH_PATH=public", "postgrest/postgrest:v16.2"], {
+                "-e", "PGRST_DB_EXTRA_SEARCH_PATH=public", "postgrest/postgrest:v16.3"], {
                 PGRST_DB_URI: `postgres://authenticator:${password}@${name}:5432/${dbName}`,
                 PGRST_JWT_SECRET: secret,
             });
