@@ -174,7 +174,7 @@ unset GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN
 (
     mkdir -p "$tmp_dir/postgrest-bin"
     fake_postgrest="$tmp_dir/postgrest-bin/postgrest"
-    printf '#!/bin/sh\nprintf "PostgREST 16.2\\n"\n' > "$fake_postgrest"
+    printf '#!/bin/sh\nprintf "PostgREST 16.3\\n"\n' > "$fake_postgrest"
     chmod 755 "$fake_postgrest"
     PATH="$tmp_dir/postgrest-bin:$PATH"
     POSTGREST_BIN="$fake_postgrest"
@@ -185,7 +185,7 @@ unset GOTRUE_EXPERIMENTAL_PROVIDERS_WITH_OWN_LINKING_DOMAIN
         echo "tenant start accepted an outdated PostgREST binary" >&2
         exit 1
     fi
-    POSTGREST_VERSION=16.2
+    POSTGREST_VERSION=16.3
     if ensure_postgrest >/dev/null 2>&1; then
         echo "tenant start accepted a PostgREST version without the v prefix" >&2
         exit 1
@@ -249,12 +249,12 @@ fi
 unset -f curl
 unset SUPACLOUD_GITHUB_PROXY
 
-if resolve_release_sha256 "PostgREST" "v99.0.0" "v16.2" "default-digest" "" >/dev/null 2>&1; then
+if resolve_release_sha256 "PostgREST" "v99.0.0" "v16.3" "default-digest" "" >/dev/null 2>&1; then
     echo "non-default PostgREST version reused the default digest" >&2
     exit 1
 fi
 explicit_digest=$(printf 'e%.0s' {1..64})
-[[ "$(resolve_release_sha256 "PostgREST" "v99.0.0" "v16.2" "$(printf 'd%.0s' {1..64})" "$explicit_digest")" == "$explicit_digest" ]]
+[[ "$(resolve_release_sha256 "PostgREST" "v99.0.0" "v16.3" "$(printf 'd%.0s' {1..64})" "$explicit_digest")" == "$explicit_digest" ]]
 
 # Archive validation rejects digest mismatches and link/special-file payloads.
 mkdir -p "$tmp_dir/archive/valid" "$tmp_dir/archive/link"
