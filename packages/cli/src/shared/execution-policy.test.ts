@@ -188,7 +188,7 @@ describe("CLI execution policy", () => {
             expect(executionMode("scheduled_functions", action, {})).toBe("write");
         }
         expect(executionMode("storage", "get_bucket", {})).toBe("read");
-        for (const action of ["create_bucket", "update_bucket", "delete_bucket"]) {
+        for (const action of ["create_bucket", "update_bucket", "delete_bucket", "upload_base64", "delete_file", "upload", "upload_file"]) {
             expect(executionMode("storage", action, {})).toBe("write");
         }
     });
