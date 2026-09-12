@@ -247,10 +247,23 @@ nonterminal units, malformed or missing structured receipts, redacted or
 truncated SSH output, or unknown status, without emitting raw logs, remote
 filesystem paths, secrets, bearer material, env values, or customer data.
 
-`--artifact_transport local` accepts only `--github_proxy direct` or `none` and
-clears proxy environment variables on both hosts. The server-download path
+`--artifact_transport local` accepts only `--github_proxy direct` or `none`.
+Local GitHub asset downloads honor `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`
+(including lowercase equivalents) as transport settings, without rewriting
+official release URLs or relaxing artifact verification. Local attestation
+verification and remote offline execution still clear proxy settings.
+For a production server without Internet access, set the download proxy on
+the local operator machine only. Each local download has a 30-minute deadline
+to accommodate large runtime binaries on slow operator connections. The server-download path
 remains available as `--artifact_transport remote`; it verifies and executes
 the target Management release as the runner even for Management-only upgrades.
+
+For interrupted local downloads, an operator may prefetch assets with a resumable
+downloader and set `SUPACLOUD_RELEASE_ASSET_CACHE_DIR` to an absolute directory.
+Files are looked up at `<cache>/<owner>/<repo>/<release-tag>/<asset-name>`.
+Missing entries are downloaded normally. Cached bytes are copied to private
+staging and undergo the same pinned manifest, signature, size and SHA-256 checks;
+an invalid cached asset fails instead of being installed.
 
 With `--artifact_transport remote` (the default), omitting
 `--edge_runtime_version` retains the Management and Web Console-only upgrade

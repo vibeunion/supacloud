@@ -1,10 +1,10 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { accessSync, chmodSync, constants as fsConstants, createWriteStream, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants as fsConstants, copyFileSync, createWriteStream, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { get } from "node:https";
 import { tmpdir } from "node:os";
-import { basename, delimiter, join } from "node:path";
+import { basename, delimiter, isAbsolute, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Transform, type Readable } from "node:stream";
 
@@ -123,7 +123,7 @@ const GH_ARCHIVE_SHA256: Record<UpgradeArchitecture, string> = {
     arm64: "06f86ec7103d41993b76cd78072f43595c34aaa56506d971d9860e67140bf909",
 };
 const MAX_GH_ARCHIVE_BYTES = 64 * 1024 * 1024;
-const DOWNLOAD_TIMEOUT_MS = 10 * 60_000;
+const DOWNLOAD_TIMEOUT_MS = 30 * 60_000;
 const DOWNLOAD_IDLE_TIMEOUT_MS = 30_000;
 const GH_CAPABILITY_TIMEOUT_MS = 30_000;
 const GH_VERIFICATION_TIMEOUT_MS = 2 * 60_000;
@@ -343,6 +343,26 @@ async function downloadDirect(url: string, destination: string, maxBytes: number
 }
 
 async function downloadGithubReleaseAsset(request: GithubReleaseAssetDownloadRequest): Promise<void> {
+    const cache = process.env.SUPACLOUD_RELEASE_ASSET_CACHE_DIR?.trim();
+    if (cache) {
+        if (!isAbsolute(cache)) throw new Error("Release asset cache directory must be absolute");
+        const cachedPath = join(cache, request.repository, request.tag, request.assetName);
+        let cached: ReturnType<typeof lstatSync> | undefined;
+        try { cached = lstatSync(cachedPath); }
+        catch (error: unknown) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        if (cached) {
+            if (!cached.isFile() || cached.isSymbolicLink() || cached.size > request.maxBytes) {
+                throw new Error("Cached release asset must be a bounded regular file");
+            }
+            // 缓存仅替代传输；复制后仍执行相同的 manifest、签名及摘要验证。
+            copyFileSync(cachedPath, request.destination, fsConstants.COPYFILE_EXCL);
+            chmodSync(request.destination, 0o600);
+            assertDownloadedReleaseAsset(request);
+            return;
+        }
+    }
     const download = await runGithubCliDownload([
         "release", "download", request.tag,
         "--repo", `github.com/${request.repository}`,
@@ -475,8 +495,14 @@ function githubCliExecutable(environment: NodeJS.ProcessEnv): string {
 type GithubCliResult = { exitCode: number; stdout: string; stderr: string };
 type GithubCliProcess = ChildProcessByStdio<null, Readable, Readable>;
 
-function spawnGithubCli(arguments_: string[]): GithubCliProcess {
+function spawnGithubCli(arguments_: string[], download = false): GithubCliProcess {
     const environment = directEnvironment();
+    if (download) {
+        // 仅本地下载沿用操作者的传输代理，签名校验和远端离线执行仍保持原边界。
+        for (const key of ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"]) {
+            if (process.env[key]) environment[key] = process.env[key];
+        }
+    }
     return spawn(githubCliExecutable(environment), arguments_, {
         env: environment,
         stdio: ["ignore", "pipe", "pipe"],
@@ -522,7 +548,7 @@ export async function runGithubCliDownload(
     maxBytes: number,
     timeoutMs: number,
 ): Promise<GithubCliResult> {
-    const child = spawnGithubCli(arguments_);
+    const child = spawnGithubCli(arguments_, true);
     let stderr: string = "";
     child.stderr.on("data", (chunk: Buffer) => { stderr = `${stderr}${chunk.toString()}`.slice(-8_000); });
     const write = pipeline(
