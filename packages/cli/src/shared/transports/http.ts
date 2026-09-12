@@ -507,14 +507,19 @@ export class HttpTransport {
         );
     }
 
-    async postMultipart<T = unknown>(path: string, formData: FormData): Promise<HttpResult<T>> {
+    async postMultipart<T = unknown>(
+        path: string,
+        formData: FormData,
+        options?: { timeoutMs?: number },
+    ): Promise<HttpResult<T>> {
+        const timeoutMs = validatedPostTimeout(options);
         try {
             const headers = { Authorization: `Bearer ${this.token}` };
             const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "POST",
                 headers,
                 body: formData,
-            }, DEFAULT_TIMEOUT, this.insecureTls);
+            }, timeoutMs, this.insecureTls);
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {
