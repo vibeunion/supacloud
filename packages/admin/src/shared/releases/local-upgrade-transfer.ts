@@ -1150,6 +1150,13 @@ async function throwRemoteUpgradeFailure(ssh: SshTransport, paths: RemoteUpgrade
         `Remote local upgrade failed (${status}): ${failureEvidence.summary}`
         + (failureEvidence.causes.length > 0 ? `; causes: ${failureEvidence.causes.join(" | ")}` : ""),
     );
+    if (failureEvidence.causes.some((cause) => cause.startsWith("phase="))) {
+        throw remoteReconciliationFailure(
+            "Remote upgrade emitted only a wrapper failure; retain the runner log for diagnosis",
+            [failure],
+            paths,
+        );
+    }
     try {
         await cleanupRemoteRecords(ssh, paths);
     } catch (cleanupError: unknown) {
