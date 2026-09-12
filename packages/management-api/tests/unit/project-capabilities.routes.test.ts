@@ -104,6 +104,8 @@ describe("project capability negotiation", () => {
     } else {
       expect(body.capabilities.gotrue_auth_hooks_v1.reason_code).toBeTruthy();
     }
+    expect(body.capabilities.storage_v1).toMatchObject({ available: true, source: "supacloud" });
+    expect(body.capabilities.edge_runtime_streaming_upload_v1).toMatchObject({ available: true, source: "supacloud" });
   });
 
   test("does not advertise organization runtime materialization before its schema exists", async () => {
