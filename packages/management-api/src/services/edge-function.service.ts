@@ -2528,10 +2528,11 @@ async function commitFunctionActivation(
   commit: FunctionActivationCommit,
 ): Promise<{ config: EdgeFunctionConfigSnapshot; preheat: EdgeFunctionPreheatResult | null }> {
   const activation = await preparedFunctionActivation(commit);
-  const fence = await beginPreparedFunctionActivation(activation);
   let preheat: EdgeFunctionPreheatResult | null = null;
   let published = false;
   try {
+    // 开始激活可能已建立隔离但丢失响应，必须走同一中止或提交恢复流程。
+    const fence = await beginPreparedFunctionActivation(activation);
     preheat = await preheatPreparedFunctionActivation(activation, fence);
     try {
       await publishPreparedFunctionActivation(activation);
