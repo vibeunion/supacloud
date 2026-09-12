@@ -14,6 +14,37 @@ export * from "./workflows.js";
 export * from "./commands.js";
 export * from "./artifacts.js";
 
+export const SUPACLOUD_JS_VERSION = "0.27.1";
+
+export type SupaCloudCapability = {
+  available: boolean;
+  source: string;
+  version: string | null;
+  reason_code: string | null;
+  authority_project_ref?: string;
+  managed_by_owner?: boolean;
+  [key: string]: unknown;
+};
+
+export type SupaCloudProjectCapabilities = {
+  project_ref: string;
+  auth_runtime: string;
+  schema_version: number;
+  capabilities: Record<string, SupaCloudCapability>;
+  [key: string]: unknown;
+};
+
+export type SupaCloudStorageUploadConstraints = {
+  bucketId: string;
+  fileSizeLimit: number | null;
+  allowedMimeTypes: string[] | null;
+};
+
+export type SupaCloudUploadValidationResult = {
+  valid: boolean;
+  error?: string;
+};
+
 export type SupaCloudTaskStatus =
   | "pending"
   | "leased"
@@ -791,6 +822,29 @@ function decodePurgeResult(value: unknown): { queue_name: string; purged: number
   };
 }
 
+function decodeProjectCapabilities(value: unknown): SupaCloudProjectCapabilities {
+  const record = responseRecord(value, "project capabilities");
+  const rawCapabilities = valueRecord(record.capabilities);
+  const capabilities: Record<string, SupaCloudCapability> = {};
+  for (const [key, item] of Object.entries(rawCapabilities)) {
+    const capRecord = valueRecord(item);
+    capabilities[key] = {
+      available: typeof capRecord.available === "boolean" ? capRecord.available : false,
+      source: typeof capRecord.source === "string" ? capRecord.source : "unknown",
+      version: typeof capRecord.version === "string" ? capRecord.version : null,
+      reason_code: typeof capRecord.reason_code === "string" ? capRecord.reason_code : null,
+      ...(typeof capRecord.authority_project_ref === "string" ? { authority_project_ref: capRecord.authority_project_ref } : {}),
+      ...(typeof capRecord.managed_by_owner === "boolean" ? { managed_by_owner: capRecord.managed_by_owner } : {}),
+    };
+  }
+  return {
+    project_ref: responseString(record, "project_ref", "project capabilities"),
+    auth_runtime: typeof record.auth_runtime === "string" ? record.auth_runtime : "unknown",
+    schema_version: typeof record.schema_version === "number" ? record.schema_version : 1,
+    capabilities,
+  };
+}
+
 function normalizeRpcMessage(queueName: string, value: unknown, status?: string): SupaCloudQueueMessage | null {
   const row = firstRpcValue(value);
   if (!row || typeof row !== "object") return null;
@@ -903,6 +957,7 @@ class SupaCloudManagementClient<TClient extends SupabaseClient = SupabaseClient>
       method,
       headers: {
         authorization: `Bearer ${accessToken}`,
+        "x-client-info": `supacloud-js/${SUPACLOUD_JS_VERSION}`,
         ...(body !== undefined ? { "content-type": "application/json" } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -1637,6 +1692,91 @@ class SupaCloudSupAuthClient<TClient extends SupabaseClient = SupabaseClient> ex
   }
 }
 
+export class SupaCloudCapabilitiesClient<TClient extends SupabaseClient = SupabaseClient> extends SupaCloudManagementClient<TClient> {
+  async get(): Promise<SupaCloudProjectCapabilities> {
+    return this.request<SupaCloudProjectCapabilities>(
+      `/v1/projects/${this.options.projectRef}/capabilities`,
+      "GET",
+      undefined,
+      decodeProjectCapabilities,
+    );
+  }
+
+  async isAvailable(capabilityKey: string): Promise<boolean> {
+    const res = await this.get();
+    return res.capabilities?.[capabilityKey]?.available === true;
+  }
+}
+
+export class SupaCloudStorageClient<TClient extends SupabaseClient = SupabaseClient> extends SupaCloudManagementClient<TClient> {
+  async getUploadConstraints(bucketId: string): Promise<SupaCloudStorageUploadConstraints> {
+    try {
+      const { data, error } = await this.options.supabase.storage.getBucket(bucketId);
+      if (!error && data) {
+        return {
+          bucketId,
+          fileSizeLimit: typeof data.file_size_limit === "number"
+            ? data.file_size_limit
+            : data.file_size_limit ? Number(data.file_size_limit) : null,
+          allowedMimeTypes: Array.isArray(data.allowed_mime_types) ? data.allowed_mime_types : null,
+        };
+      }
+    } catch {
+      // Fall back to management API query if storage client throws or lacks RLS
+    }
+
+    try {
+      const bucket = await this.request<Record<string, unknown>>(
+        `/v1/projects/${this.options.projectRef}/storage/buckets/${encodeURIComponent(bucketId)}`,
+        "GET",
+        undefined,
+        (val) => responseRecord(val, "storage bucket"),
+      );
+      const rawLimit = bucket.file_size_limit;
+      const fileSizeLimit = typeof rawLimit === "number" ? rawLimit : rawLimit ? Number(rawLimit) : null;
+      const allowedMimeTypes = Array.isArray(bucket.allowed_mime_types)
+        ? (bucket.allowed_mime_types as string[])
+        : null;
+      return {
+        bucketId,
+        fileSizeLimit,
+        allowedMimeTypes,
+      };
+    } catch {
+      return {
+        bucketId,
+        fileSizeLimit: null,
+        allowedMimeTypes: null,
+      };
+    }
+  }
+
+  async validateUpload(
+    bucketId: string,
+    file: { size: number; type?: string },
+  ): Promise<SupaCloudUploadValidationResult> {
+    const constraints = await this.getUploadConstraints(bucketId);
+    if (constraints.fileSizeLimit !== null && file.size > constraints.fileSizeLimit) {
+      return {
+        valid: false,
+        error: `File size ${file.size} bytes exceeds bucket limit of ${constraints.fileSizeLimit} bytes`,
+      };
+    }
+    if (
+      constraints.allowedMimeTypes &&
+      constraints.allowedMimeTypes.length > 0 &&
+      file.type &&
+      !constraints.allowedMimeTypes.includes(file.type)
+    ) {
+      return {
+        valid: false,
+        error: `MIME type "${file.type}" is not in the allowed list: ${constraints.allowedMimeTypes.join(", ")}`,
+      };
+    }
+    return { valid: true };
+  }
+}
+
 export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseClient>(
   options: SupaCloudClientOptions<TClient>,
 ) {
@@ -1654,6 +1794,8 @@ export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseC
   const oauthClients = new SupaCloudOAuthClientsClient(normalized);
   const supauth = new SupaCloudSupAuthClient(normalized);
   const queues = new SupaCloudQueuesClient(normalized);
+  const capabilities = new SupaCloudCapabilitiesClient(normalized);
+  const storage = new SupaCloudStorageClient(normalized);
   const workflows = new SupaCloudWorkflowsClient(options.supabase);
   const commands = new SupaCloudCommandsClient(options.supabase);
   const artifacts = new SupaCloudArtifactsClient(options.supabase);
@@ -1672,6 +1814,8 @@ export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseC
     artifacts,
     supauth,
     queues,
+    capabilities,
+    storage,
     queue: (name: string) => new SupaCloudQueueClient(normalized, name),
     functions: {
       invokeBackground: (

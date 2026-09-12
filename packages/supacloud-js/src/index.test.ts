@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { createSupaCloudClient, SupaCloudApiError, SupaCloudTaskSubmitError } from "./index";
+import {
+  createSupaCloudClient,
+  SupaCloudApiError,
+  SupaCloudTaskSubmitError,
+  SUPACLOUD_JS_VERSION,
+} from "./index";
 
 function createFakeSupabase() {
   const removeChannel = mock(async () => "ok");
@@ -32,6 +37,18 @@ function createFakeSupabase() {
     },
     functions: {
       invoke: mock(),
+    },
+    storage: {
+      getBucket: mock(async (id: string) => ({
+        data: {
+          id,
+          name: id,
+          public: true,
+          file_size_limit: 10485760,
+          allowed_mime_types: ["image/png", "image/jpeg"],
+        },
+        error: null,
+      })),
     },
     schema,
     channel: mock(() => channelInstance),
@@ -847,4 +864,119 @@ describe("@supacloud/js", () => {
 
     subscription.unsubscribe();
   });
+
+  test("capabilities client queries project capabilities and checks availability", async () => {
+    const { supabase } = createFakeSupabase();
+    const capturedCalls: Array<{ url: string; init?: RequestInit }> = [];
+
+    globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+      capturedCalls.push({ url: String(input), init });
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            project_ref: "proj_1",
+            auth_runtime: "gotrue",
+            schema_version: 1,
+            capabilities: {
+              storage_v1: { available: true, source: "supacloud", version: "v1", reason_code: null },
+              edge_runtime_streaming_upload_v1: { available: true, source: "supacloud", version: "v1", reason_code: null },
+              experimental_feature_v2: { available: false, source: "supacloud", version: null, reason_code: "disabled" },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    }) as typeof fetch;
+
+    const client = createSupaCloudClient({
+      supabase: supabase as never,
+      managementApiUrl: "https://admin.example.com",
+      projectRef: "proj_1",
+    });
+
+    const caps = await client.capabilities.get();
+    expect(caps.project_ref).toBe("proj_1");
+    expect(caps.capabilities.storage_v1?.available).toBe(true);
+    expect(caps.capabilities.edge_runtime_streaming_upload_v1?.available).toBe(true);
+    expect(caps.capabilities.experimental_feature_v2?.available).toBe(false);
+
+    const isStorageAvail = await client.capabilities.isAvailable("storage_v1");
+    expect(isStorageAvail).toBe(true);
+
+    const isExpAvail = await client.capabilities.isAvailable("experimental_feature_v2");
+    expect(isExpAvail).toBe(false);
+
+    const isUnknownAvail = await client.capabilities.isAvailable("unknown_cap");
+    expect(isUnknownAvail).toBe(false);
+
+    expect(capturedCalls[0]?.url).toBe("https://admin.example.com/v1/projects/proj_1/capabilities");
+    expect((capturedCalls[0]?.init?.headers as Record<string, string>)?.["x-client-info"]).toBe(`supacloud-js/${SUPACLOUD_JS_VERSION}`);
+  });
+
+  test("storage client queries upload constraints and validates files", async () => {
+    const { supabase } = createFakeSupabase();
+
+    const client = createSupaCloudClient({
+      supabase: supabase as never,
+      managementApiUrl: "https://admin.example.com",
+      projectRef: "proj_1",
+    });
+
+   const constraints = await client.storage.getUploadConstraints("avatars");
+   expect(constraints.bucketId).toBe("avatars");
+   expect(constraints.fileSizeLimit).toBe(10485760);
+   expect(constraints.allowedMimeTypes).toMatchObject(["image/png", "image/jpeg"]);
+
+   // Valid file
+   const valid = await client.storage.validateUpload("avatars", { size: 1024, type: "image/png" });
+   expect(valid.valid).toBe(true);
+   expect(valid.error).toBe(undefined);
+
+   // Size limit exceeded
+    const tooBig = await client.storage.validateUpload("avatars", { size: 20971520, type: "image/png" });
+    expect(tooBig.valid).toBe(false);
+    expect(tooBig.error).toContain("exceeds bucket limit");
+
+    // MIME type mismatch
+    const wrongMime = await client.storage.validateUpload("avatars", { size: 1024, type: "application/pdf" });
+    expect(wrongMime.valid).toBe(false);
+    expect(wrongMime.error).toContain("MIME type");
+  });
+
+  test("storage client falls back to management api when supabase storage throws or errors", async () => {
+    const { supabase } = createFakeSupabase();
+    supabase.storage.getBucket = mock(async () => ({
+      data: null,
+      error: { message: "The resource was not found", statusCode: "404" },
+    })) as never;
+
+    const capturedCalls: Array<{ url: string; init?: RequestInit }> = [];
+    globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+      capturedCalls.push({ url: String(input), init });
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            id: "documents",
+            name: "documents",
+            public: false,
+            file_size_limit: 52428800,
+            allowed_mime_types: ["application/pdf"],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    }) as typeof fetch;
+
+    const client = createSupaCloudClient({
+      supabase: supabase as never,
+      managementApiUrl: "https://admin.example.com",
+      projectRef: "proj_1",
+    });
+
+   const constraints = await client.storage.getUploadConstraints("documents");
+   expect(constraints.bucketId).toBe("documents");
+   expect(constraints.fileSizeLimit).toBe(52428800);
+   expect(constraints.allowedMimeTypes).toMatchObject(["application/pdf"]);
+   expect(capturedCalls[0]?.url).toBe("https://admin.example.com/v1/projects/proj_1/storage/buckets/documents");
+ });
 });

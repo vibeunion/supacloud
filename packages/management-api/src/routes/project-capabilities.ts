@@ -146,6 +146,8 @@ export const projectCapabilityRoutes = new Elysia({ prefix: "/v1/projects/:ref" 
         authority_project_ref: authRuntime.authority_project_ref,
         managed_by_owner: authRuntime.mode === "shared",
       },
+      storage_v1: available("supacloud", "v1"),
+      edge_runtime_streaming_upload_v1: available("supacloud", "v1"),
     };
 
     return {
