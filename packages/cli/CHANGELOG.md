@@ -14,6 +14,14 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.52.0](https://github.com/vibeunion/supacloud/compare/cli-v0.51.3...cli-v0.52.0) (2026-09-12)
+
+
+### Features
+
+* **cli:** support configurable upload body limits for edge functions and host install ([#1274](https://github.com/vibeunion/supacloud/issues/1274)) ([5f9e85a](https://github.com/vibeunion/supacloud/commit/5f9e85aa502e06e739fa9e6d43e2bcc1f94d721a))
+* **cli:** support unrestricted manual file upload for storage ([#1276](https://github.com/vibeunion/supacloud/issues/1276)) ([53eae1f](https://github.com/vibeunion/supacloud/commit/53eae1f1af3014c014b5cb65127cb9fff2291696))
+
 ## [0.51.3](https://github.com/vibeunion/supacloud/compare/cli-v0.51.2...cli-v0.51.3) (2026-09-11)
 
 

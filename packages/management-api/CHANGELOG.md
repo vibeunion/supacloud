@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.79.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.78.1...management-api-v0.79.0) (2026-09-12)
+
+
+### Features
+
+* adopt Pigsty Silo MinIO fork, expose environment/version APIs, and storage upload constraints ([#1279](https://github.com/vibeunion/supacloud/issues/1279)) ([e47b25b](https://github.com/vibeunion/supacloud/commit/e47b25bdc61935e901f0e98b7eb2a84dcf221e89))
+* **cli:** support configurable upload body limits for edge functions and host install ([#1274](https://github.com/vibeunion/supacloud/issues/1274)) ([5f9e85a](https://github.com/vibeunion/supacloud/commit/5f9e85aa502e06e739fa9e6d43e2bcc1f94d721a))
+* **sdk:** support capabilities probing and storage upload constraints in supacloud-js ([#1277](https://github.com/vibeunion/supacloud/issues/1277)) ([c4eda8a](https://github.com/vibeunion/supacloud/commit/c4eda8a105535c37da09bb03f19ddee616257c47))
+
+
+### Bug Fixes
+
+* **edge-functions:** recover unacknowledged activation begin ([#1278](https://github.com/vibeunion/supacloud/issues/1278)) ([fab21dd](https://github.com/vibeunion/supacloud/commit/fab21dda8cedb927145876d50f5ce18be79087d0))
+
 ## [0.78.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.78.0...management-api-v0.78.1) (2026-09-11)
 
 
