@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/vibeunion/supacloud/compare/admin-v0.22.0...admin-v0.22.1) (2026-09-12)
+
+
+### Bug Fixes
+
+* **admin:** allow local transport proxy for offline release downloads ([#1281](https://github.com/vibeunion/supacloud/issues/1281)) ([fa2137d](https://github.com/vibeunion/supacloud/commit/fa2137d200ad5a44bbd2e0da558ebe93369f167a))
+
 ## [0.22.0](https://github.com/vibeunion/supacloud/compare/admin-v0.21.2...admin-v0.22.0) (2026-09-12)
 
 
