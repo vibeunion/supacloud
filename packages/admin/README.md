@@ -258,6 +258,13 @@ to accommodate large runtime binaries on slow operator connections. The server-d
 remains available as `--artifact_transport remote`; it verifies and executes
 the target Management release as the runner even for Management-only upgrades.
 
+For interrupted local downloads, an operator may prefetch assets with a resumable
+downloader and set `SUPACLOUD_RELEASE_ASSET_CACHE_DIR` to an absolute directory.
+Files are looked up at `<cache>/<owner>/<repo>/<release-tag>/<asset-name>`.
+Missing entries are downloaded normally. Cached bytes are copied to private
+staging and undergo the same pinned manifest, signature, size and SHA-256 checks;
+an invalid cached asset fails instead of being installed.
+
 With `--artifact_transport remote` (the default), omitting
 `--edge_runtime_version` retains the Management and Web Console-only upgrade
 behavior and reports that Edge Runtime was not upgraded. Local transport

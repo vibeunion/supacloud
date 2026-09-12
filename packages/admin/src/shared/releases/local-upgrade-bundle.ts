@@ -1,10 +1,10 @@
 import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { accessSync, chmodSync, constants as fsConstants, createWriteStream, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, constants as fsConstants, copyFileSync, createWriteStream, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { get } from "node:https";
 import { tmpdir } from "node:os";
-import { basename, delimiter, join } from "node:path";
+import { basename, delimiter, isAbsolute, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Transform, type Readable } from "node:stream";
 
@@ -343,6 +343,26 @@ async function downloadDirect(url: string, destination: string, maxBytes: number
 }
 
 async function downloadGithubReleaseAsset(request: GithubReleaseAssetDownloadRequest): Promise<void> {
+    const cache = process.env.SUPACLOUD_RELEASE_ASSET_CACHE_DIR?.trim();
+    if (cache) {
+        if (!isAbsolute(cache)) throw new Error("Release asset cache directory must be absolute");
+        const cachedPath = join(cache, request.repository, request.tag, request.assetName);
+        let cached: ReturnType<typeof lstatSync> | undefined;
+        try { cached = lstatSync(cachedPath); }
+        catch (error: unknown) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        if (cached) {
+            if (!cached.isFile() || cached.isSymbolicLink() || cached.size > request.maxBytes) {
+                throw new Error("Cached release asset must be a bounded regular file");
+            }
+            // 缓存仅替代传输；复制后仍执行相同的 manifest、签名及摘要验证。
+            copyFileSync(cachedPath, request.destination, fsConstants.COPYFILE_EXCL);
+            chmodSync(request.destination, 0o600);
+            assertDownloadedReleaseAsset(request);
+            return;
+        }
+    }
     const download = await runGithubCliDownload([
         "release", "download", request.tag,
         "--repo", `github.com/${request.repository}`,

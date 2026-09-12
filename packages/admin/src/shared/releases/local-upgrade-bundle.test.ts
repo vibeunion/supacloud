@@ -74,6 +74,27 @@ function withFakeGithubCli(script: string, run: () => Promise<void>, mode = 0o70
 }
 
 describe("local upgrade download trust boundary", () => {
+    test("an opt-in local cache never bypasses pinned artifact verification", async () => {
+        const cache = mkdtempSync(join(tmpdir(), "supacloud-admin-cache-"));
+        const destination = mkdtempSync(join(tmpdir(), "supacloud-admin-cache-copy-"));
+        const previous = process.env.SUPACLOUD_RELEASE_ASSET_CACHE_DIR;
+        const cachedDirectory = join(cache, "cli", "cli", "v2.96.0");
+        mkdirSync(cachedDirectory, { recursive: true });
+        writeFileSync(join(cachedDirectory, "gh_2.96.0_linux_amd64.tar.gz"), "tampered cached bytes");
+        process.env.SUPACLOUD_RELEASE_ASSET_CACHE_DIR = cache;
+        try {
+            await withFakeGithubCli("#!/usr/bin/env bash\nexit 42", async () => {
+                await expect(downloadPinnedGithubCli(destination, "amd64"))
+                    .rejects.toThrow("Pinned GitHub CLI archive SHA256 mismatch");
+            });
+        } finally {
+            if (previous === undefined) delete process.env.SUPACLOUD_RELEASE_ASSET_CACHE_DIR;
+            else process.env.SUPACLOUD_RELEASE_ASSET_CACHE_DIR = previous;
+            rmSync(cache, { recursive: true, force: true });
+            rmSync(destination, { recursive: true, force: true });
+        }
+    });
+
     test("local downloads honor transport proxies without changing release origin or verifier environment", async () => {
         const directory = mkdtempSync(join(tmpdir(), "supacloud-admin-proxy-"));
         const values = {
