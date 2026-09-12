@@ -253,7 +253,8 @@ Local GitHub asset downloads honor `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`
 official release URLs or relaxing artifact verification. Local attestation
 verification and remote offline execution still clear proxy settings.
 For a production server without Internet access, set the download proxy on
-the local operator machine only. The server-download path
+the local operator machine only. Each local download has a 30-minute deadline
+to accommodate large runtime binaries on slow operator connections. The server-download path
 remains available as `--artifact_transport remote`; it verifies and executes
 the target Management release as the runner even for Management-only upgrades.
 
