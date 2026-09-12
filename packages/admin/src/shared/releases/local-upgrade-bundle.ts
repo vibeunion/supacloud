@@ -475,8 +475,14 @@ function githubCliExecutable(environment: NodeJS.ProcessEnv): string {
 type GithubCliResult = { exitCode: number; stdout: string; stderr: string };
 type GithubCliProcess = ChildProcessByStdio<null, Readable, Readable>;
 
-function spawnGithubCli(arguments_: string[]): GithubCliProcess {
+function spawnGithubCli(arguments_: string[], download = false): GithubCliProcess {
     const environment = directEnvironment();
+    if (download) {
+        // 仅本地下载沿用操作者的传输代理，签名校验和远端离线执行仍保持原边界。
+        for (const key of ["HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"]) {
+            if (process.env[key]) environment[key] = process.env[key];
+        }
+    }
     return spawn(githubCliExecutable(environment), arguments_, {
         env: environment,
         stdio: ["ignore", "pipe", "pipe"],
@@ -522,7 +528,7 @@ export async function runGithubCliDownload(
     maxBytes: number,
     timeoutMs: number,
 ): Promise<GithubCliResult> {
-    const child = spawnGithubCli(arguments_);
+    const child = spawnGithubCli(arguments_, true);
     let stderr: string = "";
     child.stderr.on("data", (chunk: Buffer) => { stderr = `${stderr}${chunk.toString()}`.slice(-8_000); });
     const write = pipeline(

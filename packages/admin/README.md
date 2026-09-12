@@ -247,8 +247,13 @@ nonterminal units, malformed or missing structured receipts, redacted or
 truncated SSH output, or unknown status, without emitting raw logs, remote
 filesystem paths, secrets, bearer material, env values, or customer data.
 
-`--artifact_transport local` accepts only `--github_proxy direct` or `none` and
-clears proxy environment variables on both hosts. The server-download path
+`--artifact_transport local` accepts only `--github_proxy direct` or `none`.
+Local GitHub asset downloads honor `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`
+(including lowercase equivalents) as transport settings, without rewriting
+official release URLs or relaxing artifact verification. Local attestation
+verification and remote offline execution still clear proxy settings.
+For a production server without Internet access, set the download proxy on
+the local operator machine only. The server-download path
 remains available as `--artifact_transport remote`; it verifies and executes
 the target Management release as the runner even for Management-only upgrades.
 

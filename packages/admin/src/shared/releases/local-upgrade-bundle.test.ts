@@ -74,6 +74,41 @@ function withFakeGithubCli(script: string, run: () => Promise<void>, mode = 0o70
 }
 
 describe("local upgrade download trust boundary", () => {
+    test("local downloads honor transport proxies without changing release origin or verifier environment", async () => {
+        const directory = mkdtempSync(join(tmpdir(), "supacloud-admin-proxy-"));
+        const values = {
+            HTTPS_PROXY: "http://127.0.0.1:7897",
+            http_proxy: "http://127.0.0.1:7897",
+            NO_PROXY: "localhost",
+            GH_HOST: "github.enterprise.invalid",
+            SUPACLOUD_GITHUB_PROXY: "https://mirror.invalid",
+        };
+        const previous = Object.fromEntries(Object.keys(values).map(key => [key, process.env[key]]));
+        Object.assign(process.env, values);
+        try {
+            await withFakeGithubCli([
+                "#!/usr/bin/env bash",
+                "printf '%s\\n' \"${HTTPS_PROXY-unset}\" \"${http_proxy-unset}\" \"${NO_PROXY-unset}\" \"${GH_HOST-unset}\" \"${SUPACLOUD_GITHUB_PROXY-unset}\"",
+            ].join("\n"), async () => {
+                const destination = join(directory, "download");
+                const result = await runGithubCliDownload(["release", "download"], destination, 1024, 5000);
+                expect(result.exitCode).toBe(0);
+                expect(readFileSync(destination, "utf8").trim().split("\n")).toEqual([
+                    values.HTTPS_PROXY, values.http_proxy, values.NO_PROXY, "unset", "unset",
+                ]);
+                const verifier = await runGithubCli(["attestation", "verify"], 5000);
+                expect(verifier.exitCode).toBe(0);
+                expect(verifier.stdout.trim().split("\n")).toEqual(Array(5).fill("unset"));
+            });
+        } finally {
+            for (const [key, value] of Object.entries(previous)) {
+                if (value === undefined) delete process.env[key];
+                else process.env[key] = value;
+            }
+            rmSync(directory, { recursive: true, force: true });
+        }
+    });
+
     test("accepts only the exact official GitHub release asset path", () => {
         const official = `https://github.com/vibeunion/supacloud/releases/download/${RELEASE_TAG}/SUPACLOUD-RELEASE.json`;
 
