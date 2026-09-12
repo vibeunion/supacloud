@@ -352,18 +352,51 @@ const backgroundRoutesSchema = Type.Optional(decodedSchema(
 ));
 
 const functionFilesRecordSchema = Type.Record(Type.String(), Type.String());
-const functionCapabilitiesSchema = Type.Object({
+const functionCapabilitiesRecordSchema = Type.Object({
     secrets: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 128 })),
     outbound_hosts: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 128 })),
     bindings: Type.Optional(Type.Array(Type.String({ minLength: 1 }), { maxItems: 128 })),
     background: Type.Optional(Type.Boolean()),
 }, { additionalProperties: false });
-const functionLimitsSchema = Type.Object({
+
+function parseFunctionCapabilities(input: string | Record<string, unknown>): unknown {
+    if (typeof input !== "string") return input;
+    try {
+        return JSON.parse(input);
+    } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        throw new Error("Invalid capabilities JSON object");
+    }
+}
+
+const functionCapabilitiesSchema = decodedSchema(
+    Type.Union([Type.String(), functionCapabilitiesRecordSchema]),
+    functionCapabilitiesRecordSchema,
+    parseFunctionCapabilities,
+);
+
+const functionLimitsRecordSchema = Type.Object({
     timeout_ms: Type.Optional(Type.Integer({ minimum: 1, maximum: 900_000 })),
-    max_request_body_bytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 30 * 1024 * 1024 })),
-    max_response_body_bytes: Type.Optional(Type.Integer({ minimum: 1, maximum: 30 * 1024 * 1024 })),
+    max_request_body_bytes: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
+    max_response_body_bytes: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
     wait_until_timeout_ms: Type.Optional(Type.Integer({ minimum: 1, maximum: 900_000 })),
 }, { additionalProperties: false });
+
+function parseFunctionLimits(input: string | Record<string, unknown>): unknown {
+    if (typeof input !== "string") return input;
+    try {
+        return JSON.parse(input);
+    } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        throw new Error("Invalid limits JSON object");
+    }
+}
+
+const functionLimitsSchema = decodedSchema(
+    Type.Union([Type.String(), functionLimitsRecordSchema]),
+    functionLimitsRecordSchema,
+    parseFunctionLimits,
+);
 
 function parseFunctionFiles(input: string | Record<string, string>): unknown {
     if (typeof input !== "string") return input;
@@ -948,6 +981,14 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             framework: optional(withDescription(stringEnum(["fetch", "elysia", "hono", "sveltekit-function"]), "[deploy/deploy_bundle/config/scaffold] Fetch framework adapter profile")),
             capabilities: optional(functionCapabilitiesSchema, "[deploy/deploy_bundle/config] Host capabilities: secrets, outbound_hosts, bindings, background"),
             limits: optional(functionLimitsSchema, "[deploy/deploy_bundle/config] Execution limits in milliseconds/bytes"),
+            max_request_body_bytes: optional(
+                Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+                "[deploy/deploy_bundle/config] Max inbound request body size in bytes",
+            ),
+            max_body_size_mb: optional(
+                Type.Integer({ minimum: 1, maximum: 10240 }),
+                "[deploy/deploy_bundle/config] Max inbound request body size in MiB (convenience shorthand)",
+            ),
             "expected-active-version": withDescription(
                 expectedActiveVersionSchema,
                 "[deploy/deploy_bundle/activate] Required current active version, or 'absent' when none exists",
@@ -962,7 +1003,11 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             if (args.action === "scaffold") {
                 return { content: [{ type: "text" as const, text: scaffoldFunction(args.path, args.slug, args.framework) }] };
             }
-            const { action, ref, slug, path: pathArg, output, entrypoint, minify, verify_jwt, background_routes, framework, capabilities, limits } = args;
+            const {
+                action, ref, slug, path: pathArg, output, entrypoint, minify,
+                verify_jwt, background_routes, framework, capabilities, limits,
+                max_request_body_bytes, max_body_size_mb,
+            } = args;
             rejectActionSpecificFlags(action, args);
             const expectedActiveVersion = action === "deploy" || action === "deploy_bundle"
                 ? requiredExpectedActiveVersion(args, action)
@@ -975,12 +1020,22 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
 
             let text: string;
 
+            const resolvedMaxRequestBodyBytes = max_request_body_bytes !== undefined
+                ? max_request_body_bytes
+                : (max_body_size_mb !== undefined ? max_body_size_mb * 1024 * 1024 : undefined);
+            const resolvedLimits = limits !== undefined || resolvedMaxRequestBodyBytes !== undefined
+                ? {
+                    ...(limits !== undefined ? limits : {}),
+                    ...(resolvedMaxRequestBodyBytes !== undefined ? { max_request_body_bytes: resolvedMaxRequestBodyBytes } : {}),
+                }
+                : undefined;
+
             const functionConfig = (): EdgeFunctionConfigInput => ({
                 ...(typeof verify_jwt === "boolean" ? { verify_jwt } : {}),
                 ...(Array.isArray(background_routes) ? { background_routes } : {}),
                 ...(typeof framework === "string" ? { framework: framework as EdgeFunctionConfigInput["framework"] } : {}),
                 ...(capabilities === undefined ? {} : { capabilities }),
-                ...(limits === undefined ? {} : { limits }),
+                ...(resolvedLimits === undefined ? {} : { limits: resolvedLimits }),
             });
 
             const hasFunctionConfig = () => Object.keys(functionConfig()).length > 0;
@@ -1072,7 +1127,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                 case "config":
                     need("slug", slug);
                     if (!hasFunctionConfig()) {
-                        throw new Error("'verify_jwt', 'background_routes', 'framework', 'capabilities', or 'limits' required for 'config'");
+                        throw new Error("'verify_jwt', 'background_routes', 'framework', 'capabilities', 'limits', 'max_request_body_bytes', or 'max_body_size_mb' required for 'config'");
                     }
                     return updateFunctionConfiguration(http, {
                         projectRef: ref,
