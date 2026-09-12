@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.28.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.27.1...supacloud-js-v0.28.0) (2026-09-12)
+
+
+### Features
+
+* adopt Pigsty Silo MinIO fork, expose environment/version APIs, and storage upload constraints ([#1279](https://github.com/vibeunion/supacloud/issues/1279)) ([e47b25b](https://github.com/vibeunion/supacloud/commit/e47b25bdc61935e901f0e98b7eb2a84dcf221e89))
+* **sdk:** support capabilities probing and storage upload constraints in supacloud-js ([#1277](https://github.com/vibeunion/supacloud/issues/1277)) ([c4eda8a](https://github.com/vibeunion/supacloud/commit/c4eda8a105535c37da09bb03f19ddee616257c47))
+
 ## [0.27.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.27.0...supacloud-js-v0.27.1) (2026-09-11)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.24.1...edge-runtime-v0.25.0) (2026-09-12)
+
+
+### Features
+
+* **cli:** support configurable upload body limits for edge functions and host install ([#1274](https://github.com/vibeunion/supacloud/issues/1274)) ([5f9e85a](https://github.com/vibeunion/supacloud/commit/5f9e85aa502e06e739fa9e6d43e2bcc1f94d721a))
+
 ## [0.24.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.24.0...edge-runtime-v0.24.1) (2026-09-11)
 
 
