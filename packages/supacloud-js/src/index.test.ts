@@ -875,6 +875,8 @@ describe("@supacloud/js", () => {
         new Response(
           JSON.stringify({
             project_ref: "proj_1",
+            platform_version: "0.79.0",
+            environment: "production",
             auth_runtime: "gotrue",
             schema_version: 1,
             capabilities: {
@@ -896,9 +898,17 @@ describe("@supacloud/js", () => {
 
     const caps = await client.capabilities.get();
     expect(caps.project_ref).toBe("proj_1");
+    expect(caps.platform_version).toBe("0.79.0");
+    expect(caps.environment).toBe("production");
     expect(caps.capabilities.storage_v1?.available).toBe(true);
     expect(caps.capabilities.edge_runtime_streaming_upload_v1?.available).toBe(true);
     expect(caps.capabilities.experimental_feature_v2?.available).toBe(false);
+
+    expect(await client.getVersion()).toBe("0.79.0");
+    const env = await client.getEnvironment();
+    expect(env.platformVersion).toBe("0.79.0");
+    expect(env.environment).toBe("production");
+    expect(env.projectRef).toBe("proj_1");
 
     const isStorageAvail = await client.capabilities.isAvailable("storage_v1");
     expect(isStorageAvail).toBe(true);
@@ -979,4 +989,39 @@ describe("@supacloud/js", () => {
    expect(constraints.allowedMimeTypes).toMatchObject(["application/pdf"]);
    expect(capturedCalls[0]?.url).toBe("https://admin.example.com/v1/projects/proj_1/storage/buckets/documents");
  });
+
+  test("storage client queries platform upload constraints", async () => {
+    const { supabase } = createFakeSupabase();
+    const capturedCalls: Array<{ url: string; init?: RequestInit }> = [];
+
+    globalThis.fetch = mock((input: string | URL | Request, init?: RequestInit) => {
+      capturedCalls.push({ url: String(input), init });
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            max_upload_size_bytes: 524288000,
+            max_upload_size_mb: 500,
+            tus_max_size_bytes: 524288000,
+            tus_chunk_max_size_bytes: 6291456,
+            streaming_upload_supported: true,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        ),
+      );
+    }) as typeof fetch;
+
+    const client = createSupaCloudClient({
+      supabase: supabase as never,
+      managementApiUrl: "https://admin.example.com",
+      projectRef: "proj_1",
+    });
+
+    const constraints = await client.storage.getPlatformConstraints();
+    expect(constraints.max_upload_size_bytes).toBe(524288000);
+    expect(constraints.max_upload_size_mb).toBe(500);
+    expect(constraints.tus_max_size_bytes).toBe(524288000);
+    expect(constraints.tus_chunk_max_size_bytes).toBe(6291456);
+    expect(constraints.streaming_upload_supported).toBe(true);
+    expect(capturedCalls[0]?.url).toBe("https://admin.example.com/storage/v1/constraints");
+  });
 });

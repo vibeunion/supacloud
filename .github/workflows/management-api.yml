@@ -764,7 +764,7 @@ jobs:
             --publish 9001:9000 \
             --env MINIO_ROOT_USER=minioadmin \
             --env MINIO_ROOT_PASSWORD=minioadmin \
-            quay.io/minio/minio:latest server /data
+            pgsty/silo:latest server /data
 
       # Management refuses to serve until the Caddy Admin API is reachable and
       # accepts its canonical JSON config, so this job needs a real Caddy. The

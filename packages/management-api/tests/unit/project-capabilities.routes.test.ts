@@ -82,6 +82,8 @@ describe("project capability negotiation", () => {
     expect(response.status).toBe(200);
     const body = await response.json() as any;
     expect(body.auth_runtime).toBe("gotrue");
+    expect(body.platform_version).toBeTruthy();
+    expect(body.environment).toBeTruthy();
     expect(body.capabilities.webhook_delivery_v2).toMatchObject({ available: true, source: "supacloud" });
     expect(body.capabilities.business_organizations_v1).toMatchObject({
       available: true,
@@ -106,6 +108,17 @@ describe("project capability negotiation", () => {
     }
     expect(body.capabilities.storage_v1).toMatchObject({ available: true, source: "supacloud" });
     expect(body.capabilities.edge_runtime_streaming_upload_v1).toMatchObject({ available: true, source: "supacloud" });
+  });
+
+  test("serves project environment and platform version", async () => {
+    const response = await request("/v1/projects/proj_1/environment");
+    expect(response.status).toBe(200);
+    const body = await response.json() as any;
+    expect(body.project_ref).toBe("proj_1");
+    expect(body.platform_version).toBeTruthy();
+    expect(body.environment).toBeTruthy();
+    expect(body.schema_version).toBe(1);
+    expect(body.auth_runtime).toBe("gotrue");
   });
 
   test("does not advertise organization runtime materialization before its schema exists", async () => {

@@ -30,8 +30,30 @@ export type SupaCloudProjectCapabilities = {
   project_ref: string;
   auth_runtime: string;
   schema_version: number;
+  platform_version?: string;
+  environment?: string;
+  storage_backend?: string;
   capabilities: Record<string, SupaCloudCapability>;
   [key: string]: unknown;
+};
+
+export type SupaCloudEnvironmentInfo = {
+  projectRef: string;
+  platformVersion: string;
+  environment: string;
+  schemaVersion: number;
+  authRuntime: string;
+  storageBackend?: string;
+  capabilities: Record<string, SupaCloudCapability>;
+  [key: string]: unknown;
+};
+
+export type SupaCloudStoragePlatformConstraints = {
+  max_upload_size_bytes: number;
+  max_upload_size_mb: number;
+  tus_max_size_bytes: number;
+  tus_chunk_max_size_bytes: number;
+  streaming_upload_supported: boolean;
 };
 
 export type SupaCloudStorageUploadConstraints = {
@@ -838,10 +860,25 @@ function decodeProjectCapabilities(value: unknown): SupaCloudProjectCapabilities
     };
   }
   return {
+    ...record,
     project_ref: responseString(record, "project_ref", "project capabilities"),
     auth_runtime: typeof record.auth_runtime === "string" ? record.auth_runtime : "unknown",
     schema_version: typeof record.schema_version === "number" ? record.schema_version : 1,
+    platform_version: typeof record.platform_version === "string" ? record.platform_version : undefined,
+    environment: typeof record.environment === "string" ? record.environment : undefined,
+    storage_backend: typeof record.storage_backend === "string" ? record.storage_backend : undefined,
     capabilities,
+  };
+}
+
+function decodeStoragePlatformConstraints(value: unknown): SupaCloudStoragePlatformConstraints {
+  const record = responseRecord(value, "storage constraints");
+  return {
+    max_upload_size_bytes: responseNumber(record, "max_upload_size_bytes", "storage constraints"),
+    max_upload_size_mb: responseNumber(record, "max_upload_size_mb", "storage constraints"),
+    tus_max_size_bytes: responseNumber(record, "tus_max_size_bytes", "storage constraints"),
+    tus_chunk_max_size_bytes: responseNumber(record, "tus_chunk_max_size_bytes", "storage constraints"),
+    streaming_upload_supported: responseBoolean(record, "streaming_upload_supported", "storage constraints"),
   };
 }
 
@@ -1706,9 +1743,36 @@ export class SupaCloudCapabilitiesClient<TClient extends SupabaseClient = Supaba
     const res = await this.get();
     return res.capabilities?.[capabilityKey]?.available === true;
   }
+
+  async getVersion(): Promise<string> {
+    const res = await this.get();
+    return res.platform_version ?? "unknown";
+  }
+
+  async getEnvironment(): Promise<SupaCloudEnvironmentInfo> {
+    const res = await this.get();
+    return {
+      projectRef: res.project_ref,
+      platformVersion: res.platform_version ?? "unknown",
+      environment: res.environment ?? "production",
+      schemaVersion: res.schema_version,
+      authRuntime: res.auth_runtime,
+      storageBackend: res.storage_backend,
+      capabilities: res.capabilities,
+    };
+  }
 }
 
 export class SupaCloudStorageClient<TClient extends SupabaseClient = SupabaseClient> extends SupaCloudManagementClient<TClient> {
+  async getPlatformConstraints(): Promise<SupaCloudStoragePlatformConstraints> {
+    return this.request<SupaCloudStoragePlatformConstraints>(
+      `/storage/v1/constraints`,
+      "GET",
+      undefined,
+      decodeStoragePlatformConstraints,
+    );
+  }
+
   async getUploadConstraints(bucketId: string): Promise<SupaCloudStorageUploadConstraints> {
     try {
       const { data, error } = await this.options.supabase.storage.getBucket(bucketId);
@@ -1816,6 +1880,8 @@ export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseC
     queues,
     capabilities,
     storage,
+    getEnvironment: () => capabilities.getEnvironment(),
+    getVersion: () => capabilities.getVersion(),
     queue: (name: string) => new SupaCloudQueueClient(normalized, name),
     functions: {
       invokeBackground: (

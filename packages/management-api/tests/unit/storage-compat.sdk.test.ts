@@ -1025,4 +1025,22 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     assembleSpy.mockRestore();
     uploadSpy.mockRestore();
   });
+
+  test("serves storage upload and protocol constraints", async () => {
+    const res = await request("/storage/v1/constraints", {
+      method: "GET",
+      headers: {
+        "x-project-ref": "test_mock",
+        apikey: "test-token",
+      },
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.max_upload_size_bytes).toBeGreaterThan(0);
+    expect(body.max_upload_size_mb).toBeGreaterThan(0);
+    expect(body.tus_max_size_bytes).toBeGreaterThan(0);
+    expect(body.tus_chunk_max_size_bytes).toBeGreaterThan(0);
+    expect(body.streaming_upload_supported).toBe(true);
+  });
 });
