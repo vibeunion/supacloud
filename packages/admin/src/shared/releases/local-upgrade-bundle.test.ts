@@ -100,7 +100,7 @@ describe("local upgrade download trust boundary", () => {
         const values = {
             HTTPS_PROXY: "http://127.0.0.1:7897",
             http_proxy: "http://127.0.0.1:7897",
-            NO_PROXY: "localhost",
+            NO_PROXY: "localhost,127.0.0.1",
             GH_HOST: "github.enterprise.invalid",
             SUPACLOUD_GITHUB_PROXY: "https://mirror.invalid",
         };
