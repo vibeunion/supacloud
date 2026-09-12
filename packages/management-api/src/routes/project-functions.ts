@@ -45,8 +45,8 @@ const functionCapabilitiesSchema = t.Object({
 }, { additionalProperties: false });
 const functionLimitsSchema = t.Object({
   timeout_ms: t.Optional(t.Integer({ minimum: 1, maximum: 900_000 })),
-  max_request_body_bytes: t.Optional(t.Integer({ minimum: 1, maximum: 30 * 1024 * 1024 })),
-  max_response_body_bytes: t.Optional(t.Integer({ minimum: 1, maximum: 30 * 1024 * 1024 })),
+  max_request_body_bytes: t.Optional(t.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
+  max_response_body_bytes: t.Optional(t.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
   wait_until_timeout_ms: t.Optional(t.Integer({ minimum: 1, maximum: 900_000 })),
 }, { additionalProperties: false });
 

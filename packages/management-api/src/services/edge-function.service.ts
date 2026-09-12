@@ -690,7 +690,7 @@ function validatedFunctionConfig(
 }
 
 const MAX_FUNCTION_TIMEOUT_MS = 900_000;
-const MAX_FUNCTION_BODY_BYTES = 30 * 1024 * 1024;
+const MAX_FUNCTION_BODY_BYTES = Number.MAX_SAFE_INTEGER;
 const MAX_WAIT_UNTIL_TIMEOUT_MS = 900_000;
 const FUNCTION_HOST_PATTERN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/i;
 

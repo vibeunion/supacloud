@@ -1618,6 +1618,21 @@ describe("ssh admin tool", () => {
         expect(innerSyntax.exitCode).toBe(0);
     });
 
+    test("install forwards edge_max_body_size_mb to protected install input", async () => {
+        const ssh = new FakeSsh();
+        const tool = captureSshTool(ssh);
+
+        const result = await tool.invoke({
+            action: "install",
+            public_domain: "api.example.com",
+            edge_max_body_size_mb: 500,
+        });
+
+        expect(result.content[0]?.text).toContain("Installation started");
+        expect(ssh.uploads).toHaveLength(1);
+        expect(ssh.uploads[0]?.content).toContain("EDGE_MAX_BODY_SIZE_MB='500'");
+    });
+
     test("install never wraps root bootstrap source with a proxy and forwards HTTPS proxy only to verified assets", async () => {
         const ssh = new FakeSsh();
         const tool = captureSshTool(ssh);
