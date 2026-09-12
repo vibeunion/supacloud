@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.24.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.24.0...edge-runtime-v0.24.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **edge-runtime:** honor configured upload limit in HTTP listener ([#1273](https://github.com/vibeunion/supacloud/issues/1273)) ([cbd1131](https://github.com/vibeunion/supacloud/commit/cbd11311471ac31c8aa605f00ac5b503c3d60160))
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade Bun runtime baseline from 1.4.0 to 1.4.2 ([#1271](https://github.com/vibeunion/supacloud/issues/1271)) ([f53aee5](https://github.com/vibeunion/supacloud/commit/f53aee52e93c25e017e9c693a920de5752fe3ddc))
+
 ## [0.24.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.23.0...edge-runtime-v0.24.0) (2026-09-08)
 
 

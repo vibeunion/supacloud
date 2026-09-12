@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/vibeunion/supacloud/compare/db-v0.7.0...db-v0.7.1) (2026-09-11)
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade Bun runtime baseline from 1.4.0 to 1.4.2 ([#1271](https://github.com/vibeunion/supacloud/issues/1271)) ([f53aee5](https://github.com/vibeunion/supacloud/commit/f53aee52e93c25e017e9c693a920de5752fe3ddc))
+
 ## [0.7.0](https://github.com/vibeunion/supacloud/compare/db-v0.6.0...db-v0.7.0) (2026-09-09)
 
 
