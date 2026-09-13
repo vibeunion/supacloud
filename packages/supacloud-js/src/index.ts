@@ -1091,7 +1091,7 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       cancel: () => this.cancel(taskId) as Promise<SupaCloudTaskDetail<TResult>>,
       retry: () => this.retry(taskId) as Promise<SupaCloudTaskDetail<TResult>>,
       subscribe: (options: SupaCloudTaskSubscribeOptions<TResult>) =>
-        this.subscribe(taskId, options),
+        this.subscribeInternal(taskId, options),
     };
   }
 
@@ -1169,12 +1169,15 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     decoderOrOptions: SupaCloudTaskResultDecoder<TResult> | SupaCloudTaskSubmitOptions,
     optionsOrDecoder?: SupaCloudTaskSubmitOptions | SupaCloudTaskResultDecoder<TResult>,
   ): Promise<SupaCloudTaskReceipt<TResult>> {
-    const decoder = typeof decoderOrOptions === "function"
-      ? captureTaskDecoder<TResult>(decoderOrOptions)
-      : captureTaskDecoder<TResult>(optionsOrDecoder);
-    const options = typeof decoderOrOptions === "function"
-      ? optionsOrDecoder ?? {}
-      : decoderOrOptions;
+    let decoder: SupaCloudTaskResultDecoder<TResult>;
+    let options: SupaCloudTaskSubmitOptions | undefined;
+    if (typeof decoderOrOptions === "function") {
+      decoder = captureTaskDecoder<TResult>(decoderOrOptions);
+      options = typeof optionsOrDecoder === "function" ? undefined : optionsOrDecoder;
+    } else {
+      options = decoderOrOptions;
+      decoder = captureTaskDecoder<TResult>(optionsOrDecoder);
+    }
     const receipt = await this.submit(functionName, options);
     return this.createTypedReceipt(receipt.taskId, receipt.status, decoder);
   }
