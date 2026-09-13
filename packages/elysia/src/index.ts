@@ -1,5 +1,6 @@
 import { Elysia } from "elysia";
 import { CommandError } from "@supacloud/contracts";
+import { provideToken, runInRequestContext, type EnvironmentInjector, REQUEST_CONTEXT } from "@supacloud/app";
 import { commandErrorStatus } from "./command-errors";
 import { executionRequestId, observeExecution, type ExecutionObserver } from "./execution";
 
@@ -332,6 +333,8 @@ export interface ApplicationOptions {
   name?: string;
   /** false rejects extra schema properties instead of silently removing them. */
   normalize?: boolean;
+  /** Optional Angular-backed root injector used for async request contexts. */
+  injector?: EnvironmentInjector;
   /** Modules in topological import order. */
   modules?: CompiledModule[];
   /** Platform-level dependencies (db client etc.), passed to createServices. */
@@ -651,7 +654,7 @@ export function createModulePlugin(
   compiled: CompiledModule,
   services: Record<string, unknown>,
   ctxFactory: RequestContextFactory = defaultRequestContext,
-  options: Pick<ApplicationOptions, "commandGovernance" | "commandExecutor" | "errorMapper" | "onExecution" | "normalize"> = {},
+  options: Pick<ApplicationOptions, "commandGovernance" | "commandExecutor" | "errorMapper" | "onExecution" | "normalize" | "injector"> = {},
   imported: Record<string, Record<string, unknown>> = {},
 ): Elysia {
   const hasCommandRoutes = compiled.controllers.some((controller) =>
@@ -825,10 +828,13 @@ export function createModulePlugin(
             requestId: executionRequestId(requestContext),
           }, () => commandExecutor(invocation, invoke));
         };
-        return modulePipeline(
+        const invokeModule = () => modulePipeline(
           route.command ? commandContext : routeContext,
           invokeRoute,
         );
+        return options.injector
+          ? runInRequestContext(options.injector, [provideToken(REQUEST_CONTEXT, requestContext)], invokeModule)
+          : invokeModule();
       };
 
       switch (route.method) {
@@ -1004,6 +1010,7 @@ export function createApplication(options: ApplicationOptions): Elysia {
     imported[module.name] = services;
     app.use(createModulePlugin(module, services, ctxFactory, {
       normalize: options.normalize,
+      injector: options.injector,
       commandGovernance: options.commandGovernance,
       commandExecutor: options.commandExecutor,
       errorMapper: options.errorMapper,

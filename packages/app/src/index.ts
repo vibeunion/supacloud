@@ -21,6 +21,7 @@ export {
   makeEnvironmentProviders,
   provideAppInitializer,
   provideEnvironmentInitializer,
+  provideLifecycle,
   provideToken,
 } from "./provider";
 export type {
@@ -35,6 +36,15 @@ export type {
   Type,
   ValueProvider,
 } from "./provider";
+export { ConfigValidationError, decodeConfig } from "./config";
+export type { ConfigIssue } from "./config";
+export {
+  bootstrapBun,
+  runInRequestContext,
+  runInScope,
+  runInTransactionContext,
+} from "./bun";
+export type { BunApplication, BunBootstrapOptions, BunServerLike } from "./bun";
 export {
   Body,
   CanDeactivate,
@@ -127,6 +137,7 @@ export type {
 } from "./module";
 export {
   APP_INITIALIZER,
+  APP_LIFECYCLE,
   DB_CLIENT,
   DESTROY_REF,
   ENVIRONMENT_INITIALIZER,
@@ -134,7 +145,7 @@ export {
   REQUEST_CONTEXT,
   createDestroyRef,
 } from "./context";
-export type { DestroyRef, OnDestroy } from "./context";
+export type { DestroyRef, LifecycleHooks, OnDestroy, OnInit } from "./context";
 export {
   INJECTOR,
   assertInInjectionContext,
@@ -146,7 +157,12 @@ export {
   injectDestroySignal,
   runInInjectionContext,
 } from "./inject";
-export type { EnvironmentInjector, InjectFlags, InjectorLike } from "./inject";
+export type {
+  EnvironmentInjector,
+  EnvironmentInjectorOptions,
+  InjectFlags,
+  InjectorLike,
+} from "./inject";
 export { forwardRef, isForwardRef, resolveForwardRef } from "./forward_ref";
 export type { ForwardRefFn } from "./forward_ref";
 export { matchRoute } from "./route_match";

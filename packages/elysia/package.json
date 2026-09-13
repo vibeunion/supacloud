@@ -20,7 +20,7 @@
   "scripts": {
     "generate:example": "bun src/generate-webhook-example.ts",
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts --outdir dist --target node --external elysia --external jose --external @supacloud/db --external @supacloud/contracts",
+    "build:js": "bun build src/index.ts --outdir dist --target node --external elysia --external jose --external @supacloud/app --external @supacloud/db --external @supacloud/contracts",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
@@ -42,6 +42,7 @@
     "directory": "packages/elysia"
   },
   "dependencies": {
+    "@supacloud/app": "file:../app",
     "@supacloud/contracts": "file:../contracts",
     "jose": "^6.2.11"
   },
@@ -53,7 +54,6 @@
     "elysia": "^1.4.30"
   },
   "devDependencies": {
-    "@supacloud/app": "file:../app",
     "@supacloud/compiler": "file:../compiler",
     "@supacloud/commands": "file:../commands",
     "@supacloud/db": "file:../db",

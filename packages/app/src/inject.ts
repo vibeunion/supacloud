@@ -4,14 +4,21 @@ import {
   inject as angularInject,
   Injector as AngularInjector,
   runInInjectionContext as angularRunInInjectionContext,
-  DestroyRef as AngularDestroyRef,
   type EnvironmentInjector as AngularEnvironmentInjector,
   type InjectOptions,
   type Provider as AngularProvider,
 } from "@angular/core";
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { EnvironmentProviders, Provider, ProviderDep, ProviderDependency, Token, Type } from "./provider";
 import { flattenProviders, isClassProvider, isFactoryProvider } from "./provider";
-import { APP_INITIALIZER, DESTROY_REF, ENVIRONMENT_INITIALIZER } from "./context";
+import {
+  APP_INITIALIZER,
+  APP_LIFECYCLE,
+  createDestroyRef,
+  DESTROY_REF,
+  ENVIRONMENT_INITIALIZER,
+  type LifecycleHooks,
+} from "./context";
 import {
   getInjectableMeta,
   getInjectParams,
@@ -31,10 +38,11 @@ export interface InjectorLike {
   readonly parent?: InjectorLike;
 }
 
+const injectorContext = new AsyncLocalStorage<InjectorLike>();
 let currentInjector: InjectorLike | null = null;
 
 export function getActiveInjector(): InjectorLike | null {
-  return currentInjector;
+  return injectorContext.getStore() ?? currentInjector;
 }
 
 /**
@@ -50,7 +58,10 @@ export function runInInjectionContext<R>(injector: InjectorLike, fn: () => R): R
   const previous = currentInjector;
   currentInjector = injector;
   try {
-    return angularRunInInjectionContext(injector as AngularInjector, fn);
+    return injectorContext.run(
+      injector,
+      () => angularRunInInjectionContext(injector as AngularInjector, fn),
+    );
   } finally {
     currentInjector = previous;
   }
@@ -60,11 +71,17 @@ export function runInInjectionContext<R>(injector: InjectorLike, fn: () => R): R
  * Angular is the source of truth for runtime injection semantics. This
  * wrapper keeps the SupaCloud error contract for calls outside a context.
  */
-export function inject<T>(token: Token<T>, options?: InjectFlags): T {
+export function inject<T>(token: Token<T>, options?: InjectFlags & { optional?: false }): T;
+export function inject<T>(token: Token<T>, options: InjectFlags | undefined): T | undefined;
+export function inject<T>(token: Token<T>, options?: InjectFlags): T | undefined {
   try {
-    const value = options === undefined
+    const resolve = () => options === undefined
       ? angularInject(token as never)
       : angularInject(token as never, options);
+    const activeInjector = getActiveInjector();
+    const value = activeInjector
+      ? angularRunInInjectionContext(activeInjector as AngularInjector, resolve)
+      : resolve();
     if (value !== undefined && value !== null) return value as T;
     if (
       token instanceof InjectionToken &&
@@ -74,7 +91,7 @@ export function inject<T>(token: Token<T>, options?: InjectFlags): T {
     ) {
       return token.factory() as T;
     }
-    if (options?.optional) return undefined as T;
+    if (options?.optional) return undefined;
     throw new Error(`NullInjectorError: No provider for ${tokenToString(token)}`);
   } catch (error) {
     if (
@@ -130,6 +147,7 @@ export function createChildInjector(
 }
 
 export function assertInInjectionContext(fnName: string): void {
+  if (getActiveInjector()) return;
   try {
     angularAssertInInjectionContext(() => undefined);
   } catch {
@@ -151,12 +169,22 @@ function tokenToString(token: Token<unknown>): string {
 }
 
 export interface EnvironmentInjector extends InjectorLike {
-  get<T>(token: Token<T>, options?: InjectFlags): T;
+  get<T>(token: Token<T>, options?: InjectFlags & { optional?: false }): T;
+  get<T>(token: Token<T>, options: InjectFlags | undefined): T | undefined;
   get<T>(token: Token<T>, notFoundValue: T, options?: InjectFlags): T;
   runInContext<R>(fn: () => R): R;
+  initialize(): Promise<void>;
   destroy(): void;
+  destroyAsync(): Promise<void>;
+  readonly initialized: boolean;
   readonly destroyed: boolean;
   readonly parent?: InjectorLike;
+}
+
+export interface EnvironmentInjectorOptions {
+  /** Keep compatibility with the existing eager initializer behavior. */
+  initialize?: boolean;
+  name?: string;
 }
 
 /**
@@ -167,8 +195,10 @@ export interface EnvironmentInjector extends InjectorLike {
 export function createEnvironmentInjector(
   providers: Array<Provider | EnvironmentProviders>,
   parent?: InjectorLike,
+  options: EnvironmentInjectorOptions = {},
 ): EnvironmentInjector {
   let adapter: EnvironmentInjector;
+  const destroyRef = createDestroyRef();
   const trackedInstances: unknown[] = [];
   const track = (value: unknown): unknown => {
     if (value && typeof value === "object" && !trackedInstances.includes(value)) {
@@ -200,9 +230,7 @@ export function createEnvironmentInjector(
             ? dependencies.map((dependency) => resolveProviderDependency(dependency))
             : deps,
         ),
-        deps: hasDescriptors
-          ? undefined
-          : dependencies as unknown as never[],
+        ...(hasDescriptors ? {} : { deps: dependencies }),
       };
     }
     if (isFactoryProvider(provider)) {
@@ -227,7 +255,7 @@ export function createEnvironmentInjector(
     [
       {
         provide: DESTROY_REF,
-        useFactory: () => angularInject(AngularDestroyRef),
+        useValue: destroyRef,
       },
       {
         provide: INJECTOR,
@@ -236,12 +264,19 @@ export function createEnvironmentInjector(
       ...normalizedProviders,
     ] as AngularProvider[],
     parent as AngularEnvironmentInjector,
-    "supacloud",
+    options.name ?? "supacloud",
   );
+  let initialized = false;
+  let initializationPromise: Promise<void> | null = null;
+  let destructionPromise: Promise<void> | null = null;
+  let destroyed = false;
   adapter = {
-    parent,
+    ...(parent ? { parent } : {}),
     get destroyed() {
-      return runtime.destroyed;
+      return destroyed || runtime.destroyed;
+    },
+    get initialized() {
+      return initialized;
     },
     get<T>(token: Token<T>, notFoundOrOptions?: T | InjectFlags, maybeOptions?: InjectFlags): T {
       try {
@@ -267,41 +302,103 @@ export function createEnvironmentInjector(
       }
     },
     runInContext<R>(fn: () => R): R {
-      if (runtime.destroyed) {
+      if (destroyed || runtime.destroyed) {
         throw new Error("EnvironmentInjector has already been destroyed.");
       }
       return runInInjectionContext(adapter, fn);
     },
-    destroy(): void {
-      runtime.destroy();
-      for (const instance of [...trackedInstances].reverse()) {
-        if (!instance || typeof instance !== "object") continue;
-        const candidate = instance as {
-          onDestroy?: () => void | Promise<void>;
-          ngOnDestroy?: () => void | Promise<void>;
-        };
-        const hook = candidate.onDestroy ?? candidate.ngOnDestroy;
-        if (hook) void hook.call(instance);
+    initialize(): Promise<void> {
+      if (destroyed || runtime.destroyed) {
+        return Promise.reject(new Error("EnvironmentInjector has already been destroyed."));
       }
+      if (initialized) return Promise.resolve();
+      if (initializationPromise) return initializationPromise;
+
+      initializationPromise = (async () => {
+        await runInitializers(adapter, ENVIRONMENT_INITIALIZER);
+        await runInitializers(adapter, APP_INITIALIZER);
+        await runLifecycleInitializers(adapter);
+        initialized = true;
+      })().catch((error) => {
+        initializationPromise = null;
+        throw error;
+      });
+      return initializationPromise;
+    },
+    destroy(): void {
+      void startDestroy().catch(() => undefined);
+    },
+    destroyAsync(): Promise<void> {
+      return startDestroy();
     },
   };
 
-  runInitializers(adapter, ENVIRONMENT_INITIALIZER);
-  runInitializers(adapter, APP_INITIALIZER);
+  if (options.initialize !== false) void adapter.initialize().catch(() => undefined);
   return adapter;
+
+  function startDestroy(): Promise<void> {
+    if (destructionPromise) return destructionPromise;
+    destroyed = true;
+
+    const operations: Array<Promise<void>> = [];
+    try {
+      runtime.destroy();
+    } catch (error) {
+      operations.push(Promise.reject(error));
+    }
+
+    operations.push(destroyRef.destroy());
+    for (const instance of [...trackedInstances].reverse()) {
+      if (!instance || typeof instance !== "object") continue;
+      const candidate = instance as {
+        onDestroy?: () => void | Promise<void>;
+      };
+      // Angular owns ngOnDestroy; only invoke the Node-specific async hook here.
+      const hook = candidate.onDestroy;
+      if (!hook) continue;
+      try {
+        operations.push(Promise.resolve(hook.call(instance)));
+      } catch (error) {
+        operations.push(Promise.reject(error));
+      }
+    }
+
+    destructionPromise = Promise.allSettled(operations).then((results) => {
+      const errors = results
+        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+        .map((result) => result.reason);
+      if (errors.length > 0) throw new AggregateError(errors, "EnvironmentInjector destruction failed");
+    });
+    return destructionPromise;
+  }
 }
 
-function runInitializers(
+async function runInitializers(
   injector: EnvironmentInjector,
   token: Token<() => void | Promise<void>>,
-): void {
+): Promise<void> {
   const initializers = injector.get(token, { optional: true }) as unknown;
   if (!Array.isArray(initializers)) return;
   for (const initializer of initializers) {
     if (typeof initializer === "function") {
-      void injector.runInContext(() => initializer());
+      await injector.runInContext(() => initializer());
     }
   }
+}
+
+async function runLifecycleInitializers(injector: EnvironmentInjector): Promise<void> {
+  const lifecycles = injector.get(APP_LIFECYCLE, { optional: true });
+  if (!Array.isArray(lifecycles)) return;
+  for (const lifecycle of lifecycles) {
+    if (isLifecycleHooks(lifecycle) && lifecycle.onInit) {
+      await injector.runInContext(() => lifecycle.onInit?.());
+    }
+  }
+}
+
+function isLifecycleHooks(value: unknown): value is LifecycleHooks {
+  return typeof value === "object" && value !== null
+    && ("onInit" in value || "onDestroy" in value);
 }
 
 function resolveClassDependencies(type: Type<unknown>): unknown[] {
@@ -344,7 +441,12 @@ function resolveProviderDependency(dependency: ProviderDep): unknown {
     ? dependency
     : { token: dependency };
   const { token, optional, self, skipSelf, host } = descriptor;
-  const options: InjectFlags = { optional, self, skipSelf, host };
+  const options: InjectFlags = {
+    optional: optional ?? false,
+    self: self ?? false,
+    skipSelf: skipSelf ?? false,
+    host: host ?? false,
+  };
   const resolved = resolveForwardRef(token);
   return optional || self || skipSelf || host
     ? angularInject(resolved as never, options)

@@ -40,6 +40,14 @@ export const APP_INITIALIZER = new InjectionToken<() => void | Promise<void>>(
 );
 
 /**
+ * Multi-provider token for services with an explicit asynchronous startup hook.
+ */
+export const APP_LIFECYCLE = new InjectionToken<LifecycleHooks>(
+  "supacloud.app-lifecycle",
+  { scope: "application" },
+);
+
+/**
  * Built-in multi-provider token for environment initialization hooks.
  * Modeled directly after Angular 14+ ENVIRONMENT_INITIALIZER.
  */
@@ -55,6 +63,12 @@ export const ENVIRONMENT_INITIALIZER = new InjectionToken<() => void | Promise<v
 export interface OnDestroy {
   onDestroy(): void | Promise<void>;
 }
+
+export interface OnInit {
+  onInit(): void | Promise<void>;
+}
+
+export type LifecycleHooks = Partial<OnInit & OnDestroy>;
 
 /**
  * Mechanism to register teardown callbacks for an active context or service.
