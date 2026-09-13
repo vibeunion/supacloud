@@ -50,6 +50,28 @@ test('release order and preparation cover every package using local command depe
     assert.match(block, /prepare-command-package\.mjs[\s\S]*bun install --lockfile-only[\s\S]*bun install --frozen-lockfile/);
   }
 });
+test('recovery runs the command package graph after a tag-only release', () => {
+  const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /recover_npm:\n\s+description: Retry missing command-package publications[\s\S]*?type: boolean/);
+  assert.match(workflow,
+    /publish-npm:\n\s+needs: release-please[\s\S]*?if: \$\{\{ always\(\) && \(needs\.release-please\.outputs\.releases_created == 'true' \|\| inputs\.recover_npm == true\) \}\}/);
+  const contracts = workflow.indexOf('name: Publish command contracts');
+  const commands = workflow.indexOf('name: Publish durable commands');
+  assert.match(workflow.slice(contracts, commands), /inputs\.recover_npm == true/);
+  for (const stepName of [
+    'Publish supacloud-js to NPM',
+    'Publish durable commands to NPM',
+    'Publish database governance to NPM',
+    'Publish app framework metadata to NPM',
+    'Publish Svelte lifecycle binding to NPM',
+    'Publish elysia adapter to NPM',
+  ]) {
+    const start = workflow.indexOf(`- name: ${stepName}`);
+    const end = workflow.indexOf('\n      - name:', start + 1);
+    assert.ok(start >= 0 && end > start, `missing publish step for ${stepName}`);
+    assert.match(workflow.slice(start, end), /inputs\.recover_npm == true/);
+  }
+});
 test('build fixtures use versioned dependencies without adding them to the runtime graph', () => {
   const input = {
     name: '@supacloud/elysia',

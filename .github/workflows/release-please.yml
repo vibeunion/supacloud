@@ -11,6 +11,12 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      recover_npm:
+        description: Retry missing command-package publications
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
   group: release-please-${{ github.ref }}
@@ -383,7 +389,9 @@ jobs:
 
   publish-npm:
     needs: release-please
-    if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+    # A previous release can leave a Git tag behind after npm publication
+    # fails. Allow an explicit recovery run without creating another release.
+    if: ${{ always() && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true) }}
     runs-on: ubuntu-latest
     environment: npm-publish
     permissions:
@@ -408,7 +416,9 @@ jobs:
         run: npm --version
 
       - name: Publish command contracts to NPM
-        if: ${{ needs.release-please.outputs.contracts_released == 'true' }}
+        # Contracts are the root of the command package graph. Recheck them on
+        # every release so a failed first publication is retried automatically.
+        if: ${{ needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true }}
         working-directory: packages/contracts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -418,7 +428,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish supacloud-js to NPM
-        if: ${{ needs.release-please.outputs.supacloud_js_released == 'true' }}
+        if: ${{ needs.release-please.outputs.supacloud_js_released == 'true' || inputs.recover_npm == true }}
         working-directory: packages/supacloud-js
         run: |
           node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
@@ -464,7 +474,7 @@ jobs:
       # App-framework packages. NODE_AUTH_TOKEN supports the first publish of
       # each new package before npm trusted publishing is linked.
       - name: Publish durable commands to NPM
-        if: ${{ needs.release-please.outputs.commands_released == 'true' }}
+        if: ${{ needs.release-please.outputs.commands_released == 'true' || inputs.recover_npm == true }}
         working-directory: packages/commands
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -476,7 +486,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish database governance to NPM
-        if: ${{ needs.release-please.outputs.db_released == 'true' }}
+        if: ${{ needs.release-please.outputs.db_released == 'true' || inputs.recover_npm == true }}
         working-directory: packages/db
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -488,7 +498,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish app framework metadata to NPM
-        if: ${{ needs.release-please.outputs.app_released == 'true' }}
+        if: ${{ needs.release-please.outputs.app_released == 'true' || inputs.recover_npm == true }}
         working-directory: packages/app
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -500,7 +510,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish Svelte lifecycle binding to NPM
-        if: ${{ needs.release-please.outputs.app_svelte_released == 'true' }}
+        if: ${{ needs.release-please.outputs.app_svelte_released == 'true' || inputs.recover_npm == true }}
         working-directory: packages/app-svelte
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -551,7 +561,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish elysia adapter to NPM
-        if: ${{ needs.release-please.outputs.elysia_released == 'true' }}
+        if: ${{ needs.release-please.outputs.elysia_released == 'true' || inputs.recover_npm == true }}
         working-directory: packages/elysia
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
