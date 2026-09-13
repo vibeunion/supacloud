@@ -9,6 +9,15 @@ import {
 
 const taskId = "task-typed-1";
 
+function decodeResult(value: unknown): { value: number } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("invalid result");
+  }
+  const record = value as { value?: unknown };
+  if (typeof record.value !== "number") throw new Error("invalid result");
+  return { value: record.value };
+}
+
 function taskDetail(status = "completed", result: unknown = { value: 42 }) {
   return {
     id: taskId,
@@ -50,11 +59,7 @@ function createTaskClient(responses: readonly unknown[] = [taskDetail()]) {
 describe("SupaCloud typed task receipts", () => {
   test("keeps the explicit result type across receipt operations and snapshots", async () => {
     type Result = { value: number };
-    const decode: SupaCloudTaskResultDecoder<Result> = (value) => {
-      if (!value || typeof value !== "object" || Array.isArray(value)
-        || typeof value.value !== "number") throw new Error("invalid result");
-      return { value: value.value };
-    };
+    const decode: SupaCloudTaskResultDecoder<Result> = decodeResult;
     const { client, requests, managementFetch } = createTaskClient();
     const previousFetch = globalThis.fetch;
     globalThis.fetch = managementFetch;
@@ -88,11 +93,7 @@ describe("SupaCloud typed task receipts", () => {
 
   test("typed direct methods decode results without making an unchecked generic claim", async () => {
     type Result = { value: number };
-    const decode: SupaCloudTaskResultDecoder<Result> = (value) => {
-      if (!value || typeof value !== "object" || Array.isArray(value)
-        || typeof value.value !== "number") throw new Error("invalid result");
-      return { value: value.value };
-    };
+    const decode: SupaCloudTaskResultDecoder<Result> = decodeResult;
     const { client, managementFetch } = createTaskClient([
       taskDetail("running"), taskDetail(), [taskDetail()], [taskDetail()],
     ]);

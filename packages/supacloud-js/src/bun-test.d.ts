@@ -31,14 +31,23 @@ declare module "bun:test" {
     ? Mock<TArgs, TResult>
     : never;
 
-  export function expect(value: unknown): {
+  export interface Expectation {
     toBe(expected: unknown): void;
     toContain(expected: unknown): void;
+    toEqual(expected: unknown): void;
     toMatchObject(expected: unknown): void;
+    toHaveProperty(property: string): void;
     toHaveBeenCalledTimes(expected: number): void;
     toHaveBeenCalled(): void;
+    toBeInstanceOf(expected: unknown): void;
+    toBeGreaterThanOrEqual(expected: number): void;
+    toThrow(expected?: unknown): void;
+    not: Expectation;
     rejects: {
       toBeInstanceOf(expected: unknown): Promise<void>;
     };
-  };
+
+  }
+
+  export function expect(value: unknown): Expectation;
 }
