@@ -98,7 +98,12 @@ export type SupaCloudTaskAttempt = {
   logs: SupaCloudTaskLogEntry[];
 };
 
-export type SupaCloudTaskDetail = {
+export type SupaCloudTaskResultDecoder<TResult> = (value: unknown) => TResult;
+
+/** Alias kept short for consumers that already use decoder terminology. */
+export type SupaCloudTaskDecoder<TResult> = SupaCloudTaskResultDecoder<TResult>;
+
+export type SupaCloudTaskDetail<TResult = unknown> = {
   id: string;
   status: SupaCloudTaskStatus | string;
   function_slug?: string | null;
@@ -108,7 +113,7 @@ export type SupaCloudTaskDetail = {
   progress?: number | null;
   error?: string | null;
   error_message?: string | null;
-  result?: unknown;
+  result?: TResult;
   payload?: Record<string, unknown>;
   attempts?: SupaCloudTaskAttempt[];
   latest_logs?: SupaCloudTaskLogEntry[];
@@ -120,13 +125,13 @@ export type SupaCloudTaskDetail = {
   [key: string]: unknown;
 };
 
-export type SupaCloudTaskSnapshot = {
+export type SupaCloudTaskSnapshot<TResult = unknown> = {
   id: string;
   status: SupaCloudTaskStatus | string;
   progress?: number | null;
   error?: string | null;
   updatedAt?: string | null;
-  raw: unknown;
+  raw: SupaCloudTaskDetail<TResult>;
 };
 
 export type SupaCloudTaskListFilters = {
@@ -365,11 +370,11 @@ export type SupaCloudTaskSubscribeState =
   | "polling"
   | "closed";
 
-export type SupaCloudTaskSubscribeOptions = {
+export type SupaCloudTaskSubscribeOptions<TResult = unknown> = {
   pollingIntervalMs?: number;
   realtimeTimeoutMs?: number;
   reconcileIntervalMs?: number;
-  onUpdate: (task: SupaCloudTaskSnapshot) => void;
+  onUpdate: (task: SupaCloudTaskSnapshot<TResult>) => void;
   onStateChange?: (
     state: SupaCloudTaskSubscribeState,
     details?: { error?: unknown },
@@ -378,16 +383,21 @@ export type SupaCloudTaskSubscribeOptions = {
   stopOnTerminal?: boolean;
 };
 
-export type SupaCloudTaskReceipt = {
+export type SupaCloudTaskSubscription = {
+  readonly connectionState: SupaCloudTaskSubscribeState;
+  unsubscribe: () => void;
+};
+
+export type SupaCloudTaskReceipt<TResult = unknown> = {
   taskId: string;
   status: string;
-  get: () => Promise<SupaCloudTaskDetail>;
-  wait: (options?: SupaCloudTaskWaitOptions) => Promise<SupaCloudTaskDetail>;
-  cancel: () => Promise<SupaCloudTaskDetail>;
-  retry: () => Promise<SupaCloudTaskDetail>;
+  get: () => Promise<SupaCloudTaskDetail<TResult>>;
+  wait: (options?: SupaCloudTaskWaitOptions) => Promise<SupaCloudTaskDetail<TResult>>;
+  cancel: () => Promise<SupaCloudTaskDetail<TResult>>;
+  retry: () => Promise<SupaCloudTaskDetail<TResult>>;
   subscribe: (
-    options: SupaCloudTaskSubscribeOptions,
-  ) => { connectionState: SupaCloudTaskSubscribeState; unsubscribe: () => void };
+    options: SupaCloudTaskSubscribeOptions<TResult>,
+  ) => SupaCloudTaskSubscription;
 };
 
 export type SupaCloudClientOptions<TClient extends SupabaseClient = SupabaseClient> = {
@@ -494,6 +504,30 @@ export class SupaCloudApiError extends Error {
     this.code = extractErrorCode(responseBody);
   }
 }
+
+export type SupaCloudTaskDecodeOperation = "get" | "list" | "wait" | "cancel" | "retry" | "subscribe";
+
+/**
+ * A caller-supplied result decoder failed. Decoder errors are sanitized so
+ * application result values and decoder implementation details are not leaked.
+ */
+export class SupaCloudTaskDecoderError extends SupaCloudApiError {
+  readonly code = "TASK_RESULT_INVALID" as const;
+  readonly mutationMayHaveApplied: boolean;
+
+  constructor(readonly operation: SupaCloudTaskDecodeOperation) {
+    const mutation = operation === "cancel" || operation === "retry";
+    super("Task result could not be decoded", 0, {
+      code: "TASK_RESULT_INVALID",
+      mutation_may_have_applied: mutation,
+    });
+    this.name = "SupaCloudTaskDecoderError";
+    this.mutationMayHaveApplied = mutation;
+  }
+}
+
+/** Compatibility spelling for callers that use the shorter decode term. */
+export { SupaCloudTaskDecoderError as SupaCloudTaskDecodeError };
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 type ResponseDecoder<T> = (value: unknown) => T;
@@ -656,6 +690,31 @@ function decodeTaskDetail(value: unknown): SupaCloudTaskDetail {
 function decodeTaskDetails(value: unknown): SupaCloudTaskDetail[] {
   if (!Array.isArray(value)) throw new Error("Invalid task list response");
   return value.map(decodeTaskDetail);
+}
+
+function captureTaskDecoder<TResult>(value: unknown): SupaCloudTaskResultDecoder<TResult> {
+  if (typeof value !== "function") throw new TypeError("Invalid task result decoder");
+  return value as SupaCloudTaskResultDecoder<TResult>;
+}
+
+function decodeTaskResult<TResult>(
+  task: SupaCloudTaskDetail,
+  decoder: SupaCloudTaskResultDecoder<TResult>,
+  operation: SupaCloudTaskDecodeOperation,
+): SupaCloudTaskDetail<TResult> {
+  if (!Object.hasOwn(task, "result")) return task as SupaCloudTaskDetail<TResult>;
+  try {
+    return { ...task, result: decoder(task.result) };
+  } catch {
+    throw new SupaCloudTaskDecoderError(operation);
+  }
+}
+
+function decodeTaskDetailsWithResult<TResult>(
+  value: unknown,
+  decoder: SupaCloudTaskResultDecoder<TResult>,
+): SupaCloudTaskDetail<TResult>[] {
+  return decodeTaskDetails(value).map((task) => decodeTaskResult(task, decoder, "list"));
 }
 
 function decodeQueueMessage(value: unknown): SupaCloudQueueMessage {
@@ -948,8 +1007,14 @@ async function defaultAccessTokenResolver(
   return data.session?.access_token ?? null;
 }
 
-function normalizeTaskSnapshot(task: unknown): SupaCloudTaskSnapshot {
-  const value = valueRecord(task ?? {});
+function normalizeTaskSnapshot<TResult = unknown>(
+  task: unknown,
+  decoder?: SupaCloudTaskResultDecoder<TResult>,
+): SupaCloudTaskSnapshot<TResult> {
+  const raw: SupaCloudTaskDetail<TResult> = decoder
+    ? decodeTaskResult(decodeTaskDetail(task), decoder, "subscribe")
+    : task as SupaCloudTaskDetail<TResult>;
+  const value = valueRecord(raw);
   return {
     id: String(value.id ?? ""),
     status: String(value.status ?? "unknown"),
@@ -966,7 +1031,7 @@ function normalizeTaskSnapshot(task: unknown): SupaCloudTaskSnapshot {
         : typeof value.updatedAt === "string"
           ? value.updatedAt
           : null,
-    raw: task,
+    raw,
   };
 }
 
@@ -1017,23 +1082,40 @@ class SupaCloudManagementClient<TClient extends SupabaseClient = SupabaseClient>
 }
 
 class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> extends SupaCloudManagementClient<TClient> {
-  private createReceipt(taskId: string, status: string): SupaCloudTaskReceipt {
+  private createReceipt<TResult = unknown>(taskId: string, status: string): SupaCloudTaskReceipt<TResult> {
     return {
       taskId,
       status,
-      get: () => this.get(taskId),
-      wait: (options?: SupaCloudTaskWaitOptions) => this.wait(taskId, options),
-      cancel: () => this.cancel(taskId),
-      retry: () => this.retry(taskId),
-      subscribe: (options: SupaCloudTaskSubscribeOptions) =>
-        this.subscribe(taskId, options),
+      get: () => this.get(taskId) as Promise<SupaCloudTaskDetail<TResult>>,
+      wait: (options?: SupaCloudTaskWaitOptions) => this.wait(taskId, options) as Promise<SupaCloudTaskDetail<TResult>>,
+      cancel: () => this.cancel(taskId) as Promise<SupaCloudTaskDetail<TResult>>,
+      retry: () => this.retry(taskId) as Promise<SupaCloudTaskDetail<TResult>>,
+      subscribe: (options: SupaCloudTaskSubscribeOptions<TResult>) =>
+        this.subscribeInternal(taskId, options),
+    };
+  }
+
+  private createTypedReceipt<TResult>(
+    taskId: string,
+    status: string,
+    decoder: SupaCloudTaskResultDecoder<TResult>,
+  ): SupaCloudTaskReceipt<TResult> {
+    return {
+      taskId,
+      status,
+      get: () => this.getTyped(taskId, decoder),
+      wait: (options?: SupaCloudTaskWaitOptions) => this.waitTyped(taskId, decoder, options),
+      cancel: () => this.cancelTyped(taskId, decoder),
+      retry: () => this.retryTyped(taskId, decoder),
+      subscribe: (options: SupaCloudTaskSubscribeOptions<TResult>) =>
+        this.subscribeTyped(taskId, decoder, options),
     };
   }
 
   async submit(
     functionName: string,
     options: SupaCloudTaskSubmitOptions = {},
-  ) {
+  ): Promise<SupaCloudTaskReceipt<unknown>> {
     const { body, headers = {}, retries: _retries, timeoutSec: _timeoutSec, idempotencyKey, method } = options;
     // Background execution is selected by server-side background_routes.
     // Keep the async decision server-side, but forward the logical idempotency key
@@ -1072,6 +1154,34 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     return this.createReceipt(taskId, String(payload.status ?? "enqueued"));
   }
 
+  async submitTyped<TResult>(
+    functionName: string,
+    decoder: SupaCloudTaskResultDecoder<TResult>,
+    options?: SupaCloudTaskSubmitOptions,
+  ): Promise<SupaCloudTaskReceipt<TResult>>;
+  async submitTyped<TResult>(
+    functionName: string,
+    options: SupaCloudTaskSubmitOptions,
+    decoder: SupaCloudTaskResultDecoder<TResult>,
+  ): Promise<SupaCloudTaskReceipt<TResult>>;
+  async submitTyped<TResult>(
+    functionName: string,
+    decoderOrOptions: SupaCloudTaskResultDecoder<TResult> | SupaCloudTaskSubmitOptions,
+    optionsOrDecoder?: SupaCloudTaskSubmitOptions | SupaCloudTaskResultDecoder<TResult>,
+  ): Promise<SupaCloudTaskReceipt<TResult>> {
+    let decoder: SupaCloudTaskResultDecoder<TResult>;
+    let options: SupaCloudTaskSubmitOptions | undefined;
+    if (typeof decoderOrOptions === "function") {
+      decoder = captureTaskDecoder<TResult>(decoderOrOptions);
+      options = typeof optionsOrDecoder === "function" ? undefined : optionsOrDecoder;
+    } else {
+      options = decoderOrOptions;
+      decoder = captureTaskDecoder<TResult>(optionsOrDecoder);
+    }
+    const receipt = await this.submit(functionName, options);
+    return this.createTypedReceipt(receipt.taskId, receipt.status, decoder);
+  }
+
   async get(taskId: string): Promise<SupaCloudTaskDetail> {
     return this.request<SupaCloudTaskDetail>(
       `/v1/projects/${this.options.projectRef}/tasks/${taskId}`,
@@ -1079,6 +1189,14 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       undefined,
       decodeTaskDetail,
     );
+  }
+
+  async getTyped<TResult>(
+    taskId: string,
+    decoder: SupaCloudTaskResultDecoder<TResult>,
+  ): Promise<SupaCloudTaskDetail<TResult>> {
+    const resultDecoder = captureTaskDecoder<TResult>(decoder);
+    return decodeTaskResult(await this.get(taskId), resultDecoder, "get");
   }
 
   async list(filters: SupaCloudTaskListFilters = {}): Promise<SupaCloudTaskDetail[]> {
@@ -1090,6 +1208,27 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     );
   }
 
+  async listTyped<TResult>(
+    decoder: SupaCloudTaskResultDecoder<TResult>,
+    filters?: SupaCloudTaskListFilters,
+  ): Promise<SupaCloudTaskDetail<TResult>[]>;
+  async listTyped<TResult>(
+    filters: SupaCloudTaskListFilters,
+    decoder: SupaCloudTaskResultDecoder<TResult>,
+  ): Promise<SupaCloudTaskDetail<TResult>[]>;
+  async listTyped<TResult>(
+    decoderOrFilters: SupaCloudTaskResultDecoder<TResult> | SupaCloudTaskListFilters,
+    filtersOrDecoder?: SupaCloudTaskListFilters | SupaCloudTaskResultDecoder<TResult>,
+  ): Promise<SupaCloudTaskDetail<TResult>[]> {
+    const decoder = typeof decoderOrFilters === "function"
+      ? captureTaskDecoder<TResult>(decoderOrFilters)
+      : captureTaskDecoder<TResult>(filtersOrDecoder);
+    const filters = typeof decoderOrFilters === "function"
+      ? filtersOrDecoder as SupaCloudTaskListFilters | undefined
+      : decoderOrFilters;
+    return (await this.list(filters)).map((task) => decodeTaskResult(task, decoder, "list"));
+  }
+
   async cancel(taskId: string): Promise<SupaCloudTaskDetail> {
     return this.request<SupaCloudTaskDetail>(
       `/v1/projects/${this.options.projectRef}/tasks/${taskId}/cancel`,
@@ -1097,6 +1236,13 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       undefined,
       decodeTaskDetail,
     );
+  }
+
+  async cancelTyped<TResult>(
+    taskId: string,
+    decoder: SupaCloudTaskResultDecoder<TResult>,
+  ): Promise<SupaCloudTaskDetail<TResult>> {
+    return decodeTaskResult(await this.cancel(taskId), captureTaskDecoder<TResult>(decoder), "cancel");
   }
 
   async retry(taskId: string): Promise<SupaCloudTaskDetail> {
@@ -1108,6 +1254,13 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     );
   }
 
+  async retryTyped<TResult>(
+    taskId: string,
+    decoder: SupaCloudTaskResultDecoder<TResult>,
+  ): Promise<SupaCloudTaskDetail<TResult>> {
+    return decodeTaskResult(await this.retry(taskId), captureTaskDecoder<TResult>(decoder), "retry");
+  }
+
   async listDlq(limit = 100): Promise<SupaCloudTaskDetail[]> {
     return this.request<SupaCloudTaskDetail[]>(
       `/v1/projects/${this.options.projectRef}/tasks/dlq?limit=${limit}`,
@@ -1115,6 +1268,13 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       undefined,
       decodeTaskDetails,
     );
+  }
+
+  async listDlqTyped<TResult>(
+    decoder: SupaCloudTaskResultDecoder<TResult>,
+    limit = 100,
+  ): Promise<SupaCloudTaskDetail<TResult>[]> {
+    return this.listTyped({ dlq: true, limit }, captureTaskDecoder<TResult>(decoder));
   }
 
   async wait(
@@ -1135,7 +1295,63 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     }
   }
 
-  subscribe(taskId: string, options: SupaCloudTaskSubscribeOptions) {
+  async waitTyped<TResult>(
+    taskId: string,
+    decoder: SupaCloudTaskResultDecoder<TResult>,
+    options?: SupaCloudTaskWaitOptions,
+  ): Promise<SupaCloudTaskDetail<TResult>>;
+  async waitTyped<TResult>(
+    taskId: string,
+    options: SupaCloudTaskWaitOptions,
+    decoder: SupaCloudTaskResultDecoder<TResult>,
+  ): Promise<SupaCloudTaskDetail<TResult>>;
+  async waitTyped<TResult>(
+    taskId: string,
+    decoderOrOptions: SupaCloudTaskResultDecoder<TResult> | SupaCloudTaskWaitOptions,
+    optionsOrDecoder?: SupaCloudTaskWaitOptions | SupaCloudTaskResultDecoder<TResult>,
+  ): Promise<SupaCloudTaskDetail<TResult>> {
+    const decoder = typeof decoderOrOptions === "function"
+      ? captureTaskDecoder<TResult>(decoderOrOptions)
+      : captureTaskDecoder<TResult>(optionsOrDecoder);
+    const options = typeof decoderOrOptions === "function"
+      ? optionsOrDecoder as SupaCloudTaskWaitOptions | undefined
+      : decoderOrOptions;
+    return decodeTaskResult(await this.wait(taskId, options), decoder, "wait");
+  }
+
+  subscribe(taskId: string, options: SupaCloudTaskSubscribeOptions): SupaCloudTaskSubscription {
+    return this.subscribeInternal(taskId, options);
+  }
+
+  subscribeTyped<TResult>(
+    taskId: string,
+    decoder: SupaCloudTaskResultDecoder<TResult>,
+    options: SupaCloudTaskSubscribeOptions<TResult>,
+  ): SupaCloudTaskSubscription;
+  subscribeTyped<TResult>(
+    taskId: string,
+    options: SupaCloudTaskSubscribeOptions<TResult>,
+    decoder: SupaCloudTaskResultDecoder<TResult>,
+  ): SupaCloudTaskSubscription;
+  subscribeTyped<TResult>(
+    taskId: string,
+    decoderOrOptions: SupaCloudTaskResultDecoder<TResult> | SupaCloudTaskSubscribeOptions<TResult>,
+    optionsOrDecoder?: SupaCloudTaskSubscribeOptions<TResult> | SupaCloudTaskResultDecoder<TResult>,
+  ): SupaCloudTaskSubscription {
+    const decoder = typeof decoderOrOptions === "function"
+      ? captureTaskDecoder<TResult>(decoderOrOptions)
+      : captureTaskDecoder<TResult>(optionsOrDecoder);
+    const options = typeof decoderOrOptions === "function"
+      ? optionsOrDecoder as SupaCloudTaskSubscribeOptions<TResult>
+      : decoderOrOptions;
+    return this.subscribeInternal(taskId, options, decoder);
+  }
+
+  private subscribeInternal<TResult = unknown>(
+    taskId: string,
+    options: SupaCloudTaskSubscribeOptions<TResult>,
+    decoder?: SupaCloudTaskResultDecoder<TResult>,
+  ): SupaCloudTaskSubscription {
     let closed: boolean = false;
     let channel: RealtimeChannel | null = null;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1197,7 +1413,7 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     };
 
     const emitTask = (task: unknown) => {
-      const snapshot = normalizeTaskSnapshot(task);
+      const snapshot = normalizeTaskSnapshot(task, decoder);
       options.onUpdate(snapshot);
 
       if (stopOnTerminal && TERMINAL_STATUSES.has(snapshot.status)) {

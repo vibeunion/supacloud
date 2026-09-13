@@ -30,8 +30,27 @@ export type { IncrementalProgramSession, ProgramUpdate } from "./program";
 export { compileTraits } from "./traits";
 export { TraitCompiler } from "./traits";
 export type { TraitCompilation, TraitHandler, TraitKind, TraitRecord } from "./traits";
-export { generateApplication, renderApplication } from "./generate";
+export { generateApplication, renderApplication, renderClient, renderOpenApi } from "./generate";
 export type { GenerateOptions, RenderedArtifacts } from "./generate";
+export {
+  diffOpenApiDocuments,
+  exportGeneratedOpenApiJson,
+  formatOpenApiDiff,
+  loadGeneratedOpenApiDocument,
+  parseOpenApiDocument,
+  readOpenApiJson,
+  serializeOpenApiJson,
+  writeOpenApiJson,
+  OpenApiDocumentError,
+} from "./openapi-tools";
+export type {
+  OpenApiDiffChange,
+  OpenApiDiffResult,
+  OpenApiDocument,
+  OpenApiExportOptions,
+  OpenApiJsonWriteResult,
+  OpenApiObject,
+} from "./openapi-tools";
 export type { ContextPack, DoctorResult, ExecutionPlan } from "./inspect";
 export { validateGraph, COMPILER_DIAGNOSTIC_CODES } from "./validate";
 export { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
@@ -89,6 +108,9 @@ export type {
   FeatureTransitionNode,
   GraphqlOptions,
   GraphqlContractSummary,
+  OpenApiOptions,
+  OpenApiSecurityScheme,
+  OpenApiServer,
 } from "./types";
 export { inspectRouteContracts, validateRouteContracts } from "./route-contracts";
 export { pullGraphqlSchema } from "./graphql-schema";
