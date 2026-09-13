@@ -1,4 +1,4 @@
-FROM oven/bun:1.4.0 AS bun
+FROM oven/bun:1.4.2 AS bun
 FROM postgres:18-bookworm
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 RUN apt-get update && apt-get install -y --no-install-recommends pgbackrest ca-certificates \

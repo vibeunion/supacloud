@@ -12,7 +12,7 @@ export function appStarterFiles(name: string): Record<string, string> {
     return {
         "package.json": json({
             name, version: "0.0.0", private: true, type: "module",
-            engines: { bun: ">=1.4.0" },
+            engines: { bun: ">=1.4.2" },
             scripts: {
                 compile: "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js compile",
                 "check:generated": "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js check",
@@ -33,7 +33,7 @@ export function appStarterFiles(name: string): Record<string, string> {
             },
             devDependencies: {
                 "@supacloud/compiler": `^${compilerMetadata.version}`,
-                "@types/bun": "^1.4.0",
+                "@types/bun": "^1.4.2",
                 typescript: "^7.0.2",
             },
         }),

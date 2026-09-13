@@ -62,7 +62,7 @@ EDGE_RUNTIME_SOURCE_TRANSACTION_DIR=""
 PGREDIS_INSTALL_TRANSACTION_DIR=""
 CREDENTIALS_FILE="${SUPACLOUD_CREDENTIALS_FILE:-/etc/supabase/supacloud-credentials.env}"
 MASTER_TOKEN_FILE="${SUPACLOUD_MASTER_TOKEN_FILE:-/etc/supabase/master-token.env}"
-BUN_VERSION="${BUN_VERSION:-1.4.0}"
+BUN_VERSION="${BUN_VERSION:-1.4.2}"
 XCADDY_VERSION="${XCADDY_VERSION:-v0.4.5}"
 
 # shellcheck source=scripts/lib/install_config.sh
@@ -197,7 +197,7 @@ supacloud_resolve_artifact_policy() {
 }
 
 ensure_bun_version() {
-    local required_version="${BUN_VERSION:-1.4.0}"
+    local required_version="${BUN_VERSION:-1.4.2}"
     local current_version=""
 
     if command -v bun &> /dev/null; then

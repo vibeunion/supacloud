@@ -1,6 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
 import {
+  createEnvironmentInjector,
+  inject,
+  InjectionToken,
+  provideToken,
+  REQUEST_CONTEXT,
+} from "@supacloud/app";
+import {
   ApplicationError,
   composeAspects,
   composeCommandExecutors,
@@ -168,7 +175,7 @@ function createCaseModule(captured: Captured): CompiledModule {
   };
 }
 
-const requestIdFromHeader: ApplicationOptions["requestContext"] = (request) => ({
+const requestIdFromHeader: NonNullable<ApplicationOptions["requestContext"]> = (request) => ({
   requestId: request.headers.get("x-request-id") ?? "anonymous",
   request,
 });
@@ -283,6 +290,51 @@ describe("createApplication", () => {
     const firstId = ((await first.json()) as { requestId: string }).requestId;
     const secondId = ((await second.json()) as { requestId: string }).requestId;
     expect(firstId).not.toBe(secondId);
+  });
+
+  test("binds an Angular-backed request injector across concurrent async handlers", async () => {
+    const rootValue = new InjectionToken<string>("root-value");
+    class InjectedController {
+      async get() {
+        await Promise.resolve();
+        const context = inject(REQUEST_CONTEXT) as { requestId: string };
+        return { requestId: context.requestId, rootValue: inject(rootValue) };
+      }
+    }
+    const root = createEnvironmentInjector([
+      provideToken(rootValue, "root"),
+    ], undefined, { initialize: false });
+    const module: CompiledModule = {
+      name: "injected",
+      createServices: () => ({ controller: new InjectedController() }),
+      controllers: [{
+        path: "/injected",
+        serviceKey: "controller",
+        scope: "application",
+        routes: [{
+          method: "GET",
+          path: "/context",
+          handler: "get",
+          response: t.Object({ requestId: t.String(), rootValue: t.String() }),
+        }],
+      }],
+    };
+
+    try {
+      const app = createApplication({
+        modules: [module],
+        injector: root,
+        requestContext: requestIdFromHeader,
+      });
+      const [first, second] = await Promise.all([
+        testRequest(app, "/injected/context", { headers: { "x-request-id": "request-a" } }),
+        testRequest(app, "/injected/context", { headers: { "x-request-id": "request-b" } }),
+      ]);
+      expect(await first.json()).toEqual({ requestId: "request-a", rootValue: "root" });
+      expect(await second.json()).toEqual({ requestId: "request-b", rootValue: "root" });
+    } finally {
+      await root.destroyAsync();
+    }
   });
 
   test("resolves module imports and platform deps", async () => {

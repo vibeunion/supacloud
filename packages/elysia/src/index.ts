@@ -1,5 +1,6 @@
 import { Elysia } from "elysia";
 import { executionRequestId, observeExecution, type ExecutionObserver } from "./execution";
+import { provideToken, runInRequestContext, type EnvironmentInjector, REQUEST_CONTEXT } from "@supacloud/app";
 
 export type { ExecutionEvent, ExecutionObserver } from "./execution";
 
@@ -326,6 +327,8 @@ export type ErrorMapper = (
 
 export interface ApplicationOptions {
   name?: string;
+  /** Optional Angular-backed root injector used for async request contexts. */
+  injector?: EnvironmentInjector;
   /** Modules in topological import order. */
   modules?: CompiledModule[];
   /** Platform-level dependencies (db client etc.), passed to createServices. */
@@ -645,7 +648,7 @@ export function createModulePlugin(
   compiled: CompiledModule,
   services: Record<string, unknown>,
   ctxFactory: RequestContextFactory = defaultRequestContext,
-  options: Pick<ApplicationOptions, "commandGovernance" | "commandExecutor" | "errorMapper" | "onExecution"> = {},
+  options: Pick<ApplicationOptions, "commandGovernance" | "commandExecutor" | "errorMapper" | "onExecution" | "injector"> = {},
   imported: Record<string, Record<string, unknown>> = {},
 ): Elysia {
   const hasCommandRoutes = compiled.controllers.some((controller) =>
@@ -819,10 +822,7 @@ export function createModulePlugin(
             requestId: executionRequestId(requestContext),
           }, () => commandExecutor(invocation, invoke));
         };
-        return modulePipeline(
-          route.command ? commandContext : routeContext,
-          invokeRoute,
-        );
+        return options.injector ? runInRequestContext(options.injector, [provideToken(REQUEST_CONTEXT, requestContext)], () => modulePipeline(route.command ? commandContext : routeContext, invokeRoute)) : modulePipeline(route.command ? commandContext : routeContext, invokeRoute);
       };
 
       switch (route.method) {
@@ -996,6 +996,7 @@ export function createApplication(options: ApplicationOptions): Elysia {
       commandExecutor: options.commandExecutor,
       errorMapper: options.errorMapper,
       onExecution: options.onExecution,
+      injector: options.injector,
     }, imported));
   }
 

@@ -191,4 +191,44 @@ describe("Angular 14+ EnvironmentInjector and createEnvironmentInjector", () => 
 
     expect(child.get(RESULT)).toBe("parent:optional");
   });
+
+  it("keeps 100 concurrent Bun.serve requests isolated across awaits", async () => {
+    const REQUEST_ID = new InjectionToken<number>("REQUEST_ID");
+    const root = createEnvironmentInjector([]);
+    const server = Bun.serve({
+      port: 0,
+      fetch: async (request) => {
+        const requestId = Number(new URL(request.url).searchParams.get("requestId"));
+        const requestInjector = createEnvironmentInjector([
+          provideToken(REQUEST_ID, requestId),
+        ], root);
+
+        try {
+          const resolved = await runInInjectionContext(requestInjector, async () => {
+            await Promise.resolve();
+            await new Promise<void>((resolve) => setTimeout(resolve, requestId % 5));
+            await Promise.resolve();
+            return inject(REQUEST_ID);
+          });
+          return new Response(String(resolved));
+        } finally {
+          requestInjector.destroy();
+        }
+      },
+    });
+
+    try {
+      const responses = await Promise.all(
+        Array.from({ length: 100 }, (_, requestId) =>
+          fetch(`http://localhost:${server.port}/?requestId=${requestId}`),
+        ),
+      );
+      const resolved = await Promise.all(responses.map((response) => response.text()));
+
+      expect(resolved).toEqual(Array.from({ length: 100 }, (_, requestId) => String(requestId)));
+    } finally {
+      server.stop(true);
+      root.destroy();
+    }
+  });
 });

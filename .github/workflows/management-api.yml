@@ -49,7 +49,7 @@ concurrency:
 # gitleaks:allow
 env:
   NODE_VERSION: "24.x"
-  BUN_VERSION: "1.4.0"
+  BUN_VERSION: "1.4.2"
   GO_VERSION: "1.27.1"
   XCADDY_VERSION: "v0.4.7"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"

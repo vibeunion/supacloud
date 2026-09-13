@@ -46,10 +46,11 @@
     "directory": "packages/app"
   },
   "dependencies": {
-    "@angular/core": "^22.1.5"
+    "@angular/core": "^22.1.5",
+    "@sinclair/typebox": "^0.34.52"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.0",
+    "@types/bun": "^1.4.2",
     "typescript": "^7.0.2"
   }
 }

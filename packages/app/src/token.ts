@@ -30,9 +30,9 @@ export class InjectionToken<T> extends AngularInjectionToken<T> {
       super(name);
     }
     this.name = name;
-    this.factory = options.factory;
-    this.providedIn = options.providedIn;
-    this.scope = options.scope;
+    if (options.factory !== undefined) this.factory = options.factory;
+    if (options.providedIn !== undefined) this.providedIn = options.providedIn;
+    if (options.scope !== undefined) this.scope = options.scope;
   }
 
   toString(): string {

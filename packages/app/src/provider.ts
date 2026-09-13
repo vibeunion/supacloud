@@ -1,6 +1,6 @@
 import type { InjectionToken } from "./token";
 import type { ForwardRefFn } from "./forward_ref";
-import { APP_INITIALIZER, ENVIRONMENT_INITIALIZER } from "./context";
+import { APP_INITIALIZER, APP_LIFECYCLE, ENVIRONMENT_INITIALIZER, type LifecycleHooks } from "./context";
 import type { Scope } from "./scope";
 
 /** A class usable as a DI token / provider implementation. */
@@ -9,7 +9,7 @@ export interface Type<T> {
 }
 
 /** Anything that can identify a provider: an InjectionToken or a class. */
-export type Token<T = any> = InjectionToken<T> | Type<T> | ForwardRefFn<InjectionToken<T> | Type<T>>;
+export type Token<T = unknown> = InjectionToken<T> | Type<T> | ForwardRefFn<InjectionToken<T> | Type<T>>;
 
 export interface ProviderDependency {
   token: Token;
@@ -30,31 +30,31 @@ interface BaseProvider {
   multi?: boolean;
 }
 
-export interface ClassProvider<T = any> extends BaseProvider {
+export interface ClassProvider<T = unknown> extends BaseProvider {
   provide: Token<T>;
   useClass: Type<T> | ForwardRefFn<Type<T>>;
   /** Explicit dependency tokens, positional (constructor order). */
   deps?: ProviderDep[];
 }
 
-export interface ValueProvider<T = any> extends BaseProvider {
+export interface ValueProvider<T = unknown> extends BaseProvider {
   provide: Token<T>;
   useValue: T;
 }
 
-export interface FactoryProvider<T = any> extends BaseProvider {
+export interface FactoryProvider<T = unknown> extends BaseProvider {
   provide: Token<T>;
   useFactory: (...deps: any[]) => T;
   deps?: ProviderDep[];
 }
 
-export interface ExistingProvider<T = any> extends BaseProvider {
+export interface ExistingProvider<T = unknown> extends BaseProvider {
   provide: Token<T>;
   useExisting: Token<T>;
 }
 
 /** Class shorthand registers the class as its own token. */
-export type Provider<T = any> =
+export type Provider<T = unknown> =
   | Type<T>
   | ClassProvider<T>
   | ValueProvider<T>
@@ -144,11 +144,23 @@ export function provideEnvironmentInitializer(
   ]);
 }
 
+/** Registers an explicit service lifecycle with the Bun application bootstrap. */
+export function provideLifecycle<T extends LifecycleHooks>(token: Token<T>): EnvironmentProviders {
+  return makeEnvironmentProviders([
+    {
+      provide: APP_LIFECYCLE,
+      useFactory: (instance: T) => instance,
+      deps: [token],
+      multi: true,
+    },
+  ]);
+}
+
 /**
  * Functional provider helper to register an InjectionToken with a static value or factory.
  * Modeled after Angular's provideToken pattern.
  */
-export function provideToken<T>(token: Token<T>, value: T): EnvironmentProviders {
+export function provideToken<T>(token: Token<T>, value: NoInfer<T>): EnvironmentProviders {
   return makeEnvironmentProviders([
     {
       provide: token,
