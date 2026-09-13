@@ -31,6 +31,7 @@ import { assertSecretsSafe, isNetworkExposed } from './security.js'
 import { GraphqlHandler, inspectGraphql, type GraphqlCapability } from './graphql.js'
 import { runtimeMode } from './functions/profile.js'
 import { ApiError } from './types.js'
+import { validateExternalIdentityClaims } from './identity.js'
 
 export * from './types.js'
 export { Database } from './db/database.js'
@@ -280,7 +281,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
     }
   }
 
-  const fnMap =
+  const fnMap: Map<string, FunctionRegistryValue> =
     config.functions instanceof Map
       ? config.functions
       : new Map(Object.entries(config.functions ?? {}))
@@ -301,7 +302,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
     await failStartup(error)
   }
   const functions = await Promise.resolve().then(() =>
-    new FunctionsHandler(fnMap as Map<string, FunctionRegistryValue>, fnEnv, pgredis, mode)
+    new FunctionsHandler(fnMap, fnEnv, pgredis, mode)
   ).catch(failStartup)
 
   async function resolveContext(req: Request, url: URL): Promise<RequestContext | Response> {
@@ -319,11 +320,7 @@ export async function createBackend(config: BackendConfig = {}): Promise<SupaClo
     let claims = await verifyJwt(token, jwtSecret)
     if (config.externalIdentity && token !== anonKey && token !== serviceRoleKey) {
       try {
-        claims = await config.externalIdentity(req)
-        if (claims.role !== 'authenticated' || typeof claims.sub !== 'string' || !claims.sub ||
-          !Number.isSafeInteger(claims.exp) || claims.exp! * 1000 <= Date.now()) {
-          throw new ApiError(401, { message: 'Invalid external identity' })
-        }
+        claims = validateExternalIdentityClaims(await config.externalIdentity(req))
       } catch (error) {
         const status = error instanceof ApiError && [401, 403, 503].includes(error.status) ? error.status : 503
         return withCors(Response.json({ message: status === 503 ? 'Identity verification unavailable' : 'External access denied' }, { status }))

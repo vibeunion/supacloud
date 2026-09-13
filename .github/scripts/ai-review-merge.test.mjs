@@ -147,7 +147,7 @@ describe('trusted review workflow', () => {
     assert.match(readFileSync(new URL('../../scripts/audit_dependencies.ts', import.meta.url), 'utf8'), /\["audit", "--audit-level", "high"\]/);
     assert.match(workflow, /bun run \.\.\/\.\.\/scripts\/audit_dependencies\.ts/);
     assert.match(workflow, /anchore\/sbom-action@/);
-    assert.match(workflow, /XCADDY_VERSION:\s*["']v0\.4\.5["']/);
+    assert.match(workflow, /XCADDY_VERSION:\s*["']v0\.4\.7["']/);
     assert.match(workflow, /xcaddy\/cmd\/xcaddy@\$\{XCADDY_VERSION\}/);
     assert.doesNotMatch(workflow, /xcaddy\/cmd\/xcaddy@latest/);
     for (const contents of [workflow, releaseWorkflow]) {
@@ -157,11 +157,9 @@ describe('trusted review workflow', () => {
         assert.match(line, /bun install --frozen-lockfile/);
       }
       if (contents === releaseWorkflow) {
-        assert.deepEqual(lockfileGenerationLines, [
+        assert.deepEqual(lockfileGenerationLines, Array.from({ length: 9 }, () =>
           '          bun install --lockfile-only --registry https://registry.npmjs.org',
-          '          bun install --lockfile-only --registry https://registry.npmjs.org',
-          '          bun install --lockfile-only --registry https://registry.npmjs.org',
-        ]);
+        ));
       } else {
         assert.deepEqual(lockfileGenerationLines, []);
       }
@@ -170,7 +168,7 @@ describe('trusted review workflow', () => {
     assert.match(releaseWorkflow, /npm --version/);
     assert.equal(
       releaseWorkflow.match(/node "\$GITHUB_WORKSPACE\/\.github\/scripts\/publish-npm-package\.mjs"/g)?.length,
-      11,
+      14,
       'all npm packages must use the retry-safe publisher',
     );
     assert.doesNotMatch(releaseWorkflow, /^\s+npm publish/m);

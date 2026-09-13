@@ -1,6 +1,10 @@
 FROM caddy:2.11.4-builder@sha256:522c540599fa8f6a340b18dea8ee12dfd9d8198347cefa2c4c54344159ae6c0b AS builder
 
-RUN GOBIN=/usr/bin go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.5 \
+ARG GOPROXY=https://proxy.golang.org,direct
+ENV GOTOOLCHAIN=go1.27.1
+
+RUN go version \
+    && GOBIN=/usr/bin go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.7 \
     && xcaddy build v2.11.4 \
         --with github.com/mholt/caddy-ratelimit@5625512f24f6f59d6f64fb3aafe5eecff0b286db \
         --output /usr/bin/caddy

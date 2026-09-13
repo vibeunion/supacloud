@@ -22,7 +22,7 @@ describe("HttpClient contract execution", () => {
     const client = new HttpClient({
       baseUrl: "https://example.test",
       fetch: (async (url, init) => {
-        calls.push({ url: String(url), init });
+        calls.push({ url: String(url), ...(init === undefined ? {} : { init }) });
         return Response.json({ version: 2 });
       }) as typeof fetch,
     }, [async (req, next) => next({ ...req, headers: { ...req.headers, traced: "yes" } })]);
@@ -73,5 +73,16 @@ function contractTypes(client: HttpClient) {
   client.execute(contract, { name: 1 });
   // @ts-expect-error Contract owns the request body.
   client.execute(contract, { name: "item" }, { body: {} });
+  // @ts-expect-error Unvalidated JSON cannot acquire a caller-supplied business type.
+  client.get<{ version: number }>("/items");
+  // @ts-expect-error Raw JSON remains unknown, including contextual inference.
+  const unchecked: Promise<{ version: number }> = client.get("/items");
+  // @ts-expect-error The low-level transport cannot assert a result type either.
+  client.request<{ version: number }>("GET", "/items");
+  const response: Promise<Response> = client.get("/items", { observe: "response" });
+  const text: Promise<string> = client.post("/items", {}, { responseType: "text" });
+  const blob: Promise<Blob> = client.request("GET", "/items", { responseType: "blob" });
+  // @ts-expect-error observe: response takes precedence over responseType.
+  const wrong: Promise<string> = client.get("/items", { observe: "response", responseType: "text" });
   return result;
 }

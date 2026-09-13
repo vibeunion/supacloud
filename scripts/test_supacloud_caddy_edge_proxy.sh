@@ -93,6 +93,22 @@ cat >"$work_dir/caddy.json" <<EOF
           "listen": ["127.0.0.1:$CADDY_PORT"],
           "automatic_https": { "disable": true },
           "routes": [{
+            "match": [{ "host": ["auth.edge.test"], "path": ["/__rate_limit_probe"] }],
+            "handle": [
+              {
+                "handler": "rate_limit",
+                "rate_limits": {
+                  "smoke": {
+                    "key": "{http.request.remote.host}",
+                    "window": "1m",
+                    "max_events": 2
+                  }
+                }
+              },
+              { "handler": "static_response", "status_code": 200, "body": "ok" }
+            ],
+            "terminal": true
+          }, {
             "match": [{ "host": ["auth.edge.test"] }],
             "handle": [
               {
@@ -178,6 +194,16 @@ if [[ "$caddy_ready" != true ]]; then
   exit 1
 fi
 
+for expected_status in 200 200 429; do
+  actual_status="$(curl -sS --max-time 5 -o /dev/null -w '%{http_code}' \
+    -H "Host: auth.edge.test" "http://127.0.0.1:$CADDY_PORT/__rate_limit_probe")"
+  if [[ "$actual_status" != "$expected_status" ]]; then
+    echo "Caddy rate limit: expected $expected_status, got $actual_status" >&2
+    cat "$caddy_log" >&2
+    exit 1
+  fi
+done
+
 curl -fsS --max-time 10 -H "Host: auth.edge.test" \
   "http://127.0.0.1:$CADDY_PORT/api/v1/slow" >/dev/null 2>&1 &
 slow_client_pid=$!
@@ -252,4 +278,4 @@ if [[ "$probe_failed" == true ]]; then
   exit 1
 fi
 
-echo "Caddy disconnect cancellation and 12 concurrent Edge Runtime round-trips passed"
+echo "Caddy rate limiting, disconnect cancellation, and 12 concurrent Edge Runtime round-trips passed"

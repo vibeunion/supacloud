@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { Type } from "@sinclair/typebox";
+import { Value } from "@sinclair/typebox/value";
 import {
   SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256,
   SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SIZE,
@@ -12,6 +14,8 @@ import {
 } from "../../src/sigstore-trusted-root";
 
 const repoRoot = join(import.meta.dir, "../../..", "..");
+const commandPath = process.env["PATH"];
+if (!commandPath) throw new Error("PATH is required for runtime asset tests");
 setDefaultTimeout(60_000);
 
 function readRepoFile(path: string): string {
@@ -19,9 +23,9 @@ function readRepoFile(path: string): string {
 }
 
 function readShellConstant(script: string, name: string): string {
-  const assignment = script.match(new RegExp(`^${name}="([^"]+)"$`, "m"));
+  const assignment = script.match(new RegExp(`^${name}="([^"]+)"$`, "m"))?.[1];
   if (!assignment) throw new Error(`Missing shell constant: ${name}`);
-  return assignment[1];
+  return assignment;
 }
 
 function readDocumentedComponentVersion(notes: string, component: string): string {
@@ -37,9 +41,9 @@ function systemdDirectiveSections(source: string, directive: string): string[] {
   const sections: string[] = [];
   for (const rawLine of source.split(/\r?\n/)) {
     const line = rawLine.trim();
-    const sectionMatch = line.match(/^\[([A-Za-z]+)\]$/);
+    const sectionMatch = line.match(/^\[([A-Za-z]+)\]$/)?.[1];
     if (sectionMatch) {
-      section = sectionMatch[1]!;
+      section = sectionMatch;
       continue;
     }
     if (line.startsWith(`${directive}=`)) sections.push(section);
@@ -95,7 +99,11 @@ describe("runtime companion version assets", () => {
     );
 
     expect(result.status, result.stderr).toBe(0);
-    expect(JSON.parse(result.stdout).tag_name).toBe("management-api-v0.38.0");
+    const release: unknown = JSON.parse(result.stdout);
+    if (!Value.Check(Type.Object({ tag_name: Type.String() }), release)) {
+      throw new Error("Release resolver returned an invalid tag");
+    }
+    expect(release.tag_name).toBe("management-api-v0.38.0");
   });
 
   test("missing release asset URL returns a non-zero status", () => {
@@ -190,7 +198,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${tools}:${process.env.PATH}`,
+          PATH: `${tools}:${commandPath}`,
           ROOT: dir,
           TARGET: target,
           MANAGEMENT_ASSET: managementAsset,
@@ -216,7 +224,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${tools}:${process.env.PATH}`,
+          PATH: `${tools}:${commandPath}`,
           ROOT: dir,
           MANAGEMENT_ASSET: managementAsset,
           EDGE_ASSET: edgeAsset,
@@ -235,7 +243,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${tools}:${process.env.PATH}`,
+          PATH: `${tools}:${commandPath}`,
           ROOT: dir,
           MANAGEMENT_ASSET: managementAsset,
           EDGE_ASSET: edgeAsset,
@@ -469,11 +477,11 @@ describe("runtime companion version assets", () => {
     expect(systemdBrokerUnit).toContain("ProtectSystem=strict");
     expect(serviceRenderer).not.toContain("/opt/supacloud/config.env");
     expect(serviceRenderer).toContain("/etc/supabase/management-api.env");
-    expect(installer).toContain('XCADDY_VERSION="${XCADDY_VERSION:-v0.4.5}"');
+    expect(installer).toContain('XCADDY_VERSION="${XCADDY_VERSION:-v0.4.7}"');
     expect(installer).toContain('xcaddy/cmd/xcaddy@${XCADDY_VERSION}');
-    expect(workflow).toContain('XCADDY_VERSION: "v0.4.5"');
+    expect(workflow).toContain('XCADDY_VERSION: "v0.4.7"');
     expect(workflow).toContain('xcaddy/cmd/xcaddy@${XCADDY_VERSION}');
-    expect(caddyBuilder).toContain('XCADDY_VERSION="${XCADDY_VERSION:-v0.4.5}"');
+    expect(caddyBuilder).toContain('XCADDY_VERSION="${XCADDY_VERSION:-v0.4.7}"');
     expect(caddyBuilder).toContain('xcaddy/cmd/xcaddy@${XCADDY_VERSION}');
     expect(installer).not.toContain("xcaddy/cmd/xcaddy@latest");
     expect(workflow).not.toContain("xcaddy/cmd/xcaddy@latest");
@@ -604,7 +612,7 @@ describe("runtime companion version assets", () => {
         SUPACLOUD_INSTALL_DIR: installDir,
         SUPACLOUD_SETUP_BRANCH: "main",
         SUPACLOUD_TEST_REMOTE_URL: reportedOrigin,
-        PATH: `${fakeBin}:${process.env.PATH}`,
+        PATH: `${fakeBin}:${commandPath}`,
         GIT_TERMINAL_PROMPT: "0",
       },
       encoding: "utf8",
@@ -698,7 +706,11 @@ describe("runtime companion version assets", () => {
       .toBe(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256);
     expect(trustedRoot.endsWith("\n")).toBe(true);
     expect(trustedRoot.slice(0, -1)).not.toContain("\n");
-    expect(JSON.parse(trustedRoot).mediaType)
+    const parsedRoot: unknown = JSON.parse(trustedRoot);
+    if (!Value.Check(Type.Object({ mediaType: Type.String() }), parsedRoot)) {
+      throw new Error("Trusted root has an invalid media type");
+    }
+    expect(parsedRoot.mediaType)
       .toBe("application/vnd.dev.sigstore.trustedroot+json;version=0.1");
     expect(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_TUF_TARGET_SHA256)
       .toBe("6494e21ea73fa7ee769f85f57d5a3e6a08725eae1e38c755fc3517c9e6bc0b66");
@@ -761,7 +773,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${dir}:${process.env.PATH}`,
+          PATH: `${dir}:${commandPath}`,
           GH_FAKE_VERSION: version,
           GH_HELP_TEXT: helpText,
         },
@@ -812,7 +824,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${fakeTools}:${process.env.PATH}`,
+          PATH: `${fakeTools}:${commandPath}`,
           ARCHIVE: archive,
           CHECKSUM: checksum,
           TARGET: target,
@@ -902,7 +914,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${fakeBin}:${process.env.PATH}`,
+          PATH: `${fakeBin}:${commandPath}`,
           ARTIFACT: artifact,
           GH_BUNDLE_ARGUMENT_RECORD: bundleArgumentRecord,
           TMPDIR: dir,
@@ -957,7 +969,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${fakeBin}:${process.env.PATH}`,
+          PATH: `${fakeBin}:${commandPath}`,
           ARTIFACT: artifact,
           GH_BUNDLE_ARGUMENT_RECORD: bundleArgumentRecord,
           GH_SOURCE_REF_ARGUMENT_RECORD: sourceRefArgumentRecord,
@@ -1183,7 +1195,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${fakeTools}:${process.env.PATH}`,
+          PATH: `${fakeTools}:${commandPath}`,
           ARCHIVE: archive,
           CHECKSUM: checksum,
           TAR_LOG: tarLog,
@@ -1224,7 +1236,7 @@ describe("runtime companion version assets", () => {
         cwd: repoRoot,
         env: {
           ...process.env,
-          PATH: `${fakeTools}:${process.env.PATH}`,
+          PATH: `${fakeTools}:${commandPath}`,
           ARCHIVE: archive,
           ARCH: arch,
           CHECKSUM: checksum,
@@ -1268,7 +1280,7 @@ describe("runtime companion version assets", () => {
     const installer = readRepoFile("install.sh");
     const upgrade = readRepoFile("scripts/lib/gotrue_upgrade.sh");
 
-    expect(readShellConstant(upgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION")).toBe("v2.196.0");
+    expect(readShellConstant(upgrade, "SUPACLOUD_GOTRUE_DEFAULT_VERSION")).toBe("v2.197.0");
     expect(installer).toContain('source "${SCRIPT_DIR}/scripts/lib/gotrue_upgrade.sh"');
     expect(installer).toContain(
       'local GOTRUE_VERSION="${GOTRUE_VERSION:-$SUPACLOUD_GOTRUE_DEFAULT_VERSION}"',
@@ -1279,8 +1291,8 @@ describe("runtime companion version assets", () => {
     expect(upgrade).toContain(
       'SUPACLOUD_GOTRUE_RELEASE_ASSET="auth-${target_version}-${SUPACLOUD_GOTRUE_RELEASE_ARCH}.tar.xz"',
     );
-    expect(upgrade).toContain("0d35d4c06a9ae673d06bc8579aeef6bba6f7551fa7842f9fcdac33ec926e360c");
-    expect(upgrade).toContain("6a769c0995578dcf208f43036a814daee741c560078d29df7821025f58652d9b");
+    expect(upgrade).toContain("b5c2991d1df760c9b099c1c2395a94bd1c2f83ed58901934921997179dc9f7ea");
+    expect(upgrade).toContain("a9da2e668137cb280c830d900df4081b3fdd42a289469485634426a7587f9f76");
     expect(upgrade).toContain("supacloud_download_url");
     expect(upgrade).toContain("supacloud_install_pinned_tar_xz_binary");
     expect(upgrade).not.toContain(".tar.gz");
@@ -1364,8 +1376,8 @@ describe("runtime companion version assets", () => {
     expect(installer).toContain('CADDY_VERSION:-2.11.4');
     expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.4}"');
 
-    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.2"');
-    expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.196.0"');
+    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.3"');
+    expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.197.0"');
     const realtimeDigest =
       "sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb";
     expect(installer).toContain('REALTIME_BASE_IMAGE="public.ecr.aws/supabase/realtime:v2.133.0"');
@@ -1382,11 +1394,11 @@ describe("runtime companion version assets", () => {
     expect(workflow).not.toContain("public.ecr.aws/supabase/realtime:v2.129.0");
     for (const compose of [devCompose, selfHostCompose]) {
       expect(compose).toContain("image: supacloud-caddy:2.11.4-ratelimit");
-      expect(compose).toContain("supabase/gotrue:v2.196.0");
-      expect(compose).toContain("postgrest/postgrest:v16.2");
+      expect(compose).toContain("supabase/gotrue:v2.197.0");
+      expect(compose).toContain("postgrest/postgrest:v16.3");
     }
-    expect(workflow).toContain("postgrest/postgrest:v16.2");
-    expect(workflow).toContain("supabase/gotrue:v2.196.0");
+    expect(workflow).toContain("postgrest/postgrest:v16.3");
+    expect(workflow).toContain("supabase/gotrue:v2.197.0");
     expect(postgresDockerfile).toContain("FROM postgres:18-bookworm");
     expect(devCompose).toContain("context: ../self-host/postgres");
     expect(selfHostCompose).toContain("context: ./postgres");

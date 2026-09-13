@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.15.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.15.0...supacloud-lite-v0.15.1) (2026-09-11)
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade Bun runtime baseline from 1.4.0 to 1.4.2 ([#1271](https://github.com/vibeunion/supacloud/issues/1271)) ([f53aee5](https://github.com/vibeunion/supacloud/commit/f53aee52e93c25e017e9c693a920de5752fe3ddc))
+
+## [0.15.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.14.0...supacloud-lite-v0.15.0) (2026-09-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **commands:** HTTP JSON methods return unknown unless decoded through a contract; writes default to no replay. Durable adapters require explicit authorization and input codecs. See docs/command-migration.md for import, auth, schema, and deployment migration steps.
+
+### Features
+
+* **commands:** unify durable execution with existing workflows ([#1243](https://github.com/vibeunion/supacloud/issues/1243)) ([6da15d4](https://github.com/vibeunion/supacloud/commit/6da15d459e1883ab94e240834200a57e9a41676b))
+
+## [0.14.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.13.0...supacloud-lite-v0.14.0) (2026-09-09)
+
+
+### Features
+
+* **lite:** align runtime contracts and support real pg_graphql ([#1231](https://github.com/vibeunion/supacloud/issues/1231)) ([9dec0ce](https://github.com/vibeunion/supacloud/commit/9dec0ceca8f0457cd8f514506c4660b5148226b3))
+
 ## [0.13.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.12.2...supacloud-lite-v0.13.0) (2026-09-05)
 
 

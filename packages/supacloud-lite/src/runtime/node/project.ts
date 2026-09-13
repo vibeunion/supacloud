@@ -72,9 +72,11 @@ export async function loadSupabaseProject(projectDir: string, seed: SeedOptions 
     ...seed.bindings,
     migrations: sources,
   }) : undefined
-  if (rendered) migrations = migrations.map((migration, index) => ({
-    ...migration, sql: rendered.migrations[index]!.sql,
-  }))
+  if (rendered) migrations = migrations.map((migration, index) => {
+    const bound = rendered.migrations[index]
+    if (!bound) throw new Error(`missing rendered migration: ${migration.name}`)
+    return { ...migration, sql: bound.sql }
+  })
   else if (sources.some(({ sql }) => /__SC_BINDING_[A-Z0-9_]+__/.test(sql))) {
     throw new Error('migration binding placeholders require an explicit manifest and target')
   }

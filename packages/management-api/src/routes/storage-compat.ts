@@ -437,6 +437,17 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         return await StorageService.getStatus();
     }, { detail: { tags: ["storage"], summary: "Get storage service status" } })
 
+    // GET /constraints â Storage upload size and protocol constraints
+    .get('/constraints', async () => {
+        return {
+            max_upload_size_bytes: STORAGE_UPLOAD_MAX_BYTES,
+            max_upload_size_mb: Math.floor(STORAGE_UPLOAD_MAX_BYTES / (1024 * 1024)),
+            tus_max_size_bytes: TUS_MAX_SIZE,
+            tus_chunk_max_size_bytes: TUS_MAX_CHUNK_SIZE,
+            streaming_upload_supported: true,
+        };
+    }, { detail: { tags: ["storage"], summary: "Get storage upload size and protocol constraints" } })
+
     // ════════════════════════════════════════════════════════
     // BUCKET Operations
     // ════════════════════════════════════════════════════════
@@ -690,7 +701,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
             // Check file size limit
             if (bucket.file_size_limit && size > Number(bucket.file_size_limit)) {
-                return status(413, { statusCode: "413", error: 'Payload too large', message: 'The object exceeded the maximum allowed size' });
+                return status(413, { statusCode: "413", error: 'Payload too large', message: 'The object exceeded the maximum allowed size', max_bytes: Number(bucket.file_size_limit) });
             }
             
             // Check allowed mime types
@@ -734,7 +745,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             };
         } catch (err: unknown) {
             if (err instanceof Error && err.message === "UPLOAD_TOO_LARGE") {
-                return status(413, { statusCode: "413", error: 'Payload too large', message: `Upload is limited to ${STORAGE_UPLOAD_MAX_BYTES} bytes` });
+                return status(413, { statusCode: "413", error: 'Payload too large', message: `Upload is limited to ${STORAGE_UPLOAD_MAX_BYTES} bytes`, max_bytes: STORAGE_UPLOAD_MAX_BYTES });
             }
             logger.error('SDK upload error:', { error: err instanceof Error ? err.message : String(err) });
             return status(500, { statusCode: "500", error: 'Internal', message: 'Upload failed' });
@@ -775,7 +786,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             };
         } catch (err: unknown) {
             if (err instanceof Error && err.message === "UPLOAD_TOO_LARGE") {
-                return status(413, { statusCode: "413", error: 'Payload too large', message: `Upload is limited to ${STORAGE_UPLOAD_MAX_BYTES} bytes` });
+                return status(413, { statusCode: "413", error: 'Payload too large', message: `Upload is limited to ${STORAGE_UPLOAD_MAX_BYTES} bytes`, max_bytes: STORAGE_UPLOAD_MAX_BYTES });
             }
             return status(500, { statusCode: "500", error: 'Internal', message: 'Upsert failed' });
         }
@@ -1614,7 +1625,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         if (uploadLength > TUS_MAX_SIZE) {
-            return status(413, { statusCode: "413", error: 'Payload too large', message: `TUS uploads are limited to ${TUS_MAX_SIZE / (1024 * 1024)}MB. Use standard upload for larger files.` });
+            return status(413, { statusCode: "413", error: 'Payload too large', message: `TUS uploads are limited to ${TUS_MAX_SIZE / (1024 * 1024)}MB. Use standard upload for larger files.`, max_bytes: TUS_MAX_SIZE });
         }
         const metadataHeader = headers['upload-metadata'] || '';
 
@@ -1634,7 +1645,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!logicalBucket) return status(404, { statusCode: "404", error: 'Not Found', message: 'Bucket not found' });
 
         if (logicalBucket.file_size_limit && uploadLength > Number(logicalBucket.file_size_limit)) {
-            return status(413, { statusCode: "413", error: 'Payload too large', message: 'The object exceeded the maximum allowed size' });
+            return status(413, { statusCode: "413", error: 'Payload too large', message: 'The object exceeded the maximum allowed size', max_bytes: Number(logicalBucket.file_size_limit) });
         }
 
         const allowedMimes = logicalBucket.allowed_mime_types as string[] | null;
@@ -1706,7 +1717,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         const chunkLength = parseContentLength(headers['content-length']);
         if (chunkLength !== null && chunkLength > TUS_MAX_CHUNK_SIZE) {
-            return status(413, { statusCode: "413", error: 'Payload too large', message: `TUS chunks are limited to ${TUS_MAX_CHUNK_SIZE} bytes` });
+            return status(413, { statusCode: "413", error: 'Payload too large', message: `TUS chunks are limited to ${TUS_MAX_CHUNK_SIZE} bytes`, max_bytes: TUS_MAX_CHUNK_SIZE });
         }
 
         const clientOffset = Number(headers['upload-offset'] || 0);

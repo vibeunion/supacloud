@@ -1,4 +1,13 @@
 export { analyzeProject } from "./analyze";
+export { createDeliveryPlan, planDeliveryProject, formatDeliveryPlan } from "./delivery-plan";
+export { buildDeliveryProject } from "./delivery-build";
+export { DeliveryBuildManifestSchema, DeliveryBuildResultSchema, parseDeliveryBuildManifest, parseDeliveryBuildResult } from "./delivery-build-schema";
+export type { DeliveryBuildManifest, DeliveryBuildResult, DeliveryObject } from "./delivery-build-schema";
+export {
+  DeliveryOptionsSchema, DeliveryPlanSchema, DeliveryPlanResultSchema, DeliveryTargetSchema,
+  DeliveryConfigurationError, parseDeliveryOptions, parseDeliveryPlanResult,
+} from "./delivery-schema";
+export type { DeliveryOptions, DeliveryPlan, DeliveryPlanResult, DeliveryTarget, DeliveryDiagnostic } from "./delivery-schema";
 export { generateFeatureSource, validateFeatureSpec } from "./feature";
 export { applyDiagnosticFix } from "./fixes";
 export type { AppliedDiagnosticFix, ApplyDiagnosticFixOptions } from "./fixes";

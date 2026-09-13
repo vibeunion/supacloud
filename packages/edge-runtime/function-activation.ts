@@ -9,7 +9,7 @@ const FUNCTION_SLUG_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
 const VERSION_PATTERN = /^(?:0|[1-9]\d*)$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_FUNCTION_TIMEOUT_MS = 900_000;
-const MAX_FUNCTION_BODY_BYTES = 30 * 1024 * 1024;
+const MAX_FUNCTION_BODY_BYTES = Number.MAX_SAFE_INTEGER;
 const MAX_WAIT_UNTIL_TIMEOUT_MS = 900_000;
 const AUTHORITY_KEYS = [
   "activation_generation",

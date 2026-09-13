@@ -182,8 +182,17 @@ The generated client has no GraphQL/compiler runtime dependency. It resolves the
 current token per request, accepts an AbortSignal as the second method argument,
 and rejects HTTP failures, GraphQL errors (including partial results), and malformed
 envelopes. `getSdk(requester)` is available for applications with an existing
-transport. Types describe the snapshot contract; response field values are not
-runtime-decoded. Default ID inputs are strings; unmapped custom scalars are unknown.
+transport. Types describe the snapshot contract; response field values are
+validated by generated operation parsers before either `createGraphqlClient` or
+`getSdk` returns typed data. The SDK requester returns `Promise<unknown>`; it no
+longer needs to claim an unchecked generic result. Standalone
+`parse<OperationName>Query` and `is<OperationName>Query` functions are exported for
+other boundaries. They share the standard Codegen operation types as their source
+of truth and require no runtime dependency or customer code generator.
+Default ID inputs are strings; unmapped custom scalars are unknown. Scalar domain
+formats, authorization and remote schema freshness remain separate checks.
+Unsupported non-JSON scalar mappings fail compilation instead of generating an
+unchecked validator.
 
 `graphql.manifest.json` records schema hash, query names and source locations
 without timestamps. Module context packs include colocated query inventory and

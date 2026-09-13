@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "modules": [
+    {
+      "name": "webhook",
+      "className": "WebhookModule",
+      "file": "webhook.module.ts",
+      "line": 5,
+      "imports": [],
+      "providers": [
+        {
+          "token": "UpdateWebhook",
+          "tokenKind": "class",
+          "kind": "class",
+          "useClass": "UpdateWebhook",
+          "scope": "application",
+          "deps": [
+            "WEBHOOK_ENVIRONMENT"
+          ],
+          "exported": false,
+          "file": "webhook.module.ts",
+          "line": 5,
+          "importPath": "update.command"
+        }
+      ],
+      "controllers": [
+        {
+          "className": "WebhookController",
+          "path": "/webhooks",
+          "scope": "request",
+          "deps": [
+            "UpdateWebhook",
+            "REQUEST_CONTEXT"
+          ],
+          "routes": [
+            {
+              "method": "POST",
+              "path": "/update",
+              "handler": "update",
+              "hasBodyBinding": true,
+              "handlerParams": [
+                {
+                  "name": "input",
+                  "kind": "body"
+                },
+                {
+                  "name": "key",
+                  "kind": "headers",
+                  "bindingName": "idempotency-key"
+                }
+              ],
+              "body": "WebhookInputSchema",
+              "schemaKinds": {
+                "body": "declared",
+                "response": "declared"
+              },
+              "response": "WebhookReceiptSchema"
+            },
+            {
+              "method": "GET",
+              "path": "/receipts/:key",
+              "handler": "receipt",
+              "pathParams": [
+                "key"
+              ],
+              "paramBindings": [
+                "key"
+              ],
+              "handlerParams": [
+                {
+                  "name": "key",
+                  "kind": "param",
+                  "bindingName": "key"
+                }
+              ],
+              "params": "WebhookKeySchema",
+              "schemaKinds": {
+                "params": "declared",
+                "response": "declared"
+              },
+              "response": "WebhookLookupSchema"
+            }
+          ],
+          "file": "webhook.controller.ts",
+          "importPath": "webhook.controller",
+          "schemaImports": {
+            "WebhookInputSchema": "contracts",
+            "WebhookReceiptSchema": "contracts",
+            "WebhookKeySchema": "contracts",
+            "WebhookLookupSchema": "contracts"
+          }
+        }
+      ],
+      "commands": [
+        {
+          "className": "UpdateWebhook",
+          "name": "webhook.update.v1",
+          "permission": "webhook.update",
+          "rpc": "webhookUpdate",
+          "transaction": "required",
+          "audit": "webhook.updated",
+          "idempotency": "required"
+        }
+      ],
+      "jobs": [],
+      "queries": [],
+      "exports": []
+    }
+  ],
+  "externalTokens": [
+    "REQUEST_CONTEXT",
+    "WEBHOOK_ENVIRONMENT"
+  ]
+}

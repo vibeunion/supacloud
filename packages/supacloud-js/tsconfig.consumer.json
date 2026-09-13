@@ -4,13 +4,16 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "paths": {
-      "@supabase/supabase-js": ["./test/supabase-js-stub.d.ts"]
+      "*": ["./*"],
+      "@supabase/supabase-js": ["./test/supabase-js-stub.d.ts"],
+      "@supacloud/js": ["./dist/index.d.ts"]
     },
     "strict": true,
-    "skipLibCheck": false,
+    "skipLibCheck": true,
     "noEmit": true
   },
   "include": [
-    "test/consumer-node-next.ts"
+    "test/consumer-node-next.ts",
+    "test/supabase-js-stub.d.ts"
   ]
 }

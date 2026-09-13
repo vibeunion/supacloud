@@ -2,7 +2,8 @@
 set -euo pipefail
 
 CADDY_VERSION="${CADDY_VERSION:-v2.11.4}"
-XCADDY_VERSION="${XCADDY_VERSION:-v0.4.5}"
+GO_VERSION="${GO_VERSION:-1.27.1}"
+XCADDY_VERSION="${XCADDY_VERSION:-v0.4.7}"
 RATE_LIMIT_MODULE_VERSION="${RATE_LIMIT_MODULE_VERSION:-5625512f24f6f59d6f64fb3aafe5eecff0b286db}"
 RATE_LIMIT_MODULE="${RATE_LIMIT_MODULE:-github.com/mholt/caddy-ratelimit@${RATE_LIMIT_MODULE_VERSION}}"
 CADDY_BUILD_TARGETS="${CADDY_BUILD_TARGETS:-linux-amd64 linux-arm64}"
@@ -15,9 +16,19 @@ if [[ "$RATE_LIMIT_MODULE" != *@* ]]; then
 fi
 
 if ! command -v xcaddy >/dev/null 2>&1; then
-  echo "xcaddy is required. Install with: go install github.com/caddyserver/xcaddy/cmd/xcaddy@${XCADDY_VERSION}" >&2
+  echo "xcaddy is required. Install with: GOTOOLCHAIN=go${GO_VERSION} go install github.com/caddyserver/xcaddy/cmd/xcaddy@${XCADDY_VERSION}" >&2
   exit 1
 fi
+
+xcaddy_version="$(xcaddy version)"
+if [[ "${xcaddy_version%% *}" != "$XCADDY_VERSION" ]]; then
+  echo "xcaddy ${XCADDY_VERSION} is required; found ${xcaddy_version%% *}. Install with: GOTOOLCHAIN=go${GO_VERSION} go install github.com/caddyserver/xcaddy/cmd/xcaddy@${XCADDY_VERSION}" >&2
+  exit 1
+fi
+
+# Use the same compiler as release and Docker builds, even on older Go hosts.
+export GOTOOLCHAIN="go${GO_VERSION}"
+go version
 
 build_one() {
   local goos="$1"

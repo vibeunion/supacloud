@@ -48,9 +48,9 @@ test('changed history fails before pending SQL and unchanged history is idempote
       { name: '050_pending', sql: 'create table public.should_not_exist(id int);' },
       { ...initial, sql: initial.sql + '\nselect 1;' },
     ])).rejects.toThrow('content mismatch')
-    expect((await backend.db.query(`select to_regclass('public.should_not_exist') as relation`)).rows[0].relation).toBeNull()
+    expect((await backend.db.query<unknown>(`select to_regclass('public.should_not_exist') as relation`)).rows).toEqual([{ relation: null }])
     await expect(backend.migrate([initial, { name: '100_duplicate', sql: 'select 1;' }])).rejects.toThrow('duplicate')
-    await backend.db.query(`update supabase_migrations.schema_migrations set statements = null where version = '100'`)
+    await backend.db.query<unknown>(`update supabase_migrations.schema_migrations set statements = null where version = '100'`)
     await expect(backend.migrate([initial])).rejects.toThrow('no verifiable SQL')
   } finally { await backend.close() }
 })
@@ -81,6 +81,6 @@ test('concurrent migration calls cannot apply two different bodies under one ver
     expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
     expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
     expect(await backend.db.listAppliedMigrations()).toHaveLength(1)
-    expect((await backend.db.query(`select to_regclass('public.concurrent_two') as relation`)).rows[0].relation).toBeNull()
+    expect((await backend.db.query<unknown>(`select to_regclass('public.concurrent_two') as relation`)).rows).toEqual([{ relation: null }])
   } finally { await backend.close() }
 })

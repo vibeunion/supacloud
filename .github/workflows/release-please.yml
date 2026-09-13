@@ -4,7 +4,8 @@ env:
   LANG: C.UTF-8
   LC_ALL: C.UTF-8
   BUN_VERSION: "1.4.2"
-  XCADDY_VERSION: "v0.4.5"
+  GO_VERSION: "1.27.1"
+  XCADDY_VERSION: "v0.4.7"
 
 on:
   push:
@@ -41,6 +42,9 @@ jobs:
       function_adapter_released: ${{ steps.release.outputs['packages/function-adapter--release_created'] }}
       supacloud_released: ${{ steps.release.outputs['packages/supacloud--release_created'] }}
       app_released: ${{ steps.release.outputs['packages/app--release_created'] }}
+      contracts_released: ${{ steps.release.outputs['packages/contracts--release_created'] }}
+      commands_released: ${{ steps.release.outputs['packages/commands--release_created'] }}
+      app_svelte_released: ${{ steps.release.outputs['packages/app-svelte--release_created'] }}
       compiler_released: ${{ steps.release.outputs['packages/compiler--release_created'] }}
       elysia_released: ${{ steps.release.outputs['packages/elysia--release_created'] }}
       db_released: ${{ steps.release.outputs['packages/db--release_created'] }}
@@ -75,7 +79,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version: stable
+          go-version: ${{ env.GO_VERSION }}
 
       - name: Install dependencies
         working-directory: packages/management-api
@@ -403,11 +407,23 @@ jobs:
       - name: Verify npm publisher
         run: npm --version
 
+      - name: Publish command contracts to NPM
+        if: ${{ needs.release-please.outputs.contracts_released == 'true' }}
+        working-directory: packages/contracts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
       - name: Publish supacloud-js to NPM
         if: ${{ needs.release-please.outputs.supacloud_js_released == 'true' }}
         working-directory: packages/supacloud-js
         run: |
-          bun install --frozen-lockfile
+          node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
+          bun install --lockfile-only --registry https://registry.npmjs.org
+          bun install --frozen-lockfile --registry https://registry.npmjs.org
           bun run build
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
@@ -447,13 +463,51 @@ jobs:
 
       # App-framework packages. NODE_AUTH_TOKEN supports the first publish of
       # each new package before npm trusted publishing is linked.
+      - name: Publish durable commands to NPM
+        if: ${{ needs.release-please.outputs.commands_released == 'true' }}
+        working-directory: packages/commands
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
+          bun install --lockfile-only --registry https://registry.npmjs.org
+          bun install --frozen-lockfile --registry https://registry.npmjs.org
+          bun run build
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
+      - name: Publish database governance to NPM
+        if: ${{ needs.release-please.outputs.db_released == 'true' }}
+        working-directory: packages/db
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
+          bun install --lockfile-only --registry https://registry.npmjs.org
+          bun install --frozen-lockfile --registry https://registry.npmjs.org
+          bun run build
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
       - name: Publish app framework metadata to NPM
         if: ${{ needs.release-please.outputs.app_released == 'true' }}
         working-directory: packages/app
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
-          bun install --frozen-lockfile
+          node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
+          bun install --lockfile-only --registry https://registry.npmjs.org
+          bun install --frozen-lockfile --registry https://registry.npmjs.org
+          bun run build
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
+      - name: Publish Svelte lifecycle binding to NPM
+        if: ${{ needs.release-please.outputs.app_svelte_released == 'true' }}
+        working-directory: packages/app-svelte
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
+          bun install --lockfile-only --registry https://registry.npmjs.org
+          bun install --frozen-lockfile --registry https://registry.npmjs.org
           bun run build
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
@@ -502,17 +556,9 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
-          bun install --frozen-lockfile
-          bun run build
-          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
-
-      - name: Publish database governance to NPM
-        if: ${{ needs.release-please.outputs.db_released == 'true' }}
-        working-directory: packages/db
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
-        run: |
-          bun install --frozen-lockfile
+          node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
+          bun install --lockfile-only --registry https://registry.npmjs.org
+          bun install --frozen-lockfile --registry https://registry.npmjs.org
           bun run build
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 

@@ -9,6 +9,9 @@ import type { Diagnostic, ModuleBoundaryPresetName } from "./types";
 import { compileOptionsFromConfig, loadSupacloudConfig, resolveSupacloudConfig } from "./config";
 import { applyDiagnosticFix } from "./fixes";
 import { GraphqlConfigurationError } from "./graphql-options";
+import { planDeliveryProject, formatDeliveryPlan } from "./delivery-plan";
+import { DeliveryConfigurationError } from "./delivery-schema";
+import { buildDeliveryProject } from "./delivery-build";
 
 function isModuleBoundaryPresetName(value: string | undefined): value is ModuleBoundaryPresetName {
   return value === "modular-monolith"
@@ -32,6 +35,8 @@ Usage:
   supacloud-compiler explain <name> [rootDir] [options]
   supacloud-compiler context <module> [rootDir] [options]
   supacloud-compiler doctor  [rootDir] [options]
+  supacloud-compiler plan    [rootDir] [options]
+  supacloud-compiler build-delivery [rootDir] [options]
   supacloud-compiler fix     <fix.json> [options]
   supacloud-compiler graphql-schema --url <project-url> --key-env <name> [--token-env <name>]
 
@@ -43,6 +48,8 @@ Commands:
   explain             Explain a module, provider, or external token
   context             Extract an AI-sized module context pack
   doctor              Run project and generated-artifact health checks
+  plan                Preview deterministic workload targets without writing or deploying
+  build-delivery      Build independent local factories and an atomic delivery manifest (Bun)
   graphql-schema      Explicitly export a caller-scoped schema to the configured local file
 
 Options:
@@ -60,7 +67,8 @@ Options:
   --token-env <name>  Environment variable holding the intended user's access token
   --check             graphql-schema: compare the remote schema without changing the snapshot
   --debounce <ms>     Debounce source changes in dev mode (default: 100)
-  --json              Print machine-readable output for compile/check/graph/explain/context/doctor
+  --json              Print machine-readable output for compile/check/graph/explain/context/doctor/plan/build-delivery
+  --delivery <file>   plan/build-delivery: validated JSON configuration (overrides config.delivery)
   --dry-run           Preview a fix without writing the target file
   --write             Apply a fix to disk (fix is preview-only by default)
   --preset, -p <name> Architecture preset ('modular-monolith' | 'angular-enterprise' | 'clean-architecture')
@@ -76,7 +84,7 @@ async function run(): Promise<void> {
   }
 
   const command = args[0];
-  if (!["compile", "check", "dev", "graph", "explain", "context", "doctor", "fix", "graphql-schema"].includes(command)) {
+  if (!command || !["compile", "check", "dev", "graph", "explain", "context", "doctor", "fix", "graphql-schema", "plan", "build-delivery"].includes(command)) {
     console.error(`Error: unknown command "${command}"`);
     printUsage();
     process.exit(1);
@@ -97,10 +105,32 @@ async function run(): Promise<void> {
   let keyEnv: string | undefined;
   let tokenEnv: string | undefined;
   let checkSchema = false;
+  let deliveryPath: string | undefined;
+  const deliveryCommand = command === "plan" || command === "build-delivery";
+  const planFlags = new Set([
+    "--delivery", "--root", "-r", "--out", "-o", "--strict", "--no-strict",
+    "--client", "--no-client", "--permissions", "--no-permissions", "--no-graphql",
+    "--json", "--dry-run", "--preset", "-p",
+  ]);
+  const planValueFlags = new Set(["--delivery", "--root", "-r", "--out", "-o", "--preset", "-p"]);
 
   for (let i: number = 1; i < args.length; i++) {
     const arg = args[i];
-    if (arg === "--root" || arg === "-r") {
+    if (arg === undefined) throw new Error("Missing command-line argument");
+    if (deliveryCommand && arg.startsWith("-")) {
+      if (!planFlags.has(arg)) throw new Error("Unsupported plan argument");
+      if (command === "build-delivery" && arg === "--dry-run") throw new Error("Use plan for read-only previews");
+      const next = args[i + 1];
+      if (planValueFlags.has(arg) && (!next || next.startsWith("-"))) {
+        throw new Error("Plan option requires a value");
+      }
+    }
+    if (arg === "--delivery") {
+      deliveryPath = args[++i];
+      if (!deliveryCommand || !deliveryPath || deliveryPath.startsWith("-")) {
+        throw new Error("--delivery requires a JSON file and a delivery command");
+      }
+    } else if (arg === "--root" || arg === "-r") {
       rootDir = args[++i];
     } else if (arg === "--out" || arg === "-o") {
       outDir = args[++i];
@@ -137,6 +167,7 @@ async function run(): Promise<void> {
     } else if (arg === "--dry-run") {
       dryRun = true;
     } else if (arg === "--write") {
+      if (command === "plan") throw new Error("plan is read-only; --write is not supported");
       dryRun = false;
     } else if (arg === "--preset" || arg === "-p") {
       const presetArg = args[++i];
@@ -150,6 +181,8 @@ async function run(): Promise<void> {
       else rootDir = arg;
     } else if (!arg.startsWith("-") && (command === "explain" || command === "context" || command === "fix") && !query) {
       query = arg;
+    } else if (deliveryCommand) {
+      throw new Error("Unsupported plan argument");
     }
   }
 
@@ -162,17 +195,37 @@ async function run(): Promise<void> {
     ...loadedConfig,
     root: resolvedRoot,
     outDir: resolvedOut,
-    strict: strict ?? loadedConfig.strict,
-    generateClient: generateClient ?? loadedConfig.generateClient,
-    generatePermissions: generatePermissions ?? loadedConfig.generatePermissions,
-    graphql: noGraphql ? false : loadedConfig.graphql,
+    ...(strict === undefined ? {} : { strict }),
+    ...(generateClient === undefined ? {} : { generateClient }),
+    ...(generatePermissions === undefined ? {} : { generatePermissions }),
+    ...(noGraphql ? { graphql: false } : {}),
   }, process.cwd());
   const compileDefaults = {
     ...configured,
-    moduleBoundaryPreset: preset ?? configured.moduleBoundaryPreset,
+    ...(preset ? { moduleBoundaryPreset: preset } : {}),
   };
 
-  if (command === "graphql-schema") {
+  if (deliveryCommand) {
+    let delivery: unknown = loadedConfig.delivery;
+    if (deliveryPath !== undefined) {
+      try {
+        delivery = JSON.parse(await readFile(resolve(process.cwd(), deliveryPath), "utf8"));
+      } catch {
+        throw new DeliveryConfigurationError();
+      }
+    }
+    if (command === "build-delivery") {
+      const result = await buildDeliveryProject(compileDefaults, delivery);
+      console.log(json ? JSON.stringify(result, null, 2) : result.ok
+        ? `Local delivery artifacts built. Changed: ${result.changedTargets.join(", ") || "-"}. Unchanged: ${result.unchangedTargets.join(", ") || "-"}. No deployment performed.`
+        : result.diagnostics.map((item) => `${item.code}: ${item.message}\n${item.suggestion ?? ""}`).join("\n"));
+      if (!result.ok) process.exitCode = 1;
+    } else {
+      const result = await planDeliveryProject(compileDefaults, delivery);
+      console.log(json ? JSON.stringify(result, null, 2) : formatDeliveryPlan(result));
+      if (!result.ok) process.exitCode = 1;
+    }
+  } else if (command === "graphql-schema") {
     if (!projectUrl) throw new Error("graphql-schema requires --url with an explicit project URL");
     if (!compileDefaults.graphql) throw new Error("graphql-schema requires graphql configuration");
     const credential = (name: string | undefined): string | undefined => {
@@ -182,11 +235,13 @@ async function run(): Promise<void> {
       return value;
     };
     const { pullGraphqlSchema } = await import("./graphql-schema");
+    const publishableKey = credential(keyEnv);
+    const accessToken = credential(tokenEnv);
     const result = await pullGraphqlSchema({
       url: projectUrl,
       output: compileDefaults.graphql.schema,
-      publishableKey: credential(keyEnv),
-      accessToken: credential(tokenEnv),
+      ...(publishableKey === undefined ? {} : { publishableKey }),
+      ...(accessToken === undefined ? {} : { accessToken }),
       check: checkSchema,
     });
     console.log(json ? JSON.stringify({ ok: result.upToDate, ...result }, null, 2)
@@ -344,7 +399,7 @@ async function run(): Promise<void> {
       console.log(JSON.stringify(doctor, null, 2));
     } else {
       for (const check of doctor.checks) console.log(`${check.ok ? "OK" : "FAIL"} ${check.name}: ${check.detail}`);
-      printDiagnostics(doctor.diagnostics);
+      printDiagnostics(doctor.diagnostics ?? []);
     }
     if (doctor.errors > 0) process.exit(1);
   }
@@ -362,6 +417,22 @@ function printDiagnostics(diagnostics: Diagnostic[]): void {
 }
 
 run().catch((err: unknown) => {
+  if (process.argv[2] === "plan" || process.argv[2] === "build-delivery" || err instanceof DeliveryConfigurationError) {
+    const result = {
+      ok: false, written: [],
+      ...(process.argv[2] === "build-delivery" ? { manifest: null, bundledTargets: [] } : { plan: null }),
+      diagnostics: [{
+        severity: "error",
+        code: err instanceof DeliveryConfigurationError ? err.code : "delivery-planning-failed",
+        message: err instanceof DeliveryConfigurationError ? err.message
+          : "Planning failed. Check source/configuration paths and supported plan arguments.",
+      }],
+    };
+    console.log(process.argv.slice(2).includes("--json") ? JSON.stringify(result, null, 2)
+      : result.diagnostics.map((item) => `${item.code}: ${item.message}`).join("\n"));
+    process.exitCode = 1;
+    return;
+  }
   if (err instanceof GraphqlConfigurationError) {
     const diagnostic: Diagnostic = {
       code: err.code,

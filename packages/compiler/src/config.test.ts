@@ -63,4 +63,32 @@ describe("SupaCloud default configuration", () => {
       transaction: "rpc-only",
     });
   });
+  test("passes customer boundary and type safety rules through the standard configuration", () => {
+    const config = defineSupacloudConfig({
+      moduleBoundaries: [{
+        sourceTag: "type:feature",
+        bannedDependenciesWithTags: ["type:feature"],
+      }],
+      typeSafety: {
+        scanProductionSource: true,
+        noAnyInGenerated: true,
+        exclude: ["legacy/**"],
+      },
+      allowRouteCommandBindings: false,
+      disallowControllerDirectDb: true,
+      detectOrphanModules: true,
+    });
+    const resolved = compileOptionsFromConfig(config, "/workspace");
+    expect(resolved.moduleBoundaries).toEqual(config.moduleBoundaries);
+    expect(resolved.typeSafety).toEqual(config.typeSafety);
+    expect(resolved.allowRouteCommandBindings).toBe(false);
+    expect(resolved.disallowControllerDirectDb).toBe(true);
+    expect(resolved.detectOrphanModules).toBe(true);
+    expect(compileOptionsFromConfig({}, "/workspace")).not.toHaveProperty("moduleBoundaries");
+    expect(compileOptionsFromConfig({}, "/workspace")).not.toHaveProperty("typeSafety");
+    expect(compileOptionsFromConfig({ moduleBoundaries: [] }, "/workspace").moduleBoundaries).toEqual([]);
+    expect(compileOptionsFromConfig({
+      disallowControllerDirectDb: false, detectOrphanModules: false,
+    }, "/workspace")).toMatchObject({ disallowControllerDirectDb: false, detectOrphanModules: false });
+  });
 });

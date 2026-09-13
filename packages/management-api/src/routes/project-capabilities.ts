@@ -10,6 +10,7 @@ import { normalizeProjectConfig } from "../utils/project-config";
 import { normalizeProjectRoutingConfig, resolveTenantPorts } from "../utils/project-routing";
 import { config } from "../config";
 import { detectOrganizationJitCapability } from "../services/organization-jit-capability.service";
+import pkg from "../../package.json";
 
 type Capability = {
   available: boolean;
@@ -146,15 +147,36 @@ export const projectCapabilityRoutes = new Elysia({ prefix: "/v1/projects/:ref" 
         authority_project_ref: authRuntime.authority_project_ref,
         managed_by_owner: authRuntime.mode === "shared",
       },
+      storage_v1: available("supacloud", "v1"),
+      edge_runtime_streaming_upload_v1: available("supacloud", "v1"),
     };
 
     return {
       project_ref: params.ref,
+      platform_version: (pkg as { version?: string })?.version || "unknown",
+      environment: process.env.NODE_ENV || "production",
       auth_runtime: "gotrue",
       schema_version: 1,
+      storage_backend: config.storageType || "s3",
       capabilities,
     };
   }, {
     params: t.Object({ ref: t.String() }),
     detail: { tags: ["projects"], summary: "Get project platform capabilities" },
+  })
+  .get("/environment", async ({ params }) => {
+    const project = await projectRepository.findByRef(params.ref);
+    if (!project) return status(404, { message: "Project not found", code: "NOT_FOUND" });
+
+    return {
+      project_ref: params.ref,
+      platform_version: (pkg as { version?: string })?.version || "unknown",
+      environment: process.env.NODE_ENV || "production",
+      schema_version: 1,
+      auth_runtime: "gotrue",
+      storage_backend: config.storageType || "s3",
+    };
+  }, {
+    params: t.Object({ ref: t.String() }),
+    detail: { tags: ["projects"], summary: "Get project environment and platform version" },
   });

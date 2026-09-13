@@ -83,7 +83,7 @@ export async function handleProjectCreate(args: string[]) {
                 if (value.length > 100) return "Project name must be less than 100 characters";
             },
         });
-        if (p.isCancel(input)) {
+        if (typeof input === "symbol" || p.isCancel(input)) {
             p.cancel("Operation cancelled");
             process.exit(0);
         }
@@ -108,7 +108,7 @@ export async function handleProjectCreate(args: string[]) {
                     if (!/^[a-z0-9.-]+$/.test(value)) return "Invalid domain format";
                 },
             });
-            if (p.isCancel(input)) {
+            if (typeof input === "symbol" || p.isCancel(input)) {
                 p.cancel("Operation cancelled");
                 process.exit(0);
             }

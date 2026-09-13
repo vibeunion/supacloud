@@ -1,5 +1,63 @@
 # Changelog
 
+## [0.17.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.17.0...compiler-v0.17.1) (2026-09-11)
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade Bun runtime baseline from 1.4.0 to 1.4.2 ([#1271](https://github.com/vibeunion/supacloud/issues/1271)) ([f53aee5](https://github.com/vibeunion/supacloud/commit/f53aee52e93c25e017e9c693a920de5752fe3ddc))
+
+## [0.17.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.16.0...compiler-v0.17.0) (2026-09-09)
+
+
+### Features
+
+* **compiler:** add local delivery planning and independent builds ([#1245](https://github.com/vibeunion/supacloud/issues/1245)) ([fd860ac](https://github.com/vibeunion/supacloud/commit/fd860ac82834f28df733ca5c91f3a3314a8ca748))
+
+
+### Performance Improvements
+
+* **compiler,web-console:** optimize I/O with Bun APIs, Vite pre-bundling, and graph algorithms ([#1246](https://github.com/vibeunion/supacloud/issues/1246)) ([1db9458](https://github.com/vibeunion/supacloud/commit/1db9458bb620c32476597c5bf795d00e63700559))
+
+## [0.16.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.15.0...compiler-v0.16.0) (2026-09-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **commands:** HTTP JSON methods return unknown unless decoded through a contract; writes default to no replay. Durable adapters require explicit authorization and input codecs. See docs/command-migration.md for import, auth, schema, and deployment migration steps.
+
+### Features
+
+* **commands:** unify durable execution with existing workflows ([#1243](https://github.com/vibeunion/supacloud/issues/1243)) ([6da15d4](https://github.com/vibeunion/supacloud/commit/6da15d459e1883ab94e240834200a57e9a41676b))
+
+## [0.15.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.14.0...compiler-v0.15.0) (2026-09-09)
+
+
+### Features
+
+* **lite:** align runtime contracts and support real pg_graphql ([#1231](https://github.com/vibeunion/supacloud/issues/1231)) ([9dec0ce](https://github.com/vibeunion/supacloud/commit/9dec0ceca8f0457cd8f514506c4660b5148226b3))
+
+## [0.14.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.13.1...compiler-v0.14.0) (2026-09-09)
+
+
+### Features
+
+* **compiler:** validate GraphQL results and expose governance config ([#1232](https://github.com/vibeunion/supacloud/issues/1232)) ([a238d56](https://github.com/vibeunion/supacloud/commit/a238d564050ba2927da426781377ce7d5bb30ab3))
+
+## [0.13.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.13.0...compiler-v0.13.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* **compiler:** avoid duplicate GraphQL enum and input types ([#1228](https://github.com/vibeunion/supacloud/issues/1228)) ([9054c41](https://github.com/vibeunion/supacloud/commit/9054c417b3e16c2d265ea2839f4aa72f9a64f513))
+
+## [0.13.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.12.0...compiler-v0.13.0) (2026-09-08)
+
+
+### Features
+
+* **compiler:** add database-first GraphQL query contracts ([#1224](https://github.com/vibeunion/supacloud/issues/1224)) ([a10e0d5](https://github.com/vibeunion/supacloud/commit/a10e0d54f87bee79c0a3a34f9b8685a994eb444b))
+
 ## [0.12.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.11.0...compiler-v0.12.0) (2026-09-08)
 
 

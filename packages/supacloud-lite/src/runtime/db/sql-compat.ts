@@ -143,7 +143,11 @@ function extensionName(statement: string): string | undefined {
     rest = rest.slice(LEADING_TRIVIA.exec(rest)?.[0].length ?? 0)
     const token = /^(?:"((?:""|[^"])*)"|([A-Za-z_][A-Za-z_0-9]*))/.exec(rest)
     if (!token) break
-    tokens.push(token[1]?.replaceAll('""', '"') ?? token[2]!.toLowerCase())
+    const quoted = token[1]
+    const bare = token[2]
+    if (quoted !== undefined) tokens.push(quoted.replaceAll('""', '"'))
+    else if (bare !== undefined) tokens.push(bare.toLowerCase())
+    else throw new Error('invalid migration SQL token')
     rest = rest.slice(token[0].length)
   }
   return tokens[2] === 'if'

@@ -42,7 +42,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     },
     storage: {
         read: ["status", "list_buckets", "get_bucket", "list_files"],
-        write: ["create_bucket", "update_bucket", "delete_bucket", "upload_base64", "delete_file"],
+        write: ["create_bucket", "update_bucket", "delete_bucket", "upload_base64", "delete_file", "upload", "upload_file"],
     },
     edge_functions: {
         read: ["list", "get_config", "source"],

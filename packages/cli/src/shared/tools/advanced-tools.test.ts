@@ -236,6 +236,129 @@ describe("edge_functions CLI tool", () => {
         })).toThrow("Invalid background_routes JSON array");
     });
 
+    test("parses execution limits from a CLI JSON string and supports uploads beyond 30MB", () => {
+        const { schema } = captureEdgeFunctionsTool({});
+        const parsed = parseToolArguments(schema, {
+            action: "config",
+            ref: "proj",
+            slug: "render",
+            limits: '{"max_request_body_bytes": 524288000}',
+            "expected-activation-id": EXPECTED_ACTIVATION_ID,
+        });
+        expect(parsed.limits).toEqual({ max_request_body_bytes: 524288000 });
+    });
+
+    test("returns a friendly error for invalid limits JSON", () => {
+        const { schema } = captureEdgeFunctionsTool({});
+        expect(() => parseToolArguments(schema, {
+            action: "config",
+            ref: "proj",
+            slug: "render",
+            limits: "invalid-json",
+            "expected-activation-id": EXPECTED_ACTIVATION_ID,
+        })).toThrow("Invalid limits JSON object");
+    });
+
+    test("configures upload size limit via max_body_size_mb shorthand", async () => {
+        const calls: Array<{ path: string; body: unknown }> = [];
+        const { callback } = captureEdgeFunctionsTool({
+            patch: async (path: string, body: unknown) => {
+                calls.push({ path, body });
+                return {
+                    ok: true,
+                    status: 200,
+                    data: {
+                        success: true,
+                        project_ref: "proj",
+                        slug: "upload",
+                        limits: { max_request_body_bytes: 524288000 },
+                        verify_jwt: true,
+                        background_routes: [],
+                        expected_activation_id: EXPECTED_ACTIVATION_ID,
+                        activation_id: COMMITTED_ACTIVATION_ID,
+                    },
+                };
+            },
+        });
+
+        const result = await callback({
+            action: "config",
+            ref: "proj",
+            slug: "upload",
+            max_body_size_mb: 500,
+            "expected-activation-id": EXPECTED_ACTIVATION_ID,
+        });
+
+        expect(calls).toEqual([
+            {
+                path: "/v1/projects/proj/functions/upload/config",
+                body: {
+                    limits: { max_request_body_bytes: 500 * 1024 * 1024 },
+                    expected_activation_id: EXPECTED_ACTIVATION_ID,
+                },
+            },
+        ]);
+        expect(JSON.parse(result.content[0].text)).toMatchObject({
+            ok: true,
+            operation: "edge_functions.config",
+            project_ref: "proj",
+            slug: "upload",
+            limits: { max_request_body_bytes: 524288000 },
+            activation_id: COMMITTED_ACTIVATION_ID,
+        });
+    });
+
+    test("deploys function with max_request_body_bytes limit beyond 30MB", async () => {
+        const calls: Array<{ path: string; body: unknown }> = [];
+        const { callback } = captureEdgeFunctionsTool({
+            post: async (path: string, body: unknown) => {
+                calls.push({ path, body });
+                return {
+                    ok: true,
+                    status: 200,
+                    data: {
+                        success: true,
+                        project_ref: "proj",
+                        slug: "fa-upload",
+                        previous_active_version: "absent",
+                        version: "1",
+                        active_version: "1",
+                        expected_activation_id: "legacy",
+                        activation_id: COMMITTED_ACTIVATION_ID,
+                        config: {
+                            version: "1",
+                            verify_jwt: true,
+                            activation_id: COMMITTED_ACTIVATION_ID,
+                            limits: { max_request_body_bytes: 524288000 },
+                        },
+                    },
+                };
+            },
+        });
+
+        const result = await callback({
+            action: "deploy",
+            ref: "proj",
+            slug: "fa-upload",
+            code: "export default () => new Response('ok');",
+            max_request_body_bytes: 524288000,
+            "expected-active-version": "absent",
+            "expected-activation-id": "legacy",
+        });
+
+        expect(calls[0].body).toMatchObject({
+            limits: { max_request_body_bytes: 524288000 },
+        });
+        expect(JSON.parse(result.content[0].text)).toMatchObject({
+            ok: true,
+            operation: "edge_functions.deploy",
+            project_ref: "proj",
+            slug: "fa-upload",
+            active_version: "1",
+            limits: { max_request_body_bytes: 524288000 },
+        });
+    });
+
     test("updates Edge Function config through the management API", async () => {
         const calls: Array<{ path: string; body: unknown }> = [];
         const { callback } = captureEdgeFunctionsTool({

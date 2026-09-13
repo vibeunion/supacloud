@@ -220,6 +220,20 @@ describe("HttpTransport retry policy", () => {
         expect(clearedTimerIds).toHaveLength(1);
     });
 
+    test("uses a bounded operation-specific timeout for multipart POST", async () => {
+        globalThis.fetch = (async () => Response.json({ ok: true })) as unknown as typeof fetch;
+
+        const response = await createTransport().postMultipart(
+            "/v1/storage/test/buckets/b/upload",
+            new FormData(),
+            { timeoutMs: 36 * 60_000 },
+        );
+
+        expect(response.ok).toBe(true);
+        expect(scheduledTimers.map(({ delay }) => delay)).toEqual([36 * 60_000]);
+        expect(clearedTimerIds).toHaveLength(1);
+    });
+
     test("aborts a long POST at its cap without retrying", async () => {
         let fetchCalls = 0;
         globalThis.fetch = ((_input, init) => {

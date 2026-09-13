@@ -1,5 +1,25 @@
 # @supacloud/compiler
 
+## Local Delivery
+
+`supacloud-compiler plan --json` previews workload targets and route ownership.
+`supacloud-compiler build-delivery --json` creates independent local factory bundles
+and an atomic inspection manifest, reusing unchanged artifacts without deployment.
+See [local delivery](./DELIVERY.md) for configuration, contracts, and limitations.
+
+## Persistent Execution Policy
+
+Set `commandCapabilities.requirePersistentAdapters: true` to require named adapters
+with explicit `database`/`external` boundaries, permission, audit and idempotency.
+Database commands require transactional capability and `transaction: "required"`.
+External adapters cannot satisfy a required database transaction: use durable
+intent and read-only reconciliation instead.
+
+`command-persistence-required` and `command-external-transaction` diagnostics include
+recovery suggestions and participate in JSON output and the existing no-write-on-error
+gate. These checks validate declared policy, not the implementation of a custom
+adapter. See [configuration and migration](../../docs/command-migration.md).
+
 FA-derived direct-command RPC ownership, contract inspection and POST command
 protocol migration are documented in `docs/fa-consumer-governance.md` in the
 repository. `context <module> --json` reports `routeContracts` and standalone
@@ -72,6 +92,41 @@ Consumers of that optional file must install `@graphql-typed-document-node/core`
 it provides `ResultOf` and `VariablesOf` for operation-level inference. The default
 fetch client still needs no GraphQL runtime dependency.
 
+Both outputs use the operation plugin as the single owner of referenced enums
+and input objects. Regenerate both files after upgrading the compiler; do not
+deduplicate declarations by editing generated files. Scalar mappings are applied
+directly to operation/input fields, and types unused by queries are not emitted.
+
+Consumer acceptance tests cover both SDK and TypedDocumentNode output:
+
+```gherkin
+Scenario: Shared enum types
+  Given multiple queries share an enum in variables and selected fields
+  When the compiler generates the client artifacts
+  Then each artifact declares the enum once and passes strict TypeScript checks
+
+Scenario: Nested input objects
+  Given recursive input objects contain enum lists, defaults and custom scalars
+  When the compiler generates the client artifacts
+  Then input declarations are unique and valid variables retain their types
+
+Scenario: Invalid consumer code
+  Given generated query contracts
+  When a consumer supplies invalid variables or reads an unselected field
+  Then TypeScript rejects the consumer code
+
+Scenario: Release package acceptance
+  Given an installed compiler package
+  When its CLI runs the same consumer acceptance suite
+  Then both artifact formats pass without editing generated files
+```
+
+Run `bun test src/graphql-package.test.ts` from this package. To test an installed
+tarball or registry release with the same suite, set
+`SUPACLOUD_COMPILER_TEST_CLI` to its absolute `dist/cli.js` path.
+`bun run test:package` checks the built CLI and runs automatically after the build
+in `prepublishOnly`, blocking publication when generated consumer types fail.
+
 ```ts
 import { createGraphqlClient } from "./generated/graphql";
 const queries = createGraphqlClient({
@@ -84,11 +139,48 @@ const result = await queries.ReviewList({ first: 20 });
 
 Method names and types come from named operations. The generated client is
 dependency-free and refreshes identity per request; `getSdk(requester)` integrates
-an existing transport. It rejects HTTP errors, GraphQL errors and malformed
-response envelopes, but does not runtime-decode selected field values.
+an existing transport returning `Promise<unknown>`. It rejects HTTP errors,
+GraphQL errors, malformed response envelopes and invalid selected field values.
+Both clients run generated operation parsers before returning typed data. No
+customer TypeScript-to-TypeBox postprocessor or extra runtime dependency is needed.
+The same module exports `parseReviewListQuery(value: unknown)` and
+`isReviewListQuery(value: unknown)` for other integration boundaries (names follow
+your operations). Validation follows the generated selected JSON shape, including
+aliases, fragments, enums, lists, nullability and optional conditional fields.
+Unmapped scalars remain `unknown`; scalar domain formats and authorization still
+need business validation. Non-JSON scalar mappings such as `Date` fail compilation;
+map the wire value to `string` and convert it after validation instead.
+Generic application adapters can use `GraphqlQueryResults[Name]`,
+`parseGraphqlResult(name, value)` and `isGraphqlResult(name, value)` instead of
+maintaining their own result-type registry. Registry keys are operation names
+such as `"ReviewList"`, without the `Query` type suffix.
 `graphql.manifest.json` records query locations and the schema hash; context packs
 include colocated queries. RLS/grants, real database acceptance and query resource
 limits remain deployment responsibilities. Business writes stay in Commands.
+
+Use project configuration instead of a custom compile wrapper for shared rules:
+
+```ts
+export default defineSupacloudConfig({
+  root: "src",
+  graphql: { schema: "graphql/schema.graphql" },
+  moduleBoundaries: [{
+    sourceTag: "type:feature",
+    bannedDependenciesWithTags: ["type:feature"],
+  }],
+  typeSafety: { scanProductionSource: true, noAnyInGenerated: true },
+  allowRouteCommandBindings: false,
+});
+```
+
+`compile`, `check` and `dev` apply these options through the same compiler pipeline.
+`check` also compares generated validators without temporary directories or writes.
+`allowRouteCommandBindings: false` prevents duplicate governance when an application
+executes Commands inside its own service boundary. `disallowControllerDirectDb`
+and `detectOrphanModules` expose the existing optional architecture checks too.
+Keep application-specific governance and business queries in the application.
+See `docs/compiler-consumer-simplification.md` in the repository for the ownership
+checklist and migration boundaries.
 
 ## 安装
 

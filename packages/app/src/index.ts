@@ -175,6 +175,8 @@ export {
   withInterceptors,
 } from "./interceptor";
 export type { HttpInterceptorFn, HttpRequestPayload } from "./interceptor";
+export { HttpReplayError } from "./http_replay";
+export type { HttpReplayPolicy } from "./http_replay";
 export {
   computed,
   effect,

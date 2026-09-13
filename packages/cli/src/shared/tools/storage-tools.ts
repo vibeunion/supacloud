@@ -1,3 +1,5 @@
+import { existsSync, openAsBlob, readFileSync, statSync } from "node:fs";
+import { basename, resolve } from "node:path";
 import { Type } from "@sinclair/typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
@@ -27,15 +29,29 @@ type StorageAction =
     | "delete_bucket"
     | "list_files"
     | "upload_base64"
-    | "delete_file";
+    | "delete_file"
+    | "upload"
+    | "upload_file";
 
 const MAX_BUCKET_ID_LENGTH = 100;
 const MAX_MIME_TYPE_COUNT = 100;
 const MAX_MIME_TYPE_LENGTH = 255;
+const DEFAULT_UPLOAD_TIMEOUT_MS = 36 * 60_000;
 const PROJECT_REF_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const BUCKET_ID_PATTERN = new RegExp(`^(?!\\.+$)[A-Za-z0-9._-]{1,${MAX_BUCKET_ID_LENGTH}}$`);
 const MIME_TYPE_PATTERN = /^(?=\S)(?=.*\S$)[^\u0000-\u001f\u007f]+$/;
 const BUCKET_REVISION_PATTERN = /^[0-9]{1,20}$/;
+const UPLOAD_ARGUMENTS = new Set([
+    "action",
+    "ref",
+    "bucket",
+    "file_path",
+    "file",
+    "path",
+    "filename",
+    "mime_type",
+    "timeout_ms",
+]);
 const ACTION_ARGUMENTS: Record<StorageAction, ReadonlySet<string>> = {
     status: new Set(["action"]),
     list_buckets: new Set(["action", "ref"]),
@@ -46,6 +62,8 @@ const ACTION_ARGUMENTS: Record<StorageAction, ReadonlySet<string>> = {
     list_files: new Set(["action", "ref", "bucket"]),
     upload_base64: new Set(["action", "ref", "bucket", "filename", "base64_content", "mime_type"]),
     delete_file: new Set(["action", "ref", "bucket", "filename"]),
+    upload: UPLOAD_ARGUMENTS,
+    upload_file: UPLOAD_ARGUMENTS,
 };
 
 function normalizedMimeTypes(candidate: unknown): unknown {
@@ -174,6 +192,20 @@ function isAllowedMimeTypes(candidate: unknown): candidate is string[] | null {
 function isBucketRevision(candidate: unknown): candidate is string | null {
     return candidate === null
         || (typeof candidate === "string" && BUCKET_REVISION_PATTERN.test(candidate));
+}
+
+function formatBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes < 0) return "—";
+    if (bytes === 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+    let value = bytes;
+    let index = 0;
+    while (value >= 1024 && index < units.length - 1) {
+        value /= 1024;
+        index += 1;
+    }
+    const formatted = index === 0 ? String(value) : (value >= 100 ? value.toFixed(0) : value.toFixed(1));
+    return `${formatted} ${units[index]}`;
 }
 
 function safeBucket(candidate: unknown, expectedBucket?: string): SafeBucket | null {
@@ -487,22 +519,26 @@ export function registerStorageTools(server: ToolServer, http: HttpTransport): v
     server.tool(
         "storage",
         `S3/MinIO storage management.
-Actions: status, list_buckets, get_bucket, create_bucket, update_bucket, delete_bucket, list_files, upload_base64, delete_file`,
+Actions: status, list_buckets, get_bucket, create_bucket, update_bucket, delete_bucket, list_files, upload_base64, delete_file, upload, upload_file`,
         {
             action: withDescription(stringEnum([
                 "status", "list_buckets", "get_bucket", "create_bucket", "update_bucket", "delete_bucket",
-                "list_files", "upload_base64", "delete_file",
+                "list_files", "upload_base64", "delete_file", "upload", "upload_file",
             ]), "Action"),
-            ref: optional(Type.String({ pattern: PROJECT_REF_PATTERN.source }), "[list_buckets/get_bucket/create_bucket/update_bucket/delete_bucket/list_files/upload_base64/delete_file] Project ref"),
-            bucket: optional(Type.String({ pattern: BUCKET_ID_PATTERN.source }), "[get_bucket/create_bucket/update_bucket/delete_bucket/list_files/upload_base64/delete_file] Bucket name or ID"),
+            ref: optional(Type.String({ pattern: PROJECT_REF_PATTERN.source }), "[list_buckets/get_bucket/create_bucket/update_bucket/delete_bucket/list_files/upload_base64/delete_file/upload/upload_file] Project ref"),
+            bucket: optional(Type.String({ pattern: BUCKET_ID_PATTERN.source }), "[get_bucket/create_bucket/update_bucket/delete_bucket/list_files/upload_base64/delete_file/upload/upload_file] Bucket name or ID"),
             public: optional(Type.Boolean(), "[create_bucket/update_bucket] Public bucket access"),
             file_size_limit: withDescription(fileSizeLimitSchema, "[create_bucket/update_bucket] Positive safe-integer per-file size limit in bytes"),
             allowed_mime_types: withDescription(allowedMimeTypesSchema, "[create_bucket/update_bucket] MIME types as a comma-separated or JSON array"),
             expected_revision: optional(Type.String({ pattern: BUCKET_REVISION_PATTERN.source }), "[update_bucket/delete_bucket] Exact revision from list_buckets/get_bucket"),
             require_empty: optional(Type.Boolean(), "[delete_bucket] Must be true; deletion never empties a bucket"),
-            filename: optional(Type.String(), "[upload_base64/delete_file] File name/path"),
+            filename: optional(Type.String(), "[upload_base64/delete_file/upload/upload_file] File name/path"),
             base64_content: optional(Type.String(), "[upload_base64] Base64 encoded content"),
-            mime_type: optional(Type.String(), "[upload_base64] MIME type (default: application/octet-stream)"),
+            mime_type: optional(Type.String(), "[upload_base64/upload/upload_file] MIME type (default: application/octet-stream)"),
+            file_path: optional(Type.String(), "[upload/upload_file] Local file path to upload"),
+            file: optional(Type.String(), "[upload/upload_file] Alias for file_path"),
+            path: optional(Type.String(), "[upload/upload_file] Alias for file_path"),
+            timeout_ms: optional(Type.Integer({ minimum: 1, maximum: 36 * 60_000 }), "[upload/upload_file] Request timeout in milliseconds (default: 2160000 ms / 36 min)"),
         },
         async (args) => {
             const action = String(args.action) as StorageAction;
@@ -549,6 +585,60 @@ Actions: status, list_buckets, get_bucket, create_bucket, update_bucket, delete_
                     const filename = requiredText(args, "filename");
                     text = (await http.delete(`/v1/storage/${ref}/buckets/${bucket}/files/${filename}`)).ok
                         ? `✅ File ${filename} deleted` : "❌ Failed";
+                    break;
+                }
+                case "upload":
+                case "upload_file": {
+                    const ref = requiredProjectRef(args);
+                    const bucket = requiredBucketId(args);
+                    const rawFilePath = args.file_path ?? args.file ?? args.path;
+                    if (typeof rawFilePath !== "string" || !rawFilePath.trim()) {
+                        throw new Error(`'file_path' (or '--file') required for '${action}'`);
+                    }
+                    const resolvedFilePath = resolve(process.cwd(), rawFilePath.trim());
+                    if (!existsSync(resolvedFilePath)) {
+                        throw new Error(`File not found: ${resolvedFilePath}`);
+                    }
+                    const stat = statSync(resolvedFilePath);
+                    if (!stat.isFile()) {
+                        throw new Error(`Path is not a regular file: ${resolvedFilePath}`);
+                    }
+                    const filename = typeof args.filename === "string" && args.filename.trim()
+                        ? args.filename.trim()
+                        : basename(resolvedFilePath);
+                    const mimeType = typeof args.mime_type === "string" && args.mime_type.trim()
+                        ? args.mime_type.trim()
+                        : "application/octet-stream";
+                    let timeoutMs = DEFAULT_UPLOAD_TIMEOUT_MS;
+                    if (args.timeout_ms !== undefined) {
+                        const parsed = typeof args.timeout_ms === "number"
+                            ? args.timeout_ms
+                            : (typeof args.timeout_ms === "string" && /^\d+$/.test(args.timeout_ms) ? Number(args.timeout_ms) : NaN);
+                        if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > DEFAULT_UPLOAD_TIMEOUT_MS) {
+                            throw new Error(`'timeout_ms' must be a positive integer up to ${DEFAULT_UPLOAD_TIMEOUT_MS} ms`);
+                        }
+                        timeoutMs = parsed;
+                    }
+                    try {
+                        const blob = typeof openAsBlob === "function"
+                            ? await openAsBlob(resolvedFilePath, { type: mimeType })
+                            : new Blob([readFileSync(resolvedFilePath)], { type: mimeType });
+                        const formData = new FormData();
+                        formData.append("file", blob, filename);
+                        formData.append("path", filename);
+                        const response = await http.postMultipart(
+                            `/v1/storage/${ref}/buckets/${bucket}/upload`,
+                            formData,
+                            { timeoutMs },
+                        );
+                        const errMessage = (response.data as { message?: string; error?: string })?.message
+                            || (response.data as { message?: string; error?: string })?.error;
+                        text = response.ok
+                            ? `✅ File ${filename} (${formatBytes(stat.size)}) uploaded to ${bucket}`
+                            : `❌ Upload failed (${response.status}${errMessage ? `: ${errMessage}` : ""})`;
+                    } catch (error: unknown) {
+                        text = `❌ Error: ${error instanceof Error ? error.message : String(error)}`;
+                    }
                     break;
                 }
                 default:

@@ -1,8 +1,12 @@
 import { Elysia } from "elysia";
-import { executionRequestId, observeExecution, type ExecutionObserver } from "./execution";
+import { CommandError } from "@supacloud/contracts";
 import { provideToken, runInRequestContext, type EnvironmentInjector, REQUEST_CONTEXT } from "@supacloud/app";
+import { commandErrorStatus } from "./command-errors";
+import { executionRequestId, observeExecution, type ExecutionObserver } from "./execution";
 
 export type { ExecutionEvent, ExecutionObserver } from "./execution";
+export { createSchemaDecoder, defineJsonContract, SchemaContractError } from "./schema_contract";
+export { createPersistentCommandAdapter, type PersistentCommandHandler } from "./persistent-command";
 
 // ---------------------------------------------------------------------------
 // Compiled module contract (mirrors @supacloud/compiler output)
@@ -212,7 +216,7 @@ export interface CommandAudit {
 export interface CommandGovernance {
   /** Application-owned adapters: a single RPC owns all declared persistence. */
   rpc?: Record<string, {
-    capabilities: { audit?: boolean; transaction?: boolean; idempotency?: boolean };
+    capabilities: { audit?: boolean; transaction?: boolean; idempotency?: boolean; boundary?: "database" | "external" };
     execute: CommandMiddleware;
   }>;
   authorize: CommandAuthorizer;
@@ -327,6 +331,8 @@ export type ErrorMapper = (
 
 export interface ApplicationOptions {
   name?: string;
+  /** false rejects extra schema properties instead of silently removing them. */
+  normalize?: boolean;
   /** Optional Angular-backed root injector used for async request contexts. */
   injector?: EnvironmentInjector;
   /** Modules in topological import order. */
@@ -648,7 +654,7 @@ export function createModulePlugin(
   compiled: CompiledModule,
   services: Record<string, unknown>,
   ctxFactory: RequestContextFactory = defaultRequestContext,
-  options: Pick<ApplicationOptions, "commandGovernance" | "commandExecutor" | "errorMapper" | "onExecution" | "injector"> = {},
+  options: Pick<ApplicationOptions, "commandGovernance" | "commandExecutor" | "errorMapper" | "onExecution" | "normalize" | "injector"> = {},
   imported: Record<string, Record<string, unknown>> = {},
 ): Elysia {
   const hasCommandRoutes = compiled.controllers.some((controller) =>
@@ -680,7 +686,7 @@ export function createModulePlugin(
     ? composeCommandExecutors(options.commandExecutor, governanceExecutor)
     : (options.commandExecutor ?? governanceExecutor);
 
-  const plugin = new Elysia({ name: `supacloud:${compiled.name}` }).decorate(
+  const plugin = new Elysia({ name: `supacloud:${compiled.name}`, normalize: options.normalize ?? true }).decorate(
     "services",
     services,
   );
@@ -822,7 +828,13 @@ export function createModulePlugin(
             requestId: executionRequestId(requestContext),
           }, () => commandExecutor(invocation, invoke));
         };
-        return options.injector ? runInRequestContext(options.injector, [provideToken(REQUEST_CONTEXT, requestContext)], () => modulePipeline(route.command ? commandContext : routeContext, invokeRoute)) : modulePipeline(route.command ? commandContext : routeContext, invokeRoute);
+        const invokeModule = () => modulePipeline(
+          route.command ? commandContext : routeContext,
+          invokeRoute,
+        );
+        return options.injector
+          ? runInRequestContext(options.injector, [provideToken(REQUEST_CONTEXT, requestContext)], invokeModule)
+          : invokeModule();
       };
 
       switch (route.method) {
@@ -927,6 +939,11 @@ export function defaultErrorResponse(
   error: unknown,
   frameworkCode?: string | number,
 ): Response {
+  if (error instanceof CommandError) {
+    return Response.json({ ok: false, code: error.code, message: error.code }, {
+      status: commandErrorStatus(error.code),
+    });
+  }
   if (isPublicApplicationError(error)) {
     return Response.json({
       ok: false,
@@ -976,7 +993,7 @@ function isPublicApplicationError(error: unknown): error is PublicApplicationErr
  * created modules, keyed by module name.
  */
 export function createApplication(options: ApplicationOptions): Elysia {
-  const app = new Elysia({ name: options.name ?? "supacloud:app" });
+  const app = new Elysia({ name: options.name ?? "supacloud:app", normalize: options.normalize ?? true });
   const configuredContextFactory = options.requestContext ?? defaultRequestContext;
   const contextCache = new WeakMap<Request, Promise<unknown>>();
   const ctxFactory: RequestContextFactory = (request) => {
@@ -992,11 +1009,12 @@ export function createApplication(options: ApplicationOptions): Elysia {
     const services = module.createServices(options.deps ?? {}, imported);
     imported[module.name] = services;
     app.use(createModulePlugin(module, services, ctxFactory, {
+      normalize: options.normalize,
+      injector: options.injector,
       commandGovernance: options.commandGovernance,
       commandExecutor: options.commandExecutor,
       errorMapper: options.errorMapper,
       onExecution: options.onExecution,
-      injector: options.injector,
     }, imported));
   }
 

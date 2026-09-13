@@ -103,6 +103,25 @@ describe("Angular-inspired HttpParams and HttpHeaders", () => {
 });
 
 describe("Angular 15+ provideHttpClient and HttpClient", () => {
+  test("transport modes return their declared runtime values and preserve binary slices", async () => {
+    const bodies: unknown[] = [];
+    const client = new HttpClient({
+      fetch: (async (_url, init) => {
+        bodies.push(init?.body);
+        return new Response("payload");
+      }) as typeof fetch,
+    });
+    expect(await client.get("/items", { responseType: "text" })).toBe("payload");
+    const blob = await client.get("/items", { responseType: "blob" });
+    expect(blob).toBeInstanceOf(Blob);
+    expect(await blob.text()).toBe("payload");
+    const response = await client.get("/items", { responseType: "text", observe: "response" });
+    expect(response).toBeInstanceOf(Response);
+    const bytes = new Uint8Array([0, 1, 2, 3]);
+    await client.post("/items", bytes.subarray(1, 3));
+    expect(bodies.at(-1)).toEqual(new Uint8Array([1, 2]));
+  });
+
   test("executes GET requests through mock fetch and functional interceptors", async () => {
     const mockFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -130,7 +149,7 @@ describe("Angular 15+ provideHttpClient and HttpClient", () => {
     const client = env.get(HttpClient);
     expect(client).toBeDefined();
 
-    const users = await client.get<Array<{ id: number; name: string }>>(
+    const users = await client.get(
       "https://api.supacloud.dev/users",
       {
         params: { role: "admin" },
@@ -160,32 +179,32 @@ describe("Angular 15+ provideHttpClient and HttpClient", () => {
       [],
     );
 
-    const postRes = await client.post<{ success: boolean; method: string }>(
+    const postRes = await client.post(
       "items",
       { title: "Item 1" },
     );
-    expect(postRes.success).toBe(true);
+    expect(postRes).toEqual({ success: true, method: "POST" });
     expect(lastMethod).toBe("POST");
     expect(lastUrl).toBe("https://api.supacloud.dev/v1/items");
     expect(JSON.parse(lastBody)).toEqual({ title: "Item 1" });
 
-    const putRes = await client.put<{ success: boolean; method: string }>(
+    const putRes = await client.put(
       "/items/123",
       { title: "Item 1 Updated" },
     );
-    expect(putRes.method).toBe("PUT");
+    expect(putRes).toEqual({ success: true, method: "PUT" });
     expect(lastUrl).toBe("https://api.supacloud.dev/v1/items/123");
 
-    const patchRes = await client.patch<{ success: boolean; method: string }>(
+    const patchRes = await client.patch(
       "/items/123",
       { active: false },
     );
-    expect(patchRes.method).toBe("PATCH");
+    expect(patchRes).toEqual({ success: true, method: "PATCH" });
 
-    const deleteRes = await client.delete<{ success: boolean; method: string }>(
+    const deleteRes = await client.delete(
       "/items/123",
     );
-    expect(deleteRes.method).toBe("DELETE");
+    expect(deleteRes).toEqual({ success: true, method: "DELETE" });
   });
 
   test("throws HttpErrorResponse on non-2xx HTTP responses", async () => {
@@ -232,7 +251,7 @@ describe("Angular 15+ provideHttpClient and HttpClient", () => {
     const client = new HttpClient({ fetch: mockFetch as any }, [contextInterceptor]);
     const ctx = new HttpContext().set(SKIP_AUTH, true);
 
-    const response = await client.get<Response>("https://api.supacloud.dev/status", {
+    const response = await client.get("https://api.supacloud.dev/status", {
       context: ctx,
       observe: "response",
     });

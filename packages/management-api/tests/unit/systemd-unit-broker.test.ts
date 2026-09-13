@@ -37,7 +37,7 @@ WantedBy=multi-user.target
 function canonicalPostgrestUnit(): string {
   return renderPostgrestSystemdTemplate({
     postgrestRts: "-N2 -A8m",
-    postgrestBinary: "/opt/supacloud/postgrest-v16.2/bin/postgrest",
+    postgrestBinary: "/opt/supacloud/postgrest-v16.3/bin/postgrest",
     tenantConfigDir: "/etc/supabase/tenants",
     memoryMax: "64M",
     cpuWeight: 20,

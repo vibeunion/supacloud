@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/management-api",
-  "version": "0.77.0",
+  "version": "0.79.0",
   "description": "SupaCloud Multi-tenant Management API",
   "type": "module",
   "scripts": {
@@ -11,6 +11,8 @@
     "realtime:reconcile-schema": "bun run scripts/reconcile-realtime-schema-privileges.ts",
     "tsc": "tsc",
     "typecheck": "tsc --noEmit",
+    "typecheck:caddy-tests": "tsc --project tsconfig.caddy-tests.json",
+    "typecheck:graphql-tests": "tsc --project tsconfig.graphql-tests.json",
     "test": "bun run test:local",
     "test:local": "bun run sql:check && bun run test:unit && bun run test:integration",
     "test:unit": "bun run scripts/run-unit-tests.ts",
@@ -18,6 +20,7 @@
     "sql:sync": "bun run scripts/sync-sql-modules.ts",
     "test:sql-modules": "bun --config=bunfig.sql-modules.toml test tests/unit/sql-module-sync.test.ts",
     "test:integration": "bun test tests/integration/api.test.ts tests/integration/diagnostics.api.test.ts",
+    "test:graphql-local": "SUPACLOUD_TEST_GRAPHQL_LOCAL=1 bun test tests/integration/extension-graphql.local.test.ts",
     "test:e2e": "bun test tests/e2e",
     "test:sdk": "bun test tests/integration/sdk.automation.test.ts",
     "test:compat": "bun test tests/integration/sdk-parity.test.ts && bun run tests/scripts/run-official-sdk-compliance.ts && bun run tests/scripts/run-official-cli-compliance.ts && bun run tests/scripts/run-openapi-compliance.ts",
@@ -32,18 +35,18 @@
     "build:all": "bun run prebuild && bun run build:linux && bun run build:macos"
   },
   "dependencies": {
-    "@clack/prompts": "^1.7.0",
+    "@clack/prompts": "^1.8.0",
     "@elysiajs/cors": "^1.4.2",
     "@elysiajs/swagger": "^1.3.1",
     "@sinclair/typebox": "^0.34.52",
     "acorn": "^8.18.0",
     "aws4fetch": "^1.0.20",
     "elysia": "^1.4.30",
-    "jose": "^6.2.11",
+    "jose": "^6.2.12",
     "nanoid": "^6.0.1"
   },
   "devDependencies": {
-    "@supabase/supabase-js": "^2.115.0",
+    "@supabase/supabase-js": "^2.116.0",
     "@types/bun": "^1.4.2",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",

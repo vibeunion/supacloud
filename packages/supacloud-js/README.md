@@ -292,6 +292,30 @@ Queue settings:
 
 Management extension conflicts are surfaced as `SupaCloudApiError` with `status`, `code`, and `responseBody`, so callers do not need to parse raw `fetch` responses.
 
+## Command Status
+
+`commands.submit` and `commands.get` share a runtime-validated status contract:
+`kind: "submission"` means accepted work, with `execution: null`; `kind: "execution"`
+includes the durable execution receipt. Workflow status remains a separate field.
+A completed workflow by itself never proves that an external business effect
+occurred. Use `workflows.get(commandId)` for the full workflow details.
+
+`commands.get(commandId)` also accepts `{ tenantId, actorId, command, operationId }`
+for direct executions. The returned commandId is the global dispatch/workflow ID.
+These RPCs remain service-role-only and are not browser authorization boundaries.
+
+For submitted work, supply verified `tenantId` and `actorId` on submission, then
+bind the claimed execute step with `createPostgresCommandStore(database, { submission })`.
+The executor preserves the submitted ID and atomically completes or advances the
+same Workflow; it does not create a second command. See
+[migration and worker wiring](../../docs/command-workflow-convergence.md).
+
+This is a breaking SDK return-shape change: old top-level `idempotent`, target and
+full-workflow fields are no longer the public command status contract. Identical
+submission replay still deduplicates in SQL. Legacy low-level SQL snapshot/submit
+functions retain their stored submission data; older records are not reclassified
+as confirmed executions.
+
 ## Durable Workflows
 
 `supacloud.workflows` coordinates code-defined, linear steps on the project's PostgreSQL and PGMQ runtime. Every workflow RPC is restricted to `service_role`; create this client only in a trusted worker or server process.

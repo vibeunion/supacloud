@@ -63,7 +63,8 @@ PGREDIS_INSTALL_TRANSACTION_DIR=""
 CREDENTIALS_FILE="${SUPACLOUD_CREDENTIALS_FILE:-/etc/supabase/supacloud-credentials.env}"
 MASTER_TOKEN_FILE="${SUPACLOUD_MASTER_TOKEN_FILE:-/etc/supabase/master-token.env}"
 BUN_VERSION="${BUN_VERSION:-1.4.2}"
-XCADDY_VERSION="${XCADDY_VERSION:-v0.4.5}"
+GO_VERSION="${GO_VERSION:-1.27.1}"
+XCADDY_VERSION="${XCADDY_VERSION:-v0.4.7}"
 
 # shellcheck source=scripts/lib/install_config.sh
 source "${SCRIPT_DIR}/scripts/lib/install_config.sh"
@@ -91,7 +92,7 @@ SUPACLOUD_INSTALL_KEYS=(
     S3_ENDPOINT S3_PROTOCOL S3_REGION S3_BUCKET S3_ACCESS_KEY S3_SECRET_KEY
     S3_FORCE_PATH_STYLE
     EXTERNAL_S3_ENDPOINT EXTERNAL_S3_REGION EXTERNAL_S3_BUCKET
-    EXTERNAL_S3_ACCESS_KEY EXTERNAL_S3_SECRET_KEY IMAGINARY_IMAGE EDGE_RUNTIME EDGE_RUNTIME_PORT
+    EXTERNAL_S3_ACCESS_KEY EXTERNAL_S3_SECRET_KEY IMAGINARY_IMAGE EDGE_RUNTIME EDGE_RUNTIME_PORT EDGE_MAX_BODY_SIZE_MB
     SUPACLOUD_LOGS_ENABLED VICTORIALOGS_VERSION VICTORIALOGS_DATA_DIR VICTORIALOGS_RETENTION
     SUPACLOUD_PIPELINES_ENABLED SUPACLOUD_ETL_COMMIT SUPACLOUD_ETL_IMAGE
     JIT_DATABASE_GATEWAY_PUBLIC_HOST JIT_DATABASE_GATEWAY_PORT_RANGE
@@ -111,6 +112,8 @@ while [[ $# -gt 0 ]]; do
         --domain) SUPABASE_PUBLIC_DOMAIN="$2"; shift 2 ;;
         --studio) SUPABASE_STUDIO_DOMAIN="$2"; shift 2 ;;
         --s3)     S3_STORAGE_TYPE="$2"; shift 2 ;;
+        --edge-max-body-size-mb)
+            EDGE_MAX_BODY_SIZE_MB="$2"; shift 2 ;;
         --password) 
             POSTGRES_PASSWORD="$2"; 
             DASHBOARD_PASSWORD="$2"; 
@@ -127,6 +130,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --domain <domain>  Specify Supabase API domain"
             echo "  --studio <domain>  Specify Supabase Studio domain"
             echo "  --s3 <type>        Specify storage type (minio | juicefs)"
+            echo "  --edge-max-body-size-mb <mb>"
+            echo "                     Specify Edge Runtime max request body size in MB"
             echo "  --password <pass>  Set unified password for DB and dashboard"
             echo "  --migrate-legacy-supabase-compose"
             echo "                      Clean old Pigsty Supabase compose residues explicitly"
@@ -474,6 +479,7 @@ recover_legacy_install_config() {
     apply_recovered_env_value JWT_SECRET "$MANAGEMENT_ENV_FILE" JWT_SECRET
     apply_recovered_env_value S3_STORAGE_TYPE "$MANAGEMENT_ENV_FILE" S3_STORAGE_TYPE
     apply_recovered_env_value EDGE_RUNTIME_PORT "$MANAGEMENT_ENV_FILE" EDGE_RUNTIME_PORT
+    apply_recovered_env_value EDGE_MAX_BODY_SIZE_MB "$MANAGEMENT_ENV_FILE" EDGE_MAX_BODY_SIZE_MB
     apply_recovered_env_value IMAGINARY_IMAGE "$MANAGEMENT_ENV_FILE" IMAGINARY_IMAGE
     local recovered_base_domain
     recovered_base_domain=$(supacloud_env_value "$MANAGEMENT_ENV_FILE" BASE_DOMAIN)
@@ -2046,10 +2052,9 @@ install_caddy_gateway() {
         chmod 0755 "$target"
     elif [[ -x "${SCRIPT_DIR}/scripts/build_supacloud_caddy.sh" ]] && command -v go >/dev/null 2>&1; then
         log_info "Building supacloud-caddy locally with xcaddy and the rate-limit module..."
-        if ! command -v xcaddy >/dev/null 2>&1; then
-            GOBIN=/usr/local/bin go install "github.com/caddyserver/xcaddy/cmd/xcaddy@${XCADDY_VERSION}"
-        fi
-        OUT_DIR=/tmp/supacloud-caddy-build "${SCRIPT_DIR}/scripts/build_supacloud_caddy.sh"
+        GOTOOLCHAIN="go${GO_VERSION}" GOBIN=/usr/local/bin go install "github.com/caddyserver/xcaddy/cmd/xcaddy@${XCADDY_VERSION}"
+        PATH="/usr/local/bin:$PATH" GO_VERSION="$GO_VERSION" XCADDY_VERSION="$XCADDY_VERSION" \
+            OUT_DIR=/tmp/supacloud-caddy-build "${SCRIPT_DIR}/scripts/build_supacloud_caddy.sh"
         install -m 0755 "/tmp/supacloud-caddy-build/supacloud-caddy-linux-${arch}" "$target"
         rm -rf /tmp/supacloud-caddy-build
     elif [[ "${SUPACLOUD_ALLOW_STOCK_CADDY_FALLBACK:-false}" == "true" ]]; then
@@ -3710,6 +3715,7 @@ install_management_api() {
         SUPACLOUD_EDGE_RUNTIME_SOURCE_IDENTITY_FILE "${EDGE_RUNTIME_SOURCE_DIR}/${SUPACLOUD_EDGE_RUNTIME_SOURCE_IDENTITY_NAME}" \
         EDGE_RUNTIME_USER supacloud-edge \
         EDGE_RUNTIME_GROUP supacloud-edge \
+        EDGE_MAX_BODY_SIZE_MB "${EDGE_MAX_BODY_SIZE_MB:-}" \
         PGREDIS_RUNTIME_INTERNAL_URL "${PGREDIS_RUNTIME_INTERNAL_URL:-http://127.0.0.1:${PGREDIS_RUNTIME_PORT:-9011}}" \
         PGREDIS_RUNTIME_INTERNAL_TOKEN "$pgredis_token" \
         PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS "${PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS:-5000}" \
@@ -3784,6 +3790,7 @@ install_management_api() {
     if ! supacloud_write_service_env_pairs "$EDGE_RUNTIME_ENV_FILE" \
         EDGE_RUNTIME_PORT "${EDGE_RUNTIME_PORT:-9005}" \
         EDGE_RUNTIME_MASTER_KEY "$MASTER_TOKEN" \
+        EDGE_MAX_BODY_SIZE_MB "${EDGE_MAX_BODY_SIZE_MB:-}" \
         SUPACLOUD_EDGE_RUNTIME_IDENTITY_MODE "$EDGE_RUNTIME_EXTERNAL_IDENTITY_MODE" \
         SUPACLOUD_EDGE_RUNTIME_SOURCE_IDENTITY_FILE "$EDGE_RUNTIME_EXTERNAL_SOURCE_IDENTITY_FILE" \
         MANAGEMENT_API_URL http://127.0.0.1:9090 \

@@ -25,9 +25,9 @@ make_postgrest_archive() {
 }
 
 postgrest_binary="${tmp_dir}/postgrest"
-good_archive="${tmp_dir}/postgrest-v16.2.tar.xz"
+good_archive="${tmp_dir}/postgrest-v16.3.tar.xz"
 wrong_version_archive="${tmp_dir}/postgrest-v16.1.tar.xz"
-make_postgrest_archive v16.2 "$good_archive"
+make_postgrest_archive v16.3 "$good_archive"
 make_postgrest_archive v16.1 "$wrong_version_archive"
 good_checksum=$(sha256sum "$good_archive" | awk '{print $1}')
 
@@ -79,7 +79,7 @@ curl() {
 
 supacloud_postgrest_unit_uses_binary() {
     if [[ "${FORCE_NEW_ATTESTATION_FAILURE:-false}" == true \
-        && "$(supacloud_postgrest_binary_version "$postgrest_binary")" == v16.2 ]]; then
+        && "$(supacloud_postgrest_binary_version "$postgrest_binary")" == v16.3 ]]; then
         return 1
     fi
     [[ "$runtime_binary_current" == true ]]
@@ -97,13 +97,13 @@ export SUPACLOUD_POSTGREST_TENANT_CONFIG_DIR="$tenant_dir"
 export SUPACLOUD_POSTGREST_BACKUP_ROOT="$backup_root"
 export SUPACLOUD_POSTGREST_HEALTH_ATTEMPTS=1
 export SUPACLOUD_POSTGREST_HEALTH_DELAY_SECONDS=0
-export POSTGREST_VERSION=v16.2
+export POSTGREST_VERSION=v16.3
 export POSTGREST_SHA256="$good_checksum"
 
 # Every active tenant is stopped, upgraded, restarted, and attested.
 write_binary v14.16
 supacloud_upgrade_postgrest_binary "$postgrest_binary"
-[[ "$(supacloud_postgrest_binary_version "$postgrest_binary")" == v16.2 ]]
+[[ "$(supacloud_postgrest_binary_version "$postgrest_binary")" == v16.3 ]]
 grep -Fq 'stop supacloud-pgrst@tenant1.service' "$systemctl_log"
 grep -Fq 'daemon-reload' "$systemctl_log"
 grep -Fq 'start supacloud-pgrst@tenant1.service' "$systemctl_log"
@@ -131,10 +131,10 @@ if supacloud_upgrade_postgrest_binary "$postgrest_binary" >/dev/null 2>&1; then
     echo "PostgREST accepted a version without the v prefix" >&2
     exit 1
 fi
-[[ "$(supacloud_postgrest_binary_version "$postgrest_binary")" == v16.2 ]]
+[[ "$(supacloud_postgrest_binary_version "$postgrest_binary")" == v16.3 ]]
 
 # Failed runtime attestation restores the previous binary and restarts it.
-POSTGREST_VERSION=v16.2
+POSTGREST_VERSION=v16.3
 write_binary v14.16
 download_source="$good_archive"
 POSTGREST_SHA256="$good_checksum"

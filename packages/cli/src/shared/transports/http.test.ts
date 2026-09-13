@@ -395,6 +395,36 @@ describe("HttpTransport retry policy", () => {
         expect(response).toEqual({ ok: true, status: 200, data: { ok: true } });
         expect(scheduledDelays).toEqual([120_000]);
     });
+
+    test("uses an explicit timeout for multipart POST", async () => {
+        const scheduledDelays: number[] = [];
+        globalThis.setTimeout = ((callback: (...args: unknown[]) => void, delay?: number) => {
+            scheduledDelays.push(delay ?? 0);
+            return ++nextTimerId as unknown as ReturnType<typeof setTimeout>;
+        }) as typeof setTimeout;
+        globalThis.fetch = (async () => Response.json({ ok: true })) as unknown as typeof fetch;
+
+        const response = await createTransport().postMultipart("/resource", new FormData(), { timeoutMs: 36 * 60_000 });
+
+        expect(response).toEqual({ ok: true, status: 200, data: { ok: true } });
+        expect(scheduledDelays).toEqual([36 * 60_000]);
+    });
+
+    test.each([0, 36 * 60_000 + 1, 1.5])(
+        "rejects invalid multipart POST timeout %s before dispatch",
+        async timeoutMs => {
+            let fetchCalls = 0;
+            globalThis.fetch = (async () => {
+                fetchCalls += 1;
+                return Response.json({ ok: true });
+            }) as unknown as typeof fetch;
+
+            await expect(createTransport().postMultipart("/resource", new FormData(), { timeoutMs })).rejects.toThrow(
+                "HTTP request timeout must be between",
+            );
+            expect(fetchCalls).toBe(0);
+        },
+    );
 });
 
 describe("HttpTransport bounded GET responses", () => {

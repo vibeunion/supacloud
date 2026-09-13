@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.79.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.78.1...management-api-v0.79.0) (2026-09-12)
+
+
+### Features
+
+* adopt Pigsty Silo MinIO fork, expose environment/version APIs, and storage upload constraints ([#1279](https://github.com/vibeunion/supacloud/issues/1279)) ([e47b25b](https://github.com/vibeunion/supacloud/commit/e47b25bdc61935e901f0e98b7eb2a84dcf221e89))
+* **cli:** support configurable upload body limits for edge functions and host install ([#1274](https://github.com/vibeunion/supacloud/issues/1274)) ([5f9e85a](https://github.com/vibeunion/supacloud/commit/5f9e85aa502e06e739fa9e6d43e2bcc1f94d721a))
+* **sdk:** support capabilities probing and storage upload constraints in supacloud-js ([#1277](https://github.com/vibeunion/supacloud/issues/1277)) ([c4eda8a](https://github.com/vibeunion/supacloud/commit/c4eda8a105535c37da09bb03f19ddee616257c47))
+
+
+### Bug Fixes
+
+* **edge-functions:** recover unacknowledged activation begin ([#1278](https://github.com/vibeunion/supacloud/issues/1278)) ([fab21dd](https://github.com/vibeunion/supacloud/commit/fab21dda8cedb927145876d50f5ce18be79087d0))
+
+## [0.78.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.78.0...management-api-v0.78.1) (2026-09-11)
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade Bun runtime baseline from 1.4.0 to 1.4.2 ([#1271](https://github.com/vibeunion/supacloud/issues/1271)) ([f53aee5](https://github.com/vibeunion/supacloud/commit/f53aee52e93c25e017e9c693a920de5752fe3ddc))
+
+## [0.78.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.77.1...management-api-v0.78.0) (2026-09-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **commands:** HTTP JSON methods return unknown unless decoded through a contract; writes default to no replay. Durable adapters require explicit authorization and input codecs. See docs/command-migration.md for import, auth, schema, and deployment migration steps.
+
+### Features
+
+* **commands:** unify durable execution with existing workflows ([#1243](https://github.com/vibeunion/supacloud/issues/1243)) ([6da15d4](https://github.com/vibeunion/supacloud/commit/6da15d459e1883ab94e240834200a57e9a41676b))
+
+## [0.77.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.77.0...management-api-v0.77.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* **management-api:** reconcile pg_graphql project entrypoint atomically ([#1234](https://github.com/vibeunion/supacloud/issues/1234)) ([4b6ba7d](https://github.com/vibeunion/supacloud/commit/4b6ba7d1e1b6eb8d836d4ff3c95cb221f2d9db32))
+
 ## [0.77.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.76.0...management-api-v0.77.0) (2026-09-08)
 
 

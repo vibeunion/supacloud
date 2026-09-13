@@ -1863,6 +1863,46 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(await edgeFunctionService.readSource(ref, targetSlug)).toBeNull();
   });
 
+  test.each(["lost response", "invalid acknowledgement"])(
+    "aborts an established candidate fence after begin has an %s",
+    async (failureMode) => {
+      const ref = `proj_begin_${failureMode.replaceAll(" ", "_")}`;
+      const slug = "begin-recovery";
+      await deployConditionalRelease({
+        ref, slug, code: "export default { fetch: () => new Response('original') };",
+      });
+      const current = await edgeFunctionService.getConfig(ref, slug);
+      const runtimeFetch = runtimeSuccessFetch();
+      let candidateId: string | null = null;
+      let aborted = false;
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(String(input));
+        const activationId = new Headers(init?.headers).get("x-supacloud-activation-id");
+        // 先让运行时执行 begin，再模拟控制端无法接收响应；旧版本 status 不受影响。
+        const response = await runtimeFetch(input, init);
+        if (activationId !== current.activation_id
+          && (url.pathname.endsWith("/begin") || url.pathname.endsWith("/status"))) {
+          candidateId = activationId;
+          if (failureMode === "lost response") throw new Error("Control response lost");
+          return Response.json({ malformed: true });
+        }
+        if (url.pathname.endsWith("/abort")) {
+          expect(activationId).toBe(candidateId);
+          const body = await response.clone().json() as { state: string };
+          aborted = body.state === "aborted";
+        }
+        return response;
+      }) as typeof fetch;
+      const result = await deployConditionalRelease({
+        ref, slug, code: "export default { fetch: () => new Response('candidate') };",
+      });
+      expect(result.success).toBe(false);
+      expect(aborted).toBe(true);
+      expect(await edgeFunctionService.getConfig(ref, slug)).toEqual(current);
+      expect(await edgeFunctionService.getActiveVersion(ref, slug)).toBe(current.version!);
+    },
+  );
+
   test("preserves the active authority when delete fencing is not acknowledged", async () => {
     const ref = "proj_delete_unconfirmed";
     const slug = "delete-unconfirmed";

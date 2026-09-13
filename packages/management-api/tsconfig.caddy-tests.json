@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "lib": ["ES2022"],
+    "types": ["bun"],
+    "noEmit": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": false
+  },
+  "include": [
+    "tests/unit/caddy-build-reproducibility.test.ts",
+    "tests/unit/runtime-version-assets.test.ts"
+  ]
+}

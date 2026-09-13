@@ -80,7 +80,7 @@ export function liteCapabilities(
   replicationProfile?: 'powersync',
 ): LiteDoctorReport {
   const common = {
-    graphql: { status: 'unverified', extension: 'pg_graphql', reason: 'DATABASE_NOT_INSPECTED' } as GraphqlCapability,
+    graphql: { status: 'unverified', extension: 'pg_graphql', reason: 'DATABASE_NOT_INSPECTED' } satisfies GraphqlCapability,
     runtime_mode: 'development' as const,
     identity: { mode: 'local' as const, verification: 'built-in' as const },
     migrations: { formats: ['flat-sql', 'timestamp-folder'], content_check: 'supported' as const, target_bindings: 'supported' as const },

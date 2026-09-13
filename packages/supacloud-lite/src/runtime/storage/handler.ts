@@ -103,7 +103,7 @@ const RLS_POLICY_HINT =
   'Without a policy, RLS blocks every write by default.'
 
 class RlsPolicyError extends Error {
-  constructor(public cause: unknown) {
+  constructor(public override cause: unknown) {
     super('storage.objects row-level security policy denied the write')
     this.name = 'RlsPolicyError'
   }

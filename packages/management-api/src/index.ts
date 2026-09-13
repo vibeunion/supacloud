@@ -2,6 +2,7 @@ import { Elysia, status } from "elysia";
 import type { AnyElysia } from "elysia";
 import { logger } from "./utils/logger";
 import { runBootstrapOrExit } from "./runtime/bootstrap-fatal";
+import pkg from "../package.json";
 
 process.on("uncaughtException", (err: Error) => {
   logger.error("FATAL UNCAUGHT EXCEPTION:", {
@@ -415,6 +416,16 @@ const app = new Elysia({ strictPath: false })
 
   // Health check (no auth required)
   .get("/health", () => ({ status: "ok", timestamp: new Date().toISOString() }))
+  .get("/version", () => ({
+    version: pkg.version || "unknown",
+    environment: process.env.NODE_ENV || "production",
+    api_version: "2024-01-01",
+  }))
+  .get("/v1/version", () => ({
+    version: pkg.version || "unknown",
+    environment: process.env.NODE_ENV || "production",
+    api_version: "2024-01-01",
+  }))
   .get("/metrics", ({ request, set }) => {
     const token = process.env.SUPACLOUD_METRICS_TOKEN?.trim();
     if (token && request.headers.get("authorization") !== `Bearer ${token}`) {

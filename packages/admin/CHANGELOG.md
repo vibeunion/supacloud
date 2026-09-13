@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.22.1](https://github.com/vibeunion/supacloud/compare/admin-v0.22.0...admin-v0.22.1) (2026-09-12)
+
+
+### Bug Fixes
+
+* **admin:** allow local transport proxy for offline release downloads ([#1281](https://github.com/vibeunion/supacloud/issues/1281)) ([fa2137d](https://github.com/vibeunion/supacloud/commit/fa2137d200ad5a44bbd2e0da558ebe93369f167a))
+
+## [0.22.0](https://github.com/vibeunion/supacloud/compare/admin-v0.21.2...admin-v0.22.0) (2026-09-12)
+
+
+### Features
+
+* **cli:** support configurable upload body limits for edge functions and host install ([#1274](https://github.com/vibeunion/supacloud/issues/1274)) ([5f9e85a](https://github.com/vibeunion/supacloud/commit/5f9e85aa502e06e739fa9e6d43e2bcc1f94d721a))
+* **cli:** support unrestricted manual file upload for storage ([#1276](https://github.com/vibeunion/supacloud/issues/1276)) ([53eae1f](https://github.com/vibeunion/supacloud/commit/53eae1f1af3014c014b5cb65127cb9fff2291696))
+
+## [0.21.2](https://github.com/vibeunion/supacloud/compare/admin-v0.21.1...admin-v0.21.2) (2026-09-11)
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade Bun runtime baseline from 1.4.0 to 1.4.2 ([#1271](https://github.com/vibeunion/supacloud/issues/1271)) ([f53aee5](https://github.com/vibeunion/supacloud/commit/f53aee52e93c25e017e9c693a920de5752fe3ddc))
+
+## [0.21.1](https://github.com/vibeunion/supacloud/compare/admin-v0.21.0...admin-v0.21.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* **admin:** resolve upgrade release versions with valid jq patterns ([#1237](https://github.com/vibeunion/supacloud/issues/1237)) ([45a26d2](https://github.com/vibeunion/supacloud/commit/45a26d2bfb1709ed9acad2c9220e577ae4355fa5))
+
 ## [0.21.0](https://github.com/vibeunion/supacloud/compare/admin-v0.20.1...admin-v0.21.0) (2026-09-05)
 
 

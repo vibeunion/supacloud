@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import { parseToolArguments } from "../schema";
 import type { ToolSchema } from "../schema";
@@ -709,5 +712,232 @@ describe("Storage bucket lifecycle", () => {
 
         expect(response.isError).toBe(true);
         expect(JSON.parse(response.content[0].text).error).toEqual({ code: "OUTCOME_UNKNOWN", http_status: 200 });
+    });
+});
+
+describe("Storage file upload", () => {
+    test("uploads a file with default filename, mime-type, and timeout", async () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "storage-test-"));
+        const testFile = join(tempDir, "test-report.pdf");
+        writeFileSync(testFile, "PDF content bytes");
+
+        let postedPath = "";
+        let postedFormData: FormData | undefined;
+        let postedOptions: { timeoutMs?: number } | undefined;
+
+        const { callback } = captureStorageTool({
+            postMultipart: async (path: string, formData: FormData, options?: { timeoutMs?: number }) => {
+                postedPath = path;
+                postedFormData = formData;
+                postedOptions = options;
+                return { ok: true, status: 200, data: { success: true } };
+            },
+        });
+
+        try {
+            const response = await callback({
+                action: "upload",
+                ref: "project-ref",
+                bucket: "reports",
+                file_path: testFile,
+            });
+
+            expect(response.isError).toBeFalsy();
+            expect(response.content[0].text).toContain("✅ File test-report.pdf");
+            expect(response.content[0].text).toContain("uploaded to reports");
+            expect(postedPath).toBe("/v1/storage/project-ref/buckets/reports/upload");
+            expect(postedFormData).toBeDefined();
+            expect(postedFormData?.get("path")).toBe("test-report.pdf");
+            expect(postedOptions?.timeoutMs).toBe(36 * 60_000);
+        } finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+
+    test("supports upload_file alias and custom filename, mime_type, and timeout_ms", async () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "storage-test-"));
+        const testFile = join(tempDir, "data.bin");
+        writeFileSync(testFile, "binary content");
+
+        let postedPath = "";
+        let postedFormData: FormData | undefined;
+        let postedOptions: { timeoutMs?: number } | undefined;
+
+        const { callback } = captureStorageTool({
+            postMultipart: async (path: string, formData: FormData, options?: { timeoutMs?: number }) => {
+                postedPath = path;
+                postedFormData = formData;
+                postedOptions = options;
+                return { ok: true, status: 200, data: { success: true } };
+            },
+        });
+
+        try {
+            const response = await callback({
+                action: "upload_file",
+                ref: "project-ref",
+                bucket: "backups",
+                file: testFile,
+                filename: "custom/archive.bin",
+                mime_type: "application/octet-stream",
+                timeout_ms: 120_000,
+            });
+
+            expect(response.isError).toBeFalsy();
+            expect(response.content[0].text).toContain("✅ File custom/archive.bin");
+            expect(postedPath).toBe("/v1/storage/project-ref/buckets/backups/upload");
+            expect(postedFormData).toBeDefined();
+            expect(postedFormData?.get("path")).toBe("custom/archive.bin");
+            expect(postedOptions?.timeoutMs).toBe(120_000);
+        } finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+
+    test("supports path alias flag for file path", async () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "storage-test-"));
+        const testFile = join(tempDir, "notes.txt");
+        writeFileSync(testFile, "hello world");
+
+        let postedFormData: FormData | undefined;
+
+        const { callback } = captureStorageTool({
+            postMultipart: async (_path: string, formData: FormData) => {
+                postedFormData = formData;
+                return { ok: true, status: 200, data: { success: true } };
+            },
+        });
+
+        try {
+            const response = await callback({
+                action: "upload",
+                ref: "project-ref",
+                bucket: "notes",
+                path: testFile,
+            });
+
+            expect(response.isError).toBeFalsy();
+            expect(response.content[0].text).toContain("✅ File notes.txt");
+            expect(postedFormData).toBeDefined();
+            expect(postedFormData?.get("path")).toBe("notes.txt");
+        } finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+
+    test("reports friendly error when file does not exist", async () => {
+        const { callback } = captureStorageTool({});
+
+        await expect(callback({
+            action: "upload",
+            ref: "project-ref",
+            bucket: "reports",
+            file_path: "/nonexistent/path/to/file.zip",
+        })).rejects.toThrow("File not found");
+    });
+
+    test("reports friendly error when path is a directory", async () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "storage-test-"));
+        const { callback } = captureStorageTool({});
+
+        try {
+            await expect(callback({
+                action: "upload",
+                ref: "project-ref",
+                bucket: "reports",
+                file_path: tempDir,
+            })).rejects.toThrow("Path is not a regular file");
+        } finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+
+    test("rejects missing file_path", async () => {
+        const { callback } = captureStorageTool({});
+
+        await expect(callback({
+            action: "upload",
+            ref: "project-ref",
+            bucket: "reports",
+        })).rejects.toThrow("'file_path' (or '--file') required");
+    });
+
+    test("rejects invalid timeout_ms", async () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "storage-test-"));
+        const testFile = join(tempDir, "file.txt");
+        writeFileSync(testFile, "content");
+        const { callback } = captureStorageTool({});
+
+        try {
+            await expect(callback({
+                action: "upload",
+                ref: "project-ref",
+                bucket: "reports",
+                file_path: testFile,
+                timeout_ms: -5,
+            })).rejects.toThrow("'timeout_ms' must be a positive integer");
+
+            await expect(callback({
+                action: "upload",
+                ref: "project-ref",
+                bucket: "reports",
+                file_path: testFile,
+                timeout_ms: 36 * 60_000 + 1,
+            })).rejects.toThrow("'timeout_ms' must be a positive integer");
+        } finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+
+    test("reports error text when upload API returns non-ok status", async () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "storage-test-"));
+        const testFile = join(tempDir, "bad.txt");
+        writeFileSync(testFile, "bad");
+
+        const { callback } = captureStorageTool({
+            postMultipart: async () => ({
+                ok: false,
+                status: 413,
+                data: { error: "Payload Too Large", message: "File exceeds bucket limit" },
+            }),
+        });
+
+        try {
+            const response = await callback({
+                action: "upload",
+                ref: "project-ref",
+                bucket: "reports",
+                file_path: testFile,
+            });
+
+            expect(response.content[0].text).toContain("❌ Upload failed (413: File exceeds bucket limit)");
+        } finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
+    });
+
+    test("catches transport network error gracefully", async () => {
+        const tempDir = mkdtempSync(join(tmpdir(), "storage-test-"));
+        const testFile = join(tempDir, "net.txt");
+        writeFileSync(testFile, "net");
+
+        const { callback } = captureStorageTool({
+            postMultipart: async () => {
+                throw new Error("Network timeout after 36 minutes");
+            },
+        });
+
+        try {
+            const response = await callback({
+                action: "upload",
+                ref: "project-ref",
+                bucket: "reports",
+                file_path: testFile,
+            });
+
+            expect(response.content[0].text).toContain("❌ Error: Network timeout after 36 minutes");
+        } finally {
+            rmSync(tempDir, { recursive: true, force: true });
+        }
     });
 });

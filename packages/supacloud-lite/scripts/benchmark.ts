@@ -17,14 +17,18 @@ const measurement = async (operation: () => Promise<void>) => {
     times.push(performance.now() - start)
   }
   times.sort((a, b) => a - b)
-  return { samples, p50_ms: times[Math.ceil(samples * 0.5) - 1], p95_ms: times[Math.ceil(samples * 0.95) - 1], max_ms: times.at(-1) }
+  const p50 = times[Math.ceil(samples * 0.5) - 1]
+  const p95 = times[Math.ceil(samples * 0.95) - 1]
+  const maximum = times.at(-1)
+  if (p50 === undefined || p95 === undefined || maximum === undefined) throw new Error('benchmark produced insufficient samples')
+  return { samples, p50_ms: p50, p95_ms: p95, max_ms: maximum }
 }
 try {
   const before = process.memoryUsage().rss
   const start = performance.now()
   const engine = engineName === 'native' ? await createNativeEngine({ dataDir: join(root, 'pg') }) : undefined
   backend = await createBackend({
-    engine, startRuntimeServices: false, log: () => {},
+    ...(engine ? { engine } : {}), startRuntimeServices: false, log: () => {},
     functions: { ping: () => Response.json({ ok: true }) },
     migrations: [{ name: '100_benchmark', sql: `
       create table public.benchmark_items(id int primary key, label text not null);
@@ -36,8 +40,9 @@ try {
   })
   const startup = performance.now() - start
   const rss = process.memoryUsage().rss
+  const activeBackend = backend
   const request = async (path: string, method = 'GET') => {
-    const response = await backend!.fetch(`http://local${path}`, { method, headers: { apikey: backend!.anonKey } })
+    const response = await activeBackend.fetch(`http://local${path}`, { method, headers: { apikey: activeBackend.anonKey } })
     if (!response.ok) throw new Error(`benchmark request failed with ${response.status}`)
     await response.arrayBuffer()
   }

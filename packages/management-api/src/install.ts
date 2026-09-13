@@ -448,7 +448,7 @@ async function runInteractiveConfig(
                 initialValue: internalIp || primaryIp,
                 placeholder: internalIp || primaryIp
             });
-            if (p.isCancel(manualIp)) process.exit(0);
+            if (typeof manualIp === "symbol" || p.isCancel(manualIp)) process.exit(0);
             internalIp = manualIp;
         } else {
             internalIp = ipSelection as string;
@@ -510,7 +510,7 @@ async function runInteractiveConfig(
             initialValue: defaultStudio,
             placeholder: defaultStudio
         });
-        if (p.isCancel(studioResult)) process.exit(0);
+        if (typeof studioResult === "symbol" || p.isCancel(studioResult)) process.exit(0);
         studioDomain = studioResult;
     }
     studioDomain = studioDomain || defaultStudio;
@@ -536,14 +536,14 @@ async function runInteractiveConfig(
                 const customDatabasePassword = await p.password({
                     message: "Enter database master password (for Postgres/Pigsty)",
                 });
-                if (p.isCancel(customDatabasePassword)) process.exit(0);
+                if (typeof customDatabasePassword === "symbol" || p.isCancel(customDatabasePassword)) process.exit(0);
                 dbPass = customDatabasePassword;
             }
             if (!studioPass) {
                 const customStudioPassword = await p.password({
                     message: "Enter Studio dashboard super admin password",
                 });
-                if (p.isCancel(customStudioPassword)) process.exit(0);
+                if (typeof customStudioPassword === "symbol" || p.isCancel(customStudioPassword)) process.exit(0);
                 studioPass = customStudioPassword;
             }
         }

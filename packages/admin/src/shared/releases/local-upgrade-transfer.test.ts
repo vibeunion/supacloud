@@ -1594,6 +1594,25 @@ describe("local upgrade remote runner", () => {
         }
     });
 
+    test("retains the runner log when only a generic wrapper failure was emitted", async () => {
+        const ssh = new ScriptedSsh([
+            remoteState({ status: "FAILED:1:TRANSACTION", serviceState: "failed", stageExists: false }),
+            remoteResult(`SUPACLOUD_UPGRADE_FAILURE=${JSON.stringify({
+                schema: "supacloud.upgrade-failure.v1",
+                summary: "Remote upgrade execution failed during runner_upgrade (exit code 1)",
+                causes: ["exit_code=1", "phase=runner_upgrade"],
+            })}\n`),
+        ]);
+
+        const failure = await awaitRemoteUpgrade(ssh as never, paths).catch((error: unknown) => error);
+        expect(failureRequiresRemoteReconciliation(failure)).toBe(true);
+        expect(String(failure)).toContain("retain the runner log for diagnosis");
+        expect(String(failure)).toContain(paths.log);
+        expect(String(failure)).toContain(paths.status);
+        expect(ssh.commands).toHaveLength(2);
+        expect(ssh.commands.some((command) => command.includes("rm -f --"))).toBe(false);
+    });
+
     test("retains all evidence for ambiguous FAILED unit states", async () => {
         for (const [serviceState, unitLoadState] of [
             ["unknown", "loaded"],
