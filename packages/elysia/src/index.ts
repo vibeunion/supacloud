@@ -56,6 +56,14 @@ export interface CompiledJob {
   name: string;
   serviceKey: string;
   scope: "application" | "request" | "job";
+  /** TypeBox input schema emitted by the compiler. */
+  input?: unknown;
+  /** TypeBox output schema emitted by the compiler. */
+  output?: unknown;
+  mode?: "task" | "workflow";
+  timeoutSec?: number;
+  maxAttempts?: number;
+  idempotency?: "required" | "none";
   aspects?: ApplicationAspect[];
 }
 
@@ -1039,3 +1047,26 @@ export type {
 } from "./memory";
 export { createMemoryPolicy } from "./memory_policy";
 export type { MemoryPolicy } from "./memory_policy";
+export {
+  createQueueWorkerTransport,
+  createWorker,
+  SupaCloudWorker,
+  WorkerRegistrationError,
+  WorkerReceiptUnconfirmedError,
+} from "./worker";
+export type {
+  WorkerAcknowledge,
+  WorkerClaim,
+  WorkerFail,
+  WorkerOptions,
+  QueueWorkerTransportOptions,
+  WorkerQueueFailureOptions,
+  WorkerQueueMessage,
+  WorkerQueuePort,
+  WorkerQueueReceiveOptions,
+  WorkerReceiptContext,
+  WorkerReceiptOperation,
+  WorkerRunResult,
+  WorkerState,
+  WorkerTransport,
+} from "./worker";

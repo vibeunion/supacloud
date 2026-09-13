@@ -21,6 +21,8 @@ export interface SupaCloudConfig {
   strict?: boolean;
   requireRouteContracts?: boolean;
   generateClient?: boolean;
+  generateOpenApi?: boolean;
+  openApi?: NonNullable<CompileOptions["openApi"]>;
   generatePermissions?: boolean;
   moduleBoundaryPreset?: ModuleBoundaryPresetName;
   moduleBoundaries?: NonNullable<CompileOptions["moduleBoundaries"]>;
@@ -35,7 +37,7 @@ export interface SupaCloudConfig {
 export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
   SupaCloudConfig,
   "include" | "moduleBoundaryPreset" | "commandCapabilities" | "moduleBoundaries" | "typeSafety" | "delivery"
-  | "allowRouteCommandBindings" | "disallowControllerDirectDb" | "detectOrphanModules"
+  | "allowRouteCommandBindings" | "disallowControllerDirectDb" | "detectOrphanModules" | "openApi"
 >> & {
   include: string[];
   moduleBoundaryPreset: ModuleBoundaryPresetName;
@@ -47,6 +49,7 @@ export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
   strict: true,
   requireRouteContracts: false,
   generateClient: true,
+  generateOpenApi: true,
   generatePermissions: true,
   treeShakeUnusedProviders: true,
   moduleBoundaryPreset: "modular-monolith",
@@ -143,6 +146,8 @@ export function resolveSupacloudConfig(
   strict: boolean;
   requireRouteContracts: boolean;
   generateClient: boolean;
+  generateOpenApi: boolean;
+  openApi?: NonNullable<CompileOptions["openApi"]>;
   generatePermissions: boolean;
   moduleBoundaryPreset: ModuleBoundaryPresetName;
   commandCapabilities?: CommandExecutionCapabilities;
@@ -162,6 +167,8 @@ export function resolveSupacloudConfig(
     strict: resolved.strict ?? DEFAULT_SUPACLOUD_CONFIG.strict,
     requireRouteContracts: resolved.requireRouteContracts ?? DEFAULT_SUPACLOUD_CONFIG.requireRouteContracts,
     generateClient: resolved.generateClient ?? DEFAULT_SUPACLOUD_CONFIG.generateClient,
+    generateOpenApi: resolved.generateOpenApi ?? DEFAULT_SUPACLOUD_CONFIG.generateOpenApi,
+    ...(resolved.openApi === undefined ? {} : { openApi: resolved.openApi }),
     generatePermissions: resolved.generatePermissions ?? DEFAULT_SUPACLOUD_CONFIG.generatePermissions,
     moduleBoundaryPreset: resolved.moduleBoundaryPreset ?? DEFAULT_SUPACLOUD_CONFIG.moduleBoundaryPreset,
     commandCapabilities: resolved.commandCapabilities,

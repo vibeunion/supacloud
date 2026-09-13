@@ -123,6 +123,59 @@ input, requestContext)`. The asynchronous compiler-generated job scope is
 destroyed after execution, including when the job throws or scope construction
 fails partway through.
 
+### `SupaCloudWorker`
+
+`createWorker()` registers compiler-emitted Jobs before startup, creates the
+application services once, limits concurrent claims, and shuts down after
+in-flight executions settle. The worker only owns Job dispatch and lifecycle;
+queue leasing, retry budgets, visibility changes and DLQ policy remain in the
+platform transport.
+
+`createQueueWorkerTransport()` adapts the existing `supacloud.queue(name)` shape
+without making `@supacloud/elysia` depend on the SDK. The third generic preserves
+the platform's acknowledgement/failure receipt type end to end.
+
+```ts
+import type {
+  SupaCloudQueueMessage,
+  SupaCloudQueueMutationResult,
+} from "@supacloud/js";
+import {
+  createQueueWorkerTransport,
+  createWorker,
+  type WorkerClaim,
+} from "@supacloud/elysia";
+
+const transport = createQueueWorkerTransport<
+  SupaCloudQueueMessage,
+  WorkerClaim,
+  SupaCloudQueueMutationResult
+>({
+  queue: supacloud.queue("jobs"),
+  receive: { visibilityTimeoutSec: 60 },
+  decodeClaim: (message) => {
+    const jobName = message.payload.jobName;
+    if (typeof jobName !== "string") throw new Error("Queue message has no jobName");
+    return { id: message.id, jobName, input: message.payload.input };
+  },
+  messageId: (claim) => claim.id,
+});
+
+const worker = createWorker({
+  modules: generatedModules,
+  transport,
+  concurrency: 4,
+});
+
+await worker.start();
+// await worker.stop() during process shutdown
+```
+
+`WorkerRunResult.receipt` is the unchanged platform receipt. If an `ack` or
+`fail` request throws after the platform may have applied it, the worker raises
+`WorkerReceiptUnconfirmedError` and does not issue a second settlement request;
+the host should reconcile using the platform's durable message/task state.
+
 ## API
 
 ### External SupAuth Identity
@@ -240,6 +293,13 @@ once is rejected.
 
 Executes a compiler-emitted Job descriptor with its static aspect list and
 compiler-generated job scope.
+
+### `createWorker(options: WorkerOptions): SupaCloudWorker`
+
+Registers generated modules and drives a host-provided claim/ack/fail transport.
+Use `registerModule()` before startup when modules are discovered incrementally.
+Registration rejects duplicate module or Job names and invalid execution
+metadata before changing the registry.
 
 ### `assertFeatureTransition(spec, state, event)`
 

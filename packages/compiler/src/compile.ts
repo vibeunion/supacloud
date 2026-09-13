@@ -45,6 +45,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
     diagnostics.push(...scanGeneratedArtifacts({
       "application.ts": rendered.applicationCode,
       "client.ts": rendered.clientCode,
+      "openapi.ts": rendered.openApiCode,
       "permissions.ts": rendered.permissionsCode,
       "graphql.ts": graphql.files["graphql.ts"],
       "graphql.documents.ts": graphql.files["graphql.documents.ts"],
@@ -109,6 +110,7 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
     diagnostics.push(...scanGeneratedArtifacts({
       "application.ts": rendered.applicationCode,
       "client.ts": rendered.clientCode,
+      "openapi.ts": rendered.openApiCode,
       "permissions.ts": rendered.permissionsCode,
       "graphql.ts": graphql.files["graphql.ts"],
       "graphql.documents.ts": graphql.files["graphql.documents.ts"],
@@ -122,6 +124,9 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
   };
   if (rendered.clientCode) {
     expectedFiles["client.ts"] = rendered.clientCode;
+  }
+  if (rendered.openApiCode) {
+    expectedFiles["openapi.ts"] = rendered.openApiCode;
   }
   if (rendered.permissionsCode) {
     expectedFiles["permissions.ts"] = rendered.permissionsCode;

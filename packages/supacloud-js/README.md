@@ -186,6 +186,44 @@ The current package focuses on:
 - `artifacts.get`
 - `artifacts.link`
 
+### Typed task results
+
+Task receipts are transport-safe by default: ordinary task methods return an
+unknown result payload. Use an explicit decoder when the application owns the
+result contract; the decoder is retained by the receipt for `get`, `wait`,
+`cancel`, `retry`, and `subscribe`.
+
+```ts
+type InvoiceResult = { invoiceId: string; accepted: boolean };
+
+const decodeInvoiceResult = (value: unknown): InvoiceResult => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Invalid invoice result");
+  }
+  const result = value as Record<string, unknown>;
+  if (typeof result.invoiceId !== "string" || typeof result.accepted !== "boolean") {
+    throw new Error("Invalid invoice result");
+  }
+  return { invoiceId: result.invoiceId, accepted: result.accepted };
+};
+
+const receipt = await supacloud.tasks.submitTyped(
+  "issue-invoice",
+  decodeInvoiceResult,
+  { body: { invoiceId: "inv-123" } },
+);
+const result = await receipt.wait();
+console.log(result.result?.invoiceId, result.result?.accepted);
+```
+
+The same decoder-first API is available as `getTyped`, `listTyped`,
+`listDlqTyped`, `waitTyped`, `cancelTyped`, `retryTyped`, and `subscribeTyped`.
+Decoder failures throw the sanitized `SupaCloudTaskDecoderError`; its
+`mutationMayHaveApplied` flag is `true` for `cancelTyped` and `retryTyped`, so a
+caller must reconcile the task state instead of blindly repeating the mutation.
+This is runtime validation supplied by the application, not an unchecked
+generic cast or a second platform task schema.
+
 ## Status Subscription
 
 `tasks.subscribe()` uses this strategy:

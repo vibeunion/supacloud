@@ -7,6 +7,7 @@ import type {
   ControllerNode,
   FunctionalInjectNode,
   ModuleNode,
+  OpenApiOptions,
   ProviderNode,
   Scope,
 } from "./types";
@@ -71,6 +72,12 @@ export interface CompiledJob {
   name: string;
   serviceKey: string;
   scope: "application" | "request" | "job";
+  input?: unknown;
+  output?: unknown;
+  mode?: "task" | "workflow";
+  timeoutSec?: number;
+  maxAttempts?: number;
+  idempotency?: "required" | "none";
   aspects?: CompiledAspect[];
 }
 
@@ -171,6 +178,8 @@ export interface GenerateOptions {
   rootDir: string;
   outDir: string;
   generateClient?: boolean;
+  generateOpenApi?: boolean;
+  openApi?: OpenApiOptions;
   generatePermissions?: boolean;
   /** Prune unused root providers from compiled output (Angular Ivy AOT tree-shaking). */
   treeShakeUnusedProviders?: boolean;
@@ -182,6 +191,7 @@ export interface RenderedArtifacts {
   applicationCode: string;
   manifestJson: string;
   clientCode?: string;
+  openApiCode?: string;
   permissionsCode?: string;
 }
 
@@ -284,12 +294,14 @@ export function renderApplication(
   };
 
   const clientCode = options.generateClient ? renderClient(graph, options) : undefined;
+  const openApiCode = options.generateOpenApi ? renderOpenApi(graph, options) : undefined;
   const permissionsCode = options.generatePermissions ? renderPermissions(graph) : undefined;
 
   return {
     applicationCode: code,
     manifestJson: JSON.stringify(manifest, null, 2) + "\n",
     ...(clientCode === undefined ? {} : { clientCode }),
+    ...(openApiCode === undefined ? {} : { openApiCode }),
     ...(permissionsCode === undefined ? {} : { permissionsCode }),
   };
 }
@@ -313,6 +325,9 @@ export async function generateApplication(
   ];
   if (rendered.clientCode) {
     writeCandidates.push({ path: join(options.outDir, "client.ts"), content: rendered.clientCode });
+  }
+  if (rendered.openApiCode) {
+    writeCandidates.push({ path: join(options.outDir, "openapi.ts"), content: rendered.openApiCode });
   }
   if (rendered.permissionsCode) {
     writeCandidates.push({ path: join(options.outDir, "permissions.ts"), content: rendered.permissionsCode });
@@ -655,7 +670,29 @@ class ModuleGenerator {
   private renderJobs(): string {
     const jobs = this.module.jobs ?? [];
     if (jobs.length === 0) return "[]";
-    return `[${jobs.map((job) => `{ className: ${JSON.stringify(job.className)}, name: ${JSON.stringify(job.name)}, serviceKey: ${JSON.stringify(job.serviceKey)}, scope: ${JSON.stringify(job.scope)},${job.aspects && job.aspects.length > 0 ? ` aspects: ${this.renderAspects(job.aspects)},` : ""} }`).join(", ")}]`;
+    return `[${jobs.map((job) => {
+      const fields = [
+        `className: ${JSON.stringify(job.className)}`,
+        `name: ${JSON.stringify(job.name)}`,
+        `serviceKey: ${JSON.stringify(job.serviceKey)}`,
+        `scope: ${JSON.stringify(job.scope)}`,
+      ];
+      for (const field of ["input", "output"] as const) {
+        const symbol = job[field];
+        if (symbol) {
+          const local = this.imports.add(symbol, job.schemaImports?.[symbol]);
+          fields.push(`${field}: ${local}`);
+        }
+      }
+      if (job.mode !== undefined) fields.push(`mode: ${JSON.stringify(job.mode)}`);
+      if (job.timeoutSec !== undefined) fields.push(`timeoutSec: ${job.timeoutSec}`);
+      if (job.maxAttempts !== undefined) fields.push(`maxAttempts: ${job.maxAttempts}`);
+      if (job.idempotency !== undefined) fields.push(`idempotency: ${JSON.stringify(job.idempotency)}`);
+      if (job.aspects && job.aspects.length > 0) {
+        fields.push(`aspects: ${this.renderAspects(job.aspects)}`);
+      }
+      return `{ ${fields.join(", ")}, }`;
+    }).join(", ")}]`;
   }
 
   private renderAspects(aspects: Array<AspectRefNode>): string {
@@ -1009,27 +1046,45 @@ function orderProviders(providers: ProviderNode[]): ProviderNode[] {
  * Generates typed API client in client.ts from discovered Controllers and Routes.
  * Modeled after Angular HttpClient and typed contract clients.
  */
-export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions): string {
+export function renderClient(graph: ApplicationGraph, options?: GenerateOptions): string {
+  const rootDir = options?.rootDir ?? process.cwd();
+  const outDir = options?.outDir ?? process.cwd();
+  const imports = new ImportManager();
   const controllerEntries: string[] = [];
-  const allRoutes: Array<{
-    method: string;
-    path: string;
-    controller: string;
-    handler: string;
-    command?: string;
-    guards?: string[];
-    canMatch?: string[];
-    canDeactivate?: string[];
-    resolvers?: Record<string, string>;
-    redirectTo?: string;
-    pathMatch?: "full" | "prefix";
-    paramTransforms?: Record<string, "number" | "boolean" | "string">;
-    paramDefaults?: Record<string, unknown>;
-    queryTransforms?: Record<string, "number" | "boolean" | "string">;
-    queryDefaults?: Record<string, unknown>;
-    title?: string;
-    data?: Record<string, unknown>;
-  }> = [];
+  const routeTypes: string[] = [];
+  const schemaEntries: string[] = [];
+  const schemaLocals = new Map<string, string>();
+  const usedTypeNames = new Set<string>();
+  const allRoutes: Array<Record<string, unknown>> = [];
+  let usesStatic = false;
+
+  const uniqueTypeName = (candidate: string): string => {
+    let name = candidate || "Route";
+    let suffix = 2;
+    while (usedTypeNames.has(name)) {
+      name = `${candidate}${suffix}`;
+      suffix += 1;
+    }
+    usedTypeNames.add(name);
+    return name;
+  };
+
+  const schemaRef = (
+    controller: ControllerNode,
+    route: ControllerNode["routes"][number],
+    field: "body" | "params" | "query" | "response",
+  ): { local: string; key: string } | undefined => {
+    const symbol = route[field];
+    if (!symbol) return undefined;
+    const local = imports.add(symbol, controller.schemaImports?.[symbol]);
+    const key = `${controller.schemaImports?.[symbol] ?? ""}:${symbol}`;
+    if (!schemaLocals.has(key)) {
+      schemaLocals.set(key, local);
+      schemaEntries.push(`  { name: ${JSON.stringify(local)}, schema: ${local} },`);
+    }
+    usesStatic = true;
+    return { local, key };
+  };
 
   for (const module of graph.modules) {
     for (const controller of module.controllers) {
@@ -1038,32 +1093,74 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
 
       for (const route of controller.routes) {
         const fullPath = joinRoutePaths(controller.path, route.path);
-        allRoutes.push({
-          method: route.method,
-          path: fullPath,
-          controller: controller.className,
-          handler: route.handler,
-          ...(route.command === undefined ? {} : { command: route.command }),
-          ...(route.guards === undefined ? {} : { guards: route.guards }),
-          ...(route.canMatch === undefined ? {} : { canMatch: route.canMatch }),
-          ...(route.canDeactivate === undefined ? {} : { canDeactivate: route.canDeactivate }),
-          ...(route.resolvers === undefined ? {} : { resolvers: route.resolvers }),
-          ...(route.redirectTo === undefined ? {} : { redirectTo: route.redirectTo }),
-          ...(route.pathMatch === undefined ? {} : { pathMatch: route.pathMatch }),
-          ...(route.paramTransforms === undefined ? {} : { paramTransforms: route.paramTransforms }),
-          ...(route.paramDefaults === undefined ? {} : { paramDefaults: route.paramDefaults }),
-          ...(route.queryTransforms === undefined ? {} : { queryTransforms: route.queryTransforms }),
-          ...(route.queryDefaults === undefined ? {} : { queryDefaults: route.queryDefaults }),
-          ...(route.title === undefined ? {} : { title: route.title }),
-          ...(route.data === undefined ? {} : { data: route.data }),
-        });
-
-        const paramNames = [...new Set((fullPath.match(/:([a-zA-Z0-9_]+)/g) ?? []).map((p) => p.slice(1)))];
-        const routeParams = paramNames.length > 0
-          ? `{ ${paramNames.map((p) => `${/^[a-zA-Z_$]/.test(p) ? p : JSON.stringify(p)}: string | number`).join("; ")} }`
+        const baseTypeName = pascalName(`${controller.className}_${route.handler}`);
+        const requestTypeName = uniqueTypeName(`${baseTypeName}Request`);
+        const responseTypeName = uniqueTypeName(`${baseTypeName}Response`);
+        const paramsSchema = schemaRef(controller, route, "params");
+        const querySchema = schemaRef(controller, route, "query");
+        const bodySchema = schemaRef(controller, route, "body");
+        const responseSchema = schemaRef(controller, route, "response");
+        const paramNames = [...new Set(
+          (fullPath.match(/:([a-zA-Z0-9_]+)/g) ?? []).map((p) => p.slice(1)),
+        )];
+        const pathParamsType = paramNames.length > 0
+          ? `{ ${paramNames.map((p) => `${/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(p) ? p : JSON.stringify(p)}: string | number`).join("; ")} }`
           : "Record<string, string | number>";
+        const paramsType = paramsSchema
+          ? `Static<typeof ${paramsSchema.local}>${paramNames.length > 0 ? ` & ${pathParamsType}` : ""}`
+          : pathParamsType;
+        const queryType = querySchema ? `Static<typeof ${querySchema.local}>` : "Record<string, unknown>";
+        const bodyType = bodySchema ? `Static<typeof ${bodySchema.local}>` : "unknown";
+        const responseType = responseSchema ? `Static<typeof ${responseSchema.local}>` : "never";
+        const requestType = `ClientRequestOptions<${paramsType}, ${queryType}, ${bodyType}>${
+          paramNames.length > 0 ? ` & { params: ${paramsType} }` : ""
+        }`;
+
+        routeTypes.push(`export type ${requestTypeName} = ${requestType};`);
+        routeTypes.push(`export type ${responseTypeName} = ${responseType === "never" ? "unknown" : responseType};`);
+        const routeFields = [
+          `method: ${JSON.stringify(route.method)}`,
+          `path: ${JSON.stringify(fullPath)}`,
+          `controller: ${JSON.stringify(controller.className)}`,
+          `handler: ${JSON.stringify(route.handler)}`,
+        ];
+        for (const [key, value] of [
+          ["command", route.command],
+          ["guards", route.guards],
+          ["canMatch", route.canMatch],
+          ["canDeactivate", route.canDeactivate],
+          ["resolvers", route.resolvers],
+          ["redirectTo", route.redirectTo],
+          ["pathMatch", route.pathMatch],
+          ["paramTransforms", route.paramTransforms],
+          ["paramDefaults", route.paramDefaults],
+          ["queryTransforms", route.queryTransforms],
+          ["queryDefaults", route.queryDefaults],
+          ["title", route.title],
+          ["data", route.data],
+        ] as const) {
+          if (value !== undefined) routeFields.push(`${key}: ${JSON.stringify(value)}`);
+        }
+        allRoutes.push(Object.fromEntries(routeFields.map((field) => {
+          const separator = field.indexOf(": ");
+          return [field.slice(0, separator), JSON.parse(field.slice(separator + 2))];
+        })));
+
+        const schemaFields = [
+          ["body", bodySchema?.local],
+          ["params", paramsSchema?.local],
+          ["query", querySchema?.local],
+          ["response", responseSchema?.local],
+        ] as const;
+        const contractName = uniqueTypeName(`${baseTypeName}Contract`);
+        const contractFields = schemaFields
+          .filter((entry): entry is [typeof entry[0], string] => entry[1] !== undefined)
+          .map(([key, value]) => `${key}: ${value}`);
+        if (contractFields.length > 0) {
+          routeTypes.push(`export const ${contractName} = { ${contractFields.join(", ")} } as const;`);
+        }
         routeMethods.push(`
-    ${route.handler}: makeRoute<{ params${routeParams.startsWith("{") ? "" : "?"}: ${routeParams}; query?: Record<string, unknown>; body?: unknown; headers?: Record<string, string> }>(${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}),`);
+    ${route.handler}: makeRoute<${requestTypeName}, ${responseSchema ? responseTypeName : "never"}>(${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}),`);
       }
 
       controllerEntries.push(`
@@ -1072,25 +1169,47 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     }
   }
 
+  const generatedImports = imports.render(rootDir, outDir);
   return [
     HEADER,
     "",
-    "export interface ClientRequestOptions {",
-    "  params?: Record<string, string | number>;",
-    "  query?: Record<string, unknown>;",
-    "  body?: unknown;",
+    ...(usesStatic ? ['import type { Static } from "@sinclair/typebox";'] : []),
+    ...generatedImports,
+    ...(usesStatic || generatedImports.length > 0 ? [""] : []),
+    "export interface ClientRequestOptions<",
+    "  Params = Record<string, string | number>,",
+    "  Query = Record<string, unknown>,",
+    "  Body = unknown,",
+    "> {",
+    "  params?: Params;",
+    "  query?: Query;",
+    "  body?: Body;",
     "  headers?: Record<string, string>;",
     "}",
     "",
     "export type ResponseDecoder<T> = (value: unknown) => T;",
     "",
-    "export type RouteMethod<Options extends ClientRequestOptions = ClientRequestOptions> = {",
-    "  <T>(options: Options, decode: ResponseDecoder<T>): Promise<T>;",
-    "} & ((...args: {} extends Options ? [options?: Options] : [options: Options]) => Promise<unknown>);",
+    "export type RouteMethod<",
+    "  Options extends ClientRequestOptions = ClientRequestOptions,",
+    "  Result = never,",
+    "> = (",
+    "  [Result] extends [never]",
+    "    ? { <T>(options: Options, decode: ResponseDecoder<T>): Promise<T> }",
+    "    : { (options: Options, decode: ResponseDecoder<Result>): Promise<Result> }",
+    ") & ((...args: {} extends Options ? [options?: Options] : [options: Options]) => Promise<unknown>);",
+    "",
+    ...routeTypes,
+    ...(routeTypes.length > 0 ? [""] : []),
+    "export interface HttpInterceptorRequest {",
+    "  method: string;",
+    "  url: string;",
+    "  headers: Record<string, string>;",
+    "  body?: unknown;",
+    "}",
     "",
     "export type HttpInterceptorFn = (",
-    "  req: { method: string; url: string; headers: Record<string, string>; body?: unknown },",
-    "  next: (req: { method: string; url: string; headers: Record<string, string>; body?: unknown }) => Promise<Response>,",
+    "  req: HttpInterceptorRequest,",
+    "  next: (req: HttpInterceptorRequest) => Promise<Response>,",
     ") => Promise<Response>;",
     "",
     "export interface ApiClientConfig {",
@@ -1103,6 +1222,10 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     "export const API_ROUTES = " + JSON.stringify(allRoutes, null, 2) + " as const;",
     "",
     "export type AppRoutePath = typeof API_ROUTES[number]['path'];",
+    "",
+    "export const API_SCHEMAS = [",
+    ...schemaEntries,
+    "] as const;",
     "",
     "/**",
     " * Type-safe URL builder replacing route path parameters and appending query parameters.",
@@ -1159,7 +1282,7 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     "    const interceptors = config.interceptors ?? [];",
     "    const executeChain = (",
     "      index: number,",
-    "      reqPayload: { method: string; url: string; headers: Record<string, string>; body?: unknown },",
+    "      reqPayload: HttpInterceptorRequest,",
     "    ): Promise<Response> => {",
     "      const interceptor = interceptors[index];",
     "      if (interceptor) {",
@@ -1186,14 +1309,15 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     "    return decode ? decode(value) : value;",
     "  }",
     "",
-    "  function makeRoute<Options extends ClientRequestOptions>(method: string, path: string): RouteMethod<Options> {",
+    "  function makeRoute<Options extends ClientRequestOptions, Result = never>(method: string, path: string): RouteMethod<Options, Result> {",
     "    function route<T>(options: Options, decode: ResponseDecoder<T>): Promise<T>;",
+    "    function route(options: Options, decode: ResponseDecoder<Result>): Promise<Result>;",
     "    function route(options?: Options): Promise<unknown>;",
     "    function route<T>(options?: Options, decode?: ResponseDecoder<T>): Promise<T | unknown> {",
     "      const requestOptions = options ?? {};",
     "      return decode ? request(method, path, requestOptions, decode) : request(method, path, requestOptions);",
     "    }",
-    "    return route;",
+    "    return route as RouteMethod<Options, Result>;",
     "  }",
     "",
     "  return {",
@@ -1205,6 +1329,345 @@ export function renderClient(graph: ApplicationGraph, _options?: GenerateOptions
     "}",
     "",
     "export type ApiClient = ReturnType<typeof createApiClient>;",
+    "",
+  ].join("\n");
+}
+
+/**
+ * Generates a self-contained OpenAPI 3.1 document module.
+ *
+ * Schema values are imported into the generated module and converted there at
+ * runtime. The compiler only knows their static symbol references; it never
+ * evaluates application code while compiling.
+ */
+export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions): string {
+  const rootDir = options?.rootDir ?? process.cwd();
+  const outDir = options?.outDir ?? process.cwd();
+  const imports = new ImportManager();
+  const schemaLocals = new Map<string, string>();
+  const schemaComponents = new Map<string, string>();
+  const usedComponentNames = new Set<string>();
+  const operationIds = new Set<string>();
+  const definitions: Array<Record<string, unknown>> = [];
+
+  const uniqueName = (candidate: string, used: Set<string>): string => {
+    const base = candidate || "Schema";
+    let name = base;
+    let suffix = 2;
+    while (used.has(name)) {
+      name = `${base}${suffix}`;
+      suffix += 1;
+    }
+    used.add(name);
+    return name;
+  };
+
+  const schemaRef = (
+    controller: ControllerNode,
+    route: ControllerNode["routes"][number],
+    field: "body" | "params" | "query" | "response",
+  ): string | undefined => {
+    const symbol = route[field];
+    if (!symbol) return undefined;
+    const importPath = controller.schemaImports?.[symbol];
+    const key = `${importPath ?? ""}:${symbol}`;
+    const existing = schemaLocals.get(key);
+    const local = existing ?? imports.add(symbol, importPath);
+    if (!existing) schemaLocals.set(key, local);
+    if (!schemaComponents.has(key)) {
+      schemaComponents.set(key, uniqueName(pascalName(local), usedComponentNames));
+    }
+    return schemaComponents.get(key);
+  };
+
+  const commandByClass = new Map(
+    graph.modules.flatMap((module) => module.commands.map((command) => [command.className, command] as const)),
+  );
+
+  for (const module of graph.modules) {
+    for (const controller of module.controllers) {
+      for (const route of controller.routes) {
+        const fullPath = joinRoutePaths(controller.path, route.path);
+        const pathParams = [...new Set([
+          ...(fullPath.match(/:([A-Za-z0-9_]+)/g) ?? []).map((item) => item.slice(1)),
+          ...(route.pathParams ?? []),
+        ].filter((item) => item.length > 0))];
+        const queryParams = [...new Set([
+          ...(route.queryBindings ?? []),
+          ...(route.handlerParams ?? [])
+            .filter((param) => param.kind === "query")
+            .map((param) => param.bindingName ?? param.name),
+        ])];
+        const operationBase = pascalName(`${module.name}_${controller.className}_${route.handler}`);
+        const operationId = uniqueName(operationBase, operationIds);
+        const command = route.command ? commandByClass.get(route.command) : undefined;
+        const requiresAuth = (route.guards?.length ?? 0) > 0 || command !== undefined;
+        const responseKind = route.contract?.response;
+        const responseContentType = responseKind === "binary" || responseKind === "stream"
+          ? "application/octet-stream"
+          : "application/json";
+        const definition: Record<string, unknown> = {
+          method: route.method.toLowerCase(),
+          path: fullPath,
+          operationId,
+          tags: [controller.className.replace(/Controller$/, "") || module.name],
+          summary: route.title ?? `${route.method} ${fullPath}`,
+          pathParams,
+          queryParams,
+          ...(schemaRef(controller, route, "params") === undefined
+            ? {}
+            : { paramsSchema: schemaRef(controller, route, "params") }),
+          ...(schemaRef(controller, route, "query") === undefined
+            ? {}
+            : { querySchema: schemaRef(controller, route, "query") }),
+          ...(schemaRef(controller, route, "body") === undefined
+            ? {}
+            : { bodySchema: schemaRef(controller, route, "body") }),
+          ...(schemaRef(controller, route, "response") === undefined
+            ? {}
+            : { responseSchema: schemaRef(controller, route, "response") }),
+          responseContentType,
+          responseKind: responseKind ?? (route.nativeResponse ? "native-response" : undefined),
+          module: module.name,
+          controller: controller.className,
+          handler: route.handler,
+          ...(route.command === undefined ? {} : { command: route.command }),
+          ...(command?.permission === undefined ? {} : { permission: command.permission }),
+          ...(route.guards && route.guards.length > 0 ? { guards: route.guards } : {}),
+          ...(route.canMatch && route.canMatch.length > 0 ? { canMatch: route.canMatch } : {}),
+          ...(route.canDeactivate && route.canDeactivate.length > 0 ? { canDeactivate: route.canDeactivate } : {}),
+          ...(route.contract === undefined ? {} : { contract: route.contract }),
+          ...(route.data === undefined ? {} : { data: route.data }),
+          ...(requiresAuth ? { requiresAuth: true } : {}),
+        };
+        definitions.push(definition);
+      }
+    }
+  }
+
+  const localByComponent = new Map<string, string>();
+  for (const [key, component] of schemaComponents) {
+    const local = schemaLocals.get(key);
+    if (local) localByComponent.set(component, local);
+  }
+  const schemaRegistry = [...localByComponent.entries()]
+    .map(([component, local]) => `  ${JSON.stringify(component)}: ${local},`);
+  const configuredSecurity = options?.openApi?.securitySchemes ?? {};
+  const securitySchemes = {
+    bearerAuth: {
+      type: "http",
+      scheme: "bearer",
+      bearerFormat: "JWT",
+    },
+    ...configuredSecurity,
+  };
+  const info = {
+    title: options?.openApi?.title ?? "SupaCloud Application",
+    version: options?.openApi?.version ?? "0.0.0",
+    ...(options?.openApi?.description === undefined ? {} : { description: options.openApi.description }),
+  };
+  const servers = options?.openApi?.servers ?? [];
+  const generatedImports = imports.render(rootDir, outDir);
+
+  return [
+    HEADER,
+    "",
+    ...generatedImports,
+    ...(generatedImports.length > 0 ? [""] : []),
+    "export type OpenApiSchema = Record<string, unknown>;",
+    "",
+    "export interface OpenApiDocument {",
+    '  openapi: "3.1.0";',
+    "  info: { title: string; version: string; description?: string };",
+    "  servers?: readonly { url: string; description?: string }[];",
+    "  paths: Record<string, Record<string, unknown>>;",
+    "  components: {",
+    "    schemas: Record<string, OpenApiSchema>;",
+    "    securitySchemes: Record<string, Record<string, unknown>>;",
+    "  };",
+    "}",
+    "",
+    "type OpenApiRouteDefinition = {",
+    "  method: string;",
+    "  path: string;",
+    "  operationId: string;",
+    "  tags: readonly string[];",
+    "  summary: string;",
+    "  pathParams: readonly string[];",
+    "  queryParams: readonly string[];",
+    "  paramsSchema?: string;",
+    "  querySchema?: string;",
+    "  bodySchema?: string;",
+    "  responseSchema?: string;",
+    "  responseContentType: string;",
+    "  responseKind?: string;",
+    "  module: string;",
+    "  controller: string;",
+    "  handler: string;",
+    "  command?: string;",
+    "  permission?: string;",
+    "  guards?: readonly string[];",
+    "  canMatch?: readonly string[];",
+    "  canDeactivate?: readonly string[];",
+    "  contract?: Record<string, unknown>;",
+    "  data?: Record<string, unknown>;",
+    "  requiresAuth?: boolean;",
+    "};",
+    "",
+    "const OPENAPI_SCHEMA_REGISTRY = {",
+    ...schemaRegistry,
+    "} as const;",
+    "",
+    "const OPENAPI_ROUTE_DEFINITIONS: readonly OpenApiRouteDefinition[] = ",
+    JSON.stringify(definitions, null, 2),
+    ";",
+    "",
+    "const OPENAPI_SECURITY_SCHEMES: Record<string, Record<string, unknown>> = ",
+    JSON.stringify(securitySchemes, null, 2),
+    ";",
+    "",
+    `const OPENAPI_INFO = ${JSON.stringify(info, null, 2)} as { title: string; version: string; description?: string };`,
+    "",
+    `const OPENAPI_SERVERS = ${JSON.stringify(servers, null, 2)} as readonly { url: string; description?: string }[];`,
+    "",
+    "const OPENAPI_ERROR_SCHEMA: OpenApiSchema = {",
+    '  type: "object",',
+    '  properties: { ok: { const: false }, code: { type: "string" }, message: { type: "string" }, details: {} },',
+    '  required: ["ok", "code", "message"],',
+    '  additionalProperties: true,',
+    "};",
+    "",
+    "function isRecord(value: unknown): value is Record<string, unknown> {",
+    '  return value !== null && typeof value === "object" && !Array.isArray(value);',
+    "}",
+    "",
+    "function cloneSchema(value: unknown, seen = new WeakSet<object>()): OpenApiSchema {",
+    "  if (!isRecord(value)) return {};",
+    "  if (seen.has(value)) return {};",
+    "  seen.add(value);",
+    "  const allowed = new Set([",
+    '    "$id", "$ref", "$schema", "title", "description", "type", "enum", "const", "examples", "default",',
+    '    "deprecated", "readOnly", "writeOnly", "format", "pattern", "minLength", "maxLength", "minimum",',
+    '    "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "minItems", "maxItems",',
+    '    "uniqueItems", "minProperties", "maxProperties", "required", "properties", "patternProperties",',
+    '    "additionalProperties", "items", "prefixItems", "contains", "allOf", "anyOf", "oneOf", "not",',
+    '    "if", "then", "else", "unevaluatedProperties", "contentEncoding", "contentMediaType",',
+    "  ]);",
+    "  const result: OpenApiSchema = {};",
+    "  for (const [key, item] of Object.entries(value)) {",
+    "    if (!allowed.has(key) || typeof item === \"function\" || typeof item === \"symbol\") continue;",
+    "    if (key === \"properties\" || key === \"patternProperties\") {",
+    "      if (!isRecord(item)) continue;",
+    "      const properties: Record<string, OpenApiSchema> = {};",
+    "      for (const [name, schema] of Object.entries(item)) properties[name] = cloneSchema(schema, seen);",
+    "      result[key] = properties;",
+    "    } else if (key === \"additionalProperties\") {",
+    "      result[key] = typeof item === \"boolean\" ? item : cloneSchema(item, seen);",
+    "    } else if (key === \"items\" || key === \"contains\" || key === \"not\" || key === \"if\" || key === \"then\" || key === \"else\") {",
+    "      result[key] = cloneSchema(item, seen);",
+    "    } else if ([\"allOf\", \"anyOf\", \"oneOf\", \"prefixItems\", \"enum\", \"required\", \"examples\"].includes(key)) {",
+    "      result[key] = Array.isArray(item) ? item.map((entry) => isRecord(entry) ? cloneSchema(entry, seen) : entry) : item;",
+    "    } else if (Array.isArray(item)) {",
+    "      result[key] = item.map((entry) => isRecord(entry) ? cloneSchema(entry, seen) : entry);",
+    "    } else if (isRecord(item)) {",
+    "      result[key] = cloneSchema(item, seen);",
+    "    } else {",
+    "      result[key] = item;",
+    "    }",
+    "  }",
+    "  seen.delete(value);",
+    "  return result;",
+    "}",
+    "",
+    "function schemaProperty(schema: unknown, name: string): OpenApiSchema {",
+    "  const document = cloneSchema(schema);",
+    "  const properties = document.properties;",
+    "  return isRecord(properties) && isRecord(properties[name]) ? properties[name] : { type: \"string\" };",
+    "}",
+    "",
+    "function schemaPropertyNames(schema: unknown): string[] {",
+    "  const document = cloneSchema(schema);",
+    "  return isRecord(document.properties) ? Object.keys(document.properties).sort() : [];",
+    "}",
+    "",
+    "function schemaRequired(schema: unknown, name: string): boolean {",
+    "  const document = cloneSchema(schema);",
+    "  return Array.isArray(document.required) && document.required.includes(name);",
+    "}",
+    "",
+    "function schemaReference(name: string): OpenApiSchema {",
+    '  return { $ref: `#/components/schemas/${encodeURIComponent(name).replaceAll("%2F", "/")}` };',
+    "}",
+    "",
+    "function openApiPath(path: string): string {",
+    '  return path.replace(/:([A-Za-z0-9_]+)/g, "{$1}");',
+    "}",
+    "",
+    "function operationFor(definition: OpenApiRouteDefinition): Record<string, unknown> {",
+    "  const parameters: Record<string, unknown>[] = [];",
+    "  const paramsSchema = definition.paramsSchema ? OPENAPI_SCHEMA_REGISTRY[definition.paramsSchema as keyof typeof OPENAPI_SCHEMA_REGISTRY] : undefined;",
+    "  for (const name of definition.pathParams) parameters.push({",
+    '    name, in: "path", required: true, schema: schemaProperty(paramsSchema, name),',
+    "  });",
+    "  const querySchema = definition.querySchema ? OPENAPI_SCHEMA_REGISTRY[definition.querySchema as keyof typeof OPENAPI_SCHEMA_REGISTRY] : undefined;",
+    "  const queryNames = new Set([...(querySchema ? schemaPropertyNames(querySchema) : []), ...definition.queryParams]);",
+    "  for (const name of [...queryNames].sort()) parameters.push({",
+    '    name, in: "query", required: querySchema ? schemaRequired(querySchema, name) : false, schema: schemaProperty(querySchema, name),',
+    "  });",
+    "  const responses: Record<string, unknown> = {",
+    '    "422": { description: "Request validation failed", content: { "application/json": { schema: { $ref: "#/components/schemas/SupaCloudError" } } } },',
+    '    "500": { description: "Internal server error", content: { "application/json": { schema: { $ref: "#/components/schemas/SupaCloudError" } } } },',
+    "  };",
+    "  if (definition.responseSchema) {",
+    '    responses["200"] = { description: "Successful response", content: { [definition.responseContentType]: { schema: schemaReference(definition.responseSchema) } } };',
+    "  } else if (definition.responseKind === \"binary\" || definition.responseKind === \"stream\") {",
+    '    responses["200"] = { description: "Successful response", content: { [definition.responseContentType]: { schema: { type: "string", format: "binary" } } } };',
+    "  } else {",
+    '    responses["200"] = { description: "Successful response" };',
+    "  }",
+    "  const operation: Record<string, unknown> = {",
+    "    operationId: definition.operationId, tags: [...definition.tags], summary: definition.summary, responses,",
+    "    ...(parameters.length === 0 ? {} : { parameters }),",
+    "    ...(definition.bodySchema ? { requestBody: { required: true, content: { \"application/json\": { schema: schemaReference(definition.bodySchema) } } } } : {}),",
+    "    ...(definition.requiresAuth ? { security: [{ bearerAuth: [] }] } : {}),",
+    "    \"x-supacloud\": {",
+    "      module: definition.module, controller: definition.controller, handler: definition.handler,",
+    "      ...(definition.command ? { command: definition.command } : {}),",
+    "      ...(definition.permission ? { permission: definition.permission } : {}),",
+    "      ...(definition.guards ? { guards: [...definition.guards] } : {}),",
+    "      ...(definition.canMatch ? { canMatch: [...definition.canMatch] } : {}),",
+    "      ...(definition.canDeactivate ? { canDeactivate: [...definition.canDeactivate] } : {}),",
+    "      ...(definition.contract ? { contract: definition.contract } : {}),",
+    "      ...(definition.data ? { data: definition.data } : {}),",
+    "    },",
+    "  };",
+    "  return operation;",
+    "}",
+    "",
+    "export function createOpenApiDocument(): OpenApiDocument {",
+    "  const paths: Record<string, Record<string, unknown>> = {};",
+    "  for (const definition of OPENAPI_ROUTE_DEFINITIONS) {",
+    "    const path = openApiPath(definition.path);",
+    "    const item = paths[path] ?? {};",
+    "    item[definition.method] = operationFor(definition);",
+    "    paths[path] = item;",
+    "  }",
+    "  const schemas: Record<string, OpenApiSchema> = { SupaCloudError: OPENAPI_ERROR_SCHEMA };",
+    "  for (const [name, schema] of Object.entries(OPENAPI_SCHEMA_REGISTRY)) schemas[name] = cloneSchema(schema);",
+    "  return {",
+    '    openapi: "3.1.0", info: OPENAPI_INFO,',
+    "    ...(OPENAPI_SERVERS.length === 0 ? {} : { servers: OPENAPI_SERVERS }),",
+    "    paths, components: { schemas, securitySchemes: OPENAPI_SECURITY_SCHEMES },",
+    "  };",
+    "}",
+    "",
+    "export const OPENAPI_DOCUMENT = createOpenApiDocument();",
+    "",
+    "export function serializeOpenApiDocument(document: OpenApiDocument = OPENAPI_DOCUMENT, space = 2): string {",
+    "  return JSON.stringify(document, null, space) + \"\\n\";",
+    "}",
+    "",
+    "export const OPENAPI_JSON = serializeOpenApiDocument();",
     "",
   ].join("\n");
 }
