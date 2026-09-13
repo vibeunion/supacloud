@@ -7,6 +7,10 @@ import type { IncrementalProgramSession } from "./program";
 
 export type Scope = "application" | "request" | "job";
 
+export type JobMode = "task" | "workflow";
+export type JobIdempotency = "required" | "none";
+export type JobSchemaKind = "opaque" | "declared";
+
 export type ProviderKind = "class" | "value" | "factory" | "existing";
 
 export type TokenKind = "injection-token" | "class";
@@ -263,6 +267,21 @@ export interface JobNode {
   /** Generated services key; follows a custom useClass provider token when present. */
   serviceKey: string;
   scope: Scope;
+  /** Input schema symbol imported into the generated application, when declared. */
+  input?: string;
+  /** Output schema symbol imported into the generated application, when declared. */
+  output?: string;
+  schemaKinds?: Partial<Record<"input" | "output", JobSchemaKind>>;
+  /** Job schema symbol name -> relative module path for import generation. */
+  schemaImports?: Record<string, string>;
+  /** Existing execution adapter selected by the job declaration. */
+  mode?: JobMode;
+  /** Adapter-owned execution deadline in seconds. */
+  timeoutSec?: number;
+  /** Adapter-owned maximum execution attempts. */
+  maxAttempts?: number;
+  /** Adapter-owned idempotency requirement. */
+  idempotency?: JobIdempotency;
   aspects?: AspectRefNode[];
 }
 
@@ -366,6 +385,10 @@ export interface CompileOptions {
   writeOnError?: boolean;
   /** Generate typed API client in client.ts (default: false). */
   generateClient?: boolean;
+  /** Generate the OpenAPI 3.1 document module in openapi.ts (default: false). */
+  generateOpenApi?: boolean;
+  /** OpenAPI document metadata and explicitly configured security schemes. */
+  openApi?: OpenApiOptions;
   /** Generate typed permissions registry in permissions.ts (default: false). */
   generatePermissions?: boolean;
   /** Prune unused root providers from compiled output (Angular Ivy AOT tree-shaking). */
@@ -392,6 +415,43 @@ export interface GraphqlOptions {
   documents?: string[];
   /** Explicit wire types for custom scalars. Unmapped scalars remain unknown. */
   scalars?: Record<string, string | { input: string; output: string }>;
+}
+
+export interface OpenApiServer {
+  url: string;
+  description?: string;
+}
+
+export type OpenApiSecurityScheme =
+  | {
+      type: "apiKey";
+      name: string;
+      in: "header" | "query" | "cookie";
+      description?: string;
+    }
+  | {
+      type: "http";
+      scheme: string;
+      bearerFormat?: string;
+      description?: string;
+    }
+  | {
+      type: "oauth2";
+      flows: Record<string, unknown>;
+      description?: string;
+    }
+  | {
+      type: "openIdConnect";
+      openIdConnectUrl: string;
+      description?: string;
+    };
+
+export interface OpenApiOptions {
+  title?: string;
+  version?: string;
+  description?: string;
+  servers?: OpenApiServer[];
+  securitySchemes?: Record<string, OpenApiSecurityScheme>;
 }
 
 export interface GraphqlContractSummary {

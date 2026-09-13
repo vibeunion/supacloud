@@ -211,6 +211,7 @@ bunx supacloud-compiler dev
 | 文件发现 | `**/*.module.ts`、`**/*.ts` |
 | strict 类型安全门 | 开启 |
 | typed client | 开启 |
+| OpenAPI 3.1 module | 开启 |
 | permissions manifest | 开启 |
 | module boundary preset | `modular-monolith` |
 | provider tree-shaking | 开启 |
@@ -225,6 +226,11 @@ export default defineSupacloudConfig({
   outDir: "generated",
   strict: true,
   generateClient: true,
+  generateOpenApi: true,
+  openApi: {
+    title: "Orders API",
+    version: "1.0.0",
+  },
   generatePermissions: true,
   moduleBoundaryPreset: "modular-monolith",
   commandCapabilities: {
@@ -240,6 +246,35 @@ export default defineSupacloudConfig({
 `--no-permissions` 只建议用于本地迁移或调试；生产 CI 应保留默认 strict。
 `commandCapabilities` 用于声明运行时实际支持的命令治理能力；命令声明了
 `permission`、`audit` 或 `idempotency` 时，若对应能力关闭，编译器会失败。
+
+## OpenAPI 与 Client Generator
+
+编译器从同一份 `ApplicationGraph` 生成 `client.ts` 和 `openapi.ts`，不引入
+反射或第二套路由注册。路由装饰器中显式声明的 TypeBox `body`、`params`、
+`query`、`response` schema 会被静态导入；没有 schema 的字段保持为
+`unknown`，不会从 TypeScript 类型推断出未经验证的运行时协议。
+
+`client.ts` 提供路由方法、路径参数检查、请求类型和 `API_ROUTES`。已声明
+响应 schema 的方法需要调用方提供 `ResponseDecoder<T>` 才能得到业务类型；
+不传 decoder 时仍可读取原始 `unknown`，因此生成客户端不会伪造响应安全性。
+
+`openapi.ts` 导出 `OPENAPI_DOCUMENT`、`OPENAPI_JSON` 和
+`createOpenApiDocument()`。它包含 OpenAPI 3.1 路径、参数、请求体、响应、
+错误协议、默认 bearer security scheme，以及 `x-supacloud` 中的模块、命令、
+权限和静态 contract 元数据。文档只描述编译器发现的 HTTP routes；文件和
+流式响应仍由宿主运行时负责传输。
+
+```bash
+# 导出可提交或交给文档工具的 JSON
+bunx supacloud-compiler openapi-export generated/openapi.ts openapi.json
+
+# 在 CI 中阻止破坏性 contract 变更
+bunx supacloud-compiler openapi-diff openapi-baseline.json openapi.json --json
+```
+
+`openapi-diff` 会检查路径/操作、参数必填性、请求体、响应状态和 schema 的
+枚举、属性与 required 变化；命令失败时返回非零退出码。基线文件由应用
+负责版本管理，生成的 `openapi.ts` 则由普通 `compile`/`check` 漂移检查维护。
 
 ## API
 
@@ -340,6 +375,8 @@ IDE 和 AI agent 做状态机漂移检查。
 - 执行顺序为 `module -> route -> command -> commandGovernance -> handler`；Job 使用 `module -> job -> executor -> run/execute`，并在 finally 中销毁 job scope。
 - services 对象的 key 为 token 名的 camelCase：`CaseService → caseService`、`CASE_REPOSITORY → caseRepository`、`LOGGER → logger`。
 - controller 描述静态给出：`{ path, serviceKey, scope, routes: [{ method, path, handler, body?, params?, query?, response? }] }`，schema 直接引用 import 进来的对象。
+- `client.ts` 在启用 `generateClient` 时生成：包含 `API_ROUTES`、`API_SCHEMAS`、类型化请求选项和显式响应 decoder 入口。
+- `openapi.ts` 在启用 `generateOpenApi` 时生成：包含 OpenAPI 3.1 文档模块和可序列化 JSON；`check` 会将它纳入生成物漂移检查。
 - 严格生成模式会对 `application.ts`、可选的 `client.ts` 和 `permissions.ts` 做 AST 扫描，禁止生成 `any`。
 
 `<outDir>/app.manifest.json`：`{ version: 1, modules, externalTokens }`，供 CLI graph/explain 使用。
