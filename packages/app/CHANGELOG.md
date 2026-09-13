@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.2](https://github.com/vibeunion/supacloud/compare/app-v0.12.1...app-v0.12.2) (2026-09-13)
+
+
+### Performance Improvements
+
+* optimize compiler and upgrade Bun runtime ([#1283](https://github.com/vibeunion/supacloud/issues/1283)) ([381c1b9](https://github.com/vibeunion/supacloud/commit/381c1b98264a563d22fc2f4af85f7f7117563481))
+
 ## [0.12.1](https://github.com/vibeunion/supacloud/compare/app-v0.12.0...app-v0.12.1) (2026-09-11)
 
 
