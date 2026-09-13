@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.28.0...supacloud-js-v0.29.0) (2026-09-13)
+
+
+### Features
+
+* **framework:** add OpenAPI generation and typed worker execution ([#1286](https://github.com/vibeunion/supacloud/issues/1286)) ([25dcffb](https://github.com/vibeunion/supacloud/commit/25dcffb9a7a33ee7205868c860126d3d2ef50ff4))
+
 ## [0.28.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.27.1...supacloud-js-v0.28.0) (2026-09-12)
 
 

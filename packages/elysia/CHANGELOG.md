@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.11.2...elysia-v0.12.0) (2026-09-13)
+
+
+### Features
+
+* **framework:** add OpenAPI generation and typed worker execution ([#1286](https://github.com/vibeunion/supacloud/issues/1286)) ([25dcffb](https://github.com/vibeunion/supacloud/commit/25dcffb9a7a33ee7205868c860126d3d2ef50ff4))
+
 ## [0.11.2](https://github.com/vibeunion/supacloud/compare/elysia-v0.11.1...elysia-v0.11.2) (2026-09-13)
 
 
