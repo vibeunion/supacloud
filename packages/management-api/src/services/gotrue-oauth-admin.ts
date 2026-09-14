@@ -270,7 +270,7 @@ export async function requestGoTrueOAuth(contextInput: unknown, operationInput: 
   const admin = new GoTrueAdminApi({
     url: context.url,
     headers: { authorization: `Bearer ${context.adminToken}`, apikey: context.adminToken, "x-project-ref": context.projectRef },
-    fetch: async (url, options) => {
+    fetch: (async (url, options) => {
       controller.signal.throwIfAborted();
       dispatched = true;
       let response: Response | undefined;
@@ -293,7 +293,7 @@ export async function requestGoTrueOAuth(contextInput: unknown, operationInput: 
           : new GoTrueOAuthError(502, mutation);
         throw transportError;
       } finally { void response?.body?.cancel().catch(() => {}); }
-    },
+    }) as typeof fetch,
   });
   const workflow = async () => {
     let result: { data: unknown; error: unknown };

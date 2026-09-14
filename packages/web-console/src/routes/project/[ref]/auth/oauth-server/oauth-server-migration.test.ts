@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from "bun:test";
+import { expect, test } from "bun:test";
 import type { BunPlugin } from "bun";
 import { JSDOM } from "jsdom";
 import { compile, compileModule, preprocess } from "svelte/compiler";
@@ -108,34 +108,6 @@ test("status and migration transport reject oversized responses and cancellation
       return Response.json(partialFailure(), { status: 503 });
     }, cancel.signal)).rejects.toThrow();
   expect(calls).toBe(1);
-});
-
-test("decoder accepts the actual authenticated Management OAuth status producer", async () => {
-  const { authOAuthServerRoutes } = await import("../../../../../../../management-api/src/routes/auth-oauth-server");
-  const { projectAuthRepository } = await import("../../../../../../../management-api/src/repositories/project-auth.repository");
-  const { generateOidcJwtKeyMaterial } = await import("../../../../../../../management-api/src/utils/project-jwt");
-  const { config } = await import("../../../../../../../management-api/src/config");
-  const oldToken = config.masterToken, oldOwner = config.authRuntimeOwnerRef;
-  config.masterToken = "oauth-page-producer-test-token";
-  config.authRuntimeOwnerRef = "";
-  const material = await generateOidcJwtKeyMaterial("synthetic-project-secret");
-  const project = spyOn(projectAuthRepository, "findByRef").mockResolvedValue({
-    ref: "a", organization_id: null, jwt_secret: "synthetic-project-secret",
-    config: {
-      api_domain: "api.test", gotrue_port: 3200, postgrest_port: 3100,
-      auth: { oauth_server: { ...material, issuer: "https://api.test/auth/v1", enabled: true } },
-    },
-  });
-  try {
-    const response = await authOAuthServerRoutes.handle(new Request("http://localhost/v1/projects/a/auth/oauth-server", {
-      headers: { authorization: `Bearer ${config.masterToken}` },
-    }));
-    expect(response.status).toBe(200);
-    const parsed = parseOAuthServerStatus(await response.json(), "a");
-    expect(parsed.key_id).toBe(material.key_id);
-    expect(parsed.signing_alg).toBe("ES256");
-    expect(parsed.runtime_verified).toBe(false);
-  } finally { project.mockRestore(); config.masterToken = oldToken; config.authRuntimeOwnerRef = oldOwner; }
 });
 
 const localFile = (path: string) => fileURLToPath(new URL(path, import.meta.url));

@@ -1,4 +1,5 @@
 import { calculateJwkThumbprint, importJWK, CompactSign, compactVerify } from "jose";
+import type { JWK } from "jose";
 import type { AuthRuntimeDescriptor } from "./auth-runtime.service";
 import { resolveAuthExecutionPolicy } from "./auth-execution-policy";
 import { readAuthSessionPolicy, normalizeAuthSessionPolicyPatch } from "./auth-session-policy";
@@ -10,6 +11,7 @@ type SigningSettings = { issuer: string; jwks_url: string } & (
   | { algorithm: "ES256" | "RS256"; key_id: string; oauth_enabled: boolean; migration_status: "configured" }
   | { algorithm: null; key_id: null; oauth_enabled: false; migration_status: "not_migrated" }
 );
+type ExtendedJwk = JWK & Record<string, unknown>;
 export type JwtSettingsState = { project_ref: string } & (
   | {
     execution_mode: "local" | "owner"; authority_project_ref: string;
@@ -55,8 +57,8 @@ export async function buildProjectJwtSettings(
   const oauth = parseOAuthServerSettings(auth.oauth_server);
   const issuer = canonicalJwtIssuerUrl(oauth.issuer
     ?? `${resolveProjectAuthUrl(ref, normalizeProjectRoutingConfig(config)).replace(/\/+$/, "")}/auth/v1`);
-  const keys = normalizeProjectJwtKeys(oauth.jwt_keys);
-  const jwks = normalizeProjectJwtJwks(oauth.jwt_jwks);
+  const keys = normalizeProjectJwtKeys(oauth.jwt_keys) as ExtendedJwk[] | null;
+  const jwks = normalizeProjectJwtJwks(oauth.jwt_jwks) as { keys: ExtendedJwk[] } | null;
   const publicState = {
     ...identity, policy: { access_expiry: session.jwt_expiry, refresh_rotation: session.refresh_token_rotation_enabled },
   };
