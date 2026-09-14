@@ -31,16 +31,15 @@ The production build outputs to `build/` directory. In production, the Managemen
 
 ## SVAdmin Styles
 
-The console uses `@svadmin/ui@0.69.0`, `@svadmin/core@0.49.1`,
-`@svadmin/ai-elements@0.4.1`, and `@svadmin/sveltekit@0.10.6`.
-`@svadmin/elysia` stays on npm's published `0.11.0`; a newer GitHub release
-alone is not an installable dependency.
+The console uses `@svadmin/ui@0.70.0`, `@svadmin/core@0.50.0`,
+`@svadmin/ai-elements@0.5.1`, `@svadmin/sveltekit@0.10.7`, and
+`@svadmin/elysia@0.12.7`.
 
 Tailwind v4 configuration lives in `src/app.css`. Import
 `@svadmin/ui/app.theme.css` once after Tailwind, not alongside
 `@svadmin/ui/app.css`. This entry includes precompiled component styles and
 semantic theme metadata, so the host does not scan UI package sources.
-AI elements retain their separate stylesheet and source scan.
+AI elements import `@svadmin/ai-elements/ai.theme.css` and keep their source scan.
 
 Use public component entries such as
 `@svadmin/ui/components/AutoTable.svelte`. The root UI entry re-exports

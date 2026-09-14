@@ -11,6 +11,10 @@ const uiThemeSource = readFileSync(
   fileURLToPath(import.meta.resolve("@svadmin/ui/app.theme.css")),
   "utf8",
 );
+const aiThemeSource = readFileSync(
+  fileURLToPath(import.meta.resolve("@svadmin/ai-elements/ai.theme.css")),
+  "utf8",
+);
 
 describe("SVAdmin stylesheet migration", () => {
   test("uses public component entries without the AdminApp stylesheet side effect", () => {
@@ -22,7 +26,7 @@ describe("SVAdmin stylesheet migration", () => {
     }
   });
 
-  test("imports only the Tailwind host entry and keeps AI styles separate", () => {
+  test("imports the Tailwind host entries with semantic AI theme support", () => {
     const imports: string[] = [];
     const sources: string[] = [];
     appCss.walkAtRules("import", (rule) => { imports.push(rule.params); });
@@ -31,10 +35,11 @@ describe("SVAdmin stylesheet migration", () => {
     expect(imports).toEqual([
       '"tailwindcss"',
       '"@svadmin/ui/app.theme.css"',
-      '"@svadmin/ai-elements/ai.css"',
+      '"@svadmin/ai-elements/ai.theme.css"',
     ]);
     expect(sources.some((source) => source.includes("@svadmin/ui"))).toBe(false);
     expect(sources.some((source) => source.includes("@svadmin/ai-elements"))).toBe(true);
+    expect(aiThemeSource).toContain("--color-background: var(--background, Canvas)");
   });
 
   test("preserves light and dark colors as complete semantic color values", () => {

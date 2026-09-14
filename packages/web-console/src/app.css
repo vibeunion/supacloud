@@ -1,6 +1,6 @@
 @import "tailwindcss";
 @import "@svadmin/ui/app.theme.css";
-@import "@svadmin/ai-elements/ai.css";
+@import "@svadmin/ai-elements/ai.theme.css";
 
 @source "../node_modules/@svadmin/core";
 @source "../node_modules/@svadmin/ai-elements";
