@@ -138,9 +138,11 @@ Submission waiting has a separate 15-second deadline around the official
 Functions invocation, including waiting for its parsed response. On timeout,
 the SDK aborts the invocation signal and throws `TASK_SUBMIT_UNCONFIRMED` with
 `mutationMayHaveApplied: true`; it never automatically replays the call.
-This deadline is independent of worker execution time and the `timeoutSec`
-option. A custom transport that ignores cancellation may continue in the
-background. The deadline does not impose a streamed response-size limit.
+The legacy `retries` and `timeoutSec` submit fields are accepted for source
+compatibility but ignored; configure retry budgets and worker timeouts in the
+platform project/function settings. This SDK deadline is independent of worker
+execution time. A custom transport that ignores cancellation may continue in
+the background. The deadline does not impose a streamed response-size limit.
 Network, relay, server and response-parsing failures also produce
 `TASK_SUBMIT_UNCONFIRMED`, without exposing the underlying exception.
 Verified official `FunctionsHttpError` responses with a non-redirected HTTP

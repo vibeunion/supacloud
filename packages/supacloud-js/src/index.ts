@@ -121,7 +121,9 @@ export type SupaCloudTaskSubmitOptions = {
     | ReadableStream<Uint8Array>
     | Record<string, unknown>;
   headers?: Record<string, string>;
+  /** @deprecated Configure retry policy on the platform; this compatibility field is ignored. */
   retries?: number;
+  /** @deprecated Configure execution timeout on the platform; this compatibility field is ignored. */
   timeoutSec?: number;
   idempotencyKey?: string;
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -643,15 +645,6 @@ function decodeBoundTask(
   }
 }
 
-function decodeBoundTaskWithResult<TResult>(
-  value: unknown,
-  taskId: string,
-  operation: "get" | "cancel" | "retry",
-  decoder: SupaCloudTaskResultDecoder<TResult>,
-): SupaCloudTaskDetail<TResult> {
-  return decodeTaskResult(decodeBoundTask(value, taskId, operation), decoder, operation);
-}
-
 function decodeQueueMessages(value: unknown, queueName: string): SupaCloudQueueMessage[] {
   if (!Array.isArray(value) || value.length > 10000) throw new SupaCloudQueueError();
   const messages = value.map((row: unknown) => queueMessage(row, { queueName }));
@@ -1003,7 +996,7 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     decoder?: SupaCloudTaskResultDecoder<TResult>,
   ): Promise<SupaCloudTaskReceipt<TResult>> {
     const projectRef = this.options.projectRef;
-    const { body, headers = {}, retries: _retries, timeoutSec: _timeoutSec, idempotencyKey, method } = options;
+    const { body, headers = {}, idempotencyKey, method } = options;
     // Background execution is selected by server-side background_routes.
     // Keep the async decision server-side, but forward the logical idempotency key
     // so management-api can dedupe background-route submissions.

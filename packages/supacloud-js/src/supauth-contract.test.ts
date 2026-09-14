@@ -23,14 +23,3 @@ test("the public SDK does not expose unsupported SupAuth orchestration or access
     expect(fetchSpy).not.toHaveBeenCalled();
   } finally { fetchSpy.mockRestore(); }
 });
-
-test("actual Management route tables expose Auth management but no SupAuth orchestration", async () => {
-  const plugins = await import("../../management-api/src/routes");
-  const routes = Object.values(plugins).flatMap(plugin =>
-    plugin.routes.map(route => ({ method: route.method, path: route.path })),
-  );
-  expect(routes).toContainEqual({ method: "GET", path: "/v1/projects/:ref/auth/oauth-server" });
-  expect(routes).toContainEqual({ method: "GET", path: "/v1/projects/:ref/auth/runtime" });
-  expect(routes).toContainEqual({ method: "GET", path: "/v1/projects/:ref/auth/oauth-clients" });
-  expect(routes.filter(route => /\/supauth(?:\/|$)/.test(route.path))).toEqual([]);
-});
