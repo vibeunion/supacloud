@@ -1,5 +1,11 @@
 <script lang="ts">
-  import { apiClient, ensureMutationSucceeded } from "$lib/api";
+  import { apiClient } from "$lib/api";
+  import { runHostingMutation } from "$lib/hosting-mutations";
+  import { loadHostingDetail } from "$lib/hosting-detail";
+  import { createHostingToken, HostingTokenCreationError, loadHostingTokens } from "$lib/hosting-tokens";
+  import { loadHostingLogs } from "$lib/hosting-logs";
+  import { HostingEnvironmentConflictError, HostingEnvironmentUpdateError, saveHostingEnvironment } from "$lib/hosting-env";
+  import { HostingConfigurationConflictError, saveHostingConfiguration, type HostingConfiguration } from "$lib/hosting-configuration";
 
   import { page } from "$app/state";
   import { Loader2, Save, Key, Globe, GitBranch, Terminal, Copy, RefreshCw, Trash2, Plus, ExternalLink, Upload } from "lucide-svelte";
@@ -7,6 +13,7 @@
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
 
   const FRONTEND_DEPLOY_TIMEOUT_MS = 5 * 60 * 1000;
+  const TOKEN_COPY_FAILURE_MESSAGE = "复制失败，令牌仍保留在此页面。请重试。";
 
   const projectRef = $derived(page.params.ref);
   const deployId = $derived(page.url.pathname.split("/hosting/")[1]?.split("/")[0] || "");
@@ -23,6 +30,9 @@
   let gitUrl = $state("");
   let gitBranch = $state("");
   let envPairs: { key: string; value: string }[] = $state([]);
+  let envRevision = $state("");
+  let configurationRevision = $state("");
+  let initializedDeployment: string | null = $state(null);
 
   // Custom Domains
   let newDomain = $state("");
@@ -32,50 +42,63 @@
 
   let isCreatingToken = $state(false);
   let newTokenName = $state("");
-  let lastCreatedToken: string | null = $state.raw(null);
-
-  const depQuery = createQuery(() => ({
-    queryKey: ["deployment", projectRef, deployId],
-    queryFn: async () => {
-      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}`);
-      if (!res.ok) return null;
-      return res.json();
-    }
-  }));
-
-  const tokensQuery = createQuery(() => ({
-    queryKey: ["deployment_tokens", projectRef, deployId],
-    queryFn: async () => {
-      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens`);
-      if (!res.ok) return [];
-      const data = await res.json();
-      return data.tokens || [];
-    }
-  }));
-
-  const logsQuery = createQuery(() => ({
-    queryKey: ["deployment_logs", projectRef, deployId],
-    queryFn: async () => {
-      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/logs`);
-      if (!res.ok) return "";
-      const data = await res.json();
-      return data.logs || "";
-    }
-  }));
+  type TokenScope = { projectRef: string; deploymentId: string };
+  const tokenScope: TokenScope = $derived({ projectRef: projectRef ?? "", deploymentId: deployId });
+  let createdToken: { scope: TokenScope; token: string } | null = $state.raw(null);
+  const lastCreatedToken = $derived(createdToken?.scope === tokenScope ? createdToken.token : null);
+  let tokenCreateInFlight = false;
+  let tokenCopyInFlight = $state(false);
+  let envSaveInFlight = $state(false);
+  let configSaveInFlight = $state(false);
 
   $effect(() => {
-    if (depQuery.data && !buildCommand && !outputDir && !installCommand) { // Initialize editable fields once
-      const d = depQuery.data;
-      buildCommand = String(d.build_command || "");
-      outputDir = String(d.output_dir || "");
-      installCommand = String(d.install_command || "");
-      nodeVersion = String(d.node_version || "20");
-      healthCheckPath = String(d.health_check_path || "/");
-      gitUrl = String(d.git_url || "");
-      gitBranch = String(d.git_branch || "main");
-      if (envPairs.length === 0) {
-        envPairs = Object.entries(d.env_vars || {}).map(([key, value]) => ({ key, value: String(value) }));
-      }
+    tokenScope;
+    createdToken = null;
+    newTokenName = "";
+  });
+
+  const depQuery = createQuery(() => {
+    const ref = projectRef ?? "";
+    const id = deployId;
+    return {
+      queryKey: ["deployment", ref, id],
+      queryFn: ({ signal }: { signal: AbortSignal }) => loadHostingDetail(ref, id, apiClient, signal),
+    };
+  });
+
+  const tokensQuery = createQuery(() => {
+    const ref = projectRef ?? "";
+    const id = deployId;
+    return {
+      queryKey: ["deployment_tokens", ref, id],
+      queryFn: ({ signal }: { signal: AbortSignal }) => loadHostingTokens(ref, id, apiClient, signal),
+    };
+  });
+
+  const logsQuery = createQuery(() => {
+    const ref = projectRef ?? "";
+    const id = deployId;
+    return {
+      queryKey: ["deployment_logs", ref, id],
+      queryFn: ({ signal }: { signal: AbortSignal }) => loadHostingLogs(ref, id, apiClient, signal),
+    };
+  });
+
+  $effect(() => {
+    const d = depQuery.data;
+    const scope = `${projectRef}/${deployId}`;
+    if (d && d.project_ref === projectRef && d.id === deployId && initializedDeployment !== scope) {
+      buildCommand = d.build_command;
+      outputDir = d.output_dir;
+      installCommand = d.install_command;
+      nodeVersion = d.node_version;
+      healthCheckPath = d.health_check_path;
+      gitUrl = d.git_url ?? "";
+      gitBranch = d.git_branch || "main";
+      envPairs = Object.entries(d.env_vars).map(([key, value]) => ({ key, value }));
+      envRevision = d.env_revision;
+      configurationRevision = d.configuration_revision;
+      initializedDeployment = scope;
     }
   });
 
@@ -84,64 +107,89 @@
   const tokens = $derived(tokensQuery.data || []);
   const logs = $derived(logsQuery.data || "");
 
+  type ConfigurationSaveInput = HostingConfiguration & { scope: TokenScope; revision: string };
   const saveConfigMutation = createMutation(() => ({
-    mutationFn: async () => {
-      const updateResponse = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ build_command: buildCommand, output_dir: outputDir, install_command: installCommand, node_version: nodeVersion, health_check_path: healthCheckPath || "/" })
-      });
-      if (!updateResponse.ok) throw new Error("Failed to save build configuration");
-      if (gitUrl) {
-        const gitResponse = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/git`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ git_url: gitUrl, branch: gitBranch || "main" })
-        });
-        if (!gitResponse.ok) throw new Error("Failed to save Git configuration");
-      }
-      return true;
-    },
-    onSuccess: () => {
+    retry: false,
+    mutationFn: (input: ConfigurationSaveInput) => saveHostingConfiguration(
+      input.scope.projectRef, input.scope.deploymentId,
+      { configuration: input.configuration, git: input.git }, apiClient, new AbortController().signal,
+      input.revision,
+    ),
+    onSuccess: (revision, input) => {
+      queryClient.invalidateQueries({ queryKey: ["deployment", input.scope.projectRef, input.scope.deploymentId] });
+      if (input.scope !== tokenScope) return;
+      configurationRevision = revision;
       actionMsg = "✅ 构建配置已保存";
-      queryClient.invalidateQueries({ queryKey: ["deployment", projectRef, deployId] });
-      setTimeout(() => actionMsg = null, 4000);
+      setTimeout(() => { if (input.scope === tokenScope) actionMsg = null; }, 4000);
     },
-    onError: (err: unknown) => {
-      actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
-      setTimeout(() => actionMsg = null, 4000);
-    }
+    onError: (error: unknown, input) => {
+      queryClient.invalidateQueries({ queryKey: ["deployment", input.scope.projectRef, input.scope.deploymentId] });
+      if (input.scope !== tokenScope) return;
+      actionMsg = error instanceof HostingConfigurationConflictError
+        ? "构建或 Git 配置已被其他操作修改。请刷新页面并重新编辑。"
+        : "构建与 Git 配置可能已保存，但结果无法确认。请重新读取配置后再操作。";
+    },
+    onSettled: () => { configSaveInFlight = false; },
   }));
 
   function saveBuildConfig() {
-    saveConfigMutation.mutate();
+    if (configSaveInFlight || !projectRef
+      || initializedDeployment !== `${projectRef}/${deployId}`) return;
+    const input: ConfigurationSaveInput = {
+      scope: tokenScope,
+      revision: configurationRevision,
+      configuration: {
+        build_command: buildCommand, output_dir: outputDir, install_command: installCommand,
+        node_version: nodeVersion, health_check_path: healthCheckPath || "/",
+      },
+      git: { url: gitUrl, branch: gitBranch || "main" },
+    };
+    configSaveInFlight = true;
+    saveConfigMutation.mutate(input);
   }
 
   const saveEnvMutation = createMutation(() => ({
-    mutationFn: async () => {
-      const envObj: Record<string, string> = {};
-      envPairs.filter(p => p.key.trim()).forEach(p => envObj[p.key] = p.value);
-      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/env`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ env_vars: envObj })
-      });
-      if (!res.ok) throw new Error("Failed to save environment variables");
-      return true;
-    },
-    onSuccess: () => {
+    retry: false,
+    mutationFn: (input: { scope: TokenScope; values: Record<string, string>; revision: string }) => saveHostingEnvironment(
+      input.scope.projectRef, input.scope.deploymentId, input.values, apiClient, new AbortController().signal,
+      input.revision,
+    ),
+    onSuccess: (revision, input) => {
+      queryClient.invalidateQueries({ queryKey: ["deployment", input.scope.projectRef, input.scope.deploymentId] });
+      if (input.scope !== tokenScope) return;
+      envRevision = revision;
       actionMsg = "✅ 环境变量已保存";
-      queryClient.invalidateQueries({ queryKey: ["deployment", projectRef, deployId] });
-      setTimeout(() => actionMsg = null, 4000);
+      setTimeout(() => { if (input.scope === tokenScope) actionMsg = null; }, 4000);
     },
-    onError: (err: unknown) => {
-      actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
-      setTimeout(() => actionMsg = null, 4000);
-    }
+    onError: (error: unknown, input) => {
+      queryClient.invalidateQueries({ queryKey: ["deployment", input.scope.projectRef, input.scope.deploymentId] });
+      if (input.scope !== tokenScope) return;
+      actionMsg = error instanceof HostingEnvironmentConflictError
+        ? "环境变量已被其他操作修改。请刷新页面并重新编辑。"
+        : error instanceof HostingEnvironmentUpdateError && error.mutationMayHaveApplied
+        ? "环境变量可能已保存，但结果无法确认。请重新读取配置后再操作。"
+        : "环境变量输入无效。";
+    },
+    onSettled: () => { envSaveInFlight = false; },
   }));
 
   function saveEnvVars() {
-    saveEnvMutation.mutate();
+    if (envSaveInFlight || !projectRef
+      || initializedDeployment !== `${projectRef}/${deployId}`) return;
+    const values = new Map<string, string>();
+    for (const pair of envPairs) {
+      if (!pair.key.trim()) {
+        actionMsg = "环境变量名称不能为空。";
+        return;
+      }
+      if (values.has(pair.key)) {
+        actionMsg = "环境变量名称重复。";
+        return;
+      }
+      values.set(pair.key, pair.value);
+    }
+    envSaveInFlight = true;
+    saveEnvMutation.mutate({ scope: tokenScope, values: Object.fromEntries(values), revision: envRevision });
   }
 
   const addDomainMutation = createMutation(() => ({
@@ -209,8 +257,7 @@
 
   const removeDomainMutation = createMutation(() => ({
     mutationFn: async (domain: string) => {
-      const response = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/domains/${domain}`, { method: "DELETE" });
-      await ensureMutationSucceeded(response, "删除域名失败");
+      await runHostingMutation(projectRef, deployId, { operation: "remove_domain", domain });
       return true;
     },
     onSuccess: () => {
@@ -227,31 +274,40 @@
   }
 
   const createTokenMutation = createMutation(() => ({
-    mutationFn: async () => {
-      const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newTokenName.trim() })
-      });
-      if (!res.ok) throw new Error("Token create failed");
-      return res.json();
+    retry: false,
+    mutationFn: async (input: { scope: TokenScope; name: string }): Promise<void> => {
+      const data = await createHostingToken(
+        input.scope.projectRef, input.scope.deploymentId, input.name, apiClient, new AbortController().signal,
+      );
+      if (input.scope === tokenScope) createdToken = { scope: input.scope, token: data.token };
     },
-    onSuccess: (data) => {
-      lastCreatedToken = data.token;
+    onSuccess: (_data, input) => {
+      queryClient.invalidateQueries({ queryKey: ["deployment_tokens", input.scope.projectRef, input.scope.deploymentId] });
+      if (input.scope !== tokenScope) return;
       newTokenName = "";
-      queryClient.invalidateQueries({ queryKey: ["deployment_tokens", projectRef, deployId] });
-    }
+    },
+    onError: (error: unknown, input) => {
+      if (error instanceof HostingTokenCreationError && error.mutationMayHaveApplied) {
+        queryClient.invalidateQueries({ queryKey: ["deployment_tokens", input.scope.projectRef, input.scope.deploymentId] });
+      }
+      if (input.scope !== tokenScope) return;
+      actionMsg = error instanceof HostingTokenCreationError && error.mutationMayHaveApplied
+        ? "令牌可能已创建，但结果无法确认。请检查令牌列表后再操作。"
+        : "无法创建令牌，请检查输入。";
+    },
+    onSettled: () => { tokenCreateInFlight = false; },
   }));
 
   function createToken() {
-    if (!newTokenName.trim()) return;
-    createTokenMutation.mutate();
+    if (!newTokenName.trim() || tokenCreateInFlight) return;
+    tokenCreateInFlight = true;
+    createdToken = null;
+    createTokenMutation.mutate({ scope: tokenScope, name: newTokenName.trim() });
   }
 
   const deleteTokenMutation = createMutation(() => ({
     mutationFn: async (tokenId: string) => {
-      const response = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/tokens/${tokenId}`, { method: "DELETE" });
-      await ensureMutationSucceeded(response, "删除访问令牌失败");
+      await runHostingMutation(projectRef, deployId, { operation: "delete_token", tokenId });
       return true;
     },
     onSuccess: () => {
@@ -265,6 +321,25 @@
 
   function deleteToken(tokenId: string) {
     deleteTokenMutation.mutate(tokenId);
+  }
+
+  async function copyCreatedToken() {
+    const captured = createdToken;
+    if (!captured || captured.scope !== tokenScope || tokenCopyInFlight) return;
+    tokenCopyInFlight = true;
+    try {
+      await navigator.clipboard.writeText(captured.token);
+      if (createdToken === captured && captured.scope === tokenScope) {
+        createdToken = null;
+        if (actionMsg === TOKEN_COPY_FAILURE_MESSAGE) actionMsg = null;
+      }
+    } catch {
+      if (createdToken === captured && captured.scope === tokenScope) {
+        actionMsg = TOKEN_COPY_FAILURE_MESSAGE;
+      }
+    } finally {
+      tokenCopyInFlight = false;
+    }
   }
 
   async function copyText(text: string) {
@@ -282,6 +357,8 @@
 <div class="space-y-4 max-w-3xl">
   {#if isLoading}
     <div class="flex items-center justify-center py-24"><Loader2 size={24} class="animate-spin text-brand opacity-50" /></div>
+  {:else if depQuery.isError}
+    <div class="p-8 text-center text-red-600">无法读取部署详情</div>
   {:else if !dep}
     <div class="p-8 text-center text-muted-foreground">部署不存在</div>
   {:else}
@@ -291,7 +368,7 @@
         <p class="text-xs text-muted-foreground">{dep.framework} · ID: {dep.id}</p>
       </div>
       {#if dep.deployment_url}
-        <a href={String(dep.deployment_url || "")} target="_blank" class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors"><ExternalLink size={12} /> 访问站点</a>
+        <a href={dep.deployment_url} target="_blank" rel="noopener noreferrer" class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors"><ExternalLink size={12} /> 访问站点</a>
       {/if}
     </div>
 
@@ -303,7 +380,7 @@
     <div class="rounded-xl border bg-card overflow-hidden">
       <div class="border-b px-5 py-3 bg-muted/20 flex items-center justify-between">
         <h3 class="text-sm font-semibold flex items-center gap-2"><GitBranch size={16} /> 构建与 Git 配置</h3>
-        <button onclick={saveBuildConfig} disabled={saveConfigMutation.isPending} class="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md bg-brand text-white hover:bg-brand/90 disabled:opacity-50">
+        <button onclick={saveBuildConfig} disabled={configSaveInFlight} class="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md bg-brand text-white hover:bg-brand/90 disabled:opacity-50">
           {#if saveConfigMutation.isPending}<Loader2 size={12} class="animate-spin" />{:else}<Save size={12} />{/if} 保存
         </button>
       </div>
@@ -341,7 +418,7 @@
         <h3 class="text-sm font-semibold flex items-center gap-2"><Key size={16} /> 环境变量</h3>
         <div class="flex gap-2">
           <button onclick={() => envPairs = [...envPairs, { key: '', value: '' }]} class="px-2 py-1 text-[10px] rounded border hover:bg-muted/50"><Plus size={10} class="inline" /> 添加</button>
-          <button onclick={saveEnvVars} disabled={saveEnvMutation.isPending} class="px-3 py-1 text-[10px] font-semibold rounded bg-brand text-white hover:bg-brand/90 disabled:opacity-50">
+          <button onclick={saveEnvVars} disabled={envSaveInFlight} class="px-3 py-1 text-[10px] font-semibold rounded bg-brand text-white hover:bg-brand/90 disabled:opacity-50">
             {#if saveEnvMutation.isPending}<Loader2 size={10} class="animate-spin inline" />{/if} 保存
           </button>
         </div>
@@ -365,7 +442,7 @@
         <h3 class="text-sm font-semibold flex items-center gap-2"><Globe size={16} /> 自定义域名</h3>
       </div>
       <div class="p-4">
-        {#each (dep.custom_domains || []) as string[] as domain (domain)}
+        {#each dep.custom_domains as domain (domain)}
           <div class="flex items-center justify-between py-1.5">
             <span class="text-xs font-mono">{domain}</span>
             <button onclick={() => removeDomain(domain)} class="text-red-500 text-[10px] hover:bg-red-500/10 rounded px-2 py-0.5">移除</button>
@@ -406,15 +483,21 @@
           <div class="rounded-lg bg-green-500/10 border border-green-500/20 p-3 text-xs text-green-700">
             <b>新令牌（仅显示一次）:</b>
             <code class="block mt-1 font-mono text-[10px] break-all">{lastCreatedToken}</code>
-            <button onclick={() => { copyText(lastCreatedToken || ''); lastCreatedToken = null; }} class="mt-1 text-brand text-[10px] font-semibold">复制并关闭</button>
+            <button onclick={copyCreatedToken} disabled={tokenCopyInFlight} class="mt-1 text-brand text-[10px] font-semibold disabled:opacity-50"><Copy size={10} class="inline" /> 复制并关闭</button>
           </div>
         {/if}
-        {#each tokens as token (String((token as Record<string, unknown>).id))}
-          <div class="flex items-center justify-between py-1.5">
-            <div><span class="text-xs font-medium">{(token as Record<string, unknown>).name}</span><span class="text-[10px] text-muted-foreground ml-2">创建于 {(token as Record<string, unknown>).created_at}</span></div>
-            <button onclick={() => deleteToken(String((token as Record<string, unknown>).id))} class="text-red-500 text-[10px]">删除</button>
-          </div>
-        {/each}
+        {#if tokensQuery.isPending}
+          <div class="py-2"><Loader2 size={16} class="animate-spin" /></div>
+        {:else if tokensQuery.isError}
+          <p class="text-xs text-red-600">无法读取部署令牌</p>
+        {:else}
+          {#each tokens as token (token.id)}
+            <div class="flex items-center justify-between py-1.5">
+              <div><span class="text-xs font-medium">{token.name}</span><span class="text-[10px] text-muted-foreground ml-2">创建于 {token.created_at}</span></div>
+              <button onclick={() => deleteToken(token.id)} class="text-red-500 text-[10px]">删除</button>
+            </div>
+          {/each}
+        {/if}
         <div class="flex items-center gap-2 mt-2">
           <input bind:value={newTokenName} placeholder="Token 名称 (如 github-actions)" class="flex-1 px-3 py-1.5 text-xs rounded border bg-muted/30" />
           <button onclick={createToken} disabled={createTokenMutation.isPending} class="px-3 py-1.5 text-xs font-semibold rounded bg-brand text-white disabled:opacity-50">创建</button>
@@ -427,7 +510,13 @@
       <div class="border-b px-5 py-3 bg-muted/20">
         <h3 class="text-sm font-semibold flex items-center gap-2"><Terminal size={16} /> 构建日志</h3>
       </div>
-      <pre class="p-4 text-[10px] font-mono text-muted-foreground whitespace-pre-wrap max-h-64 overflow-auto bg-black/5">{logs || '暂无构建日志'}</pre>
+      {#if logsQuery.isPending}
+        <div class="p-4"><Loader2 size={16} class="animate-spin" /></div>
+      {:else if logsQuery.isError}
+        <p class="p-4 text-xs text-red-600">无法读取构建日志</p>
+      {:else}
+        <pre class="p-4 text-[10px] font-mono text-muted-foreground whitespace-pre-wrap max-h-64 overflow-auto bg-black/5">{logs || '暂无构建日志'}</pre>
+      {/if}
     </div>
   {/if}
 </div>

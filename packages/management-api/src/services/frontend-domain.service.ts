@@ -11,6 +11,9 @@ import type {
 import type { FrontendDeploymentLock } from "./frontend-deployment-lock";
 import { decryptSecretIfNeeded, encryptSecretIfNeeded } from "../utils/secret-crypto";
 import { timingSafeEqual } from "node:crypto";
+import { parseFrontendTokenMetadata } from "../utils/frontend-token-record";
+import { requireFrontendEnvironmentRevision } from "../utils/frontend-environment-revision";
+import { assertSafeGitBranch, assertSafeGitUrl, sameGitTarget } from "../utils/frontend-git";
 import {
   MASKED_FRONTEND_VALUE,
   normalizeFrontendCustomDomain,
@@ -27,7 +30,16 @@ interface FrontendDomainServiceOptions {
   ) => Promise<void>;
 }
 
-function newDeployToken(name: string): DeployToken {
+export interface FrontendTokenCreateReceipt {
+  operation: "create_token";
+  project_ref: string;
+  deployment_id: string;
+  name: string;
+  id: string;
+  token: string;
+}
+
+function newDeployToken(name: string): DeployToken & { token: string } {
   return {
     id: crypto.randomUUID().substring(0, 8),
     name,
@@ -48,19 +60,8 @@ function safeTokenEqual(expected: string, actual: string): boolean {
     && timingSafeEqual(expectedBytes, actualBytes);
 }
 
-function sameGitTarget(left: string, right: string): boolean {
-  try {
-    const a = new URL(left);
-    const b = new URL(right);
-    if (b.username || b.password) return false;
-    a.username = "";
-    a.password = "";
-    b.username = "";
-    b.password = "";
-    return a.toString() === b.toString();
-  } catch {
-    return left === right;
-  }
+function isTokenId(value: unknown): value is string {
+  return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 }
 
 export class FrontendDomainService {
@@ -70,20 +71,38 @@ export class FrontendDomainService {
     projectRef: string,
     deploymentId: string,
     envVars: Record<string, string>,
+    mode: "merge" | "replace" = "merge",
+    expectedRevision?: string,
   ): Promise<FrontendDeployment | null> {
+    if (!isTokenId(projectRef) || !isTokenId(deploymentId) || envVars === undefined
+      || (mode !== "merge" && mode !== "replace")
+      || mode === "replace" && expectedRevision === undefined) {
+      throw new Error("Invalid frontend environment update");
+    }
+    const captured = normalizeFrontendEnvVars(envVars);
     return this.options.deploymentLock(projectRef, deploymentId, async () => {
       const deployment = await this.options.getDeployment(projectRef, deploymentId);
       if (!deployment) return null;
-      const nextEnvVars = { ...deployment.env_vars };
-      for (const [name, value] of Object.entries(envVars)) {
-        if (value === MASKED_FRONTEND_VALUE && Object.prototype.hasOwnProperty.call(nextEnvVars, name)) {
-          continue;
+      if (deployment.project_ref !== projectRef || deployment.id !== deploymentId) {
+        throw new Error("Invalid deployment identity");
+      }
+      if (expectedRevision !== undefined) requireFrontendEnvironmentRevision(deployment, expectedRevision);
+      const existing = new Map(Object.entries(deployment.env_vars));
+      const nextEnvVars = mode === "merge" ? new Map(existing) : new Map<string, string>();
+      for (const [name, value] of Object.entries(captured)) {
+        if (value === MASKED_FRONTEND_VALUE) {
+          const previous = existing.get(name);
+          if (previous !== undefined) {
+            nextEnvVars.set(name, previous);
+            continue;
+          }
+          if (mode === "replace") throw new Error("Cannot preserve a missing environment variable");
         }
-        nextEnvVars[name] = value;
+        nextEnvVars.set(name, value);
       }
       const updated = {
         ...deployment,
-        env_vars: normalizeFrontendEnvVars(nextEnvVars),
+        env_vars: normalizeFrontendEnvVars(Object.fromEntries(nextEnvVars)),
         updated_at: new Date().toISOString(),
       };
       await this.options.writeDeployment(updated);
@@ -139,12 +158,29 @@ export class FrontendDomainService {
     projectRef: string,
     deploymentId: string,
     name: string,
-  ): Promise<{ id: string; token: string } | null> {
+  ): Promise<FrontendTokenCreateReceipt | null> {
+    const safeId = /^[A-Za-z0-9_-]{1,128}$/;
+    if (typeof projectRef !== "string" || !safeId.test(projectRef)
+      || typeof deploymentId !== "string" || !safeId.test(deploymentId)
+      || typeof name !== "string" || !name.trim() || name.length > 1024
+      || /[\u0000-\u001f\u007f]/.test(name)) {
+      throw new Error("Invalid deployment token creation input");
+    }
     return this.options.deploymentLock(projectRef, deploymentId, async () => {
       const deployment = await this.options.getDeployment(projectRef, deploymentId);
       if (!deployment) return null;
+      if (deployment.project_ref !== projectRef || deployment.id !== deploymentId) {
+        throw new Error("Invalid deployment identity");
+      }
+      parseFrontendTokenMetadata(deployment, projectRef, deploymentId);
+      if ((deployment.deploy_tokens?.length ?? 0) >= 5000) {
+        throw new Error("Deployment token count exceeds the limit");
+      }
       const deployToken = newDeployToken(name);
-      const token = readToken(deployToken)!;
+      if (deployment.deploy_tokens?.some(existing => existing.id === deployToken.id)) {
+        throw new Error("Deployment token ID collision");
+      }
+      const token = deployToken.token;
       await this.options.writeDeployment({
         ...deployment,
         deploy_tokens: [
@@ -158,7 +194,10 @@ export class FrontendDomainService {
         ],
         updated_at: new Date().toISOString(),
       });
-      return { id: deployToken.id, token };
+      return {
+        operation: "create_token", project_ref: projectRef, deployment_id: deploymentId,
+        name: deployToken.name, id: deployToken.id, token,
+      };
     });
   }
 
@@ -177,14 +216,14 @@ export class FrontendDomainService {
     projectRef: string,
     deploymentId: string,
   ): Promise<{ id: string; name: string; created_at: string; last_used_at?: string }[]> {
-    const deployment = await this.options.getDeployment(projectRef, deploymentId);
-    if (!deployment) return [];
-    return (deployment.deploy_tokens || []).map((deployToken) => ({
-      id: deployToken.id,
-      name: deployToken.name,
-      created_at: deployToken.created_at,
-      last_used_at: deployToken.last_used_at,
-    }));
+    const safeId = /^[A-Za-z0-9_-]{1,128}$/;
+    if (typeof projectRef !== "string" || !safeId.test(projectRef)
+      || typeof deploymentId !== "string" || !safeId.test(deploymentId)) {
+      throw new Error("Invalid deployment identity");
+    }
+    const deployment: unknown = await this.options.getDeployment(projectRef, deploymentId);
+    if (deployment === null) return [];
+    return parseFrontendTokenMetadata(deployment, projectRef, deploymentId);
   }
 
   async deleteDeployToken(
@@ -192,9 +231,14 @@ export class FrontendDomainService {
     deploymentId: string,
     tokenId: string,
   ): Promise<boolean> {
+    if (!isTokenId(projectRef) || !isTokenId(deploymentId) || !isTokenId(tokenId)) {
+      throw new Error("Invalid deployment token deletion input");
+    }
     return this.options.deploymentLock(projectRef, deploymentId, async () => {
       const deployment = await this.options.getDeployment(projectRef, deploymentId);
       if (!deployment) return false;
+      parseFrontendTokenMetadata(deployment, projectRef, deploymentId);
+      if (!deployment.deploy_tokens?.some((token) => token.id === tokenId)) return false;
       await this.options.writeDeployment({
         ...deployment,
         deploy_tokens: (deployment.deploy_tokens || []).filter((deployToken) => deployToken.id !== tokenId),
@@ -209,9 +253,16 @@ export class FrontendDomainService {
     deploymentId: string,
     token: string,
   ): Promise<boolean> {
+    if (!isTokenId(projectRef) || !isTokenId(deploymentId)) {
+      throw new Error("Invalid deployment token verification input");
+    }
+    if (typeof token !== "string" || token.length === 0 || token.length > 4096 || /[\u0000-\u0020\u007f]/.test(token)) {
+      return false;
+    }
     return this.options.deploymentLock(projectRef, deploymentId, async () => {
       const deployment = await this.options.getDeployment(projectRef, deploymentId);
       if (!deployment) return false;
+      parseFrontendTokenMetadata(deployment, projectRef, deploymentId);
       const foundToken = (deployment.deploy_tokens || []).find((candidate) => {
         const candidateToken = readToken(candidate);
         return candidateToken ? safeTokenEqual(candidateToken, token) : false;
@@ -235,9 +286,25 @@ export class FrontendDomainService {
     gitUrl: string,
     branch: string,
   ): Promise<FrontendDeployment | null> {
+    if (!isTokenId(projectRef) || !isTokenId(deploymentId)
+      || typeof gitUrl !== "string" || gitUrl.length > 16_384
+      || (gitUrl !== "" && !gitUrl.trim()) || /[\u0000-\u001f\u007f]/.test(gitUrl)
+      || typeof branch !== "string" || !branch.trim() || branch.length > 16_384
+      || /[\u0000-\u001f\u007f]/.test(branch)) {
+      throw new Error("Invalid frontend Git configuration");
+    }
+    try {
+      if (gitUrl !== "") assertSafeGitUrl(gitUrl);
+      assertSafeGitBranch(branch);
+    } catch {
+      throw new Error("Invalid frontend Git configuration");
+    }
     return this.options.deploymentLock(projectRef, deploymentId, async () => {
       const deployment = await this.options.getDeployment(projectRef, deploymentId);
       if (!deployment) return null;
+      if (deployment.project_ref !== projectRef || deployment.id !== deploymentId) {
+        throw new Error("Invalid deployment identity");
+      }
       const updated = {
         ...deployment,
         git_url: deployment.git_url && sameGitTarget(deployment.git_url, gitUrl)

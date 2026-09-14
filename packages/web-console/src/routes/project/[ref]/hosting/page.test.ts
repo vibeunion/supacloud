@@ -30,16 +30,16 @@ describe("hosting deployment entrypoints", () => {
     expect(pageSource).toContain('/v1/webhooks/{github|gitlab|gitee|gitcode}');
   });
 
-  test("reports backend deployment deletion failures without showing false success", () => {
-    expect(pageSource).toContain('import { apiClient, ensureMutationSucceeded } from "$lib/api";');
-    expect(pageSource).toContain('await ensureMutationSucceeded(response, "删除部署失败");');
-    expect(pageSource).toContain("onError: (error: unknown) => {");
-    expect(pageSource).toContain("error instanceof Error ? error.message : String(error)");
+  test("routes list mutations through the verified hosting receipt helper", () => {
+    expect(pageSource).toContain('import { runHostingMutation } from "$lib/hosting-mutations";');
+    expect(pageSource).toContain('await runHostingMutation(current.ref, id, { operation }, { signal: current.controller.signal });');
+    expect(pageSource).toContain('void mutateDeployment(id, "delete_deployment");');
+    expect(pageSource).not.toContain("as Deployment[]");
   });
 
   test("checks domain and token deletion responses in deployment settings", () => {
-    expect(settingsSource).toContain('await ensureMutationSucceeded(response, "删除域名失败");');
-    expect(settingsSource).toContain('await ensureMutationSucceeded(response, "删除访问令牌失败");');
+    expect(settingsSource).toContain('await runHostingMutation(projectRef, deployId, { operation: "remove_domain", domain });');
+    expect(settingsSource).toContain('await runHostingMutation(projectRef, deployId, { operation: "delete_token", tokenId });');
     expect(settingsSource.match(/onError: \(error: unknown\)/g) ?? []).toHaveLength(2);
   });
 });

@@ -12,11 +12,15 @@
  *   SSR: build -> start process -> readiness -> switch proxy route
  */
 import { $ } from "bun";
-import { chmod, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from "node:zlib";
 import { logger } from "../utils/logger";
+import { assertSafeGitBranch, assertSafeGitUrl, sameGitTarget } from "../utils/frontend-git";
+import { parseFrontendBuildConfiguration } from "../utils/frontend-deployment-record";
+import { requireFrontendConfigurationRevision } from "../utils/frontend-configuration-revision";
+import { FrontendDeploymentReadError, parseFrontendDeployment, parseFrontendDeploymentConfig, parseFrontendDeploymentUpdate, readFrontendDeploymentFile, serializeFrontendDeployment } from "../utils/frontend-deployment-record";
 import { config } from "../config";
 import { AppError } from "../utils/errors";
 import { normalizeBaseDomain } from "../utils/project-routing";
@@ -70,7 +74,6 @@ const SAFE_GIT_ENV_KEYS = [
   "BITBUCKET_TOKEN",
 ] as const;
 const RESTRICTED_BUILD_SHELL_PATTERN = /[\r\n;&|`<>]|\$\(|\$\{/;
-const SAFE_GIT_SSH_PATTERN = /^git@[A-Za-z0-9.-]+:[A-Za-z0-9._~/-]+\.git$/;
 const STATIC_PRECOMPRESS_MIN_BYTES = 1024;
 const STATIC_PRECOMPRESS_EXTENSIONS = new Set([
   ".css",
@@ -206,35 +209,6 @@ async function resolveContainedOutputDir(sourceDir: string, outputDir: string): 
   return canonicalCandidate;
 }
 
-function assertSafeGitUrl(gitUrl: string): void {
-  if (SAFE_GIT_SSH_PATTERN.test(gitUrl)) return;
-  let parsed: URL;
-  try {
-    parsed = new URL(gitUrl);
-  } catch {
-    throw new Error("Invalid git URL");
-  }
-  if (!["https:", "http:", "ssh:"].includes(parsed.protocol)) {
-    throw new Error("Unsupported git URL protocol");
-  }
-  const host = parsed.hostname.toLowerCase();
-  if (!host || host === "localhost" || host === "127.0.0.1" || host === "::1") {
-    throw new Error("Git URL host is not allowed");
-  }
-  if (/^(169\.254\.169\.254|metadata\.google\.internal)$/i.test(host)) {
-    throw new Error("Git URL metadata service targets are not allowed");
-  }
-  if (process.env.SUPACLOUD_RESTRICT_GIT_PRIVATE_NETWORKS === "true" && /^(10\.|127\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(host)) {
-    throw new Error("Git URL private network targets are not allowed");
-  }
-}
-
-function assertSafeGitBranch(branch: string): void {
-  if (!/^[A-Za-z0-9._/-]{1,128}$/.test(branch) || branch.includes("..") || branch.startsWith("-")) {
-    throw new Error("Invalid git branch");
-  }
-}
-
 function defaultFrontendDomain(projectRef: string, deploymentId: string): string {
   const baseDomain = normalizeBaseDomain(config.baseDomain).replace(/^\.+|\.+$/g, "");
   if (!baseDomain) {
@@ -331,29 +305,20 @@ export class FrontendService {
   // ── CRUD ──────────────────────────────────────────────────────────
 
   async listDeployments(projectRef: string): Promise<FrontendDeployment[]> {
+    if (typeof projectRef !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(projectRef)) {
+      throw new FrontendDeploymentReadError();
+    }
     const deploymentsDir = this.joinPath(this.baseDir, projectRef);
     const deployments: FrontendDeployment[] = [];
-
-    try {
-      const dirs = await readdir(deploymentsDir, { withFileTypes: true });
-      
-      for (const entry of dirs) {
-        if (!entry.isDirectory()) continue;
-        const name = entry.name;
-        const configPath = this.joinPath(deploymentsDir, name, "deployment.json");
-        try {
-          const cfg = await Bun.file(configPath).json();
-          deployments.push(cfg);
-        } catch (err: unknown) {
-          logger.warn("[FrontendService] Failed to read deployment config", { error: err });
-          continue;
-        }
-      }
-    } catch (err: unknown) {
-      logger.warn("[FrontendService] Failed to list deployment directories", { error: err });
-      return [];
+    const dirs = await readdir(deploymentsDir, { withFileTypes: true }).catch((error: unknown) => {
+      if (error instanceof Error && "code" in error && error.code === "ENOENT") return [];
+      throw new FrontendDeploymentReadError();
+    });
+    for (const entry of dirs) {
+      if (!entry.isDirectory()) continue;
+      const deployment = await this.getDeployment(projectRef, entry.name);
+      if (deployment !== null) deployments.push(deployment);
     }
-
     return deployments;
   }
 
@@ -415,16 +380,22 @@ export class FrontendService {
   }
 
   async getDeployment(projectRef: string, deploymentId: string): Promise<FrontendDeployment | null> {
+    const safeId = /^[A-Za-z0-9_-]{1,128}$/;
+    if (typeof projectRef !== "string" || !safeId.test(projectRef)
+      || typeof deploymentId !== "string" || !safeId.test(deploymentId)) throw new FrontendDeploymentReadError();
     const configPath = this.joinPath(this.baseDir, projectRef, deploymentId, "deployment.json");
+    let value: unknown;
     try {
-      return await Bun.file(configPath).json();
+      value = await readFrontendDeploymentFile(configPath);
     } catch (err: unknown) {
-      logger.warn("[FrontendService] Failed to read deployment JSON", { error: err });
-      return null;
+      if (err instanceof Error && "code" in err && err.code === "ENOENT") return null;
+      throw new FrontendDeploymentReadError();
     }
+    return parseFrontendDeployment(value, projectRef, deploymentId);
   }
 
   private async writeDeployment(deployment: FrontendDeployment): Promise<void> {
+    const serialized = serializeFrontendDeployment(deployment);
     const deploymentPath = this.joinPath(
       this.baseDir,
       deployment.project_ref,
@@ -432,13 +403,19 @@ export class FrontendService {
       "deployment.json",
     );
     const temporaryPath = `${deploymentPath}.tmp-${crypto.randomUUID()}`;
+    let ownsTemporary = false;
     try {
-      await Bun.write(temporaryPath, JSON.stringify(deployment, null, 2));
-      await chmod(temporaryPath, 0o600);
+      const temporary = await open(temporaryPath, "wx", 0o600);
+      ownsTemporary = true;
+      try {
+        await temporary.writeFile(serialized, "utf8");
+      } finally {
+        await temporary.close();
+      }
       await rename(temporaryPath, deploymentPath);
     } finally {
       try {
-        await rm(temporaryPath, { force: true });
+        if (ownsTemporary) await rm(temporaryPath, { force: true });
       } catch (error: unknown) {
         logger.warn("[FrontendService] Failed to clean up deployment metadata temporary file", {
           path: temporaryPath,
@@ -479,7 +456,11 @@ export class FrontendService {
     };
   }
 
-  async createDeployment(projectRef: string, deploymentConfig: FrontendDeploymentConfig): Promise<FrontendDeployment> {
+  async createDeployment(projectRef: string, configuration: FrontendDeploymentConfig): Promise<FrontendDeployment> {
+    if (typeof projectRef !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(projectRef)) {
+      throw new Error("Invalid frontend project identity");
+    }
+    const deploymentConfig = parseFrontendDeploymentConfig(configuration);
     const deploymentId = this.generateId();
     const defaults = FRAMEWORK_DEFAULTS[deploymentConfig.framework];
     const domain = deploymentConfig.domain
@@ -507,29 +488,60 @@ export class FrontendService {
       deployment_url: `https://${domain}`,
     };
 
+    serializeFrontendDeployment(deployment);
     const deploymentDir = this.joinPath(this.baseDir, projectRef, deploymentId);
     await $`mkdir -p ${deploymentDir}/source ${deploymentDir}/build`.quiet();
 
-    await Bun.write(
-      this.joinPath(deploymentDir, "deployment.json"),
-      JSON.stringify(deployment, null, 2)
-    );
+    await this.writeDeployment(deployment);
 
     // Do NOT route traffic yet — route is configured after build + readiness
     return deployment;
   }
 
-  async updateDeployment(
-    projectRef: string,
-    deploymentId: string,
-    updates: Partial<FrontendDeploymentConfig>
+  async saveBuildConfiguration(
+    projectRef: string, deploymentId: string, configuration: unknown, gitUrl: unknown, branch: unknown,
+    expectedRevision: string,
   ): Promise<FrontendDeployment | null> {
+    const safeId = /^[A-Za-z0-9_-]{1,128}$/;
+    if (typeof projectRef !== "string" || !safeId.test(projectRef)
+      || typeof deploymentId !== "string" || !safeId.test(deploymentId)) {
+      throw new Error("Invalid deployment identity");
+    }
+    const captured = parseFrontendBuildConfiguration(configuration);
+    if (gitUrl !== "") assertSafeGitUrl(gitUrl);
+    assertSafeGitBranch(branch);
+    const normalized = {
+      ...captured,
+      output_dir: normalizeFrontendOutputDir(captured.output_dir),
+      health_check_path: normalizeHealthCheckPath(captured.health_check_path),
+    };
     return this.deploymentLock(projectRef, deploymentId, async () => {
       const deployment = await this.getDeployment(projectRef, deploymentId);
       if (!deployment) return null;
-      const definedUpdates = Object.fromEntries(
-        Object.entries(updates).filter(([, value]) => value !== undefined),
-      ) as Partial<FrontendDeploymentConfig>;
+      if (deployment.project_ref !== projectRef || deployment.id !== deploymentId) {
+        throw new Error("Invalid deployment identity");
+      }
+      requireFrontendConfigurationRevision(deployment, expectedRevision);
+      const updated = {
+        ...deployment, ...normalized,
+        git_url: deployment.git_url && sameGitTarget(deployment.git_url, gitUrl) ? deployment.git_url : gitUrl,
+        git_branch: branch,
+        updated_at: new Date().toISOString(),
+      };
+      await this.writeDeployment(updated);
+      return updated;
+    });
+  }
+
+  async updateDeployment(
+    projectRef: string,
+    deploymentId: string,
+    updates: unknown
+  ): Promise<FrontendDeployment | null> {
+    const definedUpdates = parseFrontendDeploymentUpdate(updates);
+    return this.deploymentLock(projectRef, deploymentId, async () => {
+      const deployment = await this.getDeployment(projectRef, deploymentId);
+      if (!deployment) return null;
       const normalizedUpdates: Partial<FrontendDeploymentConfig> = { ...definedUpdates };
       if (definedUpdates.domain !== undefined) {
         normalizedUpdates.domain = normalizeFrontendCustomDomain(definedUpdates.domain);
@@ -560,6 +572,25 @@ export class FrontendService {
         }
         await this.assertLegacyMutationAllowed(projectRef, deploymentId);
       }
+      await this.writeDeployment(updated);
+      return updated;
+    });
+  }
+
+  private async updateBuildState(
+    projectRef: string,
+    deploymentId: string,
+    update: Pick<FrontendDeployment, "status"> & Partial<Pick<FrontendDeployment, "build_log">>,
+  ): Promise<FrontendDeployment | null> {
+    const status = update.status;
+    const buildLog = update.build_log;
+    return this.deploymentLock(projectRef, deploymentId, async () => {
+      const deployment = await this.getDeployment(projectRef, deploymentId);
+      if (!deployment) return null;
+      const updated: FrontendDeployment = {
+        ...deployment, status, updated_at: new Date().toISOString(),
+        ...(buildLog === undefined ? {} : { build_log: buildLog }),
+      };
       await this.writeDeployment(updated);
       return updated;
     });
@@ -660,10 +691,10 @@ export class FrontendService {
     } catch (error: unknown) {
       const errorMsg = error instanceof Error ? error.message : String(error);
       const safeError = maskFrontendBuildLog(errorMsg, Object.values(deployment.env_vars));
-      await this.updateDeployment(projectRef, deploymentId, {
+      await this.updateBuildState(projectRef, deploymentId, {
         status: "failed",
         build_log: `Error copying source: ${safeError}`,
-      } as Partial<FrontendDeployment>);
+      });
 
       return {
         success: false,
@@ -711,14 +742,14 @@ export class FrontendService {
       assertSafeGitUrl(gitUrl);
       assertSafeGitBranch(branch);
       await this.domainService.setGitConfig(projectRef, deploymentId, gitUrl, branch);
-      await this.updateDeployment(projectRef, deploymentId, {
+      await this.updateBuildState(projectRef, deploymentId, {
         status: "building",
-      } as Partial<FrontendDeployment>);
+      });
 
       await $`rm -rf ${sourceDir}`.quiet();
 
       buildLog += `$ git clone --branch ${branch} ${gitUrlForLog(gitUrl)}\n`;
-      const cloneResult = await $`git clone --branch ${branch} --depth 1 ${gitUrl} ${sourceDir}`
+      const cloneResult = await $`git clone --branch ${branch} --depth 1 -- ${gitUrl} ${sourceDir}`
         .env({
           ...buildGitEnvironment(),
           GIT_TERMINAL_PROMPT: "0",
@@ -744,10 +775,10 @@ export class FrontendService {
         buildLog,
         [...Object.values(deployment.env_vars), gitUrl],
       );
-      await this.updateDeployment(projectRef, deploymentId, {
+      await this.updateBuildState(projectRef, deploymentId, {
         status: "failed",
         build_log: safeBuildLog,
-      } as Partial<FrontendDeployment>);
+      });
 
       return {
         success: false,
@@ -778,7 +809,7 @@ export class FrontendService {
 
     let buildLog = "";
 
-    await this.updateDeployment(projectRef, deploymentId, { status: "building" } as Partial<FrontendDeployment>);
+    await this.updateBuildState(projectRef, deploymentId, { status: "building" });
 
     try {
       const buildUser = process.getuid?.() === 0
@@ -831,10 +862,10 @@ export class FrontendService {
         buildLog,
         Object.values(deployment.env_vars),
       );
-      await this.updateDeployment(projectRef, deploymentId, {
+      await this.updateBuildState(projectRef, deploymentId, {
         status: "failed",
         build_log: safeBuildLog,
-      } as Partial<FrontendDeployment>);
+      });
 
       return {
         success: false,
@@ -1095,9 +1126,9 @@ export class FrontendService {
       projectRef: deployment.project_ref,
       deploymentId: deployment.id,
       hosts: [deployment.domain, ...deployment.custom_domains],
-      port: activeBuildDir ? undefined : isSSR ? port : undefined,
-      root: activeBuildDir || (isSSR ? undefined : buildDir),
-      mode: activeBuildDir || !isSSR ? "static" : "proxy",
+      ...(activeBuildDir || !isSSR
+        ? { mode: "static", root: activeBuildDir || buildDir }
+        : { mode: "proxy", port }),
     });
   }
 

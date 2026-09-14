@@ -147,7 +147,7 @@ class MemoryMutations {
       completedAt: FIXED_TIME,
     };
     stored.state = this.corruptNextSuccessJournal?.(successfulState) ?? successfulState;
-    this.corruptNextSuccessJournal = undefined;
+    delete this.corruptNextSuccessJournal;
     stored.leaseToken = null;
     return "updated";
   }
@@ -354,12 +354,12 @@ async function fixture(
   const sha = createHash("sha256").update(archive).digest("hex");
   const service = new FrontendReleaseService({
     baseDir: root,
-    gateway: gateway as never,
+    gateway,
     mutations,
     deploymentLock: async (_projectRef, _deploymentId, operation) => operation(),
     now: () => new Date(FIXED_TIME),
-    interruption: options.interruption,
-    beforePublish: options.beforePublish,
+    ...(options.interruption === undefined ? {} : { interruption: options.interruption }),
+    ...(options.beforePublish === undefined ? {} : { beforePublish: options.beforePublish }),
   });
   return {
     root,
@@ -521,12 +521,14 @@ describe.skipIf(process.platform !== "linux")("FrontendReleaseService", () => {
       { limit: 2 },
     );
     expect(firstPage.releases.map(({ release_id }) => release_id)).toEqual(expectedIds.slice(0, 2));
-    expect(firstPage.next_cursor).toBe(expectedIds[1]);
+    const expectedCursor = expectedIds[1];
+    if (expectedCursor === undefined || firstPage.next_cursor === null) throw new Error("Missing release cursor");
+    expect(firstPage.next_cursor).toBe(expectedCursor);
 
     const secondPage = await prepared.service.listReleases(
       PROJECT_REF,
       DEPLOYMENT_ID,
-      { cursor: firstPage.next_cursor!, limit: 2 },
+      { cursor: firstPage.next_cursor, limit: 2 },
     );
     expect(secondPage.releases.map(({ release_id }) => release_id)).toEqual(expectedIds.slice(2));
     expect(secondPage.next_cursor).toBeNull();
@@ -889,6 +891,7 @@ describe.skipIf(process.platform !== "linux")("FrontendReleaseService", () => {
     const staged = await upload.finish(prepared.sha256);
     const stagingRoot = join(prepared.root, PROJECT_REF, DEPLOYMENT_ID, "releases", ".staging");
     const [sessionName] = await readdir(stagingRoot);
+    if (!sessionName) throw new Error("Missing staged archive session");
     const archivePath = join(stagingRoot, sessionName, "archive.zip");
     await rename(archivePath, `${archivePath}.moved`);
     await writeFile(archivePath, "attacker-controlled");
