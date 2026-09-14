@@ -27,7 +27,7 @@ export async function withNativePostgres(
     "--publish", "127.0.0.1::5432",
     "--env", "POSTGRES_USER=fixture", "--env", "POSTGRES_DB=fixture",
     "--env", "POSTGRES_PASSWORD=synthetic", "--env", "POSTGRES_HOST_AUTH_METHOD=scram-sha-256",
-    options.image ?? "supacloud-graphql-test:pg18",
+    options.image ?? "postgres:18.4-bookworm",
     ...(options.logicalReplication ? ["postgres", "-c", "wal_level=logical"] : []));
   try {
     await waitForPostgresFixture(async () => {
