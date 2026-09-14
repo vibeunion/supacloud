@@ -94,7 +94,7 @@
       };
       scope = owner;
     } catch {
-      errorMessage = "OAuth 配置暂时不可用。";
+      errorMessage = $t("OAuthServer.unavailable");
       loading = false;
       return;
     }
@@ -106,7 +106,7 @@
       loading = false;
       if (value.enabled) await loadClients(owner);
     } catch {
-      if (current(owner)) errorMessage = "OAuth 配置暂时不可用。";
+      if (current(owner)) errorMessage = $t("OAuthServer.unavailable");
     } finally {
       if (current(owner)) loading = false;
     }
@@ -135,14 +135,14 @@
       result = value.status;
       allowDynamicRegistration = value.status.allow_dynamic_registration;
       partialWarning = value.outcome === "dependent_refresh_failed"
-        ? "配置已保存，但依赖项目刷新失败或状态未知。尚未完成全部应用。" : "";
+        ? $t("OAuthServer.partial_apply_warning") : "";
       if (partialWarning) toast.warning(partialWarning);
-      else toast.success("OAuth 配置已保存。运行状态尚未验证。");
+      else toast.success($t("OAuthServer.configuration_saved"));
       await loadClients(owner);
     } catch {
       if (current(owner)) {
         result = null;
-        errorMessage = "迁移结果未确认，配置可能已保存。请刷新核对，不要直接重复提交。";
+        errorMessage = $t("OAuthServer.migration_uncertain");
       }
     } finally {
       if (current(owner)) saving = false;
@@ -151,10 +151,10 @@
   function clientFailure(error: unknown) {
     mutationUncertain = error instanceof SupaCloudOAuthClientError && error.mutationMayHaveApplied;
     mutationNotice = mutationUncertain
-      ? "操作结果未确认，服务端可能已执行。请先刷新核对，不要直接重复提交。"
+      ? $t("OAuthServer.mutation_uncertain")
       : error instanceof SupaCloudOAuthClientError && error.code === "INVALID_OAUTH_CLIENT_INPUT"
-        ? "客户端参数无效，请检查名称和回调地址。"
-        : "客户端操作失败，请核对后重试。";
+        ? $t("OAuthServer.invalid_client_input")
+        : $t("OAuthServer.client_delete_failed");
     toast.error(mutationNotice);
   }
   async function createClient() {
@@ -163,7 +163,7 @@
     const form = { name: clientName, redirects: redirectUrisText, type: clientType, method: authMethod };
     const redirectUris = form.redirects.split("\n").map(value => value.trim()).filter(Boolean);
     if (!form.name.trim() || !redirectUris.length) {
-      mutationNotice = "请填写客户端名称和回调地址。";
+      mutationNotice = $t("OAuthServer.client_required");
       return;
     }
     const body: SupaCloudOAuthClientCreate = form.type === "public"
@@ -232,15 +232,15 @@
   <div class="flex items-start justify-between gap-4">
     <div>
       <h1 class="text-2xl font-bold">{$t("OAuthServer.title")}</h1>
-      <p class="mt-1 text-sm text-muted-foreground">OAuth 配置与客户端</p>
+      <p class="mt-1 text-sm text-muted-foreground">{$t("OAuthServer.subtitle")}</p>
     </div>
     <button class="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm disabled:opacity-50"
-      onclick={refresh} disabled={loading || saving || !!secret} aria-label="刷新 OAuth">
+      onclick={refresh} disabled={loading || saving || !!secret} aria-label={$t("OAuthServer.refresh_oauth")}>
       <RefreshCw size={14} class={loading ? "animate-spin" : ""} />{$t("Common.refresh")}
     </button>
   </div>
   {#if loading || (!statusData && !errorMessage)}
-    <div class="flex min-h-[240px] items-center justify-center" role="status" aria-label="加载 OAuth">
+    <div class="flex min-h-[240px] items-center justify-center" role="status" aria-label={$t("OAuthServer.loading_oauth")}>
       <Loader2 size={28} class="animate-spin" />
     </div>
   {:else if errorMessage}
@@ -248,28 +248,28 @@
   {:else if statusData}
     <section class="border-y py-4">
       <div class="flex items-center gap-2">
-        <ShieldCheck size={18} /><h2 class="font-semibold">配置状态</h2>
-        <span class="ml-auto text-sm">{statusData.enabled ? "已配置启用" : "未配置启用"}</span>
+        <ShieldCheck size={18} /><h2 class="font-semibold">{$t("OAuthServer.service_status")}</h2>
+        <span class="ml-auto text-sm">{statusData.enabled ? $t("OAuthServer.configured_enabled") : $t("OAuthServer.not_configured_enabled")}</span>
       </div>
       <dl class="mt-4 grid gap-3 sm:grid-cols-3">
         <div><dt class="text-xs text-muted-foreground">{$t("OAuthServer.signing_algorithm")}</dt>
-          <dd class="mt-1 font-mono text-sm">{statusData.signing_alg === "not_migrated" ? "未配置" : statusData.signing_alg}</dd></div>
-        <div><dt class="text-xs text-muted-foreground">ID Token 签名</dt>
-          <dd class="mt-1 text-sm">{statusData.oidc_id_token_ready ? "已配置" : "未配置"}</dd></div>
+          <dd class="mt-1 font-mono text-sm">{statusData.signing_alg === "not_migrated" ? $t("OAuthServer.not_configured") : statusData.signing_alg}</dd></div>
+        <div><dt class="text-xs text-muted-foreground">{$t("OAuthServer.id_token_signing")}</dt>
+          <dd class="mt-1 text-sm">{statusData.oidc_id_token_ready ? $t("OAuthServer.configured_enabled") : $t("OAuthServer.not_configured")}</dd></div>
         <div><dt class="text-xs text-muted-foreground">{$t("OAuthServer.dynamic_registration")}</dt>
           <dd class="mt-1 text-sm">{statusData.allow_dynamic_registration ? $t("OAuthServer.allowed") : $t("OAuthServer.disabled")}</dd></div>
       </dl>
-      <p class="mt-4 text-sm text-amber-800">运行状态未验证，配置状态不代表 GoTrue、JWKS 或 KMS 已生效。</p>
+      <p class="mt-4 text-sm text-amber-800">{$t("OAuthServer.runtime_unverified")}</p>
       {#if partialWarning}
         <div class="mt-3 flex items-start gap-2 text-sm text-amber-800" role="alert"><AlertTriangle size={16} class="shrink-0" />{partialWarning}</div>
       {/if}
       <div class="mt-4 flex flex-wrap items-center gap-4">
         <label class="flex items-center gap-2 text-sm">
-          <input type="checkbox" bind:checked={allowDynamicRegistration} disabled={saving || !!secret} aria-label="允许动态注册" />
+          <input type="checkbox" bind:checked={allowDynamicRegistration} disabled={saving || !!secret} aria-label={$t("OAuthServer.allow_dynamic_registration")} />
           {$t("OAuthServer.allow_dynamic_registration")}
         </label>
         <button class="inline-flex items-center gap-2 rounded-md bg-brand px-4 py-2 text-sm text-brand-foreground disabled:opacity-50"
-          onclick={migrate} disabled={saving || !!secret} aria-label="应用 OAuth 配置">
+          onclick={migrate} disabled={saving || !!secret} aria-label={$t("OAuthServer.apply_configuration")}>
           {#if saving}<Loader2 size={14} class="animate-spin" />{:else}<KeyRound size={14} />{/if}
           {statusData.enabled ? $t("OAuthServer.reapply_configuration") : $t("OAuthServer.enable")}
         </button>
@@ -284,79 +284,79 @@
           <div class="grid items-start gap-2 py-3 text-sm md:grid-cols-[160px_minmax(0,1fr)_36px]">
             <span>{row.label}</span><code class="break-all text-xs">{row.value}</code>
             <button class="flex h-9 w-9 items-center justify-center rounded-md border disabled:opacity-50"
-              title={`复制 ${row.label}`} disabled={copying} onclick={() => copyText(row.value)}><Copy size={14} /></button>
+              title={$t("OAuthServer.copy_endpoint", { values: { label: row.label } })} disabled={copying} onclick={() => copyText(row.value)}><Copy size={14} /></button>
           </div>
         {/each}
       </div>
     </section>
 
     <section>
-      <h2 class="py-3 font-semibold">OAuth Clients</h2>
+      <h2 class="py-3 font-semibold">{$t("OAuthServer.clients_heading")}</h2>
       {#if mutationNotice}<p class="mb-3 text-sm text-destructive" role="alert">{mutationNotice}</p>{/if}
       {#if secret}
-        <div class="mb-4 border-l-2 border-amber-600 p-3" role="status" aria-label="新客户端密钥">
+        <div class="mb-4 border-l-2 border-amber-600 p-3" role="status" aria-label={$t("OAuthServer.new_client_secret")}>
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <h3 class="font-semibold">客户端密钥，仅本次返回</h3>
+              <h3 class="font-semibold">{$t("OAuthServer.client_secret_one_time")}</h3>
               <p class="mt-1 break-all font-mono text-xs">{secret.clientId}</p>
               <code class="mt-2 block break-all text-sm">{secret.value}</code>
             </div>
-            <button class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border" title="关闭密钥" onclick={dismissSecret}><X size={16} /></button>
+            <button class="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border" title={$t("OAuthServer.close_secret")} onclick={dismissSecret}><X size={16} /></button>
           </div>
           <button class="mt-3 flex h-9 w-9 items-center justify-center rounded-md border disabled:opacity-50"
-            title="复制客户端密钥" disabled={copying} onclick={() => { if (secret) void copyText(secret.value); }}><Copy size={14} /></button>
+            title={$t("OAuthServer.copy_client_secret")} disabled={copying} onclick={() => { if (secret) void copyText(secret.value); }}><Copy size={14} /></button>
         </div>
       {/if}
       {#if !statusData.enabled}
-        <p class="py-4 text-sm text-muted-foreground">OAuth 尚未配置启用。</p>
+        <p class="py-4 text-sm text-muted-foreground">{$t("OAuthServer.not_enabled")}</p>
       {:else}
         <div class="grid gap-6 xl:grid-cols-[minmax(240px,0.8fr)_minmax(0,1.2fr)]">
           <fieldset class="min-w-0 space-y-3" disabled={!canManageClients}>
-            <legend class="mb-3 text-sm font-medium">创建客户端</legend>
+            <legend class="mb-3 text-sm font-medium">{$t("OAuthServer.create_client")}</legend>
             <input class="w-full rounded-md border bg-background px-3 py-2 text-sm" bind:value={clientName}
-              aria-label="客户端名称" placeholder={$t("OAuthServer.client_name_placeholder")} />
+              aria-label={$t("OAuthServer.client_name_label")} placeholder={$t("OAuthServer.client_name_placeholder")} />
             <textarea class="min-h-24 w-full rounded-md border bg-background px-3 py-2 text-sm" bind:value={redirectUrisText}
-              aria-label="回调地址" placeholder={$t("OAuthServer.redirect_uri_placeholder")}></textarea>
+              aria-label={$t("OAuthServer.redirect_uri_label")} placeholder={$t("OAuthServer.redirect_uri_placeholder")}></textarea>
             <div class="grid gap-2">
-              <select class="min-w-0 rounded-md border bg-background px-3 py-2 text-sm" bind:value={clientType} aria-label="客户端类型">
+              <select class="min-w-0 rounded-md border bg-background px-3 py-2 text-sm" bind:value={clientType} aria-label={$t("OAuthServer.client_type_label")}>
                 <option value="confidential">confidential</option><option value="public">public</option>
               </select>
               {#if clientType === "public"}
-                <select class="min-w-0 rounded-md border bg-background px-3 py-2 text-sm" disabled aria-label="客户端认证方式">
+                <select class="min-w-0 rounded-md border bg-background px-3 py-2 text-sm" disabled aria-label={$t("OAuthServer.client_auth_method_label")}>
                   <option value="none">none</option>
                 </select>
               {:else}
                 <select class="min-w-0 rounded-md border bg-background px-3 py-2 text-sm" bind:value={authMethod}
-                  disabled={!canManageClients} aria-label="客户端认证方式">
+                  disabled={!canManageClients} aria-label={$t("OAuthServer.client_auth_method_label")}>
                   <option value="client_secret_basic">client_secret_basic</option><option value="client_secret_post">client_secret_post</option>
                 </select>
               {/if}
             </div>
             <button class="inline-flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm disabled:opacity-50"
-              onclick={createClient} disabled={!canManageClients} aria-label="创建客户端">
+              onclick={createClient} disabled={!canManageClients} aria-label={$t("OAuthServer.create_client")}>
               <Plus size={14} />{$t("OAuthServer.create_client")}
             </button>
           </fieldset>
           <div class="min-w-0 border-y">
             {#if clientState === "loading"}
-              <div class="flex items-center gap-2 py-6 text-sm" role="status" aria-label="加载客户端"><Loader2 size={16} class="animate-spin" />正在读取客户端</div>
+              <div class="flex items-center gap-2 py-6 text-sm" role="status" aria-label={$t("OAuthServer.clients_loading")}><Loader2 size={16} class="animate-spin" />{$t("OAuthServer.clients_loading")}</div>
             {:else if clientState === "error"}
               <div class="py-4 text-sm" role="alert">
-                <p>客户端列表暂时不可用。</p>
+                <p>{$t("OAuthServer.clients_unavailable")}</p>
                 <button class="mt-2 inline-flex items-center gap-2 rounded-md border px-3 py-2 disabled:opacity-50"
-                  onclick={retryClients} disabled={saving} aria-label="重试客户端"><RefreshCw size={14} />重试</button>
+                  onclick={retryClients} disabled={saving} aria-label={$t("OAuthServer.retry_clients")}><RefreshCw size={14} />{$t("Common.retry")}</button>
               </div>
             {:else if clientState === "ready" && clients.length === 0}
-              <p class="py-6 text-sm text-muted-foreground">{$t("OAuthServer.no_clients")}</p>
+              <p class="py-6 text-sm text-muted-foreground">{$t("OAuthServer.no_clients_short")}</p>
             {:else if clientState === "ready"}
               <div class="divide-y">
                 {#each clients as client (client.client_id)}
                   <div class="grid gap-3 py-4 md:grid-cols-[minmax(0,1fr)_36px]">
                     <div class="min-w-0">
-                      <div class="break-words font-medium">{client.client_name || "未命名客户端"}</div>
+                      <div class="break-words font-medium">{client.client_name || $t("OAuthServer.unnamed_client")}</div>
                       <div class="mt-1 break-all font-mono text-xs text-muted-foreground">{client.client_id}</div>
                       <div class="mt-2 flex flex-wrap gap-2 text-xs"><span>{client.client_type}</span>
-                        <span>{client.token_endpoint_auth_method ?? "认证方式未返回"}</span></div>
+                        <span>{client.token_endpoint_auth_method ?? $t("OAuthServer.auth_method_missing")}</span></div>
                       {#each client.redirect_uris ?? [] as uri (uri)}
                         <div class="mt-2 break-all font-mono text-xs text-muted-foreground">{uri}</div>
                       {/each}
@@ -366,7 +366,7 @@
                   </div>
                 {/each}
               </div>
-            {:else}<p class="py-4 text-sm text-muted-foreground">客户端状态尚未确认。</p>{/if}
+            {:else}<p class="py-4 text-sm text-muted-foreground">{$t("OAuthServer.client_state_unconfirmed")}</p>{/if}
           </div>
         </div>
       {/if}
