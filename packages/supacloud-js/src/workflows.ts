@@ -1,5 +1,23 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { invokeServiceRoleRpc } from "./service-role-rpc.js";
+import { invokeWorkflowMutation, invokeWorkflowRead } from "./workflow-rpc.js";
+import { captureWorkflowClaimRequest, decodeWorkflowClaim, SupaCloudWorkflowClaimError } from "./workflow-claim.js";
+import { captureWorkflowRunId, decodeWorkflowRun, SupaCloudWorkflowReadError } from "./workflow-run.js";
+import { captureWorkflowStart, decodeWorkflowStart, SupaCloudWorkflowStartError } from "./workflow-start.js";
+import { captureWorkflowCancel, decodeWorkflowCancel, SupaCloudWorkflowCancelError } from "./workflow-cancel.js";
+import { captureWorkflowComplete, decodeWorkflowComplete, SupaCloudWorkflowCompleteError } from "./workflow-complete.js";
+import { captureWorkflowFail, decodeWorkflowFail, SupaCloudWorkflowFailError } from "./workflow-fail.js";
+import { captureWorkflowAdvance, decodeWorkflowAdvance, SupaCloudWorkflowAdvanceError } from "./workflow-advance.js";
+import { captureWorkflowRetry, decodeWorkflowRetry, SupaCloudWorkflowRetryError } from "./workflow-retry.js";
+import { captureWorkflowEvents, decodeWorkflowEvents, SupaCloudWorkflowEventsError } from "./workflow-events.js";
+export { SupaCloudWorkflowClaimError, SupaCloudWorkflowClaimInputError } from "./workflow-claim.js";
+export { SupaCloudWorkflowReadError } from "./workflow-run.js";
+export { SupaCloudWorkflowStartError } from "./workflow-start.js";
+export { SupaCloudWorkflowCancelError } from "./workflow-cancel.js";
+export { SupaCloudWorkflowCompleteError } from "./workflow-complete.js";
+export { SupaCloudWorkflowFailError } from "./workflow-fail.js";
+export { SupaCloudWorkflowAdvanceError } from "./workflow-advance.js";
+export { SupaCloudWorkflowRetryError } from "./workflow-retry.js";
+export { SupaCloudWorkflowEventsError } from "./workflow-events.js";
 
 export type SupaCloudWorkflowRunStatus =
   | "queued"
@@ -151,48 +169,78 @@ export interface SupaCloudWorkflowEvent {
 export class SupaCloudWorkflowsClient<TClient extends SupabaseClient = SupabaseClient> {
   constructor(private readonly supabase: TClient) {}
 
-  start(request: SupaCloudWorkflowStartRequest): Promise<SupaCloudWorkflowRun> {
-    return invokeServiceRoleRpc(this.supabase, "supacloud_workflow_start", request);
+  async start(request: SupaCloudWorkflowStartRequest): Promise<SupaCloudWorkflowRun> {
+    const captured = captureWorkflowStart(request);
+    const result = await invokeWorkflowMutation(
+      this.supabase, "supacloud_workflow_start", captured, () => new SupaCloudWorkflowStartError(true),
+    );
+    return decodeWorkflowStart(result, captured);
   }
 
-  claim(request: SupaCloudWorkflowClaimRequest): Promise<SupaCloudWorkflowClaimResult> {
-    return invokeServiceRoleRpc(this.supabase, "supacloud_workflow_claim", request);
+  async claim(request: SupaCloudWorkflowClaimRequest): Promise<SupaCloudWorkflowClaimResult> {
+    const captured = captureWorkflowClaimRequest(request);
+    const result = await invokeWorkflowMutation(
+      this.supabase, "supacloud_workflow_claim", captured, () => new SupaCloudWorkflowClaimError(),
+    );
+    return decodeWorkflowClaim(result, captured.workerId);
   }
 
-  advance(request: SupaCloudWorkflowAdvanceRequest): Promise<SupaCloudWorkflowRun> {
-    return invokeServiceRoleRpc(this.supabase, "supacloud_workflow_advance", request);
+  async advance(request: SupaCloudWorkflowAdvanceRequest): Promise<SupaCloudWorkflowRun> {
+    const captured = captureWorkflowAdvance(request);
+    const result = await invokeWorkflowMutation(
+      this.supabase, "supacloud_workflow_advance", captured, () => new SupaCloudWorkflowAdvanceError(true),
+    );
+    return decodeWorkflowAdvance(result, captured);
   }
 
-  complete(request: SupaCloudWorkflowCompleteRequest): Promise<SupaCloudWorkflowRun> {
-    return invokeServiceRoleRpc(this.supabase, "supacloud_workflow_complete", request);
+  async complete(request: SupaCloudWorkflowCompleteRequest): Promise<SupaCloudWorkflowRun> {
+    const captured = captureWorkflowComplete(request);
+    const result = await invokeWorkflowMutation(
+      this.supabase, "supacloud_workflow_complete", captured, () => new SupaCloudWorkflowCompleteError(true),
+    );
+    return decodeWorkflowComplete(result, captured);
   }
 
-  retry(request: SupaCloudWorkflowRetryRequest): Promise<SupaCloudWorkflowRun> {
-    return invokeServiceRoleRpc(this.supabase, "supacloud_workflow_retry", request);
+  async retry(request: SupaCloudWorkflowRetryRequest): Promise<SupaCloudWorkflowRun> {
+    const captured = captureWorkflowRetry(request);
+    const result = await invokeWorkflowMutation(
+      this.supabase, "supacloud_workflow_retry", captured, () => new SupaCloudWorkflowRetryError(true),
+    );
+    return decodeWorkflowRetry(result, captured);
   }
 
-  fail(request: SupaCloudWorkflowFailRequest): Promise<SupaCloudWorkflowRun> {
-    return invokeServiceRoleRpc(this.supabase, "supacloud_workflow_fail", request);
+  async fail(request: SupaCloudWorkflowFailRequest): Promise<SupaCloudWorkflowRun> {
+    const captured = captureWorkflowFail(request);
+    const result = await invokeWorkflowMutation(
+      this.supabase, "supacloud_workflow_fail", captured, () => new SupaCloudWorkflowFailError(true),
+    );
+    return decodeWorkflowFail(result, captured);
   }
 
-  cancel(runId: string, reason: string): Promise<SupaCloudWorkflowRun> {
-    return invokeServiceRoleRpc(this.supabase, "supacloud_workflow_cancel", {
-      runId,
-      reason,
-    });
+  async cancel(runId: string, reason: string): Promise<SupaCloudWorkflowRun> {
+    const captured = captureWorkflowCancel(runId, reason);
+    const result = await invokeWorkflowMutation(
+      this.supabase, "supacloud_workflow_cancel", captured, () => new SupaCloudWorkflowCancelError(true),
+    );
+    return decodeWorkflowCancel(result, captured);
   }
 
-  get(runId: string): Promise<SupaCloudWorkflowRun | null> {
-    return invokeServiceRoleRpc(this.supabase, "supacloud_workflow_get", { runId });
+  async get(runId: string): Promise<SupaCloudWorkflowRun | null> {
+    const captured = captureWorkflowRunId(runId);
+    const result = await invokeWorkflowRead(
+      this.supabase, "supacloud_workflow_get", { runId: captured }, () => new SupaCloudWorkflowReadError(),
+    );
+    return decodeWorkflowRun(result, captured);
   }
 
-  events(
+  async events(
     runId: string,
     options: { afterEventId?: string; limit?: number } = {},
   ): Promise<SupaCloudWorkflowEvent[]> {
-    return invokeServiceRoleRpc(this.supabase, "supacloud_workflow_events", {
-      runId,
-      ...options,
-    });
+    const captured = captureWorkflowEvents(runId, options);
+    const result = await invokeWorkflowRead(
+      this.supabase, "supacloud_workflow_events", captured, () => new SupaCloudWorkflowEventsError(),
+    );
+    return decodeWorkflowEvents(result, captured);
   }
 }

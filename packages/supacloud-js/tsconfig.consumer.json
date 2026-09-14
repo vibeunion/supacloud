@@ -3,17 +3,12 @@
     "target": "ES2022",
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "paths": {
-      "*": ["./*"],
-      "@supabase/supabase-js": ["./test/supabase-js-stub.d.ts"],
-      "@supacloud/js": ["./dist/index.d.ts"]
-    },
+    "types": ["node"],
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true
   },
   "include": [
-    "test/consumer-node-next.ts",
-    "test/supabase-js-stub.d.ts"
+    "test/consumer-node-next.ts"
   ]
 }

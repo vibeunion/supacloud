@@ -1,13 +1,13 @@
 import type { SupaCloudCommandsClient } from "../../../supacloud-js/src/commands";
 
 interface QueueMessage {
-  msg_id: number
+  msg_id: string
   payload: Record<string, unknown>
   status?: string
 }
 
 interface QueueMutationResult {
-  msg_id: number
+  msg_id: string
   status: 'archived' | 'deleted' | 'released'
   success: boolean
 }

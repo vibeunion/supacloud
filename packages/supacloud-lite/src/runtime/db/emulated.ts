@@ -903,7 +903,12 @@ BEGIN
        OR (retry_receipt ->> 'delaySeconds')::integer IS DISTINCT FROM p_delay_seconds THEN
       RAISE EXCEPTION 'SUPACLOUD_WORKFLOW_IDEMPOTENCY_CONFLICT' USING ERRCODE = '23505';
     END IF;
-    RETURN supacloud_workflows.snapshot(current_step.run_id, true);
+    retry_receipt := retry_receipt || jsonb_build_object(
+      'stepId', current_step.id,
+      'attempt', p_attempt
+    );
+    RETURN supacloud_workflows.snapshot(current_step.run_id, true)
+      || jsonb_build_object('retryReceipt', retry_receipt);
   END IF;
   IF normalized_worker_id IS NULL
      OR p_message_id IS NULL
@@ -931,19 +936,22 @@ BEGIN
     IF NOT FOUND THEN
       RAISE EXCEPTION 'SUPACLOUD_WORKFLOW_RUN_NOT_ACTIVE' USING ERRCODE = '55000';
     END IF;
+    retry_receipt := jsonb_build_object(
+      'operation', 'retry',
+      'stepId', current_step.id,
+      'messageId', p_message_id::text,
+      'attempt', p_attempt,
+      'workerId', normalized_worker_id,
+      'errorMessage', normalized_error,
+      'delaySeconds', p_delay_seconds
+    );
     INSERT INTO supacloud_workflows.events (
       run_id, step_id, event_type, attempt, details
     ) VALUES (
-      current_step.run_id, current_step.id, 'step_dead_lettered', p_attempt,
-      jsonb_build_object(
-        'operation', 'retry',
-        'messageId', p_message_id::text,
-        'workerId', normalized_worker_id,
-        'errorMessage', normalized_error,
-        'delaySeconds', p_delay_seconds
-      )
+      current_step.run_id, current_step.id, 'step_dead_lettered', p_attempt, retry_receipt
     );
-    RETURN supacloud_workflows.snapshot(current_step.run_id, false);
+    RETURN supacloud_workflows.snapshot(current_step.run_id, false)
+      || jsonb_build_object('retryReceipt', retry_receipt);
   END IF;
 
   SELECT EXISTS (
@@ -956,19 +964,22 @@ BEGIN
   SET status = 'queued', error_message = normalized_error,
       retry_delay_seconds = p_delay_seconds, updated_at = now()
   WHERE id = current_step.id;
+  retry_receipt := jsonb_build_object(
+    'operation', 'retry',
+    'stepId', current_step.id,
+    'messageId', p_message_id::text,
+    'attempt', p_attempt,
+    'workerId', normalized_worker_id,
+    'errorMessage', normalized_error,
+    'delaySeconds', p_delay_seconds
+  );
   INSERT INTO supacloud_workflows.events (
     run_id, step_id, event_type, attempt, details
   ) VALUES (
-    current_step.run_id, current_step.id, 'step_retried', p_attempt,
-    jsonb_build_object(
-      'operation', 'retry',
-      'messageId', p_message_id::text,
-      'workerId', normalized_worker_id,
-      'errorMessage', normalized_error,
-      'delaySeconds', p_delay_seconds
-    )
+    current_step.run_id, current_step.id, 'step_retried', p_attempt, retry_receipt
   );
-  RETURN supacloud_workflows.snapshot(current_step.run_id, false);
+  RETURN supacloud_workflows.snapshot(current_step.run_id, false)
+    || jsonb_build_object('retryReceipt', retry_receipt);
 END;
 $$;
 
