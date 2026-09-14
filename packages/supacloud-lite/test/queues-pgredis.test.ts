@@ -82,12 +82,12 @@ describe('Queues compatibility', () => {
 
       const sent = await queue.send({ sequence: 1 })
       const batch = await queue.sendBatch([{ sequence: 2 }, { sequence: 3 }, { sequence: 4 }])
-      expect(sent).toMatchObject({ msg_id: 1, queue_name: 'sdk_jobs', status: 'pending' })
-      expect(batch.map((message) => message.msg_id)).toEqual([2, 3, 4])
+      expect(sent).toMatchObject({ msg_id: '1', queue_name: 'sdk_jobs', status: 'pending' })
+      expect(batch.map((message) => message.msg_id)).toEqual(['2', '3', '4'])
 
       const received = await queue.receive({ visibilityTimeoutSec: 30 })
-      expect(received).toMatchObject({ msg_id: 1, payload: { sequence: 1 }, status: 'leased' })
-      expect(await queue.ack(received!.msg_id)).toMatchObject({ msg_id: 1, status: 'archived', success: true })
+      expect(received).toMatchObject({ msg_id: '1', payload: { sequence: 1 }, status: 'leased' })
+      expect(await queue.ack(received!.msg_id)).toMatchObject({ msg_id: '1', status: 'archived', success: true })
 
       const messages = await queue.read({ sleepSeconds: 30, n: 3 })
       expect(messages.map((message) => message.payload)).toEqual([
@@ -95,9 +95,9 @@ describe('Queues compatibility', () => {
         { sequence: 3 },
         { sequence: 4 },
       ])
-      expect(await queue.archive(messages[0]!.msg_id)).toMatchObject({ msg_id: 2, status: 'archived', success: true })
-      expect(await queue.delete(messages[1]!.msg_id)).toMatchObject({ msg_id: 3, status: 'deleted', success: true })
-      expect(await queue.delete(messages[2]!.msg_id)).toMatchObject({ msg_id: 4, status: 'deleted', success: true })
+      expect(await queue.archive(messages[0]!.msg_id)).toMatchObject({ msg_id: '2', status: 'archived', success: true })
+      expect(await queue.delete(messages[1]!.msg_id)).toMatchObject({ msg_id: '3', status: 'deleted', success: true })
+      expect(await queue.delete(messages[2]!.msg_id)).toMatchObject({ msg_id: '4', status: 'deleted', success: true })
       expect(await queue.receive()).toBeNull()
     } finally {
       await backend.close()

@@ -1,9 +1,35 @@
 import { decodeCommandStatus, type CommandLookup, type CommandStatus } from "@supacloud/contracts";
+import { SupaCloudApiError } from "./api-error.js";
+
+export class SupaCloudCommandReadError extends SupaCloudApiError {
+  readonly mutationMayHaveApplied = false;
+
+  constructor() {
+    super("Command read could not be validated", 0, {
+      code: "COMMAND_READ_INVALID", mutation_may_have_applied: false,
+    });
+    this.name = "SupaCloudCommandReadError";
+  }
+}
+
+export class SupaCloudCommandSubmitError extends SupaCloudApiError {
+  constructor(readonly mutationMayHaveApplied = true) {
+    super("Command submission could not be validated", 0, {
+      code: "COMMAND_SUBMIT_UNCONFIRMED", mutation_may_have_applied: mutationMayHaveApplied,
+    });
+    this.name = "SupaCloudCommandSubmitError";
+  }
+}
 
 /** Narrow, validated boundary compatible with the Supabase RPC client. */
 export interface CommandRpcClient {
-  rpc(functionName: string, args: { request: object }): PromiseLike<{ data: unknown; error: unknown }>;
+  rpc(functionName: string, args: { request: object }): PromiseLike<{
+    data: unknown;
+    error: unknown;
+    status?: number;
+  }>;
 }
+
 export interface SupaCloudCommandSubmitRequest {
   commandId: string;
   commandType: string;
@@ -27,7 +53,7 @@ export class SupaCloudCommandsClient<TClient extends CommandRpcClient = CommandR
   constructor(private readonly supabase: TClient) {}
 
   async submit(request: SupaCloudCommandSubmitRequest): Promise<SupaCloudCommandReceipt> {
-    const raw = await this.request("supacloud_command_submit", request);
+    const raw = await this.request("supacloud_command_submit", request, () => new SupaCloudCommandSubmitError());
     const status = decodeCommandStatus(raw);
     if (status.commandId !== request.commandId.toLowerCase()) throw new TypeError("Invalid command submission");
     return status;
@@ -35,7 +61,7 @@ export class SupaCloudCommandsClient<TClient extends CommandRpcClient = CommandR
 
   async get(lookup: string | CommandLookup): Promise<SupaCloudCommandReceipt | null> {
     const request: CommandLookup = typeof lookup === "string" ? { commandId: lookup } : { ...lookup };
-    const raw = await this.request("supacloud_command_get", request);
+    const raw = await this.request("supacloud_command_get", request, () => new SupaCloudCommandReadError());
     if (raw === null) return null;
     const status = decodeCommandStatus(raw);
     if ("commandId" in request) {
@@ -49,9 +75,20 @@ export class SupaCloudCommandsClient<TClient extends CommandRpcClient = CommandR
     return status;
   }
 
-  private async request(functionName: string, request: object): Promise<unknown> {
-    const result = await this.supabase.rpc(functionName, { request });
-    if (result.error) throw result.error;
+  private async request(functionName: string, request: object, failure: () => Error): Promise<unknown> {
+    let result: { data: unknown; error: unknown; status?: number };
+    try {
+      result = await this.supabase.rpc(functionName, { request });
+    } catch {
+      throw failure();
+    }
+    if (result.error) {
+      const error = result.error;
+      const code = error && typeof error === "object" && "code" in error && typeof error.code === "string"
+        ? error.code : null;
+      if (result.status === 0 || (result.status === undefined && !code)) throw failure();
+      throw error;
+    }
     return result.data;
   }
 }

@@ -14,7 +14,7 @@ declare const Bun: {
 
 describe("createSupaCloudOAuthFetch", () => {
   test("passes non-refresh requests through unchanged", async () => {
-    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    const calls: Array<{ input: RequestInfo | URL; init: RequestInit | undefined }> = [];
     const transport = createSupaCloudOAuthFetch({
       clientId: "client_1",
       fetch: async (input, init) => {
@@ -164,7 +164,7 @@ describe("createSupaCloudOAuthFetch", () => {
     const supabase = createClient("https://project.example.com", "anon-key", {
       auth: { autoRefreshToken: false, persistSession: false },
       global: {
-        fetch: createSupaCloudOAuthFetch({
+        fetch: Object.assign(createSupaCloudOAuthFetch({
           fetch: async (input, init) => {
             calls.push(input instanceof Request ? input : new Request(input, init));
             return Response.json({
@@ -175,7 +175,7 @@ describe("createSupaCloudOAuthFetch", () => {
               user: { id: "user_1", aud: "authenticated", role: "authenticated" },
             });
           },
-        }),
+        }), { preconnect: fetch.preconnect }),
       },
     });
 
@@ -211,7 +211,7 @@ describe("createSupaCloudOAuthFetch", () => {
     });
     const supabase = createClient("https://auth.example.com", "anon-key", {
       auth: { autoRefreshToken: false, persistSession: false },
-      global: { fetch: authFetch },
+      global: { fetch: Object.assign(authFetch, { preconnect: fetch.preconnect }) },
     });
 
     const { data, error } = await supabase.auth.refreshSession({ refresh_token: "refresh_1" });

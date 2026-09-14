@@ -2,70 +2,38 @@ import type {
   RealtimeChannel,
   SupabaseClient,
 } from "@supabase/supabase-js";
+import { FunctionsHttpError } from "@supabase/supabase-js";
 import { SupaCloudWorkflowsClient } from "./workflows.js";
 import { SupaCloudCommandsClient } from "./commands.js";
 import { SupaCloudArtifactsClient } from "./artifacts.js";
+import { SupaCloudApiError } from "./api-error.js";
+import { createBoundedRpcFetch, type FetchTransport } from "./bounded-rpc-fetch.js";
+import { SupaCloudOAuthClientsClient } from "./oauth-clients.js";
+import { SupaCloudOAuthServerClient } from "./oauth-server.js";
+import {
+  SupaCloudQueueError, queueJsonSnapshot, queueMessage,
+  queueMessageId, queueReadCount, queueRpcBoolean, queueRpcId, queueRpcIds, queueRpcMessages, queueSeconds,
+  type SupaCloudQueueJson, type SupaCloudQueueMessage, type SupaCloudQueueSendResult,
+  type SupaCloudQueueMutationResult,
+} from "./queue-rpc.js";
+export { SupaCloudApiError } from "./api-error.js";
+export {
+  SupaCloudQueueError, type SupaCloudQueueJson, type SupaCloudQueueMessage,
+  type SupaCloudQueueSendResult, type SupaCloudQueueMutationResult,
+} from "./queue-rpc.js";
+export * from "./oauth-clients.js";
+export * from "./oauth-server.js";
 
 export {
   createSupaCloudOAuthFetch,
   type SupaCloudOAuthFetchOptions,
 } from "./auth-fetch.js";
 export * from "./workflows.js";
+export { createSupaCloudWorkflowFetch, type SupaCloudWorkflowFetchOptions } from "./workflow-fetch.js";
+export { createSupaCloudCommandFetch, type SupaCloudCommandFetchOptions } from "./command-fetch.js";
+export { createSupaCloudArtifactFetch, type SupaCloudArtifactFetchOptions } from "./artifact-fetch.js";
 export * from "./commands.js";
 export * from "./artifacts.js";
-
-export const SUPACLOUD_JS_VERSION = "0.27.1";
-
-export type SupaCloudCapability = {
-  available: boolean;
-  source: string;
-  version: string | null;
-  reason_code: string | null;
-  authority_project_ref?: string;
-  managed_by_owner?: boolean;
-  [key: string]: unknown;
-};
-
-export type SupaCloudProjectCapabilities = {
-  project_ref: string;
-  auth_runtime: string;
-  schema_version: number;
-  platform_version?: string;
-  environment?: string;
-  storage_backend?: string;
-  capabilities: Record<string, SupaCloudCapability>;
-  [key: string]: unknown;
-};
-
-export type SupaCloudEnvironmentInfo = {
-  projectRef: string;
-  platformVersion: string;
-  environment: string;
-  schemaVersion: number;
-  authRuntime: string;
-  storageBackend?: string;
-  capabilities: Record<string, SupaCloudCapability>;
-  [key: string]: unknown;
-};
-
-export type SupaCloudStoragePlatformConstraints = {
-  max_upload_size_bytes: number;
-  max_upload_size_mb: number;
-  tus_max_size_bytes: number;
-  tus_chunk_max_size_bytes: number;
-  streaming_upload_supported: boolean;
-};
-
-export type SupaCloudStorageUploadConstraints = {
-  bucketId: string;
-  fileSizeLimit: number | null;
-  allowedMimeTypes: string[] | null;
-};
-
-export type SupaCloudUploadValidationResult = {
-  valid: boolean;
-  error?: string;
-};
 
 export type SupaCloudTaskStatus =
   | "pending"
@@ -105,6 +73,7 @@ export type SupaCloudTaskDecoder<TResult> = SupaCloudTaskResultDecoder<TResult>;
 
 export type SupaCloudTaskDetail<TResult = unknown> = {
   id: string;
+  project_ref: string;
   status: SupaCloudTaskStatus | string;
   function_slug?: string | null;
   function_version?: string | null;
@@ -152,7 +121,9 @@ export type SupaCloudTaskSubmitOptions = {
     | ReadableStream<Uint8Array>
     | Record<string, unknown>;
   headers?: Record<string, string>;
+  /** @deprecated Configure retry policy on the platform; this compatibility field is ignored. */
   retries?: number;
+  /** @deprecated Configure execution timeout on the platform; this compatibility field is ignored. */
   timeoutSec?: number;
   idempotencyKey?: string;
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -217,36 +188,6 @@ export type SupaCloudQueueListFilters = {
   limit?: number;
 };
 
-export type SupaCloudQueueMessage = {
-  id: string;
-  msg_id: number;
-  read_ct?: number;
-  enqueued_at?: string | null;
-  vt?: string | null;
-  message?: Record<string, unknown>;
-  payload: Record<string, unknown>;
-  status?: string;
-  queue_name?: string;
-  task_type?: string;
-  [key: string]: unknown;
-};
-
-export type SupaCloudQueueSendResult = {
-  id: string;
-  msg_id: number;
-  queue_name: string;
-  status: "pending";
-  payload: Record<string, unknown>;
-};
-
-export type SupaCloudQueueMutationResult = {
-  id: string;
-  msg_id: number;
-  queue_name: string;
-  status: "archived" | "deleted" | "released";
-  success: boolean;
-};
-
 export type SupaCloudQueueStats = {
   queue_name: string;
   queue_length: number;
@@ -278,87 +219,6 @@ export type SupaCloudQueueSettings = {
 
 export type SupaCloudQueueSettingsUpdate = Partial<SupaCloudQueueSettings>;
 
-export type SupaCloudSupAuthAdminMode = "sso" | "token" | "auto";
-
-export type SupaCloudSupAuthStorageBucket = {
-  id: string;
-  public?: boolean;
-  fileSizeLimit?: number;
-  allowedMimeTypes?: string[];
-};
-
-export type SupaCloudSupAuthProvisionOptions = {
-  authDomain?: string;
-  apiDomain?: string;
-  adminMode?: SupaCloudSupAuthAdminMode;
-  adminSsoClientId?: string;
-  runtimeUrl?: string;
-  supaOAuthUrl?: string;
-  storageBuckets?: SupaCloudSupAuthStorageBucket[];
-  metadata?: Record<string, unknown>;
-};
-
-export type SupaCloudSupAuthReconcileOptions = {
-  dryRun?: boolean;
-  force?: boolean;
-};
-
-export type SupaCloudSupAuthStepResult = {
-  step: string;
-  status: "pending" | "running" | "succeeded" | "failed" | "skipped" | string;
-  message?: string;
-  details?: Record<string, unknown>;
-};
-
-export type SupaCloudSupAuthProvisionResult = {
-  projectRef: string;
-  status: "pending" | "running" | "succeeded" | "failed" | string;
-  steps?: SupaCloudSupAuthStepResult[];
-  raw?: unknown;
-};
-
-export type SupaCloudSupAuthReconcileResult = {
-  projectRef: string;
-  changed: boolean;
-  dryRun?: boolean;
-  steps?: SupaCloudSupAuthStepResult[];
-  raw?: unknown;
-};
-
-export type SupaCloudSupAuthRollbackResult = {
-  projectRef: string;
-  status: "succeeded" | "failed" | string;
-  steps?: SupaCloudSupAuthStepResult[];
-  raw?: unknown;
-};
-
-export type SupaCloudSupAuthClientConfig = {
-  projectRef: string;
-  supabaseUrl: string;
-  anonKey?: string | null;
-  authUrl: string;
-  restUrl: string;
-  storageUrl: string;
-  realtimeUrl: string;
-  functionsUrl: string;
-  issuer?: string | null;
-  jwksUrl?: string | null;
-  metadata?: Record<string, unknown>;
-};
-
-export type SupaCloudSupAuthVerificationCheck = {
-  name: string;
-  status: "pass" | "fail" | "warn" | string;
-  message?: string;
-  details?: Record<string, unknown>;
-};
-
-export type SupaCloudSupAuthVerification = {
-  projectRef: string;
-  healthy: boolean;
-  checks: SupaCloudSupAuthVerificationCheck[];
-};
-
 export type SupaCloudTaskWaitOptions = {
   intervalMs?: number;
   signal?: AbortSignal;
@@ -370,7 +230,13 @@ export type SupaCloudTaskSubscribeState =
   | "polling"
   | "closed";
 
+export type SupaCloudTaskSubscription = {
+  readonly connectionState: SupaCloudTaskSubscribeState;
+  unsubscribe: () => void;
+};
+
 export type SupaCloudTaskSubscribeOptions<TResult = unknown> = {
+  realtime?: { schema: string; table: string };
   pollingIntervalMs?: number;
   realtimeTimeoutMs?: number;
   reconcileIntervalMs?: number;
@@ -381,11 +247,6 @@ export type SupaCloudTaskSubscribeOptions<TResult = unknown> = {
   ) => void;
   onError?: (error: unknown) => void;
   stopOnTerminal?: boolean;
-};
-
-export type SupaCloudTaskSubscription = {
-  readonly connectionState: SupaCloudTaskSubscribeState;
-  unsubscribe: () => void;
 };
 
 export type SupaCloudTaskReceipt<TResult = unknown> = {
@@ -408,80 +269,9 @@ export type SupaCloudClientOptions<TClient extends SupabaseClient = SupabaseClie
   pollingIntervalMs?: number;
 };
 
-export type SupaCloudOAuthServerStatus = {
-  project_ref: string;
-  organization_id?: string;
-  account_isolated: boolean;
-  enabled: boolean;
-  allow_dynamic_registration: boolean;
-  issuer: string;
-  authorization_path?: string;
-  discovery_url: string;
-  oauth_authorization_server_metadata_url?: string;
-  jwks_url: string;
-  authorization_endpoint: string;
-  token_endpoint: string;
-  userinfo_endpoint?: string;
-  registration_endpoint?: string;
-  signing_alg?: string;
-  oidc_id_token_ready?: boolean;
-  migration_status?: string;
-  warnings?: string[];
-};
-
-export type SupaCloudOAuthClientType = "public" | "confidential";
-export type SupaCloudOAuthClientAuthMethod =
-  | "none"
-  | "client_secret_basic"
-  | "client_secret_post";
-
-export type SupaCloudOAuthClient = {
-  client_id: string;
-  client_secret?: string;
-  client_type?: SupaCloudOAuthClientType | string;
-  redirect_uris?: string[];
-  token_endpoint_auth_method?: SupaCloudOAuthClientAuthMethod | string;
-  grant_types?: string[];
-  response_types?: string[];
-  client_name?: string;
-  client_uri?: string;
-  logo_uri?: string;
-  registration_type?: string;
-  created_at?: string;
-  updated_at?: string;
-  [key: string]: unknown;
-};
-
-export type SupaCloudOAuthClientList = {
-  clients?: SupaCloudOAuthClient[];
-  [key: string]: unknown;
-};
-
-export type SupaCloudOAuthClientCreate = {
-  redirect_uris: string[];
-  client_type?: SupaCloudOAuthClientType;
-  token_endpoint_auth_method?: SupaCloudOAuthClientAuthMethod;
-  grant_types?: string[];
-  client_name?: string;
-  client_uri?: string;
-  logo_uri?: string;
-};
-
-export type SupaCloudOAuthClientUpdate = Partial<Omit<SupaCloudOAuthClientCreate, "client_type">>;
-
-export type SupaCloudAuthorizeUrlOptions = {
-  clientId: string;
-  redirectUri: string;
-  scope?: string | string[];
-  state?: string;
-  codeChallenge?: string;
-  codeChallengeMethod?: "S256" | "plain";
-  nonce?: string;
-  responseType?: "code";
-  resource?: string;
-};
-
 export class SupaCloudTaskSubmitError extends Error {
+  readonly code = "TASK_SUBMIT_UNCONFIRMED";
+  readonly mutationMayHaveApplied = true;
   readonly responseBody: unknown;
 
   constructor(message: string, responseBody: unknown) {
@@ -491,43 +281,52 @@ export class SupaCloudTaskSubmitError extends Error {
   }
 }
 
-export class SupaCloudApiError extends Error {
-  readonly status: number;
-  readonly code: string | null;
-  readonly responseBody: unknown;
+export interface SupaCloudTaskFetchOptions {
+  functionUrls: readonly string[];
+  fetch?: FetchTransport;
+}
 
-  constructor(message: string, status: number, responseBody: unknown) {
-    super(message);
-    this.name = "SupaCloudApiError";
-    this.status = status;
-    this.responseBody = responseBody;
-    this.code = extractErrorCode(responseBody);
+const boundedTaskHttpFailures = new WeakSet<Response>();
+
+function matchesForeignTaskHttpError(error: unknown, response: Response): boolean {
+  try {
+    return error instanceof Error
+      && Object.getOwnPropertyDescriptor(error, "name")?.value === "FunctionsHttpError"
+      && Object.getOwnPropertyDescriptor(error, "context")?.value === response;
+  } catch {
+    return false;
   }
 }
 
-export type SupaCloudTaskDecodeOperation = "get" | "list" | "wait" | "cancel" | "retry" | "subscribe";
-
-/**
- * A caller-supplied result decoder failed. Decoder errors are sanitized so
- * application result values and decoder implementation details are not leaked.
- */
-export class SupaCloudTaskDecoderError extends SupaCloudApiError {
-  readonly code = "TASK_RESULT_INVALID" as const;
-  readonly mutationMayHaveApplied: boolean;
-
-  constructor(readonly operation: SupaCloudTaskDecodeOperation) {
-    const mutation = operation === "cancel" || operation === "retry";
-    super("Task result could not be decoded", 0, {
-      code: "TASK_RESULT_INVALID",
-      mutation_may_have_applied: mutation,
-    });
-    this.name = "SupaCloudTaskDecoderError";
-    this.mutationMayHaveApplied = mutation;
-  }
+export function createSupaCloudTaskFetch(options: SupaCloudTaskFetchOptions): FetchTransport {
+  const captured = queueJsonSnapshot(options.functionUrls);
+  if (!Array.isArray(captured) || captured.length === 0) throw new Error("Invalid task function URLs");
+  const urls = new Set(captured.map(value => {
+    if (typeof value !== "string" || value.trim() !== value || /[\u0000-\u001f\u007f]/.test(value)) {
+      throw new Error("Invalid task function URLs");
+    }
+    let url: URL;
+    try { url = new URL(value); } catch { throw new Error("Invalid task function URLs"); }
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+      throw new Error("Invalid task function URLs");
+    }
+    return url.origin + url.pathname;
+  }));
+  const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
+  const bounded = createBoundedRpcFetch(/./, () => new SupaCloudTaskSubmitError(
+    "Background task submission could not be confirmed", undefined,
+  ), fetchImpl);
+  return async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : input.toString());
+    if (!urls.has(url.origin + url.pathname)) return fetchImpl(input, init);
+    const response = await bounded(input, init);
+    if (response.status >= 400 && response.status < 500
+      && response.headers.get("x-relay-error") !== "true") {
+      boundedTaskHttpFailures.add(response);
+    }
+    return response;
+  };
 }
-
-/** Compatibility spelling for callers that use the shorter decode term. */
-export { SupaCloudTaskDecoderError as SupaCloudTaskDecodeError };
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 type ResponseDecoder<T> = (value: unknown) => T;
@@ -554,7 +353,7 @@ function waitForPollingInterval(
       settle();
     };
     const onAbort = () => finish(() => {
-      reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+      reject(signal ? signal.reason : new DOMException("Aborted", "AbortError"));
     });
     const timer = setTimeout(() => finish(resolve), intervalMs);
 
@@ -573,16 +372,42 @@ function toArray(value?: string | string[]): string[] | undefined {
 }
 
 function createQueryString(filters: SupaCloudTaskListFilters = {}): string {
+  let captured: Record<string, unknown>;
+  try {
+    captured = responseRecord(queueJsonSnapshot(filters), "task filters");
+  } catch {
+    throw new Error("Invalid task list filters");
+  }
+  if (Object.keys(captured).some(key => !["status", "taskType", "functionSlug", "dlq", "limit"].includes(key))) {
+    throw new Error("Invalid task list filters");
+  }
+  const text = (value: unknown, commaAllowed = false): string => {
+    if (typeof value !== "string" || !value || value.trim() !== value
+      || /[\u0000-\u001f\u007f]/.test(value) || (!commaAllowed && value.includes(","))) {
+      throw new Error("Invalid task list filters");
+    }
+    try { encodeURIComponent(value); } catch { throw new Error("Invalid task list filters"); }
+    return value;
+  };
+  const values = (value: unknown): string[] => {
+    const items: unknown[] = Array.isArray(value) ? value : [value];
+    if (items.length === 0) throw new Error("Invalid task list filters");
+    return items.map(item => text(item));
+  };
   const params = new URLSearchParams();
-
-  const statuses = toArray(filters.status);
-  const taskTypes = toArray(filters.taskType);
-
-  if (statuses?.length) params.set("status", statuses.join(","));
-  if (taskTypes?.length) params.set("task_type", taskTypes.join(","));
-  if (filters.functionSlug) params.set("function_slug", filters.functionSlug);
-  if (filters.dlq) params.set("dlq", "true");
-  if (filters.limit !== undefined) params.set("limit", String(filters.limit));
+  if (Object.hasOwn(captured, "status")) params.set("status", values(captured.status).join(","));
+  if (Object.hasOwn(captured, "taskType")) params.set("task_type", values(captured.taskType).join(","));
+  if (Object.hasOwn(captured, "functionSlug")) params.set("function_slug", text(captured.functionSlug, true));
+  if (Object.hasOwn(captured, "dlq")) {
+    if (typeof captured.dlq !== "boolean") throw new Error("Invalid task list filters");
+    if (captured.dlq) params.set("dlq", "true");
+  }
+  if (Object.hasOwn(captured, "limit")) {
+    if (typeof captured.limit !== "number" || !Number.isSafeInteger(captured.limit) || captured.limit < 1) {
+      throw new Error("Invalid task list filters");
+    }
+    params.set("limit", String(captured.limit));
+  }
 
   const query = params.toString();
   return query.length > 0 ? `?${query}` : "";
@@ -604,20 +429,7 @@ function createQueueQueryString(filters: SupaCloudQueueListFilters = {}): string
 function normalizeSecondsFromOptions(
   options: { sleepSeconds?: number; sleep_seconds?: number; delayMs?: number; visibilityTimeoutSec?: number } = {},
 ): number {
-  if (typeof options.sleepSeconds === "number") return Math.max(0, Math.floor(options.sleepSeconds));
-  if (typeof options.sleep_seconds === "number") return Math.max(0, Math.floor(options.sleep_seconds));
-  if (typeof options.visibilityTimeoutSec === "number") return Math.max(0, Math.floor(options.visibilityTimeoutSec));
-  if (typeof options.delayMs === "number") return Math.max(0, Math.floor(options.delayMs / 1000));
-  return 0;
-}
-
-function normalizeMessageId(value: unknown): number {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
-}
-
-function firstRpcValue(value: unknown): unknown {
-  return isUnknownArray(value) ? value[0] : value;
+  return queueSeconds(options);
 }
 
 function isUnknownArray(value: unknown): value is unknown[] {
@@ -662,34 +474,137 @@ function responseNumber(
   return value;
 }
 
-function responseBoolean(
-  record: Record<string, unknown>,
-  key: string,
-  label: string,
-): boolean {
-  const value = record[key];
-  if (typeof value !== "boolean") {
-    throw new Error(`Invalid ${label} response: ${key} is required`);
-  }
-  return value;
-}
-
 function decodeVoid(value: unknown): void {
   if (value !== undefined) throw new Error("Expected an empty response");
 }
 
+function taskText(value: unknown): string {
+  if (typeof value !== "string") throw new Error("Invalid task response: expected text");
+  return value;
+}
+
+function taskNumber(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) throw new Error("Invalid task response: expected number");
+  return value;
+}
+
+function taskNullable<T>(value: unknown, decode: (value: unknown) => T): T | null {
+  return value === null ? null : decode(value);
+}
+
+function taskArray<T>(value: unknown, decode: (value: unknown) => T): T[] {
+  if (!Array.isArray(value)) throw new Error("Invalid task response: expected array");
+  return value.map(decode);
+}
+
+function decodeTaskLog(value: unknown): SupaCloudTaskLogEntry {
+  const data = responseRecord(value, "task log");
+  if (data.stream !== "stdout" && data.stream !== "stderr") throw new Error("Invalid task log response: stream");
+  return {
+    timestamp: taskText(data.timestamp), stream: data.stream,
+    level: taskText(data.level), message: taskText(data.message),
+  };
+}
+
+function decodeTaskAttempt(value: unknown): SupaCloudTaskAttempt {
+  const data = responseRecord(value, "task attempt");
+  return {
+    attempt_no: taskNumber(data.attempt_no), status: taskText(data.status),
+    started_at: taskNullable(data.started_at, taskText), completed_at: taskNullable(data.completed_at, taskText),
+    duration_ms: taskNullable(data.duration_ms, taskNumber),
+    response_status: taskNullable(data.response_status, taskNumber),
+    error: taskNullable(data.error, taskText), logs: taskArray(data.logs, decodeTaskLog),
+  };
+}
+
 function decodeTaskDetail(value: unknown): SupaCloudTaskDetail {
   const record = responseRecord(value, "task");
+  for (const key of [
+    "function_slug", "function_version", "error", "error_message", "correlation_id",
+    "business_task_id", "updated_at", "created_at",
+  ]) {
+    if (Object.hasOwn(record, key)) taskNullable(record[key], taskText);
+  }
+  for (const key of ["attempt", "max_attempts", "progress"]) {
+    if (Object.hasOwn(record, key)) taskNullable(record[key], taskNumber);
+  }
+  if (Object.hasOwn(record, "payload")) responseRecord(record.payload, "task payload");
+  if (Object.hasOwn(record, "metadata") && record.metadata !== null) responseRecord(record.metadata, "task metadata");
   return {
     ...record,
     id: responseString(record, "id", "task"),
+    project_ref: responseString(record, "project_ref", "task"),
     status: responseString(record, "status", "task"),
+    ...(Object.hasOwn(record, "attempts") ? { attempts: taskArray(record.attempts, decodeTaskAttempt) } : {}),
+    ...(Object.hasOwn(record, "latest_logs") ? { latest_logs: taskArray(record.latest_logs, decodeTaskLog) } : {}),
   };
 }
 
 function decodeTaskDetails(value: unknown): SupaCloudTaskDetail[] {
   if (!Array.isArray(value)) throw new Error("Invalid task list response");
   return value.map(decodeTaskDetail);
+}
+
+export class SupaCloudTaskResponseError extends SupaCloudApiError {
+  readonly mutationMayHaveApplied: boolean;
+
+  constructor(operation: "get" | "cancel" | "retry") {
+    const mutation = operation !== "get";
+    super("Invalid task response: could not validate the requested task", 0, {
+      code: operation === "get" ? "TASK_READ_INVALID" : `TASK_${operation.toUpperCase()}_UNCONFIRMED`,
+      mutation_may_have_applied: mutation,
+    });
+    this.name = "SupaCloudTaskResponseError";
+    this.mutationMayHaveApplied = mutation;
+  }
+}
+
+export type SupaCloudTaskDecodeOperation = "get" | "list" | "wait" | "cancel" | "retry" | "subscribe";
+
+/**
+ * A caller-supplied result decoder failed. The original decoder error and
+ * response value are intentionally not retained because either may contain
+ * secrets or unbounded application data.
+ */
+export class SupaCloudTaskDecoderError extends SupaCloudApiError {
+  readonly code = "TASK_RESULT_INVALID" as const;
+  readonly mutationMayHaveApplied: boolean;
+
+  constructor(readonly operation: SupaCloudTaskDecodeOperation) {
+    const mutation = operation === "cancel" || operation === "retry";
+    super("Task result could not be decoded", 0, {
+      code: "TASK_RESULT_INVALID",
+      mutation_may_have_applied: mutation,
+    });
+    this.name = "SupaCloudTaskDecoderError";
+    this.mutationMayHaveApplied = mutation;
+  }
+}
+
+/** Compatibility spelling for callers that refer to decoding rather than decoding contracts. */
+export { SupaCloudTaskDecoderError as SupaCloudTaskDecodeError };
+
+export class SupaCloudTaskAuthenticationError extends SupaCloudApiError {
+  readonly mutationMayHaveApplied = false;
+
+  constructor(code: "TASK_AUTH_INVALID" | "TASK_AUTH_TIMEOUT" = "TASK_AUTH_INVALID") {
+    super("Task authentication could not be validated", 0, {
+      code, mutation_may_have_applied: false,
+    });
+    this.name = "SupaCloudTaskAuthenticationError";
+  }
+}
+
+function captureTaskId(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0 || value.trim() !== value
+    || value === "." || value === ".." || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new Error("Invalid task ID");
+  }
+  try { encodeURIComponent(value); } catch { throw new Error("Invalid task ID"); }
+  const candidate = value.startsWith("{") && value.endsWith("}") ? value.slice(1, -1) : value;
+  if (!/^[0-9a-f]{4}(?:-?[0-9a-f]{4}){7}$/i.test(candidate)) return value;
+  const hex = candidate.replaceAll("-", "").toLowerCase();
+  return [hex.slice(0, 8), hex.slice(8, 12), hex.slice(12, 16), hex.slice(16, 20), hex.slice(20)].join("-");
 }
 
 function captureTaskDecoder<TResult>(value: unknown): SupaCloudTaskResultDecoder<TResult> {
@@ -704,7 +619,8 @@ function decodeTaskResult<TResult>(
 ): SupaCloudTaskDetail<TResult> {
   if (!Object.hasOwn(task, "result")) return task as SupaCloudTaskDetail<TResult>;
   try {
-    return { ...task, result: decoder(task.result) };
+    const input = task.result === undefined ? undefined : queueJsonSnapshot(task.result);
+    return { ...task, result: decoder(input) };
   } catch {
     throw new SupaCloudTaskDecoderError(operation);
   }
@@ -717,22 +633,23 @@ function decodeTaskDetailsWithResult<TResult>(
   return decodeTaskDetails(value).map((task) => decodeTaskResult(task, decoder, "list"));
 }
 
-function decodeQueueMessage(value: unknown): SupaCloudQueueMessage {
-  const record = responseRecord(value, "queue message");
-  const messageValue = record.message ?? record.payload;
-  const message = valueRecord(messageValue);
-  return {
-    ...record,
-    id: responseString(record, "id", "queue message"),
-    msg_id: responseNumber(record, "msg_id", "queue message"),
-    message,
-    payload: message,
-  };
+function decodeBoundTask(
+  value: unknown, taskId: string, operation: "get" | "cancel" | "retry",
+): SupaCloudTaskDetail {
+  try {
+    const task = decodeTaskDetail(value);
+    if (task.id !== taskId) throw new Error("Mismatched task ID");
+    return task;
+  } catch {
+    throw new SupaCloudTaskResponseError(operation);
+  }
 }
 
-function decodeQueueMessages(value: unknown): SupaCloudQueueMessage[] {
-  if (!Array.isArray(value)) throw new Error("Invalid queue message list response");
-  return value.map(decodeQueueMessage);
+function decodeQueueMessages(value: unknown, queueName: string): SupaCloudQueueMessage[] {
+  if (!Array.isArray(value) || value.length > 10000) throw new SupaCloudQueueError();
+  const messages = value.map((row: unknown) => queueMessage(row, { queueName }));
+  if (new Set(messages.map(row => row.id)).size !== messages.length) throw new SupaCloudQueueError();
+  return messages;
 }
 
 function decodeQueueStats(value: unknown): SupaCloudQueueStats {
@@ -779,213 +696,12 @@ function decodeQueueInfos(value: unknown): SupaCloudQueueInfo[] {
   return value.map(decodeQueueInfo);
 }
 
-function decodeOAuthServerStatus(value: unknown): SupaCloudOAuthServerStatus {
-  const record = responseRecord(value, "OAuth Server");
-  return {
-    ...record,
-    project_ref: responseString(record, "project_ref", "OAuth Server"),
-    account_isolated: responseBoolean(record, "account_isolated", "OAuth Server"),
-    enabled: responseBoolean(record, "enabled", "OAuth Server"),
-    allow_dynamic_registration: responseBoolean(record, "allow_dynamic_registration", "OAuth Server"),
-    issuer: responseString(record, "issuer", "OAuth Server"),
-    discovery_url: responseString(record, "discovery_url", "OAuth Server"),
-    jwks_url: responseString(record, "jwks_url", "OAuth Server"),
-    authorization_endpoint: responseString(record, "authorization_endpoint", "OAuth Server"),
-    token_endpoint: responseString(record, "token_endpoint", "OAuth Server"),
-  };
-}
-
-function decodeOAuthClient(value: unknown): SupaCloudOAuthClient {
-  const record = responseRecord(value, "OAuth client");
-  return {
-    ...record,
-    client_id: responseString(record, "client_id", "OAuth client"),
-  };
-}
-
-function decodeOAuthClientList(value: unknown): SupaCloudOAuthClientList {
-  const record = responseRecord(value, "OAuth client list");
-  const clients = record.clients;
-  if (clients === undefined) return record;
-  if (!Array.isArray(clients)) throw new Error("Invalid OAuth client list response");
-  return { ...record, clients: clients.map(decodeOAuthClient) };
-}
-
-function decodeSupAuthStepResult(value: unknown): SupaCloudSupAuthStepResult {
-  const record = responseRecord(value, "SupAuth step");
-  return {
-    ...record,
-    step: responseString(record, "step", "SupAuth step"),
-    status: responseString(record, "status", "SupAuth step"),
-  };
-}
-
-function decodeSupAuthProvisionResult(value: unknown): SupaCloudSupAuthProvisionResult {
-  const record = responseRecord(value, "SupAuth provision");
-  const steps = record.steps;
-  if (steps !== undefined && !Array.isArray(steps)) {
-    throw new Error("Invalid SupAuth provision response");
-  }
-  return {
-    ...record,
-    projectRef: responseString(record, "projectRef", "SupAuth provision"),
-    status: responseString(record, "status", "SupAuth provision"),
-    ...(steps === undefined ? {} : { steps: steps.map(decodeSupAuthStepResult) }),
-  };
-}
-
-function decodeSupAuthReconcileResult(value: unknown): SupaCloudSupAuthReconcileResult {
-  const record = responseRecord(value, "SupAuth reconcile");
-  const steps = record.steps;
-  if (steps !== undefined && !Array.isArray(steps)) {
-    throw new Error("Invalid SupAuth reconcile response");
-  }
-  return {
-    ...record,
-    projectRef: responseString(record, "projectRef", "SupAuth reconcile"),
-    changed: responseBoolean(record, "changed", "SupAuth reconcile"),
-    ...(steps === undefined ? {} : { steps: steps.map(decodeSupAuthStepResult) }),
-  };
-}
-
-function decodeSupAuthRollbackResult(value: unknown): SupaCloudSupAuthRollbackResult {
-  const record = responseRecord(value, "SupAuth rollback");
-  const steps = record.steps;
-  if (steps !== undefined && !Array.isArray(steps)) {
-    throw new Error("Invalid SupAuth rollback response");
-  }
-  return {
-    ...record,
-    projectRef: responseString(record, "projectRef", "SupAuth rollback"),
-    status: responseString(record, "status", "SupAuth rollback"),
-    ...(steps === undefined ? {} : { steps: steps.map(decodeSupAuthStepResult) }),
-  };
-}
-
-function decodeSupAuthClientConfig(value: unknown): SupaCloudSupAuthClientConfig {
-  const record = responseRecord(value, "SupAuth client config");
-  return {
-    ...record,
-    projectRef: responseString(record, "projectRef", "SupAuth client config"),
-    supabaseUrl: responseString(record, "supabaseUrl", "SupAuth client config"),
-    authUrl: responseString(record, "authUrl", "SupAuth client config"),
-    restUrl: responseString(record, "restUrl", "SupAuth client config"),
-    storageUrl: responseString(record, "storageUrl", "SupAuth client config"),
-    realtimeUrl: responseString(record, "realtimeUrl", "SupAuth client config"),
-    functionsUrl: responseString(record, "functionsUrl", "SupAuth client config"),
-  };
-}
-
-function decodeSupAuthVerification(value: unknown): SupaCloudSupAuthVerification {
-  const record = responseRecord(value, "SupAuth verification");
-  const checks = record.checks;
-  if (!isUnknownArray(checks)) throw new Error("Invalid SupAuth verification response");
-  return {
-    ...record,
-    projectRef: responseString(record, "projectRef", "SupAuth verification"),
-    healthy: responseBoolean(record, "healthy", "SupAuth verification"),
-    checks: checks.map((check) => {
-      const record = responseRecord(check, "SupAuth check");
-      return {
-        ...record,
-        name: responseString(record, "name", "SupAuth check"),
-        status: responseString(record, "status", "SupAuth check"),
-      };
-    }),
-  };
-}
-
 function decodePurgeResult(value: unknown): { queue_name: string; purged: number } {
   const record = responseRecord(value, "queue purge");
   return {
     queue_name: responseString(record, "queue_name", "queue purge"),
     purged: responseNumber(record, "purged", "queue purge"),
   };
-}
-
-function decodeProjectCapabilities(value: unknown): SupaCloudProjectCapabilities {
-  const record = responseRecord(value, "project capabilities");
-  const rawCapabilities = valueRecord(record.capabilities);
-  const capabilities: Record<string, SupaCloudCapability> = {};
-  for (const [key, item] of Object.entries(rawCapabilities)) {
-    const capRecord = valueRecord(item);
-    capabilities[key] = {
-      available: typeof capRecord.available === "boolean" ? capRecord.available : false,
-      source: typeof capRecord.source === "string" ? capRecord.source : "unknown",
-      version: typeof capRecord.version === "string" ? capRecord.version : null,
-      reason_code: typeof capRecord.reason_code === "string" ? capRecord.reason_code : null,
-      ...(typeof capRecord.authority_project_ref === "string" ? { authority_project_ref: capRecord.authority_project_ref } : {}),
-      ...(typeof capRecord.managed_by_owner === "boolean" ? { managed_by_owner: capRecord.managed_by_owner } : {}),
-    };
-  }
-  return {
-    ...record,
-    project_ref: responseString(record, "project_ref", "project capabilities"),
-    auth_runtime: typeof record.auth_runtime === "string" ? record.auth_runtime : "unknown",
-    schema_version: typeof record.schema_version === "number" ? record.schema_version : 1,
-    platform_version: typeof record.platform_version === "string" ? record.platform_version : undefined,
-    environment: typeof record.environment === "string" ? record.environment : undefined,
-    storage_backend: typeof record.storage_backend === "string" ? record.storage_backend : undefined,
-    capabilities,
-  };
-}
-
-function decodeStoragePlatformConstraints(value: unknown): SupaCloudStoragePlatformConstraints {
-  const record = responseRecord(value, "storage constraints");
-  return {
-    max_upload_size_bytes: responseNumber(record, "max_upload_size_bytes", "storage constraints"),
-    max_upload_size_mb: responseNumber(record, "max_upload_size_mb", "storage constraints"),
-    tus_max_size_bytes: responseNumber(record, "tus_max_size_bytes", "storage constraints"),
-    tus_chunk_max_size_bytes: responseNumber(record, "tus_chunk_max_size_bytes", "storage constraints"),
-    streaming_upload_supported: responseBoolean(record, "streaming_upload_supported", "storage constraints"),
-  };
-}
-
-function normalizeRpcMessage(queueName: string, value: unknown, status?: string): SupaCloudQueueMessage | null {
-  const row = firstRpcValue(value);
-  if (!row || typeof row !== "object") return null;
-  const record = valueRecord(row);
-  const message = record.message && typeof record.message === "object" && !Array.isArray(record.message)
-    ? valueRecord(record.message)
-    : {};
-  const msgId = normalizeMessageId(record.msg_id ?? record.id);
-  return {
-    ...record,
-    id: String(msgId),
-    msg_id: msgId,
-    message,
-    payload: message,
-    status,
-    queue_name: queueName,
-    task_type: `queue:${queueName}`,
-  };
-}
-
-function normalizeRpcMessages(queueName: string, value: unknown, status?: string): SupaCloudQueueMessage[] {
-  const rows = isUnknownArray(value) ? value : value == null ? [] : [value];
-  return rows
-    .map((row) => normalizeRpcMessage(queueName, row, status))
-    .filter((row): row is SupaCloudQueueMessage => Boolean(row));
-}
-
-function normalizeRpcMessageId(value: unknown): number {
-  const row = firstRpcValue(value);
-  if (row && typeof row === "object") {
-    const record = valueRecord(row);
-    return normalizeMessageId(record.msg_id ?? record.send ?? record.send_batch ?? record.id);
-  }
-  return normalizeMessageId(row);
-}
-
-function normalizeRpcMessageIds(value: unknown): number[] {
-  const rows = isUnknownArray(value) ? value : value == null ? [] : [value];
-  return rows.map((row) => normalizeRpcMessageId(row)).filter((id) => id > 0);
-}
-
-function extractErrorCode(body: unknown): string | null {
-  if (!body || typeof body !== "object") return null;
-  const code = valueRecord(body).code;
-  return typeof code === "string" ? code : null;
 }
 
 async function readResponseBody(response: Response): Promise<unknown> {
@@ -1007,38 +723,132 @@ async function defaultAccessTokenResolver(
   return data.session?.access_token ?? null;
 }
 
+function validateTaskProject(record: Record<string, unknown>, projectRef: string): void {
+  if (!Object.hasOwn(record, "project_ref") || record.project_ref !== projectRef) {
+    throw new Error("Invalid task response project");
+  }
+}
+
+const MAX_TASK_TIMER_MS = 2147483647;
+
+function taskTimerMs(value: unknown, allowZero = false): number {
+  if (typeof value !== "number" || !Number.isInteger(value)
+    || value < (allowZero ? 0 : 1) || value > MAX_TASK_TIMER_MS) {
+    throw new Error("Invalid task timer interval");
+  }
+  return value;
+}
+
+function captureTaskWaitOptions(options: unknown): SupaCloudTaskWaitOptions {
+  if (!options || typeof options !== "object" || Array.isArray(options)) {
+    throw new Error("Invalid task wait options");
+  }
+  const prototype: unknown = Object.getPrototypeOf(options);
+  if (prototype !== Object.prototype && prototype !== null) throw new Error("Invalid task wait options");
+  let intervalMs: number | undefined;
+  let signal: AbortSignal | undefined;
+  for (const key of Reflect.ownKeys(options)) {
+    const property = Object.getOwnPropertyDescriptor(options, key);
+    if ((key !== "intervalMs" && key !== "signal") || !property || !("value" in property)) {
+      throw new Error("Invalid task wait options");
+    }
+    const value: unknown = property.value;
+    if (value === undefined) continue;
+    if (key === "intervalMs") intervalMs = taskTimerMs(value);
+    else {
+      if (!(value instanceof AbortSignal)) throw new Error("Invalid task wait options");
+      signal = value;
+    }
+  }
+  return {
+    ...(intervalMs === undefined ? {} : { intervalMs }),
+    ...(signal === undefined ? {} : { signal }),
+  };
+}
+
+function captureTaskRealtimeSource(value: unknown): { schema: string; table: string } | null {
+  if (value === undefined) return null;
+  try {
+    const source = responseRecord(queueJsonSnapshot(value), "task Realtime source");
+    if (Object.keys(source).some(key => key !== "schema" && key !== "table")) throw new Error();
+    const schema = responseString(source, "schema", "task Realtime source");
+    const table = responseString(source, "table", "task Realtime source");
+    if (![schema, table].every(name => /^[A-Za-z_][A-Za-z0-9_]{0,62}$/.test(name))) throw new Error();
+    return { schema, table };
+  } catch {
+    throw new Error("Invalid task Realtime source");
+  }
+}
+
+function captureTaskSubscribeOptions<TResult>(
+  options: SupaCloudTaskSubscribeOptions<TResult>,
+): SupaCloudTaskSubscribeOptions<TResult> {
+  if (!options || typeof options !== "object" || Array.isArray(options)
+    || (Object.getPrototypeOf(options) !== Object.prototype && Object.getPrototypeOf(options) !== null)) {
+    throw new Error("Invalid task subscription options");
+  }
+  const allowed = new Set([
+    "realtime", "pollingIntervalMs", "realtimeTimeoutMs", "reconcileIntervalMs",
+    "onUpdate", "onStateChange", "onError", "stopOnTerminal",
+  ]);
+  for (const key of Reflect.ownKeys(options)) {
+    const property = Object.getOwnPropertyDescriptor(options, key);
+    if (typeof key !== "string" || !allowed.has(key) || !property || !("value" in property)) {
+      throw new Error("Invalid task subscription options");
+    }
+  }
+  const captured = { ...options };
+  if (typeof captured.onUpdate !== "function"
+    || (captured.onStateChange !== undefined && typeof captured.onStateChange !== "function")
+    || (captured.onError !== undefined && typeof captured.onError !== "function")
+    || (captured.stopOnTerminal !== undefined && typeof captured.stopOnTerminal !== "boolean")) {
+    throw new Error("Invalid task subscription options");
+  }
+  const realtime = captureTaskRealtimeSource(captured.realtime);
+  if (realtime) captured.realtime = realtime;
+  return captured;
+}
+
 function normalizeTaskSnapshot<TResult = unknown>(
   task: unknown,
+  taskId: string,
+  projectRef: string,
   decoder?: SupaCloudTaskResultDecoder<TResult>,
 ): SupaCloudTaskSnapshot<TResult> {
-  const raw: SupaCloudTaskDetail<TResult> = decoder
-    ? decodeTaskResult(decodeTaskDetail(task), decoder, "subscribe")
-    : task as SupaCloudTaskDetail<TResult>;
-  const value = valueRecord(raw);
+  let value: SupaCloudTaskDetail;
+  try {
+    value = decodeBoundTask(queueJsonSnapshot(task), taskId, "get");
+    validateTaskProject(value, projectRef);
+    if (Object.hasOwn(value, "updatedAt")) taskNullable(value.updatedAt, taskText);
+  } catch {
+    throw new SupaCloudTaskResponseError("get");
+  }
+  const decoded = decoder === undefined ? value as SupaCloudTaskDetail<TResult>
+    : decodeTaskResult(value, decoder, "subscribe");
   return {
-    id: String(value.id ?? ""),
-    status: String(value.status ?? "unknown"),
-    progress: typeof value.progress === "number" ? value.progress : null,
+    id: decoded.id,
+    status: decoded.status,
+    progress: typeof decoded.progress === "number" ? decoded.progress : null,
     error:
-      typeof value.error === "string"
-        ? value.error
-        : typeof value.error_message === "string"
-          ? value.error_message
+      typeof decoded.error === "string"
+        ? decoded.error
+        : typeof decoded.error_message === "string"
+          ? decoded.error_message
           : null,
     updatedAt:
-      typeof value.updated_at === "string"
-        ? value.updated_at
-        : typeof value.updatedAt === "string"
-          ? value.updatedAt
+      typeof decoded.updated_at === "string"
+        ? decoded.updated_at
+        : typeof decoded.updatedAt === "string"
+          ? decoded.updatedAt
           : null,
-    raw,
+    raw: decoded,
   };
 }
 
 class SupaCloudManagementClient<TClient extends SupabaseClient = SupabaseClient> {
   constructor(protected readonly options: Required<SupaCloudClientOptions<TClient>>) {}
 
-  protected async resolveAccessToken(): Promise<string> {
+  protected async resolveAccessToken(_signal?: AbortSignal): Promise<string> {
     const token = await this.options.getAccessToken();
     if (!token) {
       throw new Error(
@@ -1053,16 +863,20 @@ class SupaCloudManagementClient<TClient extends SupabaseClient = SupabaseClient>
     method: HttpMethod,
     body: unknown,
     decode: ResponseDecoder<T>,
+    transport: FetchTransport = globalThis.fetch.bind(globalThis),
+    signal?: AbortSignal,
   ): Promise<T> {
-    const accessToken = await this.resolveAccessToken();
-    const response = await fetch(`${this.options.managementApiUrl}${path}`, {
+    signal?.throwIfAborted();
+    const accessToken = await this.resolveAccessToken(signal);
+    signal?.throwIfAborted();
+    const response = await transport(`${this.options.managementApiUrl}${path}`, {
       method,
       headers: {
         authorization: `Bearer ${accessToken}`,
-        "x-client-info": `supacloud-js/${SUPACLOUD_JS_VERSION}`,
         ...(body !== undefined ? { "content-type": "application/json" } : {}),
       },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      ...(signal === undefined ? {} : { signal }),
     });
 
     if (response.status === 204) return decode(undefined);
@@ -1082,16 +896,80 @@ class SupaCloudManagementClient<TClient extends SupabaseClient = SupabaseClient>
 }
 
 class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> extends SupaCloudManagementClient<TClient> {
-  private createReceipt<TResult = unknown>(taskId: string, status: string): SupaCloudTaskReceipt<TResult> {
+  protected override async resolveAccessToken(signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort: () => void = () => {};
+    const aborted = new Promise<never>((_, reject) => {
+      onAbort = () => reject(signal?.reason);
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+    const timeoutError = new SupaCloudTaskAuthenticationError("TASK_AUTH_TIMEOUT");
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(timeoutError), 15000);
+    });
+    try {
+      const token = await Promise.race([super.resolveAccessToken(), deadline, aborted]);
+      signal?.throwIfAborted();
+      if (typeof token !== "string" || !/^[\x21-\x7e]+$/.test(token)) {
+        throw new SupaCloudTaskAuthenticationError();
+      }
+      return token;
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (error === timeoutError) throw timeoutError;
+      throw new SupaCloudTaskAuthenticationError();
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+    }
+  }
+
+  protected override request<T>(
+    path: string, method: HttpMethod, body: unknown, decode: ResponseDecoder<T>,
+    _transport?: FetchTransport, signal?: AbortSignal,
+  ): Promise<T> {
+    const operation = method === "POST" ? (path.endsWith("/cancel") ? "cancel" : "retry") : "get";
+    const projectRef = this.options.projectRef;
+    const failure = () => new SupaCloudTaskResponseError(operation);
+    const bounded = createBoundedRpcFetch(/./, failure);
+    const transport: FetchTransport = async (input, init) => {
+      const response = await bounded(input, init);
+      if (response.status >= 500 || (response.ok && response.status !== 200)) throw failure();
+      return response;
+    };
+    return super.request(path, method, body, value => {
+      try {
+        const rows: unknown[] = Array.isArray(value) ? value : [value];
+        for (const task of rows) {
+          const record = responseRecord(task, "task");
+          validateTaskProject(record, projectRef);
+        }
+        return decode(value);
+      }
+      catch (error) {
+        if (error instanceof SupaCloudTaskDecoderError) throw error;
+        throw failure();
+      }
+    }, transport, signal).then(value => {
+      signal?.throwIfAborted();
+      return value;
+    }, error => {
+      signal?.throwIfAborted();
+      throw error;
+    });
+  }
+
+  private createReceipt(taskId: string, status: string): SupaCloudTaskReceipt<unknown> {
     return {
       taskId,
       status,
-      get: () => this.get(taskId) as Promise<SupaCloudTaskDetail<TResult>>,
-      wait: (options?: SupaCloudTaskWaitOptions) => this.wait(taskId, options) as Promise<SupaCloudTaskDetail<TResult>>,
-      cancel: () => this.cancel(taskId) as Promise<SupaCloudTaskDetail<TResult>>,
-      retry: () => this.retry(taskId) as Promise<SupaCloudTaskDetail<TResult>>,
-      subscribe: (options: SupaCloudTaskSubscribeOptions<TResult>) =>
-        this.subscribeInternal(taskId, options),
+      get: () => this.get(taskId),
+      wait: (options?: SupaCloudTaskWaitOptions) => this.wait(taskId, options),
+      cancel: () => this.cancel(taskId),
+      retry: () => this.retry(taskId),
+      subscribe: (options: SupaCloudTaskSubscribeOptions) =>
+        this.subscribe(taskId, options),
     };
   }
 
@@ -1108,15 +986,17 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       cancel: () => this.cancelTyped(taskId, decoder),
       retry: () => this.retryTyped(taskId, decoder),
       subscribe: (options: SupaCloudTaskSubscribeOptions<TResult>) =>
-        this.subscribeTyped(taskId, decoder, options),
+        this.subscribeTypedInternal(taskId, options, decoder),
     };
   }
 
-  async submit(
+  private async submitInternal<TResult = unknown>(
     functionName: string,
     options: SupaCloudTaskSubmitOptions = {},
-  ): Promise<SupaCloudTaskReceipt<unknown>> {
-    const { body, headers = {}, retries: _retries, timeoutSec: _timeoutSec, idempotencyKey, method } = options;
+    decoder?: SupaCloudTaskResultDecoder<TResult>,
+  ): Promise<SupaCloudTaskReceipt<TResult>> {
+    const projectRef = this.options.projectRef;
+    const { body, headers = {}, idempotencyKey, method } = options;
     // Background execution is selected by server-side background_routes.
     // Keep the async decision server-side, but forward the logical idempotency key
     // so management-api can dedupe background-route submissions.
@@ -1127,31 +1007,91 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       ...(options.businessTaskId ? { "x-supacloud-business-task-id": options.businessTaskId } : {}),
       ...(options.metadata ? { "x-supacloud-task-metadata": JSON.stringify(options.metadata) } : {}),
     };
-    const invocation: { data: unknown; error: unknown } = await this.options.supabase.functions.invoke(functionName, {
-      body,
-      method,
-      headers: invokeHeaders,
+    const controller = new AbortController();
+    const failure = () => new SupaCloudTaskSubmitError(
+      "Background task submission could not be confirmed", undefined,
+    );
+    const timeoutError = new SupaCloudTaskSubmitError(
+      "Background task submission timed out; outcome is unconfirmed", undefined,
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(timeoutError);
+        controller.abort(timeoutError);
+      }, 15000);
     });
-    const { data, error } = invocation;
+    let invocation: { data: unknown; error: unknown; response?: unknown };
+    try {
+      invocation = await Promise.race([
+        this.options.supabase.functions.invoke(functionName, {
+          ...(body === undefined ? {} : { body }),
+          ...(method === undefined ? {} : { method }),
+          headers: invokeHeaders,
+          signal: controller.signal,
+        }),
+        deadline,
+      ]);
+    } catch (error) {
+      if (error === timeoutError) throw timeoutError;
+      throw failure();
+    } finally {
+      clearTimeout(timer);
+    }
+    const { data, error, response } = invocation;
+    const boundedHttpFailure = response instanceof Response && boundedTaskHttpFailures.delete(response);
 
-    if (error) throw error;
+    if (error !== null && error !== undefined) {
+      if (error instanceof FunctionsHttpError && response instanceof Response
+        && error.context === response && !response.redirected
+        && response.status >= 400 && response.status < 500) {
+        throw error;
+      }
+      // Peer copies have different constructors; require transport provenance, not just a name.
+      if (boundedHttpFailure && response instanceof Response && !response.redirected
+        && response.status >= 400 && response.status < 500
+        && matchesForeignTaskHttpError(error, response)) {
+        throw new FunctionsHttpError(response);
+      }
+      if (response instanceof Response) void response.body?.cancel().catch(() => {});
+      throw failure();
+    }
+    if (!(response instanceof Response) || response.status !== 202 || response.redirected) {
+      if (response instanceof Response) void response.body?.cancel().catch(() => {});
+      throw failure();
+    }
 
-    const payload = valueRecord(data ?? {});
-    const taskId =
-      typeof payload.task_id === "string"
-        ? payload.task_id
-        : typeof payload.taskId === "string"
-          ? payload.taskId
-          : null;
-
-    if (!taskId) {
+    try {
+      const payload = responseRecord(queueJsonSnapshot(data), "task submission");
+      validateTaskProject(payload, projectRef);
+      const snakeId = Object.hasOwn(payload, "task_id")
+        ? captureTaskId(payload.task_id) : undefined;
+      const camelId = Object.hasOwn(payload, "taskId")
+        ? captureTaskId(payload.taskId) : undefined;
+      const taskId = snakeId ?? camelId;
+      if (taskId === undefined || (snakeId !== undefined && camelId !== undefined && snakeId !== camelId)) {
+        throw new Error("Invalid task receipt identity");
+      }
+      const status = responseString(payload, "status", "task submission");
+      if (status.trim() !== status || /[\u0000-\u001f\u007f]/.test(status)) {
+        throw new Error("Invalid task receipt status");
+      }
+      return decoder === undefined
+        ? this.createReceipt(taskId, status) as SupaCloudTaskReceipt<TResult>
+        : this.createTypedReceipt(taskId, status, decoder);
+    } catch {
       throw new SupaCloudTaskSubmitError(
-        "Background task was not enqueued",
+        "Background task submission could not be confirmed",
         data,
       );
     }
+  }
 
-    return this.createReceipt(taskId, String(payload.status ?? "enqueued"));
+  async submit(
+    functionName: string,
+    options: SupaCloudTaskSubmitOptions = {},
+  ): Promise<SupaCloudTaskReceipt<unknown>> {
+    return this.submitInternal(functionName, options);
   }
 
   async submitTyped<TResult>(
@@ -1169,38 +1109,65 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     decoderOrOptions: SupaCloudTaskResultDecoder<TResult> | SupaCloudTaskSubmitOptions,
     optionsOrDecoder?: SupaCloudTaskSubmitOptions | SupaCloudTaskResultDecoder<TResult>,
   ): Promise<SupaCloudTaskReceipt<TResult>> {
-    let decoder: SupaCloudTaskResultDecoder<TResult>;
-    let options: SupaCloudTaskSubmitOptions | undefined;
-    if (typeof decoderOrOptions === "function") {
-      decoder = captureTaskDecoder<TResult>(decoderOrOptions);
-      options = typeof optionsOrDecoder === "function" ? undefined : optionsOrDecoder;
-    } else {
-      options = decoderOrOptions;
-      decoder = captureTaskDecoder<TResult>(optionsOrDecoder);
-    }
-    const receipt = await this.submit(functionName, options);
-    return this.createTypedReceipt(receipt.taskId, receipt.status, decoder);
+    const decoder = typeof decoderOrOptions === "function"
+      ? captureTaskDecoder<TResult>(decoderOrOptions)
+      : captureTaskDecoder<TResult>(optionsOrDecoder);
+    const options = typeof decoderOrOptions === "function"
+      ? optionsOrDecoder ?? {}
+      : decoderOrOptions;
+    return this.submitInternal(functionName, options as SupaCloudTaskSubmitOptions, decoder);
   }
 
-  async get(taskId: string): Promise<SupaCloudTaskDetail> {
-    return this.request<SupaCloudTaskDetail>(
-      `/v1/projects/${this.options.projectRef}/tasks/${taskId}`,
+  private getInternal<TResult = unknown>(
+    taskId: string,
+    decoder?: SupaCloudTaskResultDecoder<TResult>,
+    signal?: AbortSignal,
+  ): Promise<SupaCloudTaskDetail<TResult>> {
+    const captured = captureTaskId(taskId);
+    return this.request<SupaCloudTaskDetail<TResult>>(
+      `/v1/projects/${this.options.projectRef}/tasks/${encodeURIComponent(captured)}`,
       "GET",
       undefined,
-      decodeTaskDetail,
+      value => {
+        const task = decodeBoundTask(value, captured, "get");
+        return decoder === undefined ? task as SupaCloudTaskDetail<TResult>
+          : decodeTaskResult(task, decoder, "get");
+      },
+      undefined,
+      signal,
     );
+  }
+
+  async get(taskId: string, signal?: AbortSignal): Promise<SupaCloudTaskDetail<unknown>> {
+    return this.getInternal(taskId, undefined, signal);
   }
 
   async getTyped<TResult>(
     taskId: string,
     decoder: SupaCloudTaskResultDecoder<TResult>,
+    signal?: AbortSignal,
+  ): Promise<SupaCloudTaskDetail<TResult>>;
+  async getTyped<TResult>(
+    taskId: string,
+    signal: AbortSignal | undefined,
+    decoder: SupaCloudTaskResultDecoder<TResult>,
+  ): Promise<SupaCloudTaskDetail<TResult>>;
+  async getTyped<TResult>(
+    taskId: string,
+    decoderOrSignal: SupaCloudTaskResultDecoder<TResult> | AbortSignal | undefined,
+    signalOrDecoder?: AbortSignal | SupaCloudTaskResultDecoder<TResult>,
   ): Promise<SupaCloudTaskDetail<TResult>> {
-    const resultDecoder = captureTaskDecoder<TResult>(decoder);
-    return decodeTaskResult(await this.get(taskId), resultDecoder, "get");
+    const decoder = typeof decoderOrSignal === "function"
+      ? captureTaskDecoder<TResult>(decoderOrSignal)
+      : captureTaskDecoder<TResult>(signalOrDecoder);
+    const signal = typeof decoderOrSignal === "function"
+      ? signalOrDecoder as AbortSignal | undefined
+      : decoderOrSignal;
+    return this.getInternal(taskId, decoder, signal);
   }
 
-  async list(filters: SupaCloudTaskListFilters = {}): Promise<SupaCloudTaskDetail[]> {
-    return this.request<SupaCloudTaskDetail[]>(
+  async list(filters: SupaCloudTaskListFilters = {}): Promise<SupaCloudTaskDetail<unknown>[]> {
+    return this.request<SupaCloudTaskDetail<unknown>[]>(
       `/v1/projects/${this.options.projectRef}/tasks${createQueryString(filters)}`,
       "GET",
       undefined,
@@ -1226,48 +1193,72 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     const filters = typeof decoderOrFilters === "function"
       ? filtersOrDecoder as SupaCloudTaskListFilters | undefined
       : decoderOrFilters;
-    return (await this.list(filters)).map((task) => decodeTaskResult(task, decoder, "list"));
+    return this.request<SupaCloudTaskDetail<TResult>[]>(
+      `/v1/projects/${this.options.projectRef}/tasks${createQueryString(filters)}`,
+      "GET",
+      undefined,
+      value => decodeTaskDetailsWithResult(value, decoder),
+    );
   }
 
-  async cancel(taskId: string): Promise<SupaCloudTaskDetail> {
-    return this.request<SupaCloudTaskDetail>(
-      `/v1/projects/${this.options.projectRef}/tasks/${taskId}/cancel`,
+  private cancelInternal<TResult = unknown>(
+    taskId: string,
+    decoder?: SupaCloudTaskResultDecoder<TResult>,
+  ): Promise<SupaCloudTaskDetail<TResult>> {
+    const captured = captureTaskId(taskId);
+    return this.request<SupaCloudTaskDetail<TResult>>(
+      `/v1/projects/${this.options.projectRef}/tasks/${encodeURIComponent(captured)}/cancel`,
       "POST",
       undefined,
-      decodeTaskDetail,
+      value => {
+        const task = decodeBoundTask(value, captured, "cancel");
+        return decoder === undefined ? task as SupaCloudTaskDetail<TResult>
+          : decodeTaskResult(task, decoder, "cancel");
+      },
     );
+  }
+
+  async cancel(taskId: string): Promise<SupaCloudTaskDetail<unknown>> {
+    return this.cancelInternal(taskId);
   }
 
   async cancelTyped<TResult>(
     taskId: string,
     decoder: SupaCloudTaskResultDecoder<TResult>,
   ): Promise<SupaCloudTaskDetail<TResult>> {
-    return decodeTaskResult(await this.cancel(taskId), captureTaskDecoder<TResult>(decoder), "cancel");
+    return this.cancelInternal(taskId, captureTaskDecoder<TResult>(decoder));
   }
 
-  async retry(taskId: string): Promise<SupaCloudTaskDetail> {
-    return this.request<SupaCloudTaskDetail>(
-      `/v1/projects/${this.options.projectRef}/tasks/${taskId}/retry`,
+  private retryInternal<TResult = unknown>(
+    taskId: string,
+    decoder?: SupaCloudTaskResultDecoder<TResult>,
+  ): Promise<SupaCloudTaskDetail<TResult>> {
+    const captured = captureTaskId(taskId);
+    return this.request<SupaCloudTaskDetail<TResult>>(
+      `/v1/projects/${this.options.projectRef}/tasks/${encodeURIComponent(captured)}/retry`,
       "POST",
       undefined,
-      decodeTaskDetail,
+      value => {
+        const task = decodeBoundTask(value, captured, "retry");
+        return decoder === undefined ? task as SupaCloudTaskDetail<TResult>
+          : decodeTaskResult(task, decoder, "retry");
+      },
     );
+  }
+
+  async retry(taskId: string): Promise<SupaCloudTaskDetail<unknown>> {
+    return this.retryInternal(taskId);
   }
 
   async retryTyped<TResult>(
     taskId: string,
     decoder: SupaCloudTaskResultDecoder<TResult>,
   ): Promise<SupaCloudTaskDetail<TResult>> {
-    return decodeTaskResult(await this.retry(taskId), captureTaskDecoder<TResult>(decoder), "retry");
+    return this.retryInternal(taskId, captureTaskDecoder<TResult>(decoder));
   }
 
-  async listDlq(limit = 100): Promise<SupaCloudTaskDetail[]> {
-    return this.request<SupaCloudTaskDetail[]>(
-      `/v1/projects/${this.options.projectRef}/tasks/dlq?limit=${limit}`,
-      "GET",
-      undefined,
-      decodeTaskDetails,
-    );
+  async listDlq(limit = 100): Promise<SupaCloudTaskDetail<unknown>[]> {
+    return this.list({ dlq: true, limit });
   }
 
   async listDlqTyped<TResult>(
@@ -1277,22 +1268,36 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     return this.listTyped({ dlq: true, limit }, captureTaskDecoder<TResult>(decoder));
   }
 
+  private async waitInternal<TResult = unknown>(
+    taskId: string,
+    decoder: SupaCloudTaskResultDecoder<TResult> | undefined,
+    options: SupaCloudTaskWaitOptions = {},
+  ): Promise<SupaCloudTaskDetail<TResult>> {
+    options = captureTaskWaitOptions(options);
+    const { signal } = options;
+    const intervalMs = taskTimerMs(
+      options.intervalMs === undefined ? this.options.pollingIntervalMs : options.intervalMs,
+    );
+
+    while (true) {
+      if (signal?.aborted) {
+        throw signal.reason;
+      }
+
+      const task: SupaCloudTaskDetail<TResult> = decoder === undefined
+        ? await this.get(taskId, signal) as SupaCloudTaskDetail<TResult>
+        : await this.getTyped(taskId, decoder, signal);
+      if (TERMINAL_STATUSES.has(task.status)) return task;
+
+      await waitForPollingInterval(intervalMs, signal);
+    }
+  }
+
   async wait(
     taskId: string,
     options: SupaCloudTaskWaitOptions = {},
-  ): Promise<SupaCloudTaskDetail> {
-    const intervalMs = options.intervalMs ?? this.options.pollingIntervalMs;
-
-    while (true) {
-      if (options.signal?.aborted) {
-        throw options.signal.reason ?? new DOMException("Aborted", "AbortError");
-      }
-
-      const task = await this.get(taskId);
-      if (TERMINAL_STATUSES.has(String(task.status))) return task;
-
-      await waitForPollingInterval(intervalMs, options.signal);
-    }
+  ): Promise<SupaCloudTaskDetail<unknown>> {
+    return this.waitInternal(taskId, undefined, options);
   }
 
   async waitTyped<TResult>(
@@ -1316,7 +1321,7 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     const options = typeof decoderOrOptions === "function"
       ? optionsOrDecoder as SupaCloudTaskWaitOptions | undefined
       : decoderOrOptions;
-    return decodeTaskResult(await this.wait(taskId, options), decoder, "wait");
+    return this.waitInternal(taskId, decoder, options);
   }
 
   subscribe(taskId: string, options: SupaCloudTaskSubscribeOptions): SupaCloudTaskSubscription {
@@ -1344,6 +1349,14 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     const options = typeof decoderOrOptions === "function"
       ? optionsOrDecoder as SupaCloudTaskSubscribeOptions<TResult>
       : decoderOrOptions;
+    return this.subscribeTypedInternal(taskId, options, decoder);
+  }
+
+  private subscribeTypedInternal<TResult>(
+    taskId: string,
+    options: SupaCloudTaskSubscribeOptions<TResult>,
+    decoder: SupaCloudTaskResultDecoder<TResult>,
+  ): SupaCloudTaskSubscription {
     return this.subscribeInternal(taskId, options, decoder);
   }
 
@@ -1352,25 +1365,53 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     options: SupaCloudTaskSubscribeOptions<TResult>,
     decoder?: SupaCloudTaskResultDecoder<TResult>,
   ): SupaCloudTaskSubscription {
+    taskId = captureTaskId(taskId);
+    options = captureTaskSubscribeOptions(options);
+    const realtime = captureTaskRealtimeSource(options.realtime);
+    const projectRef = this.options.projectRef;
     let closed: boolean = false;
     let channel: RealtimeChannel | null = null;
     let pollTimer: ReturnType<typeof setTimeout> | null = null;
     let realtimeTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
     let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
     let mode: SupaCloudTaskSubscribeState = "connecting";
-    const pollingIntervalMs =
-      options.pollingIntervalMs ?? this.options.pollingIntervalMs;
-    const realtimeTimeoutMs = options.realtimeTimeoutMs ?? 10000;
-    const reconcileIntervalMs = options.reconcileIntervalMs ?? Math.max(30000, pollingIntervalMs * 10);
+    const pollingIntervalMs = taskTimerMs(
+      options.pollingIntervalMs === undefined ? this.options.pollingIntervalMs : options.pollingIntervalMs,
+    );
+    const realtimeTimeoutMs = taskTimerMs(options.realtimeTimeoutMs === undefined ? 10000 : options.realtimeTimeoutMs, true);
+    const reconcileIntervalMs = taskTimerMs(options.reconcileIntervalMs === undefined
+      ? Math.min(MAX_TASK_TIMER_MS, Math.max(30000, pollingIntervalMs * 10))
+      : options.reconcileIntervalMs, true);
     const stopOnTerminal = options.stopOnTerminal ?? true;
+    const readController = new AbortController();
+    const readTask = async (signal: AbortSignal): Promise<SupaCloudTaskDetail<TResult>> =>
+      decoder === undefined
+        ? await this.get(taskId, signal) as SupaCloudTaskDetail<TResult>
+        : await this.getTyped(taskId, decoder, signal);
+    let callbackFailed = false;
+    const callCallback = (callback: () => unknown, onFailure: (error: unknown) => void) => {
+      try {
+        const result: unknown = callback();
+        if (result !== undefined) void Promise.resolve(result).catch(onFailure);
+      } catch (error) { onFailure(error); }
+    };
+    const handleCallbackFailure = (error: unknown, report = true) => {
+      if (callbackFailed) return;
+      callbackFailed = true;
+      void close();
+      if (report) reportError(error);
+    };
+    const reportError = (error: unknown) => {
+      callCallback(() => options.onError?.(error), cause => handleCallbackFailure(cause, false));
+    };
 
     const setMode = (
       next: SupaCloudTaskSubscribeState,
       details?: { error?: unknown },
     ) => {
-      if (closed || mode === next) return;
+      if ((closed && next !== "closed") || mode === next) return;
       mode = next;
-      options.onStateChange?.(next, details);
+      callCallback(() => options.onStateChange?.(next, details), handleCallbackFailure);
     };
 
     const stopPolling = () => {
@@ -1398,23 +1439,31 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       if (channel) {
         const current = channel;
         channel = null;
-        await this.options.supabase.removeChannel(current);
+        try { await this.options.supabase.removeChannel(current); }
+        catch (error) { reportError(error); }
       }
     };
 
     const close = async () => {
       if (closed) return;
+      closed = true;
+      readController.abort();
       stopPolling();
       stopRealtimeTimeout();
       stopReconcile();
-      await teardownRealtime();
-      setMode("closed");
-      closed = true;
+      try { await teardownRealtime(); }
+      finally { setMode("closed"); }
     };
 
     const emitTask = (task: unknown) => {
-      const snapshot = normalizeTaskSnapshot(task, decoder);
-      options.onUpdate(snapshot);
+      if (closed) return;
+      let snapshot: SupaCloudTaskSnapshot<TResult>;
+      try { snapshot = normalizeTaskSnapshot(task, taskId, projectRef, decoder); }
+      catch (error) {
+        reportError(error);
+        return;
+      }
+      callCallback(() => options.onUpdate(snapshot), handleCallbackFailure);
 
       if (stopOnTerminal && TERMINAL_STATUSES.has(snapshot.status)) {
         void close();
@@ -1425,10 +1474,10 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       if (closed) return;
 
       try {
-        const task = await this.get(taskId);
+        const task = await readTask(readController.signal);
         emitTask(task);
       } catch (error) {
-        options.onError?.(error);
+        if (!closed) reportError(error);
       } finally {
         if (!closed && mode === "polling") {
           pollTimer = setTimeout(() => {
@@ -1442,9 +1491,9 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       if (closed || mode !== "realtime") return;
 
       try {
-        emitTask(await this.get(taskId));
+        emitTask(await readTask(readController.signal));
       } catch (error) {
-        options.onError?.(error);
+        if (!closed) reportError(error);
       } finally {
         if (!closed && mode === "realtime") {
           reconcileTimer = setTimeout(() => {
@@ -1471,14 +1520,23 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       void pollOnce();
     };
 
+    const subscription = {
+      get connectionState() { return mode; },
+      unsubscribe() { void close(); },
+    };
+    if (!realtime) {
+      startPolling();
+      return subscription;
+    }
+
     channel = this.options.supabase
       .channel(`supacloud-task:${this.options.projectRef}:${taskId}`)
       .on(
         "postgres_changes",
         {
           event: "*",
-          schema: "public",
-          table: "tasks",
+          schema: realtime.schema,
+          table: realtime.table,
           filter: `id=eq.${taskId}`,
         },
         (payload) => {
@@ -1487,18 +1545,19 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
             : payload.old;
           if (next) emitTask(next);
         },
-      )
-      .subscribe(async (status, error) => {
+      );
+    channel.subscribe(async (status, error) => {
         if (closed) return;
 
         if (status === "SUBSCRIBED") {
           stopPolling();
           stopRealtimeTimeout();
           setMode("realtime");
+          if (closed) return;
           try {
-            emitTask(await this.get(taskId));
+            emitTask(await readTask(readController.signal));
           } catch (err) {
-            options.onError?.(err);
+            if (!closed) reportError(err);
           }
           startReconcile();
           return;
@@ -1514,7 +1573,7 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
         }
       });
 
-    if (realtimeTimeoutMs > 0) {
+    if (!closed && realtimeTimeoutMs > 0) {
       realtimeTimeoutTimer = setTimeout(() => {
         if (!closed && mode === "connecting") {
           void teardownRealtime().finally(() => {
@@ -1526,14 +1585,7 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
 
     setMode("connecting");
 
-    return {
-      get connectionState() {
-        return mode;
-      },
-      unsubscribe() {
-        void close();
-      },
-    };
+    return subscription;
   }
 }
 
@@ -1543,6 +1595,8 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
     private readonly name: string,
   ) {
     super(options);
+    if (typeof name !== "string" || !/^[a-z0-9][a-z0-9_-]{0,127}$/.test(name)
+      || name.startsWith("supacloud_internal_")) throw new SupaCloudQueueError();
   }
 
   private get encodedName(): string {
@@ -1555,68 +1609,84 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
     decode: ResponseDecoder<T>,
   ): Promise<T> {
     const scopedClient = this.options.supabase.schema("pgmq_public");
-    const rpcResult: { data: unknown; error: unknown } = await scopedClient.rpc(fn, params);
-    const { data, error } = rpcResult;
-    if (error) throw error;
-    return decode(data);
+    try {
+      const rpcResult: { data: unknown; error: unknown } = await scopedClient.rpc(fn, params).retry(false);
+      const { data, error } = rpcResult;
+      if (error) throw new SupaCloudQueueError(true, "QUEUE_RPC_FAILED");
+      return decode(data);
+    } catch (error) {
+      // Read changes visibility and pop deletes a message, so every RPC here can mutate.
+      throw new SupaCloudQueueError(true, error instanceof SupaCloudQueueError
+        ? error.code ?? "QUEUE_CONTRACT_INVALID" : "QUEUE_RPC_FAILED");
+    }
   }
 
   async send(
-    payload: Record<string, unknown> = {},
+    payload: SupaCloudQueueJson = {},
     options: SupaCloudQueueSendOptions = {},
   ): Promise<SupaCloudQueueSendResult> {
+    const captured = queueJsonSnapshot(payload);
     const msgId = await this.rpc("send", {
       queue_name: this.name,
-      message: payload,
+      message: captured,
       sleep_seconds: normalizeSecondsFromOptions(options),
-    }, normalizeRpcMessageId);
+    }, queueRpcId);
     return {
       id: String(msgId),
       msg_id: msgId,
       queue_name: this.name,
       status: "pending",
-      payload,
+      payload: captured,
     };
   }
 
   async sendBatch(
-    messages: Record<string, unknown>[],
+    messages: SupaCloudQueueJson[],
     options: SupaCloudQueueSendOptions = {},
   ): Promise<SupaCloudQueueSendResult[]> {
+    if (!Array.isArray(messages) || messages.length === 0 || messages.length > 10000) throw new SupaCloudQueueError();
+    const captured = queueJsonSnapshot(messages);
+    if (!Array.isArray(captured)) throw new SupaCloudQueueError();
     const ids = await this.rpc("send_batch", {
       queue_name: this.name,
-      messages,
+      messages: captured,
       sleep_seconds: normalizeSecondsFromOptions(options),
-    }, normalizeRpcMessageIds);
-    return ids.map((msgId, index) => ({
-      id: String(msgId),
-      msg_id: msgId,
-      queue_name: this.name,
-      status: "pending",
-      payload: messages[index] ?? {},
-    }));
+    }, value => queueRpcIds(value, captured.length));
+    return ids.map((msgId, index): SupaCloudQueueSendResult => {
+      const payload = captured[index];
+      if (payload === undefined) throw new SupaCloudQueueError(true);
+      return {
+        id: msgId,
+        msg_id: msgId,
+        queue_name: this.name,
+        status: "pending",
+        payload,
+      };
+    });
   }
 
   async read(
     options: SupaCloudQueueReceiveOptions = {},
   ): Promise<SupaCloudQueueMessage[]> {
+    const count = queueReadCount(options);
     return this.rpc("read", {
       queue_name: this.name,
       sleep_seconds: normalizeSecondsFromOptions(options),
-      n: Math.max(1, Math.floor(options.n ?? options.count ?? 1)),
-    }, (value) => normalizeRpcMessages(this.name, value, "leased"));
+      n: count,
+    }, (value) => queueRpcMessages(this.name, value, count, "leased"));
   }
 
   async receive(
     options: SupaCloudQueueReceiveOptions = {},
   ): Promise<SupaCloudQueueMessage | null> {
+    queueReadCount(options, true);
     const messages = await this.read({ ...options, n: 1 });
     return messages[0] ?? null;
   }
 
   async pop(): Promise<SupaCloudQueueMessage | null> {
     return this.rpc("pop", { queue_name: this.name }, (value) =>
-      normalizeRpcMessage(this.name, value, "deleted"));
+      queueRpcMessages(this.name, value, 1, "deleted")[0] ?? null);
   }
 
   async list(filters: SupaCloudQueueListFilters = {}): Promise<SupaCloudQueueMessage[]> {
@@ -1624,7 +1694,7 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
       `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages${createQueueQueryString(filters)}`,
       "GET",
       undefined,
-      decodeQueueMessages,
+      value => decodeQueueMessages(value, this.name),
     );
   }
 
@@ -1664,11 +1734,11 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
   }
 
   async archive(messageId: string | number): Promise<SupaCloudQueueMutationResult> {
-    const msgId = normalizeMessageId(messageId);
+    const msgId = queueMessageId(messageId);
     const success = await this.rpc("archive", {
       queue_name: this.name,
       message_id: msgId,
-    }, (value) => Boolean(firstRpcValue(value)));
+    }, queueRpcBoolean);
     return { id: String(msgId), msg_id: msgId, queue_name: this.name, status: "archived", success };
   }
 
@@ -1677,11 +1747,11 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
   }
 
   async delete(messageId: string | number): Promise<SupaCloudQueueMutationResult> {
-    const msgId = normalizeMessageId(messageId);
+    const msgId = queueMessageId(messageId);
     const success = await this.rpc("delete", {
       queue_name: this.name,
       message_id: msgId,
-    }, (value) => Boolean(firstRpcValue(value)));
+    }, queueRpcBoolean);
     return { id: String(msgId), msg_id: msgId, queue_name: this.name, status: "deleted", success };
   }
 
@@ -1689,15 +1759,19 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
     messageId: string | number,
     options: SupaCloudQueueReleaseOptions = {},
   ): Promise<SupaCloudQueueMessage> {
-    return this.request<SupaCloudQueueMessage>(
-      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}/release`,
-      "POST",
-      {
-        sleep_seconds: normalizeSecondsFromOptions(options),
-        ...(options.error ? { error: options.error } : {}),
-      },
-      decodeQueueMessage,
-    );
+    const msgId = queueMessageId(messageId);
+    const body = {
+      sleep_seconds: normalizeSecondsFromOptions(options),
+      ...(options.error ? { error: options.error } : {}),
+    };
+    try {
+      return await this.request<SupaCloudQueueMessage>(
+        `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${msgId}/release`,
+        "POST", body, value => queueMessage(value, { queueName: this.name, messageId: msgId }),
+      );
+    } catch {
+      throw new SupaCloudQueueError(true, "QUEUE_MANAGEMENT_FAILED");
+    }
   }
 
   async purge(): Promise<{ queue_name: string; purged: number }> {
@@ -1724,11 +1798,12 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
    * @deprecated Direct random lookup is not part of Supabase Queues' official API.
    */
   async get(messageId: string): Promise<SupaCloudQueueMessage> {
+    const msgId = queueMessageId(messageId);
     return this.request<SupaCloudQueueMessage>(
-      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}`,
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${msgId}`,
       "GET",
       undefined,
-      decodeQueueMessage,
+      value => queueMessage(value, { queueName: this.name, messageId: msgId }),
     );
   }
 
@@ -1736,11 +1811,12 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
    * @deprecated PGMQ archived messages are replayed with SQL/application workflows, not an official Queue API call.
    */
   async retry(messageId: string): Promise<SupaCloudQueueMessage> {
+    const msgId = queueMessageId(messageId);
     return this.request<SupaCloudQueueMessage>(
-      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${messageId}/retry`,
+      `/v1/projects/${this.options.projectRef}/tasks/queues/${this.encodedName}/messages/${msgId}/retry`,
       "POST",
       undefined,
-      decodeQueueMessage,
+      value => queueMessage(value, { queueName: this.name, messageId: msgId }),
     );
   }
 }
@@ -1774,289 +1850,6 @@ class SupaCloudQueuesClient<TClient extends SupabaseClient = SupabaseClient> ext
   }
 }
 
-class SupaCloudOAuthServerClient<TClient extends SupabaseClient = SupabaseClient> extends SupaCloudManagementClient<TClient> {
-  async getStatus(): Promise<SupaCloudOAuthServerStatus> {
-    return this.request<SupaCloudOAuthServerStatus>(
-      `/v1/projects/${this.options.projectRef}/auth/oauth-server`,
-      "GET",
-      undefined,
-      decodeOAuthServerStatus,
-    );
-  }
-
-  async migrateToOidc(options: {
-    allowDynamicRegistration?: boolean;
-    authorizationPath?: string;
-  } = {}): Promise<SupaCloudOAuthServerStatus> {
-    return this.request<SupaCloudOAuthServerStatus>(
-      `/v1/projects/${this.options.projectRef}/auth/oauth-server/migrate`,
-      "POST",
-      {
-        allow_dynamic_registration: options.allowDynamicRegistration === true,
-        ...(options.authorizationPath === undefined
-          ? {}
-          : { authorization_path: options.authorizationPath }),
-      },
-      decodeOAuthServerStatus,
-    );
-  }
-
-  async getDiscovery(): Promise<Record<string, unknown>> {
-    const status = await this.getStatus();
-    const response = await fetch(status.discovery_url);
-    if (!response.ok) throw new Error(`SupaCloud OIDC discovery failed (${response.status})`);
-    const payload: unknown = await response.json();
-    return valueRecord(payload);
-  }
-
-  async getJwks(): Promise<Record<string, unknown>> {
-    const status = await this.getStatus();
-    const response = await fetch(status.jwks_url);
-    if (!response.ok) throw new Error(`SupaCloud JWKS fetch failed (${response.status})`);
-    const payload: unknown = await response.json();
-    return valueRecord(payload);
-  }
-
-  async buildAuthorizeUrl(options: SupaCloudAuthorizeUrlOptions): Promise<string> {
-    const status = await this.getStatus();
-    const url = new URL(status.authorization_endpoint);
-    url.searchParams.set("client_id", options.clientId);
-    url.searchParams.set("redirect_uri", options.redirectUri);
-    url.searchParams.set("response_type", options.responseType ?? "code");
-    const scope = Array.isArray(options.scope) ? options.scope.join(" ") : options.scope;
-    if (scope) url.searchParams.set("scope", scope);
-    if (options.state) url.searchParams.set("state", options.state);
-    if (options.codeChallenge) url.searchParams.set("code_challenge", options.codeChallenge);
-    if (options.codeChallengeMethod) url.searchParams.set("code_challenge_method", options.codeChallengeMethod);
-    if (options.nonce) url.searchParams.set("nonce", options.nonce);
-    if (options.resource) url.searchParams.set("resource", options.resource);
-    return url.toString();
-  }
-}
-
-class SupaCloudOAuthClientsClient<TClient extends SupabaseClient = SupabaseClient> extends SupaCloudManagementClient<TClient> {
-  async list(): Promise<SupaCloudOAuthClientList> {
-    return this.request<SupaCloudOAuthClientList>(
-      `/v1/projects/${this.options.projectRef}/auth/oauth-clients`,
-      "GET",
-      undefined,
-      decodeOAuthClientList,
-    );
-  }
-
-  async create(input: SupaCloudOAuthClientCreate): Promise<SupaCloudOAuthClient> {
-    return this.request<SupaCloudOAuthClient>(
-      `/v1/projects/${this.options.projectRef}/auth/oauth-clients`,
-      "POST",
-      input,
-      decodeOAuthClient,
-    );
-  }
-
-  async get(clientId: string): Promise<SupaCloudOAuthClient> {
-    return this.request<SupaCloudOAuthClient>(
-      `/v1/projects/${this.options.projectRef}/auth/oauth-clients/${encodeURIComponent(clientId)}`,
-      "GET",
-      undefined,
-      decodeOAuthClient,
-    );
-  }
-
-  async update(clientId: string, patch: SupaCloudOAuthClientUpdate): Promise<SupaCloudOAuthClient> {
-    return this.request<SupaCloudOAuthClient>(
-      `/v1/projects/${this.options.projectRef}/auth/oauth-clients/${encodeURIComponent(clientId)}`,
-      "PUT",
-      patch,
-      decodeOAuthClient,
-    );
-  }
-
-  async delete(clientId: string): Promise<void> {
-    await this.request<void>(
-      `/v1/projects/${this.options.projectRef}/auth/oauth-clients/${encodeURIComponent(clientId)}`,
-      "DELETE",
-      undefined,
-      decodeVoid,
-    );
-  }
-
-  async regenerateSecret(clientId: string): Promise<SupaCloudOAuthClient> {
-    return this.request<SupaCloudOAuthClient>(
-      `/v1/projects/${this.options.projectRef}/auth/oauth-clients/${encodeURIComponent(clientId)}/regenerate-secret`,
-      "POST",
-      undefined,
-      decodeOAuthClient,
-    );
-  }
-}
-
-class SupaCloudSupAuthClient<TClient extends SupabaseClient = SupabaseClient> extends SupaCloudManagementClient<TClient> {
-  private get basePath(): string {
-    return `/v1/projects/${this.options.projectRef}/supauth`;
-  }
-
-  async provision(
-    options: SupaCloudSupAuthProvisionOptions = {},
-  ): Promise<SupaCloudSupAuthProvisionResult> {
-    return this.request<SupaCloudSupAuthProvisionResult>(
-      `${this.basePath}/provision`,
-      "POST",
-      options,
-      decodeSupAuthProvisionResult,
-    );
-  }
-
-  async reconcile(
-    options: SupaCloudSupAuthReconcileOptions = {},
-  ): Promise<SupaCloudSupAuthReconcileResult> {
-    return this.request<SupaCloudSupAuthReconcileResult>(
-      `${this.basePath}/reconcile`,
-      "POST",
-      options,
-      decodeSupAuthReconcileResult,
-    );
-  }
-
-  async rollback(): Promise<SupaCloudSupAuthRollbackResult> {
-    return this.request<SupaCloudSupAuthRollbackResult>(
-      `${this.basePath}/rollback`,
-      "POST",
-      undefined,
-      decodeSupAuthRollbackResult,
-    );
-  }
-
-  async getClientConfig(): Promise<SupaCloudSupAuthClientConfig> {
-    return this.request<SupaCloudSupAuthClientConfig>(
-      `${this.basePath}/client-config`,
-      "GET",
-      undefined,
-      decodeSupAuthClientConfig,
-    );
-  }
-
-  async verify(): Promise<SupaCloudSupAuthVerification> {
-    return this.request<SupaCloudSupAuthVerification>(
-      `${this.basePath}/verify`,
-      "GET",
-      undefined,
-      decodeSupAuthVerification,
-    );
-  }
-}
-
-export class SupaCloudCapabilitiesClient<TClient extends SupabaseClient = SupabaseClient> extends SupaCloudManagementClient<TClient> {
-  async get(): Promise<SupaCloudProjectCapabilities> {
-    return this.request<SupaCloudProjectCapabilities>(
-      `/v1/projects/${this.options.projectRef}/capabilities`,
-      "GET",
-      undefined,
-      decodeProjectCapabilities,
-    );
-  }
-
-  async isAvailable(capabilityKey: string): Promise<boolean> {
-    const res = await this.get();
-    return res.capabilities?.[capabilityKey]?.available === true;
-  }
-
-  async getVersion(): Promise<string> {
-    const res = await this.get();
-    return res.platform_version ?? "unknown";
-  }
-
-  async getEnvironment(): Promise<SupaCloudEnvironmentInfo> {
-    const res = await this.get();
-    return {
-      projectRef: res.project_ref,
-      platformVersion: res.platform_version ?? "unknown",
-      environment: res.environment ?? "production",
-      schemaVersion: res.schema_version,
-      authRuntime: res.auth_runtime,
-      storageBackend: res.storage_backend,
-      capabilities: res.capabilities,
-    };
-  }
-}
-
-export class SupaCloudStorageClient<TClient extends SupabaseClient = SupabaseClient> extends SupaCloudManagementClient<TClient> {
-  async getPlatformConstraints(): Promise<SupaCloudStoragePlatformConstraints> {
-    return this.request<SupaCloudStoragePlatformConstraints>(
-      `/storage/v1/constraints`,
-      "GET",
-      undefined,
-      decodeStoragePlatformConstraints,
-    );
-  }
-
-  async getUploadConstraints(bucketId: string): Promise<SupaCloudStorageUploadConstraints> {
-    try {
-      const { data, error } = await this.options.supabase.storage.getBucket(bucketId);
-      if (!error && data) {
-        return {
-          bucketId,
-          fileSizeLimit: typeof data.file_size_limit === "number"
-            ? data.file_size_limit
-            : data.file_size_limit ? Number(data.file_size_limit) : null,
-          allowedMimeTypes: Array.isArray(data.allowed_mime_types) ? data.allowed_mime_types : null,
-        };
-      }
-    } catch {
-      // Fall back to management API query if storage client throws or lacks RLS
-    }
-
-    try {
-      const bucket = await this.request<Record<string, unknown>>(
-        `/v1/projects/${this.options.projectRef}/storage/buckets/${encodeURIComponent(bucketId)}`,
-        "GET",
-        undefined,
-        (val) => responseRecord(val, "storage bucket"),
-      );
-      const rawLimit = bucket.file_size_limit;
-      const fileSizeLimit = typeof rawLimit === "number" ? rawLimit : rawLimit ? Number(rawLimit) : null;
-      const allowedMimeTypes = Array.isArray(bucket.allowed_mime_types)
-        ? (bucket.allowed_mime_types as string[])
-        : null;
-      return {
-        bucketId,
-        fileSizeLimit,
-        allowedMimeTypes,
-      };
-    } catch {
-      return {
-        bucketId,
-        fileSizeLimit: null,
-        allowedMimeTypes: null,
-      };
-    }
-  }
-
-  async validateUpload(
-    bucketId: string,
-    file: { size: number; type?: string },
-  ): Promise<SupaCloudUploadValidationResult> {
-    const constraints = await this.getUploadConstraints(bucketId);
-    if (constraints.fileSizeLimit !== null && file.size > constraints.fileSizeLimit) {
-      return {
-        valid: false,
-        error: `File size ${file.size} bytes exceeds bucket limit of ${constraints.fileSizeLimit} bytes`,
-      };
-    }
-    if (
-      constraints.allowedMimeTypes &&
-      constraints.allowedMimeTypes.length > 0 &&
-      file.type &&
-      !constraints.allowedMimeTypes.includes(file.type)
-    ) {
-      return {
-        valid: false,
-        error: `MIME type "${file.type}" is not in the allowed list: ${constraints.allowedMimeTypes.join(", ")}`,
-      };
-    }
-    return { valid: true };
-  }
-}
-
 export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseClient>(
   options: SupaCloudClientOptions<TClient>,
 ) {
@@ -2072,10 +1865,7 @@ export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseC
   const tasks = new SupaCloudTasksClient(normalized);
   const oauthServer = new SupaCloudOAuthServerClient(normalized);
   const oauthClients = new SupaCloudOAuthClientsClient(normalized);
-  const supauth = new SupaCloudSupAuthClient(normalized);
   const queues = new SupaCloudQueuesClient(normalized);
-  const capabilities = new SupaCloudCapabilitiesClient(normalized);
-  const storage = new SupaCloudStorageClient(normalized);
   const workflows = new SupaCloudWorkflowsClient(options.supabase);
   const commands = new SupaCloudCommandsClient(options.supabase);
   const artifacts = new SupaCloudArtifactsClient(options.supabase);
@@ -2092,12 +1882,7 @@ export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseC
     workflows,
     commands,
     artifacts,
-    supauth,
     queues,
-    capabilities,
-    storage,
-    getEnvironment: () => capabilities.getEnvironment(),
-    getVersion: () => capabilities.getVersion(),
     queue: (name: string) => new SupaCloudQueueClient(normalized, name),
     functions: {
       invokeBackground: (
