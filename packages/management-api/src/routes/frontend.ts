@@ -11,10 +11,12 @@ import {
   frontendReleasePrincipal,
   frontendReleaseService,
 } from "../services/frontend-release.service";
-import type { FrontendFramework } from "../types/frontend";
+import { FRONTEND_FRAMEWORKS } from "../types/frontend";
 import { FRAMEWORK_DEFAULTS } from "../types/frontend";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
-import { maskFrontendBuildLog, toFrontendDeploymentResponse } from "../utils/frontend-security";
+import { MASKED_FRONTEND_VALUE, maskFrontendBuildLog, normalizeFrontendCustomDomain, toFrontendDeploymentResponse } from "../utils/frontend-security";
+import { createFrontendEnvironmentRevision, FrontendEnvironmentConflictError } from "../utils/frontend-environment-revision";
+import { createFrontendConfigurationRevision, FrontendConfigurationConflictError } from "../utils/frontend-configuration-revision";
 
 const FRONTEND_UPLOAD_MAX_BYTES = Number(process.env.FRONTEND_UPLOAD_MAX_BYTES || 100 * 1024 * 1024);
 const FRONTEND_UPLOAD_MAX_FILES = Number(process.env.FRONTEND_UPLOAD_MAX_FILES || 10_000);
@@ -235,7 +237,10 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       if (!deployment) {
                 return status(404, { message: "Deployment not found", code: "404" });
       }
-      return toFrontendDeploymentResponse(deployment);
+      return {
+        ...toFrontendDeploymentResponse(deployment), env_revision: createFrontendEnvironmentRevision(deployment),
+        configuration_revision: createFrontendConfigurationRevision(deployment),
+      };
     },
     {
       params: t.Object({
@@ -341,18 +346,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
   .post(
     "/deployments",
     async ({ params, body, set }) => {
-      const deployment = await frontendService.createDeployment(params.ref, {
-        name: body.name,
-        framework: body.framework as FrontendFramework,
-        domain: body.domain,
-        custom_domains: body.custom_domains,
-        build_command: body.build_command,
-        output_dir: body.output_dir,
-        install_command: body.install_command,
-        node_version: body.node_version,
-        health_check_path: body.health_check_path,
-        env_vars: body.env_vars,
-      });
+      const deployment = await frontendService.createDeployment(params.ref, body);
 
       set.status = 201;
       return toFrontendDeploymentResponse(deployment);
@@ -363,7 +357,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       }),
       body: t.Object({
         name: t.String({ minLength: 1, maxLength: 100, pattern: "^[^\\r\\n]+$" }),
-        framework: t.String(),
+        framework: t.Union(FRONTEND_FRAMEWORKS.map((value) => t.Literal(value))),
         domain: t.Optional(t.String()),
         custom_domains: t.Optional(t.Array(t.String())),
         build_command: t.Optional(t.String()),
@@ -380,23 +374,19 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
   .patch(
     "/deployments/:id",
     async ({ params, body, set }) => {
-      const deployment = await frontendService.updateDeployment(params.ref, params.id, {
-        name: body.name,
-        domain: body.domain,
-        custom_domains: body.custom_domains,
-        build_command: body.build_command,
-        output_dir: body.output_dir,
-        install_command: body.install_command,
-        node_version: body.node_version,
-        health_check_path: body.health_check_path,
-        env_vars: body.env_vars,
-      });
+      const deployment = await frontendService.updateDeployment(params.ref, params.id, body);
 
       if (!deployment) {
                 return status(404, { message: "Deployment not found", code: "404" });
       }
 
-      return toFrontendDeploymentResponse(deployment);
+      if (deployment.project_ref !== params.ref || deployment.id !== params.id) {
+        return status(502, { code: "INVALID_RECEIPT", message: "Invalid deployment update receipt" });
+      }
+      return {
+        ...toFrontendDeploymentResponse(deployment),
+        success: true, operation: "update_deployment", deployment_id: params.id,
+      };
     },
     {
       params: t.Object({
@@ -418,6 +408,49 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
     }
   )
 
+  .put(
+    "/deployments/:id/configuration",
+    async ({ params, body }) => {
+      if (body.expected_revision === undefined) {
+        return status(428, { code: "CONFIGURATION_PRECONDITION_REQUIRED", message: "Read the configuration before replacing it" });
+      }
+      const deployment = await frontendService.saveBuildConfiguration(
+        params.ref, params.id, body.configuration, body.git.url, body.git.branch, body.expected_revision,
+      ).catch((error: unknown) => {
+        if (error instanceof FrontendConfigurationConflictError) return error;
+        throw error;
+      });
+      if (deployment instanceof FrontendConfigurationConflictError) {
+        return status(409, {
+          code: "CONFIGURATION_CONFLICT", message: deployment.message,
+          project_ref: params.ref, deployment_id: params.id, expected_revision: body.expected_revision,
+        });
+      }
+      if (!deployment) return status(404, { code: "404", message: "Deployment not found" });
+      if (deployment.project_ref !== params.ref || deployment.id !== params.id) {
+        return status(502, { code: "INVALID_RECEIPT", message: "Invalid configuration update receipt" });
+      }
+      return {
+        ...toFrontendDeploymentResponse(deployment),
+        success: true, operation: "update_configuration", deployment_id: params.id,
+        previous_configuration_revision: body.expected_revision,
+        configuration_revision: createFrontendConfigurationRevision(deployment),
+      };
+    },
+    {
+      params: t.Object({ ref: t.String(), id: t.String() }),
+      body: t.Object({
+        expected_revision: t.Optional(t.String({ minLength: 1, maxLength: 256 })),
+        configuration: t.Object({
+          build_command: t.String(), output_dir: t.String(), install_command: t.String(),
+          node_version: t.String(), health_check_path: t.String(),
+        }),
+        git: t.Object({ url: t.String(), branch: t.String() }),
+      }),
+      detail: { tags: ["frontend"], summary: "Save build and Git configuration together" },
+    },
+  )
+
   .delete(
     "/deployments/:id",
     async ({ params, set }) => {
@@ -431,7 +464,11 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       if (deletion === "not_found") {
                 return status(404, { message: "Deployment not found", code: "404" });
       }
-      return { message: "Deployment deleted successfully" };
+      if (deletion !== "deleted") return status(502, { message: "Invalid deletion result", code: "INVALID_RECEIPT" });
+      return {
+        success: true, operation: "delete_deployment", project_ref: params.ref, deployment_id: params.id,
+        message: "Deployment deleted successfully",
+      };
     },
     {
       params: t.Object({
@@ -581,7 +618,8 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       const sourceDir = `${deploymentDir}/source`;
 
       const result = await frontendService.deployFromSource(params.ref, params.id, sourceDir);
-      return result;
+      if (result.deployment_id !== params.id) return status(502, { message: "Invalid build result", code: "INVALID_RECEIPT" });
+      return { ...result, project_ref: params.ref, operation: "redeploy" };
     },
     {
       params: t.Object({
@@ -596,7 +634,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
     "/deployments/:id/logs",
     async ({ params, set }) => {
       const buildLog = await frontendService.getBuildLog(params.ref, params.id);
-      return { logs: buildLog };
+      return { project_ref: params.ref, deployment_id: params.id, logs: buildLog };
     },
     {
       params: t.Object({
@@ -610,11 +648,52 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
   .put(
     "/deployments/:id/env",
     async ({ params, body, set }) => {
-      const deployment = await frontendService.setEnvVars(params.ref, params.id, body.env_vars);
+      if ((body.env_vars === undefined) === (body.env_entries === undefined)) {
+        return status(400, { code: "INVALID_ENV_INPUT", message: "Provide one environment representation" });
+      }
+      let environment: Record<string, string>;
+      if (body.env_entries !== undefined) {
+        const names = body.env_entries.map(entry => entry.name);
+        if (new Set(names).size !== names.length) {
+          return status(400, { code: "INVALID_ENV_INPUT", message: "Duplicate environment variable name" });
+        }
+        environment = Object.fromEntries(body.env_entries.map(entry => [entry.name, entry.value]));
+      } else if (body.env_vars !== undefined) {
+        environment = body.env_vars;
+      } else {
+        return status(400, { code: "INVALID_ENV_INPUT", message: "Missing environment variables" });
+      }
+      const mode = body.mode ?? "merge";
+      if (mode === "replace" && body.expected_revision === undefined) {
+        return status(428, { code: "ENVIRONMENT_PRECONDITION_REQUIRED", message: "Read the environment before replacing it" });
+      }
+      const deployment = await frontendService.setEnvVars(params.ref, params.id, environment, mode, body.expected_revision)
+        .catch((error: unknown) => {
+          if (error instanceof FrontendEnvironmentConflictError) return error;
+          throw error;
+        });
+      if (deployment instanceof FrontendEnvironmentConflictError) {
+        return status(409, {
+          code: "ENVIRONMENT_CONFLICT", message: deployment.message,
+          project_ref: params.ref, deployment_id: params.id, expected_revision: body.expected_revision,
+        });
+      }
       if (!deployment) {
                 return status(404, { message: "Deployment not found", code: "404" });
       }
-      return toFrontendDeploymentResponse(deployment);
+      if (deployment.project_ref !== params.ref || deployment.id !== params.id
+        || mode === "replace" && Object.keys(deployment.env_vars).length !== Object.keys(environment).length
+        || Object.entries(environment).some(([name, value]) => !Object.hasOwn(deployment.env_vars, name)
+          || typeof deployment.env_vars[name] !== "string"
+          || value !== MASKED_FRONTEND_VALUE && deployment.env_vars[name] !== value)) {
+        return status(502, { code: "INVALID_RECEIPT", message: "Invalid environment update receipt" });
+      }
+      return {
+        ...toFrontendDeploymentResponse(deployment),
+        success: true, operation: "update_env", deployment_id: params.id, mode,
+        env_revision: createFrontendEnvironmentRevision(deployment),
+        ...(body.expected_revision === undefined ? {} : { previous_env_revision: body.expected_revision }),
+      };
     },
     {
       params: t.Object({
@@ -622,7 +701,10 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         id: t.String(),
       }),
       body: t.Object({
-        env_vars: t.Record(t.String(), t.String()),
+        mode: t.Optional(t.Union([t.Literal("merge"), t.Literal("replace")])),
+        expected_revision: t.Optional(t.String({ minLength: 1, maxLength: 256 })),
+        env_vars: t.Optional(t.Record(t.String(), t.String())),
+        env_entries: t.Optional(t.Array(t.Object({ name: t.String(), value: t.String() }), { maxItems: 256 })),
       }),
       detail: { tags: ["frontend"], summary: "Set deployment environment variables" },
     }
@@ -660,7 +742,15 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       if (!deployment) {
                 return status(404, { message: "Deployment not found", code: "404" });
       }
-      return toFrontendDeploymentResponse(deployment);
+      const domain = normalizeFrontendCustomDomain(params.domain);
+      if (deployment.id !== params.id || deployment.project_ref !== params.ref
+        || deployment.custom_domains.includes(domain)) {
+        return status(502, { message: "Invalid domain deletion result", code: "INVALID_RECEIPT" });
+      }
+      return {
+        ...toFrontendDeploymentResponse(deployment), success: true, operation: "remove_domain",
+        deployment_id: params.id, domain: params.domain,
+      };
     },
     {
       params: t.Object({
@@ -711,7 +801,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
     "/deployments/:id/tokens",
     async ({ params, set }) => {
       const tokens = await frontendService.listDeployTokens(params.ref, params.id);
-      return { tokens };
+      return { project_ref: params.ref, deployment_id: params.id, tokens };
     },
     {
       params: t.Object({
@@ -726,10 +816,14 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
     "/deployments/:id/tokens/:tokenId",
     async ({ params, set }) => {
       const success = await frontendService.deleteDeployToken(params.ref, params.id, params.tokenId);
-      if (!success) {
+      if (success === false) {
                 return status(404, { message: "Token not found", code: "404" });
       }
-      return { message: "Token deleted successfully" };
+      if (success !== true) return status(502, { message: "Invalid token deletion result", code: "INVALID_RECEIPT" });
+      return {
+        success: true, operation: "delete_token", project_ref: params.ref, deployment_id: params.id,
+        token_id: params.tokenId, message: "Token deleted successfully",
+      };
     },
     {
       params: t.Object({
@@ -753,7 +847,13 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       if (!deployment) {
                 return status(404, { message: "Deployment not found", code: "404" });
       }
-      return toFrontendDeploymentResponse(deployment);
+      if (deployment.project_ref !== params.ref || deployment.id !== params.id) {
+        return status(502, { code: "INVALID_RECEIPT", message: "Invalid Git update receipt" });
+      }
+      return {
+        ...toFrontendDeploymentResponse(deployment),
+        success: true, operation: "update_git", deployment_id: params.id,
+      };
     },
     {
       params: t.Object({

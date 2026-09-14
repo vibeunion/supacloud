@@ -1,4 +1,7 @@
-export type FrontendFramework = "static" | "react" | "vue" | "svelte" | "nextjs" | "nuxt" | "sveltekit" | "sveltekit-static" | "astro" | "remix";
+export const FRONTEND_FRAMEWORKS = [
+  "static", "react", "vue", "svelte", "nextjs", "nuxt", "sveltekit", "sveltekit-static", "astro", "remix",
+] as const;
+export type FrontendFramework = (typeof FRONTEND_FRAMEWORKS)[number];
 
 export type BuildStatus = "pending" | "building" | "success" | "failed";
 

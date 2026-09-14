@@ -1,82 +1,98 @@
 <script lang="ts">
-  import { apiClient, ensureMutationSucceeded } from "$lib/api";
-
+  import { apiClient } from "$lib/api";
+  import { isHostingId, loadHostingList, type HostingDeployment } from "$lib/hosting-list";
+  import { runHostingMutation } from "$lib/hosting-mutations";
+  import { untrack } from "svelte";
   import { page } from "$app/state";
   import { goto } from "$app/navigation";
   import { t } from "svelte-i18n";
-  import { Loader2, Globe, ExternalLink, GitBranch, Clock, CheckCircle2, XCircle, RefreshCw, Trash2, Settings } from "lucide-svelte";
-  import { useList, type BaseRecord } from "@svadmin/core";
-  import { createMutation } from "@tanstack/svelte-query";
-
-  interface Deployment extends BaseRecord {
-    id: string;
-    name: string;
-    framework: string;
-    domain: string;
-    custom_domains: string[];
-    status: string;
-    deployment_url: string;
-    git_url?: string;
-    git_branch?: string;
-    last_deployed_at?: string;
-    created_at: string;
-  }
+  import Loader2 from "lucide-svelte/icons/loader-circle";
+  import Globe from "lucide-svelte/icons/globe";
+  import ExternalLink from "lucide-svelte/icons/external-link";
+  import GitBranch from "lucide-svelte/icons/git-branch";
+  import Clock from "lucide-svelte/icons/clock";
+  import CheckCircle2 from "lucide-svelte/icons/circle-check";
+  import XCircle from "lucide-svelte/icons/circle-x";
+  import RefreshCw from "lucide-svelte/icons/refresh-cw";
+  import Settings from "lucide-svelte/icons/settings";
 
   const projectRef = $derived(page.params.ref);
-  const query = useList<Deployment>({ get resource() { return `v1/projects/${projectRef}/frontend/deployments`; } });
-  const deployments = $derived(Array.isArray(query.data?.data) ? query.data.data : ((query.data?.data as unknown as Record<string, unknown>)?.deployments as Deployment[] || []));
+  let deployments = $state<HostingDeployment[]>([]);
+  let loading = $state(true);
+  let loadError = $state(false);
+  type Operation = "redeploy" | "delete_deployment";
+  let pending = $state.raw(new Map<string, Operation>());
+  type Scope = { ref: string; controller: AbortController; read: AbortController | null };
+  let scope: Scope | null = null;
+  const isCurrent = (current: Scope) =>
+    scope === current && projectRef === current.ref && !current.controller.signal.aborted;
 
   let actionMsg: string | null = $state.raw(null);
 
-  const redeployMutation = createMutation(() => ({
-    mutationFn: async (id: string) => {
-      const response = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${id}/redeploy`, { method: "POST" });
-      await ensureMutationSucceeded(response, "部署失败");
-      return true;
-    },
-    onSuccess: () => {
-      actionMsg = `✅ 重新部署已触发`;
-      query.refetch();
-      setTimeout(() => actionMsg = null, 5000);
-    },
-    onError: (err: unknown) => {
-      actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
-      setTimeout(() => actionMsg = null, 5000);
+  async function loadDeployments() {
+    const current = scope;
+    if (!current || !isCurrent(current)) return;
+    current.read?.abort();
+    const read = new AbortController();
+    current.read = read;
+    const valid = () => isCurrent(current) && current.read === read;
+    loading = true;
+    loadError = false;
+    deployments = [];
+    try {
+      const rows = await loadHostingList(current.ref, apiClient,
+        AbortSignal.any([read.signal, current.controller.signal]));
+      if (valid()) deployments = rows;
+    } catch {
+      if (valid()) loadError = true;
+    } finally {
+      read.abort();
+      if (valid()) {
+        current.read = null;
+        loading = false;
+      }
     }
-  }));
-
-  function redeploy(id: string) {
-    actionMsg = null;
-    redeployMutation.mutate(id);
   }
 
-  let deletingId: string | null = $state.raw(null);
+  $effect(() => {
+    const ref = projectRef;
+    deployments = [];
+    pending = new Map();
+    actionMsg = null;
+    loading = false;
+    loadError = !isHostingId(ref);
+    if (!isHostingId(ref)) { scope = null; return; }
+    const current: Scope = { ref, controller: new AbortController(), read: null };
+    scope = current;
+    untrack(() => { void loadDeployments(); });
+    return () => { current.controller.abort(); current.read?.abort(); };
+  });
 
-  const deleteMutation = createMutation(() => ({
-    mutationFn: async (id: string) => {
-      const response = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${id}`, { method: "DELETE" });
-      await ensureMutationSucceeded(response, "删除部署失败");
-      return true;
-    },
-    onMutate: (id) => {
-      deletingId = id;
-    },
-    onSuccess: () => {
-      actionMsg = "✅ 部署已删除";
-      query.refetch();
-    },
-    onError: (error: unknown) => {
-      actionMsg = `❌ ${error instanceof Error ? error.message : String(error)}`;
-    },
-    onSettled: () => {
-      deletingId = null;
-      setTimeout(() => actionMsg = null, 3000);
+  async function mutateDeployment(id: string, operation: Operation) {
+    const current = scope;
+    if (!current || !isCurrent(current) || pending.has(id) || !deployments.some(row => row.id === id)) return;
+    pending = new Map(pending).set(id, operation);
+    actionMsg = null;
+    try {
+      await runHostingMutation(current.ref, id, { operation }, { signal: current.controller.signal });
+      if (!isCurrent(current)) return;
+      actionMsg = operation === "redeploy" ? "✅ 重新部署已完成" : "✅ 部署已删除";
+      void loadDeployments();
+    } catch (error) {
+      if (isCurrent(current)) actionMsg = `❌ ${error instanceof Error ? error.message : "操作无法确认"}`;
+    } finally {
+      if (isCurrent(current)) {
+        const remaining = new Map(pending);
+        remaining.delete(id);
+        pending = remaining;
+      }
     }
-  }));
+  }
 
   function deleteDeployment(id: string) {
+    if (pending.has(id)) return;
     if (!confirm("确定要删除此部署吗？这将停止服务并删除所有相关文件。")) return;
-    deleteMutation.mutate(id);
+    void mutateDeployment(id, "delete_deployment");
   }
 
 
@@ -89,7 +105,7 @@
   function getFrameworkLabel(fw: string): string {
     const map: Record<string, string> = {
       static: "静态站点", react: "React", vue: "Vue", svelte: "Svelte",
-      nextjs: "Next.js", nuxt: "Nuxt", sveltekit: "SvelteKit", astro: "Astro", remix: "Remix"
+      nextjs: "Next.js", nuxt: "Nuxt", sveltekit: "SvelteKit", "sveltekit-static": "SvelteKit Static", astro: "Astro", remix: "Remix"
     };
     return map[fw] || fw;
   }
@@ -109,7 +125,7 @@
   <div class="flex items-center justify-between">
     <h2 class="text-xl font-bold">站点列表</h2>
     <div class="flex items-center gap-2">
-      <button onclick={() => query.refetch()} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors">
+      <button onclick={() => loadDeployments()} disabled={loading || !isHostingId(projectRef)} class="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border hover:bg-muted/50 transition-colors disabled:opacity-50">
         <RefreshCw size={12} /> {$t("Hosting.refresh")}
       </button>
       {#if deployments.length > 0}
@@ -126,10 +142,12 @@
     </div>
   {/if}
 
-  {#if query.isLoading}
+  {#if loading}
     <div class="flex items-center justify-center py-24">
       <Loader2 size={24} class="animate-spin text-brand opacity-50" />
     </div>
+  {:else if loadError}
+    <div role="alert" class="border-l-2 border-red-500 px-4 py-3 text-sm text-red-600">无法加载部署列表</div>
   {:else if deployments.length === 0}
     <div class="rounded-xl border bg-card p-12 text-center">
       <Globe size={48} class="mx-auto text-muted-foreground/30 mb-4" />
@@ -194,11 +212,11 @@
               </button>
             </div>
             <div class="flex items-center gap-1">
-              <button onclick={() => redeploy(dep.id)} class="px-2.5 py-1 text-[10px] font-semibold rounded-md text-brand hover:bg-brand/10 transition-colors">
+              <button onclick={() => mutateDeployment(dep.id, "redeploy")} disabled={pending.has(dep.id)} class="px-2.5 py-1 text-[10px] font-semibold rounded-md text-brand hover:bg-brand/10 transition-colors disabled:opacity-50">
                 ↻ 重新部署
               </button>
-              <button onclick={() => deleteDeployment(dep.id)} disabled={deletingId === dep.id} class="px-2.5 py-1 text-[10px] font-semibold rounded-md text-red-500 hover:bg-red-500/10 transition-colors disabled:opacity-50">
-                {#if deletingId === dep.id}<Loader2 size={10} class="animate-spin inline" />{/if} 删除
+              <button onclick={() => deleteDeployment(dep.id)} disabled={pending.has(dep.id)} class="px-2.5 py-1 text-[10px] font-semibold rounded-md text-red-500 hover:bg-red-500/10 transition-colors disabled:opacity-50">
+                {#if pending.get(dep.id) === "delete_deployment"}<Loader2 size={10} class="animate-spin inline" />{/if} 删除
               </button>
             </div>
           </div>

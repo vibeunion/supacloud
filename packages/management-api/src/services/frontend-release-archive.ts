@@ -266,8 +266,10 @@ function assertPathHierarchy(paths: readonly string[]): void {
 function assertNonOverlappingRanges(entries: readonly VerifiedZipFileEntry[]): void {
   const ranges = entries.map((entry) => [entry.localHeaderOffset, entry.recordEnd] as const)
     .sort((left, right) => left[0] - right[0]);
-  for (let index = 1; index < ranges.length; index += 1) {
-    if (ranges[index][0] < ranges[index - 1][1]) invalidZip("Zip archive entries overlap");
+  let previousEnd: number | undefined;
+  for (const [start, end] of ranges) {
+    if (previousEnd !== undefined && start < previousEnd) invalidZip("Zip archive entries overlap");
+    previousEnd = end;
   }
 }
 
@@ -334,7 +336,11 @@ function crc32Table(): Uint32Array {
 function updateCrc32(crc: number, bytes: Uint8Array): number {
   const table = crc32Table();
   let updated = crc;
-  for (const byte of bytes) updated = (updated >>> 8) ^ table[(updated ^ byte) & 0xff];
+  for (const byte of bytes) {
+    const entry = table[(updated ^ byte) & 0xff];
+    if (entry === undefined) throw new Error("CRC32 lookup table is incomplete");
+    updated = (updated >>> 8) ^ entry;
+  }
   return updated >>> 0;
 }
 

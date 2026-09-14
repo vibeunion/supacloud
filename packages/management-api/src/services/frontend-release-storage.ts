@@ -1087,7 +1087,7 @@ export class FrontendReleaseStorage implements FrontendReleaseStoragePort {
     const publish = await publishImmutableDirectory({
       sourceDir: input.artifactDir,
       finalDir,
-      beforePublish: this.beforePublish,
+      ...(this.beforePublish === undefined ? {} : { beforePublish: this.beforePublish }),
     });
     if (publish === "exists") {
       return this.releaseRecord(input.projectRef, input.deploymentId, input.releaseId);

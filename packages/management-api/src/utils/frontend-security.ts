@@ -50,20 +50,29 @@ function assertSafeFrontendEnvName(name: string): void {
 }
 
 export function normalizeFrontendEnvVars(
-  envVars: Record<string, string> | undefined,
+  envVars: unknown,
 ): Record<string, string> {
-  const normalized: Record<string, string> = {};
-  for (const [name, value] of Object.entries(envVars || {})) {
+  if (envVars === undefined) return {};
+  if (!envVars || typeof envVars !== "object" || Array.isArray(envVars)
+    || (Object.getPrototypeOf(envVars) !== Object.prototype && Object.getPrototypeOf(envVars) !== null)) {
+    throw new Error("Invalid frontend environment variables");
+  }
+  const names = Reflect.ownKeys(envVars);
+  if (names.length > 256) throw new Error("Frontend environment variable count exceeds 256");
+  const entries: Array<[string, string]> = [];
+  for (const name of names) {
+    const property = Object.getOwnPropertyDescriptor(envVars, name);
+    if (typeof name !== "string" || !property || !("value" in property) || !property.enumerable) {
+      throw new Error("Invalid frontend environment variables");
+    }
     assertSafeFrontendEnvName(name);
+    const value: unknown = property.value;
     if (typeof value !== "string" || value.length > 24_576 || /[\u0000\r\n]/.test(value)) {
       throw new Error(`Frontend environment variable is too large: ${name}`);
     }
-    normalized[name] = value;
+    entries.push([name, value]);
   }
-  if (Object.keys(normalized).length > 256) {
-    throw new Error("Frontend environment variable count exceeds 256");
-  }
-  return normalized;
+  return Object.fromEntries(entries);
 }
 
 export function normalizeFrontendCustomDomain(domain: string): string {
@@ -136,7 +145,7 @@ export function toFrontendDeploymentResponse(deployment: FrontendDeployment): Om
       id,
       name,
       created_at,
-      last_used_at,
+      ...(last_used_at === undefined ? {} : { last_used_at }),
     })),
   };
 }

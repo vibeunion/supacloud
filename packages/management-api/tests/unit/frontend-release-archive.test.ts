@@ -164,10 +164,13 @@ describe("verified frontend release archives", () => {
 
   test("accepts a valid data descriptor and rejects descriptor corruption", async () => {
     const descriptor = dataDescriptorFixture(await zipFixture({ "index.html": "ok" }));
-    expect((await verifiedEntries(descriptor))[0].recordEnd).toBe(firstCentralOffset(descriptor));
+    const [descriptorEntry] = await verifiedEntries(descriptor);
+    if (!descriptorEntry) throw new Error("Missing descriptor entry");
+    expect(descriptorEntry.recordEnd).toBe(firstCentralOffset(descriptor));
 
     const corrupted = descriptor.slice();
     const entry = (await verifiedEntries(corrupted))[0];
+    if (!entry) throw new Error("Missing descriptor entry");
     Buffer.from(corrupted.buffer).writeUInt32LE(0, entry.dataEnd + 4);
     await expectInvalid(corrupted);
   });
@@ -187,7 +190,9 @@ describe("verified frontend release archives", () => {
     const firstCentralCommentLength = view.readUInt16LE(central + 32);
     const secondCentral = central + 46 + firstCentralNameLength
       + firstCentralExtraLength + firstCentralCommentLength;
-    view.writeUInt32LE(entries[1].dataEnd, secondCentral + 42);
+    const secondEntry = entries[1];
+    if (!secondEntry) throw new Error("Missing second archive entry");
+    view.writeUInt32LE(secondEntry.dataEnd, secondCentral + 42);
     await expectInvalid(archive);
   });
 
@@ -218,7 +223,7 @@ describe("verified frontend release archives", () => {
       } else {
         const local = view.readUInt32LE(central + 42);
         const dataOffset = local + 30 + view.readUInt16LE(local + 26) + view.readUInt16LE(local + 28);
-        view[dataOffset] ^= 0xff;
+        view.writeUInt8(view.readUInt8(dataOffset) ^ 0xff, dataOffset);
       }
       const corruptPath = join(tmpdir(), `frontend-release-corrupt-${crypto.randomUUID()}.zip`);
       const outputDir = await mkdtemp(join(tmpdir(), "frontend-release-corrupt-build-"));

@@ -58,17 +58,17 @@ export class FrontendReleaseService {
     this.deploymentLock = options.deploymentLock ?? withFrontendDeploymentLock;
     this.mutations = mutations;
     this.storage = new FrontendReleaseStorage({
-      baseDir: options.baseDir,
-      now: options.now,
-      beforePublish: options.beforePublish,
+      ...(options.baseDir === undefined ? {} : { baseDir: options.baseDir }),
+      ...(options.now === undefined ? {} : { now: options.now }),
+      ...(options.beforePublish === undefined ? {} : { beforePublish: options.beforePublish }),
     });
     this.activation = new FrontendReleaseActivationService({
       storage: this.storage,
       gateway,
       mutations,
       deploymentLock: this.deploymentLock,
-      now: options.now,
-      interruption: options.interruption,
+      ...(options.now === undefined ? {} : { now: options.now }),
+      ...(options.interruption === undefined ? {} : { interruption: options.interruption }),
     });
   }
 

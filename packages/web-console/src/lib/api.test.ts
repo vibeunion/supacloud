@@ -134,12 +134,13 @@ describe("apiClient", () => {
 
   test("normalizes the cookie login, session, and logout contract without returning a token", async () => {
     const calls: Array<{ input: string; init?: RequestInit }> = [];
+    const expiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
     const responses = [
-      new Response(JSON.stringify({ success: true, username: "admin" }), { status: 200 }),
+      new Response(JSON.stringify({ success: true, username: "admin", expires_at: expiresAt }), { status: 200 }),
       new Response(JSON.stringify({
         valid: true,
         username: "admin",
-        expires_at: "2026-07-24T03:00:00.000Z",
+        expires_at: expiresAt,
       }), { status: 200 }),
       new Response(JSON.stringify({ success: true }), { status: 200 }),
     ];
@@ -156,7 +157,7 @@ describe("apiClient", () => {
     expect(session).toEqual({
       authenticated: true,
       username: "admin",
-      expiresAt: "2026-07-24T03:00:00.000Z",
+      expiresAt,
     });
     expect(logout).toEqual({ success: true });
     expect(calls.map(call => [call.input, call.init?.method, call.init?.credentials])).toEqual([
@@ -179,6 +180,7 @@ describe("apiClient", () => {
       if (url === "/auth/session") {
         return Response.json({
           valid: true,
+          username: "admin",
           expires_at: new Date(Date.now() + 30_000).toISOString(),
         });
       }
@@ -188,6 +190,7 @@ describe("apiClient", () => {
       if (url === "/auth/refresh") {
         return Response.json({
           success: true,
+          username: "admin",
           expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
         });
       }
@@ -229,7 +232,7 @@ describe("apiClient", () => {
       const url = String(input);
       calls.push(url);
       if (url === "/auth/session") {
-        return Response.json({ valid: true, username: "admin" });
+        return Response.json({ valid: true, username: "admin", expires_at: new Date(Date.now() + 15 * 60_000).toISOString() });
       }
       return Response.json({ message: "Unauthorized" }, { status: 401 });
     };
@@ -290,6 +293,7 @@ describe("apiClient", () => {
       if (url === "/auth/session") {
         return Response.json({
           valid: true,
+          username: "admin",
           expires_at: new Date(Date.now() + 30_000).toISOString(),
         });
       }
@@ -297,6 +301,7 @@ describe("apiClient", () => {
         await refreshGate;
         return Response.json({
           success: true,
+          username: "admin",
           expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
         });
       }
@@ -329,6 +334,7 @@ describe("apiClient", () => {
       if (url === "/auth/session") {
         return Response.json({
           valid: true,
+          username: "admin",
           expires_at: new Date(Date.now() + 30_000).toISOString(),
         });
       }
@@ -353,6 +359,7 @@ describe("apiClient", () => {
       if (url === "/auth/session") {
         return Response.json({
           valid: true,
+          username: "admin",
           expires_at: new Date(Date.now() + 30_000).toISOString(),
         });
       }

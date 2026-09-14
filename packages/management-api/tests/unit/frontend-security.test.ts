@@ -64,11 +64,10 @@ describe("frontend security boundaries", () => {
 
     expect(response).not.toHaveProperty("build_log");
     expect(response.env_vars).toEqual({ NPM_TOKEN_VALUE: "********" });
-    expect(response.deploy_tokens).toEqual([{
+    expect(response.deploy_tokens).toStrictEqual([{
       id: "token123",
       name: "ci",
       created_at: "2026-09-04T00:00:00.000Z",
-      last_used_at: undefined,
     }]);
   });
 
