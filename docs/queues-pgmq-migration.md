@@ -99,7 +99,7 @@ await supacloud.queues.create("emails");
 
 | Previous SupaCloud API | New behavior |
 | --- | --- |
-| `queue.send(payload, options)` | Calls `pgmq_public.send`; returns numeric `msg_id` metadata. |
+| `queue.send(payload, options)` | Calls `pgmq_public.send`; returns a decimal-string `msg_id` metadata value. |
 | `queue.sendBatch(messages, options)` | Calls `pgmq_public.send_batch`. |
 | `queue.receive(options)` | Compatibility shortcut for `queue.read({ n: 1 })`. |
 | `queue.read({ sleepSeconds, n })` | Calls `pgmq_public.read`. |
@@ -117,7 +117,7 @@ await supacloud.queues.create("emails");
 
 PGMQ changes the queue contract in several important ways:
 
-- Message IDs are numeric `msg_id` values, not generated string IDs.
+- Public wrapper message IDs are decimal strings backed by PostgreSQL `bigint`; raw `pgmq` SQL may still expose numeric values.
 - `read` leases messages by changing their visibility timeout.
 - `archive` is the official acknowledgement path.
 - `pop` reads and deletes in one operation.

@@ -15,12 +15,14 @@ LANGUAGE plpgsql
 IMMUTABLE
 SET search_path = ''
 AS $$
+DECLARE
+  normalized_queue_name text := lower(btrim(queue_name));
 BEGIN
+  IF left(normalized_queue_name, char_length('supacloud_internal_')) = 'supacloud_internal_' THEN
+    RAISE EXCEPTION 'SUPACLOUD_QUEUE_NAME_RESERVED' USING ERRCODE = '42501';
+  END IF;
   IF queue_name IS NULL OR queue_name !~ '^[a-z0-9][a-z0-9_-]{0,127}$' THEN
     RAISE EXCEPTION 'SUPACLOUD_QUEUE_NAME_INVALID' USING ERRCODE = '22023';
-  END IF;
-  IF left(queue_name, char_length('supacloud_internal_')) = 'supacloud_internal_' THEN
-    RAISE EXCEPTION 'SUPACLOUD_QUEUE_NAME_RESERVED' USING ERRCODE = '42501';
   END IF;
   RETURN queue_name;
 END;
