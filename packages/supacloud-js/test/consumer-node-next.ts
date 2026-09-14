@@ -70,6 +70,7 @@ const client = createSupaCloudClient({
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends
   (<T>() => T extends B ? 1 : 2) ? true : false;
 type Assert<T extends true> = T;
+type SupAuthNamespaceRemoved = Assert<"supauth" extends keyof typeof client ? false : true>;
 type TaskTransportContract = Assert<Equal<
   Awaited<ReturnType<ReturnType<typeof createSupaCloudTaskFetch>>>, Response
 >>;
