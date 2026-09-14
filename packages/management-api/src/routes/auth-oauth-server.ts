@@ -1,20 +1,28 @@
 import { Elysia, t, status } from "elysia";
+import { isDeepStrictEqual } from "node:util";
 import { projectService } from "../services";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { logger } from "../utils/logger";
-import { sql as metaSql } from "../db";
+import { projectAuthRepository } from "../repositories/project-auth.repository";
 import {
   normalizeProjectRoutingConfig,
   resolveProjectAuthUrl,
   resolveProjectApiUrl,
   resolveTenantPorts,
 } from "../utils/project-routing";
-import { normalizeOAuthServerConfig, normalizeProjectConfig } from "../utils/project-config";
+import {
+  parseOAuthServerSettings, parseProjectAuthConfig, ProjectAuthContextError,
+  type OAuthServerSettings,
+} from "../utils/project-auth-record";
 import { requireAuthRuntimeManagement } from "./auth-runtime";
+import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
+import { resolveAuthExecutionPolicy } from "../services/auth-execution-policy";
+import { buildProjectJwtSettings, canonicalJwtIssuerUrl } from "../services/project-jwt-settings";
 import {
   OAuthAuthorizationPathError,
   resolveOAuthAuthorizationPath,
+  validateOAuthAuthorizationPath,
 } from "../utils/oauth-authorization-path";
 import {
   buildAwsKmsRs256JwtKeyMaterial,
@@ -22,8 +30,10 @@ import {
   normalizeProjectJwtJwks,
   normalizeProjectJwtKeys,
   signOidcServiceRoleJwt,
+  type OidcJwtKeyMaterial,
 } from "../utils/project-jwt";
 import { buildAuthRuntimeApplyFailureBody } from "./auth-config-responses";
+import { GoTrueOAuthError, requestGoTrueOAuth, type GoTrueOAuthOperation } from "../services/gotrue-oauth-admin";
 
 const OAUTH_CLIENT_BODY = t.Object({
   redirect_uris: t.Array(t.String()),
@@ -52,38 +62,6 @@ const OAUTH_CLIENT_UPDATE_BODY = t.Object({
   logo_uri: t.Optional(t.String()),
 });
 
-function normalizeOAuthClientPayload(input: unknown): unknown {
-  if (!input || typeof input !== "object" || Array.isArray(input)) return input;
-
-  const payload = { ...(input as Record<string, unknown>) };
-  const clientType = typeof payload.client_type === "string" ? payload.client_type : "";
-  const authMethod = typeof payload.token_endpoint_auth_method === "string"
-    ? payload.token_endpoint_auth_method
-    : "";
-  const isPublicClient = clientType === "public" || authMethod === "none";
-
-  if (clientType === "public" && !authMethod) {
-    payload.token_endpoint_auth_method = "none";
-  }
-  if (isPublicClient && (payload.client_secret === undefined || payload.client_secret === null)) {
-    payload.client_secret = "";
-  }
-
-  return payload;
-}
-
-type OAuthServerSettings = {
-  enabled?: boolean;
-  allow_dynamic_registration?: boolean;
-  issuer?: string;
-  migrated_at?: string;
-  signing_alg?: string;
-  key_id?: string;
-  authorization_path?: string;
-  jwt_keys?: unknown;
-  jwt_jwks?: unknown;
-};
-
 type MigrateOAuthServerInput = {
   allow_dynamic_registration?: boolean;
   authorization_path?: string;
@@ -96,31 +74,34 @@ type KmsRs256Input = {
   allow_dynamic_registration?: boolean;
 };
 
-async function loadProjectContext(ref: string) {
-  const project = await projectService.getProject(ref);
-  if (!project) return null;
+class ExternalOAuthManagementError extends Error {}
 
-  const rows = await metaSql`
-    SELECT config, organization_id, jwt_secret
-    FROM projects
-    WHERE ref = ${ref} AND deleted_at IS NULL
-    LIMIT 1
-  `;
-  const rawConfig = normalizeProjectConfig(rows[0]?.config);
+async function readProjectContext(ref: string) {
+  const project = await projectAuthRepository.findByRef(ref);
+  if (!project) return null;
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(ref) || project.ref !== ref) throw new ProjectAuthContextError();
+  const rawConfig = project.config;
+  const runtime = getAuthRuntimeDescriptor(ref);
+  const executionPolicy = resolveAuthExecutionPolicy(runtime, rawConfig);
+  if (!executionPolicy.localGoTrue) throw new ExternalOAuthManagementError();
   const routingConfig = normalizeProjectRoutingConfig(rawConfig);
-  const apiUrl = resolveProjectApiUrl(ref, routingConfig).replace(/\/+$/, "");
-  const authUrl = resolveProjectAuthUrl(ref, routingConfig).replace(/\/+$/, "");
+  let apiUrl: string;
+  let authUrl: string;
+  try {
+    apiUrl = canonicalJwtIssuerUrl(resolveProjectApiUrl(ref, routingConfig));
+    authUrl = canonicalJwtIssuerUrl(resolveProjectAuthUrl(ref, routingConfig));
+  } catch { throw new ProjectAuthContextError(); }
   const ports = resolveTenantPorts(routingConfig);
   const gotrueUrl = ports?.gotruePort
     ? `http://127.0.0.1:${ports.gotruePort}`
     : apiUrl.replace(/\/+$/, "").replace(/\/auth\/v1$/, "");
-  const authConfig = (rawConfig.auth || {}) as Record<string, unknown>;
-  const oauthServer = normalizeOAuthServerConfig(authConfig.oauth_server) as OAuthServerSettings;
+  const authConfig = parseProjectAuthConfig(rawConfig.auth);
+  const oauthServer = parseOAuthServerSettings(authConfig.oauth_server);
 
   return {
-    project,
-    organizationId: rows[0]?.organization_id || project.organization_id || "default",
-    jwtSecret: String(rows[0]?.jwt_secret || ""),
+    project, runtime, authConfig,
+    organizationId: project.organization_id,
+    jwtSecret: project.jwt_secret,
     apiUrl,
     authUrl,
     issuer: oauthServer.issuer || `${authUrl}/auth/v1`,
@@ -129,23 +110,68 @@ async function loadProjectContext(ref: string) {
   };
 }
 
-function buildOAuthServerStatus(ctx: NonNullable<Awaited<ReturnType<typeof loadProjectContext>>>) {
-  const issuer = ctx.issuer.replace(/\/+$/, "");
-  const authUrl = ctx.authUrl.replace(/\/+$/, "");
-  const jwtKeys = normalizeProjectJwtKeys(ctx.oauthServer.jwt_keys);
-  const jwtJwks = normalizeProjectJwtJwks(ctx.oauthServer.jwt_jwks);
-  const migrated = Boolean(jwtKeys && jwtJwks);
-  const signingAlg = migrated
-    ? String(ctx.oauthServer.signing_alg || jwtKeys?.[0]?.alg || "unknown")
-    : "not_migrated";
+async function loadProjectContext(ref: string) {
+  try {
+    return await readProjectContext(ref);
+  } catch (error) {
+    if (error instanceof ExternalOAuthManagementError) throw error;
+    throw new ProjectAuthContextError();
+  }
+}
+
+type OAuthContext = NonNullable<Awaited<ReturnType<typeof loadProjectContext>>>;
+
+export interface OAuthServerStatus {
+  project_ref: string;
+  organization_id: string | null;
+  account_isolated: true;
+  enabled: boolean;
+  state_source: "configuration";
+  runtime_verified: false;
+  allow_dynamic_registration: boolean;
+  issuer: string;
+  authorization_path: string;
+  discovery_url: string;
+  oauth_authorization_server_metadata_url: string;
+  jwks_url: string;
+  authorization_endpoint: string;
+  token_endpoint: string;
+  userinfo_endpoint: string;
+  registration_endpoint: string;
+  signing_alg: "ES256" | "RS256" | "not_migrated";
+  key_id?: string;
+  oidc_id_token_ready: boolean;
+  migration_status: "oidc_es256_migrated" | "oidc_rs256_migrated" | "not_migrated";
+  warnings: string[];
+}
+
+async function buildOAuthServerStatus(ctx: OAuthContext): Promise<OAuthServerStatus> {
+  let jwt: Awaited<ReturnType<typeof buildProjectJwtSettings>>;
+  let authorizationPath: string;
+  try {
+    jwt = await buildProjectJwtSettings(ctx.project.ref, {
+      ...ctx.project.config, auth: { ...ctx.authConfig, oauth_server: ctx.oauthServer },
+    }, ctx.runtime);
+    authorizationPath = ctx.oauthServer.authorization_path === undefined
+      ? resolveOAuthAuthorizationPath(undefined, undefined)
+      : validateOAuthAuthorizationPath(ctx.oauthServer.authorization_path);
+  } catch { throw new ProjectAuthContextError(); }
+  if (jwt.execution_mode === "shared" || jwt.execution_mode === "external") throw new ExternalOAuthManagementError();
+  const { signing } = jwt;
+  const issuer = signing.issuer;
+  const authUrl = ctx.authUrl;
+  const migrated = signing.migration_status === "configured";
+  const signingAlg = signing.algorithm ?? "not_migrated";
   return {
     project_ref: ctx.project.ref,
     organization_id: ctx.organizationId,
     account_isolated: true,
-    enabled: migrated && ctx.oauthServer.enabled === true,
+    enabled: signing.oauth_enabled,
+    state_source: "configuration" as const,
+    runtime_verified: false as const,
     allow_dynamic_registration: ctx.oauthServer.allow_dynamic_registration === true,
     issuer,
-    authorization_path: ctx.oauthServer.authorization_path,
+    authorization_path: authorizationPath,
     discovery_url: `${issuer}/.well-known/openid-configuration`,
     oauth_authorization_server_metadata_url: `${authUrl}/.well-known/oauth-authorization-server/auth/v1`,
     jwks_url: `${issuer}/.well-known/jwks.json`,
@@ -154,13 +180,24 @@ function buildOAuthServerStatus(ctx: NonNullable<Awaited<ReturnType<typeof loadP
     userinfo_endpoint: `${issuer}/oauth/userinfo`,
     registration_endpoint: `${issuer}/oauth/clients/register`,
     signing_alg: signingAlg,
-    key_id: migrated ? ctx.oauthServer.key_id : undefined,
+    ...(signing.key_id === null ? {} : { key_id: signing.key_id }),
     oidc_id_token_ready: migrated,
-    migration_status: migrated ? `oidc_${String(signingAlg).toLowerCase()}_migrated` : "not_migrated",
+    migration_status: signing.algorithm === "ES256" ? "oidc_es256_migrated"
+      : signing.algorithm === "RS256" ? "oidc_rs256_migrated" : "not_migrated",
     warnings: migrated ? [] : [
       "Project is not migrated to project-scoped OIDC signing keys. Run POST /oauth-server/migrate.",
     ],
   };
+}
+
+async function currentContext(ctx: OAuthContext, expectedAuth: Record<string, unknown> = ctx.authConfig): Promise<OAuthContext> {
+  const current = await loadProjectContext(ctx.project.ref);
+  if (!current || !isDeepStrictEqual(current.runtime, ctx.runtime)
+    || !isDeepStrictEqual(current.authConfig, expectedAuth)
+    || current.apiUrl !== ctx.apiUrl || current.authUrl !== ctx.authUrl
+    || current.gotrueUrl !== ctx.gotrueUrl || current.jwtSecret !== ctx.jwtSecret
+    || current.organizationId !== ctx.organizationId) throw new ProjectAuthContextError();
+  return current;
 }
 
 async function configureKmsRs256Signing(
@@ -181,7 +218,7 @@ async function configureKmsRs256Signing(
     keyMaterial = await buildAwsKmsRs256JwtKeyMaterial({
       aws_kms_arn: input.aws_kms_arn,
       public_jwk: input.public_jwk,
-      key_id: input.key_id,
+      ...(input.key_id === undefined ? {} : { key_id: input.key_id }),
     });
   } catch (error: unknown) {
     return status(400, {
@@ -190,12 +227,14 @@ async function configureKmsRs256Signing(
     });
   }
 
-  const currentAuth = (settings.auth || {}) as Record<string, unknown>;
-  const currentOauthServer = normalizeOAuthServerConfig(currentAuth.oauth_server) as OAuthServerSettings;
-  const authorizationPath = resolveOAuthAuthorizationPath(
-    undefined,
-    currentOauthServer.authorization_path,
-  );
+  const currentAuth = parseProjectAuthConfig(settings.auth);
+  const currentOauthServer = parseOAuthServerSettings(currentAuth.oauth_server);
+  let authorizationPath: string;
+  try {
+    authorizationPath = currentOauthServer.authorization_path === undefined
+      ? resolveOAuthAuthorizationPath(undefined, undefined)
+      : validateOAuthAuthorizationPath(currentOauthServer.authorization_path);
+  } catch { throw new ProjectAuthContextError(); }
   const oauthServer: OAuthServerSettings = {
     ...currentOauthServer,
     enabled: true,
@@ -213,10 +252,14 @@ async function configureKmsRs256Signing(
     ...currentAuth,
     oauth_server: oauthServer,
   };
-  await projectService.updateProjectSettings(ref, {
+  const nextStatus = await buildOAuthServerStatus({ ...ctx, authConfig: nextAuth, oauthServer });
+  await currentContext(ctx, currentAuth);
+  const persisted = await projectService.updateProjectSettings(ref, {
     ...settings,
     auth: nextAuth,
   });
+  if (!persisted) return status(404, { message: "Project not found", code: "404" });
+  await currentContext(ctx, nextAuth);
 
   try {
     await tenantRuntimeService.applyAuthConfig(ref, currentAuth, nextAuth);
@@ -228,16 +271,14 @@ async function configureKmsRs256Signing(
     return status(503, buildAuthRuntimeApplyFailureBody(ref, error));
   }
 
-  return buildOAuthServerStatus({
-    ...ctx,
-    oauthServer,
-  });
+  await currentContext(ctx, nextAuth);
+  return nextStatus;
 }
 
 async function proxyGoTrueAdmin(
-  ctx: NonNullable<Awaited<ReturnType<typeof loadProjectContext>>>,
-  path: string,
-  init: RequestInit = {},
+  ctx: OAuthContext,
+  operation: GoTrueOAuthOperation,
+  request: Request,
 ) {
   const adminToken = await signOidcServiceRoleJwt(ctx.oauthServer.jwt_keys, ctx.issuer);
   if (!adminToken) {
@@ -256,35 +297,35 @@ async function proxyGoTrueAdmin(
     });
   }
 
-  const headers = new Headers(init.headers);
-  headers.set("apikey", adminToken);
-  headers.set("authorization", `Bearer ${adminToken}`);
-  headers.set("x-project-ref", ctx.project.ref);
-  if (init.body !== undefined && !headers.has("content-type")) {
-    headers.set("content-type", "application/json");
-  }
-
+  await buildOAuthServerStatus(ctx);
+  await currentContext(ctx);
   try {
-    const upstream = await fetch(`${ctx.gotrueUrl}${path}`, {
-      ...init,
-      headers,
-    });
-    const responseHeaders = new Headers();
-    const contentType = upstream.headers.get("content-type");
-    if (contentType) responseHeaders.set("content-type", contentType);
-    return new Response(upstream.body, {
-      status: upstream.status,
-      headers: responseHeaders,
-    });
+    const response = await requestGoTrueOAuth({
+      url: ctx.gotrueUrl, projectRef: ctx.project.ref, adminToken, signal: request.signal,
+    }, operation);
+    try { await currentContext(ctx); }
+    catch (error) {
+      void response.body?.cancel().catch(() => {});
+      if (operation.kind !== "list" && operation.kind !== "get") {
+        return Response.json({
+          code: "OAUTH_CONTEXT_UNCONFIRMED", message: "OAuth client result cannot be confirmed against current project context",
+          mutation_may_have_applied: true,
+        }, { status: 503 });
+      }
+      throw error;
+    }
+    return response;
   } catch (error: unknown) {
-    logger.warn("[auth-oauth-server] GoTrue OAuth admin proxy failed", {
-      ref: ctx.project.ref,
-      path,
-      error: error instanceof Error ? error.message : String(error),
+    if (error instanceof ProjectAuthContextError || error instanceof ExternalOAuthManagementError) throw error;
+    const failure = error instanceof GoTrueOAuthError ? error : new GoTrueOAuthError();
+    logger.warn("[auth-oauth-server] GoTrue OAuth admin request failed", {
+      ref: ctx.project.ref, operation: operation.kind, status: failure.status,
     });
-    return new Response(JSON.stringify({ message: "GoTrue OAuth admin endpoint unavailable", code: "502" }), {
-      status: 502,
-      headers: { "content-type": "application/json" },
+    return Response.json({
+      message: failure.message, code: String(failure.status),
+      ...(failure.mutationMayHaveApplied ? { mutation_may_have_applied: true } : {}),
+    }, {
+      status: failure.status,
     });
   }
 }
@@ -302,8 +343,8 @@ async function migrateProjectToOidc(
   const settings = await projectService.getProjectSettings(ref);
   if (!settings) return status(404, { message: "Project not found", code: "404" });
 
-  const currentAuth = (settings.auth || {}) as Record<string, unknown>;
-  const currentOauthServer = normalizeOAuthServerConfig(currentAuth.oauth_server) as OAuthServerSettings;
+  const currentAuth = parseProjectAuthConfig(settings.auth);
+  const currentOauthServer = parseOAuthServerSettings(currentAuth.oauth_server);
   let authorizationPath: string;
   try {
     authorizationPath = resolveOAuthAuthorizationPath(
@@ -316,16 +357,16 @@ async function migrateProjectToOidc(
     }
     throw error;
   }
-  const existingJwtKeys = normalizeProjectJwtKeys(currentOauthServer.jwt_keys);
-  const existingJwtJwks = normalizeProjectJwtJwks(currentOauthServer.jwt_jwks);
-  const keyMaterial = existingJwtKeys && existingJwtJwks && typeof currentOauthServer.key_id === "string"
-    ? {
-      key_id: currentOauthServer.key_id,
-      signing_alg: "ES256" as const,
-      jwt_keys: existingJwtKeys,
-      jwt_jwks: existingJwtJwks,
-    }
-    : await generateOidcJwtKeyMaterial(ctx.jwtSecret);
+  const currentStatus = await buildOAuthServerStatus({ ...ctx, authConfig: currentAuth, oauthServer: currentOauthServer });
+  let keyMaterial: OidcJwtKeyMaterial;
+  if (currentStatus.signing_alg === "not_migrated") {
+    keyMaterial = await generateOidcJwtKeyMaterial(ctx.jwtSecret);
+  } else {
+    const keys = normalizeProjectJwtKeys(currentOauthServer.jwt_keys);
+    const jwks = normalizeProjectJwtJwks(currentOauthServer.jwt_jwks);
+    if (!keys || !jwks || !currentStatus.key_id) throw new ProjectAuthContextError();
+    keyMaterial = { key_id: currentStatus.key_id, signing_alg: currentStatus.signing_alg, jwt_keys: keys, jwt_jwks: jwks };
+  }
 
   const oauthServer: OAuthServerSettings = {
     ...currentOauthServer,
@@ -344,10 +385,14 @@ async function migrateProjectToOidc(
     ...currentAuth,
     oauth_server: oauthServer,
   };
-  await projectService.updateProjectSettings(ref, {
+  const nextStatus = await buildOAuthServerStatus({ ...ctx, authConfig: nextAuth, oauthServer });
+  await currentContext(ctx, currentAuth);
+  const persisted = await projectService.updateProjectSettings(ref, {
     ...settings,
     auth: nextAuth,
   });
+  if (!persisted) return status(404, { message: "Project not found", code: "404" });
+  await currentContext(ctx, nextAuth);
 
   try {
     await tenantRuntimeService.applyAuthConfig(ref, currentAuth, nextAuth);
@@ -359,10 +404,22 @@ async function migrateProjectToOidc(
     return status(503, buildAuthRuntimeApplyFailureBody(ref, error));
   }
 
-  return buildOAuthServerStatus({ ...ctx, oauthServer });
+  await currentContext(ctx, nextAuth);
+  return nextStatus;
 }
 
 export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
+  .onRequest(({ set }) => { set.headers["cache-control"] = "no-store"; })
+  .onError(({ error }) => {
+    if (error instanceof ExternalOAuthManagementError) {
+      return Response.json({
+        code: "AUTH_RUNTIME_NOT_LOCAL", message: "OAuth management is not available for a non-local Auth runtime",
+      }, { status: 409, headers: { "cache-control": "no-store" } });
+    }
+    if (error instanceof ProjectAuthContextError) {
+      return Response.json(error.toJSON(), { status: 503, headers: { "cache-control": "no-store" } });
+    }
+  })
   .onBeforeHandle(requireAuthRuntimeManagement("oauth"))
   .get(
     "/oauth-server",
@@ -371,7 +428,9 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       if (authError) return status(authError.status, authError.body);
       const ctx = await loadProjectContext(params.ref);
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
-      return buildOAuthServerStatus(ctx);
+      const result = await buildOAuthServerStatus(ctx);
+      await currentContext(ctx);
+      return result;
     },
     { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "Get OAuth server status" } },
   )
@@ -381,7 +440,7 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       return migrateProjectToOidc(
         params.ref,
         request,
-        body as MigrateOAuthServerInput,
+        body,
       );
     },
     {
@@ -397,7 +456,7 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
   .post(
     "/oauth-server/kms-rs256",
     async ({ params, body, request }) => {
-      return configureKmsRs256Signing(params.ref, request, body as KmsRs256Input);
+      return configureKmsRs256Signing(params.ref, request, body);
     },
     {
       params: t.Object({ ref: t.String() }),
@@ -417,7 +476,7 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       if (authError) return status(authError.status, authError.body);
       const ctx = await loadProjectContext(params.ref);
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
-      return proxyGoTrueAdmin(ctx, "/admin/oauth/clients");
+      return proxyGoTrueAdmin(ctx, { kind: "list" }, request);
     },
     { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "List OAuth clients" } },
   )
@@ -428,10 +487,7 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       if (authError) return status(authError.status, authError.body);
       const ctx = await loadProjectContext(params.ref);
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
-      return proxyGoTrueAdmin(ctx, "/admin/oauth/clients", {
-        method: "POST",
-        body: JSON.stringify(normalizeOAuthClientPayload(body)),
-      });
+      return proxyGoTrueAdmin(ctx, { kind: "create", input: body }, request);
     },
     { params: t.Object({ ref: t.String() }), body: OAUTH_CLIENT_BODY, detail: { tags: ["auth"], summary: "Create OAuth client" } },
   )
@@ -442,7 +498,7 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       if (authError) return status(authError.status, authError.body);
       const ctx = await loadProjectContext(params.ref);
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
-      return proxyGoTrueAdmin(ctx, `/admin/oauth/clients/${encodeURIComponent(params.clientId)}`);
+      return proxyGoTrueAdmin(ctx, { kind: "get", clientId: params.clientId }, request);
     },
     { params: t.Object({ ref: t.String(), clientId: t.String() }), detail: { tags: ["auth"], summary: "Get OAuth client" } },
   )
@@ -453,10 +509,7 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       if (authError) return status(authError.status, authError.body);
       const ctx = await loadProjectContext(params.ref);
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
-      return proxyGoTrueAdmin(ctx, `/admin/oauth/clients/${encodeURIComponent(params.clientId)}`, {
-        method: "PUT",
-        body: JSON.stringify(normalizeOAuthClientPayload(body)),
-      });
+      return proxyGoTrueAdmin(ctx, { kind: "update", clientId: params.clientId, input: body }, request);
     },
     { params: t.Object({ ref: t.String(), clientId: t.String() }), body: OAUTH_CLIENT_UPDATE_BODY, detail: { tags: ["auth"], summary: "Update OAuth client" } },
   )
@@ -467,9 +520,7 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       if (authError) return status(authError.status, authError.body);
       const ctx = await loadProjectContext(params.ref);
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
-      return proxyGoTrueAdmin(ctx, `/admin/oauth/clients/${encodeURIComponent(params.clientId)}`, {
-        method: "DELETE",
-      });
+      return proxyGoTrueAdmin(ctx, { kind: "delete", clientId: params.clientId }, request);
     },
     { params: t.Object({ ref: t.String(), clientId: t.String() }), detail: { tags: ["auth"], summary: "Delete OAuth client" } },
   )
@@ -480,9 +531,7 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       if (authError) return status(authError.status, authError.body);
       const ctx = await loadProjectContext(params.ref);
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
-      return proxyGoTrueAdmin(ctx, `/admin/oauth/clients/${encodeURIComponent(params.clientId)}/regenerate_secret`, {
-        method: "POST",
-      });
+      return proxyGoTrueAdmin(ctx, { kind: "regenerate", clientId: params.clientId }, request);
     },
     { params: t.Object({ ref: t.String(), clientId: t.String() }), detail: { tags: ["auth"], summary: "Regenerate OAuth client secret" } },
   );

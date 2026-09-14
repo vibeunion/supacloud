@@ -249,36 +249,39 @@ export class TenantOAuthService {
         const durableContent = normalizedContent.endsWith("\n") ? normalizedContent : `${normalizedContent}\n`;
         const runtimePath = this.gotrueRuntimeEnvPath(ref);
         const legacyPath = this.gotrueLegacyEnvPath(ref);
-        const preparedFiles: PreparedTenantEnvFile[] = [runtimePath, legacyPath].map((targetPath) => ({
+        const preparedFile = (targetPath: string): PreparedTenantEnvFile => ({
             targetPath,
             stagePath: "",
             backupPath: "",
             existed: false,
             originalMode: 0o600,
             rollbackReady: false,
-        }));
+        });
+        const runtimeFile = preparedFile(runtimePath);
+        const legacyFile = preparedFile(legacyPath);
+        const preparedFiles = [runtimeFile, legacyFile];
 
         try {
             const runtimeTemporaryPath = await this.stageTenantEnvFile(runtimePath, durableContent, runtimeUser);
-            preparedFiles[0].stagePath = runtimeTemporaryPath;
+            runtimeFile.stagePath = runtimeTemporaryPath;
             const legacyTemporaryPath = await this.stageTenantEnvFile(legacyPath, durableContent, runtimeUser);
-            preparedFiles[1].stagePath = legacyTemporaryPath;
+            legacyFile.stagePath = legacyTemporaryPath;
 
-            await this.prepareTenantEnvFile(preparedFiles[0], runtimeUser);
-            await this.prepareTenantEnvFile(preparedFiles[1], runtimeUser);
+            await this.prepareTenantEnvFile(runtimeFile, runtimeUser);
+            await this.prepareTenantEnvFile(legacyFile, runtimeUser);
 
             if (this.renamePathOverride) {
                 await this.renamePathOverride(runtimeTemporaryPath, runtimePath);
             } else {
                 await fs.rename(runtimeTemporaryPath, runtimePath);
             }
-            preparedFiles[0].stagePath = "";
+            runtimeFile.stagePath = "";
             if (this.renamePathOverride) {
                 await this.renamePathOverride(legacyTemporaryPath, legacyPath);
             } else {
                 await fs.rename(legacyTemporaryPath, legacyPath);
             }
-            preparedFiles[1].stagePath = "";
+            legacyFile.stagePath = "";
             await this.commitChmod(runtimePath, 0o600);
             await this.commitChmod(legacyPath, 0o600);
         } catch (error: unknown) {

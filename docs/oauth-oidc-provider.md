@@ -161,6 +161,14 @@ Example response:
 }
 ```
 
+The status projection preserves a nullable `organization_id` as `null`; it does
+not invent a default organization. Missing or deleted projects return 404.
+Malformed persisted authentication context and database read failures return
+503 with `PROJECT_AUTH_CONTEXT_UNAVAILABLE`, without database error details.
+The reader accepts object configuration, one legacy JSON-text object layer,
+or a nullable configuration column. Malformed, scalar, array and repeatedly
+encoded configuration values are rejected.
+
 ### Migrate Project
 
 ```bash
@@ -182,6 +190,11 @@ backslashes, control characters, and dot-traversal segments are rejected to
 keep GoTrue redirects on the configured public host. It defaults to
 `/authorize.html` when omitted.
 
+Both OIDC migration and KMS configuration stop before runtime apply if the
+settings update returns no project. A non-null service result alone is not
+proof of an atomic persisted receipt; that write path still needs an
+independent transaction/receipt audit.
+
 ### OAuth Client CRUD
 
 The Management API proxies project-scoped OAuth client administration to that project's GoTrue runtime:
@@ -196,6 +209,10 @@ The Management API proxies project-scoped OAuth client administration to that pr
 | `POST` | `/v1/projects/:ref/auth/oauth-clients/:clientId/regenerate-secret` |
 
 All Management API routes require a valid Management API token or a project-scoped service-role token for the same `:ref`.
+
+OAuth management responses use `Cache-Control: no-store`. The GoTrue admin
+proxy rejects redirects, including same-origin redirects, so it does not
+forward project administration credentials to a redirect target.
 
 ## `@supacloud/js`
 
@@ -223,6 +240,19 @@ const clients = await client.auth.oauthClients.list();
 ```
 
 The SDK never accepts `accountId` or `organizationId` for authorization. It sends the same Bearer token as other Management API calls; the server decides project access.
+
+`getStatus()` and `migrateToOidc()` validate all declared status fields and
+require `project_ref` to match the requested project. Optional fields may be
+absent, and `organization_id` may also be null. Invalid optional values reject
+the response instead of being spread into a typed object; undeclared fields
+are not exposed. This validation does not establish URL trust, full discovery
+or JWKS semantics, or a committed settings transaction.
+
+Local regression evidence includes native PostgreSQL projection reads,
+loopback HTTP error/redirect cases, and real ES256 signature/issuer checks.
+The native fixture uses a minimal projection table and a Management master
+token, not a full migration replay or real project-token acceptance. KMS tests
+use fixtures rather than an AWS KMS service.
 
 ## Isolation Rules
 

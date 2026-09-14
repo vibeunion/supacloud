@@ -162,7 +162,9 @@ export function applyAuthSettingsPatch(target: AuthSettings, patch: Record<strin
   for (const k of NUMBER_KEYS) {
     if (!(k in patch)) continue
     const n = patch[k]
-    const { min, max } = numBounds[k]
+    const bounds = numBounds[k]
+    if (!bounds) throw new Error(`Missing setting bounds: ${k}`)
+    const { min, max } = bounds
     if (typeof n !== 'number' || !Number.isFinite(n) || n < min || n > max) {
       return max === Number.MAX_SAFE_INTEGER
         ? `${k} must be a number >= ${min}`
