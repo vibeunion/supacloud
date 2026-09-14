@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.80.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.79.0...management-api-v0.80.0) (2026-09-14)
+
+
+### Features
+
+* **auth:** add project OAuth Server console and GoTrue admin proxy ([#1293](https://github.com/vibeunion/supacloud/issues/1293)) ([2cbc565](https://github.com/vibeunion/supacloud/commit/2cbc5657ee59d173869cbf36d979b14babd81e56))
+* **hosting:** add frontend hosting environments, versions, and console ([#1292](https://github.com/vibeunion/supacloud/issues/1292)) ([4a5dc78](https://github.com/vibeunion/supacloud/commit/4a5dc78cbb827ff22e5b714c3311c377db44ea67))
+* **management-api:** add PGMQ queue settings, batch ingestion, and queue governance ([#1291](https://github.com/vibeunion/supacloud/issues/1291)) ([8362642](https://github.com/vibeunion/supacloud/commit/8362642267c18f92beee2e3f5833eef3945651a0))
+* **supacloud-js:** add durable workflow, command, artifact, and queue RPC client ([#1290](https://github.com/vibeunion/supacloud/issues/1290)) ([0183c74](https://github.com/vibeunion/supacloud/commit/0183c7441988902fcad98b25bd80b8cb15d254de))
+
 ## [0.79.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.78.1...management-api-v0.79.0) (2026-09-12)
 
 
