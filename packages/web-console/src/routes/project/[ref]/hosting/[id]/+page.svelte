@@ -44,7 +44,7 @@
   let newTokenName = $state("");
   type TokenScope = { projectRef: string; deploymentId: string };
   const tokenScope: TokenScope = $derived({ projectRef: projectRef ?? "", deploymentId: deployId });
-  let createdToken: { scope: TokenScope; token: string } | null = $state.raw(null);
+  let createdToken = $state.raw<{ scope: TokenScope; token: string } | null>(null);
   const lastCreatedToken = $derived(createdToken?.scope === tokenScope ? createdToken.token : null);
   let tokenCreateInFlight = false;
   let tokenCopyInFlight = $state(false);
