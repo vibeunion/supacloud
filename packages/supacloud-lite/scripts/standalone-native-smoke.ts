@@ -31,7 +31,7 @@ interface RoleClients {
 }
 
 interface PersistenceSeeds {
-  queueMessageId: number
+  queueMessageId: string
   workflowRunId: string
   userEmail: string
 }
