@@ -3,10 +3,21 @@ import { CommandError } from "@supacloud/contracts";
 import { provideToken, runInRequestContext, type EnvironmentInjector, REQUEST_CONTEXT } from "@supacloud/app";
 import { commandErrorStatus } from "./command-errors";
 import { executionRequestId, observeExecution, type ExecutionObserver } from "./execution";
+import {
+  createDocumentationPlugin,
+  type ApplicationDocumentationOptions,
+} from "./documentation";
 
 export type { ExecutionEvent, ExecutionObserver } from "./execution";
 export { createSchemaDecoder, defineJsonContract, SchemaContractError } from "./schema_contract";
 export { createPersistentCommandAdapter, type PersistentCommandHandler } from "./persistent-command";
+export { createDocumentationPlugin } from "./documentation";
+export type {
+  ApplicationDocumentationOptions,
+  DocumentationSource,
+  GraphqlDocumentationOptions,
+  OpenApiDocumentationOptions,
+} from "./documentation";
 
 // ---------------------------------------------------------------------------
 // Compiled module contract (mirrors @supacloud/compiler output)
@@ -357,6 +368,8 @@ export interface ApplicationOptions {
   errorMapper?: ErrorMapper;
   /** Best-effort execution metadata only; durable audit belongs to governance. */
   onExecution?: ExecutionObserver;
+  /** Optional read-only OpenAPI and GraphQL documentation endpoints. */
+  documentation?: ApplicationDocumentationOptions;
 }
 
 export interface JobInvocation {
@@ -1002,6 +1015,7 @@ function isPublicApplicationError(error: unknown): error is PublicApplicationErr
  */
 export function createApplication(options: ApplicationOptions): Elysia {
   const app = new Elysia({ name: options.name ?? "supacloud:app", normalize: options.normalize ?? true });
+  if (options.documentation) app.use(createDocumentationPlugin(options.documentation));
   const configuredContextFactory = options.requestContext ?? defaultRequestContext;
   const contextCache = new WeakMap<Request, Promise<unknown>>();
   const ctxFactory: RequestContextFactory = (request) => {
