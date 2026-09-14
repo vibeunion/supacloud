@@ -297,14 +297,17 @@ export class OAuthService {
           JSON.stringify({ sub: profile.id, email: profile.email, full_name: profile.name, ...profile.metadata }),
         ]
       )
-      userId = created.rows[0].id
+      const user = created.rows[0]
+      if (!user) throw new Error('OAuth user creation returned no row')
+      userId = user.id
     }
     await this.db.query(
       `insert into auth.identities (user_id, provider, provider_id, identity_data)
        values ($1, $2, $3, $4::jsonb)`,
       [userId, provider, profile.id, JSON.stringify({ sub: profile.id, email: profile.email, ...profile.metadata })]
     )
-    return userId!
+    if (!userId) throw new Error('OAuth identity has no user ID')
+    return userId
   }
 }
 

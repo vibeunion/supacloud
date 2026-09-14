@@ -13,7 +13,8 @@ const config = {
 		alias: {
 			"$components": "src/lib/components",
 			"$lib": "src/lib",
-			"$management": "../management-api/src"
+			"$management": "../management-api/src",
+			"$supacloud": "../supacloud-js/src"
 		}
 	}
 };

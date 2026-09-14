@@ -1,30 +1,23 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import type { Snippet } from "svelte";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
   import { apiClient } from "$lib/api";
+  import { loadAuthRuntime, type AuthRuntimeDescriptor } from "$lib/auth-runtime";
   import { t } from "svelte-i18n";
   import { Users, Shield, KeyRound, Link2, Mail, Clock, Webhook, BadgeCheck, ChevronDown, Fingerprint } from "lucide-svelte";
 
-  type AuthRuntimeDescriptor = {
-    project_ref: string;
-    mode: "local" | "owner" | "shared";
-    authority_project_ref: string;
-    owner_project_ref: string | null;
-    local_gotrue_enabled: boolean;
-    public_auth_route: "local_gotrue" | "owner_proxy";
-    user_management: "local" | "owner_only";
-    configuration_management: "local" | "owner_only";
-    local_membership_source: "project_database";
-    realtime_auth_supported: boolean;
-    owner_management_path: string | null;
-  };
-
   const projectRef = $derived(page.params.ref ?? "");
   const currentPath = $derived(page.url.pathname);
-  let authRuntime = $state.raw<AuthRuntimeDescriptor | null>(null);
-  let authRuntimeError = $state<string | null>(null);
-  let authRuntimeLoading = $state(true);
+  type RuntimeState = { projectRef: string } & (
+    | { status: "loading" | "error" }
+    | { status: "ready"; runtime: AuthRuntimeDescriptor }
+  );
+  let runtimeState = $state.raw<RuntimeState>({ projectRef: "", status: "loading" });
+  let retryRevision = $state(0);
+  const authRuntime = $derived(runtimeState.projectRef === projectRef && runtimeState.status === "ready"
+    ? runtimeState.runtime : null);
+  const authRuntimeLoading = $derived(runtimeState.projectRef !== projectRef || runtimeState.status === "loading");
 
   const AUTH_GROUPS = [
     {
@@ -72,38 +65,38 @@
     AUTH_GROUPS
       .map((group) => ({
         ...group,
-        tabs: group.tabs.filter((tab) =>
-          authRuntime?.mode === "local" || authRuntime?.mode === "owner" || tab.path === "policies"
+        tabs: group.tabs.filter((tab) => authRuntime && (
+          authRuntime.mode === "local" || authRuntime.mode === "owner" || tab.path === "policies")
         ),
       }))
       .filter((group) => group.tabs.length > 0),
   );
   const ownerManagedPage = $derived(
-    authRuntime?.mode === "shared" && !currentPath.endsWith("/policies"),
+    authRuntime?.mode === "shared" && currentPath !== resolve("/project/[ref]/auth/policies", { ref: projectRef }),
   );
   let menuBar = $state<HTMLDivElement>();
   let openMenu = $state<string | null>(null);
 
-  onMount(() => {
-    let cancelled = false;
+  $effect(() => {
+    const ref = projectRef;
+    retryRevision;
+    const controller = new AbortController();
+    runtimeState = { projectRef: ref, status: "loading" };
+    openMenu = null;
     void (async () => {
       try {
-        const response = await apiClient(`/v1/projects/${projectRef}/auth/runtime`);
-        const data = await response.json().catch(() => ({})) as Partial<AuthRuntimeDescriptor> & { message?: string };
-        if (!response.ok) throw new Error(data.message || "无法读取认证运行模式");
-        if (!cancelled) authRuntime = data as AuthRuntimeDescriptor;
-      } catch (error: unknown) {
-        if (!cancelled) {
-          authRuntimeError = error instanceof Error ? error.message : String(error);
+        const runtime = await loadAuthRuntime(ref, apiClient, controller.signal);
+        if (!controller.signal.aborted && projectRef === ref) {
+          runtimeState = { projectRef: ref, status: "ready", runtime };
         }
-      } finally {
-        if (!cancelled) authRuntimeLoading = false;
+      } catch {
+        if (!controller.signal.aborted && projectRef === ref) {
+          runtimeState = { projectRef: ref, status: "error" };
+        }
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   });
 
   function isActive(tabPath: string): boolean {
@@ -139,7 +132,7 @@
     openMenu = null;
   }
 
-  let { children } = $props();
+  let { children }: { children: Snippet } = $props();
 </script>
 
 <svelte:window onclick={closeMenusOnOutsideClick} />
@@ -181,9 +174,10 @@
     <div class="rounded-lg border border-border/50 bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
       正在确认项目认证运行模式…
     </div>
-  {:else if authRuntimeError}
-    <div class="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
-      无法确认认证运行模式：{authRuntimeError}。为避免误操作，认证管理面暂不可用，请刷新后重试。
+  {:else if !authRuntime}
+    <div role="alert" class="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-xs text-destructive">
+      无法读取或验证认证运行模式，认证管理面暂不可用。
+      <button type="button" onclick={() => retryRevision += 1} class="ml-2 underline underline-offset-2">{$t("Common.retry")}</button>
     </div>
   {:else if authRuntime?.mode === "owner"}
     <div class="rounded-lg border border-blue-500/30 bg-blue-500/5 px-4 py-4 text-sm text-blue-950 space-y-2">
@@ -222,7 +216,7 @@
   <div class="flex-1 min-h-0 overflow-auto">
     {#if authRuntimeLoading}
       <div class="h-full flex items-center justify-center text-xs text-muted-foreground">正在加载…</div>
-    {:else if authRuntimeError}
+    {:else if !authRuntime}
       <div class="h-full flex items-center justify-center text-xs text-muted-foreground">认证管理面已安全锁定。</div>
     {:else if ownerManagedPage}
       <div class="h-full flex items-center justify-center p-8">
@@ -235,7 +229,9 @@
         </div>
       </div>
     {:else}
-      {@render children()}
+      {#key authRuntime.project_ref}
+        {@render children()}
+      {/key}
     {/if}
   </div>
 </div>

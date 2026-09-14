@@ -1,98 +1,135 @@
-export type OAuthServerStatus = {
+import { requestValidatedJson } from "../../../../../lib/validated-json";
+
+export interface OAuthServerStatus {
+  project_ref: string;
+  organization_id: string | null;
+  account_isolated: true;
+  state_source: "configuration";
+  runtime_verified: false;
   enabled: boolean;
   allow_dynamic_registration: boolean;
   issuer: string;
+  authorization_path: string;
   discovery_url: string;
   oauth_authorization_server_metadata_url: string;
   jwks_url: string;
   authorization_endpoint: string;
   token_endpoint: string;
+  userinfo_endpoint: string;
   registration_endpoint: string;
-  signing_alg: string;
+  signing_alg: "ES256" | "RS256" | "not_migrated";
+  key_id: string | null;
   oidc_id_token_ready: boolean;
-  migration_status: string;
-  warnings?: string[];
-};
-
-type OAuthApiResponse = {
-  response: Response;
-  payload: unknown;
-};
-
-function isRecord(candidate: unknown): candidate is Record<string, unknown> {
-  return Boolean(candidate && typeof candidate === "object" && !Array.isArray(candidate));
+  migration_status: "oidc_es256_migrated" | "oidc_rs256_migrated" | "not_migrated";
 }
-
-function responseMessage(payload: unknown, fallback: string): string {
-  if (!isRecord(payload) || typeof payload.message !== "string" || !payload.message.trim()) {
-    return fallback;
+type OAuthRequest = (url: string, options: RequestInit) => Promise<Response>;
+function invalid(): never { throw new Error("Invalid OAuth configuration response"); }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function record(value: unknown): Record<string, unknown> { return isRecord(value) ? value : invalid(); }
+function text(value: unknown, max = 2048): string {
+  return typeof value === "string" && !!value && value === value.trim() && value.length <= max
+    && !/[\u0000-\u001f\u007f]/.test(value) ? value : invalid();
+}
+function flag(value: unknown): boolean { return typeof value === "boolean" ? value : invalid(); }
+function texts(value: unknown, max: number): string[] {
+  if (!Array.isArray(value) || value.length > max) return invalid();
+  const result = value.map((item: unknown) => text(item));
+  return new Set(result).size === result.length ? result : invalid();
+}
+function url(value: unknown): string {
+  const input = text(value);
+  let parsed: URL;
+  try { parsed = new URL(input); } catch { return invalid(); }
+  if (/[\s\\?#]/.test(input) || !/^https?:$/.test(parsed.protocol) || parsed.username || parsed.password
+    || parsed.href.replace(/\/$/, "") !== input.replace(/\/$/, "")) return invalid();
+  return input;
+}
+function path(value: unknown): string {
+  const input = text(value);
+  let decoded: string;
+  try { decoded = decodeURIComponent(input); } catch { return invalid(); }
+  if (!input.startsWith("/") || [input, decoded].some(value => value.includes("//")
+    || /[\\?#\u0000-\u001f\u007f]/.test(value)
+    || value.split("/").some(part => part === "." || part === ".."))) return invalid();
+  return input;
+}
+export function oauthPath(ref: string): string {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(ref)) return invalid();
+  return `/v1/projects/${ref}/auth/oauth-server`;
+}
+export function parseOAuthServerStatus(value: unknown, ref: string): OAuthServerStatus {
+  oauthPath(ref);
+  const data = record(value);
+  if (data.project_ref !== ref || data.account_isolated !== true
+    || data.state_source !== "configuration" || data.runtime_verified !== false) return invalid();
+  const organization = data.organization_id === null ? null : text(data.organization_id, 128);
+  const issuer = url(data.issuer);
+  if (issuer.endsWith("/")) return invalid();
+  const algorithm = data.signing_alg;
+  if (algorithm !== "ES256" && algorithm !== "RS256" && algorithm !== "not_migrated") return invalid();
+  const migrated = algorithm !== "not_migrated";
+  const migration = algorithm === "ES256" ? "oidc_es256_migrated"
+    : algorithm === "RS256" ? "oidc_rs256_migrated" : "not_migrated";
+  if (data.migration_status !== migration || data.oidc_id_token_ready !== migrated) return invalid();
+  const key = migrated ? text(data.key_id, 256) : null;
+  if (!migrated && data.key_id !== undefined) return invalid();
+  texts(data.warnings, 32);
+  function endpoint(key: string, suffix: string): string {
+    const endpoint = url(data[key]);
+    return endpoint === `${issuer}${suffix}` ? endpoint : invalid();
   }
-  return payload.message;
-}
-
-function isAppliedDependentRefreshFailure({ response, payload }: OAuthApiResponse): boolean {
-  return response.status === 503
-    && isRecord(payload)
-    && payload.code === "SUPAUTH_DEPENDENT_REFRESH_FAILED"
-    && payload.persisted === true
-    && payload.runtime_applied === true;
-}
-
-function enabledOAuthServerStatus(payload: unknown): OAuthServerStatus | null {
-  if (!isRecord(payload)
-    || payload.enabled !== true
-    || typeof payload.allow_dynamic_registration !== "boolean"
-    || typeof payload.issuer !== "string"
-    || typeof payload.discovery_url !== "string"
-    || typeof payload.oauth_authorization_server_metadata_url !== "string"
-    || typeof payload.jwks_url !== "string"
-    || typeof payload.authorization_endpoint !== "string"
-    || typeof payload.token_endpoint !== "string"
-    || typeof payload.registration_endpoint !== "string"
-    || typeof payload.signing_alg !== "string"
-    || typeof payload.oidc_id_token_ready !== "boolean"
-    || typeof payload.migration_status !== "string"
-    || (payload.warnings !== undefined
-      && (!Array.isArray(payload.warnings)
-        || !payload.warnings.every((warning: unknown) => typeof warning === "string")))) {
-    return null;
-  }
+  const metadata = url(data.oauth_authorization_server_metadata_url);
+  // A custom issuer can differ from the configured Auth URL used for RFC 8414.
+  if (!new URL(metadata).pathname.endsWith("/.well-known/oauth-authorization-server/auth/v1")) return invalid();
   return {
-    enabled: payload.enabled,
-    allow_dynamic_registration: payload.allow_dynamic_registration,
-    issuer: payload.issuer,
-    discovery_url: payload.discovery_url,
-    oauth_authorization_server_metadata_url: payload.oauth_authorization_server_metadata_url,
-    jwks_url: payload.jwks_url,
-    authorization_endpoint: payload.authorization_endpoint,
-    token_endpoint: payload.token_endpoint,
-    registration_endpoint: payload.registration_endpoint,
-    signing_alg: payload.signing_alg,
-    oidc_id_token_ready: payload.oidc_id_token_ready,
-    migration_status: payload.migration_status,
-    ...(payload.warnings ? { warnings: payload.warnings.filter((warning): warning is string => typeof warning === "string") } : {}),
+    project_ref: ref, organization_id: organization, account_isolated: true,
+    state_source: "configuration", runtime_verified: false,
+    enabled: flag(data.enabled), allow_dynamic_registration: flag(data.allow_dynamic_registration),
+    issuer, authorization_path: path(data.authorization_path),
+    discovery_url: endpoint("discovery_url", "/.well-known/openid-configuration"),
+    oauth_authorization_server_metadata_url: metadata,
+    jwks_url: endpoint("jwks_url", "/.well-known/jwks.json"),
+    authorization_endpoint: endpoint("authorization_endpoint", "/oauth/authorize"),
+    token_endpoint: endpoint("token_endpoint", "/oauth/token"),
+    userinfo_endpoint: endpoint("userinfo_endpoint", "/oauth/userinfo"),
+    registration_endpoint: endpoint("registration_endpoint", "/oauth/clients/register"),
+    signing_alg: algorithm, key_id: key, oidc_id_token_ready: migrated, migration_status: migration,
   };
 }
-
+export function readOAuthServer(ref: string, request: OAuthRequest, signal: AbortSignal) {
+  return requestValidatedJson(oauthPath(ref), request, value => parseOAuthServerStatus(value, ref),
+    { signal, cache: "no-store" }, { maxBytes: 32 * 1024 });
+}
 export async function migrateOAuthServerWithReadback(
-  requestMigration: () => Promise<OAuthApiResponse>,
-  readOAuthServer: () => Promise<OAuthApiResponse>,
-): Promise<OAuthServerStatus> {
-  const migration = await requestMigration();
-  if (migration.response.ok) {
-    const status = enabledOAuthServerStatus(migration.payload);
-    if (!status) throw new Error("迁移响应未确认 OAuth Server 已启用");
-    return status;
-  }
-  if (!isAppliedDependentRefreshFailure(migration)) {
-    throw new Error(responseMessage(migration.payload, "迁移失败"));
-  }
-
-  const readback = await readOAuthServer();
-  if (!readback.response.ok) {
-    throw new Error(responseMessage(readback.payload, "迁移配置已保存并应用，但无法确认 OAuth Server 启用状态"));
-  }
-  const status = enabledOAuthServerStatus(readback.payload);
-  if (!status) throw new Error("迁移配置已保存并应用，但状态回读显示 OAuth Server 未启用");
-  return status;
+  previous: OAuthServerStatus, allowDynamicRegistration: boolean, request: OAuthRequest, signal: AbortSignal,
+): Promise<{ status: OAuthServerStatus; outcome: "applied" | "dependent_refresh_failed" }> {
+  const before = { ...previous };
+  const ref = before.project_ref;
+  const allow = flag(allowDynamicRegistration);
+  const migration = await requestValidatedJson(`${oauthPath(ref)}/migrate`, request,
+    (value, httpStatus): { outcome: "applied"; status: OAuthServerStatus } | { outcome: "dependent_refresh_failed" } => {
+      if (httpStatus === 200) return { outcome: "applied", status: parseOAuthServerStatus(value, ref) };
+      const data = record(value);
+      if (data.code !== "SUPAUTH_DEPENDENT_REFRESH_FAILED" || data.persisted !== true
+        || data.runtime_applied !== true || data.dependents_applied !== false
+        || data.runtime_mode !== "owner" || data.authority_project_ref !== ref
+        || data.dependent_status !== "failed" && data.dependent_status !== "unknown") return invalid();
+      const failed = texts(data.failed_dependents, 1000);
+      if ((data.dependent_status === "failed") !== (failed.length > 0)
+        || failed.some(ref => !/^[A-Za-z0-9_-]{1,128}$/.test(ref) || ref === before.project_ref)) return invalid();
+      return { outcome: "dependent_refresh_failed" };
+    }, {
+      method: "POST", body: JSON.stringify({ allow_dynamic_registration: allow }), signal, cache: "no-store",
+    }, { statuses: [200, 503], maxBytes: 32 * 1024 });
+  signal.throwIfAborted();
+  const status = migration.outcome === "applied" ? migration.status : await readOAuthServer(ref, request, signal);
+  const expectedAlgorithm = before.signing_alg === "not_migrated" ? "ES256" : before.signing_alg;
+  if (!status.enabled || !status.oidc_id_token_ready || status.allow_dynamic_registration !== allow
+    || status.organization_id !== before.organization_id || status.issuer !== before.issuer
+    || status.authorization_path !== before.authorization_path || status.signing_alg !== expectedAlgorithm
+    || status.oauth_authorization_server_metadata_url !== before.oauth_authorization_server_metadata_url
+    || before.key_id !== null && status.key_id !== before.key_id) return invalid();
+  return { status, outcome: migration.outcome };
 }

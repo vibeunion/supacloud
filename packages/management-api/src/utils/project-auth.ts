@@ -1,5 +1,6 @@
 import { sql as metaSql } from "../db";
 import { hashSecretApiKey } from "./api-keys";
+import { isRecord } from "./project-config";
 
 export type ProjectApiKeyKind = "anon" | "service_role" | "publishable" | "secret";
 
@@ -12,14 +13,6 @@ export type ResolvedProjectApiKey = {
 
 type ProjectApiKeyLookupOptions = {
   includeProvisioning?: boolean;
-};
-
-type ProjectApiKeyRow = {
-  ref?: unknown;
-  anon_key?: unknown;
-  service_role_key?: unknown;
-  publishable_key?: unknown;
-  secret_key_hash?: unknown;
 };
 
 function buildApiKeyLookup(key: string, options: ProjectApiKeyLookupOptions = {}) {
@@ -42,7 +35,7 @@ function buildApiKeyLookup(key: string, options: ProjectApiKeyLookupOptions = {}
         )
       LIMIT 1
     `,
-    params: [key, secretHash] as [string, string],
+    params: [key, secretHash],
     secretHash,
   };
 }
@@ -50,17 +43,17 @@ function buildApiKeyLookup(key: string, options: ProjectApiKeyLookupOptions = {}
 function resolveApiKeyRow(
   key: string,
   secretHash: string,
-  row: ProjectApiKeyRow | undefined,
+  row: unknown,
 ): ResolvedProjectApiKey | null {
-  if (!row) return null;
+  if (!isRecord(row) || typeof row.ref !== "string" || !row.ref || !key) return null;
 
-  const ref = String(row.ref);
-  const anonKey = String(row.anon_key || "");
-  const serviceRoleKey = String(row.service_role_key || "");
-  if (key === row.publishable_key) {
+  const ref = row.ref;
+  const anonKey = typeof row.anon_key === "string" ? row.anon_key : "";
+  const serviceRoleKey = typeof row.service_role_key === "string" ? row.service_role_key : "";
+  if (key === row.publishable_key && anonKey) {
     return { ref, kind: "publishable", role: "anon", upstreamKey: anonKey };
   }
-  if (secretHash === row.secret_key_hash) {
+  if (secretHash && secretHash === row.secret_key_hash && serviceRoleKey) {
     return { ref, kind: "secret", role: "service_role", upstreamKey: serviceRoleKey };
   }
   if (key === anonKey) {
@@ -86,13 +79,13 @@ export async function resolveProjectApiKey(
   const lookup = buildApiKeyLookup(key, options);
 
   try {
-    const rows = await metaSql.unsafe(lookup.query, lookup.params);
-    return resolveApiKeyRow(key, lookup.secretHash, rows[0] as ProjectApiKeyRow | undefined);
+    const rows: unknown = await metaSql.unsafe(lookup.query, lookup.params);
+    return Array.isArray(rows) ? resolveApiKeyRow(key, lookup.secretHash, rows[0]) : null;
   } catch {
     // Rolling upgrades may briefly run before the additive opaque-key columns
     // exist. Preserve legacy key lookup until initDatabase finishes.
     try {
-      const rows = options.includeProvisioning
+      const rows: unknown = options.includeProvisioning
         ? await metaSql`
           SELECT ref, anon_key, service_role_key FROM projects
           WHERE (anon_key = ${key} OR service_role_key = ${key})
@@ -107,19 +100,12 @@ export async function resolveProjectApiKey(
             AND lower(status) = 'active'
           LIMIT 1
         `;
-      const row = rows[0] as Record<string, unknown> | undefined;
-      if (!row) return null;
-      const ref = String(row.ref);
-      if (key === row.anon_key) {
-        return { ref, kind: "anon", role: "anon", upstreamKey: key };
-      }
-      return { ref, kind: "service_role", role: "service_role", upstreamKey: key };
+      return Array.isArray(rows) ? resolveApiKeyRow(key, lookup.secretHash, rows[0]) : null;
     } catch {
       return null;
     }
   }
 
-  return null;
 }
 
 export async function resolveProjectRefFromApiKey(
@@ -163,7 +149,7 @@ function normalizeRefFromIssuer(iss: unknown): string | null {
   if (typeof iss !== "string" || !iss.trim()) return null;
 
   const hostLike = iss.replace(/^https?:\/\//, "").split("/")[0];
-  const firstLabel = hostLike.split(".")[0]?.trim();
+  const firstLabel = hostLike?.split(".")[0]?.trim();
 
   if (!firstLabel) return null;
   if (firstLabel === "supabase" || firstLabel === "supacloud") return null;
