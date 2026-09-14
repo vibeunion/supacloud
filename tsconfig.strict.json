@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "experimentalDecorators": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noFallthroughCasesInSwitch": true
+  }
+}

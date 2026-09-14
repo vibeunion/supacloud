@@ -1,3 +1,5 @@
+type FetchTransport = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
 export type SupaCloudOAuthFetchOptions = {
   /**
    * Public OAuth client identifier registered with SupAuth. Leave empty for a
@@ -11,7 +13,7 @@ export type SupaCloudOAuthFetchOptions = {
    */
   tokenEndpoint?: string;
   /** Injectable transport for tests or runtimes with a custom fetch. */
-  fetch?: typeof fetch;
+  fetch?: FetchTransport;
 };
 
 function requestMethod(input: RequestInfo | URL, init?: RequestInit): string {
@@ -88,7 +90,7 @@ function replacementRequest(
  */
 export function createSupaCloudOAuthFetch(
   options: SupaCloudOAuthFetchOptions = {},
-): typeof fetch {
+): FetchTransport {
   const fetchImpl = options.fetch || globalThis.fetch.bind(globalThis);
   const clientId = options.clientId?.trim();
   if (!clientId) return fetchImpl;
