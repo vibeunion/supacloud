@@ -286,7 +286,7 @@ export async function enqueueBackgroundFunctionTask(
           ${input.functionSlug},
           ${input.functionVersion || null},
           ${TaskStatus.PENDING},
-          ${JSON.stringify(envelope)}::jsonb,
+          ${envelope},
           ${maxAttempts},
           NOW(),
           ${timeoutSec},

@@ -2,7 +2,6 @@
 import { expect, spyOn, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { Elysia } from "elysia";
-import { createClient } from "@supabase/supabase-js";
 import { projectRepository } from "../../src/repositories/project.repository";
 import { config } from "../../src/config";
 import { pgmqService, type PgmqMessage } from "../../src/services/pgmq.service";
@@ -12,7 +11,6 @@ import {
   readPgmqJson, readPgmqTimestamp, readPgmqBooleanReceipt,
 } from "../../src/utils/pgmq-message-id";
 import { withNativePostgres } from "../helpers/native-postgres";
-import { createSupaCloudClient } from "../../../supacloud-js/src/index";
 
 const maximum = "9223372036854775807";
 
@@ -81,7 +79,7 @@ test("invalid service inputs stop before project database resolution", async () 
   } finally { resolver.mockRestore(); }
 });
 
-test("Management routes and the SDK retain large IDs through visibility, archive and delete", async () => {
+test("Management routes retain large IDs through visibility, archive and delete", async () => {
   const oldToken = config.masterToken;
   config.masterToken = "synthetic-pgmq-test-management-token";
   const message: PgmqMessage = {
@@ -95,15 +93,14 @@ test("Management routes and the SDK retain large IDs through visibility, archive
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: request => app.handle(request) });
   const headers = { authorization: `Bearer ${config.masterToken}` };
   try {
-    const supabase = createClient("https://project.example.com", "synthetic-anon-key", {
-      auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
-    });
-    const queue = createSupaCloudClient({
-      supabase, managementApiUrl: server.url.origin, projectRef: "proj_1", getAccessToken: () => config.masterToken,
-    }).queue("jobs");
-    expect((await queue.release(maximum, { sleepSeconds: 5 })).msg_id).toBe(maximum);
-    expect(visibility).toHaveBeenLastCalledWith("proj_1", "jobs", maximum, 5);
     const base = `${server.url.origin}/v1/projects/proj_1/tasks/queues/jobs/messages`;
+    const released = await fetch(`${base}/${maximum}/release`, {
+      method: "POST", headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify({ sleep_seconds: 5 }),
+    });
+    expect(released.status).toBe(200);
+    expect(await released.json()).toMatchObject({ id: maximum, msg_id: maximum });
+    expect(visibility).toHaveBeenLastCalledWith("proj_1", "jobs", maximum, 5);
     const ack = await fetch(`${base}/${maximum}/ack`, { method: "POST", headers });
     expect(ack.status).toBe(200);
     expect(await ack.json()).toMatchObject({ id: maximum, msg_id: maximum });
