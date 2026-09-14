@@ -4,8 +4,8 @@
  * handles common error scenarios (e.g. 401 Unauthorized -> redirect to login).
  */
 
-import { requestValidatedJson } from "./validated-json";
 import { readBoundedText } from "./http-body";
+import { requestValidatedJson } from "./validated-json";
 import {
   InvalidStudioSessionResponse, parseStudioLogout, parseStudioSession, studioLoginFailure,
   type StudioLoginResult, type StudioLogoutResult, type StudioSessionState,
@@ -23,24 +23,63 @@ class StudioSessionChanged extends Error {
   constructor() { super("Studio session changed during the request"); }
 }
 
+class MutationResponseError extends Error {}
+
 export interface ApiRequestInit extends RequestInit {
   timeoutMs?: number;
 }
 
 export async function ensureMutationSucceeded(
-  response: Response, fallback: string, decode: (value: unknown) => void,
+  response: Response, fallback: string, decode?: (value: unknown) => void,
   options: Pick<RequestInit, "signal"> = {},
 ): Promise<void> {
-  const { signal } = options;
+  const controller = new AbortController();
+  const signal = options.signal ?? controller.signal;
   try {
-    await requestValidatedJson("", async () => response, decode,
-      signal === undefined ? {} : { signal });
-  } catch {
-    signal?.throwIfAborted();
-    throw new Error(fallback);
+    signal.throwIfAborted();
+    if (response.status === 204) {
+      if (decode === undefined) return;
+      throw new Error(fallback);
+    }
+
+    const rawBody = await readBoundedText(response, 8 * 1024 * 1024, signal);
+    if (!rawBody.trim()) throw new Error(fallback);
+
+    let payload: unknown;
+    try {
+      payload = JSON.parse(rawBody);
+    } catch {
+      if (!response.ok) throw new MutationResponseError(rawBody.trim() || fallback);
+      throw new Error(fallback);
+    }
+
+    if (!response.ok) throw new MutationResponseError(mutationErrorMessage(payload, fallback));
+    if (isMutationFailure(payload)) throw new MutationResponseError(mutationErrorMessage(payload, fallback));
+    try {
+      decode?.(payload);
+    } catch {
+      throw new Error(fallback);
+    }
+  } catch (error) {
+    signal.throwIfAborted();
+    throw error instanceof MutationResponseError ? error : new Error(fallback);
   } finally {
     void response.body?.cancel().catch(() => {});
   }
+}
+
+function isMutationFailure(value: unknown): boolean {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && Object.hasOwn(value, "success") && (value as { success?: unknown }).success === false;
+}
+
+function mutationErrorMessage(value: unknown, fallback: string): string {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const data = value as { message?: unknown; error?: unknown };
+    if (typeof data.message === "string" && data.message.trim()) return data.message;
+    if (typeof data.error === "string" && data.error.trim()) return data.error;
+  }
+  return fallback;
 }
 
 function requireStudioSessionGeneration(generation: number): void {
@@ -132,16 +171,34 @@ export async function refreshStudioSession(options: Pick<RequestInit, "signal"> 
 
 export async function logoutStudio(options: Pick<RequestInit, "signal"> = {}): Promise<StudioLogoutResult> {
   const generation = ++studioSessionGeneration;
-  return requestStudioSession("/auth/logout", {
+  const response = await fetch("/auth/logout", {
     method: "POST",
     headers: { "Accept": "application/json" },
+    credentials: "include",
+    cache: "no-store",
+    redirect: "error",
     ...(options.signal === undefined ? {} : { signal: options.signal }),
-  }, (value, status) => {
-    const result = parseStudioLogout(value, status);
-    requireStudioSessionGeneration(generation);
+  });
+  requireStudioSessionGeneration(generation);
+
+  const signal = options.signal ?? new AbortController().signal;
+  const rawBody = await readBoundedText(response, 64 * 1024, signal);
+  let payload: unknown;
+  try {
+    payload = rawBody.trim() ? JSON.parse(rawBody) : {};
+  } catch {
+    payload = rawBody.trim();
+  }
+
+  if (response.ok) {
+    const result = parseStudioLogout(payload, response.status);
     if (result.success) clearStudioSessionExpiry();
     return result;
-  });
+  }
+  if (response.status === 403 && payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
+    return parseStudioLogout(payload, response.status);
+  }
+  return { success: false, error: mutationErrorMessage(payload, rawBody.trim() || "Logout failed") };
 }
 
 async function refreshExpiringStudioSession(): Promise<void> {
