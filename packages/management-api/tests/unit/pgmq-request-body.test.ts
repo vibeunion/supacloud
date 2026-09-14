@@ -176,7 +176,7 @@ test("native HTTP send and batch ingress enforce body limits and allow valid str
 
 test("request body helper compiles with strict full-library checking", async () => {
   const child = Bun.spawn({
-    cmd: [join(import.meta.dir, "../../../supacloud-js/node_modules/.bin/tsc"), "--ignoreConfig",
+    cmd: [join(import.meta.dir, "../../node_modules/.bin/tsc"), "--ignoreConfig",
       "--noEmit", "--strict", "--exactOptionalPropertyTypes", "--noUncheckedIndexedAccess",
       "--skipLibCheck", "false", "--module", "ESNext", "--moduleResolution", "bundler",
       "--target", "ESNext", "--types", "node", join(import.meta.dir, "../../src/utils/pgmq-request-body.ts")],

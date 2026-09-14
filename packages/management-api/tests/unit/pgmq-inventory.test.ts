@@ -211,7 +211,7 @@ test("service uses checked unknown results and text projections for integer coun
 
 test("inventory decoder module compiles with strict and full library checks", async () => {
   const child = Bun.spawn({
-    cmd: [join(import.meta.dir, "../../../supacloud-js/node_modules/.bin/tsc"), "--ignoreConfig",
+    cmd: [join(import.meta.dir, "../../node_modules/.bin/tsc"), "--ignoreConfig",
       "--noEmit", "--strict", "--exactOptionalPropertyTypes", "--noUncheckedIndexedAccess",
       "--skipLibCheck", "false", "--module", "ESNext", "--moduleResolution", "bundler",
       "--target", "ESNext", "--types", "node", join(import.meta.dir, "../../src/utils/pgmq-inventory.ts")],

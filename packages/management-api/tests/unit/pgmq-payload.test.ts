@@ -77,7 +77,7 @@ test("actual HTTP send routes return sanitized 413 from real service budget enfo
 
 test("payload and batch helpers compile with strict full-library checking", async () => {
   const child = Bun.spawn({
-    cmd: [join(import.meta.dir, "../../../supacloud-js/node_modules/.bin/tsc"), "--ignoreConfig",
+    cmd: [join(import.meta.dir, "../../node_modules/.bin/tsc"), "--ignoreConfig",
       "--noEmit", "--strict", "--exactOptionalPropertyTypes", "--noUncheckedIndexedAccess",
       "--skipLibCheck", "false", "--module", "ESNext", "--moduleResolution", "bundler",
       "--target", "ESNext", "--types", "node",
