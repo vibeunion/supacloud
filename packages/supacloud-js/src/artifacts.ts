@@ -1,11 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { captureArtifactId, decodeArtifactRead, SupaCloudArtifactReadError } from "./artifact-read.js";
-import { captureArtifactRegister, decodeArtifactRegister, SupaCloudArtifactRegisterError } from "./artifact-register.js";
-import { invokeArtifactRpc } from "./artifact-rpc.js";
-import { captureArtifactLink, decodeArtifactLink, SupaCloudArtifactLinkError } from "./artifact-link.js";
-export { SupaCloudArtifactReadError } from "./artifact-read.js";
-export { SupaCloudArtifactRegisterError } from "./artifact-register.js";
-export { SupaCloudArtifactLinkError } from "./artifact-link.js";
+import { invokeServiceRoleRpc } from "./service-role-rpc.js";
 
 export type SupaCloudArtifactJson = Record<string, unknown>;
 
@@ -57,27 +51,17 @@ export interface SupaCloudArtifactLinkRequest {
 export class SupaCloudArtifactsClient<TClient extends SupabaseClient = SupabaseClient> {
   constructor(private readonly supabase: TClient) {}
 
-  async register(request: SupaCloudArtifactRegisterRequest): Promise<SupaCloudArtifact> {
-    const captured = captureArtifactRegister(request);
-    const result = await invokeArtifactRpc(
-      this.supabase, "supacloud_artifact_register", captured, () => new SupaCloudArtifactRegisterError(true),
-    );
-    return decodeArtifactRegister(result, captured);
+  register(request: SupaCloudArtifactRegisterRequest): Promise<SupaCloudArtifact> {
+    return invokeServiceRoleRpc(this.supabase, "supacloud_artifact_register", request);
   }
 
-  async get(artifactId: string): Promise<SupaCloudArtifact | null> {
-    const captured = captureArtifactId(artifactId);
-    const result = await invokeArtifactRpc(this.supabase, "supacloud_artifact_get", {
-      artifactId: captured,
-    }, () => new SupaCloudArtifactReadError());
-    return decodeArtifactRead(result, captured);
+  get(artifactId: string): Promise<SupaCloudArtifact | null> {
+    return invokeServiceRoleRpc(this.supabase, "supacloud_artifact_get", {
+      artifactId,
+    });
   }
 
-  async link(request: SupaCloudArtifactLinkRequest): Promise<SupaCloudArtifact> {
-    const captured = captureArtifactLink(request);
-    const result = await invokeArtifactRpc(
-      this.supabase, "supacloud_artifact_link", captured, () => new SupaCloudArtifactLinkError(true),
-    );
-    return decodeArtifactLink(result, captured);
+  link(request: SupaCloudArtifactLinkRequest): Promise<SupaCloudArtifact> {
+    return invokeServiceRoleRpc(this.supabase, "supacloud_artifact_link", request);
   }
 }
