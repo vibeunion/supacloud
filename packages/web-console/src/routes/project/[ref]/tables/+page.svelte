@@ -15,11 +15,13 @@
     type TableColumnDraft,
     type TableColumnType,
   } from "./table-draft";
+  import { isValidTableForm, type TableFormValues } from "./table-form";
 
   const projectRef = $derived(page.params.ref!);
   let tableName = $state("");
   let tableListEpoch = $state(0);
   let columns = $state<TableColumnDraft[]>(initialTableColumns());
+  let formError = $state<string | null>(null);
 
   function addColumn(): void {
     if (columns.length < 64) columns = [...columns, { name: "", type: "text", nullable: true }];
@@ -51,10 +53,10 @@
   }
 
   const createTableMutation = createMutation(() => ({
-    mutationFn: async () => {
+    mutationFn: async (input: TableFormValues) => {
       const response = await apiClient(`/v1/projects/${projectRef}/database/tables`, {
         method: "POST",
-        body: JSON.stringify({ name: tableName.trim(), columns }),
+        body: JSON.stringify(input),
       });
       const payload = await response.json() as { message?: unknown; error?: unknown };
       if (!response.ok) {
@@ -69,9 +71,20 @@
       toast.success($t("Tables.create_success", { values: { name: tableName.trim() } }));
       tableName = "";
       columns = initialTableColumns();
+      formError = null;
       tableListEpoch += 1;
     },
   }));
+
+  function submitTable(): void {
+    const input = { name: tableName.trim(), columns };
+    if (!isValidTableForm(input)) {
+      formError = $t("Tables.invalid_form");
+      return;
+    }
+    formError = null;
+    createTableMutation.mutate(input);
+  }
 </script>
 
 <div class="flex flex-col space-y-4">
@@ -126,7 +139,7 @@
         <h2 class="font-semibold text-sm flex items-center gap-2"><Plus size={16} /> {$t("Tables.create_title")}</h2>
         <p class="text-xs text-muted-foreground mt-1">{$t("Tables.create_description")}</p>
       </div>
-      <form class="p-5 space-y-4" onsubmit={(event) => { event.preventDefault(); createTableMutation.mutate(); }}>
+      <form class="p-5 space-y-4" onsubmit={(event) => { event.preventDefault(); submitTable(); }}>
         <label class="block space-y-1.5">
           <span class="text-xs font-medium text-muted-foreground">{$t("Tables.table_name")}</span>
           <input bind:value={tableName} required maxlength="63" pattern="[A-Za-z_][A-Za-z0-9_]*" class="w-full px-3 py-2 rounded-md border bg-background text-sm font-mono" placeholder="orders" autocomplete="off" />
@@ -163,8 +176,10 @@
           {/each}
         </div>
 
-        {#if createTableMutation.error}
-          <div class="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">{createTableMutation.error.message}</div>
+        {#if formError || createTableMutation.error}
+          <div class="rounded-md border border-destructive/20 bg-destructive/10 p-3 text-xs text-destructive">
+            {formError || createTableMutation.error?.message}
+          </div>
         {/if}
         <button disabled={createTableMutation.isPending || !tableName.trim() || columns.some((column) => !column.name.trim())} class="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-md bg-brand text-white text-sm font-medium disabled:opacity-50">
           {#if createTableMutation.isPending}

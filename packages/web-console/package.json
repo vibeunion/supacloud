@@ -42,6 +42,7 @@
     "vite": "8.2.2"
   },
   "dependencies": {
+    "@sinclair/typebox": "^0.34.52",
     "@svadmin/ai-elements": "0.5.1",
     "@svadmin/core": "^0.50.0",
     "@svadmin/elysia": "^0.12.7",

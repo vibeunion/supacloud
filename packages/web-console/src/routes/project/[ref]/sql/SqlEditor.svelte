@@ -202,9 +202,9 @@
 
   function exportToCsv() {
     if (!activeTab?.results || activeTab.results.length === 0) return;
-    
+
     const csvContent = sqlRowsToCsv(activeTab.results);
-    
+
     // Add BOM for Excel UTF-8 compatibility
     const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -479,7 +479,7 @@
                   onkeydown={(e) => { if (e.key === 'Enter') submitCustomRole(); }}
                   placeholder={$t("SqlEditor.role_custom")}
                   class="w-full px-2 py-1.5 text-xs font-mono rounded border bg-muted/30 focus:outline-none focus:ring-1 focus:ring-brand"
- 
+
                 />
               </div>
             {:else}

@@ -1,4 +1,5 @@
 import { Type, type Static } from "@sinclair/typebox";
+import { Value } from "@sinclair/typebox/value";
 import { tableColumnTypes } from "./table-draft";
 
 const tableColumnTypeSchema = Type.Union([
@@ -29,3 +30,7 @@ export const tableFormSchema = Type.Object({
 });
 
 export type TableFormValues = Static<typeof tableFormSchema>;
+
+export function isValidTableForm(value: unknown): value is TableFormValues {
+  return Value.Check(tableFormSchema, value);
+}

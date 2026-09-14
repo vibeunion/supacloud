@@ -34,6 +34,11 @@ function command(label: string): HTMLButtonElement {
   return button;
 }
 
+function record(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid request body");
+  return Object.fromEntries(Object.entries(value));
+}
+
 localStorage.setItem("supacloud_a_sql_tabs", JSON.stringify([
   { id: "shared-id", name: "Draft A", sql: "select 'a'", results: [{ leaked: "old-secret" }] },
 ]));
@@ -59,10 +64,10 @@ try {
   edit("edited after send");
   await eventually(() => assert.equal(calls.length, 1));
   assert.ok(calls[0]?.url.includes("/a/database/sql"));
-  const submitted = calls[0]?.body;
-  assert.ok(submitted && typeof submitted === "object" && "sql" in submitted);
-  assert.equal(submitted.sql, "select 'a'");
-  assert.ok("query_id" in submitted && typeof submitted.query_id === "string");
+  const submitted = record(calls[0]?.body);
+  if (submitted.sql !== "select 'a'" || typeof submitted.query_id !== "string") {
+    throw new Error("Invalid SQL request body");
+  }
   const queryId = submitted.query_id;
   command("SqlEditor.cancel_query").click();
   await eventually(() => assert.equal(calls.length, 2));
