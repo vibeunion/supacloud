@@ -584,7 +584,7 @@ jobs:
 
   sync-supacloud-dependencies:
     needs: [release-please, publish-npm]
-    if: ${{ always() && needs.publish-npm.result == 'success' && (needs.release-please.outputs.cli_released == 'true' || needs.release-please.outputs.admin_released == 'true') }}
+    if: ${{ always() && needs.publish-npm.result == 'success' && (needs.release-please.outputs.cli_released == 'true' || needs.release-please.outputs.admin_released == 'true' || inputs.recover_npm == true) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -693,7 +693,7 @@ jobs:
 
   sync-cli-compiler-dependency:
     needs: [release-please, publish-npm]
-    if: ${{ always() && needs.publish-npm.result == 'success' && needs.release-please.outputs.compiler_released == 'true' }}
+    if: ${{ always() && needs.publish-npm.result == 'success' && (needs.release-please.outputs.compiler_released == 'true' || inputs.recover_npm == true) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
