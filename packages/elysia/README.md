@@ -51,6 +51,8 @@ Runtime adapter that turns `@supacloud/compiler` output into a production-ready
   `errorMapper` with standard `ApplicationError` envelope support, preserving
   HTTP 422 for request validation and HTTP 500 / `RESPONSE_VALIDATION_ERROR`
   for invalid handler output, without exposing payloads or schema internals.
+- **Opt-in API documentation**: serves a generated OpenAPI JSON document and a
+  dependency-free viewer, plus a role-scoped GraphQL SDL snapshot viewer.
 
 ## Installation
 
@@ -64,11 +66,24 @@ bun add @supacloud/elysia elysia
 import { composeCommandExecutors, createApplication, requireIdempotencyKey } from "@supacloud/elysia";
 import AuditModule from "./.generated/audit.module";
 import CaseModule from "./.generated/case.module";
+import { OPENAPI_DOCUMENT } from "./generated/openapi";
 
 const app = createApplication({
   name: "case-service",
   modules: [AuditModule, CaseModule], // topological import order
   deps: { db: createDbClient() },     // platform deps, passed to createServices
+  documentation: {
+    openApi: {
+      document: OPENAPI_DOCUMENT,
+      specPath: "/openapi.json",
+      uiPath: "/docs",
+    },
+    graphql: {
+      schema: () => Bun.file("./graphql/schema.graphql").text(),
+      schemaPath: "/graphql/schema.graphql",
+      uiPath: "/graphql/docs",
+    },
+  },
   commandGovernance: {
     authorize: (invocation) => authorize(invocation.requestContext, invocation.command.permission),
     idempotency: (invocation, next) => idempotencyStore.run(requireIdempotencyKey(invocation), next),
@@ -84,6 +99,12 @@ const app = createApplication({
 
 export default app;
 ```
+
+Documentation is disabled unless `documentation` is provided. The OpenAPI
+document can be imported from the compiler-generated `openapi.ts` module. The
+GraphQL endpoint serves a local, role-scoped snapshot only; it does not enable
+server introspection or create a GraphQL resolver layer. Protect or omit these
+routes in production when the schema is not public.
 
 For deterministic local verification, use the in-memory sandbox. It supplies
 stable request identity, an isolated key-value database with optimistic
