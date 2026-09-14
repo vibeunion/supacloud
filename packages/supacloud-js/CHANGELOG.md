@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.29.0...supacloud-js-v0.30.0) (2026-09-14)
+
+
+### Features
+
+* **supacloud-js:** add durable workflow, command, artifact, and queue RPC client ([#1290](https://github.com/vibeunion/supacloud/issues/1290)) ([0183c74](https://github.com/vibeunion/supacloud/commit/0183c7441988902fcad98b25bd80b8cb15d254de))
+
 ## [0.29.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.28.0...supacloud-js-v0.29.0) (2026-09-13)
 
 

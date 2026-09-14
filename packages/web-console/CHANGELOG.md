@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.39.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.38.1...web-console-v0.39.0) (2026-09-14)
+
+
+### Features
+
+* **auth:** add project OAuth Server console and GoTrue admin proxy ([#1293](https://github.com/vibeunion/supacloud/issues/1293)) ([2cbc565](https://github.com/vibeunion/supacloud/commit/2cbc5657ee59d173869cbf36d979b14babd81e56))
+* **hosting:** add frontend hosting environments, versions, and console ([#1292](https://github.com/vibeunion/supacloud/issues/1292)) ([4a5dc78](https://github.com/vibeunion/supacloud/commit/4a5dc78cbb827ff22e5b714c3311c377db44ea67))
+* **web-console:** persist SQL editor drafts and typed table forms ([#1294](https://github.com/vibeunion/supacloud/issues/1294)) ([1eadf8b](https://github.com/vibeunion/supacloud/commit/1eadf8b2001506d02d4d978ee223168705a60a90))
+
+
+### Miscellaneous Chores
+
+* **deps:** upgrade SVAdmin packages to npm latest ([#1295](https://github.com/vibeunion/supacloud/issues/1295)) ([6c9a406](https://github.com/vibeunion/supacloud/commit/6c9a4063d6d05b6bf57d63d5a03b134c95174ec0))
+
 ## [0.38.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.38.0...web-console-v0.38.1) (2026-09-09)
 
 

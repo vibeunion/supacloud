@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.16.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.15.1...supacloud-lite-v0.16.0) (2026-09-14)
+
+
+### Features
+
+* **auth:** add project OAuth Server console and GoTrue admin proxy ([#1293](https://github.com/vibeunion/supacloud/issues/1293)) ([2cbc565](https://github.com/vibeunion/supacloud/commit/2cbc5657ee59d173869cbf36d979b14babd81e56))
+* **management-api:** add PGMQ queue settings, batch ingestion, and queue governance ([#1291](https://github.com/vibeunion/supacloud/issues/1291)) ([8362642](https://github.com/vibeunion/supacloud/commit/8362642267c18f92beee2e3f5833eef3945651a0))
+* **supacloud-js:** add durable workflow, command, artifact, and queue RPC client ([#1290](https://github.com/vibeunion/supacloud/issues/1290)) ([0183c74](https://github.com/vibeunion/supacloud/commit/0183c7441988902fcad98b25bd80b8cb15d254de))
+
 ## [0.15.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.15.0...supacloud-lite-v0.15.1) (2026-09-11)
 
 
