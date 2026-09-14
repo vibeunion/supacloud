@@ -1,13 +1,21 @@
-import { Elysia, status, t } from "elysia";
+import { Elysia, ParseError, status, t } from "elysia";
 import { taskRepository } from "../repositories/task.repository";
 import { TaskStatus, type ProjectTask } from "../db";
 import { backgroundFunctionWorker, projectService } from "../services";
 import { isPublicPgmqQueueName, pgmqService } from "../services/pgmq.service";
 import * as authMiddleware from "../middleware/auth";
+import { isRecord } from "../utils/project-config";
+import { parsePgmqMessageId } from "../utils/pgmq-message-id";
+import { PgmqInventoryError } from "../utils/pgmq-inventory";
+import { pgmqInteger, PgmqInputError, PgmqPayloadTooLargeError } from "../utils/pgmq-input";
+import { PgmqSettingsError, PgmqSettingsConflictError } from "../utils/pgmq-settings";
+import { pgmqHttpDelay, pgmqHttpList, pgmqHttpReceive, pgmqHttpReceiveSettings } from "../utils/pgmq-http-input";
+import { PgmqRequestBodyError } from "../utils/pgmq-request-body";
+import { parseAuthorizedPgmqEnqueue, PgmqEnqueueAuthError } from "./pgmq-enqueue-parser";
+import { PgmqMutationError } from "../utils/pgmq-mutation";
+import { InvalidTaskListQueryError, parseTaskListQuery } from "../utils/task-list-query";
 
 const QUEUE_TASK_TYPE_PREFIX = "queue:";
-const DEFAULT_QUEUE_VISIBILITY_TIMEOUT_SEC = 330;
-const MAX_QUEUE_DELAY_MS = 30 * 24 * 60 * 60 * 1000;
 
 function normalizeQueueName(name: string): string | null {
     const normalizedName = name.trim();
@@ -19,44 +27,32 @@ function queueTaskType(name: string): string {
     return `${QUEUE_TASK_TYPE_PREFIX}${name}`;
 }
 
-function normalizePositiveInteger(value: unknown, fallback: number, min: number, max: number): number {
-    const numberValue = typeof value === "number" ? value : Number(value);
-    if (!Number.isFinite(numberValue)) return fallback;
-    return Math.max(min, Math.min(max, Math.floor(numberValue)));
+function normalizeMessageId(value: string): string | null {
+    try {
+        return parsePgmqMessageId(value);
+    } catch {
+        return null;
+    }
 }
 
-function normalizeNonNegativeSeconds(value: unknown, fallback: number, max: number): number {
-    return normalizePositiveInteger(value, fallback, 0, max);
-}
-
-function normalizeMessageId(value: string): number | null {
-    const parsed = Number(value);
-    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
-}
-
-function isTaskDetailRead(request: Request, projectRef: string): boolean {
-    if (request.method !== "GET") return false;
-    const pathname = new URL(request.url).pathname;
-    const prefix = `/v1/projects/${projectRef}/tasks/`;
-    if (!pathname.startsWith(prefix)) return false;
-    const suffix = pathname.slice(prefix.length);
-    return suffix.length > 0 && !suffix.includes("/");
+function isTaskDetailRead(request: Request, route: string): boolean {
+    return request.method === "GET" && route === "/v1/projects/:ref/tasks/:taskId";
 }
 
 function taskInvokerUserId(task: ProjectTask): string | null {
     const auth = task.payload?.auth;
-    if (!auth || typeof auth !== "object" || Array.isArray(auth)) return null;
-    const userId = (auth as Record<string, unknown>).invoker_user_id;
+    if (!isRecord(auth)) return null;
+    const userId = auth.invoker_user_id;
     return typeof userId === "string" && userId.length > 0 ? userId : null;
 }
 
 function redactTaskPayloadForInvoker(payload: Record<string, unknown>): Record<string, unknown> {
     const auth = payload.auth;
-    if (!auth || typeof auth !== "object" || Array.isArray(auth)) return payload;
+    if (!isRecord(auth)) return payload;
     return {
         ...payload,
         auth: {
-            ...(auth as Record<string, unknown>),
+            ...auth,
             authorization: null,
             apikey: null,
         },
@@ -88,8 +84,15 @@ async function getTaskDetailAuth(
 }
 
 export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
-    .onBeforeHandle(async ({ params, request }) => {
-        if (isTaskDetailRead(request, params.ref)) return;
+    .onError(({ error }) => {
+        const cause = error instanceof ParseError ? error.cause : error;
+        if (cause instanceof PgmqEnqueueAuthError) return status(cause.status, cause.body);
+        if (cause instanceof PgmqRequestBodyError) {
+            return status(cause.status, { message: "Queue request body could not be accepted", code: "PGMQ_REQUEST_BODY_INVALID" });
+        }
+    })
+    .onBeforeHandle(async ({ params, request, route }) => {
+        if (isTaskDetailRead(request, route)) return;
         const authError = await authMiddleware.requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
     })
@@ -97,20 +100,23 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
         try {
             return await pgmqService.listQueues(params.ref);
         } catch (err: unknown) {
-            return status(500, { message: "Failed to list queues", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            return status(500, { message: "Failed to list queues", code: "500" });
         }
     }, { detail: { tags: ["tasks"], summary: "List PGMQ queues" } })
     .post("/queues", async ({ params, body }) => {
         try {
-            const input = body as { queueName?: string; queue_name?: string; unlogged?: boolean };
+            const input = body;
             const queueName = normalizeQueueName(input.queueName || input.queue_name || "");
             if (!queueName) {
                 return status(400, { message: "Invalid queue name", code: "400" });
             }
-            await pgmqService.createQueue(params.ref, queueName, { unlogged: input.unlogged });
+            await pgmqService.createQueue(params.ref, queueName,
+                input.unlogged === undefined ? {} : { unlogged: input.unlogged });
             return status(201, { queue_name: queueName, type: input.unlogged ? "unlogged" : "basic" });
         } catch (err: unknown) {
-            return status(500, { message: "Failed to create queue", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            if (err instanceof PgmqMutationError) return status(503, { message: "Queue creation could not be confirmed", code: "PGMQ_MUTATION_UNCONFIRMED", mutation_may_have_applied: true });
+            if (err instanceof PgmqInputError) return status(400, { message: "Invalid queue input", code: "PGMQ_INPUT_INVALID" });
+            return status(500, { message: "Failed to create queue", code: "500" });
         }
     }, {
         body: t.Object({
@@ -129,7 +135,10 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             const dropped = await pgmqService.dropQueue(params.ref, queueName);
             return dropped ? status(204) : status(404, { message: "Queue not found", code: "404" });
         } catch (err: unknown) {
-            return status(500, { message: "Failed to drop queue", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            if (err instanceof PgmqInventoryError && err.mutationMayHaveApplied) {
+                return status(503, { message: "Queue deletion could not be confirmed", code: "PGMQ_MUTATION_UNCONFIRMED", mutation_may_have_applied: true });
+            }
+            return status(500, { message: "Failed to drop queue", code: "500" });
         }
     }, { detail: { tags: ["tasks"], summary: "Drop a PGMQ queue" } })
     .post("/queues/:queueName/messages", async ({ params, body }) => {
@@ -139,20 +148,13 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 return status(400, { message: "Invalid queue name", code: "400" });
             }
 
-            const input = body as {
-                payload?: Record<string, unknown>;
-                message?: Record<string, unknown>;
-                delayMs?: number;
-                sleepSeconds?: number;
-                sleep_seconds?: number;
-            };
-            const sleepSeconds = input.sleepSeconds ?? input.sleep_seconds ??
-                Math.floor(normalizeNonNegativeSeconds(input.delayMs, 0, MAX_QUEUE_DELAY_MS) / 1000);
+            const input = body;
+            const sleepSeconds = pgmqHttpDelay(input);
             const msgId = await pgmqService.send(
                 params.ref,
                 queueName,
                 input.message || input.payload || {},
-                normalizeNonNegativeSeconds(sleepSeconds, 0, MAX_QUEUE_DELAY_MS / 1000),
+                sleepSeconds,
             );
             return status(202, {
                 id: String(msgId),
@@ -162,7 +164,10 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 status: "pending",
             });
         } catch (err: unknown) {
-            return status(500, { message: "Failed to enqueue queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            if (err instanceof PgmqMutationError) return status(503, { message: "Queue send could not be confirmed", code: "PGMQ_MUTATION_UNCONFIRMED", mutation_may_have_applied: true });
+            if (err instanceof PgmqPayloadTooLargeError) return status(413, { message: "Queue payload exceeds limits", code: "PGMQ_PAYLOAD_TOO_LARGE" });
+            if (err instanceof PgmqInputError) return status(400, { message: "Invalid queue input", code: "PGMQ_INPUT_INVALID" });
+            return status(500, { message: "Failed to enqueue queue message", code: "500" });
         }
     }, {
         body: t.Object({
@@ -172,6 +177,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             sleepSeconds: t.Optional(t.Number()),
             sleep_seconds: t.Optional(t.Number()),
         }),
+        parse: async ({ request, params }) => await parseAuthorizedPgmqEnqueue(request, params.ref, false),
         detail: { tags: ["tasks"], summary: "Enqueue a PGMQ message" },
     })
     .post("/queues/:queueName/messages/batch", async ({ params, body }) => {
@@ -180,15 +186,14 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             if (!queueName) {
                 return status(400, { message: "Invalid queue name", code: "400" });
             }
-            const input = body as { messages?: Record<string, unknown>[]; sleepSeconds?: number; sleep_seconds?: number; delayMs?: number };
-            const messages = Array.isArray(input.messages) ? input.messages : [];
-            const sleepSeconds = input.sleepSeconds ?? input.sleep_seconds ??
-                Math.floor(normalizeNonNegativeSeconds(input.delayMs, 0, MAX_QUEUE_DELAY_MS) / 1000);
+            const input = body;
+            const messages = input.messages;
+            const sleepSeconds = pgmqHttpDelay(input);
             const ids = await pgmqService.sendBatch(
                 params.ref,
                 queueName,
                 messages,
-                normalizeNonNegativeSeconds(sleepSeconds, 0, MAX_QUEUE_DELAY_MS / 1000),
+                sleepSeconds,
             );
             return status(202, {
                 queue_name: queueName,
@@ -197,7 +202,10 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 count: ids.length,
             });
         } catch (err: unknown) {
-            return status(500, { message: "Failed to enqueue queue message batch", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            if (err instanceof PgmqMutationError) return status(503, { message: "Queue batch send could not be confirmed", code: "PGMQ_MUTATION_UNCONFIRMED", mutation_may_have_applied: true });
+            if (err instanceof PgmqPayloadTooLargeError) return status(413, { message: "Queue payload exceeds limits", code: "PGMQ_PAYLOAD_TOO_LARGE" });
+            if (err instanceof PgmqInputError) return status(400, { message: "Invalid queue input", code: "PGMQ_INPUT_INVALID" });
+            return status(500, { message: "Failed to enqueue queue message batch", code: "500" });
         }
     }, {
         body: t.Object({
@@ -206,6 +214,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             sleepSeconds: t.Optional(t.Number()),
             sleep_seconds: t.Optional(t.Number()),
         }),
+        parse: async ({ request, params }) => await parseAuthorizedPgmqEnqueue(request, params.ref, true),
         detail: { tags: ["tasks"], summary: "Enqueue a PGMQ message batch" },
     })
     .post("/queues/:queueName/messages/receive", async ({ params, body }) => {
@@ -215,26 +224,24 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 return status(400, { message: "Invalid queue name", code: "400" });
             }
 
-            const input = body as { visibilityTimeoutSec?: number; sleep_seconds?: number; n?: number; count?: number } | undefined;
+            const input = pgmqHttpReceive(body ?? {});
             const queueSettings = await projectService.getQueueSettings(params.ref, queueName);
             if (!queueSettings) {
                 return status(404, { message: "Project not found", code: "404" });
             }
+            const settings = pgmqHttpReceiveSettings(queueSettings);
             const messages = await pgmqService.read(
                 params.ref,
                 queueName,
-                normalizePositiveInteger(
-                    input?.sleep_seconds ?? input?.visibilityTimeoutSec,
-                    queueSettings.default_visibility_timeout_sec || DEFAULT_QUEUE_VISIBILITY_TIMEOUT_SEC,
-                    1,
-                    1800,
-                ),
-                normalizePositiveInteger(input?.n ?? input?.count, 1, 1, Math.max(1, queueSettings.max_in_flight)),
+                input.seconds ?? settings.defaultSeconds,
+                pgmqInteger(input.count ?? 1, 1, settings.maxCount),
             );
             if (messages.length === 0) return status(204);
-            return (input?.n ?? input?.count) ? messages : messages[0];
+            return input.count === undefined ? messages[0] : messages;
         } catch (err: unknown) {
-            return status(500, { message: "Failed to receive queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            if (err instanceof PgmqMutationError) return status(503, { message: "Queue receive could not be confirmed", code: "PGMQ_MUTATION_UNCONFIRMED", mutation_may_have_applied: true });
+            if (err instanceof PgmqInputError) return status(400, { message: "Invalid queue input", code: "PGMQ_INPUT_INVALID" });
+            return status(500, { message: "Failed to receive queue message", code: "500" });
         }
     }, {
         body: t.Optional(t.Object({
@@ -252,12 +259,10 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 return status(400, { message: "Invalid queue name", code: "400" });
             }
 
-            return await pgmqService.listMessages(params.ref, queueName, {
-                archived: query.archived === "true" || query.dlq === "true",
-                limit: normalizePositiveInteger(query.limit, 50, 1, 500),
-            });
+            return await pgmqService.listMessages(params.ref, queueName, pgmqHttpList(query));
         } catch (err: unknown) {
-            return status(500, { message: "Failed to list queue messages", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            if (err instanceof PgmqInputError) return status(400, { message: "Invalid queue input", code: "PGMQ_INPUT_INVALID" });
+            return status(500, { message: "Failed to list queue messages", code: "500" });
         }
     }, {
         query: t.Optional(t.Object({
@@ -278,7 +283,8 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             if (!message) return status(204);
             return message;
         } catch (err: unknown) {
-            return status(500, { message: "Failed to pop queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            if (err instanceof PgmqMutationError) return status(503, { message: "Queue pop could not be confirmed", code: "PGMQ_MUTATION_UNCONFIRMED", mutation_may_have_applied: true });
+            return status(500, { message: "Failed to pop queue message", code: "500" });
         }
     }, { detail: { tags: ["tasks"], summary: "Pop and delete the next PGMQ message" } })
     .get("/queues/:queueName/stats", async ({ params }) => {
@@ -291,7 +297,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             const metrics = await pgmqService.metrics(params.ref, queueName);
             return metrics || status(404, { message: "Queue not found", code: "404" });
         } catch (err: unknown) {
-            return status(500, { message: "Failed to retrieve queue stats", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            return status(500, { message: "Failed to retrieve queue stats", code: "500" });
         }
     }, { detail: { tags: ["tasks"], summary: "Get queue statistics" } })
     .post("/queues/:queueName/purge", async ({ params }) => {
@@ -303,7 +309,10 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
 
             return { queue_name: queueName, purged: await pgmqService.purge(params.ref, queueName) };
         } catch (err: unknown) {
-            return status(500, { message: "Failed to purge queue", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            if (err instanceof PgmqInventoryError && err.mutationMayHaveApplied) {
+                return status(503, { message: "Queue purge could not be confirmed", code: "PGMQ_MUTATION_UNCONFIRMED", mutation_may_have_applied: true });
+            }
+            return status(500, { message: "Failed to purge queue", code: "500" });
         }
     }, { detail: { tags: ["tasks"], summary: "Purge pending PGMQ messages" } })
     .get("/queues/:queueName/settings", async ({ params }) => {
@@ -317,7 +326,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             if (!settings) return status(404, { message: "Project not found", code: "404" });
             return settings;
         } catch (err: unknown) {
-            return status(500, { message: "Failed to retrieve queue settings", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            return status(500, { message: "Failed to retrieve queue settings", code: "500" });
         }
     }, { detail: { tags: ["tasks"], summary: "Get queue settings" } })
     .patch("/queues/:queueName/settings", async ({ params, body }) => {
@@ -327,22 +336,16 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 return status(400, { message: "Invalid queue name", code: "400" });
             }
 
-            const input = body as {
-                max_in_flight?: number;
-                default_visibility_timeout_sec?: number;
-                max_attempts?: number;
-                rate_limit_per_minute?: number;
-            };
-            const settings = await projectService.updateQueueSettings(params.ref, queueName, {
-                max_in_flight: input.max_in_flight,
-                default_visibility_timeout_sec: input.default_visibility_timeout_sec,
-                max_attempts: input.max_attempts,
-                rate_limit_per_minute: input.rate_limit_per_minute,
-            });
+            const settings = await projectService.updateQueueSettings(params.ref, queueName, body);
             if (!settings) return status(404, { message: "Project not found", code: "404" });
             return settings;
         } catch (err: unknown) {
-            return status(500, { message: "Failed to update queue settings", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            if (err instanceof PgmqInputError) return status(400, { message: "Invalid queue settings", code: "PGMQ_INPUT_INVALID" });
+            if (err instanceof PgmqSettingsConflictError) return status(409, { message: "Queue settings changed; reload before updating", code: "PGMQ_SETTINGS_CONFLICT" });
+            if (err instanceof PgmqSettingsError && err.mutationMayHaveApplied) {
+                return status(503, { message: "Queue settings update could not be confirmed", code: "PGMQ_MUTATION_UNCONFIRMED", mutation_may_have_applied: true });
+            }
+            return status(500, { message: "Failed to update queue settings", code: "500" });
         }
     }, {
         body: t.Object({
@@ -385,7 +388,8 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             }
             return { id: String(messageId), msg_id: messageId, queue_name: queueName, status: "archived" };
         } catch (err: unknown) {
-            return status(500, { message: "Failed to acknowledge queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            if (err instanceof PgmqMutationError) return status(503, { message: "Queue acknowledgement could not be confirmed", code: "PGMQ_MUTATION_UNCONFIRMED", mutation_may_have_applied: true });
+            return status(500, { message: "Failed to acknowledge queue message", code: "500" });
         }
     }, {
         body: t.Optional(t.Object({
@@ -404,18 +408,19 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             if (!messageId) {
                 return status(400, { message: "Invalid queue message ID", code: "400" });
             }
-            const input = body as { delayMs?: number; sleep_seconds?: number } | undefined;
-            const sleepSeconds = input?.sleep_seconds ??
-                Math.floor(normalizeNonNegativeSeconds(input?.delayMs, 0, MAX_QUEUE_DELAY_MS) / 1000);
+            const input = body;
+            const sleepSeconds = pgmqHttpDelay(input ?? {});
             const task = await pgmqService.setVisibilityTimeout(
                 params.ref,
                 queueName,
                 messageId,
-                normalizeNonNegativeSeconds(sleepSeconds, 0, MAX_QUEUE_DELAY_MS / 1000),
+                sleepSeconds,
             );
             return task || status(404, { message: "Queue message not found", code: "404" });
         } catch (err: unknown) {
-            return status(500, { message: "Failed to release queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            if (err instanceof PgmqMutationError) return status(503, { message: "Queue release could not be confirmed", code: "PGMQ_MUTATION_UNCONFIRMED", mutation_may_have_applied: true });
+            if (err instanceof PgmqInputError) return status(400, { message: "Invalid queue input", code: "PGMQ_INPUT_INVALID" });
+            return status(500, { message: "Failed to release queue message", code: "500" });
         }
     }, {
         body: t.Optional(t.Object({
@@ -440,7 +445,8 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 ? { id: String(messageId), msg_id: messageId, queue_name: queueName, status: "archived" }
                 : status(404, { message: "Queue message not found", code: "404" });
         } catch (err: unknown) {
-            return status(500, { message: "Failed to fail queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            if (err instanceof PgmqMutationError) return status(503, { message: "Queue archive could not be confirmed", code: "PGMQ_MUTATION_UNCONFIRMED", mutation_may_have_applied: true });
+            return status(500, { message: "Failed to fail queue message", code: "500" });
         }
     }, {
         body: t.Optional(t.Object({
@@ -481,35 +487,18 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             }
             return status(204);
         } catch (err: unknown) {
-            return status(500, { message: "Failed to delete queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            if (err instanceof PgmqMutationError) return status(503, { message: "Queue message deletion could not be confirmed", code: "PGMQ_MUTATION_UNCONFIRMED", mutation_may_have_applied: true });
+            return status(500, { message: "Failed to delete queue message", code: "500" });
         }
     }, { detail: { tags: ["tasks"], summary: "Delete a queue message" } })
-    .get("/", async ({ params, query }) => {
+    .get("/", async ({ params, request }) => {
         try {
-            const statuses = typeof query.status === "string"
-              ? query.status.split(",").map((value) => value.trim()).filter(Boolean)
-              : undefined;
-            const taskTypes = typeof query.task_type === "string"
-              ? query.task_type.split(",").map((value) => value.trim()).filter(Boolean)
-              : undefined;
-            const functionSlug = typeof query.function_slug === "string" && query.function_slug.trim().length > 0
-              ? query.function_slug.trim()
-              : undefined;
-            const functionVersion = typeof query.function_version === "string" && query.function_version.trim().length > 0
-              ? query.function_version.trim()
-              : undefined;
-            const limit = typeof query.limit === "string" ? Number.parseInt(query.limit, 10) : 50;
-            const tasks = await taskRepository.listTasksByProjectFiltered(params.ref, {
-              statuses,
-              taskTypes,
-              functionSlug,
-              functionVersion,
-              onlyDeadLettered: query.dlq === "true",
-              limit: Number.isFinite(limit) ? limit : 50,
-              summary: query.summary === "true",
-            });
+            const tasks = await taskRepository.listTasksByProjectFiltered(params.ref, parseTaskListQuery(request));
             return tasks;
         } catch (err: unknown) {
+            if (err instanceof InvalidTaskListQueryError) {
+                return status(400, { message: err.message, code: "TASK_LIST_QUERY_INVALID" });
+            }
                         return status(500, { message: "Failed to retrieve tasks", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
     }, {
@@ -535,20 +524,20 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             return status(500, { message: "Failed to retrieve background task settings", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
     }, { detail: { tags: ["tasks"], summary: "Get background task settings" } })
-    .get("/dlq", async ({ params, query }) => {
+    .get("/dlq", async ({ params, request }) => {
         try {
-            const tasks = await taskRepository.listTasksByProjectFiltered(params.ref, {
-                onlyDeadLettered: true,
-                limit: 100,
-                summary: query.summary === "true",
-            });
+            const tasks = await taskRepository.listTasksByProjectFiltered(params.ref, parseTaskListQuery(request, true));
             return tasks;
         } catch (err: unknown) {
+            if (err instanceof InvalidTaskListQueryError) {
+                return status(400, { message: err.message, code: "TASK_LIST_QUERY_INVALID" });
+            }
             return status(500, { message: "Failed to retrieve DLQ tasks", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
     }, {
         query: t.Optional(t.Object({
             summary: t.Optional(t.String()),
+            limit: t.Optional(t.String()),
         })),
         detail: { tags: ["tasks"], summary: "List dead-lettered tasks" },
     })
@@ -561,7 +550,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
     }, { detail: { tags: ["tasks"], summary: "Get task statistics" } })
     .patch("/settings/background", async ({ params, body }) => {
         try {
-            const settings = await projectService.updateBackgroundTaskSettings(params.ref, body as Record<string, number>);
+            const settings = await projectService.updateBackgroundTaskSettings(params.ref, body);
             if (!settings) {
                 return status(404, { message: "Project not found", code: "404" });
             }
@@ -640,12 +629,12 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
     }, { detail: { tags: ["tasks"], summary: "Cancel a running task" } })
     .post("/:taskId/retry", async ({ params }) => {
         try {
-            const task = await taskRepository.retryTask(params.taskId);
+            const task = await taskRepository.retryTask(params.taskId, params.ref);
             if (!task) {
                 return status(404, { message: "Task not found", code: "404" });
             }
             return task;
         } catch (err: unknown) {
-            return status(500, { message: "Failed to retry task", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            return status(500, { message: "Failed to retry task", code: "500" });
         }
     }, { detail: { tags: ["tasks"], summary: "Retry a failed task" } });

@@ -8,6 +8,7 @@ import { databaseService } from "../../src/services/database.service";
 import { jwtService } from "../../src/services/jwt.service";
 import { storageService } from "../../src/services/storage.service";
 import * as wsModule from "../../src/routes/ws";
+import { taskProjectFixture } from "../helpers/task-fixtures";
 
 function failedTask(overrides: Partial<ProjectTask> = {}): ProjectTask {
   const now = new Date();
@@ -53,23 +54,27 @@ describe("TaskWorker delayed retry wakeup", () => {
     const worker = new TaskWorker();
     const nextRunAt = "2026-04-24T12:34:56.000Z";
 
-    expect((worker as any).extractNextRunAt(JSON.stringify({ next_run_at: nextRunAt }))).toEqual(new Date(nextRunAt));
-    expect((worker as any).extractNextRunAt(JSON.stringify({ next_run_at: null }))).toBeNull();
-    expect((worker as any).extractNextRunAt("not json")).toBeNull();
+    expect(worker["extractNextRunAt"](JSON.stringify({ next_run_at: nextRunAt }))).toEqual(new Date(nextRunAt));
+    expect(worker["extractNextRunAt"](JSON.stringify({ next_run_at: null }))).toBeNull();
+    expect(worker["extractNextRunAt"]("not json")).toBeNull();
   });
 
   test("schedules delayed poll when retry_scheduled notification arrives", async () => {
     const worker = new TaskWorker();
-    const pollSpy = spyOn(worker as any, "poll").mockImplementation(() => Promise.resolve());
-    (worker as any).isRunning = true;
+    const pollSpy = mock<typeof worker["poll"]>(async () => {});
+    worker["poll"] = pollSpy;
+    worker["isRunning"] = true;
 
-    (worker as any).scheduleDelayedWakeup(JSON.stringify({
+    worker["scheduleDelayedWakeup"](JSON.stringify({
       next_run_at: new Date(Date.now() - 1).toISOString(),
     }));
 
-    await new Promise((resolve) => setTimeout(resolve, 5));
-
-    expect(pollSpy).toHaveBeenCalledTimes(1);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(pollSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      worker.stop();
+    }
   });
 });
 
@@ -81,10 +86,10 @@ describe("TaskWorker failure handling", () => {
   test("provision_realtime failure preserves project resources and continues provisioning", async () => {
     const worker = new TaskWorker();
     const markTaskFailedSpy = spyOn(taskRepository, "markTaskFailed").mockResolvedValue(null);
-    const createTaskSpy = spyOn(taskRepository, "createTask").mockResolvedValue({} as any);
-    const updateStatusSpy = spyOn(projectRepository, "updateStatus").mockResolvedValue(undefined as any);
+    const createTaskSpy = spyOn(taskRepository, "createTask").mockResolvedValue(failedTask());
+    const updateStatusSpy = spyOn(projectRepository, "updateStatus").mockResolvedValue(null);
 
-    await (worker as any).handleTaskFailure({
+    await worker["handleTaskFailure"](failedTask({
       id: "task-1",
       project_ref: "proj-ref",
       task_type: "provision_realtime",
@@ -94,7 +99,7 @@ describe("TaskWorker failure handling", () => {
       retries: 1,
       created_at: new Date(),
       updated_at: new Date(),
-    });
+    }));
 
     // Realtime is optional: failure continues the pipeline immediately regardless of retry budget
     expect(createTaskSpy).toHaveBeenCalledTimes(1);
@@ -106,22 +111,22 @@ describe("TaskWorker failure handling", () => {
   test("provision failure with retries left schedules a retry instead of stalling", async () => {
     const task = failedTask();
     const worker = new TaskWorker();
-    const workerHarness = worker as unknown as {
-      handleTaskFailure(task: ProjectTask): Promise<void>;
-    };
     const markTaskFailedSpy = spyOn(taskRepository, "markTaskFailed").mockResolvedValue(null);
     const scheduleRetrySpy = spyOn(taskRepository, "scheduleRetry").mockResolvedValue(task);
     const createTaskSpy = spyOn(taskRepository, "createTask").mockResolvedValue(task);
     const updateStatusSpy = spyOn(projectRepository, "updateStatus").mockResolvedValue(null);
     const beforeRetry = Date.now();
 
-    await workerHarness.handleTaskFailure(task);
+    await worker["handleTaskFailure"](task);
 
     expect(scheduleRetrySpy).toHaveBeenCalledTimes(1);
-    expect(scheduleRetrySpy.mock.calls[0][0]).toBe("task-retry-1");
-    expect(scheduleRetrySpy.mock.calls[0][1]).toBe("Task execution failed");
-    expect(scheduleRetrySpy.mock.calls[0][2].getTime()).toBeGreaterThanOrEqual(beforeRetry + 5_000);
-    expect(scheduleRetrySpy.mock.calls[0][2].getTime()).toBeLessThanOrEqual(Date.now() + 5_000);
+    const scheduled = scheduleRetrySpy.mock.calls[0];
+    if (!scheduled) throw new Error("Expected a scheduled retry");
+    const [taskId, reason, nextRunAt] = scheduled;
+    expect(taskId).toBe("task-retry-1");
+    expect(reason).toBe("Task execution failed");
+    expect(nextRunAt.getTime()).toBeGreaterThanOrEqual(beforeRetry + 5_000);
+    expect(nextRunAt.getTime()).toBeLessThanOrEqual(Date.now() + 5_000);
     // Must not trigger saga compensation while retries remain
     expect(markTaskFailedSpy).not.toHaveBeenCalled();
     expect(createTaskSpy).not.toHaveBeenCalled();
@@ -131,12 +136,7 @@ describe("TaskWorker failure handling", () => {
   test("retryable poll failure transitions directly to retry_scheduled", async () => {
     const task = failedTask();
     const worker = new TaskWorker();
-    const workerHarness = worker as unknown as {
-      isRunning: boolean;
-      poll(): Promise<void>;
-      executeTask(task: ProjectTask): Promise<boolean>;
-    };
-    workerHarness.isRunning = true;
+    worker["isRunning"] = true;
 
     spyOn(taskRepository, "claimNextTask").mockResolvedValue(task);
     spyOn(taskRepository, "markTaskRunning").mockResolvedValue(task);
@@ -145,10 +145,10 @@ describe("TaskWorker failure handling", () => {
       ...task,
       status: TaskStatus.RETRY_SCHEDULED,
     });
-    spyOn(workerHarness, "executeTask").mockResolvedValue(false);
+    worker["executeTask"] = mock<typeof worker["executeTask"]>(async () => false);
     const broadcastTaskUpdateSpy = spyOn(wsModule, "broadcastTaskUpdate").mockImplementation(() => {});
 
-    await workerHarness.poll();
+    await worker["poll"]();
 
     expect(markTaskFailedSpy).not.toHaveBeenCalled();
     expect(scheduleRetrySpy).toHaveBeenCalledTimes(1);
@@ -161,10 +161,10 @@ describe("TaskWorker failure handling", () => {
   test("provision_runtime failure still rolls back runtime, storage, and database", async () => {
     const worker = new TaskWorker();
     const markTaskFailedSpy = spyOn(taskRepository, "markTaskFailed").mockResolvedValue(null);
-    const createTaskSpy = spyOn(taskRepository, "createTask").mockResolvedValue({} as any);
-    const updateStatusSpy = spyOn(projectRepository, "updateStatus").mockResolvedValue(undefined as any);
+    const createTaskSpy = spyOn(taskRepository, "createTask").mockResolvedValue(failedTask());
+    const updateStatusSpy = spyOn(projectRepository, "updateStatus").mockResolvedValue(null);
 
-    await (worker as any).handleTaskFailure({
+    await worker["handleTaskFailure"](failedTask({
       id: "task-2",
       project_ref: "proj-ref",
       task_type: "provision_runtime",
@@ -174,7 +174,7 @@ describe("TaskWorker failure handling", () => {
       retries: 3,
       created_at: new Date(),
       updated_at: new Date(),
-    });
+    }));
 
     expect(markTaskFailedSpy).toHaveBeenCalledWith("task-2", "Task execution failed");
     expect(updateStatusSpy).toHaveBeenCalledWith("proj-ref", "paused");
@@ -207,12 +207,12 @@ describe("TaskWorker cleanup_s3", () => {
     spyOn(projectRepository, "findByRef").mockResolvedValue(null);
 
     try {
-      const completed = await (worker as any).executeTask({
+      const completed = await worker["executeTask"](failedTask({
         id: "cleanup-s3-task",
         project_ref: "proj-ref",
         task_type: "cleanup_s3",
         payload: {},
-      });
+      }));
 
       expect(completed).toBe(expected);
       expect(deleteBucketSpy).toHaveBeenCalledWith("proj-ref");
@@ -234,7 +234,7 @@ describe("TaskWorker provision_secrets", () => {
     spyOn(databaseService, "getSecrets").mockResolvedValue([]);
     const generateServiceRoleKeySpy = spyOn(jwtService, "generateServiceRoleKey")
       .mockResolvedValue("generated.service.role");
-    let storedProject = {
+    let storedProject = taskProjectFixture({
       ref: "proj-ref",
       name: "proj",
       db_name: "proj_ref",
@@ -252,7 +252,7 @@ describe("TaskWorker provision_secrets", () => {
       created_at: new Date(),
       updated_at: new Date(),
       deleted_at: null,
-    } as any;
+    });
     spyOn(projectRepository, "findByRef").mockImplementation(async () => storedProject);
     const updateApiKeysSpy = spyOn(projectRepository, "updateApiKeys").mockImplementation(async (
       _ref,
@@ -262,12 +262,12 @@ describe("TaskWorker provision_secrets", () => {
       return storedProject;
     });
 
-    const ok = await (worker as any).executeTask({
+    const ok = await worker["executeTask"](failedTask({
       id: "task-1",
       project_ref: "proj-ref",
       task_type: "provision_secrets",
       payload: {},
-    });
+    }));
 
     expect(ok).toBe(true);
     expect(generateServiceRoleKeySpy).toHaveBeenCalledWith("test-jwt-secret-with-enough-length");
@@ -295,7 +295,7 @@ describe("TaskWorker provision_secrets", () => {
     );
     const upsertSecretSpy = spyOn(databaseService, "upsertSecret").mockResolvedValue(true);
     spyOn(databaseService, "getSecrets").mockResolvedValue([]);
-    let storedProject = {
+    let storedProject = taskProjectFixture({
       ref: "proj-ref",
       name: "proj",
       db_name: "proj_ref",
@@ -313,7 +313,7 @@ describe("TaskWorker provision_secrets", () => {
       created_at: new Date(),
       updated_at: new Date(),
       deleted_at: null,
-    } as any;
+    });
     spyOn(projectRepository, "findByRef").mockImplementation(async () => storedProject);
     const updateApiKeysSpy = spyOn(projectRepository, "updateApiKeys").mockImplementation(async (
       _ref,
@@ -323,20 +323,22 @@ describe("TaskWorker provision_secrets", () => {
       return storedProject;
     });
 
-    const ok = await (worker as any).executeTask({
+    const ok = await worker["executeTask"](failedTask({
       id: "task-stale-key",
       project_ref: "proj-ref",
       task_type: "provision_secrets",
       payload: {},
-    });
+    }));
 
     expect(ok).toBe(true);
     expect(updateApiKeysSpy).toHaveBeenCalledTimes(1);
-    expect(updateApiKeysSpy.mock.calls[0][1]).toMatchObject({
+    const updated = updateApiKeysSpy.mock.calls[0];
+    if (!updated) throw new Error("Expected service-role key repair");
+    expect(updated[1]).toMatchObject({
       jwt_secret: currentSecret,
       service_role_key: expect.any(String),
     });
-    expect(updateApiKeysSpy.mock.calls[0][1].service_role_key).not.toBe(staleKey);
+    expect(updated[1].service_role_key).not.toBe(staleKey);
     const secrets = new Map(upsertSecretSpy.mock.calls.map((call) => [call[1], call[2]]));
     expect(secrets.get("SUPABASE_SERVICE_ROLE_KEY")).toMatch(/^[^.]+\.[^.]+\.[^.]+$/);
     expect(secrets.get("SUPACLOUD_INTERNAL_SUPABASE_URL")).toBe("http://127.0.0.1");
@@ -355,12 +357,12 @@ describe("TaskWorker project activation", () => {
   test("uses the guarded creating to active transition after provisioning", async () => {
     const worker = new TaskWorker();
     const activateSpy = spyOn(projectRepository, "activateCreatingProject")
-      .mockResolvedValue({ ref: "proj-ref" } as never);
+      .mockResolvedValue(taskProjectFixture({ ref: "proj-ref" }));
 
-    await (worker as any).handleTaskCompletion({
+    await worker["handleTaskCompletion"](failedTask({
       project_ref: "proj-ref",
       task_type: "provision_secrets",
-    });
+    }));
 
     expect(activateSpy).toHaveBeenCalledWith("proj-ref");
   });

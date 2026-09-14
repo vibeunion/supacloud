@@ -44,21 +44,21 @@ describe('Queues compatibility', () => {
         sleep_seconds: 0,
       })
       expect(sent.error).toBeNull()
-      expect(sent.data).toEqual([1])
+      expect(sent.data).toEqual(['1'])
       expect(batch.error).toBeNull()
-      expect(batch.data).toEqual([2, 3])
+      expect(batch.data).toEqual(['2', '3'])
 
       const read = await queues.rpc('read', { queue_name: 'client_jobs', sleep_seconds: 30, n: 2 })
       expect(read.error).toBeNull()
-      const messages = read.data as Array<{ msg_id: number; message: { sequence: number } }>
-      expect(messages.map((message) => message.msg_id)).toEqual([1, 2])
+      const messages = read.data as Array<{ msg_id: string; message: { sequence: number } }>
+      expect(messages.map((message) => message.msg_id)).toEqual(['1', '2'])
       expect(messages.map((message) => message.message)).toEqual([{ sequence: 1 }, { sequence: 2 }])
-      expect((await queues.rpc('archive', { queue_name: 'client_jobs', message_id: 1 })).data).toBe(true)
-      expect((await queues.rpc('delete', { queue_name: 'client_jobs', message_id: 2 })).data).toBe(true)
+      expect((await queues.rpc('archive', { queue_name: 'client_jobs', message_id: '1' })).data).toBe(true)
+      expect((await queues.rpc('delete', { queue_name: 'client_jobs', message_id: '2' })).data).toBe(true)
 
       const popped = await queues.rpc('pop', { queue_name: 'client_jobs' })
       expect(popped.error).toBeNull()
-      expect(popped.data?.[0]).toMatchObject({ msg_id: 3, message: { sequence: 3 } })
+      expect(popped.data?.[0]).toMatchObject({ msg_id: '3', message: { sequence: 3 } })
       expect((await queues.rpc('pop', { queue_name: 'client_jobs' })).data).toEqual([])
     } finally {
       await backend.close()

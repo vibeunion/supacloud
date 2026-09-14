@@ -8,7 +8,7 @@ export function normalizeProjectConfig(
     if (!trimmed) return {};
 
     try {
-      const parsed = JSON.parse(trimmed);
+      const parsed: unknown = JSON.parse(trimmed);
       return isRecord(parsed) ? { ...parsed } : {};
     } catch {
       return {};
@@ -63,17 +63,22 @@ export function normalizeThirdPartyAuthConfig(value: unknown): ThirdPartyAuthCon
   const mode = config.auth_endpoint_mode === "local" || config.authEndpointMode === "local"
     ? "local"
     : "external";
+  const issuer = pickString(config.issuer);
+  const jwksUrl = pickString(config.jwks_url) || pickString(config.jwksUrl);
+  const audience = normalizeAudience(config.audience);
+  const clientId = pickString(config.client_id) || pickString(config.clientId);
+  const authHostHeader = pickString(config.auth_host_header) || pickString(config.authHostHeader);
 
   return {
     enabled: config.enabled === true,
-    issuer: pickString(config.issuer),
-    jwks_url: pickString(config.jwks_url) || pickString(config.jwksUrl),
+    ...(issuer === undefined ? {} : { issuer }),
+    ...(jwksUrl === undefined ? {} : { jwks_url: jwksUrl }),
     jwt_jwks: config.jwt_jwks ?? config.jwtJwks,
-    audience: normalizeAudience(config.audience),
-    client_id: pickString(config.client_id) || pickString(config.clientId),
+    ...(audience === undefined ? {} : { audience }),
+    ...(clientId === undefined ? {} : { client_id: clientId }),
     auth_endpoint_mode: mode,
-    auth_upstream: authUpstream,
-    auth_host_header: pickString(config.auth_host_header) || pickString(config.authHostHeader),
+    ...(authUpstream === undefined ? {} : { auth_upstream: authUpstream }),
+    ...(authHostHeader === undefined ? {} : { auth_host_header: authHostHeader }),
     auth_upstream_tls_insecure_skip_verify: config.auth_upstream_tls_insecure_skip_verify === true || config.authUpstreamTlsInsecureSkipVerify === true,
     claim_mapping: normalizeClaimMapping(config.claim_mapping ?? config.claimMapping),
   };
@@ -106,15 +111,15 @@ function normalizeAudience(value: unknown): string | string[] | undefined {
 
 function normalizeClaimMapping(value: unknown): Record<string, string> {
   if (!isRecord(value)) return {};
-  const mapping: Record<string, string> = {};
+  const entries: [string, string][] = [];
   for (const [key, raw] of Object.entries(value)) {
     const normalizedKey = pickString(key);
     const normalizedValue = pickString(raw);
-    if (normalizedKey && normalizedValue) mapping[normalizedKey] = normalizedValue;
+    if (normalizedKey && normalizedValue) entries.push([normalizedKey, normalizedValue]);
   }
-  return mapping;
+  return Object.fromEntries(entries);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

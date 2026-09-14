@@ -1,8 +1,6 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, spyOn, test } from "bun:test";
 mock.restore();
-const repo = await import(
-  new URL("../../src/repositories/task.repository.ts?task-repository-test", import.meta.url).href
-);
+const repo = await import("../../src/repositories/task.repository");
 
 const { buildTaskListQuery, retryTask } = repo;
 
@@ -50,9 +48,12 @@ describe("TaskRepository query builders", () => {
     expect(values).toEqual(["proj_1", "pending", "leased", "queue:emails", 20]);
   });
 
-  test("buildTaskListQuery prefers explicit DLQ filter over statuses", () => {
+  test("buildTaskListQuery rejects conflicting DLQ status filters", () => {
+    expect(() => buildTaskListQuery("proj_1", {
+      statuses: ["failed"], onlyDeadLettered: true,
+    })).toThrow("Invalid task list input");
     const { sqlText, values } = buildTaskListQuery("proj_1", {
-      statuses: ["failed"],
+      statuses: ["dead_lettered"],
       onlyDeadLettered: true,
       limit: 10,
     });
@@ -60,6 +61,55 @@ describe("TaskRepository query builders", () => {
     expect(sqlText).toContain("status = 'dead_lettered'");
     expect(sqlText).not.toContain("status = ANY");
     expect(values).toEqual(["proj_1", 10]);
+  });
+
+  test("rejects invalid runtime list inputs before SQL and does not invoke getters", async () => {
+    const { sql } = await import("../../src/db");
+    const unsafe = spyOn(sql, "unsafe").mockResolvedValue([]);
+    let reads = 0;
+    const accessor = Object.defineProperty({}, "limit", { get() { reads++; return 1; } });
+    const itemAccessor = Object.defineProperty(["pending"], "0", { get() { reads++; return "pending"; } });
+    try {
+      for (const filters of [
+        null, [], "filters", accessor, { statuses: itemAccessor },
+        { statuses: new Array(1) }, { statuses: [] }, { statuses: [1] },
+        { taskTypes: "queue:one" }, { statuses: ["failed,pending"] },
+        { functionSlug: "" }, { functionVersion: "\ud800" }, { summary: "false" },
+        { onlyDeadLettered: 1 }, { extra: true },
+        ...[0, -1, 1.5, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1, "5"].map(limit => ({ limit })),
+      ]) {
+        const result: unknown = Reflect.apply(repo.listTasksByProjectFiltered, repo, ["proj_1", filters]);
+        await expect(result).rejects.toThrow("Invalid task list input");
+        expect(unsafe).not.toHaveBeenCalled();
+      }
+      for (const ref of ["", " padded", "bad\nref", "\ud800"]) {
+        await expect(repo.listTasksByProject(ref)).rejects.toThrow("Invalid task list input");
+        expect(unsafe).not.toHaveBeenCalled();
+      }
+      await expect(repo.listTasksByProject("proj_1", 0)).rejects.toThrow("Invalid task list input");
+      expect(unsafe).not.toHaveBeenCalled();
+      expect(reads).toBe(0);
+    } finally { unsafe.mockRestore(); }
+  });
+
+  test("captures list SQL parameters once across a database retry", async () => {
+    const { sql } = await import("../../src/db");
+    const filters = { statuses: ["pending"], taskTypes: ["queue:one"], limit: 3 };
+    const unsafe = spyOn(sql, "unsafe")
+      .mockRejectedValueOnce(new Error("synthetic transient list failure"))
+      .mockResolvedValue([]);
+    try {
+      const pending = repo.listTasksByProjectFiltered("proj_1", filters);
+      filters.statuses[0] = "failed";
+      filters.taskTypes.push("queue:two");
+      filters.limit = 100;
+      expect(await pending).toEqual([]);
+      expect(unsafe).toHaveBeenCalledTimes(2);
+      for (const call of unsafe.mock.calls) {
+        expect(call[1]).toEqual(["proj_1", "pending", "queue:one", 3]);
+      }
+      expect(unsafe.mock.calls[0]?.[0]).toBe(unsafe.mock.calls[1]?.[0]);
+    } finally { unsafe.mockRestore(); }
   });
 
   test("buildTaskListQuery can omit heavy payload columns for summary lists", () => {
@@ -100,7 +150,7 @@ describe("TaskRepository query builders", () => {
   });
 
   test("counts a whitespace-normalized invoker across every child of one auth authority", async () => {
-    const unsafe = mock(async () => [{
+    const unsafe = mock(async (_query: string, _params: unknown[]) => [{
       count: 1,
       id: "task-child",
       task_type: "edge_function",
@@ -112,10 +162,12 @@ describe("TaskRepository query builders", () => {
     await expect(repo.countActiveTasksByInvoker(
       "auth-owner",
       userId,
-      { unsafe } as never,
+      { unsafe },
     )).resolves.toMatchObject({ count: 1 });
 
-    const [query, params] = unsafe.mock.calls[0] as [string, unknown[]];
+    const call = unsafe.mock.calls[0];
+    if (!call) throw new Error("Expected an invoker query");
+    const [query, params] = call;
     expect(query).toContain("WHERE auth_authority_ref = $1");
     expect(query).not.toContain("WHERE project_ref = $1");
     expect(query).toContain("BTRIM(payload->'auth'->>'invoker_user_id')");

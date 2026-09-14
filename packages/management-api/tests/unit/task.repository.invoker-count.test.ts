@@ -1,25 +1,19 @@
 import { describe, expect, mock, test } from "bun:test";
 
-const unsafe = mock(async (_sqlText: string, _params: unknown[]) => {
+const unsafe = mock(async (_sqlText: string, _params: unknown[]): Promise<unknown[]> => {
   throw new Error("sql.unsafe should be mocked per test");
 });
 
+const originalDb = await import("../../src/db");
 mock.module("../../src/db", () => ({
+  ...originalDb,
   sql: {
     unsafe,
-  },
-  TaskStatus: {
-    PENDING: "pending",
-    LEASED: "leased",
-    RUNNING: "running",
-    RETRY_SCHEDULED: "retry_scheduled",
   },
 }));
 
 
-const { countActiveTasksByInvoker } = await import(
-  new URL("../../src/repositories/task.repository.ts?task-repository-invoker-count-test", import.meta.url).href
-);
+const { countActiveTasksByInvoker } = await import("../../src/repositories/task.repository");
 
 describe("TaskRepository.countActiveTasksByInvoker", () => {
   test("returns the total active count even when the task summary is capped at 100", async () => {
@@ -52,5 +46,13 @@ describe("TaskRepository.countActiveTasksByInvoker", () => {
 
     expect(result.count).toBe(0);
     expect(result.tasks).toEqual([]);
+  });
+
+  test("rejects invalid counts and identities instead of coercing a deletion-safety result", async () => {
+    const valid = { count: 1, id: "task-1", task_type: "edge_function", status: "running", invoker_consistent: true };
+    for (const patch of [{ count: "1" }, { count: -1 }, { count: 0 }, { id: null }, { status: "succeeded" }]) {
+      unsafe.mockResolvedValue([{ ...valid, ...patch }]);
+      await expect(countActiveTasksByInvoker("proj_1", "user_1")).rejects.toThrow("Invalid persisted task record");
+    }
   });
 });

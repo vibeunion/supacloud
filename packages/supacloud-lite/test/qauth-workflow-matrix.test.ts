@@ -88,18 +88,18 @@ async function expectConcurrentQueueClaims(
   ])
   const claimedIds = reads.flatMap((response) => queueMessageIds(response.data))
   expect(reads.map((response) => response.error)).toEqual([null, null])
-  expect(claimedIds).toEqual([1])
+  expect(claimedIds).toEqual(['1'])
   expect(reads.map((response) => queueMessageIds(response.data).length).sort()).toEqual([0, 1])
   expect(queueMessageIds((await queue.rpc('read', queueRead('matrix_jobs', 30))).data)).toEqual([])
-  expect((await queue.rpc('archive', { queue_name: 'matrix_jobs', message_id: 1 })).data).toBe(true)
+  expect((await queue.rpc('archive', { queue_name: 'matrix_jobs', message_id: '1' })).data).toBe(true)
   await expectArchivedQueueInvariant(backend)
   expect((await queue.rpc('send_batch', {
     queue_name: 'matrix_jobs',
     messages: [{ sequence: 2 }, { sequence: 3 }],
     sleep_seconds: 0,
   })).error).toBeNull()
-  expect((await queue.rpc('delete', { queue_name: 'matrix_jobs', message_id: 2 })).data).toBe(true)
-  expect(queueMessageIds((await queue.rpc('pop', { queue_name: 'matrix_jobs' })).data)).toEqual([3])
+  expect((await queue.rpc('delete', { queue_name: 'matrix_jobs', message_id: '2' })).data).toBe(true)
+  expect(queueMessageIds((await queue.rpc('pop', { queue_name: 'matrix_jobs' })).data)).toEqual(['3'])
 }
 
 async function expectArchivedQueueInvariant(backend: SupaCloudLiteBackend): Promise<void> {
@@ -268,19 +268,19 @@ function queueRead(queueName: string, visibilityTimeoutSeconds: number) {
   return { queue_name: queueName, sleep_seconds: visibilityTimeoutSeconds, n: 1 }
 }
 
-function queueMessageIds(payload: unknown): number[] {
+function queueMessageIds(payload: unknown): string[] {
   if (!Array.isArray(payload)) return []
   return payload.flatMap((entry) => isQueueMessage(entry) ? [entry.msg_id] : [])
 }
 
-function queueMessage(payload: unknown): { msg_id: number; read_ct: number } {
+function queueMessage(payload: unknown): { msg_id: string; read_ct: number } {
   if (!Array.isArray(payload) || !isQueueMessage(payload[0])) throw new Error('expected one queue message')
   return payload[0]
 }
 
-function isQueueMessage(candidate: unknown): candidate is { msg_id: number; read_ct: number } {
+function isQueueMessage(candidate: unknown): candidate is { msg_id: string; read_ct: number } {
   return typeof candidate === 'object' && candidate !== null
-    && typeof (candidate as Record<string, unknown>).msg_id === 'number'
+    && typeof (candidate as Record<string, unknown>).msg_id === 'string'
     && typeof (candidate as Record<string, unknown>).read_ct === 'number'
 }
 

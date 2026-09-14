@@ -1,17 +1,18 @@
 import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { Elysia } from "elysia";
+import { taskProjectFixture } from "../helpers/task-fixtures";
 
-const findByRef = mock(() => Promise.resolve(null));
-const updateConfig = mock(() => Promise.resolve(null));
-const requireProjectOrAdminAuth = mock(() => Promise.resolve(null));
+const findByRef = mock<typeof projectRepository.findByRef>(async () => null);
+const updateConfig = mock<typeof projectRepository.updateConfig>(async () => null);
+const requireProjectOrAdminAuth = mock<typeof authModule.requireProjectOrAdminAuth>(async () => undefined);
 
 const { projectRepository } = await import("../../src/repositories/project.repository");
 const authModule = await import("../../src/middleware/auth");
 
-const findByRefSpy = spyOn(projectRepository, "findByRef").mockImplementation(findByRef as typeof projectRepository.findByRef);
-const updateConfigSpy = spyOn(projectRepository, "updateConfig").mockImplementation(updateConfig as typeof projectRepository.updateConfig);
+const findByRefSpy = spyOn(projectRepository, "findByRef").mockImplementation(findByRef);
+const updateConfigSpy = spyOn(projectRepository, "updateConfig").mockImplementation(updateConfig);
 const requireProjectOrAdminAuthSpy = spyOn(authModule, "requireProjectOrAdminAuth").mockImplementation(
-  requireProjectOrAdminAuth as typeof authModule.requireProjectOrAdminAuth,
+  requireProjectOrAdminAuth,
 );
 
 const { taskEventRoutes } = await import("../../src/routes/task-events");
@@ -38,15 +39,15 @@ describe("taskEventRoutes", () => {
     findByRef.mockReset();
     updateConfig.mockReset();
     requireProjectOrAdminAuth.mockReset();
-    requireProjectOrAdminAuth.mockResolvedValue(null);
+    requireProjectOrAdminAuth.mockResolvedValue(undefined);
   });
 
   test("POST /webhook stores webhook config in project settings", async () => {
-    findByRef.mockResolvedValue({
+    findByRef.mockResolvedValue(taskProjectFixture({
       ref: "proj_1",
       config: {},
-    } as never);
-    updateConfig.mockResolvedValue({
+    }));
+    updateConfig.mockResolvedValue(taskProjectFixture({
       ref: "proj_1",
       config: {
         task_event_webhook: {
@@ -54,7 +55,7 @@ describe("taskEventRoutes", () => {
           secret: "secret-123",
         },
       },
-    } as never);
+    }));
 
     const response = await request("/v1/projects/proj_1/task-events/webhook", {
       method: "POST",
@@ -74,7 +75,7 @@ describe("taskEventRoutes", () => {
   });
 
   test("GET /webhook returns the persisted webhook config", async () => {
-    findByRef.mockResolvedValue({
+    findByRef.mockResolvedValue(taskProjectFixture({
       ref: "proj_1",
       config: {
         task_event_webhook: {
@@ -82,7 +83,7 @@ describe("taskEventRoutes", () => {
           secret: "secret-123",
         },
       },
-    } as never);
+    }));
 
     const response = await request("/v1/projects/proj_1/task-events/webhook");
     expect(response.status).toBe(200);
@@ -94,7 +95,7 @@ describe("taskEventRoutes", () => {
   });
 
   test("DELETE /webhook removes webhook config", async () => {
-    findByRef.mockResolvedValue({
+    findByRef.mockResolvedValue(taskProjectFixture({
       ref: "proj_1",
       config: {
         task_event_webhook: {
@@ -102,11 +103,11 @@ describe("taskEventRoutes", () => {
           secret: "secret-123",
         },
       },
-    } as never);
-    updateConfig.mockResolvedValue({
+    }));
+    updateConfig.mockResolvedValue(taskProjectFixture({
       ref: "proj_1",
       config: {},
-    } as never);
+    }));
 
     const response = await request("/v1/projects/proj_1/task-events/webhook", {
       method: "DELETE",
