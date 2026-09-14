@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { isRecord } from "./project-config";
 
 export interface TaskTraceEnvelope {
   project_ref: string;
@@ -10,19 +11,21 @@ export function parseTaskTraceparent(value: unknown) {
   const match = typeof value === "string"
     ? value.match(/^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/)
     : null;
-  if (!match || /^0+$/.test(match[1]!) || /^0+$/.test(match[2]!)) return null;
-  return { traceId: match[1]!, spanId: match[2]!, flags: (parseInt(match[3]!, 16) & 1) ? "01" : "00" };
+  const [, traceId, spanId, flags] = match ?? [];
+  if (!traceId || !spanId || !flags || /^0+$/.test(traceId) || /^0+$/.test(spanId)) return null;
+  return { traceId, spanId, flags: (parseInt(flags, 16) & 1) ? "01" : "00" };
 }
 
 export function taskAttemptTrace(
   task: { id: string; project_ref: string; trace_id?: string | null; payload?: Record<string, unknown> },
 ): Headers {
-  const envelope = task.payload?.trace as Partial<TaskTraceEnvelope> | undefined;
+  const envelope = task.payload?.trace;
   let traceId: string;
   let flags = "00";
   if (envelope !== undefined) {
-    const parent = parseTaskTraceparent(envelope?.traceparent);
-    if (!parent || envelope?.project_ref !== task.project_ref
+    if (!isRecord(envelope)) throw new Error("Background trace identity is inconsistent");
+    const parent = parseTaskTraceparent(envelope.traceparent);
+    if (!parent || envelope.project_ref !== task.project_ref
       || typeof envelope.request_id !== "string" || !/^[A-Za-z0-9._:-]{1,256}$/.test(envelope.request_id)
       || parent.traceId !== task.trace_id) {
       throw new Error("Background trace identity is inconsistent");

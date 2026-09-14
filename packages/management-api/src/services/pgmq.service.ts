@@ -1,65 +1,33 @@
-import { getProjectDb, resolveDbName } from "../db";
+import { getProjectDb } from "../db";
+import { projectRepository } from "../repositories/project.repository";
+import { PgmqProjectContextError, pgmqProjectRef, readPgmqProjectDatabase } from "../utils/pgmq-project";
 import { withRetry } from "../utils/retry";
+import { pgmqCreateOptions, pgmqInteger, pgmqListOptions, pgmqSeconds } from "../utils/pgmq-input";
+import { capturePgmqBatch } from "../utils/pgmq-batch";
+import { serializePgmqPayload } from "../utils/pgmq-payload";
+import { PgmqMutationError } from "../utils/pgmq-mutation";
+import {
+  assertPublicPgmqQueueName, PgmqInventoryError, readPgmqDropReceipt,
+  readPgmqMetrics, readPgmqMetricsAll, readPgmqPurgeReceipt, readPgmqQueueInfo,
+  type PgmqQueueInfo, type PgmqQueueMetrics,
+} from "../utils/pgmq-inventory";
+export { isPublicPgmqQueueName, type PgmqQueueInfo, type PgmqQueueMetrics } from "../utils/pgmq-inventory";
+import {
+  parsePgmqMessageId, readPgmqIdReceipt, readPgmqIdReceipts, readPgmqJson,
+  readPgmqMessageRows, readPgmqTimestamp, readPgmqBooleanReceipt, type PgmqJson,
+} from "../utils/pgmq-message-id";
 
 const QUEUE_TASK_TYPE_PREFIX = "queue:";
-const INTERNAL_QUEUE_PREFIX = "supacloud_internal_";
-
-export function isPublicPgmqQueueName(queueName: string): boolean {
-  return !queueName.trim().toLowerCase().startsWith(INTERNAL_QUEUE_PREFIX);
-}
-
-function assertPublicPgmqQueueName(queueName: string): void {
-  if (!isPublicPgmqQueueName(queueName)) {
-    throw new Error("SupaCloud internal queues are reserved");
-  }
-}
-
 export interface PgmqMessage {
   id: string;
-  msg_id: number;
+  msg_id: string;
   read_ct: number;
   enqueued_at: string | Date;
   vt: string | Date;
-  message: Record<string, unknown>;
-  payload: Record<string, unknown>;
+  message: PgmqJson;
+  payload: PgmqJson;
   status: "pending" | "leased" | "archived" | "deleted";
   task_type: string;
-}
-
-export interface PgmqQueueInfo {
-  queue_name: string;
-  created_at: string | Date | null;
-  is_partitioned: boolean;
-  is_unlogged: boolean;
-}
-
-export interface PgmqQueueMetrics {
-  queue_name: string;
-  queue_length: number;
-  newest_msg_age_sec: number | null;
-  oldest_msg_age_sec: number | null;
-  total_messages: number;
-  scrape_time: string | Date;
-}
-
-function asJsonObject(value: unknown): Record<string, unknown> {
-  if (!value) return {};
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
-        : {};
-    } catch {
-      return {};
-    }
-  }
-  return typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-function normalizeMsgId(value: unknown): number {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function quoteIdentifier(value: string): string {
@@ -71,14 +39,17 @@ function queueTableName(queueName: string, archived: boolean): string {
 }
 
 function mapMessage(queueName: string, row: Record<string, unknown>, status: PgmqMessage["status"]): PgmqMessage {
-  const message = asJsonObject(row.message);
-  const msgId = normalizeMsgId(row.msg_id);
+  const message = readPgmqJson(row.message);
+  const msgId = parsePgmqMessageId(row.msg_id);
+  if (typeof row.read_ct !== "number" || !Number.isSafeInteger(row.read_ct) || row.read_ct < 0) {
+    throw new Error("Invalid PGMQ message read count");
+  }
   return {
     id: String(msgId),
     msg_id: msgId,
-    read_ct: Number(row.read_ct || 0),
-    enqueued_at: row.enqueued_at as string | Date,
-    vt: row.vt as string | Date,
+    read_ct: row.read_ct,
+    enqueued_at: readPgmqTimestamp(row.enqueued_at),
+    vt: readPgmqTimestamp(row.vt),
     message,
     payload: message,
     status,
@@ -89,16 +60,15 @@ function mapMessage(queueName: string, row: Record<string, unknown>, status: Pgm
 async function listMessages(
   projectRef: string,
   queueName: string,
-  options: { archived?: boolean; limit?: number } = {},
+  options: ReturnType<typeof pgmqListOptions>,
 ): Promise<PgmqMessage[]> {
   assertPublicPgmqQueueName(queueName);
-  await ensurePgmq(projectRef);
-  const db = await projectDb(projectRef);
-  const limit = Math.max(1, Math.min(500, Math.floor(options.limit || 50)));
-  const rows = await db.unsafe(
+  const { limit, archived } = options;
+  const db = await prepareProjectDb(projectRef);
+  const rows: unknown = await db.unsafe(
     `
       SELECT
-        msg_id,
+        q.msg_id::text AS msg_id,
         read_ct,
         enqueued_at,
         vt,
@@ -108,67 +78,93 @@ async function listMessages(
           WHEN vt > NOW() THEN 'leased'
           ELSE 'pending'
         END AS queue_status
-      FROM ${queueTableName(queueName, Boolean(options.archived))}
-      ORDER BY msg_id DESC
+      FROM ${queueTableName(queueName, archived)} AS q
+      ORDER BY q.msg_id DESC
       LIMIT $1
     `,
-    [limit, Boolean(options.archived)],
+    [limit, archived],
   );
-  return (rows as Record<string, unknown>[]).map((row) =>
-    mapMessage(queueName, row as Record<string, unknown>, String(row.queue_status) as PgmqMessage["status"])
-  );
+  return readPgmqMessageRows(rows, limit).map(row => {
+    const state = row.queue_status;
+    if (state !== "pending" && state !== "leased" && state !== "archived") throw new Error("Invalid PGMQ queue status");
+    if (archived !== (state === "archived")) throw new Error("Mismatched PGMQ archive status");
+    return mapMessage(queueName, row, state);
+  });
 }
 
-async function projectDb(projectRef: string) {
-  return getProjectDb(await resolveDbName(projectRef));
-}
-
-async function ensurePgmq(projectRef: string): Promise<void> {
-  const db = await projectDb(projectRef);
+async function prepareProjectDb(projectRef: string) {
+  pgmqProjectRef(projectRef);
+  let database: string;
+  try {
+    const project: unknown = await projectRepository.findByRef(projectRef);
+    database = readPgmqProjectDatabase(project, projectRef);
+  } catch {
+    throw new PgmqProjectContextError();
+  }
+  // One validated mapping and connection are used for setup and the operation.
+  const db = getProjectDb(database);
   await db`CREATE EXTENSION IF NOT EXISTS pgmq`;
+  return db;
 }
 
 async function createQueue(projectRef: string, queueName: string, options: { unlogged?: boolean } = {}): Promise<void> {
   assertPublicPgmqQueueName(queueName);
-  await ensurePgmq(projectRef);
-  const db = await projectDb(projectRef);
-  if (options.unlogged) {
-    await db`SELECT pgmq.create_unlogged(${queueName})`;
-  } else {
-    await db`SELECT pgmq.create(${queueName})`;
+  const { unlogged } = pgmqCreateOptions(options);
+  const db = await prepareProjectDb(projectRef);
+  try {
+    if (unlogged) {
+      await db`SELECT pgmq.create_unlogged(${queueName})`;
+    } else {
+      await db`SELECT pgmq.create(${queueName})`;
+    }
+    const rows: unknown = await db`
+      SELECT queue_name, created_at, is_partitioned, is_unlogged
+      FROM pgmq.list_queues() WHERE queue_name = ${queueName}
+    `;
+    const queues = readPgmqQueueInfo(rows);
+    const queue = queues[0];
+    if (queues.length !== 1 || !queue || queue.queue_name !== queueName
+      || queue.is_unlogged !== unlogged || queue.is_partitioned) {
+      throw new PgmqMutationError();
+    }
+  } catch {
+    throw new PgmqMutationError();
   }
 }
 
 async function dropQueue(projectRef: string, queueName: string): Promise<boolean> {
   assertPublicPgmqQueueName(queueName);
-  await ensurePgmq(projectRef);
-  const db = await projectDb(projectRef);
-  const [row] = await db`SELECT pgmq.drop_queue(${queueName}) AS dropped`;
-  return Boolean(row?.dropped);
+  const db = await prepareProjectDb(projectRef);
+  try {
+    const rows: unknown = await db`SELECT pgmq.drop_queue(${queueName}) AS dropped`;
+    return readPgmqDropReceipt(rows);
+  } catch {
+    throw new PgmqInventoryError(true);
+  }
 }
 
 async function listQueues(projectRef: string): Promise<PgmqQueueInfo[]> {
-  await ensurePgmq(projectRef);
-  const db = await projectDb(projectRef);
-  const rows = await db`SELECT * FROM pgmq.list_queues() ORDER BY queue_name`;
-  return (rows as Record<string, unknown>[])
-    .filter((row) => isPublicPgmqQueueName(String(row.queue_name)))
-    .map((row) => ({
-      queue_name: String(row.queue_name),
-      created_at: row.created_at as string | Date | null,
-      is_partitioned: Boolean(row.is_partitioned),
-      is_unlogged: Boolean(row.is_unlogged),
-    }));
+  const db = await prepareProjectDb(projectRef);
+  const rows: unknown = await db`
+    SELECT queue_name, created_at, is_partitioned, is_unlogged FROM pgmq.list_queues() ORDER BY queue_name
+  `;
+  return readPgmqQueueInfo(rows);
 }
 
-async function send(projectRef: string, queueName: string, message: Record<string, unknown>, sleepSeconds = 0): Promise<number> {
+async function send(projectRef: string, queueName: string, message: Record<string, unknown>, sleepSeconds = 0): Promise<string> {
   assertPublicPgmqQueueName(queueName);
-  await ensurePgmq(projectRef);
-  const db = await projectDb(projectRef);
-  const [row] = await db`
-    SELECT * FROM pgmq.send(${queueName}, ${JSON.stringify(message)}::jsonb, ${sleepSeconds}) AS msg_id
-  `;
-  return normalizeMsgId(row?.msg_id ?? row?.send);
+  const seconds = pgmqSeconds(sleepSeconds);
+  const payload = serializePgmqPayload(message);
+  const db = await prepareProjectDb(projectRef);
+  try {
+    const rows: unknown = await db`
+      SELECT sent.msg_id::text AS msg_id
+      FROM pgmq.send(${queueName}, ${payload}::text::jsonb, ${seconds}) AS sent(msg_id)
+    `;
+    return readPgmqIdReceipt(rows);
+  } catch {
+    throw new PgmqMutationError();
+  }
 }
 
 async function sendBatch(
@@ -176,107 +172,133 @@ async function sendBatch(
   queueName: string,
   messages: Record<string, unknown>[],
   sleepSeconds = 0,
-): Promise<number[]> {
+): Promise<string[]> {
   assertPublicPgmqQueueName(queueName);
-  await ensurePgmq(projectRef);
-  if (messages.length === 0) return [];
-  const db = await projectDb(projectRef);
-  const values = messages.map((message) => JSON.stringify(message));
-  const params: unknown[] = [queueName, ...values, sleepSeconds];
-  const messagePlaceholders = values.map((_, index) => `$${index + 2}::jsonb`).join(", ");
+  const seconds = pgmqSeconds(sleepSeconds);
+  const values = capturePgmqBatch(messages);
+  if (values.length === 0) return [];
+  const db = await prepareProjectDb(projectRef);
+  const params: unknown[] = [queueName, ...values, seconds];
+  const messagePlaceholders = values.map((_, index) => `$${index + 2}::text::jsonb`).join(", ");
   const delayIndex = values.length + 2;
-  const rows = await db.unsafe(
-    `SELECT * FROM pgmq.send_batch($1, ARRAY[${messagePlaceholders}]::jsonb[], $${delayIndex}) AS msg_id`,
-    params,
-  );
-  return (rows as Record<string, unknown>[]).map((row) => normalizeMsgId(row.msg_id ?? row.send_batch));
+  try {
+    const rows: unknown = await db.unsafe(
+      `SELECT sent.msg_id::text AS msg_id FROM pgmq.send_batch($1, ARRAY[${messagePlaceholders}]::jsonb[], $${delayIndex}) AS sent(msg_id)`,
+      params,
+    );
+    return readPgmqIdReceipts(rows, values.length);
+  } catch {
+    throw new PgmqMutationError();
+  }
 }
 
 async function read(projectRef: string, queueName: string, sleepSeconds: number, count: number): Promise<PgmqMessage[]> {
   assertPublicPgmqQueueName(queueName);
-  await ensurePgmq(projectRef);
-  const db = await projectDb(projectRef);
-  const rows = await db`SELECT * FROM pgmq.read(${queueName}, ${sleepSeconds}, ${count})`;
-  return (rows as Record<string, unknown>[]).map((row) => mapMessage(queueName, row, "leased"));
+  const seconds = pgmqSeconds(sleepSeconds);
+  const quantity = pgmqInteger(count, 1, 10000);
+  const db = await prepareProjectDb(projectRef);
+  try {
+    const rows: unknown = await db`
+      SELECT msg_id::text AS msg_id, read_ct, enqueued_at, vt, message
+      FROM pgmq.read(${queueName}, ${seconds}, ${quantity})
+    `;
+    return readPgmqMessageRows(rows, quantity).map(row => mapMessage(queueName, row, "leased"));
+  } catch {
+    throw new PgmqMutationError();
+  }
 }
 
 async function pop(projectRef: string, queueName: string): Promise<PgmqMessage | null> {
   assertPublicPgmqQueueName(queueName);
-  await ensurePgmq(projectRef);
-  const db = await projectDb(projectRef);
-  const rows = await db`SELECT * FROM pgmq.pop(${queueName})`;
-  const row = rows[0] as Record<string, unknown> | undefined;
-  return row ? mapMessage(queueName, row, "deleted") : null;
+  const db = await prepareProjectDb(projectRef);
+  try {
+    const rows: unknown = await db`
+      SELECT msg_id::text AS msg_id, read_ct, enqueued_at, vt, message FROM pgmq.pop(${queueName})
+    `;
+    const row = readPgmqMessageRows(rows, 1)[0];
+    return row ? mapMessage(queueName, row, "deleted") : null;
+  } catch {
+    throw new PgmqMutationError();
+  }
 }
 
-async function archive(projectRef: string, queueName: string, messageId: number): Promise<boolean> {
+async function archive(projectRef: string, queueName: string, messageId: string | number): Promise<boolean> {
   assertPublicPgmqQueueName(queueName);
-  await ensurePgmq(projectRef);
-  const db = await projectDb(projectRef);
-  const [row] = await db`SELECT pgmq.archive(${queueName}, ${messageId}) AS archived`;
-  return Boolean(row?.archived);
+  const id = parsePgmqMessageId(messageId);
+  const db = await prepareProjectDb(projectRef);
+  try {
+    const rows: unknown = await db`SELECT pgmq.archive(${queueName}, ${id}::bigint) AS archived`;
+    return readPgmqBooleanReceipt(rows, "archived");
+  } catch {
+    throw new PgmqMutationError();
+  }
 }
 
-async function deleteMessage(projectRef: string, queueName: string, messageId: number): Promise<boolean> {
+async function deleteMessage(projectRef: string, queueName: string, messageId: string | number): Promise<boolean> {
   assertPublicPgmqQueueName(queueName);
-  await ensurePgmq(projectRef);
-  const db = await projectDb(projectRef);
-  const [row] = await db`SELECT pgmq.delete(${queueName}, ${messageId}) AS deleted`;
-  return Boolean(row?.deleted);
+  const id = parsePgmqMessageId(messageId);
+  const db = await prepareProjectDb(projectRef);
+  try {
+    const rows: unknown = await db`SELECT pgmq.delete(${queueName}, ${id}::bigint) AS deleted`;
+    return readPgmqBooleanReceipt(rows, "deleted");
+  } catch {
+    throw new PgmqMutationError();
+  }
 }
 
 async function setVisibilityTimeout(
   projectRef: string,
   queueName: string,
-  messageId: number,
+  messageId: string | number,
   sleepSeconds: number,
 ): Promise<PgmqMessage | null> {
   assertPublicPgmqQueueName(queueName);
-  await ensurePgmq(projectRef);
-  const db = await projectDb(projectRef);
-  const rows = await db`SELECT * FROM pgmq.set_vt(${queueName}, ${messageId}, ${sleepSeconds})`;
-  const row = rows[0] as Record<string, unknown> | undefined;
-  return row ? mapMessage(queueName, row, "leased") : null;
+  const id = parsePgmqMessageId(messageId);
+  const seconds = pgmqSeconds(sleepSeconds);
+  const db = await prepareProjectDb(projectRef);
+  try {
+    const rows: unknown = await db`
+      SELECT msg_id::text AS msg_id, read_ct, enqueued_at, vt, message
+      FROM pgmq.set_vt(${queueName}, ${id}::bigint, ${seconds})
+    `;
+    const row = readPgmqMessageRows(rows, 1)[0];
+    if (row && row.msg_id !== id) throw new Error("Mismatched PGMQ visibility receipt");
+    return row ? mapMessage(queueName, row, "leased") : null;
+  } catch {
+    throw new PgmqMutationError();
+  }
 }
 
 async function purge(projectRef: string, queueName: string): Promise<number> {
   assertPublicPgmqQueueName(queueName);
-  await ensurePgmq(projectRef);
-  const db = await projectDb(projectRef);
-  const [row] = await db`SELECT pgmq.purge_queue(${queueName}) AS purged`;
-  return Number(row?.purged || 0);
+  const db = await prepareProjectDb(projectRef);
+  try {
+    const rows: unknown = await db`SELECT pgmq.purge_queue(${queueName})::text AS purged`;
+    return readPgmqPurgeReceipt(rows);
+  } catch {
+    throw new PgmqInventoryError(true);
+  }
 }
 
 async function metrics(projectRef: string, queueName: string): Promise<PgmqQueueMetrics | null> {
   assertPublicPgmqQueueName(queueName);
-  await ensurePgmq(projectRef);
-  const db = await projectDb(projectRef);
-  const [row] = await db`SELECT * FROM pgmq.metrics(${queueName})`;
-  if (!row) return null;
-  return {
-    queue_name: String(row.queue_name),
-    queue_length: Number(row.queue_length || 0),
-    newest_msg_age_sec: row.newest_msg_age_sec == null ? null : Number(row.newest_msg_age_sec),
-    oldest_msg_age_sec: row.oldest_msg_age_sec == null ? null : Number(row.oldest_msg_age_sec),
-    total_messages: Number(row.total_messages || 0),
-    scrape_time: row.scrape_time as string | Date,
-  };
+  const db = await prepareProjectDb(projectRef);
+  const rows: unknown = await db`
+    SELECT queue_name, queue_length::text AS queue_length, total_messages::text AS total_messages,
+      newest_msg_age_sec::text AS newest_msg_age_sec, oldest_msg_age_sec::text AS oldest_msg_age_sec, scrape_time
+    FROM pgmq.metrics(${queueName})
+  `;
+  return readPgmqMetrics(rows, queueName);
 }
 
 async function metricsAll(projectRef: string): Promise<PgmqQueueMetrics[]> {
-  await ensurePgmq(projectRef);
-  const db = await projectDb(projectRef);
-  const rows = await db`SELECT * FROM pgmq.metrics_all() ORDER BY queue_name`;
-  return (rows as Record<string, unknown>[])
-    .filter((row) => isPublicPgmqQueueName(String(row.queue_name)))
-    .map((row) => ({
-      queue_name: String(row.queue_name),
-      queue_length: Number(row.queue_length || 0),
-      newest_msg_age_sec: row.newest_msg_age_sec == null ? null : Number(row.newest_msg_age_sec),
-      oldest_msg_age_sec: row.oldest_msg_age_sec == null ? null : Number(row.oldest_msg_age_sec),
-      total_messages: Number(row.total_messages || 0),
-      scrape_time: row.scrape_time as string | Date,
-    }));
+  const db = await prepareProjectDb(projectRef);
+  const rows: unknown = await db`
+    SELECT queue_name, queue_length::text AS queue_length, total_messages::text AS total_messages,
+      newest_msg_age_sec::text AS newest_msg_age_sec, oldest_msg_age_sec::text AS oldest_msg_age_sec, scrape_time
+    FROM pgmq.metrics_all() ORDER BY queue_name
+  `;
+  return readPgmqMetricsAll(rows);
 }
 
 export const pgmqService = {
@@ -285,9 +307,15 @@ export const pgmqService = {
   dropQueue: (projectRef: string, queueName: string) =>
     dropQueue(projectRef, queueName),
   listQueues: (projectRef: string) =>
-    withRetry("PgmqService.listQueues", () => listQueues(projectRef)),
-  listMessages: (projectRef: string, queueName: string, options?: { archived?: boolean; limit?: number }) =>
-    withRetry("PgmqService.listMessages", () => listMessages(projectRef, queueName, options)),
+    withRetry("PgmqService.listQueues", () => listQueues(projectRef), {
+      shouldRetry: error => !(error instanceof PgmqInventoryError || error instanceof PgmqProjectContextError),
+    }),
+  listMessages: async (projectRef: string, queueName: string, options?: { archived?: boolean; limit?: number }) => {
+    const captured = pgmqListOptions(options);
+    return withRetry("PgmqService.listMessages", () => listMessages(projectRef, queueName, captured), {
+      shouldRetry: error => !(error instanceof PgmqInventoryError || error instanceof PgmqProjectContextError),
+    });
+  },
   send: (projectRef: string, queueName: string, message: Record<string, unknown>, sleepSeconds?: number) =>
     send(projectRef, queueName, message, sleepSeconds),
   sendBatch: (projectRef: string, queueName: string, messages: Record<string, unknown>[], sleepSeconds?: number) =>
@@ -296,16 +324,20 @@ export const pgmqService = {
     read(projectRef, queueName, sleepSeconds, count),
   pop: (projectRef: string, queueName: string) =>
     pop(projectRef, queueName),
-  archive: (projectRef: string, queueName: string, messageId: number) =>
+  archive: (projectRef: string, queueName: string, messageId: string | number) =>
     archive(projectRef, queueName, messageId),
-  deleteMessage: (projectRef: string, queueName: string, messageId: number) =>
+  deleteMessage: (projectRef: string, queueName: string, messageId: string | number) =>
     deleteMessage(projectRef, queueName, messageId),
-  setVisibilityTimeout: (projectRef: string, queueName: string, messageId: number, sleepSeconds: number) =>
+  setVisibilityTimeout: (projectRef: string, queueName: string, messageId: string | number, sleepSeconds: number) =>
     setVisibilityTimeout(projectRef, queueName, messageId, sleepSeconds),
   purge: (projectRef: string, queueName: string) =>
     purge(projectRef, queueName),
   metrics: (projectRef: string, queueName: string) =>
-    withRetry("PgmqService.metrics", () => metrics(projectRef, queueName)),
+    withRetry("PgmqService.metrics", () => metrics(projectRef, queueName), {
+      shouldRetry: error => !(error instanceof PgmqInventoryError || error instanceof PgmqProjectContextError),
+    }),
   metricsAll: (projectRef: string) =>
-    withRetry("PgmqService.metricsAll", () => metricsAll(projectRef)),
+    withRetry("PgmqService.metricsAll", () => metricsAll(projectRef), {
+      shouldRetry: error => !(error instanceof PgmqInventoryError || error instanceof PgmqProjectContextError),
+    }),
 };

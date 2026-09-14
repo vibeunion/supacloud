@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { taskAttemptTrace, parseTaskTraceparent } from "../../src/utils/task-trace";
 import { beginRequestObservability } from "../../src/utils/observability";
 import { recordBackgroundObservation, renderBackgroundMetrics, resetBackgroundMetricsForTests } from "../../src/utils/background-observability";
+import { parseBackgroundInvocation } from "../../src/utils/background-invocation";
 
 afterEach(resetBackgroundMetricsForTests);
 test("persisted queue trace survives retry with separate attempt spans", () => {
@@ -9,17 +10,37 @@ test("persisted queue trace survives retry with separate attempt spans", () => {
     headers: { traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01" },
   });
   const trace = beginRequestObservability(request);
-  const task = JSON.parse(JSON.stringify({
-    id: "task_1", project_ref: "tenant_a", trace_id: trace.traceId,
-    payload: { trace: { project_ref: "tenant_a", traceparent: trace.traceparent, request_id: trace.requestId } },
+  const serialized: unknown = JSON.parse(JSON.stringify({
+    trace: { project_ref: "tenant_a", traceparent: trace.traceparent, request_id: trace.requestId },
   }));
-  const first = parseTaskTraceparent(taskAttemptTrace(task).get("traceparent"))!;
-  const retry = parseTaskTraceparent(taskAttemptTrace(task).get("traceparent"))!;
+  const task = {
+    id: "task_1", project_ref: "tenant_a", trace_id: trace.traceId,
+    payload: parseBackgroundInvocation(serialized),
+  };
+  const first = parseTaskTraceparent(taskAttemptTrace(task).get("traceparent"));
+  const retry = parseTaskTraceparent(taskAttemptTrace(task).get("traceparent"));
+  if (!first || !retry) throw new Error("Expected valid attempt trace headers");
   expect(first.traceId).toBe(trace.traceId);
   expect(retry.traceId).toBe(first.traceId);
   expect(retry.spanId).not.toBe(first.spanId);
   expect(() => taskAttemptTrace({ ...task, project_ref: "tenant_b" })).toThrow("inconsistent");
   expect(() => taskAttemptTrace({ ...task, trace_id: "f".repeat(32) })).toThrow("inconsistent");
+});
+
+test("malformed trace identities are rejected rather than replaced with a legacy trace", () => {
+  for (const trace of [null, [], "invalid", {}, {
+    project_ref: "tenant_a",
+    traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01",
+    request_id: "invalid\nheader",
+  }]) {
+    expect(() => taskAttemptTrace({
+      id: "task_1", project_ref: "tenant_a",
+      trace_id: "0123456789abcdef0123456789abcdef", payload: { trace },
+    })).toThrow("inconsistent");
+  }
+  for (const value of [null, {}, "", "00-" + "0".repeat(32) + "-0123456789abcdef-01"]) {
+    expect(parseTaskTraceparent(value)).toBeNull();
+  }
 });
 
 test("legacy traces are stable and tenant scoped, not copied from client headers", () => {

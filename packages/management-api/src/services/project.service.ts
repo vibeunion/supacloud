@@ -1,4 +1,12 @@
 import { projectRepository } from "../repositories/project.repository";
+import { pgmqSettingsRepository } from "../repositories/pgmq-settings.repository";
+import { assertPublicPgmqQueueName } from "../utils/pgmq-inventory";
+import { pgmqProjectRef } from "../utils/pgmq-project";
+import {
+  pgmqSettingsPatch, pgmqSettingsProject, readPgmqSettings, pgmqSettingsMatch, pgmqSettingsWithUpdate,
+  PgmqSettingsError, PgmqSettingsConflictError, type QueueSettings,
+} from "../utils/pgmq-settings";
+export type { QueueSettings } from "../utils/pgmq-settings";
 import { jwtService } from "./jwt.service";
 import { databaseService } from "./database.service";
 import { gatewayService } from "./gateway.service";
@@ -147,13 +155,6 @@ export interface BackgroundTaskSettings {
   timeout_sec_max: number;
 }
 
-export interface QueueSettings {
-  max_in_flight: number;
-  default_visibility_timeout_sec: number;
-  max_attempts: number;
-  rate_limit_per_minute: number;
-}
-
 export interface LogEntryResponse {
   id: string;
   timestamp: string;
@@ -164,13 +165,6 @@ export interface LogEntryResponse {
 
 export class ProjectService {
   private readonly defaultBackgroundTaskSettings: BackgroundTaskSettings = { ...DEFAULT_BACKGROUND_TASK_SETTINGS };
-
-  private readonly defaultQueueSettings: QueueSettings = {
-    max_in_flight: 10,
-    default_visibility_timeout_sec: 330,
-    max_attempts: 3,
-    rate_limit_per_minute: 600,
-  };
 
   private async reconcileGatewayRoutes(
     ref: string,
@@ -725,33 +719,16 @@ export class ProjectService {
   }
 
   async getQueueSettings(ref: string, queueName: string): Promise<QueueSettings | null> {
-    const settings = await this.getProjectSettings(ref);
-    if (!settings) return null;
-
-    const queueSettings = settings.queue_settings as Record<string, unknown> | undefined;
-    const raw = (queueSettings?.[queueName] || {}) as Record<string, unknown>;
-    const pickNumber = (value: unknown, fallback: number, min: number, max: number) => {
-      const parsed = Number(value);
-      if (!Number.isFinite(parsed)) return fallback;
-      return Math.min(max, Math.max(min, Math.floor(parsed)));
-    };
-
-    return {
-      max_in_flight: pickNumber(raw.max_in_flight, this.defaultQueueSettings.max_in_flight, 1, 100),
-      default_visibility_timeout_sec: pickNumber(
-        raw.default_visibility_timeout_sec,
-        this.defaultQueueSettings.default_visibility_timeout_sec,
-        1,
-        1800,
-      ),
-      max_attempts: pickNumber(raw.max_attempts, this.defaultQueueSettings.max_attempts, 1, 10),
-      rate_limit_per_minute: pickNumber(
-        raw.rate_limit_per_minute,
-        this.defaultQueueSettings.rate_limit_per_minute,
-        1,
-        60_000,
-      ),
-    };
+    pgmqProjectRef(ref);
+    assertPublicPgmqQueueName(queueName);
+    try {
+      const project = await projectRepository.findByRef(ref);
+      if (project === null) return null;
+      const { queues } = pgmqSettingsProject(project, ref);
+      return readPgmqSettings(queues, queueName);
+    } catch {
+      throw new PgmqSettingsError();
+    }
   }
 
   async updateQueueSettings(
@@ -759,22 +736,32 @@ export class ProjectService {
     queueName: string,
     settings: Partial<QueueSettings>,
   ): Promise<QueueSettings | null> {
-    const currentProjectSettings = await this.getProjectSettings(ref);
-    if (!currentProjectSettings) return null;
-
-    const current = await this.getQueueSettings(ref, queueName);
-    if (!current) return null;
-
-    const queueSettings = {
-      ...((currentProjectSettings.queue_settings || {}) as Record<string, unknown>),
-      [queueName]: {
-        ...current,
-        ...settings,
-      },
-    };
-
-    await this.updateProjectSettings(ref, { queue_settings: queueSettings });
-    return this.getQueueSettings(ref, queueName);
+    pgmqProjectRef(ref);
+    assertPublicPgmqQueueName(queueName);
+    const patch = pgmqSettingsPatch(settings);
+    let captured: ReturnType<typeof pgmqSettingsProject>;
+    let expected: QueueSettings;
+    try {
+      const project = await projectRepository.findByRef(ref);
+      if (project === null) return null;
+      captured = pgmqSettingsProject(project, ref);
+      expected = Object.freeze({ ...readPgmqSettings(captured.queues, queueName), ...patch });
+    } catch {
+      throw new PgmqSettingsError();
+    }
+    const nextQueues = pgmqSettingsWithUpdate(captured.queues, queueName, expected);
+    try {
+      const updated = await pgmqSettingsRepository.compareAndUpdate(ref, captured.id, captured.config, nextQueues);
+      if (updated === null) throw new PgmqSettingsConflictError();
+      const { id, queues } = pgmqSettingsProject(updated, ref);
+      if (id !== captured.id) throw new PgmqSettingsError();
+      const receipt = readPgmqSettings(queues, queueName, true);
+      if (!pgmqSettingsMatch(receipt, expected)) throw new PgmqSettingsError();
+      return receipt;
+    } catch (error) {
+      if (error instanceof PgmqSettingsConflictError) throw error;
+      throw new PgmqSettingsError(true);
+    }
   }
 
   // Get project API keys
@@ -1012,7 +999,7 @@ export class ProjectService {
       updated_at: project.updated_at,
       // API Keys for Studio compatibility
       anon_key: project.anon_key,
-      publishable_key: project.publishable_key || undefined,
+      ...(project.publishable_key ? { publishable_key: project.publishable_key } : {}),
     };
   }
 

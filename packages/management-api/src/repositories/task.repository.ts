@@ -1,12 +1,18 @@
-import type { SQL } from "bun";
-import { sql, type ProjectTask, type ProjectTaskAttempt, type TaskStatus, type TaskType, TaskStatus as TaskStatuses } from "../db";
+import { sql, type ProjectTask, type ProjectTaskAttempt, type TaskStatus, type TaskType, TaskStatus as TaskStatuses, TaskType as TaskTypes } from "../db";
 import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../config/background-task-settings";
-import { withRetry } from "../utils/retry";
+import { withRetry as retryOperation } from "../utils/retry";
+import { isRecord } from "../utils/project-config";
+import {
+  InvalidTaskRecordError, parseTaskRecord as mapTask, parseTaskAttemptRecord as mapAttempt, parseTaskJsonObject,
+  parseTaskAttemptLogs,
+} from "../utils/task-record";
 import {
   GOTRUE_USER_ID_POSTGRES_PATTERN,
   normalizedGoTrueUserId,
 } from "../utils/project-user-lifecycle";
 import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
+import { readTaskStatistics } from "../utils/task-statistics";
+import { captureTaskListFilters, taskListText } from "../utils/task-list-input";
 
 export interface CreateTaskInput {
   ref: string;
@@ -55,10 +61,17 @@ export interface LeasedTask extends ProjectTask {
 
 const DEFAULT_LEASE_SECONDS = 330;
 
+function withRetry<T>(operation: string, run: () => Promise<T>): Promise<T> {
+  return retryOperation(operation, run, {
+    shouldRetry: (error) => !(error instanceof InvalidTaskRecordError),
+  });
+}
+
 function taskInvokerUserId(payload: Record<string, unknown>): string | null {
   const auth = payload.auth;
-  if (!auth || typeof auth !== "object" || Array.isArray(auth)) return null;
-  const candidate = (auth as Record<string, unknown>).invoker_user_id;
+  if (auth === undefined) return null;
+  if (!isRecord(auth)) throw new Error("Invalid task auth context");
+  const candidate = auth.invoker_user_id;
   if (candidate === undefined || candidate === null) return null;
   if (typeof candidate !== "string") throw new Error("Task invoker user id must be a GoTrue UUID");
   const normalized = normalizedGoTrueUserId(candidate);
@@ -66,72 +79,12 @@ function taskInvokerUserId(payload: Record<string, unknown>): string | null {
   return normalized;
 }
 
-function mapTask(row: unknown): ProjectTask {
-  const task = row as ProjectTask & {
-    payload?: Record<string, unknown> | string | null;
-    result?: Record<string, unknown> | string | null;
-  };
-
-  return {
-    ...task,
-    payload: parseJsonObject(task.payload),
-    result: parseOptionalJsonObject(task.result),
-  } as ProjectTask;
-}
-
-function mapAttempt(row: unknown): ProjectTaskAttempt {
-  const attempt = row as ProjectTaskAttempt & {
-    logs?: ProjectTaskAttempt["logs"] | string | null;
-  };
-
-  return {
-    ...attempt,
-    logs: parseAttemptLogs(attempt.logs),
-  } as ProjectTaskAttempt;
-}
-
-function parseJsonObject(value: Record<string, unknown> | string | null | undefined): Record<string, unknown> {
-  if (!value) return {};
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? (parsed as Record<string, unknown>)
-        : {};
-    } catch {
-      return {};
-    }
-  }
-  return value;
-}
-
-function parseOptionalJsonObject(
-  value: Record<string, unknown> | string | null | undefined,
-): Record<string, unknown> | null {
-  if (value == null) return null;
-  const parsed = parseJsonObject(value);
-  return Object.keys(parsed).length > 0 ? parsed : null;
-}
-
-function parseAttemptLogs(
-  value: ProjectTaskAttempt["logs"] | string | null | undefined,
-): ProjectTaskAttempt["logs"] {
-  if (!value) return [];
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? (parsed as ProjectTaskAttempt["logs"]) : [];
-    } catch {
-      return [];
-    }
-  }
-  return Array.isArray(value) ? value : [];
-}
-
 export function buildTaskListQuery(projectRef: string, filters: TaskListFilters = {}): {
   sqlText: string;
   values: unknown[];
 } {
+  projectRef = taskListText(projectRef);
+  filters = captureTaskListFilters(filters);
   const conditions = [`project_ref = $1`];
   const values: unknown[] = [projectRef];
   const selectClause = filters.summary
@@ -155,6 +108,9 @@ export function buildTaskListQuery(projectRef: string, filters: TaskListFilters 
       trace_id,
       cancel_requested_at,
       cancellation_reason,
+      correlation_id,
+      business_task_id,
+      metadata,
       invoker_user_id,
       auth_authority_ref,
       function_slug,
@@ -188,7 +144,7 @@ export function buildTaskListQuery(projectRef: string, filters: TaskListFilters 
     conditions.push(`function_version = $${values.length}`);
   }
 
-  values.push(filters.limit || 50);
+  values.push(filters.limit ?? 50);
 
   return {
     sqlText: `
@@ -203,11 +159,15 @@ export function buildTaskListQuery(projectRef: string, filters: TaskListFilters 
 }
 
 export async function createTask(inputOrRef: CreateTaskInput | string, type?: TaskType, payload: Record<string, unknown> = {}): Promise<ProjectTask> {
-  const input: CreateTaskInput =
-    typeof inputOrRef === "string"
-      ? { ref: inputOrRef, type: type!, payload }
-      : inputOrRef;
-  const taskPayload = input.payload || {};
+  let input: CreateTaskInput;
+  if (typeof inputOrRef === "string") {
+    if (!type) throw new Error("Task type is required");
+    input = { ref: inputOrRef, type, payload };
+  } else {
+    input = { ...inputOrRef };
+  }
+  const taskPayload = parseTaskJsonObject(input.payload ?? {});
+  const metadata = parseTaskJsonObject(input.metadata ?? {});
   const invokerUserId = taskInvokerUserId(taskPayload);
   const authAuthorityRef = getAuthRuntimeDescriptor(input.ref).authority_project_ref;
 
@@ -237,7 +197,7 @@ export async function createTask(inputOrRef: CreateTaskInput | string, type?: Ta
         ${input.functionSlug || null},
         ${input.functionVersion || null},
         ${input.status || TaskStatuses.PENDING},
-        ${JSON.stringify(taskPayload)},
+        ${taskPayload},
         ${input.maxAttempts || 3},
         ${input.nextRunAt || new Date()},
         ${input.timeoutSec ?? null},
@@ -247,7 +207,7 @@ export async function createTask(inputOrRef: CreateTaskInput | string, type?: Ta
         ${input.businessTaskId || null},
         ${invokerUserId}::uuid,
         ${authAuthorityRef},
-        ${JSON.stringify(input.metadata || {})}
+        ${metadata}
       )
       ON CONFLICT (project_ref, idempotency_key)
       WHERE idempotency_key IS NOT NULL
@@ -311,7 +271,7 @@ export async function claimQueueMessage(options: ClaimQueueMessageOptions): Prom
       RETURNING pt.*
     `;
 
-    return task ? (mapTask(task) as LeasedTask) : null;
+    return task ? mapTask(task) : null;
   });
 }
 
@@ -387,9 +347,9 @@ export async function claimNextTask(options: TaskLeaseOptions): Promise<LeasedTa
     `;
 
     const rows = await sql.unsafe(sqlText, params);
-    const [task] = rows as unknown[];
+    const [task] = rows;
 
-    return task ? (mapTask(task) as LeasedTask) : null;
+    return task ? mapTask(task) : null;
   });
 }
 
@@ -406,12 +366,13 @@ export async function markTaskRunning(id: string): Promise<ProjectTask | null> {
 }
 
 export async function markTaskSucceeded(id: string, result?: Record<string, unknown> | null): Promise<ProjectTask | null> {
+  const snapshot = result == null ? null : parseTaskJsonObject(result);
   return withRetry("TaskRepository.markTaskSucceeded", async () => {
     const [task] = await sql`
       UPDATE project_tasks
       SET
         status = ${TaskStatuses.SUCCEEDED},
-        result = ${result ? JSON.stringify(result) : null},
+        result = ${snapshot},
         error = NULL,
         lease_until = NULL,
         cancel_requested_at = NULL,
@@ -426,12 +387,13 @@ export async function markTaskSucceeded(id: string, result?: Record<string, unkn
 }
 
 export async function acknowledgeQueueMessage(id: string, result?: Record<string, unknown> | null): Promise<ProjectTask | null> {
+  const snapshot = result == null ? null : parseTaskJsonObject(result);
   return withRetry("TaskRepository.acknowledgeQueueMessage", async () => {
     const [task] = await sql`
       UPDATE project_tasks
       SET
         status = ${TaskStatuses.SUCCEEDED},
-        result = ${result ? JSON.stringify(result) : null},
+        result = ${snapshot},
         error = NULL,
         lease_until = NULL,
         cancel_requested_at = NULL,
@@ -563,23 +525,14 @@ export async function getTaskByIdAndType(id: string, projectRef: string, taskTyp
 }
 
 export async function listTasksByProject(projectRef: string, limit = 50): Promise<ProjectTask[]> {
-  return withRetry("TaskRepository.listTasksByProject", async () => {
-    const rows = await sql`
-      SELECT *
-      FROM project_tasks
-      WHERE project_ref = ${projectRef}
-      ORDER BY created_at DESC
-      LIMIT ${limit}
-    `;
-    return rows.map(mapTask);
-  });
+  return listTasksByProjectFiltered(projectRef, { limit });
 }
 
 export async function listTasksByProjectFiltered(projectRef: string, filters: TaskListFilters = {}): Promise<ProjectTask[]> {
+  const { sqlText, values } = buildTaskListQuery(projectRef, filters);
   return withRetry("TaskRepository.listTasksByProjectFiltered", async () => {
-    const { sqlText, values } = buildTaskListQuery(projectRef, filters);
     const rows = await sql.unsafe(sqlText, values);
-    return (rows as unknown[]).map(mapTask);
+    return rows.map(mapTask);
   });
 }
 
@@ -590,6 +543,7 @@ export async function recoverExpiredLeases(projectRef?: string, taskTypes?: stri
       TaskStatuses.RUNNING,
       TaskStatuses.RETRY_SCHEDULED,
       TaskStatuses.DEAD_LETTERED,
+      TaskTypes.EDGE_FUNCTION,
     ];
 
     const conditions = [
@@ -614,16 +568,23 @@ export async function recoverExpiredLeases(projectRef?: string, taskTypes?: stri
       UPDATE project_tasks
       SET
         status = CASE
+          WHEN task_type = $5 AND status = $2 THEN $4
           WHEN COALESCE(attempt, 0) < COALESCE(max_attempts, 3) THEN $3
           ELSE $4
         END,
-        error = COALESCE(NULLIF(error, ''), 'Lease expired before acknowledgement'),
+        error = CASE
+          WHEN task_type = $5 AND status = $2
+            THEN 'Background invocation outcome is unknown after lease expiry; automatic retry is disabled'
+          ELSE COALESCE(NULLIF(error, ''), 'Lease expired before acknowledgement')
+        END,
         lease_until = NULL,
         next_run_at = CASE
+          WHEN task_type = $5 AND status = $2 THEN next_run_at
           WHEN COALESCE(attempt, 0) < COALESCE(max_attempts, 3) THEN NOW()
           ELSE next_run_at
         END,
         completed_at = CASE
+          WHEN task_type = $5 AND status = $2 THEN NOW()
           WHEN COALESCE(attempt, 0) < COALESCE(max_attempts, 3) THEN completed_at
           ELSE NOW()
         END,
@@ -636,9 +597,12 @@ export async function recoverExpiredLeases(projectRef?: string, taskTypes?: stri
   });
 }
 
-export async function retryTask(id: string): Promise<ProjectTask | null> {
-  return withRetry("TaskRepository.retryTask", async () => {
-    const [task] = await sql`
+export async function retryTask(id: string, projectRef: string): Promise<ProjectTask | null> {
+  if (typeof id !== "string" || !id.trim() || typeof projectRef !== "string" || !projectRef.trim()) {
+    throw new InvalidTaskRecordError();
+  }
+  return sql.begin(async (transaction) => {
+    const rows: unknown[] = await transaction`
       UPDATE project_tasks
       SET
         status = ${TaskStatuses.PENDING},
@@ -650,10 +614,23 @@ export async function retryTask(id: string): Promise<ProjectTask | null> {
         cancellation_reason = NULL,
         updated_at = NOW()
       WHERE id = ${id}
+        AND project_ref = ${projectRef}
         AND status IN (${TaskStatuses.FAILED}, ${TaskStatuses.DEAD_LETTERED}, ${TaskStatuses.CANCELLED})
-      RETURNING *
+      RETURNING *, id = ${id}::uuid AS retry_identity_matches
     `;
-    return task ? mapTask(task) : null;
+    if (rows.length === 0) return null;
+    if (rows.length !== 1) throw new InvalidTaskRecordError();
+    const row = rows[0];
+    if (!isRecord(row) || row.retry_identity_matches !== true) throw new InvalidTaskRecordError();
+    // Compare UUID identity in PostgreSQL, which canonicalizes valid input forms.
+    const { retry_identity_matches: _, ...record } = row;
+    const task = mapTask(record);
+    if (task.project_ref !== projectRef || task.status !== TaskStatuses.PENDING
+      || task.error !== null || task.lease_until !== null || task.next_run_at === null
+      || task.completed_at !== null || task.cancel_requested_at !== null || task.cancellation_reason !== null) {
+      throw new InvalidTaskRecordError();
+    }
+    return task;
   });
 }
 
@@ -727,7 +704,7 @@ export async function countActiveTasksForProject(projectRef: string, taskTypes?:
 export async function countActiveTasksByInvoker(
   authAuthorityRef: string,
   userId: string,
-  database: SQL = sql,
+  database: { unsafe(query: string, params: unknown[]): PromiseLike<unknown> } = sql,
 ): Promise<{
   count: number;
   tasks: Array<{ id: string; task_type: string; status: string }>;
@@ -779,17 +756,25 @@ export async function countActiveTasksByInvoker(
       ],
     );
 
-    if (rows.some((row: { invoker_consistent?: boolean }) => row.invoker_consistent !== true)) {
+    if (!Array.isArray(rows)) throw new InvalidTaskRecordError();
+    if (rows.some((row: unknown) => !isRecord(row) || row.invoker_consistent !== true)) {
       throw new Error("TASK_INVOKER_MISMATCH: project_tasks invoker columns disagree");
     }
-
+    const records = rows.map((row: unknown) => {
+      if (!isRecord(row) || typeof row.count !== "number" || !Number.isSafeInteger(row.count)
+        || row.count < rows.length || typeof row.id !== "string" || !row.id
+        || typeof row.task_type !== "string" || !row.task_type
+        || typeof row.status !== "string"
+        || !["pending", "leased", "running", "retry_scheduled"].includes(row.status)) {
+        throw new InvalidTaskRecordError();
+      }
+      return { id: row.id, task_type: row.task_type, status: row.status, count: row.count };
+    });
+    const count = records[0]?.count ?? 0;
+    if (records.some((row) => row.count !== count)) throw new InvalidTaskRecordError();
     return {
-      count: Number(rows[0]?.count || 0),
-      tasks: rows.map((row: { id: string; task_type: string; status: string }) => ({
-        id: String(row.id),
-        task_type: String(row.task_type),
-        status: String(row.status),
-      })),
+      count,
+      tasks: records.map(({ id, task_type, status }) => ({ id, task_type, status })),
     };
   });
 }
@@ -935,6 +920,7 @@ export async function completeTaskAttempt(
     }> | null;
   },
 ): Promise<ProjectTaskAttempt | null> {
+  const logs = parseTaskAttemptLogs(input.logs ?? []);
   return withRetry("TaskRepository.completeTaskAttempt", async () => {
     const [attempt] = await sql`
       UPDATE project_task_attempts
@@ -943,7 +929,7 @@ export async function completeTaskAttempt(
         error = ${input.error || null},
         response_status = ${input.responseStatus ?? null},
         duration_ms = ${input.durationMs ?? null},
-        logs = ${JSON.stringify(input.logs || [])}::jsonb,
+        logs = ${logs}::jsonb,
         completed_at = NOW(),
         updated_at = NOW()
       WHERE task_id = ${taskId} AND attempt_no = ${attemptNo}
@@ -1017,21 +1003,12 @@ export async function getTaskStats(projectRef: string): Promise<{
       LIMIT 5
     `;
 
-    return {
-      running: Number(summary?.running || 0),
-      retryScheduled: Number(summary?.retry_scheduled || 0),
-      deadLettered: Number(summary?.dead_lettered || 0),
-      failedLast24h: Number(summary?.failed_last_24h || 0),
-      cancelledLast24h: Number(summary?.cancelled_last_24h || 0),
-      topFailures: topFailureRows.map((row: { message: string; count: number | string }) => ({
-        message: String(row.message),
-        count: Number(row.count || 0),
-      })),
-      failedTrend: trendRows.map((row: { bucket: string; failures: number | string }) => ({
-        bucket: String(row.bucket),
-        failures: Number(row.failures || 0),
-      })),
-    };
+    return readTaskStatistics({
+      running: summary?.running, retryScheduled: summary?.retry_scheduled,
+      deadLettered: summary?.dead_lettered, failedLast24h: summary?.failed_last_24h,
+      cancelledLast24h: summary?.cancelled_last_24h,
+      topFailures: topFailureRows, failedTrend: trendRows,
+    });
   });
 }
 

@@ -2,22 +2,29 @@ import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:t
 import { Elysia } from "elysia";
 import { TaskStatus } from "../../src/db";
 import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../../src/config/background-task-settings";
+import { taskAttemptFixture, taskFixture } from "../helpers/task-fixtures";
+import type { PgmqMessage } from "../../src/services/pgmq.service";
 
-const listTasksByProjectFiltered = mock(() => Promise.resolve([]));
-const getTaskById = mock(() => Promise.resolve(null));
-const getTaskByIdAndType = mock(() => Promise.resolve(null));
-const listTaskAttempts = mock(() => Promise.resolve([]));
-const createTask = mock(() => Promise.resolve(null));
-const claimQueueMessage = mock(() => Promise.resolve(null));
-const acknowledgeQueueMessage = mock(() => Promise.resolve(null));
-const releaseTask = mock(() => Promise.resolve(null));
-const markTaskFailed = mock(() => Promise.resolve(null));
-const cancelTask = mock(() => Promise.resolve(null));
-const retryTask = mock(() => Promise.resolve(null));
-const retryQueueMessage = mock(() => Promise.resolve(null));
-const countQueueMessagesCreatedSince = mock(() => Promise.resolve(0));
-const requestTaskCancellation = mock(() => Promise.resolve(null));
-const getTaskStats = mock(() => Promise.resolve({
+const { taskRepository } = await import("../../src/repositories/task.repository");
+const services = await import("../../src/services");
+const { pgmqService } = await import("../../src/services/pgmq.service");
+const authModule = await import("../../src/middleware/auth");
+
+const listTasksByProjectFiltered = spyOn(taskRepository, "listTasksByProjectFiltered").mockResolvedValue([]);
+const getTaskById = spyOn(taskRepository, "getTaskById").mockResolvedValue(null);
+const getTaskByIdAndType = spyOn(taskRepository, "getTaskByIdAndType").mockResolvedValue(null);
+const listTaskAttempts = spyOn(taskRepository, "listTaskAttempts").mockResolvedValue([]);
+const createTask = spyOn(taskRepository, "createTask").mockImplementation(async () => taskFixture());
+const claimQueueMessage = spyOn(taskRepository, "claimQueueMessage").mockResolvedValue(null);
+const acknowledgeQueueMessage = spyOn(taskRepository, "acknowledgeQueueMessage").mockResolvedValue(null);
+const releaseTask = spyOn(taskRepository, "releaseTask").mockResolvedValue(null);
+const markTaskFailed = spyOn(taskRepository, "markTaskFailed").mockResolvedValue(null);
+const cancelTask = spyOn(taskRepository, "cancelTask").mockResolvedValue(null);
+const retryTask = spyOn(taskRepository, "retryTask").mockResolvedValue(null);
+const retryQueueMessage = spyOn(taskRepository, "retryQueueMessage").mockResolvedValue(null);
+const countQueueMessagesCreatedSince = spyOn(taskRepository, "countQueueMessagesCreatedSince").mockResolvedValue(0);
+const requestTaskCancellation = spyOn(taskRepository, "requestTaskCancellation").mockResolvedValue(null);
+const getTaskStats = spyOn(taskRepository, "getTaskStats").mockResolvedValue({
   running: 0,
   retryScheduled: 0,
   deadLettered: 0,
@@ -25,8 +32,8 @@ const getTaskStats = mock(() => Promise.resolve({
   cancelledLast24h: 0,
   topFailures: [],
   failedTrend: [],
-}));
-const getQueueStats = mock(() => Promise.resolve({
+});
+const getQueueStats = spyOn(taskRepository, "getQueueStats").mockResolvedValue({
   pending: 0,
   leased: 0,
   running: 0,
@@ -36,116 +43,62 @@ const getQueueStats = mock(() => Promise.resolve({
   deadLettered: 0,
   oldestPendingAgeSec: null,
   inFlight: 0,
-}));
-const pgmqCreateQueue = mock(() => Promise.resolve(undefined));
-const pgmqListQueues = mock(() => Promise.resolve([]));
-const pgmqListMessages = mock(() => Promise.resolve([]));
-const pgmqSend = mock(() => Promise.resolve(1));
-const pgmqSendBatch = mock(() => Promise.resolve([1, 2]));
-const pgmqRead = mock(() => Promise.resolve([]));
-const pgmqPop = mock(() => Promise.resolve(null));
-const pgmqArchive = mock(() => Promise.resolve(true));
-const pgmqDeleteMessage = mock(() => Promise.resolve(true));
-const pgmqSetVisibilityTimeout = mock(() => Promise.resolve(null));
-const pgmqMetrics = mock(() => Promise.resolve(null));
+});
+const pgmqCreateQueue = spyOn(pgmqService, "createQueue").mockResolvedValue(undefined);
+const pgmqListQueues = spyOn(pgmqService, "listQueues").mockResolvedValue([]);
+const pgmqListMessages = spyOn(pgmqService, "listMessages").mockResolvedValue([]);
+const pgmqSend = spyOn(pgmqService, "send").mockResolvedValue("1");
+const pgmqSendBatch = spyOn(pgmqService, "sendBatch").mockResolvedValue(["1", "2"]);
+const pgmqRead = spyOn(pgmqService, "read").mockResolvedValue([]);
+const pgmqPop = spyOn(pgmqService, "pop").mockResolvedValue(null);
+const pgmqArchive = spyOn(pgmqService, "archive").mockResolvedValue(true);
+const pgmqDeleteMessage = spyOn(pgmqService, "deleteMessage").mockResolvedValue(true);
+const pgmqSetVisibilityTimeout = spyOn(pgmqService, "setVisibilityTimeout").mockResolvedValue(null);
+const pgmqMetrics = spyOn(pgmqService, "metrics").mockResolvedValue(null);
 
 const backgroundFunctionWorker = {
-  cancel: mock(() => Promise.resolve(true)),
+  cancel: spyOn(services.backgroundFunctionWorker, "cancel").mockResolvedValue(true),
 };
 
 const projectService = {
-  getBackgroundTaskSettings: mock(() => Promise.resolve({
+  getBackgroundTaskSettings: spyOn(services.projectService, "getBackgroundTaskSettings").mockResolvedValue({
     ...DEFAULT_BACKGROUND_TASK_SETTINGS,
-  })),
-  updateBackgroundTaskSettings: mock(() => Promise.resolve({
+  }),
+  updateBackgroundTaskSettings: spyOn(services.projectService, "updateBackgroundTaskSettings").mockResolvedValue({
     concurrency: 4,
     max_attempts: 5,
     max_payload_bytes: 524288,
     timeout_sec_default: 300,
     timeout_sec_max: 900,
-  })),
-  getQueueSettings: mock(() => Promise.resolve({
+  }),
+  getQueueSettings: spyOn(services.projectService, "getQueueSettings").mockResolvedValue({
     max_in_flight: 10,
     default_visibility_timeout_sec: 330,
     max_attempts: 3,
     rate_limit_per_minute: 600,
-  })),
-  updateQueueSettings: mock(() => Promise.resolve({
+  }),
+  updateQueueSettings: spyOn(services.projectService, "updateQueueSettings").mockResolvedValue({
     max_in_flight: 20,
     default_visibility_timeout_sec: 120,
     max_attempts: 5,
     rate_limit_per_minute: 1200,
-  })),
+  }),
 };
 
-const { taskRepository } = await import("../../src/repositories/task.repository");
-const services = await import("../../src/services");
-const { pgmqService } = await import("../../src/services/pgmq.service");
-const authModule = await import("../../src/middleware/auth");
-
-spyOn(taskRepository, "listTasksByProjectFiltered").mockImplementation(
-  listTasksByProjectFiltered as typeof taskRepository.listTasksByProjectFiltered,
-);
-spyOn(taskRepository, "getTaskById").mockImplementation(getTaskById as typeof taskRepository.getTaskById);
-spyOn(taskRepository, "getTaskByIdAndType").mockImplementation(getTaskByIdAndType as typeof taskRepository.getTaskByIdAndType);
-spyOn(taskRepository, "listTaskAttempts").mockImplementation(
-  listTaskAttempts as typeof taskRepository.listTaskAttempts,
-);
-spyOn(taskRepository, "createTask").mockImplementation(createTask as typeof taskRepository.createTask);
-spyOn(taskRepository, "claimQueueMessage").mockImplementation(claimQueueMessage as typeof taskRepository.claimQueueMessage);
-spyOn(taskRepository, "acknowledgeQueueMessage").mockImplementation(acknowledgeQueueMessage as typeof taskRepository.acknowledgeQueueMessage);
-spyOn(taskRepository, "releaseTask").mockImplementation(releaseTask as typeof taskRepository.releaseTask);
-spyOn(taskRepository, "markTaskFailed").mockImplementation(markTaskFailed as typeof taskRepository.markTaskFailed);
-spyOn(taskRepository, "cancelTask").mockImplementation(cancelTask as typeof taskRepository.cancelTask);
-spyOn(taskRepository, "retryTask").mockImplementation(retryTask as typeof taskRepository.retryTask);
-spyOn(taskRepository, "retryQueueMessage").mockImplementation(retryQueueMessage as typeof taskRepository.retryQueueMessage);
-spyOn(taskRepository, "countQueueMessagesCreatedSince").mockImplementation(
-  countQueueMessagesCreatedSince as typeof taskRepository.countQueueMessagesCreatedSince,
-);
-spyOn(taskRepository, "requestTaskCancellation").mockImplementation(
-  requestTaskCancellation as typeof taskRepository.requestTaskCancellation,
-);
-spyOn(taskRepository, "getTaskStats").mockImplementation(getTaskStats as typeof taskRepository.getTaskStats);
-spyOn(taskRepository, "getQueueStats").mockImplementation(getQueueStats as typeof taskRepository.getQueueStats);
-spyOn(services.backgroundFunctionWorker, "cancel").mockImplementation(
-  backgroundFunctionWorker.cancel as typeof services.backgroundFunctionWorker.cancel,
-);
-spyOn(services.projectService, "getBackgroundTaskSettings").mockImplementation(
-  projectService.getBackgroundTaskSettings as typeof services.projectService.getBackgroundTaskSettings,
-);
-spyOn(services.projectService, "updateBackgroundTaskSettings").mockImplementation(
-  projectService.updateBackgroundTaskSettings as typeof services.projectService.updateBackgroundTaskSettings,
-);
-spyOn(services.projectService, "getQueueSettings").mockImplementation(
-  projectService.getQueueSettings as typeof services.projectService.getQueueSettings,
-);
-spyOn(services.projectService, "updateQueueSettings").mockImplementation(
-  projectService.updateQueueSettings as typeof services.projectService.updateQueueSettings,
-);
-spyOn(pgmqService, "createQueue").mockImplementation(pgmqCreateQueue as typeof pgmqService.createQueue);
-spyOn(pgmqService, "listQueues").mockImplementation(pgmqListQueues as typeof pgmqService.listQueues);
-spyOn(pgmqService, "listMessages").mockImplementation(pgmqListMessages as typeof pgmqService.listMessages);
-spyOn(pgmqService, "send").mockImplementation(pgmqSend as typeof pgmqService.send);
-spyOn(pgmqService, "sendBatch").mockImplementation(pgmqSendBatch as typeof pgmqService.sendBatch);
-spyOn(pgmqService, "read").mockImplementation(pgmqRead as typeof pgmqService.read);
-spyOn(pgmqService, "pop").mockImplementation(pgmqPop as typeof pgmqService.pop);
-spyOn(pgmqService, "archive").mockImplementation(pgmqArchive as typeof pgmqService.archive);
-spyOn(pgmqService, "deleteMessage").mockImplementation(pgmqDeleteMessage as typeof pgmqService.deleteMessage);
-spyOn(pgmqService, "setVisibilityTimeout").mockImplementation(
-  pgmqSetVisibilityTimeout as typeof pgmqService.setVisibilityTimeout,
-);
-spyOn(pgmqService, "metrics").mockImplementation(pgmqMetrics as typeof pgmqService.metrics);
-
-const verifyProjectJwt = mock(() => Promise.resolve(null));
-spyOn(authModule, "verifyProjectJwt").mockImplementation(
-  verifyProjectJwt as typeof authModule.verifyProjectJwt,
-);
+const verifyProjectJwt = spyOn(authModule, "verifyProjectJwt").mockResolvedValue(null);
 
 const { taskRoutes } = await import("../../src/routes/tasks");
 
 const app = new Elysia().use(taskRoutes);
 
 const authHeaders = { Authorization: "Bearer dev-master-token" };
+
+function queueMessageFixture(overrides: Partial<PgmqMessage> = {}): PgmqMessage {
+  return {
+    id: "1", msg_id: "1", task_type: "queue:emails", status: "leased", payload: {}, message: {},
+    enqueued_at: new Date(0), vt: new Date(60_000), read_ct: 1, ...overrides,
+  };
+}
 
 function request(path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
@@ -209,8 +162,8 @@ describe("taskRoutes", () => {
     pgmqCreateQueue.mockResolvedValue(undefined);
     pgmqListQueues.mockResolvedValue([]);
     pgmqListMessages.mockResolvedValue([]);
-    pgmqSend.mockResolvedValue(1);
-    pgmqSendBatch.mockResolvedValue([1, 2]);
+    pgmqSend.mockResolvedValue("1");
+    pgmqSendBatch.mockResolvedValue(["1", "2"]);
     pgmqRead.mockResolvedValue([]);
     pgmqPop.mockResolvedValue(null);
     pgmqArchive.mockResolvedValue(true);
@@ -220,7 +173,7 @@ describe("taskRoutes", () => {
   });
 
   test("POST /queues/:queueName/messages enqueues a JSON message", async () => {
-    pgmqSend.mockResolvedValueOnce(42);
+    pgmqSend.mockResolvedValueOnce("42");
 
     const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages", {
       method: "POST",
@@ -279,7 +232,7 @@ describe("taskRoutes", () => {
   });
 
   test("POST /queues/:queueName/messages/batch sends JSON messages through PGMQ", async () => {
-    pgmqSendBatch.mockResolvedValueOnce([7, 8]);
+    pgmqSendBatch.mockResolvedValueOnce(["7", "8"]);
 
     const response = await request("/v1/projects/proj_1/tasks/queues/crawl/messages/batch", {
       method: "POST",
@@ -289,12 +242,14 @@ describe("taskRoutes", () => {
     const payload = await response.json();
 
     expect(response.status).toBe(202);
-    expect(payload.msg_ids).toEqual([7, 8]);
+    expect(payload.msg_ids).toEqual(["7", "8"]);
     expect(pgmqSendBatch).toHaveBeenCalledWith("proj_1", "crawl", [{ a: 1 }, { b: 2 }], 30);
   });
 
   test("POST /queues/:queueName/messages/receive leases the next available message", async () => {
-    pgmqRead.mockResolvedValueOnce([{ id: "11", msg_id: 11, task_type: "queue:emails", status: "leased", payload: { hello: "world" } }]);
+    pgmqRead.mockResolvedValueOnce([queueMessageFixture({
+      id: "11", msg_id: "11", payload: { hello: "world" }, message: { hello: "world" },
+    })]);
 
     const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages/receive", {
       method: "POST",
@@ -332,11 +287,13 @@ describe("taskRoutes", () => {
 
     expect(response.status).toBe(200);
     expect(payload.status).toBe("archived");
-    expect(pgmqArchive).toHaveBeenCalledWith("proj_1", "emails", 11);
+    expect(pgmqArchive).toHaveBeenCalledWith("proj_1", "emails", "11");
   });
 
   test("POST /queues/:queueName/messages/pop deletes and returns next PGMQ message", async () => {
-    pgmqPop.mockResolvedValueOnce({ id: "12", msg_id: 12, task_type: "queue:emails", status: "deleted", payload: { ok: true } });
+    pgmqPop.mockResolvedValueOnce(queueMessageFixture({
+      id: "12", msg_id: "12", status: "deleted", payload: { ok: true }, message: { ok: true },
+    }));
 
     const response = await request("/v1/projects/proj_1/tasks/queues/emails/messages/pop", {
       method: "POST",
@@ -397,7 +354,7 @@ describe("taskRoutes", () => {
     });
 
     expect(response.status).toBe(204);
-    expect(pgmqDeleteMessage).toHaveBeenCalledWith("proj_1", "emails", 11);
+    expect(pgmqDeleteMessage).toHaveBeenCalledWith("proj_1", "emails", "11");
   });
 
   test("POST /queues/:queueName/messages/:messageId/retry reports official PGMQ limitation", async () => {
@@ -412,7 +369,7 @@ describe("taskRoutes", () => {
 
   test("GET /v1/projects/:ref/tasks forwards function_slug filter to repository", async () => {
     listTasksByProjectFiltered.mockResolvedValueOnce([
-      { id: "tsk_1", function_slug: "mockup-generator", status: "running" },
+      taskFixture({ function_slug: "mockup-generator", status: "running" }),
     ]);
 
     const response = await request(
@@ -421,8 +378,6 @@ describe("taskRoutes", () => {
 
     expect(response.status).toBe(200);
     expect(listTasksByProjectFiltered).toHaveBeenCalledWith("proj_1", {
-      statuses: undefined,
-      taskTypes: undefined,
       functionSlug: "mockup-generator",
       onlyDeadLettered: false,
       limit: 8,
@@ -432,7 +387,7 @@ describe("taskRoutes", () => {
 
   test("GET /v1/projects/:ref/tasks forwards summary list mode to repository", async () => {
     listTasksByProjectFiltered.mockResolvedValueOnce([
-      { id: "tsk_1", function_slug: "mockup-generator", status: "running" },
+      taskFixture({ function_slug: "mockup-generator", status: "running" }),
     ]);
 
     const response = await request(
@@ -441,8 +396,6 @@ describe("taskRoutes", () => {
 
     expect(response.status).toBe(200);
     expect(listTasksByProjectFiltered).toHaveBeenCalledWith("proj_1", {
-      statuses: undefined,
-      taskTypes: undefined,
       functionSlug: "mockup-generator",
       onlyDeadLettered: false,
       limit: 8,
@@ -482,15 +435,15 @@ describe("taskRoutes", () => {
   });
 
   test("POST /:taskId/cancel triggers runtime cancellation for running tasks", async () => {
-    getTaskById.mockResolvedValueOnce({
+    getTaskById.mockResolvedValueOnce(taskFixture({
       id: "tsk_running",
       status: TaskStatus.RUNNING,
       project_ref: "proj_1",
-    }).mockResolvedValueOnce({
+    })).mockResolvedValueOnce(taskFixture({
       id: "tsk_running",
       status: TaskStatus.RUNNING,
-      cancel_requested_at: "2026-04-17T12:00:00.000Z",
-    });
+      cancel_requested_at: new Date("2026-04-17T12:00:00.000Z"),
+    }));
 
     const response = await request("/v1/projects/proj_1/tasks/tsk_running/cancel", {
       method: "POST",
@@ -504,14 +457,14 @@ describe("taskRoutes", () => {
   });
 
   test("POST /:taskId/cancel skips runtime cancellation for non-running tasks", async () => {
-    getTaskById.mockResolvedValueOnce({
+    getTaskById.mockResolvedValueOnce(taskFixture({
       id: "tsk_done",
       status: TaskStatus.PENDING,
       project_ref: "proj_1",
-    }).mockResolvedValueOnce({
+    })).mockResolvedValueOnce(taskFixture({
       id: "tsk_done",
       status: TaskStatus.CANCELLED,
-    });
+    }));
     backgroundFunctionWorker.cancel.mockResolvedValueOnce(true);
 
     const response = await request("/v1/projects/proj_1/tasks/tsk_done/cancel", {
@@ -523,11 +476,11 @@ describe("taskRoutes", () => {
   });
 
   test("POST /:taskId/cancel returns 409 for terminal tasks", async () => {
-    getTaskById.mockResolvedValueOnce({
+    getTaskById.mockResolvedValueOnce(taskFixture({
       id: "tsk_done",
       status: TaskStatus.SUCCEEDED,
       project_ref: "proj_1",
-    });
+    }));
 
     const response = await request("/v1/projects/proj_1/tasks/tsk_done/cancel", {
       method: "POST",
@@ -538,22 +491,39 @@ describe("taskRoutes", () => {
     expect(cancelTask).not.toHaveBeenCalled();
   });
 
+  test("POST /:taskId/retry binds the authenticated project to the repository mutation", async () => {
+    retryTask.mockResolvedValueOnce(taskFixture({ id: "tsk_failed", project_ref: "proj_1", status: "pending" }));
+    const response = await request("/v1/projects/proj_1/tasks/tsk_failed/retry", { method: "POST" });
+    expect(response.status).toBe(200);
+    expect(retryTask).toHaveBeenCalledTimes(1);
+    expect(retryTask).toHaveBeenCalledWith("tsk_failed", "proj_1");
+  });
+
+  test("POST /:taskId/retry cannot retry or disclose a failed database write", async () => {
+    retryTask.mockRejectedValueOnce(new Error("private-database-detail"));
+    const response = await request("/v1/projects/proj_1/tasks/tsk_failed/retry", { method: "POST" });
+    expect(response.status).toBe(500);
+    const body: unknown = await response.json();
+    expect(body).toEqual({ message: "Failed to retry task", code: "500" });
+    expect(retryTask).toHaveBeenCalledTimes(1);
+  });
+
   test("GET /:taskId returns attempts and latest_logs", async () => {
-    getTaskById.mockResolvedValueOnce({
+    getTaskById.mockResolvedValueOnce(taskFixture({
       id: "tsk_1",
       status: "dead_lettered",
       project_ref: "proj_1",
       function_slug: "mockup-generator",
-    });
+    }));
     listTaskAttempts.mockResolvedValueOnce([
-      {
+      taskAttemptFixture({
         attempt_no: 2,
         logs: [{ timestamp: "2026-04-17T12:00:00.000Z", stream: "stderr", level: "error", message: "boom" }],
-      },
-      {
+      }),
+      taskAttemptFixture({
         attempt_no: 1,
         logs: [],
-      },
+      }),
     ]);
 
     const response = await request("/v1/projects/proj_1/tasks/tsk_1");
@@ -572,7 +542,7 @@ describe("taskRoutes", () => {
       ref: "proj_1",
       sub: "user_1",
     });
-    getTaskById.mockResolvedValueOnce({
+    getTaskById.mockResolvedValueOnce(taskFixture({
       id: "tsk_user",
       status: "succeeded",
       project_ref: "proj_1",
@@ -583,7 +553,7 @@ describe("taskRoutes", () => {
           apikey: "enc:key",
         },
       },
-    });
+    }));
     listTaskAttempts.mockResolvedValueOnce([]);
 
     const response = await request("/v1/projects/proj_1/tasks/tsk_user", {
@@ -603,7 +573,7 @@ describe("taskRoutes", () => {
       ref: "proj_1",
       sub: "user_2",
     });
-    getTaskById.mockResolvedValueOnce({
+    getTaskById.mockResolvedValueOnce(taskFixture({
       id: "tsk_user",
       status: "succeeded",
       project_ref: "proj_1",
@@ -612,7 +582,7 @@ describe("taskRoutes", () => {
           invoker_user_id: "user_1",
         },
       },
-    });
+    }));
 
     const response = await request("/v1/projects/proj_1/tasks/tsk_user", {
       headers: { Authorization: "Bearer user.jwt.token" },

@@ -219,48 +219,203 @@ LANGUAGE plpgsql
 IMMUTABLE
 SET search_path = ''
 AS $$
-DECLARE
-  normalized_queue_name text := lower(btrim(queue_name));
 BEGIN
-  IF normalized_queue_name IS NULL
-     OR left(normalized_queue_name, char_length('supacloud_internal_')) = 'supacloud_internal_' THEN
+  IF queue_name IS NULL OR queue_name !~ '^[a-z0-9][a-z0-9_-]{0,127}$' THEN
+    RAISE EXCEPTION 'SUPACLOUD_QUEUE_NAME_INVALID' USING ERRCODE = '22023';
+  END IF;
+  IF left(queue_name, char_length('supacloud_internal_')) = 'supacloud_internal_' THEN
     RAISE EXCEPTION 'SUPACLOUD_QUEUE_NAME_RESERVED' USING ERRCODE = '42501';
   END IF;
-  RETURN normalized_queue_name;
+  RETURN queue_name;
+END;
+$$;
+
+-- Return-type changes require replacement. Do not CASCADE through user dependencies.
+DO $pgmq_receipt_types$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_proc
+    WHERE oid = to_regprocedure('pgmq_public.send(text,jsonb,integer)')
+      AND prorettype = 'bigint'::regtype
+  ) THEN
+    DROP FUNCTION pgmq_public.send(text,jsonb,integer);
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_proc
+    WHERE oid = to_regprocedure('pgmq_public.send_batch(text,jsonb[],integer)')
+      AND prorettype = 'bigint'::regtype
+  ) THEN
+    DROP FUNCTION pgmq_public.send_batch(text,jsonb[],integer);
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_proc
+    WHERE oid = to_regprocedure('pgmq_public.read(text,integer,integer)')
+      AND prorettype = 'pgmq.message_record'::regtype
+  ) THEN
+    DROP FUNCTION pgmq_public.read(text,integer,integer);
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_proc
+    WHERE oid = to_regprocedure('pgmq_public.pop(text)')
+      AND prorettype = 'pgmq.message_record'::regtype
+  ) THEN
+    DROP FUNCTION pgmq_public.pop(text);
+  END IF;
+END
+$pgmq_receipt_types$;
+
+CREATE OR REPLACE FUNCTION pgmq_public.require_seconds(value integer)
+RETURNS integer LANGUAGE plpgsql IMMUTABLE SET search_path = ''
+AS $$
+BEGIN
+  IF value IS NULL OR value < 0 THEN
+    RAISE EXCEPTION 'SUPACLOUD_QUEUE_SECONDS_INVALID' USING ERRCODE = '22023';
+  END IF;
+  RETURN value;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION pgmq_public.require_read_count(value integer)
+RETURNS integer LANGUAGE plpgsql IMMUTABLE SET search_path = ''
+AS $$
+BEGIN
+  IF value IS NULL OR value < 1 OR value > 10000 THEN
+    RAISE EXCEPTION 'SUPACLOUD_QUEUE_COUNT_INVALID' USING ERRCODE = '22023';
+  END IF;
+  RETURN value;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION pgmq_public.require_message_id(value bigint)
+RETURNS bigint LANGUAGE plpgsql IMMUTABLE SET search_path = ''
+AS $$
+BEGIN
+  IF value IS NULL OR value < 1 THEN
+    RAISE EXCEPTION 'SUPACLOUD_QUEUE_MESSAGE_ID_INVALID' USING ERRCODE = '22023';
+  END IF;
+  RETURN value;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION pgmq_public.message_node_count(value jsonb)
+RETURNS integer LANGUAGE plpgsql IMMUTABLE SET search_path = ''
+AS $$
+DECLARE
+  node_count integer;
+  maximum_depth integer;
+BEGIN
+  IF value IS NULL THEN
+    RAISE EXCEPTION 'SUPACLOUD_QUEUE_MESSAGE_INVALID' USING ERRCODE = '22023';
+  END IF;
+  IF octet_length(convert_to(value::text, 'UTF8')) > 1048576 THEN
+    RAISE EXCEPTION 'SUPACLOUD_QUEUE_PAYLOAD_TOO_LARGE' USING ERRCODE = '22023';
+  END IF;
+  WITH RECURSIVE tree(item, depth) AS (
+    SELECT value, 0
+    UNION ALL
+    SELECT child.item, tree.depth + 1
+    FROM tree
+    CROSS JOIN LATERAL (
+      SELECT element AS item
+      FROM jsonb_array_elements(CASE WHEN jsonb_typeof(tree.item) = 'array' THEN tree.item ELSE '[]'::jsonb END) AS element
+      UNION ALL
+      SELECT entry.value AS item
+      FROM jsonb_each(CASE WHEN jsonb_typeof(tree.item) = 'object' THEN tree.item ELSE '{}'::jsonb END) AS entry
+    ) AS child
+    WHERE tree.depth < 65
+  )
+  SELECT count(*)::integer, max(depth) INTO node_count, maximum_depth
+  FROM (SELECT depth FROM tree LIMIT 10001) AS bounded;
+  IF node_count > 10000 OR maximum_depth > 64 THEN
+    RAISE EXCEPTION 'SUPACLOUD_QUEUE_STRUCTURE_TOO_LARGE' USING ERRCODE = '22023';
+  END IF;
+  RETURN node_count;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION pgmq_public.require_message(value jsonb)
+RETURNS jsonb LANGUAGE plpgsql IMMUTABLE SET search_path = ''
+AS $$
+BEGIN
+  PERFORM pgmq_public.message_node_count(value);
+  RETURN value;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION pgmq_public.require_messages(values_ jsonb[])
+RETURNS jsonb[] LANGUAGE plpgsql IMMUTABLE SET search_path = ''
+AS $$
+DECLARE
+  item jsonb;
+  total_bytes bigint := 0;
+  total_nodes integer := 0;
+BEGIN
+  IF values_ IS NULL OR cardinality(values_) < 1 OR cardinality(values_) > 10000
+     OR array_ndims(values_) <> 1 OR array_lower(values_, 1) <> 1 THEN
+    RAISE EXCEPTION 'SUPACLOUD_QUEUE_BATCH_INVALID' USING ERRCODE = '22023';
+  END IF;
+  FOREACH item IN ARRAY values_ LOOP
+    total_nodes := total_nodes + pgmq_public.message_node_count(item);
+    IF total_nodes > 100000 THEN
+      RAISE EXCEPTION 'SUPACLOUD_QUEUE_STRUCTURE_TOO_LARGE' USING ERRCODE = '22023';
+    END IF;
+    total_bytes := total_bytes + octet_length(convert_to(item::text, 'UTF8'));
+    IF total_bytes > 8388608 THEN
+      RAISE EXCEPTION 'SUPACLOUD_QUEUE_PAYLOAD_TOO_LARGE' USING ERRCODE = '22023';
+    END IF;
+  END LOOP;
+  RETURN values_;
 END;
 $$;
 
 CREATE OR REPLACE FUNCTION pgmq_public.send(queue_name text, message jsonb, sleep_seconds integer DEFAULT 0)
-RETURNS SETOF bigint
+RETURNS SETOF text
 LANGUAGE sql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
-AS $$ SELECT * FROM pgmq.send(pgmq_public.require_public_queue(queue_name), message, sleep_seconds); $$;
+AS $$ SELECT receipt.msg_id::text FROM pgmq.send(pgmq_public.require_public_queue(queue_name), pgmq_public.require_message(message), pgmq_public.require_seconds(sleep_seconds)) AS receipt(msg_id); $$;
 
 CREATE OR REPLACE FUNCTION pgmq_public.send_batch(queue_name text, messages jsonb[], sleep_seconds integer DEFAULT 0)
-RETURNS SETOF bigint
+RETURNS SETOF text
 LANGUAGE sql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
-AS $$ SELECT * FROM pgmq.send_batch(pgmq_public.require_public_queue(queue_name), messages, sleep_seconds); $$;
+AS $$ SELECT receipt.msg_id::text FROM pgmq.send_batch(pgmq_public.require_public_queue(queue_name), pgmq_public.require_messages(messages), pgmq_public.require_seconds(sleep_seconds)) AS receipt(msg_id); $$;
 
 CREATE OR REPLACE FUNCTION pgmq_public.read(queue_name text, sleep_seconds integer, n integer)
-RETURNS SETOF pgmq.message_record
+RETURNS TABLE (
+  msg_id text, read_ct integer, enqueued_at timestamptz,
+  last_read_at timestamptz, vt timestamptz, message jsonb, headers jsonb
+)
 LANGUAGE sql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
-AS $$ SELECT * FROM pgmq.read(pgmq_public.require_public_queue(queue_name), sleep_seconds, n); $$;
+AS $$
+  SELECT receipt.msg_id::text, receipt.read_ct, receipt.enqueued_at,
+    (to_jsonb(receipt)->>'last_read_at')::timestamptz, receipt.vt,
+    receipt.message, to_jsonb(receipt)->'headers'
+  FROM pgmq.read(pgmq_public.require_public_queue(queue_name),
+    pgmq_public.require_seconds(sleep_seconds), pgmq_public.require_read_count(n)) AS receipt;
+$$;
 
 CREATE OR REPLACE FUNCTION pgmq_public.pop(queue_name text)
-RETURNS SETOF pgmq.message_record
+RETURNS TABLE (
+  msg_id text, read_ct integer, enqueued_at timestamptz,
+  last_read_at timestamptz, vt timestamptz, message jsonb, headers jsonb
+)
 LANGUAGE sql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
-AS $$ SELECT * FROM pgmq.pop(pgmq_public.require_public_queue(queue_name)); $$;
+AS $$
+  SELECT receipt.msg_id::text, receipt.read_ct, receipt.enqueued_at,
+    (to_jsonb(receipt)->>'last_read_at')::timestamptz, receipt.vt,
+    receipt.message, to_jsonb(receipt)->'headers'
+  FROM pgmq.pop(pgmq_public.require_public_queue(queue_name)) AS receipt;
+$$;
 
 CREATE OR REPLACE FUNCTION pgmq_public.archive(queue_name text, message_id bigint)
 RETURNS boolean
@@ -268,7 +423,7 @@ LANGUAGE sql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
-AS $$ SELECT pgmq.archive(pgmq_public.require_public_queue(queue_name), message_id); $$;
+AS $$ SELECT pgmq.archive(pgmq_public.require_public_queue(queue_name), pgmq_public.require_message_id(message_id)); $$;
 
 CREATE OR REPLACE FUNCTION pgmq_public."delete"(queue_name text, message_id bigint)
 RETURNS boolean
@@ -276,10 +431,12 @@ LANGUAGE sql
 VOLATILE
 SECURITY DEFINER
 SET search_path = ''
-AS $$ SELECT pgmq.delete(pgmq_public.require_public_queue(queue_name), message_id); $$;
+AS $$ SELECT pgmq.delete(pgmq_public.require_public_queue(queue_name), pgmq_public.require_message_id(message_id)); $$;
 
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA pgmq_public FROM PUBLIC;
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgmq_public TO anon, authenticated, service_role;
+
+NOTIFY pgrst, 'reload schema';
 -- supacloud:sql-module:pgmq-public:end
 `
 
@@ -509,14 +666,17 @@ BEGIN
   PERFORM pg_advisory_xact_lock(hashtextextended(p_run_id::text, 0));
   SELECT * INTO existing_run FROM supacloud_workflows.runs WHERE id = p_run_id;
   IF FOUND THEN
-    SELECT * INTO existing_step
-    FROM supacloud_workflows.steps
-    WHERE run_id = p_run_id
-    ORDER BY created_at, id
-    LIMIT 1;
-    IF NOT FOUND THEN
+    BEGIN
+      SELECT step.* INTO STRICT existing_step
+      FROM supacloud_workflows.steps step
+      WHERE step.run_id = p_run_id
+        AND NOT EXISTS (
+          SELECT 1 FROM supacloud_workflows.steps predecessor
+          WHERE predecessor.run_id = p_run_id AND predecessor.next_step_key = step.step_key
+        );
+    EXCEPTION WHEN no_data_found OR too_many_rows THEN
       RAISE EXCEPTION 'SUPACLOUD_WORKFLOW_IDEMPOTENCY_CONFLICT' USING ERRCODE = '23505';
-    END IF;
+    END;
     IF existing_run.workflow_name <> normalized_name
        OR existing_run.workflow_version <> normalized_version
        OR existing_run.input <> p_input
@@ -1229,10 +1389,14 @@ $$;
 CREATE OR REPLACE FUNCTION public.supacloud_workflow_retry(request jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '' AS $$
+<<retry_request>>
 DECLARE
   message_id bigint;
   attempt integer;
   delay_seconds integer;
+  step_id uuid;
+  result jsonb;
+  retry_receipt jsonb;
 BEGIN
   message_id := (request ->> 'messageId')::bigint;
   attempt := (request ->> 'attempt')::integer;
@@ -1240,14 +1404,22 @@ BEGIN
   IF message_id <= 0 OR attempt <= 0 THEN
     RAISE EXCEPTION 'SUPACLOUD_WORKFLOW_RETRY_INVALID' USING ERRCODE = '22023';
   END IF;
-  RETURN supacloud_workflows.retry_step(
-    supacloud_workflows.request_uuid(request, 'stepId'),
+  step_id := supacloud_workflows.request_uuid(request, 'stepId');
+  result := supacloud_workflows.retry_step(
+    step_id,
     message_id,
     attempt,
     request ->> 'workerId',
     request ->> 'errorMessage',
     delay_seconds
   );
+  SELECT event.details || jsonb_build_object('stepId', event.step_id, 'attempt', event.attempt)
+  INTO STRICT retry_receipt
+  FROM supacloud_workflows.events event
+  WHERE event.step_id = retry_request.step_id AND event.attempt = retry_request.attempt
+    AND event.event_type IN ('step_retried', 'step_dead_lettered')
+    AND event.details ->> 'operation' = 'retry';
+  RETURN result || jsonb_build_object('retryReceipt', retry_receipt);
 EXCEPTION
   WHEN invalid_parameter_value OR invalid_text_representation OR numeric_value_out_of_range THEN
     RAISE EXCEPTION 'SUPACLOUD_WORKFLOW_RETRY_INVALID' USING ERRCODE = '22023';
@@ -1379,8 +1551,6 @@ CREATE TABLE IF NOT EXISTS supacloud_commands.receipts (
 CREATE INDEX IF NOT EXISTS supacloud_commands_target_idx
   ON supacloud_commands.receipts (target_type, target_id, created_at DESC, id);
 
-ALTER TABLE supacloud_commands.receipts ADD COLUMN IF NOT EXISTS tenant_id text;
-
 CREATE OR REPLACE FUNCTION supacloud_commands.snapshot(
   p_command_id uuid,
   p_idempotent boolean DEFAULT false
@@ -1392,7 +1562,6 @@ LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
     'targetType', receipt.target_type,
     'targetId', receipt.target_id,
     'actorId', receipt.actor_id,
-    'tenantId', receipt.tenant_id,
     'payloadFingerprint', receipt.payload_fingerprint,
     'createdAt', receipt.created_at,
     'idempotent', p_idempotent,
@@ -1420,8 +1589,6 @@ DECLARE
   normalized_target_id text;
   fingerprint text;
   existing supacloud_commands.receipts%ROWTYPE;
-  tenant_id text;
-  existing_execution jsonb;
 BEGIN
   IF jsonb_typeof(request) IS DISTINCT FROM 'object' THEN
     RAISE EXCEPTION 'SUPACLOUD_COMMAND_INVALID' USING ERRCODE = '22023';
@@ -1432,11 +1599,6 @@ BEGIN
     RAISE EXCEPTION 'SUPACLOUD_COMMAND_INVALID' USING ERRCODE = '22023';
   END IF;
   command_id := command_id_text::uuid;
-  tenant_id := request->>'tenantId';
-  IF request ? 'tenantId' AND (jsonb_typeof(request->'tenantId') IS DISTINCT FROM 'string'
-    OR tenant_id !~ '^[A-Za-z0-9._:@|-]{1,200}$') THEN
-    RAISE EXCEPTION 'SUPACLOUD_COMMAND_INVALID' USING ERRCODE = '22023';
-  END IF;
   IF request ? 'actorId' AND request ->> 'actorId' IS NOT NULL THEN
     actor_id := (request ->> 'actorId')::uuid;
   END IF;
@@ -1464,19 +1626,11 @@ BEGIN
        OR existing.target_type <> normalized_target_type
        OR existing.target_id <> normalized_target_id
        OR existing.actor_id IS DISTINCT FROM actor_id
-       OR existing.tenant_id IS DISTINCT FROM tenant_id
        OR existing.payload <> payload
        OR existing.payload_fingerprint <> fingerprint THEN
       RAISE EXCEPTION 'SUPACLOUD_COMMAND_IDEMPOTENCY_CONFLICT' USING ERRCODE = '23505';
     END IF;
     RETURN supacloud_commands.snapshot(command_id, true);
-  END IF;
-  IF to_regprocedure('supacloud_commands.execution_status(jsonb)') IS NOT NULL THEN
-    EXECUTE 'SELECT supacloud_commands.execution_status($1)' INTO existing_execution
-      USING jsonb_build_object('commandId',command_id);
-    IF existing_execution IS NOT NULL THEN
-      RAISE EXCEPTION 'SUPACLOUD_COMMAND_IDEMPOTENCY_CONFLICT' USING ERRCODE = '23505';
-    END IF;
   END IF;
 
   PERFORM supacloud_workflows.start_run(
@@ -1498,10 +1652,10 @@ BEGIN
 
   INSERT INTO supacloud_commands.receipts (
     id, command_type, target_type, target_id, actor_id, payload,
-    payload_fingerprint, workflow_run_id, tenant_id
+    payload_fingerprint, workflow_run_id
   ) VALUES (
     command_id, normalized_command_type, normalized_target_type,
-    normalized_target_id, actor_id, payload, fingerprint, command_id, tenant_id
+    normalized_target_id, actor_id, payload, fingerprint, command_id
   );
   RETURN supacloud_commands.snapshot(command_id, false);
 EXCEPTION
@@ -1510,77 +1664,31 @@ EXCEPTION
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION supacloud_commands.status(request jsonb)
+CREATE OR REPLACE FUNCTION public.supacloud_command_submit(request jsonb)
+RETURNS jsonb
+LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path = '' AS $$
+  SELECT supacloud_commands.submit(request)
+$$;
+
+CREATE OR REPLACE FUNCTION public.supacloud_command_get(request jsonb)
 RETURNS jsonb
 LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = '' AS $$
 DECLARE
   command_id_text text;
-  execution jsonb;
-  submission jsonb;
-  field text;
 BEGIN
   IF jsonb_typeof(request) IS DISTINCT FROM 'object' THEN
     RAISE EXCEPTION 'SUPACLOUD_COMMAND_GET_INVALID' USING ERRCODE = '22023';
-  END IF;
-  IF request ? 'commandId' THEN
-    IF jsonb_typeof(request->'commandId') IS DISTINCT FROM 'string'
-      OR request->>'commandId' !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
-      OR EXISTS(SELECT FROM jsonb_object_keys(request) AS k WHERE k <> 'commandId') THEN
-      RAISE EXCEPTION 'SUPACLOUD_COMMAND_GET_INVALID' USING ERRCODE = '22023';
-    END IF;
-    request := jsonb_build_object('commandId',(request->>'commandId')::uuid::text);
-  ELSE
-    IF EXISTS(SELECT FROM jsonb_object_keys(request) AS k WHERE k NOT IN ('tenantId','actorId','command','operationId')) THEN
-      RAISE EXCEPTION 'SUPACLOUD_COMMAND_GET_INVALID' USING ERRCODE = '22023';
-    END IF;
-    FOREACH field IN ARRAY ARRAY['tenantId','actorId','command','operationId'] LOOP
-      IF jsonb_typeof(request->field) IS DISTINCT FROM 'string' OR request->>field !~ '^[A-Za-z0-9._:@|-]{1,200}$' THEN
-        RAISE EXCEPTION 'SUPACLOUD_COMMAND_GET_INVALID' USING ERRCODE = '22023';
-      END IF;
-    END LOOP;
-  END IF;
-  IF to_regprocedure('supacloud_commands.execution_status(jsonb)') IS NOT NULL THEN
-    EXECUTE 'SELECT supacloud_commands.execution_status($1)' INTO execution USING request;
-    IF execution IS NOT NULL THEN RETURN execution; END IF;
-  END IF;
-  IF NOT (request ? 'commandId') THEN
-    IF jsonb_typeof(request->'tenantId') IS DISTINCT FROM 'string'
-      OR jsonb_typeof(request->'actorId') IS DISTINCT FROM 'string'
-      OR jsonb_typeof(request->'command') IS DISTINCT FROM 'string'
-      OR jsonb_typeof(request->'operationId') IS DISTINCT FROM 'string' THEN
-      RAISE EXCEPTION 'SUPACLOUD_COMMAND_GET_INVALID' USING ERRCODE = '22023';
-    END IF;
-    RETURN NULL;
   END IF;
   command_id_text := request ->> 'commandId';
   IF command_id_text IS NULL
      OR command_id_text !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' THEN
     RAISE EXCEPTION 'SUPACLOUD_COMMAND_GET_INVALID' USING ERRCODE = '22023';
   END IF;
-  submission := supacloud_commands.snapshot(command_id_text::uuid, false);
-  IF submission IS NULL THEN RETURN NULL; END IF;
-  RETURN jsonb_build_object('kind','submission','commandId',command_id_text::uuid,
-    'execution',NULL,'workflow',jsonb_build_object(
-      'runId',submission->'workflow'->'runId','status',submission->'workflow'->'status'));
+  RETURN supacloud_commands.snapshot(command_id_text::uuid, false);
 EXCEPTION
   WHEN invalid_parameter_value OR invalid_text_representation THEN
     RAISE EXCEPTION 'SUPACLOUD_COMMAND_GET_INVALID' USING ERRCODE = '22023';
 END;
-$$;
-
-CREATE OR REPLACE FUNCTION public.supacloud_command_submit(request jsonb)
-RETURNS jsonb
-LANGUAGE plpgsql VOLATILE SECURITY DEFINER SET search_path = '' AS $$
-BEGIN
-  PERFORM supacloud_commands.submit(request);
-  RETURN supacloud_commands.status(jsonb_build_object('commandId',request->>'commandId'));
-END
-$$;
-
-CREATE OR REPLACE FUNCTION public.supacloud_command_get(request jsonb)
-RETURNS jsonb
-LANGUAGE sql STABLE SECURITY DEFINER SET search_path = '' AS $$
-  SELECT supacloud_commands.status(request)
 $$;
 
 REVOKE ALL ON ALL TABLES IN SCHEMA supacloud_commands
@@ -1634,10 +1742,25 @@ CREATE TABLE IF NOT EXISTS supacloud_artifacts.lineage (
 CREATE INDEX IF NOT EXISTS supacloud_artifacts_lineage_child_idx
   ON supacloud_artifacts.lineage (child_artifact_id, created_at, parent_artifact_id);
 
+CREATE TABLE IF NOT EXISTS supacloud_artifacts.lineage_write_guard (
+  id boolean PRIMARY KEY CHECK (id)
+);
+INSERT INTO supacloud_artifacts.lineage_write_guard (id) VALUES (true)
+  ON CONFLICT DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS supacloud_artifacts.storage_write_guard (
+  storage_object_id uuid PRIMARY KEY REFERENCES storage.objects(id)
+    ON UPDATE CASCADE ON DELETE CASCADE
+);
+
 CREATE OR REPLACE FUNCTION supacloud_artifacts.guard_storage_object()
 RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 BEGIN
+  -- A tuple write rejects old snapshots that cannot see a concurrent registration.
+  INSERT INTO supacloud_artifacts.storage_write_guard AS guard (storage_object_id)
+    VALUES (OLD.id)
+    ON CONFLICT (storage_object_id) DO UPDATE SET storage_object_id = EXCLUDED.storage_object_id;
   IF EXISTS (
     SELECT 1 FROM supacloud_artifacts.artifacts artifact
     WHERE artifact.storage_object_id = OLD.id
@@ -1732,10 +1855,15 @@ BEGIN
   END IF;
 
   SELECT * INTO object_row FROM storage.objects
-  WHERE bucket_id = normalized_bucket AND name = normalized_path;
+  WHERE bucket_id = normalized_bucket AND name = normalized_path
+  FOR UPDATE;
   IF NOT FOUND THEN
     RAISE EXCEPTION 'SUPACLOUD_ARTIFACT_OBJECT_NOT_FOUND' USING ERRCODE = 'P0002';
   END IF;
+
+  INSERT INTO supacloud_artifacts.storage_write_guard AS guard (storage_object_id)
+    VALUES (object_row.id)
+    ON CONFLICT (storage_object_id) DO UPDATE SET storage_object_id = EXCLUDED.storage_object_id;
 
   PERFORM pg_advisory_xact_lock(hashtextextended(artifact_id::text, 0));
   SELECT * INTO existing FROM supacloud_artifacts.artifacts WHERE id = artifact_id;
@@ -1786,6 +1914,11 @@ BEGIN
      OR normalized_relation !~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$'
      OR jsonb_typeof(p_metadata) IS DISTINCT FROM 'object' THEN
     RAISE EXCEPTION 'SUPACLOUD_ARTIFACT_LINEAGE_INVALID' USING ERRCODE = '22023';
+  END IF;
+  -- Updating one guard row serializes graph writes and fences stale MVCC snapshots.
+  UPDATE supacloud_artifacts.lineage_write_guard SET id = id WHERE id = true;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'SUPACLOUD_ARTIFACT_LINEAGE_GUARD_MISSING' USING ERRCODE = '55000';
   END IF;
   IF EXISTS (
     WITH RECURSIVE descendants(artifact_id) AS (
