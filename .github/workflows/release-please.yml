@@ -438,7 +438,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish SupaCloud Lite to NPM
-        if: ${{ needs.release-please.outputs.supacloud_lite_released == 'true' }}
+        if: ${{ needs.release-please.outputs.supacloud_lite_released == 'true' || inputs.recover_npm == true }}
         working-directory: packages/supacloud-lite
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -448,7 +448,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish admin to NPM
-        if: ${{ needs.release-please.outputs.admin_released == 'true' }}
+        if: ${{ needs.release-please.outputs.admin_released == 'true' || inputs.recover_npm == true }}
         working-directory: packages/admin
         run: |
           bun install --frozen-lockfile
@@ -456,7 +456,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish function adapter to NPM
-        if: ${{ needs.release-please.outputs.function_adapter_released == 'true' }}
+        if: ${{ needs.release-please.outputs.function_adapter_released == 'true' || inputs.recover_npm == true }}
         working-directory: packages/function-adapter
         run: |
           bun install --frozen-lockfile
@@ -464,7 +464,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish supacloud (umbrella) to NPM
-        if: ${{ needs.release-please.outputs.supacloud_released == 'true' }}
+        if: ${{ needs.release-please.outputs.supacloud_released == 'true' || inputs.recover_npm == true }}
         working-directory: packages/supacloud
         run: |
           bun install --frozen-lockfile --registry https://registry.npmjs.org
@@ -522,7 +522,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish app compiler to NPM
-        if: ${{ needs.release-please.outputs.compiler_released == 'true' }}
+        if: ${{ needs.release-please.outputs.compiler_released == 'true' || inputs.recover_npm == true }}
         working-directory: packages/compiler
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -532,7 +532,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish cli to NPM
-        if: ${{ needs.release-please.outputs.cli_released == 'true' }}
+        if: ${{ needs.release-please.outputs.cli_released == 'true' || inputs.recover_npm == true }}
         working-directory: packages/cli
         run: |
           # npm packages cannot contain a local `file:` dependency. The CLI
@@ -573,7 +573,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish testing utilities to NPM
-        if: ${{ needs.release-please.outputs.testing_released == 'true' }}
+        if: ${{ needs.release-please.outputs.testing_released == 'true' || inputs.recover_npm == true }}
         working-directory: packages/testing
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
