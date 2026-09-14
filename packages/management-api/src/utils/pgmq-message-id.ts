@@ -24,7 +24,7 @@ export function readPgmqJson(value: unknown, budget?: PgmqJsonBudget): PgmqJson 
     if (typeof input === "string") chargeString(input);
     if (input === null || typeof input === "string" || typeof input === "boolean") return input;
     if (typeof input === "number" && Number.isFinite(input)) return input;
-    if (typeof input !== "object" || input === null || ancestors.has(input)) throw new Error("Invalid PGMQ JSON message");
+    if (typeof input !== "object" || ancestors.has(input)) throw new Error("Invalid PGMQ JSON message");
     if (!Array.isArray(input) && Object.getPrototypeOf(input) !== Object.prototype
       && Object.getPrototypeOf(input) !== null) throw new Error("Invalid PGMQ JSON object");
     ancestors.add(input);

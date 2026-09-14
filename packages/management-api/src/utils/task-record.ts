@@ -63,7 +63,7 @@ export function copyTaskJson(value: unknown): unknown {
     if (--budget < 0 || depth > 32) throw new InvalidTaskRecordError();
     if (input === null || typeof input === "string" || typeof input === "boolean") return input;
     if (typeof input === "number" && Number.isFinite(input)) return input;
-    if (typeof input !== "object" || input === null || ancestors.has(input)) throw new InvalidTaskRecordError();
+    if (typeof input !== "object" || ancestors.has(input)) throw new InvalidTaskRecordError();
     const prototype: unknown = Object.getPrototypeOf(input);
     if (!Array.isArray(input) && prototype !== Object.prototype && prototype !== null) throw new InvalidTaskRecordError();
     ancestors.add(input);
