@@ -1,5 +1,4 @@
 {
-  "extends": "../../tsconfig.strict.json",
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",

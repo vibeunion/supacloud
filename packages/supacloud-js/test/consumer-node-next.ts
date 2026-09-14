@@ -34,6 +34,7 @@ import {
   type SupaCloudQueueMutationResult,
 } from "@supacloud/js";
 import { createClient } from "@supabase/supabase-js";
+import type { CommandWorkflowStatus } from "@supacloud/contracts";
 
 const options = {
   clientId: "public-client",
@@ -244,7 +245,7 @@ type CommandReadContract = Assert<Equal<
 type CommandSubmitContract = Assert<Equal<
   Awaited<ReturnType<typeof client.commands.submit>>, SupaCloudCommandReceipt
 >>;
-type CommandWorkflowContract = Assert<Equal<SupaCloudCommandReceipt["workflow"], SupaCloudWorkflowRun>>;
+type CommandWorkflowContract = Assert<Equal<SupaCloudCommandReceipt["workflow"], CommandWorkflowStatus | null>>;
 type ArtifactReadContract = Assert<Equal<
   Awaited<ReturnType<typeof client.artifacts.get>>, SupaCloudArtifact | null
 >>;

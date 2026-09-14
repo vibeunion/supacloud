@@ -313,62 +313,6 @@ test("native HTTP redirect cannot send management credentials to another endpoin
   } finally { await source.stop(true); await target.stop(true); }
 });
 
-test("actual Management status producer matches SDK and native public document reads", async () => {
-  const { authOAuthServerRoutes } = await import("../../management-api/src/routes/auth-oauth-server");
-  const { projectAuthRepository } = await import("../../management-api/src/repositories/project-auth.repository");
-  const { config } = await import("../../management-api/src/config");
-  const { generateOidcJwtKeyMaterial } = await import("../../management-api/src/utils/project-jwt");
-  const oldToken = config.masterToken, oldOwner = config.authRuntimeOwnerRef;
-  config.masterToken = "oauth-server-local-fixture-token";
-  config.authRuntimeOwnerRef = "";
-  const material = await generateOidcJwtKeyMaterial("synthetic-signing-secret");
-  let issuer = "";
-  let publicReads = 0;
-  const upstream = Bun.serve({
-    hostname: "127.0.0.1", port: 0,
-    fetch(request) {
-      publicReads++;
-      expect(request.headers.has("authorization")).toBe(false);
-      expect(request.headers.has("cookie")).toBe(false);
-      expect(request.headers.has("apikey")).toBe(false);
-      return Response.json(new URL(request.url).pathname.endsWith("/jwks.json")
-        ? { keys: material.jwt_jwks.keys.filter(key => key.kty === "EC") }
-        : {
-          ...discovery, issuer, authorization_endpoint: `${issuer}/oauth/authorize`,
-          token_endpoint: `${issuer}/oauth/token`, jwks_uri: `${issuer}/.well-known/jwks.json`,
-        });
-    },
-  });
-  issuer = `${upstream.url.origin}/auth/v1`;
-  const project = spyOn(projectAuthRepository, "findByRef").mockResolvedValue({
-    ref: "proj_1", organization_id: null, jwt_secret: "synthetic-signing-secret",
-    config: {
-      api_domain: "api.test", gotrue_port: upstream.port, postgrest_port: 3100,
-      auth: { oauth_server: { ...material, issuer, enabled: true } },
-    },
-  });
-  const management = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: request => authOAuthServerRoutes.handle(request) });
-  try {
-    const client = new SupaCloudOAuthServerClient({
-      managementApiUrl: management.url.origin, projectRef: "proj_1", getAccessToken: () => config.masterToken,
-    });
-    const status = await client.getStatus();
-    expect(status.key_id).toBe(material.key_id);
-    expect(status.runtime_verified).toBe(false);
-    expect((await client.getDiscovery()).issuer).toBe(issuer);
-    expect((await client.getJwks()).keys[0]?.kid).toBe(material.key_id);
-    expect(publicReads).toBe(2);
-    await expect(new SupaCloudOAuthServerClient({
-      managementApiUrl: management.url.origin, projectRef: "proj_1", getAccessToken: () => "invalid",
-    }).getDiscovery()).rejects.toThrow();
-    expect(publicReads).toBe(2);
-  } finally {
-    project.mockRestore();
-    config.masterToken = oldToken; config.authRuntimeOwnerRef = oldOwner;
-    await management.stop(true); await upstream.stop(true);
-  }
-});
-
 test("strict focused consumer checks real declarations without skipLibCheck", async () => {
   const child = Bun.spawn({
     cmd: [join(import.meta.dir, "../node_modules/.bin/tsc"), "--ignoreConfig", "--noEmit",

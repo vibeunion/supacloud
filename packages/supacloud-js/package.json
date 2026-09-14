@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/js",
-  "version": "0.25.0",
+  "version": "0.29.0",
   "description": "Platform SDK for SupaCloud, built on top of supabase-js",
   "type": "module",
   "main": "./dist/index.js",
@@ -20,11 +20,11 @@
   "scripts": {
     "test": "bun test",
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts --outdir dist --target node --external @supabase/supabase-js",
+    "build:js": "bun build src/index.ts --outdir dist --target node --external @supabase/supabase-js --external @supacloud/contracts",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
-    "typecheck:consumer": "bun test ./src/consumer-artifact.test.ts",
+    "typecheck:consumer": "tsc -p tsconfig.consumer.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit"
   },
@@ -43,6 +43,9 @@
   },
   "peerDependencies": {
     "@supabase/supabase-js": "^2.115.0"
+  },
+  "dependencies": {
+    "@supacloud/contracts": "file:../contracts"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",

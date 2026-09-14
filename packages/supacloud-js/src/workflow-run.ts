@@ -91,7 +91,7 @@ function validateStepSuccessors(steps: SupaCloudWorkflowStep[]): void {
   if (roots.length !== 1) return invalid();
   // Walk iteratively so deep histories cannot exhaust the call stack.
   const visited = new Set<string>();
-  let current = roots[0];
+  let current: SupaCloudWorkflowStep | undefined = roots[0];
   while (current) {
     if (visited.has(current.stepKey)) return invalid();
     visited.add(current.stepKey);
