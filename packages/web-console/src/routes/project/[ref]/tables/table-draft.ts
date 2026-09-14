@@ -29,6 +29,7 @@ export function initialTableColumns(): TableColumnDraft[] {
 }
 
 export function tableColumnWithType(column: TableColumnDraft, type: TableColumnType): TableColumnDraft {
-  const identity = type === "integer" || type === "bigint" ? column.identity : false;
-  return { ...column, type, identity };
+  return type === "integer" || type === "bigint"
+    ? { ...column, type }
+    : { ...column, type, identity: false };
 }

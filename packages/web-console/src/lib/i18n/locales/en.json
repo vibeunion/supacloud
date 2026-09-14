@@ -523,6 +523,7 @@
     "create_action": "Create table",
     "create_success": "Table {name} created",
     "create_failed": "Failed to create table",
+    "invalid_form": "Enter a valid table and column definition",
     "estimated_rows": "About {count} rows",
     "public_schema": "Public schema (public)",
     "base_table": "Base table",

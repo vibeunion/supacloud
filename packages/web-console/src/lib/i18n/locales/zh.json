@@ -523,6 +523,7 @@
     "create_action": "创建表",
     "create_success": "数据表 {name} 已创建",
     "create_failed": "创建数据表失败",
+    "invalid_form": "请输入有效的数据表和字段定义",
     "estimated_rows": "约 {count} 行",
     "public_schema": "公共模式（public）",
     "base_table": "基础表",

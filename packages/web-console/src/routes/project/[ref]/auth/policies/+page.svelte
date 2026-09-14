@@ -18,6 +18,13 @@
     qual: string;
   }
 
+  function isRlsPolicy(value: unknown): value is RlsPolicy {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const data = Object.fromEntries(Object.entries(value));
+    return ["policyname", "tablename", "schemaname", "cmd", "roles", "permissive", "qual"]
+      .every((key) => typeof data[key] === "string");
+  }
+
   const POLICY_ACTION_KEYS: Record<string, string> = {
     SELECT: "AuthPolicies.action_select",
     INSERT: "AuthPolicies.action_insert",
@@ -73,7 +80,9 @@
         body: JSON.stringify({ sql: POLICIES_SQL })
       });
       const data = await readDatabaseSqlResponse(res);
-      return data.rows as RlsPolicy[];
+      const rows: RlsPolicy[] = [];
+      for (const row of data.rows) if (isRlsPolicy(row)) rows.push(row);
+      return rows;
     }
   }));
 
