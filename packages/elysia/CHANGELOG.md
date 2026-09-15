@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.14.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.13.0...elysia-v0.14.0) (2026-09-15)
+
+
+### Features
+
+* **architecture:** enforce compile-time application governance ([#1301](https://github.com/vibeunion/supacloud/issues/1301)) ([b2c1df2](https://github.com/vibeunion/supacloud/commit/b2c1df25294d0195ddf313623b965e599847d9f9))
+* **elysia:** add read-only command preview ([#1302](https://github.com/vibeunion/supacloud/issues/1302)) ([995bcd4](https://github.com/vibeunion/supacloud/commit/995bcd43ac3639465eab476deefadd0f37867427))
+* **framework:** complete schema-first route contracts ([#1304](https://github.com/vibeunion/supacloud/issues/1304)) ([4acc3ac](https://github.com/vibeunion/supacloud/commit/4acc3aced2b6e3202705dd87071131af631abad2))
+
 ## [0.13.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.12.0...elysia-v0.13.0) (2026-09-15)
 
 

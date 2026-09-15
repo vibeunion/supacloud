@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.3.1...contracts-v0.4.0) (2026-09-15)
+
+
+### Features
+
+* **elysia:** add read-only command preview ([#1302](https://github.com/vibeunion/supacloud/issues/1302)) ([995bcd4](https://github.com/vibeunion/supacloud/commit/995bcd43ac3639465eab476deefadd0f37867427))
+
 ## [0.3.1](https://github.com/vibeunion/supacloud/compare/contracts-v0.3.0...contracts-v0.3.1) (2026-09-11)
 
 

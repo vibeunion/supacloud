@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/vibeunion/supacloud/compare/commands-v0.3.1...commands-v0.4.0) (2026-09-15)
+
+
+### Features
+
+* **framework:** complete schema-first route contracts ([#1304](https://github.com/vibeunion/supacloud/issues/1304)) ([4acc3ac](https://github.com/vibeunion/supacloud/commit/4acc3aced2b6e3202705dd87071131af631abad2))
+
 ## [0.3.1](https://github.com/vibeunion/supacloud/compare/commands-v0.3.0...commands-v0.3.1) (2026-09-11)
 
 
