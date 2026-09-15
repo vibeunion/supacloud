@@ -5,6 +5,9 @@ import * as browser from "./browser";
 
 test("protocol, client and storage are separate entrypoints", async () => {
   expect(Object.hasOwn(protocol, "CommandError")).toBe(true);
+  expect(Object.hasOwn(protocol, "decodeCommandPreview")).toBe(true);
+  expect(Object.hasOwn(client, "decodeCommandPreview")).toBe(false);
+  expect(Object.hasOwn(browser, "decodeCommandPreview")).toBe(false);
   for (const key of ["createCommandScope", "createAuthenticatedFetch", "createDurableCommandLocks"]) {
     expect(Object.hasOwn(protocol, key)).toBe(false);
   }

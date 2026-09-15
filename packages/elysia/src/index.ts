@@ -1,5 +1,5 @@
 import { Elysia, type TSchema } from "elysia";
-import { CommandError } from "@supacloud/contracts";
+import { CommandError, decodeCommandPreview, type CommandPreview } from "@supacloud/contracts";
 import {
   provideToken,
   runInRequestContext,
@@ -661,6 +661,46 @@ export async function executeCompiledCommand<Input, Result>(options: {
       services: invocation.services, ...(invocation.scope ? { scope: invocation.scope } : {}), metadata: command },
     once(() => options.handler(options.input)))));
   return options.decode(value);
+}
+
+/** Read-only actionability. Accepts the same governance object as execute, but only runs authorize. */
+export async function previewCompiledCommand<Input>(options: {
+  module: Pick<CompiledModule, "name" | "commands">;
+  command: string;
+  input: Input;
+  request: Request;
+  requestContext: unknown;
+  services?: Record<string, unknown>;
+  scope?: Record<string, unknown>;
+  governance: CommandGovernance;
+  preview: (input: Input) => unknown;
+}): Promise<CommandPreview> {
+  const matches = options.module.commands?.filter((item) => item.className === options.command) ?? [];
+  if (matches.length !== 1) throw new ApplicationError("Command descriptor missing or ambiguous", { code: "COMMAND_NOT_REGISTERED" });
+  const command = matches[0];
+  if (!command) throw new Error(`Command not found: ${options.command}`);
+  const invocation: CommandInvocation = {
+    command, input: { body: options.input, params: {}, query: {} },
+    request: options.request, requestContext: options.requestContext,
+    services: options.services ?? {}, ...(options.scope ? { scope: options.scope } : {}),
+  };
+  try {
+    await options.governance.authorize(invocation);
+  } catch (error) {
+    if (error instanceof ApplicationError && (error.status === 401 || error.status === 403)) {
+      return decodeCommandPreview({
+        command: command.name,
+        allowed: false,
+        blockers: [{ code: error.code, message: error.message }],
+      });
+    }
+    throw error;
+  }
+  const preview = decodeCommandPreview(await options.preview(options.input));
+  if (preview.command !== command.name && preview.command !== command.className) {
+    throw new TypeError("Mismatched command identity");
+  }
+  return preview;
 }
 
 function once(next: () => unknown | Promise<unknown>): () => Promise<unknown> {
