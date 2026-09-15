@@ -52,9 +52,13 @@
               "body": "WebhookInputSchema",
               "schemaKinds": {
                 "body": "declared",
+                "headers": "declared",
                 "response": "declared"
               },
-              "response": "WebhookReceiptSchema"
+              "headers": "WebhookHeadersSchema",
+              "responses": {
+                "200": "WebhookReceiptSchema"
+              }
             },
             {
               "method": "GET",
@@ -78,13 +82,16 @@
                 "params": "declared",
                 "response": "declared"
               },
-              "response": "WebhookLookupSchema"
+              "responses": {
+                "200": "WebhookLookupSchema"
+              }
             }
           ],
           "file": "webhook.controller.ts",
           "importPath": "webhook.controller",
           "schemaImports": {
             "WebhookInputSchema": "contracts",
+            "WebhookHeadersSchema": "contracts",
             "WebhookReceiptSchema": "contracts",
             "WebhookKeySchema": "contracts",
             "WebhookLookupSchema": "contracts"

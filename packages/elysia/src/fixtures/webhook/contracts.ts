@@ -4,6 +4,9 @@ import { createSchemaDecoder } from "../../schema_contract";
 export const WebhookInputSchema = t.Object({
   id: t.String({ minLength: 1, maxLength: 200 }), enabled: t.Boolean(),
 }, { additionalProperties: false });
+export const WebhookHeadersSchema = t.Object({
+  "idempotency-key": t.String({ minLength: 1, maxLength: 512 }),
+}, { additionalProperties: false });
 export const decodeWebhookInput = createSchemaDecoder(WebhookInputSchema);
 export const WebhookReceiptSchema = t.Object({
   tenantId: t.String(), actorId: t.String(), command: t.Literal("webhook.update.v1"),

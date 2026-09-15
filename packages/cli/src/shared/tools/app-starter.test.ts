@@ -50,6 +50,7 @@ test("compiler dependencies and demo adapters stay outside the production entry"
     expect(manifest.devDependencies["@supacloud/compiler"]).toMatch(/^\^\d+\.\d+\.\d+/);
     expect(files["src/application.ts"]).not.toContain("@supacloud/compiler");
     expect(files["src/application.ts"]).not.toContain("createMemorySandbox");
+    expect(files["generated/application.ts"]).toContain("Run bun run compile");
     expect(files[".gitignore"]).toContain("!.env.test");
     expect(files[".gitignore"]).not.toContain("generated");
 });

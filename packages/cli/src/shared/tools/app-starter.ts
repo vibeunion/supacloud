@@ -197,6 +197,12 @@ export function createSupAuthApp(identity: SupAuthContextOptions, adapters: Omit
   return createApp({ ...adapters, requestContext: createSupAuthRequestContext(identity) });
 }
 `,
+        "generated/application.ts": `// BOOTSTRAP ARTIFACT: bun run compile replaces this file.
+// Keeping a typed placeholder lets the first compile resolve the application entrypoint.
+export function createCompiledModules(): never {
+  throw new Error("Run bun run compile before starting the application");
+}
+`,
         "src/review/review.ts": `import {
   Body, Command, Controller, DB_CLIENT, Get, Inject, Param, Post,
   defineFeatureSlice, defineFeatureSpec, type Aspect,

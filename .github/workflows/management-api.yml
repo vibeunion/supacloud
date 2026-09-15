@@ -134,9 +134,11 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Prepare app public API dependencies
-        run: |
-          bun run scripts/build-command-dependencies.ts app
-          bun install --cwd packages/app --frozen-lockfile
+        run: bun run scripts/build-command-dependencies.ts app
+
+      - name: Install app public API dependencies
+        working-directory: packages/app
+        run: bun install --frozen-lockfile
 
       - name: Run workspace architecture gates
         run: |
