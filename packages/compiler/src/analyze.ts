@@ -45,6 +45,19 @@ const JOB_TIMEOUT_MAX_SEC = 900;
 const JOB_TASK_MAX_ATTEMPTS = 10;
 const JOB_WORKFLOW_MAX_ATTEMPTS = 100;
 
+const RESPONSE_STATUS_SELECTOR = /^[1-5]\d{2}$/;
+const RESPONSE_STATUS_FAMILY_SELECTOR = /^[1-5](?:xx|XX)$/;
+
+function isRouteResponseSelector(value: string): boolean {
+  return value === "default"
+    || RESPONSE_STATUS_SELECTOR.test(value)
+    || RESPONSE_STATUS_FAMILY_SELECTOR.test(value);
+}
+
+function canonicalRouteResponseSelector(value: string): string {
+  return RESPONSE_STATUS_FAMILY_SELECTOR.test(value) ? value.toUpperCase() : value;
+}
+
 function isScope(value: string): value is Scope {
   return SCOPES.some((scope) => scope === value);
 }
@@ -1677,6 +1690,20 @@ function parseController(
       const optionsArg = args[1];
       const optionsObject = resolveStaticObjectLiteral(optionsArg, ctx);
       if (optionsObject) {
+        const legacyResponseExpr = getProp(optionsObject, "response");
+        const responsesExpr = getProp(optionsObject, "responses");
+        if (legacyResponseExpr !== undefined && responsesExpr !== undefined) {
+          ctx.diagnostics.push({
+            severity: "error",
+            code: "conflicting-route-response-schema",
+            errorCode: "SC3026",
+            docsUrl: "https://supacloud.dev/errors/SC3026",
+            file,
+            line: lineOf(optionsObject),
+            message: `Route ${route.handler} declares both response and responses; choose the status-map responses field.`,
+            suggestion: "Remove response and represent the successful response as responses: { 200: Schema }.",
+          });
+        }
         const contract = getProp(optionsObject, "contract");
         if (contract && ts.isObjectLiteralExpression(contract)) {
           route.contract = {};
@@ -1705,13 +1732,40 @@ function parseController(
             (route.schemaKinds ??= {})[field] = opaque ? "opaque" : "declared";
           }
         }
-        const responsesExpr = getProp(optionsObject, "responses");
         const responsesObject = resolveStaticObjectLiteral(responsesExpr, ctx);
         if (responsesObject) {
           const responses: Record<string, string> = {};
+          const selectors = new Map<string, string>();
           for (const property of responsesObject.properties) {
             if (!ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name)) continue;
             const status = propertyName(property.name);
+            if (!isRouteResponseSelector(status)) {
+              ctx.diagnostics.push({
+                severity: "error",
+                code: "invalid-route-response-selector",
+                errorCode: "SC3025",
+                docsUrl: "https://supacloud.dev/errors/SC3025",
+                file,
+                message: `Route ${route.handler} uses unsupported response selector "${status}". Use an HTTP status (100-599), a status family such as 4XX/5XX, or default.`,
+              });
+              continue;
+            }
+            const canonical = canonicalRouteResponseSelector(status);
+            const existingSelector = selectors.get(canonical);
+            if (existingSelector !== undefined) {
+              ctx.diagnostics.push({
+                severity: "error",
+                code: "duplicate-route-response-selector",
+                errorCode: "SC3027",
+                docsUrl: "https://supacloud.dev/errors/SC3027",
+                file,
+                line: lineOf(property.name),
+                message: `Route ${route.handler} declares duplicate response selectors "${existingSelector}" and "${status}".`,
+                suggestion: `Keep one ${canonical} selector so runtime, clients and OpenAPI choose the same schema.`,
+              });
+              continue;
+            }
+            selectors.set(canonical, status);
             const schemaExpr = property.initializer;
             if (!ts.isIdentifier(schemaExpr)) {
               ctx.diagnostics.push({
@@ -1722,7 +1776,7 @@ function parseController(
               });
               continue;
             }
-            responses[status] = schemaExpr.text;
+            responses[canonical] = schemaExpr.text;
             const importPath = importPathOf(schemaExpr, ctx);
             if (importPath) schemaImports[schemaExpr.text] = importPath;
             const declaration = resolveDeclaration(schemaExpr, ctx)[0];

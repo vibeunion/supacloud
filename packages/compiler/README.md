@@ -288,8 +288,10 @@ export default defineSupacloudConfig({
 `unknown`，不会从 TypeScript 类型推断出未经验证的运行时协议。
 
 `client.ts` 提供路由方法、路径参数检查、请求类型和 `API_ROUTES`。已声明
-响应 schema 的方法需要调用方提供 `ResponseDecoder<T>` 才能得到业务类型；
-不传 decoder 时仍可读取原始 `unknown`，因此生成客户端不会伪造响应安全性。
+响应 schema 的方法不传 decoder 也会按 HTTP status 自动选择并校验内置 schema；
+传入 `ResponseDecoder<T>` 时，decoder 接收已经通过 schema 校验/规范化的值，
+可安全做日期、金额等业务转换。没有响应 schema 的方法仍返回原始 `unknown`，
+除非调用方显式提供 decoder。
 
 `openapi.ts` 导出 `OPENAPI_DOCUMENT`、`OPENAPI_JSON` 和
 `createOpenApiDocument()`。它包含 OpenAPI 3.1 路径、参数、请求体、响应、

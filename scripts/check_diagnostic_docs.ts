@@ -167,6 +167,12 @@ list() {}`,
 create() {}`,
   SC3024: `@Get("/items", { responses: { 200: Type.Object({ id: Type.String() }) } })
 list() {}`,
+  SC3025: `@Get("/items", { responses: { fallback: ItemResponse } })
+list() {}`,
+  SC3026: `@Get("/items", { response: ItemResponse, responses: { 200: ItemResponse } })
+list() {}`,
+  SC3027: `@Get("/items", { responses: { "4XX": ItemResponse, "4xx": ItemResponse } })
+list() {}`,
   SC5001: `@Injectable({ providedIn: "root" })
 class UnusedService {}`,
   SC6001: `// generated/application.ts

@@ -146,6 +146,7 @@ export type {
   RouteHandlerInput,
   RouteHandlerOutput,
   RouteResponseMap,
+  ResponseMapSelector,
 } from "./route_contract";
 export { defineFeatureSlice, defineFeatureSpec, defineModule } from "./module";
 export type {

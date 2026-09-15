@@ -1,16 +1,21 @@
 import { CommandError, canonicalCommandJson, decodeDurableCommandReceipt, type CommandIdentity } from "@supacloud/contracts";
 import { checkAuthorization, commandContext, type PersistentCommandDefinition, type RecoveryPrincipal } from "./context";
-import type { OperationReference } from "./store";
+import type { CommandStore, OperationReference } from "./store";
 
 export interface ExternalDispatch { idempotencyKey: string }
-export function createExternalCommand<Input, Result, Transaction>(
-  definition: PersistentCommandDefinition<Input, Result, Transaction> & {
+type TransactionOf<Store extends CommandStore<unknown>> = Store extends CommandStore<infer Transaction> ? Transaction : never;
+type ExternalCommandDefinition<Input, Result, Store extends CommandStore<unknown>> =
+  Omit<PersistentCommandDefinition<Input, Result, TransactionOf<Store>>, "store"> & {
+    store: Store;
     send(input: Input, dispatch: ExternalDispatch): Promise<unknown>;
     lookup(input: Input, dispatch: ExternalDispatch): Promise<unknown>;
     matches(input: Input, result: Result): boolean;
-  },
+  };
+
+export function createExternalCommand<Input, Result, Store extends CommandStore<unknown>>(
+  definition: ExternalCommandDefinition<Input, Result, Store>,
 ) {
-  const context = commandContext(definition);
+  const context = commandContext(definition as PersistentCommandDefinition<Input, Result, TransactionOf<Store>>);
   const read = async (identity: CommandIdentity, key: string, value: unknown, principal?: RecoveryPrincipal) => {
     const request = await context.prepare(identity, key, value);
     return context.transaction(async (session) => {

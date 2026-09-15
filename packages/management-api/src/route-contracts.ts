@@ -60,7 +60,42 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isStatusCode(value: string): boolean {
-  return value === "default" || /^[1-5][0-9]{2}$/.test(value);
+  return value === "default"
+    || /^[1-5][0-9]{2}$/.test(value)
+    || /^[1-5](?:xx|XX)$/.test(value);
+}
+
+/** Top-level keywords that identify a JSON Schema rather than a response map. */
+const JSON_SCHEMA_KEYS = new Set([
+  "$schema", "$id", "$ref", "$defs", "definitions", "type", "title", "description",
+  "default", "enum", "const", "examples", "properties", "patternProperties", "required",
+  "additionalProperties", "items", "prefixItems", "contains", "allOf", "anyOf", "oneOf",
+  "not", "if", "then", "else", "unevaluatedProperties", "format", "pattern", "minLength",
+  "maxLength", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+  "minItems", "maxItems", "uniqueItems", "minProperties", "maxProperties", "contentEncoding",
+  "contentMediaType", "deprecated", "readOnly", "writeOnly",
+]);
+
+function isJsonSchemaObject(value: unknown): boolean {
+  return isRecord(value) && Object.keys(value).some((key) => JSON_SCHEMA_KEYS.has(key));
+}
+
+/** Status-shaped keys include invalid numeric selectors so malformed maps fail closed. */
+function isStatusSelectorShape(value: string): boolean {
+  return value === "default"
+    || /^\d{3}$/.test(value)
+    || /^[1-5](?:xx|XX)$/.test(value);
+}
+
+function invalidResponseSelector(selector: string): never {
+  throw new TypeError(
+    `Unsupported response selector "${selector}". Use an HTTP status (100-599), `
+      + "a status family such as 4XX/5XX, or default.",
+  );
+}
+
+function canonicalStatusSelector(value: string): string {
+  return /^[1-5](?:xx|XX)$/.test(value) ? value.toUpperCase() : value;
 }
 
 /** Elysia stores both single response schemas and status-code maps in `response`. */
@@ -72,7 +107,29 @@ function isResponseMap(value: unknown): value is Record<string, unknown> {
 
 function normalizeResponses(response: unknown): Readonly<Record<string, unknown>> | undefined {
   if (response === undefined) return undefined;
-  if (isResponseMap(response)) return Object.freeze({ ...response });
+  if (isResponseMap(response)) {
+    const normalized: Record<string, unknown> = {};
+    const originalSelectors = new Map<string, string>();
+    for (const [selector, schema] of Object.entries(response)) {
+      const canonical = canonicalStatusSelector(selector);
+      const existing = originalSelectors.get(canonical);
+      if (existing !== undefined) {
+        throw new TypeError(
+          `Duplicate response selectors "${existing}" and "${selector}" resolve to "${canonical}".`,
+        );
+      }
+      originalSelectors.set(canonical, selector);
+      normalized[canonical] = schema;
+    }
+    return Object.freeze(normalized);
+  }
+  if (isRecord(response) && !isJsonSchemaObject(response)) {
+    const entries = Object.entries(response);
+    if (entries.some(([key]) => isStatusSelectorShape(key))) {
+      const invalid = entries.find(([key]) => !isStatusCode(key));
+      if (invalid) invalidResponseSelector(invalid[0]);
+    }
+  }
   return Object.freeze({ "200": response });
 }
 

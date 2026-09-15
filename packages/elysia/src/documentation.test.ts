@@ -2,6 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { createApplication, type CompiledModule } from "./index";
 import { testRequest } from "./testing";
 
+interface GeneratedOpenApiDocument {
+  openapi: "3.1.0";
+  info: { title: string; version: string };
+  paths: object;
+}
+
 const emptyModule: CompiledModule = {
   name: "empty",
   createServices: () => ({}),
@@ -11,15 +17,16 @@ const emptyModule: CompiledModule = {
 
 describe("application documentation", () => {
   test("serves opt-in OpenAPI and GraphQL documentation", async () => {
+    const generatedDocument: GeneratedOpenApiDocument = {
+      openapi: "3.1.0",
+      info: { title: "Orders", version: "1.0.0" },
+      paths: {},
+    };
     const app = createApplication({
       modules: [emptyModule],
       documentation: {
         openApi: {
-          document: {
-            openapi: "3.1.0",
-            info: { title: "Orders", version: "1.0.0" },
-            paths: {},
-          },
+          document: generatedDocument,
         },
         graphql: {
           schema: "type Query { health: String! }",

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { analyzeProject } from "./analyze";
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
-import { writeFixtureProject } from "./fixtures/helpers";
+import { requireValue, writeFixtureProject } from "./fixtures/helpers";
 import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./fixtures/runtime-source";
 import type { ApplicationGraph, ModuleNode } from "./types";
 
@@ -54,19 +54,19 @@ describe("analyzeProject：provider 解析", () => {
       "AUDIT_SERVICE",
     ]);
 
-    const config = audit.providers[0];
+    const config = requireValue(audit.providers[0]);
     expect(config.kind).toBe("value");
     expect(config.tokenKind).toBe("injection-token");
     expect(config.useValueExpr).toBe('{ level: "info" }');
     expect(config.scope).toBe("application");
 
-    const logger = audit.providers[1];
+    const logger = requireValue(audit.providers[1]);
     expect(logger.kind).toBe("factory");
     expect(logger.useFactoryName).toBe("createLogger");
     expect(logger.importPath).toBe("src/features/audit/logger");
     expect(logger.deps).toEqual(["AUDIT_CONFIG"]);
 
-    const service = audit.providers[2];
+    const service = requireValue(audit.providers[2]);
     expect(service.kind).toBe("class");
     expect(service.useClass).toBe("AuditService");
     expect(service.importPath).toBe("src/features/audit/audit.service");
@@ -83,16 +83,16 @@ describe("analyzeProject：provider 解析", () => {
       "AcceptCaseCommand",
     ]);
 
-    const repository = caseModule.providers[0];
+    const repository = requireValue(caseModule.providers[0]);
     expect(repository.kind).toBe("class");
     expect(repository.useClass).toBe("DrizzleCaseRepository");
     expect(repository.deps).toEqual(["DB_CLIENT"]);
 
-    const service = caseModule.providers[1];
+    const service = requireValue(caseModule.providers[1]);
     expect(service.tokenKind).toBe("class");
     expect(service.deps).toEqual(["CASE_REPOSITORY", "AUDIT_SERVICE"]);
 
-    const alias = caseModule.providers[2];
+    const alias = requireValue(caseModule.providers[2]);
     expect(alias.kind).toBe("existing");
     expect(alias.useExisting).toBe("CaseService");
     expect(alias.deps).toEqual(["CaseService"]);
@@ -100,7 +100,7 @@ describe("analyzeProject：provider 解析", () => {
 
   test("exports 标记到 provider.exported", () => {
     const health = moduleByName("health");
-    expect(health.providers[0].exported).toBe(true);
+    expect(requireValue(health.providers[0]).exported).toBe(true);
     expect(moduleByName("case").providers.every((p) => !p.exported)).toBe(true);
   });
 });
@@ -109,7 +109,7 @@ describe("analyzeProject：controller 与路由", () => {
   test("controller 默认 request scope，deps 含 REQUEST_CONTEXT", () => {
     const caseModule = moduleByName("case");
     expect(caseModule.controllers).toHaveLength(1);
-    const controller = caseModule.controllers[0];
+    const controller = requireValue(caseModule.controllers[0]);
     expect(controller.className).toBe("CaseController");
     expect(controller.path).toBe("/cases");
     expect(controller.scope).toBe("request");
@@ -118,7 +118,7 @@ describe("analyzeProject：controller 与路由", () => {
   });
 
   test("路由收集方法装饰器与 schema 符号及其 import 路径", () => {
-    const controller = moduleByName("case").controllers[0];
+    const controller = requireValue(moduleByName("case").controllers[0]);
     expect(controller.routes).toHaveLength(1);
     expect(controller.routes[0]).toEqual({
       method: "POST",
@@ -159,7 +159,7 @@ export class StatusModule {}
 `,
     });
 
-    const status = (await analyzeProject(root)).modules[0];
+    const status = requireValue((await analyzeProject(root)).modules[0]);
     expect(status.controllers[0]?.routes.map((route) => route.method)).toEqual(["HEAD", "OPTIONS"]);
   });
 });
@@ -214,14 +214,12 @@ describe("analyzeProject：command 与 externalTokens", () => {
       name: "auditAspect",
       expression: "auditAspect",
       importPath: "src/aspects",
-      importModule: undefined,
     }]);
     expect(analyzed.modules[0]?.commands[0]?.aspects).toEqual([{
       file: "src/aspects.ts",
       name: "auditAspect",
       expression: "auditAspect",
       importPath: "src/aspects",
-      importModule: undefined,
     }]);
 
     await writeFixtureProject(root, {
@@ -329,6 +327,74 @@ describe("analyzeProject：command 与 externalTokens", () => {
     });
   });
 
+  test("分析 Job contract 与 adapter policy，并拒绝动态或越界配置", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-job-contract-options-"));
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
+      "src/contracts.ts": `
+        export const JobInput = { type: "object", properties: { caseId: { type: "string" } } };
+        export const JobOutput = { type: "object", properties: { accepted: { type: "boolean" } } };
+        export function makeSchema() { return JobInput; }
+      `,
+      "src/jobs.module.ts": `
+        import { Job, Module } from "./runtime";
+        import { JobInput, JobOutput, makeSchema } from "./contracts";
+
+        @Job({
+          name: "case.accept",
+          input: JobInput,
+          output: JobOutput,
+          mode: "workflow",
+          timeoutSec: 120,
+          maxAttempts: 7,
+          idempotency: "required",
+        })
+        export class AcceptJob { run(input: unknown) { return input; } }
+
+        @Job({
+          name: "case.invalid",
+          input: makeSchema(),
+          mode: "other",
+          timeoutSec: 0,
+          maxAttempts: 101,
+          idempotency: "maybe",
+        })
+        export class InvalidJob { run(input: unknown) { return input; } }
+
+        @Module({ name: "jobs", jobs: [AcceptJob, InvalidJob] })
+        export class JobsModule {}
+      `,
+    });
+
+    const analyzed = await analyzeProject(root);
+    expect(analyzed.modules[0]?.jobs?.[0]).toEqual({
+      className: "AcceptJob",
+      name: "case.accept",
+      serviceKey: "acceptJob",
+      scope: "job",
+      input: "JobInput",
+      output: "JobOutput",
+      schemaKinds: { input: "declared", output: "declared" },
+      schemaImports: {
+        JobInput: "src/contracts",
+        JobOutput: "src/contracts",
+      },
+      mode: "workflow",
+      timeoutSec: 120,
+      maxAttempts: 7,
+      idempotency: "required",
+    });
+
+    expect(analyzed.diagnostics?.filter((diagnostic) => diagnostic.errorCode).map((diagnostic) => diagnostic.errorCode)).toEqual([
+      "SC4018",
+      "SC4015",
+      "SC4016",
+      "SC4017",
+      "SC4019",
+    ]);
+  });
+
   test("analyzes property-level inject() dependencies", async () => {
     const root = await mkdtemp(join(tmpdir(), "supacloud-inject-prop-"));
     await writeFixtureProject(root, {
@@ -357,7 +423,6 @@ describe("analyzeProject：command 与 externalTokens", () => {
         token: "CONFIG",
         expression: "CONFIG",
         importPath: "src/test.service",
-        importModule: undefined,
         optional: false,
         self: false,
         skipSelf: false,
@@ -367,7 +432,6 @@ describe("analyzeProject：command 与 externalTokens", () => {
         token: "CACHE",
         expression: "CACHE",
         importPath: "src/test.service",
-        importModule: undefined,
         optional: true,
         self: false,
         skipSelf: false,
@@ -410,10 +474,10 @@ describe("analyzeProject：command 与 externalTokens", () => {
 
     const ctrl = rootMod?.controllers.find((c) => c.className === "ItemsController");
     expect(ctrl).toBeDefined();
-    expect(ctrl?.routes[0].canMatch).toEqual(["FeatureMatchGuard"]);
-    expect(ctrl?.routes[0].paramTransforms).toEqual({ id: "number" });
-    expect(ctrl?.routes[0].queryTransforms).toEqual({ limit: "number" });
-    expect(ctrl?.routes[0].queryDefaults).toEqual({ limit: 20 });
+    expect(requireValue(ctrl?.routes[0]).canMatch).toEqual(["FeatureMatchGuard"]);
+    expect(requireValue(ctrl?.routes[0]).paramTransforms).toEqual({ id: "number" });
+    expect(requireValue(ctrl?.routes[0]).queryTransforms).toEqual({ limit: "number" });
+    expect(requireValue(ctrl?.routes[0]).queryDefaults).toEqual({ limit: 20 });
   });
 
   test("unwraps forwardRef in @Inject, useClass, and provider tokens", async () => {
@@ -486,10 +550,10 @@ describe("analyzeProject：command 与 externalTokens", () => {
     const rootMod = analyzed.modules.find((m) => m.name === "root");
     const ctrl = rootMod?.controllers.find((c) => c.className === "DocsController");
     expect(ctrl).toBeDefined();
-    expect(ctrl?.routes[0].title).toBe("Documentation Overview");
-    expect(ctrl?.routes[0].data).toEqual({ auth: false, version: 2 });
-    expect(ctrl?.routes[1].title).toBe("Advanced Guides");
-    expect(ctrl?.routes[1].data).toEqual({ auth: true, tier: "pro" });
+    expect(requireValue(ctrl?.routes[0]).title).toBe("Documentation Overview");
+    expect(requireValue(ctrl?.routes[0]).data).toEqual({ auth: false, version: 2 });
+    expect(requireValue(ctrl?.routes[1]).title).toBe("Advanced Guides");
+    expect(requireValue(ctrl?.routes[1]).data).toEqual({ auth: true, tier: "pro" });
   });
 
   test("analyzes property-level inject with self, skipSelf, and host flags", async () => {
@@ -542,8 +606,8 @@ describe("analyzeProject：command 与 externalTokens", () => {
     const rootMod = analyzed.modules.find((m) => m.name === "root");
     const ctrl = rootMod?.controllers.find((c) => c.className === "OrdersController");
     expect(ctrl).toBeDefined();
-    expect(ctrl?.routes[0].canDeactivate).toEqual(["PendingPaymentGuard"]);
-    expect(ctrl?.routes[1].canDeactivate).toEqual(["UnsavedChangesGuard"]);
+    expect(requireValue(ctrl?.routes[0]).canDeactivate).toEqual(["PendingPaymentGuard"]);
+    expect(requireValue(ctrl?.routes[1]).canDeactivate).toEqual(["UnsavedChangesGuard"]);
   });
 
   test("synthesizes root factory provider with importPath for tree-shakable InjectionToken", async () => {
@@ -631,7 +695,7 @@ export function provideEnvironmentInitializer(initializer: unknown) { return ini
     const rootMod = analyzed.modules.find((m) => m.name === "root");
     const ctrl = rootMod?.controllers.find((c) => c.className === "AccountsController");
     expect(ctrl).toBeDefined();
-    expect(ctrl?.routes[0].resolvers).toEqual({
+    expect(requireValue(ctrl?.routes[0]).resolvers).toEqual({
       user: "UserResolver",
       org: "OrgResolver",
     });

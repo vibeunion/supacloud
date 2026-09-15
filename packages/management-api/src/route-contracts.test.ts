@@ -38,6 +38,42 @@ test("normalizes a single response schema to a 200 response map", () => {
   expect(Object.isFrozen(contract?.schemas.responses)).toBe(true);
 });
 
+test("preserves status-family and default response selectors from Elysia", () => {
+  const client = t.Object({ code: t.String() });
+  const server = t.Object({ code: t.String() });
+  const fallback = t.Object({ code: t.String() });
+  const app = new Elysia().get("/selector", () => ({ code: "ok" }), {
+    response: { 404: client, "4XX": client, "5xx": server, default: fallback },
+  });
+
+  const [contract] = collectManagementRouteContracts(app);
+  expect(contract?.schemas.responses).toEqual({
+    "404": client,
+    "4XX": client,
+    "5XX": server,
+    default: fallback,
+  });
+  expect(contract?.schemas.response).toBeDefined();
+});
+
+test("rejects mixed valid and invalid response selectors instead of wrapping the map as a 200 schema", () => {
+  const app = new Elysia().get("/invalid-selector", () => "ok", {
+    response: { 200: t.String(), invalid: t.String() },
+  });
+
+  expect(() => collectManagementRouteContracts(app)).toThrow(
+    'Unsupported response selector "invalid"',
+  );
+});
+
+test("keeps a JSON Schema with a default keyword as a single response schema", () => {
+  const response = { type: "string", default: "ok" };
+  const app = new Elysia().get("/default-value", () => "ok", { response });
+
+  const [contract] = collectManagementRouteContracts(app);
+  expect(contract?.schemas.responses).toEqual({ 200: response });
+});
+
 test("documented projection excludes hidden, websocket, wildcard, and ALL routes", () => {
   const app = new Elysia()
     .get("/visible/:id", () => ({ ok: true }), { response: t.Object({ ok: t.Boolean() }) })

@@ -1,5 +1,14 @@
 import type { StaticDecode, TSchema } from "@sinclair/typebox";
 
+type StatusFamily = 1 | 2 | 3 | 4 | 5;
+
+/** Response selectors shared by route decorators, Elysia and generated tooling. */
+export type ResponseMapSelector =
+  | number
+  | `${number}`
+  | "default"
+  | `${StatusFamily}${"xx" | "XX"}`;
+
 /** The schema fields understood by every SupaCloud HTTP route. */
 export interface RouteContractSchemas {
   body?: unknown | undefined;
@@ -9,7 +18,7 @@ export interface RouteContractSchemas {
   cookie?: unknown | undefined;
   /** @deprecated Use `responses` with an explicit HTTP status map. */
   response?: unknown | undefined;
-  responses?: Readonly<Record<string | number, unknown>> | undefined;
+  responses?: Readonly<Partial<Record<ResponseMapSelector, unknown>>> | undefined;
 }
 
 type DecodeSchema<Schema> = Schema extends TSchema ? StaticDecode<Schema> : unknown;

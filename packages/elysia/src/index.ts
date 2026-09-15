@@ -1,4 +1,4 @@
-import { Elysia, type TSchema } from "elysia";
+import { Elysia, type StatusMap, type TSchema } from "elysia";
 import { CommandError, decodeCommandPreview, type CommandPreview } from "@supacloud/contracts";
 import {
   provideToken,
@@ -8,7 +8,13 @@ import {
 import { REQUEST_CONTEXT } from "@supacloud/app";
 import { commandErrorStatus } from "./command-errors";
 import { executionTrace, observeExecution, type ExecutionObserver } from "./execution";
-import { createSchemaDecoder, toElysiaRouteSchema } from "./schema_contract";
+import {
+  createSchemaDecoder,
+  responseSchemaForStatus,
+  responseStatusDeclared,
+  responseStatusOf,
+  toElysiaRouteSchema,
+} from "./schema_contract";
 import {
   createDocumentationPlugin,
   type ApplicationDocumentationOptions,
@@ -17,10 +23,14 @@ import {
 export type { ExecutionEvent, ExecutionObserver } from "./execution";
 export {
   createSchemaDecoder,
+  assertResponseStatusDeclared,
   defineElysiaRoute,
   defineJsonContract,
   defineRouteContract,
   registerElysiaRoute,
+  responseSchemaForStatus,
+  responseStatusDeclared,
+  responseStatusOf,
   SchemaContractError,
   toElysiaRouteSchema,
 } from "./schema_contract";
@@ -29,6 +39,7 @@ export type {
   ElysiaRouteDefinition,
   ElysiaRouteHandler,
   ElysiaRouteSchema,
+  ResponseMapSelector,
   RouteContractSchemas,
   SchemaDecoderOptions,
   SchemaNormalizeMode,
@@ -757,6 +768,9 @@ interface HttpContext {
   headers?: Record<string, unknown>;
   cookie?: Record<string, unknown>;
   request: Request;
+  set: {
+    status?: number | keyof StatusMap;
+  };
   scope?: Record<string, unknown>;
   requestContext?: unknown;
 }
@@ -774,6 +788,24 @@ function cookieValues(value: unknown): Record<string, unknown> | undefined {
     result[name] = isRecord(entry) && "value" in entry ? entry.value : entry;
   }
   return result;
+}
+
+function assertDeclaredResponseStatus(
+  route: CompiledRoute,
+  value: unknown,
+  configuredStatus: number | string | undefined,
+): void {
+  if (route.responses === undefined) return;
+  const status = responseStatusOf(value, configuredStatus);
+  if (responseStatusDeclared(route.responses, status)) return;
+  // Binary/stream routes may intentionally declare only JSON error responses.
+  // Their successful transport is validated by bytes/headers at the host boundary.
+  const transport = route.contract?.response;
+  if ((transport === "binary" || transport === "stream") && status >= 200 && status < 300) return;
+  throw new ApplicationError(
+    "Response validation failed",
+    { status: 500, code: "RESPONSE_CONTRACT_UNDECLARED" },
+  );
 }
 
 /**
@@ -966,9 +998,11 @@ export function createModulePlugin(
             invokeRoute,
           );
         };
-        return options.injector
-          ? runInRequestContext(options.injector, [provideToken(REQUEST_CONTEXT, requestContext)], execute)
-          : execute();
+        const result = options.injector
+          ? await runInRequestContext(options.injector, [provideToken(REQUEST_CONTEXT, requestContext)], execute)
+          : await execute();
+        assertDeclaredResponseStatus(route, result, ctx.set.status);
+        return result;
       };
 
       switch (route.method) {
