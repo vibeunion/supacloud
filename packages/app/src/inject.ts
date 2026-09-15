@@ -173,6 +173,7 @@ export interface EnvironmentInjector extends InjectorLike {
   get<T>(token: Token<T>, options: InjectFlags | undefined): T | undefined;
   get<T>(token: Token<T>, notFoundValue: T, options?: InjectFlags): T;
   runInContext<R>(fn: () => R): R;
+  /** Await startup readiness; a failed initialization cannot be retried. */
   initialize(): Promise<void>;
   destroy(): void;
   destroyAsync(): Promise<void>;
@@ -319,10 +320,7 @@ export function createEnvironmentInjector(
         await runInitializers(adapter, APP_INITIALIZER);
         await runLifecycleInitializers(adapter);
         initialized = true;
-      })().catch((error) => {
-        initializationPromise = null;
-        throw error;
-      });
+      })();
       return initializationPromise;
     },
     destroy(): void {
@@ -333,7 +331,11 @@ export function createEnvironmentInjector(
     },
   };
 
-  if (options.initialize !== false) void adapter.initialize().catch(() => undefined);
+  if (options.initialize !== false) {
+    void adapter.initialize().catch((error: unknown) => {
+      console.error("EnvironmentInjector initialization failed", error);
+    });
+  }
   return adapter;
 
   function startDestroy(): Promise<void> {
@@ -377,7 +379,7 @@ async function runInitializers(
   injector: EnvironmentInjector,
   token: Token<() => void | Promise<void>>,
 ): Promise<void> {
-  const initializers = injector.get(token, { optional: true }) as unknown;
+  const initializers = injector.get(token, { optional: true, self: true }) as unknown;
   if (!Array.isArray(initializers)) return;
   for (const initializer of initializers) {
     if (typeof initializer === "function") {
@@ -387,7 +389,7 @@ async function runInitializers(
 }
 
 async function runLifecycleInitializers(injector: EnvironmentInjector): Promise<void> {
-  const lifecycles = injector.get(APP_LIFECYCLE, { optional: true });
+  const lifecycles = injector.get(APP_LIFECYCLE, { optional: true, self: true });
   if (!Array.isArray(lifecycles)) return;
   for (const lifecycle of lifecycles) {
     if (isLifecycleHooks(lifecycle) && lifecycle.onInit) {
