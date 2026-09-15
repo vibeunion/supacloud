@@ -1,0 +1,1457 @@
+{
+  "format": 2,
+  "package": "@supacloud/app",
+  "entrypoint": ".",
+  "exports": [
+    {
+      "name": "AbstractControl",
+      "kind": "both",
+      "signature": "export declare abstract class AbstractControl<TValue = any> {\n    private _value;\n    protected _status: FormControlStatus;\n    protected _errors: ValidationErrors | null;\n    private _pristine;\n    private _touched;\n    private _parent;\n    private _validationRun;\n    protected _validator: ValidatorFn | null;\n    protected _asyncValidator: AsyncValidatorFn | null;\n    constructor(validatorOrOpts?: ValidatorFn | ValidatorFn[] | AbstractControlOptions | null, asyncValidator?: AsyncValidatorFn | AsyncValidatorFn[] | null);\n    get value(): TValue;\n    protected setRawValue(val: TValue): void;\n    get status(): FormControlStatus;\n    get valid(): boolean;\n    get invalid(): boolean;\n    get pending(): boolean;\n    get disabled(): boolean;\n    get enabled(): boolean;\n    get errors(): ValidationErrors | null;\n    get pristine(): boolean;\n    get dirty(): boolean;\n    get touched(): boolean;\n    get untouched(): boolean;\n    get parent(): FormGroup | FormArray | null;\n    setParent(parent: FormGroup | FormArray | null): void;\n    markAsTouched(): void;\n    markAsUntouched(): void;\n    markAsDirty(): void;\n    markAsPristine(): void;\n    disable(): void;\n    enable(): void;\n    setErrors(errors: ValidationErrors | null): void;\n    protected cancelPendingValidation(): void;\n    hasError(errorCode: string, path?: string | (string | number)[]): boolean;\n    getError(errorCode: string, path?: string | (string | number)[]): unknown;\n    abstract setValue(value: any): void;\n    abstract patchValue(value: any): void;\n    abstract reset(value?: any): void;\n    get(_path: string | (string | number)[]): AbstractControl | null;\n    updateValueAndValidity(): void;\n}"
+    },
+    {
+      "name": "AbstractControlOptions",
+      "kind": "type",
+      "signature": "export interface AbstractControlOptions {\n    validators?: ValidatorFn | ValidatorFn[] | null;\n    asyncValidators?: AsyncValidatorFn | AsyncValidatorFn[] | null;\n}"
+    },
+    {
+      "name": "APP_BASE_HREF",
+      "kind": "value",
+      "signature": "export declare const APP_BASE_HREF: any;"
+    },
+    {
+      "name": "APP_INITIALIZER",
+      "kind": "value",
+      "signature": "export declare const APP_INITIALIZER: any;"
+    },
+    {
+      "name": "APP_LIFECYCLE",
+      "kind": "value",
+      "signature": "export declare const APP_LIFECYCLE: any;"
+    },
+    {
+      "name": "Aspect",
+      "kind": "type",
+      "signature": "export type Aspect<TResult = unknown> = (context: AspectContext, next: AspectNext<TResult>) => TResult | Promise<TResult>;"
+    },
+    {
+      "name": "AspectContext",
+      "kind": "type",
+      "signature": "export interface AspectContext {\n    kind: AspectKind;\n    name: string;\n    input: unknown;\n    request?: Request;\n    requestContext?: unknown;\n    scope?: Record<string, unknown>;\n    services?: Record<string, unknown>;\n    metadata?: unknown;\n}"
+    },
+    {
+      "name": "AspectKind",
+      "kind": "type",
+      "signature": "export type AspectKind = \"route\" | \"command\" | \"job\";"
+    },
+    {
+      "name": "AspectNext",
+      "kind": "type",
+      "signature": "export type AspectNext<TResult = unknown> = () => TResult | Promise<TResult>;"
+    },
+    {
+      "name": "assertInInjectionContext",
+      "kind": "value",
+      "signature": "export declare function assertInInjectionContext(fnName: string): void;"
+    },
+    {
+      "name": "AsyncValidatorFn",
+      "kind": "type",
+      "signature": "export type AsyncValidatorFn = (control: AbstractControl) => Promise<ValidationErrors | null>;"
+    },
+    {
+      "name": "Body",
+      "kind": "value",
+      "signature": "export declare function Body(): ParameterDecorator;"
+    },
+    {
+      "name": "booleanAttribute",
+      "kind": "value",
+      "signature": "export declare function booleanAttribute(value: unknown): boolean;"
+    },
+    {
+      "name": "bootstrapBun",
+      "kind": "value",
+      "signature": "export declare function bootstrapBun(options: BunBootstrapOptions): Promise<BunApplication>;"
+    },
+    {
+      "name": "BunApplication",
+      "kind": "type",
+      "signature": "export interface BunApplication {\n    readonly injector: EnvironmentInjector;\n    readonly server?: BunServerLike;\n    stop(): Promise<void>;\n}"
+    },
+    {
+      "name": "BunBootstrapOptions",
+      "kind": "type",
+      "signature": "export interface BunBootstrapOptions {\n    providers: Array<Provider | EnvironmentProviders>;\n    parent?: InjectorLike;\n    name?: string;\n    serve?: (injector: EnvironmentInjector) => BunServerLike | Promise<BunServerLike>;\n    installSignalHandlers?: boolean;\n}"
+    },
+    {
+      "name": "BunServerLike",
+      "kind": "type",
+      "signature": "export interface BunServerLike {\n    stop(closeActiveConnections?: boolean): void | Promise<void>;\n}"
+    },
+    {
+      "name": "CAN_DEACTIVATE_METADATA",
+      "kind": "value",
+      "signature": "export declare const CAN_DEACTIVATE_METADATA = \"supacloud:guards:can-deactivate\";"
+    },
+    {
+      "name": "CanActivateFn",
+      "kind": "type",
+      "signature": "export type CanActivateFn<TContext = import(\"./route_pipeline\").RoutePipelineContext> = (ctx: TContext) => GuardResult | Promise<GuardResult>;"
+    },
+    {
+      "name": "CanDeactivate",
+      "kind": "value",
+      "signature": "export declare function CanDeactivate(...guards: Array<CanDeactivateFn | string>): MethodDecorator;"
+    },
+    {
+      "name": "CanDeactivateFn",
+      "kind": "type",
+      "signature": "export type CanDeactivateFn<T = unknown, TContext = import(\"./route_pipeline\").RoutePipelineContext> = {\n    bivarianceHack(component: T, ctx: TContext): boolean | Promise<boolean>;\n}[\"bivarianceHack\"];"
+    },
+    {
+      "name": "CanMatchFn",
+      "kind": "type",
+      "signature": "export type CanMatchFn<TContext = import(\"./route_pipeline\").RoutePipelineContext> = (ctx: TContext) => GuardResult | Promise<GuardResult>;"
+    },
+    {
+      "name": "ClassProvider",
+      "kind": "type",
+      "signature": "export interface ClassProvider<T = unknown> extends BaseProvider {\n    provide: Token<T>;\n    useClass: Type<T> | ForwardRefFn<Type<T>>;\n    deps?: ProviderDep[];\n}"
+    },
+    {
+      "name": "Command",
+      "kind": "value",
+      "signature": "export declare function Command(options: CommandOptions): ClassDecorator;"
+    },
+    {
+      "name": "COMMAND_METADATA",
+      "kind": "value",
+      "signature": "export declare const COMMAND_METADATA = \"supacloud:command\";"
+    },
+    {
+      "name": "CommandAspect",
+      "kind": "type",
+      "signature": "export type CommandAspect = Aspect;"
+    },
+    {
+      "name": "CommandContract",
+      "kind": "type",
+      "signature": "export interface CommandContract<Input, Result> {\n    input: ContractDecoder<Input>;\n    result: ContractDecoder<Result>;\n}"
+    },
+    {
+      "name": "CommandMeta",
+      "kind": "type",
+      "signature": "export type CommandMeta = Omit<CommandOptions, \"transaction\" | \"idempotency\"> & {\n    transaction: \"required\" | \"none\";\n    idempotency: \"required\" | \"none\";\n    standalone?: boolean;\n};"
+    },
+    {
+      "name": "CommandOptions",
+      "kind": "type",
+      "signature": "export interface CommandOptions {\n    name: string;\n    rpc?: string;\n    permission: string;\n    transaction?: \"required\" | \"none\";\n    audit?: string;\n    idempotency?: \"required\" | \"none\";\n    standalone?: boolean;\n    aspects?: Aspect[];\n}"
+    },
+    {
+      "name": "CommandOutcome",
+      "kind": "type",
+      "signature": "export type CommandOutcome<Result> = {\n    status: \"confirmed\";\n    result: Result;\n    source: \"response\" | \"lookup\";\n} | {\n    status: \"unknown\";\n};"
+    },
+    {
+      "name": "computed",
+      "kind": "value",
+      "signature": "export declare function computed<T>(computation: () => T): Signal<T>;"
+    },
+    {
+      "name": "ConfigIssue",
+      "kind": "type",
+      "signature": "export interface ConfigIssue {\n    readonly path: string;\n    readonly message: string;\n}"
+    },
+    {
+      "name": "ConfigValidationError",
+      "kind": "both",
+      "signature": "export declare class ConfigValidationError extends Error {\n    readonly issues: readonly ConfigIssue[];\n    constructor(name: string, issues: readonly ConfigIssue[]);\n}"
+    },
+    {
+      "name": "ContractDecoder",
+      "kind": "type",
+      "signature": "export type ContractDecoder<T> = (value: unknown) => T;"
+    },
+    {
+      "name": "Controller",
+      "kind": "value",
+      "signature": "export declare function Controller(pathOrOptions?: string | ControllerOptions): ClassDecorator;"
+    },
+    {
+      "name": "CONTROLLER_METADATA",
+      "kind": "value",
+      "signature": "export declare const CONTROLLER_METADATA = \"supacloud:controller\";"
+    },
+    {
+      "name": "ControllerMeta",
+      "kind": "type",
+      "signature": "export interface ControllerMeta {\n    path: string;\n    standalone?: boolean;\n}"
+    },
+    {
+      "name": "ControllerOptions",
+      "kind": "type",
+      "signature": "export interface ControllerOptions {\n    path?: string;\n    standalone?: boolean;\n}"
+    },
+    {
+      "name": "Cookie",
+      "kind": "value",
+      "signature": "export declare function Cookie(name?: string): ParameterDecorator;"
+    },
+    {
+      "name": "createBearerAuthInterceptor",
+      "kind": "value",
+      "signature": "export declare function createBearerAuthInterceptor(tokenOrGetter: string | (() => string | Promise<string>)): HttpInterceptorFn;"
+    },
+    {
+      "name": "createChildInjector",
+      "kind": "value",
+      "signature": "export declare function createChildInjector(parent: InjectorLike, localProviders?: Map<Token<unknown> | string, unknown> | Record<string, unknown>): InjectorLike & {\n    readonly parent: InjectorLike;\n};"
+    },
+    {
+      "name": "createContractCommandClient",
+      "kind": "value",
+      "signature": "export declare function createContractCommandClient<Input, Result>(contract: CommandContract<Input, Result>, transport: {\n    send(input: Input): Promise<unknown>;\n    lookup?(input: Input): Promise<unknown>;\n    matches(input: Input, result: Result): boolean;\n    isDefinitiveFailure?(error: unknown): boolean;\n}): (value: Input) => Promise<CommandOutcome<Result>>;"
+    },
+    {
+      "name": "createDestroyRef",
+      "kind": "value",
+      "signature": "export declare function createDestroyRef(): DestroyRef & {\n    readonly destroyed: boolean;\n    readonly signal: AbortSignal;\n    destroy(): Promise<void>;\n    _teardowns: Array<() => void | Promise<void>>;\n};"
+    },
+    {
+      "name": "createEnvironmentInjector",
+      "kind": "value",
+      "signature": "export declare function createEnvironmentInjector(providers: Array<Provider | EnvironmentProviders>, parent?: InjectorLike, options?: EnvironmentInjectorOptions): EnvironmentInjector;"
+    },
+    {
+      "name": "createHeaderInterceptor",
+      "kind": "value",
+      "signature": "export declare function createHeaderInterceptor(headers: Record<string, string> | (() => Record<string, string> | Promise<Record<string, string>>)): HttpInterceptorFn;"
+    },
+    {
+      "name": "createRetryInterceptor",
+      "kind": "value",
+      "signature": "export declare function createRetryInterceptor(maxRetries: number, delayMs?: number): HttpInterceptorFn;"
+    },
+    {
+      "name": "createTimeoutInterceptor",
+      "kind": "value",
+      "signature": "export declare function createTimeoutInterceptor(timeoutMs: number): HttpInterceptorFn;"
+    },
+    {
+      "name": "Data",
+      "kind": "value",
+      "signature": "export declare function Data(data: Record<string, unknown>): MethodDecorator;"
+    },
+    {
+      "name": "DatePipe",
+      "kind": "both",
+      "signature": "export declare class DatePipe implements PipeTransform<Date | string | number | null | undefined, string> {\n    transform(value: Date | string | number | null | undefined, format?: \"iso\" | \"locale\"): string;\n}"
+    },
+    {
+      "name": "DB_CLIENT",
+      "kind": "value",
+      "signature": "export declare const DB_CLIENT: any;"
+    },
+    {
+      "name": "decodeConfig",
+      "kind": "value",
+      "signature": "export declare function decodeConfig<T extends TSchema>(schema: T, value: unknown, name?: string): Static<T>;"
+    },
+    {
+      "name": "decodeHttpContract",
+      "kind": "value",
+      "signature": "export declare function decodeHttpContract<T>(decode: ContractDecoder<T>, value: unknown, boundary: \"request\" | \"response\"): T;"
+    },
+    {
+      "name": "DEFAULT_SCOPE",
+      "kind": "value",
+      "signature": "export declare const DEFAULT_SCOPE: Scope;"
+    },
+    {
+      "name": "DefaultTitleStrategy",
+      "kind": "both",
+      "signature": "export declare class DefaultTitleStrategy extends TitleStrategy {\n    updateTitle(title: string | undefined, ctx?: RoutePipelineContext): void;\n}"
+    },
+    {
+      "name": "DefaultUrlSerializer",
+      "kind": "both",
+      "signature": "export declare class DefaultUrlSerializer implements UrlSerializer {\n    parse(url: string): UrlTree;\n    serialize(tree: UrlTree): string;\n}"
+    },
+    {
+      "name": "defineFeatureSlice",
+      "kind": "value",
+      "signature": "export declare function defineFeatureSlice(options: FeatureSliceOptions): Type<unknown>;"
+    },
+    {
+      "name": "defineFeatureSpec",
+      "kind": "value",
+      "signature": "export declare function defineFeatureSpec<const T extends FeatureSpecOptions>(options: T & {\n    transitions: Readonly<Record<string, FeatureTransitionOptions<NoInfer<T[\"states\"][number]>>>>;\n}): T;"
+    },
+    {
+      "name": "defineModule",
+      "kind": "value",
+      "signature": "export declare function defineModule(options: ModuleOptions): Type<unknown>;"
+    },
+    {
+      "name": "defineRouteContract",
+      "kind": "value",
+      "signature": "export declare function defineRouteContract<const Schemas extends RouteContractSchemas>(schemas: Schemas): Readonly<Schemas>;"
+    },
+    {
+      "name": "defineRouteHandler",
+      "kind": "value",
+      "signature": "export declare function defineRouteHandler<const Schemas extends RouteContractSchemas>(contract: Schemas, handler: RouteHandler<NoInfer<Schemas>>): RouteHandler<Schemas>;"
+    },
+    {
+      "name": "defineTypedRoute",
+      "kind": "value",
+      "signature": "export declare function defineTypedRoute<const Schemas extends RouteContractSchemas>(contract: Schemas, handler: RouteHandler<NoInfer<Schemas>>): RouteHandlerBinding<Schemas>;"
+    },
+    {
+      "name": "Delete",
+      "kind": "value",
+      "signature": "export declare const Delete: any;"
+    },
+    {
+      "name": "DESTROY_REF",
+      "kind": "value",
+      "signature": "export declare const DESTROY_REF: any;"
+    },
+    {
+      "name": "DestroyRef",
+      "kind": "type",
+      "signature": "export interface DestroyRef {\n    readonly signal?: AbortSignal;\n    onDestroy(callback: () => void | Promise<void>): () => void;\n}"
+    },
+    {
+      "name": "detectPlatform",
+      "kind": "value",
+      "signature": "export declare function detectPlatform(): PlatformId;"
+    },
+    {
+      "name": "DOCUMENT",
+      "kind": "value",
+      "signature": "export declare const DOCUMENT: any;"
+    },
+    {
+      "name": "effect",
+      "kind": "value",
+      "signature": "export declare function effect(effectFn: () => void | (() => void)): () => void;"
+    },
+    {
+      "name": "ENVIRONMENT_INITIALIZER",
+      "kind": "value",
+      "signature": "export declare const ENVIRONMENT_INITIALIZER: any;"
+    },
+    {
+      "name": "EnvironmentInjector",
+      "kind": "type",
+      "signature": "export interface EnvironmentInjector extends InjectorLike {\n    get<T>(token: Token<T>, options?: InjectFlags & {\n        optional?: false;\n    }): T;\n    get<T>(token: Token<T>, options: InjectFlags | undefined): T | undefined;\n    get<T>(token: Token<T>, notFoundValue: T, options?: InjectFlags): T;\n    runInContext<R>(fn: () => R): R;\n    initialize(): Promise<void>;\n    destroy(): void;\n    destroyAsync(): Promise<void>;\n    readonly initialized: boolean;\n    readonly destroyed: boolean;\n    readonly parent?: InjectorLike;\n}"
+    },
+    {
+      "name": "EnvironmentInjectorOptions",
+      "kind": "type",
+      "signature": "export interface EnvironmentInjectorOptions {\n    initialize?: boolean;\n    name?: string;\n}"
+    },
+    {
+      "name": "EnvironmentProviders",
+      "kind": "type",
+      "signature": "export interface EnvironmentProviders {\n    readonly providers: Array<Provider | EnvironmentProviders>;\n}"
+    },
+    {
+      "name": "executeResolvers",
+      "kind": "value",
+      "signature": "export declare function executeResolvers<TContext = import(\"./route_pipeline\").RoutePipelineContext>(resolvers: Record<string, ResolveFn<unknown, TContext> | string>, ctx: TContext): Promise<Record<string, unknown>>;"
+    },
+    {
+      "name": "executeRoutePipeline",
+      "kind": "value",
+      "signature": "export declare function executeRoutePipeline<T = unknown>(route: RoutePipelineDefinition, ctx: RoutePipelineContext, componentInstance?: any, options?: RoutePipelineOptions): Promise<RoutePipelineResult<T>>;"
+    },
+    {
+      "name": "ExistingProvider",
+      "kind": "type",
+      "signature": "export interface ExistingProvider<T = unknown> extends BaseProvider {\n    provide: Token<T>;\n    useExisting: Token<T>;\n}"
+    },
+    {
+      "name": "FactoryProvider",
+      "kind": "type",
+      "signature": "export interface FactoryProvider<T = unknown> extends BaseProvider {\n    provide: Token<T>;\n    useFactory: (...deps: any[]) => T;\n    deps?: ProviderDep[];\n}"
+    },
+    {
+      "name": "FeatureEvent",
+      "kind": "type",
+      "signature": "export type FeatureEvent<Spec extends FeatureSpecOptions> = keyof Spec[\"transitions\"] & string;"
+    },
+    {
+      "name": "FeatureSliceOptions",
+      "kind": "type",
+      "signature": "export interface FeatureSliceOptions extends ModuleOptions {\n    spec?: FeatureSpecOptions;\n}"
+    },
+    {
+      "name": "FeatureSpecOptions",
+      "kind": "type",
+      "signature": "export interface FeatureSpecOptions {\n    name: string;\n    states: readonly string[];\n    transitions: Readonly<Record<string, FeatureTransitionOptions>>;\n}"
+    },
+    {
+      "name": "FeatureState",
+      "kind": "type",
+      "signature": "export type FeatureState<Spec extends FeatureSpecOptions> = Spec[\"states\"][number];"
+    },
+    {
+      "name": "FeatureTransitionOptions",
+      "kind": "type",
+      "signature": "export interface FeatureTransitionOptions<State extends string = string> {\n    from: State;\n    to: State;\n    permission?: string;\n    command?: string;\n    route?: string;\n    transaction?: \"required\" | \"none\";\n    idempotency?: \"required\" | \"none\";\n    audit?: string;\n}"
+    },
+    {
+      "name": "flattenProviders",
+      "kind": "value",
+      "signature": "export declare function flattenProviders(providers: Array<Provider | EnvironmentProviders>): Provider[];"
+    },
+    {
+      "name": "FormArray",
+      "kind": "both",
+      "signature": "export declare class FormArray<TControl extends AbstractControl = AbstractControl> extends AbstractControl<Array<TControl[\"value\"]>> {\n    readonly controls: TControl[];\n    constructor(controls?: TControl[], validatorOrOpts?: ValidatorFn | ValidatorFn[] | AbstractControlOptions | null, asyncValidator?: AsyncValidatorFn | AsyncValidatorFn[] | null);\n    get length(): number;\n    at(index: number): TControl | null;\n    push(control: TControl): void;\n    insert(index: number, control: TControl): void;\n    removeAt(index: number): void;\n    clear(): void;\n    get value(): Array<TControl[\"value\"]>;\n    setValue(value: any): void;\n    patchValue(value: any): void;\n    reset(): void;\n    updateValueAndValidity(): void;\n}"
+    },
+    {
+      "name": "FormControl",
+      "kind": "both",
+      "signature": "export declare class FormControl<T = any> extends AbstractControl<T> {\n    constructor(formState?: T | {\n        value: T;\n        disabled?: boolean;\n    }, validatorOrOpts?: ValidatorFn | ValidatorFn[] | AbstractControlOptions | null, asyncValidator?: AsyncValidatorFn | AsyncValidatorFn[] | null);\n    setValue(value: any): void;\n    patchValue(value: any): void;\n    reset(formState?: any): void;\n}"
+    },
+    {
+      "name": "FormControlStatus",
+      "kind": "type",
+      "signature": "export type FormControlStatus = \"VALID\" | \"INVALID\" | \"PENDING\" | \"DISABLED\";"
+    },
+    {
+      "name": "FormGroup",
+      "kind": "both",
+      "signature": "export declare class FormGroup<TControls extends Record<string, AbstractControl> = Record<string, AbstractControl>> extends AbstractControl<{\n    [K in keyof TControls]: TControls[K][\"value\"];\n}> {\n    readonly controls: TControls;\n    constructor(controls: TControls, validatorOrOpts?: ValidatorFn | ValidatorFn[] | AbstractControlOptions | null, asyncValidator?: AsyncValidatorFn | AsyncValidatorFn[] | null);\n    get value(): {\n        [K in keyof TControls]: TControls[K][\"value\"];\n    };\n    get(path: string | (string | number)[]): AbstractControl | null;\n    addControl(name: string, control: AbstractControl): void;\n    removeControl(name: string): void;\n    setControl(name: string, control: AbstractControl): void;\n    contains(name: string): boolean;\n    setValue(value: any): void;\n    patchValue(value: any): void;\n    reset(): void;\n    updateValueAndValidity(): void;\n}"
+    },
+    {
+      "name": "forwardRef",
+      "kind": "value",
+      "signature": "export declare function forwardRef<T>(fn: () => T): ForwardRefFn<T>;"
+    },
+    {
+      "name": "ForwardRefFn",
+      "kind": "type",
+      "signature": "export interface ForwardRefFn<T = unknown> {\n    (): T;\n    __forward_ref__?: typeof forwardRef;\n}"
+    },
+    {
+      "name": "Get",
+      "kind": "value",
+      "signature": "export declare const Get: any;"
+    },
+    {
+      "name": "getActiveInjector",
+      "kind": "value",
+      "signature": "export declare function getActiveInjector(): InjectorLike | null;"
+    },
+    {
+      "name": "getCommandMeta",
+      "kind": "value",
+      "signature": "export declare function getCommandMeta(target: object): CommandMeta | undefined;"
+    },
+    {
+      "name": "getControllerMeta",
+      "kind": "value",
+      "signature": "export declare function getControllerMeta(target: object): ControllerMeta | undefined;"
+    },
+    {
+      "name": "getGuards",
+      "kind": "value",
+      "signature": "export declare function getGuards(target: object, propertyKey?: string | symbol): Array<CanActivateFn | string>;"
+    },
+    {
+      "name": "getHostParams",
+      "kind": "value",
+      "signature": "export declare function getHostParams(target: object): number[];"
+    },
+    {
+      "name": "getInjectableMeta",
+      "kind": "value",
+      "signature": "export declare function getInjectableMeta(target: object): InjectableMeta | undefined;"
+    },
+    {
+      "name": "getInjectParams",
+      "kind": "value",
+      "signature": "export declare function getInjectParams(target: object): Record<number, Token>;"
+    },
+    {
+      "name": "getJobMeta",
+      "kind": "value",
+      "signature": "export declare function getJobMeta<TInputSchema extends TSchema = TSchema, TOutputSchema extends TSchema = TSchema>(target: object): JobMeta<TInputSchema, TOutputSchema> | undefined;"
+    },
+    {
+      "name": "getModuleMeta",
+      "kind": "value",
+      "signature": "export declare function getModuleMeta(target: object): ModuleMeta | undefined;"
+    },
+    {
+      "name": "getOptionalParams",
+      "kind": "value",
+      "signature": "export declare function getOptionalParams(target: object): number[];"
+    },
+    {
+      "name": "getPipeMetadata",
+      "kind": "value",
+      "signature": "export declare function getPipeMetadata(target: any): PipeMetadata | undefined;"
+    },
+    {
+      "name": "getQueryMeta",
+      "kind": "value",
+      "signature": "export declare function getQueryMeta(target: object): QueryMeta | undefined;"
+    },
+    {
+      "name": "getRouteParams",
+      "kind": "value",
+      "signature": "export declare function getRouteParams(target: object, propertyKey: string | symbol): RouteParamBinding[];"
+    },
+    {
+      "name": "getRoutes",
+      "kind": "value",
+      "signature": "export declare function getRoutes(target: object): RouteDefinition[];"
+    },
+    {
+      "name": "getSelfParams",
+      "kind": "value",
+      "signature": "export declare function getSelfParams(target: object): number[];"
+    },
+    {
+      "name": "getSkipSelfParams",
+      "kind": "value",
+      "signature": "export declare function getSkipSelfParams(target: object): number[];"
+    },
+    {
+      "name": "GuardResult",
+      "kind": "type",
+      "signature": "export type GuardResult = boolean | import(\"./route_pipeline\").RedirectCommand;"
+    },
+    {
+      "name": "GUARDS_METADATA",
+      "kind": "value",
+      "signature": "export declare const GUARDS_METADATA = \"supacloud:guards\";"
+    },
+    {
+      "name": "Head",
+      "kind": "value",
+      "signature": "export declare const Head: any;"
+    },
+    {
+      "name": "Headers",
+      "kind": "value",
+      "signature": "export declare function Headers(name?: string): ParameterDecorator;"
+    },
+    {
+      "name": "Host",
+      "kind": "value",
+      "signature": "export declare function Host(): ParameterDecorator;"
+    },
+    {
+      "name": "HOST_PARAMS_METADATA",
+      "kind": "value",
+      "signature": "export declare const HOST_PARAMS_METADATA = \"supacloud:host-params\";"
+    },
+    {
+      "name": "HTTP_CLIENT_CONFIG",
+      "kind": "value",
+      "signature": "export declare const HTTP_CLIENT_CONFIG: any;"
+    },
+    {
+      "name": "HTTP_INTERCEPTORS",
+      "kind": "value",
+      "signature": "export declare const HTTP_INTERCEPTORS: any;"
+    },
+    {
+      "name": "HttpClient",
+      "kind": "both",
+      "signature": "export declare class HttpClient extends HttpClientCore {\n    constructor(config?: HttpClientConfig, interceptors?: HttpInterceptorFn[]);\n}"
+    },
+    {
+      "name": "HttpClientConfig",
+      "kind": "type",
+      "signature": "export interface HttpClientConfig {\n    baseUrl?: string;\n    fetch?: typeof fetch;\n}"
+    },
+    {
+      "name": "HttpClientFeature",
+      "kind": "type",
+      "signature": "export interface HttpClientFeature {\n    kind: HttpClientFeatureKind;\n    providers: Provider[];\n}"
+    },
+    {
+      "name": "HttpClientFeatureKind",
+      "kind": "type",
+      "signature": "export type HttpClientFeatureKind = \"Fetch\" | \"Interceptors\" | \"ParentRequests\";"
+    },
+    {
+      "name": "HttpContext",
+      "kind": "both",
+      "signature": "export declare class HttpContext {\n    private readonly map;\n    set<T>(token: HttpContextToken<T>, value: T): this;\n    get<T>(token: HttpContextToken<T>): T;\n    delete(token: HttpContextToken<unknown>): this;\n    has(token: HttpContextToken<unknown>): boolean;\n    keys(): IterableIterator<HttpContextToken<unknown>>;\n}"
+    },
+    {
+      "name": "HttpContextToken",
+      "kind": "both",
+      "signature": "export declare class HttpContextToken<T> {\n    readonly defaultValue: () => T;\n    constructor(defaultValue: () => T);\n}"
+    },
+    {
+      "name": "HttpContract",
+      "kind": "type",
+      "signature": "export interface HttpContract<Input, Result> {\n    input: ContractDecoder<Input>;\n    result: ContractDecoder<Result>;\n    request: (input: Input) => {\n        method: \"GET\" | \"POST\" | \"PUT\" | \"PATCH\" | \"DELETE\";\n        url: string;\n        body?: unknown;\n    };\n}"
+    },
+    {
+      "name": "HttpContractError",
+      "kind": "both",
+      "signature": "export declare class HttpContractError extends Error {\n    readonly boundary: \"request\" | \"response\";\n    readonly code = \"HTTP_CONTRACT_INVALID\";\n    constructor(boundary: \"request\" | \"response\");\n}"
+    },
+    {
+      "name": "HttpErrorResponse",
+      "kind": "both",
+      "signature": "export declare class HttpErrorResponse extends Error {\n    readonly status: number;\n    readonly statusText: string;\n    readonly url: string | null;\n    readonly error: unknown;\n    constructor(init: {\n        error?: unknown;\n        status?: number;\n        statusText?: string;\n        url?: string;\n    });\n}"
+    },
+    {
+      "name": "HttpHeaders",
+      "kind": "both",
+      "signature": "export declare class HttpHeaders {\n    private readonly headersMap;\n    private readonly originalNames;\n    constructor(headers?: Record<string, string | string[]> | HttpHeaders);\n    private clone;\n    has(name: string): boolean;\n    get(name: string): string | null;\n    getAll(name: string): string[] | null;\n    keys(): string[];\n    set(name: string, value: string | string[]): HttpHeaders;\n    append(name: string, value: string | string[]): HttpHeaders;\n    delete(name: string): HttpHeaders;\n    toObject(): Record<string, string>;\n}"
+    },
+    {
+      "name": "HttpInterceptorFn",
+      "kind": "type",
+      "signature": "export type HttpInterceptorFn = (req: HttpRequestPayload, next: (req: HttpRequestPayload) => Promise<Response>) => Promise<Response>;"
+    },
+    {
+      "name": "HttpMethod",
+      "kind": "type",
+      "signature": "export type HttpMethod = \"GET\" | \"POST\" | \"PUT\" | \"PATCH\" | \"DELETE\" | \"HEAD\" | \"OPTIONS\";"
+    },
+    {
+      "name": "HttpParams",
+      "kind": "both",
+      "signature": "export declare class HttpParams {\n    private readonly map;\n    constructor(options?: HttpParamsOptions);\n    private clone;\n    has(param: string): boolean;\n    get(param: string): string | null;\n    getAll(param: string): string[] | null;\n    keys(): string[];\n    set(param: string, value: string | number | boolean): HttpParams;\n    append(param: string, value: string | number | boolean): HttpParams;\n    delete(param: string, value?: string | number | boolean): HttpParams;\n    toString(): string;\n}"
+    },
+    {
+      "name": "HttpParamsOptions",
+      "kind": "type",
+      "signature": "export interface HttpParamsOptions {\n    fromString?: string;\n    fromObject?: Record<string, string | number | boolean | ReadonlyArray<string | number | boolean>>;\n}"
+    },
+    {
+      "name": "HttpReplayError",
+      "kind": "both",
+      "signature": "export declare class HttpReplayError extends Error {\n    readonly code = \"HTTP_REPLAY_BLOCKED\";\n    constructor();\n}"
+    },
+    {
+      "name": "HttpReplayPolicy",
+      "kind": "type",
+      "signature": "export type HttpReplayPolicy = {\n    mode: \"never\";\n} | {\n    mode: \"idempotent\";\n    idempotencyKey: string;\n};"
+    },
+    {
+      "name": "HttpRequestOptions",
+      "kind": "type",
+      "signature": "export interface HttpRequestOptions {\n    headers?: HttpHeaders | Record<string, string | string[]>;\n    params?: HttpParams | Record<string, string | number | boolean | ReadonlyArray<string | number | boolean>>;\n    body?: unknown;\n    context?: HttpContext;\n    observe?: \"body\" | \"response\";\n    responseType?: \"json\" | \"text\" | \"blob\";\n    signal?: AbortSignal;\n    replay?: HttpReplayPolicy;\n}"
+    },
+    {
+      "name": "HttpRequestPayload",
+      "kind": "type",
+      "signature": "export interface HttpRequestPayload {\n    method: string;\n    url: string;\n    headers: Record<string, string>;\n    body?: unknown;\n    context?: HttpContext;\n    replay?: HttpReplayPolicy;\n    signal?: AbortSignal;\n}"
+    },
+    {
+      "name": "inject",
+      "kind": "value",
+      "signature": "export declare function inject<T>(token: Token<T>, options: InjectFlags | undefined): T | undefined;\nexport declare function inject<T>(token: Token<T>, options?: InjectFlags & {\n    optional?: false;\n}): T;\nexport declare function inject<T>(token: Token<T>, options?: InjectFlags): T | undefined;"
+    },
+    {
+      "name": "Inject",
+      "kind": "value",
+      "signature": "export declare function Inject(token: Token): ParameterDecorator;"
+    },
+    {
+      "name": "INJECT_PARAMS_METADATA",
+      "kind": "value",
+      "signature": "export declare const INJECT_PARAMS_METADATA = \"supacloud:inject-params\";"
+    },
+    {
+      "name": "Injectable",
+      "kind": "value",
+      "signature": "export declare function Injectable(options?: InjectableOptions): ClassDecorator;"
+    },
+    {
+      "name": "INJECTABLE_METADATA",
+      "kind": "value",
+      "signature": "export declare const INJECTABLE_METADATA = \"supacloud:injectable\";"
+    },
+    {
+      "name": "InjectableMeta",
+      "kind": "type",
+      "signature": "export interface InjectableMeta {\n    scope: Scope;\n    providedIn?: \"root\";\n    deps: ProviderDep[];\n}"
+    },
+    {
+      "name": "InjectableOptions",
+      "kind": "type",
+      "signature": "export interface InjectableOptions {\n    scope?: Scope;\n    providedIn?: \"root\";\n    deps?: ProviderDep[];\n}"
+    },
+    {
+      "name": "injectAll",
+      "kind": "value",
+      "signature": "export declare function injectAll<T>(token: Token<T>): T[];"
+    },
+    {
+      "name": "injectDestroySignal",
+      "kind": "value",
+      "signature": "export declare function injectDestroySignal(): AbortSignal;"
+    },
+    {
+      "name": "InjectFlags",
+      "kind": "type",
+      "signature": "export type InjectFlags = InjectOptions;"
+    },
+    {
+      "name": "InjectionToken",
+      "kind": "both",
+      "signature": "export declare class InjectionToken<T> extends AngularInjectionToken<T> {\n    readonly name: string;\n    readonly factory?: () => T;\n    readonly providedIn?: \"root\";\n    readonly scope?: Scope;\n    constructor(name: string, options?: InjectionTokenOptions<T>);\n    toString(): string;\n}"
+    },
+    {
+      "name": "InjectionTokenOptions",
+      "kind": "type",
+      "signature": "export interface InjectionTokenOptions<T> {\n    factory?: () => T;\n    providedIn?: \"root\";\n    scope?: Scope;\n}"
+    },
+    {
+      "name": "INJECTOR",
+      "kind": "value",
+      "signature": "export declare const INJECTOR: any;"
+    },
+    {
+      "name": "InjectorLike",
+      "kind": "type",
+      "signature": "export interface InjectorLike {\n    get<T>(token: Token<T>, options?: InjectFlags): T | undefined;\n    get<T>(token: Token<T>, notFoundValue: T, options?: InjectFlags): T;\n    readonly parent?: InjectorLike;\n}"
+    },
+    {
+      "name": "isClassProvider",
+      "kind": "value",
+      "signature": "export declare function isClassProvider<T>(provider: Provider<T>): provider is ClassProvider<T>;"
+    },
+    {
+      "name": "isEnvironmentProviders",
+      "kind": "value",
+      "signature": "export declare function isEnvironmentProviders(value: unknown): value is EnvironmentProviders;"
+    },
+    {
+      "name": "isExistingProvider",
+      "kind": "value",
+      "signature": "export declare function isExistingProvider<T>(provider: Provider<T>): provider is ExistingProvider<T>;"
+    },
+    {
+      "name": "isFactoryProvider",
+      "kind": "value",
+      "signature": "export declare function isFactoryProvider<T>(provider: Provider<T>): provider is FactoryProvider<T>;"
+    },
+    {
+      "name": "isForwardRef",
+      "kind": "value",
+      "signature": "export declare function isForwardRef(fn: unknown): fn is ForwardRefFn;"
+    },
+    {
+      "name": "isPlatformBrowser",
+      "kind": "value",
+      "signature": "export declare function isPlatformBrowser(platformId: unknown): boolean;"
+    },
+    {
+      "name": "isPlatformEdge",
+      "kind": "value",
+      "signature": "export declare function isPlatformEdge(platformId: unknown): boolean;"
+    },
+    {
+      "name": "isPlatformServer",
+      "kind": "value",
+      "signature": "export declare function isPlatformServer(platformId: unknown): boolean;"
+    },
+    {
+      "name": "isRedirectCommand",
+      "kind": "value",
+      "signature": "export declare function isRedirectCommand(val: unknown): val is RedirectCommand;"
+    },
+    {
+      "name": "isScopeViolation",
+      "kind": "value",
+      "signature": "export declare function isScopeViolation(from: Scope, to: Scope): boolean;"
+    },
+    {
+      "name": "isValueProvider",
+      "kind": "value",
+      "signature": "export declare function isValueProvider<T>(provider: Provider<T>): provider is ValueProvider<T>;"
+    },
+    {
+      "name": "Job",
+      "kind": "value",
+      "signature": "export declare function Job<TInputSchema extends TSchema = TSchema, TOutputSchema extends TSchema = TSchema>(options: JobOptions<TInputSchema, TOutputSchema>): ClassDecorator;"
+    },
+    {
+      "name": "JOB_CONTEXT",
+      "kind": "value",
+      "signature": "export declare const JOB_CONTEXT: any;"
+    },
+    {
+      "name": "JOB_METADATA",
+      "kind": "value",
+      "signature": "export declare const JOB_METADATA = \"supacloud:job\";"
+    },
+    {
+      "name": "JobAspect",
+      "kind": "type",
+      "signature": "export type JobAspect = Aspect;"
+    },
+    {
+      "name": "JobHandler",
+      "kind": "type",
+      "signature": "export interface JobHandler<TInput = unknown, TOutput = unknown> {\n    run(input: TInput): TOutput | Promise<TOutput>;\n}"
+    },
+    {
+      "name": "JobIdempotency",
+      "kind": "type",
+      "signature": "export type JobIdempotency = \"required\" | \"none\";"
+    },
+    {
+      "name": "JobInput",
+      "kind": "type",
+      "signature": "export type JobInput<Schema extends TSchema | undefined> = Schema extends TSchema ? StaticDecode<Schema> : unknown;"
+    },
+    {
+      "name": "JobMeta",
+      "kind": "type",
+      "signature": "export type JobMeta<TInputSchema extends TSchema = TSchema, TOutputSchema extends TSchema = TSchema> = JobOptions<TInputSchema, TOutputSchema>;"
+    },
+    {
+      "name": "JobMode",
+      "kind": "type",
+      "signature": "export type JobMode = \"task\" | \"workflow\";"
+    },
+    {
+      "name": "JobOptions",
+      "kind": "type",
+      "signature": "export interface JobOptions<TInputSchema extends TSchema = TSchema, TOutputSchema extends TSchema = TSchema> {\n    name: string;\n    input?: TInputSchema;\n    output?: TOutputSchema;\n    mode?: JobMode;\n    timeoutSec?: number;\n    maxAttempts?: number;\n    idempotency?: JobIdempotency;\n    aspects?: Aspect[];\n}"
+    },
+    {
+      "name": "JobOutput",
+      "kind": "type",
+      "signature": "export type JobOutput<Schema extends TSchema | undefined> = Schema extends TSchema ? StaticDecode<Schema> : unknown;"
+    },
+    {
+      "name": "joinWithSlash",
+      "kind": "value",
+      "signature": "export declare function joinWithSlash(start: string, end: string): string;"
+    },
+    {
+      "name": "JsonPipe",
+      "kind": "both",
+      "signature": "export declare class JsonPipe implements PipeTransform<unknown, string> {\n    transform(value: unknown, space?: number): string;\n}"
+    },
+    {
+      "name": "LifecycleHooks",
+      "kind": "type",
+      "signature": "export type LifecycleHooks = Partial<OnInit & OnDestroy>;"
+    },
+    {
+      "name": "linkedSignal",
+      "kind": "value",
+      "signature": "export declare function linkedSignal<D>(computation: () => D, options?: {\n    equal?: (a: D, b: D) => boolean;\n}): WritableSignal<D>;\nexport declare function linkedSignal<S, D = S>(options: LinkedSignalOptions<S, D>): WritableSignal<D>;\nexport declare function linkedSignal<S, D>(computationOrOptions: (() => D) | LinkedSignalOptions<S, D>, shorthandOptions?: {\n    equal?: (a: D, b: D) => boolean;\n}): WritableSignal<D>;"
+    },
+    {
+      "name": "LinkedSignalOptions",
+      "kind": "type",
+      "signature": "export interface LinkedSignalOptions<S, D> {\n    source: () => S;\n    computation: (source: S, previous?: {\n        source: S;\n        value: D;\n    }) => D;\n    equal?: (a: D, b: D) => boolean;\n}"
+    },
+    {
+      "name": "LowerCasePipe",
+      "kind": "both",
+      "signature": "export declare class LowerCasePipe implements PipeTransform<string | null | undefined, string> {\n    transform(value: string | null | undefined): string;\n}"
+    },
+    {
+      "name": "makeEnvironmentProviders",
+      "kind": "value",
+      "signature": "export declare function makeEnvironmentProviders(providers: Array<Provider | EnvironmentProviders>): EnvironmentProviders;"
+    },
+    {
+      "name": "makeStateKey",
+      "kind": "value",
+      "signature": "export declare function makeStateKey<T>(key: string): StateKey<T>;"
+    },
+    {
+      "name": "matchRoute",
+      "kind": "value",
+      "signature": "export declare function matchRoute(pattern: string, url: string, strategy?: \"full\" | \"prefix\"): RouteMatchResult;"
+    },
+    {
+      "name": "Module",
+      "kind": "value",
+      "signature": "export declare function Module(options: ModuleOptions): ClassDecorator;"
+    },
+    {
+      "name": "MODULE_METADATA",
+      "kind": "value",
+      "signature": "export declare const MODULE_METADATA = \"supacloud:module\";"
+    },
+    {
+      "name": "ModuleMeta",
+      "kind": "type",
+      "signature": "export interface ModuleMeta extends Required<Omit<ModuleOptions, \"exports\" | \"tags\" | \"aspects\">> {\n    tags?: string[];\n    aspects: Aspect[];\n    exports: Token[];\n}"
+    },
+    {
+      "name": "ModuleOptions",
+      "kind": "type",
+      "signature": "export interface ModuleOptions {\n    name: string;\n    tags?: string[];\n    imports?: Array<Type<unknown>>;\n    providers?: Array<Provider | EnvironmentProviders>;\n    controllers?: Array<Type<unknown>>;\n    commands?: Array<Type<unknown>>;\n    jobs?: Array<Type<unknown>>;\n    queries?: Array<Type<unknown>>;\n    aspects?: Aspect[];\n    exports?: Token[];\n}"
+    },
+    {
+      "name": "NavigationExtras",
+      "kind": "type",
+      "signature": "export interface NavigationExtras {\n    status?: number;\n    skipLocationChange?: boolean;\n    queryParams?: Record<string, unknown>;\n    headers?: Record<string, string>;\n}"
+    },
+    {
+      "name": "normalizePath",
+      "kind": "value",
+      "signature": "export declare function normalizePath(path: string): string;"
+    },
+    {
+      "name": "numberAttribute",
+      "kind": "value",
+      "signature": "export declare function numberAttribute(value: unknown, fallbackValue?: any): number;"
+    },
+    {
+      "name": "OnDestroy",
+      "kind": "type",
+      "signature": "export interface OnDestroy {\n    onDestroy(): void | Promise<void>;\n}"
+    },
+    {
+      "name": "OnInit",
+      "kind": "type",
+      "signature": "export interface OnInit {\n    onInit(): void | Promise<void>;\n}"
+    },
+    {
+      "name": "Optional",
+      "kind": "value",
+      "signature": "export declare function Optional(): ParameterDecorator;"
+    },
+    {
+      "name": "OPTIONAL_PARAMS_METADATA",
+      "kind": "value",
+      "signature": "export declare const OPTIONAL_PARAMS_METADATA = \"supacloud:optional-params\";"
+    },
+    {
+      "name": "Options",
+      "kind": "value",
+      "signature": "export declare const Options: any;"
+    },
+    {
+      "name": "Param",
+      "kind": "value",
+      "signature": "export declare function Param(nameOrOptions?: string | ParamOptions, options?: ParamOptions): ParameterDecorator;"
+    },
+    {
+      "name": "ParamOptions",
+      "kind": "type",
+      "signature": "export interface ParamOptions {\n    name?: string;\n    transform?: \"number\" | \"boolean\" | \"string\";\n    default?: unknown;\n}"
+    },
+    {
+      "name": "Patch",
+      "kind": "value",
+      "signature": "export declare const Patch: any;"
+    },
+    {
+      "name": "Pipe",
+      "kind": "value",
+      "signature": "export declare function Pipe(options: PipeMetadata): ClassDecorator;"
+    },
+    {
+      "name": "PipeMetadata",
+      "kind": "type",
+      "signature": "export interface PipeMetadata {\n    name: string;\n    pure?: boolean;\n    standalone?: boolean;\n}"
+    },
+    {
+      "name": "PipeTransform",
+      "kind": "type",
+      "signature": "export interface PipeTransform<T = any, R = any> {\n    transform(value: T, ...args: any[]): R;\n}"
+    },
+    {
+      "name": "PLATFORM_BROWSER_ID",
+      "kind": "value",
+      "signature": "export declare const PLATFORM_BROWSER_ID = \"browser\";"
+    },
+    {
+      "name": "PLATFORM_EDGE_ID",
+      "kind": "value",
+      "signature": "export declare const PLATFORM_EDGE_ID = \"edge\";"
+    },
+    {
+      "name": "PLATFORM_ID",
+      "kind": "value",
+      "signature": "export declare const PLATFORM_ID: any;"
+    },
+    {
+      "name": "PLATFORM_SERVER_ID",
+      "kind": "value",
+      "signature": "export declare const PLATFORM_SERVER_ID = \"server\";"
+    },
+    {
+      "name": "PlatformId",
+      "kind": "type",
+      "signature": "export type PlatformId = \"server\" | \"browser\" | \"edge\";"
+    },
+    {
+      "name": "Post",
+      "kind": "value",
+      "signature": "export declare const Post: any;"
+    },
+    {
+      "name": "provideAppInitializer",
+      "kind": "value",
+      "signature": "export declare function provideAppInitializer(initializerFn: () => void | Promise<void>): EnvironmentProviders;"
+    },
+    {
+      "name": "provideEnvironmentInitializer",
+      "kind": "value",
+      "signature": "export declare function provideEnvironmentInitializer(initializerFn: () => void | Promise<void>): EnvironmentProviders;"
+    },
+    {
+      "name": "provideHttpClient",
+      "kind": "value",
+      "signature": "export declare function provideHttpClient(...features: HttpClientFeature[]): EnvironmentProviders;"
+    },
+    {
+      "name": "provideLifecycle",
+      "kind": "value",
+      "signature": "export declare function provideLifecycle<T extends LifecycleHooks>(token: Token<T>): EnvironmentProviders;"
+    },
+    {
+      "name": "Provider",
+      "kind": "type",
+      "signature": "export type Provider<T = unknown> = Type<T> | ClassProvider<T> | ValueProvider<T> | FactoryProvider<T> | ExistingProvider<T>;"
+    },
+    {
+      "name": "ProviderDep",
+      "kind": "type",
+      "signature": "export type ProviderDep = Token | ProviderDependency;"
+    },
+    {
+      "name": "ProviderDependency",
+      "kind": "type",
+      "signature": "export interface ProviderDependency {\n    token: Token;\n    optional?: boolean;\n    self?: boolean;\n    skipSelf?: boolean;\n    host?: boolean;\n}"
+    },
+    {
+      "name": "provideRouter",
+      "kind": "value",
+      "signature": "export declare function provideRouter(routes: RouteDefinition[], ...features: RouterFeature[]): EnvironmentProviders;"
+    },
+    {
+      "name": "provideToken",
+      "kind": "value",
+      "signature": "export declare function provideToken<T>(token: Token<T>, value: NoInfer<T>): EnvironmentProviders;"
+    },
+    {
+      "name": "Put",
+      "kind": "value",
+      "signature": "export declare const Put: any;"
+    },
+    {
+      "name": "Query",
+      "kind": "value",
+      "signature": "export declare function Query(optionsOrName?: QueryOptions | ParamOptions | string, options?: ParamOptions): ClassDecorator & ParameterDecorator;"
+    },
+    {
+      "name": "QUERY_METADATA",
+      "kind": "value",
+      "signature": "export declare const QUERY_METADATA = \"supacloud:query\";"
+    },
+    {
+      "name": "QueryMeta",
+      "kind": "type",
+      "signature": "export type QueryMeta = QueryOptions;"
+    },
+    {
+      "name": "QueryOptions",
+      "kind": "type",
+      "signature": "export interface QueryOptions {\n    name: string;\n}"
+    },
+    {
+      "name": "RedirectCommand",
+      "kind": "both",
+      "signature": "export declare class RedirectCommand {\n    readonly redirectTo: string | {\n        toString(): string;\n    };\n    readonly navigationExtras?: NavigationExtras;\n    constructor(redirectTo: string | {\n        toString(): string;\n    }, navigationExtras?: NavigationExtras);\n}"
+    },
+    {
+      "name": "REQUEST_CONTEXT",
+      "kind": "value",
+      "signature": "export declare const REQUEST_CONTEXT: any;"
+    },
+    {
+      "name": "Resolve",
+      "kind": "value",
+      "signature": "export declare function Resolve(resolvers: Record<string, ResolveFn | string>): MethodDecorator;"
+    },
+    {
+      "name": "RESOLVE_METADATA",
+      "kind": "value",
+      "signature": "export declare const RESOLVE_METADATA = \"supacloud:resolvers\";"
+    },
+    {
+      "name": "ResolveFn",
+      "kind": "type",
+      "signature": "export type ResolveFn<T = unknown, TContext = import(\"./route_pipeline\").RoutePipelineContext> = (ctx: TContext) => T | Promise<T>;"
+    },
+    {
+      "name": "resolveForwardRef",
+      "kind": "value",
+      "signature": "export declare function resolveForwardRef<T>(type: T): T;"
+    },
+    {
+      "name": "resource",
+      "kind": "value",
+      "signature": "export declare function resource<T, R = unknown>(options: ResourceOptions<T, R>): ResourceRef<T>;"
+    },
+    {
+      "name": "ResourceLoaderParams",
+      "kind": "type",
+      "signature": "export interface ResourceLoaderParams<R> {\n    request: R;\n    abortSignal: AbortSignal;\n    previous?: {\n        status: ResourceStatus;\n    };\n}"
+    },
+    {
+      "name": "ResourceOptions",
+      "kind": "type",
+      "signature": "export interface ResourceOptions<T, R = unknown> {\n    request?: () => R;\n    loader: (params: ResourceLoaderParams<R>) => Promise<T>;\n    initialValue?: T;\n}"
+    },
+    {
+      "name": "ResourceRef",
+      "kind": "type",
+      "signature": "export interface ResourceRef<T> {\n    readonly value: Signal<T | undefined>;\n    readonly status: Signal<ResourceStatus>;\n    readonly error: Signal<unknown | undefined>;\n    readonly isLoading: Signal<boolean>;\n    reload(): void;\n    set(value: T): void;\n    update(updateFn: (current: T | undefined) => T): void;\n    destroy(): void;\n}"
+    },
+    {
+      "name": "ResourceStatus",
+      "kind": "type",
+      "signature": "export type ResourceStatus = \"idle\" | \"loading\" | \"resolved\" | \"error\";"
+    },
+    {
+      "name": "ROUTE_CONFIG",
+      "kind": "value",
+      "signature": "export declare const ROUTE_CONFIG: any;"
+    },
+    {
+      "name": "ROUTE_PARAMS_METADATA",
+      "kind": "value",
+      "signature": "export declare const ROUTE_PARAMS_METADATA = \"supacloud:route-params\";"
+    },
+    {
+      "name": "RouteAspect",
+      "kind": "type",
+      "signature": "export type RouteAspect = Aspect;"
+    },
+    {
+      "name": "RouteContractSchemas",
+      "kind": "type",
+      "signature": "export interface RouteContractSchemas {\n    body?: unknown | undefined;\n    params?: unknown | undefined;\n    query?: unknown | undefined;\n    headers?: unknown | undefined;\n    cookie?: unknown | undefined;\n    response?: unknown | undefined;\n    responses?: Readonly<Record<string | number, unknown>> | undefined;\n}"
+    },
+    {
+      "name": "RouteDefinition",
+      "kind": "type",
+      "signature": "export type RouteDefinition<Schemas extends RouteContractSchemas = RouteContractSchemas> = RouteOptions<Schemas> & {\n    method: HttpMethod;\n    path: string;\n    handler: string;\n};"
+    },
+    {
+      "name": "RouteHandler",
+      "kind": "type",
+      "signature": "export type RouteHandler<Schemas extends RouteContractSchemas = RouteContractSchemas> = (input: RouteHandlerInput<Schemas>) => RouteHandlerOutput<Schemas> | Promise<RouteHandlerOutput<Schemas>>;"
+    },
+    {
+      "name": "RouteHandlerBinding",
+      "kind": "type",
+      "signature": "export interface RouteHandlerBinding<Schemas extends RouteContractSchemas = RouteContractSchemas> {\n    readonly contract: Readonly<Schemas>;\n    readonly handler: RouteHandler<Schemas>;\n}"
+    },
+    {
+      "name": "RouteHandlerInput",
+      "kind": "type",
+      "signature": "export interface RouteHandlerInput<Schemas extends RouteContractSchemas = RouteContractSchemas> {\n    body: DecodeSchema<Schemas[\"body\"]>;\n    params: DecodeSchema<Schemas[\"params\"]>;\n    query: DecodeSchema<Schemas[\"query\"]>;\n    headers: DecodeSchema<Schemas[\"headers\"]>;\n    cookie: DecodeSchema<Schemas[\"cookie\"]>;\n    request: Request;\n    context: unknown;\n}"
+    },
+    {
+      "name": "RouteHandlerOutput",
+      "kind": "type",
+      "signature": "export type RouteHandlerOutput<Schemas extends RouteContractSchemas = RouteContractSchemas> = Schemas[\"responses\"] extends Readonly<Record<string | number, unknown>> ? RouteResponseMap<Schemas>[keyof RouteResponseMap<Schemas>] : DecodeSchema<Schemas[\"response\"]>;"
+    },
+    {
+      "name": "RouteMatchResult",
+      "kind": "type",
+      "signature": "export interface RouteMatchResult {\n    matched: boolean;\n    params: Record<string, string>;\n    remainingUrl?: string;\n}"
+    },
+    {
+      "name": "RouteOptions",
+      "kind": "type",
+      "signature": "export interface RouteOptions<Schemas extends RouteContractSchemas = RouteContractSchemas> {\n    contract?: {\n        body?: \"framework\" | \"domain\";\n        response?: \"framework\" | \"native-json\" | \"binary\" | \"stream\";\n        evidence?: string;\n    };\n    body?: Schemas[\"body\"] extends TSchema ? Schemas[\"body\"] : unknown;\n    params?: Schemas[\"params\"] extends TSchema ? Schemas[\"params\"] : unknown;\n    query?: Schemas[\"query\"] extends TSchema ? Schemas[\"query\"] : unknown;\n    headers?: Schemas[\"headers\"] extends TSchema ? Schemas[\"headers\"] : unknown;\n    cookie?: Schemas[\"cookie\"] extends TSchema ? Schemas[\"cookie\"] : unknown;\n    response?: Schemas[\"response\"] extends TSchema ? Schemas[\"response\"] : unknown;\n    responses?: Schemas[\"responses\"] extends Readonly<Record<string | number, unknown>> ? Schemas[\"responses\"] : Readonly<Record<string | number, unknown>>;\n    command?: Type<unknown>;\n    guards?: Array<CanActivateFn | string>;\n    canMatch?: Array<CanMatchFn | string>;\n    canDeactivate?: Array<CanDeactivateFn | string>;\n    resolvers?: Record<string, ResolveFn | string>;\n    redirectTo?: string;\n    pathMatch?: \"full\" | \"prefix\";\n    title?: string;\n    data?: Record<string, unknown>;\n    aspects?: Aspect[];\n}"
+    },
+    {
+      "name": "RouteParamBinding",
+      "kind": "type",
+      "signature": "export interface RouteParamBinding {\n    index: number;\n    type: \"param\" | \"query\" | \"body\" | \"headers\" | \"cookie\";\n    name?: string;\n    transform?: \"number\" | \"boolean\" | \"string\";\n    default?: unknown;\n}"
+    },
+    {
+      "name": "RoutePipelineContext",
+      "kind": "type",
+      "signature": "export interface RoutePipelineContext {\n    url: string;\n    method: string;\n    params?: Record<string, string>;\n    query?: Record<string, unknown>;\n    body?: unknown;\n    headers?: Record<string, string>;\n    resolved?: Record<string, unknown>;\n    data?: Record<string, unknown>;\n    [key: string]: unknown;\n}"
+    },
+    {
+      "name": "RoutePipelineDefinition",
+      "kind": "type",
+      "signature": "export interface RoutePipelineDefinition {\n    path: string;\n    method: string;\n    handler: ((...args: any[]) => any) | string;\n    guards?: Array<CanActivateFn | string>;\n    canMatch?: Array<CanMatchFn | string>;\n    canDeactivate?: Array<CanDeactivateFn | string>;\n    resolvers?: Record<string, ResolveFn | string>;\n    title?: string;\n    data?: Record<string, unknown>;\n    invoker?: (controller: unknown, request: RoutePipelineContext) => Promise<unknown> | unknown;\n}"
+    },
+    {
+      "name": "RoutePipelineOptions",
+      "kind": "type",
+      "signature": "export interface RoutePipelineOptions {\n    onEvent?: (event: RouterEvent) => void;\n    titleStrategy?: TitleStrategy;\n}"
+    },
+    {
+      "name": "RoutePipelineResult",
+      "kind": "type",
+      "signature": "export interface RoutePipelineResult<T = unknown> {\n    matched: boolean;\n    status: number;\n    body?: T;\n    error?: string;\n    resolvedData?: Record<string, unknown>;\n    redirect?: string;\n    headers?: Record<string, string>;\n}"
+    },
+    {
+      "name": "ROUTER_CONFIGURATION",
+      "kind": "value",
+      "signature": "export declare const ROUTER_CONFIGURATION: any;"
+    },
+    {
+      "name": "RouterConfigOptions",
+      "kind": "type",
+      "signature": "export interface RouterConfigOptions {\n    onSameUrlNavigation?: \"reload\" | \"ignore\";\n    paramsInheritanceStrategy?: \"emptyOnly\" | \"always\";\n}"
+    },
+    {
+      "name": "RouteResponseMap",
+      "kind": "type",
+      "signature": "export type RouteResponseMap<Schemas extends RouteContractSchemas> = Schemas[\"responses\"] extends Readonly<Record<string | number, unknown>> ? {\n    [Code in keyof Schemas[\"responses\"]]: DecodeSchema<Schemas[\"responses\"][Code]>;\n} : never;"
+    },
+    {
+      "name": "RouterEvent",
+      "kind": "type",
+      "signature": "export interface RouterEvent {\n    type: RouterEventType;\n    url: string;\n    timestamp: number;\n    data?: unknown;\n}"
+    },
+    {
+      "name": "RouterEventType",
+      "kind": "type",
+      "signature": "export type RouterEventType = \"NavigationStart\" | \"RoutesRecognized\" | \"GuardsCheckStart\" | \"GuardsCheckEnd\" | \"ResolveStart\" | \"ResolveEnd\" | \"ExecutionStart\" | \"ExecutionEnd\" | \"NavigationEnd\" | \"NavigationCancel\" | \"NavigationError\";"
+    },
+    {
+      "name": "RouterFeature",
+      "kind": "type",
+      "signature": "export interface RouterFeature {\n    kind: string;\n    providers: Provider[];\n}"
+    },
+    {
+      "name": "ROUTES_METADATA",
+      "kind": "value",
+      "signature": "export declare const ROUTES_METADATA = \"supacloud:routes\";"
+    },
+    {
+      "name": "runInInjectionContext",
+      "kind": "value",
+      "signature": "export declare function runInInjectionContext<R>(injector: InjectorLike, fn: () => R): R;"
+    },
+    {
+      "name": "runInRequestContext",
+      "kind": "value",
+      "signature": "export declare function runInRequestContext<T>(parent: EnvironmentInjector, providers: Array<Provider | EnvironmentProviders>, work: (injector: EnvironmentInjector) => T | Promise<T>): Promise<T>;"
+    },
+    {
+      "name": "runInScope",
+      "kind": "value",
+      "signature": "export declare function runInScope<T>(parent: EnvironmentInjector, providers: Array<Provider | EnvironmentProviders>, work: (injector: EnvironmentInjector) => T | Promise<T>, name?: string): Promise<T>;"
+    },
+    {
+      "name": "runInTransactionContext",
+      "kind": "value",
+      "signature": "export declare function runInTransactionContext<T>(parent: EnvironmentInjector, providers: Array<Provider | EnvironmentProviders>, work: (injector: EnvironmentInjector) => T | Promise<T>): Promise<T>;"
+    },
+    {
+      "name": "Scope",
+      "kind": "type",
+      "signature": "export type Scope = (typeof SCOPES)[number];"
+    },
+    {
+      "name": "SCOPE_LIFETIME_RANK",
+      "kind": "value",
+      "signature": "export declare const SCOPE_LIFETIME_RANK: Record<Scope, number>;"
+    },
+    {
+      "name": "SCOPES",
+      "kind": "value",
+      "signature": "export declare const SCOPES: readonly [\"application\", \"request\", \"job\"];"
+    },
+    {
+      "name": "Self",
+      "kind": "value",
+      "signature": "export declare function Self(): ParameterDecorator;"
+    },
+    {
+      "name": "SELF_PARAMS_METADATA",
+      "kind": "value",
+      "signature": "export declare const SELF_PARAMS_METADATA = \"supacloud:self-params\";"
+    },
+    {
+      "name": "signal",
+      "kind": "value",
+      "signature": "export declare function signal<T>(initialValue: T): WritableSignal<T>;"
+    },
+    {
+      "name": "Signal",
+      "kind": "type",
+      "signature": "export interface Signal<T> {\n    (): T;\n}"
+    },
+    {
+      "name": "SKIP_SELF_PARAMS_METADATA",
+      "kind": "value",
+      "signature": "export declare const SKIP_SELF_PARAMS_METADATA = \"supacloud:skip-self-params\";"
+    },
+    {
+      "name": "SkipSelf",
+      "kind": "value",
+      "signature": "export declare function SkipSelf(): ParameterDecorator;"
+    },
+    {
+      "name": "StateKey",
+      "kind": "type",
+      "signature": "export type StateKey<T> = string & {\n    readonly __type_brand?: T;\n};"
+    },
+    {
+      "name": "stripTrailingSlash",
+      "kind": "value",
+      "signature": "export declare function stripTrailingSlash(path: string): string;"
+    },
+    {
+      "name": "TestBed",
+      "kind": "both",
+      "signature": "export declare class TestBed {\n    private static declaredProviders;\n    private static overriddenProviders;\n    private static activeInjector;\n    static configureTestingModule(moduleDef: TestModuleMetadata): typeof TestBed;\n    static overrideProvider(token: Token<unknown>, provider: Provider): typeof TestBed;\n    static inject<T>(token: Token<T>, notFoundValue?: T, flags?: InjectFlags): T;\n    static injectAll<T>(token: Token<T>): T[];\n    static run<R>(fn: () => R): R;\n    static resetTestingModule(): typeof TestBed;\n    private static getOrCreateInjector;\n}"
+    },
+    {
+      "name": "TestModuleMetadata",
+      "kind": "type",
+      "signature": "export interface TestModuleMetadata {\n    providers?: Array<Provider | EnvironmentProviders>;\n    imports?: Array<{\n        providers?: Array<Provider | EnvironmentProviders>;\n    } | any>;\n}"
+    },
+    {
+      "name": "Title",
+      "kind": "value",
+      "signature": "export declare function Title(title: string): MethodDecorator;"
+    },
+    {
+      "name": "TITLE_STRATEGY",
+      "kind": "value",
+      "signature": "export declare const TITLE_STRATEGY: any;"
+    },
+    {
+      "name": "TitleStrategy",
+      "kind": "both",
+      "signature": "export declare abstract class TitleStrategy {\n    abstract updateTitle(title: string | undefined, ctx?: RoutePipelineContext): void;\n    buildTitle(title: string | undefined, appPrefix?: string): string | undefined;\n}"
+    },
+    {
+      "name": "Token",
+      "kind": "type",
+      "signature": "export type Token<T = unknown> = InjectionToken<T> | Type<T> | ForwardRefFn<InjectionToken<T> | Type<T>>;"
+    },
+    {
+      "name": "TRANSFER_STATE",
+      "kind": "value",
+      "signature": "export declare const TRANSFER_STATE: any;"
+    },
+    {
+      "name": "TransferState",
+      "kind": "both",
+      "signature": "export declare class TransferState {\n    private store;\n    get<T>(key: StateKey<T> | string, defaultValue: T): T;\n    set<T>(key: StateKey<T> | string, value: T): void;\n    hasKey<T>(key: StateKey<T> | string): boolean;\n    remove<T>(key: StateKey<T> | string): void;\n    isEmpty(): boolean;\n    toJson(): string;\n    static fromJson(json: string): TransferState;\n    static fromObject(record: Record<string, unknown>): TransferState;\n}"
+    },
+    {
+      "name": "TrimPipe",
+      "kind": "both",
+      "signature": "export declare class TrimPipe implements PipeTransform<string | null | undefined, string> {\n    transform(value: string | null | undefined): string;\n}"
+    },
+    {
+      "name": "Type",
+      "kind": "type",
+      "signature": "export interface Type<T> {\n    new (...args: any[]): T;\n}"
+    },
+    {
+      "name": "untracked",
+      "kind": "value",
+      "signature": "export declare function untracked<T>(fn: () => T): T;"
+    },
+    {
+      "name": "UpperCasePipe",
+      "kind": "both",
+      "signature": "export declare class UpperCasePipe implements PipeTransform<string | null | undefined, string> {\n    transform(value: string | null | undefined): string;\n}"
+    },
+    {
+      "name": "UrlSegment",
+      "kind": "type",
+      "signature": "export interface UrlSegment {\n    path: string;\n    parameters: Record<string, string>;\n}"
+    },
+    {
+      "name": "UrlSegmentGroup",
+      "kind": "both",
+      "signature": "export declare class UrlSegmentGroup {\n    segments: UrlSegment[];\n    children: Record<string, UrlSegmentGroup>;\n    parent: UrlSegmentGroup | null;\n    constructor(segments: UrlSegment[], children?: Record<string, UrlSegmentGroup>);\n    hasChildren(): boolean;\n}"
+    },
+    {
+      "name": "UrlSerializer",
+      "kind": "both",
+      "signature": "export declare abstract class UrlSerializer {\n    abstract parse(url: string): UrlTree;\n    abstract serialize(tree: UrlTree): string;\n}"
+    },
+    {
+      "name": "UrlTree",
+      "kind": "both",
+      "signature": "export declare class UrlTree {\n    root: UrlSegmentGroup;\n    queryParams: Record<string, string>;\n    fragment: string | null;\n    constructor(root: UrlSegmentGroup, queryParams?: Record<string, string>, fragment?: string | null);\n    get queryParamMap(): Map<string, string>;\n    toString(): string;\n}"
+    },
+    {
+      "name": "UseGuards",
+      "kind": "value",
+      "signature": "export declare function UseGuards(...guards: Array<CanActivateFn | string>): ClassDecorator & MethodDecorator;"
+    },
+    {
+      "name": "ValidationErrors",
+      "kind": "type",
+      "signature": "export type ValidationErrors = Record<string, unknown>;"
+    },
+    {
+      "name": "ValidatorFn",
+      "kind": "type",
+      "signature": "export type ValidatorFn = (control: AbstractControl) => ValidationErrors | null;"
+    },
+    {
+      "name": "Validators",
+      "kind": "both",
+      "signature": "export declare class Validators {\n    static nullValidator(_control: AbstractControl): null;\n    static required(control: AbstractControl): ValidationErrors | null;\n    static requiredTrue(control: AbstractControl): ValidationErrors | null;\n    static min(min: number): ValidatorFn;\n    static max(max: number): ValidatorFn;\n    static minLength(minLength: number): ValidatorFn;\n    static maxLength(maxLength: number): ValidatorFn;\n    static email(control: AbstractControl): ValidationErrors | null;\n    static pattern(pattern: string | RegExp): ValidatorFn;\n    static compose(validators: (ValidatorFn | null | undefined)[] | null): ValidatorFn | null;\n    static composeAsync(validators: (AsyncValidatorFn | null | undefined)[] | null): AsyncValidatorFn | null;\n}"
+    },
+    {
+      "name": "ValueProvider",
+      "kind": "type",
+      "signature": "export interface ValueProvider<T = unknown> extends BaseProvider {\n    provide: Token<T>;\n    useValue: T;\n}"
+    },
+    {
+      "name": "withComponentInputBinding",
+      "kind": "value",
+      "signature": "export declare function withComponentInputBinding(): RouterFeature;"
+    },
+    {
+      "name": "withFetch",
+      "kind": "value",
+      "signature": "export declare function withFetch(customFetch?: typeof fetch): HttpClientFeature;"
+    },
+    {
+      "name": "withInterceptors",
+      "kind": "value",
+      "signature": "export declare function withInterceptors(...interceptors: HttpInterceptorFn[]): HttpInterceptorFn[];"
+    },
+    {
+      "name": "withRequestsMadeViaParent",
+      "kind": "value",
+      "signature": "export declare function withRequestsMadeViaParent(): HttpClientFeature;"
+    },
+    {
+      "name": "withRouterConfig",
+      "kind": "value",
+      "signature": "export declare function withRouterConfig(options: RouterConfigOptions): RouterFeature;"
+    },
+    {
+      "name": "withTitleStrategy",
+      "kind": "value",
+      "signature": "export declare function withTitleStrategy(strategy: TitleStrategy | Type<TitleStrategy>): RouterFeature;"
+    },
+    {
+      "name": "WritableSignal",
+      "kind": "type",
+      "signature": "export interface WritableSignal<T> extends Signal<T> {\n    set(value: T): void;\n    update(updateFn: (current: T) => T): void;\n    asReadonly(): Signal<T>;\n}"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Headers, Inject, Injectable, Param, Post, REQUEST_CONTEXT } from "@supacloud/app";
 import { CommandError, commandIdentifier, decodeCommandIdentity } from "@supacloud/contracts";
-import { WebhookInputSchema, WebhookReceiptSchema, WebhookKeySchema, WebhookLookupSchema } from "./contracts";
+import { WebhookHeadersSchema, WebhookInputSchema, WebhookReceiptSchema, WebhookKeySchema, WebhookLookupSchema } from "./contracts";
 import { UpdateWebhook } from "./update.command";
 
 function operationKey(value: unknown): string {
@@ -16,11 +16,11 @@ export class WebhookController {
     if (!(command instanceof UpdateWebhook)) throw new TypeError("Invalid webhook command");
     this.command = command;
   }
-  @Post("/update", { body: WebhookInputSchema, response: WebhookReceiptSchema })
+  @Post("/update", { body: WebhookInputSchema, headers: WebhookHeadersSchema, responses: { 200: WebhookReceiptSchema } })
   update(@Body() input: unknown, @Headers("idempotency-key") key: unknown) {
     return this.command.execute(decodeCommandIdentity(this.context), operationKey(key), input);
   }
-  @Get("/receipts/:key", { params: WebhookKeySchema, response: WebhookLookupSchema })
+  @Get("/receipts/:key", { params: WebhookKeySchema, responses: { 200: WebhookLookupSchema } })
   async receipt(@Param("key") key: unknown) {
     return { receipt: await this.command.receipt(decodeCommandIdentity(this.context), operationKey(key)) };
   }

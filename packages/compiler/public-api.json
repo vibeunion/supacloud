@@ -1,0 +1,732 @@
+{
+  "format": 2,
+  "package": "@supacloud/compiler",
+  "entrypoint": ".",
+  "exports": [
+    {
+      "name": "analyzeProject",
+      "kind": "value",
+      "signature": "export declare function analyzeProject(rootDir: string, include?: string[], cache?: DependencyGraphCache, changedPaths?: string[]): Promise<ApplicationGraph>;"
+    },
+    {
+      "name": "ANGULAR_ENTERPRISE_RULES",
+      "kind": "value",
+      "signature": "export declare const ANGULAR_ENTERPRISE_RULES: ModuleBoundaryRule[];"
+    },
+    {
+      "name": "ApplicationGraph",
+      "kind": "type",
+      "signature": "export interface ApplicationGraph {\n    graphql?: GraphqlContractSummary;\n    modules: ModuleNode[];\n    externalTokens: string[];\n    diagnostics?: Diagnostic[];\n    tokenNames?: Record<string, string>;\n    cacheStats?: {\n        reusedModules: string[];\n        reanalyzedModules: string[];\n    };\n}"
+    },
+    {
+      "name": "AppliedDiagnosticFix",
+      "kind": "type",
+      "signature": "export interface AppliedDiagnosticFix {\n    file: string;\n    changed: boolean;\n    content: string;\n}"
+    },
+    {
+      "name": "applyDiagnosticFix",
+      "kind": "value",
+      "signature": "export declare function applyDiagnosticFix(fix: DiagnosticFix, options?: ApplyDiagnosticFixOptions): Promise<AppliedDiagnosticFix>;"
+    },
+    {
+      "name": "ApplyDiagnosticFixOptions",
+      "kind": "type",
+      "signature": "export interface ApplyDiagnosticFixOptions {\n    rootDir?: string;\n    dryRun?: boolean;\n    permission?: string;\n}"
+    },
+    {
+      "name": "AspectRefNode",
+      "kind": "type",
+      "signature": "export interface AspectRefNode {\n    file?: string;\n    name: string;\n    expression: string;\n    importPath?: string;\n    importModule?: string;\n}"
+    },
+    {
+      "name": "buildDeliveryProject",
+      "kind": "value",
+      "signature": "export declare function buildDeliveryProject(options: CompileOptions, delivery?: unknown): Promise<DeliveryBuildResult>;"
+    },
+    {
+      "name": "CachedModuleEntry",
+      "kind": "type",
+      "signature": "export interface CachedModuleEntry {\n    module: ModuleNode;\n    ownedFiles: string[];\n    fileHashes: Record<string, string>;\n    diagnostics?: Diagnostic[];\n}"
+    },
+    {
+      "name": "camelName",
+      "kind": "value",
+      "signature": "export declare function camelName(token: string): string;"
+    },
+    {
+      "name": "checkProject",
+      "kind": "value",
+      "signature": "export declare function checkProject(options: CompileOptions): Promise<CheckProjectResult>;"
+    },
+    {
+      "name": "CheckProjectResult",
+      "kind": "type",
+      "signature": "export interface CheckProjectResult {\n    upToDate: boolean;\n    mismatches: string[];\n    diagnostics: Diagnostic[];\n    graph: ApplicationGraph;\n}"
+    },
+    {
+      "name": "CLEAN_ARCHITECTURE_RULES",
+      "kind": "value",
+      "signature": "export declare const CLEAN_ARCHITECTURE_RULES: ModuleBoundaryRule[];"
+    },
+    {
+      "name": "CommandExecutionCapabilities",
+      "kind": "type",
+      "signature": "export interface CommandExecutionCapabilities {\n    requirePersistentAdapters?: boolean;\n    rpc?: Record<string, {\n        audit?: boolean;\n        idempotency?: boolean;\n        transaction?: boolean;\n        boundary?: \"database\" | \"external\";\n    }>;\n    permission?: boolean;\n    audit?: boolean;\n    idempotency?: boolean;\n    transaction?: boolean | \"rpc-only\";\n}"
+    },
+    {
+      "name": "CommandNode",
+      "kind": "type",
+      "signature": "export interface CommandNode {\n    rpc?: string;\n    className: string;\n    name: string;\n    permission?: string;\n    transaction: \"required\" | \"none\";\n    audit?: string;\n    idempotency: \"required\" | \"none\";\n    standalone?: boolean;\n    aspects?: AspectRefNode[];\n}"
+    },
+    {
+      "name": "CompileOptions",
+      "kind": "type",
+      "signature": "export interface CompileOptions {\n    graphql?: GraphqlOptions;\n    requireRouteContracts?: boolean;\n    rootDir: string;\n    include?: string[];\n    outDir: string;\n    strict?: boolean;\n    moduleBoundaryPreset?: ModuleBoundaryPresetName;\n    moduleBoundaries?: ModuleBoundaryRule[];\n    allowRouteCommandBindings?: boolean;\n    commandCapabilities?: CommandExecutionCapabilities;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    writeOnError?: boolean;\n    generateClient?: boolean;\n    generateOpenApi?: boolean;\n    openApi?: OpenApiOptions;\n    generatePermissions?: boolean;\n    treeShakeUnusedProviders?: boolean;\n    cache?: DependencyGraphCache;\n    changedPaths?: string[];\n    typeSafety?: TypeSafetyOptions;\n}"
+    },
+    {
+      "name": "compileOptionsFromConfig",
+      "kind": "value",
+      "signature": "export declare function compileOptionsFromConfig(config: SupaCloudConfig, cwd?: any): CompileOptions;"
+    },
+    {
+      "name": "compileProject",
+      "kind": "value",
+      "signature": "export declare function compileProject(options: CompileOptions): Promise<CompileResult>;"
+    },
+    {
+      "name": "COMPILER_DIAGNOSTIC_CODES",
+      "kind": "value",
+      "signature": "export declare const COMPILER_DIAGNOSTIC_CODES: Record<string, {\n    code: string;\n    docsUrl: string;\n}>;"
+    },
+    {
+      "name": "CompileResult",
+      "kind": "type",
+      "signature": "export interface CompileResult {\n    diagnostics: Diagnostic[];\n    graph: ApplicationGraph;\n    written: string[];\n    stats?: CompileStats;\n}"
+    },
+    {
+      "name": "CompileStats",
+      "kind": "type",
+      "signature": "export interface CompileStats {\n    cacheHit: boolean;\n    changedFiles: string[];\n    affectedModules: string[];\n    reanalyzedModules?: string[];\n    reusedModules?: string[];\n}"
+    },
+    {
+      "name": "compileTraits",
+      "kind": "value",
+      "signature": "export declare function compileTraits(program: ts.Program, previous: TraitCompilation | undefined, changedFiles: Set<string>): TraitCompilation;"
+    },
+    {
+      "name": "ContextPack",
+      "kind": "type",
+      "signature": "export interface ContextPack {\n    version: 1;\n    subject: string;\n    modules: ModuleNode[];\n    files: string[];\n    externalTokens: string[];\n    executionPlans: ExecutionPlan[];\n    routeContracts: ReturnType<typeof inspectRouteContracts>;\n    diagnostics: Diagnostic[];\n    relatedModules: {\n        importedBy: string[];\n        imports: string[];\n    };\n    graphql?: ApplicationGraph[\"graphql\"];\n}"
+    },
+    {
+      "name": "ControllerNode",
+      "kind": "type",
+      "signature": "export interface ControllerNode {\n    className: string;\n    path: string;\n    scope: Scope;\n    deps: string[];\n    hasOnDestroy?: boolean;\n    optionalDeps?: string[];\n    selfDeps?: string[];\n    skipSelfDeps?: string[];\n    hostDeps?: string[];\n    functionalInjects?: FunctionalInjectNode[];\n    standalone?: boolean;\n    routes: RouteNode[];\n    file: string;\n    importPath: string;\n    schemaImports?: Record<string, string>;\n}"
+    },
+    {
+      "name": "createContextPack",
+      "kind": "value",
+      "signature": "export declare function createContextPack(graph: ApplicationGraph, subject: string): ContextPack;"
+    },
+    {
+      "name": "createDeliveryPlan",
+      "kind": "value",
+      "signature": "export declare function createDeliveryPlan(graph: ApplicationGraph, input?: unknown): DeliveryPlanResult;"
+    },
+    {
+      "name": "createDependencyGraphCache",
+      "kind": "value",
+      "signature": "export declare function createDependencyGraphCache(): DependencyGraphCache;"
+    },
+    {
+      "name": "createExecutionPlans",
+      "kind": "value",
+      "signature": "export declare function createExecutionPlans(graph: ApplicationGraph): ExecutionPlan[];"
+    },
+    {
+      "name": "createIncrementalCompiler",
+      "kind": "value",
+      "signature": "export declare function createIncrementalCompiler(): IncrementalCompiler;"
+    },
+    {
+      "name": "createIncrementalProgramSession",
+      "kind": "value",
+      "signature": "export declare function createIncrementalProgramSession(projectRoot: string): IncrementalProgramSession;"
+    },
+    {
+      "name": "DEFAULT_SUPACLOUD_CONFIG",
+      "kind": "value",
+      "signature": "export declare const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<SupaCloudConfig, \"include\" | \"moduleBoundaryPreset\" | \"commandCapabilities\" | \"moduleBoundaries\" | \"typeSafety\" | \"delivery\" | \"allowRouteCommandBindings\" | \"disallowControllerDirectDb\" | \"detectOrphanModules\" | \"openApi\">> & {\n    include: string[];\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n};"
+    },
+    {
+      "name": "defineSupacloudConfig",
+      "kind": "value",
+      "signature": "export declare function defineSupacloudConfig(config?: SupaCloudConfig): SupaCloudConfig;"
+    },
+    {
+      "name": "DeliveryBuildManifest",
+      "kind": "type",
+      "signature": "export type DeliveryBuildManifest = Static<typeof DeliveryBuildManifestSchema>;"
+    },
+    {
+      "name": "DeliveryBuildManifestSchema",
+      "kind": "value",
+      "signature": "export declare const DeliveryBuildManifestSchema: any;"
+    },
+    {
+      "name": "DeliveryBuildResult",
+      "kind": "type",
+      "signature": "export type DeliveryBuildResult = Static<typeof DeliveryBuildResultSchema>;"
+    },
+    {
+      "name": "DeliveryBuildResultSchema",
+      "kind": "value",
+      "signature": "export declare const DeliveryBuildResultSchema: any;"
+    },
+    {
+      "name": "DeliveryConfigurationError",
+      "kind": "both",
+      "signature": "export declare class DeliveryConfigurationError extends Error {\n    readonly code = \"delivery-config-invalid\";\n    constructor();\n}"
+    },
+    {
+      "name": "DeliveryDiagnostic",
+      "kind": "type",
+      "signature": "export type DeliveryDiagnostic = Static<typeof DeliveryDiagnosticSchema>;"
+    },
+    {
+      "name": "DeliveryObject",
+      "kind": "type",
+      "signature": "export type DeliveryObject = Static<typeof DeliveryObjectSchema>;"
+    },
+    {
+      "name": "DeliveryOptions",
+      "kind": "type",
+      "signature": "export type DeliveryOptions = Static<typeof DeliveryOptionsSchema>;"
+    },
+    {
+      "name": "DeliveryOptionsSchema",
+      "kind": "value",
+      "signature": "export declare const DeliveryOptionsSchema: any;"
+    },
+    {
+      "name": "DeliveryPlan",
+      "kind": "type",
+      "signature": "export type DeliveryPlan = Static<typeof DeliveryPlanSchema>;"
+    },
+    {
+      "name": "DeliveryPlanResult",
+      "kind": "type",
+      "signature": "export type DeliveryPlanResult = Static<typeof DeliveryPlanResultSchema>;"
+    },
+    {
+      "name": "DeliveryPlanResultSchema",
+      "kind": "value",
+      "signature": "export declare const DeliveryPlanResultSchema: any;"
+    },
+    {
+      "name": "DeliveryPlanSchema",
+      "kind": "value",
+      "signature": "export declare const DeliveryPlanSchema: any;"
+    },
+    {
+      "name": "DeliveryTarget",
+      "kind": "type",
+      "signature": "export type DeliveryTarget = Static<typeof DeliveryTargetSchema>;"
+    },
+    {
+      "name": "DeliveryTargetSchema",
+      "kind": "value",
+      "signature": "export declare const DeliveryTargetSchema: any;"
+    },
+    {
+      "name": "DependencyGraphCache",
+      "kind": "type",
+      "signature": "export interface DependencyGraphCache {\n    modules: Map<string, CachedModuleEntry>;\n    fileHashes: Map<string, string>;\n    programSession?: IncrementalProgramSession;\n    dependencyGraph?: DependencyGraphIndex;\n    generatedHashes?: Map<string, string>;\n    lastStats?: {\n        reusedModules: string[];\n        reanalyzedModules: string[];\n    };\n}"
+    },
+    {
+      "name": "DependencyGraphIndex",
+      "kind": "type",
+      "signature": "export interface DependencyGraphIndex {\n    getAffectedModules(changedFiles: string[]): string[];\n}"
+    },
+    {
+      "name": "Diagnostic",
+      "kind": "type",
+      "signature": "export interface Diagnostic {\n    severity: \"error\" | \"warn\";\n    code: string;\n    message: string;\n    file?: string;\n    line?: number;\n    suggestion?: string;\n    errorCode?: string;\n    docsUrl?: string;\n    fix?: DiagnosticFix;\n}"
+    },
+    {
+      "name": "DiagnosticFix",
+      "kind": "type",
+      "signature": "export type DiagnosticFix = {\n    type: \"set_command_mode\";\n    targetFile: string;\n    command: string;\n    property: \"transaction\" | \"idempotency\";\n    expectedExpression: string;\n    value?: \"required\" | \"none\";\n} | {\n    type: \"add_module_import\";\n    targetFile: string;\n    module: string;\n    provider?: string;\n    importPath?: string;\n    symbol?: string;\n    targetModule?: string;\n} | {\n    type: \"add_provider\";\n    targetFile: string;\n    token: string;\n    module: string;\n} | {\n    type: \"mark_optional_dependency\";\n    targetFile: string;\n    owner: string;\n    token: string;\n} | {\n    type: \"change_provider_scope\";\n    targetFile: string;\n    provider: string;\n    from: Scope;\n    to: Scope;\n} | {\n    type: \"add_command_permission\";\n    targetFile: string;\n    command: string;\n    module: string;\n    permission?: string;\n} | {\n    type: \"add_route_parameter_binding\";\n    targetFile: string;\n    controller: string;\n    route: string;\n    parameter: string;\n    binding: \"param\" | \"query\";\n} | {\n    type: \"remove_route_body_binding\";\n    targetFile: string;\n    controller: string;\n    route: string;\n};"
+    },
+    {
+      "name": "diffOpenApiDocuments",
+      "kind": "value",
+      "signature": "export declare function diffOpenApiDocuments(baseValue: unknown, currentValue: unknown): OpenApiDiffResult;"
+    },
+    {
+      "name": "doctorProject",
+      "kind": "value",
+      "signature": "export declare function doctorProject(rootDir: string, outDir: string, graph: ApplicationGraph, upToDate: boolean, diagnostics?: Diagnostic[]): DoctorResult;"
+    },
+    {
+      "name": "DoctorResult",
+      "kind": "type",
+      "signature": "export interface DoctorResult {\n    checks: Array<{\n        name: string;\n        ok: boolean;\n        detail: string;\n    }>;\n    diagnostics: ApplicationGraph[\"diagnostics\"];\n    errors: number;\n}"
+    },
+    {
+      "name": "ExecutionPlan",
+      "kind": "type",
+      "signature": "export interface ExecutionPlan {\n    module: string;\n    kind: \"route\" | \"command\" | \"job\";\n    name: string;\n    command?: string;\n    stages: string[];\n}"
+    },
+    {
+      "name": "explainGraph",
+      "kind": "value",
+      "signature": "export declare function explainGraph(graph: ApplicationGraph, subject: string): string;"
+    },
+    {
+      "name": "exportGeneratedOpenApiJson",
+      "kind": "value",
+      "signature": "export declare function exportGeneratedOpenApiJson(options: OpenApiExportOptions): Promise<OpenApiJsonWriteResult>;"
+    },
+    {
+      "name": "exportGraphDot",
+      "kind": "value",
+      "signature": "export declare function exportGraphDot(graph: ApplicationGraph): string;"
+    },
+    {
+      "name": "exportGraphMermaid",
+      "kind": "value",
+      "signature": "export declare function exportGraphMermaid(graph: ApplicationGraph): string;"
+    },
+    {
+      "name": "FeatureSpecNode",
+      "kind": "type",
+      "signature": "export interface FeatureSpecNode {\n    name: string;\n    states: string[];\n    transitions: FeatureTransitionNode[];\n    file?: string;\n    line?: number;\n}"
+    },
+    {
+      "name": "FeatureTransitionNode",
+      "kind": "type",
+      "signature": "export interface FeatureTransitionNode {\n    name: string;\n    from: string;\n    to: string;\n    permission?: string;\n    command?: string;\n    route?: string;\n    transaction?: \"required\" | \"none\";\n    idempotency?: \"required\" | \"none\";\n    audit?: string;\n}"
+    },
+    {
+      "name": "formatDeliveryPlan",
+      "kind": "value",
+      "signature": "export declare function formatDeliveryPlan(result: DeliveryPlanResult): string;"
+    },
+    {
+      "name": "formatGraph",
+      "kind": "value",
+      "signature": "export declare function formatGraph(graph: ApplicationGraph): string;"
+    },
+    {
+      "name": "formatOpenApiDiff",
+      "kind": "value",
+      "signature": "export declare function formatOpenApiDiff(result: OpenApiDiffResult): string;"
+    },
+    {
+      "name": "generateApplication",
+      "kind": "value",
+      "signature": "export declare function generateApplication(graph: ApplicationGraph, options: GenerateOptions): Promise<string[]>;"
+    },
+    {
+      "name": "generateFeatureSource",
+      "kind": "value",
+      "signature": "export declare function generateFeatureSource(spec: FeatureSpecNode): string;"
+    },
+    {
+      "name": "GenerateOptions",
+      "kind": "type",
+      "signature": "export interface GenerateOptions {\n    rootDir: string;\n    outDir: string;\n    generateClient?: boolean;\n    generateOpenApi?: boolean;\n    openApi?: OpenApiOptions;\n    generatePermissions?: boolean;\n    treeShakeUnusedProviders?: boolean;\n    artifactHashes?: Map<string, string>;\n}"
+    },
+    {
+      "name": "getModuleBoundaryPreset",
+      "kind": "value",
+      "signature": "export declare function getModuleBoundaryPreset(name: ModuleBoundaryPresetName): ModuleBoundaryRule[];"
+    },
+    {
+      "name": "getModuleBoundaryProfile",
+      "kind": "value",
+      "signature": "export declare function getModuleBoundaryProfile(name: ModuleBoundaryPresetName): ModuleBoundaryProfile;"
+    },
+    {
+      "name": "GraphqlContractSummary",
+      "kind": "type",
+      "signature": "export interface GraphqlContractSummary {\n    schema: string;\n    schemaHash?: string;\n    documents: string[];\n    operations: Array<{\n        name: string;\n        file: string;\n        line: number;\n    }>;\n}"
+    },
+    {
+      "name": "GraphqlOptions",
+      "kind": "type",
+      "signature": "export interface GraphqlOptions {\n    typedDocuments?: boolean;\n    schema: string;\n    documents?: string[];\n    scalars?: Record<string, string | {\n        input: string;\n        output: string;\n    }>;\n}"
+    },
+    {
+      "name": "IncrementalProgramSession",
+      "kind": "type",
+      "signature": "export interface IncrementalProgramSession {\n    getProgram(): ts.Program;\n    getTypeChecker(): ts.TypeChecker;\n    update(rootNames: string[], changedPaths?: string[]): ProgramUpdate;\n    getTraits(): readonly TraitRecord[];\n    getDiagnostics(): readonly ts.Diagnostic[];\n    emit(): ts.EmitResult;\n    reset(): void;\n}"
+    },
+    {
+      "name": "inspectRouteContracts",
+      "kind": "value",
+      "signature": "export declare function inspectRouteContracts(graph: ApplicationGraph): any;"
+    },
+    {
+      "name": "JobNode",
+      "kind": "type",
+      "signature": "export interface JobNode {\n    className: string;\n    name: string;\n    serviceKey: string;\n    scope: Scope;\n    input?: string;\n    output?: string;\n    schemaKinds?: Partial<Record<\"input\" | \"output\", JobSchemaKind>>;\n    schemaImports?: Record<string, string>;\n    mode?: JobMode;\n    timeoutSec?: number;\n    maxAttempts?: number;\n    idempotency?: JobIdempotency;\n    aspects?: AspectRefNode[];\n}"
+    },
+    {
+      "name": "loadGeneratedOpenApiDocument",
+      "kind": "value",
+      "signature": "export declare function loadGeneratedOpenApiDocument(modulePath: string): Promise<OpenApiDocument>;"
+    },
+    {
+      "name": "loadSupacloudConfig",
+      "kind": "value",
+      "signature": "export declare function loadSupacloudConfig(cwd?: any): Promise<SupaCloudConfig>;"
+    },
+    {
+      "name": "MigrateFileResult",
+      "kind": "type",
+      "signature": "export interface MigrateFileResult {\n    file: string;\n    changed: boolean;\n    replacements: number;\n    issues: SourceMigrationIssue[];\n}"
+    },
+    {
+      "name": "migrateProject",
+      "kind": "value",
+      "signature": "export declare function migrateProject(options: MigrateProjectOptions): Promise<MigrateProjectResult>;"
+    },
+    {
+      "name": "MigrateProjectOptions",
+      "kind": "type",
+      "signature": "export interface MigrateProjectOptions {\n    rootDir: string;\n    include?: string[];\n    write?: boolean;\n}"
+    },
+    {
+      "name": "MigrateProjectResult",
+      "kind": "type",
+      "signature": "export interface MigrateProjectResult {\n    write: boolean;\n    migrations: Array<Pick<SupaCloudMigration, \"id\" | \"from\" | \"to\" | \"description\">>;\n    files: MigrateFileResult[];\n    changedFiles: string[];\n    issues: SourceMigrationIssue[];\n}"
+    },
+    {
+      "name": "migrateRouteResponse",
+      "kind": "value",
+      "signature": "declare function migrateRouteResponse(source: string, fileName: string): SourceMigrationResult;"
+    },
+    {
+      "name": "MODULAR_MONOLITH_RULES",
+      "kind": "value",
+      "signature": "export declare const MODULAR_MONOLITH_RULES: ModuleBoundaryRule[];"
+    },
+    {
+      "name": "MODULE_BOUNDARY_PROFILES",
+      "kind": "value",
+      "signature": "export declare const MODULE_BOUNDARY_PROFILES: Record<ModuleBoundaryPresetName, ModuleBoundaryProfile>;"
+    },
+    {
+      "name": "ModuleBoundaryPresetName",
+      "kind": "type",
+      "signature": "export type ModuleBoundaryPresetName = \"modular-monolith\" | \"feature-slices\" | \"vertical-slices\" | \"angular-enterprise\" | \"angular\" | \"clean-architecture\" | \"domain-driven\";"
+    },
+    {
+      "name": "ModuleBoundaryProfile",
+      "kind": "type",
+      "signature": "export interface ModuleBoundaryProfile {\n    name: ModuleBoundaryPresetName;\n    description: string;\n    rules: ModuleBoundaryRule[];\n}"
+    },
+    {
+      "name": "ModuleBoundaryRule",
+      "kind": "type",
+      "signature": "export interface ModuleBoundaryRule {\n    sourceTag: string;\n    onlyDependOnLibsWithTags?: string[];\n    bannedDependenciesWithTags?: string[];\n}"
+    },
+    {
+      "name": "ModuleDependencyGraph",
+      "kind": "both",
+      "signature": "export declare class ModuleDependencyGraph {\n    private readonly imports;\n    private readonly dependents;\n    private readonly fileOwners;\n    private readonly moduleMap;\n    constructor(modules?: ModuleNode[]);\n    rebuild(modules: ModuleNode[]): void;\n    private indexFile;\n    getModulesOwningFile(filePath: string): string[];\n    getAffectedModules(changedFiles: string[]): string[];\n    getDirectImports(moduleName: string): string[];\n    getDirectDependents(moduleName: string): string[];\n}"
+    },
+    {
+      "name": "ModuleNode",
+      "kind": "type",
+      "signature": "export interface ModuleNode {\n    name: string;\n    className: string;\n    tags?: string[];\n    file: string;\n    line: number;\n    imports: string[];\n    providers: ProviderNode[];\n    controllers: ControllerNode[];\n    commands: CommandNode[];\n    jobs?: JobNode[];\n    queries: QueryNode[];\n    aspects?: AspectRefNode[];\n    exports: string[];\n    featureSpec?: FeatureSpecNode;\n}"
+    },
+    {
+      "name": "OpenApiDiffChange",
+      "kind": "type",
+      "signature": "export interface OpenApiDiffChange {\n    kind: \"breaking\" | \"non-breaking\";\n    code: string;\n    path: string;\n    message: string;\n}"
+    },
+    {
+      "name": "OpenApiDiffResult",
+      "kind": "type",
+      "signature": "export interface OpenApiDiffResult {\n    ok: boolean;\n    breaking: OpenApiDiffChange[];\n    changes: OpenApiDiffChange[];\n}"
+    },
+    {
+      "name": "OpenApiDocument",
+      "kind": "type",
+      "signature": "export interface OpenApiDocument {\n    openapi: string;\n    info: OpenApiObject;\n    paths: OpenApiObject;\n    [key: string]: unknown;\n}"
+    },
+    {
+      "name": "OpenApiDocumentError",
+      "kind": "both",
+      "signature": "export declare class OpenApiDocumentError extends Error {\n    readonly code: \"OPENAPI_DOCUMENT_INVALID\";\n    constructor();\n}"
+    },
+    {
+      "name": "OpenApiExportOptions",
+      "kind": "type",
+      "signature": "export interface OpenApiExportOptions {\n    modulePath: string;\n    outputPath: string;\n    space?: number;\n}"
+    },
+    {
+      "name": "OpenApiJsonWriteResult",
+      "kind": "type",
+      "signature": "export interface OpenApiJsonWriteResult {\n    path: string;\n    written: boolean;\n}"
+    },
+    {
+      "name": "OpenApiObject",
+      "kind": "type",
+      "signature": "export type OpenApiObject = {\n    [key: string]: unknown;\n};"
+    },
+    {
+      "name": "OpenApiOptions",
+      "kind": "type",
+      "signature": "export interface OpenApiOptions {\n    title?: string;\n    version?: string;\n    description?: string;\n    servers?: OpenApiServer[];\n    securitySchemes?: Record<string, OpenApiSecurityScheme>;\n}"
+    },
+    {
+      "name": "OpenApiSecurityScheme",
+      "kind": "type",
+      "signature": "export type OpenApiSecurityScheme = {\n    type: \"apiKey\";\n    name: string;\n    in: \"header\" | \"query\" | \"cookie\";\n    description?: string;\n} | {\n    type: \"http\";\n    scheme: string;\n    bearerFormat?: string;\n    description?: string;\n} | {\n    type: \"oauth2\";\n    flows: Record<string, unknown>;\n    description?: string;\n} | {\n    type: \"openIdConnect\";\n    openIdConnectUrl: string;\n    description?: string;\n};"
+    },
+    {
+      "name": "OpenApiServer",
+      "kind": "type",
+      "signature": "export interface OpenApiServer {\n    url: string;\n    description?: string;\n}"
+    },
+    {
+      "name": "parseDeliveryBuildManifest",
+      "kind": "value",
+      "signature": "export declare function parseDeliveryBuildManifest(value: unknown): DeliveryBuildManifest;"
+    },
+    {
+      "name": "parseDeliveryBuildResult",
+      "kind": "value",
+      "signature": "export declare function parseDeliveryBuildResult(value: unknown): DeliveryBuildResult;"
+    },
+    {
+      "name": "parseDeliveryOptions",
+      "kind": "value",
+      "signature": "export declare function parseDeliveryOptions(value: unknown): DeliveryOptions;"
+    },
+    {
+      "name": "parseDeliveryPlanResult",
+      "kind": "value",
+      "signature": "export declare function parseDeliveryPlanResult(value: unknown): DeliveryPlanResult;"
+    },
+    {
+      "name": "parseOpenApiDocument",
+      "kind": "value",
+      "signature": "export declare function parseOpenApiDocument(value: unknown): OpenApiDocument;"
+    },
+    {
+      "name": "planDeliveryProject",
+      "kind": "value",
+      "signature": "export declare function planDeliveryProject(options: CompileOptions, delivery?: unknown): Promise<DeliveryPlanResult>;"
+    },
+    {
+      "name": "ProgramUpdate",
+      "kind": "type",
+      "signature": "export interface ProgramUpdate {\n    changedFiles: string[];\n    reusedFiles: string[];\n    program: ts.Program;\n}"
+    },
+    {
+      "name": "ProviderKind",
+      "kind": "type",
+      "signature": "export type ProviderKind = \"class\" | \"value\" | \"factory\" | \"existing\";"
+    },
+    {
+      "name": "ProviderNode",
+      "kind": "type",
+      "signature": "export interface ProviderNode {\n    token: string;\n    tokenKind: TokenKind;\n    kind: ProviderKind;\n    useClass?: string;\n    useValueExpr?: string;\n    useFactoryName?: string;\n    useExisting?: string;\n    scope: Scope;\n    deps: string[];\n    optionalDeps?: string[];\n    selfDeps?: string[];\n    skipSelfDeps?: string[];\n    hostDeps?: string[];\n    functionalInjects?: FunctionalInjectNode[];\n    multi?: boolean;\n    providedIn?: \"root\";\n    hasOnDestroy?: boolean;\n    exported: boolean;\n    file: string;\n    line: number;\n    importPath?: string;\n    importModule?: string;\n}"
+    },
+    {
+      "name": "pullGraphqlSchema",
+      "kind": "value",
+      "signature": "export declare function pullGraphqlSchema(options: PullGraphqlSchemaOptions): Promise<{\n    path: string;\n    schemaHash: string;\n    upToDate: boolean;\n    written: boolean;\n}>;"
+    },
+    {
+      "name": "PullGraphqlSchemaOptions",
+      "kind": "type",
+      "signature": "export interface PullGraphqlSchemaOptions {\n    url: string;\n    output: string;\n    publishableKey?: string;\n    accessToken?: string;\n    check?: boolean;\n    fetch?: (url: string, init: RequestInit) => Promise<Response>;\n}"
+    },
+    {
+      "name": "QueryNode",
+      "kind": "type",
+      "signature": "export interface QueryNode {\n    className: string;\n    name: string;\n}"
+    },
+    {
+      "name": "readOpenApiJson",
+      "kind": "value",
+      "signature": "export declare function readOpenApiJson(path: string): Promise<OpenApiDocument>;"
+    },
+    {
+      "name": "renderApplication",
+      "kind": "value",
+      "signature": "export declare function renderApplication(graph: ApplicationGraph, options: GenerateOptions): RenderedArtifacts;"
+    },
+    {
+      "name": "renderClient",
+      "kind": "value",
+      "signature": "export declare function renderClient(graph: ApplicationGraph, options?: GenerateOptions): string;"
+    },
+    {
+      "name": "RenderedArtifacts",
+      "kind": "type",
+      "signature": "export interface RenderedArtifacts {\n    applicationCode: string;\n    manifestJson: string;\n    clientCode?: string;\n    openApiCode?: string;\n    permissionsCode?: string;\n}"
+    },
+    {
+      "name": "renderOpenApi",
+      "kind": "value",
+      "signature": "export declare function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions): string;"
+    },
+    {
+      "name": "resolveModuleBoundaries",
+      "kind": "value",
+      "signature": "export declare function resolveModuleBoundaries(options?: {\n    preset?: ModuleBoundaryPresetName;\n    rules?: ModuleBoundaryRule[];\n}): ModuleBoundaryRule[] | undefined;"
+    },
+    {
+      "name": "resolveSupacloudConfig",
+      "kind": "value",
+      "signature": "export declare function resolveSupacloudConfig(config?: SupaCloudConfig, cwd?: any): {\n    rootDir: string;\n    outDir: string;\n    include: string[];\n    strict: boolean;\n    requireRouteContracts: boolean;\n    generateClient: boolean;\n    generateOpenApi: boolean;\n    openApi?: NonNullable<CompileOptions[\"openApi\"]>;\n    generatePermissions: boolean;\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n    commandCapabilities?: CommandExecutionCapabilities;\n    moduleBoundaries?: NonNullable<CompileOptions[\"moduleBoundaries\"]>;\n    typeSafety?: NonNullable<CompileOptions[\"typeSafety\"]>;\n    allowRouteCommandBindings?: boolean;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    treeShakeUnusedProviders: boolean;\n    graphql?: GraphqlOptions;\n};"
+    },
+    {
+      "name": "RouteNode",
+      "kind": "type",
+      "signature": "export interface RouteNode {\n    contract?: {\n        body?: \"framework\" | \"domain\";\n        response?: \"framework\" | \"native-json\" | \"binary\" | \"stream\";\n        evidence?: string;\n    };\n    schemaKinds?: Partial<Record<\"body\" | \"params\" | \"query\" | \"headers\" | \"cookie\" | \"response\", \"opaque\" | \"declared\">>;\n    nativeResponse?: boolean;\n    method: \"GET\" | \"POST\" | \"PUT\" | \"PATCH\" | \"DELETE\" | \"HEAD\" | \"OPTIONS\";\n    path: string;\n    handler: string;\n    body?: string;\n    params?: string;\n    query?: string;\n    headers?: string;\n    cookie?: string;\n    response?: string;\n    responses?: Record<string, string>;\n    command?: string;\n    guards?: string[];\n    canMatch?: string[];\n    canDeactivate?: string[];\n    resolvers?: Record<string, string>;\n    redirectTo?: string;\n    pathMatch?: \"full\" | \"prefix\";\n    pathParams?: string[];\n    paramBindings?: string[];\n    queryBindings?: string[];\n    hasBodyBinding?: boolean;\n    paramTransforms?: Record<string, \"number\" | \"boolean\" | \"string\">;\n    paramDefaults?: Record<string, unknown>;\n    queryTransforms?: Record<string, \"number\" | \"boolean\" | \"string\">;\n    queryDefaults?: Record<string, unknown>;\n    title?: string;\n    data?: Record<string, unknown>;\n    handlerParams?: HandlerParamNode[];\n    aspects?: AspectRefNode[];\n}"
+    },
+    {
+      "name": "scanGeneratedArtifacts",
+      "kind": "value",
+      "signature": "export declare function scanGeneratedArtifacts(artifacts: Record<string, string | undefined>, strict?: boolean): Diagnostic[];"
+    },
+    {
+      "name": "scanProductionSource",
+      "kind": "value",
+      "signature": "export declare function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic[];"
+    },
+    {
+      "name": "Scope",
+      "kind": "type",
+      "signature": "export type Scope = \"application\" | \"request\" | \"job\";"
+    },
+    {
+      "name": "serializeOpenApiJson",
+      "kind": "value",
+      "signature": "export declare function serializeOpenApiJson(document: unknown, space?: number): string;"
+    },
+    {
+      "name": "SourceMigrationIssue",
+      "kind": "type",
+      "signature": "export interface SourceMigrationIssue {\n    code: string;\n    message: string;\n    file: string;\n    line?: number;\n}"
+    },
+    {
+      "name": "SourceMigrationResult",
+      "kind": "type",
+      "signature": "export interface SourceMigrationResult {\n    changed: boolean;\n    content: string;\n    replacements: number;\n    issues: SourceMigrationIssue[];\n}"
+    },
+    {
+      "name": "SUPACLOUD_MIGRATIONS",
+      "kind": "value",
+      "signature": "export declare const SUPACLOUD_MIGRATIONS: SupaCloudMigration[];"
+    },
+    {
+      "name": "SupaCloudConfig",
+      "kind": "type",
+      "signature": "export interface SupaCloudConfig {\n    delivery?: DeliveryOptions;\n    graphql?: GraphqlOptions | false;\n    root?: string;\n    outDir?: string;\n    include?: string[];\n    strict?: boolean;\n    requireRouteContracts?: boolean;\n    generateClient?: boolean;\n    generateOpenApi?: boolean;\n    openApi?: NonNullable<CompileOptions[\"openApi\"]>;\n    generatePermissions?: boolean;\n    moduleBoundaryPreset?: ModuleBoundaryPresetName;\n    moduleBoundaries?: NonNullable<CompileOptions[\"moduleBoundaries\"]>;\n    typeSafety?: NonNullable<CompileOptions[\"typeSafety\"]>;\n    allowRouteCommandBindings?: boolean;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    commandCapabilities?: CommandExecutionCapabilities;\n    treeShakeUnusedProviders?: boolean;\n}"
+    },
+    {
+      "name": "SupaCloudMigration",
+      "kind": "type",
+      "signature": "export interface SupaCloudMigration {\n    id: string;\n    from: string;\n    to: string;\n    description: string;\n    apply(source: string, fileName: string): SourceMigrationResult;\n}"
+    },
+    {
+      "name": "TokenKind",
+      "kind": "type",
+      "signature": "export type TokenKind = \"injection-token\" | \"class\";"
+    },
+    {
+      "name": "TraitCompilation",
+      "kind": "type",
+      "signature": "export interface TraitCompilation {\n    byFile: Map<string, TraitRecord[]>;\n    all: TraitRecord[];\n}"
+    },
+    {
+      "name": "TraitCompiler",
+      "kind": "both",
+      "signature": "export declare class TraitCompiler {\n    private readonly handlers;\n    constructor(handlers?: readonly TraitHandler[]);\n    compile(program: ts.Program, previous: TraitCompilation | undefined, changedFiles: Set<string>): TraitCompilation;\n    private compileSourceFile;\n}"
+    },
+    {
+      "name": "TraitHandler",
+      "kind": "type",
+      "signature": "export interface TraitHandler {\n    readonly kind: TraitKind;\n    detect(node: ts.Node): string | undefined;\n}"
+    },
+    {
+      "name": "TraitKind",
+      "kind": "type",
+      "signature": "export type TraitKind = \"module\" | \"injectable\" | \"controller\" | \"command\" | \"query\" | \"defineModule\" | \"defineFeatureSlice\" | \"injectionToken\";"
+    },
+    {
+      "name": "TraitRecord",
+      "kind": "type",
+      "signature": "export interface TraitRecord {\n    kind: TraitKind;\n    name: string;\n    file: string;\n    start: number;\n    end: number;\n    fingerprint: string;\n}"
+    },
+    {
+      "name": "TYPE_SAFETY_DIAGNOSTIC_CODES",
+      "kind": "value",
+      "signature": "export declare const TYPE_SAFETY_DIAGNOSTIC_CODES: {\n    readonly \"generated-any\": {\n        readonly errorCode: \"SC6001\";\n        readonly docsUrl: \"https://supacloud.dev/errors/SC6001\";\n    };\n    readonly \"source-any\": {\n        readonly errorCode: \"SC6002\";\n        readonly docsUrl: \"https://supacloud.dev/errors/SC6002\";\n    };\n    readonly \"source-type-assertion\": {\n        readonly errorCode: \"SC6003\";\n        readonly docsUrl: \"https://supacloud.dev/errors/SC6003\";\n    };\n    readonly \"source-non-null-assertion\": {\n        readonly errorCode: \"SC6004\";\n        readonly docsUrl: \"https://supacloud.dev/errors/SC6004\";\n    };\n    readonly \"source-implicit-widening\": {\n        readonly errorCode: \"SC6005\";\n        readonly docsUrl: \"https://supacloud.dev/errors/SC6005\";\n    };\n    readonly \"source-type-suppression\": {\n        readonly errorCode: \"SC6006\";\n        readonly docsUrl: \"https://supacloud.dev/errors/SC6006\";\n    };\n};"
+    },
+    {
+      "name": "TypeSafetyOptions",
+      "kind": "type",
+      "signature": "export interface TypeSafetyOptions {\n    noAnyInGenerated?: boolean;\n    scanProductionSource?: boolean;\n    exclude?: string[];\n}"
+    },
+    {
+      "name": "TypeSafetyScanOptions",
+      "kind": "type",
+      "signature": "export interface TypeSafetyScanOptions extends TypeSafetyOptions {\n    rootDir: string;\n    include?: string[];\n    outDir?: string;\n    strict?: boolean;\n}"
+    },
+    {
+      "name": "validateFeatureSpec",
+      "kind": "value",
+      "signature": "export declare function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode): Diagnostic[];"
+    },
+    {
+      "name": "validateGraph",
+      "kind": "value",
+      "signature": "export declare function validateGraph(graph: ApplicationGraph, options?: boolean | ValidateOptions): Diagnostic[];"
+    },
+    {
+      "name": "ValidateOptions",
+      "kind": "type",
+      "signature": "export interface ValidateOptions {\n    strict?: boolean;\n    moduleBoundaryPreset?: ModuleBoundaryPresetName;\n    moduleBoundaries?: ModuleBoundaryRule[];\n    allowRouteCommandBindings?: boolean;\n    commandCapabilities?: CommandExecutionCapabilities;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n}"
+    },
+    {
+      "name": "validateRouteContracts",
+      "kind": "value",
+      "signature": "export declare function validateRouteContracts(graph: ApplicationGraph): Diagnostic[];"
+    },
+    {
+      "name": "WatchEvent",
+      "kind": "type",
+      "signature": "export interface WatchEvent {\n    type: \"compile-start\" | \"compiled\" | \"compile-error\";\n    initial: boolean;\n    durationMs: number;\n    diagnostics: Diagnostic[];\n    written: string[];\n    stats?: CompileStats;\n}"
+    },
+    {
+      "name": "WatchHandle",
+      "kind": "type",
+      "signature": "export interface WatchHandle {\n    ready: Promise<WatchEvent>;\n    close(): Promise<void>;\n}"
+    },
+    {
+      "name": "WatchOptions",
+      "kind": "type",
+      "signature": "export interface WatchOptions extends CompileOptions {\n    debounceMs?: number;\n    onEvent?: (event: WatchEvent) => void;\n}"
+    },
+    {
+      "name": "watchProject",
+      "kind": "value",
+      "signature": "export declare function watchProject(options: WatchOptions): WatchHandle;"
+    },
+    {
+      "name": "writeOpenApiJson",
+      "kind": "value",
+      "signature": "export declare function writeOpenApiJson(document: unknown, outputPath: string, space?: number): Promise<OpenApiJsonWriteResult>;"
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.strict.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": false,
+    "exactOptionalPropertyTypes": false,
+    "noEmit": true,
+    "allowJs": false,
+    "checkJs": false,
+    "skipLibCheck": true,
+    "types": ["bun", "node"],
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "paths": {
+      "@typescript/typescript6": ["packages/compiler/node_modules/@typescript/typescript6"]
+    },
+    "typeRoots": ["./packages/compiler/node_modules/@types"],
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true
+  },
+  "include": ["scripts/**/*.ts"],
+  "exclude": ["node_modules", "dist", "scripts/fixtures"]
+}

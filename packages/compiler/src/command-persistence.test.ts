@@ -37,14 +37,16 @@ test("external effects cannot acquire transaction guarantees from metadata", () 
   const diagnostics = validateGraph(graph(), { commandCapabilities: {
     rpc: { update: { boundary: "external", audit: true, idempotency: true, transaction: false } },
   } });
-  expect(diagnostics.some((item) => item.code === "command-external-transaction" && item.severity === "error")).toBe(true);
+  expect(diagnostics.some((item) => item.code === "command-external-transaction"
+    && item.errorCode === "SC4021" && item.severity === "error")).toBe(true);
 });
 
 test("persistent profile rejects unproven adapters and weak command policy", () => {
   const diagnostics = validateGraph(graph(), { commandCapabilities: {
     requirePersistentAdapters: true, rpc: { update: { audit: true, idempotency: true, transaction: true } },
   } });
-  expect(diagnostics.some((item) => item.code === "command-persistence-required")).toBe(true);
+  expect(diagnostics.some((item) => item.code === "command-persistence-required"
+    && item.errorCode === "SC4020")).toBe(true);
 });
 
 test("untrusted configuration rejects mistyped persistence capabilities", () => {

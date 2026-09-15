@@ -107,6 +107,45 @@ jobs:
         working-directory: packages/management-api
         run: bun run scripts/check-swagger-coverage.ts --strict
 
+  architecture-governance:
+    name: Architecture Governance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+
+      - name: Restore compiler dependency cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-compiler-governance-${{ hashFiles('packages/compiler/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ env.BUN_VERSION }}-compiler-governance-
+
+      - name: Install compiler dependencies
+        working-directory: packages/compiler
+        run: bun install --frozen-lockfile
+
+      - name: Prepare app public API dependencies
+        run: |
+          bun run scripts/build-command-dependencies.ts app
+          (cd packages/app && bun install --frozen-lockfile)
+
+      - name: Run workspace architecture gates
+        run: |
+          bun test scripts/check_workspace_boundaries.test.ts
+          bun run check:boundaries
+          bun run typecheck:tools
+          bun run check:public-api
+          bun run check:diagnostic-docs
+
   package-checks:
     name: Package Checks (${{ matrix.name }})
     runs-on: ubuntu-latest
@@ -1035,6 +1074,7 @@ jobs:
     if: ${{ always() }}
     needs:
       - lint-and-typecheck
+      - architecture-governance
       - package-checks
       - command-workflow-integration
       - supacloud-lite-windows
@@ -1052,6 +1092,7 @@ jobs:
       - name: Verify required jobs
         env:
           LINT_AND_TYPECHECK: ${{ needs.lint-and-typecheck.result }}
+          ARCHITECTURE_GOVERNANCE: ${{ needs.architecture-governance.result }}
           PACKAGE_CHECKS: ${{ needs.package-checks.result }}
           COMMAND_WORKFLOW: ${{ needs.command-workflow-integration.result }}
           SUPACLOUD_LITE_WINDOWS: ${{ needs.supacloud-lite-windows.result }}
@@ -1065,6 +1106,7 @@ jobs:
         run: |
           for result in \
             "$LINT_AND_TYPECHECK" \
+            "$ARCHITECTURE_GOVERNANCE" \
             "$PACKAGE_CHECKS" \
             "$COMMAND_WORKFLOW" \
             "$SUPACLOUD_LITE_WINDOWS" \
@@ -1083,7 +1125,7 @@ jobs:
 
   build-binaries:
     name: Build Binaries
-    needs: [lint-and-typecheck, package-checks, generate-sbom, docker-and-scripts-checks, unit-test, integration-test, shell-scripts-lint, caddy-edge-proxy-smoke]
+    needs: [lint-and-typecheck, architecture-governance, package-checks, generate-sbom, docker-and-scripts-checks, unit-test, integration-test, shell-scripts-lint, caddy-edge-proxy-smoke]
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
 

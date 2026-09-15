@@ -36,8 +36,15 @@ Runtime adapter that turns `@supacloud/compiler` output into a production-ready
   controllers and services.
 - **Request-scope teardown**: invokes the compiler-generated
   `destroyRequestScope` after the response, including when the handler fails.
-- **TypeBox schema binding**: attaches compiled parameter, query, body, and
-  response TypeBox schemas directly to Elysia route definitions.
+- **Angular-backed async DI**: when `createApplication({ injector })` receives
+  an `@supacloud/app` root injector, each request gets an isolated child
+  injector with `REQUEST_CONTEXT`, including across `await` boundaries.
+- **TypeBox schema binding**: attaches compiled parameter, query, body, headers,
+  cookie, single-response and status-map TypeBox schemas directly to Elysia
+  route definitions; Elysia performs request validation and normalization.
+- **Schema-first client decoding**: generated clients select the declared
+  response schema by HTTP status and decode it before returning; an explicit
+  decoder remains available for custom transforms.
 - **Compiler invoker execution**: uses the compiler-emitted positional invoker
   after Elysia has decoded route input, while retaining the legacy input-object
   handler path for hand-written compiled fixtures.
@@ -47,6 +54,9 @@ Runtime adapter that turns `@supacloud/compiler` output into a production-ready
 - **Static AOP pipeline**: executes compiler-emitted module, route, command, and
   job aspects with `composeAspects`; no runtime discovery or registration is
   performed.
+- **Worker registration**: registers compiler-emitted Jobs, initializes their
+  application services once, and provides polling plus graceful shutdown around
+  a host-owned claim/receipt transport.
 - **Public error mapping**: transforms framework / application errors via
   `errorMapper` with standard `ApplicationError` envelope support, preserving
   HTTP 422 for request validation and HTTP 500 / `RESPONSE_VALIDATION_ERROR`
@@ -105,6 +115,11 @@ document can be imported from the compiler-generated `openapi.ts` module. The
 GraphQL endpoint serves a local, role-scoped snapshot only; it does not enable
 server introspection or create a GraphQL resolver layer. Protect or omit these
 routes in production when the schema is not public.
+
+The root injector is normally created and owned by `bootstrapBun`. The Elysia
+adapter does not take ownership of an injected root injector; stop it from the
+same Bun bootstrap that created it. Existing applications may omit `injector`
+and continue using compiler-generated request scopes unchanged.
 
 For deterministic local verification, use the in-memory sandbox. It supplies
 stable request identity, an isolated key-value database with optimistic
@@ -166,7 +181,6 @@ import {
   createWorker,
   type WorkerClaim,
 } from "@supacloud/elysia";
-
 const transport = createQueueWorkerTransport<
   SupaCloudQueueMessage,
   WorkerClaim,
@@ -366,5 +380,42 @@ decoders compatible with `HttpClient.execute` while retaining the same schemas
 for route registration. Keep schemas independently importable and reference
 their identifiers explicitly in compiler-analyzed route decorators.
 
-See [command migration](../../docs/command-migration.md) for examples and
+For hand-written Elysia routes, `defineRouteContract` and
+`defineElysiaRoute` provide contextual handler types from the same schema value.
+`registerElysiaRoute` maps the contract's `responses` status map to Elysia's
+`response` option and registers the route:
+
+```ts
+import { Elysia, t } from "elysia";
+import {
+  defineElysiaRoute,
+  defineRouteContract,
+  registerElysiaRoute,
+} from "@supacloud/elysia";
+
+const itemRoute = defineRouteContract({
+  body: t.Object({ name: t.String() }),
+  params: t.Object({ id: t.String() }),
+  responses: {
+    200: t.Object({ id: t.String(), name: t.String() }),
+    409: t.Object({ conflict: t.Literal(true) }),
+  },
+});
+
+const route = defineElysiaRoute("POST", "/items/:id", itemRoute, ({ body, params, status }) =>
+  body.name === "existing"
+    ? status(409, { conflict: true })
+    : { id: params.id, name: body.name },
+);
+
+const app = registerElysiaRoute(new Elysia(), route);
+```
+
+The callback is typed from the contract (including decoded transforms and
+declared response statuses). Cookie values retain Elysia's native shape, so a
+declared `session: t.String()` is read as `cookie.session.value`. This helper
+does not add Eden-style client inference to an existing Elysia instance; the
+compiler-generated client remains the source of transport types.
+
+See [type safety and migration](../../docs/type-safety.md) and [command migration](../../docs/command-migration.md) for examples and
 the distinction between contract declarations and runtime verification.

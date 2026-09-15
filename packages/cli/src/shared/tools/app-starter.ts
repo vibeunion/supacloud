@@ -59,6 +59,10 @@ export default defineSupacloudConfig({
   root: "src",
   outDir: "generated",
   strict: true,
+  moduleBoundaryPreset: "modular-monolith",
+  typeSafety: { scanProductionSource: true, noAnyInGenerated: true },
+  disallowControllerDirectDb: true,
+  detectOrphanModules: true,
   graphql: { schema: "graphql/schema.graphql" },
   commandCapabilities: { permission: true, transaction: true, idempotency: true, audit: true },
 });
@@ -193,6 +197,12 @@ export function createSupAuthApp(identity: SupAuthContextOptions, adapters: Omit
   return createApp({ ...adapters, requestContext: createSupAuthRequestContext(identity) });
 }
 `,
+        "generated/application.ts": `// BOOTSTRAP ARTIFACT: bun run compile replaces this file.
+// Keeping a typed placeholder lets the first compile resolve the application entrypoint.
+export function createCompiledModules(): never {
+  throw new Error("Run bun run compile before starting the application");
+}
+`,
         "src/review/review.ts": `import {
   Body, Command, Controller, DB_CLIENT, Get, Inject, Param, Post,
   defineFeatureSlice, defineFeatureSpec, type Aspect,
@@ -268,10 +278,10 @@ export class ApproveReview {
 export class ReviewController {
   constructor(@Inject(ApproveReview) private readonly approveReview: ApproveReview) {}
 
-  @Get("/health", { response: HealthResult })
+  @Get("/health", { responses: { 200: HealthResult } })
   health(): { ok: boolean } { return { ok: true }; }
 
-  @Post("/:id/approve", { command: ApproveReview, params: Params, body: ApproveBody, response: ReviewResult })
+  @Post("/:id/approve", { command: ApproveReview, params: Params, body: ApproveBody, responses: { 200: ReviewResult } })
   approve(@Param("id") id: string, @Body() body: { expectedVersion: number }): Review {
     return this.approveReview.execute(id, body.expectedVersion);
   }

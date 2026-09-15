@@ -14,7 +14,10 @@ import type {
   FunctionalInjectNode,
   FeatureSpecNode,
   FeatureTransitionNode,
+  JobIdempotency,
+  JobMode,
   JobNode,
+  JobSchemaKind,
   ModuleNode,
   ProviderNode,
   QueryNode,
@@ -22,6 +25,7 @@ import type {
   Scope,
   TokenKind,
 } from "./types";
+import { COMPILER_DIAGNOSTIC_CODES } from "./validate";
 import { camelName } from "./util";
 
 const DEFAULT_INCLUDE = ["**/*.module.ts", "**/*.ts"];
@@ -35,9 +39,21 @@ const ROUTE_DECORATORS: Record<string, RouteNode["method"]> = {
   Options: "OPTIONS",
 };
 const SCOPES: Scope[] = ["application", "request", "job"];
+const JOB_MODES = ["task", "workflow"] as const satisfies readonly JobMode[];
+const JOB_IDEMPOTENCY = ["required", "none"] as const satisfies readonly JobIdempotency[];
+const JOB_TIMEOUT_MAX_SEC = 900;
+const JOB_TASK_MAX_ATTEMPTS = 10;
+const JOB_WORKFLOW_MAX_ATTEMPTS = 100;
 
 function isScope(value: string): value is Scope {
   return SCOPES.some((scope) => scope === value);
+}
+
+function withDiagnosticMetadata(diagnostic: Diagnostic): Diagnostic {
+  const metadata = COMPILER_DIAGNOSTIC_CODES[diagnostic.code];
+  return metadata
+    ? { ...diagnostic, errorCode: metadata.code, docsUrl: metadata.docsUrl }
+    : diagnostic;
 }
 
 interface TokenInfo {
@@ -482,7 +498,7 @@ export async function analyzeProject(
   return {
     modules,
     externalTokens,
-    diagnostics: ctx.diagnostics,
+    diagnostics: ctx.diagnostics.map(withDiagnosticMetadata),
     tokenNames,
     ...(cache ? { cacheStats: { reusedModules, reanalyzedModules } } : {}),
   };
@@ -788,11 +804,13 @@ function parseModule(
           ctx,
           `job ${className}`,
         );
+        const contract = parseJobOptions(meta, className, ctx);
         jobs.push({
           className,
           name: stringLiteralProp(meta, "name") ?? className,
           serviceKey: camelName(provider?.token ?? className),
           scope,
+          ...contract,
           ...(aspects.length > 0 ? { aspects } : {}),
         });
       }
@@ -904,6 +922,33 @@ function parseFeatureSpec(
     });
   }
   return { name, states, transitions, file: sourcePath(ctx.rootDir, input.getSourceFile().fileName), line: lineOf(input) };
+}
+
+/** Resolves route options passed inline, through a const, or via defineRouteContract. */
+function resolveStaticObjectLiteral(
+  input: Expression | undefined,
+  ctx: AnalysisContext,
+  seen = new Set<ts.Node>(),
+): ObjectLiteralExpression | undefined {
+  if (!input || seen.has(input)) return undefined;
+  seen.add(input);
+  if (ts.isAsExpression(input) || ts.isSatisfiesExpression(input) || ts.isParenthesizedExpression(input)) {
+    return resolveStaticObjectLiteral(input.expression, ctx, seen);
+  }
+  if (ts.isIdentifier(input)) {
+    const declaration = resolveDeclaration(input, ctx).find(ts.isVariableDeclaration);
+    return declaration?.initializer
+      ? resolveStaticObjectLiteral(declaration.initializer, ctx, seen)
+      : undefined;
+  }
+  if (ts.isCallExpression(input)) {
+    const expressionName = nodeText(input.expression);
+    if (expressionName === "defineRouteContract" || expressionName.endsWith(".defineRouteContract")) {
+      return resolveStaticObjectLiteral(input.arguments[0], ctx, seen);
+    }
+    return undefined;
+  }
+  return ts.isObjectLiteralExpression(input) ? input : undefined;
 }
 
 function commandModeProp(
@@ -1543,6 +1588,11 @@ function parseController(
             const argument = dArgs[0];
             const bindingName = argument !== undefined && ts.isStringLiteral(argument) ? argument.text : undefined;
             paramNode = { name: pName, kind: "headers", ...(bindingName === undefined ? {} : { bindingName }) };
+          } else if (dName === "Cookie") {
+            hasBindingDecorator = true;
+            const argument = dArgs[0];
+            const bindingName = argument !== undefined && ts.isStringLiteral(argument) ? argument.text : undefined;
+            paramNode = { name: pName, kind: "cookie", ...(bindingName === undefined ? {} : { bindingName }) };
           }
         }
         // Automatic route parameter binding (Angular withComponentInputBinding pattern):
@@ -1625,8 +1675,9 @@ function parseController(
       }
 
       const optionsArg = args[1];
-      if (optionsArg && ts.isObjectLiteralExpression(optionsArg)) {
-        const contract = getProp(optionsArg, "contract");
+      const optionsObject = resolveStaticObjectLiteral(optionsArg, ctx);
+      if (optionsObject) {
+        const contract = getProp(optionsObject, "contract");
         if (contract && ts.isObjectLiteralExpression(contract)) {
           route.contract = {};
           for (const field of ["body", "response", "evidence"] as const) {
@@ -1639,8 +1690,8 @@ function parseController(
             } else if (value) Object.assign(route.contract, { [field]: value });
           }
         }
-        for (const field of ["body", "params", "query", "response"] as const) {
-          const schemaExpr = getProp(optionsArg, field);
+        for (const field of ["body", "params", "query", "headers", "cookie", "response"] as const) {
+          const schemaExpr = getProp(optionsObject, field);
           if (schemaExpr && ts.isIdentifier(schemaExpr)) {
             route[field] = nodeText(schemaExpr);
             const importPath = importPathOf(schemaExpr, ctx);
@@ -1654,20 +1705,51 @@ function parseController(
             (route.schemaKinds ??= {})[field] = opaque ? "opaque" : "declared";
           }
         }
-        const commandExpr = getProp(optionsArg, "command");
+        const responsesExpr = getProp(optionsObject, "responses");
+        const responsesObject = resolveStaticObjectLiteral(responsesExpr, ctx);
+        if (responsesObject) {
+          const responses: Record<string, string> = {};
+          for (const property of responsesObject.properties) {
+            if (!ts.isPropertyAssignment(property) || ts.isComputedPropertyName(property.name)) continue;
+            const status = propertyName(property.name);
+            const schemaExpr = property.initializer;
+            if (!ts.isIdentifier(schemaExpr)) {
+              ctx.diagnostics.push({
+                severity: "error",
+                code: "invalid-route-response-map",
+                file,
+                message: `Route ${route.handler} response schemas must be exported identifier references.`,
+              });
+              continue;
+            }
+            responses[status] = schemaExpr.text;
+            const importPath = importPathOf(schemaExpr, ctx);
+            if (importPath) schemaImports[schemaExpr.text] = importPath;
+            const declaration = resolveDeclaration(schemaExpr, ctx)[0];
+            const typeName = ctx.checker.typeToString(ctx.checker.getTypeAtLocation(schemaExpr));
+            const initializer = declaration && ts.isVariableDeclaration(declaration) ? declaration.initializer : undefined;
+            const opaque = /\bT(?:Unknown|Any)\b/.test(typeName) ||
+              (initializer && ts.isCallExpression(initializer) && ts.isPropertyAccessExpression(initializer.expression) &&
+                ["Unknown", "Any"].includes(initializer.expression.name.text));
+            const previousKind = route.schemaKinds?.response;
+            (route.schemaKinds ??= {}).response = opaque || previousKind === "opaque" ? "opaque" : "declared";
+          }
+          if (Object.keys(responses).length > 0) route.responses = responses;
+        }
+        const commandExpr = getProp(optionsObject, "command");
         if (commandExpr && ts.isIdentifier(commandExpr)) {
           const commandDecl = resolveDeclaration(commandExpr, ctx)[0];
           route.command = commandDecl && ts.isClassDeclaration(commandDecl)
             ? (commandDecl.name?.text ?? commandExpr.text)
             : commandExpr.text;
         }
-        const guardsExpr = getProp(optionsArg, "guards");
+        const guardsExpr = getProp(optionsObject, "guards");
         if (guardsExpr && ts.isArrayLiteralExpression(guardsExpr)) {
           for (const el of guardsExpr.elements) {
             routeGuards.push(tokenText(el, ctx));
           }
         }
-        const canMatchExpr = getProp(optionsArg, "canMatch");
+        const canMatchExpr = getProp(optionsObject, "canMatch");
         if (canMatchExpr && ts.isArrayLiteralExpression(canMatchExpr)) {
           const canMatchList: string[] = [];
           for (const el of canMatchExpr.elements) {
@@ -1677,13 +1759,13 @@ function parseController(
             route.canMatch = canMatchList;
           }
         }
-        const canDeactivateExpr = getProp(optionsArg, "canDeactivate");
+        const canDeactivateExpr = getProp(optionsObject, "canDeactivate");
         if (canDeactivateExpr && ts.isArrayLiteralExpression(canDeactivateExpr)) {
           for (const el of canDeactivateExpr.elements) {
             routeCanDeactivate.push(tokenText(el, ctx));
           }
         }
-        const resolversExpr = getProp(optionsArg, "resolvers");
+        const resolversExpr = getProp(optionsObject, "resolvers");
         if (resolversExpr && ts.isObjectLiteralExpression(resolversExpr)) {
           const resolvers: Record<string, string> = {};
           for (const prop of resolversExpr.properties) {
@@ -1697,27 +1779,27 @@ function parseController(
             route.resolvers = resolvers;
           }
         }
-        const redirectToExpr = getProp(optionsArg, "redirectTo");
+        const redirectToExpr = getProp(optionsObject, "redirectTo");
         if (redirectToExpr && ts.isStringLiteral(redirectToExpr)) {
           route.redirectTo = redirectToExpr.text;
         }
-        const pathMatchExpr = getProp(optionsArg, "pathMatch");
+        const pathMatchExpr = getProp(optionsObject, "pathMatch");
         if (pathMatchExpr && ts.isStringLiteral(pathMatchExpr)) {
           const val = pathMatchExpr.text;
           if (val === "full" || val === "prefix") {
             route.pathMatch = val;
           }
         }
-        const titleExpr = getProp(optionsArg, "title");
+        const titleExpr = getProp(optionsObject, "title");
         if (titleExpr && ts.isStringLiteral(titleExpr)) {
           route.title = titleExpr.text;
         }
-        const dataExpr = getProp(optionsArg, "data");
+        const dataExpr = getProp(optionsObject, "data");
         if (dataExpr && ts.isObjectLiteralExpression(dataExpr)) {
           route.data = { ...route.data, ...parseObjectLiteralValues(dataExpr) };
         }
         const aspects = parseAspectRefs(
-          getProp(optionsArg, "aspects"),
+          getProp(optionsObject, "aspects"),
           ctx,
           `route ${httpMethod} ${routePath}`,
         );
@@ -1750,6 +1832,172 @@ function parseController(
     importPath: modulePath(ctx.rootDir, decl.getSourceFile().fileName),
     ...(Object.keys(schemaImports).length > 0 ? { schemaImports } : {}),
   };
+}
+
+function parseJobOptions(
+  meta: ObjectLiteralExpression,
+  owner: string,
+  ctx: AnalysisContext,
+): Partial<Pick<JobNode, "input" | "output" | "schemaKinds" | "schemaImports" | "mode" | "timeoutSec" | "maxAttempts" | "idempotency">> {
+  const result: Partial<Pick<JobNode, "input" | "output" | "schemaKinds" | "schemaImports" | "mode" | "timeoutSec" | "maxAttempts" | "idempotency">> = {};
+  const mode = parseJobEnum(meta, "mode", JOB_MODES, owner, ctx, "invalid-job-mode", "SC4018");
+  const effectiveMode = mode ?? "task";
+  if (mode !== undefined) result.mode = mode;
+
+  const timeoutSec = parseJobInteger(
+    meta,
+    "timeoutSec",
+    1,
+    JOB_TIMEOUT_MAX_SEC,
+    owner,
+    ctx,
+    "invalid-job-timeout",
+    "SC4015",
+  );
+  if (timeoutSec !== undefined) result.timeoutSec = timeoutSec;
+
+  const maxAttempts = parseJobInteger(
+    meta,
+    "maxAttempts",
+    1,
+    effectiveMode === "workflow" ? JOB_WORKFLOW_MAX_ATTEMPTS : JOB_TASK_MAX_ATTEMPTS,
+    owner,
+    ctx,
+    "invalid-job-attempts",
+    "SC4016",
+  );
+  if (maxAttempts !== undefined) result.maxAttempts = maxAttempts;
+
+  const idempotency = parseJobEnum(
+    meta,
+    "idempotency",
+    JOB_IDEMPOTENCY,
+    owner,
+    ctx,
+    "invalid-job-idempotency",
+    "SC4017",
+  );
+  if (idempotency !== undefined) result.idempotency = idempotency;
+
+  const schemaImports: Record<string, string> = {};
+  const schemaKinds: Partial<Record<"input" | "output", JobSchemaKind>> = {};
+  for (const field of ["input", "output"] as const) {
+    const expression = getProp(meta, field);
+    if (!expression) continue;
+    if (!ts.isIdentifier(expression)) {
+      jobOptionError(
+        ctx,
+        "invalid-job-schema",
+        `${owner} 的 ${field} schema 必须是可静态解析的标识符引用，不能使用内联调用或动态表达式`,
+        expression,
+        "SC4019",
+        `将 schema 提取为命名导出，例如 ${field}: ${field === "input" ? "JobInput" : "JobOutput"}。`,
+      );
+      continue;
+    }
+    const declaration = resolveDeclaration(expression, ctx)[0];
+    const importPath = importPathOf(expression, ctx);
+    if (!declaration || !importPath) {
+      jobOptionError(
+        ctx,
+        "invalid-job-schema",
+        `${owner} 的 ${field} schema '${expression.text}' 无法解析为项目内静态引用`,
+        expression,
+        "SC4019",
+        "确保 schema 是当前项目中可导入的命名变量。",
+      );
+      continue;
+    }
+    result[field] = expression.text;
+    schemaImports[expression.text] = importPath;
+    schemaKinds[field] = jobSchemaKind(expression, declaration, ctx);
+  }
+  if (Object.keys(schemaImports).length > 0) result.schemaImports = schemaImports;
+  if (Object.keys(schemaKinds).length > 0) result.schemaKinds = schemaKinds;
+  return result;
+}
+
+function parseJobEnum<T extends string>(
+  meta: ObjectLiteralExpression,
+  field: string,
+  allowed: readonly T[],
+  owner: string,
+  ctx: AnalysisContext,
+  code: string,
+  errorCode: string,
+): T | undefined {
+  const expression = getProp(meta, field);
+  if (!expression) return undefined;
+  if (!ts.isStringLiteral(expression) || !allowed.includes(expression.text as T)) {
+    jobOptionError(
+      ctx,
+      code,
+      `${owner} 的 ${field} 必须是 ${allowed.map((value) => JSON.stringify(value)).join(" 或 ")} 字符串字面量`,
+      expression,
+      errorCode,
+    );
+    return undefined;
+  }
+  return expression.text as T;
+}
+
+function parseJobInteger(
+  meta: ObjectLiteralExpression,
+  field: string,
+  min: number,
+  max: number,
+  owner: string,
+  ctx: AnalysisContext,
+  code: string,
+  errorCode: string,
+): number | undefined {
+  const expression = getProp(meta, field);
+  if (!expression) return undefined;
+  const value = ts.isNumericLiteral(expression) ? Number(expression.text) : Number.NaN;
+  if (!Number.isSafeInteger(value) || value < min || value > max) {
+    jobOptionError(
+      ctx,
+      code,
+      `${owner} 的 ${field} 必须是 ${min} 到 ${max} 之间的安全整数`,
+      expression,
+      errorCode,
+    );
+    return undefined;
+  }
+  return value;
+}
+
+function jobOptionError(
+  ctx: AnalysisContext,
+  code: string,
+  message: string,
+  node: ts.Node,
+  errorCode: string,
+  suggestion?: string,
+): void {
+  ctx.diagnostics.push({
+    severity: "error",
+    code,
+    message,
+    file: sourcePath(ctx.rootDir, node.getSourceFile().fileName),
+    line: lineOf(node),
+    ...(suggestion === undefined ? {} : { suggestion }),
+    errorCode,
+    docsUrl: `https://supacloud.dev/errors/${errorCode}`,
+  });
+}
+
+function jobSchemaKind(
+  identifier: Identifier,
+  declaration: ts.Declaration,
+  ctx: AnalysisContext,
+): JobSchemaKind {
+  const typeName = ctx.checker.typeToString(ctx.checker.getTypeAtLocation(identifier));
+  const initializer = ts.isVariableDeclaration(declaration) ? declaration.initializer : undefined;
+  const opaque = /\bT(?:Unknown|Any)\b/.test(typeName) ||
+    (initializer && ts.isCallExpression(initializer) && ts.isPropertyAccessExpression(initializer.expression) &&
+      ["Unknown", "Any"].includes(initializer.expression.name.text));
+  return opaque ? "opaque" : "declared";
 }
 
 function checkedRpc(meta: ObjectLiteralExpression, ctx: AnalysisContext): string | undefined {

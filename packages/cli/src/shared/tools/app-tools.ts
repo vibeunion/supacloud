@@ -105,6 +105,7 @@ function moduleScaffold(name: string): string {
 
 @Module({
     name: ${JSON.stringify(name)},
+    tags: ["type:feature"],
     providers: [],
 })
 export class ${pascalName(name)}Module {}
@@ -117,10 +118,13 @@ function commandScaffold(moduleName: string, name: string): string {
 @Injectable()
 @Command({
     name: ${JSON.stringify(`${moduleName}.${camelName(name)}`)},
-    // TODO: Declare business permission identifier (e.g. ${moduleName}.${camelName(name)})
-    permission: "TODO",
+    permission: ${JSON.stringify(`${moduleName}.${camelName(name)}`)},
 })
-export class ${pascalName(name)}Command {}
+export class ${pascalName(name)}Command {
+    execute(): void {
+        throw new Error("Implement ${pascalName(name)}Command.execute before exposing this command");
+    }
+}
 `;
 }
 
@@ -201,12 +205,14 @@ async function runCompile(args: AppToolArguments): Promise<ToolResult> {
     const root = resolve(args.root || process.cwd());
     const loadedConfig = await loadSupacloudConfig(root);
     const defaults = resolveSupacloudConfig(loadedConfig, root);
+    const configuredRoot = sourceRoot(args, root, loadedConfig.root);
+    const include = parseInclude(args.include) ?? loadedConfig.include;
     const result = await compileProject({
         ...compileOptionsFromConfig({
             ...loadedConfig,
-            root: sourceRoot(args, root, loadedConfig.root),
+            ...(configuredRoot === undefined ? {} : { root: configuredRoot }),
             outDir: args.out_dir ? resolve(root, args.out_dir) : defaults.outDir,
-            include: parseInclude(args.include) ?? loadedConfig.include,
+            ...(include === undefined ? {} : { include }),
             strict: args.strict ?? loadedConfig.strict ?? false,
         }, root),
         writeOnError: false,
@@ -225,11 +231,13 @@ async function runCheck(args: AppToolArguments): Promise<ToolResult> {
     const root = resolve(args.root || process.cwd());
     const loadedConfig = await loadSupacloudConfig(root);
     const defaults = resolveSupacloudConfig(loadedConfig, root);
+    const configuredRoot = sourceRoot(args, root, loadedConfig.root);
+    const include = parseInclude(args.include) ?? loadedConfig.include;
     const config = compileOptionsFromConfig({
         ...loadedConfig,
-        root: sourceRoot(args, root, loadedConfig.root),
+        ...(configuredRoot === undefined ? {} : { root: configuredRoot }),
         outDir: args.out_dir ? resolve(root, args.out_dir) : defaults.outDir,
-        include: parseInclude(args.include) ?? loadedConfig.include,
+        ...(include === undefined ? {} : { include }),
         strict: args.strict ?? loadedConfig.strict ?? false,
     }, root);
     const result = await checkProject(config);
@@ -310,6 +318,7 @@ function reverseDependencies(manifest: AppManifest, token: string): string[] {
 
 function explainProvider(manifest: AppManifest, module: ModuleNode, index: number): string {
     const provider = module.providers[index];
+    if (!provider) throw new Error("Provider does not exist in the manifest");
     const lines = [
         `对象: ${provider.token}`,
         `类型: provider (${provider.kind})`,
@@ -329,6 +338,7 @@ function explainProvider(manifest: AppManifest, module: ModuleNode, index: numbe
 
 function explainController(manifest: AppManifest, module: ModuleNode, index: number): string {
     const controller = module.controllers[index];
+    if (!controller) throw new Error("Controller does not exist in the manifest");
     const lines = [
         `对象: ${controller.className}`,
         "类型: controller",
