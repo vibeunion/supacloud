@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.12.0...elysia-v0.13.0) (2026-09-15)
+
+
+### Features
+
+* **elysia:** add opt-in OpenAPI and GraphQL documentation ([#1297](https://github.com/vibeunion/supacloud/issues/1297)) ([d5b3f32](https://github.com/vibeunion/supacloud/commit/d5b3f32a075e813708b462a7b9d45458800b10e5))
+
 ## [0.12.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.11.2...elysia-v0.12.0) (2026-09-13)
 
 
