@@ -2,6 +2,7 @@ export * from "./http_contract.js";
 export * from "./receipts.js";
 export * from "./command_error.js";
 export * from "./command_status.js";
+export * from "./command_preview.js";
 export type {
   OperationReference, StoredCommand, CommandStoreSession, CommandStore,
   RecoveryScope, CommandRetentionStore,

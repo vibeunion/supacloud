@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { executeCompiledCommand, type CompiledModule, type CommandGovernance } from "./index";
+import { ApplicationError, executeCompiledCommand, previewCompiledCommand, type CompiledModule, type CommandGovernance } from "./index";
 
 const module: Pick<CompiledModule, "name" | "commands" | "aspects"> = {
   name: "review", commands: [{ className: "Approve", name: "approve", permission: "approve",
@@ -55,4 +55,99 @@ test("replayed RPC outcomes are decoded and never execute the handler", async ()
     capabilities: { audit: true, transaction: true, idempotency: true }, execute: () => ({ bad: true }),
   } } }, async () => ++writes)).rejects.toThrow("invalid result");
   expect(writes).toBe(0);
+});
+
+function preview(governance: Pick<CommandGovernance, "authorize">, previewFn: (input: number) => unknown,
+  rpc = async () => { throw new Error("rpc executed"); },
+  handler = async () => { throw new Error("handler executed"); }) {
+  const stages: string[] = [];
+  return {
+    stages,
+    result: previewCompiledCommand({
+      module, command: "Approve", input: 4,
+      request: new Request("https://app.example/"), requestContext: { requestId: "r1" },
+      governance: {
+        authorize: governance.authorize,
+        rpc: { approve_review: { capabilities: { audit: true, transaction: true, idempotency: true }, execute: rpc } },
+      },
+      preview: previewFn,
+    }),
+    execute: () => execute({
+      authorize: governance.authorize,
+      rpc: { approve_review: { capabilities: { audit: true, transaction: true, idempotency: true }, execute: rpc } },
+    }, handler, module, stages),
+  };
+}
+
+test("denied authorization returns a blocked preview and never runs preview, RPC or writes", async () => {
+  let previews = 0;
+  const denied = preview({
+    authorize: () => { throw new ApplicationError("Denied", { status: 403, code: "COMMAND_FORBIDDEN" }); },
+  }, () => { previews++; return { command: "approve", allowed: true, blockers: [] }; });
+  await expect(denied.result).resolves.toEqual({
+    command: "approve", allowed: false,
+    blockers: [{ code: "COMMAND_FORBIDDEN", message: "Denied" }],
+  });
+  expect(previews).toBe(0);
+  await expect(denied.execute()).rejects.toMatchObject({ status: 403, code: "COMMAND_FORBIDDEN" });
+});
+
+test("allowed authorization runs preview without RPC or the write handler", async () => {
+  let previews = 0;
+  let writes = 0;
+  let rpcs = 0;
+  const allowed = await previewCompiledCommand({
+    module, command: "Approve", input: 4,
+    request: new Request("https://app.example/"), requestContext: { requestId: "r1" },
+    governance: {
+      authorize: () => {},
+      rpc: { approve_review: {
+        capabilities: { audit: true, transaction: true, idempotency: true },
+        execute: async () => { rpcs++; throw new Error("rpc executed"); },
+      } },
+    },
+    preview: (input) => {
+      previews++;
+      return { command: "approve", allowed: input === 4, blockers: [] };
+    },
+  });
+  expect(allowed).toEqual({ command: "approve", allowed: true, blockers: [] });
+  expect(previews).toBe(1);
+  expect(rpcs).toBe(0);
+  expect(writes).toBe(0);
+});
+
+test("domain blockers disable the command without RPC or writes", async () => {
+  let rpcs = 0;
+  let writes = 0;
+  const blocked = await previewCompiledCommand({
+    module, command: "Approve", input: 4,
+    request: new Request("https://app.example/"), requestContext: { requestId: "r1" },
+    governance: {
+      authorize: () => {},
+      rpc: { approve_review: {
+        capabilities: { audit: true, transaction: true, idempotency: true },
+        execute: async () => { rpcs++; throw new Error("rpc executed"); },
+      } },
+    },
+    preview: () => ({
+      command: "approve", allowed: false,
+      blockers: [{ code: "CASE_FROZEN", message: "案件已冻结", correction: "解冻后再提交" }],
+    }),
+  });
+  expect(blocked).toEqual({
+    command: "approve", allowed: false,
+    blockers: [{ code: "CASE_FROZEN", message: "案件已冻结", correction: "解冻后再提交" }],
+  });
+  expect(rpcs).toBe(0);
+  expect(writes).toBe(0);
+});
+
+test("preview identity must match the compiled command", async () => {
+  await expect(previewCompiledCommand({
+    module, command: "Approve", input: 4,
+    request: new Request("https://app.example/"), requestContext: { requestId: "r1" },
+    governance: { authorize: () => {} },
+    preview: () => ({ command: "other.command", allowed: true, blockers: [] }),
+  })).rejects.toThrow("Mismatched command identity");
 });
