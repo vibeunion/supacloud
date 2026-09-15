@@ -63,6 +63,7 @@
 - [PowerSync 离线优先同步](./powersync-local-first.md) - 私有化同步边界、复制就绪度、RLS 写入流与冲突处理
 - [应用架构指南](./application-architecture.md) - 可扩展 Monorepo 规范、迁移治理与契约边界
 - [应用开发框架](./application-framework.md) - Angular 风格模块与依赖注入、编译期无反射代码生成与 Elysia 运行时
+- [路由契约升级迁移](./route-contract-migration.md) - schema-first 路由、客户端 decoder、OpenAPI 与 Management API 注册表迁移
 - [数据库治理](./database-governance.md) - RLS/RPC 作为一等资源管理、Catalog 对齐与 SQL Lint (`@supacloud/db`)
 - [应用平台原语](./application-platform-primitives.md) - 自定义 PostgREST Schema、事务性 Command 回执与不可变物料追溯
 

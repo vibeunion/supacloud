@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
+import { requireValue } from "../../test-helpers";
 import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -44,7 +45,7 @@ test("initialization rejects unsafe names and symlink roots", async () => {
 
 test("compiler dependencies and demo adapters stay outside the production entry", () => {
     const files = appStarterFiles("example");
-    const manifest = JSON.parse(files["package.json"]);
+    const manifest = JSON.parse(requireValue(files["package.json"]));
     expect(manifest.dependencies["@supacloud/compiler"]).toBeUndefined();
     expect(manifest.devDependencies["@supacloud/compiler"]).toMatch(/^\^\d+\.\d+\.\d+/);
     expect(files["src/application.ts"]).not.toContain("@supacloud/compiler");
@@ -60,6 +61,15 @@ test("framework starters include default query contracts and an offline client t
     expect(files["src/review/reviews.graphql"]).toContain("query ReviewList");
     expect(files["tests/graphql.test.ts"]).toContain('from "../generated/graphql"');
     expect(files["tests/graphql.test.ts"]).toContain("ReviewListQuery");
+});
+
+test("starter routes use explicit status response maps", () => {
+    const files = appStarterFiles("example");
+    const source = files["src/review/review.ts"];
+    expect(source).toContain('responses: { 200: HealthResult }');
+    expect(source).toContain('responses: { 200: ReviewResult }');
+    expect(source).not.toContain("response: HealthResult");
+    expect(source).not.toContain("response: ReviewResult");
 });
 
 test("starter documents Database First without representing its synthetic fixture as a deployed schema", () => {
@@ -79,7 +89,7 @@ test("the generated environment test suite runs without installing dependencies"
     await mkdir(join(root, "scripts"));
     await mkdir(join(root, "tests"));
     for (const name of ["scripts/environment.ts", "tests/environment.test.ts", "bunfig.toml"]) {
-        await writeFile(join(root, name), files[name]);
+        await writeFile(join(root, name), requireValue(files[name]));
     }
     const child = Bun.spawn([process.execPath, "--no-env-file", "test"], {
         cwd: root, env: { PATH: process.env.PATH ?? "" }, stdout: "pipe", stderr: "pipe",
@@ -101,6 +111,6 @@ test("starter documents external unified identity without adding an identity run
     expect(readme).toContain("never fall back to the demo identity");
     expect(readme).toContain("Recheck business authorization on idempotent replay");
     expect(readme).toContain("tests do not require SupAuth credentials");
-    const manifest = JSON.parse(files["package.json"]);
+    const manifest = JSON.parse(requireValue(files["package.json"]));
     expect(Object.keys(manifest.dependencies).some((name) => name.startsWith("@supauth/"))).toBe(false);
 });

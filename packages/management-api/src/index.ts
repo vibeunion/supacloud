@@ -42,6 +42,26 @@ import { caddyAskRoutes } from "./routes/caddy-ask";
 import { mcpRoutes } from "./mcp/server";
 import { validationErrorResponse } from "./utils/http-validation";
 import {
+  collectManagementDocumentedRouteContracts,
+  collectManagementRouteContracts,
+  augmentManagementOpenApiDocument,
+  type ManagementRouteContract,
+  type ManagementRouteProjectionOptions,
+} from "./route-contracts";
+export {
+  augmentManagementOpenApiDocument,
+  collectManagementDocumentedRouteContracts,
+  collectManagementRouteContracts,
+  isManagementDocumentedRoute,
+  toManagementOpenApiPath,
+} from "./route-contracts";
+export type {
+  ManagementRouteContract,
+  ManagementRouteProjectionOptions,
+  ManagementRouteSchemas,
+  ManagementRouteLike,
+} from "./route-contracts";
+import {
   applyObservabilityHeaders,
   beginRequestObservability,
   recordRequestObservation,
@@ -282,6 +302,8 @@ async function reconcileGatewayBeforeServe(): Promise<void> {
   });
 }
 
+let routeProjectionSource: Pick<AnyElysia, "routes"> | undefined;
+
 const app = new Elysia({ strictPath: false })
   .onRequest(({ request, set }) => {
     const context = beginRequestObservability(request);
@@ -314,6 +336,14 @@ const app = new Elysia({ strictPath: false })
       set.headers["Retry-After"] = "5";
     }
     return appError.toJSON();
+  })
+  // Elysia's Swagger adapter omits cookie parameters. Project that field from
+  // the same compiled route table before the adapter serializes its document.
+  .onAfterHandle(({ request, response }) => {
+    if (new URL(request.url).pathname !== "/swagger/json") return response;
+    return routeProjectionSource === undefined
+      ? response
+      : augmentManagementOpenApiDocument(response, routeProjectionSource);
   })
   // Swagger docs
   .use(
@@ -544,6 +574,24 @@ const app = new Elysia({ strictPath: false })
     const { HealthChecker } = await import("./infra/health");
     return await HealthChecker.runFullCheck();
   });
+
+routeProjectionSource = app;
+
+/** Read-only projection of the exact route contracts registered in Elysia. */
+export const MANAGEMENT_ROUTE_CONTRACTS = collectManagementRouteContracts(app);
+/** Routes representable by the Management API OpenAPI document and HTTP client. */
+export const MANAGEMENT_DOCUMENTED_ROUTE_CONTRACTS =
+  collectManagementDocumentedRouteContracts(app);
+
+/**
+ * Return a fresh projection when callers need to observe routes mounted after
+ * module initialization. The exported constants above remain stable snapshots.
+ */
+export function getManagementRouteContracts(
+  options: ManagementRouteProjectionOptions = {},
+): readonly ManagementRouteContract[] {
+  return collectManagementRouteContracts(app, options);
+}
 
 /**
  * Gateway-inspired try_files static asset serving.
@@ -1016,7 +1064,12 @@ async function bootstrap() {
       if (args.includes("--asset-bundle-dir") && !assetBundleDir) {
         throw new Error("--asset-bundle-dir requires an absolute protected directory");
       }
-      await runUpgrade({ forceYes, targetVersion, edgeRuntimeVersion, assetBundleDir });
+      await runUpgrade({
+        forceYes,
+        ...(targetVersion === undefined ? {} : { targetVersion }),
+        ...(edgeRuntimeVersion === undefined ? {} : { edgeRuntimeVersion }),
+        ...(assetBundleDir === undefined ? {} : { assetBundleDir }),
+      });
       process.exit(0);
     } catch (err: unknown) {
       logger.error("Upgrade aborted:", {

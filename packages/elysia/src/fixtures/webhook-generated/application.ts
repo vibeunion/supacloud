@@ -55,6 +55,12 @@ export interface CompiledJob {
   name: string;
   serviceKey: string;
   scope: "application" | "request" | "job";
+  input?: unknown;
+  output?: unknown;
+  mode?: "task" | "workflow";
+  timeoutSec?: number;
+  maxAttempts?: number;
+  idempotency?: "required" | "none";
   aspects?: CompiledAspect[];
 }
 

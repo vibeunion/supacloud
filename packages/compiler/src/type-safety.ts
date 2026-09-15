@@ -15,12 +15,13 @@ const DEFAULT_EXCLUDES = [
   "**/*.d.ts",
 ];
 
-const DIAGNOSTIC_META = {
+export const TYPE_SAFETY_DIAGNOSTIC_CODES = {
   "generated-any": { errorCode: "SC6001", docsUrl: "https://supacloud.dev/errors/SC6001" },
   "source-any": { errorCode: "SC6002", docsUrl: "https://supacloud.dev/errors/SC6002" },
   "source-type-assertion": { errorCode: "SC6003", docsUrl: "https://supacloud.dev/errors/SC6003" },
   "source-non-null-assertion": { errorCode: "SC6004", docsUrl: "https://supacloud.dev/errors/SC6004" },
   "source-implicit-widening": { errorCode: "SC6005", docsUrl: "https://supacloud.dev/errors/SC6005" },
+  "source-type-suppression": { errorCode: "SC6006", docsUrl: "https://supacloud.dev/errors/SC6006" },
 } as const;
 
 export interface TypeSafetyScanOptions extends TypeSafetyOptions {
@@ -59,7 +60,7 @@ export function scanGeneratedArtifacts(
 
 export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic[] {
   const rootDir = resolve(options.rootDir);
-  const configPath = join(rootDir, "tsconfig.json");
+  const configPath = ts.findConfigFile(rootDir, ts.sys.fileExists) ?? join(rootDir, "tsconfig.json");
   const projectConfig: { options: ts.CompilerOptions; errors: readonly ts.Diagnostic[] } = existsSync(configPath)
     ? readProjectConfig(configPath)
     : {
@@ -68,6 +69,7 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
           skipLibCheck: true,
           target: ts.ScriptTarget.ES2022,
           module: ts.ModuleKind.ESNext,
+          moduleResolution: ts.ModuleResolutionKind.Bundler,
         },
         errors: [],
       };
@@ -84,7 +86,7 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
   ));
   const compilerOptions: ts.CompilerOptions = { ...projectConfig.options, noEmit: true };
   const host = ts.createCompilerHost(compilerOptions);
-  host.getCurrentDirectory = () => rootDir;
+  host.getCurrentDirectory = () => dirname(configPath);
   const program = ts.createProgram(rootNames, compilerOptions, host);
   const outDir = options.outDir ? normalizeRelative(rootDir, options.outDir) : undefined;
   const excludes = [...DEFAULT_EXCLUDES, ...(options.exclude ?? [])];
@@ -98,14 +100,46 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
       code: "source-config",
       message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
       file: diagnostic.file ? normalizeRelative(rootDir, diagnostic.file.fileName) : normalizeRelative(rootDir, configPath),
-      line: diagnostic.file && diagnostic.start !== undefined
-        ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start).line + 1
-        : undefined,
+      ...(diagnostic.file && diagnostic.start !== undefined
+        ? { line: diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start).line + 1 }
+        : {}),
       errorCode: `TS${diagnostic.code}`,
     }));
   const checker = program.getTypeChecker();
+  for (const diagnostic of [
+    ...program.getGlobalDiagnostics(),
+    ...sourceFiles.flatMap((sourceFile) => [
+      ...program.getSyntacticDiagnostics(sourceFile),
+      ...program.getSemanticDiagnostics(sourceFile),
+    ]),
+  ]) {
+    diagnostics.push({
+      severity: "error",
+      code: "source-typescript",
+      message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+      ...(diagnostic.file ? { file: normalizeRelative(rootDir, diagnostic.file.fileName) } : {}),
+      ...(diagnostic.file && diagnostic.start !== undefined
+        ? { line: diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start).line + 1 } : {}),
+      errorCode: `TS${diagnostic.code}`,
+    });
+  }
   for (const sourceFile of sourceFiles) {
     scanSourceFile(sourceFile, checker, rootDir, diagnostics, options.strict ?? false);
+    const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, sourceFile.languageVariant, sourceFile.text);
+    for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFileToken; kind = scanner.scan()) {
+      if ((kind === ts.SyntaxKind.SingleLineCommentTrivia || kind === ts.SyntaxKind.MultiLineCommentTrivia)
+        && /@ts-(?:ignore|nocheck|expect-error)\b/.test(scanner.getTokenText())) {
+        diagnostics.push({
+          severity: "error",
+          code: "source-type-suppression",
+          message: "Production source must not suppress TypeScript checking; keep negative type fixtures in tests.",
+          file: normalizeRelative(rootDir, sourceFile.fileName),
+          line: sourceFile.getLineAndCharacterOfPosition(scanner.getTokenPos()).line + 1,
+          errorCode: TYPE_SAFETY_DIAGNOSTIC_CODES["source-type-suppression"].errorCode,
+          docsUrl: TYPE_SAFETY_DIAGNOSTIC_CODES["source-type-suppression"].docsUrl,
+        });
+      }
+    }
   }
   return diagnostics;
 }
@@ -341,7 +375,7 @@ function descendantsOfKind<T extends ts.Node>(
 }
 
 function makeDiagnostic(
-  code: keyof typeof DIAGNOSTIC_META,
+  code: keyof typeof TYPE_SAFETY_DIAGNOSTIC_CODES,
   message: string,
   fileOrSourceFile: string | ts.SourceFile,
   node: ts.Node,
@@ -354,15 +388,15 @@ function makeDiagnostic(
     : rootDir
       ? normalizeRelative(rootDir, fileOrSourceFile.fileName)
       : fileOrSourceFile.fileName;
-  const meta = DIAGNOSTIC_META[code];
+  const meta = TYPE_SAFETY_DIAGNOSTIC_CODES[code];
   return {
     severity: strict ? "error" : "warn",
     code,
     message,
     file,
-    line: sourceFile
-      ? sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1
-      : undefined,
+    ...(sourceFile
+      ? { line: sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile)).line + 1 }
+      : {}),
     errorCode: meta.errorCode,
     docsUrl: meta.docsUrl,
   };

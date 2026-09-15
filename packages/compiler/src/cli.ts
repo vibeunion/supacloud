@@ -12,6 +12,7 @@ import { GraphqlConfigurationError } from "./graphql-options";
 import { planDeliveryProject, formatDeliveryPlan } from "./delivery-plan";
 import { DeliveryConfigurationError } from "./delivery-schema";
 import { buildDeliveryProject } from "./delivery-build";
+import { migrateProject } from "./migrations";
 import {
   diffOpenApiDocuments,
   exportGeneratedOpenApiJson,
@@ -42,6 +43,7 @@ Usage:
   supacloud-compiler explain <name> [rootDir] [options]
   supacloud-compiler context <module> [rootDir] [options]
   supacloud-compiler doctor  [rootDir] [options]
+  supacloud-compiler migrate [rootDir] [options]
   supacloud-compiler plan    [rootDir] [options]
   supacloud-compiler build-delivery [rootDir] [options]
   supacloud-compiler openapi-export <openapi-module> <output.json> [options]
@@ -57,6 +59,7 @@ Commands:
   explain             Explain a module, provider, or external token
   context             Extract an AI-sized module context pack
   doctor              Run project and generated-artifact health checks
+  migrate             Preview or apply versioned source migrations
   plan                Preview deterministic workload targets without writing or deploying
   build-delivery      Build independent local factories and an atomic delivery manifest (Bun)
   openapi-export      Export a generated OpenAPI module to a standalone JSON document
@@ -84,7 +87,7 @@ Options:
   --space <n>         openapi-export: JSON indentation (0-10, default: 2)
   --delivery <file>   plan/build-delivery: validated JSON configuration (overrides config.delivery)
   --dry-run           Preview a fix without writing the target file
-  --write             Apply a fix to disk (fix is preview-only by default)
+  --write             Apply a fix or migration to disk (preview-only by default)
   --preset, -p <name> Architecture preset ('modular-monolith' | 'angular-enterprise' | 'clean-architecture')
   --help, -h          Show this help
 `);
@@ -98,7 +101,7 @@ async function run(): Promise<void> {
   }
 
   const command = args[0];
-  if (!command || !["compile", "check", "dev", "graph", "explain", "context", "doctor", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
+  if (!command || !["compile", "check", "dev", "graph", "explain", "context", "doctor", "migrate", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
     console.error(`Error: unknown command "${command}"`);
     printUsage();
     process.exit(1);
@@ -258,6 +261,27 @@ async function run(): Promise<void> {
     });
     console.log(json ? JSON.stringify({ ok: true, ...result }, null, 2)
       : result.written ? `OpenAPI JSON written: ${result.path}` : `OpenAPI JSON matches: ${result.path}`);
+    return;
+  }
+
+  if (command === "migrate") {
+    const result = await migrateProject({
+      rootDir: rootDir ? resolve(process.cwd(), rootDir) : process.cwd(),
+      write: !dryRun,
+    });
+    if (json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      const action = result.write ? "changed" : "would change";
+      const lines = [`${action} ${result.changedFiles.length} file(s)`];
+      for (const file of result.files) {
+        lines.push(`  ${file.file}: ${file.replacements} replacement(s)`);
+        for (const issue of file.issues) lines.push(`  ${issue.file}:${issue.line ?? 0} ${issue.code}: ${issue.message}`);
+      }
+      if (result.changedFiles.length === 0 && result.issues.length === 0) lines.push("  no migrations required");
+      console.log(lines.join("\n"));
+    }
+    if (result.issues.length > 0) process.exitCode = 1;
     return;
   }
 

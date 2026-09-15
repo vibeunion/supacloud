@@ -1,7 +1,15 @@
 import { expect, test } from "bun:test";
-import { t } from "elysia";
+import { Elysia, status, t } from "elysia";
 import { createApplication, type CompiledModule } from "./index";
-import { createSchemaDecoder, defineJsonContract, SchemaContractError } from "./schema_contract";
+import {
+  createSchemaDecoder,
+  defineElysiaRoute,
+  defineJsonContract,
+  defineRouteContract,
+  registerElysiaRoute,
+  SchemaContractError,
+  toElysiaRouteSchema,
+} from "./schema_contract";
 
 const body = t.Object({ name: t.String({ minLength: 1 }) });
 const response = t.Object({ version: t.Integer({ minimum: 1 }) });
@@ -68,3 +76,100 @@ function schemaTypes() {
   createSchemaDecoder<{ version: string }>(response);
   return { input, result };
 }
+
+const routeContract = defineRouteContract({
+  body: t.Object({ name: t.String({ minLength: 1 }) }),
+  params: t.Object({ id: t.String({ minLength: 1 }) }),
+  query: t.Object({ verbose: t.Optional(t.Boolean()) }),
+  headers: t.Object({ authorization: t.String({ minLength: 1 }) }),
+  cookie: t.Object({ session: t.String({ minLength: 1 }) }),
+  responses: {
+    "200": t.Object({ id: t.String(), name: t.String(), verbose: t.Boolean() }),
+    "409": t.Object({ conflict: t.Literal(true) }),
+  },
+});
+
+const route = defineElysiaRoute(
+  "POST",
+  "/items/:id",
+  routeContract,
+  ({ body, params, query, headers, cookie, status: responseStatus }) => {
+    const id: string = params.id;
+    const name: string = body.name;
+    const authorization: string = headers.authorization;
+    const session: string = cookie.session.value;
+    const verbose: boolean = query.verbose ?? false;
+    if (name === "existing") return responseStatus(409, { conflict: true });
+    return { id, name: `${authorization}:${session}:${name}`, verbose };
+  },
+);
+
+function routeHandlerTypes() {
+  // @ts-expect-error Route params are decoded from the declared schema.
+  route.handler({ params: { id: 1 } });
+  // @ts-expect-error The response map rejects an undeclared status payload.
+  const invalid: ReturnType<typeof route.handler> = { conflict: false };
+  const typed: typeof route.handler = ({ status: responseStatus }) => {
+    // @ts-expect-error The declared 409 payload is literal true.
+    return responseStatus(409, { conflict: false });
+  };
+  void typed;
+  return invalid;
+}
+
+void routeHandlerTypes;
+
+test("binds one contract to an Elysia-native handler and runtime route", async () => {
+  const schema = toElysiaRouteSchema(routeContract);
+  expect(schema.body).toBe(routeContract.body);
+  expect(schema.response).toBe(routeContract.responses);
+  expect("responses" in schema).toBe(false);
+
+  const app = registerElysiaRoute(new Elysia(), route);
+  expect(route.contract).toBe(routeContract);
+  const response = await app.handle(new Request("http://localhost/items/item-1?verbose=true", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer test",
+      cookie: "session=s-1",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ name: "demo" }),
+  }));
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    id: "item-1",
+    name: "Bearer test:s-1:demo",
+    verbose: true,
+  });
+
+  const conflict = await app.handle(new Request("http://localhost/items/item-1", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer test",
+      cookie: "session=s-1",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ name: "existing" }),
+  }));
+  expect(conflict.status).toBe(409);
+  expect(await conflict.json()).toEqual({ conflict: true });
+
+  const invalid = await app.handle(new Request("http://localhost/items/item-1", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer test",
+      cookie: "session=s-1",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ name: 1 }),
+  }));
+  expect(invalid.status).toBe(422);
+});
+
+test("schema decoders follow Elysia normalization by default and allow an explicit strict mode", () => {
+  const schema = t.Object({ name: t.String() });
+  expect(createSchemaDecoder(schema)({ name: "item", ignored: true })).toEqual({ name: "item" });
+  expect(() => createSchemaDecoder(schema, { normalize: false })({ name: "item", ignored: true }))
+    .toThrow(SchemaContractError);
+});

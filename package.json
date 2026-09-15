@@ -5,7 +5,11 @@
     "check:boundaries": "bun run scripts/check_workspace_boundaries.ts",
     "check:invariants": "bun run scripts/check_business_invariants.ts",
     "check:type-safety": "bun run scripts/check_type_safety.ts",
-    "test:type-safety": "bun run scripts/check_type_safety.ts --test"
+    "test:type-safety": "bun run scripts/check_type_safety.ts --test",
+    "typecheck:tools": "bun run --cwd packages/compiler tsc -p ../../tsconfig.tools.json --noEmit",
+    "check:public-api": "bun scripts/check_public_api.ts",
+    "update:public-api": "bun scripts/check_public_api.ts --update",
+    "check:diagnostic-docs": "bun scripts/check_diagnostic_docs.ts"
   },
   "dependencies": {
     "@types/ws": "^8.18.1",

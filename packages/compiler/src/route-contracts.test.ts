@@ -28,7 +28,10 @@ const graph: ApplicationGraph = {
 
 test("lists missing declarations including inherited path and handler bindings", () => {
   expect(inspectRouteContracts(graph)[0]?.missing).toEqual(["body", "params", "query", "response"]);
-  expect(validateRouteContracts(graph)[0]).toMatchObject({ severity: "error", code: "route-contract-required", file: "items.ts" });
+  expect(validateRouteContracts(graph)[0]).toMatchObject({
+    severity: "error", code: "route-contract-required", errorCode: "SC3021",
+    docsUrl: "https://supacloud.dev/errors/SC3021", file: "items.ts",
+  });
 });
 
 test("declared contracts have no missing-schema diagnostic without claiming runtime coverage", () => {
@@ -44,13 +47,45 @@ test("binary/stream declarations require transport evidence, not a JSON schema",
   for (const response of ["binary", "stream"] as const) {
     const declared = structuredClone(graph);
     Object.assign(declared.modules[0]!.controllers[0]!.routes[0]!, {
-      body: "Input", params: "Params", query: "Query", contract: { response },
+      body: "Input", params: "Params", query: "Query", contract: { response, evidence: "transport.test.ts" },
     });
     expect(validateRouteContracts(declared)).toEqual([]);
     const report = inspectRouteContracts(declared)[0]!;
     expect(report.validation).toMatchObject({ response, verified: false });
     expect(report.validation.obligations).toContain("Test transport headers, access and bytes without JSON decoding.");
   }
+});
+
+test("opaque schemas and unclassified native responses cannot satisfy strict contracts", () => {
+  const declared = structuredClone(graph);
+  Object.assign(declared.modules[0]!.controllers[0]!.routes[0]!, {
+    body: "Input", params: "Params", query: "Query", response: "Result",
+    schemaKinds: { body: "opaque", response: "opaque" },
+  });
+  expect(validateRouteContracts(declared)).toContainEqual(
+    expect.objectContaining({ code: "route-contract-unverified", errorCode: "SC3022" }),
+  );
+  Object.assign(declared.modules[0]!.controllers[0]!.routes[0]!, {
+    schemaKinds: {}, nativeResponse: true,
+  });
+  expect(validateRouteContracts(declared)).toContainEqual(
+    expect.objectContaining({ code: "route-contract-unverified", errorCode: "SC3022" }),
+  );
+});
+
+test("domain and native transports require evidence without pretending it is verified", () => {
+  const declared = structuredClone(graph);
+  const route = declared.modules[0]!.controllers[0]!.routes[0]!;
+  Object.assign(route, {
+    body: "Input", params: "Params", query: "Query", response: "Result",
+    contract: { body: "domain", response: "native-json" },
+  });
+  expect(validateRouteContracts(declared)).toContainEqual(
+    expect.objectContaining({ code: "route-contract-evidence-required", errorCode: "SC3023" }),
+  );
+  route.contract!.evidence = "boundary.test.ts";
+  expect(validateRouteContracts(declared)).toEqual([]);
+  expect(inspectRouteContracts(declared)[0]?.validation.verified).toBe(false);
 });
 
 test("config policy reaches compile/check and invalidates a prior incremental result", async () => {
@@ -75,6 +110,33 @@ test("config policy reaches compile/check and invalidates a prior incremental re
     const strict = await incremental.compile(options, []);
     expect(strict.stats.cacheHit).toBe(false);
     expect(strict.diagnostics.some((item) => item.code === "route-contract-required")).toBe(true);
+  } finally {
+    await rm(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("incremental type gates recheck enclosing configuration even with empty source change hints", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "supacloud-type-config-"));
+  try {
+    await writeFixtureProject(rootDir, {
+      "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true } }),
+      "src/value.ts": "export const values: string[] = [];\nexport const first: string = values[0];",
+    });
+    const compiler = createIncrementalCompiler();
+    const options = {
+      rootDir: join(rootDir, "src"), outDir: join(rootDir, "generated"),
+      typeSafety: { scanProductionSource: true },
+    };
+    expect((await compiler.compile(options)).diagnostics).toEqual([]);
+    await writeFixtureProject(rootDir, {
+      "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true, noUncheckedIndexedAccess: true } }),
+    });
+    const result = await compiler.compile(options, []);
+    expect(result.stats.cacheHit).toBe(false);
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "source-typescript", errorCode: "TS2322" }),
+    );
+    expect(result.written).toEqual([]);
   } finally {
     await rm(rootDir, { recursive: true, force: true });
   }

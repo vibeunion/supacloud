@@ -57,14 +57,13 @@ function textResponse(schema: string): Response {
 }
 
 function escapeHtml(value: string): string {
-  const entities: Record<string, string> = {
+  return value.replace(/[&<>"']/g, (character) => ({
     "&": "&amp;",
     "<": "&lt;",
     ">": "&gt;",
     '"': "&quot;",
     "'": "&#39;",
-  };
-  return value.replace(/[&<>"']/g, (character) => entities[character] ?? character);
+  })[character] ?? character);
 }
 
 function scriptString(value: string): string {

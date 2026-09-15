@@ -28,7 +28,20 @@ const INTERFACES = `export interface CompiledRoute {
   body?: unknown;
   params?: unknown;
   query?: unknown;
+  headers?: unknown;
+  cookie?: unknown;
   response?: unknown;
+  responses?: Record<string | number, unknown>;
+  /** Compile-time ownership and transport classification for the route boundary. */
+  contract?: {
+    body?: "framework" | "domain";
+    response?: "framework" | "native-json" | "binary" | "stream";
+    evidence?: string;
+  };
+  /** Whether each declared schema is concrete or intentionally opaque. */
+  schemaKinds?: Partial<Record<"body" | "params" | "query" | "headers" | "cookie" | "response", "opaque" | "declared">>;
+  /** True when the handler returns a native Response rather than a framework value. */
+  nativeResponse?: boolean;
   command?: string;
   guards?: string[];
   canMatch?: string[];
@@ -50,6 +63,7 @@ const INTERFACES = `export interface CompiledRoute {
       query?: Record<string, unknown>;
       body?: unknown;
       headers?: Record<string, unknown>;
+      cookie?: Record<string, unknown>;
       context?: unknown;
     },
   ) => Promise<unknown> | unknown;
@@ -543,12 +557,19 @@ class ModuleGenerator {
           `path: ${JSON.stringify(route.path)}`,
           `handler: ${JSON.stringify(route.handler)}`,
         ];
-        for (const field of ["body", "params", "query", "response"] as const) {
+        for (const field of ["body", "params", "query", "headers", "cookie", "response"] as const) {
           const symbol = route[field];
           if (symbol) {
             const local = this.imports.add(symbol, controller.schemaImports?.[symbol]);
-            fields.push(`${field}: ${local}`);
+          fields.push(`${field}: ${local}`);
           }
+        }
+        if (route.responses && Object.keys(route.responses).length > 0) {
+          const responseFields = Object.entries(route.responses).map(([status, symbol]) => {
+            const local = this.imports.add(symbol, controller.schemaImports?.[symbol]);
+            return `${JSON.stringify(status)}: ${local}`;
+          });
+          fields.push(`responses: { ${responseFields.join(", ")} }`);
         }
         if (route.command) fields.push(`command: ${JSON.stringify(route.command)}`);
         if (route.guards && route.guards.length > 0) {
@@ -622,17 +643,28 @@ class ModuleGenerator {
           if (hp.kind === "body") return "req.body";
           if (hp.kind === "headers") return hp.bindingName === undefined
             ? "req.headers" : `req.headers?.[${JSON.stringify(hp.bindingName.toLowerCase())}]`;
+          if (hp.kind === "cookie") return hp.bindingName === undefined
+            ? "req.cookie" : `req.cookie?.[${JSON.stringify(hp.bindingName)}]`;
           if (hp.kind === "context") return "(req.context ?? req)";
           return "undefined";
         });
         const callArgs = invokerArgs.length > 0 ? invokerArgs.join(", ") : "req";
         fields.push(
-          `invoker: async (ctrl: unknown, req: { params?: Record<string, unknown>; query?: Record<string, unknown>; body?: unknown; headers?: Record<string, unknown>; context?: unknown }) => { ` +
+          `invoker: async (ctrl: unknown, req: { params?: Record<string, unknown>; query?: Record<string, unknown>; body?: unknown; headers?: Record<string, unknown>; cookie?: Record<string, unknown>; context?: unknown }) => { ` +
           `if (!isRecord(ctrl)) throw new TypeError("Route controller is not an object"); ` +
           `const handler = ctrl[${JSON.stringify(route.handler)}]; ` +
           `if (typeof handler !== "function") throw new TypeError("Route handler ${route.handler} is not callable"); ` +
           `return await Reflect.apply(handler, ctrl, [${callArgs}]); }`,
         );
+        if (route.contract !== undefined) {
+          fields.push(`contract: ${JSON.stringify(route.contract)}`);
+        }
+        if (route.schemaKinds !== undefined && Object.keys(route.schemaKinds).length > 0) {
+          fields.push(`schemaKinds: ${JSON.stringify(route.schemaKinds)}`);
+        }
+        if (route.nativeResponse === true) {
+          fields.push("nativeResponse: true");
+        }
         return `{ ${fields.join(", ")} }`;
       });
       return [
@@ -1057,6 +1089,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
   const usedTypeNames = new Set<string>();
   const allRoutes: Array<Record<string, unknown>> = [];
   let usesStatic = false;
+  let usesValue = false;
 
   const uniqueTypeName = (candidate: string): string => {
     let name = candidate || "Route";
@@ -1072,7 +1105,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
   const schemaRef = (
     controller: ControllerNode,
     route: ControllerNode["routes"][number],
-    field: "body" | "params" | "query" | "response",
+    field: "body" | "params" | "query" | "headers" | "cookie" | "response",
   ): { local: string; key: string } | undefined => {
     const symbol = route[field];
     if (!symbol) return undefined;
@@ -1099,7 +1132,16 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
         const paramsSchema = schemaRef(controller, route, "params");
         const querySchema = schemaRef(controller, route, "query");
         const bodySchema = schemaRef(controller, route, "body");
+        const headersSchema = schemaRef(controller, route, "headers");
+        const cookieSchema = schemaRef(controller, route, "cookie");
         const responseSchema = schemaRef(controller, route, "response");
+        const responseKind = route.contract?.response ?? (route.nativeResponse ? "native-response" : undefined);
+        if (responseSchema) usesValue = true;
+        const responseSchemas = Object.fromEntries(Object.entries(route.responses ?? {}).map(([status, symbol]) => {
+          const ref = schemaRef(controller, { ...route, response: symbol }, "response");
+          return ref ? [status, ref] : [];
+        }).filter((entry): entry is [string, { local: string; key: string }] => entry.length === 2));
+        if (Object.keys(responseSchemas).length > 0) usesValue = true;
         const paramNames = [...new Set(
           (fullPath.match(/:([a-zA-Z0-9_]+)/g) ?? []).map((p) => p.slice(1)),
         )];
@@ -1111,9 +1153,22 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           : pathParamsType;
         const queryType = querySchema ? `Static<typeof ${querySchema.local}>` : "Record<string, unknown>";
         const bodyType = bodySchema ? `Static<typeof ${bodySchema.local}>` : "unknown";
-        const responseType = responseSchema ? `Static<typeof ${responseSchema.local}>` : "never";
-        const requestType = `ClientRequestOptions<${paramsType}, ${queryType}, ${bodyType}>${
-          paramNames.length > 0 ? ` & { params: ${paramsType} }` : ""
+        const headersType = headersSchema ? `Static<typeof ${headersSchema.local}>` : "Record<string, string>";
+        const cookieType = cookieSchema ? `Static<typeof ${cookieSchema.local}>` : "Record<string, string | number | boolean>";
+        const responseTypes = [
+          ...(responseSchema ? [`Static<typeof ${responseSchema.local}>`] : []),
+          ...Object.values(responseSchemas).map((ref) => `Static<typeof ${ref.local}>`),
+        ];
+        const responseType = responseTypes.length > 0 ? responseTypes.join(" | ") : "never";
+        const requiredRequestFields = [
+          ...(bodySchema ? [`body: ${bodyType}`] : []),
+          ...(querySchema ? [`query: ${queryType}`] : []),
+          ...(headersSchema ? [`headers: ${headersType}`] : []),
+          ...(cookieSchema ? [`cookie: ${cookieType}`] : []),
+          ...(paramsSchema || paramNames.length > 0 ? [`params: ${paramsType}`] : []),
+        ];
+        const requestType = `ClientRequestOptions<${paramsType}, ${queryType}, ${bodyType}, ${headersType}, ${cookieType}>${
+          requiredRequestFields.length > 0 ? ` & { ${requiredRequestFields.join("; ")} }` : ""
         }`;
 
         routeTypes.push(`export type ${requestTypeName} = ${requestType};`);
@@ -1150,17 +1205,32 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           ["body", bodySchema?.local],
           ["params", paramsSchema?.local],
           ["query", querySchema?.local],
+          ["headers", headersSchema?.local],
+          ["cookie", cookieSchema?.local],
           ["response", responseSchema?.local],
         ] as const;
         const contractName = uniqueTypeName(`${baseTypeName}Contract`);
         const contractFields = schemaFields
           .filter((entry): entry is [typeof entry[0], string] => entry[1] !== undefined)
           .map(([key, value]) => `${key}: ${value}`);
+        if (Object.keys(responseSchemas).length > 0) {
+          contractFields.push(`responses: { ${Object.entries(responseSchemas)
+            .map(([status, ref]) => `${JSON.stringify(status)}: ${ref.local}`)
+            .join(", ")} }`);
+        }
         if (contractFields.length > 0) {
           routeTypes.push(`export const ${contractName} = { ${contractFields.join(", ")} } as const;`);
         }
+        const responseSchemaEntries = [
+          ...(responseSchema ? [["200", responseSchema.local] as const] : []),
+          ...Object.entries(responseSchemas).map(([status, ref]) => [status, ref.local] as const),
+        ];
+        const responseSchemaArgument = responseSchemaEntries.length > 0
+          ? `{ ${responseSchemaEntries.map(([status, local]) => `${JSON.stringify(status)}: ${local}`).join(", ")} }`
+          : "undefined";
+        const responseKindArgument = responseKind === undefined ? "undefined" : JSON.stringify(responseKind);
         routeMethods.push(`
-    ${route.handler}: makeRoute<${requestTypeName}, ${responseSchema ? responseTypeName : "never"}>(${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}),`);
+    ${route.handler}: makeRoute<${requestTypeName}, ${responseType === "never" ? "never" : responseTypeName}>(${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}, ${responseSchemaArgument}, ${responseKindArgument}),`);
       }
 
       controllerEntries.push(`
@@ -1170,6 +1240,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
   }
 
   const generatedImports = imports.render(rootDir, outDir);
+  const responseSchemaType = "unknown";
   return [
     HEADER,
     "",
@@ -1180,11 +1251,14 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "  Params = Record<string, string | number>,",
     "  Query = Record<string, unknown>,",
     "  Body = unknown,",
+    "  Headers = Record<string, string>,",
+    "  Cookie = Record<string, string | number | boolean>,",
     "> {",
     "  params?: Params;",
     "  query?: Query;",
     "  body?: Body;",
-    "  headers?: Record<string, string>;",
+    "  headers?: Headers;",
+    "  cookie?: Cookie;",
     "}",
     "",
     "export type ResponseDecoder<T> = (value: unknown) => T;",
@@ -1195,8 +1269,8 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "> = (",
     "  [Result] extends [never]",
     "    ? { <T>(options: Options, decode: ResponseDecoder<T>): Promise<T> }",
-    "    : { (options: Options, decode: ResponseDecoder<Result>): Promise<Result> }",
-    ") & ((...args: {} extends Options ? [options?: Options] : [options: Options]) => Promise<unknown>);",
+    "    : { (options: Options, decode?: ResponseDecoder<Result>): Promise<Result> }",
+    ") & ((...args: {} extends Options ? [options?: Options] : [options: Options]) => Promise<[Result] extends [never] ? unknown : Result>);",
     "",
     ...routeTypes,
     ...(routeTypes.length > 0 ? [""] : []),
@@ -1251,6 +1325,173 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "  return url;",
     "}",
     "",
+    "function selectResponseSchema(status: number, schemas: Readonly<Record<string, unknown>>): unknown {",
+    "  const family = `${Math.floor(status / 100)}xx`;",
+    "  return schemas[String(status)] ?? schemas[family] ?? schemas[family.toUpperCase()] ?? schemas.default;",
+    "}",
+    "",
+    ...(usesValue ? [
+      "function isRecord(value: unknown): value is Record<string, unknown> {",
+      "  return value !== null && typeof value === \"object\" && !Array.isArray(value);",
+      "}",
+      "",
+      "export function decodeResponseSchema(value: unknown, status: number, schemas: Readonly<Record<string, unknown>>): unknown {",
+      "  const schema = selectResponseSchema(status, schemas);",
+      "  if (schema === undefined) throw new Error(`No response schema declared for HTTP ${status}`);",
+      "  return decodeSchemaValue(schema, value, schema, new Set<string>());",
+      "}",
+      "",
+      "function schemaError(): never {",
+      "  throw new Error(\"Response does not match schema\");",
+      "}",
+      "",
+      "function sameJsonValue(left: unknown, right: unknown): boolean {",
+      "  if (Object.is(left, right)) return true;",
+      "  try { return JSON.stringify(left) === JSON.stringify(right); } catch { return false; }",
+      "}",
+      "",
+      "function schemaReferenceTarget(ref: string, root: unknown): unknown {",
+      "  const localRef = ref.startsWith(\"#/$defs/\") ? ref.slice(8) : ref.startsWith(\"#/definitions/\") ? ref.slice(14) : ref.startsWith(\"#/components/schemas/\") ? ref.slice(21) : undefined;",
+      "  if (localRef !== undefined && isRecord(root)) {",
+      "    const defs = ref.startsWith(\"#/definitions/\") ? root.definitions : ref.startsWith(\"#/components/schemas/\") ? root.components : root.$defs;",
+      "    if (ref.startsWith(\"#/components/schemas/\") && isRecord(defs)) {",
+      "      const components = defs.schemas;",
+      "      if (isRecord(components) && components[localRef] !== undefined) return components[localRef];",
+      "    } else if (isRecord(defs) && defs[localRef] !== undefined) return defs[localRef];",
+      "  }",
+      "  for (const entry of API_SCHEMAS as readonly { name: string; schema: unknown }[]) {",
+      "    if (entry.name === ref) return entry.schema;",
+      "    if (!isRecord(entry.schema)) continue;",
+      "    if (entry.schema.$id === ref || entry.schema.$id === localRef) return entry.schema;",
+      "    for (const key of [\"$defs\", \"definitions\"] as const) {",
+      "      const defs = entry.schema[key];",
+      "      if (isRecord(defs) && localRef !== undefined && defs[localRef] !== undefined) return defs[localRef];",
+      "    }",
+      "  }",
+      "  return undefined;",
+      "}",
+      "",
+      "function matchesFormat(format: unknown, value: string): boolean {",
+      "  if (typeof format !== \"string\") return true;",
+      "  switch (format) {",
+      "    case \"email\": return /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(value);",
+      "    case \"uuid\": return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);",
+      "    case \"date\": return /^\\d{4}-\\d{2}-\\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));",
+      "    case \"date-time\": return !Number.isNaN(Date.parse(value));",
+      "    case \"uri\": case \"uri-reference\": try { new URL(value, \"https://supacloud.invalid\"); return true; } catch { return false; }",
+      "    case \"ipv4\": return /^(?:\\d{1,3}\\.){3}\\d{1,3}$/.test(value) && value.split(\".\").every((part) => Number(part) <= 255);",
+      "    case \"ipv6\": return value.includes(\":\");",
+      "    default: return true;",
+      "  }",
+      "}",
+      "",
+      "function decodeSchemaValue(schema: unknown, value: unknown, root: unknown = schema, seenRefs = new Set<string>()): unknown {",
+      "  if (schema === true) return value;",
+      "  if (schema === false || !isRecord(schema)) return schemaError();",
+      "  if (Object.getOwnPropertySymbols(schema).some((symbol) => String(symbol).includes(\"Transform\"))) throw new Error(\"Response schema transforms are unsupported by the generated decoder\");",
+      "  if (typeof schema.$ref === \"string\") {",
+      "    if (seenRefs.has(schema.$ref)) return schemaError();",
+      "    const target = schemaReferenceTarget(schema.$ref, root);",
+      "    if (target === undefined) return schemaError();",
+      "    const nextRefs = new Set(seenRefs); nextRefs.add(schema.$ref);",
+      "    return decodeSchemaValue(target, value, root, nextRefs);",
+      "  }",
+      "  if (schema.nullable === true && value === null) return value;",
+      "  if (Object.hasOwn(schema, \"const\") && !sameJsonValue(schema.const, value)) return schemaError();",
+      "  if (Array.isArray(schema.enum) && !schema.enum.some((entry) => sameJsonValue(entry, value))) return schemaError();",
+      "  if (Array.isArray(schema.anyOf)) {",
+      "    const matches: unknown[] = [];",
+      "    for (const variant of schema.anyOf) { try { matches.push(decodeSchemaValue(variant, value, root, new Set(seenRefs))); } catch {} }",
+      "    if (matches.length === 0) return schemaError();",
+      "    return matches[0];",
+      "  }",
+      "  if (Array.isArray(schema.oneOf)) {",
+      "    const matches: unknown[] = [];",
+      "    for (const variant of schema.oneOf) { try { matches.push(decodeSchemaValue(variant, value, root, new Set(seenRefs))); } catch {} }",
+      "    if (matches.length !== 1 || matches[0] === undefined) return schemaError();",
+      "    return matches[0];",
+      "  }",
+      "  if (Array.isArray(schema.allOf)) {",
+      "    let output: unknown = value;",
+      "    for (const variant of schema.allOf) {",
+      "      const decoded = decodeSchemaValue(variant, value, root, new Set(seenRefs));",
+      "      output = isRecord(output) && isRecord(decoded) ? { ...output, ...decoded } : decoded;",
+      "    }",
+      "    return output;",
+      "  }",
+      "  if (schema.not !== undefined) {",
+      "    try { decodeSchemaValue(schema.not, value, root, new Set(seenRefs)); } catch { return value; }",
+      "    return schemaError();",
+      "  }",
+      "  if (Array.isArray(schema.type)) {",
+      "    for (const type of schema.type) { try { return decodeSchemaValue({ ...schema, type }, value, root, new Set(seenRefs)); } catch {} }",
+      "    return schemaError();",
+      "  }",
+      "  if (schema.type === \"object\" || (schema.type === undefined && (isRecord(schema.properties) || schema.required !== undefined))) {",
+      "    if (!isRecord(value)) return schemaError();",
+      "    const properties = isRecord(schema.properties) ? schema.properties : {};",
+      "    const patterns = isRecord(schema.patternProperties) ? schema.patternProperties : {};",
+      "    const required = Array.isArray(schema.required) ? schema.required : [];",
+      "    for (const name of required) if (typeof name === \"string\" && !Object.hasOwn(value, name)) return schemaError();",
+      "    if (typeof schema.minProperties === \"number\" && Object.keys(value).length < schema.minProperties) return schemaError();",
+      "    if (typeof schema.maxProperties === \"number\" && Object.keys(value).length > schema.maxProperties) return schemaError();",
+      "    const output: Record<string, unknown> = {};",
+      "    for (const [name, item] of Object.entries(value)) {",
+      "      const propertySchema = properties[name];",
+      "      if (propertySchema !== undefined) { output[name] = decodeSchemaValue(propertySchema, item, root, new Set(seenRefs)); continue; }",
+      "      let matched = false;",
+      "      for (const [pattern, patternSchema] of Object.entries(patterns)) {",
+      "        let applies = false; try { applies = new RegExp(pattern).test(name); } catch { return schemaError(); }",
+      "        if (applies) { output[name] = decodeSchemaValue(patternSchema, item, root, new Set(seenRefs)); matched = true; }",
+      "      }",
+      "      if (matched) continue;",
+      "      if (schema.additionalProperties === false || schema.unevaluatedProperties === false) return schemaError();",
+      "      if (isRecord(schema.additionalProperties) || schema.additionalProperties === true) output[name] = schema.additionalProperties === true ? item : decodeSchemaValue(schema.additionalProperties, item, root, new Set(seenRefs));",
+      "      else output[name] = item;",
+      "    }",
+      "    return output;",
+      "  }",
+      "  if (schema.type === \"array\") {",
+      "    if (!Array.isArray(value)) return schemaError();",
+      "    if (typeof schema.minItems === \"number\" && value.length < schema.minItems) return schemaError();",
+      "    if (typeof schema.maxItems === \"number\" && value.length > schema.maxItems) return schemaError();",
+      "    if (schema.uniqueItems === true) { const keys = value.map((item) => JSON.stringify(item)); if (new Set(keys).size !== keys.length) return schemaError(); }",
+      "    const tuple = Array.isArray(schema.prefixItems) ? schema.prefixItems : Array.isArray(schema.items) ? schema.items : undefined;",
+      "    if (tuple) {",
+      "      if (schema.additionalItems === false && value.length > tuple.length) return schemaError();",
+      "      return value.map((item, index) => index < tuple.length ? decodeSchemaValue(tuple[index], item, root, new Set(seenRefs)) : schema.items && !Array.isArray(schema.items) ? decodeSchemaValue(schema.items, item, root, new Set(seenRefs)) : item);",
+      "    }",
+      "    if (schema.items === undefined || schema.items === true) return value;",
+      "    if (schema.items === false && value.length > 0) return schemaError();",
+      "    return value.map((item) => decodeSchemaValue(schema.items, item, root, new Set(seenRefs)));",
+      "  }",
+      "  if (schema.type === \"string\") {",
+      "    if (typeof value !== \"string\") return schemaError();",
+      "    if (typeof schema.minLength === \"number\" && value.length < schema.minLength) return schemaError();",
+      "    if (typeof schema.maxLength === \"number\" && value.length > schema.maxLength) return schemaError();",
+      "    if (typeof schema.pattern === \"string\") { let matches = false; try { matches = new RegExp(schema.pattern).test(value); } catch { return schemaError(); } if (!matches) return schemaError(); }",
+      "    if (!matchesFormat(schema.format, value)) return schemaError();",
+      "    return value;",
+      "  }",
+      "  if (schema.type === \"boolean\") { if (typeof value !== \"boolean\") return schemaError(); return value; }",
+      "  if (schema.type === \"number\" || schema.type === \"integer\") {",
+      "    if (typeof value !== \"number\" || !Number.isFinite(value) || (schema.type === \"integer\" && !Number.isInteger(value))) return schemaError();",
+      "    if (typeof schema.minimum === \"number\" && value < schema.minimum) return schemaError();",
+      "    if (typeof schema.maximum === \"number\" && value > schema.maximum) return schemaError();",
+      "    if (typeof schema.exclusiveMinimum === \"number\" && value <= schema.exclusiveMinimum) return schemaError();",
+      "    if (typeof schema.exclusiveMaximum === \"number\" && value >= schema.exclusiveMaximum) return schemaError();",
+      "    if (schema.exclusiveMinimum === true && typeof schema.minimum === \"number\" && value <= schema.minimum) return schemaError();",
+      "    if (schema.exclusiveMaximum === true && typeof schema.maximum === \"number\" && value >= schema.maximum) return schemaError();",
+      "    if (typeof schema.multipleOf === \"number\" && schema.multipleOf > 0 && Math.abs(value / schema.multipleOf - Math.round(value / schema.multipleOf)) > 1e-9) return schemaError();",
+      "    return value;",
+      "  }",
+      "  if (schema.type === \"null\") { if (value !== null) return schemaError(); return value; }",
+      "  if (schema.type === \"void\" || schema.type === \"undefined\") { if (value !== undefined) return schemaError(); return value; }",
+      "  if (schema.type === \"never\") return schemaError();",
+      "  return value;",
+      "}",
+      "",
+    ] : []),
     "export function createApiClient(config: ApiClientConfig = {}) {",
     "  const fetcher = config.fetch ?? globalThis.fetch.bind(globalThis);",
     '  const baseUrl = (config.baseUrl ?? "").replace(/\\/+$/, "");',
@@ -1260,7 +1501,17 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "    path: string,",
     "    options: ClientRequestOptions,",
     "    decode: ResponseDecoder<T>,",
+    `    responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>,`,
+    "    responseKind?: string,",
     "  ): Promise<T>;",
+    "  async function request<T>(",
+    "    method: string,",
+    "    path: string,",
+    "    options: ClientRequestOptions,",
+    "    decode?: ResponseDecoder<T>,",
+    `    responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>,`,
+    "    responseKind?: string,",
+    "  ): Promise<T | unknown>;",
     "  async function request(",
     "    method: string,",
     "    path: string,",
@@ -1271,6 +1522,8 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "    path: string,",
     "    options: ClientRequestOptions = {},",
     "    decode?: ResponseDecoder<T>,",
+    `    responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>,`,
+    "    responseKind?: string,",
     "  ): Promise<T | unknown> {",
     "    const url = `${baseUrl}${buildRouteUrl(path, options.params, options.query)}`;",
     '    const customHeaders = typeof config.headers === "function" ? await config.headers() : config.headers;',
@@ -1279,6 +1532,9 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "      ...customHeaders,",
     "      ...options.headers,",
     "    };",
+    "    if (options.cookie && !Object.keys(headers).some((key) => key.toLowerCase() === \"cookie\")) {",
+    "      headers.cookie = Object.entries(options.cookie).map(([key, value]) => `${key}=${encodeURIComponent(String(value))}`).join(\"; \" );",
+    "    }",
     "    const interceptors = config.interceptors ?? [];",
     "    const executeChain = (",
     "      index: number,",
@@ -1295,27 +1551,38 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "      });",
     "    };",
     "    const response = await executeChain(0, { method, url, headers, body: options.body });",
-    "    if (!response.ok) {",
+    "    const declaredSchema = responseSchemas ? selectResponseSchema(response.status, responseSchemas) : undefined;",
+    "    if (!response.ok && declaredSchema === undefined) {",
     "      const errBody = await response.text();",
     "      throw new Error(`API request failed: ${method} ${path} -> ${response.status} ${errBody}`);",
     "    }",
     '    const contentType = response.headers?.get("content-type") ?? "";',
     "    let value: unknown;",
-    '    if (contentType.includes("application/json")) {',
+    "    if ([204, 205, 304].includes(response.status)) {",
+    "      value = undefined;",
+    '    } else if (responseKind === "binary" || contentType.includes("application/octet-stream")) {',
+    "      value = await response.arrayBuffer();",
+    '    } else if (responseKind === "stream") {',
+    "      value = response.body;",
+    '    } else if (contentType.includes("application/json") || contentType.includes("+json")) {',
     "      value = await response.json();",
     "    } else {",
     "      value = await response.text();",
     "    }",
-    "    return decode ? decode(value) : value;",
+    "    if (!responseSchemas) return decode ? decode(value) : value;",
+    "    if (decode) return decode(value);",
+    ...(usesValue
+      ? ["    return decodeResponseSchema(value, response.status, responseSchemas) as T;"]
+      : ["    return value as T;"]),
     "  }",
     "",
-    "  function makeRoute<Options extends ClientRequestOptions, Result = never>(method: string, path: string): RouteMethod<Options, Result> {",
+    `  function makeRoute<Options extends ClientRequestOptions, Result = never>(method: string, path: string, responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>, responseKind?: string): RouteMethod<Options, Result> {`,
     "    function route<T>(options: Options, decode: ResponseDecoder<T>): Promise<T>;",
     "    function route(options: Options, decode: ResponseDecoder<Result>): Promise<Result>;",
     "    function route(options?: Options): Promise<unknown>;",
     "    function route<T>(options?: Options, decode?: ResponseDecoder<T>): Promise<T | unknown> {",
     "      const requestOptions = options ?? {};",
-    "      return decode ? request(method, path, requestOptions, decode) : request(method, path, requestOptions);",
+    "      return request(method, path, requestOptions, decode, responseSchemas, responseKind);",
     "    }",
     "    return route as RouteMethod<Options, Result>;",
     "  }",
@@ -1365,7 +1632,7 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
   const schemaRef = (
     controller: ControllerNode,
     route: ControllerNode["routes"][number],
-    field: "body" | "params" | "query" | "response",
+    field: "body" | "params" | "query" | "headers" | "cookie" | "response",
   ): string | undefined => {
     const symbol = route[field];
     if (!symbol) return undefined;
@@ -1420,12 +1687,24 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
           ...(schemaRef(controller, route, "query") === undefined
             ? {}
             : { querySchema: schemaRef(controller, route, "query") }),
+          ...(schemaRef(controller, route, "headers") === undefined
+            ? {}
+            : { headersSchema: schemaRef(controller, route, "headers") }),
+          ...(schemaRef(controller, route, "cookie") === undefined
+            ? {}
+            : { cookieSchema: schemaRef(controller, route, "cookie") }),
           ...(schemaRef(controller, route, "body") === undefined
             ? {}
             : { bodySchema: schemaRef(controller, route, "body") }),
           ...(schemaRef(controller, route, "response") === undefined
             ? {}
             : { responseSchema: schemaRef(controller, route, "response") }),
+          ...(route.responses && Object.keys(route.responses).length > 0
+            ? { responseSchemas: Object.fromEntries(Object.entries(route.responses).map(([status, symbol]) => {
+              const ref = schemaRef(controller, { ...route, response: symbol }, "response");
+              return ref ? [status, ref] : [];
+            }).filter((entry): entry is [string, string] => entry.length === 2)) }
+            : {}),
           responseContentType,
           responseKind: responseKind ?? (route.nativeResponse ? "native-response" : undefined),
           module: module.name,
@@ -1497,8 +1776,11 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
     "  queryParams: readonly string[];",
     "  paramsSchema?: string;",
     "  querySchema?: string;",
+    "  headersSchema?: string;",
+    "  cookieSchema?: string;",
     "  bodySchema?: string;",
     "  responseSchema?: string;",
+    "  responseSchemas?: Record<string, string>;",
     "  responseContentType: string;",
     "  responseKind?: string;",
     "  module: string;",
@@ -1545,8 +1827,9 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
     "  if (!isRecord(value)) return {};",
     "  if (seen.has(value)) return {};",
     "  seen.add(value);",
+    "  if (value.type === \"void\" || value.type === \"undefined\") { seen.delete(value); return {}; }",
     "  const allowed = new Set([",
-    '    "$id", "$ref", "$schema", "title", "description", "type", "enum", "const", "examples", "default",',
+    '    "$id", "$ref", "$schema", "$defs", "definitions", "title", "description", "type", "enum", "const", "examples", "default",',
     '    "deprecated", "readOnly", "writeOnly", "format", "pattern", "minLength", "maxLength", "minimum",',
     '    "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "minItems", "maxItems",',
     '    "uniqueItems", "minProperties", "maxProperties", "required", "properties", "patternProperties",',
@@ -1556,7 +1839,7 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
     "  const result: OpenApiSchema = {};",
     "  for (const [key, item] of Object.entries(value)) {",
     "    if (!allowed.has(key) || typeof item === \"function\" || typeof item === \"symbol\") continue;",
-    "    if (key === \"properties\" || key === \"patternProperties\") {",
+    "    if (key === \"properties\" || key === \"patternProperties\" || key === \"$defs\" || key === \"definitions\") {",
     "      if (!isRecord(item)) continue;",
     "      const properties: Record<string, OpenApiSchema> = {};",
     "      for (const [name, schema] of Object.entries(item)) properties[name] = cloneSchema(schema, seen);",
@@ -1579,19 +1862,36 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
     "  return result;",
     "}",
     "",
+    "function resolveRegistrySchema(value: unknown, seen = new Set<string>()): OpenApiSchema {",
+    "  const schema = cloneSchema(value);",
+    "  const ref = typeof schema.$ref === \"string\" ? schema.$ref : undefined;",
+    "  if (!ref || seen.has(ref)) return schema;",
+    "  const localName = ref.startsWith(\"#/components/schemas/\") ? ref.slice(21) : ref.startsWith(\"#/$defs/\") ? ref.slice(8) : ref.startsWith(\"#/definitions/\") ? ref.slice(14) : ref;",
+    "  if (ref.startsWith(\"#/$defs/\") || ref.startsWith(\"#/definitions/\")) {",
+    "    const defs = ref.startsWith(\"#/$defs/\") ? schema.$defs : schema.definitions;",
+    "    if (isRecord(defs) && defs[localName] !== undefined) return resolveRegistrySchema(defs[localName], new Set([...seen, ref]));",
+    "  }",
+    "  for (const [name, candidate] of Object.entries(OPENAPI_SCHEMA_REGISTRY)) {",
+    "    if (name === localName) return resolveRegistrySchema(candidate, new Set([...seen, ref]));",
+    "    const candidateRecord: Record<string, unknown> | undefined = isRecord(candidate) ? candidate : undefined;",
+    "    if (candidateRecord && candidateRecord[\"$id\"] === ref) return resolveRegistrySchema(candidate, new Set([...seen, ref]));",
+    "  }",
+    "  return schema;",
+    "}",
+    "",
     "function schemaProperty(schema: unknown, name: string): OpenApiSchema {",
-    "  const document = cloneSchema(schema);",
+    "  const document = resolveRegistrySchema(schema);",
     "  const properties = document.properties;",
     "  return isRecord(properties) && isRecord(properties[name]) ? properties[name] : { type: \"string\" };",
     "}",
     "",
     "function schemaPropertyNames(schema: unknown): string[] {",
-    "  const document = cloneSchema(schema);",
+    "  const document = resolveRegistrySchema(schema);",
     "  return isRecord(document.properties) ? Object.keys(document.properties).sort() : [];",
     "}",
     "",
     "function schemaRequired(schema: unknown, name: string): boolean {",
-    "  const document = cloneSchema(schema);",
+    "  const document = resolveRegistrySchema(schema);",
     "  return Array.isArray(document.required) && document.required.includes(name);",
     "}",
     "",
@@ -1601,6 +1901,12 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
     "",
     "function openApiPath(path: string): string {",
     '  return path.replace(/:([A-Za-z0-9_]+)/g, "{$1}");',
+    "}",
+    "",
+    "function responseHasBody(status: string, kind: string | undefined): boolean {",
+    "  if (kind === \"void\" || kind === \"undefined\") return false;",
+    "  const code = Number(status);",
+    "  return ![204, 205, 304].includes(code);",
     "}",
     "",
     "function operationFor(definition: OpenApiRouteDefinition): Record<string, unknown> {",
@@ -1614,12 +1920,22 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
     "  for (const name of [...queryNames].sort()) parameters.push({",
     '    name, in: "query", required: querySchema ? schemaRequired(querySchema, name) : false, schema: schemaProperty(querySchema, name),',
     "  });",
+    "  const headersSchema = definition.headersSchema ? OPENAPI_SCHEMA_REGISTRY[definition.headersSchema as keyof typeof OPENAPI_SCHEMA_REGISTRY] : undefined;",
+    "  for (const name of headersSchema ? schemaPropertyNames(headersSchema) : []) parameters.push({",
+    '    name, in: "header", required: schemaRequired(headersSchema, name), schema: schemaProperty(headersSchema, name),',
+    "  });",
+    "  const cookieSchema = definition.cookieSchema ? OPENAPI_SCHEMA_REGISTRY[definition.cookieSchema as keyof typeof OPENAPI_SCHEMA_REGISTRY] : undefined;",
+    "  for (const name of cookieSchema ? schemaPropertyNames(cookieSchema) : []) parameters.push({",
+    '    name, in: "cookie", required: schemaRequired(cookieSchema, name), schema: schemaProperty(cookieSchema, name),',
+    "  });",
     "  const responses: Record<string, unknown> = {",
     '    "422": { description: "Request validation failed", content: { "application/json": { schema: { $ref: "#/components/schemas/SupaCloudError" } } } },',
     '    "500": { description: "Internal server error", content: { "application/json": { schema: { $ref: "#/components/schemas/SupaCloudError" } } } },',
     "  };",
-    "  if (definition.responseSchema) {",
-    '    responses["200"] = { description: "Successful response", content: { [definition.responseContentType]: { schema: schemaReference(definition.responseSchema) } } };',
+    "  if (definition.responseSchemas) {",
+    "    for (const [status, schema] of Object.entries(definition.responseSchemas)) responses[status] = { description: `HTTP ${status} response`, ...(responseHasBody(status, definition.responseKind) ? { content: { [definition.responseContentType]: { schema: schemaReference(schema) } } } : {}) };",
+    "  } else if (definition.responseSchema) {",
+    '    responses["200"] = { description: "Successful response", ...(responseHasBody("200", definition.responseKind) ? { content: { [definition.responseContentType]: { schema: schemaReference(definition.responseSchema) } } } : {}) };',
     "  } else if (definition.responseKind === \"binary\" || definition.responseKind === \"stream\") {",
     '    responses["200"] = { description: "Successful response", content: { [definition.responseContentType]: { schema: { type: "string", format: "binary" } } } };',
     "  } else {",

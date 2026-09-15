@@ -1,21 +1,26 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-interface ProjectConfig {
+export interface ProjectConfig {
   name: string;
-  tags?: string[];
+  tags: string[];
   path: string;
   dependencies: string[];
 }
 
-interface BoundaryRule {
+export interface BoundaryRule {
   sourceTag: string;
   bannedDependenciesWithTags?: string[];
   onlyDependOnLibsWithTags?: string[];
   description?: string;
 }
 
-const WORKSPACE_BOUNDARY_RULES: BoundaryRule[] = [
+export interface WorkspaceInventory {
+  projects: Map<string, ProjectConfig>;
+  errors: string[];
+}
+
+export const WORKSPACE_BOUNDARY_RULES: BoundaryRule[] = [
   {
     sourceTag: "type:compiler",
     bannedDependenciesWithTags: ["type:runtime", "type:api", "type:app", "type:cli", "type:framework"],
@@ -38,13 +43,36 @@ const WORKSPACE_BOUNDARY_RULES: BoundaryRule[] = [
   },
   {
     sourceTag: "type:runtime",
-    bannedDependenciesWithTags: ["type:cli", "type:app", "type:admin"],
-    description: "Runtimes must not depend on UI console, CLI, or admin operations.",
+    bannedDependenciesWithTags: ["type:cli", "type:app", "type:admin", "type:api", "type:compiler"],
+    description: "Runtimes must not depend on UI, control-plane API, CLI, admin operations, or the compiler.",
+  },
+  {
+    sourceTag: "type:api",
+    bannedDependenciesWithTags: ["type:app", "type:cli", "type:admin", "type:distribution", "type:compiler"],
+    description: "Control-plane APIs may depend on platform libraries, but not UI, packaging, CLI, or compiler surfaces.",
+  },
+  {
+    sourceTag: "type:app",
+    bannedDependenciesWithTags: ["type:api", "type:runtime", "type:database", "type:admin", "type:cli", "type:distribution", "type:compiler"],
+    description: "Web applications consume client contracts and must not import server, database, packaging, or compiler surfaces.",
+  },
+  {
+    sourceTag: "type:distribution",
+    onlyDependOnLibsWithTags: ["type:admin", "type:cli"],
+    description: "The distribution package is a thin packaging facade over the supported admin and project CLI entrypoints.",
   },
 ];
 
-async function loadProjects(packagesDir: string): Promise<Map<string, ProjectConfig>> {
+const REQUIRED_PACKAGE_TAGS: Record<string, string[]> = {
+  "@supacloud/management-api": ["scope:cloud", "type:api"],
+  "@supacloud/edge-runtime": ["scope:runtime", "type:runtime"],
+  "web-console": ["scope:cloud", "type:app"],
+  "@supacloud/db": ["scope:core", "type:database"],
+};
+
+export async function loadProjects(packagesDir: string): Promise<WorkspaceInventory> {
   const projects = new Map<string, ProjectConfig>();
+  const errors: string[] = [];
   const entries = await readdir(packagesDir, { withFileTypes: true });
 
   for (const entry of entries) {
@@ -67,11 +95,33 @@ async function loadProjects(packagesDir: string): Promise<Map<string, ProjectCon
     }
 
     let tags: string[] = [];
+    let projectJson: { name?: unknown; tags?: unknown } | undefined;
     try {
-      const projectJson = JSON.parse(await readFile(projectJsonPath, "utf8"));
-      tags = projectJson.tags ?? [];
+      projectJson = JSON.parse(await readFile(projectJsonPath, "utf8")) as { name?: unknown; tags?: unknown };
     } catch {
-      // If project.json does not exist, tags remain empty
+      errors.push(`Package "${pkgJson.name ?? entry.name}" is missing a valid project.json; every workspace package must declare scope and type tags.`);
+    }
+    if (projectJson) {
+      const name = pkgJson.name ?? entry.name;
+      const acceptedProjectNames = new Set([name, `@supacloud/${entry.name}`]);
+      if (typeof projectJson.name !== "string" || !acceptedProjectNames.has(projectJson.name)) {
+        errors.push(`Package "${name}" project.json name must be "${name}".`);
+      }
+      if (!Array.isArray(projectJson.tags) || !projectJson.tags.every((tag): tag is string => typeof tag === "string")) {
+        errors.push(`Package "${name}" project.json tags must be a string array.`);
+      } else {
+        tags = projectJson.tags;
+        const duplicateTags = tags.filter((tag, index) => tags.indexOf(tag) !== index);
+        if (duplicateTags.length > 0) {
+          errors.push(`Package "${name}" has duplicate tags: ${[...new Set(duplicateTags)].join(", ")}.`);
+        }
+        if (tags.filter((tag) => tag.startsWith("scope:")).length !== 1) {
+          errors.push(`Package "${name}" must declare exactly one scope:* tag.`);
+        }
+        if (tags.filter((tag) => tag.startsWith("type:")).length !== 1) {
+          errors.push(`Package "${name}" must declare exactly one type:* tag.`);
+        }
+      }
     }
 
     const name = pkgJson.name ?? entry.name;
@@ -89,22 +139,35 @@ async function loadProjects(packagesDir: string): Promise<Map<string, ProjectCon
     });
   }
 
-  return projects;
+  return { projects, errors };
 }
 
-function checkBoundaries(projects: Map<string, ProjectConfig>): { errors: string[]; warnings: string[] } {
+export function checkBoundaries(projects: Map<string, ProjectConfig>): { errors: string[]; warnings: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
 
+  for (const [packageName, requiredTags] of Object.entries(REQUIRED_PACKAGE_TAGS)) {
+    const project = projects.get(packageName);
+    if (!project) {
+      errors.push(`[Boundary Metadata] Required workspace package "${packageName}" is not present.`);
+      continue;
+    }
+    for (const tag of requiredTags) {
+      if (!project.tags.includes(tag)) {
+        errors.push(`[Boundary Metadata] Package "${packageName}" must declare tag "${tag}".`);
+      }
+    }
+  }
+
   for (const [name, project] of projects) {
-    const sourceTags = project.tags ?? [];
+    const sourceTags = project.tags;
     const allDeps = [...project.dependencies];
 
     for (const depName of allDeps) {
       const targetProject = projects.get(depName);
       if (!targetProject) continue; // External npm package
 
-      const targetTags = targetProject.tags ?? [];
+      const targetTags = targetProject.tags;
 
       for (const rule of WORKSPACE_BOUNDARY_RULES) {
         const matchesSource = rule.sourceTag === "*" || sourceTags.includes(rule.sourceTag);
@@ -166,12 +229,13 @@ function checkBoundaries(projects: Map<string, ProjectConfig>): { errors: string
   return { errors, warnings };
 }
 
-async function main() {
+async function main(): Promise<void> {
   const packagesDir = join(import.meta.dir, "..", "packages");
-  const projects = await loadProjects(packagesDir);
-  console.log(`Loaded ${projects.size} packages in workspace.`);
+  const inventory = await loadProjects(packagesDir);
+  console.log(`Loaded ${inventory.projects.size} packages in workspace.`);
 
-  const { errors, warnings } = checkBoundaries(projects);
+  const { errors, warnings } = checkBoundaries(inventory.projects);
+  errors.push(...inventory.errors);
 
   for (const warn of warnings) {
     console.warn(`\x1b[33mWARN\x1b[0m ${warn}`);
@@ -188,7 +252,9 @@ async function main() {
   console.log("\x1b[32m✔\x1b[0m All workspace architectural boundaries and module tags are respected!");
 }
 
-main().catch((err) => {
-  console.error("Failed to check workspace boundaries:", err);
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error("Failed to check workspace boundaries:", err);
+    process.exit(1);
+  });
+}

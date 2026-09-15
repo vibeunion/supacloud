@@ -1,3 +1,4 @@
+import { requireValue } from "../../test-helpers";
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,6 +27,7 @@ const FIXTURE_TSCONFIG = `{
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "paths": { "@supacloud/app": ["./src/runtime.ts"] },
     "experimentalDecorators": true,
     "strict": true
   }
@@ -37,15 +39,15 @@ const RUNTIME_SOURCE = `export class InjectionToken<T = unknown> {
   readonly name: string;
   constructor(name: string) { this.name = name; }
 }
-export function Injectable(_options: Record<string, unknown> = {}) { return () => {}; }
-export function Inject(_token: unknown) { return () => {}; }
-export function Module(_options: Record<string, unknown>) { return () => {}; }
-export function Command(_options: Record<string, unknown>) { return () => {}; }
-export function Query(_options: Record<string, unknown>) { return () => {}; }
-export function Controller(_path: string) { return () => {}; }
-export function Body() { return () => {}; }
-export function Get(_path: string, _options?: Record<string, unknown>) { return () => {}; }
-export function Post(_path: string, _options?: Record<string, unknown>) { return () => {}; }
+export function Injectable(_options: Record<string, unknown> = {}): ClassDecorator { return () => {}; }
+export function Inject(_token: unknown): ParameterDecorator { return () => {}; }
+export function Module(_options: Record<string, unknown>): ClassDecorator { return () => {}; }
+export function Command(_options: Record<string, unknown>): ClassDecorator { return () => {}; }
+export function Query(_options: Record<string, unknown>): ClassDecorator { return () => {}; }
+export function Controller(_path: string): ClassDecorator { return () => {}; }
+export function Body(): ParameterDecorator { return () => {}; }
+export function Get(_path: string, _options?: Record<string, unknown>): MethodDecorator { return () => {}; }
+export function Post(_path: string, _options?: Record<string, unknown>): MethodDecorator { return () => {}; }
 `;
 
 const FIXTURE_FILES: Record<string, string> = {
@@ -114,12 +116,18 @@ import { AcceptCaseCommand } from "./accept-case.command";
 const AcceptCaseBody = { type: "object" } as const;
 const AcceptCaseParams = { type: "object" } as const;
 const AcceptCaseQuery = { type: "object" } as const;
+const DetailParams = {
+  type: "object", properties: { caseId: { type: "string" } }, required: ["caseId"],
+} as const;
+const CaseResponse = {
+  type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"],
+} as const;
 
 @Controller("/cases")
 export class CaseController {
   constructor(@Inject(CaseService) readonly cases: unknown) {}
 
-  @Get("/:caseId")
+  @Get("/:caseId", { params: DetailParams, response: CaseResponse })
   detail(): { ok: boolean } {
     return { ok: true };
   }
@@ -129,6 +137,7 @@ export class CaseController {
     body: AcceptCaseBody,
     params: AcceptCaseParams,
     query: AcceptCaseQuery,
+    response: CaseResponse,
   })
   accept(@Body() _body: unknown): { ok: boolean } {
     return { ok: true };
@@ -189,7 +198,7 @@ describe("app tools", () => {
         const commandSource = readFileSync(commandFile, "utf8");
         expect(commandSource).toContain("@Command({");
         expect(commandSource).toContain('name: "billing.issueInvoice"');
-        expect(commandSource).toContain("TODO");
+        expect(commandSource).toContain("Implement IssueInvoiceCommand.execute before exposing this command");
         expect(commandSource).toContain("export class IssueInvoiceCommand");
 
         const queryResult = await app({
@@ -226,7 +235,7 @@ describe("app tools", () => {
 
         const forced = await app({ action: "generate", kind: "module", name: "billing", root, force: true });
         expect(forced.isError).toBe(false);
-        expect(forced.content[0].text).toContain("overwritten");
+        expect(requireValue(forced.content[0]).text).toContain("overwritten");
         expect(existsSync(moduleFile)).toBe(true);
 
         // Fixture already has case.controller.ts -> prompts manual merge, --force does not overwrite
@@ -239,14 +248,14 @@ describe("app tools", () => {
     test("check reports missing generated files without writing them", async () => {
         const result = await app({ action: "check", root });
         expect(result.isError).toBe(true);
-        expect(result.content[0].text).toContain("generated artifact mismatch");
-        expect(result.content[0].text).toContain("no files written");
+        expect(requireValue(result.content[0]).text).toContain("generated artifact mismatch");
+        expect(requireValue(result.content[0]).text).toContain("no files written");
         expect(existsSync(join(root, "generated"))).toBe(false);
     });
 
     test("compile writes application.ts and app.manifest.json", async () => {
         const result = await app({ action: "compile", root });
-        expect(result.isError).toBe(false);
+        expect(result.isError, result.content.map((chunk) => chunk.text).join("\n")).toBe(false);
         expect(existsSync(join(root, "generated", "application.ts"))).toBe(true);
         expect(existsSync(join(root, "generated", "app.manifest.json"))).toBe(true);
         expect(existsSync(join(root, "generated", "graphql.ts"))).toBe(false);
@@ -261,7 +270,7 @@ describe("app tools", () => {
         try {
             const result = await app({ action: "check", root });
             expect(result.isError).toBe(true);
-            expect(result.content[0].text).toContain("command-transaction-unsupported");
+            expect(requireValue(result.content[0]).text).toContain("command-transaction-unsupported");
             expect(readFileSync(artifactPath, "utf8")).toBe(original);
             const compiled = await app({ action: "compile", root });
             expect(compiled.isError).toBe(true);
@@ -276,7 +285,7 @@ describe("app tools", () => {
     test("graph renders the module tree and json format", async () => {
         const textResult = await app({ action: "graph", root });
         expect(textResult.isError).toBe(false);
-        const text = textResult.content[0].text;
+        const text = requireValue(textResult.content[0]).text;
         expect(text).toContain("└─ case");
         expect(text).toContain("└─ audit");
         expect(text).toContain("provider: CaseService");
@@ -286,7 +295,7 @@ describe("app tools", () => {
         expect(text).toContain("externalTokens: DB_CLIENT");
 
         const jsonResult = await app({ action: "graph", root, format: "json" });
-        const manifest = JSON.parse(jsonResult.content[0].text);
+        const manifest = JSON.parse(requireValue(jsonResult.content[0]).text);
         expect(manifest.version).toBe(1);
         expect(manifest.modules.map((module: { name: string }) => module.name))
             .toEqual(expect.arrayContaining(["audit", "case"]));
@@ -295,47 +304,47 @@ describe("app tools", () => {
     test("explain resolves providers, commands and external tokens", async () => {
         const provider = await app({ action: "explain", root, target: "CaseService" });
         expect(provider.isError).toBe(false);
-        expect(provider.content[0].text).toContain("所属模块: case");
-        expect(provider.content[0].text).toContain("scope: application");
-        expect(provider.content[0].text).toContain("deps: AUDIT_SERVICE, DB_CLIENT");
-        expect(provider.content[0].text).toContain("被依赖: case/AcceptCaseCommand, case/CaseController");
+        expect(requireValue(provider.content[0]).text).toContain("所属模块: case");
+        expect(requireValue(provider.content[0]).text).toContain("scope: application");
+        expect(requireValue(provider.content[0]).text).toContain("deps: AUDIT_SERVICE, DB_CLIENT");
+        expect(requireValue(provider.content[0]).text).toContain("被依赖: case/AcceptCaseCommand, case/CaseController");
 
         const command = await app({ action: "explain", root, target: "case.accept" });
-        expect(command.content[0].text).toContain("类型: command");
-        expect(command.content[0].text).toContain("permission: case.accept");
-        expect(command.content[0].text).toContain("transaction: required");
-        expect(command.content[0].text).toContain("audit: case.accepted");
+        expect(requireValue(command.content[0]).text).toContain("类型: command");
+        expect(requireValue(command.content[0]).text).toContain("permission: case.accept");
+        expect(requireValue(command.content[0]).text).toContain("transaction: required");
+        expect(requireValue(command.content[0]).text).toContain("audit: case.accepted");
 
         const controller = await app({ action: "explain", root, target: "CaseController" });
-        expect(controller.content[0].text).toContain("路由: GET /cases/:caseId -> detail");
+        expect(requireValue(controller.content[0]).text).toContain("路由: GET /cases/:caseId -> detail");
 
         const external = await app({ action: "explain", root, target: "DB_CLIENT" });
-        expect(external.content[0].text).toContain("externalToken");
+        expect(requireValue(external.content[0]).text).toContain("externalToken");
 
         const missing = await app({ action: "explain", root, target: "Nope" });
         expect(missing.isError).toBe(true);
-        expect(missing.content[0].text).toContain("未找到对象: Nope");
+        expect(requireValue(missing.content[0]).text).toContain("未找到对象: Nope");
     });
 
     test("export-tools writes OpenAI and MCP definitions from command governance metadata", async () => {
         await app({ action: "compile", root });
         const result = await app({ action: "export-tools", root });
         expect(result.isError).toBe(false);
-        expect(result.content[0].text).toContain("case_accept");
+        expect(requireValue(result.content[0]).text).toContain("case_accept");
 
         const openai = JSON.parse(readFileSync(join(root, "generated/tool-definitions.openai.json"), "utf8"));
         expect(openai).toHaveLength(1);
-        expect(openai[0].function.name).toBe("case_accept");
-        expect(openai[0].function.description).toContain("permission case.accept");
-        expect(openai[0].function.description).toContain("HTTP POST /cases/accept");
-        expect(openai[0].function.parameters.properties).toEqual(expect.objectContaining({
+        expect(requireValue(openai[0]).function.name).toBe("case_accept");
+        expect(requireValue(openai[0]).function.description).toContain("permission case.accept");
+        expect(requireValue(openai[0]).function.description).toContain("HTTP POST /cases/accept");
+        expect(requireValue(openai[0]).function.parameters.properties).toEqual(expect.objectContaining({
             body: expect.any(Object),
             params: expect.any(Object),
             query: expect.any(Object),
         }));
 
         const mcp = JSON.parse(readFileSync(join(root, "generated/tool-definitions.mcp.json"), "utf8"));
-        expect(mcp[0].annotations).toEqual(expect.objectContaining({
+        expect(requireValue(mcp[0]).annotations).toEqual(expect.objectContaining({
             readOnly: false,
             audited: true,
             permission: "case.accept",
@@ -347,9 +356,9 @@ describe("app tools", () => {
     test("export-tools json format returns both contracts without writing artifacts", async () => {
         const result = await app({ action: "export-tools", root, format: "json" });
         expect(result.isError).toBe(false);
-        const payload = JSON.parse(result.content[0].text);
-        expect(payload.openai[0].function.name).toBe("case_accept");
-        expect(payload.mcp[0].inputSchema.properties.body.description)
+        const payload = JSON.parse(requireValue(result.content[0]).text);
+        expect(requireValue(payload.openai[0]).function.name).toBe("case_accept");
+        expect(requireValue(payload.mcp[0]).inputSchema.properties.body.description)
             .toContain("AcceptCaseBody");
     });
 

@@ -18,6 +18,11 @@ Angular 风格源代码（装饰器）
 | `@supacloud/compiler` | 静态编译器：依赖图、循环依赖/作用域/模块边界校验、静态工厂与 manifest 生成 |
 | `@supacloud/elysia` | 把编译产物适配为 Elysia 插件，管理 application/request 作用域与路由校验，提供 `commandGovernance` 与 `composeCommandExecutors` 命令管道 |
 
+路由契约采用 schema-first：`body`、`params`、`query`、`headers`、`cookie` 和
+`responses` 同时驱动编译期 handler 类型、Elysia 请求校验、生成客户端和
+OpenAPI。升级旧路由时，按[路由契约升级迁移](./route-contract-migration.md)
+将 `response: Schema` 替换为显式状态映射。
+
 ## 编写业务模块
 
 新项目可先执行 `supacloud app init --root ./orders --name orders`，再进入目录运行
@@ -68,7 +73,7 @@ export class CaseController {
 
   @Post("/:caseId/accept", {
     body: CaseAcceptInput,
-    response: CaseAcceptResult,
+    responses: { 200: CaseAcceptResult },
     command: AcceptCaseCommand,
   })
   accept(ctx: { body: unknown; params: Record<string, string> }) {
@@ -192,7 +197,7 @@ export default createApplication({
 
 - application 级服务经 `.decorate()` 挂载，全实例共享
 - request 级 provider 经 `.resolve()` 每请求新建，并发请求互不串扰
-- 路由自动接 TypeBox body/params/query/response 校验（失败返回 422）
+- 路由自动接 TypeBox body/params/query/headers/cookie/response 校验（失败返回 422）
 - 绑定 `command` 的路由必须配置 `commandGovernance` 或 `commandExecutor`；缺少治理配置时应用启动即失败（fail-closed）
 - 治理链按授权 → 幂等 → 事务 → 业务处理 → 审计执行；具体存储和事务语义由平台适配器提供
 - 可使用 `composeCommandExecutors` 灵活组合扩展中间件

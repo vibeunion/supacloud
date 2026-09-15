@@ -162,7 +162,7 @@ export interface ProviderNode {
 
 export interface HandlerParamNode {
   name: string;
-  kind: "param" | "query" | "body" | "headers" | "context" | "unknown";
+  kind: "param" | "query" | "body" | "headers" | "cookie" | "context" | "unknown";
   bindingName?: string;
   transform?: "number" | "boolean" | "string";
   default?: unknown;
@@ -174,7 +174,7 @@ export interface RouteNode {
     response?: "framework" | "native-json" | "binary" | "stream";
     evidence?: string;
   };
-  schemaKinds?: Partial<Record<"body" | "params" | "query" | "response", "opaque" | "declared">>;
+  schemaKinds?: Partial<Record<"body" | "params" | "query" | "headers" | "cookie" | "response", "opaque" | "declared">>;
   nativeResponse?: boolean;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   path: string;
@@ -182,7 +182,10 @@ export interface RouteNode {
   body?: string;
   params?: string;
   query?: string;
+  headers?: string;
+  cookie?: string;
   response?: string;
+  responses?: Record<string, string>;
   /** @Command-decorated class explicitly bound by the route. */
   command?: string;
   /** Route guards executed before handler (Angular CanActivateFn style). */

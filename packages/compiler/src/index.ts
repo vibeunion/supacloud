@@ -13,6 +13,7 @@ export { applyDiagnosticFix } from "./fixes";
 export type { AppliedDiagnosticFix, ApplyDiagnosticFixOptions } from "./fixes";
 export { checkProject, compileProject } from "./compile";
 export { watchProject } from "./watch";
+export { migrateProject, SUPACLOUD_MIGRATIONS, migrateRouteResponse } from "./migrations";
 export {
   createContextPack,
   createExecutionPlans,
@@ -52,8 +53,16 @@ export type {
   OpenApiObject,
 } from "./openapi-tools";
 export type { ContextPack, DoctorResult, ExecutionPlan } from "./inspect";
+export type {
+  MigrateFileResult,
+  MigrateProjectOptions,
+  MigrateProjectResult,
+  SourceMigrationIssue,
+  SourceMigrationResult,
+  SupaCloudMigration,
+} from "./migrations";
 export { validateGraph, COMPILER_DIAGNOSTIC_CODES } from "./validate";
-export { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
+export { scanGeneratedArtifacts, scanProductionSource, TYPE_SAFETY_DIAGNOSTIC_CODES } from "./type-safety";
 export type { TypeSafetyScanOptions } from "./type-safety";
 export {
   DEFAULT_SUPACLOUD_CONFIG,

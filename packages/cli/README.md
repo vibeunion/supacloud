@@ -30,6 +30,25 @@ Failed compilation preserves the previous generated artifacts.
 Without a config file, an explicit `--root` retains the legacy source-directory
 behavior.
 
+### Framework source upgrades
+
+Breaking source-contract changes use the compiler's migration command, which is
+preview-only by default:
+
+```sh
+cd orders
+bunx supacloud-compiler migrate --root . --json
+bunx supacloud-compiler migrate --root . --write
+bunx supacloud-compiler compile
+bunx supacloud-compiler check
+```
+
+Review the preview and working-tree diff before `--write`. An ambiguous route
+conversion returns a non-zero result and leaves all files untouched. The command
+does not migrate databases or generated artifacts; regenerate those artifacts
+after the source change and use version control for rollback. See the [route
+contract migration guide](../../docs/route-contract-migration.md).
+
 ## Installation
 
 Install:

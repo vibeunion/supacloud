@@ -3,6 +3,7 @@ import type { EnvironmentProviders } from "./provider";
 import { flattenProviders } from "./provider";
 import type { Scope } from "./scope";
 import { DEFAULT_SCOPE } from "./scope";
+import type { StaticDecode, TSchema } from "@sinclair/typebox";
 import {
   Host as AngularHost,
   Inject as AngularInject,
@@ -12,6 +13,7 @@ import {
   SkipSelf as AngularSkipSelf,
 } from "@angular/core";
 import type { Aspect } from "./aspect";
+import type { RouteContractSchemas } from "./route_contract";
 
 /**
  * Decorator metadata keys. Metadata is attached as static properties on the
@@ -39,7 +41,7 @@ export const ROUTE_PARAMS_METADATA = "supacloud:route-params";
 
 export interface RouteParamBinding {
   index: number;
-  type: "param" | "query" | "body" | "headers";
+  type: "param" | "query" | "body" | "headers" | "cookie";
   name?: string;
   transform?: "number" | "boolean" | "string";
   default?: unknown;
@@ -104,13 +106,44 @@ export interface CommandOptions {
   aspects?: Aspect[];
 }
 
-export interface JobOptions {
+export type JobMode = "task" | "workflow";
+export type JobIdempotency = "required" | "none";
+
+export type JobInput<Schema extends TSchema | undefined> =
+  Schema extends TSchema ? StaticDecode<Schema> : unknown;
+
+export type JobOutput<Schema extends TSchema | undefined> =
+  Schema extends TSchema ? StaticDecode<Schema> : unknown;
+
+export interface JobHandler<TInput = unknown, TOutput = unknown> {
+  run(input: TInput): TOutput | Promise<TOutput>;
+}
+
+export interface JobOptions<
+  TInputSchema extends TSchema = TSchema,
+  TOutputSchema extends TSchema = TSchema,
+> {
   name: string;
+  /** Static TypeBox schema for the job input. */
+  input?: TInputSchema;
+  /** Static TypeBox schema for the job output. */
+  output?: TOutputSchema;
+  /** Selects the existing Background Task or Durable Workflow adapter. */
+  mode?: JobMode;
+  /** Platform execution deadline in seconds; the adapter owns enforcement. */
+  timeoutSec?: number;
+  /** Maximum execution attempts; the adapter owns retry and DLQ behavior. */
+  maxAttempts?: number;
+  /** Whether the adapter must require an idempotency key for submission. */
+  idempotency?: JobIdempotency;
   /** Explicit static aspects applied around this job invocation. */
   aspects?: Aspect[];
 }
 
-export type JobMeta = JobOptions;
+export type JobMeta<
+  TInputSchema extends TSchema = TSchema,
+  TOutputSchema extends TSchema = TSchema,
+> = JobOptions<TInputSchema, TOutputSchema>;
 
 export type CommandMeta = Omit<CommandOptions, "transaction" | "idempotency"> & {
   transaction: "required" | "none";
@@ -134,21 +167,22 @@ export interface ControllerOptions {
   standalone?: boolean;
 }
 
-export type CanActivateFn<TContext = any> = (
+export type CanActivateFn<TContext = import("./route_pipeline").RoutePipelineContext> = (
   ctx: TContext,
-) => boolean | Promise<boolean> | any;
-export type CanMatchFn<TContext = any> = (
+) => GuardResult | Promise<GuardResult>;
+export type GuardResult = boolean | import("./route_pipeline").RedirectCommand;
+export type CanMatchFn<TContext = import("./route_pipeline").RoutePipelineContext> = (
   ctx: TContext,
-) => boolean | Promise<boolean> | any;
-export type CanDeactivateFn<T = any, TContext = any> = (
+) => GuardResult | Promise<GuardResult>;
+export type CanDeactivateFn<T = unknown, TContext = import("./route_pipeline").RoutePipelineContext> = (
   component: T,
   ctx: TContext,
-) => boolean | Promise<boolean> | any;
-export type ResolveFn<T = any, TContext = any> = (ctx: TContext) => T | Promise<T>;
+) => boolean | Promise<boolean>;
+export type ResolveFn<T = unknown, TContext = import("./route_pipeline").RoutePipelineContext> = (ctx: TContext) => T | Promise<T>;
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
-export interface RouteOptions {
+export interface RouteOptions<Schemas extends RouteContractSchemas = RouteContractSchemas> {
   /** Declared validation owner/transport; these labels are not runtime proof. */
   contract?: {
     body?: "framework" | "domain";
@@ -156,13 +190,20 @@ export interface RouteOptions {
     evidence?: string;
   };
   /** TypeBox schema (or compatible) for the request body. */
-  body?: unknown;
+  body?: Schemas["body"] extends TSchema ? Schemas["body"] : unknown;
   /** TypeBox schema for path params. */
-  params?: unknown;
+  params?: Schemas["params"] extends TSchema ? Schemas["params"] : unknown;
   /** TypeBox schema for query string. */
-  query?: unknown;
-  /** TypeBox schema for the response. */
-  response?: unknown;
+  query?: Schemas["query"] extends TSchema ? Schemas["query"] : unknown;
+  /** TypeBox schema for request headers. */
+  headers?: Schemas["headers"] extends TSchema ? Schemas["headers"] : unknown;
+  /** TypeBox schema for request cookies. */
+  cookie?: Schemas["cookie"] extends TSchema ? Schemas["cookie"] : unknown;
+  /** @deprecated Use `responses` with an explicit HTTP status map. */
+  response?: Schemas["response"] extends TSchema ? Schemas["response"] : unknown;
+  /** TypeBox schemas keyed by the HTTP response status code. */
+  responses?: Schemas["responses"] extends Readonly<Record<string | number, unknown>>
+    ? Schemas["responses"] : Readonly<Record<string | number, unknown>>;
   /** Command class whose governance metadata must be enforced for this route. */
   command?: Type<unknown>;
   /** Angular-style functional route guards executed before handler. */
@@ -185,12 +226,12 @@ export interface RouteOptions {
   aspects?: Aspect[];
 }
 
-export interface RouteDefinition extends RouteOptions {
+export type RouteDefinition<Schemas extends RouteContractSchemas = RouteContractSchemas> = RouteOptions<Schemas> & {
   method: HttpMethod;
   path: string;
   /** Controller method name. */
   handler: string;
-}
+};
 
 function defineMetadata(target: object, key: string, value: unknown): void {
   Object.defineProperty(target, key, {
@@ -224,7 +265,7 @@ export function Injectable(options: InjectableOptions = {}): ClassDecorator {
     }
     const meta: InjectableMeta = {
       scope: options.scope ?? DEFAULT_SCOPE,
-      providedIn: options.providedIn,
+      ...(options.providedIn === undefined ? {} : { providedIn: options.providedIn }),
       deps: options.deps ?? [],
     };
     defineMetadata(target, INJECTABLE_METADATA, meta);
@@ -406,13 +447,19 @@ export function getCommandMeta(target: object): CommandMeta | undefined {
   return readOwnOrInherited(target, COMMAND_METADATA);
 }
 
-export function Job(options: JobOptions): ClassDecorator {
+export function Job<
+  TInputSchema extends TSchema = TSchema,
+  TOutputSchema extends TSchema = TSchema,
+>(options: JobOptions<TInputSchema, TOutputSchema>): ClassDecorator {
   return (target) => {
     defineMetadata(target, JOB_METADATA, { ...options });
   };
 }
 
-export function getJobMeta(target: object): JobMeta | undefined {
+export function getJobMeta<
+  TInputSchema extends TSchema = TSchema,
+  TOutputSchema extends TSchema = TSchema,
+>(target: object): JobMeta<TInputSchema, TOutputSchema> | undefined {
   return readOwnOrInherited(target, JOB_METADATA);
 }
 
@@ -455,6 +502,18 @@ export function Headers(name?: string): ParameterDecorator {
   };
 }
 
+export function Cookie(name?: string): ParameterDecorator {
+  return (target, propertyKey, parameterIndex) => {
+    if (propertyKey === undefined) {
+      throw new Error("@Cookie() is only supported on controller method parameters");
+    }
+    const cls = (target as { constructor: Type<unknown> }).constructor;
+    const key = `${ROUTE_PARAMS_METADATA}:${String(propertyKey)}`;
+    const existing = readOwnOrInherited<RouteParamBinding[]>(cls, key) ?? [];
+    defineMetadata(cls, key, [...existing, { index: parameterIndex, type: "cookie", name }]);
+  };
+}
+
 export function Query(optionsOrName?: QueryOptions | ParamOptions | string, options?: ParamOptions): ClassDecorator & ParameterDecorator {
   return ((target: object, propertyKey?: string | symbol, parameterIndex?: number) => {
     if (typeof parameterIndex === "number" && propertyKey !== undefined) {
@@ -485,7 +544,7 @@ export function Controller(pathOrOptions: string | ControllerOptions = "/"): Cla
   return (target) => {
     const meta: ControllerMeta = typeof pathOrOptions === "string"
       ? { path: pathOrOptions }
-      : { path: pathOrOptions.path ?? "/", standalone: pathOrOptions.standalone };
+      : { ...pathOrOptions, path: pathOrOptions.path ?? "/" };
     defineMetadata(target, CONTROLLER_METADATA, meta);
   };
 }
@@ -495,7 +554,10 @@ export function getControllerMeta(target: object): ControllerMeta | undefined {
 }
 
 function createRouteDecorator(method: HttpMethod) {
-  return (path: string, options: RouteOptions = {}): MethodDecorator =>
+  return <const Schemas extends RouteContractSchemas = RouteContractSchemas>(
+    path: string,
+    options: RouteOptions<Schemas> = {} as RouteOptions<Schemas>,
+  ): MethodDecorator =>
     (target, propertyKey) => {
       const cls = (target as { constructor: Type<unknown> }).constructor;
       const titleKey = `${TITLE_METADATA}:${String(propertyKey)}`;
@@ -523,10 +585,10 @@ function createRouteDecorator(method: HttpMethod) {
         path,
         handler: String(propertyKey),
         ...options,
-        resolvers: Object.keys(resolvers).length > 0 ? resolvers : undefined,
-        canDeactivate: canDeactivate.length > 0 ? canDeactivate : undefined,
-        title: title || undefined,
-        data: Object.keys(data).length > 0 ? data : undefined,
+        ...(Object.keys(resolvers).length > 0 ? { resolvers } : {}),
+        ...(canDeactivate.length > 0 ? { canDeactivate } : {}),
+        ...(title ? { title } : {}),
+        ...(Object.keys(data).length > 0 ? { data } : {}),
       });
       defineMetadata(cls, ROUTES_METADATA, routes);
     };
@@ -611,8 +673,8 @@ export function Resolve(resolvers: Record<string, ResolveFn | string>): MethodDe
 /**
  * Executes a dictionary of route resolvers concurrently.
  */
-export async function executeResolvers<TContext = any>(
-  resolvers: Record<string, ResolveFn | string>,
+export async function executeResolvers<TContext = import("./route_pipeline").RoutePipelineContext>(
+  resolvers: Record<string, ResolveFn<unknown, TContext> | string>,
   ctx: TContext,
 ): Promise<Record<string, unknown>> {
   const entries = Object.entries(resolvers);
