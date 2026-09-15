@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.16.0...supacloud-lite-v0.16.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **release:** retry npm view after a just-published sibling ([a9576cd](https://github.com/vibeunion/supacloud/commit/a9576cd8b76cf99ebb73bada7bbcb3351148099c))
+
 ## [0.16.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.15.1...supacloud-lite-v0.16.0) (2026-09-14)
 
 

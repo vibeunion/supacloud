@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.3.1...function-adapter-v0.3.2) (2026-09-15)
+
+
+### Bug Fixes
+
+* **release:** retry npm view after a just-published sibling ([a9576cd](https://github.com/vibeunion/supacloud/commit/a9576cd8b76cf99ebb73bada7bbcb3351148099c))
+
 ## [0.3.1](https://github.com/vibeunion/supacloud/compare/function-adapter-v0.3.0...function-adapter-v0.3.1) (2026-09-11)
 
 
