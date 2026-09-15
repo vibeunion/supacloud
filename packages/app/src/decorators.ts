@@ -174,10 +174,9 @@ export type GuardResult = boolean | import("./route_pipeline").RedirectCommand;
 export type CanMatchFn<TContext = import("./route_pipeline").RoutePipelineContext> = (
   ctx: TContext,
 ) => GuardResult | Promise<GuardResult>;
-export type CanDeactivateFn<T = unknown, TContext = import("./route_pipeline").RoutePipelineContext> = (
-  component: T,
-  ctx: TContext,
-) => boolean | Promise<boolean>;
+export type CanDeactivateFn<T = unknown, TContext = import("./route_pipeline").RoutePipelineContext> = {
+  bivarianceHack(component: T, ctx: TContext): boolean | Promise<boolean>;
+}["bivarianceHack"];
 export type ResolveFn<T = unknown, TContext = import("./route_pipeline").RoutePipelineContext> = (ctx: TContext) => T | Promise<T>;
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";

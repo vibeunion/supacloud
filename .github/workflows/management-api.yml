@@ -133,6 +133,11 @@ jobs:
         working-directory: packages/compiler
         run: bun install --frozen-lockfile
 
+      - name: Prepare app public API dependencies
+        run: |
+          bun run scripts/build-command-dependencies.ts app
+          bun install --cwd packages/app --frozen-lockfile
+
       - name: Run workspace architecture gates
         run: |
           bun test scripts/check_workspace_boundaries.test.ts

@@ -106,7 +106,7 @@
     {
       "name": "CanDeactivateFn",
       "kind": "type",
-      "signature": "export type CanDeactivateFn<T = unknown, TContext = import(\"./route_pipeline\").RoutePipelineContext> = (component: T, ctx: TContext) => boolean | Promise<boolean>;"
+      "signature": "export type CanDeactivateFn<T = unknown, TContext = import(\"./route_pipeline\").RoutePipelineContext> = {\n    bivarianceHack(component: T, ctx: TContext): boolean | Promise<boolean>;\n}[\"bivarianceHack\"];"
     },
     {
       "name": "CanMatchFn",
