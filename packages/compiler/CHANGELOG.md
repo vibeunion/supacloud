@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.19.0...compiler-v0.19.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **elysia:** recognize only Elysia status() responses ([#1307](https://github.com/vibeunion/supacloud/issues/1307)) ([b3fa60c](https://github.com/vibeunion/supacloud/commit/b3fa60c41ec71ef703c939f9d7bd5c38791750e1))
+
 ## [0.19.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.18.0...compiler-v0.19.0) (2026-09-15)
 
 
