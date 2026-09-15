@@ -22,6 +22,9 @@
     "prepare-command-test-database.ts",
     "../.github/scripts/prepare-command-package.mjs",
     "../.github/scripts/prepare-command-package.test.mjs",
-    "../.github/scripts/package-validation.mjs"
+    "../.github/scripts/package-validation.mjs",
+    "../.github/scripts/npm-registry-visibility.mjs",
+    "../.github/scripts/publish-npm-package.mjs",
+    "../.github/scripts/publish-npm-package.test.mjs"
   ]
 }

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { assertPublishedDependencies, isNpmNotFoundError, prepareCommandPackage } from './prepare-command-package.mjs';
+import { REGISTRY_RETRY_DELAYS_MS } from './npm-registry-visibility.mjs';
 
 const siblings = new Map([
   ['@supacloud/contracts', { name: '@supacloud/contracts', version: '0.1.0' }],
@@ -134,7 +135,7 @@ test('persistent registry 404s still fail after retries', async () => {
         throw notFoundError('@supacloud/app@0.14.0');
       },
     }),
-    (error) => isNpmNotFoundError(error) && views === 2,
+    (error) => error instanceof Error && /Registry does not yet list @supacloud\/app@0\.14\.0/.test(error.message) && views === 2,
   );
 });
 
@@ -156,6 +157,30 @@ test('non-404 registry errors fail immediately', async () => {
   assert.equal(views, 1);
 });
 
+test('lite publication builds sibling command packages before typecheck', () => {
+  const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
+  const start = workflow.indexOf('- name: Publish SupaCloud Lite to NPM');
+  const end = workflow.indexOf('\n      - name:', start + 1);
+  const block = workflow.slice(start, end);
+  assert.match(block, /build-command-dependencies\.ts supacloud-lite/);
+  assert.match(block, /bun run check/);
+});
+
+test('later npm publish steps keep running after an earlier package fails', () => {
+  const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
+  for (const stepName of [
+    'Publish SupaCloud Lite to NPM',
+    'Publish function adapter to NPM',
+    'Publish app framework metadata to NPM',
+    'Publish elysia adapter to NPM',
+  ]) {
+    const start = workflow.indexOf(`- name: ${stepName}`);
+    const end = workflow.indexOf('\n      - name:', start + 1);
+    assert.ok(start >= 0 && end > start, `missing publish step for ${stepName}`);
+    assert.match(workflow.slice(start, end), /if: \$\{\{ always\(\) && \(/);
+  }
+});
+
 test('publish-npm packages declare a GitHub repository URL for provenance', () => {
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
   const job = workflow.split('\n  publish-npm:\n')[1]?.split('\n  sync-')[0];
@@ -166,4 +191,8 @@ test('publish-npm packages declare a GitHub repository URL for provenance', () =
     const pkg = JSON.parse(readFileSync(new URL(`../../packages/${name}/package.json`, import.meta.url), 'utf8'));
     assert.ok(/github\.com\/vibeunion\/supacloud/.test(String(pkg.repository?.url ?? '')), name);
   }
+});
+
+test('registry retries wait long enough for provenance visibility', () => {
+  assert.ok(REGISTRY_RETRY_DELAYS_MS.reduce((sum, delay) => sum + delay, 0) >= 10 * 60 * 1000);
 });

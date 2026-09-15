@@ -418,7 +418,7 @@ jobs:
       - name: Publish command contracts to NPM
         # Contracts are the root of the command package graph. Recheck them on
         # every release so a failed first publication is retried automatically.
-        if: ${{ needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true }}
+        if: ${{ always() && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/contracts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -428,7 +428,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish supacloud-js to NPM
-        if: ${{ needs.release-please.outputs.supacloud_js_released == 'true' || inputs.recover_npm == true }}
+        if: ${{ always() && (needs.release-please.outputs.supacloud_js_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/supacloud-js
         run: |
           node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
@@ -438,17 +438,18 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish SupaCloud Lite to NPM
-        if: ${{ needs.release-please.outputs.supacloud_lite_released == 'true' || inputs.recover_npm == true }}
+        if: ${{ always() && (needs.release-please.outputs.supacloud_lite_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/supacloud-lite
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
+          bun run ../../scripts/build-command-dependencies.ts supacloud-lite
           bun install --frozen-lockfile
           bun run check
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish admin to NPM
-        if: ${{ needs.release-please.outputs.admin_released == 'true' || inputs.recover_npm == true }}
+        if: ${{ always() && (needs.release-please.outputs.admin_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/admin
         run: |
           bun install --frozen-lockfile
@@ -456,7 +457,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish function adapter to NPM
-        if: ${{ needs.release-please.outputs.function_adapter_released == 'true' || inputs.recover_npm == true }}
+        if: ${{ always() && (needs.release-please.outputs.function_adapter_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/function-adapter
         run: |
           bun install --frozen-lockfile
@@ -464,7 +465,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish supacloud (umbrella) to NPM
-        if: ${{ needs.release-please.outputs.supacloud_released == 'true' || inputs.recover_npm == true }}
+        if: ${{ always() && (needs.release-please.outputs.supacloud_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/supacloud
         run: |
           bun install --frozen-lockfile --registry https://registry.npmjs.org
@@ -474,7 +475,7 @@ jobs:
       # App-framework packages. NODE_AUTH_TOKEN supports the first publish of
       # each new package before npm trusted publishing is linked.
       - name: Publish durable commands to NPM
-        if: ${{ needs.release-please.outputs.commands_released == 'true' || inputs.recover_npm == true }}
+        if: ${{ always() && (needs.release-please.outputs.commands_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/commands
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -486,7 +487,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish database governance to NPM
-        if: ${{ needs.release-please.outputs.db_released == 'true' || inputs.recover_npm == true }}
+        if: ${{ always() && (needs.release-please.outputs.db_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/db
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -498,7 +499,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish app framework metadata to NPM
-        if: ${{ needs.release-please.outputs.app_released == 'true' || inputs.recover_npm == true }}
+        if: ${{ always() && (needs.release-please.outputs.app_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/app
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -510,7 +511,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish Svelte lifecycle binding to NPM
-        if: ${{ needs.release-please.outputs.app_svelte_released == 'true' || inputs.recover_npm == true }}
+        if: ${{ always() && (needs.release-please.outputs.app_svelte_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/app-svelte
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -522,7 +523,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish app compiler to NPM
-        if: ${{ needs.release-please.outputs.compiler_released == 'true' || inputs.recover_npm == true }}
+        if: ${{ always() && (needs.release-please.outputs.compiler_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/compiler
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -532,7 +533,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish cli to NPM
-        if: ${{ needs.release-please.outputs.cli_released == 'true' || inputs.recover_npm == true }}
+        if: ${{ always() && (needs.release-please.outputs.cli_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/cli
         run: |
           # npm packages cannot contain a local `file:` dependency. The CLI
@@ -561,7 +562,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish elysia adapter to NPM
-        if: ${{ needs.release-please.outputs.elysia_released == 'true' || inputs.recover_npm == true }}
+        if: ${{ always() && (needs.release-please.outputs.elysia_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/elysia
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -573,7 +574,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish testing utilities to NPM
-        if: ${{ needs.release-please.outputs.testing_released == 'true' || inputs.recover_npm == true }}
+        if: ${{ always() && (needs.release-please.outputs.testing_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/testing
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}

@@ -3,17 +3,25 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
+import { NPM_REGISTRY, viewRegistryVersion, waitForRegistryVersion } from './npm-registry-visibility.mjs';
 
 const execFileAsync = promisify(execFile);
-const NOT_FOUND_PATTERN = /(?:^|\n)npm (?:error|ERR!) (?:(?:code )?E404|404(?: Not Found)?)(?:\s|$)|["']code["']\s*:\s*["']E404["']/i;
-const PUBLISH_ARGUMENTS = ['publish', '--provenance', '--access', 'public'];
+const PUBLISH_ARGUMENTS = ['publish', '--provenance', '--access', 'public', `--registry=${NPM_REGISTRY}`];
+const MAX_NPM_OUTPUT_BYTES = 16 * 1024 * 1024;
 
+/** @typedef {(arguments_: string[]) => Promise<{ stdout?: unknown, stderr?: unknown }>} NpmRunner */
+
+/** @param {string[]} arguments_ */
 async function runNpmCommand(arguments_) {
-  return execFileAsync('npm', arguments_, { encoding: 'utf8' });
+  return execFileAsync('npm', arguments_, { encoding: 'utf8', maxBuffer: MAX_NPM_OUTPUT_BYTES });
 }
 
+/** @param {unknown} candidatePackage */
 function packageIdentity(candidatePackage) {
-  const { name, version } = candidatePackage;
+  if (!candidatePackage || typeof candidatePackage !== 'object') {
+    throw new Error('package.json must be an object');
+  }
+  const { name, version } = /** @type {{ name?: unknown, version?: unknown }} */ (candidatePackage);
   if (typeof name !== 'string' || name.length === 0) {
     throw new Error('package.json has no package name');
   }
@@ -23,43 +31,38 @@ function packageIdentity(candidatePackage) {
   return { name, version };
 }
 
-function registryVersion(commandOutput, packageSpec) {
-  const parsedVersion = JSON.parse(commandOutput);
-  if (typeof parsedVersion !== 'string') {
-    throw new Error(`npm returned an invalid version for ${packageSpec}`);
-  }
-  return parsedVersion;
-}
-
-function isExplicitNotFound(error) {
-  const npmErrorOutput = [error?.stdout, error?.stderr]
-    .filter((candidate) => typeof candidate === 'string')
-    .join('\n');
-  return NOT_FOUND_PATTERN.test(npmErrorOutput);
-}
-
-async function publishedVersion(packageSpec, runNpm) {
-  try {
-    const { stdout } = await runNpm(['view', packageSpec, 'version', '--json']);
-    return registryVersion(stdout, packageSpec);
-  } catch (error) {
-    if (isExplicitNotFound(error)) return undefined;
-    throw error;
-  }
-}
-
-export async function publishNpmPackage({ name, version, runNpm = runNpmCommand }) {
+/**
+ * @param {{
+ *   name: string,
+ *   version: string,
+ *   runNpm?: NpmRunner,
+ *   sleep?: (ms: number) => Promise<void>,
+ *   delays?: readonly number[],
+ * }} options
+ */
+export async function publishNpmPackage(options) {
+  const { name, version } = packageIdentity(options);
+  const runNpm = options.runNpm ?? runNpmCommand;
   const packageSpec = `${name}@${version}`;
-  const existingVersion = await publishedVersion(packageSpec, runNpm);
+  const existingVersion = await viewRegistryVersion(packageSpec, runNpm);
   if (existingVersion !== undefined) {
     if (existingVersion !== version) {
       throw new Error(`npm returned ${existingVersion} for exact package spec ${packageSpec}`);
     }
-    return { packageSpec, status: 'already-published' };
+    return { packageSpec, status: /** @type {const} */ ('already-published') };
   }
 
-  await runNpm(PUBLISH_ARGUMENTS);
-  return { packageSpec, status: 'published' };
+  const published = await runNpm(PUBLISH_ARGUMENTS);
+  const stdout = typeof published.stdout === 'string' ? published.stdout : '';
+  const stderr = typeof published.stderr === 'string' ? published.stderr : '';
+  try {
+    await waitForRegistryVersion(packageSpec, version, runNpm, options);
+  } catch (error) {
+    const detail = [stdout.trim(), stderr.trim()].filter((value) => value.length > 0).join('\n');
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(detail ? `${message}\n${detail}` : message);
+  }
+  return { packageSpec, status: /** @type {const} */ ('published'), stdout, stderr };
 }
 
 function isMainModule() {
@@ -70,5 +73,9 @@ function isMainModule() {
 if (isMainModule()) {
   const packageJson = JSON.parse(await readFile(resolve(process.cwd(), 'package.json'), 'utf8'));
   const publication = await publishNpmPackage(packageIdentity(packageJson));
+  if (publication.status === 'published') {
+    if (publication.stdout.trim()) console.log(publication.stdout.trimEnd());
+    if (publication.stderr.trim()) console.error(publication.stderr.trimEnd());
+  }
   console.log(`${publication.status}: ${publication.packageSpec}`);
 }
