@@ -4,12 +4,13 @@ import { promisify } from 'node:util';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isRecord, packageVersion, stableVersionPrecedence } from './package-validation.mjs';
+import { waitForRegistryVersion } from './npm-registry-visibility.mjs';
+
+export { isNpmNotFoundError } from './npm-registry-visibility.mjs';
 
 const root = fileURLToPath(new URL('../../packages/', import.meta.url));
 const run = promisify(execFile);
 const directories = ['contracts', 'commands', 'db', 'app', 'app-svelte', 'compiler', 'elysia', 'supacloud-js'];
-const NPM_NOT_FOUND_PATTERN = /(?:^|\n)npm (?:error|ERR!) (?:(?:code )?E404|404(?: Not Found)?)(?:\s|$)|No match found for version/i;
-const REGISTRY_RETRY_DELAYS_MS = [2000, 4000, 8000, 8000, 8000];
 /** @param {string} directory */
 const packageName = (directory) => directory === 'supacloud-js' ? '@supacloud/js' : `@supacloud/${directory}`;
 
@@ -48,47 +49,23 @@ export function prepareCommandPackage(candidate, siblings) {
 /** @param {string} path @returns {Promise<unknown>} */
 async function readJson(path) { return JSON.parse(await readFile(path, 'utf8')); }
 
-/** @param {unknown} error */
-export function isNpmNotFoundError(error) {
-  const candidate = error && typeof error === 'object' ? error : {};
-  const record = /** @type {{ stdout?: unknown, stderr?: unknown, message?: unknown }} */ (candidate);
-  const text = [record.stdout, record.stderr, error instanceof Error ? error.message : error]
-    .filter((value) => typeof value === 'string')
-    .join('\n');
-  return NPM_NOT_FOUND_PATTERN.test(text);
-}
-
 /**
  * npm view can 404 for a version that this job just published. Retry those
  * reads so a later package in the same graph is not skipped.
  * @param {readonly string[]} required
  * @param {{
- *   runNpm?: (arguments_: string[]) => Promise<{ stdout: string }>,
+ *   runNpm?: (arguments_: string[]) => Promise<{ stdout?: unknown, stderr?: unknown }>,
  *   sleep?: (ms: number) => Promise<void>,
  *   delays?: readonly number[],
  * }} [options]
  */
 export async function assertPublishedDependencies(required, options = {}) {
   const runNpm = options.runNpm ?? ((arguments_) => run('npm', arguments_));
-  const sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
-  const delays = options.delays ?? REGISTRY_RETRY_DELAYS_MS;
   for (const spec of required) {
-    let attempt = 0;
-    for (;;) {
-      try {
-        const { stdout } = await runNpm(['view', spec, 'version', '--json', '--registry=https://registry.npmjs.org']);
-        const published = JSON.parse(stdout);
-        if (typeof published === 'string' && spec.endsWith(`@${published}`)) break;
-        throw new Error(`Dependency is not published: ${spec}`);
-      } catch (error) {
-        const delay = delays[attempt];
-        if (!isNpmNotFoundError(error) || delay === undefined) {
-          throw error instanceof Error ? error : new Error(String(error));
-        }
-        await sleep(delay);
-        attempt += 1;
-      }
-    }
+    const separator = spec.lastIndexOf('@');
+    const version = separator > 0 ? spec.slice(separator + 1) : '';
+    if (version.length === 0) throw new Error(`Invalid dependency spec: ${spec}`);
+    await waitForRegistryVersion(spec, version, runNpm, options);
   }
 }
 
