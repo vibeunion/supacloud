@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.18.0...compiler-v0.19.0) (2026-09-15)
+
+
+### Features
+
+* **architecture:** enforce compile-time application governance ([#1301](https://github.com/vibeunion/supacloud/issues/1301)) ([b2c1df2](https://github.com/vibeunion/supacloud/commit/b2c1df25294d0195ddf313623b965e599847d9f9))
+* **framework:** complete schema-first route contracts ([#1304](https://github.com/vibeunion/supacloud/issues/1304)) ([4acc3ac](https://github.com/vibeunion/supacloud/commit/4acc3aced2b6e3202705dd87071131af631abad2))
+
 ## [0.18.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.17.1...compiler-v0.18.0) (2026-09-13)
 
 
