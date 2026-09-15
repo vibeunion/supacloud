@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.13.0](https://github.com/vibeunion/supacloud/compare/app-v0.12.2...app-v0.13.0) (2026-09-15)
+
+
+### Features
+
+* **app:** add browser-safe HTTP entrypoint ([#1299](https://github.com/vibeunion/supacloud/issues/1299)) ([dc5c380](https://github.com/vibeunion/supacloud/commit/dc5c38027141d0c4888ce7860d04efda79f19043))
+
+
+### Bug Fixes
+
+* **app:** isolate initialization and guarantee shutdown cleanup ([#1300](https://github.com/vibeunion/supacloud/issues/1300)) ([d16c179](https://github.com/vibeunion/supacloud/commit/d16c17990161c016b0072380e8888a57b1663986))
+
 ## [0.12.2](https://github.com/vibeunion/supacloud/compare/app-v0.12.1...app-v0.12.2) (2026-09-13)
 
 
