@@ -150,9 +150,11 @@ test("rejects response selectors that cannot be represented by the Elysia adapte
       "src/features/case/case.controller.ts": controller,
     });
     const graph = await analyzeProject(root);
-    expect(graph.diagnostics?.some((diagnostic) =>
-      diagnostic.code === "invalid-route-response-selector" && diagnostic.errorCode === "SC3025",
-    )).toBe(true);
+    const diagnostic = graph.diagnostics?.find((entry) =>
+      entry.code === "invalid-route-response-selector" && entry.errorCode === "SC3025",
+    );
+    expect(diagnostic?.file).toBe("src/features/case/case.controller.ts");
+    expect(typeof diagnostic?.line).toBe("number");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

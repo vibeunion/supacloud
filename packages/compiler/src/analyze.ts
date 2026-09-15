@@ -1746,6 +1746,7 @@ function parseController(
                 errorCode: "SC3025",
                 docsUrl: "https://supacloud.dev/errors/SC3025",
                 file,
+                line: lineOf(property.name),
                 message: `Route ${route.handler} uses unsupported response selector "${status}". Use an HTTP status (100-599), a status family such as 4XX/5XX, or default.`,
               });
               continue;
