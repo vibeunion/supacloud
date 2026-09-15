@@ -5,8 +5,8 @@
     "": {
       "name": "supacloud",
       "dependencies": {
-        "@supacloud/admin": "^0.21.1",
-        "@supacloud/cli": "^0.51.2",
+        "@supacloud/admin": "^0.22.1",
+        "@supacloud/cli": "^0.53.0",
       },
       "devDependencies": {
         "@types/bun": "^1.4.2",
@@ -20,9 +20,9 @@
   "packages": {
     "@sinclair/typebox": ["@sinclair/typebox@0.34.52", "https://registry.npmmirror.com/@sinclair/typebox/-/typebox-0.34.52.tgz", {}, "sha512-XiMQh7qqVlxZzcVD+kkGMNGMzcTrDMLWI7S4x7z1MkCkbDPrekpZXEUK0eZqZFMuHQg2a2DZOcDIh9o5v3Gonw=="],
 
-    "@supacloud/admin": ["@supacloud/admin@0.21.1", "https://registry.npmmirror.com/@supacloud/admin/-/admin-0.21.1.tgz", { "dependencies": { "@sinclair/typebox": "^0.34.52", "ssh2": "^1.17.0" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-jkBnXx7wG6ACxB/Ngq2H0GWq/ypVP9qaAYOF8zG85esV8D/B78F4IgNXUis81wq//HSksPs/vKUF7sflv0cfhA=="],
+    "@supacloud/admin": ["@supacloud/admin@0.22.1", "", { "dependencies": { "@sinclair/typebox": "^0.34.52", "ssh2": "^1.17.0" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-flCIvn0NMy9vbrKcfBn2Q5oyJ7MbLtCb/tShpd9BR4/WIevBu/3JCCHmDStDpV7NNKH8bOR7U3/2E1QX6PRZFQ=="],
 
-    "@supacloud/cli": ["@supacloud/cli@0.51.2", "https://registry.npmmirror.com/@supacloud/cli/-/cli-0.51.2.tgz", { "dependencies": { "@sinclair/typebox": "^0.34.52", "@supacloud/compiler": "^0.15.0", "@supacloud/db": "^0.2.0", "fflate": "^0.8.3" }, "bin": { "supacloud-cli": "dist/index.js" } }, "sha512-AXRSdyYo/Q3FzlKg7NuzgTYPvmaU1OpCw2yu/uxyJ3Exke7Slk+2E9+39XfFt2AZyS/a82j8lLAhbihmEqpKiQ=="],
+    "@supacloud/cli": ["@supacloud/cli@0.53.0", "", { "dependencies": { "@sinclair/typebox": "^0.34.52", "@supacloud/compiler": "^0.19.1", "@supacloud/db": "^0.2.0", "fflate": "^0.8.3" }, "bin": { "supacloud-cli": "dist/index.js" } }, "sha512-tO2rwyYvDaoZgdhh8bznwpxbJVT3ulmmwvhCsIf7jMaP6GdKmfGy3p64ijrxtnHMYPTMqWtl4WhJkIRPsNlRiQ=="],
 
     "@supacloud/db": ["@supacloud/db@0.2.0", "https://registry.npmmirror.com/@supacloud/db/-/db-0.2.0.tgz", {}, "sha512-rJKMCJqMZf4oQ+x9bOnCoYO6REQqwIcSEwugPjvMfoiCbBo7vhkpytKWfj60UJJl0IJIUjmIZMu4xI2U2Okigg=="],
 
