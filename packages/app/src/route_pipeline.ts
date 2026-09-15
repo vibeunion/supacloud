@@ -26,7 +26,7 @@ export function isRedirectCommand(val: unknown): val is RedirectCommand {
     (typeof val === "object" &&
       val !== null &&
       "redirectTo" in val &&
-      (val as any).constructor?.name === "RedirectCommand")
+      val.constructor?.name === "RedirectCommand")
   );
 }
 
@@ -45,7 +45,7 @@ export interface RoutePipelineContext {
 export interface RoutePipelineDefinition {
   path: string;
   method: string;
-  handler: ((...args: any[]) => any) | string;
+  handler: ((context: RoutePipelineContext) => unknown) | string;
   guards?: Array<CanActivateFn | string>;
   canMatch?: Array<CanMatchFn | string>;
   canDeactivate?: Array<CanDeactivateFn | string>;
@@ -101,12 +101,12 @@ export interface RoutePipelineOptions {
  * 4. handler executes
  * 5. canDeactivate guards check teardown/exit safety
  */
-export async function executeRoutePipeline<T = unknown>(
+export async function executeRoutePipeline(
   route: RoutePipelineDefinition,
   ctx: RoutePipelineContext,
-  componentInstance?: any,
+  componentInstance?: unknown,
   options?: RoutePipelineOptions,
-): Promise<RoutePipelineResult<T>> {
+): Promise<RoutePipelineResult> {
   const emit = (type: RouterEventType, data?: unknown) => {
     if (options?.onEvent) {
       options.onEvent({
@@ -137,7 +137,7 @@ export async function executeRoutePipeline<T = unknown>(
             headers: { Location: String(can.redirectTo), ...(can.navigationExtras?.headers ?? {}) },
           };
         }
-        if (!can) {
+        if (can !== true) {
           emit("GuardsCheckEnd", { stage: "canMatch", allowed: false });
           emit("NavigationCancel", { reason: "CanMatch guard rejected" });
           return { matched: false, status: 404, error: "Route match rejected by CanMatch guard" };
@@ -163,7 +163,7 @@ export async function executeRoutePipeline<T = unknown>(
             headers: { Location: String(allowed.redirectTo), ...(allowed.navigationExtras?.headers ?? {}) },
           };
         }
-        if (!allowed) {
+        if (allowed !== true) {
           emit("GuardsCheckEnd", { stage: "canActivate", allowed: false });
           emit("NavigationCancel", { reason: "CanActivate guard rejected" });
           return { matched: true, status: 403, error: "Route activation rejected by CanActivate guard" };
@@ -186,13 +186,15 @@ export async function executeRoutePipeline<T = unknown>(
   }
 
   // 4. Execute Route Handler
-  let responseBody: T;
+  let responseBody: unknown;
   try {
     emit("ExecutionStart");
     if (route.invoker && typeof route.invoker === "function") {
-      responseBody = (await route.invoker(componentInstance, ctx)) as T;
-    } else if (componentInstance && typeof route.handler === "string" && typeof componentInstance[route.handler] === "function") {
-      responseBody = await componentInstance[route.handler](ctx);
+      responseBody = await route.invoker(componentInstance, ctx);
+    } else if (componentInstance && typeof componentInstance === "object" && typeof route.handler === "string") {
+      const handler: unknown = Reflect.get(componentInstance, route.handler);
+      if (typeof handler !== "function") throw new TypeError(`Handler '${route.handler}' is not callable`);
+      responseBody = await Reflect.apply(handler, componentInstance, [ctx]);
     } else if (typeof route.handler === "function") {
       responseBody = await route.handler(ctx);
     } else {
@@ -205,7 +207,7 @@ export async function executeRoutePipeline<T = unknown>(
         status: responseBody.navigationExtras?.status ?? 302,
         redirect: String(responseBody.redirectTo),
         headers: { Location: String(responseBody.redirectTo), ...(responseBody.navigationExtras?.headers ?? {}) },
-        resolvedData,
+        ...(resolvedData === undefined ? {} : { resolvedData }),
       };
     }
     emit("ExecutionEnd");
@@ -216,7 +218,7 @@ export async function executeRoutePipeline<T = unknown>(
       matched: true,
       status: 500,
       error: errorMsg,
-      resolvedData,
+      ...(resolvedData === undefined ? {} : { resolvedData }),
     };
   }
 
@@ -226,7 +228,7 @@ export async function executeRoutePipeline<T = unknown>(
     for (const guard of route.canDeactivate) {
       if (typeof guard === "function") {
         const canLeave = await guard(componentInstance, ctx);
-        if (!canLeave) {
+        if (canLeave !== true) {
           emit("GuardsCheckEnd", { stage: "canDeactivate", allowed: false });
           emit("NavigationCancel", { reason: "CanDeactivate guard rejected" });
           return {
@@ -234,7 +236,7 @@ export async function executeRoutePipeline<T = unknown>(
             status: 409,
             body: responseBody,
             error: "Route deactivation rejected by CanDeactivate guard",
-            resolvedData,
+            ...(resolvedData === undefined ? {} : { resolvedData }),
           };
         }
       }
@@ -252,6 +254,6 @@ export async function executeRoutePipeline<T = unknown>(
     matched: true,
     status: 200,
     body: responseBody,
-    resolvedData,
+    ...(resolvedData === undefined ? {} : { resolvedData }),
   };
 }

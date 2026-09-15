@@ -135,3 +135,95 @@ export const ConflictResult = { type: "object", properties: { conflict: { type: 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("rejects response selectors that cannot be represented by the Elysia adapter", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-route-response-selector-"));
+  try {
+    const controller = GOOD_PROJECT_FILES["src/features/case/case.controller.ts"]
+      .replace("import { AcceptParams, AcceptResult, CreateCaseBody } from \"./contracts\";", "import { AcceptParams, AcceptResult, CreateCaseBody } from \"./contracts\";")
+      .replace(
+        "response: AcceptResult,",
+        'responses: { "4XX": AcceptResult, fallback: AcceptResult },',
+      );
+    await writeFixtureProject(root, {
+      ...GOOD_PROJECT_FILES,
+      "src/features/case/case.controller.ts": controller,
+    });
+    const graph = await analyzeProject(root);
+    expect(graph.diagnostics?.some((diagnostic) =>
+      diagnostic.code === "invalid-route-response-selector" && diagnostic.errorCode === "SC3025",
+    )).toBe(true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects routes that declare both response contract fields", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-route-response-conflict-"));
+  try {
+    const controller = GOOD_PROJECT_FILES["src/features/case/case.controller.ts"]
+      .replace(
+        "response: AcceptResult,",
+        "response: AcceptResult, responses: { 200: AcceptResult },",
+      );
+    await writeFixtureProject(root, {
+      ...GOOD_PROJECT_FILES,
+      "src/features/case/case.controller.ts": controller,
+    });
+    const graph = await analyzeProject(root);
+    expect(graph.diagnostics).toContainEqual(expect.objectContaining({
+      code: "conflicting-route-response-schema",
+      errorCode: "SC3026",
+    }));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects response-family selector variants that differ only by case", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-route-response-duplicate-"));
+  try {
+    const controller = GOOD_PROJECT_FILES["src/features/case/case.controller.ts"]
+      .replace(
+        "response: AcceptResult,",
+        'responses: { "4XX": AcceptResult, "4xx": AcceptResult },',
+      );
+    await writeFixtureProject(root, {
+      ...GOOD_PROJECT_FILES,
+      "src/features/case/case.controller.ts": controller,
+    });
+    const graph = await analyzeProject(root);
+    expect(graph.diagnostics).toContainEqual(expect.objectContaining({
+      code: "duplicate-route-response-selector",
+      errorCode: "SC3027",
+    }));
+    const route = graph.modules.find((module) => module.name === "case")?.controllers[0]?.routes[0];
+    expect(route?.responses).toEqual({ "4XX": "AcceptResult" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects duplicate exact response selectors before generation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-route-response-exact-duplicate-"));
+  try {
+    const controller = GOOD_PROJECT_FILES["src/features/case/case.controller.ts"]
+      .replace(
+        "response: AcceptResult,",
+        'responses: { "200": AcceptResult, 200: AcceptResult },',
+      );
+    await writeFixtureProject(root, {
+      ...GOOD_PROJECT_FILES,
+      "src/features/case/case.controller.ts": controller,
+    });
+    const graph = await analyzeProject(root);
+    expect(graph.diagnostics).toContainEqual(expect.objectContaining({
+      code: "duplicate-route-response-selector",
+      errorCode: "SC3027",
+    }));
+    const route = graph.modules.find((module) => module.name === "case")?.controllers[0]?.routes[0];
+    expect(route?.responses).toEqual({ "200": "AcceptResult" });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

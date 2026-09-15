@@ -1,12 +1,18 @@
 import { CommandError, canonicalCommandJson, type CommandIdentity, type DurableCommandReceipt } from "@supacloud/contracts";
 import { commandContext, type PersistentCommandDefinition } from "./context";
+import type { CommandStore } from "./store";
 
-export function createTransactionalCommand<Input, Result, Transaction>(
-  definition: PersistentCommandDefinition<Input, Result, Transaction> & {
-    execute(transaction: Transaction, input: Input, identity: CommandIdentity): Promise<unknown>;
-  },
+type TransactionOf<Store extends CommandStore<unknown>> = Store extends CommandStore<infer Transaction> ? Transaction : never;
+type TransactionalCommandDefinition<Input, Result, Store extends CommandStore<unknown>> =
+  Omit<PersistentCommandDefinition<Input, Result, TransactionOf<Store>>, "store"> & {
+    store: Store;
+    execute(transaction: TransactionOf<Store>, input: Input, identity: CommandIdentity): Promise<unknown>;
+  };
+
+export function createTransactionalCommand<Input, Result, Store extends CommandStore<unknown>>(
+  definition: TransactionalCommandDefinition<Input, Result, Store>,
 ) {
-  const context = commandContext(definition);
+  const context = commandContext(definition as PersistentCommandDefinition<Input, Result, TransactionOf<Store>>);
   return {
     kind: "transactional" as const,
     async execute(identity: CommandIdentity, key: string, value: unknown): Promise<DurableCommandReceipt<Result>> {

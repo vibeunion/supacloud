@@ -1200,7 +1200,7 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     );
   });
 
-  test("relativeImportPath 跨平台与反斜杠路径解析", () => {
+  test("relativeImportPath handles Windows and POSIX paths", () => {
     expect(
       relativeImportPath(
         "D:\\a\\supacloud\\supacloud\\packages\\supacloud-lite\\test\\fixtures\\starter\\generated",
@@ -1215,12 +1215,9 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
       ),
     ).toBe("../src/service");
 
-    expect(
-      relativeImportPath("/project/generated", "/project/src/service.ts"),
-    ).toBe("../src/service");
-
-    expect(
-      relativeImportPath("/project/src", "/project/src/service.ts"),
-    ).toBe("./service");
+    expect(relativeImportPath("/project/generated", "/project/src/service.ts"))
+      .toBe("../src/service");
+    expect(relativeImportPath("/project/src", "/project/src/service.ts"))
+      .toBe("./service");
   });
 });

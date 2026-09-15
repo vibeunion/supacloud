@@ -4,7 +4,7 @@ export type DocumentationSource<T> = T | (() => T | Promise<T>);
 
 export interface OpenApiDocumentationOptions {
   /** Generated OpenAPI document, usually imported from generated/openapi.ts. */
-  document: DocumentationSource<Record<string, unknown>>;
+  document: DocumentationSource<unknown>;
   /** JSON specification endpoint. */
   specPath?: string;
   /** Human-readable documentation page. */
@@ -42,7 +42,10 @@ function resolveSource<T>(source: DocumentationSource<T>): Promise<T> {
   return Promise.resolve(source);
 }
 
-function jsonResponse(document: Record<string, unknown>): Response {
+function jsonResponse(document: unknown): Response {
+  if (document === null || typeof document !== "object" || Array.isArray(document)) {
+    throw new Error("OpenAPI documentation must be a JSON object");
+  }
   const serialized = JSON.stringify(document);
   if (serialized === undefined) throw new Error("OpenAPI documentation must be JSON-serializable");
   return new Response(serialized, {

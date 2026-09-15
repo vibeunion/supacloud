@@ -366,7 +366,7 @@
     {
       "name": "executeRoutePipeline",
       "kind": "value",
-      "signature": "export declare function executeRoutePipeline<T = unknown>(route: RoutePipelineDefinition, ctx: RoutePipelineContext, componentInstance?: any, options?: RoutePipelineOptions): Promise<RoutePipelineResult<T>>;"
+      "signature": "export declare function executeRoutePipeline(route: RoutePipelineDefinition, ctx: RoutePipelineContext, componentInstance?: unknown, options?: RoutePipelineOptions): Promise<RoutePipelineResult>;"
     },
     {
       "name": "ExistingProvider",
@@ -1124,6 +1124,11 @@
       "signature": "export type ResourceStatus = \"idle\" | \"loading\" | \"resolved\" | \"error\";"
     },
     {
+      "name": "ResponseMapSelector",
+      "kind": "type",
+      "signature": "export type ResponseMapSelector = number | `${number}` | \"default\" | `${StatusFamily}${\"xx\" | \"XX\"}`;"
+    },
+    {
       "name": "ROUTE_CONFIG",
       "kind": "value",
       "signature": "export declare const ROUTE_CONFIG: any;"
@@ -1141,7 +1146,7 @@
     {
       "name": "RouteContractSchemas",
       "kind": "type",
-      "signature": "export interface RouteContractSchemas {\n    body?: unknown | undefined;\n    params?: unknown | undefined;\n    query?: unknown | undefined;\n    headers?: unknown | undefined;\n    cookie?: unknown | undefined;\n    response?: unknown | undefined;\n    responses?: Readonly<Record<string | number, unknown>> | undefined;\n}"
+      "signature": "export interface RouteContractSchemas {\n    body?: unknown | undefined;\n    params?: unknown | undefined;\n    query?: unknown | undefined;\n    headers?: unknown | undefined;\n    cookie?: unknown | undefined;\n    response?: unknown | undefined;\n    responses?: Readonly<Partial<Record<ResponseMapSelector, unknown>>> | undefined;\n}"
     },
     {
       "name": "RouteDefinition",
@@ -1191,7 +1196,7 @@
     {
       "name": "RoutePipelineDefinition",
       "kind": "type",
-      "signature": "export interface RoutePipelineDefinition {\n    path: string;\n    method: string;\n    handler: ((...args: any[]) => any) | string;\n    guards?: Array<CanActivateFn | string>;\n    canMatch?: Array<CanMatchFn | string>;\n    canDeactivate?: Array<CanDeactivateFn | string>;\n    resolvers?: Record<string, ResolveFn | string>;\n    title?: string;\n    data?: Record<string, unknown>;\n    invoker?: (controller: unknown, request: RoutePipelineContext) => Promise<unknown> | unknown;\n}"
+      "signature": "export interface RoutePipelineDefinition {\n    path: string;\n    method: string;\n    handler: ((context: RoutePipelineContext) => unknown) | string;\n    guards?: Array<CanActivateFn | string>;\n    canMatch?: Array<CanMatchFn | string>;\n    canDeactivate?: Array<CanDeactivateFn | string>;\n    resolvers?: Record<string, ResolveFn | string>;\n    title?: string;\n    data?: Record<string, unknown>;\n    invoker?: (controller: unknown, request: RoutePipelineContext) => Promise<unknown> | unknown;\n}"
     },
     {
       "name": "RoutePipelineOptions",

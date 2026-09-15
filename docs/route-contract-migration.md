@@ -8,6 +8,15 @@ Elysia route table 投影契约，不再维护第二套路由清单。
 
 - 路由支持 `body`、`params`、`query`、`headers`、`cookie` 和按状态码组织的
   `responses`。
+- 编译器诊断编号按职责重新分区：类型安全扫描继续使用 `SC6001`--`SC6005`，
+  Feature 状态机与治理诊断迁移到 `SC6101`--`SC6108`。响应 selector、冲突字段和
+  重复 selector 分别使用 `SC3025`、`SC3026`、`SC3027`，保留现有 `SC3021`--`SC3024`
+  治理诊断编号。如果 CI、IDE 或日志规则
+  按 `errorCode` 匹配，请同步更新这些规则；诊断语义本身没有改变。
+- `responses` 支持具体 HTTP 状态、`1XX` 到 `5XX` 状态族和 `default`。Elysia
+  注册适配器会把状态族/default 展开为 100-599 的具体 validator，选择优先级为
+  具体状态 > 状态族 > `default`；未知 selector 会在注册/编译阶段直接报错，
+  不会静默跳过校验。
 - `@Cookie()` 可把已解码的 cookie 对象或单个 cookie 注入 handler 参数。
 - Elysia 在 handler 执行前完成请求校验与规范化；声明的响应由运行时按实际
   HTTP status 校验。
@@ -169,6 +178,16 @@ CI 或代码审查。
 当前编译器仍接受 `response: Schema` 作为迁移桥接，并将其视为 `200` 响应；新
 代码不要继续新增该字段。下一次破坏性版本可以移除该桥接，因此应在升级窗口内
 完成全量替换。
+
+状态映射可以使用精确状态码、`1XX` 到 `5XX` 状态族和 `default`。精确状态码
+优先于状态族，状态族优先于 `default`。Elysia 运行时会把族和默认项展开为
+精确校验器，客户端和 OpenAPI 也按同样的选择顺序处理。其他字符串 selector
+会在编译/注册阶段报错，不再静默跳过响应校验。
+
+如果 body schema 本身允许 `undefined`（例如根级 `Type.Optional(...)` 或包含
+`Type.Undefined()` 的 union），生成的 OpenAPI 会将 `requestBody.required` 设为
+`false`；普通 object schema 仍为必填。客户端请求类型是否允许省略 body 仍由
+应用侧的 route contract 类型决定，不能仅凭 OpenAPI 文档推断。
 
 ### 5. 删除手写客户端 response decoder
 
