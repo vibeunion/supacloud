@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { prepareCommandPackage } from './prepare-command-package.mjs';
+import { assertPublishedDependencies, isNpmNotFoundError, prepareCommandPackage } from './prepare-command-package.mjs';
 
 const siblings = new Map([
   ['@supacloud/contracts', { name: '@supacloud/contracts', version: '0.1.0' }],
@@ -94,4 +94,61 @@ test('clean CI builds local dependencies before checking command consumers', () 
     assert.match(block, new RegExp(`build-command-dependencies\\.ts ${name}[\\s\\S]*bun install --frozen-lockfile`));
     if (name === 'elysia') assert.match(block, /generate:example[\s\S]*typecheck/);
   }
+});
+
+function notFoundError(spec) {
+  const error = new Error(`Command failed: npm view ${spec} version --json --registry=https://registry.npmjs.org`);
+  error.stderr = `npm error code E404\nnpm error 404 No match found for version ${spec.split('@').at(-1)}`;
+  return error;
+}
+
+test('just-published sibling 404s are retried until npm view succeeds', async () => {
+  const views = [];
+  const sleeps = [];
+  await assertPublishedDependencies(['@supacloud/app@0.14.0'], {
+    delays: [1, 1],
+    sleep: async (ms) => {
+      sleeps.push(ms);
+    },
+    runNpm: async () => {
+      views.push(views.length);
+      if (views.length < 3) throw notFoundError('@supacloud/app@0.14.0');
+      return { stdout: '"0.14.0"\n' };
+    },
+  });
+  assert.deepEqual(views, [0, 1, 2]);
+  assert.deepEqual(sleeps, [1, 1]);
+});
+
+test('persistent registry 404s still fail after retries', async () => {
+  let views = 0;
+  await assert.rejects(
+    () => assertPublishedDependencies(['@supacloud/app@0.14.0'], {
+      delays: [0],
+      sleep: async () => {},
+      runNpm: async () => {
+        views += 1;
+        throw notFoundError('@supacloud/app@0.14.0');
+      },
+    }),
+    (error) => isNpmNotFoundError(error) && views === 2,
+  );
+});
+
+test('non-404 registry errors fail immediately', async () => {
+  let views = 0;
+  await assert.rejects(
+    () => assertPublishedDependencies(['@supacloud/app@0.14.0'], {
+      delays: [1, 1],
+      sleep: async () => {
+        throw new Error('should not sleep');
+      },
+      runNpm: async () => {
+        views += 1;
+        throw new Error('EPERM');
+      },
+    }),
+    { message: 'EPERM' },
+  );
+  assert.equal(views, 1);
 });
