@@ -277,8 +277,15 @@ async function expectWorkflowDeadLetter(workflows: WorkflowClient): Promise<void
 }
 
 async function expectPgredisContract(url: string): Promise<void> {
-  await cacheOperation(url, { operation: 'set', key: 'ttl-probe', cacheValue: { version: 1 }, ttlMs: 80 })
-  const initial = await cacheOperation(url, { operation: 'inspect', key: 'ttl-probe' })
+  // Read the short-lived key in the same function invocation as set. A second HTTP
+  // hop can exceed 80ms on CI after the first cache-probe compile, so inspect would
+  // observe an already-expired miss rather than the remaining TTL.
+  const initial = await cacheOperation(url, {
+    operation: 'set_inspect',
+    key: 'ttl-probe',
+    cacheValue: { version: 1 },
+    ttlMs: 80,
+  })
   assert(objectField(initial, 'cacheValue') !== null, 'pgredis TTL value was not readable')
   const ttlMs = objectField(initial, 'ttlMs')
   assert(typeof ttlMs === 'number' && ttlMs > 0 && ttlMs <= 80, 'pgredis TTL was outside the requested range')
@@ -559,6 +566,10 @@ Deno.serve(async (request) => {
   const cache = globalThis.SupaCloud.pgredis
   if (command.operation === 'set') {
     return Response.json({ stored: await cache.set(command.key, command.cacheValue, command.ttlMs) })
+  }
+  if (command.operation === 'set_inspect') {
+    await cache.set(command.key, command.cacheValue, command.ttlMs)
+    return Response.json({ cacheValue: await cache.get(command.key), ttlMs: await cache.ttl(command.key) })
   }
   if (command.operation === 'get') {
     return Response.json({ cacheValue: await cache.get(command.key) })
