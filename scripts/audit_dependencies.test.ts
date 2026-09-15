@@ -4,6 +4,7 @@ import { isTransientAuditFailure } from "./audit_dependencies";
 describe("dependency audit retry classification", () => {
   test("retries advisory service outages and network failures", () => {
     expect(isTransientAuditFailure("error: POST https://registry.npmjs.org/-/npm/v1/security/advisories/bulk - 503")).toBe(true);
+    expect(isTransientAuditFailure("error: POST https://registry.npmjs.org/-/npm/v1/security/advisories/bulk - ConnectionClosed")).toBe(true);
     expect(isTransientAuditFailure("fetch failed: ECONNRESET")).toBe(true);
     expect(isTransientAuditFailure("network timeout while contacting registry")).toBe(true);
   });
