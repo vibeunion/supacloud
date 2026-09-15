@@ -1,9 +1,9 @@
 import {
   getSchemaValidator,
   StatusMap,
+  ElysiaCustomStatusResponse,
   type Cookie,
   type Elysia,
-  type ElysiaCustomStatusResponse,
   type HTTPMethod,
   type InputSchema,
   type MaybePromise,
@@ -328,9 +328,11 @@ export function responseStatusDeclared(
 
 export function responseStatusOf(value: unknown, configuredStatus: number | string | undefined): number {
   if (value instanceof Response) return value.status;
-  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-    const record = value as Record<string, unknown>;
-    if (typeof record.code === "number" && Object.hasOwn(record, "response")) return record.code;
+  if (value instanceof ElysiaCustomStatusResponse) {
+    const code = value.code;
+    if (typeof code === "number" && Number.isInteger(code) && code >= RESPONSE_STATUS_MIN && code <= RESPONSE_STATUS_MAX) {
+      return code;
+    }
   }
   if (typeof configuredStatus === "number") return configuredStatus;
   if (typeof configuredStatus === "string") {

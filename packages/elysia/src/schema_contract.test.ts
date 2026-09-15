@@ -7,6 +7,7 @@ import {
   defineJsonContract,
   defineRouteContract,
   registerElysiaRoute,
+  responseStatusOf,
   SchemaContractError,
   toElysiaRouteSchema,
 } from "./schema_contract";
@@ -378,4 +379,28 @@ test("rejects duplicate response-family selectors that differ only by case", () 
     duplicateContract,
     () => new Response(),
   )).toThrow(/Duplicate response selectors/);
+});
+
+test("does not treat domain payloads with code and response fields as HTTP status objects", async () => {
+  expect(responseStatusOf({ code: 404, response: "not-found" }, undefined)).toBe(200);
+  expect(responseStatusOf({ code: 404, response: "not-found" }, 201)).toBe(201);
+  expect(responseStatusOf(status(404, { kind: "not-found" }), undefined)).toBe(404);
+  expect(responseStatusOf(new Response(null, { status: 201 }), undefined)).toBe(201);
+
+  const payloadContract = defineRouteContract({
+    responses: {
+      200: t.Object({ code: t.Number(), response: t.String() }),
+      404: t.Object({ kind: t.Literal("not-found") }),
+    },
+  });
+  const payloadRoute = defineElysiaRoute(
+    "GET",
+    "/payload-status",
+    payloadContract,
+    () => ({ code: 404, response: "not-found" }),
+  );
+  const response = await registerElysiaRoute(new Elysia(), payloadRoute)
+    .handle(new Request("http://localhost/payload-status"));
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ code: 404, response: "not-found" });
 });

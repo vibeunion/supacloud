@@ -10,7 +10,6 @@ import { commandErrorStatus } from "./command-errors";
 import { executionTrace, observeExecution, type ExecutionObserver } from "./execution";
 import {
   createSchemaDecoder,
-  responseSchemaForStatus,
   responseStatusDeclared,
   responseStatusOf,
   toElysiaRouteSchema,
