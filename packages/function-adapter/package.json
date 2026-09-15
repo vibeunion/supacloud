@@ -30,6 +30,11 @@
     "test": "bun test"
   },
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vibeunion/supacloud.git",
+    "directory": "packages/function-adapter"
+  },
   "peerDependencies": {
     "@sveltejs/kit": "^2.0.0"
   },

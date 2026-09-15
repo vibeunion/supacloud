@@ -277,19 +277,20 @@ async function expectWorkflowDeadLetter(workflows: WorkflowClient): Promise<void
 }
 
 async function expectPgredisContract(url: string): Promise<void> {
-  // Read the short-lived key in the same function invocation as set. A second HTTP
-  // hop can exceed 80ms on CI after the first cache-probe compile, so inspect would
-  // observe an already-expired miss rather than the remaining TTL.
+  // Keep set and inspect in one invocation, and use a TTL longer than a cold
+  // native-Postgres INSERT on CI. An 80ms key can expire before the following
+  // GET even in the same request.
+  const ttlProbeMs = 2000
   const initial = await cacheOperation(url, {
     operation: 'set_inspect',
     key: 'ttl-probe',
     cacheValue: { version: 1 },
-    ttlMs: 80,
+    ttlMs: ttlProbeMs,
   })
   assert(objectField(initial, 'cacheValue') !== null, 'pgredis TTL value was not readable')
   const ttlMs = objectField(initial, 'ttlMs')
-  assert(typeof ttlMs === 'number' && ttlMs > 0 && ttlMs <= 80, 'pgredis TTL was outside the requested range')
-  await Bun.sleep(120)
+  assert(typeof ttlMs === 'number' && ttlMs > 0 && ttlMs <= ttlProbeMs, 'pgredis TTL was outside the requested range')
+  await Bun.sleep(ttlProbeMs + 500)
   const expired = await cacheOperation(url, { operation: 'get', key: 'ttl-probe' })
   assert(objectField(expired, 'cacheValue') === null, 'pgredis did not expire the TTL value')
 
