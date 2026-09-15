@@ -13,8 +13,8 @@
   "packages/commands": "0.4.0",
   "packages/app-svelte": "0.3.1",
   "packages/app": "0.14.0",
-  "packages/compiler": "0.19.0",
-  "packages/elysia": "0.14.0",
+  "packages/compiler": "0.19.1",
+  "packages/elysia": "0.14.1",
   "packages/db": "0.7.1",
   "packages/testing": "0.5.1"
 }

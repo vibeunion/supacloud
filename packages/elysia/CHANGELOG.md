@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.14.0...elysia-v0.14.1) (2026-09-15)
+
+
+### Bug Fixes
+
+* **elysia:** recognize only Elysia status() responses ([#1307](https://github.com/vibeunion/supacloud/issues/1307)) ([b3fa60c](https://github.com/vibeunion/supacloud/commit/b3fa60c41ec71ef703c939f9d7bd5c38791750e1))
+
 ## [0.14.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.13.0...elysia-v0.14.0) (2026-09-15)
 
 
