@@ -42,8 +42,20 @@ export async function bootstrapBun(options: BunBootstrapOptions): Promise<BunApp
     if (stopPromise) return stopPromise;
     stopPromise = (async () => {
       detachSignalHandlers();
-      if (server) await server.stop(true);
-      await injector.destroyAsync();
+      const errors: unknown[] = [];
+      try {
+        if (server) await server.stop(true);
+      } catch (error) {
+        errors.push(error);
+      } finally {
+        try {
+          await injector.destroyAsync();
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+      if (errors.length === 1) throw errors[0];
+      if (errors.length > 1) throw new AggregateError(errors, "Bun application shutdown failed");
     })();
     return stopPromise;
   };
