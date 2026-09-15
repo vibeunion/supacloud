@@ -4,7 +4,7 @@ const MAX_ATTEMPTS = 3;
 const ATTEMPT_TIMEOUT_MS = 30_000;
 
 export function isTransientAuditFailure(output: string): boolean {
-  return /\b(?:408|425|429|5\d\d)\b|\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN)\b|fetch failed|network timeout/i.test(output);
+  return /\b(?:408|425|429|5\d\d)\b|\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|EPIPE)\b|ConnectionClosed|UND_ERR_SOCKET|socket hang up|fetch failed|network timeout/i.test(output);
 }
 
 function runAudit(): Promise<{ code: number; output: string }> {
