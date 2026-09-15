@@ -48,6 +48,7 @@ export type { BunApplication, BunBootstrapOptions, BunServerLike } from "./bun";
 export {
   Body,
   CanDeactivate,
+  Cookie,
   Command,
   Controller,
   Data,
@@ -108,10 +109,16 @@ export type {
   CanActivateFn,
   CanDeactivateFn,
   CanMatchFn,
+  GuardResult,
   CommandMeta,
   CommandOptions,
+  JobHandler,
+  JobIdempotency,
+  JobInput,
+  JobMode,
   JobMeta,
   JobOptions,
+  JobOutput,
   ControllerMeta,
   ControllerOptions,
   HttpMethod,
@@ -127,6 +134,20 @@ export type {
   RouteOptions,
   RouteParamBinding,
 } from "./decorators";
+export {
+  defineRouteHandler,
+  defineRouteContract,
+  defineTypedRoute,
+} from "./route_contract";
+export type {
+  RouteHandlerBinding,
+  RouteContractSchemas,
+  RouteHandler,
+  RouteHandlerInput,
+  RouteHandlerOutput,
+  RouteResponseMap,
+  ResponseMapSelector,
+} from "./route_contract";
 export { defineFeatureSlice, defineFeatureSpec, defineModule } from "./module";
 export type {
   FeatureEvent,

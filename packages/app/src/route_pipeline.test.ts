@@ -103,7 +103,7 @@ describe("Angular Router lifecycle pipeline (executeRoutePipeline)", () => {
       method: "POST",
       handler: "savePost",
       canDeactivate: [
-        (component: EditController) => !component.hasUnsavedChanges,
+        (component) => component instanceof EditController && !component.hasUnsavedChanges,
       ],
     };
 

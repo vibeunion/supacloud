@@ -233,4 +233,216 @@ export const OrderResponse = {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test("marks root-optional request bodies as optional in OpenAPI", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-openapi-optional-body-"));
+    try {
+      const optionalGraph: ApplicationGraph = {
+        externalTokens: [],
+        modules: [{
+          name: "payloads",
+          className: "PayloadsModule",
+          file: "src/payloads.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+          controllers: [{
+            className: "PayloadsController",
+            path: "/payloads",
+            scope: "request",
+            deps: [],
+            file: "src/payloads.controller.ts",
+            importPath: "src/payloads.controller",
+            schemaImports: {
+              OptionalBody: "src/contracts",
+              UnionOptionalBody: "src/contracts",
+              RequiredBody: "src/contracts",
+            },
+            routes: [
+              { method: "POST", path: "/optional", handler: "optional", body: "OptionalBody" },
+              { method: "POST", path: "/union", handler: "union", body: "UnionOptionalBody" },
+              { method: "POST", path: "/required", handler: "required", body: "RequiredBody" },
+            ],
+          }],
+        }],
+      };
+      await writeFixtureProject(root, {
+        "src/contracts.ts": [
+          'const typeBoxOptional = Symbol("TypeBox.Optional");',
+          'export const OptionalBody = Object.assign({ type: "object", properties: { note: { type: "string" } } }, { [typeBoxOptional]: "Optional" });',
+          'export const UnionOptionalBody = { anyOf: [{ type: "object", properties: { note: { type: "string" } } }, { type: "undefined" }] };',
+          'export const RequiredBody = { type: "object", properties: { note: { type: "string" } } };',
+        ].join("\n"),
+        "generated/openapi.ts": renderOpenApi(optionalGraph, {
+          rootDir: root,
+          outDir: join(root, "generated"),
+        }),
+      });
+
+      const generated = await import(pathToFileURL(join(root, "generated/openapi.ts")).href);
+      const document = record(generated.OPENAPI_DOCUMENT);
+      const paths = record(document.paths);
+      expect(record(record(paths["/payloads/optional"]).post).requestBody).toMatchObject({ required: false });
+      expect(record(record(paths["/payloads/union"]).post).requestBody).toMatchObject({ required: false });
+      expect(record(record(paths["/payloads/required"]).post).requestBody).toMatchObject({ required: true });
+      const schemas = record(record(document.components).schemas);
+      const unionSchema = record(schemas.UnionOptionalBody);
+      const unionVariants = list(unionSchema.anyOf);
+      expect(unionVariants).toHaveLength(1);
+      expect(unionVariants[0]).toMatchObject({ type: "object" });
+      expect(unionVariants).not.toContainEqual({});
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("follows local defs and registry refs when detecting optional bodies", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-openapi-ref-optional-body-"));
+    try {
+      const refGraph: ApplicationGraph = {
+        externalTokens: [],
+        modules: [{
+          name: "refs",
+          className: "RefsModule",
+          file: "src/refs.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+          controllers: [{
+            className: "RefsController",
+            path: "/refs",
+            scope: "request",
+            deps: [],
+            file: "src/refs.controller.ts",
+            importPath: "src/refs.controller",
+            schemaImports: {
+              LocalRefOptionalBody: "src/contracts",
+              RegistryRefOptionalBody: "src/contracts",
+              OneOfUndefinedBody: "src/contracts",
+              OptionalTarget: "src/contracts",
+            },
+            routes: [
+              { method: "POST", path: "/local", handler: "local", body: "LocalRefOptionalBody" },
+              { method: "POST", path: "/registry", handler: "registry", body: "RegistryRefOptionalBody" },
+              { method: "POST", path: "/one-of", handler: "oneOf", body: "OneOfUndefinedBody" },
+              { method: "POST", path: "/target", handler: "target", body: "OptionalTarget" },
+            ],
+          }],
+        }],
+      };
+      await writeFixtureProject(root, {
+        "src/contracts.ts": [
+          'export const LocalRefOptionalBody = { $ref: "#/$defs/MaybePayload", $defs: { MaybePayload: { oneOf: [{ type: "object", properties: { note: { type: "string" } } }, { type: "undefined" }] } } };',
+          'export const OptionalTarget = { $id: "optional-target", anyOf: [{ type: "object", properties: { note: { type: "string" } } }, { type: "undefined" }] };',
+          'export const RegistryRefOptionalBody = { $ref: "optional-target" };',
+          'export const OneOfUndefinedBody = { oneOf: [{ type: "undefined" }] };',
+        ].join("\n"),
+        "generated/openapi.ts": renderOpenApi(refGraph, {
+          rootDir: root,
+          outDir: join(root, "generated"),
+        }),
+      });
+
+      const generated = await import(pathToFileURL(join(root, "generated/openapi.ts")).href);
+      const document = record(generated.OPENAPI_DOCUMENT);
+      const paths = record(document.paths);
+      expect(record(record(paths["/refs/local"]).post).requestBody).toMatchObject({ required: false });
+      expect(record(record(paths["/refs/registry"]).post).requestBody).toMatchObject({ required: false });
+      expect(record(record(paths["/refs/one-of"]).post).requestBody).toMatchObject({ required: false });
+
+      const schemas = record(record(document.components).schemas);
+      const localSchema = record(schemas.LocalRefOptionalBody);
+      const localDefs = record(localSchema.$defs);
+      const localTarget = record(localDefs.MaybePayload);
+      expect(list(localTarget.oneOf)).toHaveLength(1);
+      expect(localTarget.oneOf).not.toContainEqual({});
+      expect(schemas.OneOfUndefinedBody).toEqual({});
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("uses JSON media types for non-success responses in binary and stream maps", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-openapi-transport-map-"));
+    try {
+      const transportGraph: ApplicationGraph = {
+        externalTokens: [],
+        modules: [{
+          name: "media",
+          className: "MediaModule",
+          file: "src/media.module.ts",
+          line: 1,
+          imports: [],
+          providers: [],
+          commands: [],
+          queries: [],
+          exports: [],
+          controllers: [{
+            className: "MediaController",
+            path: "/media",
+            scope: "request",
+            deps: [],
+            file: "src/media.controller.ts",
+            importPath: "src/media.controller",
+            schemaImports: {
+              BinaryResult: "src/contracts",
+              StreamResult: "src/contracts",
+              NotFound: "src/contracts",
+            },
+            routes: [
+              {
+                method: "GET",
+                path: "/download",
+                handler: "download",
+                responses: { "200": "BinaryResult", "404": "NotFound" },
+                contract: { response: "binary", evidence: "openapi.test.ts" },
+              },
+              {
+                method: "GET",
+                path: "/events",
+                handler: "events",
+                responses: { "2xx": "StreamResult", "409": "NotFound", default: "NotFound" },
+                contract: { response: "stream", evidence: "openapi.test.ts" },
+              },
+            ],
+          }],
+        }],
+      };
+      await writeFixtureProject(root, {
+        "src/contracts.ts": [
+          'export const BinaryResult = { type: "string", format: "binary" };',
+          'export const StreamResult = { type: "string", format: "binary" };',
+          'export const NotFound = { type: "object", properties: { code: { type: "string" } }, required: ["code"] };',
+        ].join("\n"),
+        "generated/openapi.ts": renderOpenApi(transportGraph, {
+          rootDir: root,
+          outDir: join(root, "generated"),
+        }),
+      });
+
+      const generated = await import(pathToFileURL(join(root, "generated/openapi.ts")).href);
+      const document = record(generated.OPENAPI_DOCUMENT);
+      const paths = record(document.paths);
+      const downloadResponses = record(record(record(paths["/media/download"]).get).responses);
+      expect(record(downloadResponses["200"]).content).toHaveProperty("application/octet-stream");
+      expect(record(downloadResponses["404"]).content).toHaveProperty("application/json");
+      expect(record(downloadResponses["404"]).content).not.toHaveProperty("application/octet-stream");
+      const eventResponses = record(record(record(paths["/media/events"]).get).responses);
+      expect(record(eventResponses["2XX"]).content).toHaveProperty("application/octet-stream");
+      expect(record(eventResponses["409"]).content).toHaveProperty("application/json");
+      expect(record(eventResponses.default).content).toHaveProperty("application/json");
+      // A declared status family/default owns the matching status. Do not
+      // reintroduce an exact framework response that would win over it.
+      expect(eventResponses["422"]).toBeUndefined();
+      expect(eventResponses["500"]).toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

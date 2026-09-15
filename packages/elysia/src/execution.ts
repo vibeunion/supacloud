@@ -19,7 +19,9 @@ export async function observeExecution<T>(
     if (!observer) return;
     try {
       // Telemetry is not an audit adapter and cannot alter a command's outcome.
-      Promise.resolve(observer(Object.freeze({ ...event, phase, durationMs }))).catch(() => {});
+      Promise.resolve(observer(Object.freeze({
+        ...event, phase, ...(durationMs === undefined ? {} : { durationMs }),
+      }))).catch(() => {});
     } catch {}
   };
   const started = performance.now();
@@ -38,4 +40,9 @@ export function executionRequestId(context: unknown): string | undefined {
   if (!context || typeof context !== "object" || !("requestId" in context)) return undefined;
   const value = context.requestId;
   return typeof value === "string" && /^[A-Za-z0-9._:-]{1,256}$/.test(value) ? value : undefined;
+}
+
+export function executionTrace(context: unknown): Pick<ExecutionEvent, "requestId"> {
+  const requestId = executionRequestId(context);
+  return requestId === undefined ? {} : { requestId };
 }

@@ -347,8 +347,8 @@ describe("@Controller and route decorators", () => {
     }
 
     const routes = getRoutes(RedirectController);
-    expect(routes[0].redirectTo).toBe("/cases/active");
-    expect(routes[0].pathMatch).toBe("full");
+    expect(routes[0]?.redirectTo).toBe("/cases/active");
+    expect(routes[0]?.pathMatch).toBe("full");
   });
 });
 

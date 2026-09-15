@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { analyzeProject } from "./analyze";
 import { BAD_PROJECT_FILES } from "./fixtures/bad-project";
-import { lineOf, writeFixtureProject } from "./fixtures/helpers";
+import { lineOf, requireValue, writeFixtureProject } from "./fixtures/helpers";
 import type { ApplicationGraph, Diagnostic } from "./types";
 import { validateGraph } from "./validate";
 
@@ -30,20 +30,20 @@ describe("validateGraph：坏 fixture 诊断", () => {
   test("circular-dependency：报环路径与位置", () => {
     const cycles = byCode("circular-dependency");
     expect(cycles).toHaveLength(1);
-    expect(cycles[0].severity).toBe("error");
-    expect(cycles[0].message).toContain("CYCLE_A -> CYCLE_B -> CYCLE_A");
-    expect(cycles[0].file).toBe("src/cycle.ts");
-    expect(cycles[0].line).toBe(lineOf(BAD_PROJECT_FILES["src/cycle.ts"], "marker:circular"));
+    expect(requireValue(cycles[0]).severity).toBe("error");
+    expect(requireValue(cycles[0]).message).toContain("CYCLE_A -> CYCLE_B -> CYCLE_A");
+    expect(requireValue(cycles[0]).file).toBe("src/cycle.ts");
+    expect(requireValue(cycles[0]).line).toBe(lineOf(BAD_PROJECT_FILES["src/cycle.ts"], "marker:circular"));
   });
 
   test("scope-violation：application provider 依赖 request provider", () => {
     const violations = byCode("scope-violation");
     expect(violations).toHaveLength(1);
-    expect(violations[0].severity).toBe("error");
-    expect(violations[0].message).toContain("AppConfigService");
-    expect(violations[0].message).toContain("SESSION");
-    expect(violations[0].file).toBe("src/scope.ts");
-    expect(violations[0].line).toBe(
+    expect(requireValue(violations[0]).severity).toBe("error");
+    expect(requireValue(violations[0]).message).toContain("AppConfigService");
+    expect(requireValue(violations[0]).message).toContain("SESSION");
+    expect(requireValue(violations[0]).file).toBe("src/scope.ts");
+    expect(requireValue(violations[0]).line).toBe(
       lineOf(BAD_PROJECT_FILES["src/scope.ts"], "marker:scope-violation"),
     );
   });
@@ -51,14 +51,14 @@ describe("validateGraph：坏 fixture 诊断", () => {
   test("module-boundary：token 由未 import 的模块提供", () => {
     const boundaries = byCode("module-boundary");
     expect(boundaries).toHaveLength(1);
-    expect(boundaries[0].severity).toBe("error");
-    expect(boundaries[0].message).toContain("HIDDEN_TOKEN");
-    expect(boundaries[0].message).toContain("hidden");
-    expect(boundaries[0].file).toBe("src/boundary.ts");
-    expect(boundaries[0].line).toBe(
+    expect(requireValue(boundaries[0]).severity).toBe("error");
+    expect(requireValue(boundaries[0]).message).toContain("HIDDEN_TOKEN");
+    expect(requireValue(boundaries[0]).message).toContain("hidden");
+    expect(requireValue(boundaries[0]).file).toBe("src/boundary.ts");
+    expect(requireValue(boundaries[0]).line).toBe(
       lineOf(BAD_PROJECT_FILES["src/boundary.ts"], "marker:module-boundary"),
     );
-    expect(boundaries[0].fix).toEqual({
+    expect(requireValue(boundaries[0]).fix).toEqual({
       type: "add_module_import",
       targetFile: "src/boundary.ts",
       module: "hidden",
@@ -72,10 +72,10 @@ describe("validateGraph：坏 fixture 诊断", () => {
   test("duplicate-token：同模块重复注册", () => {
     const duplicates = byCode("duplicate-token");
     expect(duplicates).toHaveLength(1);
-    expect(duplicates[0].severity).toBe("error");
-    expect(duplicates[0].message).toContain("DupService");
-    expect(duplicates[0].file).toBe("src/misc.ts");
-    expect(duplicates[0].line).toBe(
+    expect(requireValue(duplicates[0]).severity).toBe("error");
+    expect(requireValue(duplicates[0]).message).toContain("DupService");
+    expect(requireValue(duplicates[0]).file).toBe("src/misc.ts");
+    expect(requireValue(duplicates[0]).line).toBe(
       lineOf(BAD_PROJECT_FILES["src/misc.ts"], "marker:duplicate-token"),
     );
   });
@@ -83,14 +83,14 @@ describe("validateGraph：坏 fixture 诊断", () => {
   test("command-missing-permission：始终为 error", () => {
     const missing = byCode("command-missing-permission");
     expect(missing).toHaveLength(1);
-    expect(missing[0].severity).toBe("error");
-    expect(missing[0].message).toContain("bad.noperm");
+    expect(requireValue(missing[0]).severity).toBe("error");
+    expect(requireValue(missing[0]).message).toContain("bad.noperm");
 
     const strictDiagnostics = allDiagnostics(true).filter(
       (d) => d.code === "command-missing-permission",
     );
-    expect(strictDiagnostics[0].severity).toBe("error");
-    expect(missing[0].fix).toEqual({
+    expect(requireValue(strictDiagnostics[0]).severity).toBe("error");
+    expect(requireValue(missing[0]).fix).toEqual({
       type: "add_command_permission",
       targetFile: "src/misc.ts",
       command: "NoPermCommand",
@@ -102,10 +102,10 @@ describe("validateGraph：坏 fixture 诊断", () => {
   test("missing-deps：构造参数类型无法解析为已知 token/类", () => {
     const missing = byCode("missing-deps");
     expect(missing).toHaveLength(1);
-    expect(missing[0].severity).toBe("warn");
-    expect(missing[0].message).toContain("MysteryService");
-    expect(missing[0].file).toBe("src/misc.ts");
-    expect(missing[0].line).toBe(
+    expect(requireValue(missing[0]).severity).toBe("warn");
+    expect(requireValue(missing[0]).message).toContain("MysteryService");
+    expect(requireValue(missing[0]).file).toBe("src/misc.ts");
+    expect(requireValue(missing[0]).line).toBe(
       lineOf(BAD_PROJECT_FILES["src/misc.ts"], "marker:missing-deps"),
     );
   });
@@ -117,20 +117,20 @@ describe("validateGraph：坏 fixture 诊断", () => {
   test("duplicate-command：拒绝重复的业务命令名", () => {
     const duplicates = byCode("duplicate-command");
     expect(duplicates).toHaveLength(1);
-    expect(duplicates[0].message).toContain("bad.duplicate");
+    expect(requireValue(duplicates[0]).message).toContain("bad.duplicate");
   });
 
   test("duplicate-route：拒绝规范化后重复的方法和路径", () => {
     const duplicates = byCode("duplicate-route");
     expect(duplicates).toHaveLength(1);
-    expect(duplicates[0].message).toContain("POST /duplicate");
+    expect(requireValue(duplicates[0]).message).toContain("POST /duplicate");
   });
 
   test("route-command-unresolved：路由只能绑定本模块声明的命令", () => {
     const unresolved = byCode("route-command-unresolved");
     expect(unresolved).toHaveLength(1);
-    expect(unresolved[0].message).toContain("MissingCommand");
-    expect(unresolved[0].message).toContain("route-two");
+    expect(requireValue(unresolved[0]).message).toContain("MissingCommand");
+    expect(requireValue(unresolved[0]).message).toContain("route-two");
   });
 
   test("module-boundary-violation：根据 Nx 风格 Tag 规则拦截越权依赖", () => {
@@ -178,8 +178,8 @@ describe("validateGraph：坏 fixture 诊断", () => {
 
     const violations = diags.filter((d) => d.code === "module-boundary-violation");
     expect(violations).toHaveLength(1);
-    expect(violations[0].severity).toBe("error");
-    expect(violations[0].message).toContain("禁止依赖带有标签 'type:data-access'");
+    expect(requireValue(violations[0]).severity).toBe("error");
+    expect(requireValue(violations[0]).message).toContain("禁止依赖带有标签 'type:data-access'");
   });
 
   test("module-boundary-violation：onlyDependOnLibsWithTags 白名单约束", () => {
@@ -226,7 +226,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
 
     const violations = diags.filter((d) => d.code === "module-boundary-violation");
     expect(violations).toHaveLength(1);
-    expect(violations[0].message).toContain("仅允许依赖带有 [type:contracts, type:util]");
+    expect(requireValue(violations[0]).message).toContain("仅允许依赖带有 [type:contracts, type:util]");
   });
 
   test("moduleBoundaryPreset blocks cross-feature dependencies and core-to-feature dependencies", () => {
@@ -294,10 +294,10 @@ describe("validateGraph：坏 fixture 诊断", () => {
 
     const violations = diags.filter((d) => d.code === "module-boundary-violation");
     expect(violations).toHaveLength(2);
-    expect(violations[0].message).toContain("feature-case");
-    expect(violations[0].message).toContain("feature-billing");
-    expect(violations[1].message).toContain("core-auth");
-    expect(violations[1].message).toContain("feature-billing");
+    expect(requireValue(violations[0]).message).toContain("feature-case");
+    expect(requireValue(violations[0]).message).toContain("feature-billing");
+    expect(requireValue(violations[1]).message).toContain("core-auth");
+    expect(requireValue(violations[1]).message).toContain("feature-billing");
   });
 
   test("moduleBoundaryPreset protects domain purity and layering direction", () => {
@@ -339,8 +339,8 @@ describe("validateGraph：坏 fixture 诊断", () => {
 
     const violations = diags.filter((d) => d.code === "module-boundary-violation");
     expect(violations).toHaveLength(1);
-    expect(violations[0].message).toContain("domain-case");
-    expect(violations[0].message).toContain("api-controller");
+    expect(requireValue(violations[0]).message).toContain("domain-case");
+    expect(requireValue(violations[0]).message).toContain("api-controller");
   });
 
   test("moduleBoundaryPreset merges with custom rules", () => {
@@ -402,8 +402,8 @@ describe("validateGraph：坏 fixture 诊断", () => {
 
     const errors = diags.filter((d) => d.code === "invalid-boundary-preset");
     expect(errors).toHaveLength(1);
-    expect(errors[0].severity).toBe("error");
-    expect(errors[0].message).toContain("Unknown module boundary preset");
+    expect(requireValue(errors[0]).severity).toBe("error");
+    expect(requireValue(errors[0]).message).toContain("Unknown module boundary preset");
   });
 
   test("commandCapabilities validates runtime governance support", () => {
@@ -512,8 +512,8 @@ describe("validateGraph：坏 fixture 诊断", () => {
     });
     const errors = disallowedDiags.filter((d) => d.code === "route-command-binding-disallowed");
     expect(errors).toHaveLength(1);
-    expect(errors[0].severity).toBe("error");
-    expect(errors[0].message).toContain("route-level command bindings are disabled");
+    expect(requireValue(errors[0]).severity).toBe("error");
+    expect(requireValue(errors[0]).message).toContain("route-level command bindings are disabled");
   });
 
   test("circular-module-import detects module-level cycles", () => {
@@ -550,8 +550,8 @@ describe("validateGraph：坏 fixture 诊断", () => {
     const diags = validateGraph(sampleGraph);
     const cycles = diags.filter((d) => d.code === "circular-module-import");
     expect(cycles).toHaveLength(1);
-    expect(cycles[0].severity).toBe("error");
-    expect(cycles[0].message).toContain("moduleA -> moduleB -> moduleA");
+    expect(requireValue(cycles[0]).severity).toBe("error");
+    expect(requireValue(cycles[0]).message).toContain("moduleA -> moduleB -> moduleA");
   });
 
   test("orphan-module detects unreachable modules when a root exists", () => {
@@ -603,8 +603,8 @@ describe("validateGraph：坏 fixture 诊断", () => {
     const diags = validateGraph(sampleGraph, { detectOrphanModules: true });
     const orphans = diags.filter((d) => d.code === "orphan-module");
     expect(orphans).toHaveLength(1);
-    expect(orphans[0].severity).toBe("warn");
-    expect(orphans[0].message).toContain("Module 'orphan' is declared but not reachable");
+    expect(requireValue(orphans[0]).severity).toBe("warn");
+    expect(requireValue(orphans[0]).message).toContain("Module 'orphan' is declared but not reachable");
   });
 
   test("disallowControllerDirectDb rejects direct database client injection", () => {
@@ -642,8 +642,8 @@ describe("validateGraph：坏 fixture 诊断", () => {
     const strictDiags = validateGraph(sampleGraph, { disallowControllerDirectDb: true });
     const errors = strictDiags.filter((d) => d.code === "controller-direct-db-access");
     expect(errors).toHaveLength(1);
-    expect(errors[0].severity).toBe("error");
-    expect(errors[0].message).toContain("violating presentation layer separation");
+    expect(requireValue(errors[0]).severity).toBe("error");
+    expect(requireValue(errors[0]).message).toContain("violating presentation layer separation");
   });
 
   test("multi: true allows duplicate tokens without duplicate-token diagnostic", () => {
@@ -1091,10 +1091,10 @@ describe("validateGraph：坏 fixture 诊断", () => {
       ...badGraph,
       modules: [
         {
-          ...badGraph.modules[0],
+          ...requireValue(badGraph.modules[0]),
           controllers: [
             {
-              ...badGraph.modules[0].controllers[0],
+              ...requireValue(requireValue(badGraph.modules[0]).controllers[0]),
               routes: [
                 {
                   method: "GET",
@@ -1762,8 +1762,8 @@ describe("validateGraph：坏 fixture 诊断", () => {
     const diags = validateGraph(graphWithInvalidQuery);
     const invalidQueryDiags = diags.filter((d) => d.code === "invalid-query-param-name");
     expect(invalidQueryDiags.length).toBe(2);
-    expect(invalidQueryDiags[0].errorCode).toBe("SC3013");
-    expect(invalidQueryDiags[0].docsUrl).toBe("https://supacloud.dev/errors/SC3013");
+    expect(requireValue(invalidQueryDiags[0]).errorCode).toBe("SC3013");
+    expect(requireValue(invalidQueryDiags[0]).docsUrl).toBe("https://supacloud.dev/errors/SC3013");
     expect(invalidQueryDiags.some((d) => d.message.includes("illegal character"))).toBe(true);
     expect(invalidQueryDiags.some((d) => d.message.includes("empty @Query()"))).toBe(true);
   });
@@ -1845,7 +1845,7 @@ describe("validateGraph：坏 fixture 诊断", () => {
     const diags = validateGraph(graph);
     const badParamDiags = diags.filter((d) => d.code === "unmatched-path-param-decorator");
     expect(badParamDiags.length).toBe(2);
-    expect(badParamDiags[0].errorCode).toBe("SC3014");
+    expect(requireValue(badParamDiags[0]).errorCode).toBe("SC3014");
   });
 
   test("detects invalid query parameter default values contradicting transforms (SC3015)", () => {

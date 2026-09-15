@@ -1,0 +1,1170 @@
+{
+  "package": "@supacloud/app",
+  "entrypoint": ".",
+  "exports": [
+    {
+      "name": "AbstractControl",
+      "kind": "value"
+    },
+    {
+      "name": "AbstractControlOptions",
+      "kind": "type"
+    },
+    {
+      "name": "APP_BASE_HREF",
+      "kind": "value"
+    },
+    {
+      "name": "APP_INITIALIZER",
+      "kind": "value"
+    },
+    {
+      "name": "APP_LIFECYCLE",
+      "kind": "value"
+    },
+    {
+      "name": "Aspect",
+      "kind": "type"
+    },
+    {
+      "name": "AspectContext",
+      "kind": "type"
+    },
+    {
+      "name": "AspectKind",
+      "kind": "type"
+    },
+    {
+      "name": "AspectNext",
+      "kind": "type"
+    },
+    {
+      "name": "assertInInjectionContext",
+      "kind": "value"
+    },
+    {
+      "name": "AsyncValidatorFn",
+      "kind": "type"
+    },
+    {
+      "name": "Body",
+      "kind": "value"
+    },
+    {
+      "name": "booleanAttribute",
+      "kind": "value"
+    },
+    {
+      "name": "bootstrapBun",
+      "kind": "value"
+    },
+    {
+      "name": "BunApplication",
+      "kind": "type"
+    },
+    {
+      "name": "BunBootstrapOptions",
+      "kind": "type"
+    },
+    {
+      "name": "BunServerLike",
+      "kind": "type"
+    },
+    {
+      "name": "CAN_DEACTIVATE_METADATA",
+      "kind": "value"
+    },
+    {
+      "name": "CanActivateFn",
+      "kind": "type"
+    },
+    {
+      "name": "CanDeactivate",
+      "kind": "value"
+    },
+    {
+      "name": "CanDeactivateFn",
+      "kind": "type"
+    },
+    {
+      "name": "CanMatchFn",
+      "kind": "type"
+    },
+    {
+      "name": "ClassProvider",
+      "kind": "type"
+    },
+    {
+      "name": "Command",
+      "kind": "value"
+    },
+    {
+      "name": "COMMAND_METADATA",
+      "kind": "value"
+    },
+    {
+      "name": "CommandAspect",
+      "kind": "type"
+    },
+    {
+      "name": "CommandContract",
+      "kind": "type"
+    },
+    {
+      "name": "CommandMeta",
+      "kind": "type"
+    },
+    {
+      "name": "CommandOptions",
+      "kind": "type"
+    },
+    {
+      "name": "CommandOutcome",
+      "kind": "type"
+    },
+    {
+      "name": "computed",
+      "kind": "value"
+    },
+    {
+      "name": "ConfigIssue",
+      "kind": "type"
+    },
+    {
+      "name": "ConfigValidationError",
+      "kind": "value"
+    },
+    {
+      "name": "ContractDecoder",
+      "kind": "type"
+    },
+    {
+      "name": "Controller",
+      "kind": "value"
+    },
+    {
+      "name": "CONTROLLER_METADATA",
+      "kind": "value"
+    },
+    {
+      "name": "ControllerMeta",
+      "kind": "type"
+    },
+    {
+      "name": "ControllerOptions",
+      "kind": "type"
+    },
+    {
+      "name": "Cookie",
+      "kind": "value"
+    },
+    {
+      "name": "createBearerAuthInterceptor",
+      "kind": "value"
+    },
+    {
+      "name": "createChildInjector",
+      "kind": "value"
+    },
+    {
+      "name": "createContractCommandClient",
+      "kind": "value"
+    },
+    {
+      "name": "createDestroyRef",
+      "kind": "value"
+    },
+    {
+      "name": "createEnvironmentInjector",
+      "kind": "value"
+    },
+    {
+      "name": "createHeaderInterceptor",
+      "kind": "value"
+    },
+    {
+      "name": "createRetryInterceptor",
+      "kind": "value"
+    },
+    {
+      "name": "createTimeoutInterceptor",
+      "kind": "value"
+    },
+    {
+      "name": "Data",
+      "kind": "value"
+    },
+    {
+      "name": "DatePipe",
+      "kind": "value"
+    },
+    {
+      "name": "DB_CLIENT",
+      "kind": "value"
+    },
+    {
+      "name": "decodeConfig",
+      "kind": "value"
+    },
+    {
+      "name": "decodeHttpContract",
+      "kind": "value"
+    },
+    {
+      "name": "DEFAULT_SCOPE",
+      "kind": "value"
+    },
+    {
+      "name": "DefaultTitleStrategy",
+      "kind": "value"
+    },
+    {
+      "name": "DefaultUrlSerializer",
+      "kind": "value"
+    },
+    {
+      "name": "defineFeatureSlice",
+      "kind": "value"
+    },
+    {
+      "name": "defineFeatureSpec",
+      "kind": "value"
+    },
+    {
+      "name": "defineModule",
+      "kind": "value"
+    },
+    {
+      "name": "defineRouteContract",
+      "kind": "value"
+    },
+    {
+      "name": "defineRouteHandler",
+      "kind": "value"
+    },
+    {
+      "name": "defineTypedRoute",
+      "kind": "value"
+    },
+    {
+      "name": "Delete",
+      "kind": "value"
+    },
+    {
+      "name": "DESTROY_REF",
+      "kind": "value"
+    },
+    {
+      "name": "DestroyRef",
+      "kind": "type"
+    },
+    {
+      "name": "detectPlatform",
+      "kind": "value"
+    },
+    {
+      "name": "DOCUMENT",
+      "kind": "value"
+    },
+    {
+      "name": "effect",
+      "kind": "value"
+    },
+    {
+      "name": "ENVIRONMENT_INITIALIZER",
+      "kind": "value"
+    },
+    {
+      "name": "EnvironmentInjector",
+      "kind": "type"
+    },
+    {
+      "name": "EnvironmentInjectorOptions",
+      "kind": "type"
+    },
+    {
+      "name": "EnvironmentProviders",
+      "kind": "type"
+    },
+    {
+      "name": "executeResolvers",
+      "kind": "value"
+    },
+    {
+      "name": "executeRoutePipeline",
+      "kind": "value"
+    },
+    {
+      "name": "ExistingProvider",
+      "kind": "type"
+    },
+    {
+      "name": "FactoryProvider",
+      "kind": "type"
+    },
+    {
+      "name": "FeatureEvent",
+      "kind": "type"
+    },
+    {
+      "name": "FeatureSliceOptions",
+      "kind": "type"
+    },
+    {
+      "name": "FeatureSpecOptions",
+      "kind": "type"
+    },
+    {
+      "name": "FeatureState",
+      "kind": "type"
+    },
+    {
+      "name": "FeatureTransitionOptions",
+      "kind": "type"
+    },
+    {
+      "name": "flattenProviders",
+      "kind": "value"
+    },
+    {
+      "name": "FormArray",
+      "kind": "value"
+    },
+    {
+      "name": "FormControl",
+      "kind": "value"
+    },
+    {
+      "name": "FormControlStatus",
+      "kind": "type"
+    },
+    {
+      "name": "FormGroup",
+      "kind": "value"
+    },
+    {
+      "name": "forwardRef",
+      "kind": "value"
+    },
+    {
+      "name": "ForwardRefFn",
+      "kind": "type"
+    },
+    {
+      "name": "Get",
+      "kind": "value"
+    },
+    {
+      "name": "getActiveInjector",
+      "kind": "value"
+    },
+    {
+      "name": "getCommandMeta",
+      "kind": "value"
+    },
+    {
+      "name": "getControllerMeta",
+      "kind": "value"
+    },
+    {
+      "name": "getGuards",
+      "kind": "value"
+    },
+    {
+      "name": "getHostParams",
+      "kind": "value"
+    },
+    {
+      "name": "getInjectableMeta",
+      "kind": "value"
+    },
+    {
+      "name": "getInjectParams",
+      "kind": "value"
+    },
+    {
+      "name": "getJobMeta",
+      "kind": "value"
+    },
+    {
+      "name": "getModuleMeta",
+      "kind": "value"
+    },
+    {
+      "name": "getOptionalParams",
+      "kind": "value"
+    },
+    {
+      "name": "getPipeMetadata",
+      "kind": "value"
+    },
+    {
+      "name": "getQueryMeta",
+      "kind": "value"
+    },
+    {
+      "name": "getRouteParams",
+      "kind": "value"
+    },
+    {
+      "name": "getRoutes",
+      "kind": "value"
+    },
+    {
+      "name": "getSelfParams",
+      "kind": "value"
+    },
+    {
+      "name": "getSkipSelfParams",
+      "kind": "value"
+    },
+    {
+      "name": "GuardResult",
+      "kind": "type"
+    },
+    {
+      "name": "GUARDS_METADATA",
+      "kind": "value"
+    },
+    {
+      "name": "Head",
+      "kind": "value"
+    },
+    {
+      "name": "Headers",
+      "kind": "value"
+    },
+    {
+      "name": "Host",
+      "kind": "value"
+    },
+    {
+      "name": "HOST_PARAMS_METADATA",
+      "kind": "value"
+    },
+    {
+      "name": "HTTP_CLIENT_CONFIG",
+      "kind": "value"
+    },
+    {
+      "name": "HTTP_INTERCEPTORS",
+      "kind": "value"
+    },
+    {
+      "name": "HttpClient",
+      "kind": "value"
+    },
+    {
+      "name": "HttpClientConfig",
+      "kind": "type"
+    },
+    {
+      "name": "HttpClientFeature",
+      "kind": "type"
+    },
+    {
+      "name": "HttpClientFeatureKind",
+      "kind": "type"
+    },
+    {
+      "name": "HttpContext",
+      "kind": "value"
+    },
+    {
+      "name": "HttpContextToken",
+      "kind": "value"
+    },
+    {
+      "name": "HttpContract",
+      "kind": "type"
+    },
+    {
+      "name": "HttpContractError",
+      "kind": "value"
+    },
+    {
+      "name": "HttpErrorResponse",
+      "kind": "value"
+    },
+    {
+      "name": "HttpHeaders",
+      "kind": "value"
+    },
+    {
+      "name": "HttpInterceptorFn",
+      "kind": "type"
+    },
+    {
+      "name": "HttpMethod",
+      "kind": "type"
+    },
+    {
+      "name": "HttpParams",
+      "kind": "value"
+    },
+    {
+      "name": "HttpParamsOptions",
+      "kind": "type"
+    },
+    {
+      "name": "HttpReplayError",
+      "kind": "value"
+    },
+    {
+      "name": "HttpReplayPolicy",
+      "kind": "type"
+    },
+    {
+      "name": "HttpRequestOptions",
+      "kind": "type"
+    },
+    {
+      "name": "HttpRequestPayload",
+      "kind": "type"
+    },
+    {
+      "name": "inject",
+      "kind": "value"
+    },
+    {
+      "name": "Inject",
+      "kind": "value"
+    },
+    {
+      "name": "INJECT_PARAMS_METADATA",
+      "kind": "value"
+    },
+    {
+      "name": "Injectable",
+      "kind": "value"
+    },
+    {
+      "name": "INJECTABLE_METADATA",
+      "kind": "value"
+    },
+    {
+      "name": "InjectableMeta",
+      "kind": "type"
+    },
+    {
+      "name": "InjectableOptions",
+      "kind": "type"
+    },
+    {
+      "name": "injectAll",
+      "kind": "value"
+    },
+    {
+      "name": "injectDestroySignal",
+      "kind": "value"
+    },
+    {
+      "name": "InjectFlags",
+      "kind": "type"
+    },
+    {
+      "name": "InjectionToken",
+      "kind": "value"
+    },
+    {
+      "name": "InjectionTokenOptions",
+      "kind": "type"
+    },
+    {
+      "name": "INJECTOR",
+      "kind": "value"
+    },
+    {
+      "name": "InjectorLike",
+      "kind": "type"
+    },
+    {
+      "name": "isClassProvider",
+      "kind": "value"
+    },
+    {
+      "name": "isEnvironmentProviders",
+      "kind": "value"
+    },
+    {
+      "name": "isExistingProvider",
+      "kind": "value"
+    },
+    {
+      "name": "isFactoryProvider",
+      "kind": "value"
+    },
+    {
+      "name": "isForwardRef",
+      "kind": "value"
+    },
+    {
+      "name": "isPlatformBrowser",
+      "kind": "value"
+    },
+    {
+      "name": "isPlatformEdge",
+      "kind": "value"
+    },
+    {
+      "name": "isPlatformServer",
+      "kind": "value"
+    },
+    {
+      "name": "isRedirectCommand",
+      "kind": "value"
+    },
+    {
+      "name": "isScopeViolation",
+      "kind": "value"
+    },
+    {
+      "name": "isValueProvider",
+      "kind": "value"
+    },
+    {
+      "name": "Job",
+      "kind": "value"
+    },
+    {
+      "name": "JOB_CONTEXT",
+      "kind": "value"
+    },
+    {
+      "name": "JOB_METADATA",
+      "kind": "value"
+    },
+    {
+      "name": "JobAspect",
+      "kind": "type"
+    },
+    {
+      "name": "JobHandler",
+      "kind": "type"
+    },
+    {
+      "name": "JobIdempotency",
+      "kind": "type"
+    },
+    {
+      "name": "JobInput",
+      "kind": "type"
+    },
+    {
+      "name": "JobMeta",
+      "kind": "type"
+    },
+    {
+      "name": "JobMode",
+      "kind": "type"
+    },
+    {
+      "name": "JobOptions",
+      "kind": "type"
+    },
+    {
+      "name": "JobOutput",
+      "kind": "type"
+    },
+    {
+      "name": "joinWithSlash",
+      "kind": "value"
+    },
+    {
+      "name": "JsonPipe",
+      "kind": "value"
+    },
+    {
+      "name": "LifecycleHooks",
+      "kind": "type"
+    },
+    {
+      "name": "linkedSignal",
+      "kind": "value"
+    },
+    {
+      "name": "LinkedSignalOptions",
+      "kind": "type"
+    },
+    {
+      "name": "LowerCasePipe",
+      "kind": "value"
+    },
+    {
+      "name": "makeEnvironmentProviders",
+      "kind": "value"
+    },
+    {
+      "name": "makeStateKey",
+      "kind": "value"
+    },
+    {
+      "name": "matchRoute",
+      "kind": "value"
+    },
+    {
+      "name": "Module",
+      "kind": "value"
+    },
+    {
+      "name": "MODULE_METADATA",
+      "kind": "value"
+    },
+    {
+      "name": "ModuleMeta",
+      "kind": "type"
+    },
+    {
+      "name": "ModuleOptions",
+      "kind": "type"
+    },
+    {
+      "name": "NavigationExtras",
+      "kind": "type"
+    },
+    {
+      "name": "normalizePath",
+      "kind": "value"
+    },
+    {
+      "name": "numberAttribute",
+      "kind": "value"
+    },
+    {
+      "name": "OnDestroy",
+      "kind": "type"
+    },
+    {
+      "name": "OnInit",
+      "kind": "type"
+    },
+    {
+      "name": "Optional",
+      "kind": "value"
+    },
+    {
+      "name": "OPTIONAL_PARAMS_METADATA",
+      "kind": "value"
+    },
+    {
+      "name": "Options",
+      "kind": "value"
+    },
+    {
+      "name": "Param",
+      "kind": "value"
+    },
+    {
+      "name": "ParamOptions",
+      "kind": "type"
+    },
+    {
+      "name": "Patch",
+      "kind": "value"
+    },
+    {
+      "name": "Pipe",
+      "kind": "value"
+    },
+    {
+      "name": "PipeMetadata",
+      "kind": "type"
+    },
+    {
+      "name": "PipeTransform",
+      "kind": "type"
+    },
+    {
+      "name": "PLATFORM_BROWSER_ID",
+      "kind": "value"
+    },
+    {
+      "name": "PLATFORM_EDGE_ID",
+      "kind": "value"
+    },
+    {
+      "name": "PLATFORM_ID",
+      "kind": "value"
+    },
+    {
+      "name": "PLATFORM_SERVER_ID",
+      "kind": "value"
+    },
+    {
+      "name": "PlatformId",
+      "kind": "type"
+    },
+    {
+      "name": "Post",
+      "kind": "value"
+    },
+    {
+      "name": "provideAppInitializer",
+      "kind": "value"
+    },
+    {
+      "name": "provideEnvironmentInitializer",
+      "kind": "value"
+    },
+    {
+      "name": "provideHttpClient",
+      "kind": "value"
+    },
+    {
+      "name": "provideLifecycle",
+      "kind": "value"
+    },
+    {
+      "name": "Provider",
+      "kind": "type"
+    },
+    {
+      "name": "ProviderDep",
+      "kind": "type"
+    },
+    {
+      "name": "ProviderDependency",
+      "kind": "type"
+    },
+    {
+      "name": "provideRouter",
+      "kind": "value"
+    },
+    {
+      "name": "provideToken",
+      "kind": "value"
+    },
+    {
+      "name": "Put",
+      "kind": "value"
+    },
+    {
+      "name": "Query",
+      "kind": "value"
+    },
+    {
+      "name": "QUERY_METADATA",
+      "kind": "value"
+    },
+    {
+      "name": "QueryMeta",
+      "kind": "type"
+    },
+    {
+      "name": "QueryOptions",
+      "kind": "type"
+    },
+    {
+      "name": "RedirectCommand",
+      "kind": "value"
+    },
+    {
+      "name": "REQUEST_CONTEXT",
+      "kind": "value"
+    },
+    {
+      "name": "Resolve",
+      "kind": "value"
+    },
+    {
+      "name": "RESOLVE_METADATA",
+      "kind": "value"
+    },
+    {
+      "name": "ResolveFn",
+      "kind": "type"
+    },
+    {
+      "name": "resolveForwardRef",
+      "kind": "value"
+    },
+    {
+      "name": "resource",
+      "kind": "value"
+    },
+    {
+      "name": "ResourceLoaderParams",
+      "kind": "type"
+    },
+    {
+      "name": "ResourceOptions",
+      "kind": "type"
+    },
+    {
+      "name": "ResourceRef",
+      "kind": "type"
+    },
+    {
+      "name": "ResourceStatus",
+      "kind": "type"
+    },
+    {
+      "name": "ROUTE_CONFIG",
+      "kind": "value"
+    },
+    {
+      "name": "ROUTE_PARAMS_METADATA",
+      "kind": "value"
+    },
+    {
+      "name": "RouteAspect",
+      "kind": "type"
+    },
+    {
+      "name": "RouteContractSchemas",
+      "kind": "type"
+    },
+    {
+      "name": "RouteDefinition",
+      "kind": "type"
+    },
+    {
+      "name": "RouteHandler",
+      "kind": "type"
+    },
+    {
+      "name": "RouteHandlerBinding",
+      "kind": "type"
+    },
+    {
+      "name": "RouteHandlerInput",
+      "kind": "type"
+    },
+    {
+      "name": "RouteHandlerOutput",
+      "kind": "type"
+    },
+    {
+      "name": "ResponseMapSelector",
+      "kind": "type"
+    },
+    {
+      "name": "RouteMatchResult",
+      "kind": "type"
+    },
+    {
+      "name": "RouteOptions",
+      "kind": "type"
+    },
+    {
+      "name": "RouteParamBinding",
+      "kind": "type"
+    },
+    {
+      "name": "RoutePipelineContext",
+      "kind": "type"
+    },
+    {
+      "name": "RoutePipelineDefinition",
+      "kind": "type"
+    },
+    {
+      "name": "RoutePipelineOptions",
+      "kind": "type"
+    },
+    {
+      "name": "RoutePipelineResult",
+      "kind": "type"
+    },
+    {
+      "name": "ROUTER_CONFIGURATION",
+      "kind": "value"
+    },
+    {
+      "name": "RouterConfigOptions",
+      "kind": "type"
+    },
+    {
+      "name": "RouteResponseMap",
+      "kind": "type"
+    },
+    {
+      "name": "RouterEvent",
+      "kind": "type"
+    },
+    {
+      "name": "RouterEventType",
+      "kind": "type"
+    },
+    {
+      "name": "RouterFeature",
+      "kind": "type"
+    },
+    {
+      "name": "ROUTES_METADATA",
+      "kind": "value"
+    },
+    {
+      "name": "runInInjectionContext",
+      "kind": "value"
+    },
+    {
+      "name": "runInRequestContext",
+      "kind": "value"
+    },
+    {
+      "name": "runInScope",
+      "kind": "value"
+    },
+    {
+      "name": "runInTransactionContext",
+      "kind": "value"
+    },
+    {
+      "name": "Scope",
+      "kind": "type"
+    },
+    {
+      "name": "SCOPE_LIFETIME_RANK",
+      "kind": "value"
+    },
+    {
+      "name": "SCOPES",
+      "kind": "value"
+    },
+    {
+      "name": "Self",
+      "kind": "value"
+    },
+    {
+      "name": "SELF_PARAMS_METADATA",
+      "kind": "value"
+    },
+    {
+      "name": "signal",
+      "kind": "value"
+    },
+    {
+      "name": "Signal",
+      "kind": "type"
+    },
+    {
+      "name": "SKIP_SELF_PARAMS_METADATA",
+      "kind": "value"
+    },
+    {
+      "name": "SkipSelf",
+      "kind": "value"
+    },
+    {
+      "name": "StateKey",
+      "kind": "type"
+    },
+    {
+      "name": "stripTrailingSlash",
+      "kind": "value"
+    },
+    {
+      "name": "TestBed",
+      "kind": "value"
+    },
+    {
+      "name": "TestModuleMetadata",
+      "kind": "type"
+    },
+    {
+      "name": "Title",
+      "kind": "value"
+    },
+    {
+      "name": "TITLE_STRATEGY",
+      "kind": "value"
+    },
+    {
+      "name": "TitleStrategy",
+      "kind": "value"
+    },
+    {
+      "name": "Token",
+      "kind": "type"
+    },
+    {
+      "name": "TRANSFER_STATE",
+      "kind": "value"
+    },
+    {
+      "name": "TransferState",
+      "kind": "value"
+    },
+    {
+      "name": "TrimPipe",
+      "kind": "value"
+    },
+    {
+      "name": "Type",
+      "kind": "type"
+    },
+    {
+      "name": "untracked",
+      "kind": "value"
+    },
+    {
+      "name": "UpperCasePipe",
+      "kind": "value"
+    },
+    {
+      "name": "UrlSegment",
+      "kind": "type"
+    },
+    {
+      "name": "UrlSegmentGroup",
+      "kind": "value"
+    },
+    {
+      "name": "UrlSerializer",
+      "kind": "value"
+    },
+    {
+      "name": "UrlTree",
+      "kind": "value"
+    },
+    {
+      "name": "UseGuards",
+      "kind": "value"
+    },
+    {
+      "name": "ValidationErrors",
+      "kind": "type"
+    },
+    {
+      "name": "ValidatorFn",
+      "kind": "type"
+    },
+    {
+      "name": "Validators",
+      "kind": "value"
+    },
+    {
+      "name": "ValueProvider",
+      "kind": "type"
+    },
+    {
+      "name": "withComponentInputBinding",
+      "kind": "value"
+    },
+    {
+      "name": "withFetch",
+      "kind": "value"
+    },
+    {
+      "name": "withInterceptors",
+      "kind": "value"
+    },
+    {
+      "name": "withRequestsMadeViaParent",
+      "kind": "value"
+    },
+    {
+      "name": "withRouterConfig",
+      "kind": "value"
+    },
+    {
+      "name": "withTitleStrategy",
+      "kind": "value"
+    },
+    {
+      "name": "WritableSignal",
+      "kind": "type"
+    }
+  ]
+}

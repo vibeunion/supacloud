@@ -36,8 +36,15 @@ Runtime adapter that turns `@supacloud/compiler` output into a production-ready
   controllers and services.
 - **Request-scope teardown**: invokes the compiler-generated
   `destroyRequestScope` after the response, including when the handler fails.
-- **TypeBox schema binding**: attaches compiled parameter, query, body, and
-  response TypeBox schemas directly to Elysia route definitions.
+- **Angular-backed async DI**: when `createApplication({ injector })` receives
+  an `@supacloud/app` root injector, each request gets an isolated child
+  injector with `REQUEST_CONTEXT`, including across `await` boundaries.
+- **TypeBox schema binding**: attaches compiled parameter, query, body, headers,
+  cookie, single-response and status-map TypeBox schemas directly to Elysia
+  route definitions; Elysia performs request validation and normalization.
+- **Schema-first client decoding**: generated clients select the declared
+  response schema by HTTP status and validate/normalize it before returning;
+  an explicit decoder receives that checked value for custom transforms.
 - **Compiler invoker execution**: uses the compiler-emitted positional invoker
   after Elysia has decoded route input, while retaining the legacy input-object
   handler path for hand-written compiled fixtures.
@@ -47,10 +54,15 @@ Runtime adapter that turns `@supacloud/compiler` output into a production-ready
 - **Static AOP pipeline**: executes compiler-emitted module, route, command, and
   job aspects with `composeAspects`; no runtime discovery or registration is
   performed.
+- **Worker registration**: registers compiler-emitted Jobs, initializes their
+  application services once, and provides polling plus graceful shutdown around
+  a host-owned claim/receipt transport.
 - **Public error mapping**: transforms framework / application errors via
   `errorMapper` with standard `ApplicationError` envelope support, preserving
   HTTP 422 for request validation and HTTP 500 / `RESPONSE_VALIDATION_ERROR`
   for invalid handler output, without exposing payloads or schema internals.
+- **Opt-in API documentation**: serves a generated OpenAPI JSON document and a
+  dependency-free viewer, plus a role-scoped GraphQL SDL snapshot viewer.
 
 ## Installation
 
@@ -64,11 +76,24 @@ bun add @supacloud/elysia elysia
 import { composeCommandExecutors, createApplication, requireIdempotencyKey } from "@supacloud/elysia";
 import AuditModule from "./.generated/audit.module";
 import CaseModule from "./.generated/case.module";
+import { OPENAPI_DOCUMENT } from "./generated/openapi";
 
 const app = createApplication({
   name: "case-service",
   modules: [AuditModule, CaseModule], // topological import order
   deps: { db: createDbClient() },     // platform deps, passed to createServices
+  documentation: {
+    openApi: {
+      document: OPENAPI_DOCUMENT,
+      specPath: "/openapi.json",
+      uiPath: "/docs",
+    },
+    graphql: {
+      schema: () => Bun.file("./graphql/schema.graphql").text(),
+      schemaPath: "/graphql/schema.graphql",
+      uiPath: "/graphql/docs",
+    },
+  },
   commandGovernance: {
     authorize: (invocation) => authorize(invocation.requestContext, invocation.command.permission),
     idempotency: (invocation, next) => idempotencyStore.run(requireIdempotencyKey(invocation), next),
@@ -84,6 +109,17 @@ const app = createApplication({
 
 export default app;
 ```
+
+Documentation is disabled unless `documentation` is provided. The OpenAPI
+document can be imported from the compiler-generated `openapi.ts` module. The
+GraphQL endpoint serves a local, role-scoped snapshot only; it does not enable
+server introspection or create a GraphQL resolver layer. Protect or omit these
+routes in production when the schema is not public.
+
+The root injector is normally created and owned by `bootstrapBun`. The Elysia
+adapter does not take ownership of an injected root injector; stop it from the
+same Bun bootstrap that created it. Existing applications may omit `injector`
+and continue using compiler-generated request scopes unchanged.
 
 For deterministic local verification, use the in-memory sandbox. It supplies
 stable request identity, an isolated key-value database with optimistic
@@ -123,58 +159,71 @@ input, requestContext)`. The asynchronous compiler-generated job scope is
 destroyed after execution, including when the job throws or scope construction
 fails partway through.
 
-### `SupaCloudWorker`
+### Worker Registration
 
-`createWorker()` registers compiler-emitted Jobs before startup, creates the
-application services once, limits concurrent claims, and shuts down after
-in-flight executions settle. The worker only owns Job dispatch and lifecycle;
-queue leasing, retry budgets, visibility changes and DLQ policy remain in the
-platform transport.
-
-`createQueueWorkerTransport()` adapts the existing `supacloud.queue(name)` shape
-without making `@supacloud/elysia` depend on the SDK. The third generic preserves
-the platform's acknowledgement/failure receipt type end to end.
+`createWorker` registers compiled modules and drives a host-provided claim,
+acknowledge and fail transport. The worker owns Job lookup, application-service
+initialization, concurrency and graceful shutdown. The platform adapter remains
+the owner of leases, retries, DLQ policy and receipt semantics; its receipt type
+is preserved as `TReceipt`. `createQueueWorkerTransport` adapts the structural
+API of the existing `client.queue(name)` without making Elysia depend on the SDK.
 
 ```ts
-import type {
-  SupaCloudQueueMessage,
-  SupaCloudQueueMutationResult,
-} from "@supacloud/js";
 import {
   createQueueWorkerTransport,
   createWorker,
   type WorkerClaim,
 } from "@supacloud/elysia";
+import type { SupaCloudQueueMutationResult } from "@supacloud/js";
+import { createCompiledModules } from "./generated/application";
 
-const transport = createQueueWorkerTransport<
-  SupaCloudQueueMessage,
-  WorkerClaim,
-  SupaCloudQueueMutationResult
->({
+type QueueClaim = WorkerClaim & { queueMessageId: string };
+type PlatformReceipt = SupaCloudQueueMutationResult;
+
+// `supacloud` is a configured createSupaCloudClient(...) instance.
+
+const transport = createQueueWorkerTransport({
   queue: supacloud.queue("jobs"),
   receive: { visibilityTimeoutSec: 60 },
-  decodeClaim: (message) => {
-    const jobName = message.payload.jobName;
-    if (typeof jobName !== "string") throw new Error("Queue message has no jobName");
-    return { id: message.id, jobName, input: message.payload.input };
+  decodeClaim: (message): QueueClaim => {
+    const payload = message.payload;
+    if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error("Invalid job envelope");
+    }
+    const envelope = payload as Record<string, unknown>;
+    if (typeof envelope.jobName !== "string" || !("input" in envelope)) {
+      throw new Error("Invalid job envelope");
+    }
+    return {
+      id: message.id,
+      queueMessageId: message.id,
+      jobName: envelope.jobName,
+      input: envelope.input,
+      attempt: message.read_ct ?? 1,
+    };
   },
-  messageId: (claim) => claim.id,
+  messageId: (claim) => claim.queueMessageId,
 });
 
-const worker = createWorker({
-  modules: generatedModules,
-  transport,
+const worker = createWorker<QueueClaim, PlatformReceipt>({
+  modules: createCompiledModules(),
+  deps: { supacloud },
   concurrency: 4,
+  transport,
 });
 
 await worker.start();
-// await worker.stop() during process shutdown
+// The host owns process signals and calls this during shutdown.
+await worker.stop();
 ```
 
-`WorkerRunResult.receipt` is the unchanged platform receipt. If an `ack` or
-`fail` request throws after the platform may have applied it, the worker raises
-`WorkerReceiptUnconfirmedError` and does not issue a second settlement request;
-the host should reconcile using the platform's durable message/task state.
+Use `mapClaim` when a platform claim has a different wire shape. Duplicate module
+or Job names are rejected before registration is committed. A Job failure is
+reported through `fail`; an unconfirmed `ack` is surfaced as
+`WorkerReceiptUnconfirmedError` and is never followed by a blind `fail`. The
+queue adapter preserves the queue client's mutation receipt type. With PGMQ,
+the SDK's `fail` compatibility method archives the message; use a custom
+transport when the platform needs a distinct retry or dead-letter transition.
 
 ## API
 
@@ -294,13 +343,6 @@ once is rejected.
 Executes a compiler-emitted Job descriptor with its static aspect list and
 compiler-generated job scope.
 
-### `createWorker(options: WorkerOptions): SupaCloudWorker`
-
-Registers generated modules and drives a host-provided claim/ack/fail transport.
-Use `registerModule()` before startup when modules are discovered incrementally.
-Registration rejects duplicate module or Job names and invalid execution
-metadata before changing the registry.
-
 ### `assertFeatureTransition(spec, state, event)`
 
 Checks a declared feature transition against an authoritative state and returns
@@ -345,5 +387,52 @@ decoders compatible with `HttpClient.execute` while retaining the same schemas
 for route registration. Keep schemas independently importable and reference
 their identifiers explicitly in compiler-analyzed route decorators.
 
-See [command migration](../../docs/command-migration.md) for examples and
+For hand-written Elysia routes, `defineRouteContract` and
+`defineElysiaRoute` provide contextual handler types from the same schema value.
+`registerElysiaRoute` maps the contract's `responses` status map to Elysia's
+`response` option and registers the route:
+
+```ts
+import { Elysia, t } from "elysia";
+import {
+  defineElysiaRoute,
+  defineRouteContract,
+  registerElysiaRoute,
+} from "@supacloud/elysia";
+
+const itemRoute = defineRouteContract({
+  body: t.Object({ name: t.String() }),
+  params: t.Object({ id: t.String() }),
+  responses: {
+    200: t.Object({ id: t.String(), name: t.String() }),
+    409: t.Object({ conflict: t.Literal(true) }),
+  },
+});
+
+const route = defineElysiaRoute("POST", "/items/:id", itemRoute, ({ body, params, status }) =>
+  body.name === "existing"
+    ? status(409, { conflict: true })
+    : { id: params.id, name: body.name },
+);
+
+const app = registerElysiaRoute(new Elysia(), route);
+```
+
+The callback is typed from the contract (including decoded transforms and
+declared response statuses). Cookie values retain Elysia's native shape, so a
+declared `session: t.String()` is read as `cookie.session.value`. This helper
+does not add Eden-style client inference to an existing Elysia instance; the
+compiler-generated client remains the source of transport types.
+
+Response maps may use concrete statuses, `1XX`-`5XX` families, and `default`.
+Because Elysia 1.4 only compiles numeric response keys, the adapter expands
+family/default entries to concrete validators before registration. Exact
+statuses take precedence over families, which take precedence over `default`.
+An actual status absent from a structured response map fails the route contract
+before Elysia can silently accept a default `200`; binary/stream routes may
+intentionally leave successful transport statuses unschematized when only their
+JSON error responses are declared. Unsupported selectors fail during
+registration instead of silently disabling response validation.
+
+See [type safety and migration](../../docs/type-safety.md) for examples and
 the distinction between contract declarations and runtime verification.

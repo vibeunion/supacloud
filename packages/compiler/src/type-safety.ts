@@ -59,7 +59,7 @@ export function scanGeneratedArtifacts(
 
 export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic[] {
   const rootDir = resolve(options.rootDir);
-  const configPath = join(rootDir, "tsconfig.json");
+  const configPath = findNearestTsconfig(rootDir) ?? join(rootDir, "tsconfig.json");
   const projectConfig: { options: ts.CompilerOptions; errors: readonly ts.Diagnostic[] } = existsSync(configPath)
     ? readProjectConfig(configPath)
     : {
@@ -93,21 +93,49 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
     .filter((sourceFile) => isProductionSource(rootDir, sourceFile, excludes, outDir));
 
   const diagnostics: Diagnostic[] = [...projectConfig.errors, ...program.getOptionsDiagnostics()]
-    .map((diagnostic) => ({
-      severity: "error",
-      code: "source-config",
-      message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
-      file: diagnostic.file ? normalizeRelative(rootDir, diagnostic.file.fileName) : normalizeRelative(rootDir, configPath),
-      line: diagnostic.file && diagnostic.start !== undefined
-        ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start).line + 1
-        : undefined,
-      errorCode: `TS${diagnostic.code}`,
-    }));
+    .map((diagnostic) => typescriptDiagnostic(diagnostic, rootDir, configPath, "source-config"));
   const checker = program.getTypeChecker();
   for (const sourceFile of sourceFiles) {
+    diagnostics.push(
+      ...program.getSyntacticDiagnostics(sourceFile)
+        .map((diagnostic) => typescriptDiagnostic(diagnostic, rootDir, configPath, "source-typescript")),
+      ...program.getSemanticDiagnostics(sourceFile)
+        .map((diagnostic) => typescriptDiagnostic(diagnostic, rootDir, configPath, "source-typescript")),
+    );
     scanSourceFile(sourceFile, checker, rootDir, diagnostics, options.strict ?? false);
   }
   return diagnostics;
+}
+
+function findNearestTsconfig(startDir: string): string | undefined {
+  let current = resolve(startDir);
+  while (true) {
+    const candidate = join(current, "tsconfig.json");
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(current);
+    if (parent === current) return undefined;
+    current = parent;
+  }
+}
+
+function typescriptDiagnostic(
+  diagnostic: ts.Diagnostic,
+  rootDir: string,
+  configPath: string,
+  code: "source-config" | "source-typescript",
+): Diagnostic {
+  return {
+    severity: "error",
+    code,
+    message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
+    file: diagnostic.file
+      ? normalizeRelative(rootDir, diagnostic.file.fileName)
+      : normalizeRelative(rootDir, configPath),
+    ...(diagnostic.file && diagnostic.start !== undefined
+      ? { line: diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start).line + 1 }
+      : {}),
+    errorCode: `TS${diagnostic.code}`,
+  };
 }
 
 function scanSourceFile(

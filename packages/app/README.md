@@ -139,6 +139,38 @@ export class CaseModule {}
 The compiler rejects scope violations (e.g. an `application` provider
 depending on a `request` provider) at build time.
 
+## Bun Runtime Contexts
+
+Use `bootstrapBun` for the process lifetime and pass its root injector to
+`@supacloud/elysia` when route handlers use `inject()`:
+
+```ts
+import { bootstrapBun, provideToken } from "@supacloud/app";
+import { createApplication } from "@supacloud/elysia";
+
+const APP_NAME = Symbol("app-name");
+const runtime = await bootstrapBun({
+  providers: [provideToken(APP_NAME, "cases")],
+  serve: async (injector) => {
+    const app = createApplication({ modules, injector });
+    return Bun.serve({ fetch: app.fetch, port: 3000 });
+  },
+});
+
+// runtime.stop() stops the Bun server, awaits async teardown, and is idempotent.
+```
+
+When a root injector is supplied, the Elysia adapter creates one child
+Injector per request, provides `REQUEST_CONTEXT`, preserves the context across
+`await`, and destroys the child after the handler completes. Request contexts
+are isolated with Node's `AsyncLocalStorage`; the compiler-generated request
+scope remains available for existing applications.
+
+Use `runInTransactionContext(root, providers, work)` at the database transaction
+boundary to shadow tokens such as `DB_CLIENT` with the transaction-bound client.
+The database adapter owns commit, rollback, and connection closure; the DI
+scope only exposes the already-open transaction to code running inside it.
+
 ## Built-in Tokens
 
 - `DB_CLIENT` — Platform database / Drizzle client (`application` scope).
@@ -188,8 +220,7 @@ remain synchronized and detects architectural drift at build time.
 
 `HttpClient.execute(contract, input, options?)` infers input and result types from
 `HttpContract` decoders. Each decoder accepts `unknown` and must reject invalid
-values. A TypeBox, Zod, or application decoder can be used without a new runtime
-dependency.
+values. TypeBox or an application decoder can be used for validation.
 
 ```ts
 import type { HttpContract } from "@supacloud/app";
@@ -213,6 +244,68 @@ retry; existing interceptors still control transport and must not replay an
 unknown-result write. Raw JSON methods return `unknown` and no longer accept
 caller-supplied result generics. Text, Blob and full Response modes have precise
 overloads; use `execute` to obtain a checked business result.
+
+`FormControl<T>` values now include `null`, and optional injection includes
+`undefined`. See [type safety and migration](../../docs/type-safety.md) for the
+strict configurations, consumer checks and remaining coverage boundaries.
+
+### Schema-first route contracts
+
+Use `defineRouteContract` to keep request and response schemas together. The
+same contract can be referenced by a route decorator, a handler type and the
+generated client:
+
+```ts
+import { defineRouteContract, type RouteHandler } from "@supacloud/app";
+import { Type } from "@sinclair/typebox";
+
+export const ItemBody = Type.Object({ name: Type.String() });
+export const ItemHeaders = Type.Object({ authorization: Type.String() });
+export const ItemCookie = Type.Object({ session: Type.String() });
+export const ItemCreated = Type.Object({ id: Type.String() });
+export const ItemConflict = Type.Object({ conflict: Type.Boolean() });
+
+const itemRoute = defineRouteContract({
+  body: ItemBody,
+  headers: ItemHeaders,
+  cookie: ItemCookie,
+  responses: {
+    201: ItemCreated,
+    409: ItemConflict,
+  },
+});
+
+type CreateItemHandler = RouteHandler<typeof itemRoute>;
+// @Post("/", itemRoute) is analyzed by the compiler as the same contract.
+```
+
+For functional handlers, `defineRouteHandler` makes the contract the only
+generic source and contextually types the callback. `defineTypedRoute` keeps the
+same handler and contract together for adapters that accept an object:
+
+```ts
+import { defineRouteHandler, defineTypedRoute } from "@supacloud/app";
+
+const createItem = defineRouteHandler(itemRoute, ({ body, headers, cookie }) => ({
+  id: `${headers.authorization}:${cookie.session}:${body.name}`,
+}));
+
+const binding = defineTypedRoute(itemRoute, createItem);
+```
+
+The class-method form remains explicit (`RouteHandler<typeof contract>` or
+`RouteHandlerInput`/`RouteHandlerOutput`). TypeScript decorators do not change a
+method's parameter type, so the compiler treats the decorator contract as the
+runtime/documentation source while the handler annotation is the type-level
+binding.
+
+`headers`, `cookie` and `responses` are now first-class route fields. The
+`@Cookie()` parameter decorator binds a decoded cookie value to a positional
+handler argument. New code should use `responses: { 200: Schema }` (or the
+actual status map) instead of the legacy single `response: Schema` field.
+The compiler currently accepts `response` as a migration bridge, but it is not
+part of the long-term contract and may be removed in the next breaking release.
+See the [route contract migration guide](../../docs/route-contract-migration.md).
 
 ### Authoritative Command Confirmation
 

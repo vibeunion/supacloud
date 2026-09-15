@@ -8,7 +8,7 @@ import { renderApplication } from "./generate";
 import { relativeImportPath } from "./util";
 import { BAD_PROJECT_FILES } from "./fixtures/bad-project";
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
-import { writeFixtureProject } from "./fixtures/helpers";
+import { requireValue, writeFixtureProject } from "./fixtures/helpers";
 import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./fixtures/runtime-source";
 import { scanGeneratedArtifacts } from "./type-safety";
 import type { ApplicationGraph, CompileResult } from "./types";
@@ -308,6 +308,47 @@ void modules;
     expect(rendered.applicationCode).not.toContain("Proxy");
   });
 
+  test("生成 Job schema imports 与执行 policy descriptor", () => {
+    const rendered = renderApplication({
+      modules: [{
+        name: "jobs",
+        className: "JobsModule",
+        file: "src/jobs.module.ts",
+        line: 1,
+        imports: [],
+        providers: [],
+        controllers: [],
+        commands: [],
+        queries: [],
+        jobs: [{
+          className: "AcceptJob",
+          name: "case.accept",
+          serviceKey: "acceptJob",
+          scope: "job",
+          input: "JobInput",
+          output: "JobOutput",
+          schemaImports: {
+            JobInput: "src/contracts",
+            JobOutput: "src/contracts",
+          },
+          mode: "workflow",
+          timeoutSec: 120,
+          maxAttempts: 7,
+          idempotency: "required",
+        }],
+        exports: [],
+      }],
+      externalTokens: [],
+    }, { rootDir: "/app", outDir: "/app/generated" });
+
+    expect(rendered.applicationCode).toContain(
+      'import { JobInput, JobOutput } from "../src/contracts";',
+    );
+    expect(rendered.applicationCode).toContain(
+      'jobs: [{ className: "AcceptJob", name: "case.accept", serviceKey: "acceptJob", scope: "job", input: JobInput, output: JobOutput, mode: "workflow", timeoutSec: 120, maxAttempts: 7, idempotency: "required", }]',
+    );
+  });
+
   test("scope factory 在 provider 构造失败时回滚已创建实例", async () => {
     const fixtureRoot = await mkdtemp(join(tmpdir(), "supacloud-job-rollback-"));
     await writeFixtureProject(fixtureRoot, {
@@ -399,48 +440,48 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
       "case",
       "health",
     ]);
-    expect(modules[0].controllers).toEqual([]);
-    expect(modules[1].commands[0]).toMatchObject({
+    expect(requireValue(modules[0]).controllers).toEqual([]);
+    expect(requireValue(modules[1]).commands[0]).toMatchObject({
       className: "AcceptCaseCommand",
       name: "case.accept",
       permission: "case.accept",
     });
-    expect(typeof modules[1].createRequestScope).toBe("function");
-    expect(typeof modules[1].destroyRequestScope).toBe("function");
-    expect(modules[2].createRequestScope).toBeUndefined();
+    expect(typeof requireValue(modules[1]).createRequestScope).toBe("function");
+    expect(typeof requireValue(modules[1]).destroyRequestScope).toBe("function");
+    expect(requireValue(modules[2]).createRequestScope).toBeUndefined();
   });
 
   test("services 实例化与跨模块依赖注入", () => {
     const modules = compiled.createCompiledModules();
     const deps = { dbClient: { kind: "fake-db" } };
 
-    const auditServices = modules[0].createServices(deps, {});
+    const auditServices = requireValue(modules[0]).createServices(deps, {});
     expect(auditServices.auditConfig).toEqual({ level: "info" });
     expect(auditServices.logger).toEqual({ level: "info" });
     expect(auditServices.auditService.config).toEqual({ level: "info" });
     expect(auditServices.auditService.logger).toBe(auditServices.logger);
 
-    const caseServices = modules[1].createServices(deps, { audit: auditServices });
+    const caseServices = requireValue(modules[1]).createServices(deps, { audit: auditServices });
     expect(caseServices.caseRepository.db).toBe(deps.dbClient);
     expect(caseServices.caseService.repository).toBe(caseServices.caseRepository);
     expect(caseServices.caseService.audit).toBe(auditServices.auditService);
     expect(caseServices.acceptCaseCommand.caseService).toBe(caseServices.caseService);
 
-    const healthServices = modules[2].createServices(deps, {});
+    const healthServices = requireValue(modules[2]).createServices(deps, {});
     expect(healthServices.healthService.status()).toBe("ok");
   });
 
   test("request scope：ctx 注入且两次调用相互隔离", async () => {
     const modules = compiled.createCompiledModules();
     const deps = { dbClient: {} };
-    const caseModule = modules[1];
+    const caseModule = requireValue(modules[1]);
     const services = caseModule.createServices(deps, {
-      audit: modules[0].createServices(deps, {}),
+      audit: requireValue(modules[0]).createServices(deps, {}),
     });
 
     const ctx1 = { requestId: "r1" };
     const ctx2 = { requestId: "r2" };
-    const imported = { audit: modules[0].createServices(deps, {}) };
+    const imported = { audit: requireValue(modules[0]).createServices(deps, {}) };
     const createRequestScope = caseModule.createRequestScope;
     if (!createRequestScope) throw new Error("request scope factory is missing");
     const scope1 = await createRequestScope(services, ctx1, imported);
@@ -458,14 +499,14 @@ describe("generate：application.ts 可被 bun 直接执行", () => {
       pathToFileURL(join(rootDir, "src/features/case/contracts.ts")).href
     );
     const modules = compiled.createCompiledModules();
-    const controller = modules[1].controllers[0];
+    const controller = requireValue(requireValue(modules[1]).controllers[0]);
     expect(controller.path).toBe("/cases");
     expect(controller.serviceKey).toBe("caseController");
     expect(controller.scope).toBe("request");
     expect(controller.routes).toHaveLength(1);
-    expect(controller.routes[0].body).toBe(contracts.CreateCaseBody);
-    expect(controller.routes[0].params).toBe(contracts.AcceptParams);
-    expect(controller.routes[0].response).toBe(contracts.AcceptResult);
+    expect(requireValue(controller.routes[0]).body).toBe(contracts.CreateCaseBody);
+    expect(requireValue(controller.routes[0]).params).toBe(contracts.AcceptParams);
+    expect(requireValue(controller.routes[0]).response).toBe(contracts.AcceptResult);
   });
 
   test("checkProject reports matching artifacts and detects drift", async () => {
@@ -807,6 +848,32 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     expect(rendered.clientCode).toContain('"tier": "enterprise"');
   });
 
+  test("renderApplication preserves route contract classification in the compiled descriptor", () => {
+    const rendered = renderApplication({
+      modules: [{
+        name: "contracts", className: "ContractsModule", file: "src/contracts.module.ts", line: 1,
+        imports: [], providers: [], commands: [], queries: [], exports: [],
+        controllers: [{
+          className: "ContractsController", path: "/contracts", scope: "application", deps: [],
+          file: "src/contracts.controller.ts", importPath: "./contracts.controller",
+          routes: [{
+            method: "POST", path: "/items", handler: "create",
+            contract: { body: "domain", response: "native-json", evidence: "items.test.ts" },
+            schemaKinds: { body: "declared", response: "declared" },
+            nativeResponse: true,
+          }],
+        }],
+      }],
+      externalTokens: [],
+    }, { rootDir: "/app", outDir: "/app/generated" });
+
+    expect(rendered.applicationCode).toContain(
+      'contract: {"body":"domain","response":"native-json","evidence":"items.test.ts"}',
+    );
+    expect(rendered.applicationCode).toContain('schemaKinds: {"body":"declared","response":"declared"}');
+    expect(rendered.applicationCode).toContain("nativeResponse: true");
+  });
+
   test("renderApplication and renderClient emit canDeactivate guards and tree-shakable token factory", () => {
     const rendered = renderApplication(
       {
@@ -1133,7 +1200,7 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     );
   });
 
-  test("relativeImportPath 跨平台与反斜杠路径解析", () => {
+  test("relativeImportPath handles Windows and POSIX paths", () => {
     expect(
       relativeImportPath(
         "D:\\a\\supacloud\\supacloud\\packages\\supacloud-lite\\test\\fixtures\\starter\\generated",
@@ -1148,12 +1215,9 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
       ),
     ).toBe("../src/service");
 
-    expect(
-      relativeImportPath("/project/generated", "/project/src/service.ts"),
-    ).toBe("../src/service");
-
-    expect(
-      relativeImportPath("/project/src", "/project/src/service.ts"),
-    ).toBe("./service");
+    expect(relativeImportPath("/project/generated", "/project/src/service.ts"))
+      .toBe("../src/service");
+    expect(relativeImportPath("/project/src", "/project/src/service.ts"))
+      .toBe("./service");
   });
 });

@@ -8,6 +8,8 @@ import { renderClient } from "./generate";
 import type { ApplicationGraph } from "./types";
 import { writeFixtureProject } from "./fixtures/helpers";
 
+const typeboxPath = join(import.meta.dir, "../node_modules/@sinclair/typebox");
+
 const graph: ApplicationGraph = {
   externalTokens: [],
   modules: [{
@@ -46,6 +48,9 @@ test("generated client requires inherited path parameters and a decoder for type
       strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
+      ignoreDeprecations: "6.0",
+      baseUrl: root,
+      paths: { "@sinclair/typebox": [typeboxPath] },
     });
     expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
       .toEqual([]);
@@ -64,6 +69,112 @@ test("generated client requires inherited path parameters and a decoder for type
     await api.items.get({ params: { tenantId: "a/b", id: 1 } });
     expect(calls).toBe(1);
     expect(client.buildRouteUrl("/:id/:idLong", { id: "a", idLong: "b" })).toBe("/a/b");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("generated client requires request sections covered by route schemas", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-client-request-types-"));
+  try {
+    const schemaGraph: ApplicationGraph = {
+      externalTokens: [],
+      modules: [{
+        name: "items", className: "ItemsModule", file: "items.ts", line: 1,
+        imports: [], providers: [], commands: [], queries: [], exports: [],
+        controllers: [{
+          className: "ItemsController", path: "/items", scope: "application",
+          deps: [], file: "items.ts", importPath: "./items",
+          schemaImports: {
+            Body: "./schemas",
+            Headers: "./schemas",
+            Cookie: "./schemas",
+            Result: "./schemas",
+          },
+          routes: [{
+            method: "POST", path: "/create", handler: "create",
+            body: "Body", headers: "Headers", cookie: "Cookie", response: "Result",
+          }],
+        }],
+      }],
+    };
+    await writeFixtureProject(root, {
+      "client.ts": renderClient(schemaGraph),
+      "schemas.ts": [
+        'import { Type } from "@sinclair/typebox";',
+        'export const Body = Type.Object({ name: Type.String() });',
+        'export const Headers = Type.Object({ authorization: Type.String() });',
+        'export const Cookie = Type.Object({ session: Type.String() });',
+        'export const Result = Type.Object({ id: Type.String() });',
+      ].join("\n"),
+      "consumer.ts": [
+        'import { createApiClient } from "./client";',
+        "const client = createApiClient();",
+        "// @ts-expect-error Declared body schemas make body required.",
+        "client.items.create({ headers: { authorization: \"token\" }, cookie: { session: \"s\" } });",
+        "// @ts-expect-error Declared header schemas make headers required.",
+        "client.items.create({ body: { name: \"item\" }, cookie: { session: \"s\" } });",
+        "// @ts-expect-error Declared cookie schemas make cookie required.",
+        "client.items.create({ body: { name: \"item\" }, headers: { authorization: \"token\" } });",
+        "const valid: Promise<{ id: string }> = client.items.create({ body: { name: \"item\" }, headers: { authorization: \"token\" }, cookie: { session: \"s\" } });",
+        "void valid;",
+      ].join("\n"),
+    });
+    const program = ts.createProgram([join(root, "consumer.ts")], {
+      strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
+      noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
+      ignoreDeprecations: "6.0",
+      baseUrl: root,
+      paths: { "@sinclair/typebox": [typeboxPath] },
+    });
+    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
+      .toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("generated client requires params when a params schema exists without a path token", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-client-params-schema-"));
+  try {
+    const paramsGraph: ApplicationGraph = {
+      externalTokens: [],
+      modules: [{
+        name: "items", className: "ItemsModule", file: "items.ts", line: 1,
+        imports: [], providers: [], commands: [], queries: [], exports: [],
+        controllers: [{
+          className: "ItemsController", path: "/items", scope: "application",
+          deps: [], file: "items.ts", importPath: "./items",
+          schemaImports: { Params: "./schemas" },
+          routes: [{ method: "GET", path: "/search", handler: "search", params: "Params" }],
+        }],
+      }],
+    };
+    await writeFixtureProject(root, {
+      "client.ts": renderClient(paramsGraph),
+      "schemas.ts": [
+        'import { Type } from "@sinclair/typebox";',
+        'export const Params = Type.Object({ owner: Type.String() });',
+      ].join("\n"),
+      "consumer.ts": [
+        'import { createApiClient } from "./client";',
+        "const client = createApiClient();",
+        "// @ts-expect-error A declared params schema makes params required even without :path syntax.",
+        "client.items.search();",
+        "const valid: Promise<unknown> = client.items.search({ params: { owner: \"team\" } });",
+        "void valid;",
+      ].join("\n"),
+    });
+    const program = ts.createProgram([join(root, "consumer.ts")], {
+      strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
+      noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
+      ignoreDeprecations: "6.0", baseUrl: root,
+      paths: { "@sinclair/typebox": [typeboxPath] },
+    });
+    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
+      .toEqual([]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
