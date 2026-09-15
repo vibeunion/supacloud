@@ -186,6 +186,14 @@ remain synchronized and detects architectural drift at build time.
 
 ## Validated HTTP Contracts
 
+Browser applications should import the browser-safe HTTP surface from
+`@supacloud/app/browser`. The root `@supacloud/app` entrypoint includes the
+Bun/Node DI runtime and is intended for server applications.
+
+```ts
+import { HttpClient, HttpContractError, type HttpContract } from "@supacloud/app/browser";
+```
+
 `HttpClient.execute(contract, input, options?)` infers input and result types from
 `HttpContract` decoders. Each decoder accepts `unknown` and must reject invalid
 values. A TypeBox, Zod, or application decoder can be used without a new runtime
