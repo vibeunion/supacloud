@@ -96,18 +96,21 @@ test('clean CI builds local dependencies before checking command consumers', () 
   }
 });
 
+/** @param {string} spec */
 function notFoundError(spec) {
-  const error = new Error(`Command failed: npm view ${spec} version --json --registry=https://registry.npmjs.org`);
+  const error = /** @type {Error & { stderr?: string }} */ (new Error(`Command failed: npm view ${spec} version --json --registry=https://registry.npmjs.org`));
   error.stderr = `npm error code E404\nnpm error 404 No match found for version ${spec.split('@').at(-1)}`;
   return error;
 }
 
 test('just-published sibling 404s are retried until npm view succeeds', async () => {
+  /** @type {number[]} */
   const views = [];
+  /** @type {number[]} */
   const sleeps = [];
   await assertPublishedDependencies(['@supacloud/app@0.14.0'], {
     delays: [1, 1],
-    sleep: async (ms) => {
+    sleep: async (/** @type {number} */ ms) => {
       sleeps.push(ms);
     },
     runNpm: async () => {
@@ -157,10 +160,10 @@ test('publish-npm packages declare a GitHub repository URL for provenance', () =
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
   const job = workflow.split('\n  publish-npm:\n')[1]?.split('\n  sync-')[0];
   assert.ok(job);
-  const directories = [...job.matchAll(/working-directory: packages\/([^\n]+)/g)].map((match) => match[1]);
+  const directories = [...job.matchAll(/working-directory: packages\/([^\n]+)/g)].flatMap((match) => match[1] ? [match[1]] : []);
   assert.ok(directories.includes('function-adapter'));
   for (const name of directories) {
     const pkg = JSON.parse(readFileSync(new URL(`../../packages/${name}/package.json`, import.meta.url), 'utf8'));
-    assert.match(String(pkg.repository?.url ?? ''), /github\.com\/vibeunion\/supacloud/, name);
+    assert.ok(/github\.com\/vibeunion\/supacloud/.test(String(pkg.repository?.url ?? '')), name);
   }
 });

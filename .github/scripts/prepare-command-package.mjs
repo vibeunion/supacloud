@@ -50,7 +50,9 @@ async function readJson(path) { return JSON.parse(await readFile(path, 'utf8'));
 
 /** @param {unknown} error */
 export function isNpmNotFoundError(error) {
-  const text = [error && error.stdout, error && error.stderr, error instanceof Error ? error.message : error]
+  const candidate = error && typeof error === 'object' ? error : {};
+  const record = /** @type {{ stdout?: unknown, stderr?: unknown, message?: unknown }} */ (candidate);
+  const text = [record.stdout, record.stderr, error instanceof Error ? error.message : error]
     .filter((value) => typeof value === 'string')
     .join('\n');
   return NPM_NOT_FOUND_PATTERN.test(text);
@@ -79,10 +81,11 @@ export async function assertPublishedDependencies(required, options = {}) {
         if (typeof published === 'string' && spec.endsWith(`@${published}`)) break;
         throw new Error(`Dependency is not published: ${spec}`);
       } catch (error) {
-        if (!isNpmNotFoundError(error) || attempt >= delays.length) {
+        const delay = delays[attempt];
+        if (!isNpmNotFoundError(error) || delay === undefined) {
           throw error instanceof Error ? error : new Error(String(error));
         }
-        await sleep(delays[attempt]);
+        await sleep(delay);
         attempt += 1;
       }
     }
