@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.14.1...elysia-v0.15.0) (2026-09-16)
+
+
+### Features
+
+* **framework:** runtime acceptance and versioned upgrade gates ([#1318](https://github.com/vibeunion/supacloud/issues/1318)) ([69dfba4](https://github.com/vibeunion/supacloud/commit/69dfba4f44ca3bd9a35b8a5f6fca91d61c9c2f0b))
+
 ## [0.14.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.14.0...elysia-v0.14.1) (2026-09-15)
 
 

@@ -153,7 +153,7 @@ bunx supacloud-compiler migrate --root . --from-version 0.11.0 --to-version 0.12
 `from -> to` 顺序执行，不按数组顺序猜测路径。
 
 显式版本模式要求项目 `node_modules` 中安装经过验收的配套依赖：
-`@supacloud/app 0.14.0`、`@supacloud/elysia 0.14.1`、`elysia 1.4.30`、
+`@supacloud/app 0.14.0`、`@supacloud/elysia 0.15.0`、`elysia 1.4.30`、
 `typescript 7.0.2`，以及与当前运行的编译器完全相同版本的
 `@supacloud/compiler`。这些包独立发布，不能通过“相同 minor”推断兼容性。
 未验收版本和缺失依赖返回 `migration-dependency-incompatible`；命令不会擅自

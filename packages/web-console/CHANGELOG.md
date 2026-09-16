@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.39.0...web-console-v0.39.1) (2026-09-16)
+
+
+### Documentation
+
+* **web-console:** clarify svadmin package provenance ([#1319](https://github.com/vibeunion/supacloud/issues/1319)) ([d0e4379](https://github.com/vibeunion/supacloud/commit/d0e437960fef8021d967947290e59a392d42df68))
+
 ## [0.39.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.38.1...web-console-v0.39.0) (2026-09-14)
 
 
