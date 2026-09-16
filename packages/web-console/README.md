@@ -35,6 +35,9 @@ The console uses `@svadmin/ui@0.70.0`, `@svadmin/core@0.50.0`,
 `@svadmin/ai-elements@0.5.1`, `@svadmin/sveltekit@0.10.7`, and
 `@svadmin/elysia@0.12.7`.
 
+Use versions published on npm when upgrading these packages. A GitHub release
+alone does not make a package version installable.
+
 Tailwind v4 configuration lives in `src/app.css`. Import
 `@svadmin/ui/app.theme.css` once after Tailwind, not alongside
 `@svadmin/ui/app.css`. This entry includes precompiled component styles and
