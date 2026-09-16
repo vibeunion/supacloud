@@ -830,6 +830,8 @@ export function createModulePlugin(
     "response", "responses", "contract", "schemaKinds", "nativeResponse", "invoker",
     "command", "aspects",
     "paramTransforms", "paramDefaults", "queryTransforms", "queryDefaults", "title", "data",
+    // defineJsonContract can be spread into a route; these helpers are not hooks.
+    "input", "result", "request",
   ]);
   for (const controller of compiled.controllers) {
     for (const route of controller.routes) {
