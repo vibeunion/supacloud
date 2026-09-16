@@ -147,7 +147,11 @@ async function openRun(runId: string): Promise<void> {
     selected = run;
     pendingCommand = null;
     pendingMigration = null;
+    pendingNotice = null;
     ($('#reason') as HTMLTextAreaElement).value = '';
+    for (const selector of ['#notice-reason','#recovery-reason','#migration-reason','#migration-version','#target']) {
+      ($(selector) as HTMLInputElement).value = '';
+    }
     renderDetail();
     renderRows();
   } catch (error) { if (generation === detailGeneration) announce(error instanceof Error ? error.message : '详情加载失败', true); }
