@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>审批工作台</title>
+  <link rel="stylesheet" href="./workbench.css">
+  <script type="module" src="./workbench.js"></script>
+</head>
+<body>
+  <header><div><span class="brand">SupaCloud</span><h1>审批工作台</h1></div><span id="identity">正在验证身份</span></header>
+  <main>
+    <nav aria-label="审批视图">
+      <button data-view="inbox" aria-pressed="true">我的待办</button>
+      <button data-view="done" aria-pressed="false">已办</button>
+      <button data-view="started" aria-pressed="false">我发起的</button>
+      <button data-view="delegated" aria-pressed="false">委托给我</button>
+      <button id="operations" hidden>运行健康</button><button id="preview-open">流程预览</button>
+      <button id="refresh" class="icon-button" title="刷新" aria-label="刷新">
+        <!-- Lucide RefreshCw, ISC, copyright Lucide Icons and Contributors; see LICENSE-icons.txt. -->
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/>
+          <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>
+        </svg>
+      </button>
+    </nav>
+    <p id="feedback" role="status" aria-live="polite"></p>
+    <section class="workspace">
+      <div class="queue">
+        <div class="queue-title"><h2 id="list-title">我的待办</h2><span id="count"></span></div>
+        <div class="table-scroll"><table><thead><tr><th>业务单据</th><th>流程</th><th>状态</th><th>截止时间</th><th>轮次</th></tr></thead><tbody id="rows"></tbody></table></div>
+        <p id="list-state" role="status">正在加载</p>
+        <button id="more" hidden>加载更多</button>
+      </div>
+      <aside id="detail" aria-label="审批详情" hidden>
+        <div class="detail-title"><h2 id="entity-title"></h2><button id="close-detail" title="关闭详情" aria-label="关闭详情">关闭</button></div>
+        <p id="detail-state"></p>
+        <dl id="summary"></dl>
+        <div id="graph" class="graph" aria-label="流程节点"></div>
+        <h3>审批任务</h3><ul id="tasks"></ul>
+        <form id="command">
+          <label>操作<select id="action"><option value="approve">通过</option><option value="reject">拒绝终止</option><option value="return">退回修改</option><option value="cancel">撤销</option><option value="resubmit">重新提交</option><option value="claim">领取</option><option value="release">释放</option><option value="transfer">转交</option><option value="delegate">委托</option><option value="resolve">完成委托</option><option value="add">加签</option></select></label>
+          <label id="target-field" hidden>目标人员<input id="target" maxlength="128" autocomplete="off"></label>
+          <div id="snapshot-fields" hidden><label>业务版本<input id="revision" maxlength="256"></label><label>内容摘要<input id="digest" maxlength="64" spellcheck="false"></label></div>
+          <label>处理意见<textarea id="reason" rows="3" maxlength="4000"></textarea></label>
+          <button id="submit" type="submit" class="primary">提交</button>
+        </form>
+        <section id="recovery" hidden><h3>运行恢复</h3><label>恢复类型<select id="recovery-kind"><option value="execution">失败执行</option><option value="outcome">死信结果</option></select></label><label>恢复原因<input id="recovery-reason" maxlength="4000"></label><button id="recover">执行恢复</button><h3>实例迁移</h3><label>目标定义版本<input id="migration-version" type="number" min="1" max="2147483647"></label><label>迁移原因<input id="migration-reason" maxlength="4000"></label><button id="migrate">重新审批并迁移</button></section>
+        <details id="notice-section" hidden><summary>通知投递</summary><ul id="notices"></ul><button id="notices-more" hidden>更多通知</button><label>重试原因<input id="notice-reason" maxlength="4000"></label></details>
+        <details><summary>审批轮次</summary><ul id="rounds"></ul><button id="rounds-more" hidden>更多轮次</button></details>
+        <details open><summary>审计记录</summary><ol id="events"></ol><button id="events-more" hidden>更多记录</button></details>
+        <details><summary>实例标识</summary><code id="run-id"></code></details>
+      </aside>
+    </section>
+  </main>
+  <dialog id="health-dialog"><h2>运行健康</h2><div id="health"></div><form method="dialog"><button>关闭</button></form></dialog>
+  <dialog id="preview-dialog"><h2>流程预览</h2><form id="preview-form"><label>流程定义<textarea id="definition" rows="8" spellcheck="false"></textarea></label><label>审批人样例<textarea id="samples" rows="3" spellcheck="false">{}</textarea></label><label>分支事实<textarea id="facts" rows="3" spellcheck="false">{}</textarea></label><button class="primary">校验并预览</button></form><pre id="preview-result"></pre><form method="dialog"><button>关闭</button></form></dialog>
+</body>
+</html>
