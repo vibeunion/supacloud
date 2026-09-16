@@ -61,6 +61,6 @@ describe('defineDatabaseModule', () => {
       ],
     });
     expect(module.policies).toHaveLength(1);
-    expect(module.functions[0].security).toBe('definer');
+    expect(module.functions[0]?.security).toBe('definer');
   });
 });

@@ -1,11 +1,13 @@
-import { CommandError, canonicalCommandJson, decodeDurableCommandReceipt, type CommandIdentity } from "@supacloud/contracts";
-import { checkAuthorization, commandContext, type PersistentCommandDefinition, type RecoveryPrincipal } from "./context";
+import { CommandError, canonicalCommandJson, type CommandIdentity } from "@supacloud/contracts";
+import { commandContext, type PersistentCommandDefinition, type RecoveryPrincipal } from "./context";
 import type { CommandStore, OperationReference } from "./store";
+import { createExecutionPolicy, ExecutionPolicyError, type ExecutionPolicyOptions } from "./execution-policy";
 
-export interface ExternalDispatch { idempotencyKey: string }
+export interface ExternalDispatch { idempotencyKey: string; signal?: AbortSignal }
 type TransactionOf<Store extends CommandStore<unknown>> = Store extends CommandStore<infer Transaction> ? Transaction : never;
 type ExternalCommandDefinition<Input, Result, Store extends CommandStore<unknown>> =
   Omit<PersistentCommandDefinition<Input, Result, TransactionOf<Store>>, "store"> & {
+    executionPolicy?: Omit<ExecutionPolicyOptions, "kind" | "retry">;
     store: Store;
     send(input: Input, dispatch: ExternalDispatch): Promise<unknown>;
     lookup(input: Input, dispatch: ExternalDispatch): Promise<unknown>;
@@ -16,6 +18,11 @@ export function createExternalCommand<Input, Result, Store extends CommandStore<
   definition: ExternalCommandDefinition<Input, Result, Store>,
 ) {
   const context = commandContext(definition as PersistentCommandDefinition<Input, Result, TransactionOf<Store>>);
+  const policy = createExecutionPolicy({
+    kind: "command",
+    ...(definition.executionPolicy?.timeoutMs === undefined ? {} : { timeoutMs: definition.executionPolicy.timeoutMs }),
+    ...(definition.executionPolicy?.circuit === undefined ? {} : { circuit: definition.executionPolicy.circuit }),
+  });
   const read = async (identity: CommandIdentity, key: string, value: unknown, principal?: RecoveryPrincipal) => {
     const request = await context.prepare(identity, key, value);
     return context.transaction(async (session) => {
@@ -34,7 +41,7 @@ export function createExternalCommand<Input, Result, Store extends CommandStore<
       return context.find(session, request, "external");
     });
   };
-  const reconcile = async (identity: CommandIdentity, key: string, value: unknown, principal?: RecoveryPrincipal) => {
+  const reconcile = async (identity: CommandIdentity, key: string, value: unknown, principal?: RecoveryPrincipal, signal?: AbortSignal) => {
     const request = await context.prepare(identity, key, value);
     const before = await read(identity, key, value, principal);
     if (before === null) return null;
@@ -42,7 +49,7 @@ export function createExternalCommand<Input, Result, Store extends CommandStore<
     if (before.status !== "confirmed") {
       try {
         const raw: unknown = JSON.parse(canonicalCommandJson(
-          await definition.lookup(request.input, { idempotencyKey: before.dispatchKey }),
+          await definition.lookup(request.input, { idempotencyKey: before.dispatchKey, ...(signal ? { signal } : {}) }),
         ));
         if (definition.matches(request.input, definition.result(raw)) === true) confirmation = { raw };
       } catch { /* An unavailable or negative lookup never authorizes another send. */ }
@@ -62,8 +69,9 @@ export function createExternalCommand<Input, Result, Store extends CommandStore<
   };
   return {
     kind: "external" as const,
-    async execute(identity: CommandIdentity, key: string, value: unknown) {
+    async execute(identity: CommandIdentity, key: string, value: unknown, signal?: AbortSignal) {
       const request = await context.prepare(identity, key, value);
+      return policy.execute(async (signal) => {
       const acquired = await context.transaction(async (session) => {
         await context.lock(session, request);
         const existing = await context.find(session, request, "external");
@@ -74,13 +82,20 @@ export function createExternalCommand<Input, Result, Store extends CommandStore<
         return { fresh: true, receipt };
       });
       if (!acquired.fresh) return acquired.receipt;
-      try { await definition.send(request.input, { idempotencyKey: acquired.receipt.dispatchKey }); }
+      if (signal.aborted) throw new CommandError("COMMAND_OUTCOME_UNKNOWN");
+      try { await definition.send(request.input, { idempotencyKey: acquired.receipt.dispatchKey, signal }); }
       catch { /* Intent is durable; transport errors cannot establish rollback. */ }
       try {
-        const receipt = await reconcile(identity, key, request.input);
+        const receipt = await reconcile(identity, key, request.input, undefined, signal);
         if (receipt === null) throw new Error("Missing receipt");
         return receipt;
       } catch { throw new CommandError("COMMAND_OUTCOME_UNKNOWN"); }
+      }, signal).catch((error: unknown) => {
+        if (error instanceof ExecutionPolicyError) {
+          throw new CommandError(error.code === "COMMAND_OUTCOME_UNKNOWN" ? error.code : "COMMAND_UNAVAILABLE");
+        }
+        throw error;
+      });
     },
     lookup: read, reconcile, flushAudit,
     async lookupByReference(identity: CommandIdentity, key: string) {
@@ -97,17 +112,6 @@ export function createExternalCommand<Input, Result, Store extends CommandStore<
     },
     async recover(principal: RecoveryPrincipal, reference: OperationReference) {
       if (reference.command !== definition.name) throw new CommandError("COMMAND_REJECTED");
-      const completed = await context.transaction(async (session) => {
-        await session.lock(reference);
-        const authorize = definition.authorizeRecovery;
-        if (!authorize) throw new CommandError("COMMAND_REJECTED");
-        await checkAuthorization(() => authorize(principal, reference, session.transaction));
-        const stored = await session.read(reference);
-        if (stored?.receipt.status !== "confirmed" || stored.receipt.audit !== "complete") return null;
-        if (stored.kind !== "external") throw new CommandError("COMMAND_RECEIPT_INVALID");
-        return decodeDurableCommandReceipt(stored.receipt, definition.result);
-      });
-      if (completed !== null) return completed;
       const request = await context.restore(reference, reference.operationId, principal);
       return request === null ? null : reconcile(reference, reference.operationId, request.input, principal);
     },

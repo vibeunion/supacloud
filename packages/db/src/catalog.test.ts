@@ -8,7 +8,7 @@ import {
 
 interface CapturedCall {
   sql: string;
-  params?: unknown[];
+  params: unknown[] | undefined;
 }
 
 /** Mock executor that routes by SQL keyword and returns fixed rows */
@@ -110,7 +110,7 @@ describe('readCatalog', () => {
   test('自定义 schemas 透传为参数', async () => {
     const { executor, calls } = mockExecutor([]);
     await readCatalog(executor, ['public', 'app']);
-    expect(calls[0].params).toEqual([['public', 'app']]);
+    expect(calls[0]?.params).toEqual([['public', 'app']]);
   });
 
   test('表行映射 rls 字段', async () => {
@@ -124,21 +124,21 @@ describe('readCatalog', () => {
   test('polcmd 映射为语义化操作名', async () => {
     const { executor } = mockExecutor(FULL_ROWS);
     const catalog = await readCatalog(executor);
-    expect(catalog.policies[0].command).toBe('select');
-    expect(catalog.policies[0].usingExpr).toBe('tenant_id = current_tenant()');
-    expect(catalog.policies[0].checkExpr).toBeUndefined();
-    expect(catalog.policies[1].command).toBe('all');
-    expect(catalog.policies[1].roles).toEqual(['service_role']);
+    expect(catalog.policies[0]?.command).toBe('select');
+    expect(catalog.policies[0]?.usingExpr).toBe('tenant_id = current_tenant()');
+    expect(catalog.policies[0]?.checkExpr).toBeUndefined();
+    expect(catalog.policies[1]?.command).toBe('all');
+    expect(catalog.policies[1]?.roles).toEqual(['service_role']);
   });
 
   test('prosecdef 映射 security，proconfig 提取 search_path', async () => {
     const { executor } = mockExecutor(FULL_ROWS);
     const catalog = await readCatalog(executor);
-    expect(catalog.functions[0].security).toBe('definer');
-    expect(catalog.functions[0].searchPath).toBe('public');
-    expect(catalog.functions[0].language).toBe('plpgsql');
-    expect(catalog.functions[1].security).toBe('invoker');
-    expect(catalog.functions[1].searchPath).toBeNull();
+    expect(catalog.functions[0]?.security).toBe('definer');
+    expect(catalog.functions[0]?.searchPath).toBe('public');
+    expect(catalog.functions[0]?.language).toBe('plpgsql');
+    expect(catalog.functions[1]?.security).toBe('invoker');
+    expect(catalog.functions[1]?.searchPath).toBeNull();
   });
 
   test('triggers 行映射 schema/table/name/enabled', async () => {

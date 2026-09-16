@@ -254,7 +254,7 @@ function sourceFileVersion(sourceFile: ts.SourceFile): string | undefined {
 }
 
 function readProjectConfig(rootDir: string): ProjectConfig {
-  const configPath = join(rootDir, "tsconfig.json");
+  const configPath = ts.findConfigFile(rootDir, ts.sys.fileExists) ?? join(rootDir, "tsconfig.json");
   if (!existsSync(configPath)) {
     return {
       options: {
@@ -266,7 +266,6 @@ function readProjectConfig(rootDir: string): ProjectConfig {
         skipLibCheck: true,
       },
       errors: [],
-      projectReferences: undefined,
       configFingerprint: "defaults",
     };
   }
@@ -297,7 +296,7 @@ function readProjectConfig(rootDir: string): ProjectConfig {
   return {
     options: parsed.options,
     errors: parsed.errors,
-    projectReferences: parsed.projectReferences,
+    ...(parsed.projectReferences ? { projectReferences: parsed.projectReferences } : {}),
     configFingerprint: JSON.stringify([...configReads]),
   };
 }

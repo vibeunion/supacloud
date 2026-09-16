@@ -63,11 +63,13 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "missing-token-factory": { code: "SC2009", docsUrl: "https://supacloud.dev/errors/SC2009" },
   "provider-type-mismatch": { code: "SC2010", docsUrl: "https://supacloud.dev/errors/SC2010" },
   "unsupported-provider-helper": { code: "SC2011", docsUrl: "https://supacloud.dev/errors/SC2011" },
+  "runtime-injection-disallowed": { code: "SC2012", docsUrl: "https://supacloud.dev/errors/SC2012" },
   "command-missing-permission": { code: "SC4001", docsUrl: "https://supacloud.dev/errors/SC4001" },
   "duplicate-command": { code: "SC4002", docsUrl: "https://supacloud.dev/errors/SC4002" },
   "route-command-unresolved": { code: "SC4003", docsUrl: "https://supacloud.dev/errors/SC4003" },
   "command-governance-unsupported": { code: "SC4004", docsUrl: "https://supacloud.dev/errors/SC4004" },
   "route-command-binding-disabled": { code: "SC4005", docsUrl: "https://supacloud.dev/errors/SC4005" },
+  "route-command-binding-disallowed": { code: "SC4005", docsUrl: "https://supacloud.dev/errors/SC4005" },
   "command-transaction-readonly": { code: "SC4006", docsUrl: "https://supacloud.dev/errors/SC4006" },
   "invalid-job-scope": { code: "SC4007", docsUrl: "https://supacloud.dev/errors/SC4007" },
   "dynamic-aspect-reference": { code: "SC4010", docsUrl: "https://supacloud.dev/errors/SC4010" },
@@ -84,6 +86,17 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "invalid-route-response-selector": { code: "SC3021", docsUrl: "https://supacloud.dev/errors/SC3021" },
   "conflicting-route-response-schema": { code: "SC3022", docsUrl: "https://supacloud.dev/errors/SC3022" },
   "duplicate-route-response-selector": { code: "SC3023", docsUrl: "https://supacloud.dev/errors/SC3023" },
+  "invalid-route-response-map": { code: "SC3024", docsUrl: "https://supacloud.dev/errors/SC3024" },
+  "route-contract-required": { code: "SC3025", docsUrl: "https://supacloud.dev/errors/SC3025" },
+  "route-contract-unverified": { code: "SC3026", docsUrl: "https://supacloud.dev/errors/SC3026" },
+  "route-contract-evidence-required": { code: "SC3027", docsUrl: "https://supacloud.dev/errors/SC3027" },
+  "command-persistence-required": { code: "SC4020", docsUrl: "https://supacloud.dev/errors/SC4020" },
+  "command-external-transaction": { code: "SC4021", docsUrl: "https://supacloud.dev/errors/SC4021" },
+  "command-permission-unsupported": { code: "SC4022", docsUrl: "https://supacloud.dev/errors/SC4022" },
+  "command-audit-unsupported": { code: "SC4023", docsUrl: "https://supacloud.dev/errors/SC4023" },
+  "command-idempotency-unsupported": { code: "SC4024", docsUrl: "https://supacloud.dev/errors/SC4024" },
+  "command-transaction-rpc-only": { code: "SC4025", docsUrl: "https://supacloud.dev/errors/SC4025" },
+  "command-transaction-unsupported": { code: "SC4026", docsUrl: "https://supacloud.dev/errors/SC4026" },
   "unused-root-provider": { code: "SC5001", docsUrl: "https://supacloud.dev/errors/SC5001" },
   "invalid-feature-states": { code: "SC6101", docsUrl: "https://supacloud.dev/errors/SC6101" },
   "duplicate-feature-transition": { code: "SC6102", docsUrl: "https://supacloud.dev/errors/SC6102" },
@@ -110,6 +123,16 @@ export function validateGraph(
 ): Diagnostic[] {
   const strict = typeof options === "boolean" ? options : (options.strict ?? false);
   const diagnostics: Diagnostic[] = [];
+  for (const module of graph.modules) {
+    for (const owner of [...module.providers, ...module.controllers]) {
+      if (owner.functionalInjects?.length) diagnostics.push({
+        severity: "error", code: "runtime-injection-disallowed", errorCode: "SC2012",
+        docsUrl: "https://supacloud.dev/errors/SC2012", file: owner.file,
+        message: "Property inject() requires runtime token resolution. Compiled applications require constructor injection.",
+        suggestion: "Move injected fields into typed constructor parameters with @Inject(TOKEN) where needed.",
+      });
+    }
+  }
 
   let moduleBoundaries: ModuleBoundaryRule[] | undefined;
   if (typeof options === "object") {
@@ -830,7 +853,7 @@ export function validateGraph(
           `模块 ${module.name} 的 command ${command.name} (${command.className}) 未声明 permission`,
           module.file,
           module.line,
-          "Add 'permission: string' to @Command({ ... }) or configure command execution capabilities permission=false.",
+          "Add 'permission: string' to @Command({ ... }); every executable command must declare its authorization capability.",
           {
             type: "add_command_permission",
             targetFile: module.providers.find((provider) =>

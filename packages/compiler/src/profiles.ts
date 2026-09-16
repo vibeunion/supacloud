@@ -175,8 +175,8 @@ export function getModuleBoundaryProfile(name: ModuleBoundaryPresetName): Module
     ...profile,
     rules: profile.rules.map((rule) => ({
       ...rule,
-      onlyDependOnLibsWithTags: rule.onlyDependOnLibsWithTags ? [...rule.onlyDependOnLibsWithTags] : undefined,
-      bannedDependenciesWithTags: rule.bannedDependenciesWithTags ? [...rule.bannedDependenciesWithTags] : undefined,
+      ...(rule.onlyDependOnLibsWithTags ? { onlyDependOnLibsWithTags: [...rule.onlyDependOnLibsWithTags] } : {}),
+      ...(rule.bannedDependenciesWithTags ? { bannedDependenciesWithTags: [...rule.bannedDependenciesWithTags] } : {}),
     })),
   };
 }

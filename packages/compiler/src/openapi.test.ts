@@ -445,4 +445,46 @@ export const OrderResponse = {
       await rm(root, { recursive: true, force: true });
     }
   });
+
+  test("resolves local schema refs for parameters and omits content for null-body responses", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-openapi-ref-"));
+    try {
+      const refGraph: ApplicationGraph = {
+        externalTokens: [],
+        modules: [{
+          name: "items", className: "ItemsModule", file: "src/items.module.ts", line: 1,
+          imports: [], providers: [], commands: [], queries: [], exports: [],
+          controllers: [{
+            className: "ItemsController", path: "/items/:id", scope: "request", deps: [],
+            file: "src/items.controller.ts", importPath: "src/items.controller",
+            schemaImports: { Params: "src/contracts", Empty: "src/contracts" },
+            routes: [{
+              method: "DELETE", path: "", handler: "remove", params: "Params",
+              responses: { "204": "Empty" },
+            }],
+          }],
+        }],
+      };
+      await writeFixtureProject(root, {
+        "src/contracts.ts": [
+          'export const Params = { $defs: { idParams: { type: "object", properties: { id: { type: "string", minLength: 2 } }, required: ["id"] } }, $ref: "#/$defs/idParams" };',
+          'export const Empty = { type: "undefined" };',
+        ].join("\n"),
+        "generated/openapi.ts": renderOpenApi(refGraph, { rootDir: root, outDir: join(root, "generated") }),
+      });
+      const generated = await import(pathToFileURL(join(root, "generated/openapi.ts")).href);
+      const document = record(generated.OPENAPI_DOCUMENT);
+      const operation = record(record(record(document.paths)["/items/{id}"]).delete);
+      const parameters = list(operation.parameters).map(record);
+      expect(parameters[0]).toMatchObject({
+        name: "id", in: "path", required: true,
+        schema: { type: "string", minLength: 2 },
+      });
+      expect(record(operation.responses)["204"]).toEqual({
+        description: "HTTP 204 response",
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });

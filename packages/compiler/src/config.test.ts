@@ -11,6 +11,7 @@ describe("SupaCloud default configuration", () => {
       root: "src",
       outDir: "generated",
       strict: true,
+      requireRouteContracts: true,
       generateClient: true,
       generatePermissions: true,
       treeShakeUnusedProviders: true,
@@ -63,6 +64,7 @@ describe("SupaCloud default configuration", () => {
       transaction: "rpc-only",
     });
   });
+
   test("passes customer boundary and type safety rules through the standard configuration", () => {
     const config = defineSupacloudConfig({
       moduleBoundaries: [{

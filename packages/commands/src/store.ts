@@ -1,4 +1,4 @@
 export type {
   OperationReference, StoredCommand, CommandStoreSession, CommandStore,
-  RecoveryScope, CommandRetentionStore,
+  RecoveryClaim, RecoveryScope, CommandRecoveryStore,
 } from "@supacloud/contracts";

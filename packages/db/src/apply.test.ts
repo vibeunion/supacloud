@@ -7,7 +7,7 @@ import { planModule, type ModulePlan } from './plan.js';
 
 interface CapturedCall {
   sql: string;
-  params?: unknown[];
+  params: unknown[] | undefined;
 }
 
 const files: Record<string, string> = {

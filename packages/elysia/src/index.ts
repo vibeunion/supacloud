@@ -97,6 +97,7 @@ export interface CompiledRoute {
   command?: string;
   /** Statically generated route aspects. */
   aspects?: ApplicationAspect[];
+  aspectPipeline?: ApplicationAspectPipeline;
 }
 
 export interface CompiledCommand {
@@ -109,6 +110,7 @@ export interface CompiledCommand {
   idempotency?: "required" | "none" | string;
   /** Statically generated command aspects. */
   aspects?: ApplicationAspect[];
+  aspectPipeline?: ApplicationAspectPipeline;
 }
 
 export interface CompiledJob {
@@ -125,6 +127,7 @@ export interface CompiledJob {
   maxAttempts?: number;
   idempotency?: "required" | "none";
   aspects?: ApplicationAspect[];
+  aspectPipeline?: ApplicationAspectPipeline;
 }
 
 export interface CompiledController {
@@ -159,6 +162,7 @@ export interface CompiledModule {
   jobs?: CompiledJob[];
   /** Statically generated module aspects. */
   aspects?: ApplicationAspect[];
+  aspectPipeline?: ApplicationAspectPipeline;
 }
 
 // ---------------------------------------------------------------------------
@@ -228,6 +232,12 @@ export type ApplicationAspect = (
   next: () => unknown | Promise<unknown>,
 ) => unknown | Promise<unknown>;
 
+export type ApplicationAspectPipeline = (
+  context: ApplicationAspectContext,
+  next: () => unknown | Promise<unknown>,
+  observe?: (stage: string, run: () => unknown | Promise<unknown>) => unknown | Promise<unknown>,
+) => unknown | Promise<unknown>;
+
 /**
  * Compose the compiler-emitted aspect list into a deterministic onion chain.
  * The runtime only executes the functions it receives; it never discovers or
@@ -266,6 +276,21 @@ function observedAspects(
       stage: `${boundary}.aspect[${index}]:${aspect.name || "anonymous"}`,
       ...executionTrace(context.requestContext),
     }, () => aspect(context, next))));
+}
+
+function descriptorPipeline(
+  descriptor: { aspects?: ApplicationAspect[]; aspectPipeline?: ApplicationAspectPipeline },
+  boundary: string,
+  observer?: ExecutionObserver,
+): ApplicationAspect {
+  const pipeline = descriptor.aspectPipeline;
+  if (!pipeline) return observedAspects(descriptor.aspects ?? [], boundary, observer);
+  return (context, next) => pipeline(context, next, observer
+    ? (stage, run) => observeExecution(observer, {
+      kind: context.kind, operation: context.name, stage: `${boundary}.${stage}`,
+      ...executionTrace(context.requestContext),
+    }, run)
+    : undefined);
 }
 
 export type CommandAuthorizer = (
@@ -640,7 +665,7 @@ export function createCommandExecutor(
 
 /** Execute at the business-selected boundary without binding or re-entering an HTTP route. */
 export async function executeCompiledCommand<Input, Result>(options: {
-  module: Pick<CompiledModule, "name" | "commands" | "aspects">;
+  module: Pick<CompiledModule, "name" | "commands" | "aspects" | "aspectPipeline">;
   command: string;
   input: Input;
   request: Request;
@@ -661,16 +686,17 @@ export async function executeCompiledCommand<Input, Result>(options: {
     request: options.request, requestContext: options.requestContext,
     services: options.services ?? {}, ...(options.scope ? { scope: options.scope } : {}),
   };
-  const aspects = composeAspects(
-    observedAspects(options.module.aspects ?? [], `module:${options.module.name}`, options.observer),
-    observedAspects(command.aspects ?? [], "command", options.observer),
-  );
+  const modulePipeline = descriptorPipeline(options.module, `module:${options.module.name}`, options.observer);
+  const commandPipeline = descriptorPipeline(command, "command", options.observer);
   // Authorization encloses aspects so denied calls cannot trigger their side effects.
   const value = await createCommandExecutor(options.governance, options.observer)(invocation,
-    once(() => aspects({ kind: "command", name: command.name, input: options.input,
+    once(async () => {
+      const context: ApplicationAspectContext = { kind: "command", name: command.name, input: options.input,
       request: options.request, requestContext: options.requestContext,
-      services: invocation.services, ...(invocation.scope ? { scope: invocation.scope } : {}), metadata: command },
-    once(() => options.handler(options.input)))));
+      services: invocation.services, ...(invocation.scope ? { scope: invocation.scope } : {}), metadata: command };
+      return modulePipeline(context,
+        once(() => commandPipeline(context, once(() => options.handler(options.input)))));
+    }));
   return options.decode(value);
 }
 
@@ -921,14 +947,14 @@ export function createModulePlugin(
           const routePipeline = observedAspects(route.aspects ?? [], "route", options.onExecution);
           const commandPipeline = observedAspects(commandAspects, "command", options.onExecution);
           const modulePipeline = observedAspects(compiled.aspects ?? [], `module:${compiled.name}`, options.onExecution);
-          const invokeRoute = () => routePipeline(
-            routeContext,
-            () => route.command
-              ? commandPipeline(commandContext, () => invokeCommand())
-              : invoke(),
+          const invokeRoute = () => modulePipeline(
+            route.command ? commandContext : routeContext,
+            once(() => routePipeline(routeContext, once(() => route.command
+              ? commandPipeline(commandContext, once(invoke))
+              : invoke()))),
           );
           const invokeCommand = () => {
-            if (!route.command) return invoke();
+            if (!route.command) return invokeRoute();
             if (!command) {
               throw new ApplicationError(`Command "${route.command}" is not registered`, {
                 code: "COMMAND_NOT_REGISTERED",
@@ -951,12 +977,9 @@ export function createModulePlugin(
             return observeExecution(options.onExecution, {
               kind: "command", operation: command.name, stage: "commandExecutor",
               ...executionTrace(requestContext),
-            }, () => commandExecutor(invocation, invoke));
+            }, () => commandExecutor(invocation, once(invokeRoute)));
           };
-          return modulePipeline(
-            route.command ? commandContext : routeContext,
-            invokeRoute,
-          );
+          return invokeCommand();
         };
         const result = options.injector
           ? await runInRequestContext(options.injector, [provideToken(REQUEST_CONTEXT, requestContext)], execute)

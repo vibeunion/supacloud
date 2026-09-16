@@ -10,6 +10,7 @@ export const WebhookReceiptSchema = t.Object({
   operationId: t.String(), dispatchKey: t.String(),
   status: t.Literal("confirmed"), audit: t.Literal("complete"), result: WebhookInputSchema,
 }, { additionalProperties: false });
+export const WebhookHeadersSchema = t.Object({ "idempotency-key": t.String({ minLength: 1 }) });
 export const WebhookKeySchema = t.Object({ key: t.String({ minLength: 1, maxLength: 200 }) });
 export const WebhookLookupSchema = t.Object({
   receipt: t.Union([WebhookReceiptSchema, t.Null()]),

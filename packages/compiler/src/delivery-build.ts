@@ -123,6 +123,7 @@ export async function buildDeliveryProject(
       const generated: Record<string, string> = {
         "application.ts": rendered.applicationCode,
         ...(rendered.clientCode === undefined ? {} : { "client.ts": rendered.clientCode }),
+        ...(rendered.openApiCode === undefined ? {} : { "openapi.ts": rendered.openApiCode }),
         ...(rendered.permissionsCode === undefined ? {} : { "permissions.ts": rendered.permissionsCode }),
       };
       const unsafe = scanGeneratedArtifacts(generated, true);

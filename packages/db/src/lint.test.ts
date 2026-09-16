@@ -12,9 +12,9 @@ describe('lintSql', () => {
     const sql = `create function public.f() returns int language sql security definer as $$ select 1 $$;`;
     const issues = lintSql(sql, 'f.sql');
     expect(codes(issues)).toContain('definer-no-search-path');
-    expect(issues[0].severity).toBe('error');
-    expect(issues[0].file).toBe('f.sql');
-    expect(issues[0].line).toBe(1);
+    expect(issues[0]?.severity).toBe('error');
+    expect(issues[0]?.file).toBe('f.sql');
+    expect(issues[0]?.line).toBe(1);
   });
 
   test('definer-no-search-path：带 set search_path 时不命中', () => {
@@ -25,7 +25,7 @@ describe('lintSql', () => {
   test('grant-to-public：授予 PUBLIC 报错', () => {
     const issues = lintSql('grant select on table public.cases to public;', 'g.sql');
     expect(codes(issues)).toContain('grant-to-public');
-    expect(issues[0].severity).toBe('error');
+    expect(issues[0]?.severity).toBe('error');
   });
 
   test('grant-to-public：授予具名角色不命中', () => {
@@ -51,7 +51,7 @@ describe('lintSql', () => {
   test('line 指向命中行', () => {
     const sql = `create table t (id int);\n\ndrop table t;`;
     const issues = lintSql(sql, 'm.sql');
-    expect(issues[0].line).toBe(3);
+    expect(issues[0]?.line).toBe(3);
   });
 
   test('non-idempotent-policy：create policy 前缺少 drop policy if exists', () => {
@@ -60,7 +60,7 @@ describe('lintSql', () => {
       'p.sql',
     );
     expect(codes(issues)).toContain('non-idempotent-policy');
-    expect(issues[0].severity).toBe('warn');
+    expect(issues[0]?.severity).toBe('warn');
   });
 
   test('non-idempotent-policy：先 drop policy if exists 则不命中', () => {

@@ -48,7 +48,8 @@ export async function renderGraphql(options: CompileOptions): Promise<GraphqlArt
     return result;
   }
   const paths = graphqlInputPaths(options);
-  const schemaPath = paths[0]!;
+  const schemaPath = paths[0];
+  if (schemaPath === undefined) throw new Error("GraphQL configuration did not resolve a schema path");
   const localPath = (path: string): string => relative(options.rootDir, path).split(sep).join("/");
   const contract: GraphqlContractSummary = {
     schema: localPath(schemaPath),
@@ -63,8 +64,8 @@ export async function renderGraphql(options: CompileOptions): Promise<GraphqlArt
       severity: "error",
       code,
       message: error instanceof Error ? error.message : String(error),
-      file: source ? localPath(source) : undefined,
-      line: gql?.locations?.[0]?.line,
+      ...(source ? { file: localPath(source) } : {}),
+      ...(gql?.locations?.[0] ? { line: gql.locations[0].line } : {}),
       suggestion: "Update the role-scoped local schema snapshot or correct the query, then recompile.",
     });
   };
@@ -110,18 +111,20 @@ export async function renderGraphql(options: CompileOptions): Promise<GraphqlArt
         severity: "error",
         code: "graphql-query-only",
         message: "Only GraphQL queries are supported. Use the governed Command API for business writes; subscriptions require a separate transport.",
-        file: definition.loc ? localPath(definition.loc.source.name) : undefined,
-        line: definition.loc?.startToken.line,
+        ...(definition.loc ? {
+          file: localPath(definition.loc.source.name), line: definition.loc.startToken.line,
+        } : {}),
         suggestion: "Remove this operation from the query documents. Do not bypass Command permissions, audit or transaction governance.",
       });
     }
     if (!definition.name) {
       diagnostic("graphql-operation-name-required", new GraphQLError("Name each query to generate a stable client method.", { nodes: definition }));
+    } else if (!definition.loc) {
+      diagnostic("graphql-document-invalid", new Error("GraphQL operation has no source location."));
     } else {
       queryEntries.push({
         name: definition.name.value,
-        file: localPath(definition.loc!.source.name),
-        line: definition.loc!.startToken.line,
+        file: localPath(definition.loc.source.name), line: definition.loc.startToken.line,
       });
     }
   }
@@ -145,6 +148,7 @@ export async function renderGraphql(options: CompileOptions): Promise<GraphqlArt
       documents,
       config,
       // Operations v6 owns referenced enums and inputs as well as operation types.
+
       plugins: [{ operations: {} }],
       pluginMap: { operations },
     });

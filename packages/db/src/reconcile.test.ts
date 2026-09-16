@@ -131,14 +131,16 @@ describe('reconcileModule', () => {
     const report = reconcileModule(baseModule, catalog);
     const undeclared = report.issues.filter((i) => i.code === 'undeclared-policy');
     expect(undeclared).toHaveLength(1);
-    expect(undeclared[0].severity).toBe('warn');
-    expect(undeclared[0].object).toContain('cases_extra');
+    expect(undeclared[0]?.severity).toBe('warn');
+    expect(undeclared[0]?.object).toContain('cases_extra');
     expect(report.ok).toBe(true);
   });
 
   test('rls-disabled：归属表未开启 RLS', () => {
     const catalog = cloneCatalog();
-    catalog.tables[0].rlsEnabled = false;
+    const table = catalog.tables[0];
+    if (!table) throw new Error('Missing fixture table');
+    table.rlsEnabled = false;
     const report = reconcileModule(baseModule, catalog);
     expect(report.ok).toBe(false);
     expect(codes(report)).toContain('rls-disabled');
@@ -146,7 +148,9 @@ describe('reconcileModule', () => {
 
   test('definer-without-search-path：searchPath 为 null', () => {
     const catalog = cloneCatalog();
-    catalog.functions[0].searchPath = null;
+    const fn = catalog.functions[0];
+    if (!fn) throw new Error('Missing fixture function');
+    fn.searchPath = null;
     const report = reconcileModule(baseModule, catalog);
     expect(report.ok).toBe(false);
     expect(codes(report)).toContain('definer-without-search-path');
@@ -155,16 +159,20 @@ describe('reconcileModule', () => {
   test('definer-without-search-path：searchPath 含 pg_temp 或空元素', () => {
     for (const bad of ['public, pg_temp', 'public, ', '"$user", public,,']) {
       const catalog = cloneCatalog();
-      catalog.functions[0].searchPath = bad;
+      const fn = catalog.functions[0];
+      if (!fn) throw new Error('Missing fixture function');
+      fn.searchPath = bad;
       const report = reconcileModule(baseModule, catalog);
       expect(codes(report)).toContain('definer-without-search-path');
     }
   });
 
   test('security-mismatch：声明 invoker 但 catalog 为 definer（路径固定则不报 error）', () => {
+    const fn = baseModule.functions[0];
+    if (!fn) throw new Error('Missing fixture function');
     const module = defineDatabaseModule({
       ...baseModule,
-      functions: [{ ...baseModule.functions[0], security: 'invoker' }],
+      functions: [{ ...fn, security: 'invoker' }],
     });
     const report = reconcileModule(module, cloneCatalog());
     expect(codes(report)).toContain('security-mismatch');
@@ -216,13 +224,15 @@ describe('reconcileModule', () => {
       'public.cases.cases_extra',
       'public.cases.cases_disabled',
     ]);
-    expect(undeclared[1].message).toContain('已禁用');
+    expect(undeclared[1]?.message).toContain('已禁用');
     expect(report.ok).toBe(true);
   });
 
   test('已声明的禁用触发器不报 undeclared-trigger', () => {
     const catalog = cloneCatalog();
-    catalog.triggers[0].enabled = false;
+    const trigger = catalog.triggers[0];
+    if (!trigger) throw new Error('Missing fixture trigger');
+    trigger.enabled = false;
     const report = reconcileModule(baseModule, catalog);
     expect(codes(report)).not.toContain('undeclared-trigger');
     expect(codes(report)).not.toContain('missing-trigger');

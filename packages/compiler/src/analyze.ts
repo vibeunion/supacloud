@@ -25,7 +25,9 @@ import type {
   Scope,
   TokenKind,
 } from "./types";
+import { COMPILER_DIAGNOSTIC_CODES } from "./validate";
 import { camelName } from "./util";
+import { scanRuntimeDi } from "./static-di";
 
 const DEFAULT_INCLUDE = ["**/*.module.ts", "**/*.ts"];
 const ROUTE_DECORATORS: Record<string, RouteNode["method"]> = {
@@ -59,6 +61,13 @@ function canonicalRouteResponseSelector(value: string): string {
 
 function isScope(value: string): value is Scope {
   return SCOPES.some((scope) => scope === value);
+}
+
+function withDiagnosticMetadata(diagnostic: Diagnostic): Diagnostic {
+  const metadata = COMPILER_DIAGNOSTIC_CODES[diagnostic.code];
+  return metadata
+    ? { ...diagnostic, errorCode: metadata.code, docsUrl: metadata.docsUrl }
+    : diagnostic;
 }
 
 interface TokenInfo {
@@ -208,6 +217,9 @@ export async function analyzeProject(
     nativeTraitFiles.set(trait.file, kinds);
   }
   for (const sf of sourceFiles) {
+    if (!/\.(?:test|spec)\.[cm]?tsx?$/.test(sf.fileName)) {
+      ctx.diagnostics.push(...scanRuntimeDi(sf, sourcePath(rootDir, sf.fileName)));
+    }
     indexFile(sf, ctx);
   }
 
@@ -503,7 +515,7 @@ export async function analyzeProject(
   return {
     modules,
     externalTokens,
-    diagnostics: ctx.diagnostics,
+    diagnostics: ctx.diagnostics.map(withDiagnosticMetadata),
     tokenNames,
     ...(cache ? { cacheStats: { reusedModules, reanalyzedModules } } : {}),
   };

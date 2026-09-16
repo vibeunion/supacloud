@@ -145,9 +145,11 @@ function parse(file: string, text: string): ts.SourceFile {
   return ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 }
 
-function unique<T>(items: readonly T[], description: string): T {
+function unique<T extends ts.Node>(items: readonly T[], description: string): T {
   if (items.length !== 1) throw new Error(`Expected exactly one ${description}; found ${items.length}`);
-  return items[0];
+  const item = items[0];
+  if (!item) throw new Error(`Missing ${description}`);
+  return item;
 }
 
 function identifier(value: string): void {

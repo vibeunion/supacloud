@@ -47,7 +47,7 @@ export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
   outDir: "generated",
   include: ["**/*.module.ts", "**/*.ts"],
   strict: true,
-  requireRouteContracts: false,
+  requireRouteContracts: true,
   generateClient: true,
   generateOpenApi: true,
   generatePermissions: true,
@@ -171,17 +171,17 @@ export function resolveSupacloudConfig(
     ...(resolved.openApi === undefined ? {} : { openApi: resolved.openApi }),
     generatePermissions: resolved.generatePermissions ?? DEFAULT_SUPACLOUD_CONFIG.generatePermissions,
     moduleBoundaryPreset: resolved.moduleBoundaryPreset ?? DEFAULT_SUPACLOUD_CONFIG.moduleBoundaryPreset,
-    commandCapabilities: resolved.commandCapabilities,
+    ...(resolved.commandCapabilities ? { commandCapabilities: resolved.commandCapabilities } : {}),
     ...(resolved.moduleBoundaries ? { moduleBoundaries: resolved.moduleBoundaries } : {}),
     ...(resolved.typeSafety ? { typeSafety: resolved.typeSafety } : {}),
     ...(resolved.allowRouteCommandBindings === undefined ? {} : { allowRouteCommandBindings: resolved.allowRouteCommandBindings }),
     ...(resolved.disallowControllerDirectDb === undefined ? {} : { disallowControllerDirectDb: resolved.disallowControllerDirectDb }),
     ...(resolved.detectOrphanModules === undefined ? {} : { detectOrphanModules: resolved.detectOrphanModules }),
     treeShakeUnusedProviders: resolved.treeShakeUnusedProviders ?? DEFAULT_SUPACLOUD_CONFIG.treeShakeUnusedProviders,
-    graphql: resolved.graphql ? {
+    ...(resolved.graphql ? { graphql: {
       ...resolved.graphql,
       schema: resolve(cwd, resolved.graphql.schema),
-    } : undefined,
+    } } : {}),
   };
 }
 

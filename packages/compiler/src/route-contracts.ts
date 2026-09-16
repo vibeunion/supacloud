@@ -1,4 +1,5 @@
 import type { ApplicationGraph, Diagnostic } from "./types";
+import { COMPILER_DIAGNOSTIC_CODES } from "./validate";
 
 /** Declaration coverage only; runtime decoding and database behavior require separate tests. */
 export function inspectRouteContracts(graph: ApplicationGraph) {
@@ -71,6 +72,9 @@ export function validateRouteContracts(graph: ApplicationGraph): Diagnostic[] {
       message: `${subject} delegates validation or uses native transport without a test evidence reference.`,
       suggestion: "Set contract.evidence to the boundary test path. This records an obligation, not proof that the test passed.",
     });
-    return diagnostics;
+    return diagnostics.map((diagnostic) => {
+      const metadata = COMPILER_DIAGNOSTIC_CODES[diagnostic.code];
+      return metadata ? { ...diagnostic, errorCode: metadata.code, docsUrl: metadata.docsUrl } : diagnostic;
+    });
   });
 }

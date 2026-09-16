@@ -52,8 +52,10 @@
               "body": "WebhookInputSchema",
               "schemaKinds": {
                 "body": "declared",
+                "headers": "declared",
                 "response": "declared"
               },
+              "headers": "WebhookHeadersSchema",
               "response": "WebhookReceiptSchema"
             },
             {
@@ -85,6 +87,7 @@
           "importPath": "webhook.controller",
           "schemaImports": {
             "WebhookInputSchema": "contracts",
+            "WebhookHeadersSchema": "contracts",
             "WebhookReceiptSchema": "contracts",
             "WebhookKeySchema": "contracts",
             "WebhookLookupSchema": "contracts"

@@ -172,8 +172,8 @@ void modules;
     );
   });
 
-  test("property-level inject() uses a generated static token identity context", () => {
-    const rendered = renderApplication({
+  test("property-level inject() cannot reintroduce a runtime token resolver", () => {
+    expect(() => renderApplication({
       modules: [{
         name: "functional",
         className: "FunctionalModule",
@@ -216,12 +216,7 @@ void modules;
     }, {
       rootDir: "/app",
       outDir: "/app/generated",
-    });
-
-    expect(rendered.applicationCode).toContain('import { runInInjectionContext } from "@supacloud/app";');
-    expect(rendered.applicationCode).toContain("if (token === CONFIG) return config as T;");
-    expect(rendered.applicationCode).toContain("runInInjectionContext({");
-    expect(rendered.applicationCode).not.toContain("new StaticInjector");
+    })).toThrow("SC2012");
   });
 
   test("request 工厂：REQUEST_CONTEXT 传 ctx，其余从 services 解析", () => {

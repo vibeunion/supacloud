@@ -28,7 +28,10 @@ const graph: ApplicationGraph = {
 
 test("lists missing declarations including inherited path and handler bindings", () => {
   expect(inspectRouteContracts(graph)[0]?.missing).toEqual(["body", "params", "query", "response"]);
-  expect(validateRouteContracts(graph)[0]).toMatchObject({ severity: "error", code: "route-contract-required", file: "items.ts" });
+  expect(validateRouteContracts(graph)[0]).toMatchObject({
+    severity: "error", code: "route-contract-required", errorCode: "SC3025",
+    docsUrl: "https://supacloud.dev/errors/SC3025", file: "items.ts",
+  });
 });
 
 test("declared contracts have no missing-schema diagnostic without claiming runtime coverage", () => {
@@ -60,13 +63,13 @@ test("opaque schemas and unclassified native responses cannot satisfy strict con
     schemaKinds: { body: "opaque", response: "opaque" },
   });
   expect(validateRouteContracts(declared)).toContainEqual(
-    expect.objectContaining({ code: "route-contract-unverified" }),
+    expect.objectContaining({ code: "route-contract-unverified", errorCode: "SC3026" }),
   );
   Object.assign(declared.modules[0]!.controllers[0]!.routes[0]!, {
     schemaKinds: {}, nativeResponse: true,
   });
   expect(validateRouteContracts(declared)).toContainEqual(
-    expect.objectContaining({ code: "route-contract-unverified" }),
+    expect.objectContaining({ code: "route-contract-unverified", errorCode: "SC3026" }),
   );
 });
 
@@ -78,7 +81,7 @@ test("domain and native transports require evidence without pretending it is ver
     contract: { body: "domain", response: "native-json" },
   });
   expect(validateRouteContracts(declared)).toContainEqual(
-    expect.objectContaining({ code: "route-contract-evidence-required" }),
+    expect.objectContaining({ code: "route-contract-evidence-required", errorCode: "SC3027" }),
   );
   route.contract!.evidence = "boundary.test.ts";
   expect(validateRouteContracts(declared)).toEqual([]);

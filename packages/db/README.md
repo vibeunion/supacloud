@@ -4,24 +4,16 @@
 
 `createPostgresCommandStore(database)` implements the protocol's storage ports.
 Use `createBunCommandDatabase` from `@supacloud/db/bun` for a native Bun SQL pool.
-This package contains transaction/receipt SQL, Workflow binding, row validation
-and input redaction. It does not own a recovery polling queue.
+This package contains SQL, leases, row validation and input redaction only.
 
 Execution factories moved to `@supacloud/commands`; pass `store` instead of
 `database`. Errors moved to `CommandError` in `@supacloud/contracts`. Neither
 remote sending nor command orchestration is re-exported here. The DB package
 does not depend on the command runtime, including through its tests.
 
-Install the existing PGMQ/Workflow runtime and updated commands-public SQL module,
-then `COMMAND_PERSISTENCE_SQL` through a privileged application migration.
+Install `COMMAND_PERSISTENCE_SQL` through a privileged application migration.
 Existing unreleased v1 tables require `COMMAND_PERSISTENCE_UPGRADE_SQL`, with old
 writers stopped; preserve operation identifiers during cutover.
-The upgrade enqueues pending recovery using existing Workflow and removes prototype
-lease/backoff columns. Use `createPostgresCommandStore(database, { submission })`
-inside a submitted command's execute step to preserve its command ID and atomically
-advance to reconciliation (external) or complete its Workflow (transactional).
-`submission` carries commandId, stepId, messageId, attempt and workerId. The adapter
-checks the current attempt, recorded tenant/actor/command, and original input.
 Keep its schema private and supply domain authorization, JSON-stable input/result
 decoders and a single-connection transaction adapter. Metadata cannot provide a
 distributed transaction. See [migration, deployment and recovery](../../docs/command-migration.md).
@@ -193,6 +185,45 @@ authorization, migration execution or automatic HTTP client generation.
 
 SupaCloud 兼容 Supabase 的托管 PostgreSQL 模型：`authenticated` / `anon` / `service_role` 角色、RLS 策略、`security definer` RPC 都是治理对象。本包读取的系统目录（`pg_class` / `pg_policy` / `pg_proc` / `information_schema`）是标准 PostgreSQL 接口，因此同样适用于自托管 PostgreSQL；针对 Supabase 风格的角色与 schema 约定没有硬编码依赖。
 
+## Drizzle 与类型安全命令
+
+Drizzle 是表结构、查询类型和 migration 的唯一来源；本包负责 RLS、
+RPC、trigger、grant 的治理，不复制另一套 ORM。当前适配器锁定
+`drizzle-orm@1.0.0-rc.4`，这是 RC 版本，不代表稳定版 1.0。
+
+```ts
+import { defineDrizzleDatabaseModule } from "@supacloud/db/drizzle";
+import { createBunDrizzleCommandDatabase } from "@supacloud/db/drizzle-bun";
+import { createPostgresCommandStore } from "@supacloud/db";
+import * as tables from "./tables";
+
+const module = defineDrizzleDatabaseModule(tables, { name: "orders" });
+const store = createPostgresCommandStore(createBunDrizzleCommandDatabase(pool));
+```
+
+`tables` 必须是显式的 PostgreSQL 表集合，不应混入 relations 或其他配置。
+表名读取 Drizzle 公开元数据，不依赖不存在的运行时 `_` 属性。
+Drizzle 与 Bun 适配器只从子路径导出；核心治理入口不加载可选 ORM。
+
+命令的授权、业务 `tx.db` 查询、回执和审计使用同一条 PostgreSQL
+事务连接。不要在命令中改用外层连接池，也不要把 `tx.db` 保存到事务之外。
+其他驱动可通过 `createDrizzleCommandDatabase` 提供事务、绑定和参数化查询。
+DI 可以将 `tx.db` 注册为 transaction scope 的依赖，但不会自动提供授权或 RLS。
+
+运行时契约使用 `@supacloud/commands/typebox`；可从 Drizzle 的
+`drizzle-orm/typebox-legacy` 生成 TypeBox 0.34 schema，再选取公开字段。
+请求模型不能直接接受包含租户、权限等内部字段的完整 insert schema。
+
+原生 SQL 保留为显式出口：用参数化 `sql` 模板，并通过
+`executeDecodedSql(db, query, decoder)` 将 `unknown` 结果校验为业务类型。
+`sql<T>` 本身不校验数据库返回值。编译器生产源码扫描对非 unknown 的
+`sql<T>` 报 SC6007，对动态 `sql.raw` 报 SC6008；严格模式为错误。
+这些检查不是 SQL 语义证明，也不替代 PostgreSQL 约束、RLS 或权限测试。
+
+针对该基础架构运行 `bun test tests/drizzle-foundation.test.ts` 和
+`bun run typecheck:drizzle`。集成测试需要本地 Docker，启动一次性
+PostgreSQL 容器并在结束后清理，不连接项目数据库。
+
 ## 开发
 
 ```sh
@@ -202,3 +233,37 @@ bun run typecheck
 bun run typecheck:test
 bun run build       # bun build --target node + tsc 声明文件
 ```
+# Read Queries and SQL Impact
+
+`defineReadQuery` combines input decoding, authorization, result decoding and
+payload-free observation. `createBunReadDatabase` admits a single parsed SELECT
+and runs it in a PostgreSQL READ ONLY transaction with a statement timeout.
+`createBunDrizzleReadDatabase` provides the same transaction boundary for Drizzle.
+Use least-privilege roles and RLS as well; neither a parser nor AOP replaces them.
+Query observers can report operation fingerprints, duration and slow-query status
+without logging SQL values or request payloads.
+
+`supacloud-sql-impact impact.json --check` analyzes ordered, owned migrations:
+
+```json
+{
+  "migrations": [
+    { "id": "001", "owner": "orders", "path": "migrations/001.sql" }
+  ],
+  "baseline": []
+}
+```
+
+Paths are relative to the configuration file. The JSON report includes PostgreSQL
+fingerprints, object dependencies, transitive impact, review reasons and a digest.
+Persist applied migration IDs and SHA-256 hashes as `baseline`; reordered,
+deleted or rewritten applied migrations fail validation.
+
+Use `readSqlDependencyGraph(executor, ["app"])` against the intended database and
+pass its `edges` as `catalogEdges` and `review` as `catalogReview`. Without a
+catalog snapshot, the report requires review. Dynamic SQL, opaque function bodies,
+unqualified names and unsupported dependency semantics require explicit review;
+this is conservative impact analysis, not a complete proof for arbitrary SQL.
+After reviewing the exact report, set `approvedDigest` to that report's digest.
+Any changed plan invalidates approval; approval never overrides history errors.
+The tool does not execute migrations or grant deployment authorization.

@@ -174,7 +174,7 @@ class SnapshotMemoryDatabase implements MemoryDatabase {
 
 class DefaultMemoryStorage implements MemoryStorage {
   private readonly objects = new Map<string, MemoryStorageObject>();
-  private pendingFailure?: Error;
+  private pendingFailure: Error | undefined;
   private policy?: Parameters<MemoryStorage["setPolicy"]>[0];
 
   put(
@@ -188,7 +188,7 @@ class DefaultMemoryStorage implements MemoryStorage {
       bucket,
       key,
       body: typeof body === "string" ? new TextEncoder().encode(body) : new Uint8Array(body),
-      contentType: options.contentType,
+      ...(options.contentType === undefined ? {} : { contentType: options.contentType }),
       metadata: { ...(options.metadata ?? {}) },
     });
   }
@@ -275,7 +275,7 @@ export function createMemorySandbox(options: MemorySandboxOptions = {}): MemoryS
   const configuredContext = options.requestContext;
   const app = createApplication({
     ...options,
-    commandGovernance: options.commandGovernance ?? (options.memoryGovernance ? governance : undefined),
+    ...(options.commandGovernance ? {} : options.memoryGovernance ? { commandGovernance: governance } : {}),
     deps: {
       ...(options.deps ?? {}),
       dbClient: db,
