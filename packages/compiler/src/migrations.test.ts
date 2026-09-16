@@ -1,8 +1,10 @@
-import { expect, test } from "bun:test";
+import { expect, spyOn, test } from "bun:test";
+import * as fs from "node:fs/promises";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { migrateProject, migrateRouteResponse } from "./migrations";
+import { migrateProject, migrateRouteResponse, SUPACLOUD_MIGRATIONS, type SupaCloudMigration } from "./migrations";
+import { migrationDependencies } from "./migration-policy";
 
 test("migrates deprecated route response schemas to an explicit 200 response map", () => {
   const source = `
@@ -113,4 +115,147 @@ export const ItemsRoute = { response: Result };
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+async function versionedFixture() {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-versioned-migration-"));
+  for (const [name, version] of Object.entries(migrationDependencies)) {
+    const directory = join(root, "node_modules", name);
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "package.json"), JSON.stringify({ name, version }));
+  }
+  const source = '@Get("/items", { response: Result }) class ItemsController {}';
+  await writeFile(join(root, "items.ts"), source);
+  return { root, source, fromVersion: "0.11.0", toVersion: "0.12.0" };
+}
+
+test("versioned upgrade previews without writing, applies once and is repeatable", async () => {
+  const f = await versionedFixture();
+  try {
+    const options = { rootDir: f.root, fromVersion: f.fromVersion, toVersion: f.toVersion };
+    const preview = await migrateProject(options);
+    expect(preview.issues).toEqual([]);
+    expect(preview.migrations.map((migration) => migration.id)).toEqual(["route-response-to-responses"]);
+    expect(preview.changedFiles).toEqual(["items.ts"]);
+    expect(await readFile(join(f.root, "items.ts"), "utf8")).toBe(f.source);
+    expect((await migrateProject({ ...options, write: true })).issues).toEqual([]);
+    expect((await migrateProject({ ...options, write: true })).changedFiles).toEqual([]);
+    expect((await migrateProject({ ...options, fromVersion: f.toVersion })).migrations).toEqual([]);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("unknown checkpoints, downgrade and mismatched installed packages block all writes", async () => {
+  const f = await versionedFixture();
+  try {
+    for (const versions of [
+      { fromVersion: "0.10.0", toVersion: "0.12.0" },
+      { fromVersion: "0.12.0", toVersion: "0.11.0" },
+      { fromVersion: "0.11.0" },
+    ]) {
+      expect((await migrateProject({ rootDir: f.root, write: true, ...versions })).issues.length).toBeGreaterThan(0);
+      expect(await readFile(join(f.root, "items.ts"), "utf8")).toBe(f.source);
+    }
+    await writeFile(join(f.root, "node_modules/@supacloud/app/package.json"), '{"version":"99.0.0"}');
+    const result = await migrateProject({
+      rootDir: f.root, write: true, fromVersion: f.fromVersion, toVersion: f.toVersion,
+    });
+    expect(result.issues).toMatchObject([{ code: "migration-dependency-incompatible" }]);
+    expect(result.changedFiles).toEqual([]);
+    expect(await readFile(join(f.root, "items.ts"), "utf8")).toBe(f.source);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("a later filesystem failure restores earlier writes and removes temporary files", async () => {
+  const f = await versionedFixture();
+  await writeFile(join(f.root, "z.ts"), f.source);
+  const rename = fs.rename;
+  const fault = spyOn(fs, "rename").mockImplementation(async (source, target) => {
+    if (String(target) === join(f.root, "z.ts")) throw new Error("Injected rename failure");
+    await rename(source, target);
+  });
+  try {
+    const result = await migrateProject({ rootDir: f.root, write: true });
+    expect(result.issues).toMatchObject([{ code: "migration-write-failed" }]);
+    expect(result.changedFiles).toEqual([]);
+    expect(await readFile(join(f.root, "items.ts"), "utf8")).toBe(f.source);
+    expect(await readFile(join(f.root, "z.ts"), "utf8")).toBe(f.source);
+    expect((await fs.readdir(f.root)).filter((name) => name.includes("supacloud-migrate"))).toEqual([]);
+  } finally {
+    fault.mockRestore();
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("migration order follows checkpoint edges and writes each file's final result once", async () => {
+  const f = await versionedFixture();
+  const originalLength = SUPACLOUD_MIGRATIONS.length;
+  const step = (id: string, from: string, to: string, before: string, after: string): SupaCloudMigration => ({
+    id, from, to, description: "Test-only registry edge",
+    apply: (content) => ({
+      changed: content.includes(before), content: content.replaceAll(before, after),
+      replacements: content.includes(before) ? 1 : 0, issues: [],
+    }),
+  });
+  SUPACLOUD_MIGRATIONS.push(
+    step("third", "0.13.0", "0.14.0", "Intermediate", "Final"),
+    step("second", "0.12.0", "0.13.0", "Result", "Intermediate"),
+  );
+  try {
+    const result = await migrateProject({
+      rootDir: f.root, write: true, fromVersion: "0.11.0", toVersion: "0.14.0",
+    });
+    expect(result.issues).toEqual([]);
+    expect(result.migrations.map((migration) => migration.id)).toEqual([
+      "route-response-to-responses", "second", "third",
+    ]);
+    expect(result.changedFiles).toEqual(["items.ts"]);
+    expect(await readFile(join(f.root, "items.ts"), "utf8")).toContain("responses: { 200: Final }");
+  } finally {
+    SUPACLOUD_MIGRATIONS.splice(originalLength);
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("rollback reports residual files rather than overwriting concurrent edits", async () => {
+  const f = await versionedFixture();
+  await writeFile(join(f.root, "z.ts"), f.source);
+  const rename = fs.rename;
+  const fault = spyOn(fs, "rename").mockImplementation(async (source, target) => {
+    if (String(target) === join(f.root, "z.ts")) throw new Error("Injected rename failure");
+    await rename(source, target);
+    if (String(target) === join(f.root, "items.ts")) await writeFile(target, "// concurrent edit");
+  });
+  try {
+    const result = await migrateProject({ rootDir: f.root, write: true });
+    expect(result.issues.map((issue) => issue.code)).toEqual(["migration-write-failed", "migration-rollback-failed"]);
+    expect(result.changedFiles).toEqual(["items.ts"]);
+    expect(await readFile(join(f.root, "items.ts"), "utf8")).toBe("// concurrent edit");
+    expect(await readFile(join(f.root, "z.ts"), "utf8")).toBe(f.source);
+  } finally {
+    fault.mockRestore();
+    await rm(f.root, { recursive: true, force: true });
+  }
+});
+
+test("CLI rejects unsupported checkpoints with nonzero status and visible diagnostics", async () => {
+  const f = await versionedFixture();
+  try {
+    for (const json of [false, true]) {
+      const child = Bun.spawn([
+        process.execPath, join(import.meta.dir, "cli.ts"), "migrate",
+        "--root", f.root, "--from-version", "0.10.0", "--to-version", "0.12.0", "--write",
+        ...(json ? ["--json"] : []),
+      ], { stdout: "pipe", stderr: "pipe" });
+      const [exit, stdout, stderr] = await Promise.all([
+        child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+      ]);
+      expect(exit).toBe(1);
+      expect(stderr).toBe("");
+      if (json) {
+        const result: unknown = JSON.parse(stdout);
+        expect(result).toMatchObject({ changedFiles: [], issues: [{ code: "migration-version-unsupported" }] });
+      } else expect(stdout).toContain("migration-version-unsupported");
+      expect(await readFile(join(f.root, "items.ts"), "utf8")).toBe(f.source);
+    }
+  } finally { await rm(f.root, { recursive: true, force: true }); }
 });

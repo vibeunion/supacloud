@@ -396,7 +396,7 @@
     {
       "name": "MigrateProjectOptions",
       "kind": "type",
-      "signature": "export interface MigrateProjectOptions {\n    rootDir: string;\n    include?: string[];\n    write?: boolean;\n}"
+      "signature": "export interface MigrateProjectOptions {\n    rootDir: string;\n    include?: string[];\n    write?: boolean;\n    fromVersion?: string;\n    toVersion?: string;\n}"
     },
     {
       "name": "MigrateProjectResult",
