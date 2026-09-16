@@ -216,10 +216,10 @@ describe("database tables column visibility", () => {
   }, 90_000);
 
   test("pins the released SvAdmin UI dependency exactly", async () => {
-    const packageJson = await Bun.file(new URL("package.json", packageRoot)).json();
+    const packageJson: unknown = await Bun.file(new URL("package.json", packageRoot)).json();
     const lockSource = await Bun.file(new URL("bun.lock", packageRoot)).text();
 
-    expect(packageJson.dependencies["@svadmin/ui"]).toBe("0.70.0");
+    expect(packageJson).toMatchObject({ dependencies: { "@svadmin/ui": "0.70.0" } });
     expect(lockSource).toContain('"@svadmin/ui": "0.70.0"');
     expect(lockSource).toContain('"@svadmin/ui@0.70.0"');
   });
