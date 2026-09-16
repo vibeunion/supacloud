@@ -14,7 +14,7 @@ import {
   formatGraph,
 } from "./inspect";
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
-import { writeFixtureProject } from "./fixtures/helpers";
+import { requireValue, writeFixtureProject } from "./fixtures/helpers";
 import type { ApplicationGraph } from "./types";
 
 let rootDir: string;
@@ -45,13 +45,13 @@ describe("compiler inspection", () => {
       ...module,
       aspects: [aspect],
       controllers: [{
-        ...module.controllers[0],
+        ...requireValue(module.controllers[0]),
         routes: [{ method: "POST" as const, path: "/approve", handler: "approve", command: "Approve", aspects: [aspect] }],
       }],
       commands: [{ className: "Approve", name: "case.approve", permission: "case.approve", transaction: "required" as const, idempotency: "required" as const, audit: "approved", aspects: [aspect] }],
     };
     const fixture = { ...graph, modules: [changed] };
-    const plan = createExecutionPlans(fixture)[0];
+    const plan = requireValue(createExecutionPlans(fixture)[0]);
     expect(plan.stages).toEqual([
       "module:case.aspect[0]:auditAspect", "route.aspect[0]:auditAspect",
       "command.aspect[0]:auditAspect", "commandExecutor", "authorize",

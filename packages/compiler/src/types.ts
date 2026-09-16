@@ -7,6 +7,10 @@ import type { IncrementalProgramSession } from "./program";
 
 export type Scope = "application" | "request" | "job";
 
+export type JobMode = "task" | "workflow";
+export type JobIdempotency = "required" | "none";
+export type JobSchemaKind = "opaque" | "declared";
+
 export type ProviderKind = "class" | "value" | "factory" | "existing";
 
 export type TokenKind = "injection-token" | "class";
@@ -158,7 +162,7 @@ export interface ProviderNode {
 
 export interface HandlerParamNode {
   name: string;
-  kind: "param" | "query" | "body" | "headers" | "context" | "unknown";
+  kind: "param" | "query" | "body" | "headers" | "cookie" | "context" | "unknown";
   bindingName?: string;
   transform?: "number" | "boolean" | "string";
   default?: unknown;
@@ -170,7 +174,7 @@ export interface RouteNode {
     response?: "framework" | "native-json" | "binary" | "stream";
     evidence?: string;
   };
-  schemaKinds?: Partial<Record<"body" | "params" | "query" | "response", "opaque" | "declared">>;
+  schemaKinds?: Partial<Record<"body" | "params" | "query" | "headers" | "cookie" | "response", "opaque" | "declared">>;
   nativeResponse?: boolean;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   path: string;
@@ -178,7 +182,10 @@ export interface RouteNode {
   body?: string;
   params?: string;
   query?: string;
+  headers?: string;
+  cookie?: string;
   response?: string;
+  responses?: Record<string, string>;
   /** @Command-decorated class explicitly bound by the route. */
   command?: string;
   /** Route guards executed before handler (Angular CanActivateFn style). */
@@ -263,6 +270,21 @@ export interface JobNode {
   /** Generated services key; follows a custom useClass provider token when present. */
   serviceKey: string;
   scope: Scope;
+  /** Input schema symbol imported into the generated application, when declared. */
+  input?: string;
+  /** Output schema symbol imported into the generated application, when declared. */
+  output?: string;
+  schemaKinds?: Partial<Record<"input" | "output", JobSchemaKind>>;
+  /** Job schema symbol name -> relative module path for import generation. */
+  schemaImports?: Record<string, string>;
+  /** Existing execution adapter selected by the job declaration. */
+  mode?: JobMode;
+  /** Adapter-owned execution deadline in seconds. */
+  timeoutSec?: number;
+  /** Adapter-owned maximum execution attempts. */
+  maxAttempts?: number;
+  /** Adapter-owned idempotency requirement. */
+  idempotency?: JobIdempotency;
   aspects?: AspectRefNode[];
 }
 
@@ -366,6 +388,10 @@ export interface CompileOptions {
   writeOnError?: boolean;
   /** Generate typed API client in client.ts (default: false). */
   generateClient?: boolean;
+  /** Generate the OpenAPI 3.1 document module in openapi.ts (default: false). */
+  generateOpenApi?: boolean;
+  /** OpenAPI document metadata and explicitly configured security schemes. */
+  openApi?: OpenApiOptions;
   /** Generate typed permissions registry in permissions.ts (default: false). */
   generatePermissions?: boolean;
   /** Prune unused root providers from compiled output (Angular Ivy AOT tree-shaking). */
@@ -392,6 +418,43 @@ export interface GraphqlOptions {
   documents?: string[];
   /** Explicit wire types for custom scalars. Unmapped scalars remain unknown. */
   scalars?: Record<string, string | { input: string; output: string }>;
+}
+
+export interface OpenApiServer {
+  url: string;
+  description?: string;
+}
+
+export type OpenApiSecurityScheme =
+  | {
+      type: "apiKey";
+      name: string;
+      in: "header" | "query" | "cookie";
+      description?: string;
+    }
+  | {
+      type: "http";
+      scheme: string;
+      bearerFormat?: string;
+      description?: string;
+    }
+  | {
+      type: "oauth2";
+      flows: Record<string, unknown>;
+      description?: string;
+    }
+  | {
+      type: "openIdConnect";
+      openIdConnectUrl: string;
+      description?: string;
+    };
+
+export interface OpenApiOptions {
+  title?: string;
+  version?: string;
+  description?: string;
+  servers?: OpenApiServer[];
+  securitySchemes?: Record<string, OpenApiSecurityScheme>;
 }
 
 export interface GraphqlContractSummary {
@@ -451,8 +514,10 @@ export interface ValidateOptions {
 
 /** Runtime capabilities declared by the Command executor. */
 export interface CommandExecutionCapabilities {
+  /** Require named persistent adapters and explicit audit/idempotency declarations. */
+  requirePersistentAdapters?: boolean;
   /** Explicit named adapters; declarations must also be tested against the database. */
-  rpc?: Record<string, { audit?: boolean; idempotency?: boolean; transaction?: boolean }>;
+  rpc?: Record<string, { audit?: boolean; idempotency?: boolean; transaction?: boolean; boundary?: "database" | "external" }>;
   /** Whether runtime permission checks are supported. */
   permission?: boolean;
   /** Whether runtime audit persistence is supported. */

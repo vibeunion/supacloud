@@ -1,9 +1,19 @@
 export { analyzeProject } from "./analyze";
+export { createDeliveryPlan, planDeliveryProject, formatDeliveryPlan } from "./delivery-plan";
+export { buildDeliveryProject } from "./delivery-build";
+export { DeliveryBuildManifestSchema, DeliveryBuildResultSchema, parseDeliveryBuildManifest, parseDeliveryBuildResult } from "./delivery-build-schema";
+export type { DeliveryBuildManifest, DeliveryBuildResult, DeliveryObject } from "./delivery-build-schema";
+export {
+  DeliveryOptionsSchema, DeliveryPlanSchema, DeliveryPlanResultSchema, DeliveryTargetSchema,
+  DeliveryConfigurationError, parseDeliveryOptions, parseDeliveryPlanResult,
+} from "./delivery-schema";
+export type { DeliveryOptions, DeliveryPlan, DeliveryPlanResult, DeliveryTarget, DeliveryDiagnostic } from "./delivery-schema";
 export { generateFeatureSource, validateFeatureSpec } from "./feature";
 export { applyDiagnosticFix } from "./fixes";
 export type { AppliedDiagnosticFix, ApplyDiagnosticFixOptions } from "./fixes";
 export { checkProject, compileProject } from "./compile";
 export { watchProject } from "./watch";
+export { migrateProject, SUPACLOUD_MIGRATIONS, migrateRouteResponse } from "./migrations";
 export {
   createContextPack,
   createExecutionPlans,
@@ -21,12 +31,40 @@ export type { IncrementalProgramSession, ProgramUpdate } from "./program";
 export { compileTraits } from "./traits";
 export { TraitCompiler } from "./traits";
 export type { TraitCompilation, TraitHandler, TraitKind, TraitRecord } from "./traits";
-export { generateApplication, renderApplication } from "./generate";
+export { generateApplication, renderApplication, renderClient, renderOpenApi } from "./generate";
 export type { GenerateOptions, RenderedArtifacts } from "./generate";
+export {
+  diffOpenApiDocuments,
+  exportGeneratedOpenApiJson,
+  formatOpenApiDiff,
+  loadGeneratedOpenApiDocument,
+  parseOpenApiDocument,
+  readOpenApiJson,
+  serializeOpenApiJson,
+  writeOpenApiJson,
+  OpenApiDocumentError,
+} from "./openapi-tools";
+export type {
+  OpenApiDiffChange,
+  OpenApiDiffResult,
+  OpenApiDocument,
+  OpenApiExportOptions,
+  OpenApiJsonWriteResult,
+  OpenApiObject,
+} from "./openapi-tools";
 export type { ContextPack, DoctorResult, ExecutionPlan } from "./inspect";
+export type {
+  MigrateFileResult,
+  MigrateProjectOptions,
+  MigrateProjectResult,
+  SourceMigrationIssue,
+  SourceMigrationResult,
+  SupaCloudMigration,
+} from "./migrations";
 export { validateGraph, COMPILER_DIAGNOSTIC_CODES } from "./validate";
-export { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
+export { scanGeneratedArtifacts, scanProductionSource, TYPE_SAFETY_DIAGNOSTIC_CODES } from "./type-safety";
 export type { TypeSafetyScanOptions } from "./type-safety";
+export { scanDrizzleSql, SQL_SAFETY_DIAGNOSTIC_CODES } from "./sql-safety";
 export {
   DEFAULT_SUPACLOUD_CONFIG,
   compileOptionsFromConfig,
@@ -80,7 +118,11 @@ export type {
   FeatureTransitionNode,
   GraphqlOptions,
   GraphqlContractSummary,
+  OpenApiOptions,
+  OpenApiSecurityScheme,
+  OpenApiServer,
 } from "./types";
 export { inspectRouteContracts, validateRouteContracts } from "./route-contracts";
 export { pullGraphqlSchema } from "./graphql-schema";
 export type { PullGraphqlSchemaOptions } from "./graphql-schema";
+export { generateDatabaseContracts, parseDatabaseContractsOptions, runDatabaseContractsFile, type DatabaseContractsOptions } from "./database-contracts";

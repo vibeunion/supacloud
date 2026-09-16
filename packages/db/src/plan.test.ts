@@ -90,9 +90,11 @@ describe('planModule', () => {
   test('源文件内容变化时 sha256 与 digest 变化', async () => {
     const a = await planModule(planTestModule(), planReadFile);
     const b = await planModule(planTestModule(), (path) =>
-      Promise.resolve(path.endsWith('grants/cases.sql') ? 'grant insert on public.cases to authenticated;' : planFiles[path]),
+      path.endsWith('grants/cases.sql')
+        ? Promise.resolve('grant insert on public.cases to authenticated;')
+        : planReadFile(path),
     );
-    expect(b.steps[3].sha256).not.toBe(a.steps[3].sha256);
+    expect(b.steps[3]?.sha256).not.toBe(a.steps[3]?.sha256);
     expect(b.digest).not.toBe(a.digest);
   });
 
@@ -108,7 +110,7 @@ describe('planModule', () => {
         'create function public.f() returns int language sql security definer as $$ select 1 $$;',
       ),
     );
-    expect(plan.steps[0].risk).toEqual([
+    expect(plan.steps[0]?.risk).toEqual([
       {
         severity: 'error',
         code: 'definer-no-search-path',
@@ -135,9 +137,9 @@ describe('planModule', () => {
         'create policy cases_select on public.cases for select to authenticated using (true);',
       ),
     );
-    expect(plan.steps[0].risk).toHaveLength(1);
-    expect(plan.steps[0].risk[0].severity).toBe('warn');
-    expect(plan.steps[0].risk[0].code).toBe('non-idempotent-policy');
+    expect(plan.steps[0]?.risk).toHaveLength(1);
+    expect(plan.steps[0]?.risk[0]?.severity).toBe('warn');
+    expect(plan.steps[0]?.risk[0]?.code).toBe('non-idempotent-policy');
   });
 
   test('干净模块的 step.risk 为空', async () => {

@@ -16,7 +16,7 @@ test("rejects illegal states, unknown events and inherited object members", () =
   for (const [state, event] of [
     ["approved", "approve"], ["missing", "approve"],
     ["draft", "missing"], ["draft", "toString"], ["draft", "__proto__"],
-  ]) {
+  ] as const) {
     try {
       assertFeatureTransition(spec, state, event);
       throw new Error("Expected conflict");

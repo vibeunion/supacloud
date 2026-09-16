@@ -123,4 +123,46 @@ describe("compiler type-safety gates", () => {
       expect.objectContaining({ severity: "error", code: "source-config", errorCode: "TS2688" }),
     ]));
   });
+
+  test("semantic errors fail even when no escape syntax is present or strict scanning is disabled", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "supacloud-compiler-semantic-"));
+    await writeFixtureProject(rootDir, {
+      "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true } }),
+      "src/production.ts": 'export const value: number = "wrong";',
+    });
+    expect(scanProductionSource({ rootDir, strict: false })).toContainEqual(
+      expect.objectContaining({ severity: "error", code: "source-typescript", errorCode: "TS2322" }),
+    );
+  });
+
+  test("suppression directives cannot hide production errors while quoted text remains valid", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "supacloud-compiler-suppression-"));
+    await writeFixtureProject(rootDir, {
+      "src/production.ts": '// @ts-nocheck\nexport const value: number = "wrong";',
+      "src/literal.ts": 'export const label = "// @ts-ignore";',
+      "src/suppressed.ts": '// @ts-expect-error\nexport const value: number = "wrong";',
+    });
+    expect(scanProductionSource({ rootDir })).toEqual([
+      expect.objectContaining({ severity: "error", code: "source-type-suppression", errorCode: "SC6006", file: "src/production.ts" }),
+      expect.objectContaining({ severity: "error", code: "source-type-suppression", errorCode: "SC6006", file: "src/suppressed.ts" }),
+    ]);
+  });
+
+  test("a source-directory root uses the enclosing project's aliases and strict configuration", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "supacloud-source-root-"));
+    await writeFixtureProject(rootDir, {
+      "tsconfig.json": JSON.stringify({
+        compilerOptions: {
+          strict: true, moduleResolution: "bundler", module: "esnext",
+          noUncheckedIndexedAccess: true, paths: { "@models/*": ["./src/models/*"] },
+        },
+      }),
+      "src/models/value.ts": 'export const values: string[] = [];',
+      "src/production.ts": 'import { values } from "@models/value";\nexport const value: string = values[0];',
+    });
+    const diagnostics = scanProductionSource({ rootDir: join(rootDir, "src") });
+    expect(diagnostics).toEqual([
+      expect.objectContaining({ code: "source-typescript", errorCode: "TS2322", file: "production.ts" }),
+    ]);
+  });
 });

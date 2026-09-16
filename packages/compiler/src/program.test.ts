@@ -23,7 +23,7 @@ describe("IncrementalProgramSession", () => {
   test("复用未变更 SourceFile，并只重编译发生变化文件的 traits", async () => {
     const rootDir = await fixture(GOOD_PROJECT_FILES);
     const session = createIncrementalProgramSession(rootDir);
-    const files = [
+    const files: [string, string, string] = [
       join(rootDir, "src/features/audit/audit.module.ts"),
       join(rootDir, "src/features/case/case.service.ts"),
       join(rootDir, "src/features/health/health.module.ts"),
@@ -100,7 +100,7 @@ describe("IncrementalProgramSession", () => {
       "src/b.ts": "export const b = 1;\n",
     });
     const session = createIncrementalProgramSession(root);
-    const files = [join(root, "src/a.ts"), join(root, "src/b.ts")];
+    const files: [string, string] = [join(root, "src/a.ts"), join(root, "src/b.ts")];
     session.update(files);
     expect(session.emit().emitSkipped).toBe(false);
     const output = join(root, "dist/b.js");

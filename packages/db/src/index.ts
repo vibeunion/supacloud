@@ -75,3 +75,9 @@ export {
   type RpcResult,
   type RpcTransport,
 } from './rpc.js';
+
+export { COMMAND_PERSISTENCE_SQL, COMMAND_PERSISTENCE_UPGRADE_SQL } from "./command-schema";
+export { defineReadQuery, decodePostgrestQuery, QueryBoundaryError, type QueryEvent, type QueryObserver, type ReadQueryDefinition } from "./query";
+export {
+  createPostgresCommandStore, type CommandDatabase, type CommandTransaction,
+} from "./command-adapter";

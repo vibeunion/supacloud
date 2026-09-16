@@ -56,7 +56,7 @@ describe("GraphQL query contracts", () => {
     const configured = await fixture();
     const directory = dirname(configured.rootDir);
     await rm(configured.graphql!.schema);
-    const options = compileOptionsFromConfig({ graphql }, directory);
+    const options = compileOptionsFromConfig(graphql === undefined ? {} : { graphql }, directory);
     expect(options.graphql).toBeUndefined();
     const result = await compileProject(options);
     expect(result.diagnostics).toEqual([]);
@@ -116,7 +116,8 @@ describe("GraphQL query contracts", () => {
   test("resolves schema relative to configuration and queries relative to root; low-level API remains optional", async () => {
     const options = await fixture();
     expect(options.graphql?.schema).toBe(join(options.rootDir, "../graphql/schema.graphql"));
-    expect(await renderGraphql({ ...options, graphql: undefined })).toEqual({ diagnostics: [], files: {} });
+    const { graphql: _graphql, ...unconfigured } = options;
+    expect(await renderGraphql(unconfigured)).toEqual({ diagnostics: [], files: {} });
     const result = await renderGraphql(options);
     expect(result.diagnostics).toEqual([]);
     expect(result.files["graphql.ts"]).toContain("OrderDetailQueryVariables");
@@ -276,7 +277,9 @@ result.order?.internal;
     expect(createContextPack(graph, "reviews").graphql?.operations.map((operation) => operation.name)).toEqual(["OrderDetail"]);
     await writeFile(join(options.rootDir, "reviews/order.graphql"), "query Bad { missingField }");
     const failed = await checkProject(options);
-    const pack = createContextPack({ ...graph, graphql: failed.graph.graphql, diagnostics: failed.diagnostics }, "reviews");
+    const pack = createContextPack({
+      ...graph, ...(failed.graph.graphql ? { graphql: failed.graph.graphql } : {}), diagnostics: failed.diagnostics,
+    }, "reviews");
     expect(pack.diagnostics.some((d) => d.code === "graphql-validation" && d.file === "reviews/order.graphql")).toBe(true);
   });
 

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { assertGraphqlOptions } from "./graphql-options";
+import { parseDeliveryOptions, type DeliveryOptions } from "./delivery-schema";
 import type {
   CommandExecutionCapabilities,
   CompileOptions,
@@ -10,6 +11,8 @@ import type {
 } from "./types";
 
 export interface SupaCloudConfig {
+  /** Preview-only workload placement. Does not change compile output or authorize deployment. */
+  delivery?: DeliveryOptions;
   /** Opt-in outside app init. Schema is configuration-relative; documents are root-relative. */
   graphql?: GraphqlOptions | false;
   root?: string;
@@ -18,15 +21,24 @@ export interface SupaCloudConfig {
   strict?: boolean;
   requireRouteContracts?: boolean;
   generateClient?: boolean;
+  generateOpenApi?: boolean;
+  openApi?: NonNullable<CompileOptions["openApi"]>;
   generatePermissions?: boolean;
   moduleBoundaryPreset?: ModuleBoundaryPresetName;
+  moduleBoundaries?: NonNullable<CompileOptions["moduleBoundaries"]>;
+  typeSafety?: NonNullable<CompileOptions["typeSafety"]>;
+  allowRouteCommandBindings?: boolean;
+  disallowControllerDirectDb?: boolean;
+  detectOrphanModules?: boolean;
   commandCapabilities?: CommandExecutionCapabilities;
   treeShakeUnusedProviders?: boolean;
 }
 
 export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
   SupaCloudConfig,
-  "include" | "moduleBoundaryPreset" | "commandCapabilities"
+  "include" | "moduleBoundaryPreset" | "commandCapabilities" | "moduleBoundaries" | "typeSafety" | "delivery"
+  | "allowRouteCommandBindings" | "disallowControllerDirectDb" | "detectOrphanModules"
+  | "openApi"
 >> & {
   include: string[];
   moduleBoundaryPreset: ModuleBoundaryPresetName;
@@ -36,21 +48,93 @@ export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
   outDir: "generated",
   include: ["**/*.module.ts", "**/*.ts"],
   strict: true,
-  requireRouteContracts: false,
+  requireRouteContracts: true,
   generateClient: true,
+  generateOpenApi: true,
   generatePermissions: true,
   treeShakeUnusedProviders: true,
   moduleBoundaryPreset: "modular-monolith",
 };
 
 export function defineSupacloudConfig(config: SupaCloudConfig = {}): SupaCloudConfig {
+  if (config.delivery !== undefined) parseDeliveryOptions(config.delivery);
   if (config.graphql !== undefined && config.graphql !== false) assertGraphqlOptions(config.graphql);
+  validateGovernanceConfig(config);
   return {
     ...DEFAULT_SUPACLOUD_CONFIG,
     ...config,
     include: config.include ?? [...DEFAULT_SUPACLOUD_CONFIG.include],
     graphql: config.graphql ?? DEFAULT_SUPACLOUD_CONFIG.graphql,
   };
+}
+
+/** Configuration modules are executable inputs; reject invalid new rule options before compiling. */
+function validateGovernanceConfig(config: {
+  commandCapabilities?: unknown;
+  moduleBoundaries?: unknown;
+  typeSafety?: unknown;
+  allowRouteCommandBindings?: unknown;
+  disallowControllerDirectDb?: unknown;
+  detectOrphanModules?: unknown;
+}): void {
+  const isRecord = (value: unknown): value is Record<string, unknown> =>
+    value !== null && typeof value === "object" && !Array.isArray(value);
+  const isStrings = (value: unknown): value is string[] =>
+    Array.isArray(value) && Array.from(value).every((item: unknown) => typeof item === "string" && item.trim().length > 0);
+  if (config.commandCapabilities !== undefined) {
+    const capabilities = config.commandCapabilities;
+    if (!isRecord(capabilities) || Object.keys(capabilities).some((key) =>
+      !["permission", "audit", "idempotency", "transaction", "rpc", "requirePersistentAdapters"].includes(key))) {
+      throw new Error("Invalid commandCapabilities.");
+    }
+    for (const key of ["permission", "audit", "idempotency", "requirePersistentAdapters"]) {
+      if (capabilities[key] !== undefined && typeof capabilities[key] !== "boolean") throw new Error(`commandCapabilities.${key} must be boolean.`);
+    }
+    if (capabilities["transaction"] !== undefined && typeof capabilities["transaction"] !== "boolean"
+      && capabilities["transaction"] !== "rpc-only") throw new Error("Invalid transaction capability.");
+    const adapters = capabilities["rpc"];
+    if (adapters !== undefined) {
+      if (!isRecord(adapters)) throw new Error("commandCapabilities.rpc must contain named adapters.");
+      for (const [name, adapter] of Object.entries(adapters)) {
+        if (!name.trim() || !isRecord(adapter) || Object.keys(adapter).some((key) =>
+          !["audit", "idempotency", "transaction", "boundary"].includes(key))) throw new Error("Invalid command adapter.");
+        for (const key of ["audit", "idempotency", "transaction"]) {
+          if (adapter[key] !== undefined && typeof adapter[key] !== "boolean") throw new Error("Invalid command adapter capability.");
+        }
+        if (adapter["boundary"] !== undefined && adapter["boundary"] !== "database" && adapter["boundary"] !== "external") {
+          throw new Error("Invalid command adapter boundary.");
+        }
+        if (adapter["boundary"] === "external" && adapter["transaction"] === true) {
+          throw new Error("External command adapters cannot claim database transactions.");
+        }
+      }
+    }
+  }
+  if (config.moduleBoundaries !== undefined) {
+    if (!Array.isArray(config.moduleBoundaries)) throw new Error("moduleBoundaries must be an array of module tag rules.");
+    const rules: readonly unknown[] = config.moduleBoundaries;
+    for (const rule of rules) {
+      if (!isRecord(rule) || typeof rule["sourceTag"] !== "string" || !rule["sourceTag"].trim()
+        || Object.keys(rule).some((key) => !["sourceTag", "onlyDependOnLibsWithTags", "bannedDependenciesWithTags"].includes(key))
+        || (rule["onlyDependOnLibsWithTags"] !== undefined && !isStrings(rule["onlyDependOnLibsWithTags"]))
+        || (rule["bannedDependenciesWithTags"] !== undefined && !isStrings(rule["bannedDependenciesWithTags"]))) {
+        throw new Error("moduleBoundaries rules require sourceTag and optional string arrays onlyDependOnLibsWithTags/bannedDependenciesWithTags.");
+      }
+    }
+  }
+  if (config.typeSafety !== undefined) {
+    const rules = config.typeSafety;
+    if (!isRecord(rules)
+      || Object.keys(rules).some((key) => !["scanProductionSource", "noAnyInGenerated", "exclude"].includes(key))
+      || (rules["scanProductionSource"] !== undefined && typeof rules["scanProductionSource"] !== "boolean")
+      || (rules["noAnyInGenerated"] !== undefined && typeof rules["noAnyInGenerated"] !== "boolean")
+      || (rules["exclude"] !== undefined && !isStrings(rules["exclude"]))) {
+      throw new Error("typeSafety accepts boolean scanProductionSource/noAnyInGenerated and a string array exclude.");
+    }
+  }
+  for (const key of ["allowRouteCommandBindings", "disallowControllerDirectDb", "detectOrphanModules"] as const) {
+    if (config[key] !== undefined && typeof config[key] !== "boolean") throw new Error(`${key} must be a boolean.`);
+  }
 }
 
 export function resolveSupacloudConfig(
@@ -63,9 +147,16 @@ export function resolveSupacloudConfig(
   strict: boolean;
   requireRouteContracts: boolean;
   generateClient: boolean;
+  generateOpenApi: boolean;
+  openApi?: NonNullable<CompileOptions["openApi"]>;
   generatePermissions: boolean;
   moduleBoundaryPreset: ModuleBoundaryPresetName;
   commandCapabilities?: CommandExecutionCapabilities;
+  moduleBoundaries?: NonNullable<CompileOptions["moduleBoundaries"]>;
+  typeSafety?: NonNullable<CompileOptions["typeSafety"]>;
+  allowRouteCommandBindings?: boolean;
+  disallowControllerDirectDb?: boolean;
+  detectOrphanModules?: boolean;
   treeShakeUnusedProviders: boolean;
   graphql?: GraphqlOptions;
 } {
@@ -77,14 +168,21 @@ export function resolveSupacloudConfig(
     strict: resolved.strict ?? DEFAULT_SUPACLOUD_CONFIG.strict,
     requireRouteContracts: resolved.requireRouteContracts ?? DEFAULT_SUPACLOUD_CONFIG.requireRouteContracts,
     generateClient: resolved.generateClient ?? DEFAULT_SUPACLOUD_CONFIG.generateClient,
+    generateOpenApi: resolved.generateOpenApi ?? DEFAULT_SUPACLOUD_CONFIG.generateOpenApi,
+    ...(resolved.openApi === undefined ? {} : { openApi: resolved.openApi }),
     generatePermissions: resolved.generatePermissions ?? DEFAULT_SUPACLOUD_CONFIG.generatePermissions,
     moduleBoundaryPreset: resolved.moduleBoundaryPreset ?? DEFAULT_SUPACLOUD_CONFIG.moduleBoundaryPreset,
-    commandCapabilities: resolved.commandCapabilities,
+    ...(resolved.commandCapabilities ? { commandCapabilities: resolved.commandCapabilities } : {}),
+    ...(resolved.moduleBoundaries ? { moduleBoundaries: resolved.moduleBoundaries } : {}),
+    ...(resolved.typeSafety ? { typeSafety: resolved.typeSafety } : {}),
+    ...(resolved.allowRouteCommandBindings === undefined ? {} : { allowRouteCommandBindings: resolved.allowRouteCommandBindings }),
+    ...(resolved.disallowControllerDirectDb === undefined ? {} : { disallowControllerDirectDb: resolved.disallowControllerDirectDb }),
+    ...(resolved.detectOrphanModules === undefined ? {} : { detectOrphanModules: resolved.detectOrphanModules }),
     treeShakeUnusedProviders: resolved.treeShakeUnusedProviders ?? DEFAULT_SUPACLOUD_CONFIG.treeShakeUnusedProviders,
-    graphql: resolved.graphql ? {
+    ...(resolved.graphql ? { graphql: {
       ...resolved.graphql,
       schema: resolve(cwd, resolved.graphql.schema),
-    } : undefined,
+    } } : {}),
   };
 }
 
@@ -107,18 +205,5 @@ export function compileOptionsFromConfig(
   config: SupaCloudConfig,
   cwd = process.cwd(),
 ): CompileOptions {
-  const resolved = resolveSupacloudConfig(config, cwd);
-  return {
-    rootDir: resolved.rootDir,
-    outDir: resolved.outDir,
-    include: resolved.include,
-    strict: resolved.strict,
-    requireRouteContracts: resolved.requireRouteContracts,
-    generateClient: resolved.generateClient,
-    generatePermissions: resolved.generatePermissions,
-    moduleBoundaryPreset: resolved.moduleBoundaryPreset,
-    commandCapabilities: resolved.commandCapabilities,
-    treeShakeUnusedProviders: resolved.treeShakeUnusedProviders,
-    graphql: resolved.graphql,
-  };
+  return resolveSupacloudConfig(config, cwd);
 }

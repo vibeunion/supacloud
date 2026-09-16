@@ -9,6 +9,17 @@ import type { Diagnostic, ModuleBoundaryPresetName } from "./types";
 import { compileOptionsFromConfig, loadSupacloudConfig, resolveSupacloudConfig } from "./config";
 import { applyDiagnosticFix } from "./fixes";
 import { GraphqlConfigurationError } from "./graphql-options";
+import { planDeliveryProject, formatDeliveryPlan } from "./delivery-plan";
+import { DeliveryConfigurationError } from "./delivery-schema";
+import { buildDeliveryProject } from "./delivery-build";
+import { migrateProject } from "./migrations";
+import {
+  diffOpenApiDocuments,
+  exportGeneratedOpenApiJson,
+  formatOpenApiDiff,
+  OpenApiDocumentError,
+  readOpenApiJson,
+} from "./openapi-tools";
 
 function isModuleBoundaryPresetName(value: string | undefined): value is ModuleBoundaryPresetName {
   return value === "modular-monolith"
@@ -32,8 +43,14 @@ Usage:
   supacloud-compiler explain <name> [rootDir] [options]
   supacloud-compiler context <module> [rootDir] [options]
   supacloud-compiler doctor  [rootDir] [options]
+  supacloud-compiler migrate [rootDir] [options]
+  supacloud-compiler plan    [rootDir] [options]
+  supacloud-compiler build-delivery [rootDir] [options]
+  supacloud-compiler openapi-export <openapi-module> <output.json> [options]
+  supacloud-compiler openapi-diff <base.json> <current.json> [options]
   supacloud-compiler fix     <fix.json> [options]
   supacloud-compiler graphql-schema --url <project-url> --key-env <name> [--token-env <name>]
+  supacloud-compiler database-contracts <config.json> [--check]
 
 Commands:
   compile             Compile application modules and generate artifacts
@@ -43,6 +60,11 @@ Commands:
   explain             Explain a module, provider, or external token
   context             Extract an AI-sized module context pack
   doctor              Run project and generated-artifact health checks
+  migrate             Preview or apply versioned source migrations
+  plan                Preview deterministic workload targets without writing or deploying
+  build-delivery      Build independent local factories and an atomic delivery manifest (Bun)
+  openapi-export      Export a generated OpenAPI module to a standalone JSON document
+  openapi-diff        Compare two OpenAPI JSON documents and fail on breaking changes
   graphql-schema      Explicitly export a caller-scoped schema to the configured local file
 
 Options:
@@ -52,6 +74,8 @@ Options:
   --no-strict         Disable strict diagnostics (local migration escape hatch)
   --client            Generate typed API client in client.ts (default)
   --no-client         Do not generate client.ts
+  --openapi           Generate OpenAPI 3.1 module in openapi.ts (default)
+  --no-openapi        Do not generate openapi.ts
   --permissions       Generate typed permissions registry (default)
   --no-permissions    Do not generate permissions.ts
   --no-graphql        Explicitly disable configured GraphQL contracts for this run
@@ -60,9 +84,11 @@ Options:
   --token-env <name>  Environment variable holding the intended user's access token
   --check             graphql-schema: compare the remote schema without changing the snapshot
   --debounce <ms>     Debounce source changes in dev mode (default: 100)
-  --json              Print machine-readable output for compile/check/graph/explain/context/doctor
+  --json              Print machine-readable output for compile/check/graph/explain/context/doctor/plan/build-delivery/openapi-export/openapi-diff
+  --space <n>         openapi-export: JSON indentation (0-10, default: 2)
+  --delivery <file>   plan/build-delivery: validated JSON configuration (overrides config.delivery)
   --dry-run           Preview a fix without writing the target file
-  --write             Apply a fix to disk (fix is preview-only by default)
+  --write             Apply a fix or migration to disk (preview-only by default)
   --preset, -p <name> Architecture preset ('modular-monolith' | 'angular-enterprise' | 'clean-architecture')
   --help, -h          Show this help
 `);
@@ -76,7 +102,18 @@ async function run(): Promise<void> {
   }
 
   const command = args[0];
-  if (!["compile", "check", "dev", "graph", "explain", "context", "doctor", "fix", "graphql-schema"].includes(command)) {
+  if (command === "database-contracts") {
+    const path = args[1];
+    if (!path || path.startsWith("-") || args.slice(2).some((arg) => arg !== "--check")) {
+      throw new Error("database-contracts requires <config.json> and optional --check");
+    }
+    const { runDatabaseContractsFile } = await import("./database-contracts");
+    const result = await runDatabaseContractsFile(path, args.includes("--check"));
+    console.log(JSON.stringify(result, null, 2));
+    if (args.includes("--check") && !result.upToDate) process.exitCode = 1;
+    return;
+  }
+  if (!command || !["compile", "check", "dev", "graph", "explain", "context", "doctor", "migrate", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
     console.error(`Error: unknown command "${command}"`);
     printUsage();
     process.exit(1);
@@ -86,6 +123,7 @@ async function run(): Promise<void> {
   let outDir: string | undefined;
   let strict: boolean | undefined;
   let generateClient: boolean | undefined;
+  let generateOpenApi: boolean | undefined;
   let generatePermissions: boolean | undefined;
   let preset: ModuleBoundaryPresetName | undefined;
   let debounceMs: number = 100;
@@ -97,10 +135,44 @@ async function run(): Promise<void> {
   let keyEnv: string | undefined;
   let tokenEnv: string | undefined;
   let checkSchema = false;
+  let deliveryPath: string | undefined;
+  const openApiDiffPaths: string[] = [];
+  const openApiExportPaths: string[] = [];
+  let openApiExportSpace: number | undefined;
+  const deliveryCommand = command === "plan" || command === "build-delivery";
+  const openApiDiffCommand = command === "openapi-diff";
+  const openApiExportCommand = command === "openapi-export";
+  const planFlags = new Set([
+    "--delivery", "--root", "-r", "--out", "-o", "--strict", "--no-strict",
+    "--client", "--no-client", "--permissions", "--no-permissions", "--no-graphql",
+    "--openapi", "--no-openapi",
+    "--json", "--dry-run", "--preset", "-p",
+  ]);
+  const planValueFlags = new Set(["--delivery", "--root", "-r", "--out", "-o", "--preset", "-p"]);
 
   for (let i: number = 1; i < args.length; i++) {
     const arg = args[i];
-    if (arg === "--root" || arg === "-r") {
+    if (arg === undefined) throw new Error("Missing command-line argument");
+    if (openApiDiffCommand && arg.startsWith("-") && arg !== "--json") {
+      throw new Error("openapi-diff accepts only --json and two JSON file paths");
+    }
+    if (openApiExportCommand && arg.startsWith("-") && arg !== "--json" && arg !== "--space") {
+      throw new Error("openapi-export accepts --json, --space and two file paths");
+    }
+    if (deliveryCommand && arg.startsWith("-")) {
+      if (!planFlags.has(arg)) throw new Error("Unsupported plan argument");
+      if (command === "build-delivery" && arg === "--dry-run") throw new Error("Use plan for read-only previews");
+      const next = args[i + 1];
+      if (planValueFlags.has(arg) && (!next || next.startsWith("-"))) {
+        throw new Error("Plan option requires a value");
+      }
+    }
+    if (arg === "--delivery") {
+      deliveryPath = args[++i];
+      if (!deliveryCommand || !deliveryPath || deliveryPath.startsWith("-")) {
+        throw new Error("--delivery requires a JSON file and a delivery command");
+      }
+    } else if (arg === "--root" || arg === "-r") {
       rootDir = args[++i];
     } else if (arg === "--out" || arg === "-o") {
       outDir = args[++i];
@@ -112,6 +184,10 @@ async function run(): Promise<void> {
       generateClient = true;
     } else if (arg === "--no-client") {
       generateClient = false;
+    } else if (arg === "--openapi") {
+      generateOpenApi = true;
+    } else if (arg === "--no-openapi") {
+      generateOpenApi = false;
     } else if (arg === "--permissions") {
       generatePermissions = true;
     } else if (arg === "--no-permissions") {
@@ -132,11 +208,19 @@ async function run(): Promise<void> {
         console.error("Error: --debounce must be a non-negative number");
         process.exit(1);
       }
+    } else if (openApiExportCommand && arg === "--space") {
+      const value = args[++i];
+      const space = Number(value);
+      if (!value || !Number.isInteger(space) || space < 0 || space > 10) {
+        throw new Error("openapi-export --space must be an integer from 0 to 10");
+      }
+      openApiExportSpace = space;
     } else if (arg === "--json") {
       json = true;
     } else if (arg === "--dry-run") {
       dryRun = true;
     } else if (arg === "--write") {
+      if (command === "plan") throw new Error("plan is read-only; --write is not supported");
       dryRun = false;
     } else if (arg === "--preset" || arg === "-p") {
       const presetArg = args[++i];
@@ -145,12 +229,72 @@ async function run(): Promise<void> {
         process.exit(1);
       }
       preset = presetArg;
+    } else if (openApiDiffCommand && !arg.startsWith("-")) {
+      openApiDiffPaths.push(arg);
+    } else if (openApiExportCommand && !arg.startsWith("-")) {
+      openApiExportPaths.push(arg);
     } else if (!arg.startsWith("-") && !rootDir) {
       if ((command === "explain" || command === "context" || command === "fix") && !query) query = arg;
       else rootDir = arg;
     } else if (!arg.startsWith("-") && (command === "explain" || command === "context" || command === "fix") && !query) {
       query = arg;
+    } else if (deliveryCommand) {
+      throw new Error("Unsupported plan argument");
     }
+  }
+
+  if (openApiDiffCommand) {
+    if (openApiDiffPaths.length !== 2) {
+      throw new Error("openapi-diff requires exactly two JSON file paths: <base.json> <current.json>");
+    }
+    const basePath = openApiDiffPaths[0];
+    const currentPath = openApiDiffPaths[1];
+    if (!basePath || !currentPath) throw new Error("openapi-diff requires two JSON file paths");
+    const result = diffOpenApiDocuments(
+      await readOpenApiJson(resolve(process.cwd(), basePath)),
+      await readOpenApiJson(resolve(process.cwd(), currentPath)),
+    );
+    console.log(json ? JSON.stringify(result, null, 2) : formatOpenApiDiff(result));
+    if (!result.ok) process.exitCode = 1;
+    return;
+  }
+
+  if (openApiExportCommand) {
+    if (openApiExportPaths.length !== 2) {
+      throw new Error("openapi-export requires exactly two file paths: <openapi-module> <output.json>");
+    }
+    const modulePath = openApiExportPaths[0];
+    const outputPath = openApiExportPaths[1];
+    if (!modulePath || !outputPath) throw new Error("openapi-export requires an OpenAPI module and output path");
+    const result = await exportGeneratedOpenApiJson({
+      modulePath: resolve(process.cwd(), modulePath),
+      outputPath: resolve(process.cwd(), outputPath),
+      ...(openApiExportSpace === undefined ? {} : { space: openApiExportSpace }),
+    });
+    console.log(json ? JSON.stringify({ ok: true, ...result }, null, 2)
+      : result.written ? `OpenAPI JSON written: ${result.path}` : `OpenAPI JSON matches: ${result.path}`);
+    return;
+  }
+
+  if (command === "migrate") {
+    const result = await migrateProject({
+      rootDir: rootDir ? resolve(process.cwd(), rootDir) : process.cwd(),
+      write: !dryRun,
+    });
+    if (json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      const action = result.write ? "changed" : "would change";
+      const lines = [`${action} ${result.changedFiles.length} file(s)`];
+      for (const file of result.files) {
+        lines.push(`  ${file.file}: ${file.replacements} replacement(s)`);
+        for (const issue of file.issues) lines.push(`  ${issue.file}:${issue.line ?? 0} ${issue.code}: ${issue.message}`);
+      }
+      if (result.changedFiles.length === 0 && result.issues.length === 0) lines.push("  no migrations required");
+      console.log(lines.join("\n"));
+    }
+    if (result.issues.length > 0) process.exitCode = 1;
+    return;
   }
 
   const loadedConfig = await loadSupacloudConfig(process.cwd());
@@ -162,17 +306,38 @@ async function run(): Promise<void> {
     ...loadedConfig,
     root: resolvedRoot,
     outDir: resolvedOut,
-    strict: strict ?? loadedConfig.strict,
-    generateClient: generateClient ?? loadedConfig.generateClient,
-    generatePermissions: generatePermissions ?? loadedConfig.generatePermissions,
-    graphql: noGraphql ? false : loadedConfig.graphql,
+    ...(strict === undefined ? {} : { strict }),
+    ...(generateClient === undefined ? {} : { generateClient }),
+    ...(generateOpenApi === undefined ? {} : { generateOpenApi }),
+    ...(generatePermissions === undefined ? {} : { generatePermissions }),
+    ...(noGraphql ? { graphql: false } : {}),
   }, process.cwd());
   const compileDefaults = {
     ...configured,
-    moduleBoundaryPreset: preset ?? configured.moduleBoundaryPreset,
+    ...(preset ? { moduleBoundaryPreset: preset } : {}),
   };
 
-  if (command === "graphql-schema") {
+  if (deliveryCommand) {
+    let delivery: unknown = loadedConfig.delivery;
+    if (deliveryPath !== undefined) {
+      try {
+        delivery = JSON.parse(await readFile(resolve(process.cwd(), deliveryPath), "utf8"));
+      } catch {
+        throw new DeliveryConfigurationError();
+      }
+    }
+    if (command === "build-delivery") {
+      const result = await buildDeliveryProject(compileDefaults, delivery);
+      console.log(json ? JSON.stringify(result, null, 2) : result.ok
+        ? `Local delivery artifacts built. Changed: ${result.changedTargets.join(", ") || "-"}. Unchanged: ${result.unchangedTargets.join(", ") || "-"}. No deployment performed.`
+        : result.diagnostics.map((item) => `${item.code}: ${item.message}\n${item.suggestion ?? ""}`).join("\n"));
+      if (!result.ok) process.exitCode = 1;
+    } else {
+      const result = await planDeliveryProject(compileDefaults, delivery);
+      console.log(json ? JSON.stringify(result, null, 2) : formatDeliveryPlan(result));
+      if (!result.ok) process.exitCode = 1;
+    }
+  } else if (command === "graphql-schema") {
     if (!projectUrl) throw new Error("graphql-schema requires --url with an explicit project URL");
     if (!compileDefaults.graphql) throw new Error("graphql-schema requires graphql configuration");
     const credential = (name: string | undefined): string | undefined => {
@@ -182,11 +347,13 @@ async function run(): Promise<void> {
       return value;
     };
     const { pullGraphqlSchema } = await import("./graphql-schema");
+    const publishableKey = credential(keyEnv);
+    const accessToken = credential(tokenEnv);
     const result = await pullGraphqlSchema({
       url: projectUrl,
       output: compileDefaults.graphql.schema,
-      publishableKey: credential(keyEnv),
-      accessToken: credential(tokenEnv),
+      ...(publishableKey === undefined ? {} : { publishableKey }),
+      ...(accessToken === undefined ? {} : { accessToken }),
       check: checkSchema,
     });
     console.log(json ? JSON.stringify({ ok: result.upToDate, ...result }, null, 2)
@@ -344,7 +511,7 @@ async function run(): Promise<void> {
       console.log(JSON.stringify(doctor, null, 2));
     } else {
       for (const check of doctor.checks) console.log(`${check.ok ? "OK" : "FAIL"} ${check.name}: ${check.detail}`);
-      printDiagnostics(doctor.diagnostics);
+      printDiagnostics(doctor.diagnostics ?? []);
     }
     if (doctor.errors > 0) process.exit(1);
   }
@@ -362,6 +529,40 @@ function printDiagnostics(diagnostics: Diagnostic[]): void {
 }
 
 run().catch((err: unknown) => {
+  if (process.argv[2] === "openapi-diff" || process.argv[2] === "openapi-export" || err instanceof OpenApiDocumentError) {
+    const diagnostic = {
+      severity: "error" as const,
+      code: err instanceof OpenApiDocumentError
+        ? err.code
+        : process.argv[2] === "openapi-export" ? "openapi-export-failed" : "openapi-diff-failed",
+      message: err instanceof OpenApiDocumentError
+        ? err.message
+        : process.argv[2] === "openapi-export"
+          ? "OpenAPI export requires a generated module and a writable JSON output path."
+          : "OpenAPI diff requires exactly two valid JSON documents.",
+    };
+    const result = { ok: false, breaking: [], changes: [], diagnostics: [diagnostic] };
+    if (process.argv.slice(2).includes("--json")) console.log(JSON.stringify(result, null, 2));
+    else console.error(`${diagnostic.code}: ${diagnostic.message}`);
+    process.exitCode = 1;
+    return;
+  }
+  if (process.argv[2] === "plan" || process.argv[2] === "build-delivery" || err instanceof DeliveryConfigurationError) {
+    const result = {
+      ok: false, written: [],
+      ...(process.argv[2] === "build-delivery" ? { manifest: null, bundledTargets: [] } : { plan: null }),
+      diagnostics: [{
+        severity: "error",
+        code: err instanceof DeliveryConfigurationError ? err.code : "delivery-planning-failed",
+        message: err instanceof DeliveryConfigurationError ? err.message
+          : "Planning failed. Check source/configuration paths and supported plan arguments.",
+      }],
+    };
+    console.log(process.argv.slice(2).includes("--json") ? JSON.stringify(result, null, 2)
+      : result.diagnostics.map((item) => `${item.code}: ${item.message}`).join("\n"));
+    process.exitCode = 1;
+    return;
+  }
   if (err instanceof GraphqlConfigurationError) {
     const diagnostic: Diagnostic = {
       code: err.code,

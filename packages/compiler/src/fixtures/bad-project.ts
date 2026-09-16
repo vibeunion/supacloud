@@ -6,7 +6,7 @@ import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./runtime-source";
  * command missing permission, dependency cannot be statically resolved.
  * marker:xxx comments are used by tests to locate diagnostic line numbers.
  */
-export const BAD_PROJECT_FILES: Record<string, string> = {
+export const BAD_PROJECT_FILES = {
   "tsconfig.json": FIXTURE_TSCONFIG,
   "src/runtime.ts": RUNTIME_SOURCE,
 
@@ -151,4 +151,4 @@ export class FirstRouteModule {}
 })
 export class SecondRouteModule {}
 `,
-};
+} satisfies Record<string, string>;

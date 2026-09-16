@@ -1,5 +1,58 @@
 # @supacloud/compiler
 
+## Local Delivery
+
+`supacloud-compiler plan --json` previews workload targets, dependency closures,
+route ownership, and required runtime capabilities without writing or deploying.
+`supacloud-compiler build-delivery --json` creates independent local factory bundles
+and an atomic inspection manifest, reusing unchanged artifacts without deployment.
+See [local delivery](./DELIVERY.md) for validated configuration, AI-facing
+contracts, and the distinction between a topology preview and release evidence.
+
+## Persistent Execution Policy
+
+Set `commandCapabilities.requirePersistentAdapters: true` to require named adapters
+with explicit `database`/`external` boundaries, permission, audit and idempotency.
+Database commands require transactional capability and `transaction: "required"`.
+External adapters cannot satisfy a required database transaction: use durable
+intent and read-only reconciliation instead.
+
+`command-persistence-required` and `command-external-transaction` diagnostics include
+recovery suggestions and participate in JSON output and the existing no-write-on-error
+gate. These checks validate declared policy, not the implementation of a custom
+adapter. See [configuration and migration](../../docs/command-migration.md).
+
+## Source Migrations
+
+The compiler includes deterministic, versioned source migrations for breaking
+framework changes. The command is preview-only unless `--write` is explicit:
+
+```bash
+# Preview files, replacements, and manual conflicts
+bunx supacloud-compiler migrate --root . --json
+
+# Apply only after reviewing the preview
+bunx supacloud-compiler migrate --root . --write
+```
+
+Migrations operate on TypeScript ASTs and skip `node_modules`, `dist`, and
+`generated`. Route options are resolved through local constants,
+`defineRouteContract(...)`, namespace properties, named imports, and the
+project's `tsconfig` path/module settings, so a shared contract declaration is
+changed once even when several controllers import it. If the contract is outside
+the selected root/include set, or any file has an ambiguous transformation, the
+command exits non-zero and writes no file. A successful write uses a
+same-directory temporary file followed by replacement for each changed file; it
+is not a version-control rollback mechanism. Review the diff, then run `compile`,
+`check`, and focused tests with the same compiler version. Use version control to
+revert a migration.
+
+The current route-contract migration is `route-response-to-responses` (`0.11.0`
+to `0.12.0`): it changes `response: Schema` into
+`responses: { 200: Schema }`. It refuses to guess when `responses` is already
+present. See the [route contract migration guide](../../docs/route-contract-migration.md)
+for the complete upgrade and release sequence.
+
 FA-derived direct-command RPC ownership, contract inspection and POST command
 protocol migration are documented in `docs/fa-consumer-governance.md` in the
 repository. `context <module> --json` reports `routeContracts` and standalone
@@ -84,11 +137,48 @@ const result = await queries.ReviewList({ first: 20 });
 
 Method names and types come from named operations. The generated client is
 dependency-free and refreshes identity per request; `getSdk(requester)` integrates
-an existing transport. It rejects HTTP errors, GraphQL errors and malformed
-response envelopes, but does not runtime-decode selected field values.
+an existing transport returning `Promise<unknown>`. It rejects HTTP errors,
+GraphQL errors, malformed response envelopes and invalid selected field values.
+Both clients run generated operation parsers before returning typed data. No
+customer TypeScript-to-TypeBox postprocessor or extra runtime dependency is needed.
+The same module exports `parseReviewListQuery(value: unknown)` and
+`isReviewListQuery(value: unknown)` for other integration boundaries (names follow
+your operations). Validation follows the generated selected JSON shape, including
+aliases, fragments, enums, lists, nullability and optional conditional fields.
+Unmapped scalars remain `unknown`; scalar domain formats and authorization still
+need business validation. Non-JSON scalar mappings such as `Date` fail compilation;
+map the wire value to `string` and convert it after validation instead.
+Generic application adapters can use `GraphqlQueryResults[Name]`,
+`parseGraphqlResult(name, value)` and `isGraphqlResult(name, value)` instead of
+maintaining their own result-type registry. Registry keys are operation names
+such as `"ReviewList"`, without the `Query` type suffix.
 `graphql.manifest.json` records query locations and the schema hash; context packs
 include colocated queries. RLS/grants, real database acceptance and query resource
 limits remain deployment responsibilities. Business writes stay in Commands.
+
+Use project configuration instead of a custom compile wrapper for shared rules:
+
+```ts
+export default defineSupacloudConfig({
+  root: "src",
+  graphql: { schema: "graphql/schema.graphql" },
+  moduleBoundaries: [{
+    sourceTag: "type:feature",
+    bannedDependenciesWithTags: ["type:feature"],
+  }],
+  typeSafety: { scanProductionSource: true, noAnyInGenerated: true },
+  allowRouteCommandBindings: false,
+});
+```
+
+`compile`, `check` and `dev` apply these options through the same compiler pipeline.
+`check` also compares generated validators without temporary directories or writes.
+`allowRouteCommandBindings: false` prevents duplicate governance when an application
+executes Commands inside its own service boundary. `disallowControllerDirectDb`
+and `detectOrphanModules` expose the existing optional architecture checks too.
+Keep application-specific governance and business queries in the application.
+See `docs/compiler-consumer-simplification.md` in the repository for the ownership
+checklist and migration boundaries.
 
 ## 安装
 
@@ -119,6 +209,7 @@ bunx supacloud-compiler dev
 | 文件发现 | `**/*.module.ts`、`**/*.ts` |
 | strict 类型安全门 | 开启 |
 | typed client | 开启 |
+| OpenAPI 3.1 module | 开启 |
 | permissions manifest | 开启 |
 | module boundary preset | `modular-monolith` |
 | provider tree-shaking | 开启 |
@@ -247,8 +338,85 @@ IDE 和 AI agent 做状态机漂移检查。
 - AOP 只支持静态边界：`ModuleOptions.aspects`、`RouteOptions.aspects`、`CommandOptions.aspects` 和 `JobOptions.aspects` 必须是显式数组字面量，元素必须是可解析的函数标识符。生成器会直接 import aspect 并生成固定顺序的 onion chain，不使用 Proxy、Reflect 扫描、动态 pointcut 或运行时注册。
 - 执行顺序为 `module -> route -> command -> commandGovernance -> handler`；Job 使用 `module -> job -> executor -> run/execute`，并在 finally 中销毁 job scope。
 - services 对象的 key 为 token 名的 camelCase：`CaseService → caseService`、`CASE_REPOSITORY → caseRepository`、`LOGGER → logger`。
-- controller 描述静态给出：`{ path, serviceKey, scope, routes: [{ method, path, handler, body?, params?, query?, response? }] }`，schema 直接引用 import 进来的对象。
+- controller 描述静态给出：`{ path, serviceKey, scope, routes: [{ method, path, handler, body?, params?, query?, headers?, cookie?, response?, responses? }] }`，schema 直接引用 import 进来的对象。
 - 严格生成模式会对 `application.ts`、可选的 `client.ts` 和 `permissions.ts` 做 AST 扫描，禁止生成 `any`。
+
+`<outDir>/client.ts` 提供按 Controller 分组的 Fetch client。路径参数会从
+controller 和 route 的完整路径合并推导；声明了 `response` 或 `responses` 的
+route 会自动按 HTTP status 执行内置 response decoder，并返回 schema 推导的
+类型。显式 decoder 仍可用于覆盖自定义转换；没有响应 schema 的 route 返回
+`unknown`。`headers`、`cookie` 和多状态 `responses` 会同步进入客户端和
+OpenAPI。`buildRouteUrl` 和 `createApiClient` 可直接复用，也支持动态 headers
+和请求拦截器。
+
+### Migration from manual decoders
+
+旧版本要求调用方为每个有响应 schema 的 route 传入 decoder。升级后删除该
+decoder 即可；需要保留自定义转换时，将它作为第二个参数传入。旧的单一
+`response: Schema` 当前作为迁移桥接仍可编译，但新代码必须迁移到
+`responses: { 200: Schema }` 或实际的状态映射；该桥接字段不保证在下一次破坏性
+版本继续保留。Management API 的契约注册表
+由实际 Elysia `app.routes` 投影生成，不应再维护平行的路由清单。
+
+完整的破坏性升级步骤（包括 headers、cookie、客户端 decoder、OpenAPI 和生成物
+刷新）见 [route contract migration guide](../../docs/route-contract-migration.md)。
+
+`<outDir>/openapi.ts` 是无额外运行时依赖的 OpenAPI 3.1 module，导出
+`OPENAPI_DOCUMENT`、`OPENAPI_JSON`、`createOpenApiDocument` 和
+`serializeOpenApiDocument`。它在运行时读取同一组 TypeBox schema，生成 paths、
+parameters、requestBody、responses、securitySchemes 以及 `x-supacloud` 路由元数据，
+因此不会维护第二份 API contract。默认包含 bearer JWT scheme；项目可在
+`openApi` 配置中补充文档信息、servers 和其他显式 security schemes。
+
+`OPENAPI_JSON` 是运行时快照；需要提交独立 `openapi.json` 时，在应用已经能加载
+生成模块的运行时调用 `exportGeneratedOpenApiJson()` 或直接写出该字符串。编译器
+不会为了生成 JSON 执行应用 schema。`readOpenApiJson()` 和
+`diffOpenApiDocuments()` 可用于构建发布门禁：
+
+```ts
+import {
+  exportGeneratedOpenApiJson,
+  diffOpenApiDocuments,
+  readOpenApiJson,
+} from "@supacloud/compiler";
+
+await exportGeneratedOpenApiJson({
+  modulePath: "./generated/openapi.ts",
+  outputPath: "./generated/openapi.json",
+});
+
+const diff = diffOpenApiDocuments(
+  await readOpenApiJson("./contracts/openapi.base.json"),
+  await readOpenApiJson("./generated/openapi.json"),
+);
+if (!diff.ok) throw new Error("OpenAPI breaking change");
+```
+
+也可以直接在 CI 中运行：
+
+```bash
+supacloud-compiler openapi-export ./generated/openapi.ts ./generated/openapi.json
+supacloud-compiler openapi-diff ./contracts/openapi.base.json ./generated/openapi.json --json
+```
+
+`openapi-export` 在运行时加载生成的 `openapi.ts` 并原子地写出独立 JSON；它不会在
+编译阶段执行应用 schema。可用 `--space 0` 到 `--space 10` 控制缩进，重复执行不会
+改写内容不变的文件。当前只承诺 JSON 输出，YAML 转换由发布流水线按需处理。
+
+diff 默认阻止路径/操作/参数/响应删除、请求约束收紧、响应字段收窄或安全要求新增；
+新增可选参数、路径、响应和组件会标记为 non-breaking。它是保守的合同门禁，不替代
+应用端的业务兼容性测试。
+
+```ts
+export default defineSupacloudConfig({
+  generateClient: true,
+  generateOpenApi: true,
+  openApi: { title: "Orders API", version: "1.0.0" },
+});
+```
+
+用 `--no-client` 或 `--no-openapi` 关闭对应产物；`compile` 和 `check` 会同时检查
+已生成的 `client.ts`、`openapi.ts` 是否与当前 ApplicationGraph 漂移。
 
 `<outDir>/app.manifest.json`：`{ version: 1, modules, externalTokens }`，供 CLI graph/explain 使用。
 
@@ -291,6 +459,15 @@ supacloud-compiler check --root ./app --out ./app/generated --strict
 ```
 
 程序化调用可直接使用 `scanGeneratedArtifacts()` 和 `scanProductionSource()` 获取结构化诊断。
+
+生产源码扫描还检查 Drizzle SQL：SC6007 拒绝非 `unknown` 的 `sql<T>`
+结果断言，SC6008 拒绝动态 `sql.raw`。规则解析导入符号，支持 import alias、
+namespace import 和 re-export，不匹配无关的同名函数。
+`strict: true` 默认启用扫描并将这些诊断作为错误；非严格模式需要显式开启
+`typeSafety.scanProductionSource`，此时为警告。
+使用参数化 SQL 模板，并通过 `@supacloud/db/drizzle` 的
+`executeDecodedSql` 在结果边界执行 schema 校验。这不是完整 SQL 分析器，
+不证明 SQL 语义、数据库迁移或 RLS 正确性。
 
 ## 开发模式
 
@@ -360,8 +537,8 @@ bun run build
 
 ## Route Contract Policy
 
-Enable `requireRouteContracts: true` in `defineSupacloudConfig(...)` or
-`CompileOptions` to report `route-contract-required` errors in both compile and
+Project configuration defaults to `requireRouteContracts: true`. Low-level
+`CompileOptions` callers can set it explicitly to report `route-contract-required` errors in both compile and
 check (including JSON diagnostics). Changing this option invalidates incremental
 results. Combine it with `writeOnError: false` when programmatic compilation must
 not emit files on errors.
@@ -371,11 +548,58 @@ query, and response declarations. Required inputs are detected from handler
 bindings and controller/route path parameters. Responses always require an
 explicit declaration, including intentional void contracts.
 
-This checks declaration coverage only, not schema quality, handler/schema type
+This checks declaration coverage and rejects known opaque schemas, not full schema quality, handler/schema type
 equivalence, or database authorization. It deliberately does not auto-fix missing
 schemas with `unknown` placeholders. Consumers must define the actual contracts
-and test decoding separately. The policy defaults to false for existing projects.
+and test decoding separately. Native output must be classified; delegated
+validation and native transports require a `contract.evidence` test reference.
+The report still sets `verified: false`, since a reference does not prove execution.
+
+The source type gate now includes TypeScript syntactic/semantic diagnostics and
+rejects production `@ts-ignore`, `@ts-nocheck` and `@ts-expect-error`. A source-directory root resolves
+the enclosing tsconfig. When this gate is enabled, incremental compilation
+rechecks types instead of returning an unchecked cached result.
+
+Generated route calls require all path parameters and a decoder for typed
+responses. See [type safety and migration](../../docs/type-safety.md).
 
 ## License
 
 MIT
+# Unified Database Contracts
+
+Run `supacloud-compiler database-contracts database-contracts.json` to generate a
+single type entry point and drift manifest:
+
+```json
+{
+  "rootDir": ".",
+  "outDir": "generated",
+  "postgrestTypes": "database.types.ts",
+  "drizzleSchema": "db/schema.ts",
+  "role": "authenticated",
+  "graphql": {
+    "schema": "graphql/schema.graphql",
+    "documents": ["src/**/*.graphql"]
+  },
+  "migrations": ["migrations/001.sql"]
+}
+```
+
+Paths are relative to the configuration directory; GraphQL documents are resolved
+using the compiler's GraphQL configuration under `rootDir`.
+Export the PostgREST `Database` snapshot with the official database type exporter
+and capture the role-scoped `pg_graphql` schema before running this offline step.
+The generated `database.ts` preserves native `Database` / `QueryData`, Drizzle
+schema types and GraphQL operation types; it does not pretend their result shapes
+are interchangeable. Consumers need `@supabase/supabase-js` and their Drizzle
+dependencies. Keep runtime schema decoders at untrusted boundaries.
+
+Use `--check` to detect changed snapshots, local Drizzle imports, migration content
+or order, and generated artifacts without writing. This checks the supplied files,
+not a live database: refresh snapshots from the intended database/role first.
+The role label records provenance, not proof of authorization or schema parity.
+
+Compiled DI uses constructor injection and direct generated scope factories.
+Property `inject()` and runtime injection-context imports fail with `SC2012`;
+migrate those dependencies to constructor parameters before generating.

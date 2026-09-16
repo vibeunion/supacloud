@@ -11,7 +11,7 @@ import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./runtime-source";
  *   constructor depends on CASE_REPOSITORY and REQUEST_CONTEXT (request scope)
  * - health module: defineModule format
  */
-export const GOOD_PROJECT_FILES: Record<string, string> = {
+export const GOOD_PROJECT_FILES = {
   "tsconfig.json": FIXTURE_TSCONFIG,
   "src/runtime.ts": RUNTIME_SOURCE,
 
@@ -176,4 +176,4 @@ export const HealthModule = defineModule({
   exports: [HealthService],
 });
 `,
-};
+} satisfies Record<string, string>;

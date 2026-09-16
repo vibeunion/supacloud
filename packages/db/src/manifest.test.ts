@@ -48,13 +48,13 @@ describe('buildDatabaseManifest', () => {
     const manifest = buildDatabaseManifest([casesModule, iamModule]);
     expect(manifest.version).toBe(1);
     expect(manifest.modules).toHaveLength(2);
-    expect(manifest.modules[0].name).toBe('cases');
-    expect(manifest.modules[0].tables).toEqual(['public.cases']);
-    expect(manifest.modules[0].policies).toHaveLength(1);
-    expect(manifest.modules[0].functions).toHaveLength(1);
-    expect(manifest.modules[0].triggers).toHaveLength(1);
-    expect(manifest.modules[0].grants).toHaveLength(1);
-    expect(manifest.modules[1].name).toBe('iam');
+    expect(manifest.modules[0]?.name).toBe('cases');
+    expect(manifest.modules[0]?.tables).toEqual(['public.cases']);
+    expect(manifest.modules[0]?.policies).toHaveLength(1);
+    expect(manifest.modules[0]?.functions).toHaveLength(1);
+    expect(manifest.modules[0]?.triggers).toHaveLength(1);
+    expect(manifest.modules[0]?.grants).toHaveLength(1);
+    expect(manifest.modules[1]?.name).toBe('iam');
   });
 
   test('manifest 可 JSON 序列化', () => {

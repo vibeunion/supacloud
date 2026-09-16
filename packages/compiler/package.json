@@ -18,7 +18,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "DELIVERY.md"
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
@@ -45,6 +46,7 @@
     "directory": "packages/compiler"
   },
   "dependencies": {
+    "@sinclair/typebox": "^0.34.52",
     "@graphql-codegen/core": "^6.2.0",
     "@graphql-codegen/typed-document-node": "^7.1.0",
     "@graphql-codegen/typescript": "^6.1.0",
@@ -54,6 +56,8 @@
     "graphql": "^16"
   },
   "devDependencies": {
+    "@supabase/supabase-js": "2.115.0",
+    "drizzle-orm": "1.0.0-rc.4",
     "@types/bun": "^1.4.2",
     "typescript": "^7.0.2"
   }
