@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "noEmit": true,
+    "types": ["bun"]
+  },
+  "include": [
+    "src/durable.ts",
+    "src/workbench-http.ts",
+    "web/workbench.ts",
+    "scripts/migrations.ts",
+    "scripts/local-container.ts",
+    "scripts/install-durable.ts",
+    "scripts/check-durable.ts",
+    "scripts/preview-workbench.ts",
+    "tests/durable.test.ts"
+  ]
+}
