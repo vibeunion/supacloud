@@ -45,6 +45,13 @@ It also packages these PostgreSQL libraries and optional extensions:
 - `documentdb`, created only when the FerretDB profile is enabled
 - `pgsodium`, created only when `ENABLE_PGSODIUM=true`
 - `supabase_vault`, created only when `ENABLE_SUPABASE_VAULT=true`
+- `pg_durable` 0.2.8, packaged and initialized only when `ENABLE_PG_DURABLE=true`
+  (amd64 builds; binary download is checksum-verified)
+
+The approval runtime uses `pg_durable` and the existing `pg_jsonschema` package.
+See [Durable Approval Runtime](../../docs/approval-durable.md) for the isolated
+local environment, database migration and existing-volume activation procedure.
+Enabling the extension does not switch application approval traffic.
 
 It also sets:
 
