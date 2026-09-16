@@ -510,13 +510,13 @@ export function registerDatabaseTools(
     const localActions = ["lint_migrations", "lint"] as const;
     const readActions = [
         "query", "list_tables", "describe_columns", "list_indexes", "list_constraints",
-        "list_extensions", "rls_status", "rls_policies",
+        "list_extensions", "extension_catalog", "rls_status", "rls_policies",
         "list_auth_users", "get_auth_user",
         "connections", "stats", "slow_queries",
         "list_migrations", "migration_inventory", "project_url", "generate_types",
         "database_lint", "db_lint", "rpc_catalog", "list_rpcs",
     ] as const;
-    const writeActions = ["execute", "apply_migration", "push_migrations", "baseline_migrations", "create_table_rls"] as const;
+    const writeActions = ["execute", "apply_migration", "push_migrations", "baseline_migrations", "create_table_rls", "enable_extension", "disable_extension"] as const;
     const remoteActions = [...readActions, ...localActions] as const;
     const allActions = localOnly
         ? localActions
@@ -555,6 +555,7 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
             columns: optional(Type.String(), "[create_table_rls] Column definitions"),
             policy_mode: optional(stringEnum(["deny_all", "owner"]), "[create_table_rls] RLS policy mode (default: deny_all)"),
             owner_column: optional(Type.String(), "[create_table_rls owner] UUID owner column matched to auth.uid()"),
+            extension: optional(Type.String(), "[enable_extension/disable_extension] PostgreSQL extension or pgflow"),
         },
         async (args: any) => {
             const { action } = args;
@@ -641,6 +642,34 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                     const r = await execSql(sql);
                     text = r.ok ? formatExtensionList(r.data) : `❌ Failed (${r.status})`;
                     break;
+                }
+                case "extension_catalog": {
+                    const path = `/v1/projects/${projectRefPathSegment(ref, action)}/database/extensions/catalog`;
+                    const result = await managementHttp().get(path);
+                    if (!result.ok || !Array.isArray(result.data)) throw new Error("Extension inventory unavailable");
+                    return { content: [{ type: "text" as const, text: JSON.stringify(result.data) }] };
+                }
+                case "enable_extension":
+                case "disable_extension": {
+                    if (readOnly) throw new Error("Extension mutation blocked by read-only mode");
+                    if (typeof args.extension !== "string" || !/^[A-Za-z_][A-Za-z0-9_-]{0,62}$/.test(args.extension)) {
+                        throw new Error("A valid extension name is required");
+                    }
+                    const enabled = action === "enable_extension";
+                    const path = `/v1/projects/${projectRefPathSegment(ref, action)}/database/extensions`;
+                    const result = enabled
+                        ? await managementHttp().postReleaseMutation(path, { name: args.extension })
+                        : await managementHttp().deleteReleaseMutation(path, { name: args.extension });
+                    const data: unknown = result.data;
+                    if (!result.ok || result.status !== 200 || !data || typeof data !== "object"
+                        || !("name" in data) || data.name !== args.extension
+                        || !("is_installed" in data) || typeof data.is_installed !== "boolean"
+                        || !("installed_version" in data)
+                        || (data.is_installed ? typeof data.installed_version !== "string" || !data.installed_version : data.installed_version !== null)
+                        || (args.extension === "pgflow" ? !("is_enabled" in data) || data.is_enabled !== enabled || enabled && !data.is_installed : data.is_installed !== enabled)) {
+                        throw new Error("Extension outcome unconfirmed; refresh inventory before retrying");
+                    }
+                    return { content: [{ type: "text" as const, text: JSON.stringify(data) }] };
                 }
                 case "rls_status": {
                     const sql = `SELECT tablename, rowsecurity as rls_enabled FROM pg_tables WHERE schemaname = '${schema}' ORDER BY tablename;`;

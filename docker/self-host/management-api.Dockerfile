@@ -13,6 +13,7 @@ RUN mkdir -p /etc/supabase/pgredis-tenants \
     && chown bun:bun /etc/supabase/pgredis-tenants
 
 COPY packages/management-api ./packages/management-api
+COPY packages/worker/scripts/roles.ts packages/worker/scripts/scheduler.ts packages/worker/scripts/control.ts ./packages/worker/scripts/
 COPY packages/web-console ./packages/web-console
 COPY --chmod=0755 scripts/lib/postgres_major_upgrade_executor.sh /opt/supacloud/scripts/lib/postgres_major_upgrade_executor.sh
 COPY --chmod=0755 docker/self-host/management-api-entrypoint.sh /usr/local/bin/supacloud-management-entrypoint
