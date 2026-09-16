@@ -26,7 +26,7 @@ async function run(cwd: string, args: string[], executable = process.execPath) {
 }
 
 await run(root, ["scripts/prepare-command-test-database.ts"]);
-for (const name of ["contracts", "commands", "db", "app", "compiler", "app-svelte", "supacloud-js", "elysia"]) {
+for (const name of ["contracts", "commands", "compiler", "db", "app", "app-svelte", "supacloud-js", "elysia"]) {
   const cwd = resolve(root, "packages", name);
   // Bun copies file dependencies; refresh them after upstream builds.
   await run(cwd, ["install", "--force", "--ignore-scripts", "--frozen-lockfile"]);

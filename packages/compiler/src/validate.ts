@@ -63,6 +63,7 @@ export const COMPILER_DIAGNOSTIC_CODES: Record<string, { code: string; docsUrl: 
   "missing-token-factory": { code: "SC2009", docsUrl: "https://supacloud.dev/errors/SC2009" },
   "provider-type-mismatch": { code: "SC2010", docsUrl: "https://supacloud.dev/errors/SC2010" },
   "unsupported-provider-helper": { code: "SC2011", docsUrl: "https://supacloud.dev/errors/SC2011" },
+  "runtime-injection-disallowed": { code: "SC2012", docsUrl: "https://supacloud.dev/errors/SC2012" },
   "command-missing-permission": { code: "SC4001", docsUrl: "https://supacloud.dev/errors/SC4001" },
   "duplicate-command": { code: "SC4002", docsUrl: "https://supacloud.dev/errors/SC4002" },
   "route-command-unresolved": { code: "SC4003", docsUrl: "https://supacloud.dev/errors/SC4003" },
@@ -122,6 +123,16 @@ export function validateGraph(
 ): Diagnostic[] {
   const strict = typeof options === "boolean" ? options : (options.strict ?? false);
   const diagnostics: Diagnostic[] = [];
+  for (const module of graph.modules) {
+    for (const owner of [...module.providers, ...module.controllers]) {
+      if (owner.functionalInjects?.length) diagnostics.push({
+        severity: "error", code: "runtime-injection-disallowed", errorCode: "SC2012",
+        docsUrl: "https://supacloud.dev/errors/SC2012", file: owner.file,
+        message: "Property inject() requires runtime token resolution. Compiled applications require constructor injection.",
+        suggestion: "Move injected fields into typed constructor parameters with @Inject(TOKEN) where needed.",
+      });
+    }
+  }
 
   let moduleBoundaries: ModuleBoundaryRule[] | undefined;
   if (typeof options === "object") {

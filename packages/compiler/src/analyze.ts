@@ -27,6 +27,7 @@ import type {
 } from "./types";
 import { COMPILER_DIAGNOSTIC_CODES } from "./validate";
 import { camelName } from "./util";
+import { scanRuntimeDi } from "./static-di";
 
 const DEFAULT_INCLUDE = ["**/*.module.ts", "**/*.ts"];
 const ROUTE_DECORATORS: Record<string, RouteNode["method"]> = {
@@ -216,6 +217,9 @@ export async function analyzeProject(
     nativeTraitFiles.set(trait.file, kinds);
   }
   for (const sf of sourceFiles) {
+    if (!/\.(?:test|spec)\.[cm]?tsx?$/.test(sf.fileName)) {
+      ctx.diagnostics.push(...scanRuntimeDi(sf, sourcePath(rootDir, sf.fileName)));
+    }
     indexFile(sf, ctx);
   }
 

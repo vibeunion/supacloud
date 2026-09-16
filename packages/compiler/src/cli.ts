@@ -50,6 +50,7 @@ Usage:
   supacloud-compiler openapi-diff <base.json> <current.json> [options]
   supacloud-compiler fix     <fix.json> [options]
   supacloud-compiler graphql-schema --url <project-url> --key-env <name> [--token-env <name>]
+  supacloud-compiler database-contracts <config.json> [--check]
 
 Commands:
   compile             Compile application modules and generate artifacts
@@ -103,6 +104,17 @@ async function run(): Promise<void> {
   }
 
   const command = args[0];
+  if (command === "database-contracts") {
+    const path = args[1];
+    if (!path || path.startsWith("-") || args.slice(2).some((arg) => arg !== "--check")) {
+      throw new Error("database-contracts requires <config.json> and optional --check");
+    }
+    const { runDatabaseContractsFile } = await import("./database-contracts");
+    const result = await runDatabaseContractsFile(path, args.includes("--check"));
+    console.log(JSON.stringify(result, null, 2));
+    if (args.includes("--check") && !result.upToDate) process.exitCode = 1;
+    return;
+  }
   if (!command || !["compile", "check", "dev", "graph", "explain", "context", "doctor", "migrate", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
     console.error(`Error: unknown command "${command}"`);
     printUsage();

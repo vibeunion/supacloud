@@ -2,6 +2,31 @@
 
 SupaCloud Durable Workflows is a project-scoped, PostgreSQL-backed execution ledger for code-defined, linear workflows. It uses the platform's existing PGMQ queue and is available through service-role-only RPCs and `@supacloud/js`.
 
+## pgflow integration
+
+Projects that need DAGs, fan-out, or step-level retries may opt in to pgflow as the
+execution engine. Submit a flow through `POST /v1/projects/:ref/tasks/flows`:
+
+```json
+{
+  "flow_slug": "analyze_article",
+  "input": { "url": "https://example.com/article" },
+  "idempotency_key": "article:123:analyze:v1"
+}
+```
+
+The endpoint first creates one `project_tasks` row and uses its UUID as the
+pgflow `run_id`. Existing task list/detail APIs therefore remain the only
+platform-facing task contract; pgflow `runs` and `step_states` are execution
+internals, not a second business status mapping. A project must have
+`config.pgflow_enabled = true` and a provisioned pgflow installation.
+
+pgflow owns step retries. The generic task retry and cancellation endpoints
+return a conflict for pgflow tasks, because changing only `project_tasks` would
+leave the tenant run executing. To start a new execution, submit a new
+idempotency key. The management API reconciles pending/running pgflow tasks every
+five seconds and reuses the same run UUID after a crash.
+
 ## Why this is a SupaCloud service
 
 Workflow durability belongs beside Queues and Scheduled Functions because it owns execution mechanics: leasing, retries, stale-attempt fencing, step checkpoints, cancellation, and an append-only event view. It does not belong in SupAuth, whose boundary remains identity, authentication, and authorization.

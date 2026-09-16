@@ -9,8 +9,8 @@ import type {
 export interface CommandTransaction {
   query(sql: string, parameters?: readonly (string | number | boolean | null)[]): Promise<unknown>;
 }
-export interface CommandDatabase {
-  transaction<T>(run: (transaction: CommandTransaction) => Promise<T>): Promise<T>;
+export interface CommandDatabase<Transaction extends CommandTransaction = CommandTransaction> {
+  transaction<T>(run: (transaction: Transaction) => Promise<T>): Promise<T>;
 }
 export interface CommandSubmissionBinding {
   commandId: string;
@@ -43,10 +43,10 @@ const projection = `tenant_id AS "tenantId", actor_id AS "actorId", command,
   status, audit_state AS audit, result::text AS result_json, input_fingerprint,input_payload,kind`;
 
 /** PostgreSQL only: no remote sending, domain matching or recovery policy lives here. */
-export function createPostgresCommandStore(
-  database: CommandDatabase,
+export function createPostgresCommandStore<Transaction extends CommandTransaction>(
+  database: CommandDatabase<Transaction>,
   options: { submission?: CommandSubmissionBinding } = {},
-): CommandStore<CommandTransaction> & CommandRetentionStore {
+): CommandStore<Transaction> & CommandRetentionStore {
   const submission = options.submission === undefined ? undefined : { ...options.submission };
   if (submission !== undefined && (
     !/^[0-9a-f-]{36}$/.test(submission.commandId) || !/^[0-9a-f-]{36}$/.test(submission.stepId)
@@ -69,7 +69,7 @@ export function createPostgresCommandStore(
     const payload: unknown = JSON.parse(row["payload_json"]);
     return payload;
   };
-  const transaction = async <T>(run: (tx: CommandTransaction) => Promise<T>): Promise<T> => {
+  const transaction = async <T>(run: (tx: Transaction) => Promise<T>): Promise<T> => {
     let started = false;
     try {
       return await database.transaction((tx) => { started = true; return run(tx); });
@@ -78,7 +78,7 @@ export function createPostgresCommandStore(
       throw new CommandError(started ? "COMMAND_OUTCOME_UNKNOWN" : "COMMAND_UNAVAILABLE");
     }
   };
-  const session = (tx: CommandTransaction): CommandStoreSession<CommandTransaction> => ({
+  const session = (tx: Transaction): CommandStoreSession<Transaction> => ({
     transaction: tx,
     async lock(ref) {
       await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))", [JSON.stringify(keys(ref))]);

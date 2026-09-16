@@ -1452,6 +1452,8 @@ async function bootstrap() {
     });
     const { taskWorker } = await import("./services/task.worker");
     taskWorker.start();
+    const { startPgflowTaskWorker } = await import("./workers/pgflow-task.worker");
+    startPgflowTaskWorker();
 
     const { startQueueWorker } = await import("./workers/queue.worker");
     startQueueWorker();
@@ -1539,6 +1541,8 @@ export function startManagementApi(): void {
     try {
       const { taskWorker } = await import("./services/task.worker");
       taskWorker.stop();
+      const { stopPgflowTaskWorker } = await import("./workers/pgflow-task.worker");
+      await stopPgflowTaskWorker();
       if (config.edgeRuntimeMode === "embedded") {
         const { edgeRuntimeManager } =
           await import("./plugins/edge-runtime-manager");

@@ -5,7 +5,6 @@ import type {
   ApplicationGraph,
   AspectRefNode,
   ControllerNode,
-  FunctionalInjectNode,
   ModuleNode,
   OpenApiOptions,
   ProviderNode,
@@ -78,6 +77,7 @@ const INTERFACES = `export interface CompiledRoute {
   title?: string;
   data?: Record<string, unknown>;
   aspects?: CompiledAspect[];
+  aspectPipeline?: CompiledAspectPipeline;
   invoker?: (
     controller: unknown,
     request: {
@@ -101,6 +101,7 @@ export interface CompiledCommand {
   idempotency: "required" | "none";
   standalone?: boolean;
   aspects?: CompiledAspect[];
+  aspectPipeline?: CompiledAspectPipeline;
 }
 
 export interface CompiledJob {
@@ -115,6 +116,7 @@ export interface CompiledJob {
   maxAttempts?: number;
   idempotency?: "required" | "none";
   aspects?: CompiledAspect[];
+  aspectPipeline?: CompiledAspectPipeline;
 }
 
 export interface CompiledAspectContext {
@@ -162,9 +164,26 @@ export interface CompiledModule {
   commands: CompiledCommand[];
   jobs: CompiledJob[];
   aspects?: CompiledAspect[];
+  aspectPipeline?: CompiledAspectPipeline;
 }`;
 
-const TYPE_GUARDS = `function isRecord(value: unknown): value is Record<string, unknown> {
+const TYPE_GUARDS = `type CompiledAspectObserver = (stage: string, run: () => unknown | Promise<unknown>) => unknown | Promise<unknown>;
+type CompiledAspectPipeline = (context: CompiledAspectContext, next: () => unknown | Promise<unknown>, observe?: CompiledAspectObserver) => unknown | Promise<unknown>;
+
+function compiledAspectNext(next: () => unknown | Promise<unknown>, state: { active: boolean }): () => Promise<unknown> {
+  let called = false;
+  return async () => {
+    if (!state.active) throw new Error("Aspect continuation is closed");
+    if (called) throw new Error("Aspect continuation called multiple times");
+    called = true;
+    return await next();
+  };
+}
+function observeCompiledAspect(observe: CompiledAspectObserver | undefined, stage: string, run: () => unknown | Promise<unknown>): unknown | Promise<unknown> {
+  return observe ? observe(stage, run) : run();
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
@@ -522,7 +541,7 @@ class ModuleGenerator {
       module.providers.some((provider) => (provider.functionalInjects?.length ?? 0) > 0) ||
       module.controllers.some((controller) => (controller.functionalInjects?.length ?? 0) > 0)
     ) {
-      imports.add("runInInjectionContext", undefined, "@supacloud/app");
+      throw new Error("SC2012: Compiled DI requires constructor injection; property inject() is not supported.");
     }
   }
 
@@ -558,6 +577,7 @@ class ModuleGenerator {
     lines.push(`  jobs: ${this.renderJobs()},`);
     if (this.module.aspects && this.module.aspects.length > 0) {
       lines.push(`  aspects: ${this.renderAspects(this.module.aspects)},`);
+      lines.push(`  aspectPipeline: ${this.renderAspectPipeline(this.module.aspects)},`);
     }
     lines.push(`}`);
     return lines.join("\n");
@@ -635,6 +655,7 @@ class ModuleGenerator {
         }
         if (route.aspects && route.aspects.length > 0) {
           fields.push(`aspects: ${this.renderAspects(route.aspects)}`);
+          fields.push(`aspectPipeline: ${this.renderAspectPipeline(route.aspects)}`);
         }
         const invokerArgs = (route.handlerParams ?? []).map((hp) => {
           if (hp.kind === "param") {
@@ -717,7 +738,7 @@ class ModuleGenerator {
         ...(command.rpc ? [`rpc: ${JSON.stringify(command.rpc)}`] : []),
         ...(command.standalone ? ["standalone: true"] : []),
         ...(command.aspects && command.aspects.length > 0
-          ? [`aspects: ${this.renderAspects(command.aspects)}`]
+          ? [`aspects: ${this.renderAspects(command.aspects)}`, `aspectPipeline: ${this.renderAspectPipeline(command.aspects)}`]
           : []),
       ];
       return `{ ${fields.join(", ")} }`;
@@ -747,6 +768,7 @@ class ModuleGenerator {
       if (job.idempotency !== undefined) fields.push(`idempotency: ${JSON.stringify(job.idempotency)}`);
       if (job.aspects && job.aspects.length > 0) {
         fields.push(`aspects: ${this.renderAspects(job.aspects)}`);
+        fields.push(`aspectPipeline: ${this.renderAspectPipeline(job.aspects)}`);
       }
       return `{ ${fields.join(", ")}, }`;
     }).join(", ")}]`;
@@ -754,6 +776,20 @@ class ModuleGenerator {
 
   private renderAspects(aspects: Array<AspectRefNode>): string {
     return `[${aspects.map((aspect) => this.imports.add(aspect.name, aspect.importPath, aspect.importModule)).join(", ")}]`;
+  }
+
+  private renderAspectPipeline(aspects: readonly AspectRefNode[]): string {
+    const lines = [`async (context, next, observe) => {`, `  const state = { active: true };`,
+      `  const step${aspects.length} = compiledAspectNext(next, state);`];
+    for (let index = aspects.length - 1; index >= 0; index--) {
+      const aspect = aspects[index];
+      if (!aspect) continue;
+      const name = this.imports.add(aspect.name, aspect.importPath, aspect.importModule);
+      const stage = JSON.stringify(`aspect[${index}]:${aspect.name}`);
+      lines.push(`  const step${index} = compiledAspectNext(() => observeCompiledAspect(observe, ${stage}, () => ${name}(context, step${index + 1})), state);`);
+    }
+    lines.push(`  try { return await step0(); } finally { state.active = false; }`, `}`);
+    return lines.join("\n");
   }
 
   private renderServicesFactory(): string {
@@ -883,7 +919,7 @@ class ModuleGenerator {
           .join(", ");
         const local = this.localVar(isMulti ? (provider.useClass ?? `${provider.token}Item`) : provider.token, kind);
         return {
-          constLine: `const ${local} = ${this.instantiate(useClass, args, kind, provider.functionalInjects)};`,
+          constLine: `const ${local} = new ${useClass}(${args});`,
           key,
           expr: local,
         };
@@ -934,42 +970,10 @@ class ModuleGenerator {
     const key = camelName(controller.className);
     const local = this.localVar(controller.className, kind);
     return {
-      constLine: `const ${local} = ${this.instantiate(className, args, kind, controller.functionalInjects)};`,
+      constLine: `const ${local} = new ${className}(${args});`,
       key,
       expr: local,
     };
-  }
-
-  /**
-   * Functional inject() property initializers execute during `new`.
-   * The compiler supplies a finite, generated token identity table for that
-   * constructor call; it never performs provider discovery or token lookup.
-   */
-  private instantiate(
-    className: string,
-    args: string,
-    kind: FactoryKind,
-    functionalInjects?: FunctionalInjectNode[],
-  ): string {
-    if (!functionalInjects || functionalInjects.length === 0) {
-      return `new ${className}(${args})`;
-    }
-
-    const clauses = functionalInjects.map((entry) => {
-      const token = this.imports.add(entry.expression, entry.importPath, entry.importModule);
-      const value = this.depExpr(entry.token, kind, entry);
-      return `if (token === ${token}) return ${value} as T;`;
-    });
-    const missing = `if (options?.optional) return undefined; throw new Error("Static inject token not available: " + String(token));`;
-    const injector = [
-      `{`,
-      `get<T>(token: unknown, options?: { optional?: boolean; self?: boolean; skipSelf?: boolean; host?: boolean }): T | undefined {`,
-      ...clauses,
-      missing,
-      `},`,
-      `}`,
-    ].join("\n");
-    return `runInInjectionContext(${injector}, () => new ${className}(${args}))`;
   }
 
   /** Token -> local variable name in factory (camelCase, suffixed with digits on conflict). */

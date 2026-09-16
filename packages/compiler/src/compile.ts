@@ -24,6 +24,9 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
     ...(graph.diagnostics ?? []),
     ...validateGraph(graph, options),
   ];
+  if (diagnostics.some((item) => item.code === "runtime-injection-disallowed")) {
+    return { diagnostics, graph, written: [] };
+  }
   if (options.strict) {
     for (const diagnostic of diagnostics) {
       if (diagnostic.severity === "warn") diagnostic.severity = "error";
@@ -88,6 +91,9 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
     ...(graph.diagnostics ?? []),
     ...validateGraph(graph, options),
   ];
+  if (diagnostics.some((item) => item.code === "runtime-injection-disallowed")) {
+    return { diagnostics, graph, upToDate: false, mismatches: ["Runtime DI must be migrated to constructor injection."] };
+  }
   if (options.strict) {
     for (const diagnostic of diagnostics) {
       if (diagnostic.severity === "warn") diagnostic.severity = "error";
