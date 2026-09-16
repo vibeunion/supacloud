@@ -6,7 +6,20 @@
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": { "supacloud-sql-impact": "./dist/sql-impact-cli.js" },
   "exports": {
+    "./sql-analysis": {
+      "types": "./dist/sql-analysis.d.ts",
+      "import": "./dist/sql-analysis.js"
+    },
+    "./drizzle": {
+      "types": "./dist/drizzle.d.ts",
+      "import": "./dist/drizzle.js"
+    },
+    "./drizzle-bun": {
+      "types": "./dist/drizzle-bun.d.ts",
+      "import": "./dist/drizzle-bun.js"
+    },
     "./bun": {
       "types": "./dist/command-bun.d.ts",
       "import": "./dist/command-bun.js"
@@ -24,13 +37,14 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/command-bun.ts --outdir dist --target node --external bun --external @supacloud/contracts",
+    "build:js": "bun build src/index.ts src/command-bun.ts src/drizzle.ts src/drizzle-bun.ts src/sql-analysis.ts src/sql-impact-cli.ts --outdir dist --target node --external bun --external @supacloud/contracts --external drizzle-orm --external libpg-query",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
     "test": "bun test",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "typecheck:test": "tsc -p tsconfig.test.json --noEmit"
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
+    "typecheck:drizzle": "tsc -p tsconfig.drizzle.json --noEmit"
   },
   "keywords": [
     "supacloud",
@@ -46,12 +60,18 @@
     "directory": "packages/db"
   },
   "devDependencies": {
+    "@sinclair/typebox": "0.34.52",
+    "@typescript/typescript6": "^6.0.2",
+    "drizzle-orm": "1.0.0-rc.4",
     "@types/bun": "^1.4.2",
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "libpg-query": "18.1.4",
     "@supacloud/contracts": "file:../contracts"
   },
+  "peerDependencies": { "drizzle-orm": "1.0.0-rc.4" },
+  "peerDependenciesMeta": { "drizzle-orm": { "optional": true } },
   "overrides": {
     "@supacloud/contracts": "file:../contracts"
   }
