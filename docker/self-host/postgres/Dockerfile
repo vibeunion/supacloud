@@ -1,5 +1,7 @@
 FROM postgres:18-bookworm
 
+ARG ENABLE_PG_DURABLE=false
+
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends curl ca-certificates gnupg lsb-release; \
@@ -36,6 +38,17 @@ RUN set -eux; \
       postgresql-18-wal2json \
       postgresql-18-wrappers; \
     rm -rf /var/lib/apt/lists/*
+
+RUN set -eu; if [ "$ENABLE_PG_DURABLE" = true ]; then \
+      test "$(dpkg --print-architecture)" = amd64; \
+      curl -fsSL --retry 3 --max-time 180 \
+        https://github.com/microsoft/pg_durable/releases/download/v0.2.8/pg-durable-postgresql-18_0.2.8-1_amd64.deb \
+        -o /tmp/pg_durable.deb \
+      && echo '090028f59b003613b150e61ccd5cdbebe70e69e65361913ad29b1f0b6af9e2bb  /tmp/pg_durable.deb' | sha256sum -c - \
+      && apt-get update \
+      && apt-get install -y --no-install-recommends /tmp/pg_durable.deb \
+      && rm -rf /var/lib/apt/lists/* /tmp/pg_durable.deb; \
+    fi
 
 COPY initdb /docker-entrypoint-initdb.d
 COPY pgsodium_getkey /usr/share/postgresql/18/extension/pgsodium_getkey

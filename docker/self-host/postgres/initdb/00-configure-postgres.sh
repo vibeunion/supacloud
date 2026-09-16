@@ -33,6 +33,28 @@ validate_config_path() {
 
 shared_preload_libraries="pg_stat_statements, pg_cron, pgaudit, pg_net, pg_stat_kcache, plan_filter, pg_documentdb, pg_documentdb_core"
 
+if truthy "${ENABLE_PG_DURABLE:-false}"; then
+  shared_preload_libraries="$shared_preload_libraries, pg_durable"
+  # Extension GUCs are not registered until the first preload/restart.
+  case "$POSTGRES_DB:$POSTGRES_USER" in
+    *$'\n'* | *$'\r'*)
+      echo "Durable database and worker role names must not contain newlines" >&2
+      exit 1
+      ;;
+  esac
+  durable_database="${POSTGRES_DB//\\/\\\\}"
+  durable_database="${durable_database//\'/\'\'}"
+  durable_worker="${POSTGRES_USER//\\/\\\\}"
+  durable_worker="${durable_worker//\'/\'\'}"
+  cat >> "$PGDATA/postgresql.conf" <<EOF
+pg_durable.database = '$durable_database'
+pg_durable.worker_role = '$durable_worker'
+pg_durable.host = '/var/run/postgresql'
+pg_durable.enable_superuser_instances = off
+pg_durable.log_workflow_sql = off
+EOF
+fi
+
 psql -v ON_ERROR_STOP=1 \
   --username "$POSTGRES_USER" \
   --dbname "$POSTGRES_DB" \
