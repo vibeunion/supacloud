@@ -1,0 +1,36 @@
+{
+  "name": "@supacloud/approval",
+  "version": "0.1.0",
+  "private": true,
+  "description": "PostgreSQL durable approvals with shared schema validation and optional advisory models",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./fa": { "types": "./dist/fa.d.ts", "import": "./dist/fa.js" },
+    "./durable": { "types": "./dist/durable.d.ts", "import": "./dist/durable.js" },
+    "./workbench": { "types": "./dist/workbench-http.d.ts", "import": "./dist/workbench-http.js" }
+  },
+  "files": ["dist", "sql", "web", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
+    "test": "bun test tests/approval.test.ts"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "0.34.52",
+    "xstate": "5.33.2"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "typescript": "7.0.2"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vibeunion/supacloud.git",
+    "directory": "packages/approval"
+  }
+}
