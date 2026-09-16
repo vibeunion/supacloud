@@ -3,7 +3,7 @@ import { createApprovalWorkbenchHandler } from '../src/workbench-http.js';
 import type { ApprovalSqlConnection } from '../src/durable.js';
 
 // Local acceptance only: never use this PostgreSQL administrator bridge in a host app.
-const container = 'supacloud-approval-postgres-1';
+const container = process.env.APPROVAL_TEST_CONTAINER ?? 'supacloud-approval-postgres-1';
 await assertLocalApprovalContainer(container);
 function literal(value: unknown): string {
   if (value === null) return 'NULL';

@@ -948,7 +948,8 @@ describe('pg_durable approval boundary', () => {
           IF p_tenant=${quote(name)} THEN RETURN '{"risk":"high"}'::jsonb; END IF; RAISE EXCEPTION 'UNKNOWN_FACTS';
         END $$;
         RESET ROLE; SET ROLE supacloud_approval_publisher; SELECT approval.publish(
-          ${quote(name)},'publisher',${quote(crypto.randomUUID())},'graph',1,${json(graph)});`);
+          ${quote(name)},'publisher',${quote(crypto.randomUUID())},'graph',1,${json(graph)});
+        SELECT approval.publish_notification_policy(${quote(name)},'publisher','graph',1,300,299,'supervisor');`);
       const begin = (entity: string) => call(`approval.start(${quote(name)},'maker',${quote(crypto.randomUUID())},
         'graph',1,${quote(entity)},${json(snapshot)})`);
       const root = await begin('one');
@@ -975,6 +976,12 @@ describe('pg_durable approval boundary', () => {
       await until(`SELECT status FROM approval.runs WHERE id=${quote(id(root))};`,'approved');
       expect(await sql(`SELECT count(*) FROM approval.outcomes WHERE tenant=${quote(name)};`)).toBe('1');
       expect(await sql(`SELECT payload->>'runId' FROM approval.outcomes WHERE tenant=${quote(name)};`)).toBe(id(root));
+      expect(await sql(`SELECT count(*) FROM approval.notices n JOIN approval.runs r ON r.id=n.run_id
+        WHERE r.graph_parent_id=${quote(id(root))};`)).toBe('8');
+      expect(await sql(`SELECT count(*) FROM approval.notices n JOIN approval.runs r ON r.id=n.run_id
+        WHERE r.graph_parent_id=${quote(id(root))} AND n.status IN ('scheduled','ready');`)).toBe('0');
+      await expect(sql(`UPDATE approval.graph_notification_snapshots SET policy=NULL
+        WHERE tenant=${quote(name)} AND run_id=${quote(id(root))};`)).rejects.toThrow();
       const rejected = await begin('two');
       await vote(await child(rejected,'technical'),'rejected');
       await until(`SELECT status FROM approval.runs WHERE id=${quote(id(rejected))};`,'rejected');
