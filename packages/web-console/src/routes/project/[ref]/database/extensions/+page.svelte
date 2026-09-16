@@ -12,6 +12,14 @@
     installed_version: string | null;
     schema: string | null;
     comment: string;
+    is_installed: boolean;
+    is_enabled?: boolean;
+    runtime_status?: "not_installed" | "unmanaged" | "paused" | "worker_not_ready" | "running";
+    kind: "extension" | "workflow";
+    available: boolean;
+    can_enable: boolean;
+    can_disable: boolean;
+    blocked_reason: string | null;
   }
 
   let searchQuery = $state("");
@@ -20,29 +28,15 @@
   const projectRef = $derived(page.params.ref);
   const queryClient = useQueryClient();
 
-  const EXT_SQL = `
-    SELECT 
-      e.name, 
-      e.default_version, 
-      ei.extversion as installed_version,
-      n.nspname as schema,
-      e.comment 
-    FROM pg_available_extensions e 
-    LEFT JOIN pg_extension ei ON e.name = ei.extname 
-    LEFT JOIN pg_namespace n ON ei.extnamespace = n.oid
-    ORDER BY (ei.extversion IS NOT NULL) DESC, e.name;
-  `;
-
   const extensionsQuery = createQuery(() => ({
     queryKey: ["database_extensions", projectRef],
+    refetchInterval: 15_000,
     queryFn: async () => {
-      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql: EXT_SQL })
-      });
+      const res = await apiClient(`/v1/projects/${projectRef}/database/extensions/catalog`);
       const data = await res.json();
-      if (data.error) throw new Error(data.message || data.error);
-      return (data.rows || []) as Extension[];
+      if (!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`);
+      if (!Array.isArray(data)) throw new Error("Invalid extension inventory response");
+      return data as Extension[];
     }
   }));
 
@@ -53,35 +47,29 @@
   let togglingExt = $state<string | null>(null);
 
   async function toggleExtension(ext: Extension) {
+    if (togglingExt !== null) return;
+    const currentlyEnabled = ext.is_enabled ?? ext.is_installed;
+    if (currentlyEnabled ? !ext.can_disable : !ext.can_enable) return;
+    if (currentlyEnabled && ext.kind !== "workflow" && !confirm($t("Extensions.confirm_disable", { values: { name: ext.name } }))) return;
+    const targetRef = projectRef;
     togglingExt = ext.name;
-    const isEnabling = !ext.installed_version;
-    const sql = isEnabling 
-      ? `CREATE EXTENSION IF NOT EXISTS "${ext.name}" CASCADE;`
-      : `DROP EXTENSION IF EXISTS "${ext.name}" CASCADE;`;
-
+    toggleError = null;
+    const isEnabling = !currentlyEnabled;
     try {
-      const res = await apiClient(`/v1/projects/${projectRef}/database/sql`, {
-        method: "POST",
+      const res = await apiClient(`/v1/projects/${targetRef}/database/extensions`, {
+        method: isEnabling ? "POST" : "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sql })
+        body: JSON.stringify(isEnabling ? { name: ext.name, schema: ext.schema || undefined } : { name: ext.name })
       });
       const data = await res.json();
-      if (data.error) throw new Error(data.message || data.error);
-      
-      // Update local state instead of doing full refetch for better UX
-      queryClient.setQueryData(["database_extensions", projectRef], (old: Extension[] | undefined) => {
-        if (!old) return old;
-        return old.map(e => {
-          if (e.name === ext.name) {
-            return { ...e, installed_version: isEnabling ? e.default_version : null };
-          }
-          return e;
-        });
-      });
+      if (!res.ok) throw new Error(data.message || data.error || `HTTP ${res.status}`);
+      if (data.name !== ext.name || (data.is_enabled ?? data.is_installed) !== isEnabling) {
+        throw new Error("Extension outcome could not be confirmed; refresh its state before retrying.");
+      }
     } catch (err: unknown) {
       toggleError = err instanceof Error ? err.message : String(err);
-      setTimeout(() => toggleError = null, 5000);
     } finally {
+      await queryClient.invalidateQueries({ queryKey: ["database_extensions", targetRef] });
       togglingExt = null;
     }
   }
@@ -92,7 +80,7 @@
       : extensions
   );
 
-  const enabledCount = $derived(extensions.filter(e => e.installed_version).length);
+  const enabledCount = $derived(extensions.filter(e => e.is_enabled ?? e.is_installed).length);
 
   function extensionDescription(extension: Extension): string {
     return $t("Extensions.official_description", {
@@ -152,32 +140,35 @@
               <tr class="hover:bg-muted/10 transition-colors">
                 <td class="px-4 py-2.5">
                   <div class="flex items-center gap-2">
-                    <Package size={13} class={ext.installed_version ? "text-green-500" : "text-muted-foreground/40"} />
+                    <Package size={13} class={(ext.is_enabled ?? ext.is_installed) ? "text-green-500" : "text-muted-foreground/40"} />
                     <span class="font-mono font-medium">{ext.name}</span>
                   </div>
                 </td>
                 <td class="px-3 py-2.5 font-mono text-muted-foreground tabular-nums">
-                  {ext.installed_version || ext.default_version}
+                  {ext.installed_version || ext.default_version || "—"}
                 </td>
                 <td class="px-3 py-2.5 font-mono text-muted-foreground">
                   {ext.schema || "—"}
                 </td>
-                <td class="px-3 py-2.5 text-muted-foreground max-w-sm truncate" title={ext.comment || ""}>{extensionDescription(ext)}</td>
+                <td class="px-3 py-2.5 text-muted-foreground max-w-sm break-words">
+                  {extensionDescription(ext)}
+                  {#if ext.blocked_reason}<p class="mt-1 text-xs text-amber-700">{ext.blocked_reason}</p>{/if}
+                </td>
                 <td class="px-4 py-2.5 text-right">
                   <div class="flex items-center justify-end gap-2">
-                    {#if ext.installed_version}
-                      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-500/10 text-green-600 text-[10px] font-bold">
-                        <Check size={10} /> {$t("Extensions.enabled")}
+                    {#if ext.is_enabled ?? ext.is_installed}
+                      <span class={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${ext.runtime_status === "worker_not_ready" ? "bg-amber-500/10 text-amber-700" : "bg-green-500/10 text-green-600"}`}>
+                        <Check size={10} /> {$t(ext.runtime_status ? `Extensions.pgflow_${ext.runtime_status}` : "Extensions.enabled")}
                       </span>
-                      <button onclick={() => toggleExtension(ext)} disabled={togglingExt === ext.name}
+                      <button onclick={() => toggleExtension(ext)} disabled={togglingExt !== null || !ext.can_disable} title={ext.blocked_reason || ""}
                         class="ml-2 px-2 py-1 text-[10px] rounded border border-destructive/20 text-destructive hover:bg-destructive/10 transition-colors flex items-center gap-1 disabled:opacity-50">
-                        {#if togglingExt === ext.name}<Loader2 size={10} class="animate-spin" />{:else}<X size={10} />{/if} {$t("Extensions.disable")}
+                        {#if togglingExt === ext.name}<Loader2 size={10} class="animate-spin" />{:else}<X size={10} />{/if} {$t(ext.kind === "workflow" ? "Extensions.pause" : "Extensions.disable")}
                       </button>
                     {:else}
                       <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-muted text-muted-foreground text-[10px]">
-                        <X size={10} /> {$t("Extensions.disabled")}
+                        <X size={10} /> {$t(ext.runtime_status ? `Extensions.pgflow_${ext.runtime_status}` : ext.available ? "Extensions.disabled" : "Extensions.setup_required")}
                       </span>
-                      <button onclick={() => toggleExtension(ext)} disabled={togglingExt === ext.name}
+                      <button onclick={() => toggleExtension(ext)} disabled={togglingExt !== null || !ext.can_enable} title={ext.blocked_reason || ""}
                         class="ml-2 px-2 py-1 text-[10px] rounded border border-brand/20 text-brand hover:bg-brand/10 transition-colors flex items-center gap-1 disabled:opacity-50">
                         {#if togglingExt === ext.name}<Loader2 size={10} class="animate-spin" />{:else}<Check size={10} />{/if} {$t("Extensions.enable")}
                       </button>

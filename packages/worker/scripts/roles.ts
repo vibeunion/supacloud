@@ -1,10 +1,12 @@
 import { roleNames } from "./scheduler.js";
+import { renderControl } from "./control.js";
 
 export function renderRoles(projectRef: string): string {
   const { owner, worker, recovery } = roleNames(projectRef);
   return `\\set ON_ERROR_STOP on
 BEGIN;
 SELECT pg_advisory_xact_lock(hashtextextended('supacloud-pgflow-roles',0));
+SELECT pg_advisory_xact_lock(1937076332,1);
 DO $roles$
 DECLARE role_name text;
 BEGIN
@@ -88,6 +90,7 @@ REVOKE ALL ON FUNCTION supacloud_worker.recover(text) FROM PUBLIC;
 GRANT USAGE ON SCHEMA supacloud_worker TO ${recovery};
 GRANT EXECUTE ON FUNCTION supacloud_worker.recover(text) TO ${recovery};
 COMMENT ON ROLE ${worker} IS 'SupaCloud pgflow runtime: ${projectRef}; login/password provisioned separately';
+${renderControl(projectRef)}
 COMMIT;
 `;
 }

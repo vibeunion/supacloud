@@ -690,6 +690,14 @@
     "no": "No"
   },
   "Extensions": {
+    "confirm_disable": "Remove {name}? Dependent objects block removal.",
+    "setup_required": "Setup required",
+    "pgflow_not_installed": "Not installed",
+    "pgflow_unmanaged": "Manual migration required",
+    "pgflow_paused": "Paused",
+    "pause": "Pause",
+    "pgflow_worker_not_ready": "Worker not ready",
+    "pgflow_running": "Running",
     "title": "Database Extensions",
     "subtitle": "PostgreSQL extensions installed and available in your database.",
     "loading": "Loading extensions...",
