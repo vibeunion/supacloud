@@ -39,6 +39,7 @@ export interface CompiledRoute {
   title?: string;
   data?: Record<string, unknown>;
   aspects?: CompiledAspect[];
+  aspectPipeline?: CompiledAspectPipeline;
   invoker?: (
     controller: unknown,
     request: {
@@ -62,6 +63,7 @@ export interface CompiledCommand {
   idempotency: "required" | "none";
   standalone?: boolean;
   aspects?: CompiledAspect[];
+  aspectPipeline?: CompiledAspectPipeline;
 }
 
 export interface CompiledJob {
@@ -76,6 +78,7 @@ export interface CompiledJob {
   maxAttempts?: number;
   idempotency?: "required" | "none";
   aspects?: CompiledAspect[];
+  aspectPipeline?: CompiledAspectPipeline;
 }
 
 export interface CompiledAspectContext {
@@ -123,6 +126,23 @@ export interface CompiledModule {
   commands: CompiledCommand[];
   jobs: CompiledJob[];
   aspects?: CompiledAspect[];
+  aspectPipeline?: CompiledAspectPipeline;
+}
+
+type CompiledAspectObserver = (stage: string, run: () => unknown | Promise<unknown>) => unknown | Promise<unknown>;
+type CompiledAspectPipeline = (context: CompiledAspectContext, next: () => unknown | Promise<unknown>, observe?: CompiledAspectObserver) => unknown | Promise<unknown>;
+
+function compiledAspectNext(next: () => unknown | Promise<unknown>, state: { active: boolean }): () => Promise<unknown> {
+  let called = false;
+  return async () => {
+    if (!state.active) throw new Error("Aspect continuation is closed");
+    if (called) throw new Error("Aspect continuation called multiple times");
+    called = true;
+    return await next();
+  };
+}
+function observeCompiledAspect(observe: CompiledAspectObserver | undefined, stage: string, run: () => unknown | Promise<unknown>): unknown | Promise<unknown> {
+  return observe ? observe(stage, run) : run();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

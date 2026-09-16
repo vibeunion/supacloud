@@ -53,6 +53,12 @@ class BillingModule {}`,
   SC2010: `const COUNT = new InjectionToken<number>("COUNT");
 const provider = { provide: COUNT, useValue: "not a number" };`,
   SC2011: `const providers = makeEnvironmentProviders(loadProvidersAtRuntime());`,
+  SC2012: `import { inject } from "@supacloud/app";
+class Service { repository = inject(Repository); }`,
+  SC6007: `import { sql } from "drizzle-orm";
+const count = sql<number>\`count(*)\`;`,
+  SC6008: `import { sql } from "drizzle-orm";
+const statement = sql.raw(request.body);`,
   SC3001: `@Get("/:id") findById() {}
 @Get("/health") health() {}`,
   SC3002: `const routes = [{ path: "/old", redirectTo: "/missing" }];`,
@@ -272,6 +278,9 @@ function cause(entry: DiagnosticEntry): string {
 
 function fix(entry: DiagnosticEntry): string {
   const names = entry.names.join("` or `");
+  if (entry.code === "SC2012") return "Use typed constructor parameters and compiler-generated scope factories instead of runtime inject() or injection contexts.";
+  if (entry.code === "SC6007") return "Keep raw SQL results unknown and validate them with an explicit result decoder.";
+  if (entry.code === "SC6008") return "Use parameterized SQL templates for values; raw SQL must be a static literal.";
   if (entry.registry === "type-safety") return `Replace the unsafe type escape reported by \`${names}\` with an explicit type, \`unknown\` plus narrowing, or a constrained generic.`;
   if (entry.code.startsWith("SC1")) return `Inspect the module graph and change the dependency or scope declaration that triggered \`${names}\`. Keep dependencies one-way and make the smallest shared contract explicit.`;
   if (entry.code.startsWith("SC2")) return `Correct the provider or token declaration associated with \`${names}\`. Prefer a named provider, an explicit module export, and a boundary owned by the consuming layer.`;

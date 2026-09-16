@@ -2,7 +2,7 @@ import { CommandError, canonicalCommandJson, decodeDurableCommandReceipt, type C
 import { checkAuthorization, commandContext, type PersistentCommandDefinition, type RecoveryPrincipal } from "./context";
 import type { CommandStore, OperationReference } from "./store";
 
-export interface ExternalDispatch { idempotencyKey: string }
+export interface ExternalDispatch { idempotencyKey: string; signal?: AbortSignal }
 type TransactionOf<Store extends CommandStore<unknown>> = Store extends CommandStore<infer Transaction> ? Transaction : never;
 type ExternalCommandDefinition<Input, Result, Store extends CommandStore<unknown>> =
   Omit<PersistentCommandDefinition<Input, Result, TransactionOf<Store>>, "store"> & {
@@ -62,7 +62,8 @@ export function createExternalCommand<Input, Result, Store extends CommandStore<
   };
   return {
     kind: "external" as const,
-    async execute(identity: CommandIdentity, key: string, value: unknown) {
+    async execute(identity: CommandIdentity, key: string, value: unknown, signal?: AbortSignal) {
+      if (signal?.aborted) throw new CommandError("COMMAND_UNAVAILABLE");
       const request = await context.prepare(identity, key, value);
       const acquired = await context.transaction(async (session) => {
         await context.lock(session, request);
@@ -74,7 +75,10 @@ export function createExternalCommand<Input, Result, Store extends CommandStore<
         return { fresh: true, receipt };
       });
       if (!acquired.fresh) return acquired.receipt;
-      try { await definition.send(request.input, { idempotencyKey: acquired.receipt.dispatchKey }); }
+      try { await definition.send(request.input, {
+        idempotencyKey: acquired.receipt.dispatchKey,
+        ...(signal === undefined ? {} : { signal }),
+      }); }
       catch { /* Intent is durable; transport errors cannot establish rollback. */ }
       try {
         const receipt = await reconcile(identity, key, request.input);

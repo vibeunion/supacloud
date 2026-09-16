@@ -1,11 +1,5 @@
 import { Elysia, type StatusMap, type TSchema } from "elysia";
 import { decodeCommandPreview, type CommandPreview } from "@supacloud/contracts";
-import {
-  provideToken,
-  runInRequestContext,
-  type EnvironmentInjector,
-} from "@supacloud/app";
-import { REQUEST_CONTEXT } from "@supacloud/app";
 import { commandErrorCode, commandErrorStatus } from "./command-errors";
 import { executionTrace, observeExecution, type ExecutionObserver } from "./execution";
 import {
@@ -96,6 +90,7 @@ export interface CompiledRoute {
   command?: string;
   /** Statically generated route aspects. */
   aspects?: ApplicationAspect[];
+  aspectPipeline?: ApplicationAspectPipeline;
 }
 
 export interface CompiledCommand {
@@ -108,6 +103,7 @@ export interface CompiledCommand {
   idempotency?: "required" | "none" | string;
   /** Statically generated command aspects. */
   aspects?: ApplicationAspect[];
+  aspectPipeline?: ApplicationAspectPipeline;
 }
 
 export interface CompiledJob {
@@ -124,6 +120,7 @@ export interface CompiledJob {
   maxAttempts?: number;
   idempotency?: "required" | "none";
   aspects?: ApplicationAspect[];
+  aspectPipeline?: ApplicationAspectPipeline;
 }
 
 export interface CompiledController {
@@ -158,6 +155,7 @@ export interface CompiledModule {
   jobs?: CompiledJob[];
   /** Statically generated module aspects. */
   aspects?: ApplicationAspect[];
+  aspectPipeline?: ApplicationAspectPipeline;
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +263,27 @@ function observedAspects(
       stage: `${boundary}.aspect[${index}]:${aspect.name || "anonymous"}`,
       ...executionTrace(context.requestContext),
     }, () => aspect(context, next))));
+}
+
+export type ApplicationAspectPipeline = (
+  context: ApplicationAspectContext,
+  next: () => unknown | Promise<unknown>,
+  observe?: (stage: string, run: () => unknown | Promise<unknown>) => unknown | Promise<unknown>,
+) => unknown | Promise<unknown>;
+
+function descriptorPipeline(
+  descriptor: { aspects?: ApplicationAspect[]; aspectPipeline?: ApplicationAspectPipeline },
+  boundary: string,
+  observer?: ExecutionObserver,
+): ApplicationAspect {
+  const pipeline = descriptor.aspectPipeline;
+  if (!pipeline) return observedAspects(descriptor.aspects ?? [], boundary, observer);
+  return (context, next) => pipeline(context, next, observer
+    ? (stage, run) => observeExecution(observer, {
+      kind: context.kind, operation: context.name, stage: `${boundary}.${stage}`,
+      ...executionTrace(context.requestContext),
+    }, run)
+    : undefined);
 }
 
 export type CommandAuthorizer = (
@@ -405,8 +424,6 @@ export interface ApplicationOptions {
   modules?: CompiledModule[];
   /** Platform-level dependencies (db client etc.), passed to createServices. */
   deps?: Record<string, unknown>;
-  /** Optional Angular-backed root injector used for async request contexts. */
-  injector?: EnvironmentInjector;
   /** Builds the per-request context object. Defaults to { requestId, request }. */
   requestContext?: RequestContextFactory;
   /** Enforces permission/audit/idempotency policy for command-bound routes. */
@@ -639,7 +656,7 @@ export function createCommandExecutor(
 
 /** Execute at the business-selected boundary without binding or re-entering an HTTP route. */
 export async function executeCompiledCommand<Input, Result>(options: {
-  module: Pick<CompiledModule, "name" | "commands" | "aspects">;
+  module: Pick<CompiledModule, "name" | "commands" | "aspects" | "aspectPipeline">;
   command: string;
   input: Input;
   request: Request;
@@ -661,8 +678,8 @@ export async function executeCompiledCommand<Input, Result>(options: {
     services: options.services ?? {}, ...(options.scope ? { scope: options.scope } : {}),
   };
   const aspects = composeAspects(
-    observedAspects(options.module.aspects ?? [], `module:${options.module.name}`, options.observer),
-    observedAspects(command.aspects ?? [], "command", options.observer),
+    descriptorPipeline(options.module, `module:${options.module.name}`, options.observer),
+    descriptorPipeline(command, "command", options.observer),
   );
   // Authorization encloses aspects so denied calls cannot trigger their side effects.
   const value = await createCommandExecutor(options.governance, options.observer)(invocation,
@@ -819,7 +836,7 @@ export function createModulePlugin(
   compiled: CompiledModule,
   services: Record<string, unknown>,
   ctxFactory: RequestContextFactory = defaultRequestContext,
-  options: Pick<ApplicationOptions, "commandGovernance" | "commandExecutor" | "errorMapper" | "onExecution" | "normalize" | "injector"> = {},
+  options: Pick<ApplicationOptions, "commandGovernance" | "commandExecutor" | "errorMapper" | "onExecution" | "normalize"> = {},
   imported: Record<string, Record<string, unknown>> = {},
 ): Elysia {
   // Compiled descriptors are also loadable from JavaScript and older generators.
@@ -828,7 +845,7 @@ export function createModulePlugin(
   const supportedFields = new Set([
     "method", "path", "handler", "body", "params", "query", "headers", "cookie",
     "response", "responses", "contract", "schemaKinds", "nativeResponse", "invoker",
-    "command", "aspects",
+    "command", "aspects", "aspectPipeline",
     "paramTransforms", "paramDefaults", "queryTransforms", "queryDefaults", "title", "data",
     // defineJsonContract can be spread into a route; these helpers are not hooks.
     "input", "result", "request",
@@ -977,20 +994,17 @@ export function createModulePlugin(
             services,
             metadata: command ?? route,
           };
-          const commandAspects = route.command
-            ? commandsByClassName.get(route.command)?.aspects ?? []
-            : [];
-          const routePipeline = observedAspects(route.aspects ?? [], "route", options.onExecution);
-          const commandPipeline = observedAspects(commandAspects, "command", options.onExecution);
-          const modulePipeline = observedAspects(compiled.aspects ?? [], `module:${compiled.name}`, options.onExecution);
-          const invokeRoute = () => routePipeline(
-            routeContext,
-            () => route.command
-              ? commandPipeline(commandContext, () => invokeCommand())
-              : invoke(),
+          const routePipeline = descriptorPipeline(route, "route", options.onExecution);
+          const commandPipeline = descriptorPipeline(command ?? {}, "command", options.onExecution);
+          const modulePipeline = descriptorPipeline(compiled, `module:${compiled.name}`, options.onExecution);
+          const invokeRoute = () => modulePipeline(
+            route.command ? commandContext : routeContext,
+            once(() => routePipeline(routeContext, once(() => route.command
+              ? commandPipeline(commandContext, once(invoke))
+              : invoke()))),
           );
           const invokeCommand = () => {
-            if (!route.command) return invoke();
+            if (!route.command) return invokeRoute();
             if (!command) {
               throw new ApplicationError(`Command "${route.command}" is not registered`, {
                 code: "COMMAND_NOT_REGISTERED",
@@ -1013,16 +1027,11 @@ export function createModulePlugin(
             return observeExecution(options.onExecution, {
               kind: "command", operation: command.name, stage: "commandExecutor",
               ...executionTrace(requestContext),
-            }, () => commandExecutor(invocation, invoke));
+            }, () => commandExecutor(invocation, once(invokeRoute)));
           };
-          return modulePipeline(
-            route.command ? commandContext : routeContext,
-            invokeRoute,
-          );
+          return invokeCommand();
         };
-        const result = options.injector
-          ? await runInRequestContext(options.injector, [provideToken(REQUEST_CONTEXT, requestContext)], execute)
-          : await execute();
+        const result = await execute();
         assertDeclaredResponseStatus(route, result, ctx.set.status);
         return result;
       };
@@ -1111,8 +1120,8 @@ export async function executeJob(
       kind: "job", operation: job.name, stage: "handler",
       ...executionTrace(requestContext),
     }, () => Reflect.apply(method, instance, [decodedInput])));
-    const pipeline = observedAspects(compiled.aspects ?? [], `module:${compiled.name}`, observer);
-    const jobPipeline = observedAspects(job.aspects ?? [], "job", observer);
+    const pipeline = descriptorPipeline(compiled, `module:${compiled.name}`, observer);
+    const jobPipeline = descriptorPipeline(job, "job", observer);
 
     const result = await pipeline(
       context,

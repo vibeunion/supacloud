@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "types": ["bun", "node"]
+  },
+  "include": ["tests/drizzle-foundation.test.ts"],
+  "exclude": ["node_modules", "dist"]
+}
