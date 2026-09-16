@@ -1,0 +1,6 @@
+{
+  "name": "@supacloud/approval",
+  "tags": ["scope:core", "type:runtime"],
+  "projectType": "library",
+  "sourceRoot": "packages/approval/src"
+}
