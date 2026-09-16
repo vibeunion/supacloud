@@ -6,7 +6,7 @@ import { commandErrorStatus } from "./command-errors";
 
 export interface PersistentCommandHandler<Result> {
   readonly kind: "transactional" | "external";
-  execute(identity: CommandIdentity, key: string, value: unknown): Promise<DurableCommandReceipt<Result>>;
+  execute(identity: CommandIdentity, key: string, value: unknown, signal?: AbortSignal): Promise<DurableCommandReceipt<Result>>;
 }
 
 /** Registered persistence owns the operation; a second route handler is never invoked. */
@@ -26,7 +26,7 @@ export function createPersistentCommandAdapter<Result>(
     async execute(invocation: CommandInvocation): Promise<DurableCommandReceipt<Result>> {
       try {
         const identity = decodeCommandIdentity(await options.identity(invocation));
-        return await command.execute(identity, requireIdempotencyKey(invocation), options.input(invocation));
+        return await command.execute(identity, requireIdempotencyKey(invocation), options.input(invocation), invocation.request.signal);
       } catch (error) {
         if (!(error instanceof CommandError)) throw error;
         const status = commandErrorStatus(error.code);

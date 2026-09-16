@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import * as ts from "@typescript/typescript6";
 import type { Diagnostic, TypeSafetyOptions } from "./types";
+import { scanDrizzleSql, SQL_SAFETY_DIAGNOSTIC_CODES } from "./sql-safety";
 
 const DEFAULT_EXCLUDES = [
   "**/*.test.ts",
@@ -16,6 +17,7 @@ const DEFAULT_EXCLUDES = [
 ];
 
 export const TYPE_SAFETY_DIAGNOSTIC_CODES = {
+  ...SQL_SAFETY_DIAGNOSTIC_CODES,
   "generated-any": { errorCode: "SC6001", docsUrl: "https://supacloud.dev/errors/SC6001" },
   "source-any": { errorCode: "SC6002", docsUrl: "https://supacloud.dev/errors/SC6002" },
   "source-type-assertion": { errorCode: "SC6003", docsUrl: "https://supacloud.dev/errors/SC6003" },
@@ -125,6 +127,9 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
   }
   for (const sourceFile of sourceFiles) {
     scanSourceFile(sourceFile, checker, rootDir, diagnostics, options.strict ?? false);
+    diagnostics.push(...scanDrizzleSql(
+      sourceFile, checker, normalizeRelative(rootDir, sourceFile.fileName), options.strict ?? false,
+    ));
     const scanner = ts.createScanner(ts.ScriptTarget.Latest, false, sourceFile.languageVariant, sourceFile.text);
     for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFileToken; kind = scanner.scan()) {
       if ((kind === ts.SyntaxKind.SingleLineCommentTrivia || kind === ts.SyntaxKind.MultiLineCommentTrivia)
