@@ -31,9 +31,9 @@ The production build outputs to `build/` directory. In production, the Managemen
 
 ## SVAdmin Styles
 
-The console uses `@svadmin/ui@0.69.0`, `@svadmin/core@0.49.1`,
-`@svadmin/ai-elements@0.4.1`, and `@svadmin/sveltekit@0.10.6`.
-`@svadmin/elysia` stays on npm's published `0.11.0`; a newer GitHub release
+The console uses `@svadmin/ui@0.70.0`, `@svadmin/core@0.50.0`,
+`@svadmin/ai-elements@0.5.1`, and `@svadmin/sveltekit@0.10.7`.
+`@svadmin/elysia` stays on npm's published `0.12.7`; a newer GitHub release
 alone is not an installable dependency.
 
 Tailwind v4 configuration lives in `src/app.css`. Import
