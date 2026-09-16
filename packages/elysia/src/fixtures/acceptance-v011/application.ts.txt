@@ -1,0 +1,35 @@
+import { Body, Controller, Get, Injectable, Module, Post, Query } from "@supacloud/app";
+import { Type, type Static, type StaticDecode } from "@sinclair/typebox";
+import { status } from "elysia";
+
+export const QuerySchema = Type.Object({
+  count: Type.Transform(Type.String()).Decode(Number).Encode(String),
+});
+export const BodySchema = Type.Object({
+  note: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+});
+export const ResultSchema = Type.Object({
+  note: Type.Union([Type.String(), Type.Null()]),
+  count: Type.Number(),
+  tag: Type.Optional(Type.String()),
+});
+export const ConflictSchema = Type.Object({ conflict: Type.Literal(true) });
+
+@Injectable()
+@Controller("/acceptance")
+export class AcceptanceController {
+  @Get("/item", { query: QuerySchema, response: ResultSchema })
+  read(@Query("count") count: StaticDecode<typeof QuerySchema>["count"]): Static<typeof ResultSchema> {
+    return { note: null, count };
+  }
+
+  @Post("/item", { body: BodySchema, responses: { 200: ResultSchema, 409: ConflictSchema } })
+  write(@Body() body: Static<typeof BodySchema>) {
+    return body.note === "conflict"
+      ? status(409, { conflict: true as const })
+      : { note: body.note ?? null, count: 0 };
+  }
+}
+
+@Module({ name: "acceptance", controllers: [AcceptanceController] })
+export class AcceptanceModule {}

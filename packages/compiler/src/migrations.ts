@@ -1,6 +1,7 @@
-import { rename, readFile, writeFile } from "node:fs/promises";
+import { rename, readFile, writeFile, rm } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import * as ts from "@typescript/typescript6";
+import { checkMigrationDependencies } from "./migration-policy";
 
 export interface SourceMigrationIssue {
   code: string;
@@ -28,6 +29,9 @@ export interface MigrateProjectOptions {
   rootDir: string;
   include?: string[];
   write?: boolean;
+  /** Source-format checkpoints, not npm package versions. Both are required together. */
+  fromVersion?: string;
+  toVersion?: string;
 }
 
 export interface MigrateFileResult {
@@ -379,19 +383,59 @@ export const SUPACLOUD_MIGRATIONS: SupaCloudMigration[] = [
 ];
 
 async function writeAtomically(path: string, content: string): Promise<void> {
-  const temporary = `${path}.supacloud-migrate-${process.pid}`;
-  await writeFile(temporary, content, "utf8");
-  await rename(temporary, path);
+  const temporary = `${path}.supacloud-migrate-${process.pid}-${crypto.randomUUID()}`;
+  try {
+    await writeFile(temporary, content, "utf8");
+    await rename(temporary, path);
+  } finally {
+    await rm(temporary, { force: true });
+  }
 }
 
 export async function migrateProject(options: MigrateProjectOptions): Promise<MigrateProjectResult> {
   const rootDir = resolve(options.rootDir);
+  let migrations = SUPACLOUD_MIGRATIONS;
+  const preflightIssues: SourceMigrationIssue[] = [];
+  if (options.fromVersion !== undefined || options.toVersion !== undefined) {
+    migrations = [];
+    const checkpoints = new Set(SUPACLOUD_MIGRATIONS.flatMap(({ from, to }) => [from, to]));
+    let current = options.fromVersion;
+    if (!current || !options.toVersion || !checkpoints.has(current) || !checkpoints.has(options.toVersion)) {
+      preflightIssues.push({
+        code: "migration-version-unsupported", file: "package.json",
+        message: `Supply both supported source-format checkpoints: ${[...checkpoints].join(", ")}`,
+      });
+    } else {
+      const visited = new Set<string>();
+      while (current !== options.toVersion) {
+        const next = SUPACLOUD_MIGRATIONS.filter((migration) => migration.from === current);
+        if (visited.has(current) || next.length !== 1 || !next[0]) {
+          preflightIssues.push({
+            code: "migration-path-unavailable", file: "package.json",
+            message: `No unambiguous forward migration from ${current} to ${options.toVersion}`,
+          });
+          break;
+        }
+        visited.add(current);
+        migrations.push(next[0]);
+        current = next[0].to;
+      }
+    }
+    if (preflightIssues.length === 0) {
+      for (const message of await checkMigrationDependencies(rootDir)) {
+        preflightIssues.push({ code: "migration-dependency-incompatible", file: "package.json", message });
+      }
+    }
+    if (preflightIssues.length > 0) {
+      return { write: options.write === true, migrations: [], files: [], changedFiles: [], issues: preflightIssues };
+    }
+  }
   const include = options.include ?? ["**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cts"];
   const files = ts.sys.readDirectory(rootDir, [".ts", ".tsx", ".mts", ".cts"], ["node_modules", "dist", "generated"], include)
     .sort();
   const results: MigrateFileResult[] = [];
   const issues: SourceMigrationIssue[] = [];
-  const pendingWrites: Array<{ path: string; content: string }> = [];
+  const pendingWrites = new Map<string, string>();
   const sourceByPath = new Map<string, string>();
   const issueKeys = new Set<string>();
 
@@ -407,8 +451,10 @@ export async function migrateProject(options: MigrateProjectOptions): Promise<Mi
   for (const filePath of files) {
     sourceByPath.set(resolve(filePath), await readFile(filePath, "utf8"));
   }
+  const originalSources = new Map(sourceByPath);
+  const writtenFiles = new Set<string>();
 
-  for (const migration of SUPACLOUD_MIGRATIONS) {
+  for (const migration of migrations) {
     const projectResults = migration.id === "route-response-to-responses"
       ? migrateRouteResponseProject(files, rootDir, sourceByPath)
       : undefined;
@@ -422,7 +468,7 @@ export async function migrateProject(options: MigrateProjectOptions): Promise<Mi
       const result = projectResults?.results.get(absoluteFile) ?? migration.apply(before, file);
       sourceByPath.set(absoluteFile, result.content);
       if (result.changed && result.issues.length === 0) {
-        pendingWrites.push({ path: filePath, content: result.content });
+        pendingWrites.set(absoluteFile, result.content);
       }
       if (!projectResults) appendIssues(result.issues);
       if (result.changed || result.issues.length > 0) {
@@ -437,16 +483,40 @@ export async function migrateProject(options: MigrateProjectOptions): Promise<Mi
   }
 
   if (options.write && issues.length === 0) {
-    for (const pending of pendingWrites) await writeAtomically(pending.path, pending.content);
+    const written: string[] = [];
+    try {
+      for (const [path, content] of pendingWrites) {
+        if (await readFile(path, "utf8") !== originalSources.get(path)) {
+          throw new Error(`Source changed during migration: ${path}`);
+        }
+        await writeAtomically(path, content);
+        written.push(path);
+        writtenFiles.add(path);
+      }
+    } catch (error) {
+      appendIssues([{ code: "migration-write-failed", file: rootDir, message: String(error) }]);
+      for (const path of written.reverse()) {
+        try {
+          const original = originalSources.get(path);
+          if (original === undefined || await readFile(path, "utf8") !== pendingWrites.get(path)) {
+            throw new Error("File changed after migration; refusing to overwrite concurrent edits");
+          }
+          await writeAtomically(path, original);
+          writtenFiles.delete(path);
+        } catch (rollbackError) {
+          appendIssues([{ code: "migration-rollback-failed", file: path, message: String(rollbackError) }]);
+        }
+      }
+    }
   }
 
   const changedFiles = options.write && issues.length > 0
-    ? []
-    : results.filter((result) => result.changed && result.issues.length === 0).map((result) => result.file);
+    ? [...writtenFiles].map((file) => relative(rootDir, file))
+    : [...new Set(results.filter((result) => result.changed && result.issues.length === 0).map((result) => result.file))];
 
   return {
     write: options.write === true,
-    migrations: SUPACLOUD_MIGRATIONS.map(({ id, from, to, description }) => ({ id, from, to, description })),
+    migrations: migrations.map(({ id, from, to, description }) => ({ id, from, to, description })),
     files: results,
     changedFiles,
     issues,

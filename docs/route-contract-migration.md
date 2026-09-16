@@ -140,6 +140,25 @@ bunx supacloud-compiler migrate --root . --json
 bunx supacloud-compiler migrate --root . --write
 ```
 
+需要版本路径与依赖验收时，使用显式的源码格式检查点：
+
+```bash
+bunx supacloud-compiler migrate --root . --from-version 0.11.0 --to-version 0.12.0 --json
+bunx supacloud-compiler migrate --root . --from-version 0.11.0 --to-version 0.12.0 --write
+```
+
+两个版本参数必须一起提供。它们是迁移注册表的源码格式版本，不是各个 npm
+包的版本号。目前仅验收 `0.11.0 -> 0.12.0`；相同检查点不执行迁移，未知版本、
+逆向路径和不唯一的路径均会在写入前拒绝。未来的连续迁移按注册表中的
+`from -> to` 顺序执行，不按数组顺序猜测路径。
+
+显式版本模式要求项目 `node_modules` 中安装经过验收的配套依赖：
+`@supacloud/app 0.14.0`、`@supacloud/elysia 0.14.1`、`elysia 1.4.30`、
+`typescript 7.0.2`，以及与当前运行的编译器完全相同版本的
+`@supacloud/compiler`。这些包独立发布，不能通过“相同 minor”推断兼容性。
+未验收版本和缺失依赖返回 `migration-dependency-incompatible`；命令不会擅自
+安装包或更改锁文件。无版本参数的旧命令保留机械源码转换能力，但不证明依赖兼容。
+
 迁移命令使用 TypeScript AST 和项目 `tsconfig` 的模块解析，只处理实际被路由
 契约引用的 `response` 属性。它可以跟随本地常量、`defineRouteContract(...)`、
 命名导入和命名空间属性找到共享契约，因此契约声明只改一次，不会把同一个
@@ -156,7 +175,11 @@ CI 或代码审查。
 不会只升级一部分文件。迁移只负责可证明的机械替换，人工解决冲突后重新运行
 预览，再执行 `--write`。
 
-写入时每个文件先写入同目录临时文件再替换原文件。命令不提供源码回滚历史；
+写入时每个文件先写入同目录唯一临时文件再替换原文件，正常结束或失败都会清理
+临时文件。写入前检查源文件是否被并发修改；后续文件写入失败时，恢复本次已经
+写入且没有被别人再次修改的文件。若恢复也失败，返回
+`migration-rollback-failed` 和文件路径，`changedFiles` 保留尚未恢复的文件。
+命令不提供持久化源码回滚历史；
 执行前应让工作树干净或建立可回退的提交，执行后检查 `git diff`，并用同一版本
 的 compiler 运行 `compile`、`check` 和受影响测试。操作系统级写入失败可能发生在
 多个文件之间，回滚应使用版本控制恢复本次变更，而不是手工猜测替换结果。

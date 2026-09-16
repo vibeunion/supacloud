@@ -88,6 +88,8 @@ Options:
   --delivery <file>   plan/build-delivery: validated JSON configuration (overrides config.delivery)
   --dry-run           Preview a fix without writing the target file
   --write             Apply a fix or migration to disk (preview-only by default)
+  --from-version      Migration source-format checkpoint (requires --to-version)
+  --to-version        Migration target checkpoint; verifies installed dependencies
   --preset, -p <name> Architecture preset ('modular-monolith' | 'angular-enterprise' | 'clean-architecture')
   --help, -h          Show this help
 `);
@@ -118,6 +120,8 @@ async function run(): Promise<void> {
   let query: string | undefined;
   let json: boolean = false;
   let dryRun = true;
+  let fromVersion: string | undefined;
+  let toVersion: string | undefined;
   let noGraphql = false;
   let projectUrl: string | undefined;
   let keyEnv: string | undefined;
@@ -210,6 +214,12 @@ async function run(): Promise<void> {
     } else if (arg === "--write") {
       if (command === "plan") throw new Error("plan is read-only; --write is not supported");
       dryRun = false;
+    } else if (arg === "--from-version" || arg === "--to-version") {
+      if (command !== "migrate") throw new Error(`${arg} is only supported by migrate`);
+      const value = args[++i];
+      if (!value || value.startsWith("-")) throw new Error(`${arg} requires a version`);
+      if (arg === "--from-version") fromVersion = value;
+      else toVersion = value;
     } else if (arg === "--preset" || arg === "-p") {
       const presetArg = args[++i];
       if (!isModuleBoundaryPresetName(presetArg)) {
@@ -268,6 +278,8 @@ async function run(): Promise<void> {
     const result = await migrateProject({
       rootDir: rootDir ? resolve(process.cwd(), rootDir) : process.cwd(),
       write: !dryRun,
+      ...(fromVersion === undefined ? {} : { fromVersion }),
+      ...(toVersion === undefined ? {} : { toVersion }),
     });
     if (json) {
       console.log(JSON.stringify(result, null, 2));
@@ -276,8 +288,8 @@ async function run(): Promise<void> {
       const lines = [`${action} ${result.changedFiles.length} file(s)`];
       for (const file of result.files) {
         lines.push(`  ${file.file}: ${file.replacements} replacement(s)`);
-        for (const issue of file.issues) lines.push(`  ${issue.file}:${issue.line ?? 0} ${issue.code}: ${issue.message}`);
       }
+      for (const issue of result.issues) lines.push(`  ${issue.file}:${issue.line ?? 0} ${issue.code}: ${issue.message}`);
       if (result.changedFiles.length === 0 && result.issues.length === 0) lines.push("  no migrations required");
       console.log(lines.join("\n"));
     }

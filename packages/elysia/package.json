@@ -15,7 +15,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "compatibility.json"
   ],
   "scripts": {
     "generate:example": "bun src/generate-webhook-example.ts",
@@ -25,6 +26,9 @@
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
     "test": "bun test",
+    "test:conformance": "bun test src/conformance.test.ts",
+    "test:runtime-safety": "SUPACLOUD_REQUIRE_RUNTIME_SAFETY=1 bun test src/runtime-safety.test.ts",
+    "test:contract-upgrade": "bun test src/contract-upgrade.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit"
   },

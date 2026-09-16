@@ -1,5 +1,94 @@
 # @supacloud/elysia
 
+## Compatibility and Acceptance Boundary
+
+The dependency range is not a claim that every allowed version has been tested.
+The focused conformance suite was verified with Bun 1.4.2 and Elysia 1.4.30.
+The package declares Elysia `^1.4.30` as a peer and TypeScript `^7.0.2` as a
+development dependency. `compatibility.json` records the exact exercised tuple,
+including the compiler's separate TypeScript 6 semantic API. The contract-upgrade
+gate checks both that semantic API and the TypeScript 7 CLI. These tests do not
+establish a wider version matrix or Node.js runtime compatibility.
+
+Run `bun run test:conformance` in this package after building the local
+`@supacloud/contracts` and `@supacloud/app` dependencies and installing this
+package's dependencies. The suite runs through `app.handle(Request)` without a
+network listener. It is included in the normal `bun test` discovery.
+
+| Boundary | Acceptance evidence in `src/conformance.test.ts` |
+| --- | --- |
+| Decoded body, params, query, headers and cookies | Native/adapter response comparison, with explicit decoded-value assertions |
+| Response normalization and declared status maps | Native/adapter comparison, including a 409 response |
+| Native `Response` transport | Status, body, content type, custom header and outgoing cookie preserved |
+| Parent lifecycle hooks | Request, before-handler, handler and after-handler order compared |
+| Parent early return | 403 response compared; controller must not run |
+| Local sibling hooks | Local hook cannot intercept compiled routes |
+| Request schema failure | Native 422 status retained; controller must not run |
+| Malformed JSON | Native 400 status retained for multiple malformed bodies; controller must not run |
+| Error mapper precedence | Custom mapper handles parse failure before request context resolution |
+| Module error isolation | Internal exception redacted; sibling native error handling remains unchanged |
+| Invalid handler output | Intentional 500 response with `RESPONSE_VALIDATION_ERROR` |
+| Unsupported route descriptors | Unsupported methods/native hooks rejected before registration |
+| Duplicate protocol package copies | Known command errors retain their status; unknown codes remain internal |
+
+### Intentional Adapter Semantics
+
+- Default parse failures return HTTP 400 with `PARSE_ERROR`; request schema
+  failures return HTTP 422 with `VALIDATION_ERROR`. Their public messages do not
+  include parser details, submitted values or schema internals.
+- Invalid handler output returns HTTP 500, not a client-input error. It may occur
+  after business work has completed and must not be interpreted as a rollback.
+- Unknown handler exceptions are redacted. Known `CommandError` instances are
+  recognized by their Error identity, name and allowlisted code across separate
+  protocol package copies, never by exposing their message. A configured `errorMapper` can
+  override these defaults and owns the safety of its response.
+- Cookie input passed to a compiled controller contains decoded values, not
+  Elysia's mutable cookie wrappers. Native `Response` headers can carry outgoing
+  cookies.
+- Errors before context resolution have no request context. Error mappers must
+  not assume identity or request-scoped services are available.
+
+### Not Yet Proven by This Suite
+
+WebSockets, streaming and disconnect behavior, multipart uploads, signed-cookie
+mutation, arbitrary third-party plugins, alternate runtime/version combinations,
+concurrent tenant isolation, database transaction/idempotency guarantees and
+published-package installation are not covered by the conformance suite alone.
+Runtime safety is covered separately below. This list records
+an evidence gap, not a declaration that all these features are unsupported.
+Do not claim complete Elysia compatibility from this gate.
+
+Compiled routes accept only the HTTP methods and schema fields declared by
+`CompiledRoute`, plus compiler-emitted parameter transformation/default and
+descriptive metadata. This metadata does not install native Elysia hooks.
+Other descriptor fields (including browser guards/resolvers and native
+`beforeHandle`) or unsupported methods throw `ROUTE_DESCRIPTOR_UNSUPPORTED`
+at registration. It is not an arbitrary Elysia route-options passthrough.
+TypeScript/decorator inference, compiler migrations and generated client parity
+require their own acceptance gates.
+
+### Runtime and Upgrade Gates
+
+`bun run test:runtime-safety` requires `SUPACLOUD_COMMAND_TEST_URL` and fails
+instead of skipping when it is missing. Use a dedicated loopback database named
+`supacloud_commands_test`, with PostgreSQL 18 and PGMQ 1.10.0; initialize it using
+`scripts/prepare-command-test-database.ts`. The gate opens real loopback HTTP
+listeners and exercises compiler-generated request-scoped controllers. It proves
+overlapping tenant/actor requests, duplicate-key concurrency, authorization
+revocation, audit rollback, same-key retry and per-request provider teardown.
+Its authentication uses a fixed test token map, not a production JWT provider.
+
+`bun run test:contract-upgrade` copies a fixed legacy source fixture, previews and
+applies its versioned migration, compiles factories/client/OpenAPI, checks positive
+and negative types with both TypeScript engines, and calls the generated client
+over real HTTP. It restores the old source checkpoint, regenerates artifacts and
+executes the restored application. Build local contracts, app and compiler
+(including declarations) before installing this package's copied file dependencies.
+
+These gates prove the stated scenarios, not a full historical npm upgrade matrix
+or all business-domain isolation. See [framework acceptance](../../docs/framework-acceptance.md)
+for the evidence boundaries and upgrade policy.
+
 ## Persistent Command Adapters
 
 `createPersistentCommandAdapter(command, { identity, input })` binds a
