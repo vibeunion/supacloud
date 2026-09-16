@@ -511,6 +511,29 @@ after installing the local migrations. It refuses nonlocal Docker endpoints,
 creates a synthetic tenant, listens only on loopback and prints a one-use login
 link. It uses the real engine, but its administrator-to-service SQL bridge is
 local tooling only and must never be deployed as an application adapter.
+The `--operator` flag additionally exposes local operator controls and seeds
+synthetic failed deliveries for recovery acceptance. Two separate one-use
+links are printed: reserve the user link and consume only the browser
+verification link during automated acceptance.
+
+## SupaCloud Delivery Boundary
+
+SupaCloud provides the engine, versioned definitions and core execution,
+notification timers/outboxes, service/consumer/operator interfaces, generic
+workbench and fail-closed domain extension points. The targeted integration
+file also verifies package JavaScript/declaration outputs and the browser
+bundle. Local acceptance covers notification recovery with audit evidence.
+
+FA supplies personnel/qualification and report/signature policy, including
+whether prior approval evidence may be reused. Current generic resubmission
+always creates a fresh review; the framework does not yet expose selective
+reuse or resume-at-stage execution. Those are future engine extensions, not
+capabilities an adapter can enable by returning a permissive authorization.
+Likewise, migration currently restarts review rather than retaining progress.
+
+Deployment-specific backup/restore, load/SLO acceptance and real notification
+transport remain release gates. A local build or synthetic recovery does not
+prove those properties of the target deployment.
 
 Rollback: stop callers first, revoke the service-role membership, and retain
 the extension and private records until running instances have been reconciled.
