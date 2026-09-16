@@ -1,0 +1,32 @@
+name: supacloud-approval
+services:
+  postgres:
+    platform: linux/amd64
+    build: .
+    image: supacloud-approval:pg18-durable028
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD: ${APPROVAL_POSTGRES_PASSWORD:?Set a local database password}
+    ports:
+      - "127.0.0.1:${APPROVAL_POSTGRES_PORT:-55438}:5432"
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_durable
+      - -c
+      - pg_durable.database=postgres
+      - -c
+      - pg_durable.host=/var/run/postgresql
+      - -c
+      - pg_durable.enable_superuser_instances=off
+      - -c
+      - pg_durable.log_workflow_sql=off
+    volumes:
+      - approval-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+volumes:
+  approval-data:
