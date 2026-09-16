@@ -1,5 +1,81 @@
 # Changelog
 
+## [0.40.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.39.1...web-console-v0.40.0) (2026-09-16)
+
+
+### Features
+
+* **admin:** report deployed platform versions ([#794](https://github.com/vibeunion/supacloud/issues/794)) ([1ed128c](https://github.com/vibeunion/supacloud/commit/1ed128cb8100872a9fd4a93a373ac1df67d3baf4))
+* **auth:** add project OAuth Server console and GoTrue admin proxy ([#1293](https://github.com/vibeunion/supacloud/issues/1293)) ([2cbc565](https://github.com/vibeunion/supacloud/commit/2cbc5657ee59d173869cbf36d979b14babd81e56))
+* **compiler,app:** add module tags and boundary governance with Nx workspace configuration ([#1110](https://github.com/vibeunion/supacloud/issues/1110)) ([dda9635](https://github.com/vibeunion/supacloud/commit/dda96355ba25a53f1b550e8e95011b1c806a2003))
+* **database:** add governance linter and RPC catalog ([#1048](https://github.com/vibeunion/supacloud/issues/1048)) ([c0d1192](https://github.com/vibeunion/supacloud/commit/c0d1192296420fb997766af1a134a227f1d205ad))
+* **functions:** add active version concurrency control ([7a7e8b9](https://github.com/vibeunion/supacloud/commit/7a7e8b95cb1e4001765f40302cb5ddbb7b6db372))
+* **hosting:** add frontend hosting environments, versions, and console ([#1292](https://github.com/vibeunion/supacloud/issues/1292)) ([4a5dc78](https://github.com/vibeunion/supacloud/commit/4a5dc78cbb827ff22e5b714c3311c377db44ea67))
+* migrate compiler and strengthen type safety ([81ffb9d](https://github.com/vibeunion/supacloud/commit/81ffb9dae9a09b5561f90e655f1503514d3fe1d7))
+* **runtime:** attest canonical activations ([#868](https://github.com/vibeunion/supacloud/issues/868)) ([636433e](https://github.com/vibeunion/supacloud/commit/636433e1dbaaac04ae8d842d858b647a1667b0ce))
+* **storage:** add bucket revision CAS ([15f18b0](https://github.com/vibeunion/supacloud/commit/15f18b08b763b319ebd09efcc7af45deee269044))
+* **web-console:** normalize admin list envelopes ([#849](https://github.com/vibeunion/supacloud/issues/849)) ([1034792](https://github.com/vibeunion/supacloud/commit/103479292dd38f3c5adca38375f5192aaaec4a0f))
+* **web-console:** persist SQL editor drafts and typed table forms ([#1294](https://github.com/vibeunion/supacloud/issues/1294)) ([1eadf8b](https://github.com/vibeunion/supacloud/commit/1eadf8b2001506d02d4d978ee223168705a60a90))
+* **web-console:** upgrade SVAdmin dependencies and Tailwind v4 theme styles ([#1191](https://github.com/vibeunion/supacloud/issues/1191)) ([67fa640](https://github.com/vibeunion/supacloud/commit/67fa640ccc617c7131f49132a92b346151aeb711))
+* **web-console:** upgrade svadmin UI integration ([#930](https://github.com/vibeunion/supacloud/issues/930)) ([a8a110b](https://github.com/vibeunion/supacloud/commit/a8a110be08b022212132274d171234dcdea4e7b4))
+
+
+### Bug Fixes
+
+* **compiler:** align migration dependency pin with released elysia 0.15.0 ([#1324](https://github.com/vibeunion/supacloud/issues/1324)) ([459ee84](https://github.com/vibeunion/supacloud/commit/459ee840ade78b7f5891a678ef8ccbdd29631a30))
+* **console:** fix overview navigation, dashboard table counts, and function build diagnostics ([5a689a9](https://github.com/vibeunion/supacloud/commit/5a689a9838b3ab140e58e07cd31e7af367c7f471))
+* **functions:** support legacy v0 CAS and readback ([5ee1b8b](https://github.com/vibeunion/supacloud/commit/5ee1b8b5ec5f7177839cb22d497156e93bca589a))
+* harden GoTrue upgrade runtime and CLI compatibility ([#1084](https://github.com/vibeunion/supacloud/issues/1084)) ([3ad2bac](https://github.com/vibeunion/supacloud/commit/3ad2bacad53cdff314d7120c77c9bffff067b2fe))
+* resolve all GitHub Code Quality findings ([#952](https://github.com/vibeunion/supacloud/issues/952)) ([df0fb0c](https://github.com/vibeunion/supacloud/commit/df0fb0c53eb9a6424565bf39f1ce2f00ace429f1))
+
+
+### Elegance & Refactoring
+
+* **admin:** adopt scoped svadmin providers ([#856](https://github.com/vibeunion/supacloud/issues/856)) ([6b019d3](https://github.com/vibeunion/supacloud/commit/6b019d3ac22d74ddbe75184a4b37257d25575a96))
+
+
+### Performance Improvements
+
+* **compiler,web-console:** optimize I/O with Bun APIs, Vite pre-bundling, and graph algorithms ([#1246](https://github.com/vibeunion/supacloud/issues/1246)) ([1db9458](https://github.com/vibeunion/supacloud/commit/1db9458bb620c32476597c5bf795d00e63700559))
+
+
+### Documentation
+
+* **web-console:** clarify svadmin package provenance ([#1319](https://github.com/vibeunion/supacloud/issues/1319)) ([d0e4379](https://github.com/vibeunion/supacloud/commit/d0e437960fef8021d967947290e59a392d42df68))
+
+
+### Miscellaneous Chores
+
+* clean up obsolete scripts, deprecated files and tech debt ([#1109](https://github.com/vibeunion/supacloud/issues/1109)) ([3df42f7](https://github.com/vibeunion/supacloud/commit/3df42f7a3ddfb57866427c648c08fbcac699b7dc))
+* **deps:** bump supabase-js, ts-morph and type definitions ([#1129](https://github.com/vibeunion/supacloud/issues/1129)) ([c56c38e](https://github.com/vibeunion/supacloud/commit/c56c38e54d3b293a9a86359d79a2f3ff1db7da64))
+* **deps:** upgrade SVAdmin packages to npm latest ([#1295](https://github.com/vibeunion/supacloud/issues/1295)) ([6c9a406](https://github.com/vibeunion/supacloud/commit/6c9a4063d6d05b6bf57d63d5a03b134c95174ec0))
+* **deps:** upgrade workspace dependencies and svadmin ([#1067](https://github.com/vibeunion/supacloud/issues/1067)) ([9cd8ed6](https://github.com/vibeunion/supacloud/commit/9cd8ed6e81f11da1b26bf491ca745b5599115cc0))
+* **deps:** upgrade workspace dependencies and svadmin ([#1071](https://github.com/vibeunion/supacloud/issues/1071)) ([2e14fad](https://github.com/vibeunion/supacloud/commit/2e14fadef89c59336d71e237b961176e3611c55b))
+* migrate repository references to vibeunion org ([#933](https://github.com/vibeunion/supacloud/issues/933)) ([642e14f](https://github.com/vibeunion/supacloud/commit/642e14fa6284be97ab6e964d726f9ffcf7ebf4af))
+* release main ([f8262b9](https://github.com/vibeunion/supacloud/commit/f8262b9b9ad50d05433e400c88eac4ae94bc8711))
+* release main ([48db1e2](https://github.com/vibeunion/supacloud/commit/48db1e2df3cffe2fa70b730dff957bc2539d6617))
+* release main ([#1003](https://github.com/vibeunion/supacloud/issues/1003)) ([c966274](https://github.com/vibeunion/supacloud/commit/c9662744ca6f407ea0beff5f63487f6f8fd2ca8e))
+* release main ([#1049](https://github.com/vibeunion/supacloud/issues/1049)) ([d5b4e14](https://github.com/vibeunion/supacloud/commit/d5b4e14a727b8319bf1b55d24fca4e6de21e164e))
+* release main ([#1068](https://github.com/vibeunion/supacloud/issues/1068)) ([22f9b62](https://github.com/vibeunion/supacloud/commit/22f9b62d25dc059a734f3b168a7b8cd82cdd7a6e))
+* release main ([#1070](https://github.com/vibeunion/supacloud/issues/1070)) ([9ac012c](https://github.com/vibeunion/supacloud/commit/9ac012cbc5ea610688631cdfb376bb851355c73a))
+* release main ([#1088](https://github.com/vibeunion/supacloud/issues/1088)) ([aa3c605](https://github.com/vibeunion/supacloud/commit/aa3c6053f658d0af23f541d5d10f43e9a6e3c29e))
+* release main ([#1130](https://github.com/vibeunion/supacloud/issues/1130)) ([250e7de](https://github.com/vibeunion/supacloud/commit/250e7de72d9b08968f6d346fce391d2fb444cb5b))
+* release main ([#1137](https://github.com/vibeunion/supacloud/issues/1137)) ([a1f6219](https://github.com/vibeunion/supacloud/commit/a1f6219e19a897e9f1025bd10483ca453fd6c220))
+* release main ([#1156](https://github.com/vibeunion/supacloud/issues/1156)) ([3827ba0](https://github.com/vibeunion/supacloud/commit/3827ba09bc1dd1c37e5075773900e2005aed3e0f))
+* release main ([#1192](https://github.com/vibeunion/supacloud/issues/1192)) ([1e505e1](https://github.com/vibeunion/supacloud/commit/1e505e1713c918c07596110c2078cb88bdc5e9bd))
+* release main ([#1247](https://github.com/vibeunion/supacloud/issues/1247)) ([b21ffe3](https://github.com/vibeunion/supacloud/commit/b21ffe3dfec4d8513dfcb1ff59092b4f89ff344f))
+* release main ([#1296](https://github.com/vibeunion/supacloud/issues/1296)) ([1cb6cb3](https://github.com/vibeunion/supacloud/commit/1cb6cb302064ecedba544886314dbf31d4494d91))
+* release main ([#796](https://github.com/vibeunion/supacloud/issues/796)) ([f336cc1](https://github.com/vibeunion/supacloud/commit/f336cc1443a4159b242ed754a8410e0403c2f132))
+* release main ([#835](https://github.com/vibeunion/supacloud/issues/835)) ([4d8348a](https://github.com/vibeunion/supacloud/commit/4d8348a6bfc4779edfc6c2a7eec60bc4e0383ddb))
+* release main ([#841](https://github.com/vibeunion/supacloud/issues/841)) ([83a0367](https://github.com/vibeunion/supacloud/commit/83a03676f5d2334523c8c52d646e875467256b10))
+* release main ([#850](https://github.com/vibeunion/supacloud/issues/850)) ([058c22e](https://github.com/vibeunion/supacloud/commit/058c22e9e8b8867c424b57ea2e601fe6fe796eb7))
+* release main ([#858](https://github.com/vibeunion/supacloud/issues/858)) ([7cd1d59](https://github.com/vibeunion/supacloud/commit/7cd1d59a743a01d385020cdbec6b6af41534a276))
+* release main ([#867](https://github.com/vibeunion/supacloud/issues/867)) ([42ea8f3](https://github.com/vibeunion/supacloud/commit/42ea8f3d3ee33197abb5b2e931f0ea299006c7e6))
+* release main ([#928](https://github.com/vibeunion/supacloud/issues/928)) ([46c12d7](https://github.com/vibeunion/supacloud/commit/46c12d7023efa643f17efdd18cbb0d315c8f3cd3))
+* release main ([#934](https://github.com/vibeunion/supacloud/issues/934)) ([941efa5](https://github.com/vibeunion/supacloud/commit/941efa5a022612f6ad0e66ef23eea2101d6f8a29))
+* release main ([#960](https://github.com/vibeunion/supacloud/issues/960)) ([e25ba9f](https://github.com/vibeunion/supacloud/commit/e25ba9fdc53aa7874b2eb230b9ed80a435e09a72))
+* unify all code comments to English across packages ([#1136](https://github.com/vibeunion/supacloud/issues/1136)) ([2587201](https://github.com/vibeunion/supacloud/commit/2587201347494975cd313ff3aa4b0c5c3af48780))
+
 ## [0.39.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.39.0...web-console-v0.39.1) (2026-09-16)
 
 
