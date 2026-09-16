@@ -1,7 +1,7 @@
 import type { SQL } from "bun";
 import { PGFLOW_MIGRATIONS } from "../db/pgflow-bundle";
 import { executeSqlStatements } from "../db/sql-statements";
-import { renderRoles } from "../../../worker/scripts/roles";
+import { renderRoles } from "./pgflow-roles";
 import { ExtensionOperationError } from "./extension-policy";
 
 export interface PgflowState {
@@ -53,7 +53,7 @@ export async function setPgflowEnabled(db: SQL, ref: string, enabled: boolean): 
       if (binding?.profile !== "shared") throw new ExtensionOperationError("Dedicated profile requires a reviewed control upgrade");
       const rows = await tx`SELECT version,sha256 FROM supacloud_worker.migrations`;
       if (rows.length !== PGFLOW_MIGRATIONS.length || !PGFLOW_MIGRATIONS.every(m =>
-        rows.some(row => row.version === m.version && row.sha256 === m.sha256))) {
+        rows.some((row: { version: string; sha256: string }) => row.version === m.version && row.sha256 === m.sha256))) {
         throw new ExtensionOperationError("pgflow migration checksum mismatch; reviewed upgrade required");
       }
     }

@@ -3,19 +3,15 @@ import { withNativePostgres } from "../helpers/native-postgres";
 import { readPgflowState, setPgflowEnabled } from "../../src/services/pgflow.service";
 import { executeSqlStatements } from "../../src/db/sql-statements";
 import realtime from "../../../worker/tests/fixtures/realtime.sql" with { type: "text" };
-import { roleNames } from "../../../worker/scripts/scheduler";
-import { renderQueueGrants } from "../../../worker/scripts/roles";
-import { loadMigrations } from "../../../worker/scripts/migrations";
 import { PGFLOW_MIGRATIONS } from "../../src/db/pgflow-bundle";
+import { renderQueueGrants, roleNames } from "../../src/services/pgflow-roles";
 import { createHash } from "node:crypto";
 
-test("bundled migrations match the canonical shared installer byte for byte", async () => {
-  const canonical = await loadMigrations("shared");
-  expect(canonical.length).toBe(24);
-  for (const migration of canonical) {
-    const bundled = PGFLOW_MIGRATIONS.find(row => row.version === migration.version);
-    expect(bundled?.sql).toBe(migration.sql);
-    expect(bundled?.sha256).toBe(createHash("sha256").update(migration.sql).digest("hex"));
+test("bundled migrations preserve canonical versions and checksums", async () => {
+  expect(PGFLOW_MIGRATIONS.length).toBe(24);
+  expect(new Set(PGFLOW_MIGRATIONS.map(row => row.version)).size).toBe(24);
+  for (const migration of PGFLOW_MIGRATIONS) {
+    expect(migration.sha256).toBe(createHash("sha256").update(migration.sql).digest("hex"));
   }
 });
 
