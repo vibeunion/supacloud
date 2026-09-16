@@ -126,7 +126,7 @@ export async function readSqlDependencyGraph(
   const rows = await executor.query(`
 WITH objects AS (
   SELECT 'pg_class'::regclass::oid AS classid, c.oid AS objid, n.nspname,
-    'relation:' || to_json(n.nspname)::text || '.' || to_json(c["relname"])::text AS identity
+    'relation:' || to_json(n.nspname)::text || '.' || to_json(c.relname)::text AS identity
   FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
   UNION ALL
   SELECT 'pg_proc'::regclass::oid, p.oid, n.nspname,
@@ -134,15 +134,15 @@ WITH objects AS (
   FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
   UNION ALL
   SELECT 'pg_rewrite'::regclass::oid, r.oid, n.nspname,
-    'relation:' || to_json(n.nspname)::text || '.' || to_json(c["relname"])::text
+    'relation:' || to_json(n.nspname)::text || '.' || to_json(c.relname)::text
   FROM pg_rewrite r JOIN pg_class c ON c.oid=r.ev_class JOIN pg_namespace n ON n.oid=c.relnamespace
   UNION ALL
   SELECT 'pg_policy'::regclass::oid, p.oid, n.nspname,
-    'relation:' || to_json(n.nspname)::text || '.' || to_json(c["relname"])::text
+    'relation:' || to_json(n.nspname)::text || '.' || to_json(c.relname)::text
   FROM pg_policy p JOIN pg_class c ON c.oid=p.polrelid JOIN pg_namespace n ON n.oid=c.relnamespace
   UNION ALL
   SELECT 'pg_trigger'::regclass::oid, t.oid, n.nspname,
-    'relation:' || to_json(n.nspname)::text || '.' || to_json(c["relname"])::text
+    'relation:' || to_json(n.nspname)::text || '.' || to_json(c.relname)::text
   FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid JOIN pg_namespace n ON n.oid=c.relnamespace
 )
 SELECT DISTINCT a.identity AS dependent, b.identity AS dependency
