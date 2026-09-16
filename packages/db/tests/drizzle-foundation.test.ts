@@ -44,7 +44,7 @@ function docker(args: string[]): string {
 
 beforeAll(async () => {
   docker(["run", "--rm", "-d", "--name", container, "-e", "POSTGRES_HOST_AUTH_METHOD=trust",
-    "-e", "POSTGRES_DB=supacloud_drizzle_test", "-p", "127.0.0.1::5432", "postgres:18.4-bookworm"]);
+    "-e", "POSTGRES_DB=supacloud_drizzle_test", "-p", "127.0.0.1::5432", "ghcr.io/pgmq/pg18-pgmq:v1.10.0"]);
   started = true;
   const port = docker(["port", container, "5432/tcp"]).split(":").at(-1);
   if (!port || !/^\d+$/.test(port)) throw new Error("Invalid local PostgreSQL port");
@@ -55,6 +55,10 @@ beforeAll(async () => {
     catch { await Bun.sleep(250); }
   }
   if (!ready) throw new Error("Disposable PostgreSQL did not start");
+  await pool.unsafe("CREATE ROLE anon; CREATE ROLE authenticated; CREATE ROLE service_role;");
+  for (const name of ["workflows-public", "commands-public"]) {
+    await pool.unsafe(await Bun.file(new URL(`../../management-api/src/db/sql-modules/${name}.sql`, import.meta.url)).text());
+  }
   await pool.unsafe(COMMAND_PERSISTENCE_SQL);
   await pool.unsafe(`CREATE SCHEMA app;
     CREATE TABLE app.settings(id text PRIMARY KEY, tenant_id text NOT NULL,

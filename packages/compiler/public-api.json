@@ -154,6 +154,11 @@
       "signature": "export declare function createIncrementalProgramSession(projectRoot: string): IncrementalProgramSession;"
     },
     {
+      "name": "DatabaseContractsOptions",
+      "kind": "type",
+      "signature": "export interface DatabaseContractsOptions {\n    rootDir: string;\n    outDir: string;\n    postgrestTypes: string;\n    drizzleSchema: string;\n    role: string;\n    graphql: GraphqlOptions;\n    migrations: readonly string[];\n}"
+    },
+    {
       "name": "DEFAULT_SUPACLOUD_CONFIG",
       "kind": "value",
       "signature": "export declare const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<SupaCloudConfig, \"include\" | \"moduleBoundaryPreset\" | \"commandCapabilities\" | \"moduleBoundaries\" | \"typeSafety\" | \"delivery\" | \"allowRouteCommandBindings\" | \"disallowControllerDirectDb\" | \"detectOrphanModules\" | \"openApi\">> & {\n    include: string[];\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n};"
@@ -329,6 +334,11 @@
       "signature": "export declare function generateApplication(graph: ApplicationGraph, options: GenerateOptions): Promise<string[]>;"
     },
     {
+      "name": "generateDatabaseContracts",
+      "kind": "value",
+      "signature": "export declare function generateDatabaseContracts(options: DatabaseContractsOptions, check?: boolean): unknown;"
+    },
+    {
       "name": "generateFeatureSource",
       "kind": "value",
       "signature": "export declare function generateFeatureSource(spec: FeatureSpecNode): string;"
@@ -494,6 +504,11 @@
       "signature": "export interface OpenApiServer {\n    url: string;\n    description?: string;\n}"
     },
     {
+      "name": "parseDatabaseContractsOptions",
+      "kind": "value",
+      "signature": "export declare function parseDatabaseContractsOptions(value: unknown, directory: string): DatabaseContractsOptions;"
+    },
+    {
       "name": "parseDeliveryBuildManifest",
       "kind": "value",
       "signature": "export declare function parseDeliveryBuildManifest(value: unknown): DeliveryBuildManifest;"
@@ -594,6 +609,16 @@
       "signature": "export interface RouteNode {\n    contract?: {\n        body?: \"framework\" | \"domain\";\n        response?: \"framework\" | \"native-json\" | \"binary\" | \"stream\";\n        evidence?: string;\n    };\n    schemaKinds?: Partial<Record<\"body\" | \"params\" | \"query\" | \"headers\" | \"cookie\" | \"response\", \"opaque\" | \"declared\">>;\n    nativeResponse?: boolean;\n    method: \"GET\" | \"POST\" | \"PUT\" | \"PATCH\" | \"DELETE\" | \"HEAD\" | \"OPTIONS\";\n    path: string;\n    handler: string;\n    body?: string;\n    params?: string;\n    query?: string;\n    headers?: string;\n    cookie?: string;\n    response?: string;\n    responses?: Record<string, string>;\n    command?: string;\n    guards?: string[];\n    canMatch?: string[];\n    canDeactivate?: string[];\n    resolvers?: Record<string, string>;\n    redirectTo?: string;\n    pathMatch?: \"full\" | \"prefix\";\n    pathParams?: string[];\n    paramBindings?: string[];\n    queryBindings?: string[];\n    hasBodyBinding?: boolean;\n    paramTransforms?: Record<string, \"number\" | \"boolean\" | \"string\">;\n    paramDefaults?: Record<string, unknown>;\n    queryTransforms?: Record<string, \"number\" | \"boolean\" | \"string\">;\n    queryDefaults?: Record<string, unknown>;\n    title?: string;\n    data?: Record<string, unknown>;\n    handlerParams?: HandlerParamNode[];\n    aspects?: AspectRefNode[];\n}"
     },
     {
+      "name": "runDatabaseContractsFile",
+      "kind": "value",
+      "signature": "export declare function runDatabaseContractsFile(path: string, check?: boolean): unknown;"
+    },
+    {
+      "name": "scanDrizzleSql",
+      "kind": "value",
+      "signature": "export declare function scanDrizzleSql(sourceFile: ts.SourceFile, checker: ts.TypeChecker, file: string, strict: boolean): Diagnostic[];"
+    },
+    {
       "name": "scanGeneratedArtifacts",
       "kind": "value",
       "signature": "export declare function scanGeneratedArtifacts(artifacts: Record<string, string | undefined>, strict?: boolean): Diagnostic[];"
@@ -622,6 +647,11 @@
       "name": "SourceMigrationResult",
       "kind": "type",
       "signature": "export interface SourceMigrationResult {\n    changed: boolean;\n    content: string;\n    replacements: number;\n    issues: SourceMigrationIssue[];\n}"
+    },
+    {
+      "name": "SQL_SAFETY_DIAGNOSTIC_CODES",
+      "kind": "value",
+      "signature": "export declare const SQL_SAFETY_DIAGNOSTIC_CODES: {\n    readonly \"sql-result-assertion\": {\n        readonly errorCode: \"SC6007\";\n        readonly docsUrl: \"https://supacloud.dev/errors/SC6007\";\n    };\n    readonly \"sql-raw-dynamic\": {\n        readonly errorCode: \"SC6008\";\n        readonly docsUrl: \"https://supacloud.dev/errors/SC6008\";\n    };\n};"
     },
     {
       "name": "SUPACLOUD_MIGRATIONS",
@@ -671,7 +701,7 @@
     {
       "name": "TYPE_SAFETY_DIAGNOSTIC_CODES",
       "kind": "value",
-      "signature": "export declare const TYPE_SAFETY_DIAGNOSTIC_CODES: {\n    readonly \"generated-any\": {\n        readonly errorCode: \"SC6001\";\n        readonly docsUrl: \"https://supacloud.dev/errors/SC6001\";\n    };\n    readonly \"source-any\": {\n        readonly errorCode: \"SC6002\";\n        readonly docsUrl: \"https://supacloud.dev/errors/SC6002\";\n    };\n    readonly \"source-type-assertion\": {\n        readonly errorCode: \"SC6003\";\n        readonly docsUrl: \"https://supacloud.dev/errors/SC6003\";\n    };\n    readonly \"source-non-null-assertion\": {\n        readonly errorCode: \"SC6004\";\n        readonly docsUrl: \"https://supacloud.dev/errors/SC6004\";\n    };\n    readonly \"source-implicit-widening\": {\n        readonly errorCode: \"SC6005\";\n        readonly docsUrl: \"https://supacloud.dev/errors/SC6005\";\n    };\n    readonly \"source-type-suppression\": {\n        readonly errorCode: \"SC6006\";\n        readonly docsUrl: \"https://supacloud.dev/errors/SC6006\";\n    };\n};"
+      "signature": "export declare const TYPE_SAFETY_DIAGNOSTIC_CODES: any;"
     },
     {
       "name": "TypeSafetyOptions",
