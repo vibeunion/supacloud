@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.8.0](https://github.com/vibeunion/supacloud/compare/db-v0.7.1...db-v0.8.0) (2026-09-16)
+
+
+### Features
+
+* complete compile-time database architecture ([#1332](https://github.com/vibeunion/supacloud/issues/1332)) ([4a82b4b](https://github.com/vibeunion/supacloud/commit/4a82b4b89078ef371029c6d18b7c674086627a88))
+
+
+### Documentation
+
+* complete compile-time architecture usage guides ([#1333](https://github.com/vibeunion/supacloud/issues/1333)) ([3190178](https://github.com/vibeunion/supacloud/commit/319017810deb4d7c9911f1bd001ca898f9ea9982))
+
 ## [0.7.1](https://github.com/vibeunion/supacloud/compare/db-v0.7.0...db-v0.7.1) (2026-09-11)
 
 

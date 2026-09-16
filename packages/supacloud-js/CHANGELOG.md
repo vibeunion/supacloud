@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.30.0...supacloud-js-v0.31.0) (2026-09-16)
+
+
+### Features
+
+* **worker:** add tenant-scoped pgflow runtime and shared PG18 installation ([#1329](https://github.com/vibeunion/supacloud/issues/1329)) ([5149870](https://github.com/vibeunion/supacloud/commit/51498703d15b2f3a6e4ec72e01177013b31a3068))
+
 ## [0.30.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.29.0...supacloud-js-v0.30.0) (2026-09-14)
 
 
