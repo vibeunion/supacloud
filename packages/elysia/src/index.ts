@@ -1,12 +1,12 @@
 import { Elysia, type StatusMap, type TSchema } from "elysia";
-import { CommandError, decodeCommandPreview, type CommandPreview } from "@supacloud/contracts";
+import { decodeCommandPreview, type CommandPreview } from "@supacloud/contracts";
 import {
   provideToken,
   runInRequestContext,
   type EnvironmentInjector,
 } from "@supacloud/app";
 import { REQUEST_CONTEXT } from "@supacloud/app";
-import { commandErrorStatus } from "./command-errors";
+import { commandErrorCode, commandErrorStatus } from "./command-errors";
 import { executionTrace, observeExecution, type ExecutionObserver } from "./execution";
 import {
   createSchemaDecoder,
@@ -822,6 +822,27 @@ export function createModulePlugin(
   options: Pick<ApplicationOptions, "commandGovernance" | "commandExecutor" | "errorMapper" | "onExecution" | "normalize" | "injector"> = {},
   imported: Record<string, Record<string, unknown>> = {},
 ): Elysia {
+  // Compiled descriptors are also loadable from JavaScript and older generators.
+  // Reject options we cannot preserve instead of silently dropping native hooks.
+  const supportedMethods = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
+  const supportedFields = new Set([
+    "method", "path", "handler", "body", "params", "query", "headers", "cookie",
+    "response", "responses", "contract", "schemaKinds", "nativeResponse", "invoker",
+    "command", "aspects",
+    "paramTransforms", "paramDefaults", "queryTransforms", "queryDefaults", "title", "data",
+  ]);
+  for (const controller of compiled.controllers) {
+    for (const route of controller.routes) {
+      const unsupported = Object.keys(route).filter((field) => !supportedFields.has(field));
+      if (!supportedMethods.has(route.method) || unsupported.length > 0) {
+        throw new ApplicationError(
+          `Unsupported compiled route ${route.method} ${controller.path}${route.path}`
+          + (unsupported.length > 0 ? `: ${unsupported.join(", ")}` : ""),
+          { code: "ROUTE_DESCRIPTOR_UNSUPPORTED" },
+        );
+      }
+    }
+  }
   const hasCommandRoutes = compiled.controllers.some((controller) =>
     controller.routes.some((route) => route.command !== undefined),
   );
@@ -1110,9 +1131,10 @@ export function defaultErrorResponse(
   error: unknown,
   frameworkCode?: string | number,
 ): Response {
-  if (error instanceof CommandError) {
-    return Response.json({ ok: false, code: error.code, message: error.code }, {
-      status: commandErrorStatus(error.code),
+  const protocolCode = commandErrorCode(error);
+  if (protocolCode) {
+    return Response.json({ ok: false, code: protocolCode, message: protocolCode }, {
+      status: commandErrorStatus(protocolCode),
     });
   }
   if (isPublicApplicationError(error)) {
@@ -1122,6 +1144,13 @@ export function defaultErrorResponse(
       message: error.message,
       ...(error.details === undefined ? {} : { details: error.details }),
     }, { status: error.status });
+  }
+  if (frameworkCode === "PARSE") {
+    return Response.json({
+      ok: false,
+      code: "PARSE_ERROR",
+      message: "Request body could not be parsed",
+    }, { status: 400 });
   }
   if (frameworkCode === "VALIDATION") {
     // A response failure can occur after a command commits; it is not invalid input.
