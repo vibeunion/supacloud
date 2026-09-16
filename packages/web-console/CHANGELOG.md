@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.40.0...web-console-v0.41.0) (2026-09-16)
+
+
+### Features
+
+* **extensions:** manage canonical pgflow installation and pause state ([#1331](https://github.com/vibeunion/supacloud/issues/1331)) ([aa666eb](https://github.com/vibeunion/supacloud/commit/aa666eb48130508f39a41523d8aeefdf25912e9a))
+
 ## [0.40.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.39.1...web-console-v0.40.0) (2026-09-16)
 
 

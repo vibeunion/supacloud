@@ -14,6 +14,18 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.54.0](https://github.com/vibeunion/supacloud/compare/cli-v0.53.1...cli-v0.54.0) (2026-09-16)
+
+
+### Features
+
+* **extensions:** manage canonical pgflow installation and pause state ([#1331](https://github.com/vibeunion/supacloud/issues/1331)) ([aa666eb](https://github.com/vibeunion/supacloud/commit/aa666eb48130508f39a41523d8aeefdf25912e9a))
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#1326](https://github.com/vibeunion/supacloud/issues/1326)) ([2778c7d](https://github.com/vibeunion/supacloud/commit/2778c7d44b9d3350f8483cb8cb7611b64affcaa9))
+
 ## [0.53.1](https://github.com/vibeunion/supacloud/compare/cli-v0.53.0...cli-v0.53.1) (2026-09-15)
 
 

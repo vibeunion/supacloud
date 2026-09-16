@@ -1,12 +1,14 @@
 {
   "name": "@supacloud/db",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "Database governance layer for SupaCloud: RLS policies, RPC functions and grants as first-class resources, with manifest/catalog reconciliation",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": { "supacloud-sql-impact": "./dist/sql-impact-cli.js" },
+  "bin": {
+    "supacloud-sql-impact": "./dist/sql-impact-cli.js"
+  },
   "exports": {
     "./sql-analysis": {
       "types": "./dist/sql-analysis.d.ts",
@@ -70,8 +72,14 @@
     "libpg-query": "18.1.4",
     "@supacloud/contracts": "file:../contracts"
   },
-  "peerDependencies": { "drizzle-orm": "1.0.0-rc.4" },
-  "peerDependenciesMeta": { "drizzle-orm": { "optional": true } },
+  "peerDependencies": {
+    "drizzle-orm": "1.0.0-rc.4"
+  },
+  "peerDependenciesMeta": {
+    "drizzle-orm": {
+      "optional": true
+    }
+  },
   "overrides": {
     "@supacloud/contracts": "file:../contracts"
   }

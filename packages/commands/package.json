@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/commands",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Storage-independent durable command execution and recovery",
   "type": "module",
   "main": "./dist/index.js",
@@ -40,7 +40,9 @@
     "@sinclair/typebox": "0.34.52"
   },
   "peerDependenciesMeta": {
-    "@sinclair/typebox": { "optional": true }
+    "@sinclair/typebox": {
+      "optional": true
+    }
   },
   "license": "MIT",
   "repository": {

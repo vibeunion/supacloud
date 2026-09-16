@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.82.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.81.0...management-api-v0.82.0) (2026-09-16)
+
+
+### Features
+
+* **extensions:** manage canonical pgflow installation and pause state ([#1331](https://github.com/vibeunion/supacloud/issues/1331)) ([aa666eb](https://github.com/vibeunion/supacloud/commit/aa666eb48130508f39a41523d8aeefdf25912e9a))
+* **management:** integrate pgflow execution with project tasks ([#1325](https://github.com/vibeunion/supacloud/issues/1325)) ([10e977c](https://github.com/vibeunion/supacloud/commit/10e977c42da0e945c60e0b90412f37d0fcc5e9ed))
+* **worker:** add tenant-scoped pgflow runtime and shared PG18 installation ([#1329](https://github.com/vibeunion/supacloud/issues/1329)) ([5149870](https://github.com/vibeunion/supacloud/commit/51498703d15b2f3a6e4ec72e01177013b31a3068))
+
 ## [0.81.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.80.0...management-api-v0.81.0) (2026-09-15)
 
 
