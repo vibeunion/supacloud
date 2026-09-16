@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.21.0...compiler-v0.21.1) (2026-09-16)
+
+
+### Bug Fixes
+
+* **compiler:** resolve migration dependency pin lazily ([#1327](https://github.com/vibeunion/supacloud/issues/1327)) ([e36a094](https://github.com/vibeunion/supacloud/commit/e36a094051107948a60cabe582f7a3662143d98c))
+
 ## [0.21.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.20.0...compiler-v0.21.0) (2026-09-16)
 
 
