@@ -1,0 +1,6 @@
+{
+  "name": "@supacloud/worker",
+  "tags": ["scope:core", "type:runtime"],
+  "projectType": "library",
+  "sourceRoot": "packages/worker/src"
+}

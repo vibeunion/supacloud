@@ -7,13 +7,14 @@ let beginCalls = 0;
 let createExtensionFailure: Error | null = null;
 let entrypointFailure: Error | null = null;
 let invalidResult: unknown = undefined;
+let extensionInstalled = true;
 
 const mockDbFn = Object.assign(
     async (strings: TemplateStringsArray, extension?: string): Promise<unknown> => {
         const sql = strings.join("?");
         taggedCalls.push(sql);
         if (invalidResult !== undefined && sql.includes("pg_available_extensions")) return invalidResult;
-        return [{ name: extension ?? "pg_stat_statements", default_version: "1.10", installed_version: "1.10", comment: "track stats", is_installed: true }];
+        return [{ name: extension ?? "pg_stat_statements", default_version: "1.10", installed_version: extensionInstalled ? "1.10" : null, comment: "track stats", is_installed: extensionInstalled }];
     },
     {
         close: async () => { },
@@ -21,6 +22,8 @@ const mockDbFn = Object.assign(
             unsafeCalls.push(sql);
             if (createExtensionFailure && sql.startsWith("CREATE EXTENSION")) throw createExtensionFailure;
             if (entrypointFailure && sql.includes("$graphql_entrypoint$")) throw entrypointFailure;
+            if (sql.startsWith("CREATE EXTENSION")) extensionInstalled = true;
+            if (sql.startsWith("DROP EXTENSION")) extensionInstalled = false;
             return [{ name: "pg_stat_statements", default_version: "1.10", installed_version: "1.10", comment: "track stats", is_installed: true }];
         },
         begin: async (operation: (transaction: typeof mockDbFn) => Promise<unknown>): Promise<unknown> => {
@@ -45,6 +48,7 @@ describe("ExtensionService", () => {
         createExtensionFailure = null;
         entrypointFailure = null;
         invalidResult = undefined;
+        extensionInstalled = true;
     });
 
     test("listExtensions should parse DB output", async () => {
@@ -105,9 +109,9 @@ describe("ExtensionService", () => {
     test("disableExtension drops and reloads schema in one transaction", async () => {
         const result = await extensionService.disableExtension("testref123", "postgis");
 
-        expect(result.is_installed).toBe(true);
+        expect(result.is_installed).toBe(false);
         expect(beginCalls).toBe(1);
-        expect(unsafeCalls).toEqual(['DROP EXTENSION IF EXISTS "postgis" CASCADE']);
+        expect(unsafeCalls).toEqual(['DROP EXTENSION IF EXISTS "postgis" RESTRICT']);
         expect(taggedCalls.some((sql) => sql.includes("pg_notify"))).toBe(true);
     });
 
