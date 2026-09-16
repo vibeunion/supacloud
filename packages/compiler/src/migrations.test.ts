@@ -119,7 +119,7 @@ export const ItemsRoute = { response: Result };
 
 async function versionedFixture() {
   const root = await mkdtemp(join(tmpdir(), "supacloud-versioned-migration-"));
-  for (const [name, version] of Object.entries(migrationDependencies)) {
+  for (const [name, version] of Object.entries(migrationDependencies())) {
     const directory = join(root, "node_modules", name);
     await mkdir(directory, { recursive: true });
     await writeFile(join(directory, "package.json"), JSON.stringify({ name, version }));
