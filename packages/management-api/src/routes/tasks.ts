@@ -14,6 +14,7 @@ import { PgmqRequestBodyError } from "../utils/pgmq-request-body";
 import { parseAuthorizedPgmqEnqueue, PgmqEnqueueAuthError } from "./pgmq-enqueue-parser";
 import { PgmqMutationError } from "../utils/pgmq-mutation";
 import { InvalidTaskListQueryError, parseTaskListQuery } from "../utils/task-list-query";
+import { PGFLOW_TASK_TYPE, PgflowTaskError, startPgflowTask } from "../services/pgflow-task.service";
 
 const QUEUE_TASK_TYPE_PREFIX = "queue:";
 
@@ -85,6 +86,9 @@ async function getTaskDetailAuth(
 
 export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
     .onError(({ error }) => {
+        if (error instanceof PgflowTaskError) {
+            return status(error.status, { message: error.message, code: "PGFLOW_TASK_ERROR" });
+        }
         const cause = error instanceof ParseError ? error.cause : error;
         if (cause instanceof PgmqEnqueueAuthError) return status(cause.status, cause.body);
         if (cause instanceof PgmqRequestBodyError) {
@@ -95,6 +99,21 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
         if (isTaskDetailRead(request, route)) return;
         const authError = await authMiddleware.requireProjectOrAdminAuth(request, params.ref);
         if (authError) return status(authError.status, authError.body);
+    })
+    .post("/flows", async ({ params, body }) => {
+        try {
+            return status(202, await startPgflowTask(params.ref, body));
+        } catch (error) {
+            if (error instanceof PgflowTaskError) throw error;
+            return status(503, { message: "Flow submission could not be confirmed; retry with the same idempotency key", code: "PGFLOW_SUBMISSION_UNCONFIRMED" });
+        }
+    }, {
+        body: t.Object({
+            flow_slug: t.String({ minLength: 1, maxLength: 128 }),
+            input: t.Unknown(),
+            idempotency_key: t.String({ minLength: 1, maxLength: 200 }),
+        }),
+        detail: { tags: ["tasks"], summary: "Submit a pgflow execution as a project task" },
     })
     .get("/queues", async ({ params }) => {
         try {
@@ -595,6 +614,9 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             if (!current) {
                 return status(404, { message: "Task not found", code: "404" });
             }
+            if (current.task_type === PGFLOW_TASK_TYPE) {
+                return status(409, { message: "pgflow run cancellation is not supported", code: "PGFLOW_CANCEL_UNSUPPORTED" });
+            }
 
             if (
                 current.status === TaskStatus.SUCCEEDED ||
@@ -629,6 +651,10 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
     }, { detail: { tags: ["tasks"], summary: "Cancel a running task" } })
     .post("/:taskId/retry", async ({ params }) => {
         try {
+            const current = await taskRepository.getTaskById(params.taskId, params.ref);
+            if (current?.task_type === PGFLOW_TASK_TYPE) {
+                return status(409, { message: "pgflow owns step retries; submit a new idempotency key for a new execution", code: "PGFLOW_RETRY_UNSUPPORTED" });
+            }
             const task = await taskRepository.retryTask(params.taskId, params.ref);
             if (!task) {
                 return status(404, { message: "Task not found", code: "404" });
