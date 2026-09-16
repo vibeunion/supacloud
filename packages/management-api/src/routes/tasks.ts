@@ -14,6 +14,7 @@ import { PgmqRequestBodyError } from "../utils/pgmq-request-body";
 import { parseAuthorizedPgmqEnqueue, PgmqEnqueueAuthError } from "./pgmq-enqueue-parser";
 import { PgmqMutationError } from "../utils/pgmq-mutation";
 import { InvalidTaskListQueryError, parseTaskListQuery } from "../utils/task-list-query";
+import { isPgflowTask, pgflowTaskService, PgflowTaskReadError } from "../services/pgflow-task.service";
 
 const QUEUE_TASK_TYPE_PREFIX = "queue:";
 
@@ -493,9 +494,21 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
     }, { detail: { tags: ["tasks"], summary: "Delete a queue message" } })
     .get("/", async ({ params, request }) => {
         try {
-            const tasks = await taskRepository.listTasksByProjectFiltered(params.ref, parseTaskListQuery(request));
+            const filters = parseTaskListQuery(request);
+            if (filters.taskTypes?.includes("pgflow")) {
+                if (filters.taskTypes.length !== 1 || filters.functionSlug || filters.functionVersion
+                    || filters.onlyDeadLettered) throw new InvalidTaskListQueryError();
+                return await pgflowTaskService.list(params.ref, {
+                    limit: filters.limit ?? 50,
+                    ...(filters.statuses === undefined ? {} : { statuses: filters.statuses }),
+                });
+            }
+            const tasks = await taskRepository.listTasksByProjectFiltered(params.ref, filters);
             return tasks;
         } catch (err: unknown) {
+            if (err instanceof PgflowTaskReadError) {
+                return status(503, { message: "Executor status is unavailable", code: "PGFLOW_TASKS_UNAVAILABLE" });
+            }
             if (err instanceof InvalidTaskListQueryError) {
                 return status(400, { message: err.message, code: "TASK_LIST_QUERY_INVALID" });
             }
@@ -570,6 +583,13 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
     })
     .get("/:taskId", async ({ params, request }) => {
         try {
+            if (isPgflowTask(params.taskId)) {
+                // Native engine runs have no verified user/actor binding. Backend/admin only.
+                const error = await authMiddleware.requireProjectOrAdminAuth(request, params.ref);
+                if (error) return status(error.status, error.body);
+                const run = await pgflowTaskService.get(params.ref, params.taskId);
+                return run ?? status(404, { message: "Task not found", code: "404" });
+            }
             const task = await taskRepository.getTaskById(params.taskId, params.ref);
             if (!task) {
                 return status(404, { message: "Task not found", code: "404" });
@@ -586,11 +606,17 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
                 latest_logs: latestAttempt?.logs || [],
             };
         } catch (err: unknown) {
+            if (err instanceof PgflowTaskReadError) {
+                return status(503, { message: "Executor status is unavailable", code: "PGFLOW_TASKS_UNAVAILABLE" });
+            }
             return status(500, { message: "Failed to retrieve task", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
     }, { detail: { tags: ["tasks"], summary: "Get task details by ID" } })
     .post("/:taskId/cancel", async ({ params }) => {
         try {
+            if (isPgflowTask(params.taskId)) {
+                return status(409, { message: "Executor does not support this action", code: "TASK_ACTION_UNSUPPORTED" });
+            }
             const current = await taskRepository.getTaskById(params.taskId, params.ref);
             if (!current) {
                 return status(404, { message: "Task not found", code: "404" });
@@ -629,6 +655,9 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
     }, { detail: { tags: ["tasks"], summary: "Cancel a running task" } })
     .post("/:taskId/retry", async ({ params }) => {
         try {
+            if (isPgflowTask(params.taskId)) {
+                return status(409, { message: "Executor does not support this action", code: "TASK_ACTION_UNSUPPORTED" });
+            }
             const task = await taskRepository.retryTask(params.taskId, params.ref);
             if (!task) {
                 return status(404, { message: "Task not found", code: "404" });
