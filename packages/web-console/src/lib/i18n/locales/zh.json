@@ -690,6 +690,14 @@
     "no": "否"
   },
   "Extensions": {
+    "confirm_disable": "确定移除 {name}？存在依赖时将阻止移除。",
+    "setup_required": "待配置",
+    "pgflow_not_installed": "未安装",
+    "pgflow_unmanaged": "需要手动迁移",
+    "pgflow_paused": "已暂停",
+    "pause": "暂停",
+    "pgflow_worker_not_ready": "Worker 未就绪",
+    "pgflow_running": "运行中",
     "title": "数据库扩展",
     "subtitle": "PostgreSQL 中已安装和可用的扩展列表。",
     "loading": "正在加载扩展...",

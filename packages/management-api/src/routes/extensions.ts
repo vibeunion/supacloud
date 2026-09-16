@@ -2,6 +2,7 @@ import { Elysia, t, status } from "elysia";
 import { extensionService } from '../services/extension.service';
 import { requireAdminAuth, requireProjectOrAdminAuth } from '../middleware/auth';
 import { logger } from "../utils/logger";
+import { extensionOperationFailure } from "../services/extension-policy";
 
 const ErrorResponse = t.Object({ message: t.String() });
 
@@ -11,6 +12,8 @@ export const extensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/extension
         if (authError) return status(authError.status, authError.body);
     })
     .onError(({ code, error, set }) => {
+        const failure = extensionOperationFailure(error);
+        if (failure) { set.status = failure.status; return { message: failure.message }; }
         logger.error(`[Extensions] Unhandled error [${code}]:`, error);
         set.status = 500;
         return { message: "Internal server error", code: "INTERNAL_ERROR" };
@@ -85,6 +88,8 @@ export const databaseExtensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/d
         if (authError) return status(authError.status, authError.body);
     })
     .onError(({ code, error, set }) => {
+        const failure = extensionOperationFailure(error);
+        if (failure) { set.status = failure.status; return { message: failure.message }; }
         logger.error(`[DatabaseExtensions] Unhandled error [${code}]:`, error);
         set.status = 500;
         return { message: "Internal server error", code: "INTERNAL_ERROR" };
@@ -95,6 +100,7 @@ export const databaseExtensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/d
         response: { 200: t.Any() },
         detail: { tags: ["extensions"], summary: "List database extensions" },
     })
+    .get('/catalog', ({ params }) => extensionService.listExtensionCatalog(params.ref))
     .post('/', async ({ params, body }) => {
         const name = body.name;
         if (!name) return status(400, { message: "Extension name is required", code: "400" });

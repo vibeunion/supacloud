@@ -1,0 +1,4 @@
+FROM ghcr.io/pgmq/pg18-pgmq:v1.10.0 AS pgmq
+FROM postgres:18.4-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends postgresql-18-cron && rm -rf /var/lib/apt/lists/*
+COPY --from=pgmq /usr/share/postgresql/18/extension/pgmq* /usr/share/postgresql/18/extension/

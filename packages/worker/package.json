@@ -1,0 +1,37 @@
+{
+  "name": "@supacloud/worker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Project-scoped process worker integration for pgflow",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "scripts",
+    "sql",
+    "README.md"
+  ],
+  "scripts": {
+    "db:install": "bun scripts/install.ts",
+    "build": "tsc -p tsconfig.json",
+    "test": "bun test tests/worker.test.ts"
+  },
+  "dependencies": {
+    "libpg-query": "17.7.4",
+    "@pgflow/core": "0.16.0",
+    "@pgflow/edge-worker": "0.16.0",
+    "@pgflow/dsl": "0.16.0"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "typescript": "7.0.2"
+  },
+  "license": "MIT"
+}

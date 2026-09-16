@@ -75,6 +75,18 @@ export type SupaCloudTaskDetail<TResult = unknown> = {
   id: string;
   project_ref: string;
   status: SupaCloudTaskStatus | string;
+  task_type?: string;
+  executor?: {
+    kind: string;
+    version: string;
+    definition: string;
+    run_id: string;
+    native_status: string;
+  };
+  capabilities?: { cancel: boolean; retry: boolean };
+  blocked_reason?: string | null;
+  total_steps?: number;
+  finished_steps?: number;
   function_slug?: string | null;
   function_version?: string | null;
   attempt?: number | null;
@@ -519,14 +531,38 @@ function decodeTaskAttempt(value: unknown): SupaCloudTaskAttempt {
 
 function decodeTaskDetail(value: unknown): SupaCloudTaskDetail {
   const record = responseRecord(value, "task");
+  let executor: SupaCloudTaskDetail["executor"];
+  let capabilities: SupaCloudTaskDetail["capabilities"];
+  if (Object.hasOwn(record, "executor")) {
+    const source = responseRecord(record.executor, "task executor");
+    executor = {
+      kind: taskText(source.kind), version: taskText(source.version),
+      definition: taskText(source.definition), run_id: taskText(source.run_id),
+      native_status: taskText(source.native_status),
+    };
+  }
+  if (Object.hasOwn(record, "capabilities")) {
+    const source = responseRecord(record.capabilities, "task capabilities");
+    if (typeof source.cancel !== "boolean" || typeof source.retry !== "boolean") {
+      throw new Error("Invalid task capabilities");
+    }
+    capabilities = { cancel: source.cancel, retry: source.retry };
+  }
   for (const key of [
     "function_slug", "function_version", "error", "error_message", "correlation_id",
-    "business_task_id", "updated_at", "created_at",
+    "business_task_id", "updated_at", "created_at", "blocked_reason",
   ]) {
     if (Object.hasOwn(record, key)) taskNullable(record[key], taskText);
   }
   for (const key of ["attempt", "max_attempts", "progress"]) {
     if (Object.hasOwn(record, key)) taskNullable(record[key], taskNumber);
+  }
+  if (Object.hasOwn(record, "task_type")) taskText(record.task_type);
+  for (const key of ["total_steps", "finished_steps"]) {
+    if (Object.hasOwn(record, key)) {
+      const count = taskNumber(record[key]);
+      if (!Number.isSafeInteger(count) || count < 0) throw new Error("Invalid task step count");
+    }
   }
   if (Object.hasOwn(record, "payload")) responseRecord(record.payload, "task payload");
   if (Object.hasOwn(record, "metadata") && record.metadata !== null) responseRecord(record.metadata, "task metadata");
@@ -535,6 +571,8 @@ function decodeTaskDetail(value: unknown): SupaCloudTaskDetail {
     id: responseString(record, "id", "task"),
     project_ref: responseString(record, "project_ref", "task"),
     status: responseString(record, "status", "task"),
+    ...(executor === undefined ? {} : { executor }),
+    ...(capabilities === undefined ? {} : { capabilities }),
     ...(Object.hasOwn(record, "attempts") ? { attempts: taskArray(record.attempts, decodeTaskAttempt) } : {}),
     ...(Object.hasOwn(record, "latest_logs") ? { latest_logs: taskArray(record.latest_logs, decodeTaskLog) } : {}),
   };
