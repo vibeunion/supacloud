@@ -125,9 +125,9 @@ Runtime adapter that turns `@supacloud/compiler` output into a production-ready
   controllers and services.
 - **Request-scope teardown**: invokes the compiler-generated
   `destroyRequestScope` after the response, including when the handler fails.
-- **Angular-backed async DI**: when `createApplication({ injector })` receives
-  an `@supacloud/app` root injector, each request gets an isolated child
-  injector with `REQUEST_CONTEXT`, including across `await` boundaries.
+- **Compile-time DI**: constructor dependencies are directly connected by generated
+  factories. Request/job context is passed explicitly without runtime injector
+  discovery, registration or token lookup.
 - **TypeBox schema binding**: attaches compiled parameter, query, body, headers,
   cookie, single-response and status-map TypeBox schemas directly to Elysia
   route definitions; Elysia performs request validation and normalization.
@@ -205,10 +205,11 @@ GraphQL endpoint serves a local, role-scoped snapshot only; it does not enable
 server introspection or create a GraphQL resolver layer. Protect or omit these
 routes in production when the schema is not public.
 
-The root injector is normally created and owned by `bootstrapBun`. The Elysia
-adapter does not take ownership of an injected root injector; stop it from the
-same Bun bootstrap that created it. Existing applications may omit `injector`
-and continue using compiler-generated request scopes unchanged.
+Use constructor injection and the generated `createServices`,
+`createRequestScope` and `createJobScope` factories. Compiled applications reject
+property `inject()` and runtime injection contexts with `SC2012`. The host provides
+platform dependencies through `deps` and owns their lifecycle; generated factories
+own application scope construction and teardown.
 
 For deterministic local verification, use the in-memory sandbox. It supplies
 stable request identity, an isolated key-value database with optimistic
