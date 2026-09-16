@@ -1,5 +1,52 @@
 # @supacloud/db
 
+## Drizzle, Read Queries and SQL Impact
+
+Use `defineDrizzleDatabaseModule` and `createDrizzleCommandDatabase` from
+`@supacloud/db/drizzle`, or `createBunDrizzleCommandDatabase` from
+`@supacloud/db/drizzle-bun`. Authorization, business writes, receipts and audit
+share one transaction connection. Do not use the outer pool for command writes
+or retain `transaction.db` after the transaction. The adapter currently targets
+`drizzle-orm@1.0.0-rc.4`, not a stable 1.0 release.
+
+`executeDecodedSql` keeps SQL results unknown until an explicit decoder validates
+them. Use parameterized templates; `sql<T>` alone does not validate returned data.
+The optional `@supacloud/commands/typebox` contract can use schemas derived through
+`drizzle-orm/typebox-legacy`, selecting public fields rather than accepting
+internal tenant/permission fields.
+
+`defineReadQuery` combines input decoding, authorization, result decoding and
+payload-free observation. `createBunReadDatabase` admits one parsed SELECT and
+runs a PostgreSQL READ ONLY transaction with a statement timeout.
+`createBunDrizzleReadDatabase` provides the read transaction boundary for Drizzle.
+Keep least-privilege roles and RLS; AOP does not replace them.
+
+`supacloud-sql-impact impact.json --check` analyzes ordered, owned migrations:
+
+```json
+{
+  "migrations": [
+    { "id": "001", "owner": "orders", "path": "migrations/001.sql" }
+  ],
+  "baseline": []
+}
+```
+
+Paths are relative to this config. Reports include fingerprints, dependencies,
+transitive impact, review reasons and a digest. Persist applied IDs and SHA-256
+hashes as `baseline`; deleted, reordered or rewritten history fails validation.
+Supply `readSqlDependencyGraph(executor, ["app"])` results as `catalogEdges` and
+`catalogReview`. Import this catalog reader from `@supacloud/db/sql-analysis`.
+
+Dynamic SQL, opaque functions, unqualified names and unsupported semantics require
+review. This is conservative analysis, not proof of arbitrary SQL safety. Approve
+the exact reviewed report via `approvedDigest`; changes invalidate approval, and
+approval never overrides history errors. The tool does not execute migrations.
+
+The focused `tests/drizzle-foundation.test.ts` test needs Docker and starts a
+disposable local PostgreSQL/PGMQ instance. Prepare Commands and Compiler package
+dependencies first using `scripts/build-command-dependencies.ts db`.
+
 ## Durable Commands
 
 `createPostgresCommandStore(database)` implements the protocol's storage ports.
@@ -10,7 +57,8 @@ and input redaction. It does not own a recovery polling queue.
 Execution factories moved to `@supacloud/commands`; pass `store` instead of
 `database`. Errors moved to `CommandError` in `@supacloud/contracts`. Neither
 remote sending nor command orchestration is re-exported here. The DB package
-does not depend on the command runtime, including through its tests.
+does not depend on the command runtime in production. The Drizzle integration
+test uses the command runtime to verify the shared transaction boundary.
 
 Install the existing PGMQ/Workflow runtime and updated commands-public SQL module,
 then `COMMAND_PERSISTENCE_SQL` through a privileged application migration.

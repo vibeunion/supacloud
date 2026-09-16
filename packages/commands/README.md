@@ -1,5 +1,27 @@
 # @supacloud/commands
 
+## Schema and Execution Policies
+
+`@supacloud/commands/typebox` exports `createTypeBoxTransactionalCommand`.
+Pass `schemas: { input, result }` to derive both handler types and runtime
+validation from TypeBox. The concrete store transaction type is retained,
+including Drizzle `transaction.db`. Typed callers use `execute` / `lookup`;
+transport adapters use `executeUnknown` / `lookupUnknown`. Both validate at
+runtime without coercion, defaults or transforms.
+
+`createExecutionPolicy` provides explicit cooperative timeouts, classified retries
+and a circuit breaker per host-owned operation. Transactional commands accept
+`executionPolicy` and forward an `AbortSignal` to the handler; pass it to drivers.
+Read retries require classification as `retry` or `rolled-back`; command retries
+require a driver-confirmed `rolled-back` failure. Unknown write outcomes and
+external dispatches are never automatically retried. Recover via durable receipts.
+
+Timeout requests cancellation but retains ownership until the driver settles.
+An uncooperative driver can exceed the timeout. Transactional cancellation is
+conservatively reported as `COMMAND_OUTCOME_UNKNOWN`, not proof of rollback.
+Circuit `isFailure` should exclude authorization, schema and domain rejection.
+Circuit state is local to the policy instance, not distributed.
+
 Storage-independent durable execution. Depends only on `@supacloud/contracts`;
 no SQL driver, HTTP server, Svelte lifecycle or scheduler is bundled.
 
