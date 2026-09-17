@@ -1,6 +1,26 @@
-FROM postgres:18-bookworm
+FROM rust:bookworm AS durable-builder
+ARG TARGETARCH
+RUN set -eux; mkdir -p /out; \
+    if [ "$TARGETARCH" = arm64 ]; then \
+      apt-get update; \
+      apt-get install -y --no-install-recommends ca-certificates curl gnupg git pkg-config libssl-dev libclang-dev clang; \
+      curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+        | gpg --batch --yes --dearmor -o /usr/share/keyrings/postgresql.gpg; \
+      echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+        > /etc/apt/sources.list.d/pgdg.list; \
+      apt-get update; \
+      apt-get install -y --no-install-recommends postgresql-18 postgresql-server-dev-18; \
+      cargo install --locked cargo-pgrx --version 0.16.1; \
+      git init /src; \
+      git -C /src fetch --depth 1 https://github.com/microsoft/pg_durable.git 5bbbe46216f9cf1a20a4a14fd16eb9a5b8723656; \
+      git -C /src checkout --detach FETCH_HEAD; \
+      test "$(git -C /src rev-parse HEAD)" = 5bbbe46216f9cf1a20a4a14fd16eb9a5b8723656; \
+      make -C /src package PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config; \
+      make -C /src install PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config DESTDIR=/out; \
+    fi
 
-ARG PGDG_APT_REPOSITORY=https://apt.postgresql.org/pub/repos/apt
+FROM postgres:18-bookworm
+ARG TARGETARCH
 
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/pgdg.list ]; then \
@@ -45,32 +65,31 @@ RUN set -eux; \
       postgresql-18-wrappers; \
     rm -rf /var/lib/apt/lists/*
 
-ARG ENABLE_PG_DURABLE=false
-ARG PG_GRAPHQL_VERSION=1.6.2
-ARG PG_GRAPHQL_SHA256=271063ea2b8f99e00458473aa3b0e6dc0f88d341b2269401dc0b55a77b23970d
-ARG PG_GRAPHQL_DOWNLOAD_URL=https://github.com/supabase/pg_graphql/releases/download/v1.6.2/pg_graphql-v1.6.2-pg18-amd64-linux-gnu.deb
-ARG PG_DURABLE_SHA256=090028f59b003613b150e61ccd5cdbebe70e69e65361913ad29b1f0b6af9e2bb
-ARG PG_DURABLE_DOWNLOAD_URL=https://github.com/microsoft/pg_durable/releases/download/v0.2.8/pg-durable-postgresql-18_0.2.8-1_amd64.deb
+COPY --from=durable-builder /out/ /
 
 RUN set -eux; \
+    case "$TARGETARCH" in \
+      amd64) graphql_sha=271063ea2b8f99e00458473aa3b0e6dc0f88d341b2269401dc0b55a77b23970d ;; \
+      arm64) graphql_sha=3c6c3e0b65a267dc2f26e5048dbf5af288ff8b0c5546c23ec2d74407c818c2ed ;; \
+      *) echo "Unsupported architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac; \
     curl --http1.1 -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 300 \
-      "${PG_GRAPHQL_DOWNLOAD_URL}" \
+      "https://github.com/supabase/pg_graphql/releases/download/v1.6.2/pg_graphql-v1.6.2-pg18-${TARGETARCH}-linux-gnu.deb" \
       -o /tmp/pg_graphql.deb; \
-    echo "${PG_GRAPHQL_SHA256}  /tmp/pg_graphql.deb" | sha256sum -c -; \
-    dpkg --remove postgresql-18-pg-graphql 2>/dev/null || true; \
-    dpkg -i /tmp/pg_graphql.deb; \
-    grep -Fq "default_version = '${PG_GRAPHQL_VERSION}'" /usr/share/postgresql/18/extension/pg_graphql.control; \
-    rm -f /tmp/pg_graphql.deb
-
-RUN set -eu; if [ "$ENABLE_PG_DURABLE" = true ]; then \
-      test "$(dpkg --print-architecture)" = amd64; \
+    echo "$graphql_sha  /tmp/pg_graphql.deb" | sha256sum -c -; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends /tmp/pg_graphql.deb; \
+    if [ "$TARGETARCH" = amd64 ]; then \
       curl --http1.1 -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 300 \
-        "${PG_DURABLE_DOWNLOAD_URL}" \
-        -o /tmp/pg_durable.deb \
-      && echo "${PG_DURABLE_SHA256}  /tmp/pg_durable.deb" | sha256sum -c - \
-      && dpkg -i /tmp/pg_durable.deb \
-      && rm -f /tmp/pg_durable.deb; \
-    fi
+        https://github.com/microsoft/pg_durable/releases/download/v0.2.8/pg-durable-postgresql-18_0.2.8-1_amd64.deb \
+        -o /tmp/pg_durable.deb; \
+      echo '090028f59b003613b150e61ccd5cdbebe70e69e65361913ad29b1f0b6af9e2bb  /tmp/pg_durable.deb' | sha256sum -c -; \
+      apt-get install -y --no-install-recommends /tmp/pg_durable.deb; \
+    fi; \
+    rm -rf /var/lib/apt/lists/* /tmp/pg_durable.deb /tmp/pg_graphql.deb
+
+COPY verify-extensions.sh /usr/local/bin/verify-postgres-extensions
+RUN gosu postgres bash /usr/local/bin/verify-postgres-extensions
 
 COPY initdb /docker-entrypoint-initdb.d
 COPY pgsodium_getkey /usr/share/postgresql/18/extension/pgsodium_getkey

@@ -2,8 +2,6 @@ services:
   postgres:
     build:
       context: ./postgres
-      args:
-        ENABLE_PG_DURABLE: ${ENABLE_PG_DURABLE:-false}
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
