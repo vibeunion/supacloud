@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - "docker/self-host/postgres/**"
+      - ".github/workflows/publish-docker-postgres.yml"
+      - "scripts/publish-postgres-image.sh"
+      - "scripts/postgres-image.test.ts"
   workflow_dispatch:
 
 concurrency:
@@ -19,8 +22,14 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
+      - name: Require main for public tags
+        run: test "$GITHUB_REF" = refs/heads/main
+
       - name: Checkout code
         uses: actions/checkout@v7
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -32,21 +41,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata
-        id: meta
-        run: |
-          SHA=$(git rev-parse --short=7 HEAD)
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-          echo "Building postgres image: sha-$SHA, latest"
-
       - name: Build and push postgres image
-        uses: docker/build-push-action@v7
-        with:
-          context: docker/self-host/postgres
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}/postgres:sha-${{ steps.meta.outputs.sha }}
-            ghcr.io/${{ github.repository }}/postgres:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
+        env:
+          POSTGRES_IMAGE: ghcr.io/${{ github.repository }}/postgres
+        run: bash scripts/publish-postgres-image.sh
