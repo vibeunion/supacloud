@@ -31,7 +31,7 @@ The PostgreSQL image stays on `postgres:18-bookworm` and installs PGDG, Pigsty/P
 - `hypopg`
 - `pg_stat_kcache`
 - `http`
-- `pg_graphql`
+- `pg_graphql` 1.6.2 (checksum-verified official packages)
 - `pg_jsonschema`
 - `wrappers`
 - `index_advisor`
@@ -45,8 +45,29 @@ It also packages these PostgreSQL libraries and optional extensions:
 - `documentdb`, created only when the FerretDB profile is enabled
 - `pgsodium`, created only when `ENABLE_PGSODIUM=true`
 - `supabase_vault`, created only when `ENABLE_SUPABASE_VAULT=true`
-- `pg_durable` 0.2.8, packaged and initialized only when `ENABLE_PG_DURABLE=true`
-  (amd64 builds; binary download is checksum-verified)
+- `pg_durable` 0.2.8, always packaged: checksum-verified official amd64 binary,
+  pinned upstream source build on arm64. Preloading and initialization remain
+  opt-in through the runtime setting `ENABLE_PG_DURABLE=true`.
+
+Every image build starts an isolated PostgreSQL cluster and creates both
+extensions at the required versions. A missing library, SQL installation error,
+or default-version mismatch fails the build before publication.
+
+### Publishing
+
+Changes to the PostgreSQL context or its publishing workflow trigger publication
+from `main`. When hosted CI is unavailable, use a clean checkout of the current
+remote `main`, authenticate Docker to GHCR with package write access, and run:
+
+```bash
+bash scripts/publish-postgres-image.sh
+```
+
+Run this command from the repository root on a Buildx builder supporting
+`linux/amd64` and `linux/arm64` (native nodes or QEMU). Both architectures must
+pass the embedded extension verification before `sha-<commit>` and `latest`
+are published. Production consumers should pin the resulting image digest.
+Publication does not restart or upgrade existing databases.
 
 The approval runtime uses `pg_durable` and the existing `pg_jsonschema` package.
 See [Durable Approval Runtime](../../docs/approval-durable.md) for the isolated

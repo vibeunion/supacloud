@@ -224,9 +224,10 @@ uses `docker exec ... psql -U postgres -d postgres`.
 
 ## Self-host Environment
 
-Set `ENABLE_PG_DURABLE=true` when building and initializing the self-host profile
-on amd64. The new build option installs the pinned package and initializes the
-worker in `POSTGRES_DB`. pg_jsonschema is already installed by this profile.
+The self-host image always packages pg_durable 0.2.8 on amd64 and arm64.
+Set `ENABLE_PG_DURABLE=true` at runtime when initializing the self-host profile
+to enable preloading and initialize the worker in `POSTGRES_DB`.
+pg_jsonschema is already installed by this profile.
 pg_cron stays installed because other platform components use it; approval does
 not depend on it or schedule any cron job.
 
