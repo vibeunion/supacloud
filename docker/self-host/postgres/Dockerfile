@@ -21,6 +21,7 @@ RUN set -eux; mkdir -p /out; \
 
 FROM postgres:18-bookworm
 ARG TARGETARCH
+ARG PGDG_APT_REPOSITORY=https://apt.postgresql.org/pub/repos/apt
 
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/pgdg.list ]; then \
