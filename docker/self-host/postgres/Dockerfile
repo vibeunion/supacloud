@@ -68,6 +68,9 @@ RUN set -eux; \
 
 COPY --from=durable-builder /out/ /
 
+# Keep pg_graphql control and SQL files outside the PostgreSQL data mount. The
+# self-host volume mounts /var/lib/postgresql and would otherwise hide the
+# package's symlinked extension files at runtime.
 RUN set -eux; \
     case "$TARGETARCH" in \
       amd64) graphql_sha=271063ea2b8f99e00458473aa3b0e6dc0f88d341b2269401dc0b55a77b23970d ;; \
@@ -87,6 +90,11 @@ RUN set -eux; \
       echo '090028f59b003613b150e61ccd5cdbebe70e69e65361913ad29b1f0b6af9e2bb  /tmp/pg_durable.deb' | sha256sum -c -; \
       apt-get install -y --no-install-recommends /tmp/pg_durable.deb; \
     fi; \
+    for source in /var/lib/postgresql/extension/pg_graphql*; do \
+      target="/usr/share/postgresql/18/extension/$(basename "$source")"; \
+      rm -f "$target"; \
+      cp -L "$source" "$target"; \
+    done; \
     rm -rf /var/lib/apt/lists/* /tmp/pg_durable.deb /tmp/pg_graphql.deb
 
 COPY verify-extensions.sh /usr/local/bin/verify-postgres-extensions
