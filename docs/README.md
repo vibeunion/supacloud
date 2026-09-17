@@ -2,6 +2,11 @@
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
+> This index is verified by `scripts/check-docs-index.mjs`: every `docs/*.md`
+> (except per-code diagnostic pages under `errors/`) must be referenced here,
+> and every relative link in this index must resolve. Compiler diagnostics are
+> indexed collectively via the [Diagnostic Catalog](./errors/README.md).
+
 ## Quick Links
 
 - [CLI Guide](./cli-guide.md) - User CLI vs admin CLI entrypoints and command boundaries
@@ -17,6 +22,9 @@
 - [Multi-Tenant Architecture](./architecture-multi-tenant.md) - Multi-tenant architecture design
 - [Multi-Tenant Management](./multi-tenant-management.md) - Management API specification, auth boundaries, and operational hardening
 - [Enterprise Architecture Readiness](./enterprise-architecture-readiness.md) - Infrastructure boundaries, SLO model, recovery acceptance, and release governance ([中文](./enterprise-architecture-readiness.zh-CN.md))
+- [Engineering Goals](./engineering-goals.md) - Ownership boundaries, current foundations, and acceptance targets ([中文](./engineering-goals.zh-CN.md))
+- [Authorization Boundary](./authorization-boundary.md) - Identity, tenant, object, and service-role authorization boundaries
+- [FA Consumer Governance](./fa-consumer-governance.md) - Consumer-side compiler and runtime governance for domain applications
 
 ## Deployment
 
@@ -25,6 +33,10 @@
 - [CI/CD Integration](./ci-cd-integration.md) - CI/CD integration with GitHub webhooks
 - [Frontend Hosting](./frontend-hosting.md) - SupaCloud Pages static site hosting
 - [Release Control Automation & Canary Spec](./release-control-automation-spec.md) - Proposed contracts for headless PKCE canary, batch function releases, and CAS rollback primitives
+- [Automated App Delivery](./app-delivery-automation-spec.md) - Implemented planning/build stages and proposed deployment stages
+- [Multi-function Release Units](./project-release-manifest.md) - Atomic function release manifests and artifact lineage
+- [Isolated Full-project Restore Drills](./project-restore-drill.md) - Restore scope, evidence, and rollback boundaries
+- [Gateway Customization](./gateway-customization.md) - Custom Caddy routes, headers, CORS, and reconciliation rules
 
 ## Authentication
 
@@ -49,6 +61,8 @@
 - [Historical Pigsty 4.4 compatibility migration](./upgrade-to-pigsty-4.4.md) - Analytics and Supabase compatibility migration background
 - [Docker PostgreSQL 4.4 Upgrade](./upgrade-postgres-docker-4.4.md) - Docker-specific compatibility, backup, and major-version safety guide
 - [Troubleshooting Podman DNS](./troubleshooting-podman-dns.md) - Podman DNS troubleshooting
+- [Database Extension Management](./database-extensions.md) - Catalog, enable/disable policy, pg_durable prerequisites, and read-back
+- [Request and Task Tracing](./request-task-tracing.md) - Correlation identifiers and async execution tracing
 
 ## Development
 
@@ -64,8 +78,49 @@
 - [PowerSync Local-First Integration](./powersync-local-first.md) - Self-hosted sync boundary, replication readiness, RLS upload path, ELN conflicts, and cleanup
 - [Application Architecture Guide](./application-architecture.md) - Scalable monorepo, migration, Function, worker, and contract boundaries for SupaCloud applications
 - [Application Framework](./application-framework.md) - Angular-style modules, compile-time DI, and Elysia runtime (`@supacloud/app` / `compiler` / `elysia`)
+- [Route Contract Migration](./route-contract-migration.md) - Schema-first routes, generated client decoding, OpenAPI, and Management API registry migration
 - [Database Governance](./database-governance.md) - RLS/RPC as first-class resources with catalog reconcile and SQL lint (`@supacloud/db`)
 - [Application Platform Primitives](./application-platform-primitives.md) - Custom PostgREST schemas, transactional command receipts, and immutable artifact lineage
+
+## Design, Reference, and Verification
+
+- [Application Starter](./application-starter.md) - Generated application layout and starter boundaries
+- [Durable Approval Runtime](./approval-durable.md) - pg_durable approval engine, assignment, snapshots, and trusted roles
+- [Command Security and Migration](./command-migration.md) - Command/workflow convergence, recovery, and rollback plan
+- [Command Architecture Acceptance](./command-architecture-acceptance.md) - Gherkin acceptance criteria for the command boundary
+- [Command Migration Verification](./command-migration-verification.md) - Local package and native database evidence
+- [Command / Workflow Convergence](./command-workflow-convergence.md) - Single delivery runtime convergence between commands and PGMQ workflows
+- [Command / Workflow Verification](./command-workflow-verification.md) - Isolated worktree verification evidence for the command boundary
+- [Compiler Consumer Simplification](./compiler-consumer-simplification.md) - Generated query validators, watch mode, and consumer boundaries
+- [GraphQL Acceptance Pilot](./graphql-pilot.md) - Opt-in pg_graphql enablement and local acceptance boundary
+- [GraphQL Project Enablement](./graphql-project-enablement.md) - Project-scoped pg_graphql enablement purpose and boundaries
+- [GraphQL Query Contracts](./graphql-query-contracts.md) - Database-first query types, validators, and generated SDKs
+- [Lite Runtime Compatibility](./lite-runtime-compatibility.md) - Lite parity, unsupported features, and migration limits
+- [Supabase Strict Consumer Blocker](./supabase-strict-consumer-blocker.md) - Known upstream declaration/runtime compatibility blocker
+- [Storage Public Endpoint Proposal](./storage-public-endpoint-proposal.md) - Proposed internal storage and browser delivery endpoint contract
+- [Type Safety Boundaries](./type-safety.md) - Repository-wide type-safety policy and acceptance scenarios
+- [Translation Policy](./translation-policy.md) - Canonical language and synchronization rules
+- [Compiler Diagnostic Catalog](./errors/README.md) - Stable diagnostic codes and actionable pages
+
+## Package References
+
+- [@supacloud/admin](../packages/admin/README.md)
+- [@supacloud/cli](../packages/cli/README.md)
+- [@supacloud/app](../packages/app/README.md)
+- [@supacloud/app-svelte](../packages/app-svelte/README.md)
+- [@supacloud/approval](../packages/approval/README.md)
+- [@supacloud/commands](../packages/commands/README.md)
+- [@supacloud/compiler](../packages/compiler/README.md)
+- [@supacloud/contracts](../packages/contracts/README.md)
+- [@supacloud/db](../packages/db/README.md)
+- [@supacloud/elysia](../packages/elysia/README.md)
+- [@supacloud/function-adapter](../packages/function-adapter/README.md)
+- [@supacloud/pgflow-worker](../packages/pgflow-worker/README.md)
+- [@supacloud/pgredis-runtime](../packages/pgredis-runtime/README.md)
+- [@supacloud/js](../packages/supacloud-js/README.md)
+- [SupaCloud Lite](../packages/supacloud-lite/README.md)
+- [@supacloud/testing](../packages/testing/README.md)
+- [SupaCloud Web Console](../packages/web-console/README.md)
 
 ## Product Positioning
 
