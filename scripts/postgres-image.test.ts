@@ -10,7 +10,7 @@ const verifier = read("docker/self-host/postgres/verify-extensions.sh");
 const publisher = read("scripts/publish-postgres-image.sh");
 
 function withPublisher(run: (fixture: {
-  publish: (args?: string[]) => ReturnType<typeof Bun.spawnSync>;
+  publish: (args?: string[]) => { exitCode: number; stderr: string };
   git: (...args: string[]) => string;
   root: string;
   capture: string;
@@ -39,11 +39,14 @@ function withPublisher(run: (fixture: {
     git("remote", "add", "origin", root);
     run({
       root, capture, git,
-      publish: (args = []) => Bun.spawnSync(["bash", "publish.sh", ...args], {
-        cwd: root,
-        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, CAPTURE: capture,
-          POSTGRES_IMAGE: "example.invalid/postgres" },
-      }),
+      publish: (args = []) => {
+        const result = Bun.spawnSync(["bash", "publish.sh", ...args], {
+          cwd: root,
+          env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, CAPTURE: capture,
+            POSTGRES_IMAGE: "example.invalid/postgres" },
+        });
+        return { exitCode: result.exitCode, stderr: result.stderr.toString() };
+      },
     });
   } finally {
     rmSync(temporary, { recursive: true, force: true });
@@ -98,7 +101,7 @@ describe("PostgreSQL image release contract", () => {
       writeFileSync(join(root, "uncommitted"), "dirty");
       const result = publish();
       expect(result.exitCode).toBe(1);
-      expect(result.stderr.toString()).toContain("clean checkout");
+      expect(result.stderr).toContain("clean checkout");
       expect(existsSync(capture)).toBe(false);
     });
   });
@@ -109,7 +112,7 @@ describe("PostgreSQL image release contract", () => {
       git("-c", "core.hooksPath=/dev/null", "commit", "--allow-empty", "-m", "not main");
       const result = publish();
       expect(result.exitCode).toBe(1);
-      expect(result.stderr.toString()).toContain("current origin/main");
+      expect(result.stderr).toContain("current origin/main");
       expect(existsSync(capture)).toBe(false);
     });
   });
