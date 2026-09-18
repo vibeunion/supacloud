@@ -71,6 +71,8 @@ describe("PostgreSQL image release contract", () => {
     expect(dockerfile).toContain("271063ea2b8f99e00458473aa3b0e6dc0f88d341b2269401dc0b55a77b23970d");
     expect(dockerfile).toContain("3c6c3e0b65a267dc2f26e5048dbf5af288ff8b0c5546c23ec2d74407c818c2ed");
     expect(dockerfile).toContain('echo "$graphql_sha  /tmp/pg_graphql.deb" | sha256sum -c -');
+    expect(dockerfile).toContain('rm -f "$target"');
+    expect(dockerfile).toContain('cp -L "$source" "$target"');
   });
 
   test("fails builds unless isolated PostgreSQL can install the exact versions", () => {

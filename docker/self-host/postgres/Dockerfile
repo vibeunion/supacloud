@@ -21,10 +21,18 @@ RUN set -eux; mkdir -p /out; \
 
 FROM postgres:18-bookworm
 ARG TARGETARCH
+ARG PGDG_APT_REPOSITORY=https://apt.postgresql.org/pub/repos/apt
 
 RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/pgdg.list ]; then \
+      mv /etc/apt/sources.list.d/pgdg.list /etc/apt/sources.list.d/pgdg.list.disabled; \
+    fi; \
     apt-get update; \
     apt-get install -y --no-install-recommends curl ca-certificates gnupg lsb-release; \
+    if [ -f /etc/apt/sources.list.d/pgdg.list.disabled ]; then \
+      sed -i -E "s#https?://apt\\.postgresql\\.org/pub/repos/apt#${PGDG_APT_REPOSITORY}#" /etc/apt/sources.list.d/pgdg.list.disabled; \
+      mv /etc/apt/sources.list.d/pgdg.list.disabled /etc/apt/sources.list.d/pgdg.list; \
+    fi; \
     install -d /etc/apt/keyrings; \
     curl -fsSL https://repo.pigsty.io/key \
       | gpg --batch --yes --dearmor -o /etc/apt/keyrings/pigsty.gpg; \
@@ -60,25 +68,33 @@ RUN set -eux; \
 
 COPY --from=durable-builder /out/ /
 
+# Keep pg_graphql control and SQL files outside the PostgreSQL data mount. The
+# self-host volume mounts /var/lib/postgresql and would otherwise hide the
+# package's symlinked extension files at runtime.
 RUN set -eux; \
     case "$TARGETARCH" in \
       amd64) graphql_sha=271063ea2b8f99e00458473aa3b0e6dc0f88d341b2269401dc0b55a77b23970d ;; \
       arm64) graphql_sha=3c6c3e0b65a267dc2f26e5048dbf5af288ff8b0c5546c23ec2d74407c818c2ed ;; \
       *) echo "Unsupported architecture: $TARGETARCH" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL --retry 3 --max-time 180 \
+    curl --http1.1 -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 300 \
       "https://github.com/supabase/pg_graphql/releases/download/v1.6.2/pg_graphql-v1.6.2-pg18-${TARGETARCH}-linux-gnu.deb" \
       -o /tmp/pg_graphql.deb; \
     echo "$graphql_sha  /tmp/pg_graphql.deb" | sha256sum -c -; \
     apt-get update; \
     apt-get install -y --no-install-recommends /tmp/pg_graphql.deb; \
     if [ "$TARGETARCH" = amd64 ]; then \
-      curl -fsSL --retry 3 --max-time 180 \
+      curl --http1.1 -fsSL --retry 5 --retry-all-errors --retry-delay 2 --connect-timeout 15 --max-time 300 \
         https://github.com/microsoft/pg_durable/releases/download/v0.2.8/pg-durable-postgresql-18_0.2.8-1_amd64.deb \
         -o /tmp/pg_durable.deb; \
       echo '090028f59b003613b150e61ccd5cdbebe70e69e65361913ad29b1f0b6af9e2bb  /tmp/pg_durable.deb' | sha256sum -c -; \
       apt-get install -y --no-install-recommends /tmp/pg_durable.deb; \
     fi; \
+    for source in /var/lib/postgresql/extension/pg_graphql*; do \
+      target="/usr/share/postgresql/18/extension/$(basename "$source")"; \
+      rm -f "$target"; \
+      cp -L "$source" "$target"; \
+    done; \
     rm -rf /var/lib/apt/lists/* /tmp/pg_durable.deb /tmp/pg_graphql.deb
 
 COPY verify-extensions.sh /usr/local/bin/verify-postgres-extensions
