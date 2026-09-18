@@ -21,7 +21,7 @@
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.5.0",
     "@typescript/native": "npm:typescript@^7.0.2",
-    "autoprefixer": "^10.5.5",
+    "autoprefixer": "^10.6.1",
     "bits-ui": "^2.19.0",
     "clsx": "^2.1.1",
     "jsdom": "30.0.1",
