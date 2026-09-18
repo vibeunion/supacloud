@@ -284,6 +284,78 @@ export type CommandMiddleware = CommandRuntimeMiddleware<CommandInvocation>;
 export type CommandAudit = CommandRuntimeAudit<CommandInvocation>;
 export type CommandGovernance = CommandRuntimeGovernance<CommandInvocation>;
 
+export interface CommandAuthorizationRequest {
+  readonly principal: { readonly kind: "user" | "service"; readonly issuer: string; readonly subject: string };
+  readonly applicationId: string;
+  readonly domain: { readonly type: string; readonly id: string };
+}
+
+export interface CommandAuthorizationContext {
+  readonly applicationId: string;
+  readonly permissions: readonly string[];
+  readonly permissionCatalogVersion?: string;
+  readonly permissionCatalogDigest?: string;
+}
+
+export interface CommandAuthorizationCatalog {
+  readonly version: string;
+  readonly digest?: string;
+}
+
+export interface CommandAuthorizationAdapterOptions {
+  readonly applicationId: string;
+  readonly issuer: string;
+  readonly domain: (invocation: CommandInvocation) => { readonly type: string; readonly id: string };
+  readonly resolve: (request: CommandAuthorizationRequest) => Promise<CommandAuthorizationContext>;
+  readonly catalog?: CommandAuthorizationCatalog;
+}
+
+/**
+ * Adapt a SupAuth-style resolver to the standard command governance port.
+ * The resolver remains the authorization source of truth; this adapter only
+ * maps trusted request identity and normalizes public failure statuses.
+ */
+export function createCommandAuthorizationAdapter(
+  options: CommandAuthorizationAdapterOptions,
+): CommandAuthorizer {
+  return async invocation => {
+    const permission = invocation.command.permission;
+    if (!permission || !/^[a-z][a-z0-9._-]*:[a-z][a-z0-9._-]*$/.test(permission)) {
+      throw new ApplicationError("Command permission must use resource:action syntax", {
+        status: 500, code: "COMMAND_PERMISSION_INVALID",
+      });
+    }
+    const context = invocation.requestContext;
+    const identity = isRecord(context) && isTrustedIdentity(context.identity) ? context.identity : undefined;
+    if (!isAuthenticatedTrustedIdentity(identity)) {
+      throw new ApplicationError("Authentication required", { status: 401, code: "AUTHENTICATION_REQUIRED" });
+    }
+    const request: CommandAuthorizationRequest = {
+      principal: { kind: "user", issuer: options.issuer, subject: identity.subject },
+      applicationId: options.applicationId,
+      domain: options.domain(invocation),
+    };
+    let resolved: CommandAuthorizationContext;
+    try {
+      resolved = await options.resolve(request);
+    } catch {
+      throw new ApplicationError("Authorization is unavailable", { status: 503, code: "AUTHORIZATION_UNAVAILABLE" });
+    }
+    if (resolved.applicationId !== options.applicationId
+      || (options.catalog !== undefined && (
+        resolved.permissionCatalogVersion !== options.catalog.version
+        || (options.catalog.digest !== undefined && resolved.permissionCatalogDigest !== options.catalog.digest)
+      ))) {
+      throw new ApplicationError("Authorization context is not bound to this application", {
+        status: 503, code: "AUTHORIZATION_CONTEXT_INVALID",
+      });
+    }
+    if (!resolved.permissions.includes(permission)) {
+      throw new ApplicationError("Permission denied", { status: 403, code: "PERMISSION_DENIED" });
+    }
+  };
+}
+
 /**
  * Compose multiple CommandExecutors into a single onion-style pipeline.
  * Outer executors run first before calling `next()`, and complete last.
