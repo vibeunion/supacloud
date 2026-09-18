@@ -1,4 +1,11 @@
 import { Elysia, type StatusMap, type TSchema } from "elysia";
+import type {
+  CommandRuntimeAudit,
+  CommandRuntimeAuthorizer,
+  CommandRuntimeGovernance,
+  CommandRuntimeInvocation,
+  CommandRuntimeMiddleware,
+} from "@supacloud/app";
 import { decodeCommandPreview, type CommandPreview } from "@supacloud/contracts";
 import { commandErrorCode, commandErrorStatus } from "./command-errors";
 import { executionTrace, observeExecution, type ExecutionObserver } from "./execution";
@@ -188,23 +195,9 @@ export interface SupaCloudRequestContext {
   idempotencyKey?: string;
 }
 
-export interface CommandInvocation {
-  command: CompiledCommand;
-  input: {
-    body: unknown;
-    params: Record<string, unknown>;
-    query: Record<string, unknown>;
-  };
-  request: Request;
-  requestContext: unknown;
-  scope?: Record<string, unknown>;
-  services: Record<string, unknown>;
-}
+export type CommandInvocation = CommandRuntimeInvocation<CompiledCommand>;
 
-export type CommandExecutor = (
-  invocation: CommandInvocation,
-  next: () => unknown | Promise<unknown>,
-) => unknown | Promise<unknown>;
+export type CommandExecutor = CommandRuntimeMiddleware<CommandInvocation>;
 
 export { assertFeatureTransition } from "./feature";
 export type { FeatureTransitionSpec } from "./feature";
@@ -286,31 +279,10 @@ function descriptorPipeline(
     : undefined);
 }
 
-export type CommandAuthorizer = (
-  invocation: CommandInvocation,
-) => void | Promise<void>;
-
-export type CommandMiddleware = (
-  invocation: CommandInvocation,
-  next: () => unknown | Promise<unknown>,
-) => unknown | Promise<unknown>;
-
-export interface CommandAudit {
-  succeeded(invocation: CommandInvocation, result: unknown): void | Promise<void>;
-  failed(invocation: CommandInvocation, error: unknown): void | Promise<void>;
-}
-
-export interface CommandGovernance {
-  /** Application-owned adapters: a single RPC owns all declared persistence. */
-  rpc?: Record<string, {
-    capabilities: { audit?: boolean; transaction?: boolean; idempotency?: boolean; boundary?: "database" | "external" };
-    execute: CommandMiddleware;
-  }>;
-  authorize: CommandAuthorizer;
-  idempotency?: CommandMiddleware;
-  transaction?: CommandMiddleware;
-  audit?: CommandAudit;
-}
+export type CommandAuthorizer = CommandRuntimeAuthorizer<CommandInvocation>;
+export type CommandMiddleware = CommandRuntimeMiddleware<CommandInvocation>;
+export type CommandAudit = CommandRuntimeAudit<CommandInvocation>;
+export type CommandGovernance = CommandRuntimeGovernance<CommandInvocation>;
 
 /**
  * Compose multiple CommandExecutors into a single onion-style pipeline.

@@ -9,6 +9,18 @@ export type {
   JobAspect,
   RouteAspect,
 } from "./aspect";
+export type {
+  CommandRuntimeAdapter,
+  CommandRuntimeAudit,
+  CommandRuntimeAuthorizer,
+  CommandRuntimeCapabilities,
+  CommandRuntimeDescriptor,
+  CommandRuntimeGovernance,
+  CommandRuntimeInput,
+  CommandRuntimeInvocation,
+  CommandRuntimeMiddleware,
+  CommandRuntimeMode,
+} from "./command_runtime";
 export { InjectionToken } from "./token";
 export type { InjectionTokenOptions } from "./token";
 export {
