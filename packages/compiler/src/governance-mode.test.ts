@@ -12,7 +12,7 @@ const roots: string[] = [];
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); });
 const source = (mode: string, standalone = false) => `
 import { Command, Module } from "./runtime";
-@Command({ name: "case.approve", permission: "case.approve", transaction: ${mode}, idempotency: "required", standalone: ${standalone} })
+@Command({ name: "case.approve", permission: "case.approve", transaction: ${mode}, audit: "case.approved", idempotency: "required", standalone: ${standalone} })
 export class Approve {}
 @Module({ name: "case", commands: ${standalone ? "[]" : "[Approve]"} })
 export class CaseModule {}
