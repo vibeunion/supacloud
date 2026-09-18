@@ -161,7 +161,7 @@
     {
       "name": "DEFAULT_SUPACLOUD_CONFIG",
       "kind": "value",
-      "signature": "export declare const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<SupaCloudConfig, \"include\" | \"moduleBoundaryPreset\" | \"commandCapabilities\" | \"moduleBoundaries\" | \"typeSafety\" | \"delivery\" | \"allowRouteCommandBindings\" | \"disallowControllerDirectDb\" | \"detectOrphanModules\" | \"openApi\">> & {\n    include: string[];\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n};"
+      "signature": "export declare const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<SupaCloudConfig, \"include\" | \"moduleBoundaryPreset\" | \"moduleBoundaries\" | \"typeSafety\" | \"delivery\" | \"allowRouteCommandBindings\" | \"disallowControllerDirectDb\" | \"detectOrphanModules\" | \"openApi\">> & {\n    include: string[];\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n};"
     },
     {
       "name": "defineSupacloudConfig",
