@@ -257,7 +257,6 @@ function observedAspects(
       ...executionTrace(context.requestContext),
     }, () => aspect(context, next))));
 }
-
 export type ApplicationAspectPipeline = (
   context: ApplicationAspectContext,
   next: () => unknown | Promise<unknown>,
@@ -335,13 +334,20 @@ export function createCommandAuthorizationAdapter(
       applicationId: options.applicationId,
       domain: options.domain(invocation),
     };
-    let resolved: CommandAuthorizationContext;
+    // Resolver data may originate from JSON or untyped adapters. Never treat a
+    // string's substring search (or a custom includes method) as a permission grant.
+    let resolved: unknown;
     try {
       resolved = await options.resolve(request);
     } catch {
       throw new ApplicationError("Authorization is unavailable", { status: 503, code: "AUTHORIZATION_UNAVAILABLE" });
     }
-    if (resolved.applicationId !== options.applicationId
+    if (!isRecord(resolved)
+      || !Array.isArray(resolved.permissions)
+      || !resolved.permissions.every((value: unknown) => typeof value === "string")
+      || (resolved.permissionCatalogVersion !== undefined && typeof resolved.permissionCatalogVersion !== "string")
+      || (resolved.permissionCatalogDigest !== undefined && typeof resolved.permissionCatalogDigest !== "string")
+      || resolved.applicationId !== options.applicationId
       || (options.catalog !== undefined && (
         resolved.permissionCatalogVersion !== options.catalog.version
         || (options.catalog.digest !== undefined && resolved.permissionCatalogDigest !== options.catalog.digest)
