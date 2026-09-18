@@ -335,13 +335,20 @@ export function createCommandAuthorizationAdapter(
       applicationId: options.applicationId,
       domain: options.domain(invocation),
     };
-    let resolved: CommandAuthorizationContext;
+    // Resolver data may originate from JSON or untyped adapters. Never treat a
+    // string's substring search (or a custom includes method) as a permission grant.
+    let resolved: unknown;
     try {
       resolved = await options.resolve(request);
     } catch {
       throw new ApplicationError("Authorization is unavailable", { status: 503, code: "AUTHORIZATION_UNAVAILABLE" });
     }
-    if (resolved.applicationId !== options.applicationId
+    if (!isRecord(resolved)
+      || !Array.isArray(resolved.permissions)
+      || !resolved.permissions.every((value: unknown) => typeof value === "string")
+      || (resolved.permissionCatalogVersion !== undefined && typeof resolved.permissionCatalogVersion !== "string")
+      || (resolved.permissionCatalogDigest !== undefined && typeof resolved.permissionCatalogDigest !== "string")
+      || resolved.applicationId !== options.applicationId
       || (options.catalog !== undefined && (
         resolved.permissionCatalogVersion !== options.catalog.version
         || (options.catalog.digest !== undefined && resolved.permissionCatalogDigest !== options.catalog.digest)
@@ -821,31 +828,42 @@ function assertCommandGovernanceReady(
   executor: CommandExecutor | undefined,
 ): void {
   if ((compiled.commands ?? []).length === 0) return;
+  if (executor !== undefined && typeof executor !== "function") {
+    throw new ApplicationError(`Module "${compiled.name}" has no callable command executor`, {
+      code: "COMMAND_EXECUTOR_UNCONFIGURED",
+    });
+  }
   if (!governance && !executor) {
     throw new ApplicationError(`Module "${compiled.name}" has commands but no command governance`, {
       code: "COMMAND_GOVERNANCE_UNCONFIGURED",
     });
   }
   if (!governance) return;
+  if (typeof governance.authorize !== "function") {
+    throw new ApplicationError(`Module "${compiled.name}" has no authorization adapter`, {
+      code: "COMMAND_AUTHORIZATION_UNCONFIGURED",
+    });
+  }
   for (const command of compiled.commands ?? []) {
-    if (command.audit && !governance.audit && !command.rpc) {
+    if (command.audit && command.rpc === undefined
+      && (typeof governance.audit?.succeeded !== "function" || typeof governance.audit?.failed !== "function")) {
       throw new ApplicationError(`Command "${command.name}" has no audit adapter`, {
         code: "COMMAND_AUDIT_UNCONFIGURED",
       });
     }
-    if (command.idempotency === "required" && !governance.idempotency && !command.rpc) {
+    if (command.idempotency === "required" && typeof governance.idempotency !== "function" && command.rpc === undefined) {
       throw new ApplicationError(`Command "${command.name}" has no idempotency adapter`, {
         code: "COMMAND_IDEMPOTENCY_UNCONFIGURED",
       });
     }
-    if (command.transaction === "required" && !governance.transaction && !command.rpc) {
+    if (command.transaction === "required" && typeof governance.transaction !== "function" && command.rpc === undefined) {
       throw new ApplicationError(`Command "${command.name}" has no transaction adapter`, {
         code: "COMMAND_TRANSACTION_UNCONFIGURED",
       });
     }
-    if (command.rpc) {
-      const adapter = governance.rpc?.[command.rpc];
-      if (!adapter) {
+    if (command.rpc !== undefined) {
+      const adapter = Object.hasOwn(governance.rpc ?? {}, command.rpc) ? governance.rpc?.[command.rpc] : undefined;
+      if (!adapter || typeof adapter.execute !== "function" || !isRecord(adapter.capabilities)) {
         throw new ApplicationError(`Command "${command.name}" has no RPC governance adapter`, {
           code: "COMMAND_RPC_UNCONFIGURED",
         });
