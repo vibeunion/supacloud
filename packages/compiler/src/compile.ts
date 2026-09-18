@@ -8,6 +8,18 @@ import { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
 import { validateRouteContracts } from "./route-contracts";
 import type { GraphqlArtifacts } from "./graphql";
 
+function withDefaultGovernance(options: CompileOptions): CompileOptions {
+  return options.commandCapabilities === undefined
+    ? { ...options, commandCapabilities: {
+      requirePersistentAdapters: true,
+      permission: true,
+      audit: true,
+      idempotency: true,
+      transaction: true,
+    } }
+    : options;
+}
+
 async function renderOptionalGraphql(options: CompileOptions): Promise<GraphqlArtifacts> {
   return options.graphql
     ? (await import("./graphql")).renderGraphql(options)
@@ -19,6 +31,7 @@ async function renderOptionalGraphql(options: CompileOptions): Promise<GraphqlAr
  * Errors preserve the last working artifacts unless writeOnError is explicitly enabled.
  */
 export async function compileProject(options: CompileOptions): Promise<CompileResult> {
+  options = withDefaultGovernance(options);
   const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths);
   const diagnostics: Diagnostic[] = [
     ...(graph.diagnostics ?? []),
@@ -86,6 +99,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
  * Analyze the AST, run governance checks, and compare application.ts and app.manifest.json.
  */
 export async function checkProject(options: CompileOptions): Promise<CheckProjectResult> {
+  options = withDefaultGovernance(options);
   const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths);
   const diagnostics: Diagnostic[] = [
     ...(graph.diagnostics ?? []),

@@ -815,6 +815,60 @@ export function requireIdempotencyKey(invocation: CommandInvocation): string {
   return key;
 }
 
+function assertCommandGovernanceReady(
+  compiled: CompiledModule,
+  governance: CommandGovernance | undefined,
+  executor: CommandExecutor | undefined,
+): void {
+  if ((compiled.commands ?? []).length === 0) return;
+  if (!governance && !executor) {
+    throw new ApplicationError(`Module "${compiled.name}" has commands but no command governance`, {
+      code: "COMMAND_GOVERNANCE_UNCONFIGURED",
+    });
+  }
+  if (!governance) return;
+  for (const command of compiled.commands ?? []) {
+    if (command.audit && !governance.audit && !command.rpc) {
+      throw new ApplicationError(`Command "${command.name}" has no audit adapter`, {
+        code: "COMMAND_AUDIT_UNCONFIGURED",
+      });
+    }
+    if (command.idempotency === "required" && !governance.idempotency && !command.rpc) {
+      throw new ApplicationError(`Command "${command.name}" has no idempotency adapter`, {
+        code: "COMMAND_IDEMPOTENCY_UNCONFIGURED",
+      });
+    }
+    if (command.transaction === "required" && !governance.transaction && !command.rpc) {
+      throw new ApplicationError(`Command "${command.name}" has no transaction adapter`, {
+        code: "COMMAND_TRANSACTION_UNCONFIGURED",
+      });
+    }
+    if (command.rpc) {
+      const adapter = governance.rpc?.[command.rpc];
+      if (!adapter) {
+        throw new ApplicationError(`Command "${command.name}" has no RPC governance adapter`, {
+          code: "COMMAND_RPC_UNCONFIGURED",
+        });
+      }
+      if (command.audit && adapter.capabilities.audit !== true) {
+        throw new ApplicationError(`Command "${command.name}" RPC adapter has no audit capability`, {
+          code: "COMMAND_AUDIT_UNCONFIGURED",
+        });
+      }
+      if (command.idempotency === "required" && adapter.capabilities.idempotency !== true) {
+        throw new ApplicationError(`Command "${command.name}" RPC adapter has no idempotency capability`, {
+          code: "COMMAND_IDEMPOTENCY_UNCONFIGURED",
+        });
+      }
+      if (command.transaction === "required" && adapter.capabilities.transaction !== true) {
+        throw new ApplicationError(`Command "${command.name}" RPC adapter has no transaction capability`, {
+          code: "COMMAND_TRANSACTION_UNCONFIGURED",
+        });
+      }
+    }
+  }
+}
+
 /** Join a controller prefix and a route path, normalizing slashes. */
 function joinPaths(prefix: string, path: string): string {
   const joined = `${prefix}/${path}`.replace(/\/{2,}/g, "/");
@@ -915,6 +969,7 @@ export function createModulePlugin(
       { code: "COMMAND_GOVERNANCE_UNCONFIGURED" },
     );
   }
+  assertCommandGovernanceReady(compiled, options.commandGovernance, options.commandExecutor);
   const commandsByClassName = new Map(
     (compiled.commands ?? []).map((command) => [command.className, command]),
   );

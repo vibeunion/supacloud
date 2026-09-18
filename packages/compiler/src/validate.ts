@@ -873,10 +873,12 @@ export function validateGraph(
         const hostCaps = options.commandCapabilities;
         const rpcCaps = command.rpc && Object.hasOwn(hostCaps.rpc ?? {}, command.rpc) ? hostCaps.rpc?.[command.rpc] : undefined;
         if (hostCaps.requirePersistentAdapters && (
-          !rpcCaps?.boundary || rpcCaps.audit !== true || rpcCaps.idempotency !== true
+          (command.rpc !== undefined && (!rpcCaps?.boundary || rpcCaps.audit !== true || rpcCaps.idempotency !== true))
           || hostCaps.permission !== true || !command.permission
           || !command.audit || command.idempotency !== "required"
-          || (rpcCaps.boundary === "database" && (rpcCaps.transaction !== true || command.transaction !== "required"))
+          || (command.rpc !== undefined && rpcCaps?.boundary === "database" && (rpcCaps.transaction !== true || command.transaction !== "required"))
+          || (command.rpc === undefined && (hostCaps.audit !== true || hostCaps.idempotency !== true
+            || hostCaps.transaction !== true || command.transaction !== "required"))
         )) {
           error("command-persistence-required",
             `Command ${command.name} requires an explicit persistent adapter, permission, audit and idempotency policy.`,

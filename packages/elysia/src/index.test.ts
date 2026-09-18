@@ -443,23 +443,13 @@ describe("createApplication", () => {
   });
 
   test("fails closed when declared transaction governance is unavailable", async () => {
-    const app = createApp({}, {
+    expect(() => createApp({}, {
       commandGovernance: {
         authorize: () => {},
         idempotency: (_invocation, next) => next(),
         audit: { succeeded: () => {}, failed: () => {} },
       },
-    });
-    const res = await testRequest(app, "/cases", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ title: "blocked" }),
-    });
-    expect(res.status).toBe(501);
-    expect(await res.json()).toMatchObject({
-      ok: false,
-      code: "COMMAND_TRANSACTION_UNAVAILABLE",
-    });
+    })).toThrow("has no transaction adapter");
   });
 
   test("enforces command-bound routes through the configured executor", async () => {
