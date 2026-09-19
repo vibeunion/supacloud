@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.31.0...supacloud-js-v0.32.0) (2026-09-19)
+
+
+### Features
+
+* **tasks:** durable output replay, attempt fencing and quotas without gRPC ([#1356](https://github.com/vibeunion/supacloud/issues/1356)) ([6866b80](https://github.com/vibeunion/supacloud/commit/6866b808e99910ffe145788eb22f43bcf21b008e))
+
 ## [0.31.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.30.0...supacloud-js-v0.31.0) (2026-09-16)
 
 
