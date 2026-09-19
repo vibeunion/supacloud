@@ -21,6 +21,9 @@ import {
 import { getAuthRuntimeDescriptor } from "./auth-runtime.service";
 import { parseTaskTraceparent, taskAttemptTrace } from "../utils/task-trace";
 import { recordBackgroundObservation } from "../utils/background-observability";
+import { backgroundAttemptStore } from "./background-attempt.service";
+import type { BackgroundAttemptCompletion } from "../repositories/background-attempt-store";
+import { startBackgroundLeaseHeartbeat } from "../utils/background-lease-heartbeat";
 
 interface InvocationEnvelope {
   method?: string;
@@ -55,9 +58,9 @@ const DEFAULT_CONCURRENCY_PER_PROJECT = resolveBackgroundConcurrencyPerProject(
 const WORKER_ID = `bgw-${process.pid}`;
 
 // ─── Invoker DB unknown (degraded) tracking + circuit breaker ──────────────
-const INVOKER_UNKNOWN_WINDOW_MS = 60_000;   // 1-minute sliding window
-const INVOKER_UNKNOWN_THRESHOLD = 10;       // 10 unknowns in window → circuit open
-const INVOKER_CIRCUIT_OPEN_DURATION_MS = 30_000; // 30s cooldown when circuit is open
+const INVOKER_UNKNOWN_WINDOW_MS = 60_000;
+const INVOKER_UNKNOWN_THRESHOLD = 10;
+const INVOKER_CIRCUIT_OPEN_DURATION_MS = 30_000;
 
 interface UnknownEvent {
   timestamp: number;
@@ -67,27 +70,20 @@ interface UnknownEvent {
 }
 
 const invokerUnknownEvents: UnknownEvent[] = [];
-let invokerCircuitOpenUntil = 0;  // 0 = circuit closed
+let invokerCircuitOpenUntil = 0;
 
 function recordInvokerUnknown(projectRef: string, authorityProjectRef: string, error: string): void {
   const now = Date.now();
   invokerUnknownEvents.push({ timestamp: now, projectRef, authorityProjectRef, error });
-
-  // Prune events outside the sliding window
   const cutoff = now - INVOKER_UNKNOWN_WINDOW_MS;
   while (invokerUnknownEvents.length > 0 && invokerUnknownEvents[0].timestamp < cutoff) {
     invokerUnknownEvents.shift();
   }
-
   logger.warn("[BackgroundFunctionWorker] invoker DB unknown (degraded)", {
-    projectRef,
-    authorityProjectRef,
-    error,
+    projectRef, authorityProjectRef, error,
     windowCount: invokerUnknownEvents.length,
     threshold: INVOKER_UNKNOWN_THRESHOLD,
   });
-
-  // Open circuit breaker if threshold exceeded
   if (invokerUnknownEvents.length >= INVOKER_UNKNOWN_THRESHOLD && invokerCircuitOpenUntil < now) {
     invokerCircuitOpenUntil = now + INVOKER_CIRCUIT_OPEN_DURATION_MS;
     logger.error("[BackgroundFunctionWorker] invoker DB circuit breaker OPENED", {
@@ -167,7 +163,6 @@ async function assertBackgroundInvokerUserExists(task: ProjectTask): Promise<voi
   if (!normalizedUserId) {
     throw new NonRetryableBackgroundInvocationError("Background invoker user id is invalid", 400);
   }
-
   const authorityProjectRef = backgroundAuthAuthorityRef(task);
   const exists = await checkInvokerExists(task.project_ref, authorityProjectRef, normalizedUserId);
   if (!exists) {
@@ -175,25 +170,16 @@ async function assertBackgroundInvokerUserExists(task: ProjectTask): Promise<voi
   }
 }
 
-async function checkInvokerExists(
-  projectRef: string,
-  authorityProjectRef: string,
-  userId: string,
-): Promise<boolean> {
+async function checkInvokerExists(projectRef: string, authorityProjectRef: string, userId: string): Promise<boolean> {
   if (isInvokerCircuitOpen()) {
     recordInvokerUnknown(projectRef, authorityProjectRef, "circuit_breaker_open");
     throw new RetryableBackgroundInvocationError("Background invoker state is unavailable while the safety circuit is open");
   }
-
   try {
     const dbName = await resolveDbName(authorityProjectRef);
     const projectDb = getProjectDb(dbName);
     const rows = await projectDb`
-      SELECT 1
-      FROM auth.users
-      WHERE id = ${userId}::uuid
-        AND deleted_at IS NULL
-      LIMIT 1
+      SELECT 1 FROM auth.users WHERE id = ${userId}::uuid AND deleted_at IS NULL LIMIT 1
     `;
     return rows.length > 0;
   } catch (error: unknown) {
@@ -203,27 +189,15 @@ async function checkInvokerExists(
   }
 }
 
-function computeRetryDelayMs(attempt: number): number {
+export function computeRetryDelayMs(attempt: number): number {
   const base = 5_000;
   const cappedAttempt = Math.min(Math.max(attempt, 1), 6);
   return base * Math.pow(2, cappedAttempt - 1);
 }
 
-function computeLeaseSeconds(timeoutSec: number | null | undefined): number {
+export function computeLeaseSeconds(timeoutSec: number | null | undefined): number {
   const timeout = timeoutSec && timeoutSec > 0 ? timeoutSec : 300;
   return Math.min(Math.max(timeout + 30, 60), 1800);
-}
-
-function scheduleLeaseHeartbeat(taskId: string, leaseSeconds: number): Timer {
-  const intervalMs = Math.max(10_000, Math.floor((leaseSeconds * 1000) / 2));
-  return setInterval(() => {
-    void taskRepository.extendLease(taskId, leaseSeconds).catch((error: unknown) => {
-      logger.warn("[BackgroundFunctionWorker] failed to extend lease", {
-        taskId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
-  }, intervalMs);
 }
 
 function isUserDeletionFenceError(error: unknown): boolean {
@@ -233,41 +207,30 @@ function isUserDeletionFenceError(error: unknown): boolean {
 async function cleanupBackgroundTaskMirrorEvidence(task: ProjectTask): Promise<void> {
   if (await removeBackgroundTaskMirror(task)) return;
   logger.error("[BackgroundFunctionWorker] terminal mirror evidence cleanup remains pending", {
-    taskId: task.id,
-    projectRef: task.project_ref,
+    taskId: task.id, projectRef: task.project_ref,
   });
 }
 
-function preflightFailure(task: ProjectTask, error: unknown) {
+function failureOutcome(task: ProjectTask, error: unknown, durationMs = 0): BackgroundAttemptCompletion {
   const message = error instanceof Error ? error.message : String(error);
   const attempt = task.attempt || 1;
-  const maxAttempts = task.max_attempts || 3;
-  const nonRetryable = error instanceof NonRetryableBackgroundInvocationError
-    || isUserDeletionFenceError(error);
+  const nonRetryable = error instanceof NonRetryableBackgroundInvocationError || isUserDeletionFenceError(error);
+  const deadLetter = nonRetryable || attempt >= (task.max_attempts || 3);
+  const responseStatusMatch = message.match(/HTTP (\d+)/i);
   return {
-    message,
-    attempt,
-    deadLetter: nonRetryable || attempt >= maxAttempts,
+    status: deadLetter ? "dead_lettered" : "retry_scheduled",
+    error: message,
     responseStatus: error instanceof NonRetryableBackgroundInvocationError
-      ? error.responseStatus
-      : null,
+      ? error.responseStatus : responseStatusMatch ? Number.parseInt(responseStatusMatch[1], 10) : null,
+    durationMs,
+    ...(deadLetter ? {} : { nextRunAt: new Date(Date.now() + computeRetryDelayMs(attempt)) }),
   };
 }
 
 function signBackgroundInvocation(input: {
-  taskId: string;
-  projectRef: string;
-  functionSlug: string | null;
-  attempt: number;
-  timestamp: string;
+  taskId: string; projectRef: string; functionSlug: string | null; attempt: number; timestamp: string;
 }): string {
-  const canonical = [
-    input.taskId,
-    input.projectRef,
-    input.functionSlug || "",
-    String(input.attempt),
-    input.timestamp,
-  ].join("\n");
+  const canonical = [input.taskId, input.projectRef, input.functionSlug || "", String(input.attempt), input.timestamp].join("\n");
   return createHmac("sha256", config.masterToken).update(canonical).digest("hex");
 }
 
@@ -275,29 +238,26 @@ async function importDispatcher() {
   return import("./background-runtime-dispatcher");
 }
 
+// Retained only for legacy non-edge task cancellation. Edge invocations use their
+// own request AbortSignal, never a task-ID-only RPC that could hit a newer attempt.
 async function requestRuntimeCancellation(taskId: string): Promise<boolean> {
   try {
     const response = await fetch(`http://${config.edgeRuntimeBackgroundInternal}/internal/background/cancel/${taskId}`, {
       method: "POST",
-      headers: {
-        "x-supacloud-internal-auth": `Bearer ${config.masterToken}`,
-      },
+      headers: { "x-supacloud-internal-auth": `Bearer ${config.masterToken}` },
       signal: AbortSignal.timeout(5000),
     });
     if (!response.ok) return false;
     const payload = await response.json().catch(() => ({ cancelled: false }));
     return !!payload.cancelled;
-  } catch {
-    return false;
-  }
+  } catch { return false; }
 }
 
-export function buildInvocationRequest(task: ProjectTask): Request {
+export function buildInvocationRequest(task: ProjectTask, signal?: AbortSignal): Request {
   const payload = (task.payload || {}) as InvocationEnvelope;
   const headers = new Headers(payload.headers || {});
   const attempt = task.attempt || 1;
   const signatureTimestamp = new Date().toISOString();
-
   headers.set("x-project-ref", task.project_ref);
   headers.set("x-supacloud-task-id", task.id);
   try {
@@ -312,45 +272,24 @@ export function buildInvocationRequest(task: ProjectTask): Request {
   headers.set("x-supacloud-attempt", String(attempt));
   headers.set("x-supacloud-function-version", task.function_version || "1");
   headers.set("x-supacloud-auth-kind", payload.auth?.kind || "none");
-  if (payload.auth?.invoker_user_id) {
-    headers.set("x-supacloud-invoker-user-id", payload.auth.invoker_user_id);
-  }
-  if (payload.auth?.invoker_role) {
-    headers.set("x-supacloud-invoker-role", payload.auth.invoker_role);
-  }
-  if (payload.auth?.apikey_kind) {
-    headers.set("x-supacloud-apikey-kind", payload.auth.apikey_kind);
-  }
+  if (payload.auth?.invoker_user_id) headers.set("x-supacloud-invoker-user-id", payload.auth.invoker_user_id);
+  if (payload.auth?.invoker_role) headers.set("x-supacloud-invoker-role", payload.auth.invoker_role);
+  if (payload.auth?.apikey_kind) headers.set("x-supacloud-apikey-kind", payload.auth.apikey_kind);
   if (payload.auth?.authorization) {
     headers.set("x-supacloud-auth-authorization", decryptSecretIfNeeded(payload.auth.authorization));
   }
-  if (payload.auth?.apikey) {
-    headers.set("x-supacloud-auth-apikey", decryptSecretIfNeeded(payload.auth.apikey));
-  }
+  if (payload.auth?.apikey) headers.set("x-supacloud-auth-apikey", decryptSecretIfNeeded(payload.auth.apikey));
   headers.set("x-supacloud-internal-auth", `Bearer ${config.masterToken}`);
   headers.set("x-supacloud-signature-version", "v1");
   headers.set("x-supacloud-signature-timestamp", signatureTimestamp);
   headers.set("x-supacloud-signature", signBackgroundInvocation({
-    taskId: task.id,
-    projectRef: task.project_ref,
-    functionSlug: task.function_slug,
-    attempt,
-    timestamp: signatureTimestamp,
+    taskId: task.id, projectRef: task.project_ref, functionSlug: task.function_slug, attempt, timestamp: signatureTimestamp,
   }));
-
   const url = new URL(
     `http://${config.edgeRuntimeBackgroundInternal}/internal/background/${task.project_ref}/${task.function_slug}${payload.path || ""}${payload.query || ""}`,
   );
-
-  const init: RequestInit = {
-    method: payload.method || "POST",
-    headers,
-  };
-
-  if (payload.body && !["GET", "HEAD"].includes(init.method || "GET")) {
-    init.body = payload.body;
-  }
-
+  const init: RequestInit = { method: payload.method || "POST", headers, signal };
+  if (payload.body && !["GET", "HEAD"].includes(init.method || "GET")) init.body = payload.body;
   return new Request(url.toString(), init);
 }
 
@@ -361,7 +300,7 @@ export class BackgroundFunctionWorker {
   private delayedWakeupId?: Timer;
   private listener?: PgListenerHandle;
   private pendingPoll = false;
-  private cancelledTasks = new Set<string>();
+  private activeAttempts = new Map<string, { attempt: number; controller: AbortController }>();
 
   start(intervalMs = 10_000) {
     if (this.isRunning) return;
@@ -370,9 +309,7 @@ export class BackgroundFunctionWorker {
     this.intervalId = setInterval(() => void this.poll(), intervalMs);
     void this.poll();
     logger.info("[BackgroundFunctionWorker] started", {
-      workerId: WORKER_ID,
-      concurrencyPerProject: DEFAULT_CONCURRENCY_PER_PROJECT,
-      pollingFallbackMs: intervalMs,
+      workerId: WORKER_ID, concurrencyPerProject: DEFAULT_CONCURRENCY_PER_PROJECT, pollingFallbackMs: intervalMs,
     });
   }
 
@@ -411,12 +348,8 @@ export class BackgroundFunctionWorker {
 
   private isEdgeFunctionNotification(payload?: string): boolean {
     if (!payload) return false;
-    try {
-      const parsed = JSON.parse(payload) as { task_type?: unknown };
-      return parsed.task_type === TaskType.EDGE_FUNCTION;
-    } catch {
-      return false;
-    }
+    try { return (JSON.parse(payload) as { task_type?: unknown }).task_type === TaskType.EDGE_FUNCTION; }
+    catch { return false; }
   }
 
   private extractNextRunAt(payload?: string): Date | null {
@@ -426,9 +359,7 @@ export class BackgroundFunctionWorker {
       if (typeof parsed.next_run_at !== "string") return null;
       const nextRunAt = new Date(parsed.next_run_at);
       return Number.isNaN(nextRunAt.getTime()) ? null : nextRunAt;
-    } catch {
-      return null;
-    }
+    } catch { return null; }
   }
 
   private scheduleDelayedWakeup(payload?: string) {
@@ -445,37 +376,29 @@ export class BackgroundFunctionWorker {
 
   private wake() {
     if (!this.isRunning) return;
-    if (this.isPolling) {
-      this.pendingPoll = true;
-      return;
-    }
+    if (this.isPolling) { this.pendingPoll = true; return; }
     void this.poll();
   }
 
   private async poll() {
     if (!this.isRunning || this.isPolling) return;
     this.isPolling = true;
-
     try {
+      await backgroundAttemptStore.recoverCancelled();
       while (this.isRunning) {
         const task = await taskRepository.claimNextTask({
-          workerId: WORKER_ID,
-          allowedTaskTypes: [TaskType.EDGE_FUNCTION],
-          leaseSeconds: 900,
+          workerId: WORKER_ID, allowedTaskTypes: [TaskType.EDGE_FUNCTION], leaseSeconds: 900,
           concurrencyByProject: DEFAULT_CONCURRENCY_PER_PROJECT,
         });
         if (!task) break;
-
         const project = await projectRepository.findByRef(task.project_ref);
         if (!project || project.status !== "active") {
-          await taskRepository.cancelTask(task.id, !project ? "Project not found" : `Project is ${project.status}`);
+          await this.finishAttempt(task, { status: "cancelled", error: !project ? "Project not found" : `Project is ${project.status}` });
           continue;
         }
-
         void this.execute(task).catch((error: unknown) => {
           logger.error("[BackgroundFunctionWorker] unhandled task execution failure", {
-            taskId: task.id,
-            projectRef: task.project_ref,
+            taskId: task.id, projectRef: task.project_ref,
             error: error instanceof Error ? error.message : String(error),
           });
         });
@@ -493,253 +416,103 @@ export class BackgroundFunctionWorker {
     }
   }
 
-  private async finishPreflightFailure(task: ProjectTask, error: unknown): Promise<void> {
-    const failure = preflightFailure(task, error);
-    await taskRepository.startTaskAttempt(task);
-    await taskRepository.completeTaskAttempt(task.id, failure.attempt, {
-      status: failure.deadLetter ? "dead_lettered" : "retry_scheduled",
-      error: failure.message,
-      responseStatus: failure.responseStatus,
-      durationMs: 0,
-      logs: [],
-    });
-
-    if (failure.deadLetter) {
-      await taskRepository.markTaskFailed(task.id, failure.message, true);
-    } else {
-      const nextRunAt = new Date(Date.now() + computeRetryDelayMs(failure.attempt));
-      await taskRepository.scheduleRetry(task.id, failure.message, nextRunAt);
+  private async finishAttempt(task: ProjectTask, completion: BackgroundAttemptCompletion): Promise<boolean> {
+    const receipt = await backgroundAttemptStore.finish(task, completion);
+    if (!receipt) {
+      logger.warn("[BackgroundFunctionWorker] stale attempt outcome ignored", {
+        taskId: task.id, projectRef: task.project_ref, attempt: task.attempt,
+      });
+      return false;
     }
-
+    // Only the committed receipt can drive a notification. In particular, a
+    // cancellation that wins the transaction must never be broadcast as success.
     broadcastTaskUpdate({
-      taskId: task.id,
-      projectRef: task.project_ref,
-      taskType: task.task_type,
-      status: failure.deadLetter ? TaskStatus.DEAD_LETTERED : TaskStatus.RETRY_SCHEDULED,
-      error: failure.message,
+      taskId: task.id, projectRef: task.project_ref, taskType: task.task_type,
+      status: receipt.status as TaskStatus,
+      ...(receipt.status === completion.status && completion.error ? { error: completion.error } : {}),
     });
+    return true;
   }
 
   private async execute(task: ProjectTask) {
     const project = await projectRepository.findByRef(task.project_ref);
     if (!project || project.status !== "active") {
-      await taskRepository.cancelTask(task.id, !project ? "Project not found" : `Project is ${project.status}`);
-      broadcastTaskUpdate({
-        taskId: task.id,
-        projectRef: task.project_ref,
-        taskType: task.task_type,
-        status: TaskStatus.CANCELLED,
-        error: !project ? "Project not found" : `Project is ${project.status}`,
-      });
+      await this.finishAttempt(task, { status: "cancelled", error: !project ? "Project not found" : `Project is ${project.status}` });
       return;
     }
-
     const leaseSeconds = computeLeaseSeconds(task.timeout_sec);
-    const lease = await taskRepository.extendLease(task.id, leaseSeconds);
-    if (!lease) {
-      broadcastTaskUpdate({
-        taskId: task.id,
-        projectRef: task.project_ref,
-        taskType: task.task_type,
-        status: TaskStatus.CANCELLED,
-        error: task.cancellation_reason || "Cancelled before execution",
-      });
-      return;
-    }
+    if (!await backgroundAttemptStore.renew(task, leaseSeconds)) return;
 
-    try {
-      await assertBackgroundInvokerUserExists(task);
-    } catch (error) {
-      await this.finishPreflightFailure(task, error);
-      return;
-    }
-
-    const mirrorResult = await createBackgroundTaskMirrorIfUserExists(task);
-    if (mirrorResult.degraded) {
-      logger.warn("[BackgroundFunctionWorker] mirror check degraded", {
-        taskId: task.id,
-        projectRef: task.project_ref,
-      });
-    }
-
-    try {
-      const transition = await taskRepository.transitionTaskToRunning(task.id, task, leaseSeconds);
-      if (!transition.task) {
-        throw new RetryableBackgroundInvocationError(
-          "Background task could not transition to running; invocation was not dispatched",
-        );
-      }
-    } catch (error) {
-      await this.finishPreflightFailure(task, error);
-      await cleanupBackgroundTaskMirrorEvidence(task);
-      return;
-    }
-
-    // The mirror retains evidence only; prior to dispatch, bypass any positive shared caches and read directly from GoTrue.
-    try {
-      await assertBackgroundInvokerUserExists(task);
-    } catch (error) {
-      await this.finishPreflightFailure(task, error);
-      await cleanupBackgroundTaskMirrorEvidence(task);
-      return;
-    }
-
-    broadcastTaskUpdate({
-      taskId: task.id,
-      projectRef: task.project_ref,
-      taskType: task.task_type,
-      status: TaskStatus.RUNNING,
-    });
-
-    const heartbeat = scheduleLeaseHeartbeat(task.id, leaseSeconds);
-    const startedAt = Date.now();
+    let cleanupMirror = false;
+    let stopHeartbeat: (() => void) | undefined;
+    const controller = new AbortController();
     let invocationRequest: Request | undefined;
     let invocationStatus = 500;
-    const logs: Array<{
-      timestamp: string;
-      stream: "stdout" | "stderr";
-      level: string;
-      message: string;
-    }> = [];
-
+    let leaseLost = false;
+    let startedAt = Date.now();
     try {
-      const request = buildInvocationRequest(task);
-      invocationRequest = request;
-      const { dispatchBackgroundFunction } = await importDispatcher();
-      const response = await dispatchBackgroundFunction({
-        projectRef: task.project_ref,
-        functionSlug: task.function_slug || "",
-        request,
-        onLog: (entry) => {
-          logs.push(entry);
-          if (logs.length > 200) logs.shift();
+      try { await assertBackgroundInvokerUserExists(task); }
+      catch (error) { await this.finishAttempt(task, failureOutcome(task, error)); return; }
+
+      const mirror = await createBackgroundTaskMirrorIfUserExists(task);
+      if (mirror.degraded) logger.warn("[BackgroundFunctionWorker] mirror check degraded", {
+        taskId: task.id, projectRef: task.project_ref,
+      });
+      try {
+        if (!await backgroundAttemptStore.start(task, leaseSeconds)) return;
+      } catch (error) {
+        // No provider request has been sent, so this failure can safely follow
+        // the preflight retry policy (provided this attempt still owns its lease).
+        cleanupMirror = await this.finishAttempt(task, failureOutcome(task, error));
+        return;
+      }
+      // The mirror is evidence only. Always recheck GoTrue immediately before dispatch.
+      try { await assertBackgroundInvokerUserExists(task); }
+      catch (error) { cleanupMirror = await this.finishAttempt(task, failureOutcome(task, error)); return; }
+
+      this.activeAttempts.set(task.id, { attempt: task.attempt, controller });
+      broadcastTaskUpdate({ taskId: task.id, projectRef: task.project_ref, taskType: task.task_type, status: TaskStatus.RUNNING });
+      stopHeartbeat = startBackgroundLeaseHeartbeat({
+        renew: () => backgroundAttemptStore.renew(task, leaseSeconds),
+        onLost: () => {
+          leaseLost = true;
+          controller.abort(new Error("Background attempt lease lost or cancellation requested"));
         },
       });
-      invocationStatus = response.status;
-
-      const result = {
-        status: response.status,
-        headers: response.headers,
-        body: response.bodyText.slice(0, 16_384),
-      };
-
-      if (response.status === 499 || this.cancelledTasks.has(task.id)) {
-        clearInterval(heartbeat);
-        this.cancelledTasks.delete(task.id);
-        await taskRepository.completeTaskAttempt(task.id, task.attempt || 1, {
-          status: "cancelled",
-          error: task.cancellation_reason || "Cancelled by user",
-          responseStatus: response.status,
-          durationMs: Date.now() - startedAt,
-          logs,
+      startedAt = Date.now();
+      const logs: NonNullable<BackgroundAttemptCompletion["logs"]> = [];
+      let completion: BackgroundAttemptCompletion;
+      try {
+        invocationRequest = buildInvocationRequest(task, controller.signal);
+        const { dispatchBackgroundFunction } = await importDispatcher();
+        const response = await dispatchBackgroundFunction({
+          projectRef: task.project_ref, functionSlug: task.function_slug || "", request: invocationRequest,
+          onLog: (entry) => { logs.push(entry); if (logs.length > 200) logs.shift(); },
         });
-        await taskRepository.cancelTask(task.id, task.cancellation_reason || "Cancelled by user");
-        broadcastTaskUpdate({
-          taskId: task.id,
-          projectRef: task.project_ref,
-          taskType: task.task_type,
-          status: TaskStatus.CANCELLED,
-          error: task.cancellation_reason || "Cancelled by user",
-        });
-        return;
+        invocationStatus = response.status;
+        const durationMs = Math.max(0, Date.now() - startedAt);
+        if (response.status === 499) {
+          completion = { status: "cancelled", error: "Cancelled by user", responseStatus: response.status, durationMs, logs };
+        } else if (response.status >= 200 && response.status < 300) {
+          completion = { status: "succeeded", responseStatus: response.status, durationMs, logs,
+            result: { status: response.status, headers: response.headers, body: response.bodyText.slice(0, 16_384) } };
+        } else {
+          throw new Error(`Background function returned HTTP ${response.status}`);
+        }
+      } catch (error: unknown) {
+        completion = leaseLost
+          ? { status: "dead_lettered", error: "Background invocation outcome is unknown after lease verification failed", durationMs: Math.max(0, Date.now() - startedAt), logs }
+          : { ...failureOutcome(task, error, Math.max(0, Date.now() - startedAt)), logs };
       }
-
-      if (response.status >= 200 && response.status < 300) {
-        clearInterval(heartbeat);
-        await taskRepository.completeTaskAttempt(task.id, task.attempt || 1, {
-          status: "succeeded",
-          responseStatus: response.status,
-          durationMs: Date.now() - startedAt,
-          logs,
-        });
-        await taskRepository.markTaskSucceeded(task.id, result);
-        broadcastTaskUpdate({
-          taskId: task.id,
-          projectRef: task.project_ref,
-          taskType: task.task_type,
-          status: TaskStatus.SUCCEEDED,
-        });
-        return;
-      }
-
-      throw new Error(`Background function returned HTTP ${response.status}`);
-    } catch (error: unknown) {
-      clearInterval(heartbeat);
-      const message = error instanceof Error ? error.message : String(error);
-      const attempt = task.attempt || 1;
-      const maxAttempts = task.max_attempts || 3;
-      const responseStatusMatch = message.match(/HTTP (\d+)/i);
-      const responseStatus = responseStatusMatch ? Number.parseInt(responseStatusMatch[1], 10) : null;
-
-      if (error instanceof NonRetryableBackgroundInvocationError) {
-        await taskRepository.completeTaskAttempt(task.id, attempt, {
-          status: "dead_lettered",
-          error: message,
-          responseStatus: error.responseStatus,
-          durationMs: Date.now() - startedAt,
-          logs,
-        });
-        await taskRepository.markTaskFailed(task.id, message, true);
-        broadcastTaskUpdate({
-          taskId: task.id,
-          projectRef: task.project_ref,
-          taskType: task.task_type,
-          status: TaskStatus.DEAD_LETTERED,
-          error: message,
-        });
-        return;
-      }
-
-      if (attempt < maxAttempts) {
-        await taskRepository.completeTaskAttempt(task.id, attempt, {
-          status: "retry_scheduled",
-          error: message,
-          responseStatus,
-          durationMs: Date.now() - startedAt,
-          logs,
-        });
-        const nextRunAt = new Date(Date.now() + computeRetryDelayMs(attempt));
-        await taskRepository.scheduleRetry(task.id, message, nextRunAt);
-        broadcastTaskUpdate({
-          taskId: task.id,
-          projectRef: task.project_ref,
-          taskType: task.task_type,
-          status: TaskStatus.RETRY_SCHEDULED,
-          error: message,
-        });
-      } else {
-        await taskRepository.completeTaskAttempt(task.id, attempt, {
-          status: "dead_lettered",
-          error: message,
-          responseStatus,
-          durationMs: Date.now() - startedAt,
-          logs,
-        });
-        await taskRepository.markTaskFailed(task.id, message, true);
-        broadcastTaskUpdate({
-          taskId: task.id,
-          projectRef: task.project_ref,
-          taskType: task.task_type,
-          status: TaskStatus.DEAD_LETTERED,
-          error: message,
-        });
-      }
-
-      logger.error("[BackgroundFunctionWorker] task failed", {
-        taskId: task.id,
-        projectRef: task.project_ref,
-        attempt,
-        maxAttempts,
-        error: message,
-      });
+      stopHeartbeat();
+      // OUTSIDE the invocation catch: an uncertain database commit must not be
+      // reinterpreted as a provider failure and overwritten with retry_scheduled.
+      cleanupMirror = await this.finishAttempt(task, completion);
     } finally {
+      stopHeartbeat?.();
+      if (this.activeAttempts.get(task.id)?.controller === controller) this.activeAttempts.delete(task.id);
       const parent = parseTaskTraceparent(invocationRequest?.headers.get("traceparent"));
-      if (invocationRequest) {
-        recordBackgroundObservation(
-          (startedAt - new Date(task.created_at).valueOf()) / 1000,
-          invocationStatus >= 400,
-        );
-      }
+      if (invocationRequest) recordBackgroundObservation((startedAt - new Date(task.created_at).valueOf()) / 1000, invocationStatus >= 400);
       if (parent?.flags === "01") {
         const origin = parseTaskTraceparent((task.payload?.trace as { traceparent?: string } | undefined)?.traceparent);
         logger.info("[Trace] background attempt", {
@@ -749,27 +522,31 @@ export class BackgroundFunctionWorker {
           durationMs: Math.max(0, Date.now() - startedAt), status: invocationStatus,
         });
       }
-      await cleanupBackgroundTaskMirrorEvidence(task);
+      // A duplicate start or uncertain commit must not remove a live owner's evidence.
+      if (cleanupMirror) await cleanupBackgroundTaskMirrorEvidence(task);
     }
   }
 
   async cancel(taskId: string): Promise<boolean> {
     const task = await taskRepository.getTaskById(taskId);
     if (!task) return false;
-
+    if (task.task_type === TaskType.EDGE_FUNCTION) {
+      const receipt = await backgroundAttemptStore.requestCancellation(task);
+      if (!receipt) return false;
+      const active = this.activeAttempts.get(task.id);
+      if (active?.attempt === receipt.attempt) active.controller.abort(new Error("Cancelled by user"));
+      // This confirms durable acceptance, not provider termination. A worker on
+      // another node observes the flag via its heartbeat. The API returns the
+      // actual task state (running + cancel_requested_at until acknowledged).
+      return true;
+    }
+    // Do not change non-edge executors or pgflow's own action semantics.
     await taskRepository.requestTaskCancellation(taskId, "Cancelled by user");
-    this.cancelledTasks.add(taskId);
-
     if (task.status === TaskStatus.PENDING || task.status === TaskStatus.RETRY_SCHEDULED) {
       await taskRepository.cancelTask(taskId, "Cancelled by user");
       return true;
     }
-
-    const cancelled = await requestRuntimeCancellation(taskId);
-    if (!cancelled) {
-      this.cancelledTasks.delete(taskId);
-    }
-    return cancelled;
+    return requestRuntimeCancellation(taskId);
   }
 }
 

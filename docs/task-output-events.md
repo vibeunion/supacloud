@@ -21,6 +21,12 @@ Public output must not contain prompts or tool results the task owner may not se
 credentials, internal logs or provider headers. Internal workflow logs/Webhooks
 are not automatically projected into public output.
 
+The existing Edge background worker now also fences start, renewal and settlement
+by project/task/attempt and live lease. Task outcome, attempt history and opted-in
+lifecycle events commit atomically. See [background attempt fencing](./background-attempt-fencing.md)
+for cancellation, unknown outcomes, mirror cleanup and mixed-version rollout.
+This does not retrofit unrelated executors or pgflow with new action semantics.
+
 ## Enable explicitly
 
 After the normal control-plane schema initialization and a verified backup:
@@ -184,32 +190,36 @@ It is an integration example, not a newly deployed model provider or worker.
 
 Event replay is not model continuation. Restarting a non-resumable model call
 creates another attempt. External tools/billing still need their own idempotency.
-This patch fences **output appends**; it does not retrofit every pre-existing
-worker result/lease transition with attempt fencing. Do not advertise end-to-end
-exactly-once execution or seamless provider resume.
+The updated Edge background worker rejects stale final results and lease renewal;
+this must not be advertised as end-to-end exactly-once execution or seamless
+provider resume. Old running binaries must be drained before rollout.
 
 ## Verification and remaining rollout gates
 
 Portable unit tests cover pagination, ownership boundary selection, bounded bodies,
 SDK recovery, attempt separation, checkpoints, abort cleanup and uncertain writes.
 Elysia route tests verify authorization-before-parse and raw request handling.
-The dedicated Task Output Contract workflow also runs the PostgreSQL acceptance
-script against a disposable loopback database: repeated migrations, concurrent
-appends/deduplication, rollback-safe cursors, cross-owner/project denial, leases,
-cancellation, lifecycle capture, quota exhaustion and retention.
+The dedicated Task Output Contract workflow runs PostgreSQL 16/18 acceptance:
+repeated migrations, concurrent appends/deduplication, rollback-safe cursors,
+cross-owner/project denial, leases, cancellation, lifecycle capture, quota
+exhaustion and retention. It additionally tests atomic worker-attempt settlement,
+old-worker fencing, mirror safety and real loopback HTTP/SDK recovery with signed
+fixture JWTs. These are not live model or production GoTrue/browser tests.
 
 ```sh
 bun test packages/management-api/tests/unit/task-output.test.ts \
   packages/management-api/tests/unit/task-output-route.test.ts \
   packages/supacloud-js/src/task-events.test.ts
+bun test packages/management-api/tests/unit/background-function-worker.test.ts
+bun test packages/management-api/tests/unit/background-lease-heartbeat.test.ts
 # An EMPTY disposable database named task_output_test is required:
-SUPACLOUD_TEST_TASK_OUTPUT_DATABASE_URL=postgres://...@127.0.0.1:5432/task_output_test \
-  bun run packages/management-api/tests/integration/task-output.postgres.ts
+export SUPACLOUD_TEST_TASK_OUTPUT_DATABASE_URL=postgres://...@127.0.0.1:5432/task_output_test
+bun run packages/management-api/tests/integration/task-output.postgres.ts
+bun run packages/management-api/tests/integration/background-attempt.postgres.ts
 ```
 
 Before production rollout: run the complete existing compatibility suite; verify
-real authenticated browser/API gateway routing, model cancellation, worker crash
-and stale final-result behavior; measure output/page latency and storage load;
-configure retention/alerts and project-wide resource limits. Live model execution,
-worker failover, Caddy reload and production capacity/SLO acceptance are not proven
-by the portable unit tests.
+real authenticated browser/API gateway routing, live model cancellation, multi-node
+runtime crash and Caddy reload; measure output/page latency and storage load;
+configure retention/alerts and project-wide resource limits. Fixture tests and
+unit tests do not establish production capacity or SLO acceptance.

@@ -12,9 +12,13 @@ jobs:
   task-output:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["postgres:16-alpine", "postgres:18-alpine"]
     services:
       postgres:
-        image: postgres:16-alpine
+        image: ${{ matrix.postgres }}
         env:
           POSTGRES_DB: task_output_test
           POSTGRES_USER: postgres
@@ -36,7 +40,15 @@ jobs:
         run: bun install --frozen-lockfile
       - name: Elysia raw-body and authorization integration
         run: bun test packages/management-api/tests/unit/task-output-route.test.ts
+      - name: Worker ownership, cancellation and heartbeat regressions
+        run: |
+          bun test packages/management-api/tests/unit/background-function-worker.test.ts
+          bun test packages/management-api/tests/unit/background-lease-heartbeat.test.ts
       - name: PostgreSQL journal, concurrency, leases and retention
         env:
           SUPACLOUD_TEST_TASK_OUTPUT_DATABASE_URL: postgres://postgres:local-test-only@127.0.0.1:5432/task_output_test
         run: bun run packages/management-api/tests/integration/task-output.postgres.ts
+      - name: Atomic attempts, stale workers and real HTTP SDK recovery
+        env:
+          SUPACLOUD_TEST_TASK_OUTPUT_DATABASE_URL: postgres://postgres:local-test-only@127.0.0.1:5432/task_output_test
+        run: bun run packages/management-api/tests/integration/background-attempt.postgres.ts
