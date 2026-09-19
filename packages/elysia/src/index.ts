@@ -1,4 +1,11 @@
 import { Elysia, type StatusMap, type TSchema } from "elysia";
+import type {
+  CommandRuntimeAudit,
+  CommandRuntimeAuthorizer,
+  CommandRuntimeGovernance,
+  CommandRuntimeInvocation,
+  CommandRuntimeMiddleware,
+} from "@supacloud/app";
 import { decodeCommandPreview, type CommandPreview } from "@supacloud/contracts";
 import { commandErrorCode, commandErrorStatus } from "./command-errors";
 import { executionTrace, observeExecution, type ExecutionObserver } from "./execution";
@@ -188,23 +195,9 @@ export interface SupaCloudRequestContext {
   idempotencyKey?: string;
 }
 
-export interface CommandInvocation {
-  command: CompiledCommand;
-  input: {
-    body: unknown;
-    params: Record<string, unknown>;
-    query: Record<string, unknown>;
-  };
-  request: Request;
-  requestContext: unknown;
-  scope?: Record<string, unknown>;
-  services: Record<string, unknown>;
-}
+export type CommandInvocation = CommandRuntimeInvocation<CompiledCommand>;
 
-export type CommandExecutor = (
-  invocation: CommandInvocation,
-  next: () => unknown | Promise<unknown>,
-) => unknown | Promise<unknown>;
+export type CommandExecutor = CommandRuntimeMiddleware<CommandInvocation>;
 
 export { assertFeatureTransition } from "./feature";
 export type { FeatureTransitionSpec } from "./feature";
@@ -264,7 +257,6 @@ function observedAspects(
       ...executionTrace(context.requestContext),
     }, () => aspect(context, next))));
 }
-
 export type ApplicationAspectPipeline = (
   context: ApplicationAspectContext,
   next: () => unknown | Promise<unknown>,
@@ -286,30 +278,88 @@ function descriptorPipeline(
     : undefined);
 }
 
-export type CommandAuthorizer = (
-  invocation: CommandInvocation,
-) => void | Promise<void>;
+export type CommandAuthorizer = CommandRuntimeAuthorizer<CommandInvocation>;
+export type CommandMiddleware = CommandRuntimeMiddleware<CommandInvocation>;
+export type CommandAudit = CommandRuntimeAudit<CommandInvocation>;
+export type CommandGovernance = CommandRuntimeGovernance<CommandInvocation>;
 
-export type CommandMiddleware = (
-  invocation: CommandInvocation,
-  next: () => unknown | Promise<unknown>,
-) => unknown | Promise<unknown>;
-
-export interface CommandAudit {
-  succeeded(invocation: CommandInvocation, result: unknown): void | Promise<void>;
-  failed(invocation: CommandInvocation, error: unknown): void | Promise<void>;
+export interface CommandAuthorizationRequest {
+  readonly principal: { readonly kind: "user" | "service"; readonly issuer: string; readonly subject: string };
+  readonly applicationId: string;
+  readonly domain: { readonly type: string; readonly id: string };
 }
 
-export interface CommandGovernance {
-  /** Application-owned adapters: a single RPC owns all declared persistence. */
-  rpc?: Record<string, {
-    capabilities: { audit?: boolean; transaction?: boolean; idempotency?: boolean; boundary?: "database" | "external" };
-    execute: CommandMiddleware;
-  }>;
-  authorize: CommandAuthorizer;
-  idempotency?: CommandMiddleware;
-  transaction?: CommandMiddleware;
-  audit?: CommandAudit;
+export interface CommandAuthorizationContext {
+  readonly applicationId: string;
+  readonly permissions: readonly string[];
+  readonly permissionCatalogVersion?: string;
+  readonly permissionCatalogDigest?: string;
+}
+
+export interface CommandAuthorizationCatalog {
+  readonly version: string;
+  readonly digest?: string;
+}
+
+export interface CommandAuthorizationAdapterOptions {
+  readonly applicationId: string;
+  readonly issuer: string;
+  readonly domain: (invocation: CommandInvocation) => { readonly type: string; readonly id: string };
+  readonly resolve: (request: CommandAuthorizationRequest) => Promise<CommandAuthorizationContext>;
+  readonly catalog?: CommandAuthorizationCatalog;
+}
+
+/**
+ * Adapt a SupAuth-style resolver to the standard command governance port.
+ * The resolver remains the authorization source of truth; this adapter only
+ * maps trusted request identity and normalizes public failure statuses.
+ */
+export function createCommandAuthorizationAdapter(
+  options: CommandAuthorizationAdapterOptions,
+): CommandAuthorizer {
+  return async invocation => {
+    const permission = invocation.command.permission;
+    if (!permission || !/^[a-z][a-z0-9._-]*:[a-z][a-z0-9._-]*$/.test(permission)) {
+      throw new ApplicationError("Command permission must use resource:action syntax", {
+        status: 500, code: "COMMAND_PERMISSION_INVALID",
+      });
+    }
+    const context = invocation.requestContext;
+    const identity = isRecord(context) && isTrustedIdentity(context.identity) ? context.identity : undefined;
+    if (!isAuthenticatedTrustedIdentity(identity)) {
+      throw new ApplicationError("Authentication required", { status: 401, code: "AUTHENTICATION_REQUIRED" });
+    }
+    const request: CommandAuthorizationRequest = {
+      principal: { kind: "user", issuer: options.issuer, subject: identity.subject },
+      applicationId: options.applicationId,
+      domain: options.domain(invocation),
+    };
+    // Resolver data may originate from JSON or untyped adapters. Never treat a
+    // string's substring search (or a custom includes method) as a permission grant.
+    let resolved: unknown;
+    try {
+      resolved = await options.resolve(request);
+    } catch {
+      throw new ApplicationError("Authorization is unavailable", { status: 503, code: "AUTHORIZATION_UNAVAILABLE" });
+    }
+    if (!isRecord(resolved)
+      || !Array.isArray(resolved.permissions)
+      || !resolved.permissions.every((value: unknown) => typeof value === "string")
+      || (resolved.permissionCatalogVersion !== undefined && typeof resolved.permissionCatalogVersion !== "string")
+      || (resolved.permissionCatalogDigest !== undefined && typeof resolved.permissionCatalogDigest !== "string")
+      || resolved.applicationId !== options.applicationId
+      || (options.catalog !== undefined && (
+        resolved.permissionCatalogVersion !== options.catalog.version
+        || (options.catalog.digest !== undefined && resolved.permissionCatalogDigest !== options.catalog.digest)
+      ))) {
+      throw new ApplicationError("Authorization context is not bound to this application", {
+        status: 503, code: "AUTHORIZATION_CONTEXT_INVALID",
+      });
+    }
+    if (!resolved.permissions.includes(permission)) {
+      throw new ApplicationError("Permission denied", { status: 403, code: "PERMISSION_DENIED" });
+    }
+  };
 }
 
 /**
