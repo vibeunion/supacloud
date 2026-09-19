@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/vibeunion/supacloud/compare/app-v0.14.0...app-v0.15.0) (2026-09-19)
+
+
+### Features
+
+* **framework:** centralize command runtime governance contract ([#1341](https://github.com/vibeunion/supacloud/issues/1341)) ([2d7e795](https://github.com/vibeunion/supacloud/commit/2d7e79595af64c8fbe95a5e754dedcd0a825a282))
+
 ## [0.14.0](https://github.com/vibeunion/supacloud/compare/app-v0.13.0...app-v0.14.0) (2026-09-15)
 
 

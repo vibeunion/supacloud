@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.18.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.17.0...elysia-v0.18.0) (2026-09-19)
+
+
+### Features
+
+* **framework:** centralize command runtime governance contract ([#1341](https://github.com/vibeunion/supacloud/issues/1341)) ([2d7e795](https://github.com/vibeunion/supacloud/commit/2d7e79595af64c8fbe95a5e754dedcd0a825a282))
+* **framework:** make command governance default ([#1342](https://github.com/vibeunion/supacloud/issues/1342)) ([5ef7362](https://github.com/vibeunion/supacloud/commit/5ef7362ea0bd9f260576b7ecc4c7eef71aa752b4))
+
 ## [0.17.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.16.0...elysia-v0.17.0) (2026-09-16)
 
 

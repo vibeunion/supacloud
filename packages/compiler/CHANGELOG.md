@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.22.0...compiler-v0.23.0) (2026-09-19)
+
+
+### Features
+
+* **framework:** make command governance default ([#1342](https://github.com/vibeunion/supacloud/issues/1342)) ([5ef7362](https://github.com/vibeunion/supacloud/commit/5ef7362ea0bd9f260576b7ecc4c7eef71aa752b4))
+
 ## [0.22.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.21.1...compiler-v0.22.0) (2026-09-16)
 
 
