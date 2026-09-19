@@ -1,0 +1,23 @@
+# Optional. Compile/install the maintenance executable and pin the database
+# fingerprint as documented in docs/task-output-governance.md before enabling.
+[Unit]
+Description=SupaCloud bounded task output retention
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+DynamicUser=true
+EnvironmentFile=/etc/supabase/task-output-retention.env
+ExecStart=/usr/local/libexec/supacloud/task-output-retention --apply --limit 25
+TimeoutStartSec=30s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryMax=256M
+TasksMax=64
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=supacloud-task-output-retention

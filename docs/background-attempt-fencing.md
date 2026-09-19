@@ -91,10 +91,14 @@ and final-result persistence. It does not use a live GoTrue issuer or model.
 Worker unit tests exercise the actual orchestration against mocked I/O. Heartbeat
 unit tests exercise the production helper rather than reproducing its arithmetic.
 The database/HTTP scripts fail when their explicit disposable database is absent;
-they must not silently skip the meaningful assertions.
+they must not silently skip meaningful assertions.
+
+[Shared output quotas and scheduled retention](./task-output-governance.md) now provide
+transactional project-level output budgets and a fingerprint-pinned maintenance
+command with optional systemd units. They do not change attempt settlement semantics.
 
 Remaining production gates: real authenticated browser/gateway/GoTrue end-to-end
 execution, live model integration and cancellation, multi-process runtime crash
-and Caddy reload scenarios, retention scheduling, shared project-level output
-quotas, and measured SLO/capacity acceptance. Fixture HTTP tests are not a claim
-that all of these rollout gates have passed.
+and Caddy reload scenarios, actual retention scheduler deployment, and measured
+SLO/capacity acceptance. Fixture HTTP tests are not a claim that all of these
+rollout gates have passed.

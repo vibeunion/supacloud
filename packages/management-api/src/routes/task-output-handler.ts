@@ -14,7 +14,11 @@ export function taskOutputResponse(body: unknown, status = 200): Response {
 
 /** Error bodies are intentionally not derived from database exception messages. */
 export function taskOutputFailure(error: unknown): Response {
-  if (error instanceof TaskOutputError) return taskOutputResponse({ code: error.code, message: error.message }, error.statusCode);
+  if (error instanceof TaskOutputError) {
+    const response = taskOutputResponse({ code: error.code, message: error.message }, error.statusCode);
+    if (error.code === "TASK_OUTPUT_PROJECT_RATE_LIMIT") response.headers.set("retry-after", "60");
+    return response;
+  }
   return taskOutputResponse({ code: "TASK_OUTPUT_UNAVAILABLE", message: "Task output is temporarily unavailable" }, 503);
 }
 

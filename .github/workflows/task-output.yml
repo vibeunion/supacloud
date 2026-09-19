@@ -4,6 +4,8 @@ on:
     paths:
       - "packages/management-api/**"
       - "packages/supacloud-js/**"
+      - "infrastructure/systemd/supacloud-task-output-retention.*"
+      - "docs/task-output*.md"
       - ".github/workflows/task-output.yml"
   workflow_dispatch:
 permissions:
@@ -39,7 +41,7 @@ jobs:
         working-directory: packages/management-api
         run: bun install --frozen-lockfile
       - name: Elysia raw-body and authorization integration
-        run: bun test packages/management-api/tests/unit/task-output-route.test.ts
+        run: bun test packages/management-api/tests/unit/task-output-route.test.ts packages/management-api/tests/unit/task-output-maintenance.test.ts
       - name: Worker ownership, cancellation and heartbeat regressions
         run: |
           bun test packages/management-api/tests/unit/background-function-worker.test.ts
@@ -48,7 +50,18 @@ jobs:
         env:
           SUPACLOUD_TEST_TASK_OUTPUT_DATABASE_URL: postgres://postgres:local-test-only@127.0.0.1:5432/task_output_test
         run: bun run packages/management-api/tests/integration/task-output.postgres.ts
+      - name: Shared project quotas and fingerprint-pinned retention
+        env:
+          SUPACLOUD_TEST_TASK_OUTPUT_DATABASE_URL: postgres://postgres:local-test-only@127.0.0.1:5432/task_output_test
+        run: bun run packages/management-api/tests/integration/task-output-governance.postgres.ts
       - name: Atomic attempts, stale workers and real HTTP SDK recovery
         env:
           SUPACLOUD_TEST_TASK_OUTPUT_DATABASE_URL: postgres://postgres:local-test-only@127.0.0.1:5432/task_output_test
         run: bun run packages/management-api/tests/integration/background-attempt.postgres.ts
+      - name: Compile standalone retention command and validate safe CLI defaults
+        run: |
+          bun build packages/management-api/scripts/task-output-retention.ts --compile --outfile /tmp/task-output-retention
+          if /tmp/task-output-retention --apply; then
+            echo 'Missing fingerprint and database configuration must fail'; exit 1
+          fi
+          systemd-analyze calendar '*-*-* *:*:00'
