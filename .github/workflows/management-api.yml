@@ -509,6 +509,7 @@ jobs:
         run: |
           node --check .github/scripts/ai-review-merge.mjs
           node --test .github/scripts/ai-review-merge.test.mjs
+          node --test .github/scripts/required-checks.test.mjs
           node --check .github/scripts/publish-npm-package.mjs
           node --test .github/scripts/publish-npm-package.test.mjs
           node --check .github/scripts/sync-supacloud-dependencies.mjs
@@ -1078,6 +1079,7 @@ jobs:
       - package-checks
       - command-workflow-integration
       - supacloud-lite-windows
+      - supacloud-lite-standalone-native
       - docker-and-scripts-checks
       - unit-test
       - postgres-18-compatibility
@@ -1096,6 +1098,7 @@ jobs:
           PACKAGE_CHECKS: ${{ needs.package-checks.result }}
           COMMAND_WORKFLOW: ${{ needs.command-workflow-integration.result }}
           SUPACLOUD_LITE_WINDOWS: ${{ needs.supacloud-lite-windows.result }}
+          SUPACLOUD_LITE_STANDALONE: ${{ needs.supacloud-lite-standalone-native.result }}
           DOCKER_AND_SCRIPTS: ${{ needs.docker-and-scripts-checks.result }}
           UNIT_TESTS: ${{ needs.unit-test.result }}
           POSTGRES_18: ${{ needs.postgres-18-compatibility.result }}
@@ -1110,6 +1113,7 @@ jobs:
             "$PACKAGE_CHECKS" \
             "$COMMAND_WORKFLOW" \
             "$SUPACLOUD_LITE_WINDOWS" \
+            "$SUPACLOUD_LITE_STANDALONE" \
             "$DOCKER_AND_SCRIPTS" \
             "$UNIT_TESTS" \
             "$POSTGRES_18" \
