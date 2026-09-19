@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.83.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.82.0...management-api-v0.83.0) (2026-09-19)
+
+
+### Features
+
+* **tasks:** durable output replay, attempt fencing and quotas without gRPC ([#1356](https://github.com/vibeunion/supacloud/issues/1356)) ([6866b80](https://github.com/vibeunion/supacloud/commit/6866b808e99910ffe145788eb22f43bcf21b008e))
+
 ## [0.82.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.81.0...management-api-v0.82.0) (2026-09-16)
 
 
