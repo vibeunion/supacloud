@@ -14,6 +14,19 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.55.0](https://github.com/vibeunion/supacloud/compare/cli-v0.54.1...cli-v0.55.0) (2026-09-19)
+
+
+### Upgrade requirements
+
+Generated application starters now expect incomplete Command governance to fail at startup, rather than returning an error on the first request. Update existing composition roots and their startup assertions when upgrading the compiler and host adapter.
+
+Upgrade the compiler and host adapter together, regenerate application artifacts, and run startup, authorization, replay and rollback tests before deployment. See [the default Command governance migration guide](../../docs/command-governance-defaults.md). Do not use no-op adapters or deploy artifacts produced with `writeOnError: true` to bypass these checks.
+
+### Features
+
+* **framework:** make command governance default ([#1342](https://github.com/vibeunion/supacloud/issues/1342)) ([5ef7362](https://github.com/vibeunion/supacloud/commit/5ef7362ea0bd9f260576b7ecc4c7eef71aa752b4))
+
 ## [0.54.1](https://github.com/vibeunion/supacloud/compare/cli-v0.54.0...cli-v0.54.1) (2026-09-16)
 
 

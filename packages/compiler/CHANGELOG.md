@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.23.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.22.0...compiler-v0.23.0) (2026-09-19)
+
+
+### Upgrade requirements
+
+Omitting `commandCapabilities` now selects strict persistent Command governance in both `compileProject` and `checkProject`. Incomplete metadata is rejected; normal compilation preserves the previous executable factory and manifest. An explicit capability object remains a complete override, not a partial merge. Inspect error diagnostics as well as `checkProject.upToDate`.
+
+Upgrade the compiler and host adapter together, regenerate application artifacts, and run startup, authorization, replay and rollback tests before deployment. See [the default Command governance migration guide](../../docs/command-governance-defaults.md). Do not use no-op adapters or deploy artifacts produced with `writeOnError: true` to bypass these checks.
+
+### Features
+
+* **framework:** make command governance default ([#1342](https://github.com/vibeunion/supacloud/issues/1342)) ([5ef7362](https://github.com/vibeunion/supacloud/commit/5ef7362ea0bd9f260576b7ecc4c7eef71aa752b4))
+
 ## [0.22.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.21.1...compiler-v0.22.0) (2026-09-16)
 
 
