@@ -103,6 +103,7 @@ import { CaseService } from "./case.service";
   permission: "case.accept",
   transaction: "required",
   audit: "case.accepted",
+  idempotency: "required",
 })
 export class AcceptCaseCommand {
   constructor(@Inject(CaseService) readonly cases: unknown) {}
@@ -261,6 +262,49 @@ describe("app tools", () => {
         expect(existsSync(join(root, "generated", "graphql.ts"))).toBe(false);
         expect((await app({ action: "check", root })).isError).toBe(false);
     });
+
+    test("default governance rejects missing idempotency without creating or replacing artifacts", async () => {
+        const isolatedRoot = mkdtempSync(join(tmpdir(), "supacloud-app-governance-"));
+        try {
+            const { mkdir, writeFile } = await import("node:fs/promises");
+            const { dirname } = await import("node:path");
+            for (const [relativePath, content] of Object.entries(FIXTURE_FILES)) {
+                const absolute = join(isolatedRoot, relativePath);
+                await mkdir(dirname(absolute), { recursive: true });
+                await writeFile(absolute, content, "utf8");
+            }
+            // Exercise the installed compiler's defaults, not a capability override.
+            const commandPath = join(isolatedRoot, "src/features/case/accept-case.command.ts");
+            const complete = readFileSync(commandPath, "utf8");
+            const incomplete = complete.replace('  idempotency: "required",\n', "");
+            expect(incomplete).not.toBe(complete);
+            const artifacts = ["application.ts", "app.manifest.json"]
+                .map((name) => join(isolatedRoot, "generated", name));
+            writeFileSync(commandPath, incomplete);
+            for (const action of ["check", "compile"] as const) {
+                const result = await app({ action, root: isolatedRoot });
+                expect(result.isError).toBe(true);
+                expect(result.content.map((chunk) => chunk.text).join("\n"))
+                    .toContain("command-persistence-required");
+                for (const path of artifacts) expect(existsSync(path)).toBe(false);
+            }
+
+            writeFileSync(commandPath, complete);
+            const compiled = await app({ action: "compile", root: isolatedRoot });
+            expect(compiled.isError, compiled.content.map((chunk) => chunk.text).join("\n")).toBe(false);
+            const previous = artifacts.map((path) => ({ path, bytes: readFileSync(path) }));
+            writeFileSync(commandPath, incomplete);
+            for (const action of ["check", "compile"] as const) {
+                const result = await app({ action, root: isolatedRoot });
+                expect(result.isError).toBe(true);
+                expect(result.content.map((chunk) => chunk.text).join("\n"))
+                    .toContain("command-persistence-required");
+                for (const { path, bytes } of previous) expect(readFileSync(path)).toEqual(bytes);
+            }
+        } finally {
+            rmSync(isolatedRoot, { recursive: true, force: true });
+        }
+    }, 30_000);
 
     test("check honors governance capabilities and rejects artifact drift without writing", async () => {
         const configPath = join(root, "supacloud.config.mjs");
