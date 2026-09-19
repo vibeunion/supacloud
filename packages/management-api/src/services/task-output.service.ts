@@ -35,7 +35,7 @@ export const taskOutputService = {
     const [row] = await sql`
       SELECT public.supacloud_append_task_output(
         ${projectRef}::text, ${taskId}::uuid, ${input.attempt}::integer,
-        ${input.event_id}::uuid, ${input.type}::text, ${JSON.stringify(input.payload)}::jsonb
+        ${input.event_id}::uuid, ${input.type}::text, ${JSON.stringify(input.payload)}::text::jsonb
       ) AS output
     `;
     return result(row?.output);

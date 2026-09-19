@@ -13,7 +13,7 @@ if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname) || url.pathname 
 const sql = new SQL(connection, { max: 8 });
 const id = crypto.randomUUID(), owner = crypto.randomUUID(), other = crypto.randomUUID();
 const append = async (eventId = crypto.randomUUID(), attempt = 1, payload = { text: "hello" }, ref = "demo") => {
-  const [row] = await sql`SELECT public.supacloud_append_task_output(${ref}, ${id}::uuid, ${attempt}, ${eventId}::uuid, 'output.delta', ${JSON.stringify(payload)}::jsonb) AS value`;
+  const [row] = await sql`SELECT public.supacloud_append_task_output(${ref}::text, ${id}::uuid, ${attempt}::integer, ${eventId}::uuid, 'output.delta', ${JSON.stringify(payload)}::text::jsonb) AS value`;
   return row.value;
 };
 const read = async (after = "0", ref = "demo", user: string | null = owner, limit = 100) => {
@@ -43,9 +43,12 @@ try {
   assert.equal(untouched.count, 0);
   console.log("PASS migration idempotence and ordinary task compatibility");
 
+  // Bind serialized JSON as text before PostgreSQL parses it exactly once.
+  const [binding] = await sql`SELECT jsonb_typeof(${JSON.stringify({ text: "hello" })}::text::jsonb) AS kind`;
+  assert.equal(binding.kind, "object");
   const eventId = crypto.randomUUID();
   const concurrent = await Promise.all(Array.from({ length: 8 }, () => append(eventId)));
-  assert.ok(concurrent.every((value) => value.sequence === "1"));
+  assert.ok(concurrent.every((value) => value.sequence === "1"), JSON.stringify(concurrent));
   assert.equal((await append(eventId, 1, { text: "different" })).code, "TASK_OUTPUT_IDEMPOTENCY_CONFLICT");
   const more = await Promise.all(Array.from({ length: 20 }, () => append()));
   assert.equal(new Set(more.map((value) => value.sequence)).size, 20);

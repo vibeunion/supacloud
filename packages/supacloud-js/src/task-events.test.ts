@@ -130,3 +130,24 @@ test("append validates the returned attempt and event identity", async () => {
   const sdk = client(async () => Response.json(event("1", 2)));
   await assert.rejects(sdk.append(id, { attempt: 1, event_id: eventId, type: "output.delta", payload: {} }));
 });
+
+test("synchronous abort does not orphan a rejecting transport promise", async () => {
+  const controller = new AbortController();
+  const sdk = client(() => { controller.abort(); return Promise.reject(new Error("transport aborted")); });
+  await assert.rejects(sdk.list(id, { signal: controller.signal }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+});
+test("proxy HTML errors preserve retryable HTTP status", async () => {
+  let calls = 0;
+  const sdk = client(async () => ++calls === 1 ? new Response("<html>Unavailable</html>", { status: 503 })
+    : Response.json(page([], { task_status: "succeeded" })));
+  assert.equal((await sdk.watch(id, { pollIntervalMs: 10 }).next()).done, true);
+  assert.equal(calls, 2);
+});
+test("credential failures are not misclassified as retryable network failures", async () => {
+  let calls = 0;
+  const sdk = createTaskEventClient({ baseUrl: "https://api.example", projectRef: "demo",
+    getHeaders: () => { calls++; throw new Error("signed out"); }, fetch: async () => { throw new Error("must not fetch"); } });
+  await assert.rejects(sdk.watch(id, { pollIntervalMs: 10 }).next(), (error: unknown) => error instanceof TaskEventError && error.code === "TASK_OUTPUT_HEADERS_ERROR");
+  assert.equal(calls, 1);
+});

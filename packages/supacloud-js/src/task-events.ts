@@ -110,7 +110,11 @@ function page(value: unknown, ref: string, id: string, after: string, limit: num
 }
 function abortError(signal: AbortSignal): unknown { return signal.reason ?? new DOMException("Aborted", "AbortError"); }
 function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(abortError(signal));
+  if (signal.aborted) {
+    // The operation may already have started synchronously before it aborted.
+    void work.catch(() => {});
+    return Promise.reject(abortError(signal));
+  }
   return new Promise((resolve, reject) => {
     const abort = () => { cleanup(); reject(abortError(signal)); };
     const cleanup = () => signal.removeEventListener("abort", abort);
@@ -156,13 +160,26 @@ export function createTaskEventClient(options: TaskEventClientOptions) {
     signal?.addEventListener("abort", stop, { once: true });
     const timeout = setTimeout(() => controller.abort(new TaskEventError(408, "TASK_OUTPUT_REQUEST_TIMEOUT")), 30_000);
     try {
-      const headers = new Headers(await abortable(Promise.resolve().then(options.getHeaders), controller.signal));
+      let headers: Headers;
+      try { headers = new Headers(await abortable(Promise.resolve().then(options.getHeaders), controller.signal)); }
+      catch (error) {
+        if (controller.signal.aborted) throw error;
+        throw new TaskEventError(0, "TASK_OUTPUT_HEADERS_ERROR");
+      }
       headers.set("accept", "application/json");
       if (input) headers.set("content-type", "application/json");
       const url = new URL(`${basePath}/v1/projects/${encodeURIComponent(ref)}/tasks/${id}/events${query}`, base.origin);
       const response = await abortable(fetchImpl(url, { method: input ? "POST" : "GET", headers,
         body: input ? JSON.stringify(input) : undefined, signal: controller.signal, redirect: "error", credentials: "omit", cache: "no-store" }), controller.signal);
-      const data = await jsonBody(response, controller.signal);
+      let data: unknown;
+      try { data = await jsonBody(response, controller.signal); }
+      catch (error) {
+        // Reverse proxies may return HTML or an empty body during an outage.
+        if (!response.ok && error instanceof TaskEventError && error.code === "TASK_OUTPUT_INVALID_RESPONSE") {
+          throw new TaskEventError(response.status, "TASK_OUTPUT_HTTP_ERROR");
+        }
+        throw error;
+      }
       if (!response.ok) throw new TaskEventError(response.status,
         record(data) && typeof data.code === "string" ? data.code : "TASK_OUTPUT_HTTP_ERROR", record(data) ? data : {});
       return data;
