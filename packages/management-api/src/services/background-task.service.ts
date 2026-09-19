@@ -407,6 +407,9 @@ export async function createBackgroundTaskMirrorIfUserExists(
         max_attempts = EXCLUDED.max_attempts,
         trace_id = EXCLUDED.trace_id,
         updated_at = NOW()
+      -- Never let a delayed old writer replace a newer attempt's evidence.
+      WHERE background_task_mirrors.project_ref = EXCLUDED.project_ref
+        AND background_task_mirrors.attempt <= EXCLUDED.attempt
       RETURNING id
     `;
 
@@ -438,6 +441,8 @@ export async function removeBackgroundTaskMirror(task: ProjectTask): Promise<boo
     await projectDb`
       DELETE FROM public.background_task_mirrors
       WHERE id = ${task.id}::uuid
+        AND project_ref = ${task.project_ref}
+        AND attempt = ${task.attempt || 1}
     `;
     return true;
   } catch (error: unknown) {

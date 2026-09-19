@@ -1,0 +1,67 @@
+name: Task Output Contract
+on:
+  pull_request:
+    paths:
+      - "packages/management-api/**"
+      - "packages/supacloud-js/**"
+      - "infrastructure/systemd/supacloud-task-output-retention.*"
+      - "docs/task-output*.md"
+      - ".github/workflows/task-output.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  task-output:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["postgres:16-alpine", "postgres:18-alpine"]
+    services:
+      postgres:
+        image: ${{ matrix.postgres }}
+        env:
+          POSTGRES_DB: task_output_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: local-test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d task_output_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - name: Transport, authorization boundaries and SDK recovery
+        run: bun test packages/management-api/tests/unit/task-output.test.ts packages/supacloud-js/src/task-events.test.ts
+      - name: Install existing Management API dependencies
+        working-directory: packages/management-api
+        run: bun install --frozen-lockfile
+      - name: Elysia raw-body and authorization integration
+        run: bun test packages/management-api/tests/unit/task-output-route.test.ts packages/management-api/tests/unit/task-output-maintenance.test.ts
+      - name: Worker ownership, cancellation and heartbeat regressions
+        run: |
+          bun test packages/management-api/tests/unit/background-function-worker.test.ts
+          bun test packages/management-api/tests/unit/background-lease-heartbeat.test.ts
+      - name: PostgreSQL journal, concurrency, leases and retention
+        env:
+          SUPACLOUD_TEST_TASK_OUTPUT_DATABASE_URL: postgres://postgres:local-test-only@127.0.0.1:5432/task_output_test
+        run: bun run packages/management-api/tests/integration/task-output.postgres.ts
+      - name: Shared project quotas and fingerprint-pinned retention
+        env:
+          SUPACLOUD_TEST_TASK_OUTPUT_DATABASE_URL: postgres://postgres:local-test-only@127.0.0.1:5432/task_output_test
+        run: bun run packages/management-api/tests/integration/task-output-governance.postgres.ts
+      - name: Atomic attempts, stale workers and real HTTP SDK recovery
+        env:
+          SUPACLOUD_TEST_TASK_OUTPUT_DATABASE_URL: postgres://postgres:local-test-only@127.0.0.1:5432/task_output_test
+        run: bun run packages/management-api/tests/integration/background-attempt.postgres.ts
+      - name: Compile standalone retention command and validate safe CLI defaults
+        run: |
+          bun build packages/management-api/scripts/task-output-retention.ts --compile --outfile /tmp/task-output-retention
+          if /tmp/task-output-retention --apply; then
+            echo 'Missing fingerprint and database configuration must fail'; exit 1
+          fi
+          systemd-analyze calendar '*-*-* *:*:00'

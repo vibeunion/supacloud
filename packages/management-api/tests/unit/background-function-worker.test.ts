@@ -1,918 +1,348 @@
-import { afterAll, afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import type { ProjectTask } from "../../src/db";
 import { TaskStatus, TaskType } from "../../src/db";
 import { DEFAULT_BACKGROUND_TASK_SETTINGS } from "../../src/config/background-task-settings";
 import { config } from "../../src/config";
+import { taskRepository } from "../../src/repositories/task.repository";
+import { backgroundAttemptStore } from "../../src/services/background-attempt.service";
+import { projectRepository } from "../../src/repositories/project.repository";
+import * as ws from "../../src/routes/ws";
+import * as dispatcher from "../../src/services/background-runtime-dispatcher";
+import * as db from "../../src/db";
+import * as pgListen from "../../src/lib/pg-listen";
+import * as mirrors from "../../src/services/background-task.service";
+import * as heartbeat from "../../src/utils/background-lease-heartbeat";
 
-// ─── Mock all heavy dependencies ────────────────────────────────────────────
-
-const claimNextTask = mock(() => Promise.resolve(null));
-const cancelTask = mock(() => Promise.resolve(null));
-const releaseTask = mock(() => Promise.resolve(null));
-const extendLease = mock(() => Promise.resolve(null));
-const markTaskRunning = mock(() => Promise.resolve(null));
-const markTaskSucceeded = mock(() => Promise.resolve(null));
-const markTaskFailed = mock(() => Promise.resolve(null));
-const scheduleRetry = mock(() => Promise.resolve(null));
-const startTaskAttempt = mock(() => Promise.resolve({ id: "att_1" }));
-const completeTaskAttempt = mock(() => Promise.resolve(null));
-const countActiveTasksForProject = mock(() => Promise.resolve(0));
-const getTaskById = mock(() => Promise.resolve(null));
-const requestTaskCancellation = mock(() => Promise.resolve(null));
-const transitionTaskToRunning = mock(() => Promise.resolve({ task: {}, attempt: { id: "att_1" } }));
-
-const findByRef = mock(() =>
-  Promise.resolve({ ref: "proj_1", status: "active" })
-);
-
-const getBackgroundTaskSettings = mock(() =>
-  Promise.resolve({
-    ...DEFAULT_BACKGROUND_TASK_SETTINGS,
-  })
-);
-
-const { taskRepository } = await import("../../src/repositories/task.repository");
-const { projectRepository } = await import("../../src/repositories/project.repository");
-const wsModule = await import("../../src/routes/ws");
-const { projectService } = await import("../../src/services/project.service");
-const dispatcherModule = await import("../../src/services/background-runtime-dispatcher");
-const dbModule = await import("../../src/db");
-const pgListenModule = await import("../../src/lib/pg-listen");
-
-spyOn(taskRepository, "claimNextTask").mockImplementation(claimNextTask as typeof taskRepository.claimNextTask);
-spyOn(taskRepository, "cancelTask").mockImplementation(cancelTask as typeof taskRepository.cancelTask);
-spyOn(taskRepository, "releaseTask").mockImplementation(releaseTask as typeof taskRepository.releaseTask);
-spyOn(taskRepository, "extendLease").mockImplementation(extendLease as typeof taskRepository.extendLease);
-spyOn(taskRepository, "markTaskRunning").mockImplementation(markTaskRunning as typeof taskRepository.markTaskRunning);
-spyOn(taskRepository, "markTaskSucceeded").mockImplementation(markTaskSucceeded as typeof taskRepository.markTaskSucceeded);
-spyOn(taskRepository, "markTaskFailed").mockImplementation(markTaskFailed as typeof taskRepository.markTaskFailed);
-spyOn(taskRepository, "scheduleRetry").mockImplementation(scheduleRetry as typeof taskRepository.scheduleRetry);
-spyOn(taskRepository, "startTaskAttempt").mockImplementation(startTaskAttempt as typeof taskRepository.startTaskAttempt);
-spyOn(taskRepository, "completeTaskAttempt").mockImplementation(completeTaskAttempt as typeof taskRepository.completeTaskAttempt);
-spyOn(taskRepository, "countActiveTasksForProject").mockImplementation(
-  countActiveTasksForProject as typeof taskRepository.countActiveTasksForProject,
-);
-spyOn(taskRepository, "getTaskById").mockImplementation(getTaskById as typeof taskRepository.getTaskById);
-spyOn(taskRepository, "requestTaskCancellation").mockImplementation(
-  requestTaskCancellation as typeof taskRepository.requestTaskCancellation,
-);
-spyOn(taskRepository, "transitionTaskToRunning").mockImplementation(
-  transitionTaskToRunning as typeof taskRepository.transitionTaskToRunning,
-);
-spyOn(projectRepository, "findByRef").mockImplementation(findByRef as typeof projectRepository.findByRef);
-const broadcastTaskUpdate = spyOn(wsModule, "broadcastTaskUpdate").mockImplementation(() => {});
-spyOn(projectService, "getBackgroundTaskSettings").mockImplementation(
-  getBackgroundTaskSettings as typeof projectService.getBackgroundTaskSettings,
-);
-const dispatchBackgroundFunction = spyOn(dispatcherModule, "dispatchBackgroundFunction").mockImplementation(
-  () => Promise.resolve({ status: 200, headers: {}, bodyText: "", logs: [] }),
-);
-const resolveDbName = spyOn(dbModule, "resolveDbName").mockImplementation(
-  () => Promise.resolve("tenant_proj_1"),
-);
-const getProjectDb = spyOn(dbModule, "getProjectDb").mockImplementation(
-  () => ((async () => [{ exists: 1 }]) as any),
-);
-const closePgListener = mock(() => {});
-const createPgListener = spyOn(pgListenModule, "createPgListener").mockImplementation(
-  () => ({ close: closePgListener }),
-);
-
-// Mock createBackgroundTaskMirrorIfUserExists
-const bgTaskServiceModule = await import("../../src/services/background-task.service");
-const createBackgroundTaskMirrorIfUserExists = spyOn(
-  bgTaskServiceModule,
-  "createBackgroundTaskMirrorIfUserExists"
-).mockImplementation(
-  () => Promise.resolve({ inserted: false, userExists: true }),
-);
-const removeBackgroundTaskMirror = spyOn(
-  bgTaskServiceModule,
-  "removeBackgroundTaskMirror",
-).mockImplementation(() => Promise.resolve(true));
-
-// We import the worker AFTER mocks are set up
-// so the module resolves against mocks
-const { BackgroundFunctionWorker, buildInvocationRequest } = await import(
-  "../../src/services/background-function-worker"
-);
-const originalAuthRuntimeOwnerRef = config.authRuntimeOwnerRef;
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
+const claim = spyOn(taskRepository, "claimNextTask");
+const getTask = spyOn(taskRepository, "getTaskById");
+const legacyCancel = spyOn(taskRepository, "cancelTask");
+const legacySuccess = spyOn(taskRepository, "markTaskSucceeded");
+const legacyRetry = spyOn(taskRepository, "scheduleRetry");
+const renew = spyOn(backgroundAttemptStore, "renew");
+const startAttempt = spyOn(backgroundAttemptStore, "start");
+const finish = spyOn(backgroundAttemptStore, "finish");
+const requestCancellation = spyOn(backgroundAttemptStore, "requestCancellation");
+const recoverCancelled = spyOn(backgroundAttemptStore, "recoverCancelled");
+const project = spyOn(projectRepository, "findByRef");
+const broadcast = spyOn(ws, "broadcastTaskUpdate");
+const dispatch = spyOn(dispatcher, "dispatchBackgroundFunction");
+const resolveDb = spyOn(db, "resolveDbName");
+const projectDb = spyOn(db, "getProjectDb");
+const closeListener = mock(() => {});
+const listen = spyOn(pgListen, "createPgListener");
+const createMirror = spyOn(mirrors, "createBackgroundTaskMirrorIfUserExists");
+const removeMirror = spyOn(mirrors, "removeBackgroundTaskMirror");
+const stopHeartbeat = mock(() => {});
+let heartbeatOptions: Parameters<typeof heartbeat.startBackgroundLeaseHeartbeat>[0] | undefined;
+const startHeartbeat = spyOn(heartbeat, "startBackgroundLeaseHeartbeat");
+const { BackgroundFunctionWorker, buildInvocationRequest, computeLeaseSeconds, computeRetryDelayMs,
+  getInvokerUnknownMetrics, resolveBackgroundConcurrencyPerProject } = await import("../../src/services/background-function-worker");
+const originalOwner = config.authRuntimeOwnerRef;
 
 function makeTask(overrides: Partial<ProjectTask> = {}): ProjectTask {
   return {
-    id: "tsk_1",
-    project_ref: "proj_1",
-    task_type: TaskType.EDGE_FUNCTION,
-    status: TaskStatus.PENDING,
-    payload: {
-      method: "POST",
-      path: "/generate",
-      query: "",
-      headers: {},
-      body: null,
-      auth: {},
-    },
-    error: null,
-    retries: 0,
-    attempt: 1,
-    max_attempts: 3,
-    next_run_at: new Date(),
-    lease_until: null,
-    started_at: null,
-    completed_at: null,
-    timeout_sec: 300,
-    idempotency_key: null,
-    trace_id: "trace_abc",
-    invoker_user_id: null,
-    auth_authority_ref: "proj_1",
-    function_slug: "my-function",
-    function_version: null,
-    result: null,
-    created_at: new Date(),
-    updated_at: new Date(),
+    id: "tsk_1", project_ref: "proj_1", task_type: TaskType.EDGE_FUNCTION, status: TaskStatus.LEASED,
+    payload: { method: "POST", path: "/generate", query: "", headers: {}, body: null, auth: {} },
+    error: null, retries: 0, attempt: 1, max_attempts: 3, next_run_at: new Date(),
+    lease_until: new Date(Date.now() + 900_000), started_at: null, completed_at: null, timeout_sec: 300,
+    idempotency_key: null, trace_id: "trace_abc", invoker_user_id: null, auth_authority_ref: "proj_1",
+    function_slug: "my-function", function_version: null, result: null, created_at: new Date(), updated_at: new Date(),
     ...overrides,
   };
 }
-
+function userTask(overrides: Partial<ProjectTask> = {}): ProjectTask {
+  return makeTask({ payload: { method: "POST", path: "/", query: "", headers: {}, body: null,
+    auth: { kind: "jwt", invoker_user_id: "00000000-0000-4000-8000-000000000001", invoker_role: "authenticated" } }, ...overrides });
+}
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
+  const promise = new Promise<T>(res => { resolve = res; });
+  return { promise, resolve };
 }
-
-async function waitUntil(predicate: () => boolean, timeoutMs = 250): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 5));
+async function until(predicate: () => boolean) {
+  const deadline = Date.now() + 1000;
+  while (!predicate()) {
+    if (Date.now() > deadline) throw new Error("Timed out waiting for test condition");
+    await new Promise(resolve => setTimeout(resolve, 2));
   }
-  throw new Error("Timed out waiting for condition");
 }
+const execute = (worker: InstanceType<typeof BackgroundFunctionWorker>, task: ProjectTask) => (worker as any).execute(task) as Promise<void>;
 
-// ─── Tests ──────────────────────────────────────────────────────────────────
+beforeEach(() => {
+  for (const stub of [claim, getTask, legacyCancel, legacySuccess, legacyRetry, renew, startAttempt, finish,
+    requestCancellation, recoverCancelled, project, broadcast, dispatch, resolveDb, projectDb, listen,
+    createMirror, removeMirror, startHeartbeat, stopHeartbeat, closeListener]) stub.mockReset();
+  config.authRuntimeOwnerRef = "";
+  claim.mockResolvedValue(null);
+  getTask.mockResolvedValue(null);
+  legacyCancel.mockImplementation(() => { throw new Error("Unfenced edge cancellation"); });
+  legacySuccess.mockImplementation(() => { throw new Error("Unfenced edge success"); });
+  legacyRetry.mockImplementation(() => { throw new Error("Unfenced edge retry"); });
+  renew.mockResolvedValue(true);
+  startAttempt.mockResolvedValue(true);
+  finish.mockImplementation(async (task, completion) => ({ status: completion.status, attempt: task.attempt }));
+  requestCancellation.mockImplementation(async task => ({ status: "running", attempt: task.attempt }));
+  recoverCancelled.mockResolvedValue(0);
+  project.mockResolvedValue({ ref: "proj_1", status: "active" } as any);
+  broadcast.mockImplementation(() => {});
+  dispatch.mockResolvedValue({ status: 200, headers: {}, bodyText: "hello", logs: [] });
+  resolveDb.mockResolvedValue("tenant_proj_1");
+  projectDb.mockImplementation(() => (async () => [{ exists: 1 }]) as any);
+  listen.mockImplementation(() => ({ close: closeListener }));
+  createMirror.mockResolvedValue({ inserted: true, userExists: true });
+  removeMirror.mockResolvedValue(true);
+  heartbeatOptions = undefined;
+  startHeartbeat.mockImplementation(options => { heartbeatOptions = options; return stopHeartbeat; });
+});
+afterAll(() => { config.authRuntimeOwnerRef = originalOwner; mock.restore(); });
 
-describe("BackgroundFunctionWorker", () => {
-  const originalFetch = globalThis.fetch;
-
-  beforeEach(() => {
-    claimNextTask.mockReset();
-    cancelTask.mockReset();
-    releaseTask.mockReset();
-    extendLease.mockReset();
-    markTaskRunning.mockReset();
-    markTaskSucceeded.mockReset();
-    markTaskFailed.mockReset();
-    scheduleRetry.mockReset();
-    startTaskAttempt.mockReset();
-    completeTaskAttempt.mockReset();
-    countActiveTasksForProject.mockReset();
-    getTaskById.mockReset();
-    requestTaskCancellation.mockReset();
-    transitionTaskToRunning.mockReset();
-    findByRef.mockReset();
-    broadcastTaskUpdate.mockReset();
-    getBackgroundTaskSettings.mockReset();
-    dispatchBackgroundFunction.mockReset();
-    resolveDbName.mockReset();
-    getProjectDb.mockReset();
-    closePgListener.mockReset();
-    createPgListener.mockReset();
-    createBackgroundTaskMirrorIfUserExists.mockReset();
-    removeBackgroundTaskMirror.mockReset();
-    config.authRuntimeOwnerRef = "";
-
-    // Defaults
-    findByRef.mockResolvedValue({ ref: "proj_1", status: "active" } as any);
-    countActiveTasksForProject.mockResolvedValue(0);
-    getBackgroundTaskSettings.mockResolvedValue({
-      ...DEFAULT_BACKGROUND_TASK_SETTINGS,
-    });
-    dispatchBackgroundFunction.mockResolvedValue({ status: 200, headers: {}, bodyText: "", logs: [] });
-    resolveDbName.mockResolvedValue("tenant_proj_1");
-    getProjectDb.mockImplementation(() => ((async () => [{ exists: 1 }]) as any));
-    createPgListener.mockImplementation(() => ({ close: closePgListener }));
-    createBackgroundTaskMirrorIfUserExists.mockResolvedValue({ inserted: false, userExists: true });
-    removeBackgroundTaskMirror.mockResolvedValue(true);
-    startTaskAttempt.mockResolvedValue({ id: "att_1" } as any);
-    extendLease.mockResolvedValue(null);
-    markTaskRunning.mockResolvedValue(null);
-    transitionTaskToRunning.mockResolvedValue({ task: {} as any, attempt: { id: "att_1" } as any });
-    globalThis.fetch = originalFetch;
+describe("worker lifecycle and notifications", () => {
+  test("starts listener and fallback poll, and closes both on stop", () => {
+    const worker = new BackgroundFunctionWorker();
+    worker.start(60_000);
+    expect((worker as any).isRunning).toBe(true);
+    expect((worker as any).intervalId).toBeDefined();
+    expect(listen).toHaveBeenCalledWith(expect.objectContaining({ channels: ["task_pending", "task_retry_scheduled"] }));
+    worker.stop();
+    expect((worker as any).isRunning).toBe(false);
+    expect((worker as any).intervalId).toBeUndefined();
+    expect(closeListener).toHaveBeenCalledTimes(1);
   });
-
-  afterEach(() => {
-    globalThis.fetch = originalFetch;
+  test("start is idempotent", () => {
+    const worker = new BackgroundFunctionWorker(); worker.start(60_000); worker.start(60_000); worker.stop();
+    expect(listen).toHaveBeenCalledTimes(1);
   });
-
-  describe("start / stop lifecycle", () => {
-    test("start sets isRunning and begins polling", () => {
-      const worker = new BackgroundFunctionWorker();
-      claimNextTask.mockResolvedValue(null);
-      worker.start(60_000); // long interval so no double-poll
-      expect((worker as any).isRunning).toBe(true);
-      expect(createPgListener).toHaveBeenCalledWith(expect.objectContaining({
-        channels: ["task_pending", "task_retry_scheduled"],
-        applicationName: "supacloud-background-function-worker",
-      }));
-      worker.stop();
-      expect((worker as any).isRunning).toBe(false);
-      expect(closePgListener).toHaveBeenCalledTimes(1);
-    });
-
-    test("calling start twice is a no-op", () => {
-      const worker = new BackgroundFunctionWorker();
-      claimNextTask.mockResolvedValue(null);
-      worker.start(60_000);
-      worker.start(60_000);
-      expect((worker as any).isRunning).toBe(true);
-      expect(createPgListener).toHaveBeenCalledTimes(1);
-      worker.stop();
-    });
-
-    test("stop clears the interval", () => {
-      const worker = new BackgroundFunctionWorker();
-      claimNextTask.mockResolvedValue(null);
-      worker.start(60_000);
-      expect((worker as any).intervalId).toBeDefined();
-      worker.stop();
-      expect((worker as any).intervalId).toBeUndefined();
-    });
-
-    test("falls back to interval polling when listener startup fails", () => {
-      const worker = new BackgroundFunctionWorker();
-      createPgListener.mockImplementationOnce(() => {
-        throw new Error("listener unavailable");
-      });
-      claimNextTask.mockResolvedValue(null);
-
-      worker.start(60_000);
-
-      expect((worker as any).isRunning).toBe(true);
-      expect((worker as any).intervalId).toBeDefined();
-      worker.stop();
-    });
+  test("listener failure retains polling", () => {
+    listen.mockImplementationOnce(() => { throw new Error("offline"); });
+    const worker = new BackgroundFunctionWorker(); worker.start(60_000);
+    expect((worker as any).intervalId).toBeDefined(); worker.stop();
   });
-
-  describe("LISTEN/NOTIFY wakeups", () => {
-    test("ignores non-edge task notifications", () => {
-      const worker = new BackgroundFunctionWorker();
-
-      expect((worker as any).isEdgeFunctionNotification(JSON.stringify({
-        task_type: TaskType.PROVISION_DB,
-      }))).toBe(false);
-      expect((worker as any).isEdgeFunctionNotification(JSON.stringify({
-        task_type: TaskType.EDGE_FUNCTION,
-      }))).toBe(true);
-      expect((worker as any).isEdgeFunctionNotification("not json")).toBe(false);
-    });
-
-    test("schedules delayed wakeup from retry notification payload", async () => {
-      const worker = new BackgroundFunctionWorker();
-      const wakeSpy = spyOn(worker as any, "wake").mockImplementation(() => {});
-      (worker as any).isRunning = true;
-
-      (worker as any).scheduleDelayedWakeup(JSON.stringify({
-        task_type: TaskType.EDGE_FUNCTION,
-        next_run_at: new Date(Date.now() - 1).toISOString(),
-      }));
-
-      await new Promise((resolve) => setTimeout(resolve, 5));
-
-      expect(wakeSpy).toHaveBeenCalledTimes(1);
-    });
+  test("filters non-edge and malformed notifications", () => {
+    const worker = new BackgroundFunctionWorker() as any;
+    expect(worker.isEdgeFunctionNotification(JSON.stringify({ task_type: TaskType.PROVISION_DB }))).toBe(false);
+    expect(worker.isEdgeFunctionNotification(JSON.stringify({ task_type: TaskType.EDGE_FUNCTION }))).toBe(true);
+    expect(worker.isEdgeFunctionNotification("invalid")).toBe(false);
   });
-
-  describe("poll: task claiming", () => {
-    test("when claimNextTask returns null, does not call execute", async () => {
-      const worker = new BackgroundFunctionWorker();
-      (worker as any).isRunning = true; // poll() guards on this
-      claimNextTask.mockResolvedValue(null);
-
-      await (worker as any).poll();
-
-      expect(claimNextTask).toHaveBeenCalledTimes(1);
-      expect(claimNextTask).toHaveBeenCalledWith(expect.objectContaining({
-        concurrencyByProject: expect.any(Number),
-      }));
-      expect(claimNextTask.mock.calls[0][0].concurrencyByProject).toBeLessThanOrEqual(
-        DEFAULT_BACKGROUND_TASK_SETTINGS.concurrency,
-      );
-      expect(markTaskRunning).not.toHaveBeenCalled();
-    });
-
-    test("cancels task when project not found", async () => {
-      const worker = new BackgroundFunctionWorker();
-      (worker as any).isRunning = true;
-      const task = makeTask();
-      claimNextTask
-        .mockResolvedValueOnce(task)
-        .mockResolvedValueOnce(null);
-      findByRef.mockResolvedValue(null);
-
-      await (worker as any).poll();
-
-      expect(cancelTask).toHaveBeenCalledWith(task.id, "Project not found");
-    });
-
-    test("cancels task when project is paused", async () => {
-      const worker = new BackgroundFunctionWorker();
-      (worker as any).isRunning = true;
-      const task = makeTask();
-      claimNextTask
-        .mockResolvedValueOnce(task)
-        .mockResolvedValueOnce(null);
-      findByRef.mockResolvedValue({ ref: "proj_1", status: "paused" } as any);
-
-      await (worker as any).poll();
-
-      expect(cancelTask).toHaveBeenCalledWith(task.id, "Project is paused");
-    });
-
-    test("starts the next claimed task without waiting for the previous one to finish", async () => {
-      const worker = new BackgroundFunctionWorker();
-      (worker as any).isRunning = true;
-      const firstTask = makeTask({ id: "tsk_1" });
-      const secondTask = makeTask({ id: "tsk_2" });
-      const firstTaskStarted = deferred();
-      const releaseFirstTask = deferred();
-      const startedTaskIds: string[] = [];
-
-      claimNextTask
-        .mockResolvedValueOnce(firstTask)
-        .mockResolvedValueOnce(secondTask)
-        .mockResolvedValueOnce(null);
-      extendLease.mockResolvedValue({} as any);
-      dispatchBackgroundFunction.mockImplementation(async ({ request }) => {
-        const taskId = request.headers.get("x-supacloud-task-id") || "";
-        startedTaskIds.push(taskId);
-        if (taskId === firstTask.id) {
-          firstTaskStarted.resolve();
-          await releaseFirstTask.promise;
-        }
-        return { status: 200, headers: {}, bodyText: "", logs: [] };
-      });
-
-      const pollPromise = (worker as any).poll();
-      await firstTaskStarted.promise;
-
-      try {
-        await waitUntil(() => startedTaskIds.includes(secondTask.id));
-        expect(claimNextTask).toHaveBeenCalledTimes(3);
-        expect(startedTaskIds).toContain(firstTask.id);
-        expect(startedTaskIds).toContain(secondTask.id);
-      } finally {
-        releaseFirstTask.resolve();
-        await pollPromise;
-        await waitUntil(() => markTaskSucceeded.mock.calls.length >= 2);
-      }
-    });
-
+  test("retry notifications schedule a delayed wake", async () => {
+    const worker = new BackgroundFunctionWorker() as any;
+    const wake = spyOn(worker, "wake").mockImplementation(() => {}); worker.isRunning = true;
+    worker.scheduleDelayedWakeup(JSON.stringify({ next_run_at: new Date(0).toISOString() }));
+    await until(() => wake.mock.calls.length === 1); worker.stop(); wake.mockRestore();
   });
-
-  describe("cancel", () => {
-    test("cancel immediately cancels pending tasks", async () => {
-      const worker = new BackgroundFunctionWorker();
-      getTaskById.mockResolvedValueOnce(makeTask({ status: TaskStatus.PENDING }));
-      requestTaskCancellation.mockResolvedValueOnce(makeTask({ status: TaskStatus.PENDING }));
-      cancelTask.mockResolvedValueOnce(makeTask({ status: TaskStatus.CANCELLED }));
-
-      await worker.cancel("tsk_cancel_me");
-
-      expect(requestTaskCancellation).toHaveBeenCalledWith("tsk_cancel_me", "Cancelled by user");
-      expect(cancelTask).toHaveBeenCalledWith("tsk_cancel_me", "Cancelled by user");
-    });
-
-    test("cancel returns true when runtime confirms cancellation", async () => {
-      const worker = new BackgroundFunctionWorker();
-      getTaskById.mockResolvedValueOnce(makeTask({ status: TaskStatus.RUNNING }));
-      requestTaskCancellation.mockResolvedValueOnce(makeTask({ status: TaskStatus.RUNNING }));
-
-      globalThis.fetch = mock(() =>
-        Promise.resolve(
-          new Response(JSON.stringify({ cancelled: true }), { status: 200 })
-        )
-      ) as any;
-
-      const result = await worker.cancel("tsk_cancel_ok");
-      expect(result).toBe(true);
-      expect((worker as any).cancelledTasks.has("tsk_cancel_ok")).toBe(true);
-    });
-
-    test("cancel returns false when fetch fails", async () => {
-      const worker = new BackgroundFunctionWorker();
-      getTaskById.mockResolvedValueOnce(makeTask({ status: TaskStatus.RUNNING }));
-      requestTaskCancellation.mockResolvedValueOnce(makeTask({ status: TaskStatus.RUNNING }));
-
-      globalThis.fetch = mock(() =>
-        Promise.reject(new Error("network error"))
-      ) as any;
-
-      const result = await worker.cancel("tsk_net_fail");
-      expect(result).toBe(false);
-    });
+  test("empty poll checks cancellation recovery and preserves concurrency settings", async () => {
+    const worker = new BackgroundFunctionWorker() as any; worker.isRunning = true;
+    await worker.poll(); worker.stop();
+    expect(recoverCancelled).toHaveBeenCalledTimes(1);
+    expect(claim).toHaveBeenCalledTimes(1);
+    expect(claim.mock.calls[0][0].concurrencyByProject).toBeLessThanOrEqual(DEFAULT_BACKGROUND_TASK_SETTINGS.concurrency);
+    expect(dispatch).not.toHaveBeenCalled();
   });
-
-  describe("background invoker integrity", () => {
-    test("dead-letters without dispatching when the invoker user was deleted", async () => {
-      const worker = new BackgroundFunctionWorker();
-      const task = makeTask({
-        id: "tsk_deleted_invoker",
-        payload: {
-          method: "POST",
-          path: "/generate/pattern",
-          query: "",
-          headers: {},
-          body: "{}",
-          auth: {
-            kind: "jwt",
-            invoker_user_id: "00000000-0000-4000-8000-000000000001",
-            invoker_role: "authenticated",
-          },
-        },
-      });
-      extendLease.mockResolvedValue({} as any);
-      getProjectDb.mockImplementation(() => ((async () => []) as any));
-
-      await (worker as any).execute(task);
-
-      expect(resolveDbName).toHaveBeenCalledWith("proj_1");
-      expect(dispatchBackgroundFunction).not.toHaveBeenCalled();
-      expect(completeTaskAttempt).toHaveBeenCalledWith("tsk_deleted_invoker", 1, expect.objectContaining({
-        status: "dead_lettered",
-        error: "Background invoker user no longer exists",
-        responseStatus: 410,
-      }));
-      expect(markTaskFailed).toHaveBeenCalledWith(
-        "tsk_deleted_invoker",
-        "Background invoker user no longer exists",
-        true,
-      );
-    });
-
-    test("retries without dispatching when invoker state cannot be read", async () => {
-      const worker = new BackgroundFunctionWorker();
-      const task = makeTask({
-        id: "tsk_invoker_unknown",
-        payload: {
-          method: "POST", path: "/", query: "", headers: {}, body: null,
-          auth: {
-            kind: "jwt",
-            invoker_user_id: "00000000-0000-4000-8000-000000000011",
-            invoker_role: "authenticated",
-          },
-        },
-      });
-      extendLease.mockResolvedValue({} as any);
-      getProjectDb.mockImplementation(() => ((async () => {
-        throw new Error("tenant database unavailable");
-      }) as any));
-
-      await (worker as any).execute(task);
-
-      expect(scheduleRetry).toHaveBeenCalledWith(
-        "tsk_invoker_unknown",
-        expect.stringContaining("Background invoker state is unavailable"),
-        expect.any(Date),
-      );
-      expect(transitionTaskToRunning).not.toHaveBeenCalled();
-      expect(dispatchBackgroundFunction).not.toHaveBeenCalled();
-    });
-
-    test("treats an ambiguous mirror write as evidence-only and cleans it idempotently", async () => {
-      const worker = new BackgroundFunctionWorker();
-      const task = makeTask({
-        id: "tsk_mirror_unavailable",
-        payload: {
-          method: "POST", path: "/", query: "", headers: {}, body: null,
-          auth: {
-            kind: "jwt",
-            invoker_user_id: "00000000-0000-4000-8000-000000000012",
-            invoker_role: "authenticated",
-          },
-        },
-      });
-      extendLease.mockResolvedValue({} as any);
-      getProjectDb.mockImplementation(() => ((async () => [{ exists: 1 }]) as any));
-      createBackgroundTaskMirrorIfUserExists.mockResolvedValue({
-        inserted: false,
-        userExists: true,
-        degraded: true,
-      });
-
-      await (worker as any).execute(task);
-
-      expect(scheduleRetry).not.toHaveBeenCalled();
-      expect(transitionTaskToRunning).toHaveBeenCalled();
-      expect(dispatchBackgroundFunction).toHaveBeenCalled();
-      expect(removeBackgroundTaskMirror).toHaveBeenCalledWith(task);
-    });
-
-    test("dead-letters when the lifecycle fence rejects the running transition", async () => {
-      const worker = new BackgroundFunctionWorker();
-      const task = makeTask({
-        id: "tsk_deletion_fenced",
-        payload: {
-          method: "POST", path: "/", query: "", headers: {}, body: null,
-          auth: {
-            kind: "jwt",
-            invoker_user_id: "00000000-0000-4000-8000-000000000013",
-            invoker_role: "authenticated",
-          },
-        },
-      });
-      extendLease.mockResolvedValue({} as any);
-      getProjectDb.mockImplementation(() => ((async () => [{ exists: 1 }]) as any));
-      transitionTaskToRunning.mockRejectedValueOnce(new Error("USER_DELETION_FENCED"));
-
-      await (worker as any).execute(task);
-
-      expect(markTaskFailed).toHaveBeenCalledWith(
-        "tsk_deletion_fenced",
-        "USER_DELETION_FENCED",
-        true,
-      );
-      expect(dispatchBackgroundFunction).not.toHaveBeenCalled();
-    });
-
-    test("does not dispatch when the invoker is deleted between preflight and the final gate", async () => {
-      const worker = new BackgroundFunctionWorker();
-      const task = makeTask({
-        id: "tsk_deleted_during_preflight",
-        payload: {
-          method: "POST", path: "/", query: "", headers: {}, body: null,
-          auth: {
-            kind: "jwt",
-            invoker_user_id: "00000000-0000-4000-8000-000000000014",
-            invoker_role: "authenticated",
-          },
-        },
-      });
-      let invokerRead = 0;
-      extendLease.mockResolvedValue({} as any);
-      getProjectDb.mockImplementation(() => ((async () => {
-        invokerRead += 1;
-        return invokerRead === 1 ? [{ exists: 1 }] : [];
-      }) as any));
-
-      await (worker as any).execute(task);
-
-      expect(transitionTaskToRunning).toHaveBeenCalled();
-      expect(markTaskFailed).toHaveBeenCalledWith(
-        "tsk_deleted_during_preflight",
-        "Background invoker user no longer exists",
-        true,
-      );
-      expect(dispatchBackgroundFunction).not.toHaveBeenCalled();
-    });
-
-    test("uses the shared authority DB and rejects a deleted owner user despite a child residue", async () => {
-      config.authRuntimeOwnerRef = "auth-owner";
-      const userId = "00000000-0000-4000-8000-000000000015";
-      const worker = new BackgroundFunctionWorker();
-      const task = makeTask({
-        id: "tsk_shared_owner_deleted",
-        auth_authority_ref: "auth-owner",
-        invoker_user_id: userId,
-        payload: {
-          method: "POST", path: "/", query: "", headers: {}, body: null,
-          auth: {
-            kind: "jwt",
-            invoker_user_id: userId,
-            invoker_role: "authenticated",
-          },
-        },
-      });
-      extendLease.mockResolvedValue({} as any);
-      resolveDbName.mockImplementation(async (ref: string) => `tenant_${ref}`);
-      getProjectDb.mockImplementation((dbName: string) => ((async () => (
-        dbName === "tenant_auth-owner" ? [] : [{ exists: 1 }]
-      )) as any));
-
-      await (worker as any).execute(task);
-
-      expect(resolveDbName).toHaveBeenCalledWith("auth-owner");
-      expect(resolveDbName).not.toHaveBeenCalledWith("proj_1");
-      expect(markTaskFailed).toHaveBeenCalledWith(
-        "tsk_shared_owner_deleted",
-        "Background invoker user no longer exists",
-        true,
-      );
-      expect(dispatchBackgroundFunction).not.toHaveBeenCalled();
-    });
-
-    test("allows a shared-authority user even when the child auth database is empty", async () => {
-      config.authRuntimeOwnerRef = "auth-owner";
-      const userId = "00000000-0000-4000-8000-000000000016";
-      const worker = new BackgroundFunctionWorker();
-      const task = makeTask({
-        id: "tsk_shared_owner_active",
-        auth_authority_ref: "auth-owner",
-        invoker_user_id: userId,
-        payload: {
-          method: "POST", path: "/", query: "", headers: {}, body: null,
-          auth: {
-            kind: "jwt",
-            invoker_user_id: userId,
-            invoker_role: "authenticated",
-          },
-        },
-      });
-      extendLease.mockResolvedValue({} as any);
-      resolveDbName.mockImplementation(async (ref: string) => `tenant_${ref}`);
-      getProjectDb.mockImplementation((dbName: string) => ((async () => (
-        dbName === "tenant_auth-owner" ? [{ exists: 1 }] : []
-      )) as any));
-
-      await (worker as any).execute(task);
-
-      expect(resolveDbName.mock.calls.every(([ref]) => ref === "auth-owner")).toBe(true);
-      expect(transitionTaskToRunning).toHaveBeenCalled();
-      expect(dispatchBackgroundFunction).toHaveBeenCalled();
-    });
-
-    for (const [caseName, payloadUserId] of [
-      ["missing", undefined],
-      ["non-string", 42],
-      ["mismatched", "00000000-0000-4000-8000-000000000099"],
-    ] as const) {
-      test(`dead-letters a ${caseName} payload invoker when the authoritative column is set`, async () => {
-        const worker = new BackgroundFunctionWorker();
-        const task = makeTask({
-          id: `tsk_invoker_${caseName}`,
-          invoker_user_id: "00000000-0000-4000-8000-000000000017",
-          payload: {
-            method: "POST", path: "/", query: "", headers: {}, body: null,
-            auth: { kind: "jwt", invoker_user_id: payloadUserId as never },
-          },
-        });
-        extendLease.mockResolvedValue({} as any);
-
-        await (worker as any).execute(task);
-
-        expect(markTaskFailed).toHaveBeenCalledWith(
-          `tsk_invoker_${caseName}`,
-          "Background task invoker identity is inconsistent",
-          true,
-        );
-        expect(dispatchBackgroundFunction).not.toHaveBeenCalled();
-      });
-    }
-
-    test("fails closed when a queued task authority no longer matches runtime policy", async () => {
-      config.authRuntimeOwnerRef = "auth-owner-new";
-      const worker = new BackgroundFunctionWorker();
-      const userId = "00000000-0000-4000-8000-000000000018";
-      const task = makeTask({
-        id: "tsk_stale_auth_authority",
-        auth_authority_ref: "auth-owner-old",
-        invoker_user_id: userId,
-        payload: {
-          method: "POST", path: "/", query: "", headers: {}, body: null,
-          auth: { kind: "jwt", invoker_user_id: userId },
-        },
-      });
-      extendLease.mockResolvedValue({} as any);
-
-      await (worker as any).execute(task);
-
-      expect(markTaskFailed).toHaveBeenCalledWith(
-        "tsk_stale_auth_authority",
-        "Background task auth authority is inconsistent",
-        true,
-      );
-      expect(resolveDbName).not.toHaveBeenCalled();
-      expect(dispatchBackgroundFunction).not.toHaveBeenCalled();
-    });
+  for (const state of [null, "paused"] as const) test(`disabled project ${state} uses fenced finalization`, async () => {
+    const worker = new BackgroundFunctionWorker() as any; worker.isRunning = true;
+    const task = makeTask(); claim.mockResolvedValueOnce(task);
+    project.mockResolvedValue(state ? { ref: "proj_1", status: state } as any : null);
+    await worker.poll(); worker.stop();
+    expect(finish).toHaveBeenCalledWith(task, expect.objectContaining({ status: "cancelled" }));
+    expect(legacyCancel).not.toHaveBeenCalled();
   });
-
-  describe("invoker existence checks", () => {
-    test("rechecks positive invoker existence for every task", async () => {
-      const worker = new BackgroundFunctionWorker();
-      const userId = "00000000-0000-4000-8000-000000000002";
-      const task1 = makeTask({
-        id: "tsk_cache_1",
-        payload: {
-          method: "POST", path: "/", query: "", headers: {}, body: null,
-          auth: { kind: "jwt", invoker_user_id: userId, invoker_role: "authenticated" },
-        },
-      });
-      const task2 = makeTask({
-        id: "tsk_cache_2",
-        payload: {
-          method: "POST", path: "/", query: "", headers: {}, body: null,
-          auth: { kind: "jwt", invoker_user_id: userId, invoker_role: "authenticated" },
-        },
-      });
-
-      extendLease.mockResolvedValue({} as any);
-      getProjectDb.mockImplementation(() => ((async () => [{ exists: 1 }]) as any));
-
-      await (worker as any).execute(task1);
-      const firstCallCount = resolveDbName.mock.calls.length;
-      await (worker as any).execute(task2);
-
-      expect(resolveDbName.mock.calls.length).toBe(firstCallCount + 2);
+  test("a slow task does not block dispatching the next claim", async () => {
+    const worker = new BackgroundFunctionWorker() as any; worker.isRunning = true;
+    const first = makeTask(), second = makeTask({ id: "tsk_2" });
+    const release = deferred(); const seen: string[] = [];
+    claim.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    dispatch.mockImplementation(async ({ request }) => {
+      const id = request.headers.get("x-supacloud-task-id")!; seen.push(id);
+      if (id === first.id) await release.promise;
+      return { status: 200, headers: {}, bodyText: "", logs: [] };
     });
-
-    test("does not let a mirror result override the final authoritative GoTrue read", async () => {
-      const worker = new BackgroundFunctionWorker();
-      const task = makeTask({
-        id: "tsk_mirror_dead",
-        payload: {
-          method: "POST", path: "/", query: "", headers: {}, body: null,
-          auth: { kind: "jwt", invoker_user_id: "00000000-0000-4000-8000-000000000003", invoker_role: "authenticated" },
-        },
-      });
-      extendLease.mockResolvedValue({} as any);
-      getProjectDb.mockImplementation(() => ((async () => [{ exists: 1 }]) as any));
-      createBackgroundTaskMirrorIfUserExists.mockResolvedValue({ inserted: false, userExists: false });
-
-      await (worker as any).execute(task);
-
-      expect(markTaskFailed).not.toHaveBeenCalled();
-      expect(dispatchBackgroundFunction).toHaveBeenCalled();
-    });
-
-    test("removes recorded mirror evidence after a terminal attempt", async () => {
-      const worker = new BackgroundFunctionWorker();
-      const task = makeTask({
-        id: "tsk_mirror_cleanup",
-        payload: {
-          method: "POST", path: "/", query: "", headers: {}, body: null,
-          auth: {
-            kind: "jwt",
-            invoker_user_id: "00000000-0000-4000-8000-000000000004",
-            invoker_role: "authenticated",
-          },
-        },
-      });
-      extendLease.mockResolvedValue({} as any);
-      getProjectDb.mockImplementation(() => ((async () => [{ exists: 1 }]) as any));
-      createBackgroundTaskMirrorIfUserExists.mockResolvedValue({ inserted: true, userExists: true });
-
-      await (worker as any).execute(task);
-
-      expect(removeBackgroundTaskMirror).toHaveBeenCalledWith(task);
-    });
-  });
-
-  describe("background invocation contract", () => {
-    test("buildInvocationRequest signs trusted background invoker headers", async () => {
-      const request = buildInvocationRequest(makeTask({
-        id: "tsk_signed",
-        project_ref: "proj_1",
-        function_slug: "my-function",
-        attempt: 2,
-        payload: {
-          method: "POST",
-          path: "/work",
-          query: "?a=1",
-          headers: {},
-          body: null,
-          auth: {
-            kind: "jwt",
-            invoker_user_id: "user_1",
-            invoker_role: "authenticated",
-          },
-        },
-      }));
-
-      expect(request.url).toContain("/internal/background/proj_1/my-function/work?a=1");
-      expect(request.headers.get("x-supacloud-background")).toBe("true");
-      expect(request.headers.get("x-supacloud-task-id")).toBe("tsk_signed");
-      expect(request.headers.get("x-supacloud-attempt")).toBe("2");
-      expect(request.headers.get("x-supacloud-invoker-user-id")).toBe("user_1");
-      expect(request.headers.get("x-supacloud-invoker-role")).toBe("authenticated");
-      expect(request.headers.get("x-supacloud-signature-version")).toBe("v1");
-      expect(request.headers.get("x-supacloud-signature-timestamp")).toBeTruthy();
-      expect(request.headers.get("x-supacloud-signature")).toMatch(/^[a-f0-9]{64}$/);
-    });
-
+    const polling = worker.poll();
+    try { await until(() => seen.length === 2); expect(claim).toHaveBeenCalledTimes(3); }
+    finally { release.resolve(); await polling; await until(() => finish.mock.calls.length === 2); worker.stop(); }
   });
 });
 
-// ─── Pure function tests (exported helpers) ─────────────────────────────────
-
-describe("BackgroundFunctionWorker pure helpers", () => {
-  // These are module-private functions. We test them via the module's internal
-  // behavior (tested above) but also re-implement the logic here for coverage.
-
-  describe("computeRetryDelayMs logic", () => {
-    test("attempt 1 gives base delay (5s)", () => {
-      // base * 2^(attempt-1) = 5000 * 2^0 = 5000
-      const delay = 5_000 * Math.pow(2, Math.min(Math.max(1, 1), 6) - 1);
-      expect(delay).toBe(5_000);
-    });
-
-    test("attempt 3 gives 20s", () => {
-      const delay = 5_000 * Math.pow(2, Math.min(Math.max(3, 1), 6) - 1);
-      expect(delay).toBe(20_000);
-    });
-
-    test("attempt 6 caps at 160s", () => {
-      const delay = 5_000 * Math.pow(2, Math.min(Math.max(6, 1), 6) - 1);
-      expect(delay).toBe(160_000);
-    });
-
-    test("attempt > 6 is capped the same as 6", () => {
-      const delay10 = 5_000 * Math.pow(2, Math.min(Math.max(10, 1), 6) - 1);
-      const delay6 = 5_000 * Math.pow(2, Math.min(Math.max(6, 1), 6) - 1);
-      expect(delay10).toBe(delay6);
-    });
+describe("attempt fencing and completion", () => {
+  test("lost initial lease never dispatches or broadcasts a false cancellation", async () => {
+    renew.mockResolvedValue(false); await execute(new BackgroundFunctionWorker(), makeTask());
+    expect(startAttempt).not.toHaveBeenCalled(); expect(dispatch).not.toHaveBeenCalled(); expect(broadcast).not.toHaveBeenCalled();
   });
-
-  describe("computeLeaseSeconds logic", () => {
-    test("default timeout (null) gives 330s lease", () => {
-      const timeout = null;
-      const t = (timeout && timeout > 0) ? timeout : 300;
-      const lease = Math.min(Math.max(t + 30, 60), 1800);
-      expect(lease).toBe(330);
+  test("a duplicate/stale start never dispatches or finalizes another invocation", async () => {
+    startAttempt.mockResolvedValue(false); await execute(new BackgroundFunctionWorker(), makeTask());
+    expect(dispatch).not.toHaveBeenCalled(); expect(finish).not.toHaveBeenCalled(); expect(removeMirror).not.toHaveBeenCalled();
+  });
+  test("success is committed once with its attempt history", async () => {
+    const task = makeTask({ attempt: 2 }); await execute(new BackgroundFunctionWorker(), task);
+    expect(finish).toHaveBeenCalledTimes(1);
+    expect(finish).toHaveBeenCalledWith(task, expect.objectContaining({ status: "succeeded", result: expect.objectContaining({ body: "hello" }) }));
+    expect(legacySuccess).not.toHaveBeenCalled(); expect(legacyRetry).not.toHaveBeenCalled();
+    expect(stopHeartbeat).toHaveBeenCalled();
+  });
+  test("stale success is not broadcast", async () => {
+    finish.mockResolvedValue(null); await execute(new BackgroundFunctionWorker(), makeTask());
+    expect(broadcast.mock.calls.some(([value]) => value.status === TaskStatus.SUCCEEDED)).toBe(false);
+  });
+  test("cancelled receipt wins over provider success", async () => {
+    finish.mockResolvedValue({ status: "cancelled", attempt: 1 }); await execute(new BackgroundFunctionWorker(), makeTask());
+    expect(broadcast.mock.calls.at(-1)?.[0].status).toBe(TaskStatus.CANCELLED);
+    expect(broadcast.mock.calls.some(([value]) => value.status === TaskStatus.SUCCEEDED)).toBe(false);
+  });
+  test("an uncertain COMMIT is not reinterpreted as an invocation failure", async () => {
+    finish.mockRejectedValue(new Error("commit acknowledgement lost"));
+    await expect(execute(new BackgroundFunctionWorker(), makeTask())).rejects.toThrow("commit acknowledgement lost");
+    expect(finish).toHaveBeenCalledTimes(1); expect(legacyRetry).not.toHaveBeenCalled(); expect(stopHeartbeat).toHaveBeenCalled();
+    expect(removeMirror).not.toHaveBeenCalled();
+  });
+  for (const [attempt, outcome] of [[1, "retry_scheduled"], [3, "dead_lettered"]] as const) test(`HTTP failure attempt ${attempt} retains retry/DLQ policy`, async () => {
+    dispatch.mockResolvedValue({ status: 503, headers: {}, bodyText: "", logs: [] });
+    await execute(new BackgroundFunctionWorker(), makeTask({ attempt }));
+    expect(finish.mock.calls[0][1]).toMatchObject({ status: outcome, responseStatus: 503 });
+    if (attempt === 1) expect(finish.mock.calls[0][1].nextRunAt).toBeInstanceOf(Date);
+  });
+  test("HTTP 499 commits cancellation", async () => {
+    dispatch.mockResolvedValue({ status: 499, headers: {}, bodyText: "", logs: [] });
+    await execute(new BackgroundFunctionWorker(), makeTask());
+    expect(finish.mock.calls[0][1].status).toBe("cancelled");
+  });
+  test("lease verification failure aborts only the bound request and does not auto-retry an unknown outcome", async () => {
+    dispatch.mockImplementation(async ({ request }) => {
+      heartbeatOptions!.onLost(new Error("database offline"));
+      expect(request.signal.aborted).toBe(true); throw request.signal.reason;
     });
-
-    test("small timeout (10s) gives 60s minimum lease", () => {
-      const t = 10;
-      const lease = Math.min(Math.max(t + 30, 60), 1800);
-      expect(lease).toBe(60);
-    });
-
-    test("large timeout (1800s) caps at 1800s", () => {
-      const t = 1800;
-      const lease = Math.min(Math.max(t + 30, 60), 1800);
-      expect(lease).toBe(1800);
-    });
-
-    test("normal timeout (300s) gives 330s", () => {
-      const t = 300;
-      const lease = Math.min(Math.max(t + 30, 60), 1800);
-      expect(lease).toBe(330);
-    });
+    await execute(new BackgroundFunctionWorker(), makeTask());
+    expect(finish.mock.calls[0][1].status).toBe("dead_lettered");
+    expect(finish.mock.calls[0][1].nextRunAt).toBeUndefined();
   });
 });
 
-describe("BackgroundFunctionWorker safety contract", () => {
-  const workerSource = readFileSync(
-    new URL("../../src/services/background-function-worker.ts", import.meta.url),
-    "utf8",
-  );
-
-  test("has no positive invoker cache or fail-open authorization path", () => {
-    expect(workerSource).not.toContain("invokerCache");
-    expect(workerSource).not.toContain("invokerInflight");
-    expect(workerSource).not.toContain("assume user exists");
-    expect(workerSource).toContain("safety circuit is open");
-    expect(workerSource).toContain("throw new RetryableBackgroundInvocationError");
+describe("durable cancellation", () => {
+  test("queued cancellation is a single atomic operation", async () => {
+    const task = makeTask({ status: TaskStatus.PENDING, attempt: 0 }); getTask.mockResolvedValue(task);
+    requestCancellation.mockResolvedValue({ status: "cancelled", attempt: 0 });
+    expect(await new BackgroundFunctionWorker().cancel(task.id)).toBe(true);
+    expect(requestCancellation).toHaveBeenCalledWith(task); expect(legacyCancel).not.toHaveBeenCalled();
   });
-
-  test("does not parallelize authorization, mirror, and running transition", () => {
-    const executeSource = workerSource.slice(
-      workerSource.indexOf("private async execute"),
-      workerSource.indexOf("async cancel("),
-    );
-    expect(executeSource).not.toContain("Promise.all(");
-    expect(executeSource.indexOf("assertBackgroundInvokerUserExists(task)")).toBeLessThan(
-      executeSource.indexOf("createBackgroundTaskMirrorIfUserExists(task)"),
-    );
-    expect(executeSource.indexOf("createBackgroundTaskMirrorIfUserExists(task)")).toBeLessThan(
-      executeSource.indexOf("transitionTaskToRunning(task.id"),
-    );
-    expect(executeSource.lastIndexOf("assertBackgroundInvokerUserExists(task)")).toBeGreaterThan(
-      executeSource.indexOf("transitionTaskToRunning(task.id"),
-    );
+  test("remote-worker cancellation acknowledges the stored flag, not runtime termination", async () => {
+    getTask.mockResolvedValue(makeTask({ status: TaskStatus.RUNNING }));
+    expect(await new BackgroundFunctionWorker().cancel("tsk_1")).toBe(true);
+    expect(requestCancellation).toHaveBeenCalledTimes(1);
+  });
+  test("missing or already completed tasks cannot be cancelled", async () => {
+    const worker = new BackgroundFunctionWorker(); expect(await worker.cancel("missing")).toBe(false);
+    getTask.mockResolvedValue(makeTask({ status: TaskStatus.SUCCEEDED })); requestCancellation.mockResolvedValue(null);
+    expect(await worker.cancel("tsk_1")).toBe(false);
+  });
+  test("local cancellation propagates to the actual request signal", async () => {
+    const task = makeTask(); getTask.mockResolvedValue(task);
+    const worker = new BackgroundFunctionWorker();
+    dispatch.mockImplementation(async ({ request }) => {
+      expect(await worker.cancel(task.id)).toBe(true); expect(request.signal.aborted).toBe(true);
+      throw request.signal.reason;
+    });
+    finish.mockResolvedValue({ status: "cancelled", attempt: 1 });
+    await execute(worker, task); expect((worker as any).activeAttempts.size).toBe(0);
+  });
+  test("a delayed cancellation for an old attempt cannot abort a newer local attempt", async () => {
+    const task = makeTask(); getTask.mockResolvedValue(task); const worker = new BackgroundFunctionWorker() as any;
+    const newer = new AbortController(); worker.activeAttempts.set(task.id, { attempt: 2, controller: newer });
+    await worker.cancel(task.id); expect(newer.signal.aborted).toBe(false);
   });
 });
 
-  describe("invoker unknown circuit breaker", () => {
-    test("getInvokerUnknownMetrics returns structured object", async () => {
-      const { getInvokerUnknownMetrics } = await import(
-        "../../src/services/background-function-worker"
-      );
-      const metrics = getInvokerUnknownMetrics();
-      expect(metrics).toHaveProperty("unknown_window_count");
-      expect(metrics).toHaveProperty("circuit_open");
-      expect(metrics).toHaveProperty("circuit_open_until");
-      expect(typeof metrics.unknown_window_count).toBe("number");
-      expect(typeof metrics.circuit_open).toBe("boolean");
-      expect(typeof metrics.circuit_open_until).toBe("number");
-    });
-
-    test("circuit breaker starts closed", async () => {
-      const { getInvokerUnknownMetrics } = await import(
-        "../../src/services/background-function-worker"
-      );
-      const metrics = getInvokerUnknownMetrics();
-      expect(metrics.circuit_open).toBe(false);
-      expect(metrics.unknown_window_count).toBeGreaterThanOrEqual(0);
-    });
+describe("authoritative invoker and mirror integrity", () => {
+  test("deleted invoker is dead-lettered before dispatch", async () => {
+    projectDb.mockImplementation(() => (async () => []) as any);
+    await execute(new BackgroundFunctionWorker(), userTask());
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(finish.mock.calls[0][1]).toMatchObject({ status: "dead_lettered", responseStatus: 410, error: "Background invoker user no longer exists" });
   });
+  test("unknown invoker database state retries only before dispatch", async () => {
+    projectDb.mockImplementation(() => (async () => { throw new Error("offline"); }) as any);
+    await execute(new BackgroundFunctionWorker(), userTask());
+    expect(finish.mock.calls[0][1].status).toBe("retry_scheduled"); expect(startAttempt).not.toHaveBeenCalled(); expect(dispatch).not.toHaveBeenCalled();
+  });
+  test("degraded mirror does not replace the authoritative read", async () => {
+    const task = userTask(); createMirror.mockResolvedValue({ inserted: false, userExists: true, degraded: true });
+    await execute(new BackgroundFunctionWorker(), task);
+    expect(startAttempt).toHaveBeenCalled(); expect(dispatch).toHaveBeenCalled(); expect(removeMirror).toHaveBeenCalledWith(task);
+  });
+  test("running-transition user deletion fence dead-letters without dispatch", async () => {
+    startAttempt.mockRejectedValue(new Error("USER_DELETION_FENCED")); await execute(new BackgroundFunctionWorker(), userTask());
+    expect(finish.mock.calls[0][1]).toMatchObject({ status: "dead_lettered", error: "USER_DELETION_FENCED" }); expect(dispatch).not.toHaveBeenCalled();
+  });
+  test("deletion between preflight and the final gate prevents dispatch", async () => {
+    let reads = 0; projectDb.mockImplementation(() => (async () => ++reads === 1 ? [{ exists: 1 }] : []) as any);
+    await execute(new BackgroundFunctionWorker(), userTask());
+    expect(startAttempt).toHaveBeenCalled(); expect(dispatch).not.toHaveBeenCalled(); expect(finish.mock.calls[0][1].responseStatus).toBe(410);
+  });
+  for (const ownerExists of [false, true]) test(`shared authority is used even when child residue disagrees (${ownerExists})`, async () => {
+    config.authRuntimeOwnerRef = "auth-owner";
+    const task = userTask({ auth_authority_ref: "auth-owner", invoker_user_id: "00000000-0000-4000-8000-000000000001" });
+    resolveDb.mockImplementation(async ref => `tenant_${ref}`);
+    projectDb.mockImplementation(name => (async () => name === "tenant_auth-owner" ? (ownerExists ? [{}] : []) : (ownerExists ? [] : [{}])) as any);
+    await execute(new BackgroundFunctionWorker(), task);
+    expect(resolveDb.mock.calls.every(([ref]) => ref === "auth-owner")).toBe(true);
+    expect(dispatch.mock.calls.length).toBe(ownerExists ? 1 : 0);
+  });
+  for (const payloadUserId of [undefined, 42, "00000000-0000-4000-8000-000000000099"]) test(`invalid authoritative invoker pairing ${payloadUserId}`, async () => {
+    await execute(new BackgroundFunctionWorker(), makeTask({ invoker_user_id: "00000000-0000-4000-8000-000000000001",
+      payload: { auth: { kind: "jwt", invoker_user_id: payloadUserId } } }));
+    expect(finish.mock.calls[0][1]).toMatchObject({ status: "dead_lettered", error: "Background task invoker identity is inconsistent" });
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+  test("changed runtime authority fails closed", async () => {
+    config.authRuntimeOwnerRef = "new-owner"; await execute(new BackgroundFunctionWorker(), userTask({ auth_authority_ref: "old-owner" }));
+    expect(finish.mock.calls[0][1].error).toBe("Background task auth authority is inconsistent"); expect(resolveDb).not.toHaveBeenCalled();
+  });
+  test("positive invoker existence is rechecked twice for every task", async () => {
+    const worker = new BackgroundFunctionWorker(); await execute(worker, userTask()); const reads = resolveDb.mock.calls.length;
+    await execute(worker, userTask({ id: "tsk_2" })); expect(resolveDb.mock.calls.length).toBe(reads + 2);
+  });
+  test("negative mirror hint cannot override the direct GoTrue read", async () => {
+    createMirror.mockResolvedValue({ inserted: false, userExists: false }); await execute(new BackgroundFunctionWorker(), userTask());
+    expect(dispatch).toHaveBeenCalled(); expect(finish.mock.calls[0][1].status).toBe("succeeded");
+  });
+  test("cleanup always carries the original task and attempt", async () => {
+    const task = userTask({ attempt: 2 }); await execute(new BackgroundFunctionWorker(), task); expect(removeMirror).toHaveBeenCalledWith(task);
+  });
+});
 
-afterAll(() => {
-  config.authRuntimeOwnerRef = originalAuthRuntimeOwnerRef;
-  mock.restore();
+describe("invocation and production helpers", () => {
+  test("signs trusted headers and forwards the abort signal", () => {
+    const controller = new AbortController();
+    const request = buildInvocationRequest(makeTask({ attempt: 2, payload: { method: "POST", path: "/work", query: "?a=1",
+      auth: { kind: "jwt", invoker_user_id: "user_1", invoker_role: "authenticated" } } }), controller.signal);
+    expect(request.url).toContain("/internal/background/proj_1/my-function/work?a=1");
+    expect(request.headers.get("x-supacloud-attempt")).toBe("2");
+    expect(request.headers.get("x-supacloud-invoker-user-id")).toBe("user_1");
+    expect(request.headers.get("x-supacloud-signature-version")).toBe("v1");
+    expect(request.headers.get("x-supacloud-signature")).toMatch(/^[a-f0-9]{64}$/);
+    controller.abort(); expect(request.signal.aborted).toBe(true);
+  });
+  for (const [attempt, delay] of [[1, 5000], [3, 20000], [6, 160000], [10, 160000]]) test(`actual retry delay at ${attempt}`, () => {
+    expect(computeRetryDelayMs(attempt)).toBe(delay);
+  });
+  for (const [timeout, seconds] of [[null, 330], [10, 60], [1800, 1800], [300, 330]] as const) test(`actual lease duration at ${timeout}`, () => {
+    expect(computeLeaseSeconds(timeout)).toBe(seconds);
+  });
+  test("concurrency never exceeds existing configured ceiling", () => {
+    expect(resolveBackgroundConcurrencyPerProject("999999")).toBe(DEFAULT_BACKGROUND_TASK_SETTINGS.concurrency);
+    expect(resolveBackgroundConcurrencyPerProject()).toBeGreaterThan(0);
+  });
+  test("unknown-invoker metrics retain a closed safety circuit", () => {
+    const metrics = getInvokerUnknownMetrics(); expect(metrics.circuit_open).toBe(false);
+    expect(typeof metrics.unknown_window_count).toBe("number"); expect(typeof metrics.circuit_open_until).toBe("number");
+  });
+  test("source contains no positive authorization cache or unfenced edge outcomes", () => {
+    const source = readFileSync(new URL("../../src/services/background-function-worker.ts", import.meta.url), "utf8");
+    expect(source).not.toContain("invokerCache"); expect(source).not.toContain("invokerInflight");
+    expect(source).toContain("safety circuit is open");
+    const execution = source.slice(source.indexOf("private async execute"), source.indexOf("async cancel("));
+    expect(execution).not.toContain("Promise.all(");
+    expect(execution).not.toContain("taskRepository.markTask");
+    expect(execution).not.toContain("taskRepository.scheduleRetry");
+    expect(execution.indexOf("assertBackgroundInvokerUserExists(task)")).toBeLessThan(execution.indexOf("createBackgroundTaskMirrorIfUserExists(task)"));
+    expect(execution.indexOf("createBackgroundTaskMirrorIfUserExists(task)")).toBeLessThan(execution.indexOf("backgroundAttemptStore.start(task"));
+    expect(execution.lastIndexOf("assertBackgroundInvokerUserExists(task)")).toBeGreaterThan(execution.indexOf("backgroundAttemptStore.start(task"));
+  });
 });

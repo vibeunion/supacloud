@@ -1,0 +1,11 @@
+[Unit]
+Description=Run bounded SupaCloud task output retention every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+RandomizedDelaySec=10s
+Persistent=true
+Unit=supacloud-task-output-retention.service
+
+[Install]
+WantedBy=timers.target
