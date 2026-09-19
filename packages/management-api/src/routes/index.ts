@@ -13,7 +13,7 @@ export { securityRoutes } from "./security";
 export { storageRoutes, projectStorageRoutes } from "./storage";
 export { storageCompatRoutes } from "./storage-compat";
 export { scalingRoutes } from "./scaling";
-export { taskRoutes } from "./tasks";
+export { taskRoutes } from "./task-routes";
 export { taskEventRoutes } from "./task-events";
 export { databaseRoutes } from "./database";
 export { databaseJitRoutes } from "./database-jit";

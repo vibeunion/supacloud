@@ -11,6 +11,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./task-events": {
+      "types": "./dist/task-events.d.ts",
+      "import": "./dist/task-events.js",
+      "default": "./dist/task-events.js"
     }
   },
   "files": [
@@ -20,7 +25,7 @@
   "scripts": {
     "test": "bun test",
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts --outdir dist --target node --external @supabase/supabase-js --external @supacloud/contracts",
+    "build:js": "bun build src/index.ts src/task-events.ts --outdir dist --target node --external @supabase/supabase-js --external @supacloud/contracts",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",

@@ -16,6 +16,7 @@ import {
 import type { CollaboratorCapability } from "../services/project-collaborator.service";
 import { hasSupaOAuthDelegationHeaders } from "../utils/bff-proof-headers";
 import { isAppError } from "../utils/errors";
+import { resolveTaskOutputInvoker } from "../utils/task-output";
 
 export const STUDIO_SESSION_COOKIE = "__Host-supacloud_session";
 
@@ -370,7 +371,16 @@ export async function getAuthContext(request: Request): Promise<AuthContext | Au
   return delegated ?? getTransportAuthContextForDelegatedProof(request);
 }
 
+/** Only this read-only resource may use an ordinary project user's JWT.
+ * The handler still checks task ownership atomically with the event page read.
+ * Delegated requests must use the existing capability checks, never this shortcut.
+ */
+export async function getTaskOutputInvoker(request: Request, expectedRef?: string): Promise<string | null> {
+  return resolveTaskOutputInvoker(request, verifyProjectJwt, hasSupaOAuthDelegationHeaders(request), expectedRef);
+}
+
 export async function checkAuth(request: Request): Promise<{ status: number; body: { error: string } } | undefined> {
+  if (await getTaskOutputInvoker(request)) return undefined;
   const auth = await getAuthContext(request);
   return "status" in auth ? auth : undefined;
 }
