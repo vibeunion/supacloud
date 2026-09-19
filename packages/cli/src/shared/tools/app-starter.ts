@@ -341,19 +341,15 @@ test("transaction adapter rolls back mutations when work fails", async () => {
   expect(sandbox.db.get("reviews", "demo")).toEqual({ state: "draft", version: 1 });
 });
 
-test("the production composition root rejects missing governance adapters", async () => {
+test("the production composition root rejects missing governance adapters", () => {
   const sandbox = createDemo();
-  const app = createApp({
+  expect(() => createApp({
     deps: { dbClient: sandbox.db },
     requestContext: () => ({ identity: { authenticated: true, subject: "test" } }),
     commandGovernance: { authorize: () => {} },
-  });
-  const response = await app.handle(new Request("http://localhost/reviews/demo/approve", {
-    method: "POST", headers: { "content-type": "application/json", "idempotency-key": "production" },
-    body: JSON.stringify({ expectedVersion: 1 }),
-  }));
-  expect(response.status).toBe(501);
+  })).toThrow('Command "review.approve" has no audit adapter');
   expect(sandbox.db.get("reviews", "demo")).toEqual({ state: "draft", version: 1 });
+  expect(sandbox.audit).toEqual([]);
 });
 `,
         "README.md": `# ${name}
@@ -465,7 +461,8 @@ async database repository or a transactional RPC before production use. The
 authoritative database must lock or compare row versions, enforce authorization,
 and commit transition, idempotency receipt and audit atomically. For distributed
 side effects use a transactional outbox. Client state machines are projections,
-not a security boundary. Missing declared runtime adapters return an error.
+not a security boundary. Missing declared runtime adapters reject application
+startup before any request is served.
 
 ## Unified User Center
 

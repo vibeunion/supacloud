@@ -33,6 +33,22 @@ test("persistent command profile accepts database and external adapters with tru
   }
 });
 
+test("compiler defaults require persistent command governance", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-default-governance-"));
+  try {
+    await writeFixtureProject(root, { "command.ts": `
+import { Module, Command } from "@supacloud/app";
+@Command({ name: "unsafe.run", permission: "unsafe:run" })
+export class UnsafeCommand {}
+@Module({ name: "unsafe", commands: [UnsafeCommand] })
+export class UnsafeModule {}
+` });
+    const result = await compileProject({ rootDir: root, outDir: join(root, "generated") });
+    expect(result.diagnostics.some((item) => item.code === "command-persistence-required")).toBe(true);
+    expect(result.written).toEqual([]);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
 test("external effects cannot acquire transaction guarantees from metadata", () => {
   const diagnostics = validateGraph(graph(), { commandCapabilities: {
     rpc: { update: { boundary: "external", audit: true, idempotency: true, transaction: false } },

@@ -36,7 +36,7 @@ export interface SupaCloudConfig {
 
 export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
   SupaCloudConfig,
-  "include" | "moduleBoundaryPreset" | "commandCapabilities" | "moduleBoundaries" | "typeSafety" | "delivery"
+  "include" | "moduleBoundaryPreset" | "moduleBoundaries" | "typeSafety" | "delivery"
   | "allowRouteCommandBindings" | "disallowControllerDirectDb" | "detectOrphanModules" | "openApi"
 >> & {
   include: string[];
@@ -52,6 +52,13 @@ export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
   generateOpenApi: true,
   generatePermissions: true,
   treeShakeUnusedProviders: true,
+  commandCapabilities: {
+    requirePersistentAdapters: true,
+    permission: true,
+    audit: true,
+    idempotency: true,
+    transaction: true,
+  },
   moduleBoundaryPreset: "modular-monolith",
 };
 
@@ -171,7 +178,7 @@ export function resolveSupacloudConfig(
     ...(resolved.openApi === undefined ? {} : { openApi: resolved.openApi }),
     generatePermissions: resolved.generatePermissions ?? DEFAULT_SUPACLOUD_CONFIG.generatePermissions,
     moduleBoundaryPreset: resolved.moduleBoundaryPreset ?? DEFAULT_SUPACLOUD_CONFIG.moduleBoundaryPreset,
-    commandCapabilities: resolved.commandCapabilities,
+    commandCapabilities: resolved.commandCapabilities ?? DEFAULT_SUPACLOUD_CONFIG.commandCapabilities,
     ...(resolved.moduleBoundaries ? { moduleBoundaries: resolved.moduleBoundaries } : {}),
     ...(resolved.typeSafety ? { typeSafety: resolved.typeSafety } : {}),
     ...(resolved.allowRouteCommandBindings === undefined ? {} : { allowRouteCommandBindings: resolved.allowRouteCommandBindings }),

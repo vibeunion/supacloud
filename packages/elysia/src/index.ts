@@ -257,6 +257,7 @@ function observedAspects(
       ...executionTrace(context.requestContext),
     }, () => aspect(context, next))));
 }
+
 export type ApplicationAspectPipeline = (
   context: ApplicationAspectContext,
   next: () => unknown | Promise<unknown>,
@@ -821,6 +822,71 @@ export function requireIdempotencyKey(invocation: CommandInvocation): string {
   return key;
 }
 
+function assertCommandGovernanceReady(
+  compiled: CompiledModule,
+  governance: CommandGovernance | undefined,
+  executor: CommandExecutor | undefined,
+): void {
+  if ((compiled.commands ?? []).length === 0) return;
+  if (executor !== undefined && typeof executor !== "function") {
+    throw new ApplicationError(`Module "${compiled.name}" has no callable command executor`, {
+      code: "COMMAND_EXECUTOR_UNCONFIGURED",
+    });
+  }
+  if (!governance && !executor) {
+    throw new ApplicationError(`Module "${compiled.name}" has commands but no command governance`, {
+      code: "COMMAND_GOVERNANCE_UNCONFIGURED",
+    });
+  }
+  if (!governance) return;
+  if (typeof governance.authorize !== "function") {
+    throw new ApplicationError(`Module "${compiled.name}" has no authorization adapter`, {
+      code: "COMMAND_AUTHORIZATION_UNCONFIGURED",
+    });
+  }
+  for (const command of compiled.commands ?? []) {
+    if (command.audit && command.rpc === undefined
+      && (typeof governance.audit?.succeeded !== "function" || typeof governance.audit?.failed !== "function")) {
+      throw new ApplicationError(`Command "${command.name}" has no audit adapter`, {
+        code: "COMMAND_AUDIT_UNCONFIGURED",
+      });
+    }
+    if (command.idempotency === "required" && typeof governance.idempotency !== "function" && command.rpc === undefined) {
+      throw new ApplicationError(`Command "${command.name}" has no idempotency adapter`, {
+        code: "COMMAND_IDEMPOTENCY_UNCONFIGURED",
+      });
+    }
+    if (command.transaction === "required" && typeof governance.transaction !== "function" && command.rpc === undefined) {
+      throw new ApplicationError(`Command "${command.name}" has no transaction adapter`, {
+        code: "COMMAND_TRANSACTION_UNCONFIGURED",
+      });
+    }
+    if (command.rpc !== undefined) {
+      const adapter = Object.hasOwn(governance.rpc ?? {}, command.rpc) ? governance.rpc?.[command.rpc] : undefined;
+      if (!adapter || typeof adapter.execute !== "function" || !isRecord(adapter.capabilities)) {
+        throw new ApplicationError(`Command "${command.name}" has no RPC governance adapter`, {
+          code: "COMMAND_RPC_UNCONFIGURED",
+        });
+      }
+      if (command.audit && adapter.capabilities.audit !== true) {
+        throw new ApplicationError(`Command "${command.name}" RPC adapter has no audit capability`, {
+          code: "COMMAND_AUDIT_UNCONFIGURED",
+        });
+      }
+      if (command.idempotency === "required" && adapter.capabilities.idempotency !== true) {
+        throw new ApplicationError(`Command "${command.name}" RPC adapter has no idempotency capability`, {
+          code: "COMMAND_IDEMPOTENCY_UNCONFIGURED",
+        });
+      }
+      if (command.transaction === "required" && adapter.capabilities.transaction !== true) {
+        throw new ApplicationError(`Command "${command.name}" RPC adapter has no transaction capability`, {
+          code: "COMMAND_TRANSACTION_UNCONFIGURED",
+        });
+      }
+    }
+  }
+}
+
 /** Join a controller prefix and a route path, normalizing slashes. */
 function joinPaths(prefix: string, path: string): string {
   const joined = `${prefix}/${path}`.replace(/\/{2,}/g, "/");
@@ -921,6 +987,7 @@ export function createModulePlugin(
       { code: "COMMAND_GOVERNANCE_UNCONFIGURED" },
     );
   }
+  assertCommandGovernanceReady(compiled, options.commandGovernance, options.commandExecutor);
   const commandsByClassName = new Map(
     (compiled.commands ?? []).map((command) => [command.className, command]),
   );

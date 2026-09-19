@@ -342,10 +342,32 @@ export function renderApplication(
     "",
   ].join("\n");
 
-  const manifest: { version: number; modules: ModuleNode[]; externalTokens: string[] } = {
+  const commandGovernance = graph.modules.flatMap((module) => module.commands.map((command) => ({
+    module: module.name,
+    className: command.className,
+    name: command.name,
+    permission: command.permission ?? null,
+    rpc: command.rpc ?? null,
+    transaction: command.transaction ?? null,
+    audit: command.audit ?? null,
+    idempotency: command.idempotency ?? null,
+  }))).sort((left, right) => `${left.module}:${left.name}`.localeCompare(`${right.module}:${right.name}`));
+  const manifest: {
+    version: number;
+    modules: ModuleNode[];
+    externalTokens: string[];
+    commandGovernance: {
+      defaults: { authorization: "required"; audit: "required"; idempotency: "required"; transaction: "required" };
+      commands: typeof commandGovernance;
+    };
+  } = {
     version: 1,
     modules: graph.modules,
     externalTokens: graph.externalTokens,
+    commandGovernance: {
+      defaults: { authorization: "required", audit: "required", idempotency: "required", transaction: "required" },
+      commands: commandGovernance,
+    },
   };
 
   const clientCode = options.generateClient ? renderClient(graph, options) : undefined;
