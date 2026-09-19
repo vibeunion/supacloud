@@ -51,6 +51,12 @@ describe("compileProject：总体结果", () => {
       "case",
       "health",
     ]);
+    expect(manifest.commandGovernance.defaults).toEqual({
+      authorization: "required", audit: "required", idempotency: "required", transaction: "required",
+    });
+    expect(manifest.commandGovernance.commands).toContainEqual(expect.objectContaining({
+      module: "case", name: "case.accept", permission: "case.accept", idempotency: "required",
+    }));
   });
 });
 
@@ -651,7 +657,8 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     });
 
     const out = join(standaloneDir, "gen");
-    const res = await compileProject({ rootDir: standaloneDir, outDir: out, generateClient: true });
+    const res = await compileProject({ rootDir: standaloneDir, outDir: out, generateClient: true,
+      commandCapabilities: { requirePersistentAdapters: false, permission: true, audit: true, idempotency: true, transaction: true } });
     expect(res.diagnostics).toEqual([]);
     const rootMod = res.graph.modules.find((m) => m.name === "root");
     expect(rootMod).toBeDefined();

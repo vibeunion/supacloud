@@ -21,7 +21,9 @@ async function run(cwd: string, args: string[], executable = process.execPath) {
   ]);
   const output = `${stdout}\n${stderr}`;
   await Bun.write(resolve(logDir, `${String(++step).padStart(2, "0")}.log`), output);
-  console.log(output.trim().split("\n").slice(-8).join("\n"));
+  // Successful steps stay compact; failures must retain their assertion and stack
+  // in Actions logs, not only in a runner-local file that disappears after the job.
+  console.log(status === 0 ? output.trim().split("\n").slice(-8).join("\n") : output.trim());
   if (status !== 0) throw new Error(`Command migration gate failed in ${cwd}: ${args.join(" ")}`);
 }
 

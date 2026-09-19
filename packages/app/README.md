@@ -80,6 +80,16 @@ variables, spread expressions, strings, dynamic pointcuts, Proxy, and runtime
 aspect registration. Angular remains the DI runtime; aspects are SupaCloud
 compiler metadata and generated execution order.
 
+### Command Runtime Contract
+
+`@supacloud/app` defines the framework-neutral `CommandRuntimeGovernance`
+contract. It describes authorization, idempotency, transaction, audit, and
+named RPC adapter ports without implementing persistence. Server adapters such
+as `@supacloud/elysia` bind those ports to the existing durable command runtime;
+the receipt, audit record, and domain mutation remain owned by that adapter's
+transaction. Applications should implement one governance boundary rather
+than adding a second receipt or audit ledger in an aspect.
+
 ```ts
 import {
   Command,

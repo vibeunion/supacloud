@@ -154,6 +154,56 @@
       "signature": "export type CommandOutcome<Result> = {\n    status: \"confirmed\";\n    result: Result;\n    source: \"response\" | \"lookup\";\n} | {\n    status: \"unknown\";\n};"
     },
     {
+      "name": "CommandRuntimeAdapter",
+      "kind": "type",
+      "signature": "export interface CommandRuntimeAdapter<TInvocation extends CommandRuntimeInvocation = CommandRuntimeInvocation> {\n    readonly capabilities: CommandRuntimeCapabilities;\n    readonly execute: CommandRuntimeMiddleware<TInvocation>;\n}"
+    },
+    {
+      "name": "CommandRuntimeAudit",
+      "kind": "type",
+      "signature": "export interface CommandRuntimeAudit<TInvocation extends CommandRuntimeInvocation = CommandRuntimeInvocation> {\n    succeeded(invocation: TInvocation, result: unknown): void | Promise<void>;\n    failed(invocation: TInvocation, error: unknown): void | Promise<void>;\n}"
+    },
+    {
+      "name": "CommandRuntimeAuthorizer",
+      "kind": "type",
+      "signature": "export type CommandRuntimeAuthorizer<TInvocation extends CommandRuntimeInvocation = CommandRuntimeInvocation> = (invocation: TInvocation) => void | Promise<void>;"
+    },
+    {
+      "name": "CommandRuntimeCapabilities",
+      "kind": "type",
+      "signature": "export interface CommandRuntimeCapabilities {\n    readonly audit?: boolean;\n    readonly transaction?: boolean;\n    readonly idempotency?: boolean;\n    readonly boundary?: \"database\" | \"external\";\n}"
+    },
+    {
+      "name": "CommandRuntimeDescriptor",
+      "kind": "type",
+      "signature": "export interface CommandRuntimeDescriptor {\n    readonly name: string;\n    readonly permission?: string;\n    readonly rpc?: string;\n    readonly transaction?: CommandRuntimeMode | string;\n    readonly audit?: string;\n    readonly idempotency?: CommandRuntimeMode | string;\n}"
+    },
+    {
+      "name": "CommandRuntimeGovernance",
+      "kind": "type",
+      "signature": "export interface CommandRuntimeGovernance<TInvocation extends CommandRuntimeInvocation = CommandRuntimeInvocation> {\n    readonly rpc?: Record<string, CommandRuntimeAdapter<TInvocation>>;\n    readonly authorize: CommandRuntimeAuthorizer<TInvocation>;\n    readonly idempotency?: CommandRuntimeMiddleware<TInvocation>;\n    readonly transaction?: CommandRuntimeMiddleware<TInvocation>;\n    readonly audit?: CommandRuntimeAudit<TInvocation>;\n}"
+    },
+    {
+      "name": "CommandRuntimeInput",
+      "kind": "type",
+      "signature": "export interface CommandRuntimeInput {\n    readonly body: unknown;\n    readonly params: Record<string, unknown>;\n    readonly query: Record<string, unknown>;\n}"
+    },
+    {
+      "name": "CommandRuntimeInvocation",
+      "kind": "type",
+      "signature": "export interface CommandRuntimeInvocation<TCommand extends CommandRuntimeDescriptor = CommandRuntimeDescriptor> {\n    readonly command: TCommand;\n    readonly input: CommandRuntimeInput;\n    readonly request: Request;\n    readonly requestContext: unknown;\n    readonly scope?: Record<string, unknown>;\n    readonly services: Record<string, unknown>;\n}"
+    },
+    {
+      "name": "CommandRuntimeMiddleware",
+      "kind": "type",
+      "signature": "export type CommandRuntimeMiddleware<TInvocation extends CommandRuntimeInvocation = CommandRuntimeInvocation> = (invocation: TInvocation, next: () => unknown | Promise<unknown>) => unknown | Promise<unknown>;"
+    },
+    {
+      "name": "CommandRuntimeMode",
+      "kind": "type",
+      "signature": "export type CommandRuntimeMode = \"required\" | \"none\";"
+    },
+    {
       "name": "computed",
       "kind": "value",
       "signature": "export declare function computed<T>(computation: () => T): Signal<T>;"
