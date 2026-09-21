@@ -42,7 +42,7 @@ interface RealtimeSubscriptionState {
     token?: string;
 }
 
-class RealtimeBunService {
+export class RealtimeBunService {
     private tenantListeners = new Map<string, any>();
     public events = new EventEmitter();
     private tenantSubscriptions = new Map<string, RealtimeSubscriptionState[]>();
@@ -55,7 +55,8 @@ class RealtimeBunService {
     public async subscribeTenant(
         projectRef: string,
         subscriptions?: PostgresChangeConfig[],
-        token?: string
+        token?: string,
+        _options?: { signal?: AbortSignal },
     ): Promise<string | null> {
         let subscriptionStateId: string | null = null;
         if (subscriptions) {
@@ -301,15 +302,27 @@ class RealtimeBunService {
         }
     }
 
-    public registerSubscriptionIds(projectRef: string, mappings: Array<{ id: number; subscription_id: string }>) {
+    public registerSubscriptionIds(
+        projectRef: string,
+        subscriptionStateId: string,
+        mappings: Array<{ id: string | number }>,
+    ): boolean {
         let map = this.subscriptionIdMap.get(projectRef);
         if (!map) {
             map = new Map();
             this.subscriptionIdMap.set(projectRef, map);
         }
         for (const m of mappings) {
-            map.set(m.id, m.subscription_id);
+            if (typeof m.id === "number" && Number.isInteger(m.id)) map.set(m.id, subscriptionStateId);
         }
+        return true;
+    }
+
+    public updateSubscriptionToken(projectRef: string, subscriptionStateId: string, token: string): boolean {
+        const state = this.tenantSubscriptions.get(projectRef)?.find((candidate) => candidate.id === subscriptionStateId);
+        if (!state) return false;
+        state.token = token;
+        return true;
     }
 
     public unsubscribeSubscription(projectRef: string, subscriptionStateId: string): void {

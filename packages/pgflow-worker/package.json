@@ -1,0 +1,17 @@
+{
+  "name": "@supacloud/pgflow-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "@pgflow/dsl": "0.16.0",
+    "@pgflow/edge-worker": "0.16.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "typescript": "^7.0.2"
+  }
+}

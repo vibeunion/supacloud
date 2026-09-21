@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, symlinkSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, symlinkSync, unlinkSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
@@ -101,10 +101,26 @@ function linkBuiltDist(depDir: string) {
   const parts = name.startsWith("@") ? name.split("/") : [name];
   for (const pkg of readdirSync(join(root, "packages"))) {
     const linked = join(root, "packages", pkg, "node_modules", ...parts);
-    if (!existsSync(linked)) continue;
+    if (!existsSync(linked)) {
+      try {
+        if (lstatSync(linked).isSymbolicLink()) unlinkSync(linked);
+      } catch {
+        // The package link may not exist; there is nothing to repair.
+      }
+      continue;
+    }
     const target = join(linked, "dist");
     if (existsSync(target)) continue;
-    symlinkSync(dist, target);
+    try {
+      if (lstatSync(target).isSymbolicLink()) unlinkSync(target);
+    } catch {
+      // The target may not exist yet.
+    }
+    try {
+      symlinkSync(dist, target);
+    } catch (error: unknown) {
+      if (!(error instanceof Error) || !("code" in error) || error.code !== "EEXIST") throw error;
+    }
   }
 }
 

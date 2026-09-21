@@ -317,7 +317,11 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
                             const mappings = parsed.payload.response.postgres_changes;
                             if (Array.isArray(mappings) && ref) {
                                 import("../services/realtime-bun.service").then(({ realtimeBunService }) => {
-                                    realtimeBunService.registerSubscriptionIds(ref, mappings);
+                                    realtimeBunService.registerSubscriptionIds(
+                                        ref,
+                                        typeof parsed.join_ref === "string" ? parsed.join_ref : "upstream",
+                                        mappings,
+                                    );
                                 }).catch(() => {});
                             }
                         }

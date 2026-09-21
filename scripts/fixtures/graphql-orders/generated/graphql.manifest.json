@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "mode": "query-only",
+  "schema": "schema.graphql",
+  "documents": [
+    "order.graphql"
+  ],
+  "operations": [
+    {
+      "name": "OrderDetail",
+      "file": "order.graphql",
+      "line": 1
+    }
+  ],
+  "schemaHash": "ba21f8876787ff6ae08bf1c7609d8cc785b4ff5cc3a1a2d1e6b68fd97aad7178"
+}

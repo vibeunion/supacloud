@@ -1,1 +1,1 @@
-export * from "../../../../cli/src/shared/tools/project-endpoint-read";
+export * from "@supacloud/cli/project-endpoint-read";
