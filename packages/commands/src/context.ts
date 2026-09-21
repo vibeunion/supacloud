@@ -1,8 +1,11 @@
 import {
-  CommandError, canonicalCommandJson, commandIdentifier, decodeCommandIdentity, decodeDurableCommandReceipt,
+  CommandError, canonicalCommandJson, commandIdentifier, decodeValidatedCommandReference,
+  decodeDurableCommandReceipt,
   type CommandAuthorization, type CommandIdentity, type ContractDecoder, type DurableCommandReceipt,
 } from "@supacloud/contracts";
-import type { CommandStore, CommandStoreSession, OperationReference, StoredCommand } from "./store";
+import type {
+  CommandStore, CommandStoreSession, OperationReference, StoredCommand, ValidatedOperationReference,
+} from "./store";
 
 export interface CommandInputCodec {
   encode(canonicalInput: string): string | Promise<string>;
@@ -31,7 +34,7 @@ export interface PersistentCommandDefinition<Input, Result, Transaction> {
   };
 }
 interface Prepared<Input> {
-  reference: OperationReference;
+  reference: ValidatedOperationReference;
   input: Input;
   fingerprint: string;
   payload: string;
@@ -51,8 +54,17 @@ export async function checkAuthorization(run: () => CommandAuthorization | Promi
 
 export function commandContext<Input, Result, Transaction>(definition: PersistentCommandDefinition<Input, Result, Transaction>) {
   const name = commandIdentifier(definition.name), event = commandIdentifier(definition.audit.event);
-  const reference = (identity: CommandIdentity, key: string): OperationReference => {
-    try { return { ...decodeCommandIdentity(identity), command: name, operationId: commandIdentifier(key) }; }
+  const reference = (identity: CommandIdentity, key: string): ValidatedOperationReference => {
+    try {
+      return {
+        ...decodeValidatedCommandReference({
+          ...identity,
+          command: name,
+          operationId: key,
+          dispatchKey: key,
+        }),
+      };
+    }
     catch { throw new CommandError("COMMAND_INPUT_INVALID"); }
   };
   const prepare = async (identity: CommandIdentity, key: string, value: unknown): Promise<Prepared<Input>> => {

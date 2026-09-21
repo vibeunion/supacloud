@@ -1,4 +1,14 @@
 import type { ContractDecoder } from "./http_contract.js";
+import {
+  actorId,
+  commandName,
+  operationId,
+  tenantId,
+  type ActorId,
+  type CommandName,
+  type OperationId,
+  type TenantId,
+} from "./identity.js";
 
 export type CommandJson = null | boolean | number | string | CommandJson[] | { [key: string]: CommandJson };
 
@@ -26,6 +36,10 @@ export function canonicalCommandJson(value: unknown): string {
 }
 
 export interface CommandIdentity { tenantId: string; actorId: string }
+export interface ValidatedCommandIdentity {
+  tenantId: TenantId;
+  actorId: ActorId;
+}
 export interface CommandReference extends CommandIdentity {
   command: string;
   operationId: string;
@@ -50,6 +64,26 @@ export function decodeCommandIdentity(value: unknown): CommandIdentity {
     throw new TypeError("Invalid command identity");
   }
   return { tenantId: commandIdentifier(value.tenantId), actorId: commandIdentifier(value.actorId) };
+}
+
+export function decodeValidatedCommandIdentity(value: unknown): ValidatedCommandIdentity {
+  const identity = decodeCommandIdentity(value);
+  return { tenantId: tenantId(identity.tenantId), actorId: actorId(identity.actorId) };
+}
+
+export function decodeValidatedCommandReference(value: unknown): ValidatedCommandIdentity & {
+  command: CommandName;
+  operationId: OperationId;
+} {
+  const identity = decodeValidatedCommandIdentity(value);
+  if (!value || typeof value !== "object" || !("command" in value) || !("operationId" in value)) {
+    throw new TypeError("Invalid command reference");
+  }
+  return {
+    ...identity,
+    command: commandName(commandIdentifier(value.command)),
+    operationId: operationId(commandIdentifier(value.operationId)),
+  };
 }
 
 export function decodeDurableCommandReceipt<Result>(

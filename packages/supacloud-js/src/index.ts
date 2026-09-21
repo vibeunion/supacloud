@@ -13,6 +13,11 @@ export {
 export * from "./workflows.js";
 export * from "./commands.js";
 export * from "./artifacts.js";
+export * from "./queue-rpc.js";
+export * from "./oauth-clients.js";
+export * from "./workflow-fetch.js";
+export * from "./command-fetch.js";
+export * from "./artifact-fetch.js";
 
 export const SUPACLOUD_JS_VERSION = "0.27.1";
 
@@ -102,6 +107,9 @@ export type SupaCloudTaskResultDecoder<TResult> = (value: unknown) => TResult;
 
 /** Alias kept short for consumers that already use decoder terminology. */
 export type SupaCloudTaskDecoder<TResult> = SupaCloudTaskResultDecoder<TResult>;
+export type SupaCloudJsonValue = null | boolean | number | string | SupaCloudJsonValue[] | {
+  [key: string]: SupaCloudJsonValue;
+};
 
 export type SupaCloudTaskDetail<TResult = unknown> = {
   id: string;
@@ -219,12 +227,12 @@ export type SupaCloudQueueListFilters = {
 
 export type SupaCloudQueueMessage = {
   id: string;
-  msg_id: number;
+  msg_id: string;
   read_ct?: number;
   enqueued_at?: string | null;
   vt?: string | null;
-  message?: Record<string, unknown>;
-  payload: Record<string, unknown>;
+  message?: SupaCloudJsonValue;
+  payload: SupaCloudJsonValue;
   status?: string;
   queue_name?: string;
   task_type?: string;
@@ -233,15 +241,15 @@ export type SupaCloudQueueMessage = {
 
 export type SupaCloudQueueSendResult = {
   id: string;
-  msg_id: number;
+  msg_id: string;
   queue_name: string;
   status: "pending";
-  payload: Record<string, unknown>;
+  payload: SupaCloudJsonValue;
 };
 
 export type SupaCloudQueueMutationResult = {
   id: string;
-  msg_id: number;
+  msg_id: string;
   queue_name: string;
   status: "archived" | "deleted" | "released";
   success: boolean;
@@ -512,7 +520,7 @@ export type SupaCloudTaskDecodeOperation = "get" | "list" | "wait" | "cancel" | 
  * application result values and decoder implementation details are not leaked.
  */
 export class SupaCloudTaskDecoderError extends SupaCloudApiError {
-  readonly code = "TASK_RESULT_INVALID" as const;
+  override readonly code = "TASK_RESULT_INVALID" as const;
   readonly mutationMayHaveApplied: boolean;
 
   constructor(readonly operation: SupaCloudTaskDecodeOperation) {
@@ -611,9 +619,9 @@ function normalizeSecondsFromOptions(
   return 0;
 }
 
-function normalizeMessageId(value: unknown): number {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
+function normalizeMessageId(value: unknown): string {
+  const parsed = typeof value === "string" ? value : String(value);
+  return /^\d+$/.test(parsed) && BigInt(parsed) > 0n ? parsed : "";
 }
 
 function firstRpcValue(value: unknown): unknown {
@@ -629,6 +637,18 @@ function valueRecord(value: unknown): Record<string, unknown> {
   const record: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) record[key] = item;
   return record;
+}
+
+function jsonValue(value: unknown): SupaCloudJsonValue {
+  if (value === null || typeof value === "boolean" || typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (Array.isArray(value)) return value.map(jsonValue);
+  if (value && typeof value === "object") {
+    const result: { [key: string]: SupaCloudJsonValue } = {};
+    for (const [key, item] of Object.entries(value)) result[key] = jsonValue(item);
+    return result;
+  }
+  throw new Error("Invalid JSON value");
 }
 
 function responseRecord(value: unknown, label: string): Record<string, unknown> {
@@ -720,11 +740,11 @@ function decodeTaskDetailsWithResult<TResult>(
 function decodeQueueMessage(value: unknown): SupaCloudQueueMessage {
   const record = responseRecord(value, "queue message");
   const messageValue = record.message ?? record.payload;
-  const message = valueRecord(messageValue);
+  const message = jsonValue(messageValue);
   return {
     ...record,
     id: responseString(record, "id", "queue message"),
-    msg_id: responseNumber(record, "msg_id", "queue message"),
+    msg_id: responseString(record, "msg_id", "queue message"),
     message,
     payload: message,
   };
@@ -945,13 +965,11 @@ function normalizeRpcMessage(queueName: string, value: unknown, status?: string)
   const row = firstRpcValue(value);
   if (!row || typeof row !== "object") return null;
   const record = valueRecord(row);
-  const message = record.message && typeof record.message === "object" && !Array.isArray(record.message)
-    ? valueRecord(record.message)
-    : {};
+  const message = jsonValue(record.message ?? null);
   const msgId = normalizeMessageId(record.msg_id ?? record.id);
   return {
     ...record,
-    id: String(msgId),
+    id: msgId,
     msg_id: msgId,
     message,
     payload: message,
@@ -968,7 +986,7 @@ function normalizeRpcMessages(queueName: string, value: unknown, status?: string
     .filter((row): row is SupaCloudQueueMessage => Boolean(row));
 }
 
-function normalizeRpcMessageId(value: unknown): number {
+function normalizeRpcMessageId(value: unknown): string {
   const row = firstRpcValue(value);
   if (row && typeof row === "object") {
     const record = valueRecord(row);
@@ -977,9 +995,9 @@ function normalizeRpcMessageId(value: unknown): number {
   return normalizeMessageId(row);
 }
 
-function normalizeRpcMessageIds(value: unknown): number[] {
+function normalizeRpcMessageIds(value: unknown): string[] {
   const rows = isUnknownArray(value) ? value : value == null ? [] : [value];
-  return rows.map((row) => normalizeRpcMessageId(row)).filter((id) => id > 0);
+  return rows.map((row) => normalizeRpcMessageId(row)).filter((id) => id !== "");
 }
 
 function extractErrorCode(body: unknown): string | null {
@@ -1091,7 +1109,7 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       cancel: () => this.cancel(taskId) as Promise<SupaCloudTaskDetail<TResult>>,
       retry: () => this.retry(taskId) as Promise<SupaCloudTaskDetail<TResult>>,
       subscribe: (options: SupaCloudTaskSubscribeOptions<TResult>) =>
-        this.subscribe(taskId, options),
+        this.subscribe<TResult>(taskId, options),
     };
   }
 
@@ -1173,7 +1191,9 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
       ? captureTaskDecoder<TResult>(decoderOrOptions)
       : captureTaskDecoder<TResult>(optionsOrDecoder);
     const options = typeof decoderOrOptions === "function"
-      ? optionsOrDecoder ?? {}
+      ? optionsOrDecoder !== undefined && typeof optionsOrDecoder !== "function"
+        ? optionsOrDecoder
+        : {}
       : decoderOrOptions;
     const receipt = await this.submit(functionName, options);
     return this.createTypedReceipt(receipt.taskId, receipt.status, decoder);
@@ -1316,7 +1336,10 @@ class SupaCloudTasksClient<TClient extends SupabaseClient = SupabaseClient> exte
     return decodeTaskResult(await this.wait(taskId, options), decoder, "wait");
   }
 
-  subscribe(taskId: string, options: SupaCloudTaskSubscribeOptions): SupaCloudTaskSubscription {
+  subscribe<TResult = unknown>(
+    taskId: string,
+    options: SupaCloudTaskSubscribeOptions<TResult>,
+  ): SupaCloudTaskSubscription {
     return this.subscribeInternal(taskId, options);
   }
 
@@ -1559,7 +1582,7 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
   }
 
   async send(
-    payload: Record<string, unknown> = {},
+    payload: SupaCloudJsonValue = {},
     options: SupaCloudQueueSendOptions = {},
   ): Promise<SupaCloudQueueSendResult> {
     const msgId = await this.rpc("send", {
@@ -1577,7 +1600,7 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
   }
 
   async sendBatch(
-    messages: Record<string, unknown>[],
+    messages: SupaCloudJsonValue[],
     options: SupaCloudQueueSendOptions = {},
   ): Promise<SupaCloudQueueSendResult[]> {
     const ids = await this.rpc("send_batch", {

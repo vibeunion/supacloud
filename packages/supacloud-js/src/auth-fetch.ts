@@ -93,7 +93,7 @@ export function createSupaCloudOAuthFetch(
   const clientId = options.clientId?.trim();
   if (!clientId) return fetchImpl;
 
-  return async (input, init) => {
+  return Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(input instanceof Request ? input.url : input.toString());
     if (!isRefreshTokenRequest(url, requestMethod(input, init))) {
       return fetchImpl(input, init);
@@ -117,5 +117,5 @@ export function createSupaCloudOAuthFetch(
       throw new Error("SupaCloud OAuth tokenEndpoint must use the Supabase Auth origin");
     }
     return fetchImpl(replacementRequest(request, endpoint, body));
-  };
+  }, { preconnect: () => {} }) as typeof fetch;
 }

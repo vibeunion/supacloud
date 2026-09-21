@@ -28,11 +28,12 @@ beforeAll(async () => {
 }, 30_000);
 
 describe("compileProject：总体结果", () => {
-  test("无诊断，写出 application.ts 与 app.manifest.json", () => {
+  test("无诊断，写出 application.ts 与 contract manifests", () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.written).toEqual([
       join(outDir, "application.ts"),
       join(outDir, "app.manifest.json"),
+      join(outDir, "contracts.manifest.json"),
     ]);
   });
 
@@ -51,6 +52,48 @@ describe("compileProject：总体结果", () => {
       "case",
       "health",
     ]);
+  });
+
+  test("contracts.manifest.json 汇总 command/query/route/RPC/权限和 evidence", async () => {
+    const manifest = JSON.parse(
+      await readFile(join(outDir, "contracts.manifest.json"), "utf8"),
+    ) as {
+      commands: Array<{ name: string; permission?: string; auditEvent?: string }>;
+      queries: Array<{ name: string }>;
+      routes: Array<{ path: string; command?: string; permission?: string; evidence?: string }>;
+      permissions: string[];
+      rpc: unknown[];
+      events: Array<{ name: string }>;
+      fixtures: string[];
+      artifacts: { client: boolean; openapi: boolean; permissions: boolean };
+    };
+    expect(manifest.commands).toEqual([{
+      name: "case.accept",
+      className: "AcceptCaseCommand",
+      module: "case",
+      permission: "case.accept",
+      transaction: "required",
+      idempotency: "required",
+      auditEvent: "case.accepted",
+    }]);
+    expect(manifest.queries).toEqual([]);
+    expect(manifest.routes[0]).toMatchObject({
+      path: "/cases/:caseId/accept",
+      command: "AcceptCaseCommand",
+      permission: "case.accept",
+    });
+    expect(manifest.permissions).toEqual(["case.accept"]);
+    expect(manifest.rpc).toEqual([]);
+    expect(manifest.events).toEqual([{ name: "case.accepted", source: "command.audit", command: "case.accept" }]);
+    expect(manifest.fixtures).toEqual([]);
+    expect(manifest.artifacts).toMatchObject({
+      client: false,
+      openapi: false,
+      permissions: false,
+      sdk: "generated-client",
+      openapiDocument: "generated",
+      permissionManifest: "generated",
+    });
   });
 });
 

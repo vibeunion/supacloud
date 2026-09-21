@@ -4,6 +4,21 @@
   "description": "Project-scoped CLI for SupaCloud users",
   "type": "module",
   "main": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js",
+    "./frontend-release-control": {
+      "types": "./src/shared/tools/frontend-release-control.ts",
+      "import": "./dist/shared/tools/frontend-release-control.js"
+    },
+    "./project-read-projection": {
+      "types": "./src/shared/tools/project-read-projection.ts",
+      "import": "./dist/shared/tools/project-read-projection.js"
+    },
+    "./project-endpoint-read": {
+      "types": "./src/shared/tools/project-endpoint-read.ts",
+      "import": "./dist/shared/tools/project-endpoint-read.js"
+    }
+  },
   "bin": {
     "supacloud-cli": "dist/index.js"
   },
@@ -14,7 +29,7 @@
   ],
   "scripts": {
     "dev": "bun run --watch src/index.ts",
-    "build": "bun build src/index.ts --outdir dist --target node",
+    "build": "bun build src/index.ts --outdir dist --target node && bun build src/shared/tools/frontend-release-control.ts src/shared/tools/project-read-projection.ts src/shared/tools/project-endpoint-read.ts --outdir dist/shared/tools --target node",
     "pretypecheck": "bun install --cwd ../compiler --frozen-lockfile && bun run --cwd ../compiler build && bun install --frozen-lockfile",
     "prepublishOnly": "bun run build",
     "typecheck": "tsc --noEmit"
@@ -33,8 +48,10 @@
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.52",
+    "@supacloud/app": "^0.11.0",
     "@supacloud/compiler": "^0.15.0",
     "@supacloud/db": "^0.2.0",
+    "@supacloud/elysia": "^0.10.0",
     "fflate": "^0.8.3"
   },
   "devDependencies": {

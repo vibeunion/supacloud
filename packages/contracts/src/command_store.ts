@@ -1,8 +1,17 @@
-import type { CommandIdentity, DurableCommandReceipt } from "./receipts.js";
+import type {
+  CommandIdentity,
+  DurableCommandReceipt,
+  ValidatedCommandIdentity,
+} from "./receipts.js";
+import type { CommandName, OperationId } from "./identity.js";
 
 export interface OperationReference extends CommandIdentity {
   command: string;
   operationId: string;
+}
+export interface ValidatedOperationReference extends ValidatedCommandIdentity {
+  command: CommandName;
+  operationId: OperationId;
 }
 export interface StoredCommand {
   receipt: DurableCommandReceipt<unknown>;
@@ -28,6 +37,16 @@ export interface CommandStore<Transaction> {
 export interface RecoveryScope {
   tenantId: string;
   commands: readonly string[];
+}
+export interface RecoveryClaim extends OperationReference {
+  leaseId: string;
+  createdAt: number;
+  attempts: number;
+}
+export interface CommandRecoveryStore {
+  claim(options: RecoveryScope & { now: number; limit: number; leaseMs: number }): Promise<RecoveryClaim[]>;
+  release(claim: RecoveryClaim, retryAt: number): Promise<void>;
+  redactCompleted(scope: RecoveryScope & { before: number; limit: number }): Promise<number>;
 }
 export interface CommandRetentionStore {
   /** Retains receipt and fingerprint; never redacts pending or unaudited operations. */

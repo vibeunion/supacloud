@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.strict.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "types": ["bun"],
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts", "examples/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -42,6 +42,11 @@ export interface BuildTableRowsResourceInput {
 }
 
 const TABLE_ROW_ID_PREFIX = '__svadmin_row_id';
+const TABLE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+
+export function isTableIdentifier(value: string): boolean {
+  return TABLE_IDENTIFIER.test(value);
+}
 
 function toRecord(value: object): Record<string, unknown> {
   const result: Record<string, unknown> = {};

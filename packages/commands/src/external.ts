@@ -1,4 +1,10 @@
-import { CommandError, canonicalCommandJson, type CommandIdentity } from "@supacloud/contracts";
+import {
+  CommandError,
+  canonicalCommandJson,
+  decodeValidatedCommandReference,
+  type CommandIdentity,
+  type ValidatedOperationReference,
+} from "@supacloud/contracts";
 import { commandContext, type PersistentCommandDefinition, type RecoveryPrincipal } from "./context";
 import type { CommandStore, OperationReference } from "./store";
 import { createExecutionPolicy, ExecutionPolicyError, type ExecutionPolicyOptions } from "./execution-policy";
@@ -111,9 +117,15 @@ export function createExternalCommand<Input, Result, Store extends CommandStore<
       return request === null ? null : flushAudit(identity, key, request.input);
     },
     async recover(principal: RecoveryPrincipal, reference: OperationReference) {
-      if (reference.command !== definition.name) throw new CommandError("COMMAND_REJECTED");
-      const request = await context.restore(reference, reference.operationId, principal);
-      return request === null ? null : reconcile(reference, reference.operationId, request.input, principal);
+      let validated: ValidatedOperationReference;
+      try {
+        validated = decodeValidatedCommandReference(reference);
+      } catch {
+        throw new CommandError("COMMAND_RECEIPT_INVALID");
+      }
+      if (validated.command !== definition.name) throw new CommandError("COMMAND_REJECTED");
+      const request = await context.restore(validated, validated.operationId, principal);
+      return request === null ? null : reconcile(validated, validated.operationId, request.input, principal);
     },
   };
 }

@@ -17,7 +17,7 @@ void createSupaCloudOAuthFetch(options);
 declare const supabase: SupabaseClient;
 const client = createSupaCloudClient({ supabase, managementApiUrl: "https://admin.example.com", projectRef: "project" });
 const receipt: Promise<SupaCloudCommandReceipt | null> = client.commands.get({
-  tenantId: "tenant", actorId: "actor", command: "update", operationId: "key",
+  commandId: "key",
 });
 void receipt;
 void createCommandScope;

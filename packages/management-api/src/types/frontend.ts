@@ -1,5 +1,10 @@
 export type FrontendFramework = "static" | "react" | "vue" | "svelte" | "nextjs" | "nuxt" | "sveltekit" | "sveltekit-static" | "astro" | "remix";
 
+export const FRONTEND_FRAMEWORKS: readonly FrontendFramework[] = [
+  "static", "react", "vue", "svelte", "nextjs", "nuxt",
+  "sveltekit", "sveltekit-static", "astro", "remix",
+];
+
 export type BuildStatus = "pending" | "building" | "success" | "failed";
 
 export interface FrontendDeployment {

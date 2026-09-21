@@ -1,4 +1,7 @@
-import { CommandError, commandIdentifier, decodeCommandJson, decodeDurableCommandReceipt, type CommandAuthorization, type DurableCommandReceipt } from "@supacloud/contracts";
+import {
+  CommandError, commandIdentifier, decodeCommandJson, decodeDurableCommandReceipt, tenantId,
+  type CommandAuthorization, type DurableCommandReceipt,
+} from "@supacloud/contracts";
 import { checkAuthorization, type RecoveryPrincipal } from "./context";
 import type { CommandRecoveryStore, OperationReference } from "./store";
 
@@ -33,7 +36,7 @@ export function createCommandRecoveryJob(options: {
   now?: () => number;
 }) {
   options = { ...options, principal: { ...options.principal }, commands: { ...options.commands } };
-  const tenantId = commandIdentifier(options.tenantId);
+  const scopedTenantId = tenantId(commandIdentifier(options.tenantId));
   commandIdentifier(options.principal.subject);
   const names = Object.keys(options.commands).map(commandIdentifier);
   if (names.length === 0) throw new TypeError("Recovery requires named commands");
@@ -41,7 +44,7 @@ export function createCommandRecoveryJob(options: {
     if (!Number.isSafeInteger(value) || value <= 0) throw new TypeError("Invalid recovery policy");
   }
   if (options.batchSize > 1000) throw new TypeError("Recovery batches are bounded to 1000");
-  const scope = { tenantId, commands: names };
+  const scope = { tenantId: scopedTenantId, commands: names };
   return {
     async run(): Promise<CommandRecoveryReport> {
       await checkAuthorization(options.authorize);
@@ -53,7 +56,9 @@ export function createCommandRecoveryJob(options: {
       const claims = await options.store.claim({ ...scope, now, limit: options.batchSize, leaseMs: options.leaseMs });
       const report: CommandRecoveryReport = { claimed: claims.length, completed: 0, unresolved: 0, failed: 0, redacted: 0, alerts: [] };
       for (const claim of claims) {
-        if (claim.tenantId !== tenantId || !names.includes(claim.command)) throw new CommandError("COMMAND_RECEIPT_INVALID");
+        if (claim.tenantId !== scopedTenantId || !names.includes(claim.command)) {
+          throw new CommandError("COMMAND_RECEIPT_INVALID");
+        }
         const reference: OperationReference = {
           tenantId: claim.tenantId, actorId: claim.actorId, command: claim.command, operationId: claim.operationId,
         };

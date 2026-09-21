@@ -28,11 +28,22 @@ export interface ApiRequestInit extends RequestInit {
   timeoutMs?: number;
 }
 
-export async function ensureMutationSucceeded(response: Response, fallback: string): Promise<void> {
-  const [payload, rawBody] = await Promise.all([
-    readJsonObject(response.clone()),
-    response.text().catch(() => ""),
-  ]);
+export async function ensureMutationSucceeded(
+  response: Response,
+  fallback: string,
+  decode?: (value: unknown) => void,
+  options: Pick<RequestInit, "signal"> = {},
+): Promise<void> {
+  const rawBody = await readResponseBody(response, options.signal ?? undefined);
+  const payload = parseJsonObject(rawBody);
+  if (response.ok && decode) {
+    try {
+      decode(payload);
+    } catch {
+      throw new Error(fallback);
+    }
+    return;
+  }
   if (response.ok && payload.success !== false) return;
 
   const message = typeof payload.message === "string"
@@ -43,11 +54,60 @@ export async function ensureMutationSucceeded(response: Response, fallback: stri
   throw new Error(message);
 }
 
-async function readJsonObject(response: Response): Promise<Record<string, unknown>> {
-  const value: unknown = await response.json().catch(() => ({}));
+function parseJsonObject(rawBody: string): Record<string, unknown> {
+  if (!rawBody.trim()) return {};
+  let value: unknown;
+  try {
+    value = JSON.parse(rawBody) as unknown;
+  } catch {
+    return {};
+  }
   return value && typeof value === "object" && !Array.isArray(value)
     ? Object.fromEntries(Object.entries(value))
     : {};
+}
+
+async function readJsonObject(response: Response): Promise<Record<string, unknown>> {
+  return parseJsonObject(await response.text().catch(() => ""));
+}
+
+async function readResponseBody(response: Response, signal?: AbortSignal): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const read = async (): Promise<string> => {
+    const decoder = new TextDecoder();
+    let result = "";
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) return result;
+      result += decoder.decode(chunk.value, { stream: true });
+    }
+  };
+  if (!signal) {
+    try {
+      return await read();
+    } finally {
+      reader.releaseLock();
+    }
+  }
+  if (signal.aborted) {
+    await reader.cancel();
+    throw new DOMException("The operation was aborted", "AbortError");
+  }
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => {
+      void reader.cancel();
+      reject(new DOMException("The operation was aborted", "AbortError"));
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([read(), aborted]);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+    reader.releaseLock();
+  }
 }
 
 function rememberStudioSessionExpiry(candidate: unknown): string | undefined {

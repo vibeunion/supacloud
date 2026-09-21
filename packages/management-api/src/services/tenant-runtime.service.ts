@@ -549,7 +549,7 @@ type AppliedGotrueAuthConfig = {
     status: GotrueRuntimeStatus;
 };
 
-class GotrueRuntimeController {
+export class GotrueRuntimeController {
     unit(ref: string): string {
         return `supacloud-gotrue@${ref}`;
     }
