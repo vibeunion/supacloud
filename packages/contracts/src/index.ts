@@ -1,6 +1,5 @@
 export * from "./http_contract.js";
 export * from "./receipts.js";
-export * from "./receipts.js";
 export * from "./command_error.js";
 export * from "./app_error.js";
 export * from "./identity.js";
