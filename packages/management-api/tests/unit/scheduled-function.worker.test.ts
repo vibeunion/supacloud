@@ -194,6 +194,65 @@ describe("scheduled-function selection", () => {
 });
 
 describe("scheduled-function invocation boundary", () => {
+  test.each([200, 503])("releases the unused response body for HTTP %s", async (status) => {
+    let cancelled = false;
+    const response = new Response(new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+      },
+    }), { status });
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(response);
+    const findByRef = spyOn(projectRepository, "findByRef").mockResolvedValue({
+      service_role_key: "private-service-role-sentinel",
+    } as never);
+    try {
+      const result = await scheduledFunctionWorker.triggerOnce("proj_a", scheduleConfig({}));
+
+      expect(result).toEqual({ ok: status === 200, status });
+      expect(cancelled).toBe(true);
+      expect(response.bodyUsed).toBe(true);
+    } finally {
+      fetchSpy.mockRestore();
+      findByRef.mockRestore();
+    }
+  });
+
+  test("accepts a response without a body", async () => {
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+    const findByRef = spyOn(projectRepository, "findByRef").mockResolvedValue({
+      service_role_key: "private-service-role-sentinel",
+    } as never);
+    try {
+      expect(await scheduledFunctionWorker.triggerOnce("proj_a", scheduleConfig({})))
+        .toEqual({ ok: true, status: 204 });
+    } finally {
+      fetchSpy.mockRestore();
+      findByRef.mockRestore();
+    }
+  });
+
+  test("preserves the HTTP result when response cleanup rejects", async () => {
+    let cancelled = false;
+    const response = new Response(new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled = true;
+        throw new Error("private-cleanup-error-sentinel");
+      },
+    }), { status: 503 });
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(response);
+    const findByRef = spyOn(projectRepository, "findByRef").mockResolvedValue({
+      service_role_key: "private-service-role-sentinel",
+    } as never);
+    try {
+      expect(await scheduledFunctionWorker.triggerOnce("proj_a", scheduleConfig({})))
+        .toEqual({ ok: false, status: 503 });
+      expect(cancelled).toBe(true);
+    } finally {
+      fetchSpy.mockRestore();
+      findByRef.mockRestore();
+    }
+  });
+
   test("rejects a non-UUID schedule before project lookup or fetch", async () => {
     let fetchCount = 0;
     const originalFetch = globalThis.fetch;
