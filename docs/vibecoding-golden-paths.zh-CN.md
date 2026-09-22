@@ -10,6 +10,17 @@ SupaCloud 借鉴 Angular 的**工程体验**——单一入口、强约定、生
 
 > Angular 参考的是工程体验，不是技术实现；目标是让 Vibecoding 变成一条有约束、可诊断、可交付的开发流水线。
 
+## 快速开始
+
+```bash
+supacloud app init --name orders-api --template http   # 或 command / edge
+cd orders-api && bun install && bun run check
+
+supacloud context --format json > context.json   # AI 读取已编译的项目图
+supacloud doctor --format json > doctor.json     # 可执行诊断 + 修复计划
+supacloud fix --fix fix.json --write             # 应用一个 DiagnosticFix 后复检
+```
+
 ## 单一入口
 
 开发者与 AI 只面对一套 CLI，不需要记住底层包：

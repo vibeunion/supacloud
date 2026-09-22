@@ -216,6 +216,17 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
                     ? contractScaffold(moduleName, name)
                     : controllerScaffold(moduleName);
     const status = await writeScaffold(path, content, args.force === true);
+    if (kind === "contract") {
+        const prefix = pascalName(name);
+        return textResult([
+            `✅ ${status}: ${path}`,
+            "",
+            "Next, bind the contract to a route so the compiler can check route/schema drift:",
+            `  import { ${prefix}Body, ${prefix}Response } from "./contracts/${name}.contract";`,
+            `  @Post("/", { body: ${prefix}Body, responses: { 200: ${prefix}Response } })`,
+            "Fill in the schema fields and reuse them in command decoders; never widen them to unknown.",
+        ].join("\n"));
+    }
     return textResult(`✅ ${status}: ${path}`);
 }
 

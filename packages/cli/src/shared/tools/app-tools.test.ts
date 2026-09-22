@@ -247,6 +247,8 @@ describe("app tools", () => {
         expect(contractSource).toContain("IssueInvoiceBody");
         expect(contractSource).toContain("IssueInvoiceResponse");
         expect(contractSource).toContain('from "elysia"');
+        expect(contractResult.content[0].text).toContain("import { IssueInvoiceBody, IssueInvoiceResponse }");
+        expect(contractResult.content[0].text).toContain("responses: { 200: IssueInvoiceResponse }");
     });
 
     test("init creates an isolated, ready-to-run project template", async () => {
