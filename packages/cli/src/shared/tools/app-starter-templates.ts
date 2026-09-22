@@ -153,7 +153,7 @@ function httpTemplate(name: string): Record<string, string> {
   return {
     ...baseFiles(name),
     "src/orders/orders.ts": `import { Body, Controller, Get, Param, Post, defineFeatureSlice } from "@supacloud/app";
-import { t } from "elysia";
+import { status, t } from "elysia";
 
 export const OrderParams = t.Object({ id: t.String({ minLength: 1 }) });
 export const CreateOrderBody = t.Object({ name: t.String({ minLength: 1 }) });
@@ -169,7 +169,9 @@ export class OrdersController {
   get(@Param("id") id: string): { id: string; name: string } { return { id, name: "demo" }; }
 
   @Post("/", { body: CreateOrderBody, responses: { 201: OrderResult } })
-  create(@Body() body: { name: string }): { id: string; name: string } { return { id: "demo", name: body.name }; }
+  create(@Body() body: { name: string }) {
+    return status(201, { id: "demo", name: body.name });
+  }
 }
 
 export const OrdersFeature = defineFeatureSlice({

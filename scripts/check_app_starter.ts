@@ -34,6 +34,7 @@ async function run(args: string[], cwd = project, success = true): Promise<strin
 }
 
 let server: ReturnType<typeof Bun.spawn> | undefined;
+const tarballs = new Map<string, string>();
 try {
   await initializeAppProject({ root: project, name: "starter-smoke" });
   const manifestPath = join(project, "package.json");
@@ -48,6 +49,7 @@ try {
     const tarball = (await readdir(root)).find((file) => file.startsWith(`supacloud-${name}-`) && file.endsWith(".tgz"));
     assert.ok(tarball);
     const tarballPath = `file:${join(root, tarball)}`;
+    tarballs.set(name, tarballPath);
     if (name === "compiler") {
       manifest.devDependencies[`@supacloud/${name}`] = tarballPath;
     } else if (name === "app" || name === "elysia") {
@@ -168,6 +170,38 @@ try {
     await server.exited;
     reader.releaseLock();
     await errors;
+  }
+
+  // Prove the non-default golden-path templates with the same packed artifacts
+  // in one packing pass, so every supported path stays smoke-covered.
+  for (const template of ["http", "edge"] as const) {
+    const templateProject = join(root, `${template}-project`);
+    await initializeAppProject({ root: templateProject, name: `${template}-smoke`, template });
+    const templateManifestPath = join(templateProject, "package.json");
+    const templateManifest = JSON.parse(await readFile(templateManifestPath, "utf8"));
+    templateManifest.overrides = { ...templateManifest.overrides };
+    for (const [name, tarballPath] of tarballs) {
+      if (name === "compiler") templateManifest.devDependencies[`@supacloud/${name}`] = tarballPath;
+      else if (name === "app" || name === "elysia") templateManifest.dependencies[`@supacloud/${name}`] = tarballPath;
+      templateManifest.overrides[`@supacloud/${name}`] = tarballPath;
+    }
+    await writeFile(templateManifestPath, JSON.stringify(templateManifest, null, 2));
+    await run(["install", "--ignore-scripts"], templateProject);
+    console.log(await run(["run", "check"], templateProject));
+    console.log(await run(["run", "test"], templateProject));
+    console.log(await run(["run", "build"], templateProject));
+
+    const templateBundle = await readFile(join(templateProject, "dist/application.js"), "utf8");
+    assert.ok(!templateBundle.includes("@typescript/typescript6"), "Template bundle must not contain the compiler");
+    assert.ok(!templateBundle.includes("Local demo:"), "Template bundle must not contain the memory demo server");
+
+    const target = template === "http" ? "orders" : "sync";
+    const feature = template === "http" ? "orders.ts" : "sync.ts";
+    const templateContext = JSON.parse(await run([
+      "node_modules/@supacloud/compiler/dist/cli.js", "context", target, "--json",
+    ], templateProject));
+    assert.ok(templateContext.files.some((file: string) => file.endsWith(feature)));
+    console.log(`Starter ${template}: packed check/test/build, bundle boundary and AI context passed`);
   }
 } finally {
   if (server?.exitCode === null) { server.kill("SIGTERM"); await server.exited; }
