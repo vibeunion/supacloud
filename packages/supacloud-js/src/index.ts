@@ -605,7 +605,7 @@ export type SupaCloudTaskDecodeOperation = "get" | "list" | "wait" | "cancel" | 
  * secrets or unbounded application data.
  */
 export class SupaCloudTaskDecoderError extends SupaCloudApiError {
-  readonly code = "TASK_RESULT_INVALID" as const;
+  override readonly code = "TASK_RESULT_INVALID" as const;
   readonly mutationMayHaveApplied: boolean;
 
   constructor(readonly operation: SupaCloudTaskDecodeOperation) {

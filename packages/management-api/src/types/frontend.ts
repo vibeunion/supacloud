@@ -3,11 +3,6 @@ export const FRONTEND_FRAMEWORKS = [
 ] as const;
 export type FrontendFramework = (typeof FRONTEND_FRAMEWORKS)[number];
 
-export const FRONTEND_FRAMEWORKS: readonly FrontendFramework[] = [
-  "static", "react", "vue", "svelte", "nextjs", "nuxt",
-  "sveltekit", "sveltekit-static", "astro", "remix",
-];
-
 export type BuildStatus = "pending" | "building" | "success" | "failed";
 
 export interface FrontendDeployment {

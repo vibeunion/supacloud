@@ -63,7 +63,7 @@ type MigrationOptions = { allowDynamicRegistration?: boolean; authorizationPath?
 export class SupaCloudOAuthServerError extends SupaCloudApiError {
   constructor(
     message: string,
-    readonly code: string,
+    override readonly code: string,
     readonly mutationMayHaveApplied = false,
     status = 0,
   ) {

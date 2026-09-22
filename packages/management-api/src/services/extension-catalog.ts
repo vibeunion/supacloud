@@ -1,7 +1,10 @@
 import type { ExtensionInfo } from "./extension.service";
 import { assertExtensionMutation } from "./extension-policy";
 import type { PgflowState } from "./pgflow.service";
-import { PGFLOW_VERSION } from "../db/pgflow-bundle";
+
+// Version SupaCloud installs and supervises for the bundled pgflow core.
+const PGFLOW_VERSION = "0.16.0";
+export type PgflowRuntimeStatus = "not_installed" | "unmanaged" | "paused" | "worker_not_ready" | "running";
 
 const RECOMMENDED_EXTENSIONS: ReadonlyArray<readonly [string, string]> = [
     ["pg_stat_statements", "Query execution statistics and slow-query analysis."],
@@ -37,7 +40,7 @@ export interface ManagedExtensionInfo extends ExtensionInfo {
     can_enable: boolean;
     can_disable: boolean;
     blocked_reason: string | null;
-    runtime_status?: PgflowState["runtime_status"];
+    runtime_status?: PgflowRuntimeStatus;
     active_workers?: number;
     is_enabled?: boolean;
     schema?: string | null;
@@ -86,8 +89,10 @@ export function extensionCatalog(
         installed_version: pgflow?.version ?? null,
         is_installed: pgflow?.installed ?? false,
         is_enabled: pgflow?.enabled ?? false,
-        runtime_status: pgflow?.runtime_status ?? "not_installed",
-        active_workers: pgflow?.active_workers ?? 0,
+        runtime_status: pgflow === undefined || !pgflow.installed ? "not_installed"
+            : !pgflow.managed ? "unmanaged"
+                : !pgflow.enabled ? "paused" : "running",
+        active_workers: 0,
         schema: pgflow?.installed || runtime.pgflow_schema ? "pgflow" : null,
         comment: "Bundled workflow core. SupaCloud supervises registered workers; pause preserves workflow and queue data.",
         available: true,

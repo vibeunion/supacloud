@@ -42,13 +42,13 @@ export class PgflowDispatcher {
         for (const ref of await this.dependencies.projects()) {
             try {
                 const db = await this.dependencies.database(ref);
-                if (!(await readPgflowState(db)).enabled) continue;
+                if (!(await readPgflowState(db, ref)).enabled) continue;
                 const workers = await db.begin(async (transaction) => {
                     // Reserve under the pause fence, but never hold a database
                     // lock across HTTP. Accepted wakeups may arrive after pause;
                     // the SQL claim gate still prevents them starting new tasks.
                     await transaction`SELECT pg_advisory_xact_lock_shared(1937076332, 1)`;
-                    if (!(await readPgflowState(transaction)).enabled) return [];
+                    if (!(await readPgflowState(transaction, ref)).enabled) return [];
                     const claimed = await transaction`
                         UPDATE pgflow.worker_functions AS f SET last_invoked_at = clock_timestamp()
                         WHERE f.function_name IN (
@@ -71,7 +71,7 @@ export class PgflowDispatcher {
                 });
                 for (const worker of workers) {
                     if (typeof worker.function_name !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(worker.function_name)) continue;
-                    if (!(await readPgflowState(db)).enabled) break;
+                    if (!(await readPgflowState(db, ref)).enabled) break;
                     const result = await this.dependencies.invoke(ref, worker.function_name);
                     if (!result.ok) this.dependencies.report(ref);
                 }

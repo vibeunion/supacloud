@@ -49,7 +49,7 @@ export function getInjectedEnv(): Record<string, string> {
 }
 
 if (!parentPort) throw new Error("This file must be run as a Worker");
-await initModuleLexer;
+await initModuleLexer();
 disableSubprocessApis();
 guardDynamicCodeApis((source) => {
   const [generatedImports] = parseModuleImports(source);
@@ -286,7 +286,7 @@ async function assertTenantModuleGraphSafe(
   const source = await Bun.file(resolvedEntry).text();
   const [moduleImports] = parseModuleImports(source);
   if (moduleImports.some((imported) => (
-    imported.d === -1 && !isDynamicImportLiteral(source, imported.s, imported.e)
+    imported.type === "dynamic" && !isDynamicImportLiteral(source, imported.start, imported.end)
   ))) {
     throw new Error(COMPUTED_DYNAMIC_IMPORT_DISABLED_MESSAGE);
   }
