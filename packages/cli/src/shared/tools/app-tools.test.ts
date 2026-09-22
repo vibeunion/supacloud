@@ -443,11 +443,14 @@ describe("app tools", () => {
             expect(diagnostic).toBeTruthy();
             expect(diagnostic.errorCode).toBe("SC4012");
             expect(diagnostic.fix?.type).toBe("set_command_mode");
+            expect(report.autoFixable).toBeGreaterThan(0);
+            expect(report.fixPlan.some((entry: { type: string }) => entry.type === "set_command_mode")).toBe(true);
 
             const text = await app({ action: "doctor", root: isolatedRoot });
             expect(text.content[0].text).toContain("SC4012");
             expect(text.content[0].text).toContain("fixable: set_command_mode");
             expect(text.content[0].text).toContain("hint:");
+            expect(text.content[0].text).toContain("auto-fixable");
 
             writeFileSync(join(isolatedRoot, "fix.json"), JSON.stringify({ ...diagnostic.fix, value: "required" }));
             const preview = await app({ action: "fix", root: isolatedRoot, fix: "fix.json" });
