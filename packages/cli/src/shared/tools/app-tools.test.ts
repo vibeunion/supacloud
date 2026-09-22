@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { executionMode } from "../execution-policy";
-import { registerAppTools, type AppToolArguments } from "./app-tools";
+import { registerAppAliases, registerAppTools, type AppToolArguments } from "./app-tools";
 
 type AppCallback = (args: Partial<AppToolArguments>) => Promise<{
     isError: boolean;
@@ -20,6 +20,16 @@ function captureAppCallback(): AppCallback {
     });
     if (!callback) throw new Error("app tool was not registered");
     return callback;
+}
+
+function captureAliasCallbacks(): Record<string, AppCallback> {
+    const callbacks: Record<string, AppCallback> = {};
+    registerAppAliases({
+        tool(name, _description, _schema, registered) {
+            callbacks[name] = registered as AppCallback;
+        },
+    });
+    return callbacks;
 }
 
 const FIXTURE_TSCONFIG = `{
@@ -449,6 +459,28 @@ describe("app tools", () => {
         } finally {
             rmSync(emptyRoot, { recursive: true, force: true });
         }
+    });
+
+    test("top-level aliases delegate generate/check/context/doctor to app actions", async () => {
+        const aliases = captureAliasCallbacks();
+        expect(Object.keys(aliases)).toEqual(expect.arrayContaining([
+            "generate", "compile", "check", "graph", "explain", "context", "doctor",
+        ]));
+
+        await app({ action: "compile", root });
+        const doctor = await aliases.doctor({ root });
+        expect(doctor.isError).toBe(false);
+        expect(doctor.content[0].text).toContain("No blocking issues");
+
+        const context = await aliases.context({ root, format: "json" });
+        const pack = JSON.parse(context.content[0].text);
+        expect(pack.version).toBe(1);
+        expect(pack.modules.map((module: { name: string }) => module.name))
+            .toEqual(expect.arrayContaining(["audit", "case"]));
+
+        const generated = await aliases.generate({ kind: "module", name: "aliased", root });
+        expect(generated.isError).toBe(false);
+        expect(existsSync(join(root, "src/features/aliased/aliased.module.ts"))).toBe(true);
     });
 
     test("all app actions are classified as local in the execution policy", () => {

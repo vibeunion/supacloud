@@ -55,7 +55,7 @@ async function initProject(args: AppToolArguments): Promise<ToolResult> {
     ].join("\n"));
 }
 
-interface ToolResult {
+export interface ToolResult {
     isError: boolean;
     content: Array<{ type: "text"; text: string }>;
 }
@@ -560,6 +560,22 @@ async function runExportTools(args: AppToolArguments): Promise<ToolResult> {
     return textResult(summary);
 }
 
+export async function runAppTool(request: AppToolArguments): Promise<ToolResult> {
+    switch (request.action) {
+        case "init": return initProject(request);
+        case "generate": return generateScaffold(request);
+        case "compile": return runCompile(request);
+        case "check": return runCheck(request);
+        case "graph": return runGraph(request);
+        case "explain": return runExplain(request);
+        case "export-tools": return runExportTools(request);
+        case "context": return runContext(request);
+        case "doctor": return runDoctor(request);
+        default:
+            return textResult(`Unknown app action: ${String(request.action)}`, true);
+    }
+}
+
 export function registerAppTools(server: ToolServer): void {
     server.tool(
         "app",
@@ -578,22 +594,34 @@ export function registerAppTools(server: ToolServer): void {
             format: optional(stringEnum(["text", "json"]), "[graph/export-tools] Output format (default: text)"),
             target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / module name"),
         },
-        async (request) => {
-            switch (request.action) {
-                case "init": return initProject(request);
-                case "generate": return generateScaffold(request);
-                case "compile": return runCompile(request);
-                case "check": return runCheck(request);
-                case "graph": return runGraph(request);
-                case "explain": return runExplain(request);
-                case "export-tools": return runExportTools(request);
-                case "context": return runContext(request);
-                case "doctor": return runDoctor(request);
-                default:
-                    return textResult(`Unknown app action: ${String(request.action)}`, true);
-            }
-        },
+        runAppTool,
     );
+}
+
+const APP_ALIAS_ACTIONS = ["generate", "compile", "check", "graph", "explain", "context", "doctor"] as const;
+
+/**
+ * Promotes the single-entry development verbs to top-level commands so an AI or
+ * developer does not need to remember the `app` namespace. The `app` tool and
+ * these aliases share one implementation and one execution-policy classification.
+ */
+export function registerAppAliases(server: ToolServer): void {
+    const schema: ToolSchema = {
+        kind: optional(stringEnum(["module", "command", "query", "controller"]), "[generate] Scaffold kind"),
+        name: optional(Type.String(), "[generate] Object name"),
+        module: optional(Type.String(), "[generate] Target feature module"),
+        dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
+        force: optional(Type.Boolean(), "[generate] Overwrite existing files"),
+        root: optional(Type.String(), "Project directory containing supacloud.config.ts (default: current directory)"),
+        include: optional(Type.String(), "[compile/check] Comma-separated glob patterns for source files"),
+        out_dir: optional(Type.String(), "[compile/export-tools] Output directory (default: <root>/generated)"),
+        strict: optional(Type.Boolean(), "[compile/check] Promote warnings to errors"),
+        format: optional(stringEnum(["text", "json"]), "Output format (default: text)"),
+        target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / module name"),
+    };
+    for (const action of APP_ALIAS_ACTIONS) {
+        server.tool(action, `Top-level alias of \`app ${action}\`.`, schema, (request) => runAppTool({ ...request, action }));
+    }
 }
 
 // For testing and internal reuse
