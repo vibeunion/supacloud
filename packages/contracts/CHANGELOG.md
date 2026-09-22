@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.4.0...contracts-v0.5.0) (2026-09-22)
+
+
+### Features
+
+* **contracts:** add validated identity, app error and recovery contracts ([#1366](https://github.com/vibeunion/supacloud/issues/1366)) ([2811d97](https://github.com/vibeunion/supacloud/commit/2811d9711431fd5e9b495c67728441883908af4f))
+
 ## [0.4.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.3.1...contracts-v0.4.0) (2026-09-15)
 
 

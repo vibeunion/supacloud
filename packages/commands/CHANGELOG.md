@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/vibeunion/supacloud/compare/commands-v0.5.0...commands-v0.6.0) (2026-09-22)
+
+
+### Features
+
+* **commands:** adopt validated command references ([#1367](https://github.com/vibeunion/supacloud/issues/1367)) ([929b3ff](https://github.com/vibeunion/supacloud/commit/929b3ff79066957a8c7a85e57367723360621441))
+
 ## [0.5.0](https://github.com/vibeunion/supacloud/compare/commands-v0.4.0...commands-v0.5.0) (2026-09-16)
 
 

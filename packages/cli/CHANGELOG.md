@@ -14,6 +14,23 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.56.0](https://github.com/vibeunion/supacloud/compare/cli-v0.55.1...cli-v0.56.0) (2026-09-22)
+
+
+### Features
+
+* **cli:** add app context and doctor for AI-driven development ([#1370](https://github.com/vibeunion/supacloud/issues/1370)) ([9212d84](https://github.com/vibeunion/supacloud/commit/9212d8425d9e052138eac28178882c2b3f58f733))
+* **cli:** add doctor autoFixable summary and fix plan ([#1379](https://github.com/vibeunion/supacloud/issues/1379)) ([d623325](https://github.com/vibeunion/supacloud/commit/d623325af49864f08c26741bd1b06f707bc098a9))
+* **cli:** add http and edge golden-path project templates ([#1376](https://github.com/vibeunion/supacloud/issues/1376)) ([172fa2c](https://github.com/vibeunion/supacloud/commit/172fa2c45844f0eaab7cbb5e77457976bf5b6505))
+* **cli:** explain jobs from the compiled manifest ([#1383](https://github.com/vibeunion/supacloud/issues/1383)) ([97bde74](https://github.com/vibeunion/supacloud/commit/97bde74359b6c5c04fbeb9755e3b3b4b092d512b))
+* **cli:** expose allowed dependencies in context and assert fix recheck ([#1378](https://github.com/vibeunion/supacloud/issues/1378)) ([cdb2e6b](https://github.com/vibeunion/supacloud/commit/cdb2e6b9eeee3d818cbf348a503e77215ea6d9cf))
+* **cli:** guide contract wiring and document quick start ([#1380](https://github.com/vibeunion/supacloud/issues/1380)) ([77a42a5](https://github.com/vibeunion/supacloud/commit/77a42a56aaba682effc0dc6ccba6be5d350aa926))
+
+
+### Bug Fixes
+
+* **cli:** explain unknown deployment outcomes ([#1360](https://github.com/vibeunion/supacloud/issues/1360)) ([bb2f6d0](https://github.com/vibeunion/supacloud/commit/bb2f6d01f83e9b050d5f69e99635988eb928fc86))
+
 ## [0.55.1](https://github.com/vibeunion/supacloud/compare/cli-v0.55.0...cli-v0.55.1) (2026-09-19)
 
 

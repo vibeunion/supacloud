@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.2](https://github.com/vibeunion/supacloud/compare/admin-v0.22.1...admin-v0.22.2) (2026-09-22)
+
+
+### Elegance & Refactoring
+
+* **admin:** import shared CLI tools through the package contract ([#1371](https://github.com/vibeunion/supacloud/issues/1371)) ([6a225e4](https://github.com/vibeunion/supacloud/commit/6a225e40ccacd5455542a843a82cf59d46e75e70))
+
 ## [0.22.1](https://github.com/vibeunion/supacloud/compare/admin-v0.22.0...admin-v0.22.1) (2026-09-12)
 
 

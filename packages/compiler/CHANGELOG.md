@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.23.0...compiler-v0.24.0) (2026-09-22)
+
+
+### Features
+
+* **compiler:** emit a unified contract manifest ([#1369](https://github.com/vibeunion/supacloud/issues/1369)) ([db56a95](https://github.com/vibeunion/supacloud/commit/db56a95691a898afa7a948533edea5095c1d3820))
+
 ## [0.23.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.22.0...compiler-v0.23.0) (2026-09-19)
 
 
