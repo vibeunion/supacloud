@@ -37,7 +37,7 @@ const FIXTURE_TSCONFIG = `{
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "paths": { "@supacloud/app": ["./src/runtime.ts"] },
+    "paths": { "@supacloud/app": ["./src/runtime.ts"], "elysia": ["./src/elysia.ts"] },
     "experimentalDecorators": true,
     "strict": true
   }
@@ -64,6 +64,12 @@ export function Post(_path: string, _options?: Record<string, unknown>): MethodD
 const FIXTURE_FILES: Record<string, string> = {
     "tsconfig.json": FIXTURE_TSCONFIG,
     "src/runtime.ts": RUNTIME_SOURCE,
+    "src/elysia.ts": `export const t = {
+  Object: (_shape: Record<string, unknown>) => ({ type: "object" }),
+  String: (_options?: Record<string, unknown>) => ({ type: "string" }),
+  Integer: (_options?: Record<string, unknown>) => ({ type: "integer" }),
+};
+`,
 
     "src/features/shared/tokens.ts": `import { InjectionToken } from "../../runtime";
 
@@ -233,6 +239,13 @@ describe("app tools", () => {
         expect(jobSource).toContain('mode: "task"');
         expect(jobSource).toContain("export class SyncOrdersJob");
         expect(jobSource).toContain("Implement SyncOrdersJob.run");
+
+        const contractResult = await app({ action: "generate", kind: "contract", module: "billing", name: "issue-invoice", root });
+        expect(contractResult.isError).toBe(false);
+        const contractSource = readFileSync(join(root, "src/features/billing/contracts/issue-invoice.contract.ts"), "utf8");
+        expect(contractSource).toContain("IssueInvoiceBody");
+        expect(contractSource).toContain("IssueInvoiceResponse");
+        expect(contractSource).toContain('from "elysia"');
     });
 
     test("init creates an isolated, ready-to-run project template", async () => {

@@ -333,6 +333,7 @@ EXAMPLES
   ${preferredCommand} app generate --kind module --name billing
   ${preferredCommand} app generate --kind command --module billing --name issue-invoice
   ${preferredCommand} app generate --kind job --module billing --name sync-orders
+  ${preferredCommand} app generate --kind contract --module billing --name issue-invoice
   ${preferredCommand} app compile --root .
   ${preferredCommand} app check --root . --strict
   ${preferredCommand} app graph --root . --format json
@@ -343,6 +344,7 @@ EXAMPLES
   ${preferredCommand} app fix --root . --fix fix.json --write
   ${preferredCommand} generate --kind module --name billing
   ${preferredCommand} generate --kind job --module billing --name sync-orders
+  ${preferredCommand} generate --kind contract --module billing --name issue-invoice
   ${preferredCommand} check --root . --strict
   ${preferredCommand} context --format json
   ${preferredCommand} context --target CaseModule --format json

@@ -30,7 +30,7 @@ type ToolServer = {
 
 export interface AppToolArguments {
     action: "init" | "generate" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "doctor" | "fix";
-    kind?: "module" | "command" | "query" | "controller" | "job";
+    kind?: "module" | "command" | "query" | "controller" | "job" | "contract";
     name?: string;
     module?: string;
     dir?: string;
@@ -167,9 +167,23 @@ export class ${pascalName(name)}Job {
 `;
 }
 
+function contractScaffold(moduleName: string, name: string): string {
+    const prefix = pascalName(name);
+    return `import { t } from "elysia";
+
+/**
+ * Input/output contract for ${moduleName}.${camelName(name)}.
+ * Keep these shapes explicit and reuse them in route schemas and command decoders;
+ * never widen them to unknown just to accept unvalidated request data.
+ */
+export const ${prefix}Body = t.Object({});
+export const ${prefix}Response = t.Object({});
+`;
+}
+
 async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
     const kind = args.kind;
-    if (!kind) throw new Error("app generate requires --kind (module|command|query|controller|job)");
+    if (!kind) throw new Error("app generate requires --kind (module|command|query|controller|job|contract)");
     const root = resolve(args.root || process.cwd());
     const dir = args.dir || "src/features";
 
@@ -185,7 +199,7 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
     const fileName = kind === "controller"
         ? `${moduleName}.controller.ts`
         : `${name}.${kind}.ts`;
-    const subdir = kind === "command" ? "commands" : kind === "query" ? "queries" : kind === "job" ? "jobs" : "";
+    const subdir = kind === "command" ? "commands" : kind === "query" ? "queries" : kind === "job" ? "jobs" : kind === "contract" ? "contracts" : "";
     const path = join(root, dir, moduleName, subdir, fileName);
     if (kind === "controller" && existsSync(path)) {
         throw new Error(`Controller already exists: ${path}（请手工合并路由到现有 controller）`);
@@ -196,7 +210,9 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
             ? queryScaffold(moduleName, name)
             : kind === "job"
                 ? jobScaffold(moduleName, name)
-                : controllerScaffold(moduleName);
+                : kind === "contract"
+                    ? contractScaffold(moduleName, name)
+                    : controllerScaffold(moduleName);
     const status = await writeScaffold(path, content, args.force === true);
     return textResult(`✅ ${status}: ${path}`);
 }
@@ -632,7 +648,7 @@ export function registerAppTools(server: ToolServer): void {
         "Local @supacloud/app framework commands: init, scaffold, compile, check, graph, explain, export-tools, AI context/doctor and fix. Actions: init, generate, compile, check, graph, explain, export-tools, context, doctor, fix",
         {
             action: withDescription(stringEnum(["init", "generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix"]), "App action"),
-            kind: optional(stringEnum(["module", "command", "query", "controller", "job"]), "[generate] Scaffold kind"),
+            kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract"]), "[generate] Scaffold kind"),
             name: optional(Type.String(), "[init/generate] Project or object name"),
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
             dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
@@ -659,7 +675,7 @@ const APP_ALIAS_ACTIONS = ["generate", "compile", "check", "graph", "explain", "
  */
 export function registerAppAliases(server: ToolServer): void {
     const schema: ToolSchema = {
-        kind: optional(stringEnum(["module", "command", "query", "controller", "job"]), "[generate] Scaffold kind"),
+        kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract"]), "[generate] Scaffold kind"),
         name: optional(Type.String(), "[generate] Object name"),
         module: optional(Type.String(), "[generate] Target feature module"),
         dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),

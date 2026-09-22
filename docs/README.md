@@ -12,6 +12,12 @@
 - [SupaCloud vs Supabase](./supacloud-vs-supabase.md) - Product positioning and feature comparison
 - [Database Environment Promotion](./database-environment-promotion.md) - Local, preview, staging, and production migration workflow
 
+## Vibecoding
+
+- [Vibecoding Golden Paths](./vibecoding-golden-paths.md) - Single entry point, conventional structure, generators, AI context and executable diagnostics ([中文](./vibecoding-golden-paths.zh-CN.md))
+- [Engineering Goals](./engineering-goals.md) - Ownership contract and implementation priorities ([中文](./engineering-goals.zh-CN.md))
+- [Type Safety](./type-safety.md) - Compiler-enforced type and governance boundaries
+
 ## Architecture
 
 - [Multi-Tenant Architecture](./architecture-multi-tenant.md) - Multi-tenant architecture design
