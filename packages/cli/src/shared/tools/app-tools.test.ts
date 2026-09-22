@@ -63,6 +63,7 @@ export function Post(_path: string, _options?: Record<string, unknown>): MethodD
 
 const FIXTURE_FILES: Record<string, string> = {
     "tsconfig.json": FIXTURE_TSCONFIG,
+    "package.json": `{\n  "name": "fixture",\n  "dependencies": { "@supacloud/app": "0.0.0", "@supacloud/elysia": "0.0.0", "elysia": "1.4.30" }\n}\n`,
     "src/runtime.ts": RUNTIME_SOURCE,
     "src/elysia.ts": `export const t = {
   Object: (_shape: Record<string, unknown>) => ({ type: "object" }),
@@ -262,6 +263,35 @@ describe("app tools", () => {
         }
     });
 
+    test("init supports http and edge golden-path templates", async () => {
+        const httpRoot = mkdtempSync(join(tmpdir(), "supacloud-init-http-"));
+        const edgeRoot = mkdtempSync(join(tmpdir(), "supacloud-init-edge-"));
+        try {
+            const http = await app({ action: "init", root: httpRoot, name: "orders-api", template: "http" });
+            expect(http.isError).toBe(false);
+            expect(http.content[0].text).toContain("template: http");
+            const httpFeature = readFileSync(join(httpRoot, "src/orders/orders.ts"), "utf8");
+            expect(httpFeature).toContain('@Controller("/orders")');
+            expect(httpFeature).toContain("defineFeatureSlice");
+            expect(httpFeature).toContain("responses: { 201: OrderResult }");
+            expect(readFileSync(join(httpRoot, "tests/orders.test.ts"), "utf8")).toContain("createDemo");
+
+            const edge = await app({ action: "init", root: edgeRoot, name: "orders-worker", template: "edge" });
+            expect(edge.isError).toBe(false);
+            expect(edge.content[0].text).toContain("template: edge");
+            const edgeFeature = readFileSync(join(edgeRoot, "src/sync/sync.ts"), "utf8");
+            expect(edgeFeature).toContain("@Job({");
+            expect(edgeFeature).toContain('name: "sync.orders"');
+            expect(edgeFeature).toContain('mode: "task"');
+            expect(edgeFeature).toContain('idempotency: "required"');
+            expect(edgeFeature).toContain("jobs: [SyncOrdersJob]");
+            expect(readFileSync(join(edgeRoot, "tests/sync.test.ts"), "utf8")).toContain("SyncOrdersJob");
+        } finally {
+            rmSync(httpRoot, { recursive: true, force: true });
+            rmSync(edgeRoot, { recursive: true, force: true });
+        }
+    });
+
     test("generate refuses to overwrite without --force and rejects duplicate controllers", async () => {
         const moduleFile = join(root, "src/features/billing/billing.module.ts");
         await expect(app({ action: "generate", kind: "module", name: "billing", root }))
@@ -368,7 +398,9 @@ describe("app tools", () => {
         expect(pack.modules.map((module: { name: string }) => module.name))
             .toEqual(expect.arrayContaining(["audit", "case"]));
         expect(pack.externalTokens).toContain("DB_CLIENT");
+        expect(pack.allowedDependencies.dependencies).toEqual(expect.arrayContaining(["@supacloud/app", "@supacloud/elysia"]));
         expect(pack.commands.doctor).toContain("app doctor");
+        expect(pack.commands.fix).toContain("app fix");
 
         const module = await app({ action: "context", root, target: "case", format: "json" });
         const modulePack = JSON.parse(module.content[0].text);
@@ -430,6 +462,13 @@ describe("app tools", () => {
             expect(applied.isError).toBe(false);
             expect(JSON.parse(applied.content[0].text).written).toBe(true);
             expect(readFileSync(commandPath, "utf8")).toContain('transaction: "required"');
+
+            // End-to-end: the fix must clear the diagnostic on re-diagnosis.
+            const recheck = await app({ action: "doctor", root: isolatedRoot, format: "json" });
+            const recheckReport = JSON.parse(recheck.content[0].text);
+            expect(recheckReport.diagnostics.some((entry: { code: string }) => entry.code === "invalid-command-mode")).toBe(false);
+            const checked = await app({ action: "check", root: isolatedRoot });
+            expect(checked.content[0].text).not.toContain("invalid-command-mode");
         } finally {
             rmSync(isolatedRoot, { recursive: true, force: true });
         }

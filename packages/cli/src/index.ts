@@ -330,6 +330,8 @@ EXAMPLES
   ${preferredCommand} ai show_skill
   ${preferredCommand} ai install_skill --dry_run
   ${preferredCommand} app init --name my-service
+  ${preferredCommand} app init --name my-api --template http
+  ${preferredCommand} app init --name my-worker --template edge
   ${preferredCommand} app generate --kind module --name billing
   ${preferredCommand} app generate --kind command --module billing --name issue-invoice
   ${preferredCommand} app generate --kind job --module billing --name sync-orders
