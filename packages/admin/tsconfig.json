@@ -9,6 +9,10 @@
     "skipLibCheck": true,
     "outDir": "dist",
     "rootDir": "..",
+    "paths": {
+      "@supacloud/cli": ["../cli/src/index.ts"],
+      "@supacloud/cli/*": ["../cli/src/shared/tools/*.ts"]
+    },
     "declaration": true,
     "types": [
       "bun"
