@@ -1,0 +1,6 @@
+{
+  "name": "@supacloud/devtools-contract",
+  "tags": ["scope:core", "type:client"],
+  "projectType": "library",
+  "sourceRoot": "packages/devtools-contract/src"
+}
