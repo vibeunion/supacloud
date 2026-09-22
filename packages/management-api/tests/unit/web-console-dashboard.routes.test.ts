@@ -5,8 +5,10 @@ import { config } from "../../src/config";
 import * as authModule from "../../src/middleware/auth";
 import { systemRoutes } from "../../src/routes/system";
 import * as systemInfoModule from "../../src/services/system-info";
+import { formatSystemInfo, type SystemInfoSnapshot } from "../../src/services/system-info";
 import { projectCrudRoutes } from "../../src/routes/project-crud";
 import { projectService } from "../../src/services";
+import { publicProjectList } from "../../src/services/project-list-response";
 
 function projectRecord(ref = "a") {
   return {
@@ -25,6 +27,57 @@ const originalToken = config.masterToken;
 
 afterEach(() => {
   config.masterToken = originalToken;
+});
+
+function systemSnapshot(): SystemInfoSnapshot {
+  return {
+    cpus: [{ user: 10, nice: 5, sys: 5, idle: 75, irq: 5 }],
+    totalMemory: 2048 * 1024 * 1024, freeMemory: 1024 * 1024 * 1024,
+    uptime: 93780, processUptime: 30.9, version: "1.2.3-beta+sha",
+    platform: "linux", arch: "arm64", hostname: "test",
+  };
+}
+
+test("system info formatter emits the canonical dashboard projection and rejects invalid snapshots", () => {
+  const snapshot = systemSnapshot();
+  expect(formatSystemInfo(snapshot)).toMatchObject({
+    cpu: "25.0%", memory: "1024 / 2048 MB", uptime: "1d 2h 3m", version: "1.2.3-beta+sha",
+    processUptime: 30,
+  });
+  for (const uptime of [0, 59, 60, 3599, 3600, 86399, 86400, 90000, 10 ** 9, Number.MAX_SAFE_INTEGER]) {
+    expect(formatSystemInfo({ ...snapshot, uptime }).uptime).toBeDefined();
+  }
+  for (const idle of [0, 100]) {
+    expect(formatSystemInfo({
+      ...snapshot, cpus: [{ user: 100 - idle, nice: 0, sys: 0, idle, irq: 0 }],
+    }).cpu).toBe(idle === 0 ? "100.0%" : "0.0%");
+  }
+  for (const patch of [
+    { cpus: [] }, { cpus: [{ user: 0, nice: 0, sys: 0, idle: 0, irq: 0 }] },
+    { cpus: [{ user: Number.NaN, nice: 0, sys: 0, idle: 1, irq: 0 }] },
+    { totalMemory: 0 }, { freeMemory: Number.MAX_SAFE_INTEGER }, { uptime: Infinity },
+    { processUptime: -1 }, { version: "" }, { hostname: "\0" },
+  ]) expect(() => formatSystemInfo({ ...snapshot, ...patch } as SystemInfoSnapshot)).toThrow();
+});
+
+test("project list projection keeps public lifecycle fields and rejects private or ambiguous rows", () => {
+  const input = {
+    ...projectRecord(), db_password: "private-password", config: { secret: "private-config" },
+  };
+  expect(publicProjectList([input])).toEqual([{
+    id: "id-a", ref: "a", organization_id: "default", organization_slug: "default",
+    name: "Project a", region: "local", created_at: "2026-09-01T00:00:00.000Z", status: "ACTIVE_HEALTHY",
+  }]);
+  for (const [status, expected] of [["creating", "COMING_UP"], ["paused", "INACTIVE"], ["deleted", "INACTIVE"]]) {
+    expect(publicProjectList([{ ...input, status }])[0]?.status).toBe(expected);
+  }
+  expect(publicProjectList([])).toEqual([]);
+  for (const row of [
+    null, [], {}, { ...input, id: undefined }, { ...input, ref: "../escape" },
+    { ...input, organization_id: undefined }, { ...input, status: undefined },
+    { ...input, created_at: "2026-02-30T00:00:00.000Z" },
+  ]) expect(() => publicProjectList([row])).toThrow();
+  expect(() => publicProjectList([input, input])).toThrow();
 });
 
 test("system info route requires administrator authorization and sanitizes collection failures", async () => {

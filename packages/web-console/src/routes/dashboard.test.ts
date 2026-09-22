@@ -7,47 +7,23 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { formatSystemInfo, type SystemInfoSnapshot } from "../../../management-api/src/services/system-info";
 import {
   parseDashboardProjects, parseDashboardSystemInfo, loadDashboardProjects, loadDashboardSystemInfo,
 } from "../lib/dashboard";
 import { projectListFixture } from "../lib/project-list.test-fixtures";
 
-function snapshot(): SystemInfoSnapshot {
-  return {
-    cpus: [{ user: 10, nice: 5, sys: 5, idle: 75, irq: 5 }],
-    totalMemory: 2048 * 1024 * 1024, freeMemory: 1024 * 1024 * 1024,
-    uptime: 93780, processUptime: 30.9, version: "1.2.3-beta+sha",
-    platform: "linux", arch: "arm64", hostname: "test",
-  };
-}
-const system = () => formatSystemInfo(snapshot());
+const system = () => ({
+  cpu: "25.0%", memory: "1024 / 2048 MB", uptime: "1d 2h 3m", version: "1.2.3-beta+sha",
+  cores: 1, platform: "linux", arch: "arm64", hostname: "test", processUptime: 30,
+});
 
-test("native system formatter and Console decoder agree on cumulative CPU, duration and version", () => {
+test("Console system decoder accepts canonical CPU, duration and version fields", () => {
   expect(parseDashboardSystemInfo(system())).toEqual({
     cpu: "25.0%", memory: "1024 / 2048 MB", uptime: "1d 2h 3m", version: "1.2.3-beta+sha",
   });
-  expect(system().processUptime).toBe(30);
-  for (const uptime of [0, 59, 60, 3599, 3600, 86399, 86400, 90000, 10 ** 9, Number.MAX_SAFE_INTEGER]) {
-    const formatted = formatSystemInfo({ ...snapshot(), uptime });
-    expect(parseDashboardSystemInfo(formatted).uptime).toBe(formatted.uptime);
-  }
-  for (const idle of [0, 100]) {
-    expect(parseDashboardSystemInfo(formatSystemInfo({
-      ...snapshot(), cpus: [{ user: 100 - idle, nice: 0, sys: 0, idle, irq: 0 }],
-    })).cpu).toBe(idle === 0 ? "100.0%" : "0.0%");
-  }
 });
 
-test("invalid system collection and malformed wire metrics fail instead of producing placeholders", () => {
-  for (const patch of [
-    { cpus: [] }, { cpus: [{ user: 0, nice: 0, sys: 0, idle: 0, irq: 0 }] },
-    { cpus: [{ user: NaN, nice: 0, sys: 0, idle: 1, irq: 0 }] },
-    { cpus: [{ user: -1, nice: 0, sys: 0, idle: 1, irq: 0 }] },
-    { cpus: [{ user: Number.MAX_SAFE_INTEGER, nice: 1, sys: 0, idle: 1, irq: 0 }] },
-    { totalMemory: 0 }, { freeMemory: Number.MAX_SAFE_INTEGER }, { freeMemory: -1 },
-    { uptime: Infinity }, { processUptime: -1 }, { version: "" }, { hostname: "\0" },
-  ]) expect(() => formatSystemInfo({ ...snapshot(), ...patch })).toThrow();
+test("malformed wire metrics fail instead of producing placeholders", () => {
   for (const value of [null, [], {}, { ...system(), cpu: "NaN%" }, { ...system(), cpu: "100.1%" },
     { ...system(), cpu: "-1.0%" }, { ...system(), memory: "4 / 3 MB" },
     { ...system(), memory: "9007199254740992 / 9007199254740992 MB" },

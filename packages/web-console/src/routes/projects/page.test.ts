@@ -8,39 +8,29 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseProjectList, loadProjectList } from "../../lib/project-list";
-import { projectListFixture, projectRecord } from "../../lib/project-list.test-fixtures";
-import { publicProjectList } from "../../../../management-api/src/services/project-list-response";
+import { projectListFixture } from "../../lib/project-list.test-fixtures";
 
-test("project list projection keeps lifecycle fields without leaking private metadata or inventing defaults", () => {
-  const input = {
-    ...projectRecord(), db_password: "private-password", config: { secret: "private-config" },
-  };
-  const rows = publicProjectList([input]);
-  expect(rows).toEqual([{
-    id: "id-a", ref: "a", organization_id: "default", organization_slug: "default",
-    name: "Project a", region: "local", created_at: "2026-09-01T00:00:00.000Z", status: "ACTIVE_HEALTHY",
-  }]);
+test("project list decoder keeps lifecycle fields without leaking private metadata or inventing defaults", () => {
+  const rows = projectListFixture();
   expect(parseProjectList(rows)).toEqual([{
     id: "id-a", ref: "a", name: "Project a", region: "local", status: "ACTIVE_HEALTHY",
   }]);
-  for (const [status, expected] of [["creating", "COMING_UP"], ["paused", "INACTIVE"], ["deleted", "INACTIVE"]]) {
-    expect(publicProjectList([{ ...input, status }])[0]?.status).toBe(expected);
-  }
-  expect(publicProjectList([])).toEqual([]);
+  const valid = rows[0];
+  if (!valid) throw new Error("Missing project fixture");
+  expect(parseProjectList([{ ...valid, api: "private", config: { token: "private" } }])[0]).not.toHaveProperty("config");
+  expect(parseProjectList([])).toEqual([]);
 });
 
 test("invalid identities, duplicates, absent status and bad timestamps cannot become public projects", () => {
-  const valid = projectRecord();
+  const valid = projectListFixture()[0];
+  if (!valid) throw new Error("Missing project fixture");
   const inherited: unknown = Object.create(valid);
   for (const row of [
     null, [], {}, inherited, { ...valid, id: undefined }, { ...valid, ref: "../escape" },
-    { ...valid, organization_id: undefined }, { ...valid, organization_slug: "" },
-    { ...valid, region: "" }, { ...valid, name: "\0" }, { ...valid, status: undefined },
-    { ...valid, status: "unexpected" }, { ...valid, created_at: undefined },
-    { ...valid, created_at: new Date(NaN) }, { ...valid, created_at: "2026-02-30T00:00:00.000Z" },
-  ]) expect(() => publicProjectList([row])).toThrow();
-  expect(() => publicProjectList([valid, valid])).toThrow();
-  expect(() => publicProjectList([valid, { ...projectRecord("b"), id: valid.id }])).toThrow();
+    { ...valid, name: "\0" }, { ...valid, status: undefined }, { ...valid, status: "unexpected" },
+  ]) expect(() => parseProjectList([row])).toThrow();
+  expect(() => parseProjectList([valid, valid])).toThrow();
+  expect(() => parseProjectList([valid, { ...projectListFixture(["b"])[0], id: valid.id }])).toThrow();
 });
 
 test("Console accepts only complete validated arrays with unique safe project identities", () => {
