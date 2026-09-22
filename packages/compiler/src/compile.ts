@@ -63,6 +63,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
       "client.ts": rendered.clientCode,
       "openapi.ts": rendered.openApiCode,
       "permissions.ts": rendered.permissionsCode,
+      "contracts.manifest.json": rendered.contractsManifestJson,
       "graphql.ts": graphql.files["graphql.ts"],
       "graphql.documents.ts": graphql.files["graphql.documents.ts"],
     }, options.strict ?? false));
@@ -141,6 +142,7 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
     ...graphql.files,
     "application.ts": rendered.applicationCode,
     "app.manifest.json": rendered.manifestJson,
+    "contracts.manifest.json": rendered.contractsManifestJson,
   };
   if (rendered.clientCode) {
     expectedFiles["client.ts"] = rendered.clientCode;

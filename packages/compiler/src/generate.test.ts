@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 import { checkProject, compileProject } from "./compile";
 import { renderApplication } from "./generate";
 import { relativeImportPath } from "./util";
+import type { ContractManifest } from "./contract-manifest";
 import { BAD_PROJECT_FILES } from "./fixtures/bad-project";
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
 import { requireValue, writeFixtureProject } from "./fixtures/helpers";
@@ -28,11 +29,12 @@ beforeAll(async () => {
 }, 30_000);
 
 describe("compileProject：总体结果", () => {
-  test("无诊断，写出 application.ts 与 app.manifest.json", () => {
+  test("无诊断，写出 application.ts 与 contract manifests", () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.written).toEqual([
       join(outDir, "application.ts"),
       join(outDir, "app.manifest.json"),
+      join(outDir, "contracts.manifest.json"),
     ]);
   });
 
@@ -57,6 +59,39 @@ describe("compileProject：总体结果", () => {
     expect(manifest.commandGovernance.commands).toContainEqual(expect.objectContaining({
       module: "case", name: "case.accept", permission: "case.accept", idempotency: "required",
     }));
+  });
+
+  test("contracts.manifest.json 汇总 command/query/route/RPC/权限和 evidence", async () => {
+    const manifest = JSON.parse(
+      await readFile(join(outDir, "contracts.manifest.json"), "utf8"),
+    ) as ContractManifest;
+    expect(manifest.commands).toEqual([{
+      name: "case.accept",
+      className: "AcceptCaseCommand",
+      module: "case",
+      permission: "case.accept",
+      transaction: "required",
+      idempotency: "required",
+      auditEvent: "case.accepted",
+    }]);
+    expect(manifest.queries).toEqual([]);
+    expect(manifest.routes[0]).toMatchObject({
+      path: "/cases/:caseId/accept",
+      command: "AcceptCaseCommand",
+      permission: "case.accept",
+    });
+    expect(manifest.permissions).toEqual(["case.accept"]);
+    expect(manifest.rpc).toEqual([]);
+    expect(manifest.events).toEqual([{ name: "case.accepted", source: "command.audit", command: "case.accept" }]);
+    expect(manifest.fixtures).toEqual([]);
+    expect(manifest.artifacts).toMatchObject({
+      client: false,
+      openapi: false,
+      permissions: false,
+      sdk: "generated-client",
+      openapiDocument: "generated",
+      permissionManifest: "generated",
+    });
   });
 });
 
