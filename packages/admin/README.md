@@ -2,6 +2,11 @@
 
 Platform administration CLI for SupaCloud operators.
 
+The published package resolves its workspace-only `@supacloud/cli` reference to
+the exact published CLI version during the release workflow. The repository
+manifest intentionally keeps the local reference for workspace development;
+consumers of the npm package never need a sibling checkout.
+
 `supacloud-admin` is intended for server installation, SSH diagnostics, tenant runtime management, and platform-wide project administration.
 
 Typical environment variables:
