@@ -3,9 +3,12 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { Type } from "@sinclair/typebox";
 import {
+    applyDiagnosticFix,
     checkProject,
     compileProject,
     compileOptionsFromConfig,
+    createContextPack,
+    doctorProject,
     loadSupacloudConfig,
     resolveSupacloudConfig,
     type Diagnostic,
@@ -26,8 +29,8 @@ type ToolServer = {
 };
 
 export interface AppToolArguments {
-    action: "init" | "generate" | "compile" | "check" | "graph" | "explain" | "export-tools";
-    kind?: "module" | "command" | "query" | "controller";
+    action: "init" | "generate" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "doctor" | "fix";
+    kind?: "module" | "command" | "query" | "controller" | "job" | "contract";
     name?: string;
     module?: string;
     dir?: string;
@@ -38,6 +41,8 @@ export interface AppToolArguments {
     strict?: boolean;
     format?: "text" | "json";
     target?: string;
+    fix?: string;
+    write?: boolean;
 }
 
 async function initProject(args: AppToolArguments): Promise<ToolResult> {
@@ -53,7 +58,7 @@ async function initProject(args: AppToolArguments): Promise<ToolResult> {
     ].join("\n"));
 }
 
-interface ToolResult {
+export interface ToolResult {
     isError: boolean;
     content: Array<{ type: "text"; text: string }>;
 }
@@ -145,9 +150,40 @@ export class ${pascalName(moduleName)}Controller {}
 `;
 }
 
+function jobScaffold(moduleName: string, name: string): string {
+    return `import { Injectable, Job } from "@supacloud/app";
+
+@Injectable()
+@Job({
+    name: ${JSON.stringify(`${moduleName}.${camelName(name)}`)},
+    mode: "task",
+    // Optional: declare input/output TypeBox schemas for a validated, typed job boundary.
+})
+export class ${pascalName(name)}Job {
+    run(): Promise<void> {
+        throw new Error("Implement ${pascalName(name)}Job.run before dispatching this job");
+    }
+}
+`;
+}
+
+function contractScaffold(moduleName: string, name: string): string {
+    const prefix = pascalName(name);
+    return `import { t } from "elysia";
+
+/**
+ * Input/output contract for ${moduleName}.${camelName(name)}.
+ * Keep these shapes explicit and reuse them in route schemas and command decoders;
+ * never widen them to unknown just to accept unvalidated request data.
+ */
+export const ${prefix}Body = t.Object({});
+export const ${prefix}Response = t.Object({});
+`;
+}
+
 async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
     const kind = args.kind;
-    if (!kind) throw new Error("app generate requires --kind (module|command|query|controller)");
+    if (!kind) throw new Error("app generate requires --kind (module|command|query|controller|job|contract)");
     const root = resolve(args.root || process.cwd());
     const dir = args.dir || "src/features";
 
@@ -163,7 +199,7 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
     const fileName = kind === "controller"
         ? `${moduleName}.controller.ts`
         : `${name}.${kind}.ts`;
-    const subdir = kind === "command" ? "commands" : kind === "query" ? "queries" : "";
+    const subdir = kind === "command" ? "commands" : kind === "query" ? "queries" : kind === "job" ? "jobs" : kind === "contract" ? "contracts" : "";
     const path = join(root, dir, moduleName, subdir, fileName);
     if (kind === "controller" && existsSync(path)) {
         throw new Error(`Controller already exists: ${path}（请手工合并路由到现有 controller）`);
@@ -172,16 +208,27 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
         ? commandScaffold(moduleName, name)
         : kind === "query"
             ? queryScaffold(moduleName, name)
-            : controllerScaffold(moduleName);
+            : kind === "job"
+                ? jobScaffold(moduleName, name)
+                : kind === "contract"
+                    ? contractScaffold(moduleName, name)
+                    : controllerScaffold(moduleName);
     const status = await writeScaffold(path, content, args.force === true);
     return textResult(`✅ ${status}: ${path}`);
 }
 
 function formatDiagnostic(diagnostic: Diagnostic): string {
+    const code = diagnostic.errorCode && diagnostic.errorCode !== diagnostic.code
+        ? `${diagnostic.code} (${diagnostic.errorCode})`
+        : diagnostic.code;
     const location = diagnostic.file
         ? ` ${diagnostic.file}${diagnostic.line ? `:${diagnostic.line}` : ""}`
         : "";
-    return `${diagnostic.severity} ${diagnostic.code}${location} ${diagnostic.message}`;
+    const lines = [`${diagnostic.severity} ${code}${location} ${diagnostic.message}`];
+    if (diagnostic.suggestion) lines.push(`  hint: ${diagnostic.suggestion}`);
+    if (diagnostic.docsUrl) lines.push(`  docs: ${diagnostic.docsUrl}`);
+    if (diagnostic.fix) lines.push(`  fixable: ${diagnostic.fix.type}; apply with \`supacloud app fix --fix <file.json> --write\``);
+    return lines.join("\n");
 }
 
 function formatDiagnostics(diagnostics: Diagnostic[]): string {
@@ -199,6 +246,142 @@ function sourceRoot(args: AppToolArguments, root: string, configured: string | u
         existsSync(join(root, `supacloud.config.${extension}`)));
     // Preserve the legacy explicit source-directory form in unconfigured projects.
     return args.root && !hasConfig ? "." : configured;
+}
+
+/** Resolves project root/config and runs a no-write check to obtain the current graph. */
+async function projectCompileConfig(args: AppToolArguments): Promise<{
+    root: string;
+    configFile: string | null;
+    outDir: string;
+    result: Awaited<ReturnType<typeof checkProject>>;
+}> {
+    const root = resolve(args.root || process.cwd());
+    const configFile = ["ts", "mts", "js", "mjs"]
+        .map((extension) => join(root, `supacloud.config.${extension}`))
+        .find((candidate) => existsSync(candidate)) ?? null;
+    const loadedConfig = await loadSupacloudConfig(root);
+    const defaults = resolveSupacloudConfig(loadedConfig, root);
+    const configuredRoot = sourceRoot(args, root, loadedConfig.root);
+    const include = parseInclude(args.include) ?? loadedConfig.include;
+    const outDir = args.out_dir ? resolve(root, args.out_dir) : defaults.outDir;
+    const result = await checkProject(compileOptionsFromConfig({
+        ...loadedConfig,
+        ...(configuredRoot === undefined ? {} : { root: configuredRoot }),
+        outDir,
+        ...(include === undefined ? {} : { include }),
+        strict: args.strict ?? loadedConfig.strict ?? false,
+    }, root));
+    return { root, configFile, outDir, result };
+}
+
+interface ProjectContextPack {
+    version: 1;
+    root: string;
+    configFile: string | null;
+    generatedDir: string;
+    modules: ModuleNode[];
+    externalTokens: string[];
+    diagnostics: Diagnostic[];
+    commands: Record<string, string>;
+}
+
+function formatModuleContextPack(pack: ReturnType<typeof createContextPack>): string {
+    return [
+        `CONTEXT ${pack.subject}`,
+        `  modules: ${pack.modules.map((module) => module.name).join(", ") || "-"}`,
+        `  files: ${pack.files.join(", ") || "-"}`,
+        `  external tokens: ${pack.externalTokens.join(", ") || "-"}`,
+        `  imports: ${pack.relatedModules.imports.join(", ") || "-"}`,
+        `  imported by: ${pack.relatedModules.importedBy.join(", ") || "-"}`,
+        ...(pack.graphql ? [
+            `  graphql schema: ${pack.graphql.schema}`,
+            `  graphql queries: ${pack.graphql.operations.map((operation) => operation.name).join(", ") || "-"}`,
+        ] : []),
+        ...pack.executionPlans.map((plan) => `  execution ${plan.name}: ${plan.stages.join(" -> ")}`),
+        ...pack.diagnostics.map(formatDiagnostic),
+    ].join("\n");
+}
+
+/**
+ * `app context` is the AI entry point: the compiled graph and diagnostics as
+ * structured data, so an agent does not need to scan the repository. A
+ * `--target <module>` narrows the result to one module neighborhood.
+ */
+async function runContext(args: AppToolArguments): Promise<ToolResult> {
+    const { root, configFile, outDir, result } = await projectCompileConfig(args);
+    const subject = args.target?.trim();
+    if (subject) {
+        const pack = createContextPack({ ...result.graph, diagnostics: result.diagnostics }, subject);
+        return textResult(args.format === "json" ? JSON.stringify(pack, null, 2) : formatModuleContextPack(pack));
+    }
+    const project: ProjectContextPack = {
+        version: 1,
+        root,
+        configFile,
+        generatedDir: outDir,
+        modules: result.graph.modules,
+        externalTokens: result.graph.externalTokens,
+        diagnostics: result.diagnostics,
+        commands: {
+            check: "supacloud app check",
+            compile: "supacloud app compile",
+            context: "supacloud app context --format json",
+            doctor: "supacloud app doctor",
+            graph: "supacloud app graph --format json",
+            explain: "supacloud app explain --target <name>",
+        },
+    };
+    if (args.format === "json") return textResult(JSON.stringify(project, null, 2));
+    return textResult([
+        `CONTEXT ${root}`,
+        `  config: ${configFile ?? "(none)"}`,
+        `  generated: ${outDir}`,
+        `  modules: ${project.modules.map((module) => module.name).join(", ") || "-"}`,
+        `  external tokens: ${project.externalTokens.join(", ") || "-"}`,
+        ...project.diagnostics.map(formatDiagnostic),
+    ].join("\n"));
+}
+
+/**
+ * `app doctor` reports actionable, fixable project health: stable check names,
+ * diagnostics with file/line + hint, and a repairability verdict.
+ */
+async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
+    const { root, outDir, result } = await projectCompileConfig(args);
+    const doctor = doctorProject(root, outDir, result.graph, result.upToDate, result.diagnostics);
+    if (args.format === "json") {
+        return textResult(JSON.stringify({ ok: doctor.errors === 0, ...doctor }, null, 2), doctor.errors > 0);
+    }
+    const lines = doctor.checks.map((check) => `${check.ok ? "OK" : "FAIL"} ${check.name}: ${check.detail}`);
+    for (const diagnostic of doctor.diagnostics ?? []) {
+        lines.push(formatDiagnostic(diagnostic));
+    }
+    lines.push("");
+    lines.push(doctor.errors === 0
+        ? "No blocking issues. Run `supacloud app compile` to refresh generated artifacts."
+        : `${doctor.errors} blocking issue(s). Run \`supacloud app check\` for the full diagnostic list.`);
+    return textResult(lines.join("\n"), doctor.errors > 0);
+}
+
+/**
+ * `app fix` applies one machine-readable DiagnosticFix (from `doctor --format
+ * json`). It previews by default and only writes with `--write`, so an agent can
+ * inspect the exact change before mutating source.
+ */
+async function runFix(args: AppToolArguments): Promise<ToolResult> {
+    const root = resolve(args.root || process.cwd());
+    const fixPath = args.fix?.trim();
+    if (!fixPath) throw new Error("app fix requires --fix <path-to-diagnostic-fix.json>");
+    const parsed = JSON.parse(await readFile(resolve(root, fixPath), "utf8")) as unknown;
+    const write = args.write === true;
+    const applied = await applyDiagnosticFix(parsed as Parameters<typeof applyDiagnosticFix>[0], { rootDir: root, dryRun: !write });
+    return textResult(JSON.stringify({
+        ok: true,
+        written: write,
+        file: applied.file,
+        changed: applied.changed,
+        ...(write ? {} : { preview: applied.content }),
+    }, null, 2));
 }
 
 async function runCompile(args: AppToolArguments): Promise<ToolResult> {
@@ -442,13 +625,30 @@ async function runExportTools(args: AppToolArguments): Promise<ToolResult> {
     return textResult(summary);
 }
 
+export async function runAppTool(request: AppToolArguments): Promise<ToolResult> {
+    switch (request.action) {
+        case "init": return initProject(request);
+        case "generate": return generateScaffold(request);
+        case "compile": return runCompile(request);
+        case "check": return runCheck(request);
+        case "graph": return runGraph(request);
+        case "explain": return runExplain(request);
+        case "export-tools": return runExportTools(request);
+        case "context": return runContext(request);
+        case "doctor": return runDoctor(request);
+        case "fix": return runFix(request);
+        default:
+            return textResult(`Unknown app action: ${String(request.action)}`, true);
+    }
+}
+
 export function registerAppTools(server: ToolServer): void {
     server.tool(
         "app",
-        "Local @supacloud/app framework commands: init, scaffold, compile, check, graph, explain and export-tools. Actions: init, generate, compile, check, graph, explain, export-tools",
+        "Local @supacloud/app framework commands: init, scaffold, compile, check, graph, explain, export-tools, AI context/doctor and fix. Actions: init, generate, compile, check, graph, explain, export-tools, context, doctor, fix",
         {
-            action: withDescription(stringEnum(["init", "generate", "compile", "check", "graph", "explain", "export-tools"]), "App action"),
-            kind: optional(stringEnum(["module", "command", "query", "controller"]), "[generate] Scaffold kind"),
+            action: withDescription(stringEnum(["init", "generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix"]), "App action"),
+            kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract"]), "[generate] Scaffold kind"),
             name: optional(Type.String(), "[init/generate] Project or object name"),
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
             dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
@@ -458,22 +658,40 @@ export function registerAppTools(server: ToolServer): void {
             out_dir: optional(Type.String(), "[compile/export-tools] Output directory (default: <root>/generated)"),
             strict: optional(Type.Boolean(), "[compile/check] Promote warnings to errors"),
             format: optional(stringEnum(["text", "json"]), "[graph/export-tools] Output format (default: text)"),
-            target: optional(Type.String(), "[explain] Provider class name / token name / command name"),
+            target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / module name"),
+            fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
+            write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
         },
-        async (request) => {
-            switch (request.action) {
-                case "init": return initProject(request);
-                case "generate": return generateScaffold(request);
-                case "compile": return runCompile(request);
-                case "check": return runCheck(request);
-                case "graph": return runGraph(request);
-                case "explain": return runExplain(request);
-                case "export-tools": return runExportTools(request);
-                default:
-                    return textResult(`Unknown app action: ${String(request.action)}`, true);
-            }
-        },
+        runAppTool,
     );
+}
+
+const APP_ALIAS_ACTIONS = ["generate", "compile", "check", "graph", "explain", "context", "doctor", "fix"] as const;
+
+/**
+ * Promotes the single-entry development verbs to top-level commands so an AI or
+ * developer does not need to remember the `app` namespace. The `app` tool and
+ * these aliases share one implementation and one execution-policy classification.
+ */
+export function registerAppAliases(server: ToolServer): void {
+    const schema: ToolSchema = {
+        kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract"]), "[generate] Scaffold kind"),
+        name: optional(Type.String(), "[generate] Object name"),
+        module: optional(Type.String(), "[generate] Target feature module"),
+        dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
+        force: optional(Type.Boolean(), "[generate] Overwrite existing files"),
+        root: optional(Type.String(), "Project directory containing supacloud.config.ts (default: current directory)"),
+        include: optional(Type.String(), "[compile/check] Comma-separated glob patterns for source files"),
+        out_dir: optional(Type.String(), "[compile/export-tools] Output directory (default: <root>/generated)"),
+        strict: optional(Type.Boolean(), "[compile/check] Promote warnings to errors"),
+        format: optional(stringEnum(["text", "json"]), "Output format (default: text)"),
+        target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / module name"),
+        fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
+        write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
+    };
+    for (const action of APP_ALIAS_ACTIONS) {
+        server.tool(action, `Top-level alias of \`app ${action}\`.`, schema, (request) => runAppTool({ ...request, action }));
+    }
 }
 
 // For testing and internal reuse
