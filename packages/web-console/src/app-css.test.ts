@@ -39,7 +39,9 @@ describe("SVAdmin stylesheet migration", () => {
     ]);
     expect(sources.some((source) => source.includes("@svadmin/ui"))).toBe(false);
     expect(sources.some((source) => source.includes("@svadmin/ai-elements"))).toBe(true);
-    expect(aiThemeSource).toContain("--color-background: var(--background, Canvas)");
+    expect(aiThemeSource).toContain("ai.css");
+    expect(appSource).toContain("@theme inline");
+    expect(appSource).toContain("--color-border: var(--border)");
   });
 
   test("preserves light and dark colors as complete semantic color values", () => {

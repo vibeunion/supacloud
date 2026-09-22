@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { useShow } from "@svadmin/core";
+  import { useShow } from "$lib/admin/unsafe";
 
 
   import { page } from "$app/state";

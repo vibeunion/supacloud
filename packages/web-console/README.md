@@ -31,16 +31,16 @@ The production build outputs to `build/` directory. In production, the Managemen
 
 ## SVAdmin Styles
 
-The console uses `@svadmin/ui@0.70.0`, `@svadmin/core@0.50.0`,
-`@svadmin/ai-elements@0.5.1`, and `@svadmin/sveltekit@0.10.7`.
-`@svadmin/elysia` stays on npm's published `0.12.7`; a newer GitHub release
-alone is not an installable dependency.
+The console uses `@svadmin/ui@0.74.0`, `@svadmin/core@0.54.0`,
+`@svadmin/ai-elements@0.9.0`, `@svadmin/sveltekit@0.11.8`, and
+`@svadmin/elysia@0.13.8`.
 
 Tailwind v4 configuration lives in `src/app.css`. Import
 `@svadmin/ui/app.theme.css` once after Tailwind, not alongside
 `@svadmin/ui/app.css`. This entry includes precompiled component styles and
 semantic theme metadata, so the host does not scan UI package sources.
-AI elements retain their separate stylesheet and source scan.
+AI elements use the package theme entry, while the host bridges semantic tokens
+through `@theme inline` so utilities such as `bg-background` remain valid.
 
 Use public component entries such as
 `@svadmin/ui/components/AutoTable.svelte`. The root UI entry re-exports
@@ -51,6 +51,14 @@ avoids a second stylesheet overriding the host palette.
 Theme overrides use complete CSS colors such as `--background: hsl(0 0% 100%)`,
 not bare HSL channels. The UI stylesheet provides the `--color-*` aliases;
 the console preserves its existing light/dark palette and class-based dark mode.
+
+### Resource Contracts
+
+SVAdmin 0.54 requires runtime contracts for schema-bound resources. AutoTable
+resources use TypeBox contracts and Provider projections for stable IDs and
+JSON values. Open-ended pages use the explicit `$lib/admin/unsafe` hook
+boundary, and project settings use a direct PATCH form rather than AutoForm
+for the open-ended `config` payload.
 
 Migration acceptance:
 

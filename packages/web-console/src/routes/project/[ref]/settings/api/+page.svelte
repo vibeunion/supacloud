@@ -9,7 +9,7 @@
   import { toast } from "svelte-sonner";
   import { getContext } from "svelte";
 
-  import { useShow } from "@svadmin/core";
+  import { useShow } from "$lib/admin/unsafe";
 
   let showAnonKey = $state(false);
   let showServiceKey = $state(false);

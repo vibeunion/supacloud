@@ -1,4 +1,5 @@
 import type { FieldDefinition, ResourceDefinition } from '@svadmin/core';
+import { tableRowsContract, tenantAuthUsersContract, tenantTablesContract } from './contracts';
 
 export interface ProjectResourceLabels {
   projects: string;
@@ -200,16 +201,24 @@ export function buildTableRowsResource({
   return {
     name: tableRowsResourceName(projectRef, schema, tableName),
     label: `${schema}.${tableName}`,
-    primaryKey: identityKey,
+    primaryKey: 'id',
+    contract: tableRowsContract(tableRowsResourceName(projectRef, schema, tableName), columns),
     fields,
     canCreate: false,
     canEdit: false,
     canDelete: false,
     canShow: false,
     showInMenu: false,
-    ...(usesSyntheticIdentity
-      ? { provider: { meta: { tableRowIdentityKey: identityKey } } }
-      : {}),
+    provider: {
+      meta: {
+        ...(usesSyntheticIdentity ? { tableRowIdentityKey: identityKey } : {}),
+        contractProjection: {
+          contractKeys: columns.map((column) => column.column_name),
+          idFrom: identityKey,
+          stringifyComplex: true,
+        },
+      },
+    },
   };
 }
 
@@ -252,8 +261,16 @@ export const getTenantResources = (ref: string, labels: TenantResourceLabels): R
   {
     name: `v1/projects/${ref}/database/tables`,
     label: labels.tables,
-    // The endpoint lists public-schema tables and does not return an id field.
-    primaryKey: 'table_name',
+    // The endpoint lists public-schema tables; the provider maps table_name to id.
+    contract: tenantTablesContract(ref),
+    provider: {
+      meta: {
+        contractProjection: {
+          contractKeys: ['table_name', 'table_schema', 'table_type', 'row_estimate'],
+          idFrom: 'table_name',
+        },
+      },
+    },
     // Table creation uses the dedicated, migration-backed form on the Tables page.
     canCreate: false,
     canEdit: false,
@@ -269,6 +286,14 @@ export const getTenantResources = (ref: string, labels: TenantResourceLabels): R
     label: 'Users',
     // The generic AutoTable routes actions to `/:id` and `/create`; this
     // tenant API is intentionally handled by the dedicated Auth page instead.
+    contract: tenantAuthUsersContract(ref),
+    provider: {
+      meta: {
+        contractProjection: {
+          contractKeys: ['id', 'email', 'role', 'created_at', 'last_sign_in_at'],
+        },
+      },
+    },
     canCreate: false,
     canEdit: false,
     fields: [

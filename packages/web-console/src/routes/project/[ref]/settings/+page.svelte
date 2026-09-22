@@ -5,8 +5,7 @@
   import { t } from "svelte-i18n";
   import { Loader2, Activity, Server, Pause, RotateCw, Trash2, AlertTriangle, Globe, CheckCircle2, XCircle } from "lucide-svelte";
   import { toast } from "svelte-sonner";
-  import AutoForm from "@svadmin/ui/components/AutoForm.svelte";
-  import { useShow } from "@svadmin/core";
+  import { useShow } from "$lib/admin/unsafe";
   import { useQueryClient, createMutation, createQuery } from "@tanstack/svelte-query";
 
   let actionInProgress = $state<string | null>(null);
@@ -14,6 +13,7 @@
   let customDomainInput = $state("");
   let apiDomainInput = $state("");
   let studioDomainInput = $state("");
+  let generalName = $state("");
 
   // Custom domain state
   let domainHostname = $state("");
@@ -50,6 +50,9 @@
     customDomainInput = typeof routingConfig?.custom_domain === "string" ? routingConfig.custom_domain : "";
     apiDomainInput = typeof routingConfig?.api_domain === "string" ? routingConfig.api_domain : "";
     studioDomainInput = typeof routingConfig?.studio_domain === "string" ? routingConfig.studio_domain : "";
+    generalName = typeof (project as Record<string, unknown> | null)?.name === "string"
+      ? String((project as Record<string, unknown>).name)
+      : "";
   });
 
   async function refetchProject() {
@@ -110,6 +113,34 @@
 
   function saveRoutingSettings() {
     routingMutation.mutate();
+  }
+
+  const generalMutation = createMutation(() => ({
+    mutationFn: async () => {
+      const response = await apiClient(`/v1/projects/${projectRef}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: generalName.trim() }),
+      });
+      if (!response.ok) throw new Error($t("ProjectSettings.general_save_failed"));
+      return response.json();
+    },
+    onMutate: () => { actionInProgress = "general"; },
+    onSuccess: async () => {
+      actionMsg = `✅ ${$t("ProjectSettings.general_saved")}`;
+      await refetchProject();
+    },
+    onError: (error: unknown) => {
+      actionMsg = `❌ ${error instanceof Error ? error.message : $t("ProjectSettings.general_save_failed")}`;
+    },
+    onSettled: () => {
+      actionInProgress = null;
+      setTimeout(() => actionMsg = null, 4000);
+    },
+  }));
+
+  function saveGeneralSettings() {
+    generalMutation.mutate();
   }
 
   const projectActionMutation = createMutation(() => ({
@@ -271,10 +302,19 @@
     </div>
   {:else if project}
     <div class="space-y-6">
-      <!-- General via svadmin AutoForm -->
+      <!-- General project settings -->
       <div class="border rounded-xl bg-card p-6 space-y-4">
         <h2 class="text-lg font-semibold">{$t("Settings.general")}</h2>
-        <AutoForm resourceName="v1/projects" id={projectRef} />
+        <form class="space-y-3" onsubmit={(event) => { event.preventDefault(); saveGeneralSettings(); }}>
+          <label class="block space-y-1.5">
+            <span class="text-xs font-medium text-muted-foreground">{$t("Settings.project_name")}</span>
+            <input bind:value={generalName} required maxlength="100" class="w-full px-3 py-2 rounded-md border bg-background text-sm" disabled={actionInProgress !== null} />
+          </label>
+          <button type="submit" class="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-brand text-white text-sm font-medium disabled:opacity-50" disabled={actionInProgress !== null || !generalName.trim()}>
+            {#if actionInProgress === "general"}<Loader2 size={14} class="animate-spin" />{/if}
+            {$t("ProjectSettings.save")}
+          </button>
+        </form>
       </div>
 
       <!-- API & Access URLs -->

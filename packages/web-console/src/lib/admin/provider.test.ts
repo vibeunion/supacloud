@@ -147,4 +147,51 @@ describe("dataProvider resource adapters", () => {
       },
     )).rejects.toThrow("Expected object records");
   });
+
+  test("projects contract-bound rows to the declared schema", async () => {
+    const { result } = await getList(
+      { data: [{ event_id: "e-1", payload: { kind: "created" }, extra: true }], total: 1 },
+      {
+        resource: "v1/projects/alpha/database/tables/public/events/rows",
+        meta: {
+          contractProjection: {
+            contractKeys: ["event_id", "payload"],
+            idFrom: "event_id",
+            stringifyComplex: true,
+          },
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      data: [{ event_id: "e-1", payload: '{"kind":"created"}', id: "e-1" }],
+      total: 1,
+    });
+  });
+
+  test("maps table names to the strict table contract id", async () => {
+    const { result } = await getList(
+      { data: [{ table_name: "users", table_schema: "public", table_type: "BASE TABLE", row_estimate: "3", extra: true }], total: 1 },
+      {
+        resource: "v1/projects/alpha/database/tables",
+        meta: {
+          contractProjection: {
+            contractKeys: ["table_name", "table_schema", "table_type", "row_estimate"],
+            idFrom: "table_name",
+          },
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      data: [{
+        table_name: "users",
+        table_schema: "public",
+        table_type: "BASE TABLE",
+        row_estimate: "3",
+        id: "users",
+      }],
+      total: 1,
+    });
+  });
 });

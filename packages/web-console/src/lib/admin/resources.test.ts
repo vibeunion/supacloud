@@ -84,8 +84,12 @@ describe("buildResourceRegistry", () => {
       { table_schema: "public", table_name: "events" },
     ];
 
-    expect(tableResource?.primaryKey).toBe("table_name");
-    const identities = rows.map((row) => row[tableResource?.primaryKey ?? "id"]);
+    expect(tableResource?.contract?.name).toBe("v1/projects/alpha123/database/tables");
+    expect(tableResource?.provider?.meta?.contractProjection).toMatchObject({
+      contractKeys: ["table_name", "table_schema", "table_type", "row_estimate"],
+      idFrom: "table_name",
+    });
+    const identities = rows.map((row) => row.table_name);
     expect(identities).toEqual(["users", "events"]);
     expect(new Set(identities).size).toBe(rows.length);
   });
@@ -150,13 +154,18 @@ describe("buildResourceRegistry", () => {
     expect(resource).toMatchObject({
       name: tableRowsResourceName("alpha", "public", "events"),
       label: "public.events",
-      primaryKey: "__svadmin_row_id_",
+      primaryKey: "id",
       canCreate: false,
       canEdit: false,
       canDelete: false,
       canShow: false,
       showInMenu: false,
-      provider: { meta: { tableRowIdentityKey: "__svadmin_row_id_" } },
+      provider: {
+        meta: {
+          tableRowIdentityKey: "__svadmin_row_id_",
+          contractProjection: { idFrom: "__svadmin_row_id_", stringifyComplex: true },
+        },
+      },
     });
     expect(resource.fields.map(({ key, type, required, showInList }) => ({ key, type, required, showInList }))).toEqual([
       { key: "id", type: "number", required: true, showInList: true },
@@ -186,8 +195,11 @@ describe("buildResourceRegistry", () => {
       ],
     });
 
-    expect(resource.primaryKey).toBe("event_id");
-    expect(resource.provider).toBeUndefined();
+    expect(resource.primaryKey).toBe("id");
+    expect(resource.provider?.meta?.contractProjection).toMatchObject({
+      idFrom: "event_id",
+      stringifyComplex: true,
+    });
     expect(resource.fields.map((field) => field.key)).toEqual(["event_id", "payload"]);
   });
 

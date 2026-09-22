@@ -6,7 +6,8 @@
   import { Loader2, Plus, KeyRound, Trash2, AlertTriangle, Lock } from "lucide-svelte";
   import { toast } from "svelte-sonner";
   import { createMutation } from "@tanstack/svelte-query";
-  import { useList, type BaseRecord } from "@svadmin/core";
+  import { useList } from "$lib/admin/unsafe";
+  import type { BaseRecord } from "@svadmin/core";
 
   interface Secret extends BaseRecord {
     name: string;

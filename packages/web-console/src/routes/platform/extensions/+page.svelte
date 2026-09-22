@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { useList } from "@svadmin/core";
+  import { useList } from "$lib/admin/unsafe";
   import { Loader2, Package, Download, Trash2, RefreshCw, Search, AlertTriangle } from "lucide-svelte";
   import { t } from "svelte-i18n";
 
@@ -152,7 +152,7 @@
       </div>
     {:else if query.isError}
       <div class="p-4">
-        <div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs">{query.error?.message || "Failed to load extensions"}</div>
+        <div class="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs">{(query.error as Error | null)?.message || "Failed to load extensions"}</div>
       </div>
     {:else if filtered.length === 0}
       <div class="p-8 text-center text-muted-foreground text-xs">

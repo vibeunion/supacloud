@@ -5,7 +5,8 @@
   import { goto } from "$app/navigation";
   import { t } from "svelte-i18n";
   import { Loader2, Globe, ExternalLink, GitBranch, Clock, CheckCircle2, XCircle, RefreshCw, Trash2, Settings } from "lucide-svelte";
-  import { useList, type BaseRecord } from "@svadmin/core";
+  import { useList } from "$lib/admin/unsafe";
+  import type { BaseRecord } from "@svadmin/core";
   import { createMutation } from "@tanstack/svelte-query";
 
   interface Deployment extends BaseRecord {
