@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.41.0...web-console-v0.41.1) (2026-09-22)
+
+
+### Miscellaneous Chores
+
+* **web-console:** upgrade SVAdmin to latest and migrate contracts ([#1358](https://github.com/vibeunion/supacloud/issues/1358)) ([efbfb8a](https://github.com/vibeunion/supacloud/commit/efbfb8a5cd30dfa8f380be89132f7b623b1055f4))
+
 ## [0.41.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.40.0...web-console-v0.41.0) (2026-09-16)
 
 
