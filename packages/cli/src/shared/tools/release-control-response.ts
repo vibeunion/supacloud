@@ -25,19 +25,12 @@ export function releaseControlFailure(
     httpStatus: number | null,
     safeState: Record<string, unknown> = {},
 ): ReleaseControlToolResponse {
-    const outcomeUnknown = code === "OUTCOME_UNKNOWN";
     return releaseControlErrorResponse({
         ...safeState,
         schema: RELEASE_CONTROL_RESPONSE_SCHEMA,
         ok: false,
         operation,
         error: { code, http_status: httpStatus },
-        ...(outcomeUnknown
-            ? {
-                message: "部署结果无法确认：服务端可能已经完成操作，但客户端未收到可验证的最终结果。",
-                next_action: "请先查询当前部署状态或发布回执，再决定是否重试；不要直接重复提交。",
-            }
-            : {}),
     });
 }
 

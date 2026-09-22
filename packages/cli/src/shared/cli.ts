@@ -7,6 +7,7 @@ import {
     schemaProperties,
 } from "./schema";
 import type { ToolSchema } from "./schema";
+import { outcomeUnknownGuidance } from "./outcome-guidance";
 
 interface CliRunOptions {
     commandName?: string;
@@ -188,6 +189,8 @@ export async function runCli(
             for (const c of result.content) {
                 if (c.type === "text") {
                     console.log(c.text);
+                    const guidance = outcomeUnknownGuidance(c.text ?? "");
+                    if (guidance) console.error(guidance);
                 }
             }
         } else {
