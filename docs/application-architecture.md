@@ -52,6 +52,62 @@ application/
 
 Use a name meaningful to the application in place of `domain-contracts`, `app-api`, and `app-worker`. For example, a failure-analysis application may choose `fa-contracts`, `fa-api`, and `fa-worker`.
 
+## Web Surface And Elysia Backend Boundary
+
+The web framework is an application choice, not a backend boundary or a
+VibeUnion-wide profile. An existing product may retain SvelteKit when its
+current UX and runtime depend on it. This does not create a `web-sveltekit`
+organization profile or change the selected profile for new applications:
+public web applications currently use `web-nuxt`, while internal operations
+and backoffice applications use `admin-svadmin`.
+
+- **Web surface** owns browser and SSR route composition, assets, client state,
+  and optional framework-specific adapters or BFF handlers. SvelteKit, Nuxt,
+  or another selected frontend framework may implement this layer.
+- **Elysia / `@supacloud/elysia`** owns trusted application execution:
+  authenticated APIs, domain mutations, authorization decisions, transaction
+  boundaries, orchestration, workers, and durable side effects.
+- **SupaCloud** owns the platform protocols and infrastructure: Auth,
+  PostgREST, Storage, Realtime, Edge Functions, queues, and project delivery.
+
+For a SupaCloud-native application, ordinary user-scoped reads and CRUD may use
+the SupaCloud client and RLS-protected PostgREST APIs. Complex writes,
+cross-domain operations, and asynchronous side effects should cross the
+Elysia boundary:
+
+```text
+browser or mobile client
+  -> selected web/admin frontend
+  -> user-scoped SupaCloud API for ordinary reads
+  -> app-api Function or trusted Elysia service for governed commands
+  -> Elysia domain modules
+  -> PostgreSQL / Storage / Realtime / queues
+
+app-worker Function
+  -> Elysia worker modules
+  -> durable command or workflow side effects
+```
+
+For the default deployment, place Elysia application and worker modules inside
+the corresponding SupaCloud Functions. Use a separately deployed Elysia
+service only when the application needs a long-lived process, custom HTTP
+lifecycle, or runtime isolation that an Edge Function does not provide.
+Framework-specific server handlers may adapt requests or perform SSR, but must
+not become a second owner of domain authorization, transactions, or audit
+behavior.
+
+The boundary has three practical rules:
+
+1. Browser and mobile clients use user-scoped sessions and RLS-protected APIs.
+   They never receive `service_role`, Management API tokens, or tenant
+   database credentials.
+2. The frontend may call ordinary SupaCloud APIs or adapt a request for SSR,
+   but Elysia owns governed command contracts, authorization, transactions,
+   and audit behavior.
+3. Functions and workers remain thin entrypoints. Shared domain contracts stay
+   in a platform-neutral package and are consumed by the selected frontend
+   clients and the Elysia runtime.
+
 ## Ownership Boundaries
 
 ### Contracts
@@ -63,6 +119,11 @@ Keep authorization models here only when they are application contracts used by 
 Generated database types are useful clients of these contracts, but they do not replace domain contracts: generated types describe database shape, while contracts describe accepted commands, public API payloads, and state transitions.
 
 `shared-ui` may depend on the chosen frontend framework, but must not depend on application entities, authorization policy, or a Supabase client.
+
+When a product has more than one frontend or backend runtime, keep shared
+request and response schemas in `packages/<domain>-contracts`. Do not import
+frontend route modules into Elysia, or Elysia application modules into browser
+bundles.
 
 ### Database And Migrations
 
