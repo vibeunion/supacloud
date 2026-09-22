@@ -63,6 +63,7 @@ export function Post(_path: string, _options?: Record<string, unknown>): MethodD
 
 const FIXTURE_FILES: Record<string, string> = {
     "tsconfig.json": FIXTURE_TSCONFIG,
+    "package.json": `{\n  "name": "fixture",\n  "dependencies": { "@supacloud/app": "0.0.0", "@supacloud/elysia": "0.0.0", "elysia": "1.4.30" }\n}\n`,
     "src/runtime.ts": RUNTIME_SOURCE,
     "src/elysia.ts": `export const t = {
   Object: (_shape: Record<string, unknown>) => ({ type: "object" }),
@@ -397,7 +398,9 @@ describe("app tools", () => {
         expect(pack.modules.map((module: { name: string }) => module.name))
             .toEqual(expect.arrayContaining(["audit", "case"]));
         expect(pack.externalTokens).toContain("DB_CLIENT");
+        expect(pack.allowedDependencies.dependencies).toEqual(expect.arrayContaining(["@supacloud/app", "@supacloud/elysia"]));
         expect(pack.commands.doctor).toContain("app doctor");
+        expect(pack.commands.fix).toContain("app fix");
 
         const module = await app({ action: "context", root, target: "case", format: "json" });
         const modulePack = JSON.parse(module.content[0].text);
@@ -459,6 +462,13 @@ describe("app tools", () => {
             expect(applied.isError).toBe(false);
             expect(JSON.parse(applied.content[0].text).written).toBe(true);
             expect(readFileSync(commandPath, "utf8")).toContain('transaction: "required"');
+
+            // End-to-end: the fix must clear the diagnostic on re-diagnosis.
+            const recheck = await app({ action: "doctor", root: isolatedRoot, format: "json" });
+            const recheckReport = JSON.parse(recheck.content[0].text);
+            expect(recheckReport.diagnostics.some((entry: { code: string }) => entry.code === "invalid-command-mode")).toBe(false);
+            const checked = await app({ action: "check", root: isolatedRoot });
+            expect(checked.content[0].text).not.toContain("invalid-command-mode");
         } finally {
             rmSync(isolatedRoot, { recursive: true, force: true });
         }
