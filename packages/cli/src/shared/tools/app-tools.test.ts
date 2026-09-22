@@ -164,17 +164,26 @@ export class CaseController {
 }
 `,
 
+    "src/features/case/rebuild.job.ts": `import { Injectable, Job } from "../../runtime";
+
+@Injectable()
+@Job({ name: "case.rebuild", mode: "task", idempotency: "required", timeoutSec: 30, maxAttempts: 2 })
+export class RebuildJob {}
+`,
+
     "src/features/case/case.module.ts": `import { Module } from "../../runtime";
 import { AuditModule } from "../audit/audit.module";
 import { CaseService } from "./case.service";
 import { AcceptCaseCommand } from "./accept-case.command";
 import { CaseController } from "./case.controller";
+import { RebuildJob } from "./rebuild.job";
 
 @Module({
   name: "case",
   imports: [AuditModule],
-  providers: [CaseService, AcceptCaseCommand],
+  providers: [CaseService, AcceptCaseCommand, RebuildJob],
   controllers: [CaseController],
+  jobs: [RebuildJob],
 })
 export class CaseModule {}
 `,
@@ -491,6 +500,7 @@ describe("app tools", () => {
         expect(text).toContain("controller: CaseController /cases");
         expect(text).toContain("route: GET /:caseId -> detail");
         expect(text).toContain("command: case.accept (AcceptCaseCommand)");
+        expect(text).toContain("job: case.rebuild (RebuildJob)");
         expect(text).toContain("externalTokens: DB_CLIENT");
 
         const jsonResult = await app({ action: "graph", root, format: "json" });
@@ -500,7 +510,7 @@ describe("app tools", () => {
             .toEqual(expect.arrayContaining(["audit", "case"]));
     });
 
-    test("explain resolves providers, commands and external tokens", async () => {
+    test("explain resolves providers, commands, jobs and external tokens", async () => {
         const provider = await app({ action: "explain", root, target: "CaseService" });
         expect(provider.isError).toBe(false);
         expect(requireValue(provider.content[0]).text).toContain("所属模块: case");
@@ -519,6 +529,18 @@ describe("app tools", () => {
 
         const external = await app({ action: "explain", root, target: "DB_CLIENT" });
         expect(requireValue(external.content[0]).text).toContain("externalToken");
+
+        const job = await app({ action: "explain", root, target: "case.rebuild" });
+        expect(job.isError).toBe(false);
+        expect(requireValue(job.content[0]).text).toContain("类型: job");
+        expect(requireValue(job.content[0]).text).toContain("所属模块: case");
+        expect(requireValue(job.content[0]).text).toContain("mode: task");
+        expect(requireValue(job.content[0]).text).toContain("timeoutSec: 30");
+        expect(requireValue(job.content[0]).text).toContain("maxAttempts: 2");
+        expect(requireValue(job.content[0]).text).toContain("idempotency: required");
+
+        const jobByClass = await app({ action: "explain", root, target: "RebuildJob" });
+        expect(requireValue(jobByClass.content[0]).text).toContain("类型: job");
 
         const missing = await app({ action: "explain", root, target: "Nope" });
         expect(missing.isError).toBe(true);

@@ -585,6 +585,9 @@ function formatGraphText(manifest: AppManifest): string {
         for (const query of module.queries) {
             lines.push(`   query: ${query.name} (${query.className})`);
         }
+        for (const job of module.jobs ?? []) {
+            lines.push(`   job: ${job.name} (${job.className})`);
+        }
         if (module.exports.length > 0) lines.push(`   exports: ${module.exports.join(", ")}`);
     }
     if (manifest.externalTokens.length > 0) {
@@ -657,11 +660,31 @@ function explainController(manifest: AppManifest, module: ModuleNode, index: num
 
 async function runExplain(args: AppToolArguments): Promise<ToolResult> {
     const target = args.target?.trim();
-    if (!target) throw new Error("app explain requires --target（provider 类名 / token 名 / command 名）");
+    if (!target) throw new Error("app explain requires --target（provider 类名 / token 名 / command 名 / job 名）");
     const root = resolve(args.root || process.cwd());
     const manifest = await readManifest(root);
 
     for (const module of manifest.modules) {
+        const job = module.jobs?.find(
+            (entry) => entry.name === target || entry.className === target,
+        );
+        if (job) {
+            const lines = [
+                `对象: ${job.name}`,
+                "类型: job",
+                `所属模块: ${module.name}`,
+                `类: ${job.className}`,
+                `scope: ${job.scope}`,
+            ];
+            if (job.mode) lines.push(`mode: ${job.mode}`);
+            if (job.timeoutSec !== undefined) lines.push(`timeoutSec: ${job.timeoutSec}`);
+            if (job.maxAttempts !== undefined) lines.push(`maxAttempts: ${job.maxAttempts}`);
+            if (job.idempotency) lines.push(`idempotency: ${job.idempotency}`);
+            const dependents = reverseDependencies(manifest, job.className);
+            lines.push(`被依赖: ${dependents.length > 0 ? dependents.join(", ") : "(none)"}`);
+            return textResult(lines.join("\n"));
+        }
+
         const providerIndex = module.providers.findIndex(
             (provider) => provider.token === target || provider.useClass === target,
         );
@@ -778,7 +801,7 @@ export function registerAppTools(server: ToolServer): void {
             out_dir: optional(Type.String(), "[compile/export-tools] Output directory (default: <root>/generated)"),
             strict: optional(Type.Boolean(), "[compile/check] Promote warnings to errors"),
             format: optional(stringEnum(["text", "json"]), "[graph/export-tools] Output format (default: text)"),
-            target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / module name"),
+            target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / job name / module name"),
             fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
             write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
         },
@@ -805,7 +828,7 @@ export function registerAppAliases(server: ToolServer): void {
         out_dir: optional(Type.String(), "[compile/export-tools] Output directory (default: <root>/generated)"),
         strict: optional(Type.Boolean(), "[compile/check] Promote warnings to errors"),
         format: optional(stringEnum(["text", "json"]), "Output format (default: text)"),
-        target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / module name"),
+        target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / job name / module name"),
         fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
         write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
     };
