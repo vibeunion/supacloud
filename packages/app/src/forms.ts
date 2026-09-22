@@ -232,7 +232,7 @@ export abstract class AbstractControl<TValue = any> {
 /**
  * Tracks the value and validity status of an individual form control.
  */
-export class FormControl<T = any> extends AbstractControl<T> {
+export class FormControl<T = any> extends AbstractControl<T | null> {
   constructor(
     formState?: T | { value: T; disabled?: boolean },
     validatorOrOpts?: ValidatorFn | ValidatorFn[] | AbstractControlOptions | null,
@@ -252,23 +252,24 @@ export class FormControl<T = any> extends AbstractControl<T> {
         this.updateValueAndValidity();
       }
     } else {
-      this.setRawValue(formState as T);
+      // Angular parity: an omitted initial state is null, never a bare undefined.
+      this.setRawValue((formState === undefined ? null : formState) as T);
       this.updateValueAndValidity();
     }
   }
 
-  setValue(value: any): void {
-    this.setRawValue(value as T);
+  setValue(value: T): void {
+    this.setRawValue(value);
     this.markAsDirty();
     this.updateValueAndValidity();
   }
 
-  patchValue(value: any): void {
+  patchValue(value: T): void {
     this.setValue(value);
   }
 
-  reset(formState?: any): void {
-    this.setRawValue((formState !== undefined ? formState : null) as T);
+  reset(formState?: T | null): void {
+    this.setRawValue(formState !== undefined ? formState : null);
     this.markAsPristine();
     this.markAsUntouched();
     this.updateValueAndValidity();
@@ -323,7 +324,7 @@ export class FormGroup<
     this.updateValueAndValidity();
   }
 
-  removeControl(name: string): void {
+  private detachControl(name: string): void {
     const ctrl = (this.controls as Record<string, AbstractControl>)[name];
     if (ctrl) {
       ctrl.setParent(null);
@@ -332,25 +333,33 @@ export class FormGroup<
     }
   }
 
-  setControl(name: string, control: AbstractControl): void {
-    this.removeControl(name);
-    this.addControl(name, control);
+  /** A typed group cannot drop a declared control from its value shape. */
+  removeControl<Name extends string>(name: Name extends keyof TControls ? never : Name): void {
+    this.detachControl(name);
+  }
+
+  setControl<K extends keyof TControls>(name: K, control: TControls[K]): void {
+    this.detachControl(String(name));
+    this.addControl(String(name), control);
   }
 
   contains(name: string): boolean {
     return Boolean((this.controls as Record<string, AbstractControl>)[name]);
   }
 
-  setValue(value: any): void {
-    for (const [key, val] of Object.entries(value)) {
-      if (this.controls[key]) {
-        this.controls[key].setValue(val);
-      }
+  setValue(value: { [K in keyof TControls]: TControls[K]["value"] }): void {
+    const provided = value !== null && typeof value === "object" ? Object.keys(value) : [];
+    const expected = Object.keys(this.controls);
+    if (provided.length !== expected.length || expected.some((key) => !provided.includes(key))) {
+      throw new TypeError("FormGroup.setValue requires value keys to match the registered controls");
+    }
+    for (const key of expected) {
+      this.controls[key].setValue((value as Record<string, unknown>)[key]);
     }
     this.markAsDirty();
   }
 
-  patchValue(value: any): void {
+  patchValue(value: Partial<{ [K in keyof TControls]: TControls[K]["value"] }>): void {
     for (const [key, val] of Object.entries(value)) {
       if (this.controls[key] && val !== undefined) {
         this.controls[key].patchValue(val);
@@ -453,15 +462,18 @@ export class FormArray<
     return this.controls.map((c) => c.value);
   }
 
-  setValue(value: any): void {
-    (value as any[]).forEach((val, i) => {
-      if (this.controls[i]) this.controls[i].setValue(val);
+  setValue(value: Array<TControl["value"]>): void {
+    if (!Array.isArray(value) || value.length !== this.controls.length) {
+      throw new TypeError("FormArray.setValue requires the value count to match the controls");
+    }
+    value.forEach((val, i) => {
+      this.controls[i].setValue(val);
     });
     this.markAsDirty();
   }
 
-  patchValue(value: any): void {
-    (value as any[]).forEach((val, i) => {
+  patchValue(value: Array<TControl["value"] | undefined>): void {
+    value.forEach((val, i) => {
       if (this.controls[i] && val !== undefined) this.controls[i].patchValue(val);
     });
     this.markAsDirty();

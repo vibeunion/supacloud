@@ -54,7 +54,10 @@ export class TestBed {
   /**
    * Injects and resolves a dependency from the test environment.
    */
-  static inject<T>(token: Token<T>, notFoundValue?: T, flags?: InjectFlags): T {
+  static inject<T>(token: Token<T>): T;
+  static inject<T>(token: Token<T>, notFoundValue: T, flags?: InjectFlags): T;
+  static inject<T>(token: Token<T>, notFoundValue: undefined, flags: InjectFlags & { optional: true }): T | undefined;
+  static inject<T>(token: Token<T>, notFoundValue?: T, flags?: InjectFlags): T | undefined {
     const injector = TestBed.getOrCreateInjector();
     return runInInjectionContext(injector, () => {
       const resolved = resolveForwardRef(token);
