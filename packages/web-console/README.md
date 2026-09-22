@@ -31,9 +31,9 @@ The production build outputs to `build/` directory. In production, the Managemen
 
 ## SVAdmin Styles
 
-The console uses `@svadmin/ui@0.74.0`, `@svadmin/core@0.54.0`,
-`@svadmin/ai-elements@0.9.0`, `@svadmin/sveltekit@0.11.8`, and
-`@svadmin/elysia@0.13.8`.
+The console uses `@svadmin/ui@0.75.0`, `@svadmin/core@0.55.0`,
+`@svadmin/ai-elements@0.10.0`, `@svadmin/sveltekit@0.11.9`, and
+`@svadmin/elysia@0.13.9`.
 
 Tailwind v4 configuration lives in `src/app.css`. Import
 `@svadmin/ui/app.theme.css` once after Tailwind, not alongside
