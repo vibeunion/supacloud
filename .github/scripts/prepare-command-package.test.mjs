@@ -5,6 +5,7 @@ import { assertPublishedDependencies, isNpmNotFoundError, prepareCommandPackage 
 import { REGISTRY_RETRY_DELAYS_MS } from './npm-registry-visibility.mjs';
 
 const siblings = new Map([
+  ['@supacloud/cli', { name: '@supacloud/cli', version: '0.14.4' }],
   ['@supacloud/contracts', { name: '@supacloud/contracts', version: '0.1.0' }],
   ['@supacloud/commands', { name: '@supacloud/commands', version: '0.1.0' }],
   ['@supacloud/db', { name: '@supacloud/db', version: '0.6.0' }],
@@ -24,6 +25,19 @@ test('publication resolves local dependencies and overrides without mutating dev
   });
   assert.equal(input.dependencies['@supacloud/db'], 'file:../db');
   assert.deepEqual(prepareCommandPackage({ name: '@supacloud/contracts' }, siblings).required, []);
+});
+test('publication resolves the admin CLI dependency before npm publish', () => {
+  const input = {
+    name: '@supacloud/admin',
+    dependencies: { '@supacloud/cli': 'file:../cli', ssh2: '^1.17.0' },
+  };
+  const result = prepareCommandPackage(input, siblings);
+  assert.deepEqual(result.required, ['@supacloud/cli@0.14.4']);
+  assert.deepEqual(result.package, {
+    name: '@supacloud/admin',
+    dependencies: { '@supacloud/cli': '0.14.4', ssh2: '^1.17.0' },
+  });
+  assert.equal(input.dependencies['@supacloud/cli'], 'file:../cli');
 });
 test('malformed manifests, unknown paths and unstable versions cannot be published', () => {
   for (const manifest of [null, { name: 'x', dependencies: [] },
@@ -45,7 +59,7 @@ test('release order and preparation cover every package using local command depe
   const elysia = workflow.indexOf('name: Publish elysia adapter');
   assert.ok(contracts > 0 && commands > contracts && database > commands && app > database && svelte > contracts && elysia > database);
   assert.ok(contracts < workflow.indexOf('name: Publish supacloud-js'));
-  for (const name of ['commands', 'app', 'app-svelte', 'db', 'elysia', 'supacloud-js']) {
+  for (const name of ['admin', 'commands', 'app', 'app-svelte', 'db', 'elysia', 'supacloud-js']) {
     const block = workflow.split(`working-directory: packages/${name}\n`)[1]?.split('\n      - name:')[0];
     assert.ok(block);
     assert.match(block, /prepare-command-package\.mjs[\s\S]*bun install --lockfile-only[\s\S]*bun install --frozen-lockfile/);
