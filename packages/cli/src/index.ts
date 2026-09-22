@@ -24,7 +24,7 @@ import { registerBranchTools } from "./shared/tools/branch-tools";
 import { registerSupabaseCliTools } from "./shared/tools/supabase-cli-tools";
 import { registerLiteCliTools } from "./shared/tools/lite-cli-tools";
 import { registerAiTools } from "./shared/tools/ai-tools";
-import { registerAppTools } from "./shared/tools/app-tools";
+import { registerAppAliases, registerAppTools } from "./shared/tools/app-tools";
 import { registerDbGovernanceTools } from "./shared/tools/db-governance-tools";
 import { registerScheduledFunctionTools } from "./shared/tools/scheduled-function-tools";
 import { registerMutationTools } from "./shared/tools/mutation-tools";
@@ -332,10 +332,23 @@ EXAMPLES
   ${preferredCommand} app init --name my-service
   ${preferredCommand} app generate --kind module --name billing
   ${preferredCommand} app generate --kind command --module billing --name issue-invoice
+  ${preferredCommand} app generate --kind job --module billing --name sync-orders
+  ${preferredCommand} app generate --kind contract --module billing --name issue-invoice
   ${preferredCommand} app compile --root .
   ${preferredCommand} app check --root . --strict
   ${preferredCommand} app graph --root . --format json
   ${preferredCommand} app explain --target CaseService
+  ${preferredCommand} app context --root . --format json
+  ${preferredCommand} app context --root . --target CaseModule --format json
+  ${preferredCommand} app doctor --root .
+  ${preferredCommand} app fix --root . --fix fix.json --write
+  ${preferredCommand} generate --kind module --name billing
+  ${preferredCommand} generate --kind job --module billing --name sync-orders
+  ${preferredCommand} generate --kind contract --module billing --name issue-invoice
+  ${preferredCommand} check --root . --strict
+  ${preferredCommand} context --format json
+  ${preferredCommand} context --target CaseModule --format json
+  ${preferredCommand} doctor
   ${preferredCommand} db lint --root . --module_file db/modules.ts
   ${preferredCommand} db explain --target public.cases --module_file db/modules.ts
   ${preferredCommand} db module_check --module_file db/modules.ts --database_url "postgresql://..."
@@ -397,6 +410,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     Object.assign(tools, captureTools((server) => registerLiteCliTools(server as any)));
     Object.assign(tools, captureTools((server) => registerAiTools(server as any)));
     Object.assign(tools, captureTools((server) => registerAppTools(server as any)));
+    Object.assign(tools, captureTools((server) => registerAppAliases(server as any)));
     Object.assign(tools, captureTools((server) => registerDbGovernanceTools(server as any)));
     const registerContextAwareHelp = () => {
         tools.project = {

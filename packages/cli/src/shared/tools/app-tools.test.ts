@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { executionMode } from "../execution-policy";
-import { registerAppTools, type AppToolArguments } from "./app-tools";
+import { registerAppAliases, registerAppTools, type AppToolArguments } from "./app-tools";
 
 type AppCallback = (args: Partial<AppToolArguments>) => Promise<{
     isError: boolean;
@@ -22,12 +22,22 @@ function captureAppCallback(): AppCallback {
     return callback;
 }
 
+function captureAliasCallbacks(): Record<string, AppCallback> {
+    const callbacks: Record<string, AppCallback> = {};
+    registerAppAliases({
+        tool(name, _description, _schema, registered) {
+            callbacks[name] = registered as AppCallback;
+        },
+    });
+    return callbacks;
+}
+
 const FIXTURE_TSCONFIG = `{
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "paths": { "@supacloud/app": ["./src/runtime.ts"] },
+    "paths": { "@supacloud/app": ["./src/runtime.ts"], "elysia": ["./src/elysia.ts"] },
     "experimentalDecorators": true,
     "strict": true
   }
@@ -43,6 +53,7 @@ export function Injectable(_options: Record<string, unknown> = {}): ClassDecorat
 export function Inject(_token: unknown): ParameterDecorator { return () => {}; }
 export function Module(_options: Record<string, unknown>): ClassDecorator { return () => {}; }
 export function Command(_options: Record<string, unknown>): ClassDecorator { return () => {}; }
+export function Job(_options: Record<string, unknown>): ClassDecorator { return () => {}; }
 export function Query(_options: Record<string, unknown>): ClassDecorator { return () => {}; }
 export function Controller(_path: string): ClassDecorator { return () => {}; }
 export function Body(): ParameterDecorator { return () => {}; }
@@ -53,6 +64,12 @@ export function Post(_path: string, _options?: Record<string, unknown>): MethodD
 const FIXTURE_FILES: Record<string, string> = {
     "tsconfig.json": FIXTURE_TSCONFIG,
     "src/runtime.ts": RUNTIME_SOURCE,
+    "src/elysia.ts": `export const t = {
+  Object: (_shape: Record<string, unknown>) => ({ type: "object" }),
+  String: (_options?: Record<string, unknown>) => ({ type: "string" }),
+  Integer: (_options?: Record<string, unknown>) => ({ type: "integer" }),
+};
+`,
 
     "src/features/shared/tokens.ts": `import { InjectionToken } from "../../runtime";
 
@@ -213,6 +230,22 @@ describe("app tools", () => {
         expect(controllerResult.isError).toBe(false);
         expect(readFileSync(join(root, "src/features/billing/billing.controller.ts"), "utf8"))
             .toContain('@Controller("/billing")');
+
+        const jobResult = await app({ action: "generate", kind: "job", module: "billing", name: "sync-orders", root });
+        expect(jobResult.isError).toBe(false);
+        const jobSource = readFileSync(join(root, "src/features/billing/jobs/sync-orders.job.ts"), "utf8");
+        expect(jobSource).toContain("@Job({");
+        expect(jobSource).toContain('name: "billing.syncOrders"');
+        expect(jobSource).toContain('mode: "task"');
+        expect(jobSource).toContain("export class SyncOrdersJob");
+        expect(jobSource).toContain("Implement SyncOrdersJob.run");
+
+        const contractResult = await app({ action: "generate", kind: "contract", module: "billing", name: "issue-invoice", root });
+        expect(contractResult.isError).toBe(false);
+        const contractSource = readFileSync(join(root, "src/features/billing/contracts/issue-invoice.contract.ts"), "utf8");
+        expect(contractSource).toContain("IssueInvoiceBody");
+        expect(contractSource).toContain("IssueInvoiceResponse");
+        expect(contractSource).toContain('from "elysia"');
     });
 
     test("init creates an isolated, ready-to-run project template", async () => {
@@ -326,6 +359,82 @@ describe("app tools", () => {
         expect((await app({ action: "check", root })).isError).toBe(true);
         writeFileSync(artifactPath, original);
     });
+    test("context returns project graph and module neighborhood as structured AI context", async () => {
+        const project = await app({ action: "context", root, format: "json" });
+        expect(project.isError).toBe(false);
+        const pack = JSON.parse(project.content[0].text);
+        expect(pack.version).toBe(1);
+        expect(pack.root).toBe(root);
+        expect(pack.modules.map((module: { name: string }) => module.name))
+            .toEqual(expect.arrayContaining(["audit", "case"]));
+        expect(pack.externalTokens).toContain("DB_CLIENT");
+        expect(pack.commands.doctor).toContain("app doctor");
+
+        const module = await app({ action: "context", root, target: "case", format: "json" });
+        const modulePack = JSON.parse(module.content[0].text);
+        expect(modulePack.subject).toBe("case");
+        expect(modulePack.modules.map((entry: { name: string }) => entry.name))
+            .toEqual(expect.arrayContaining(["case", "audit"]));
+        expect(modulePack.relatedModules.imports).toEqual(expect.arrayContaining(["audit"]));
+    });
+
+    test("doctor reports actionable checks and passes after a clean compile", async () => {
+        await app({ action: "compile", root });
+        const result = await app({ action: "doctor", root, format: "json" });
+        expect(result.isError).toBe(false);
+        const doctor = JSON.parse(result.content[0].text);
+        expect(doctor.ok).toBe(true);
+        expect(doctor.checks.find((check: { name: string }) => check.name === "modules").ok).toBe(true);
+        expect(doctor.checks.find((check: { name: string }) => check.name === "generated-artifacts").ok).toBe(true);
+
+        const text = await app({ action: "doctor", root });
+        expect(text.isError).toBe(false);
+        expect(text.content[0].text).toContain("No blocking issues");
+    });
+
+    test("doctor surfaces fixable diagnostics and app fix previews then applies them", async () => {
+        const isolatedRoot = mkdtempSync(join(tmpdir(), "supacloud-app-fix-"));
+        try {
+            const { mkdir, writeFile } = await import("node:fs/promises");
+            const { dirname } = await import("node:path");
+            for (const [relativePath, content] of Object.entries(FIXTURE_FILES)) {
+                const absolute = join(isolatedRoot, relativePath);
+                await mkdir(dirname(absolute), { recursive: true });
+                await writeFile(absolute, content, "utf8");
+            }
+            const commandPath = join(isolatedRoot, "src/features/case/accept-case.command.ts");
+            const original = readFileSync(commandPath, "utf8");
+            const invalid = original.replace('transaction: "required"', 'transaction: "sometimes"');
+            expect(invalid).not.toBe(original);
+            writeFileSync(commandPath, invalid);
+
+            const doctor = await app({ action: "doctor", root: isolatedRoot, format: "json" });
+            const report = JSON.parse(doctor.content[0].text);
+            const diagnostic = report.diagnostics.find((entry: { code: string }) => entry.code === "invalid-command-mode");
+            expect(diagnostic).toBeTruthy();
+            expect(diagnostic.errorCode).toBe("SC4012");
+            expect(diagnostic.fix?.type).toBe("set_command_mode");
+
+            const text = await app({ action: "doctor", root: isolatedRoot });
+            expect(text.content[0].text).toContain("SC4012");
+            expect(text.content[0].text).toContain("fixable: set_command_mode");
+            expect(text.content[0].text).toContain("hint:");
+
+            writeFileSync(join(isolatedRoot, "fix.json"), JSON.stringify({ ...diagnostic.fix, value: "required" }));
+            const preview = await app({ action: "fix", root: isolatedRoot, fix: "fix.json" });
+            expect(preview.isError).toBe(false);
+            expect(JSON.parse(preview.content[0].text).written).toBe(false);
+            expect(readFileSync(commandPath, "utf8")).toBe(invalid);
+
+            const applied = await app({ action: "fix", root: isolatedRoot, fix: "fix.json", write: true });
+            expect(applied.isError).toBe(false);
+            expect(JSON.parse(applied.content[0].text).written).toBe(true);
+            expect(readFileSync(commandPath, "utf8")).toContain('transaction: "required"');
+        } finally {
+            rmSync(isolatedRoot, { recursive: true, force: true });
+        }
+    });
+
     test("graph renders the module tree and json format", async () => {
         const textResult = await app({ action: "graph", root });
         expect(textResult.isError).toBe(false);
@@ -418,8 +527,30 @@ describe("app tools", () => {
         }
     });
 
+    test("top-level aliases delegate generate/check/context/doctor to app actions", async () => {
+        const aliases = captureAliasCallbacks();
+        expect(Object.keys(aliases)).toEqual(expect.arrayContaining([
+            "generate", "compile", "check", "graph", "explain", "context", "doctor", "fix",
+        ]));
+
+        await app({ action: "compile", root });
+        const doctor = await aliases.doctor({ root });
+        expect(doctor.isError).toBe(false);
+        expect(doctor.content[0].text).toContain("No blocking issues");
+
+        const context = await aliases.context({ root, format: "json" });
+        const pack = JSON.parse(context.content[0].text);
+        expect(pack.version).toBe(1);
+        expect(pack.modules.map((module: { name: string }) => module.name))
+            .toEqual(expect.arrayContaining(["audit", "case"]));
+
+        const generated = await aliases.generate({ kind: "module", name: "aliased", root });
+        expect(generated.isError).toBe(false);
+        expect(existsSync(join(root, "src/features/aliased/aliased.module.ts"))).toBe(true);
+    });
+
     test("all app actions are classified as local in the execution policy", () => {
-        for (const action of ["generate", "compile", "check", "graph", "explain", "export-tools"]) {
+        for (const action of ["generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix"]) {
             expect(executionMode("app", action, {})).toBe("local");
         }
     });
