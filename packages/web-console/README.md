@@ -31,9 +31,9 @@ The production build outputs to `build/` directory. In production, the Managemen
 
 ## SVAdmin Styles
 
-The console uses `@svadmin/ui@0.70.0`, `@svadmin/core@0.50.0`,
-`@svadmin/ai-elements@0.5.1`, `@svadmin/sveltekit@0.10.7`, and
-`@svadmin/elysia@0.12.7`.
+The console uses `@svadmin/ui@0.74.0`, `@svadmin/core@0.54.0`,
+`@svadmin/ai-elements@0.9.0`, `@svadmin/sveltekit@0.11.8`, and
+`@svadmin/elysia@0.13.8`.
 
 Use versions published on npm when upgrading these packages. A GitHub release
 alone does not make a package version installable.
@@ -42,7 +42,10 @@ Tailwind v4 configuration lives in `src/app.css`. Import
 `@svadmin/ui/app.theme.css` once after Tailwind, not alongside
 `@svadmin/ui/app.css`. This entry includes precompiled component styles and
 semantic theme metadata, so the host does not scan UI package sources.
-AI elements import `@svadmin/ai-elements/ai.theme.css` and keep their source scan.
+AI elements import `@svadmin/ai-elements/ai.theme.css`, which now re-exports the
+precompiled plain `ai.css` entry instead of declaring raw Tailwind theme tokens.
+The host therefore declares its own `@theme inline` bridge so SVAdmin semantic
+tokens remain usable as utilities (`bg-background`, `border-border`, …).
 
 Use public component entries such as
 `@svadmin/ui/components/AutoTable.svelte`. The root UI entry re-exports
@@ -54,6 +57,22 @@ Theme overrides use complete CSS colors such as `--background: hsl(0 0% 100%)`,
 not bare HSL channels. The UI stylesheet provides the `--color-*` aliases;
 the console preserves its existing light/dark palette and class-based dark mode.
 
+### Resource contracts
+
+SVAdmin 0.54 moved CRUD hooks to strict runtime contracts. SupaCloud serves
+dynamic multi-tenant resources, so the migration splits them:
+
+- Schema-bound UI components (`AutoTable`) receive a real contract created with
+  `defineResource` in `src/lib/admin/contracts.ts`. The DataProvider projects and
+  normalizes records (including `table_name` → `id` and JSON columns → JSON text)
+  before the strict decoder validates them.
+- Metadata-driven pages without a closed schema use the upstream unchecked hooks
+  through `src/lib/admin/unsafe.ts` (`@svadmin/core/unsafe`). The wrapper restores
+  the caller-declared row type while keeping the previous transport behavior.
+- `v1/projects` is fetched through the unchecked hook and edited with a direct
+  `PATCH /v1/projects/:ref` form, because its `config` payload is intentionally
+  open-ended and cannot be described by a closed contract.
+
 Migration acceptance:
 
 ```gherkin
@@ -64,8 +83,8 @@ Scenario: Existing provider behavior
 
 Scenario: Table list identity
   Given the table-list API returns public-schema table names without an id field
-  When the list contains multiple tables
-  Then each row uses table_name as its identity without duplicate-key errors
+  When the tables resource contract is projected by the provider
+  Then each row receives a stable id derived from table_name without duplicate-key errors
 
 Scenario: Persistent column visibility
   Given a table contains an Email column
@@ -106,5 +125,5 @@ SupaCloud's Web Console now uses a custom hybrid architecture with the **SVAdmin
 - **Dynamic Tenant Resources**: Resources (like `v1/projects/[ref]/database/tables` and `auth/users`) are dynamically registered via a `$effect` hook based on SvelteKit routing parameters, meaning SVAdmin adapts seamlessly to whichever tenant project you are viewing.
 - **Dashboard Summary Hot Path**: Project dashboards first call `/v1/projects/:ref/dashboard/summary`; legacy per-card SQL calls remain as fallback if the summary endpoint is unavailable.
 - **Auto Components & Headless Hooks**: 
-  - Standard CRUD pages (like Auth Users or Tables) use declarative `<AutoTable />` with custom Svelte snippets (`#snippet cellRenderer`) to preserve Supabase-like visual styling without manual markup.
-  - Complex custom pages (like Storage buckets or Edge Function deployments) use SVAdmin's headless hooks (`useList`, `useDelete`) coupled with fully custom Svelte layouts (like split-panes or Monaco editors).
+  - Standard CRUD pages (like Auth Users or Tables) use declarative `<AutoTable />` with custom Svelte snippets (`#snippet cellRenderer`) to preserve Supabase-like visual styling without manual markup. These resources carry SVAdmin runtime contracts projected by the DataProvider.
+  - Complex custom pages (like Storage buckets or Edge Function deployments) use SVAdmin's unchecked metadata-driven hooks (`useList`/`useShow` from `$lib/admin/unsafe`) coupled with fully custom Svelte layouts (like split-panes or Monaco editors).

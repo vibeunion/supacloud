@@ -1140,6 +1140,8 @@
     "save": "Save",
     "routing_save_failed": "Failed to save routing configuration",
     "routing_saved": "Routing configuration saved",
+    "general_save_failed": "Failed to save project settings",
+    "general_saved": "Project settings saved",
     "domain_example": "e.g. app.example.com",
     "custom_domain_active": "Active",
     "current_domain": "Current Domain",

@@ -9,7 +9,7 @@
   import { toast } from "svelte-sonner";
   import { getContext } from "svelte";
 
-  import { useShow } from "@svadmin/core";
+  import { useShow } from "$lib/admin/unsafe";
 
   let showAnonKey = $state(false);
   let showServiceKey = $state(false);
@@ -27,7 +27,7 @@
     get id() { return projectRef; }
   });
 
-  const project = $derived(query.data?.data || {});
+  const project = $derived((query.data?.data || {}) as Record<string, any>);
   const apiUrl = $derived(getProjectApiUrl(project));
   const publishableKey = $derived(String((project as Record<string, unknown>)?.publishable_key || ""));
   const isLoading = $derived(query.isLoading);

@@ -7,7 +7,8 @@
   import { Loader2, Zap, Trash2, KeyRound, Clock, Plus, X, Upload, Code2, Copy, BookOpen, ArrowRight, Activity, RadioTower, ShieldCheck, RotateCcw, GitBranch, Bug, BarChart3 } from "lucide-svelte";
   import { toast } from "svelte-sonner";
   import { createMutation } from "@tanstack/svelte-query";
-  import { useList, type BaseRecord } from "@svadmin/core";
+  import { useList } from "$lib/admin/unsafe";
+  import type { BaseRecord } from "@svadmin/core";
   import {
     buildCurlExample,
     buildFunctionTaskConsolePath,

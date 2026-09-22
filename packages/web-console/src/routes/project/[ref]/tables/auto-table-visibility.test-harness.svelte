@@ -1,5 +1,7 @@
 <script lang="ts">
   import type { DataProvider, ResourceDefinition, RouterProvider } from '@svadmin/core';
+  import { defineResource } from '@svadmin/core/resource-contract';
+  import { Type } from '@sinclair/typebox';
   import { AdminApp, AutoTable } from '@svadmin/ui';
 
   const dataProvider = {
@@ -14,9 +16,18 @@
     getApiUrl: () => 'https://example.test',
   } as DataProvider;
 
+  const usersContract = defineResource('users', {
+    record: Type.Object({
+      id: Type.String(),
+      name: Type.String(),
+      email: Type.String(),
+    }),
+  });
+
   const resources: ResourceDefinition[] = [{
     name: 'users',
     label: 'Users',
+    contract: usersContract,
     canCreate: false,
     canEdit: false,
     canDelete: false,
