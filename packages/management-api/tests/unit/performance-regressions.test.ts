@@ -13,8 +13,8 @@ describe("performance regressions", () => {
     expect(routeSource).toContain('set.headers["cache-control"] = "no-store"');
     expect(routeSource).toContain("edgeFunctionService.list(params.ref)");
     expect(routeSource).toContain("taskRepository.getTaskStats(params.ref)");
-    expect(pageSource).toContain("dashboard/summary");
-    expect(pageSource).toContain("fetchDashboardLegacy");
+    expect(pageSource).toContain("loadProjectOverview");
+    expect(pageSource).not.toContain("fetchDashboardLegacy");
     expect(pageSource).not.toContain("fetchFunctions(); fetchTaskStats();");
   });
 
