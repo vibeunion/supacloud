@@ -5,8 +5,8 @@
     "": {
       "name": "supacloud",
       "dependencies": {
-        "@supacloud/admin": "^0.22.1",
-        "@supacloud/cli": "^0.55.1",
+        "@supacloud/admin": "^0.22.3",
+        "@supacloud/cli": "^0.56.1",
       },
       "devDependencies": {
         "@types/bun": "^1.4.2",
@@ -20,9 +20,9 @@
   "packages": {
     "@sinclair/typebox": ["@sinclair/typebox@0.34.52", "https://registry.npmmirror.com/@sinclair/typebox/-/typebox-0.34.52.tgz", {}, "sha512-XiMQh7qqVlxZzcVD+kkGMNGMzcTrDMLWI7S4x7z1MkCkbDPrekpZXEUK0eZqZFMuHQg2a2DZOcDIh9o5v3Gonw=="],
 
-    "@supacloud/admin": ["@supacloud/admin@0.22.1", "", { "dependencies": { "@sinclair/typebox": "^0.34.52", "ssh2": "^1.17.0" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-flCIvn0NMy9vbrKcfBn2Q5oyJ7MbLtCb/tShpd9BR4/WIevBu/3JCCHmDStDpV7NNKH8bOR7U3/2E1QX6PRZFQ=="],
+    "@supacloud/admin": ["@supacloud/admin@0.22.3", "", { "dependencies": { "@sinclair/typebox": "^0.34.52", "@supacloud/cli": "0.56.1", "ssh2": "^1.17.0" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-KsrZedQSVHfqAZAJr1ynec+VBynMFEeyv/X6nGlFCTUWNVoZkndZaWq5WY28NiBBKMRhQdwcOIr95ntUf2OH9Q=="],
 
-    "@supacloud/cli": ["@supacloud/cli@0.55.1", "", { "dependencies": { "@sinclair/typebox": "^0.34.52", "@supacloud/compiler": "^0.23.0", "@supacloud/db": "^0.2.0", "fflate": "^0.8.3" }, "bin": { "supacloud-cli": "dist/index.js" } }, "sha512-sqW+Qm5ewxIMyMErr/BAlVUSNF1X0IEwLHsI0eZ0HV/makxB1RxoZR0Eir6t1lmI8mgrZAiTe1V+qRhN38kxXQ=="],
+    "@supacloud/cli": ["@supacloud/cli@0.56.1", "", { "dependencies": { "@sinclair/typebox": "^0.34.52", "@supacloud/compiler": "^0.24.0", "@supacloud/db": "^0.2.0", "fflate": "^0.8.3" }, "bin": { "supacloud-cli": "dist/index.js" } }, "sha512-82RukiBKZoHcrVJSYlvG9mqhtolzXm553VHMnOX96I23edsJdsAoRAh4s3l6Y6btc0DfOkhjRuVYhbIFukB2rw=="],
 
     "@supacloud/db": ["@supacloud/db@0.2.0", "https://registry.npmmirror.com/@supacloud/db/-/db-0.2.0.tgz", {}, "sha512-rJKMCJqMZf4oQ+x9bOnCoYO6REQqwIcSEwugPjvMfoiCbBo7vhkpytKWfj60UJJl0IJIUjmIZMu4xI2U2Okigg=="],
 
