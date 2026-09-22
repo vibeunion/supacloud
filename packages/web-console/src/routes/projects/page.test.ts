@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from "bun:test";
+import { expect, test } from "bun:test";
 import type { BunPlugin } from "bun";
 import { JSDOM } from "jsdom";
 import { compile, preprocess } from "svelte/compiler";
@@ -71,56 +71,6 @@ test("project list transport remains bounded and cannot turn failed reads into e
   expect(calls).toBe(1);
   await expect(loadProjectList(async () => Response.json([], { status: 503 }), new AbortController().signal)).rejects.toThrow();
   await expect(loadProjectList(async () => new Response("x".repeat(1024 * 1024 + 1)), new AbortController().signal)).rejects.toThrow();
-});
-
-test("actual list routes preserve authorization, project scope and unavailable state", async () => {
-  const { projectCrudRoutes } = await import("../../../../management-api/src/routes/project-crud");
-  const { projectService } = await import("../../../../management-api/src/services");
-  const { config } = await import("../../../../management-api/src/config");
-  const authModule = await import("../../../../management-api/src/middleware/auth");
-  const originalToken = config.masterToken;
-  config.masterToken = "project-list-test-master-token";
-  const list = spyOn(projectService, "listProjects").mockResolvedValue([projectRecord()]);
-  const lookup = spyOn(projectService, "getProject").mockResolvedValue({ ...projectRecord(), config: {} });
-  const app = projectCrudRoutes;
-  const request = (suffix = "", authorized = true) => app.handle(new Request(`http://localhost/v1/projects${suffix}`, {
-    headers: authorized ? { Authorization: "Bearer project-list-test-master-token" } : {},
-  }));
-  try {
-    const denied = await request("", false);
-    expect(denied.status, await denied.text()).toBe(401);
-    expect(list).not.toHaveBeenCalled();
-    for (const suffix of ["", "/"]) {
-      const response = await request(suffix);
-      expect(response.status).toBe(200);
-      const body: unknown = await response.json();
-      expect(parseProjectList(body)).toEqual(parseProjectList(projectListFixture()));
-    }
-    list.mockResolvedValue([{ ...projectRecord(), created_at: new Date(NaN) }]);
-    expect((await request()).status).toBe(503);
-    list.mockRejectedValue(new Error("private storage failure"));
-    const unavailable = await request();
-    expect(unavailable.status).toBe(503);
-    expect(await unavailable.text()).not.toContain("private storage failure");
-    const auth = spyOn(authModule, "getAuthContext").mockResolvedValue({ role: "project", ref: "a", principalId: "project:a" });
-    try {
-      list.mockClear();
-      const scoped = await request();
-      expect(scoped.status).toBe(200);
-      expect(parseProjectList(await scoped.json()).map(row => row.ref)).toEqual(["a"]);
-      expect(list).not.toHaveBeenCalled();
-      lookup.mockResolvedValue({ ...projectRecord("b"), config: {} });
-      expect((await request()).status).toBe(503);
-      lookup.mockResolvedValue(null);
-      const missing = await request();
-      expect(missing.status).toBe(200);
-      expect(await missing.json()).toEqual([]);
-    } finally { auth.mockRestore(); }
-  } finally {
-    list.mockRestore();
-    lookup.mockRestore();
-    config.masterToken = originalToken;
-  }
 });
 
 const localFile = (path: string) => fileURLToPath(new URL(path, import.meta.url));

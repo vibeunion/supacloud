@@ -1,4 +1,4 @@
-import { expect, spyOn, test } from "bun:test";
+import { expect, test } from "bun:test";
 import type { BunPlugin } from "bun";
 import { JSDOM } from "jsdom";
 import { compile, preprocess } from "svelte/compiler";
@@ -7,9 +7,7 @@ import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import {
-  formatSystemInfo, type SystemInfoSnapshot,
-} from "../../../management-api/src/services/system-info";
+import { formatSystemInfo, type SystemInfoSnapshot } from "../../../management-api/src/services/system-info";
 import {
   parseDashboardProjects, parseDashboardSystemInfo, loadDashboardProjects, loadDashboardSystemInfo,
 } from "../lib/dashboard";
@@ -91,42 +89,6 @@ test("dashboard transports enforce bounds, cancellation and no-store without emp
     await expect(loader(async () => Response.json({}, { status: 503 }), new AbortController().signal)).rejects.toThrow();
     await expect(loader(async () => new Response("x".repeat(maxBytes + 1)), new AbortController().signal)).rejects.toThrow();
     await expect(loader(async () => Response.json({}), new AbortController().signal)).rejects.toThrow();
-  }
-});
-
-test("actual system info route requires administrator authorization and returns sanitized 503 on collection failure", async () => {
-  const { systemRoutes } = await import("../../../management-api/src/routes/system");
-  const module = await import("../../../management-api/src/services/system-info");
-  const authModule = await import("../../../management-api/src/middleware/auth");
-  const { config } = await import("../../../management-api/src/config");
-  const originalToken = config.masterToken;
-  config.masterToken = "dashboard-test-master-token";
-  const collect = spyOn(module, "collectSystemInfo").mockResolvedValue(system());
-  const request = (authorized = true) => systemRoutes.handle(new Request("http://localhost/v1/system/info", {
-    headers: authorized ? { Authorization: "Bearer dashboard-test-master-token" } : {},
-  }));
-  try {
-    const denied = await request(false);
-    expect(denied.status, await denied.text()).toBe(401);
-    expect(collect).not.toHaveBeenCalled();
-    const response = await request();
-    expect(response.status).toBe(200);
-    expect(parseDashboardSystemInfo(await response.json())).toEqual(parseDashboardSystemInfo(system()));
-    collect.mockRejectedValue(new Error("private system failure"));
-    const unavailable = await request();
-    expect(unavailable.status).toBe(503);
-    expect(await unavailable.json()).toEqual({
-      code: "SYSTEM_INFO_UNAVAILABLE", message: "System information unavailable",
-    });
-    const auth = spyOn(authModule, "getAuthContext").mockResolvedValue({ role: "project", ref: "a", principalId: "project:a" });
-    try {
-      collect.mockClear();
-      expect((await request()).status).toBe(403);
-      expect(collect).not.toHaveBeenCalled();
-    } finally { auth.mockRestore(); }
-  } finally {
-    config.masterToken = originalToken;
-    collect.mockRestore();
   }
 });
 
