@@ -418,10 +418,12 @@ describe("app tools", () => {
         expect(doctor.ok).toBe(true);
         expect(doctor.checks.find((check: { name: string }) => check.name === "modules").ok).toBe(true);
         expect(doctor.checks.find((check: { name: string }) => check.name === "generated-artifacts").ok).toBe(true);
+        expect(doctor.unwiredContracts.some((entry: { file: string }) => entry.file.includes("issue-invoice.contract.ts"))).toBe(true);
 
         const text = await app({ action: "doctor", root });
         expect(text.isError).toBe(false);
         expect(text.content[0].text).toContain("No blocking issues");
+        expect(text.content[0].text).toContain("unwired contract file(s)");
     });
 
     test("doctor surfaces fixable diagnostics and app fix previews then applies them", async () => {
@@ -446,11 +448,14 @@ describe("app tools", () => {
             expect(diagnostic).toBeTruthy();
             expect(diagnostic.errorCode).toBe("SC4012");
             expect(diagnostic.fix?.type).toBe("set_command_mode");
+            expect(report.autoFixable).toBeGreaterThan(0);
+            expect(report.fixPlan.some((entry: { type: string }) => entry.type === "set_command_mode")).toBe(true);
 
             const text = await app({ action: "doctor", root: isolatedRoot });
             expect(text.content[0].text).toContain("SC4012");
             expect(text.content[0].text).toContain("fixable: set_command_mode");
             expect(text.content[0].text).toContain("hint:");
+            expect(text.content[0].text).toContain("auto-fixable");
 
             writeFileSync(join(isolatedRoot, "fix.json"), JSON.stringify({ ...diagnostic.fix, value: "required" }));
             const preview = await app({ action: "fix", root: isolatedRoot, fix: "fix.json" });
