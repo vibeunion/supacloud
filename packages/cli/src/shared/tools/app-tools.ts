@@ -3,6 +3,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { Type } from "@sinclair/typebox";
 import {
+    applyDiagnosticFix,
     checkProject,
     compileProject,
     compileOptionsFromConfig,
@@ -28,7 +29,7 @@ type ToolServer = {
 };
 
 export interface AppToolArguments {
-    action: "init" | "generate" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "doctor";
+    action: "init" | "generate" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "doctor" | "fix";
     kind?: "module" | "command" | "query" | "controller" | "job";
     name?: string;
     module?: string;
@@ -40,6 +41,8 @@ export interface AppToolArguments {
     strict?: boolean;
     format?: "text" | "json";
     target?: string;
+    fix?: string;
+    write?: boolean;
 }
 
 async function initProject(args: AppToolArguments): Promise<ToolResult> {
@@ -199,10 +202,17 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
 }
 
 function formatDiagnostic(diagnostic: Diagnostic): string {
+    const code = diagnostic.errorCode && diagnostic.errorCode !== diagnostic.code
+        ? `${diagnostic.code} (${diagnostic.errorCode})`
+        : diagnostic.code;
     const location = diagnostic.file
         ? ` ${diagnostic.file}${diagnostic.line ? `:${diagnostic.line}` : ""}`
         : "";
-    return `${diagnostic.severity} ${diagnostic.code}${location} ${diagnostic.message}`;
+    const lines = [`${diagnostic.severity} ${code}${location} ${diagnostic.message}`];
+    if (diagnostic.suggestion) lines.push(`  hint: ${diagnostic.suggestion}`);
+    if (diagnostic.docsUrl) lines.push(`  docs: ${diagnostic.docsUrl}`);
+    if (diagnostic.fix) lines.push(`  fixable: ${diagnostic.fix.type}; apply with \`supacloud app fix --fix <file.json> --write\``);
+    return lines.join("\n");
 }
 
 function formatDiagnostics(diagnostics: Diagnostic[]): string {
@@ -329,13 +339,33 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
     const lines = doctor.checks.map((check) => `${check.ok ? "OK" : "FAIL"} ${check.name}: ${check.detail}`);
     for (const diagnostic of doctor.diagnostics ?? []) {
         lines.push(formatDiagnostic(diagnostic));
-        if (diagnostic.suggestion) lines.push(`  hint: ${diagnostic.suggestion}`);
     }
     lines.push("");
     lines.push(doctor.errors === 0
         ? "No blocking issues. Run `supacloud app compile` to refresh generated artifacts."
         : `${doctor.errors} blocking issue(s). Run \`supacloud app check\` for the full diagnostic list.`);
     return textResult(lines.join("\n"), doctor.errors > 0);
+}
+
+/**
+ * `app fix` applies one machine-readable DiagnosticFix (from `doctor --format
+ * json`). It previews by default and only writes with `--write`, so an agent can
+ * inspect the exact change before mutating source.
+ */
+async function runFix(args: AppToolArguments): Promise<ToolResult> {
+    const root = resolve(args.root || process.cwd());
+    const fixPath = args.fix?.trim();
+    if (!fixPath) throw new Error("app fix requires --fix <path-to-diagnostic-fix.json>");
+    const parsed = JSON.parse(await readFile(resolve(root, fixPath), "utf8")) as unknown;
+    const write = args.write === true;
+    const applied = await applyDiagnosticFix(parsed as Parameters<typeof applyDiagnosticFix>[0], { rootDir: root, dryRun: !write });
+    return textResult(JSON.stringify({
+        ok: true,
+        written: write,
+        file: applied.file,
+        changed: applied.changed,
+        ...(write ? {} : { preview: applied.content }),
+    }, null, 2));
 }
 
 async function runCompile(args: AppToolArguments): Promise<ToolResult> {
@@ -590,6 +620,7 @@ export async function runAppTool(request: AppToolArguments): Promise<ToolResult>
         case "export-tools": return runExportTools(request);
         case "context": return runContext(request);
         case "doctor": return runDoctor(request);
+        case "fix": return runFix(request);
         default:
             return textResult(`Unknown app action: ${String(request.action)}`, true);
     }
@@ -598,9 +629,9 @@ export async function runAppTool(request: AppToolArguments): Promise<ToolResult>
 export function registerAppTools(server: ToolServer): void {
     server.tool(
         "app",
-        "Local @supacloud/app framework commands: init, scaffold, compile, check, graph, explain, export-tools, and AI context/doctor. Actions: init, generate, compile, check, graph, explain, export-tools, context, doctor",
+        "Local @supacloud/app framework commands: init, scaffold, compile, check, graph, explain, export-tools, AI context/doctor and fix. Actions: init, generate, compile, check, graph, explain, export-tools, context, doctor, fix",
         {
-            action: withDescription(stringEnum(["init", "generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor"]), "App action"),
+            action: withDescription(stringEnum(["init", "generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix"]), "App action"),
             kind: optional(stringEnum(["module", "command", "query", "controller", "job"]), "[generate] Scaffold kind"),
             name: optional(Type.String(), "[init/generate] Project or object name"),
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
@@ -612,12 +643,14 @@ export function registerAppTools(server: ToolServer): void {
             strict: optional(Type.Boolean(), "[compile/check] Promote warnings to errors"),
             format: optional(stringEnum(["text", "json"]), "[graph/export-tools] Output format (default: text)"),
             target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / module name"),
+            fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
+            write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
         },
         runAppTool,
     );
 }
 
-const APP_ALIAS_ACTIONS = ["generate", "compile", "check", "graph", "explain", "context", "doctor"] as const;
+const APP_ALIAS_ACTIONS = ["generate", "compile", "check", "graph", "explain", "context", "doctor", "fix"] as const;
 
 /**
  * Promotes the single-entry development verbs to top-level commands so an AI or
@@ -637,6 +670,8 @@ export function registerAppAliases(server: ToolServer): void {
         strict: optional(Type.Boolean(), "[compile/check] Promote warnings to errors"),
         format: optional(stringEnum(["text", "json"]), "Output format (default: text)"),
         target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / module name"),
+        fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
+        write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
     };
     for (const action of APP_ALIAS_ACTIONS) {
         server.tool(action, `Top-level alias of \`app ${action}\`.`, schema, (request) => runAppTool({ ...request, action }));

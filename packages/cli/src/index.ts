@@ -340,6 +340,7 @@ EXAMPLES
   ${preferredCommand} app context --root . --format json
   ${preferredCommand} app context --root . --target CaseModule --format json
   ${preferredCommand} app doctor --root .
+  ${preferredCommand} app fix --root . --fix fix.json --write
   ${preferredCommand} generate --kind module --name billing
   ${preferredCommand} generate --kind job --module billing --name sync-orders
   ${preferredCommand} check --root . --strict

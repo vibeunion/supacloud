@@ -379,6 +379,49 @@ describe("app tools", () => {
         expect(text.content[0].text).toContain("No blocking issues");
     });
 
+    test("doctor surfaces fixable diagnostics and app fix previews then applies them", async () => {
+        const isolatedRoot = mkdtempSync(join(tmpdir(), "supacloud-app-fix-"));
+        try {
+            const { mkdir, writeFile } = await import("node:fs/promises");
+            const { dirname } = await import("node:path");
+            for (const [relativePath, content] of Object.entries(FIXTURE_FILES)) {
+                const absolute = join(isolatedRoot, relativePath);
+                await mkdir(dirname(absolute), { recursive: true });
+                await writeFile(absolute, content, "utf8");
+            }
+            const commandPath = join(isolatedRoot, "src/features/case/accept-case.command.ts");
+            const original = readFileSync(commandPath, "utf8");
+            const invalid = original.replace('transaction: "required"', 'transaction: "sometimes"');
+            expect(invalid).not.toBe(original);
+            writeFileSync(commandPath, invalid);
+
+            const doctor = await app({ action: "doctor", root: isolatedRoot, format: "json" });
+            const report = JSON.parse(doctor.content[0].text);
+            const diagnostic = report.diagnostics.find((entry: { code: string }) => entry.code === "invalid-command-mode");
+            expect(diagnostic).toBeTruthy();
+            expect(diagnostic.errorCode).toBe("SC4012");
+            expect(diagnostic.fix?.type).toBe("set_command_mode");
+
+            const text = await app({ action: "doctor", root: isolatedRoot });
+            expect(text.content[0].text).toContain("SC4012");
+            expect(text.content[0].text).toContain("fixable: set_command_mode");
+            expect(text.content[0].text).toContain("hint:");
+
+            writeFileSync(join(isolatedRoot, "fix.json"), JSON.stringify({ ...diagnostic.fix, value: "required" }));
+            const preview = await app({ action: "fix", root: isolatedRoot, fix: "fix.json" });
+            expect(preview.isError).toBe(false);
+            expect(JSON.parse(preview.content[0].text).written).toBe(false);
+            expect(readFileSync(commandPath, "utf8")).toBe(invalid);
+
+            const applied = await app({ action: "fix", root: isolatedRoot, fix: "fix.json", write: true });
+            expect(applied.isError).toBe(false);
+            expect(JSON.parse(applied.content[0].text).written).toBe(true);
+            expect(readFileSync(commandPath, "utf8")).toContain('transaction: "required"');
+        } finally {
+            rmSync(isolatedRoot, { recursive: true, force: true });
+        }
+    });
+
     test("graph renders the module tree and json format", async () => {
         const textResult = await app({ action: "graph", root });
         expect(textResult.isError).toBe(false);
@@ -474,7 +517,7 @@ describe("app tools", () => {
     test("top-level aliases delegate generate/check/context/doctor to app actions", async () => {
         const aliases = captureAliasCallbacks();
         expect(Object.keys(aliases)).toEqual(expect.arrayContaining([
-            "generate", "compile", "check", "graph", "explain", "context", "doctor",
+            "generate", "compile", "check", "graph", "explain", "context", "doctor", "fix",
         ]));
 
         await app({ action: "compile", root });
@@ -494,7 +537,7 @@ describe("app tools", () => {
     });
 
     test("all app actions are classified as local in the execution policy", () => {
-        for (const action of ["generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor"]) {
+        for (const action of ["generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix"]) {
             expect(executionMode("app", action, {})).toBe("local");
         }
     });
