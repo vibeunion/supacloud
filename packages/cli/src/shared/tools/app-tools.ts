@@ -370,11 +370,40 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
  * `app doctor` reports actionable, fixable project health: stable check names,
  * diagnostics with file/line + hint, and a repairability verdict.
  */
+interface DoctorFixPlanEntry {
+    code: string;
+    errorCode?: string;
+    file?: string;
+    line?: number;
+    type: string;
+    targetFile: string;
+    command: string;
+}
+
+/** One-shot repair plan: every diagnostic that carries a machine-readable fix. */
+function doctorFixPlan(doctor: ReturnType<typeof doctorProject>): DoctorFixPlanEntry[] {
+    return (doctor.diagnostics ?? [])
+        .filter((diagnostic) => diagnostic.fix !== undefined)
+        .map((diagnostic) => ({
+            code: diagnostic.code,
+            ...(diagnostic.errorCode === undefined ? {} : { errorCode: diagnostic.errorCode }),
+            ...(diagnostic.file === undefined ? {} : { file: diagnostic.file }),
+            ...(diagnostic.line === undefined ? {} : { line: diagnostic.line }),
+            type: diagnostic.fix!.type,
+            targetFile: diagnostic.fix!.targetFile,
+            command: "supacloud app fix --fix <fix.json> --write",
+        }));
+}
+
 async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
     const { root, outDir, result } = await projectCompileConfig(args);
     const doctor = doctorProject(root, outDir, result.graph, result.upToDate, result.diagnostics);
+    const fixPlan = doctorFixPlan(doctor);
     if (args.format === "json") {
-        return textResult(JSON.stringify({ ok: doctor.errors === 0, ...doctor }, null, 2), doctor.errors > 0);
+        return textResult(
+            JSON.stringify({ ok: doctor.errors === 0, autoFixable: fixPlan.length, fixPlan, ...doctor }, null, 2),
+            doctor.errors > 0,
+        );
     }
     const lines = doctor.checks.map((check) => `${check.ok ? "OK" : "FAIL"} ${check.name}: ${check.detail}`);
     for (const diagnostic of doctor.diagnostics ?? []) {
@@ -384,6 +413,9 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
     lines.push(doctor.errors === 0
         ? "No blocking issues. Run `supacloud app compile` to refresh generated artifacts."
         : `${doctor.errors} blocking issue(s). Run \`supacloud app check\` for the full diagnostic list.`);
+    if (fixPlan.length > 0) {
+        lines.push(`${fixPlan.length} auto-fixable diagnostic(s): run \`supacloud app doctor --format json\`, save each \`fix\`, then \`supacloud app fix --fix <fix.json> --write\`.`);
+    }
     return textResult(lines.join("\n"), doctor.errors > 0);
 }
 
