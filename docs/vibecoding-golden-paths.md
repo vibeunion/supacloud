@@ -15,6 +15,17 @@ and platform capabilities stay SupaCloud-native.
 > implementation. The goal is to make Vibecoding a constrained, diagnosable and
 > deliverable pipeline.
 
+## Quick start
+
+```bash
+supacloud app init --name orders-api --template http   # or command / edge
+cd orders-api && bun install && bun run check
+
+supacloud context --format json > context.json   # AI reads the compiled project graph
+supacloud doctor --format json > doctor.json     # actionable diagnostics + fix plan
+supacloud fix --fix fix.json --write             # apply one DiagnosticFix, then recheck
+```
+
 ## Single entry point
 
 Developers and AI use one CLI surface and do not need to remember the underlying
