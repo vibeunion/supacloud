@@ -8,10 +8,13 @@
     tableColumnsEndpoint,
     tableRowsResourceName,
   } from "$lib/admin/resources";
+  import { matchingTableTenant, type TableRowsIdentity } from "$lib/admin/table-rows";
+  import { requestValidatedJson } from "$lib/validated-json";
   import {
     captureAdminContext,
     provideAdminContext,
     type ResourceDefinition,
+    type TenantContext,
   } from "@svadmin/core";
   import AutoTable from "@svadmin/ui/components/AutoTable.svelte";
   import { ChevronRight, Database, Table as TableIcon } from "lucide-svelte";
@@ -24,6 +27,7 @@
   let tableResource = $state<ResourceDefinition>();
   let loading = $state(true);
   let errorMessage = $state("");
+  let retryKey = $state(0);
 
   provideAdminContext({
     get providerBundle() { return parentAdminContext.providerBundle; },
@@ -37,32 +41,27 @@
     get tenant() { return parentAdminContext.tenant; },
   });
 
-  async function loadTableResource(
-    ref: string,
-    schemaName: string,
-    name: string,
+  function loadTableResource(
+    identity: TableRowsIdentity,
+    tenant: TenantContext | undefined,
     signal: AbortSignal,
-  ): Promise<ResourceDefinition> {
-    const response = await apiClient(tableColumnsEndpoint(ref, schemaName, name), { signal });
-    const payload: unknown = await response.json().catch(() => null);
-    if (!response.ok) {
-      const message = payload && typeof payload === "object"
-        ? (payload as Record<string, unknown>).message
-        : undefined;
-      throw new Error(typeof message === "string" ? message : "Failed to load table columns");
-    }
-    return buildTableRowsResource({
-      projectRef: ref,
-      schema: schemaName,
-      tableName: name,
-      columns: parseTableColumnsResponse(payload),
-    });
+  ) {
+    if (!matchingTableTenant(tenant, identity)) throw new Error("Project context unavailable");
+    return requestValidatedJson(
+      tableColumnsEndpoint(identity.projectRef, identity.schema, identity.tableName),
+      apiClient,
+      (payload) => buildTableRowsResource({ ...identity, columns: parseTableColumnsResponse(payload) }),
+      { signal },
+    );
   }
 
   $effect(() => {
+    void retryKey;
     const ref = projectRef;
     const schemaName = schema;
     const name = tableName;
+    const tenant = parentAdminContext.tenant;
+    const identity = { projectRef: ref, schema: schemaName, tableName: name };
     const controller = new AbortController();
     let cancelled = false;
 
@@ -70,13 +69,22 @@
     errorMessage = "";
     loading = true;
 
-    void loadTableResource(ref, schemaName, name, controller.signal)
+    if (!matchingTableTenant(tenant, identity)) {
+      errorMessage = "Project context unavailable";
+      loading = false;
+      return () => {
+        cancelled = true;
+        controller.abort();
+      };
+    }
+
+    void loadTableResource(identity, tenant, controller.signal)
       .then((resource) => {
         if (!cancelled) tableResource = resource;
       })
-      .catch((error: unknown) => {
+      .catch(() => {
         if (!cancelled && !controller.signal.aborted) {
-          errorMessage = error instanceof Error ? error.message : "Failed to load table columns";
+          errorMessage = "Failed to load table columns";
         }
       })
       .finally(() => {
@@ -115,8 +123,13 @@
         Loading table columns…
       </div>
     {:else if errorMessage}
-      <div class="flex min-h-[600px] items-center justify-center px-6 text-center text-sm text-destructive" role="alert">
-        {errorMessage}
+      <div class="flex min-h-[600px] flex-col items-center justify-center gap-3 px-6 text-center text-sm text-destructive" role="alert">
+        <span>{errorMessage}</span>
+        <button
+          type="button"
+          onclick={() => { retryKey += 1; }}
+          class="rounded-lg border px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted/50"
+        >Retry</button>
       </div>
     {:else if tableResource?.name === currentResourceName}
       {#snippet customDefaultRenderer({ value }: { value: unknown })}
