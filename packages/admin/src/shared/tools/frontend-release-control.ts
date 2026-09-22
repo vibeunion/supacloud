@@ -1,1 +1,1 @@
-export * from "../../../../cli/src/shared/tools/frontend-release-control";
+export * from "@supacloud/cli/frontend-release-control";
