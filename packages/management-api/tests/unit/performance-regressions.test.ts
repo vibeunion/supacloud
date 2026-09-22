@@ -10,7 +10,7 @@ describe("performance regressions", () => {
     const pageSource = await read("../../../web-console/src/routes/project/[ref]/+page.svelte");
 
     expect(routeSource).toContain('"/:ref/dashboard/summary"');
-    expect(routeSource).toContain("DASHBOARD_SUMMARY_CACHE_TTL_MS");
+    expect(routeSource).toContain('set.headers["cache-control"] = "no-store"');
     expect(routeSource).toContain("edgeFunctionService.list(params.ref)");
     expect(routeSource).toContain("taskRepository.getTaskStats(params.ref)");
     expect(pageSource).toContain("dashboard/summary");
