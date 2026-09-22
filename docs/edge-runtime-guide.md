@@ -208,6 +208,37 @@ isolation: Functions in the same project still share the configured Worker
 Pool. Use separate runtime processes or systemd/cgroup boundaries when hard
 memory or CPU isolation is required.
 
+### Memory Pressure Recovery
+
+On cgroup v2 hosts, the runtime resolves its membership from `/proc/self/cgroup`
+and `/proc/self/mountinfo`. It samples `memory.current`, `memory.high`, and
+`memory.events` for that cgroup and its visible ancestors once per second.
+Three consecutive samples at or above 90% of a finite `memory.high` trigger
+the existing graceful shutdown path with exit code 1. The standalone systemd
+unit's `Restart=on-failure` policy can then restart the process. The existing
+30-second drain deadline still applies; in-flight work may be interrupted.
+
+The recovery log includes the triggering cgroup, usage, threshold, high-event
+counter, and both Worker pools' queue, cache, replacement, and retirement
+metrics. Historical high-event counts alone do not cause a restart. Reads do
+not overlap, a missing sample resets the consecutive-sample count, and each
+runtime instance triggers recovery at most once. Hosts without a readable
+cgroup v2 hierarchy or finite high limit do not enable this protection.
+
+This is preventive recovery, not a memory-leak fix or an independent watchdog.
+A stalled event loop or sudden allocation spike may prevent timely sampling.
+Embedded runtimes share their supervisor's cgroup, and ancestor usage may
+include other processes; persistent shared pressure requires operator
+investigation rather than repeated manual restarts.
+
+For an incident, first identify the deployed executable or source digest,
+effective systemd limits and drop-ins, runtime mode, and Worker pool sizes.
+Capture memory counters and pool metrics over time, including before and after
+function activation. Current source uses parallel foreground preheating and
+per-Worker module caches, so pool size and activation churn are investigation
+targets, not proof of a particular customer's memory-growth cause. Do not
+infer that a successful retry after restart proves a bundle-size defect.
+
 The Edge Runtime is fully compatible with `supabase.functions.invoke()`:
 
 ```typescript
