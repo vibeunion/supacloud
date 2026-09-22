@@ -252,7 +252,8 @@ export class FormControl<T = any> extends AbstractControl<T> {
         this.updateValueAndValidity();
       }
     } else {
-      this.setRawValue(formState as T);
+      // Angular parity: an omitted initial state is null, never a bare undefined.
+      this.setRawValue((formState === undefined ? null : formState) as T);
       this.updateValueAndValidity();
     }
   }
@@ -342,10 +343,13 @@ export class FormGroup<
   }
 
   setValue(value: any): void {
-    for (const [key, val] of Object.entries(value)) {
-      if (this.controls[key]) {
-        this.controls[key].setValue(val);
-      }
+    const provided = value !== null && typeof value === "object" ? Object.keys(value) : [];
+    const expected = Object.keys(this.controls);
+    if (provided.length !== expected.length || expected.some((key) => !provided.includes(key))) {
+      throw new TypeError("FormGroup.setValue requires value keys to match the registered controls");
+    }
+    for (const key of expected) {
+      this.controls[key].setValue((value as Record<string, unknown>)[key]);
     }
     this.markAsDirty();
   }
@@ -454,8 +458,11 @@ export class FormArray<
   }
 
   setValue(value: any): void {
-    (value as any[]).forEach((val, i) => {
-      if (this.controls[i]) this.controls[i].setValue(val);
+    if (!Array.isArray(value) || value.length !== this.controls.length) {
+      throw new TypeError("FormArray.setValue requires the value count to match the controls");
+    }
+    value.forEach((val, i) => {
+      this.controls[i].setValue(val);
     });
     this.markAsDirty();
   }
