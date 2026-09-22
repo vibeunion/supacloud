@@ -43,6 +43,11 @@ export interface BuildTableRowsResourceInput {
 }
 
 const TABLE_ROW_ID_PREFIX = '__svadmin_row_id';
+const TABLE_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
+
+export function isTableIdentifier(value: string): boolean {
+  return TABLE_IDENTIFIER.test(value);
+}
 
 function toRecord(value: object): Record<string, unknown> {
   const result: Record<string, unknown> = {};
@@ -126,40 +131,78 @@ export function tableColumnsEndpoint(projectRef: string, schema: string, tableNa
   ].join('/')}`;
 }
 
+const MAX_TABLE_COLUMN_COUNT = 1600;
+const MAX_IDENTIFIER_BYTES = 63;
+const identifierBytes = new TextEncoder();
+
+function isValidColumnName(value: string): boolean {
+  return value.length > 0 && !value.includes('\0') && identifierBytes.encode(value).length <= MAX_IDENTIFIER_BYTES;
+}
+
 export function parseTableColumnsResponse(payload: unknown): TableColumnMetadata[] {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('Invalid table columns response');
   }
   const data = toRecord(payload).data;
   if (!isUnknownArray(data)) throw new Error('Invalid table columns response');
+  if (data.length > MAX_TABLE_COLUMN_COUNT) throw new Error('Invalid table column metadata');
 
-  return data.map((candidate) => {
+  const seen = new Set<string>();
+  const columns = data.map((candidate): TableColumnMetadata => {
     if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
       throw new Error('Invalid table column metadata');
     }
     const column = toRecord(candidate);
+    const name = column.column_name;
+    const dataType = column.data_type;
+    const nullable = column.is_nullable;
+    const defaultValue = column.column_default;
     if (
-      typeof column.column_name !== 'string'
-      || column.column_name.length === 0
-      || typeof column.data_type !== 'string'
-      || column.data_type.length === 0
-      || (typeof column.is_nullable !== 'string' && typeof column.is_nullable !== 'boolean')
+      typeof name !== 'string'
+      || !isValidColumnName(name)
+      || typeof dataType !== 'string'
+      || dataType.length === 0
+      || (nullable !== 'YES' && nullable !== 'NO')
+      || !Object.prototype.hasOwnProperty.call(column, 'column_default')
+      || !(defaultValue === null || typeof defaultValue === 'string')
+      || ('udt_name' in column && (typeof column.udt_name !== 'string' || column.udt_name.length === 0))
+      || ('is_primary_key' in column && typeof column.is_primary_key !== 'boolean')
     ) {
       throw new Error('Invalid table column metadata');
     }
+    const isPrimaryKey = 'is_primary_key' in column ? (column.is_primary_key as boolean) : undefined;
+    const hasPosition = 'primary_key_position' in column;
+    const position = hasPosition ? column.primary_key_position : undefined;
+    if (isPrimaryKey === true) {
+      if (hasPosition && !(typeof position === 'number' && Number.isInteger(position) && position >= 1)) {
+        throw new Error('Invalid table column metadata');
+      }
+      if (nullable !== 'NO') throw new Error('Invalid table column metadata');
+    } else if (hasPosition && position !== null) {
+      throw new Error('Invalid table column metadata');
+    }
+    if (seen.has(name)) throw new Error('Invalid table column metadata');
+    seen.add(name);
 
     return {
-      column_name: column.column_name,
-      data_type: column.data_type,
-      is_nullable: column.is_nullable,
-      column_default: column.column_default ?? null,
+      column_name: name,
+      data_type: dataType,
+      is_nullable: nullable,
+      column_default: defaultValue as string | null,
       ...(typeof column.udt_name === 'string' ? { udt_name: column.udt_name } : {}),
-      ...(typeof column.is_primary_key === 'boolean' ? { is_primary_key: column.is_primary_key } : {}),
-      ...(typeof column.primary_key_position === 'number' || column.primary_key_position === null
-        ? { primary_key_position: column.primary_key_position }
-        : {}),
+      ...(isPrimaryKey === undefined ? {} : { is_primary_key: isPrimaryKey }),
+      ...(hasPosition ? { primary_key_position: (position ?? null) as number | null } : {}),
     };
   });
+
+  const positions = columns
+    .filter((column) => column.is_primary_key === true && typeof column.primary_key_position === 'number')
+    .map((column) => column.primary_key_position as number)
+    .sort((left, right) => left - right);
+  for (let index = 0; index < positions.length; index += 1) {
+    if (positions[index] !== index + 1) throw new Error('Invalid table column metadata');
+  }
+  return columns;
 }
 
 export function buildTableRowsResource({
