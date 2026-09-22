@@ -159,6 +159,7 @@ jobs:
             working-directory: packages/web-console
             script: |
               bun install --frozen-lockfile
+              (cd ../management-api && bun install --frozen-lockfile)
               bun test
               bun run check
               bun run build
