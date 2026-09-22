@@ -53,6 +53,7 @@ export function Injectable(_options: Record<string, unknown> = {}): ClassDecorat
 export function Inject(_token: unknown): ParameterDecorator { return () => {}; }
 export function Module(_options: Record<string, unknown>): ClassDecorator { return () => {}; }
 export function Command(_options: Record<string, unknown>): ClassDecorator { return () => {}; }
+export function Job(_options: Record<string, unknown>): ClassDecorator { return () => {}; }
 export function Query(_options: Record<string, unknown>): ClassDecorator { return () => {}; }
 export function Controller(_path: string): ClassDecorator { return () => {}; }
 export function Body(): ParameterDecorator { return () => {}; }
@@ -223,6 +224,15 @@ describe("app tools", () => {
         expect(controllerResult.isError).toBe(false);
         expect(readFileSync(join(root, "src/features/billing/billing.controller.ts"), "utf8"))
             .toContain('@Controller("/billing")');
+
+        const jobResult = await app({ action: "generate", kind: "job", module: "billing", name: "sync-orders", root });
+        expect(jobResult.isError).toBe(false);
+        const jobSource = readFileSync(join(root, "src/features/billing/jobs/sync-orders.job.ts"), "utf8");
+        expect(jobSource).toContain("@Job({");
+        expect(jobSource).toContain('name: "billing.syncOrders"');
+        expect(jobSource).toContain('mode: "task"');
+        expect(jobSource).toContain("export class SyncOrdersJob");
+        expect(jobSource).toContain("Implement SyncOrdersJob.run");
     });
 
     test("init creates an isolated, ready-to-run project template", async () => {
