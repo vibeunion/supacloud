@@ -140,6 +140,11 @@ try {
   const [facts] = await sql`SELECT task.result, stream.output_count FROM public.project_tasks AS task
     JOIN public.project_task_output_streams AS stream ON stream.task_id = task.id WHERE task.id = ${archived}::uuid`;
   assert.deepEqual(facts.result, { final: "preserved" }); assert.equal(facts.output_count, 1);
+  // Keep this assertion about cascade accounting deterministic when the earlier
+  // migration, lock, and maintenance checks cross a fixed-minute boundary.
+  await sql`UPDATE public.project_task_output_quotas
+    SET window_start = date_trunc('minute', clock_timestamp()), window_events = 1
+    WHERE project_ref = 'quota-store'`;
   assert.equal((await append("quota-store", blocked)).sequence, "1");
   await sql`DELETE FROM public.project_tasks WHERE id = ${blocked}::uuid`;
   assert.equal((await quota("quota-store")).retained_events, "0", "FK cascade releases retained capacity");
