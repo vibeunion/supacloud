@@ -2040,6 +2040,51 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
     },
   )
 
+  // Consolidated pooling state — declared endpoints and project identities only.
+  .get(
+    "/:ref/pooling-state",
+    async ({ params, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
+      const project = await projectService.getProject(params.ref);
+      if (!project)
+        return status(404, { code: "404", message: "Project not found" });
+      if (project.ref !== params.ref) {
+        return status(503, {
+          code: "POOLING_STATE_UNAVAILABLE",
+          message: "Project pooling state is unavailable",
+        });
+      }
+      try {
+        const { buildProjectPoolingState } = await import(
+          "../services/project-pooling-state"
+        );
+        const { config: appConfig } = await import("../config");
+        return buildProjectPoolingState(
+          {
+            ref: params.ref,
+            config: project.config,
+            database: project.database,
+          },
+          {
+            pgPort: appConfig.pgPort,
+            poolerHost: appConfig.poolerHost,
+            poolerPort: appConfig.poolerPort,
+          },
+        );
+      } catch {
+        return status(503, {
+          code: "POOLING_STATE_UNAVAILABLE",
+          message: "Project pooling state is unavailable",
+        });
+      }
+    },
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get project pooling state" },
+    },
+  )
+
   // Get Postgres DB config — required by CLI `supabase link` (V1GetPostgresConfig)
   .get(
     "/:ref/config/postgres",
