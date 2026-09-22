@@ -418,10 +418,12 @@ describe("app tools", () => {
         expect(doctor.ok).toBe(true);
         expect(doctor.checks.find((check: { name: string }) => check.name === "modules").ok).toBe(true);
         expect(doctor.checks.find((check: { name: string }) => check.name === "generated-artifacts").ok).toBe(true);
+        expect(doctor.unwiredContracts.some((entry: { file: string }) => entry.file.includes("issue-invoice.contract.ts"))).toBe(true);
 
         const text = await app({ action: "doctor", root });
         expect(text.isError).toBe(false);
         expect(text.content[0].text).toContain("No blocking issues");
+        expect(text.content[0].text).toContain("unwired contract file(s)");
     });
 
     test("doctor surfaces fixable diagnostics and app fix previews then applies them", async () => {

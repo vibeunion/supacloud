@@ -34,6 +34,10 @@ supacloud deploy              # delivery
 The `app` namespace remains as the low-level form (`supacloud app <verb>`); the
 top-level verbs are aliases with the same implementation and execution policy.
 
+> In a generated project, the local development loop is `bun run dev` (watch,
+> compile, restart). `supacloud dev ...` is the separate remote project
+> sync/watch/migrate module; they are different commands.
+
 ## Conventional project structure
 
 New projects use a fixed, AI-legible layout so an agent can locate the entry,
