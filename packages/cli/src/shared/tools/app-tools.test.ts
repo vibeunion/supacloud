@@ -262,6 +262,35 @@ describe("app tools", () => {
         }
     });
 
+    test("init supports http and edge golden-path templates", async () => {
+        const httpRoot = mkdtempSync(join(tmpdir(), "supacloud-init-http-"));
+        const edgeRoot = mkdtempSync(join(tmpdir(), "supacloud-init-edge-"));
+        try {
+            const http = await app({ action: "init", root: httpRoot, name: "orders-api", template: "http" });
+            expect(http.isError).toBe(false);
+            expect(http.content[0].text).toContain("template: http");
+            const httpFeature = readFileSync(join(httpRoot, "src/orders/orders.ts"), "utf8");
+            expect(httpFeature).toContain('@Controller("/orders")');
+            expect(httpFeature).toContain("defineFeatureSlice");
+            expect(httpFeature).toContain("responses: { 201: OrderResult }");
+            expect(readFileSync(join(httpRoot, "tests/orders.test.ts"), "utf8")).toContain("createDemo");
+
+            const edge = await app({ action: "init", root: edgeRoot, name: "orders-worker", template: "edge" });
+            expect(edge.isError).toBe(false);
+            expect(edge.content[0].text).toContain("template: edge");
+            const edgeFeature = readFileSync(join(edgeRoot, "src/sync/sync.ts"), "utf8");
+            expect(edgeFeature).toContain("@Job({");
+            expect(edgeFeature).toContain('name: "sync.orders"');
+            expect(edgeFeature).toContain('mode: "task"');
+            expect(edgeFeature).toContain('idempotency: "required"');
+            expect(edgeFeature).toContain("jobs: [SyncOrdersJob]");
+            expect(readFileSync(join(edgeRoot, "tests/sync.test.ts"), "utf8")).toContain("SyncOrdersJob");
+        } finally {
+            rmSync(httpRoot, { recursive: true, force: true });
+            rmSync(edgeRoot, { recursive: true, force: true });
+        }
+    });
+
     test("generate refuses to overwrite without --force and rejects duplicate controllers", async () => {
         const moduleFile = join(root, "src/features/billing/billing.module.ts");
         await expect(app({ action: "generate", kind: "module", name: "billing", root }))
