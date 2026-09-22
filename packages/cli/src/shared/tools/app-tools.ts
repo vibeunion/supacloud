@@ -284,7 +284,26 @@ interface ProjectContextPack {
     modules: ModuleNode[];
     externalTokens: string[];
     diagnostics: Diagnostic[];
+    allowedDependencies: { dependencies: string[]; devDependencies: string[] };
     commands: Record<string, string>;
+}
+
+/** Declared package dependencies, so an agent can tell allowed imports from new packages. */
+async function readAllowedDependencies(root: string): Promise<{ dependencies: string[]; devDependencies: string[] }> {
+    const path = join(root, "package.json");
+    if (!existsSync(path)) return { dependencies: [], devDependencies: [] };
+    try {
+        const parsed = JSON.parse(await readFile(path, "utf8")) as {
+            dependencies?: Record<string, string>;
+            devDependencies?: Record<string, string>;
+        };
+        return {
+            dependencies: Object.keys(parsed.dependencies ?? {}).sort(),
+            devDependencies: Object.keys(parsed.devDependencies ?? {}).sort(),
+        };
+    } catch {
+        return { dependencies: [], devDependencies: [] };
+    }
 }
 
 function formatModuleContextPack(pack: ReturnType<typeof createContextPack>): string {
@@ -324,11 +343,13 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
         modules: result.graph.modules,
         externalTokens: result.graph.externalTokens,
         diagnostics: result.diagnostics,
+        allowedDependencies: await readAllowedDependencies(root),
         commands: {
             check: "supacloud app check",
             compile: "supacloud app compile",
             context: "supacloud app context --format json",
             doctor: "supacloud app doctor",
+            fix: "supacloud app fix --fix <fix.json> --write",
             graph: "supacloud app graph --format json",
             explain: "supacloud app explain --target <name>",
         },
@@ -340,6 +361,7 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
         `  generated: ${outDir}`,
         `  modules: ${project.modules.map((module) => module.name).join(", ") || "-"}`,
         `  external tokens: ${project.externalTokens.join(", ") || "-"}`,
+        `  dependencies: ${project.allowedDependencies.dependencies.join(", ") || "-"}`,
         ...project.diagnostics.map(formatDiagnostic),
     ].join("\n"));
 }
