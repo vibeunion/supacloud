@@ -65,6 +65,11 @@ import {
   type EdgeFunctionActivationState,
 } from "./function-activation";
 import { runtimeSourceIdentity } from "./runtime-source-identity";
+import {
+  createMemoryPressureMonitor,
+  readMemoryPressureSnapshot,
+  resolveMemoryCgroups,
+} from "./memory-pressure";
 
 const PORT = Number(process.env.EDGE_RUNTIME_PORT) || Number(process.env.PORT) || 9005;
 const HOST = process.env.EDGE_RUNTIME_HOST || process.env.HOST || "127.0.0.1";
@@ -1959,6 +1964,23 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   console.error("[EdgeRuntime] unhandledRejection:", reason);
 });
+
+const memoryCgroups = await resolveMemoryCgroups();
+if (memoryCgroups.length > 0) {
+  const monitor = createMemoryPressureMonitor({
+    sample: () => shuttingDown ? Promise.resolve(null) : readMemoryPressureSnapshot(memoryCgroups),
+    onPressure: (snapshot) => {
+      console.error("[EdgeRuntime] Sustained cgroup memory pressure; recycling runtime", {
+        ...snapshot,
+        ...pool.snapshotMetrics("supacloud_edge"),
+        ...backgroundPool.snapshotMetrics("supacloud_edge_background"),
+      });
+      void gracefulShutdown("cgroup memory pressure", 1);
+    },
+    onError: (error) => console.warn("[EdgeRuntime] Memory pressure sampling failed", error),
+  });
+  setInterval(() => { void monitor.poll(); }, 1_000).unref();
+}
 
 // Keep the main runtime process alive so systemd can supervise the actual server
 // process instead of observing Bun's temporary bootstrap completion.
