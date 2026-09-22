@@ -125,6 +125,9 @@ async function invokeEdgeFunction(ref: string, schedule: ScheduledFunctionConfig
     if (!project) return { ok: false, error: SCHEDULE_PROJECT_NOT_FOUND };
     const headers = invocationHeaders(ref, project.service_role_key, userHeaders);
     const response = await fetch(url, invocationRequest(schedule, headers));
+    // Only the HTTP status is used; release unread bodies without buffering them.
+    // Cleanup failure must not replace the status already received from the function.
+    await response.body?.cancel().catch(() => {});
     return { ok: response.ok, status: response.status };
   } catch {
     return { ok: false, error: SCHEDULE_INVOKE_FAILED };
