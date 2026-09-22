@@ -3,6 +3,12 @@
   import { resolve } from "$app/paths";
   import { apiClient } from "$lib/api";
   import {
+    loadDashboardProjects,
+    loadDashboardSystemInfo,
+    type DashboardProject,
+    type DashboardSystemInfo,
+  } from "$lib/dashboard";
+  import {
     Activity,
     ArrowRight,
     ArrowUpRight,
@@ -25,24 +31,8 @@
     ShieldCheck,
     XCircle,
   } from "lucide-svelte";
-  import { onMount } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import { t } from "svelte-i18n";
-
-  interface ProjectItem {
-    ref: string;
-    name: string;
-    status: string;
-    region: string;
-    db_name: string;
-    created_at: string;
-  }
-
-  interface SystemInfo {
-    cpu?: string;
-    memory?: string;
-    uptime?: string;
-    version?: string;
-  }
 
   const navigation = [
     { titleKey: "Dashboard.nav_overview", href: "/", icon: LayoutDashboard },
@@ -54,20 +44,21 @@
     { titleKey: "Platform.settings", href: "/platform/settings", icon: Settings },
   ] as const;
 
-  let projects = $state<ProjectItem[]>([]);
-  let systemInfo = $state<SystemInfo>({});
+  let projects = $state<DashboardProject[]>([]);
+  let systemInfo = $state<DashboardSystemInfo | null>(null);
   let searchQuery = $state("");
-  let loading = $state(true);
-  let loadError = $state(false);
+  let projectsState = $state<"loading" | "ready" | "error">("loading");
+  let systemState = $state<"loading" | "ready" | "error">("loading");
+  let refreshController: AbortController | null = null;
 
   let activeCount = $derived(projects.filter((project) => projectStatusKind(project.status) === "active").length);
   let pausedCount = $derived(projects.filter((project) => projectStatusKind(project.status) === "paused").length);
   let otherCount = $derived(projects.length - activeCount - pausedCount);
   let activePercent = $derived(projects.length ? Math.round((activeCount / projects.length) * 100) : 0);
   let connectionLabel = $derived(
-    loading
+    projectsState === "loading"
       ? $t("Dashboard.management_api_connecting")
-      : loadError
+      : projectsState === "error"
         ? $t("Dashboard.management_api_unavailable")
         : $t("Dashboard.management_api_connected"),
   );
@@ -78,34 +69,36 @@
     }),
   );
 
-  async function fetchProjects(): Promise<ProjectItem[]> {
-    const response = await apiClient("/v1/projects");
-    if (!response.ok) throw new Error(`Projects request failed: ${response.status}`);
-    return response.json() as Promise<ProjectItem[]>;
-  }
-
-  async function fetchSystemInfo(): Promise<SystemInfo> {
-    const response = await apiClient("/v1/system/info");
-    if (!response.ok) throw new Error(`System info request failed: ${response.status}`);
-    return response.json() as Promise<SystemInfo>;
-  }
-
   async function loadDashboard(): Promise<void> {
-    loading = true;
-    loadError = false;
-    const [projectResult, systemResult] = await Promise.allSettled([fetchProjects(), fetchSystemInfo()]);
-
-    if (projectResult.status === "fulfilled") projects = projectResult.value;
-    else loadError = true;
-    if (systemResult.status === "fulfilled") systemInfo = systemResult.value;
-
-    loading = false;
+    refreshController?.abort();
+    const controller = new AbortController();
+    refreshController = controller;
+    projects = [];
+    systemInfo = null;
+    projectsState = "loading";
+    systemState = "loading";
+    await Promise.allSettled([
+      loadDashboardProjects(apiClient, controller.signal)
+        .then((value) => {
+          if (refreshController !== controller) return;
+          projects = value;
+          projectsState = "ready";
+        })
+        .catch(() => { if (refreshController === controller) projectsState = "error"; }),
+      loadDashboardSystemInfo(apiClient, controller.signal)
+        .then((value) => {
+          if (refreshController !== controller) return;
+          systemInfo = value;
+          systemState = "ready";
+        })
+        .catch(() => { if (refreshController === controller) systemState = "error"; }),
+    ]);
   }
 
   function projectStatusKind(status: string): "active" | "paused" | "other" {
     const normalizedStatus = status.toLowerCase();
-    if (["active", "active_healthy", "healthy", "running"].includes(normalizedStatus)) return "active";
-    if (["paused", "suspended", "stopped"].includes(normalizedStatus)) return "paused";
+    if (["active_healthy", "active", "healthy", "running"].includes(normalizedStatus)) return "active";
+    if (["inactive", "paused", "suspended", "stopped"].includes(normalizedStatus)) return "paused";
     return "other";
   }
 
@@ -118,22 +111,17 @@
 
   function projectStatusLabel(status: string): string {
     const kind = projectStatusKind(status);
-    if (kind === "active") return $t("Dashboard.status_active");
-    if (kind === "paused") return $t("Dashboard.status_paused");
-    return $t("Dashboard.status_other");
-  }
-
-  function timeAgo(dateTime: string): string {
-    const elapsed = Date.now() - new Date(dateTime).getTime();
-    const days = Math.floor(elapsed / 86_400_000);
-    if (days > 30) return `${Math.floor(days / 30)} ${$t("Dashboard.months_ago")}`;
-    if (days > 0) return `${days} ${$t("Common.ago_days")}`;
-    const hours = Math.floor(elapsed / 3_600_000);
-    return hours > 0 ? `${hours} ${$t("Common.ago_hours")}` : $t("Dashboard.just_now");
+    if (kind === "active") return $t("Dashboard.status_enabled");
+    if (kind === "paused") return $t("Dashboard.status_inactive");
+    return $t("Dashboard.status_creating");
   }
 
   onMount(() => {
     void loadDashboard();
+  });
+
+  onDestroy(() => {
+    refreshController?.abort();
   });
 </script>
 
@@ -166,7 +154,9 @@
     <div class="workspace-strip">
       <span class="workspace-avatar">SC</span>
       <span><strong>{$t("Dashboard.local_workspace")}</strong><small>{$t("Dashboard.console_subtitle")}</small></span>
-      <CheckCircle2 size={14} aria-label={$t("Dashboard.instance_online")} />
+      {#if systemState === "ready"}
+        <CheckCircle2 size={14} aria-label={$t("Dashboard.instance_online")} />
+      {/if}
     </div>
   </aside>
 
@@ -185,7 +175,7 @@
           <kbd>⌘ K</kbd>
         </label>
         <button class="refresh-button" type="button" title={$t("Common.refresh")} aria-label={$t("Dashboard.refresh_platform_data")} onclick={() => void loadDashboard()}>
-          <span class:spin={loading}><RefreshCw size={15} /></span>
+          <span class:spin={projectsState === "loading" || systemState === "loading"}><RefreshCw size={15} /></span>
         </button>
         <button class="primary-button" type="button" onclick={() => goto(resolve("/projects"))}>
           <Plus size={15} /> {$t("Dashboard.create_project")}
@@ -196,22 +186,27 @@
     <div class="console-canvas">
       <section class="page-intro" aria-labelledby="overview-title">
         <div>
-          <p class:disconnected={loadError} class="eyebrow"><span></span> {connectionLabel}</p>
+          <p class:disconnected={projectsState === "error"} class="eyebrow"><span></span> {connectionLabel}</p>
           <h1 id="overview-title">{$t("Dashboard.platform_overview")}</h1>
           <p>{$t("Dashboard.platform_overview_description")}</p>
         </div>
         <div class="runtime-badge">
           <span>{$t("Dashboard.runtime")}</span>
-          <strong>{systemInfo.version || "—"}</strong>
+          <strong>{systemInfo?.version ?? "—"}</strong>
         </div>
       </section>
 
-      {#if loading && projects.length === 0}
-        <div class="loading-state"><Loader2 size={24} class="spin" /><span>{$t("Dashboard.connecting_supacloud")}</span></div>
-      {:else}
-        {#if loadError}
+      {#if projectsState === "loading" || systemState === "loading"}
+        <div class="loading-state" role="status"><Loader2 size={24} class="spin" /><span>{$t("Dashboard.connecting_supacloud")}</span></div>
+      {/if}
+      {#if projectsState === "error" || systemState === "error"}
           <div class="error-banner" role="alert">
-            <XCircle size={16} /> {$t("Dashboard.project_data_unavailable")}
+            <XCircle size={16} />
+            {projectsState === "error"
+              ? systemState === "error"
+                ? $t("Dashboard.management_api_unavailable")
+                : $t("Dashboard.management_api_partially_available")
+              : $t("Dashboard.system_data_temporarily_unavailable")}
             <button type="button" onclick={() => void loadDashboard()}>{$t("Common.retry")}</button>
           </div>
         {/if}
@@ -219,7 +214,7 @@
         <section class="stats-grid" aria-label={$t("Dashboard.platform_metrics")}>
           <article class="stat-card">
             <div class="stat-heading"><span>{$t("Dashboard.project_total")}</span><FolderKanban size={18} /></div>
-            <strong>{projects.length}</strong>
+            <strong data-metric="projects">{projectsState === "ready" ? projects.length : "—"}</strong>
             <p>{$t("Dashboard.project_total_description")}</p>
           </article>
           <article class="stat-card">
@@ -234,7 +229,7 @@
           </article>
           <article class="stat-card">
             <div class="stat-heading blue"><span>{$t("Dashboard.cpu_usage")}</span><Cpu size={18} /></div>
-            <strong>{systemInfo.cpu || "—"}</strong>
+            <strong data-metric="cpu">{systemState === "ready" ? systemInfo?.cpu ?? "—" : "—"}</strong>
             <p>{$t("Dashboard.cpu_usage_description")}</p>
           </article>
         </section>
@@ -248,14 +243,16 @@
 
             <div class="health-summary">
               <div class="health-score">
-                <strong>{activePercent}%</strong>
-                <span>{$t("Dashboard.projects_online")}</span>
+                <strong>{projects.length ? `${activePercent}%` : "—"}</strong>
+                <span>{$t("Dashboard.projects_healthy")}</span>
               </div>
               <div class="health-visual">
-                <div class="health-track" aria-label={`${activePercent}% ${$t("Dashboard.projects_healthy")}`}>
-                  <span class="health-active" style:width={`${activePercent}%`}></span>
-                  <span class="health-paused" style:width={`${projects.length ? Math.round((pausedCount / projects.length) * 100) : 0}%`}></span>
-                </div>
+                {#if projects.length > 0}
+                  <div class="health-track" aria-label={`${activePercent}% ${$t("Dashboard.projects_healthy")}`}>
+                    <span class="health-active" style:width={`${activePercent}%`}></span>
+                    <span class="health-paused" style:width={`${Math.round((pausedCount / projects.length) * 100)}%`}></span>
+                  </div>
+                {/if}
                 <div class="health-legend">
                   <span><i class="dot-active"></i>{$t("Dashboard.running")} <b>{activeCount}</b></span>
                   <span><i class="dot-paused"></i>{$t("Dashboard.paused")} <b>{pausedCount}</b></span>
@@ -276,10 +273,10 @@
               <Activity size={17} />
             </div>
             <dl>
-              <div><dt><Clock3 size={14} />{$t("Dashboard.uptime")}</dt><dd>{systemInfo.uptime || "—"}</dd></div>
-              <div><dt><Cpu size={14} />CPU</dt><dd>{systemInfo.cpu || "—"}</dd></div>
-              <div><dt><HardDrive size={14} />{$t("Dashboard.memory")}</dt><dd>{systemInfo.memory || "—"}</dd></div>
-              <div><dt><Server size={14} />{$t("Dashboard.version")}</dt><dd>{systemInfo.version || "—"}</dd></div>
+              <div><dt><Clock3 size={14} />{$t("Dashboard.uptime")}</dt><dd>{systemInfo?.uptime ?? "—"}</dd></div>
+              <div><dt><Cpu size={14} />CPU</dt><dd>{systemInfo?.cpu ?? "—"}</dd></div>
+              <div><dt><HardDrive size={14} />{$t("Dashboard.memory")}</dt><dd>{systemInfo?.memory ?? "—"}</dd></div>
+              <div><dt><Server size={14} />{$t("Dashboard.version")}</dt><dd>{systemInfo?.version ?? "—"}</dd></div>
             </dl>
             <a class="system-link" href={resolve("/platform/monitoring")}>{$t("Dashboard.open_monitoring")} <ArrowRight size={13} /></a>
           </article>
@@ -291,24 +288,24 @@
             <span>{filteredProjects.length} {$t("Dashboard.projects")}</span>
           </div>
 
-          {#if filteredProjects.length === 0}
+          {#if projectsState === "ready" && filteredProjects.length === 0}
             <div class="empty-state">
               <FolderKanban size={30} />
               <strong>{projects.length === 0 ? $t("Dashboard.no_projects") : $t("Dashboard.no_matching_projects")}</strong>
               <p>{projects.length === 0 ? $t("Dashboard.no_projects_description") : $t("Dashboard.no_matching_projects_description")}</p>
               {#if projects.length === 0}
-                <button class="primary-button" type="button" onclick={() => goto(resolve("/projects"))}><Plus size={14} /> {$t("Dashboard.create_first_project")}</button>
+                <button class="primary-button" type="button" onclick={() => goto(resolve("/projects/create"))}><Plus size={14} /> {$t("Dashboard.create_first_project")}</button>
               {:else}
                 <button class="text-button" type="button" onclick={() => (searchQuery = "")}>{$t("Dashboard.clear_search")}</button>
               {/if}
             </div>
-          {:else}
+          {:else if filteredProjects.length > 0}
             <div class="table-wrap">
               <table>
               <thead><tr><th>{$t("Dashboard.project")}</th><th>{$t("Dashboard.region")}</th><th>{$t("Dashboard.database")}</th><th>{$t("Dashboard.status")}</th><th>{$t("Dashboard.created_at")}</th><th><span class="sr-only">{$t("Dashboard.open_project")}</span></th></tr></thead>
                 <tbody>
                   {#each filteredProjects.slice(0, 6) as project (project.ref)}
-                    <tr>
+                    <tr data-project-ref={project.ref}>
                       <td data-label={$t("Dashboard.project")}>
                         <a class="project-identity" href={resolve("/project/[ref]", { ref: project.ref })}>
                           <span class="project-mark">{project.name.charAt(0).toUpperCase()}</span>
@@ -316,9 +313,9 @@
                         </a>
                       </td>
                       <td data-label={$t("Dashboard.region")}>{project.region || $t("Dashboard.local_region")}</td>
-                      <td data-label={$t("Dashboard.database")}><code>{project.db_name || "postgres"}</code></td>
+                      <td data-label={$t("Dashboard.database")}><code>{project.ref}</code></td>
                       <td data-label={$t("Dashboard.status")}><span class="status-pill {statusClass(project.status)}" title={project.status}>{projectStatusLabel(project.status)}</span></td>
-                      <td data-label={$t("Dashboard.created_at")}>{timeAgo(project.created_at)}</td>
+                      <td data-label={$t("Dashboard.created_at")}>{project.created_at}</td>
                       <td class="open-cell"><a title={`${$t("Dashboard.open_project")} ${project.name}`} aria-label={`${$t("Dashboard.open_project")} ${project.name}`} href={resolve("/project/[ref]", { ref: project.ref })}><ArrowUpRight size={15} /></a></td>
                     </tr>
                   {/each}
@@ -327,8 +324,6 @@
             </div>
           {/if}
         </section>
-
-      {/if}
     </div>
   </main>
 </div>

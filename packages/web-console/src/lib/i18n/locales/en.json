@@ -84,6 +84,12 @@
     "status_active": "Healthy",
     "status_paused": "Paused",
     "status_other": "Other",
+    "status_enabled": "Enabled",
+    "status_creating": "Creating",
+    "status_inactive": "Inactive",
+    "management_api_partially_available": "Management API partially available",
+    "system_data_temporarily_unavailable": "System data is temporarily unavailable.",
+    "refresh": "Refresh",
     "just_now": "Just now",
     "months_ago": "months ago"
   },

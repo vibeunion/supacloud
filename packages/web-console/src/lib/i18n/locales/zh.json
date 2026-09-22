@@ -84,6 +84,12 @@
     "status_active": "运行健康",
     "status_paused": "已暂停",
     "status_other": "其他",
+    "status_enabled": "已启用",
+    "status_creating": "创建中",
+    "status_inactive": "未激活",
+    "management_api_partially_available": "管理 API 部分可用",
+    "system_data_temporarily_unavailable": "系统数据暂时不可用。",
+    "refresh": "刷新",
     "just_now": "刚刚",
     "months_ago": "个月前"
   },

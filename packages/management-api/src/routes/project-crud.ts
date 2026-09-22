@@ -9,6 +9,7 @@ import { getProjectDb, resolveDbName, resolveRoleName } from "../db";
 import { normalizeProjectConfig } from "../utils/project-config";
 import { publicScheduledFunctionProjectConfig } from "../utils/scheduled-function-config";
 import { getAuthContext, requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
+import { publicProjectList } from "../services/project-list-response";
 import { tenantRuntimeService } from "../services/tenant-runtime.service";
 import {
   getAuthRuntimeManagedError,
@@ -396,19 +397,25 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ request }) => {
       const auth = await getAuthContext(request);
       if ("status" in auth) return status(auth.status as 401 | 403, { message: auth.body.error, code: String(auth.status) });
-      const projects = auth.role === "project"
-        ? [await projectService.getProject(auth.ref)].filter(Boolean)
-        : await projectService.listProjects();
-      const docs = await Promise.all(
-        projects.map((p) => buildProjectResponse(p, false)),
-      );
-      return docs.map(toPublicV1ProjectResponse);
+      try {
+        const projects = auth.role === "project"
+          ? [await projectService.getProject(auth.ref)].filter(Boolean)
+          : await projectService.listProjects();
+        if (auth.role === "project" && projects.some((p) => !p || p.ref !== auth.ref)) {
+          throw new Error("Project scope mismatch");
+        }
+        return publicProjectList(projects);
+      } catch (error: unknown) {
+        logger.error("[ProjectCRUD] Failed to build project list", { error });
+        return status(503, { message: "Project list unavailable", code: "PROJECT_LIST_UNAVAILABLE" });
+      }
     },
     {
       response: {
         200: t.Array(V1ProjectResponseSchema),
         401: t.Object({ message: t.String(), code: t.String() }),
         403: t.Object({ message: t.String(), code: t.String() }),
+        503: t.Object({ message: t.String(), code: t.String() }),
       },
       detail: { tags: ["projects"], summary: "List projects" },
     },
@@ -418,19 +425,25 @@ export const projectCrudRoutes = new Elysia({ prefix: "/v1/projects" })
     async ({ request }) => {
       const auth = await getAuthContext(request);
       if ("status" in auth) return status(auth.status as 401 | 403, { message: auth.body.error, code: String(auth.status) });
-      const projects = auth.role === "project"
-        ? [await projectService.getProject(auth.ref)].filter(Boolean)
-        : await projectService.listProjects();
-      const docs = await Promise.all(
-        projects.map((p) => buildProjectResponse(p, false)),
-      );
-      return docs.map(toPublicV1ProjectResponse);
+      try {
+        const projects = auth.role === "project"
+          ? [await projectService.getProject(auth.ref)].filter(Boolean)
+          : await projectService.listProjects();
+        if (auth.role === "project" && projects.some((p) => !p || p.ref !== auth.ref)) {
+          throw new Error("Project scope mismatch");
+        }
+        return publicProjectList(projects);
+      } catch (error: unknown) {
+        logger.error("[ProjectCRUD] Failed to build project list", { error });
+        return status(503, { message: "Project list unavailable", code: "PROJECT_LIST_UNAVAILABLE" });
+      }
     },
     {
       response: {
         200: t.Array(V1ProjectResponseSchema),
         401: t.Object({ message: t.String(), code: t.String() }),
         403: t.Object({ message: t.String(), code: t.String() }),
+        503: t.Object({ message: t.String(), code: t.String() }),
       },
       detail: { tags: ["projects"], summary: "List projects" },
     },

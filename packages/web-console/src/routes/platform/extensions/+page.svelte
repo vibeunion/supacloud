@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { useList } from "$lib/admin/unsafe";
+  import { useList, useCustomMutation } from "$lib/admin/unsafe";
   import { Loader2, Package, Download, Trash2, RefreshCw, Search, AlertTriangle } from "lucide-svelte";
   import { t } from "svelte-i18n";
 
@@ -13,7 +13,16 @@
     description: string;
   }
 
-  import { apiClient } from "$lib/api";
+  const extensionsResource = "v1/system/extensions";
+  function resourceMutation(action: "install" | "remove") {
+    return useCustomMutation<{ success?: boolean; message?: string }>({
+      url: `${extensionsResource}/${action}`,
+      method: "post",
+      invalidates: ["list"],
+    });
+  }
+  const installMutation = resourceMutation("install");
+  const removeMutation = resourceMutation("remove");
 
   const query = useList<SystemExt>({ resource: "v1/system/extensions" });
   const extensions = $derived(Array.isArray(query.data?.data) ? query.data.data : []);
@@ -23,45 +32,31 @@
   let searchQuery = $state("");
 
     
-  async function installExt(name: string) {
+  function installExt(name: string) {
     actionTarget = name;
     actionMsg = null;
-    try {
-      const res = await apiClient("/v1/system/extensions/install", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name })
-      });
-      const data = await res.json();
-      actionMsg = data.success ? `✅ ${data.message}` : `❌ ${data.message}`;
-      if (data.success) query.refetch();
-    } catch (err: unknown) {
-      actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
-    } finally {
-      actionTarget = null;
-      setTimeout(() => actionMsg = null, 6000);
-    }
+    installMutation.mutate({ name }, {
+      onSuccess: (data) => {
+        actionMsg = data?.success ? `✅ ${data.message}` : `❌ ${data?.message ?? "error"}`;
+        if (data?.success) query.refetch();
+      },
+      onError: (err: unknown) => { actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`; },
+      onSettled: () => { actionTarget = null; setTimeout(() => actionMsg = null, 6000); },
+    });
   }
 
-  async function removeExt(name: string) {
+  function removeExt(name: string) {
     if (!confirm($t("PlatformExtensions.confirm_uninstall", { values: { name } }) || `Are you sure you want to uninstall "${name}"?`)) return;
     actionTarget = name;
     actionMsg = null;
-    try {
-      const res = await apiClient("/v1/system/extensions/remove", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name })
-      });
-      const data = await res.json();
-      actionMsg = data.success ? `✅ ${data.message}` : `❌ ${data.message}`;
-      if (data.success) query.refetch();
-    } catch (err: unknown) {
-      actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`;
-    } finally {
-      actionTarget = null;
-      setTimeout(() => actionMsg = null, 6000);
-    }
+    removeMutation.mutate({ name }, {
+      onSuccess: (data) => {
+        actionMsg = data?.success ? `✅ ${data.message}` : `❌ ${data?.message ?? "error"}`;
+        if (data?.success) query.refetch();
+      },
+      onError: (err: unknown) => { actionMsg = `❌ ${(err instanceof Error ? err.message : String(err))}`; },
+      onSettled: () => { actionTarget = null; setTimeout(() => actionMsg = null, 6000); },
+    });
   }
 
   const filtered = $derived(
