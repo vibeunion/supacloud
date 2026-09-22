@@ -1,12 +1,9 @@
 <script lang="ts">
-  import { apiClient } from "$lib/api";
-
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
   import { Loader2, Plus, KeyRound, Trash2, AlertTriangle, Lock } from "lucide-svelte";
   import { toast } from "svelte-sonner";
-  import { createMutation } from "@tanstack/svelte-query";
-  import { useList } from "$lib/admin/unsafe";
+  import { useList, useCustomMutation } from "$lib/admin/unsafe";
   import type { BaseRecord } from "@svadmin/core";
 
   interface Secret extends BaseRecord {
@@ -17,7 +14,12 @@
 
   const projectRef = $derived(page.params.ref);
   const query = useList<Secret>({ get resource() { return `v1/projects/${projectRef}/secrets`; } });
-  const secrets = $derived(Array.isArray(query.data?.data) ? query.data.data : ((query.data?.data as unknown as Record<string, unknown>)?.secrets as Secret[] || []));
+  function readSecrets(data: unknown): Secret[] {
+    if (Array.isArray(data)) return data as Secret[];
+    const record = data as Record<string, unknown> | null | undefined;
+    return Array.isArray(record?.secrets) ? (record.secrets as Secret[]) : [];
+  }
+  const secrets = $derived(readSecrets(query.data as unknown));
 
   let showAdd = $state(false);
   let newKey = $state("");
@@ -25,49 +27,39 @@
 
 
 
-  const addMutation = createMutation(() => ({
-    mutationFn: async () => {
-      const res = await apiClient(`/v1/projects/${projectRef}/secrets`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify([{ name: newKey, value: newValue }])
-      });
-      if (!res.ok) throw new Error($t("Functions.secret_add_failed"));
-      return res.json();
-    },
-    onSuccess: () => {
-      showAdd = false;
-      newKey = "";
-      newValue = "";
-      query.refetch();
-    },
-    onError: () => {
-      toast.error($t("Functions.secret_add_failed"));
-    }
-  }));
+  const addMutation = useCustomMutation<{ ok?: boolean }>({
+    get url() { return `/v1/projects/${projectRef}/secrets`; },
+    method: "post",
+    invalidates: ["list"],
+  });
 
   function addSecret() {
     if (!newKey.trim() || !newValue.trim()) return;
-    addMutation.mutate();
+    addMutation.mutate([{ name: newKey, value: newValue }], {
+      onSuccess: () => {
+        showAdd = false;
+        newKey = "";
+        newValue = "";
+        query.refetch();
+      },
+      onError: () => {
+        toast.error($t("Functions.secret_add_failed"));
+      },
+    });
   }
 
-  const deleteMutation = createMutation(() => ({
-    mutationFn: async (name: string) => {
-      const res = await apiClient(`/v1/projects/${projectRef}/secrets/${name}`, { method: "DELETE" });
-      if (!res.ok) throw new Error($t("Functions.secret_delete_failed"));
-      return { name };
-    },
-    onSuccess: () => {
-      query.refetch();
-    },
-    onError: () => {
-      toast.error($t("Functions.secret_delete_failed"));
-    }
-  }));
+  const deleteMutation = useCustomMutation<{ name: string }>({
+    url: (name) => `/v1/projects/${projectRef}/secrets/${String(name)}`,
+    method: "delete",
+    invalidates: ["list"],
+  });
 
   function deleteSecret(name: string) {
     if (!confirm($t("Functions.secret_delete_confirm", { values: { name } }))) return;
-    deleteMutation.mutate(name);
+    deleteMutation.mutate(name, {
+      onSuccess: () => { query.refetch(); },
+      onError: () => { toast.error($t("Functions.secret_delete_failed")); },
+    });
   }
 </script>
 

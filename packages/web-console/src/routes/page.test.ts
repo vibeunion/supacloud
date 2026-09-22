@@ -13,16 +13,16 @@ const viteSource = readFileSync(new URL("../../vite.config.ts", import.meta.url)
 
 describe("SupaCloud root dashboard", () => {
   test("keeps the root page connected to real SupaCloud data", () => {
-    expect(pageSource).toContain('apiClient("/v1/projects")');
-    expect(pageSource).toContain('apiClient("/v1/system/info")');
+    expect(pageSource).toContain('loadDashboardProjects(apiClient');
+    expect(pageSource).toContain('loadDashboardSystemInfo(apiClient');
     expect(pageSource).toContain('$t("Dashboard.console_name")');
     expect(pageSource).toContain('$t("Dashboard.platform_overview")');
     expect(pageSource).toContain('$t("Dashboard.management_api_reading")');
   });
 
   test("normalizes project status without exposing implementation enum values", () => {
-    expect(pageSource).toContain('["active", "active_healthy", "healthy", "running"]');
-    expect(pageSource).toContain('return $t("Dashboard.status_active")');
+    expect(pageSource).toContain('["active_healthy", "active", "healthy", "running"]');
+    expect(pageSource).toContain('return $t("Dashboard.status_enabled")');
     expect(pageSource).toContain('title={project.status}');
     expect(pageSource).not.toContain('>{project.status}<');
   });
