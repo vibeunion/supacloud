@@ -157,7 +157,7 @@ describe('trusted review workflow', () => {
         assert.match(line, /bun install --frozen-lockfile/);
       }
       if (contents === releaseWorkflow) {
-        assert.deepEqual(lockfileGenerationLines, Array.from({ length: 9 }, () =>
+        assert.deepEqual(lockfileGenerationLines, Array.from({ length: 10 }, () =>
           '          bun install --lockfile-only --registry https://registry.npmjs.org',
         ));
       } else {
