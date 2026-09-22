@@ -77,4 +77,13 @@ function negativeTypes(injector: EnvironmentInjector) {
   const guard: CanActivateFn = () => "yes";
   // @ts-expect-error Async guards have the same return contract.
   const asyncGuard: CanDeactivateFn = async () => ({ allowed: true });
+
+  void nonNullable;
+  void required;
+  void optionalGet;
+  void optionalTest;
+  void guard;
+  void asyncGuard;
 }
+
+void negativeTypes;
