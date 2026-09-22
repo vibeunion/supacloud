@@ -27,6 +27,9 @@ supacloud deploy
 
 `app` 命名空间作为底层形式保留（`supacloud app <verb>`），顶层动词是同一实现与执行策略的别名。
 
+> 生成项目中的本地开发循环是 `bun run dev`（watch、编译、重启）；
+> `supacloud dev ...` 是独立的远程项目 sync/watch/migrate 模块，二者不同。
+
 ## 强约定项目结构
 
 新项目使用固定、AI 易读的布局，让 Agent 不必扫描仓库即可定位入口、业务模块、生成文件与受保护文件：

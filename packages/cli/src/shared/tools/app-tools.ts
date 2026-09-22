@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { Type } from "@sinclair/typebox";
 import {
     applyDiagnosticFix,
@@ -373,13 +373,62 @@ function doctorFixPlan(doctor: ReturnType<typeof doctorProject>): DoctorFixPlanE
         }));
 }
 
+interface UnwiredContract {
+    file: string;
+    symbols: string[];
+}
+
+/**
+ * Detects generated `*.contract.ts` schemas that no controller or barrel imports.
+ * A contract that is never referenced is either dead code or a missing route
+ * binding; both are worth surfacing before an agent trusts it as a boundary.
+ */
+async function findUnwiredContracts(rootDir: string): Promise<UnwiredContract[]> {
+    const files: string[] = [];
+    const skip = new Set(["node_modules", "dist", "generated", ".git", ".svelte-kit", "coverage"]);
+    async function walk(directory: string): Promise<void> {
+        let entries;
+        try {
+            entries = await readdir(directory, { withFileTypes: true });
+        } catch {
+            return;
+        }
+        for (const entry of entries) {
+            if (skip.has(entry.name)) continue;
+            const path = join(directory, entry.name);
+            if (entry.isDirectory()) await walk(path);
+            else if (entry.isFile() && entry.name.endsWith(".ts")) files.push(path);
+        }
+    }
+    await walk(rootDir);
+    const contracts = files.filter((file) => file.endsWith(".contract.ts"));
+    if (contracts.length === 0) return [];
+    const otherSources = await Promise.all(files
+        .filter((file) => !contracts.includes(file))
+        .map(async (file) => await readFile(file, "utf8").catch(() => "")));
+    const unwired: UnwiredContract[] = [];
+    for (const contract of contracts) {
+        const source = await readFile(contract, "utf8").catch(() => "");
+        const symbols = [...source.matchAll(/export\s+const\s+([A-Za-z_$][A-Za-z0-9_$]*)/g)]
+            .map((match) => match[1]!);
+        if (symbols.length === 0) continue;
+        const moduleName = basename(contract).replace(/\.ts$/, "");
+        const wired = otherSources.some((text) =>
+            text.includes(moduleName)
+            || symbols.some((symbol) => new RegExp(`\\b${symbol}\\b`).test(text)));
+        if (!wired) unwired.push({ file: relative(rootDir, contract), symbols });
+    }
+    return unwired;
+}
+
 async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
     const { root, outDir, result } = await projectCompileConfig(args);
     const doctor = doctorProject(root, outDir, result.graph, result.upToDate, result.diagnostics);
     const fixPlan = doctorFixPlan(doctor);
+    const unwiredContracts = await findUnwiredContracts(root);
     if (args.format === "json") {
         return textResult(
-            JSON.stringify({ ok: doctor.errors === 0, autoFixable: fixPlan.length, fixPlan, ...doctor }, null, 2),
+            JSON.stringify({ ok: doctor.errors === 0, autoFixable: fixPlan.length, fixPlan, unwiredContracts, ...doctor }, null, 2),
             doctor.errors > 0,
         );
     }
@@ -393,6 +442,9 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
         : `${doctor.errors} blocking issue(s). Run \`supacloud app check\` for the full diagnostic list.`);
     if (fixPlan.length > 0) {
         lines.push(`${fixPlan.length} auto-fixable diagnostic(s): run \`supacloud app doctor --format json\`, save each \`fix\`, then \`supacloud app fix --fix <fix.json> --write\`.`);
+    }
+    if (unwiredContracts.length > 0) {
+        lines.push(`${unwiredContracts.length} unwired contract file(s): ${unwiredContracts.map((contract) => contract.file).join(", ")}. Import their schemas into a controller route or remove them.`);
     }
     return textResult(lines.join("\n"), doctor.errors > 0);
 }
