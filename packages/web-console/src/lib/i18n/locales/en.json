@@ -1138,6 +1138,8 @@
     "routing_domains": "Routing & Domains",
     "routing_description": "Manage API, Studio, and primary-domain bindings. Saving refreshes the project runtime configuration.",
     "save": "Save",
+    "general_saved": "Project settings saved",
+    "general_save_failed": "Failed to save project settings",
     "routing_save_failed": "Failed to save routing configuration",
     "routing_saved": "Routing configuration saved",
     "general_save_failed": "Failed to save project settings",

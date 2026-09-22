@@ -1138,6 +1138,8 @@
     "routing_domains": "路由与域名",
     "routing_description": "管理 API、Studio 与主域名绑定。保存后会刷新项目运行时配置。",
     "save": "保存",
+    "general_saved": "项目设置已保存",
+    "general_save_failed": "保存项目设置失败",
     "routing_save_failed": "保存路由配置失败",
     "routing_saved": "路由配置已保存",
     "general_save_failed": "保存项目设置失败",
