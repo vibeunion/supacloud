@@ -6,6 +6,8 @@ import {
     checkProject,
     compileProject,
     compileOptionsFromConfig,
+    createContextPack,
+    doctorProject,
     loadSupacloudConfig,
     resolveSupacloudConfig,
     type Diagnostic,
@@ -26,7 +28,7 @@ type ToolServer = {
 };
 
 export interface AppToolArguments {
-    action: "init" | "generate" | "compile" | "check" | "graph" | "explain" | "export-tools";
+    action: "init" | "generate" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "doctor";
     kind?: "module" | "command" | "query" | "controller";
     name?: string;
     module?: string;
@@ -199,6 +201,122 @@ function sourceRoot(args: AppToolArguments, root: string, configured: string | u
         existsSync(join(root, `supacloud.config.${extension}`)));
     // Preserve the legacy explicit source-directory form in unconfigured projects.
     return args.root && !hasConfig ? "." : configured;
+}
+
+/** Resolves project root/config and runs a no-write check to obtain the current graph. */
+async function projectCompileConfig(args: AppToolArguments): Promise<{
+    root: string;
+    configFile: string | null;
+    outDir: string;
+    result: Awaited<ReturnType<typeof checkProject>>;
+}> {
+    const root = resolve(args.root || process.cwd());
+    const configFile = ["ts", "mts", "js", "mjs"]
+        .map((extension) => join(root, `supacloud.config.${extension}`))
+        .find((candidate) => existsSync(candidate)) ?? null;
+    const loadedConfig = await loadSupacloudConfig(root);
+    const defaults = resolveSupacloudConfig(loadedConfig, root);
+    const configuredRoot = sourceRoot(args, root, loadedConfig.root);
+    const include = parseInclude(args.include) ?? loadedConfig.include;
+    const outDir = args.out_dir ? resolve(root, args.out_dir) : defaults.outDir;
+    const result = await checkProject(compileOptionsFromConfig({
+        ...loadedConfig,
+        ...(configuredRoot === undefined ? {} : { root: configuredRoot }),
+        outDir,
+        ...(include === undefined ? {} : { include }),
+        strict: args.strict ?? loadedConfig.strict ?? false,
+    }, root));
+    return { root, configFile, outDir, result };
+}
+
+interface ProjectContextPack {
+    version: 1;
+    root: string;
+    configFile: string | null;
+    generatedDir: string;
+    modules: ModuleNode[];
+    externalTokens: string[];
+    diagnostics: Diagnostic[];
+    commands: Record<string, string>;
+}
+
+function formatModuleContextPack(pack: ReturnType<typeof createContextPack>): string {
+    return [
+        `CONTEXT ${pack.subject}`,
+        `  modules: ${pack.modules.map((module) => module.name).join(", ") || "-"}`,
+        `  files: ${pack.files.join(", ") || "-"}`,
+        `  external tokens: ${pack.externalTokens.join(", ") || "-"}`,
+        `  imports: ${pack.relatedModules.imports.join(", ") || "-"}`,
+        `  imported by: ${pack.relatedModules.importedBy.join(", ") || "-"}`,
+        ...(pack.graphql ? [
+            `  graphql schema: ${pack.graphql.schema}`,
+            `  graphql queries: ${pack.graphql.operations.map((operation) => operation.name).join(", ") || "-"}`,
+        ] : []),
+        ...pack.executionPlans.map((plan) => `  execution ${plan.name}: ${plan.stages.join(" -> ")}`),
+        ...pack.diagnostics.map(formatDiagnostic),
+    ].join("\n");
+}
+
+/**
+ * `app context` is the AI entry point: the compiled graph and diagnostics as
+ * structured data, so an agent does not need to scan the repository. A
+ * `--target <module>` narrows the result to one module neighborhood.
+ */
+async function runContext(args: AppToolArguments): Promise<ToolResult> {
+    const { root, configFile, outDir, result } = await projectCompileConfig(args);
+    const subject = args.target?.trim();
+    if (subject) {
+        const pack = createContextPack({ ...result.graph, diagnostics: result.diagnostics }, subject);
+        return textResult(args.format === "json" ? JSON.stringify(pack, null, 2) : formatModuleContextPack(pack));
+    }
+    const project: ProjectContextPack = {
+        version: 1,
+        root,
+        configFile,
+        generatedDir: outDir,
+        modules: result.graph.modules,
+        externalTokens: result.graph.externalTokens,
+        diagnostics: result.diagnostics,
+        commands: {
+            check: "supacloud app check",
+            compile: "supacloud app compile",
+            context: "supacloud app context --format json",
+            doctor: "supacloud app doctor",
+            graph: "supacloud app graph --format json",
+            explain: "supacloud app explain --target <name>",
+        },
+    };
+    if (args.format === "json") return textResult(JSON.stringify(project, null, 2));
+    return textResult([
+        `CONTEXT ${root}`,
+        `  config: ${configFile ?? "(none)"}`,
+        `  generated: ${outDir}`,
+        `  modules: ${project.modules.map((module) => module.name).join(", ") || "-"}`,
+        `  external tokens: ${project.externalTokens.join(", ") || "-"}`,
+        ...project.diagnostics.map(formatDiagnostic),
+    ].join("\n"));
+}
+
+/**
+ * `app doctor` reports actionable, fixable project health: stable check names,
+ * diagnostics with file/line + hint, and a repairability verdict.
+ */
+async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
+    const { root, outDir, result } = await projectCompileConfig(args);
+    const doctor = doctorProject(root, outDir, result.graph, result.upToDate, result.diagnostics);
+    if (args.format === "json") {
+        return textResult(JSON.stringify({ ok: doctor.errors === 0, ...doctor }, null, 2), doctor.errors > 0);
+    }
+    const lines = doctor.checks.map((check) => `${check.ok ? "OK" : "FAIL"} ${check.name}: ${check.detail}`);
+    for (const diagnostic of doctor.diagnostics ?? []) {
+        lines.push(formatDiagnostic(diagnostic));
+        if (diagnostic.suggestion) lines.push(`  hint: ${diagnostic.suggestion}`);
+    }
+    lines.push("");
+    lines.push(doctor.errors === 0
+        ? "No blocking issues. Run `supacloud app compile` to refresh generated artifacts."
+        : `${doctor.errors} blocking issue(s). Run \`supacloud app check\` for the full diagnostic list.`);
+    return textResult(lines.join("\n"), doctor.errors > 0);
 }
 
 async function runCompile(args: AppToolArguments): Promise<ToolResult> {
@@ -445,9 +563,9 @@ async function runExportTools(args: AppToolArguments): Promise<ToolResult> {
 export function registerAppTools(server: ToolServer): void {
     server.tool(
         "app",
-        "Local @supacloud/app framework commands: init, scaffold, compile, check, graph, explain and export-tools. Actions: init, generate, compile, check, graph, explain, export-tools",
+        "Local @supacloud/app framework commands: init, scaffold, compile, check, graph, explain, export-tools, and AI context/doctor. Actions: init, generate, compile, check, graph, explain, export-tools, context, doctor",
         {
-            action: withDescription(stringEnum(["init", "generate", "compile", "check", "graph", "explain", "export-tools"]), "App action"),
+            action: withDescription(stringEnum(["init", "generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor"]), "App action"),
             kind: optional(stringEnum(["module", "command", "query", "controller"]), "[generate] Scaffold kind"),
             name: optional(Type.String(), "[init/generate] Project or object name"),
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
@@ -458,7 +576,7 @@ export function registerAppTools(server: ToolServer): void {
             out_dir: optional(Type.String(), "[compile/export-tools] Output directory (default: <root>/generated)"),
             strict: optional(Type.Boolean(), "[compile/check] Promote warnings to errors"),
             format: optional(stringEnum(["text", "json"]), "[graph/export-tools] Output format (default: text)"),
-            target: optional(Type.String(), "[explain] Provider class name / token name / command name"),
+            target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / module name"),
         },
         async (request) => {
             switch (request.action) {
@@ -469,6 +587,8 @@ export function registerAppTools(server: ToolServer): void {
                 case "graph": return runGraph(request);
                 case "explain": return runExplain(request);
                 case "export-tools": return runExportTools(request);
+                case "context": return runContext(request);
+                case "doctor": return runDoctor(request);
                 default:
                     return textResult(`Unknown app action: ${String(request.action)}`, true);
             }

@@ -326,6 +326,39 @@ describe("app tools", () => {
         expect((await app({ action: "check", root })).isError).toBe(true);
         writeFileSync(artifactPath, original);
     });
+    test("context returns project graph and module neighborhood as structured AI context", async () => {
+        const project = await app({ action: "context", root, format: "json" });
+        expect(project.isError).toBe(false);
+        const pack = JSON.parse(project.content[0].text);
+        expect(pack.version).toBe(1);
+        expect(pack.root).toBe(root);
+        expect(pack.modules.map((module: { name: string }) => module.name))
+            .toEqual(expect.arrayContaining(["audit", "case"]));
+        expect(pack.externalTokens).toContain("DB_CLIENT");
+        expect(pack.commands.doctor).toContain("app doctor");
+
+        const module = await app({ action: "context", root, target: "case", format: "json" });
+        const modulePack = JSON.parse(module.content[0].text);
+        expect(modulePack.subject).toBe("case");
+        expect(modulePack.modules.map((entry: { name: string }) => entry.name))
+            .toEqual(expect.arrayContaining(["case", "audit"]));
+        expect(modulePack.relatedModules.imports).toEqual(expect.arrayContaining(["audit"]));
+    });
+
+    test("doctor reports actionable checks and passes after a clean compile", async () => {
+        await app({ action: "compile", root });
+        const result = await app({ action: "doctor", root, format: "json" });
+        expect(result.isError).toBe(false);
+        const doctor = JSON.parse(result.content[0].text);
+        expect(doctor.ok).toBe(true);
+        expect(doctor.checks.find((check: { name: string }) => check.name === "modules").ok).toBe(true);
+        expect(doctor.checks.find((check: { name: string }) => check.name === "generated-artifacts").ok).toBe(true);
+
+        const text = await app({ action: "doctor", root });
+        expect(text.isError).toBe(false);
+        expect(text.content[0].text).toContain("No blocking issues");
+    });
+
     test("graph renders the module tree and json format", async () => {
         const textResult = await app({ action: "graph", root });
         expect(textResult.isError).toBe(false);
@@ -419,7 +452,7 @@ describe("app tools", () => {
     });
 
     test("all app actions are classified as local in the execution policy", () => {
-        for (const action of ["generate", "compile", "check", "graph", "explain", "export-tools"]) {
+        for (const action of ["generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor"]) {
             expect(executionMode("app", action, {})).toBe("local");
         }
     });

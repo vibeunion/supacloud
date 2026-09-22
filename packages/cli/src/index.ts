@@ -336,6 +336,9 @@ EXAMPLES
   ${preferredCommand} app check --root . --strict
   ${preferredCommand} app graph --root . --format json
   ${preferredCommand} app explain --target CaseService
+  ${preferredCommand} app context --root . --format json
+  ${preferredCommand} app context --root . --target CaseModule --format json
+  ${preferredCommand} app doctor --root .
   ${preferredCommand} db lint --root . --module_file db/modules.ts
   ${preferredCommand} db explain --target public.cases --module_file db/modules.ts
   ${preferredCommand} db module_check --module_file db/modules.ts --database_url "postgresql://..."
