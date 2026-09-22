@@ -1,6 +1,7 @@
 import { lstat, mkdir, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { STARTER_ENVIRONMENT, STARTER_ENVIRONMENT_TEST } from "./app-starter-environment";
+import { appTemplateFiles, type StarterTemplate } from "./app-starter-templates";
 import compilerMetadata from "../../../../compiler/package.json" with { type: "json" };
 import appMetadata from "../../../../app/package.json" with { type: "json" };
 import elysiaMetadata from "../../../../elysia/package.json" with { type: "json" };
@@ -515,7 +516,7 @@ and governance; TypeScript checks both application and generated source.
     };
 }
 
-export async function initializeAppProject(options: { root?: string; name?: string }): Promise<{
+export async function initializeAppProject(options: { root?: string; name?: string; template?: StarterTemplate }): Promise<{
     root: string; name: string; files: string[];
 }> {
     const root = resolve(options.root ?? process.cwd());
@@ -529,7 +530,8 @@ export async function initializeAppProject(options: { root?: string; name?: stri
     if ((await readdir(root)).some((entry) => entry !== ".git")) {
         throw new Error("app init requires an empty directory (an existing .git directory is allowed)");
     }
-    const files = appStarterFiles(name);
+    const template = options.template ?? "command";
+    const files = template === "command" ? appStarterFiles(name) : appTemplateFiles(name, template);
     for (const [relativePath, content] of Object.entries(files)) {
         const path = join(root, relativePath);
         await mkdir(dirname(path), { recursive: true });

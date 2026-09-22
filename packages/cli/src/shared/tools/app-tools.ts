@@ -31,6 +31,7 @@ type ToolServer = {
 export interface AppToolArguments {
     action: "init" | "generate" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "doctor" | "fix";
     kind?: "module" | "command" | "query" | "controller" | "job" | "contract";
+    template?: "http" | "command" | "edge";
     name?: string;
     module?: string;
     dir?: string;
@@ -47,9 +48,10 @@ export interface AppToolArguments {
 
 async function initProject(args: AppToolArguments): Promise<ToolResult> {
     if (args.force) throw new Error("app init never overwrites files; choose an empty directory");
-    const { root, name, files } = await initializeAppProject(args);
+    const template = args.template ?? "command";
+    const { root, name, files } = await initializeAppProject({ root: args.root, name: args.name, template });
     return textResult([
-        `Initialized ${name} in ${root} (${files.length} files).`,
+        `Initialized ${name} in ${root} (${files.length} files, template: ${template}).`,
         `cd '${root.replaceAll("'", "'\\''")}'`,
         "bun install",
         "bun run check",
@@ -649,6 +651,7 @@ export function registerAppTools(server: ToolServer): void {
         {
             action: withDescription(stringEnum(["init", "generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix"]), "App action"),
             kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract"]), "[generate] Scaffold kind"),
+            template: optional(stringEnum(["http", "command", "edge"]), "[init] Golden-path template (default: command)"),
             name: optional(Type.String(), "[init/generate] Project or object name"),
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
             dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
