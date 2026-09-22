@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { outcomeUnknownGuidance } from "../outcome-guidance";
 import {
     RELEASE_CONTROL_RESPONSE_SCHEMA,
     releaseControlFailure,
@@ -37,5 +38,50 @@ test("release-control safe state cannot override failure envelope invariants", (
         ok: false,
         operation: "expected.operation",
         error: { code: "OUTCOME_UNKNOWN", http_status: 503 },
+    });
+});
+
+test("unknown outcome keeps the receipt unchanged and provides safe terminal guidance", () => {
+    const response = releaseControlFailure("edge_functions.deploy", "OUTCOME_UNKNOWN", 503);
+    expect(responsePayload(response)).toEqual({
+        schema: RELEASE_CONTROL_RESPONSE_SCHEMA,
+        ok: false,
+        operation: "edge_functions.deploy",
+        error: { code: "OUTCOME_UNKNOWN", http_status: 503 },
+    });
+    const guidance = outcomeUnknownGuidance(response.content[0].text);
+    expect(guidance).toContain("操作结果无法确认");
+    expect(guidance).toContain("不要直接重复提交");
+    expect(outcomeUnknownGuidance(response.content[0].text)).toBe(guidance);
+});
+
+test("terminal guidance never reflects upstream details", () => {
+    const guidance = outcomeUnknownGuidance(JSON.stringify({
+        ok: false,
+        error: { code: "OUTCOME_UNKNOWN", message: "private-server-secret" },
+    }));
+    expect(guidance).not.toBeNull();
+    expect(guidance).not.toContain("private-server-secret");
+});
+
+test.each([
+    "OUTCOME_UNKNOWN",
+    "invalid JSON",
+    "null",
+    '{"ok":true,"error":{"code":"OUTCOME_UNKNOWN"}}',
+    '{"ok":false,"error":{"code":"HTTP_ERROR"}}',
+    '{"ok":false,"error":null}',
+])("does not misclassify other output: %s", (text) => {
+    expect(outcomeUnknownGuidance(text)).toBeNull();
+});
+
+test("release-control ordinary failures do not add outcome guidance", () => {
+    const response = releaseControlFailure("expected.operation", "HTTP_ERROR", 400);
+
+    expect(responsePayload(response)).toEqual({
+        schema: RELEASE_CONTROL_RESPONSE_SCHEMA,
+        ok: false,
+        operation: "expected.operation",
+        error: { code: "HTTP_ERROR", http_status: 400 },
     });
 });
