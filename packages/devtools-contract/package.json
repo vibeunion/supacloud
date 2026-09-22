@@ -1,0 +1,26 @@
+{
+  "name": "@supacloud/devtools-contract",
+  "version": "0.1.0",
+  "description": "Shared, redacted DevTools protocol contracts for SupaCloud clients and adapters",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "bun build src/index.ts --outdir dist --target node && tsc -p tsconfig.json --emitDeclarationOnly",
+    "test": "bun test"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vibeunion/supacloud.git",
+    "directory": "packages/devtools-contract"
+  }
+}

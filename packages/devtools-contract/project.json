@@ -1,0 +1,7 @@
+{
+  "name": "@supacloud/devtools-contract",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "tags": ["scope:tooling", "type:client"],
+  "projectType": "library",
+  "sourceRoot": "packages/devtools-contract/src"
+}
