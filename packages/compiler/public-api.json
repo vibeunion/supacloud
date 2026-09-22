@@ -39,6 +39,11 @@
       "signature": "export interface AspectRefNode {\n    file?: string;\n    name: string;\n    expression: string;\n    importPath?: string;\n    importModule?: string;\n}"
     },
     {
+      "name": "buildContractManifest",
+      "kind": "value",
+      "signature": "export declare function buildContractManifest(graph: ApplicationGraph, artifacts: Pick<ContractManifest[\"artifacts\"], \"client\" | \"openapi\" | \"permissions\">): ContractManifest;"
+    },
+    {
       "name": "buildDeliveryProject",
       "kind": "value",
       "signature": "export declare function buildDeliveryProject(options: CompileOptions, delivery?: unknown): Promise<DeliveryBuildResult>;"
@@ -117,6 +122,11 @@
       "name": "ContextPack",
       "kind": "type",
       "signature": "export interface ContextPack {\n    version: 1;\n    subject: string;\n    modules: ModuleNode[];\n    files: string[];\n    externalTokens: string[];\n    executionPlans: ExecutionPlan[];\n    routeContracts: ReturnType<typeof inspectRouteContracts>;\n    diagnostics: Diagnostic[];\n    relatedModules: {\n        importedBy: string[];\n        imports: string[];\n    };\n    graphql?: ApplicationGraph[\"graphql\"];\n}"
+    },
+    {
+      "name": "ContractManifest",
+      "kind": "type",
+      "signature": "export interface ContractManifest {\n    version: 1;\n    commands: Array<{\n        name: string;\n        className: string;\n        module: string;\n        permission?: string;\n        rpc?: string;\n        transaction: \"required\" | \"none\";\n        idempotency: \"required\" | \"none\";\n        auditEvent?: string;\n    }>;\n    queries: Array<{\n        name: string;\n        className: string;\n        module: string;\n    }>;\n    routes: Array<{\n        method: string;\n        path: string;\n        module: string;\n        controller: string;\n        handler: string;\n        command?: string;\n        permission?: string;\n        requestSchemas: Partial<Record<\"body\" | \"params\" | \"query\" | \"headers\" | \"cookie\", string>>;\n        responseSchema?: string;\n        evidence?: string;\n    }>;\n    permissions: string[];\n    rpc: Array<{\n        command: string;\n        adapter: string;\n    }>;\n    events: Array<{\n        name: string;\n        source: string;\n        command: string;\n    }>;\n    fixtures: string[];\n    artifacts: {\n        client: boolean;\n        openapi: boolean;\n        permissions: boolean;\n        sdk: \"generated-client\";\n        openapiDocument: \"generated\";\n        permissionManifest: \"generated\";\n    };\n}"
     },
     {
       "name": "ControllerNode",
@@ -586,7 +596,7 @@
     {
       "name": "RenderedArtifacts",
       "kind": "type",
-      "signature": "export interface RenderedArtifacts {\n    applicationCode: string;\n    manifestJson: string;\n    clientCode?: string;\n    openApiCode?: string;\n    permissionsCode?: string;\n}"
+      "signature": "export interface RenderedArtifacts {\n    applicationCode: string;\n    manifestJson: string;\n    contractsManifestJson: string;\n    clientCode?: string;\n    openApiCode?: string;\n    permissionsCode?: string;\n}"
     },
     {
       "name": "renderOpenApi",
