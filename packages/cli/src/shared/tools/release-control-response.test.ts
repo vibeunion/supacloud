@@ -37,5 +37,18 @@ test("release-control safe state cannot override failure envelope invariants", (
         ok: false,
         operation: "expected.operation",
         error: { code: "OUTCOME_UNKNOWN", http_status: 503 },
+        message: "部署结果无法确认：服务端可能已经完成操作，但客户端未收到可验证的最终结果。",
+        next_action: "请先查询当前部署状态或发布回执，再决定是否重试；不要直接重复提交。",
+    });
+});
+
+test("release-control ordinary failures do not add outcome guidance", () => {
+    const response = releaseControlFailure("expected.operation", "HTTP_ERROR", 400);
+
+    expect(responsePayload(response)).toEqual({
+        schema: RELEASE_CONTROL_RESPONSE_SCHEMA,
+        ok: false,
+        operation: "expected.operation",
+        error: { code: "HTTP_ERROR", http_status: 400 },
     });
 });
