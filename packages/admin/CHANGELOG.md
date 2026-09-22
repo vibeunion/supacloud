@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.3](https://github.com/vibeunion/supacloud/compare/admin-v0.22.2...admin-v0.22.3) (2026-09-22)
+
+
+### Bug Fixes
+
+* **admin:** republish package metadata ([#1398](https://github.com/vibeunion/supacloud/issues/1398)) ([b4e0357](https://github.com/vibeunion/supacloud/commit/b4e035768c4b56634af71b426bf458808cb650cd))
+
 ## [0.22.2](https://github.com/vibeunion/supacloud/compare/admin-v0.22.1...admin-v0.22.2) (2026-09-22)
 
 
