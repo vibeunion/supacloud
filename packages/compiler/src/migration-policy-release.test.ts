@@ -44,7 +44,7 @@ test("accepts the exact release migration tuple", async () => {
 });
 
 for (const [name, staleVersion] of Object.entries({
-  "@supacloud/app": "0.14.0",
+  "@supacloud/app": "0.15.0",
   "@supacloud/elysia": "0.17.0",
 })) {
   test(`rejects the previous ${name} version rather than widening compatibility`, async () => {
