@@ -461,12 +461,12 @@
     {
       "name": "FormArray",
       "kind": "both",
-      "signature": "export declare class FormArray<TControl extends AbstractControl = AbstractControl> extends AbstractControl<Array<TControl[\"value\"]>> {\n    readonly controls: TControl[];\n    constructor(controls?: TControl[], validatorOrOpts?: ValidatorFn | ValidatorFn[] | AbstractControlOptions | null, asyncValidator?: AsyncValidatorFn | AsyncValidatorFn[] | null);\n    get length(): number;\n    at(index: number): TControl | null;\n    push(control: TControl): void;\n    insert(index: number, control: TControl): void;\n    removeAt(index: number): void;\n    clear(): void;\n    get value(): Array<TControl[\"value\"]>;\n    setValue(value: any): void;\n    patchValue(value: any): void;\n    reset(): void;\n    updateValueAndValidity(): void;\n}"
+      "signature": "export declare class FormArray<TControl extends AbstractControl = AbstractControl> extends AbstractControl<Array<TControl[\"value\"]>> {\n    readonly controls: TControl[];\n    constructor(controls?: TControl[], validatorOrOpts?: ValidatorFn | ValidatorFn[] | AbstractControlOptions | null, asyncValidator?: AsyncValidatorFn | AsyncValidatorFn[] | null);\n    get length(): number;\n    at(index: number): TControl | null;\n    push(control: TControl): void;\n    insert(index: number, control: TControl): void;\n    removeAt(index: number): void;\n    clear(): void;\n    get value(): Array<TControl[\"value\"]>;\n    setValue(value: Array<TControl[\"value\"]>): void;\n    patchValue(value: Array<TControl[\"value\"] | undefined>): void;\n    reset(): void;\n    updateValueAndValidity(): void;\n}"
     },
     {
       "name": "FormControl",
       "kind": "both",
-      "signature": "export declare class FormControl<T = any> extends AbstractControl<T> {\n    constructor(formState?: T | {\n        value: T;\n        disabled?: boolean;\n    }, validatorOrOpts?: ValidatorFn | ValidatorFn[] | AbstractControlOptions | null, asyncValidator?: AsyncValidatorFn | AsyncValidatorFn[] | null);\n    setValue(value: any): void;\n    patchValue(value: any): void;\n    reset(formState?: any): void;\n}"
+      "signature": "export declare class FormControl<T = any> extends AbstractControl<T | null> {\n    constructor(formState?: T | {\n        value: T;\n        disabled?: boolean;\n    }, validatorOrOpts?: ValidatorFn | ValidatorFn[] | AbstractControlOptions | null, asyncValidator?: AsyncValidatorFn | AsyncValidatorFn[] | null);\n    setValue(value: T): void;\n    patchValue(value: T): void;\n    reset(formState?: T | null): void;\n}"
     },
     {
       "name": "FormControlStatus",
@@ -476,7 +476,7 @@
     {
       "name": "FormGroup",
       "kind": "both",
-      "signature": "export declare class FormGroup<TControls extends Record<string, AbstractControl> = Record<string, AbstractControl>> extends AbstractControl<{\n    [K in keyof TControls]: TControls[K][\"value\"];\n}> {\n    readonly controls: TControls;\n    constructor(controls: TControls, validatorOrOpts?: ValidatorFn | ValidatorFn[] | AbstractControlOptions | null, asyncValidator?: AsyncValidatorFn | AsyncValidatorFn[] | null);\n    get value(): {\n        [K in keyof TControls]: TControls[K][\"value\"];\n    };\n    get(path: string | (string | number)[]): AbstractControl | null;\n    addControl(name: string, control: AbstractControl): void;\n    removeControl(name: string): void;\n    setControl(name: string, control: AbstractControl): void;\n    contains(name: string): boolean;\n    setValue(value: any): void;\n    patchValue(value: any): void;\n    reset(): void;\n    updateValueAndValidity(): void;\n}"
+      "signature": "export declare class FormGroup<TControls extends Record<string, AbstractControl> = Record<string, AbstractControl>> extends AbstractControl<{\n    [K in keyof TControls]: TControls[K][\"value\"];\n}> {\n    readonly controls: TControls;\n    constructor(controls: TControls, validatorOrOpts?: ValidatorFn | ValidatorFn[] | AbstractControlOptions | null, asyncValidator?: AsyncValidatorFn | AsyncValidatorFn[] | null);\n    get value(): {\n        [K in keyof TControls]: TControls[K][\"value\"];\n    };\n    get(path: string | (string | number)[]): AbstractControl | null;\n    addControl(name: string, control: AbstractControl): void;\n    private detachControl;\n    removeControl<Name extends string>(name: Name extends keyof TControls ? never : Name): void;\n    setControl<K extends keyof TControls>(name: K, control: TControls[K]): void;\n    contains(name: string): boolean;\n    setValue(value: {\n        [K in keyof TControls]: TControls[K][\"value\"];\n    }): void;\n    patchValue(value: Partial<{\n        [K in keyof TControls]: TControls[K][\"value\"];\n    }>): void;\n    reset(): void;\n    updateValueAndValidity(): void;\n}"
     },
     {
       "name": "forwardRef",
@@ -1371,7 +1371,7 @@
     {
       "name": "TestBed",
       "kind": "both",
-      "signature": "export declare class TestBed {\n    private static declaredProviders;\n    private static overriddenProviders;\n    private static activeInjector;\n    static configureTestingModule(moduleDef: TestModuleMetadata): typeof TestBed;\n    static overrideProvider(token: Token<unknown>, provider: Provider): typeof TestBed;\n    static inject<T>(token: Token<T>, notFoundValue?: T, flags?: InjectFlags): T;\n    static injectAll<T>(token: Token<T>): T[];\n    static run<R>(fn: () => R): R;\n    static resetTestingModule(): typeof TestBed;\n    private static getOrCreateInjector;\n}"
+      "signature": "export declare class TestBed {\n    private static declaredProviders;\n    private static overriddenProviders;\n    private static activeInjector;\n    static configureTestingModule(moduleDef: TestModuleMetadata): typeof TestBed;\n    static overrideProvider(token: Token<unknown>, provider: Provider): typeof TestBed;\n    static inject<T>(token: Token<T>): T;\n    static inject<T>(token: Token<T>, notFoundValue: T, flags?: InjectFlags): T;\n    static inject<T>(token: Token<T>, notFoundValue: undefined, flags: InjectFlags & {\n        optional: true;\n    }): T | undefined;\n    static injectAll<T>(token: Token<T>): T[];\n    static run<R>(fn: () => R): R;\n    static resetTestingModule(): typeof TestBed;\n    private static getOrCreateInjector;\n}"
     },
     {
       "name": "TestModuleMetadata",
