@@ -1,4 +1,7 @@
-import { CommandError, canonicalCommandJson, type CommandIdentity, type DurableCommandReceipt } from "@supacloud/contracts";
+import {
+  CommandError, canonicalCommandJson, type CommandIdentity, type DurableCommandReceipt,
+  type ValidatedOperationReference,
+} from "@supacloud/contracts";
 import { commandContext, type PersistentCommandDefinition } from "./context";
 import type { CommandStore } from "./store";
 import { createExecutionPolicy, ExecutionPolicyError, type ExecutionPolicyOptions } from "./execution-policy";
@@ -8,7 +11,12 @@ type TransactionalCommandDefinition<Input, Result, Store extends CommandStore<un
   Omit<PersistentCommandDefinition<Input, Result, TransactionOf<Store>>, "store"> & {
     executionPolicy?: Omit<ExecutionPolicyOptions, "kind">;
     store: Store;
-    execute(transaction: TransactionOf<Store>, input: Input, identity: CommandIdentity, signal: AbortSignal): Promise<unknown>;
+    execute(
+      transaction: TransactionOf<Store>,
+      input: Input,
+      identity: ValidatedOperationReference,
+      signal: AbortSignal,
+    ): Promise<unknown>;
   };
 
 export function createTransactionalCommand<Input, Result, Store extends CommandStore<unknown>>(
