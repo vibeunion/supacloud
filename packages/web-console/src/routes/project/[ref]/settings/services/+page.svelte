@@ -1,131 +1,129 @@
 <script lang="ts">
-  import { apiClient } from "$lib/api";
-
+  import { onDestroy } from "svelte";
   import { resolve } from "$app/paths";
   import { page } from "$app/state";
-  import { Loader2, Play, Square, RotateCw, Activity, Server, Shield, Database, Radio, HardDrive, AlertTriangle } from "lucide-svelte";
+  import { Loader2, Play, Square, RotateCw, Activity, Server, Shield, Database, Radio, HardDrive, AlertTriangle, RefreshCw } from "lucide-svelte";
   import { toast } from "svelte-sonner";
-  import { useShow } from "$lib/admin/unsafe";
-  import { useQueryClient, createMutation } from "@tanstack/svelte-query";
+  import { apiClient } from "$lib/api";
+  import {
+    loadServiceControlState,
+    runServiceOperation,
+    type ServiceControlState,
+    type ServiceId,
+    type ServiceOperation,
+  } from "$lib/project-services";
 
-  interface ServiceInfo {
-    name: string;
-    icon: typeof Server;
-    status: string;
-    systemdUnit: string;
-    controlName: string;
-    runtimeMode?: "local" | "owner" | "shared";
-    managedByRef?: string;
-    localRuntimeEnabled?: boolean;
+  const projectRef = $derived(page.params.ref ?? "");
+
+  let snapshot = $state<ServiceControlState | null>(null);
+  let isLoading = $state(true);
+  let error = $state(false);
+  let actionInProgress = $state<string | null>(null);
+  let controller: AbortController | null = null;
+  let loadedRef = "";
+
+  const META: Record<ServiceId, { name: string; icon: typeof Server }> = {
+    postgresql: { name: "PostgreSQL", icon: Database },
+    postgrest: { name: "PostgREST", icon: Server },
+    gotrue: { name: "GoTrue", icon: Shield },
+    realtime: { name: "Realtime", icon: Radio },
+    storage: { name: "Storage", icon: HardDrive },
+    caddy: { name: "Caddy", icon: Activity },
+  };
+
+  async function load(): Promise<void> {
+    controller?.abort();
+    const current = new AbortController();
+    controller = current;
+    isLoading = true;
+    error = false;
+    if (!projectRef) {
+      snapshot = null;
+      loadedRef = "";
+      isLoading = false;
+      return;
+    }
+    loadedRef = projectRef;
+    try {
+      const next = await loadServiceControlState(projectRef, apiClient, current.signal);
+      if (controller !== current) return;
+      snapshot = next;
+      error = false;
+    } catch {
+      if (controller !== current) return;
+      snapshot = null;
+      error = true;
+    } finally {
+      if (controller === current) isLoading = false;
+    }
   }
 
-  let actionInProgress = $state<string | null>(null);
-
-  const projectRef = $derived(page.params.ref);
-
-  const query = useShow({
-    get resource() { return "v1/projects"; },
-    get id() { return projectRef; }
+  $effect(() => {
+    const ref = projectRef;
+    if (ref !== loadedRef) void load();
   });
 
-  const queryClient = useQueryClient();
-
-  const services = $derived.by(() => {
-    const data = query.data?.data as Record<string, any>;
-    const svcArr = data?.services || [];
-    const findService = (name: string) => svcArr.find((service: Record<string, unknown>) => service.name === name);
-    const authService = svcArr.find((service: Record<string, unknown>) =>
-      service.id === "gotrue"
-      || service.id === "auth"
-      || service.name === "GoTrue"
-      || service.name === "auth"
-    );
-    const authRuntimeMode = authService?.runtime_mode === "shared"
-      ? "shared"
-      : authService?.runtime_mode === "owner"
-        ? "owner"
-        : "local";
-    const authOwnerRef = typeof authService?.managed_by_ref === "string" ? authService.managed_by_ref : undefined;
-    return [
-      { name: "PostgreSQL", controlName: "postgresql", icon: Database, status: findService("PostgreSQL")?.status || "INACTIVE", systemdUnit: "patroni" },
-      { name: "PostgREST", controlName: "postgrest", icon: Server, status: findService("PostgREST")?.status || "INACTIVE", systemdUnit: `supacloud-pgrst@${projectRef}` },
-      {
-        name: authRuntimeMode === "shared"
-          ? "SupAuth（共享）"
-          : authRuntimeMode === "owner"
-            ? "SupAuth（权威）"
-            : "GoTrue",
-        controlName: "gotrue",
-        icon: Shield,
-        status: authService?.status || "INACTIVE",
-        systemdUnit: authService?.unit || `supacloud-gotrue@${authOwnerRef || projectRef}`,
-        runtimeMode: authRuntimeMode,
-        managedByRef: authOwnerRef,
-        localRuntimeEnabled: authService?.local_runtime_enabled !== false,
-      },
-      { name: "Realtime", controlName: "realtime", icon: Radio, status: findService("Realtime")?.status || "INACTIVE", systemdUnit: `supacloud-realtime@${projectRef}` },
-      { name: "Storage", controlName: "storage", icon: HardDrive, status: findService("Storage")?.status || "INACTIVE", systemdUnit: `supacloud-storage@${projectRef}` },
-      { name: "Caddy", controlName: "caddy", icon: Activity, status: findService("Caddy")?.status || "INACTIVE", systemdUnit: "supacloud-caddy" },
-    ];
+  onDestroy(() => {
+    controller?.abort();
   });
+
+  const services = $derived((snapshot?.services ?? []).map((svc) => {
+    const mode = svc.runtimeMode;
+    const name = svc.id === "gotrue"
+      ? mode === "shared" ? "SupAuth（共享）" : mode === "owner" ? "SupAuth（权威）" : "GoTrue"
+      : META[svc.id].name;
+    return {
+      name,
+      icon: META[svc.id].icon,
+      status: svc.status,
+      controlName: svc.id,
+      systemdUnit: svc.controlUnit,
+      runtimeMode: mode,
+      managedByRef: svc.managedByRef,
+      controllable: svc.controllable,
+    };
+  }));
 
   const sharedAuthService = $derived(services.find((service) => service.runtimeMode === "shared"));
   const ownerAuthService = $derived(services.find((service) => service.runtimeMode === "owner"));
+  const canPause = $derived(Boolean(snapshot) && snapshot?.authRuntime.mode !== "owner");
+  const busy = $derived(actionInProgress !== null || isLoading || error || !snapshot);
 
-  const isLoading = $derived(query.isLoading);
-
-  async function refetchServices() {
-    await queryClient.invalidateQueries({ queryKey: ["v1/projects", "getOne", projectRef] });
+  async function run(operation: ServiceOperation, key: string): Promise<void> {
+    if (!snapshot || actionInProgress) return;
+    const active = snapshot;
+    const current = controller;
+    actionInProgress = key;
+    try {
+      await runServiceOperation(active, operation, apiClient,
+        current?.signal ?? new AbortController().signal);
+      if (controller === current) await load();
+    } catch {
+      if (controller === current) toast.error("操作失败");
+    } finally {
+      if (actionInProgress === key) actionInProgress = null;
+    }
   }
 
-  const actionMutation = createMutation(() => ({
-    mutationFn: async ({ type, serviceName }: { type: string, serviceName?: string }) => {
-      let url = "";
-      if (type === "restart") url = `/v1/projects/${projectRef}/restart`;
-      else if (type === "pause") url = `/v1/projects/${projectRef}/pause`;
-      else if (type === "restore") url = `/v1/projects/${projectRef}/restore`;
-      else if (['start', 'stop', 'restart-svc'].includes(type) && serviceName) {
-        const action = type === 'restart-svc' ? 'restart' : type;
-        url = `/v1/projects/${projectRef}/services/${serviceName}/${action}`;
-      }
-      
-      const res = await apiClient(url, { method: "POST" });
-      if (!res.ok) throw new Error(`${type} failed`);
-      await new Promise(r => setTimeout(r, type === "pause" ? 1000 : 2000));
-      return { type, serviceName };
-    },
-    onMutate: (variables) => {
-      actionInProgress = variables.type === 'restart-svc' ? `restart-${variables.serviceName}` : `${variables.type}${variables.serviceName ? '-' + variables.serviceName : ''}`;
-    },
-    onSuccess: () => {
-      refetchServices();
-    },
-    onError: () => {
-      toast.error("操作失败");
-    },
-    onSettled: () => {
-      actionInProgress = null;
-    }
-  }));
+  function refresh() {
+    void load();
+  }
 
   function restartProject() {
-    actionMutation.mutate({ type: "restart" });
+    void run({ kind: "project", action: "restart" }, "restart");
   }
 
   function pauseProject() {
-    actionMutation.mutate({ type: "pause" });
+    void run({ kind: "project", action: "pause" }, "pause");
   }
 
   function restoreProject() {
-    actionMutation.mutate({ type: "restore" });
+    void run({ kind: "project", action: "restore" }, "restore");
   }
 
-  function controlService(action: "start" | "stop" | "restart", serviceName: string) {
-    const type = action === "restart" ? "restart-svc" : action;
-    actionMutation.mutate({ type, serviceName });
+  function controlService(action: "start" | "stop" | "restart", service: ServiceId) {
+    void run({ kind: "service", service, action }, `${action}:${service}`);
   }
-
-
 
   function statusColor(status: string): string {
     if (status === "ACTIVE_HEALTHY") return "text-green-600 bg-green-500/10";
@@ -147,25 +145,33 @@
       <p class="text-sm text-muted-foreground mt-1">管理项目各组件的运行状态，执行启动、停止和重启操作</p>
     </div>
     <div class="flex items-center gap-2">
-      <button 
+      <button
+        onclick={refresh}
+        disabled={isLoading}
+        class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg border hover:bg-muted/50 transition-colors disabled:opacity-50"
+      >
+        {#if isLoading}<Loader2 size={14} class="animate-spin" />{:else}<RefreshCw size={14} />{/if}
+        刷新
+      </button>
+      <button
         onclick={restoreProject}
-        disabled={!!actionInProgress}
+        disabled={busy}
         class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-green-600 text-white hover:bg-green-700 transition-colors disabled:opacity-50"
       >
         {#if actionInProgress === "restore"}<Loader2 size={14} class="animate-spin" />{:else}<Play size={14} />{/if}
         启动全部
       </button>
-      <button 
+      <button
         onclick={restartProject}
-        disabled={!!actionInProgress}
+        disabled={busy}
         class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50"
       >
         {#if actionInProgress === "restart"}<Loader2 size={14} class="animate-spin" />{:else}<RotateCw size={14} />{/if}
         重启全部
       </button>
-      <button 
+      <button
         onclick={pauseProject}
-        disabled={!!actionInProgress}
+        disabled={busy || !canPause}
         class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg border border-destructive text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50"
       >
         {#if actionInProgress === "pause"}<Loader2 size={14} class="animate-spin" />{:else}<Square size={14} />{/if}
@@ -173,6 +179,12 @@
       </button>
     </div>
   </div>
+
+  {#if error}
+    <div class="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs text-destructive" role="alert">
+      服务控制状态不可用，请刷新后重试。
+    </div>
+  {/if}
 
   <div class="rounded-lg border bg-blue-500/5 border-blue-500/20 p-3 flex items-start gap-2">
     <AlertTriangle size={14} class="text-blue-600 mt-0.5 shrink-0" />
@@ -238,12 +250,12 @@
             <div class="flex items-center gap-3">
               <span class="px-2.5 py-1 rounded-full text-[10px] font-bold {statusColor(svc.status)}">{statusLabel(svc.status)}</span>
               <div class="flex items-center gap-1 min-w-14 justify-end">
-                {#if svc.runtimeMode === "shared"}
+                {#if !svc.controllable}
                   <span class="text-[10px] font-semibold text-muted-foreground">只读</span>
                 {:else if svc.status === "ACTIVE_HEALTHY"}
                   <button
                     onclick={() => controlService("restart", svc.controlName)}
-                    disabled={!!actionInProgress}
+                    disabled={busy}
                     class="p-1.5 hover:bg-brand/10 hover:text-brand rounded transition-colors disabled:opacity-50"
                     title="重启"
                   >
@@ -251,7 +263,7 @@
                   </button>
                   <button
                     onclick={() => controlService("stop", svc.controlName)}
-                    disabled={!!actionInProgress}
+                    disabled={busy}
                     class="p-1.5 hover:bg-destructive/10 hover:text-destructive rounded transition-colors disabled:opacity-50"
                     title="停止"
                   >
@@ -260,7 +272,7 @@
                 {:else}
                   <button
                     onclick={() => controlService("start", svc.controlName)}
-                    disabled={!!actionInProgress}
+                    disabled={busy}
                     class="p-1.5 hover:bg-green-500/10 hover:text-green-600 rounded transition-colors disabled:opacity-50"
                     title="启动"
                   >
