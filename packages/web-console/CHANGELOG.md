@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.42.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.41.1...web-console-v0.42.0) (2026-09-22)
+
+
+### Features
+
+* **management-api:** validate the project dashboard summary route ([f1e7bc1](https://github.com/vibeunion/supacloud/commit/f1e7bc14911d2a97dd9ac17414bc681e68bfa991))
+* **web-console:** add validated project data-layer contracts ([#1381](https://github.com/vibeunion/supacloud/issues/1381)) ([4da077e](https://github.com/vibeunion/supacloud/commit/4da077e0107101bc49b30304c3fe7e3b58c86ce4))
+* **web-console:** drive JWT settings through a validated contract ([#1392](https://github.com/vibeunion/supacloud/issues/1392)) ([272d637](https://github.com/vibeunion/supacloud/commit/272d6372c3b8085846da2c4cbac2c97f798e24a3))
+* **web-console:** drive project pooling through the validated state API ([2316899](https://github.com/vibeunion/supacloud/commit/23168990d8a8c0820a84acdae83804449b2210d9))
+* **web-console:** drive service controls through the validated contract ([085efd8](https://github.com/vibeunion/supacloud/commit/085efd8780a44b0a14fc583ef013499a7ed66576))
+* **web-console:** harden auth settings boundaries ([a2987bd](https://github.com/vibeunion/supacloud/commit/a2987bd50ef0885b4b034aeb4a57b0ce4a913817))
+* **web-console:** rebuild the project overview on validated contracts ([f28428a](https://github.com/vibeunion/supacloud/commit/f28428ad9d2ec55d0c742f2fe539f1bc769e2fab))
+* **web-console:** rebuild the task center on validated contracts ([#1391](https://github.com/vibeunion/supacloud/issues/1391)) ([c4d2b8f](https://github.com/vibeunion/supacloud/commit/c4d2b8f0f076ed8c1dc3d3ed6d22c1532c6ae66a))
+* **web-console:** wire dashboard and project routes to validated contracts ([#1384](https://github.com/vibeunion/supacloud/issues/1384)) ([15f5913](https://github.com/vibeunion/supacloud/commit/15f5913516ca128dac03177533072bd1b7f5eb3d))
+
+
+### Bug Fixes
+
+* **web-console:** isolate table rows from the active project context ([f2ecdaf](https://github.com/vibeunion/supacloud/commit/f2ecdaf73086d4b4dba1f8e1a6bfaf7d6f220863))
+
 ## [0.41.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.41.0...web-console-v0.41.1) (2026-09-22)
 
 

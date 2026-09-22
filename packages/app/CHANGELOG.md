@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/vibeunion/supacloud/compare/app-v0.15.0...app-v0.16.0) (2026-09-22)
+
+
+### Features
+
+* **app:** enforce typed reactive form writes ([#1372](https://github.com/vibeunion/supacloud/issues/1372)) ([5f76ea8](https://github.com/vibeunion/supacloud/commit/5f76ea818a94641c6cac7d55a3b46ce6a47dac7e))
+
 ## [0.15.0](https://github.com/vibeunion/supacloud/compare/app-v0.14.0...app-v0.15.0) (2026-09-19)
 
 

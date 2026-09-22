@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.84.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.83.0...management-api-v0.84.0) (2026-09-22)
+
+
+### Features
+
+* **management-api:** add project CLI client and proof-nonce repository ([#1375](https://github.com/vibeunion/supacloud/issues/1375)) ([5ca9522](https://github.com/vibeunion/supacloud/commit/5ca952239210a3fd67826f55e52c453df96888a8))
+* **management-api:** add validated projection contract helpers ([#1374](https://github.com/vibeunion/supacloud/issues/1374)) ([a993957](https://github.com/vibeunion/supacloud/commit/a9939578f529cf9eb9e1b20844e509c8a023c579))
+* **management-api:** bind realtime subscriptions to their session identity ([#1373](https://github.com/vibeunion/supacloud/issues/1373)) ([ff8f6d9](https://github.com/vibeunion/supacloud/commit/ff8f6d9939ff7e1dfea78728c7d50f37c5652f74))
+* **management-api:** validate the project dashboard summary route ([f1e7bc1](https://github.com/vibeunion/supacloud/commit/f1e7bc14911d2a97dd9ac17414bc681e68bfa991))
+* **web-console:** drive project pooling through the validated state API ([2316899](https://github.com/vibeunion/supacloud/commit/23168990d8a8c0820a84acdae83804449b2210d9))
+* **web-console:** rebuild the project overview on validated contracts ([f28428a](https://github.com/vibeunion/supacloud/commit/f28428ad9d2ec55d0c742f2fe539f1bc769e2fab))
+* **web-console:** wire dashboard and project routes to validated contracts ([#1384](https://github.com/vibeunion/supacloud/issues/1384)) ([15f5913](https://github.com/vibeunion/supacloud/commit/15f5913516ca128dac03177533072bd1b7f5eb3d))
+
+
+### Bug Fixes
+
+* **management-api:** release scheduled function response bodies ([#1364](https://github.com/vibeunion/supacloud/issues/1364)) ([5c532e0](https://github.com/vibeunion/supacloud/commit/5c532e09ec34cd11172f6180233ab94dd315efa5))
+
 ## [0.83.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.82.0...management-api-v0.83.0) (2026-09-19)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.25.0...edge-runtime-v0.25.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* **edge-runtime:** recover from sustained memory pressure ([#1362](https://github.com/vibeunion/supacloud/issues/1362)) ([3176007](https://github.com/vibeunion/supacloud/commit/31760071f6e32031ffe1c18a1d6d04ac5fdf21c0))
+
 ## [0.25.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.24.1...edge-runtime-v0.25.0) (2026-09-12)
 
 
