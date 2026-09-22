@@ -147,4 +147,79 @@ describe("dataProvider resource adapters", () => {
       },
     )).rejects.toThrow("Expected object records");
   });
+
+  test("projects contract-bound table rows to their closed schema", async () => {
+    const { result } = await getList(
+      {
+        data: [
+          { event_id: "e-1", payload: { kind: "created" }, active: true, ignored: "strip" },
+        ],
+        total: 1,
+      },
+      {
+        resource: "v1/projects/alpha/database/tables/public/events/rows",
+        meta: {
+          contractProjection: {
+            contractKeys: ["event_id", "payload", "active"],
+            idFrom: "event_id",
+            stringifyComplex: true,
+          },
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      data: [{ event_id: "e-1", payload: '{"kind":"created"}', active: true, id: "e-1" }],
+      total: 1,
+    });
+  });
+
+  test("maps tenant table names to the contract id", async () => {
+    const { result } = await getList(
+      { data: [{ table_name: "users", table_schema: "public", table_type: "BASE TABLE", row_estimate: "3", extra: 1 }], total: 1 },
+      {
+        resource: "v1/projects/alpha/database/tables",
+        meta: {
+          contractProjection: {
+            contractKeys: ["table_name", "table_schema", "table_type", "row_estimate"],
+            idFrom: "table_name",
+          },
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      data: [{
+        table_name: "users",
+        table_schema: "public",
+        table_type: "BASE TABLE",
+        row_estimate: "3",
+        id: "users",
+      }],
+      total: 1,
+    });
+  });
+
+  test("drops synthetic identity columns from projected table rows", async () => {
+    const resource = "v1/projects/alpha/database/tables/public/events/rows";
+    const { result } = await getList(
+      { data: [{ event_id: "e-1", payload: [1, 2] }], total: 1 },
+      {
+        resource,
+        meta: {
+          tableRowIdentityKey: "__svadmin_row_id",
+          contractProjection: {
+            contractKeys: ["event_id", "payload"],
+            idFrom: "__svadmin_row_id",
+            stringifyComplex: true,
+          },
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      data: [{ event_id: "e-1", payload: "[1,2]", id: `${resource}:0` }],
+      total: 1,
+    });
+  });
 });

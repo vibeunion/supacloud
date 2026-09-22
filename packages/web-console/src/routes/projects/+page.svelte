@@ -1,8 +1,16 @@
 <script lang="ts">
-  import { useList } from "@svadmin/core";
+  import { useList } from "$lib/admin/unsafe";
   import { Loader2 } from "lucide-svelte";
+  import type { BaseRecord } from "@svadmin/core";
 
-  const query = useList({ resource: "v1/projects" });
+  interface ProjectRow extends BaseRecord {
+    ref: string;
+    name?: string;
+    status?: string;
+    region?: string;
+  }
+
+  const query = useList<ProjectRow>({ resource: "v1/projects" });
 </script>
 
 <div class="space-y-6">

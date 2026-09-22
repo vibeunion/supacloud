@@ -5,7 +5,7 @@
   import { page } from "$app/state";
   import { Loader2, Play, Square, RotateCw, Activity, Server, Shield, Database, Radio, HardDrive, AlertTriangle } from "lucide-svelte";
   import { toast } from "svelte-sonner";
-  import { useShow } from "@svadmin/core";
+  import { useShow } from "$lib/admin/unsafe";
   import { useQueryClient, createMutation } from "@tanstack/svelte-query";
 
   interface ServiceInfo {

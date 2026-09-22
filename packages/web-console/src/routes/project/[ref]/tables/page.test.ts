@@ -219,9 +219,9 @@ describe("database tables column visibility", () => {
     const packageJson: unknown = await Bun.file(new URL("package.json", packageRoot)).json();
     const lockSource = await Bun.file(new URL("bun.lock", packageRoot)).text();
 
-    expect(packageJson).toMatchObject({ dependencies: { "@svadmin/ui": "0.70.0" } });
-    expect(lockSource).toContain('"@svadmin/ui": "0.70.0"');
-    expect(lockSource).toContain('"@svadmin/ui@0.70.0"');
+    expect(packageJson).toMatchObject({ dependencies: { "@svadmin/ui": "0.74.0" } });
+    expect(lockSource).toContain('"@svadmin/ui": "0.74.0"');
+    expect(lockSource).toContain('"@svadmin/ui@0.74.0"');
   });
 
   test("keeps unavailable row estimates from rendering as negative counts", async () => {

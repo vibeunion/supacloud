@@ -26,7 +26,7 @@ describe("SVAdmin stylesheet migration", () => {
     }
   });
 
-  test("imports the Tailwind host entries with semantic AI theme support", () => {
+  test("imports the Tailwind host entries and bridges SVAdmin semantic tokens", () => {
     const imports: string[] = [];
     const sources: string[] = [];
     appCss.walkAtRules("import", (rule) => { imports.push(rule.params); });
@@ -39,7 +39,11 @@ describe("SVAdmin stylesheet migration", () => {
     ]);
     expect(sources.some((source) => source.includes("@svadmin/ui"))).toBe(false);
     expect(sources.some((source) => source.includes("@svadmin/ai-elements"))).toBe(true);
-    expect(aiThemeSource).toContain("--color-background: var(--background, Canvas)");
+    // AI Elements 0.9 ships a precompiled plain stylesheet instead of a raw
+    // `@theme` block, so the host must bridge semantic tokens itself.
+    expect(aiThemeSource).toContain("ai.css");
+    expect(appSource).toContain("@theme inline");
+    expect(appSource).toContain("--color-border: var(--border)");
   });
 
   test("preserves light and dark colors as complete semantic color values", () => {

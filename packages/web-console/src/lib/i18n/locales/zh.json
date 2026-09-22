@@ -1140,6 +1140,8 @@
     "save": "保存",
     "routing_save_failed": "保存路由配置失败",
     "routing_saved": "路由配置已保存",
+    "general_save_failed": "保存项目设置失败",
+    "general_saved": "项目设置已保存",
     "domain_example": "例如 app.example.com",
     "custom_domain_active": "已激活",
     "current_domain": "当前域名",

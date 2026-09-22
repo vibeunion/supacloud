@@ -25,6 +25,49 @@ function providerRecords<TData extends BaseRecord>(records: BaseRecord[]): TData
   return records as unknown as TData[];
 }
 
+interface ContractProjectionMeta {
+  contractKeys?: unknown;
+  idFrom?: unknown;
+  stringifyComplex?: unknown;
+}
+
+/**
+ * Contract-bound resources project provider records down to their declared
+ * closed schema before SVAdmin's strict record decoder validates them. Nested
+ * JSON values are emitted as stable JSON text so dynamic tables stay renderable.
+ */
+function projectContractRecords<TData extends BaseRecord>(
+  records: TData[],
+  meta: Record<string, unknown> | undefined,
+): TData[] {
+  const projection = meta?.["contractProjection"];
+  if (!projection || typeof projection !== "object") return records;
+  const config = projection as ContractProjectionMeta;
+  if (!Array.isArray(config.contractKeys)) return records;
+  const keys = config.contractKeys;
+  const idFrom = typeof config.idFrom === "string" ? config.idFrom : undefined;
+  const stringifyComplex = config.stringifyComplex === true;
+
+  return records.map((record) => {
+    const source = toRecord(record);
+    const projected: Record<string, unknown> = {};
+    for (const key of keys) {
+      if (typeof key !== "string") continue;
+      let value = source[key];
+      if (value === undefined) continue;
+      if (stringifyComplex && value !== null && typeof value === "object") {
+        try { value = JSON.stringify(value); } catch { value = null; }
+      }
+      projected[key] = value;
+    }
+    if (idFrom !== undefined) {
+      const identity = source[idFrom];
+      projected.id = typeof identity === "string" ? identity : String(identity ?? "");
+    }
+    return projected as TData;
+  });
+}
+
 const getApiUrl = () => {
     if (typeof window === 'undefined') return 'http://localhost:9090'; // SSR
     return window.location.origin;
@@ -60,7 +103,7 @@ function parseNamedListEnvelope<TData extends BaseRecord>(
   );
   return {
     ...metadata,
-      data: providerRecords<TData>(records),
+      data: projectContractRecords(providerRecords<TData>(records), context.meta),
     total: typeof response.total === 'number' ? response.total : records.length,
   };
 }
@@ -92,16 +135,20 @@ const tableRowsAdapter: ElysiaResourceAdapter = {
     const offset = (context.pagination.current - 1) * context.pagination.pageSize;
     return {
       ...normalized,
-      data: normalized.data.map((record, index) => ({
+      data: projectContractRecords(normalized.data.map((record, index) => ({
         ...record,
         [identityKey]: `${context.resource}:${offset + index}`,
-      })),
+      })), context.meta),
     };
   },
 };
 
 const resourceAdapters: readonly ElysiaResourceAdapter[] = [
   tableRowsAdapter,
+  namedEnvelopeAdapter(
+    (resource) => /^v1\/projects\/[^/]+\/database\/tables$/.test(resource),
+    'data',
+  ),
   namedEnvelopeAdapter(
     (resource) => resource === 'auth/users' || resource.endsWith('/auth/users'),
     'users',

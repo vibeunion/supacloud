@@ -7,7 +7,8 @@
   import { BrainCircuit, Copy, Database, Download, Eye, Folder, Loader2, Plus, Save, Search, Trash2, X } from "lucide-svelte";
   import { toast } from "svelte-sonner";
   import { createMutation } from "@tanstack/svelte-query";
-  import { useList, type BaseRecord } from "@svadmin/core";
+  import { useList } from "$lib/admin/unsafe";
+  import type { BaseRecord } from "@svadmin/core";
 
   interface Bucket extends BaseRecord {
     id?: string;
