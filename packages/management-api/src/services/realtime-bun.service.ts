@@ -1,9 +1,13 @@
 import { EventEmitter } from 'events';
+import type { SQL } from 'bun';
 import type { JWTPayload } from 'jose';
 import { logger } from '../utils/logger';
 import { resolveDbName, getProjectDb, resolveSlotName } from '../db';
 import { SQL_MODULES } from '../db/sql-modules';
+import type { ProjectJwtVerification } from '../utils/project-jwt';
 import { verifyProjectJwtPayload } from '../utils/project-jwt';
+import { isRealtimeIdentifier } from '../utils/realtime-change';
+import { canEvaluateRealtimeFilterNatively } from '../utils/realtime-filter-contract';
 
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
 
@@ -42,6 +46,11 @@ interface RealtimeSubscriptionState {
     token?: string;
 }
 
+export interface RealtimeBunServiceDependencies {
+    resolveDatabase: (projectRef: string) => Promise<SQL | null>;
+    verifyJwt: (projectRef: string, token: string) => Promise<ProjectJwtVerification | null>;
+}
+
 export class RealtimeBunService {
     private tenantListeners = new Map<string, any>();
     public events = new EventEmitter();
@@ -50,40 +59,98 @@ export class RealtimeBunService {
     private ensuredTriggers = new Set<string>();
     private wal2jsonAvailable = new Map<string, boolean>();
     private walPollingIntervals = new Map<string, NodeJS.Timeout>();
+    private tenantListenerStarts = new Map<string, Promise<boolean>>();
+    private tenantGenerations = new Map<string, number>();
     private subscriptionCounter = 0;
+    private readonly dependencies: RealtimeBunServiceDependencies;
+
+    constructor(dependencies: Partial<RealtimeBunServiceDependencies> = {}) {
+        this.dependencies = {
+            resolveDatabase: async (projectRef) => {
+                try {
+                    return getProjectDb(await resolveDbName(projectRef));
+                } catch {
+                    return null;
+                }
+            },
+            verifyJwt: (projectRef, token) => verifyProjectJwtPayload(projectRef, token),
+            ...dependencies,
+        };
+    }
 
     public async subscribeTenant(
         projectRef: string,
         subscriptions?: PostgresChangeConfig[],
         token?: string,
-        _options?: { signal?: AbortSignal },
+        options?: { signal?: AbortSignal },
     ): Promise<string | null> {
-        let subscriptionStateId: string | null = null;
-        if (subscriptions) {
-            const states = this.tenantSubscriptions.get(projectRef) || [];
-            subscriptionStateId = `${projectRef}:${++this.subscriptionCounter}`;
-            states.push({ id: subscriptionStateId, subscriptions, token });
-            this.tenantSubscriptions.set(projectRef, states);
+        const signal = options?.signal;
+        const generation = this.tenantGenerations.get(projectRef) ?? 0;
+        if (signal?.aborted || (subscriptions && !this.supportsNativeSubscriptions(subscriptions))) return null;
+
+        if (subscriptions !== undefined) {
+            if (!token) return null;
+            const jwtPayload = await this.verifyRealtimeJwt(projectRef, token);
+            if (!this.canSubscribeWithJwt(jwtPayload) || !this.isTenantCurrent(projectRef, generation, signal)) {
+                return null;
+            }
         }
+
+        let db: SQL | null;
+        try {
+            db = await this.dependencies.resolveDatabase(projectRef);
+        } catch (err: unknown) {
+            logger.error(`[RealtimeBun] Failed to resolve database for ${projectRef}`, { error: String(err) });
+            return null;
+        }
+        if (!db || !this.isTenantCurrent(projectRef, generation, signal)) return null;
 
         if (subscriptions && subscriptions.length > 0) {
-            await this.ensureTriggers(projectRef, subscriptions);
+            await this.ensureTriggers(projectRef, subscriptions, db);
+            if (!this.isTenantCurrent(projectRef, generation, signal)) return null;
         }
 
-        if (this.tenantListeners.has(projectRef)) return subscriptionStateId;
+        const started = await this.ensureTenantListener(projectRef, db, generation);
+        if (!started || !this.isTenantCurrent(projectRef, generation, signal)) return null;
+        if (!subscriptions) return null;
 
-        try {
-            const dbName = await resolveDbName(projectRef);
-            let db: any;
-            try {
-                db = getProjectDb(dbName);
-            } catch {
-                return subscriptionStateId;
-            }
+        const subscriptionStateId = `${projectRef}:${++this.subscriptionCounter}`;
+        const states = this.tenantSubscriptions.get(projectRef) || [];
+        states.push({ id: subscriptionStateId, subscriptions, token });
+        this.tenantSubscriptions.set(projectRef, states);
 
-            if (!db) return subscriptionStateId;
+        return subscriptionStateId;
+    }
 
+    private supportsNativeSubscriptions(subscriptions: PostgresChangeConfig[]): boolean {
+        return subscriptions.length > 0 && subscriptions.length <= 100 && subscriptions.every((subscription) => {
+            if (!['*', 'INSERT', 'UPDATE', 'DELETE'].includes(subscription.event)) return false;
+            if (!isRealtimeIdentifier(subscription.schema) || !isRealtimeIdentifier(subscription.table)) return false;
+            return canEvaluateRealtimeFilterNatively(subscription.filter);
+        });
+    }
+
+    private canSubscribeWithJwt(jwtPayload: JWTPayload | null): boolean {
+        if (!jwtPayload || typeof jwtPayload.role !== 'string') return false;
+        if (jwtPayload.role === 'service_role') {
+            return (jwtPayload as Record<string, unknown>).__allow_service_role === true;
+        }
+        return jwtPayload.role === 'anon' || jwtPayload.role === 'authenticated';
+    }
+
+    private isTenantCurrent(projectRef: string, generation: number, signal?: AbortSignal): boolean {
+        return !signal?.aborted && (this.tenantGenerations.get(projectRef) ?? 0) === generation;
+    }
+
+    private async ensureTenantListener(projectRef: string, db: SQL, generation: number): Promise<boolean> {
+        if (this.tenantListeners.has(projectRef) || this.walPollingIntervals.has(projectRef)) return true;
+        const existing = this.tenantListenerStarts.get(projectRef);
+        if (existing) return existing;
+
+        const start = (async () => {
+            if (!this.isTenantCurrent(projectRef, generation)) return false;
             const hasWal2json = await this.detectWal2json(db, projectRef);
+            if (!this.isTenantCurrent(projectRef, generation)) return false;
 
             if (hasWal2json) {
                 this.startWalPolling(projectRef, db);
@@ -96,16 +163,25 @@ export class RealtimeBunService {
                         logger.error(`[RealtimeBun] Failed to parse NOTIFY payload for ${projectRef}`, { error: String(err) });
                     }
                 });
-
+                if (!this.isTenantCurrent(projectRef, generation)) {
+                    try { await listener.unlisten(); } catch { /* ignore */ }
+                    return false;
+                }
                 this.tenantListeners.set(projectRef, listener);
             }
 
             logger.info(`[RealtimeBun] Started listening for ${projectRef} (wal2json: ${hasWal2json})`);
-        } catch (err: unknown) {
+            return true;
+        })().catch((err: unknown) => {
             logger.error(`[RealtimeBun] Failed to subscribe to tenant ${projectRef}`, { error: String(err) });
+            return false;
+        });
+        this.tenantListenerStarts.set(projectRef, start);
+        try {
+            return await start;
+        } finally {
+            if (this.tenantListenerStarts.get(projectRef) === start) this.tenantListenerStarts.delete(projectRef);
         }
-
-        return subscriptionStateId;
     }
 
     private async detectWal2json(db: any, projectRef: string): Promise<boolean> {
@@ -212,14 +288,7 @@ export class RealtimeBunService {
         return results.length === 1 ? results[0] : results.length > 0 ? results : null;
     }
 
-    private async ensureTriggers(projectRef: string, subscriptions: PostgresChangeConfig[]) {
-        const dbName = await resolveDbName(projectRef);
-        let db: any;
-        try {
-            db = getProjectDb(dbName);
-        } catch { return; }
-        if (!db) return;
-
+    private async ensureTriggers(projectRef: string, subscriptions: PostgresChangeConfig[], db: SQL) {
         try {
             await db.unsafe(`
                 ${SQL_MODULES["realtime-notify-payload"]}
@@ -395,7 +464,7 @@ export class RealtimeBunService {
 
     private async verifyRealtimeJwt(projectRef: string, token: string): Promise<JWTPayload | null> {
         try {
-            const verification = await verifyProjectJwtPayload(projectRef, token);
+            const verification = await this.dependencies.verifyJwt(projectRef, token);
             if (!verification || typeof verification.payload.role !== 'string') return null;
             return { ...verification.payload, __allow_service_role: verification.isServiceRole };
         } catch {
@@ -421,8 +490,7 @@ export class RealtimeBunService {
                 return false;
             }
 
-            const dbName = await resolveDbName(projectRef);
-            const db = getProjectDb(dbName);
+            const db = await this.dependencies.resolveDatabase(projectRef);
             if (!db) return false;
 
             const pkCols = await db`
@@ -527,6 +595,7 @@ export class RealtimeBunService {
     }
 
     public async unsubscribeTenant(projectRef: string) {
+        this.tenantGenerations.set(projectRef, (this.tenantGenerations.get(projectRef) ?? 0) + 1);
         const listener = this.tenantListeners.get(projectRef);
         if (listener) {
             try {
