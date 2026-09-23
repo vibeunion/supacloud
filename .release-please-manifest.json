@@ -4,7 +4,7 @@
   "packages/edge-runtime": "0.25.1",
   "packages/pgredis-runtime": "0.6.1",
   "packages/supacloud-js": "0.33.0",
-  "packages/cli": "0.56.1",
+  "packages/cli": "0.56.2",
   "packages/admin": "0.22.3",
   "packages/supacloud": "0.12.17",
   "packages/function-adapter": "0.3.2",
