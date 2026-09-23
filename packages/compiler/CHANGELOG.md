@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.24.0...compiler-v0.25.0) (2026-09-23)
+
+
+### Features
+
+* **compiler:** add migration guardrails without SSR requirement ([07e4e29](https://github.com/vibeunion/supacloud/commit/07e4e2949eebad87c2dcc7f94b34a132a46993f3))
+
 ## [0.24.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.23.0...compiler-v0.24.0) (2026-09-22)
 
 
