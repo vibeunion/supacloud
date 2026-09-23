@@ -37,6 +37,8 @@ export interface TaskListFilters {
   taskTypes?: string[];
   functionSlug?: string;
   functionVersion?: string;
+  correlationId?: string;
+  businessTaskId?: string;
   onlyDeadLettered?: boolean;
   limit?: number;
   summary?: boolean;
@@ -155,6 +157,9 @@ export function buildTaskListQuery(projectRef: string, filters: TaskListFilters 
       trace_id,
       cancel_requested_at,
       cancellation_reason,
+      correlation_id,
+      business_task_id,
+      metadata,
       invoker_user_id,
       auth_authority_ref,
       function_slug,
@@ -186,6 +191,16 @@ export function buildTaskListQuery(projectRef: string, filters: TaskListFilters 
   if (filters.functionVersion) {
     values.push(filters.functionVersion);
     conditions.push(`function_version = $${values.length}`);
+  }
+
+  if (filters.correlationId) {
+    values.push(filters.correlationId);
+    conditions.push(`correlation_id = $${values.length}`);
+  }
+
+  if (filters.businessTaskId) {
+    values.push(filters.businessTaskId);
+    conditions.push(`business_task_id = $${values.length}`);
   }
 
   values.push(filters.limit || 50);

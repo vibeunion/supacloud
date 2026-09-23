@@ -11,8 +11,8 @@ export class InvalidTaskListQueryError extends Error {
 export function parseTaskListQuery(request: Request, deadLettered = false): TaskListFilters {
     const query = new URL(request.url).searchParams;
     const allowed = new Set(deadLettered
-        ? ["limit", "summary"]
-        : ["status", "task_type", "function_slug", "function_version", "dlq", "limit", "summary"]);
+        ? ["correlation_id", "business_task_id", "limit", "summary"]
+        : ["status", "task_type", "function_slug", "function_version", "correlation_id", "business_task_id", "dlq", "limit", "summary"]);
     const seen = new Set<string>();
     for (const [key] of query) {
         if (!allowed.has(key) || seen.has(key)) throw new InvalidTaskListQueryError();
@@ -47,6 +47,8 @@ export function parseTaskListQuery(request: Request, deadLettered = false): Task
     const taskTypes = list("task_type");
     const functionSlug = optionalText("function_slug");
     const functionVersion = optionalText("function_version");
+    const correlationId = optionalText("correlation_id");
+    const businessTaskId = optionalText("business_task_id");
     const onlyDeadLettered = deadLettered || boolean("dlq");
     if (onlyDeadLettered && statuses?.some(value => value !== "dead_lettered")) {
         throw new InvalidTaskListQueryError();
@@ -57,6 +59,8 @@ export function parseTaskListQuery(request: Request, deadLettered = false): Task
             ...(taskTypes === undefined ? {} : { taskTypes }),
             ...(functionSlug === undefined ? {} : { functionSlug }),
             ...(functionVersion === undefined ? {} : { functionVersion }),
+            ...(correlationId === undefined ? {} : { correlationId }),
+            ...(businessTaskId === undefined ? {} : { businessTaskId }),
             onlyDeadLettered, limit, summary: boolean("summary"),
         });
     } catch (error) {

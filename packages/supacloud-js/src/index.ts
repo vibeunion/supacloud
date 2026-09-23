@@ -5,6 +5,7 @@ import type {
 import { SupaCloudWorkflowsClient } from "./workflows.js";
 import { SupaCloudCommandsClient } from "./commands.js";
 import { SupaCloudArtifactsClient } from "./artifacts.js";
+import { queueJsonSnapshot } from "./queue-rpc.js";
 
 export {
   createSupaCloudOAuthFetch,
@@ -581,16 +582,44 @@ function toArray(value?: string | string[]): string[] | undefined {
 }
 
 function createQueryString(filters: SupaCloudTaskListFilters = {}): string {
+  let captured: Record<string, unknown>;
+  try {
+    captured = responseRecord(queueJsonSnapshot(filters), "task filters");
+  } catch {
+    throw new Error("Invalid task list filters");
+  }
+  if (Object.keys(captured).some(key => !["status", "taskType", "functionSlug", "correlationId", "businessTaskId", "dlq", "limit"].includes(key))) {
+    throw new Error("Invalid task list filters");
+  }
+  const text = (value: unknown, commaAllowed = false): string => {
+    if (typeof value !== "string" || !value || value.trim() !== value
+      || /[\u0000-\u001f\u007f]/.test(value) || (!commaAllowed && value.includes(","))) {
+      throw new Error("Invalid task list filters");
+    }
+    try { encodeURIComponent(value); } catch { throw new Error("Invalid task list filters"); }
+    return value;
+  };
+  const values = (value: unknown): string[] => {
+    const items: unknown[] = Array.isArray(value) ? value : [value];
+    if (items.length === 0) throw new Error("Invalid task list filters");
+    return items.map(item => text(item));
+  };
   const params = new URLSearchParams();
-
-  const statuses = toArray(filters.status);
-  const taskTypes = toArray(filters.taskType);
-
-  if (statuses?.length) params.set("status", statuses.join(","));
-  if (taskTypes?.length) params.set("task_type", taskTypes.join(","));
-  if (filters.functionSlug) params.set("function_slug", filters.functionSlug);
-  if (filters.dlq) params.set("dlq", "true");
-  if (filters.limit !== undefined) params.set("limit", String(filters.limit));
+  if (Object.hasOwn(captured, "status")) params.set("status", values(captured.status).join(","));
+  if (Object.hasOwn(captured, "taskType")) params.set("task_type", values(captured.taskType).join(","));
+  if (Object.hasOwn(captured, "functionSlug")) params.set("function_slug", text(captured.functionSlug, true));
+  if (Object.hasOwn(captured, "correlationId")) params.set("correlation_id", text(captured.correlationId));
+  if (Object.hasOwn(captured, "businessTaskId")) params.set("business_task_id", text(captured.businessTaskId));
+  if (Object.hasOwn(captured, "dlq")) {
+    if (typeof captured.dlq !== "boolean") throw new Error("Invalid task list filters");
+    if (captured.dlq) params.set("dlq", "true");
+  }
+  if (Object.hasOwn(captured, "limit")) {
+    if (typeof captured.limit !== "number" || !Number.isSafeInteger(captured.limit) || captured.limit < 1) {
+      throw new Error("Invalid task list filters");
+    }
+    params.set("limit", String(captured.limit));
+  }
 
   const query = params.toString();
   return query.length > 0 ? `?${query}` : "";

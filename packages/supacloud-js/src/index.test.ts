@@ -149,13 +149,16 @@ describe("@supacloud/js", () => {
     });
 
     await client.tasks.get("tsk_123");
-    await client.tasks.list({ status: ["running", "failed"], functionSlug: "aorist-ai", limit: 5 });
+    await client.tasks.list({
+      status: ["running", "failed"], functionSlug: "aorist-ai",
+      correlationId: "workflow-123", businessTaskId: "fa-task-456", limit: 5,
+    });
     await client.tasks.cancel("tsk_123");
     await client.tasks.retry("tsk_123");
     await client.tasks.listDlq(10);
 
     expect(calls[0]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/tsk_123");
-    expect(calls[1]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks?status=running%2Cfailed&function_slug=aorist-ai&limit=5");
+    expect(calls[1]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks?status=running%2Cfailed&function_slug=aorist-ai&correlation_id=workflow-123&business_task_id=fa-task-456&limit=5");
     expect(calls[2]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/tsk_123/cancel");
     expect(calls[2]?.init?.method).toBe("POST");
     expect(calls[3]?.url).toBe("https://admin.example.com/v1/projects/proj_1/tasks/tsk_123/retry");

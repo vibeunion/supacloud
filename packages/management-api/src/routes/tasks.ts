@@ -4,6 +4,7 @@ import { TaskStatus, type ProjectTask } from "../db";
 import { backgroundFunctionWorker, projectService } from "../services";
 import { isPublicPgmqQueueName, pgmqService } from "../services/pgmq.service";
 import * as authMiddleware from "../middleware/auth";
+import { InvalidTaskListQueryError, parseTaskListQuery } from "../utils/task-list-query";
 
 const QUEUE_TASK_TYPE_PREFIX = "queue:";
 const DEFAULT_QUEUE_VISIBILITY_TIMEOUT_SEC = 330;
@@ -484,33 +485,14 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             return status(500, { message: "Failed to delete queue message", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
     }, { detail: { tags: ["tasks"], summary: "Delete a queue message" } })
-    .get("/", async ({ params, query }) => {
+    .get("/", async ({ params, request }) => {
         try {
-            const statuses = typeof query.status === "string"
-              ? query.status.split(",").map((value) => value.trim()).filter(Boolean)
-              : undefined;
-            const taskTypes = typeof query.task_type === "string"
-              ? query.task_type.split(",").map((value) => value.trim()).filter(Boolean)
-              : undefined;
-            const functionSlug = typeof query.function_slug === "string" && query.function_slug.trim().length > 0
-              ? query.function_slug.trim()
-              : undefined;
-            const functionVersion = typeof query.function_version === "string" && query.function_version.trim().length > 0
-              ? query.function_version.trim()
-              : undefined;
-            const limit = typeof query.limit === "string" ? Number.parseInt(query.limit, 10) : 50;
-            const tasks = await taskRepository.listTasksByProjectFiltered(params.ref, {
-              statuses,
-              taskTypes,
-              functionSlug,
-              functionVersion,
-              onlyDeadLettered: query.dlq === "true",
-              limit: Number.isFinite(limit) ? limit : 50,
-              summary: query.summary === "true",
-            });
-            return tasks;
+            return await taskRepository.listTasksByProjectFiltered(params.ref, parseTaskListQuery(request));
         } catch (err: unknown) {
-                        return status(500, { message: "Failed to retrieve tasks", code: "500", details: (err instanceof Error ? err.message : String(err)) });
+            if (err instanceof InvalidTaskListQueryError) {
+                return status(400, { message: err.message, code: "TASK_LIST_QUERY_INVALID" });
+            }
+            return status(500, { message: "Failed to retrieve tasks", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
     }, {
         query: t.Optional(t.Object({
@@ -518,6 +500,8 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             task_type: t.Optional(t.String()),
             function_slug: t.Optional(t.String()),
             function_version: t.Optional(t.String()),
+            correlation_id: t.Optional(t.String()),
+            business_task_id: t.Optional(t.String()),
             dlq: t.Optional(t.String()),
             limit: t.Optional(t.String()),
             summary: t.Optional(t.String()),
@@ -535,20 +519,21 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             return status(500, { message: "Failed to retrieve background task settings", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
     }, { detail: { tags: ["tasks"], summary: "Get background task settings" } })
-    .get("/dlq", async ({ params, query }) => {
+    .get("/dlq", async ({ params, request }) => {
         try {
-            const tasks = await taskRepository.listTasksByProjectFiltered(params.ref, {
-                onlyDeadLettered: true,
-                limit: 100,
-                summary: query.summary === "true",
-            });
-            return tasks;
+            return await taskRepository.listTasksByProjectFiltered(params.ref, parseTaskListQuery(request, true));
         } catch (err: unknown) {
+            if (err instanceof InvalidTaskListQueryError) {
+                return status(400, { message: err.message, code: "TASK_LIST_QUERY_INVALID" });
+            }
             return status(500, { message: "Failed to retrieve DLQ tasks", code: "500", details: (err instanceof Error ? err.message : String(err)) });
         }
     }, {
         query: t.Optional(t.Object({
             summary: t.Optional(t.String()),
+            correlation_id: t.Optional(t.String()),
+            business_task_id: t.Optional(t.String()),
+            limit: t.Optional(t.String()),
         })),
         detail: { tags: ["tasks"], summary: "List dead-lettered tasks" },
     })
