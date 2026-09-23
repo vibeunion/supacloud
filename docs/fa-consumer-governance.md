@@ -110,3 +110,7 @@ FA upgrade additionally requires its stack, frontend typecheck, function bundle,
 build and standalone gates, plus approved PostgreSQL and live SupAuth acceptance.
 Passing fake-backed consumer tests does not establish database behavior or
 publication/deployment status.
+
+The candidate gate does not prescribe server-side rendering. FA may keep its
+existing CSR/SPA or SvelteKit topology; only the trusted command, database and
+worker boundaries are evaluated where the migrated operation needs them.

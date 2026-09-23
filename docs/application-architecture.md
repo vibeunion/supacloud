@@ -61,6 +61,13 @@ organization profile or change the selected profile for new applications:
 public web applications currently use `web-nuxt`, while internal operations
 and backoffice applications use `admin-svadmin`.
 
+Rendering mode is also an application choice. SupaCloud migration does not
+require SSR: an existing CSR/SPA, SvelteKit client-rendered, Nuxt client-rendered,
+static-hosted, edge-rendered, or trusted-server arrangement may remain in place.
+Migration checks must preserve the selected topology and only require a trusted
+server boundary for operations that genuinely need service credentials,
+transactions, or durable side effects.
+
 - **Web surface** owns browser and SSR route composition, assets, client state,
   and optional framework-specific adapters or BFF handlers. SvelteKit, Nuxt,
   or another selected frontend framework may implement this layer.
