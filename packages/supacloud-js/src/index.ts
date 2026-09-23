@@ -770,10 +770,16 @@ function decodeQueueMessage(value: unknown): SupaCloudQueueMessage {
   const record = responseRecord(value, "queue message");
   const messageValue = record.message ?? record.payload;
   const message = jsonValue(messageValue);
+  const rawId = record.id ?? record.msg_id;
+  const id = typeof rawId === "string" && rawId.length > 0
+    ? rawId
+    : normalizeMessageId(rawId);
+  const msgId = normalizeMessageId(record.msg_id ?? record.id);
+  if (!id || !msgId) throw new Error("Invalid queue message response: msg_id is required");
   return {
     ...record,
-    id: responseString(record, "id", "queue message"),
-    msg_id: responseString(record, "msg_id", "queue message"),
+    id,
+    msg_id: msgId,
     message,
     payload: message,
   };

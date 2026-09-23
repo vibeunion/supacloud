@@ -237,15 +237,15 @@ describe("@supacloud/js", () => {
       sleep_seconds: 45,
       n: 1,
     }));
-    expect(sent).toMatchObject({ msg_id: 101, queue_name: "emails", status: "pending" });
-    expect(JSON.stringify(sentBatch.map((message) => message.msg_id))).toBe(JSON.stringify([102, 103]));
-    expect(read[0]).toMatchObject({ msg_id: 104, payload: { hello: "world" }, status: "leased" });
-    expect(received).toMatchObject({ msg_id: 104, payload: { hello: "world" } });
-    expect(popped).toMatchObject({ msg_id: 105, payload: { popped: true }, status: "deleted" });
-    expect(archived).toMatchObject({ msg_id: 104, status: "archived", success: true });
-    expect(acked).toMatchObject({ msg_id: 104, status: "archived", success: true });
-    expect(failed).toMatchObject({ msg_id: 104, status: "archived", success: true });
-    expect(deleted).toMatchObject({ msg_id: 104, status: "deleted", success: true });
+    expect(sent).toMatchObject({ msg_id: "101", queue_name: "emails", status: "pending" });
+    expect(JSON.stringify(sentBatch.map((message) => message.msg_id))).toBe(JSON.stringify(["102", "103"]));
+    expect(read[0]).toMatchObject({ msg_id: "104", payload: { hello: "world" }, status: "leased" });
+    expect(received).toMatchObject({ msg_id: "104", payload: { hello: "world" } });
+    expect(popped).toMatchObject({ msg_id: "105", payload: { popped: true }, status: "deleted" });
+    expect(archived).toMatchObject({ msg_id: "104", status: "archived", success: true });
+    expect(acked).toMatchObject({ msg_id: "104", status: "archived", success: true });
+    expect(failed).toMatchObject({ msg_id: "104", status: "archived", success: true });
+    expect(deleted).toMatchObject({ msg_id: "104", status: "deleted", success: true });
   });
 
   test("queue management extensions use management-api requests with bearer auth", async () => {
