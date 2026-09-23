@@ -21,7 +21,7 @@ export function captureTaskListFilters(value: unknown): TaskListFilters {
     throw new InvalidTaskListInputError();
   }
   const data: Record<string, unknown> = {};
-  const allowed = ["statuses", "taskTypes", "functionSlug", "functionVersion", "onlyDeadLettered", "limit", "summary"];
+  const allowed = ["statuses", "taskTypes", "functionSlug", "functionVersion", "correlationId", "businessTaskId", "onlyDeadLettered", "limit", "summary"];
   for (const key of Reflect.ownKeys(value)) {
     if (typeof key !== "string" || !allowed.includes(key)) throw new InvalidTaskListInputError();
     const property = Object.getOwnPropertyDescriptor(value, key);
@@ -60,6 +60,8 @@ export function captureTaskListFilters(value: unknown): TaskListFilters {
     ...(taskTypes === undefined ? {} : { taskTypes }),
     ...(data.functionSlug === undefined ? {} : { functionSlug: taskListText(data.functionSlug) }),
     ...(data.functionVersion === undefined ? {} : { functionVersion: taskListText(data.functionVersion) }),
+    ...(data.correlationId === undefined ? {} : { correlationId: taskListText(data.correlationId) }),
+    ...(data.businessTaskId === undefined ? {} : { businessTaskId: taskListText(data.businessTaskId) }),
     onlyDeadLettered, limit, summary: boolean(data.summary),
   };
 }

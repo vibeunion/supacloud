@@ -349,6 +349,9 @@ describe("sdkProxyRoutes functions proxy", () => {
           "Content-Type": "application/json",
           "x-project-ref": "proj_1",
           "x-supacloud-idempotency-key": "aorist:user_1:crop-img_1",
+          "x-supacloud-correlation-id": "workflow-123",
+          "x-supacloud-business-task-id": "fa-task-456",
+          "x-supacloud-task-metadata": JSON.stringify({ source: "fa" }),
           apikey: "anon",
           authorization: "Bearer jwt-token",
         },
@@ -360,6 +363,9 @@ describe("sdkProxyRoutes functions proxy", () => {
       expect(enqueueSpy).toHaveBeenCalledTimes(1);
       expect(enqueueSpy.mock.calls[0]?.[0]).toMatchObject({
         idempotencyKey: "aorist:user_1:crop-img_1",
+        correlationId: "workflow-123",
+        businessTaskId: "fa-task-456",
+        metadata: { source: "fa" },
       });
     });
   });
