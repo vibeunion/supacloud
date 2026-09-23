@@ -57,6 +57,151 @@ async function database(projectRef: string) {
   return getProjectDb(readPgmqProjectDatabase(project, projectRef));
 }
 
+interface PgflowObjects {
+  runs: boolean;
+  steps: boolean;
+  stepTasks: boolean;
+  installation: boolean;
+  control: boolean;
+  legacyState: boolean;
+}
+
+async function readPgflowObjects(db: ReturnType<typeof getProjectDb>): Promise<PgflowObjects> {
+  const [objects] = await db<PgflowObjects[]>`
+    SELECT
+      to_regclass('pgflow.runs') IS NOT NULL AS runs,
+      to_regclass('pgflow.step_states') IS NOT NULL AS steps,
+      to_regclass('pgflow.step_tasks') IS NOT NULL AS "stepTasks",
+      to_regclass('supacloud_worker.installation') IS NOT NULL AS installation,
+      to_regclass('supacloud_worker.control') IS NOT NULL AS control,
+      to_regclass('pgflow._supacloud_state') IS NOT NULL AS "legacyState"
+  `;
+  return objects ?? {
+    runs: false,
+    steps: false,
+    stepTasks: false,
+    installation: false,
+    control: false,
+    legacyState: false,
+  };
+}
+
+async function hasManagedPgflow(db: ReturnType<typeof getProjectDb>, projectRef: string): Promise<boolean> {
+  const objects = await readPgflowObjects(db);
+  if (!objects.runs || !objects.steps || !objects.stepTasks) return false;
+
+  if (objects.installation) {
+    const [binding] = await db`
+      SELECT project_ref, engine_version
+      FROM supacloud_worker.installation
+      WHERE singleton
+    `;
+    if (!binding || binding.project_ref !== projectRef || binding.engine_version !== "0.16.0") return false;
+    if (objects.control) {
+      const [control] = await db`SELECT enabled FROM supacloud_worker.control WHERE singleton`;
+      if (!control) return false;
+    }
+    return true;
+  }
+
+  // FA's opt-in runtime predates the platform installation table. Its
+  // database is already project-scoped, so the managed state marker is the
+  // only binding available to the read-only observer.
+  if (objects.legacyState) {
+    const [state] = await db`
+      SELECT version
+      FROM pgflow._supacloud_state
+      WHERE singleton
+    `;
+    return state?.version === "0.16.0";
+  }
+
+  return false;
+}
+
+async function readNativeTasks(
+  db: ReturnType<typeof getProjectDb>,
+  projectRef: string,
+  filters: PgflowTaskFilters,
+  runId?: string,
+): Promise<PgflowTask[]> {
+  const statusClause = filters.statuses === undefined
+    ? db`TRUE`
+    : db`(
+        CASE r.status
+          WHEN 'completed' THEN 'succeeded'
+          WHEN 'failed' THEN 'failed'
+          ELSE CASE
+            WHEN task_stats.has_started THEN 'running'
+            WHEN task_stats.has_retry THEN 'retry_scheduled'
+            WHEN NOT coalesce(task_stats.has_attempted, false) THEN 'pending'
+            ELSE 'running'
+          END
+        END
+      ) = ANY(${db.array(filters.statuses, "TEXT")})`;
+  const runClause = runId === undefined ? db`TRUE` : db`r.run_id = ${runId}::uuid`;
+  return db<PgflowTask[]>`
+    SELECT
+      'pgflow:' || r.run_id::text AS id,
+      ${projectRef}::text AS project_ref,
+      'pgflow'::text AS task_type,
+      CASE r.status
+        WHEN 'completed' THEN 'succeeded'
+        WHEN 'failed' THEN 'failed'
+        ELSE CASE
+          WHEN task_stats.has_started THEN 'running'
+          WHEN task_stats.has_retry THEN 'retry_scheduled'
+          WHEN NOT coalesce(task_stats.has_attempted, false) THEN 'pending'
+          ELSE 'running'
+        END
+      END AS status,
+      jsonb_build_object(
+        'kind', 'pgflow',
+        'version', '0.16.0',
+        'definition', r.flow_slug,
+        'run_id', r.run_id,
+        'native_status', r.status
+      ) AS executor,
+      jsonb_build_object('cancel', false, 'retry', false) AS capabilities,
+      CASE
+        WHEN r.status = 'started' AND task_stats.permanently_stalled
+          THEN 'PGFLOW_PERMANENTLY_STALLED'
+        ELSE NULL
+      END AS blocked_reason,
+      steps.total_steps,
+      steps.finished_steps,
+      r.started_at AS created_at,
+      r.started_at,
+      coalesce(r.completed_at, r.failed_at) AS completed_at,
+      greatest(r.completed_at, r.failed_at, r.started_at, task_stats.updated_at, steps.updated_at) AS updated_at,
+      CASE WHEN r.status = 'failed' THEN 'PGFLOW_RUN_FAILED' ELSE NULL END AS error,
+      NULL::jsonb AS result
+    FROM pgflow.runs r
+    CROSS JOIN LATERAL (
+      SELECT
+        count(*)::int AS total_steps,
+        count(*) FILTER (WHERE s.status IN ('completed', 'skipped'))::int AS finished_steps,
+        max(greatest(s.created_at, s.started_at, s.completed_at, s.failed_at)) AS updated_at
+      FROM pgflow.step_states s
+      WHERE s.run_id = r.run_id
+    ) steps
+    CROSS JOIN LATERAL (
+      SELECT
+        bool_or(t.status = 'started') AS has_started,
+        bool_or(t.status = 'queued' AND t.attempts_count > 0) AS has_retry,
+        bool_or(t.attempts_count > 0) AS has_attempted,
+        false AS permanently_stalled,
+        max(greatest(t.queued_at, t.started_at, t.completed_at, t.failed_at)) AS updated_at
+      FROM pgflow.step_tasks t
+      WHERE t.run_id = r.run_id
+    ) task_stats
+    WHERE ${runClause}
+      AND ${statusClause}
+    ORDER BY r.started_at DESC, r.run_id DESC
+    LIMIT ${Math.min(filters.limit, 200)}
+  `;
+}
+
 export const pgflowTaskService = {
   async list(
     projectRef: string,
@@ -67,13 +212,16 @@ export const pgflowTaskService = {
       const [installed] = await db<
         { ready: boolean }[]
       >`SELECT to_regclass('supacloud_worker.tasks') IS NOT NULL AS ready`;
-      if (!installed?.ready) return [];
-      return await db<PgflowTask[]>`
-      SELECT * FROM supacloud_worker.tasks
-      WHERE project_ref=${projectRef}
-        AND (${filters.statuses === undefined} OR status=ANY(${db.array(filters.statuses ?? [], "TEXT")}))
-      ORDER BY created_at DESC, id DESC LIMIT ${Math.min(filters.limit, 200)}
-    `;
+      if (installed?.ready) {
+        return await db<PgflowTask[]>`
+          SELECT * FROM supacloud_worker.tasks
+          WHERE project_ref=${projectRef}
+            AND (${filters.statuses === undefined} OR status=ANY(${db.array(filters.statuses ?? [], "TEXT")}))
+          ORDER BY created_at DESC, id DESC LIMIT ${Math.min(filters.limit, 200)}
+        `;
+      }
+      if (!await hasManagedPgflow(db, projectRef)) return [];
+      return await readNativeTasks(db, projectRef, filters);
     } catch {
       throw new PgflowTaskReadError();
     }
@@ -85,10 +233,14 @@ export const pgflowTaskService = {
       const [installed] = await db<
         { ready: boolean }[]
       >`SELECT to_regclass('supacloud_worker.tasks') IS NOT NULL AS ready`;
-      if (!installed?.ready) return null;
-      const [task] = await db<PgflowTask[]>`
-      SELECT * FROM supacloud_worker.tasks WHERE project_ref=${projectRef} AND id=${id}
-    `;
+      if (installed?.ready) {
+        const [task] = await db<PgflowTask[]>`
+          SELECT * FROM supacloud_worker.tasks WHERE project_ref=${projectRef} AND id=${id}
+        `;
+        return task ?? null;
+      }
+      if (!await hasManagedPgflow(db, projectRef)) return null;
+      const [task] = await readNativeTasks(db, projectRef, { limit: 1 }, id.slice("pgflow:".length));
       return task ?? null;
     } catch {
       throw new PgflowTaskReadError();
