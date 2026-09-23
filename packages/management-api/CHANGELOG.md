@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.85.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.84.0...management-api-v0.85.0) (2026-09-23)
+
+
+### Features
+
+* expose application task links for background execution ([#1406](https://github.com/vibeunion/supacloud/issues/1406)) ([24995b1](https://github.com/vibeunion/supacloud/commit/24995b169cfe81888bb187c8f2e6f0775e816d62))
+
 ## [0.84.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.83.0...management-api-v0.84.0) (2026-09-22)
 
 

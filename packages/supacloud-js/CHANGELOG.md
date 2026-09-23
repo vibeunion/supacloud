@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.32.0...supacloud-js-v0.33.0) (2026-09-23)
+
+
+### Features
+
+* expose application task links for background execution ([#1406](https://github.com/vibeunion/supacloud/issues/1406)) ([24995b1](https://github.com/vibeunion/supacloud/commit/24995b169cfe81888bb187c8f2e6f0775e816d62))
+
 ## [0.32.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.31.0...supacloud-js-v0.32.0) (2026-09-19)
 
 
