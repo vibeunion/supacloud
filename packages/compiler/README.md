@@ -96,6 +96,24 @@ protocol migration are documented in `docs/fa-consumer-governance.md` in the
 repository. `context <module> --json` reports `routeContracts` and standalone
 command execution plans; these are declarations and obligations, not runtime proof.
 
+## Migration Assessment
+
+`migration-assess` creates a local, read-only compatibility report from the
+installed tested tuple, generated contract manifest, compiler drift checks and
+an optional OpenAPI baseline/current pair:
+
+```bash
+bunx supacloud-compiler migration-assess --json \
+  --baseline-openapi artifacts/openapi-baseline.json \
+  --current-openapi artifacts/openapi-current.json
+```
+
+The report distinguishes compatible changes, review items, breaking changes and
+evidence that is not yet proven. It records artifact hashes and never writes
+files, databases or remote environments. Rendering is explicitly independent:
+CSR/SPA, SvelteKit, Nuxt, SSR, edge and trusted-server arrangements are valid;
+SSR is never a migration prerequisite.
+
 SupaCloud 应用静态编译器：读取 `@supacloud/app` 装饰器元数据的原生 TypeScript AST，构建 ApplicationGraph，做静态校验，并生成**无反射、无容器**的工厂代码与 manifest。
 
 本包不依赖 `@supacloud/app`：AST 只按装饰器名匹配（`Module`/`Injectable`/`Inject`/`Command`/`Query`/`Controller`/`Get`/`Post`/`Put`/`Patch`/`Delete`/`defineModule`/`InjectionToken`），不校验 import 来源。

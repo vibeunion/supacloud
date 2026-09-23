@@ -57,7 +57,10 @@ test('release order and preparation cover every package using local command depe
   const app = workflow.indexOf('name: Publish app framework');
   const svelte = workflow.indexOf('name: Publish Svelte lifecycle');
   const elysia = workflow.indexOf('name: Publish elysia adapter');
+  const cli = workflow.indexOf('name: Publish cli to NPM');
+  const admin = workflow.indexOf('name: Publish admin to NPM');
   assert.ok(contracts > 0 && commands > contracts && database > commands && app > database && svelte > contracts && elysia > database);
+  assert.ok(cli > 0 && admin > cli, 'admin must publish after its CLI dependency');
   assert.ok(contracts < workflow.indexOf('name: Publish supacloud-js'));
   for (const name of ['admin', 'commands', 'app', 'app-svelte', 'db', 'elysia', 'supacloud-js']) {
     const block = workflow.split(`working-directory: packages/${name}\n`)[1]?.split('\n      - name:')[0];

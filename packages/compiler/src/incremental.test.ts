@@ -40,6 +40,20 @@ describe("createIncrementalCompiler", () => {
     expect(fourth.written).toEqual([]);
   });
 
+  test("生成 OpenAPI 选项变化不会复用旧缓存", async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), "supacloud-compiler-openapi-cache-"));
+    await writeFixtureProject(rootDir, GOOD_PROJECT_FILES);
+    const outDir = join(rootDir, "generated");
+    const compiler = createIncrementalCompiler();
+    const first = await compiler.compile({ rootDir, outDir, generateOpenApi: false });
+    expect(first.stats.cacheHit).toBe(false);
+    expect(first.written).not.toContain(join(outDir, "openapi.ts"));
+
+    const second = await compiler.compile({ rootDir, outDir, generateOpenApi: true });
+    expect(second.stats.cacheHit).toBe(false);
+    expect(second.written).toContain(join(outDir, "openapi.ts"));
+  });
+
   test("模块依赖图增量缓存：单模块修改仅重解析受影响模块并复用未受影响模块节点", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "supacloud-compiler-cache-"));
     await writeFixtureProject(rootDir, GOOD_PROJECT_FILES);

@@ -24,6 +24,8 @@ export interface ContractManifest {
     permission?: string;
     requestSchemas: Partial<Record<"body" | "params" | "query" | "headers" | "cookie", string>>;
     responseSchema?: string;
+    /** Status-aware response schemas; legacy responseSchema remains for compatibility. */
+    responseSchemas?: Record<string, string>;
     evidence?: string;
   }>;
   permissions: string[];
@@ -91,6 +93,11 @@ export function buildContractManifest(
               .flatMap((key) => route[key] === undefined ? [] : [[key, route[key]] as const]),
           ),
           ...(route.response === undefined ? {} : { responseSchema: route.response }),
+          ...(route.responses === undefined ? {} : {
+            responseSchemas: Object.fromEntries(
+              Object.entries(route.responses).sort(([left], [right]) => left.localeCompare(right)),
+            ),
+          }),
           ...(route.contract?.evidence === undefined ? {} : { evidence: route.contract.evidence }),
         });
       }

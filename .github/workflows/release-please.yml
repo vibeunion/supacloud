@@ -448,16 +448,6 @@ jobs:
           bun run check
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
-      - name: Publish admin to NPM
-        if: ${{ always() && (needs.release-please.outputs.admin_released == 'true' || inputs.recover_npm == true) }}
-        working-directory: packages/admin
-        run: |
-          node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
-          bun install --lockfile-only --registry https://registry.npmjs.org
-          bun install --frozen-lockfile
-          bun run build
-          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
-
       - name: Publish function adapter to NPM
         if: ${{ always() && (needs.release-please.outputs.function_adapter_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/function-adapter
@@ -560,6 +550,18 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/sync-compiler-dependency.mjs"
           bun install --lockfile-only --registry https://registry.npmjs.org
           bun install --frozen-lockfile --registry https://registry.npmjs.org
+          bun run build
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
+      # Admin consumes the published CLI package. Keep it after CLI so a
+      # same-run release never waits for a dependency that has not published.
+      - name: Publish admin to NPM
+        if: ${{ always() && (needs.release-please.outputs.admin_released == 'true' || inputs.recover_npm == true) }}
+        working-directory: packages/admin
+        run: |
+          node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
+          bun install --lockfile-only --registry https://registry.npmjs.org
+          bun install --frozen-lockfile
           bun run build
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 

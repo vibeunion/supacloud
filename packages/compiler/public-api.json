@@ -39,6 +39,11 @@
       "signature": "export interface AspectRefNode {\n    file?: string;\n    name: string;\n    expression: string;\n    importPath?: string;\n    importModule?: string;\n}"
     },
     {
+      "name": "assessMigration",
+      "kind": "value",
+      "signature": "export declare function assessMigration(options: MigrationAssessmentOptions): Promise<MigrationAssessmentResult>;"
+    },
+    {
       "name": "buildContractManifest",
       "kind": "value",
       "signature": "export declare function buildContractManifest(graph: ApplicationGraph, artifacts: Pick<ContractManifest[\"artifacts\"], \"client\" | \"openapi\" | \"permissions\">): ContractManifest;"
@@ -126,7 +131,7 @@
     {
       "name": "ContractManifest",
       "kind": "type",
-      "signature": "export interface ContractManifest {\n    version: 1;\n    commands: Array<{\n        name: string;\n        className: string;\n        module: string;\n        permission?: string;\n        rpc?: string;\n        transaction: \"required\" | \"none\";\n        idempotency: \"required\" | \"none\";\n        auditEvent?: string;\n    }>;\n    queries: Array<{\n        name: string;\n        className: string;\n        module: string;\n    }>;\n    routes: Array<{\n        method: string;\n        path: string;\n        module: string;\n        controller: string;\n        handler: string;\n        command?: string;\n        permission?: string;\n        requestSchemas: Partial<Record<\"body\" | \"params\" | \"query\" | \"headers\" | \"cookie\", string>>;\n        responseSchema?: string;\n        evidence?: string;\n    }>;\n    permissions: string[];\n    rpc: Array<{\n        command: string;\n        adapter: string;\n    }>;\n    events: Array<{\n        name: string;\n        source: string;\n        command: string;\n    }>;\n    fixtures: string[];\n    artifacts: {\n        client: boolean;\n        openapi: boolean;\n        permissions: boolean;\n        sdk: \"generated-client\";\n        openapiDocument: \"generated\";\n        permissionManifest: \"generated\";\n    };\n}"
+      "signature": "export interface ContractManifest {\n    version: 1;\n    commands: Array<{\n        name: string;\n        className: string;\n        module: string;\n        permission?: string;\n        rpc?: string;\n        transaction: \"required\" | \"none\";\n        idempotency: \"required\" | \"none\";\n        auditEvent?: string;\n    }>;\n    queries: Array<{\n        name: string;\n        className: string;\n        module: string;\n    }>;\n    routes: Array<{\n        method: string;\n        path: string;\n        module: string;\n        controller: string;\n        handler: string;\n        command?: string;\n        permission?: string;\n        requestSchemas: Partial<Record<\"body\" | \"params\" | \"query\" | \"headers\" | \"cookie\", string>>;\n        responseSchema?: string;\n        responseSchemas?: Record<string, string>;\n        evidence?: string;\n    }>;\n    permissions: string[];\n    rpc: Array<{\n        command: string;\n        adapter: string;\n    }>;\n    events: Array<{\n        name: string;\n        source: string;\n        command: string;\n    }>;\n    fixtures: string[];\n    artifacts: {\n        client: boolean;\n        openapi: boolean;\n        permissions: boolean;\n        sdk: \"generated-client\";\n        openapiDocument: \"generated\";\n        permissionManifest: \"generated\";\n    };\n}"
     },
     {
       "name": "ControllerNode",
@@ -334,6 +339,11 @@
       "signature": "export declare function formatGraph(graph: ApplicationGraph): string;"
     },
     {
+      "name": "formatMigrationAssessment",
+      "kind": "value",
+      "signature": "export declare function formatMigrationAssessment(result: MigrationAssessmentResult): string;"
+    },
+    {
       "name": "formatOpenApiDiff",
       "kind": "value",
       "signature": "export declare function formatOpenApiDiff(result: OpenApiDiffResult): string;"
@@ -427,6 +437,31 @@
       "name": "migrateRouteResponse",
       "kind": "value",
       "signature": "declare function migrateRouteResponse(source: string, fileName: string): SourceMigrationResult;"
+    },
+    {
+      "name": "MigrationAssessmentFinding",
+      "kind": "type",
+      "signature": "export interface MigrationAssessmentFinding {\n    code: string;\n    status: MigrationAssessmentStatus;\n    message: string;\n    evidence?: string;\n    remediation?: string;\n}"
+    },
+    {
+      "name": "MigrationAssessmentOptions",
+      "kind": "type",
+      "signature": "export interface MigrationAssessmentOptions {\n    projectDir: string;\n    compile: CompileOptions;\n    baselineOpenApiPath?: string;\n    currentOpenApiPath?: string;\n    renderMode?: MigrationRenderMode;\n}"
+    },
+    {
+      "name": "MigrationAssessmentResult",
+      "kind": "type",
+      "signature": "export interface MigrationAssessmentResult {\n    version: 1;\n    ok: boolean;\n    status: MigrationAssessmentStatus;\n    readOnly: true;\n    writesPerformed: false;\n    rendering: {\n        selected: MigrationRenderMode;\n        ssrRequired: false;\n        supportedModes: readonly [\"browser\", \"ssr\", \"edge\", \"trusted-server\"];\n        guidance: string;\n    };\n    dependencies: {\n        expected: Readonly<Record<string, string>>;\n        problems: string[];\n    };\n    compiler: {\n        upToDate: boolean;\n        diagnostics: Diagnostic[];\n        mismatches: string[];\n    };\n    artifacts: {\n        contractsManifest: {\n            path: string;\n            present: boolean;\n            sha256?: string;\n            version?: number;\n            commands?: number;\n            routes?: number;\n            permissions?: number;\n        };\n        openApi?: {\n            baselinePath: string;\n            baselineSha256: string;\n            currentPath: string;\n            currentSha256: string;\n            diff: OpenApiDiffResult;\n        };\n    };\n    findings: MigrationAssessmentFinding[];\n}"
+    },
+    {
+      "name": "MigrationAssessmentStatus",
+      "kind": "type",
+      "signature": "export type MigrationAssessmentStatus = \"compatible\" | \"needs-review\" | \"breaking\" | \"unsupported\" | \"not-proven\";"
+    },
+    {
+      "name": "MigrationRenderMode",
+      "kind": "type",
+      "signature": "export type MigrationRenderMode = \"unspecified\" | \"browser\" | \"ssr\" | \"edge\" | \"trusted-server\";"
     },
     {
       "name": "MODULAR_MONOLITH_RULES",
