@@ -48,6 +48,18 @@ describe("TaskRepository query builders", () => {
     expect(values).toEqual(["proj_1", "pending", "leased", "queue:emails", 20]);
   });
 
+  test("buildTaskListQuery filters application task links", () => {
+    const { sqlText, values } = buildTaskListQuery("proj_1", {
+      correlationId: "workflow-123",
+      businessTaskId: "fa-task-456",
+      limit: 4,
+    });
+
+    expect(sqlText).toContain("correlation_id = $2");
+    expect(sqlText).toContain("business_task_id = $3");
+    expect(values).toEqual(["proj_1", "workflow-123", "fa-task-456", 4]);
+  });
+
   test("buildTaskListQuery rejects conflicting DLQ status filters", () => {
     expect(() => buildTaskListQuery("proj_1", {
       statuses: ["failed"], onlyDeadLettered: true,

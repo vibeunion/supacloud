@@ -119,6 +119,8 @@ export type SupaCloudTaskListFilters = {
   status?: string | string[];
   taskType?: string | string[];
   functionSlug?: string;
+  correlationId?: string;
+  businessTaskId?: string;
   dlq?: boolean;
   limit?: number;
 };
@@ -390,7 +392,7 @@ function createQueryString(filters: SupaCloudTaskListFilters = {}): string {
   } catch {
     throw new Error("Invalid task list filters");
   }
-  if (Object.keys(captured).some(key => !["status", "taskType", "functionSlug", "dlq", "limit"].includes(key))) {
+  if (Object.keys(captured).some(key => !["status", "taskType", "functionSlug", "correlationId", "businessTaskId", "dlq", "limit"].includes(key))) {
     throw new Error("Invalid task list filters");
   }
   const text = (value: unknown, commaAllowed = false): string => {
@@ -410,6 +412,8 @@ function createQueryString(filters: SupaCloudTaskListFilters = {}): string {
   if (Object.hasOwn(captured, "status")) params.set("status", values(captured.status).join(","));
   if (Object.hasOwn(captured, "taskType")) params.set("task_type", values(captured.taskType).join(","));
   if (Object.hasOwn(captured, "functionSlug")) params.set("function_slug", text(captured.functionSlug, true));
+  if (Object.hasOwn(captured, "correlationId")) params.set("correlation_id", text(captured.correlationId));
+  if (Object.hasOwn(captured, "businessTaskId")) params.set("business_task_id", text(captured.businessTaskId));
   if (Object.hasOwn(captured, "dlq")) {
     if (typeof captured.dlq !== "boolean") throw new Error("Invalid task list filters");
     if (captured.dlq) params.set("dlq", "true");

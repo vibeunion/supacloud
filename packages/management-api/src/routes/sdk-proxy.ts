@@ -20,6 +20,8 @@ import { GOTRUE_USER_ID_PATTERN } from "../utils/project-user-lifecycle";
 import { beginRequestObservability } from "../utils/observability";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
+const MAX_TASK_LINK_ID_BYTES = 255;
+const MAX_TASK_METADATA_BYTES = 64 * 1024;
 type SdkProxySql = (
     strings: TemplateStringsArray,
     ...values: unknown[]
@@ -251,6 +253,42 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
         );
     }
 
+    const trace = beginRequestObservability(request);
+    const traceId = trace.traceId;
+    const suppliedCorrelationId = request.headers.get("x-supacloud-correlation-id");
+    if (suppliedCorrelationId !== null && /[\u0000-\u001f\u007f]/.test(suppliedCorrelationId)) {
+        return Response.json({ message: "Invalid correlation ID" }, { status: 400 });
+    }
+    const correlationCandidate = suppliedCorrelationId === null || suppliedCorrelationId.length === 0
+        ? trace.correlationId
+        : suppliedCorrelationId;
+    const correlationId = Buffer.byteLength(correlationCandidate, "utf8") > MAX_TASK_LINK_ID_BYTES
+        ? traceId
+        : correlationCandidate;
+    const businessTaskId = request.headers.get("x-supacloud-business-task-id");
+    if (businessTaskId !== null && (businessTaskId.length === 0
+        || /[\u0000-\u001f\u007f]/.test(businessTaskId)
+        || Buffer.byteLength(businessTaskId, "utf8") > MAX_TASK_LINK_ID_BYTES)) {
+        return Response.json({ message: "Invalid business task ID" }, { status: 400 });
+    }
+    const metadataHeader = request.headers.get("x-supacloud-task-metadata");
+    let metadata: Record<string, unknown> | null = null;
+    if (metadataHeader !== null) {
+        if (Buffer.byteLength(metadataHeader, "utf8") > MAX_TASK_METADATA_BYTES) {
+            return Response.json({ message: "Task metadata exceeds the supported size" }, { status: 400 });
+        }
+        let parsedMetadata: unknown;
+        try {
+            parsedMetadata = JSON.parse(metadataHeader);
+        } catch {
+            return Response.json({ message: "Task metadata must be valid JSON" }, { status: 400 });
+        }
+        if (!parsedMetadata || typeof parsedMetadata !== "object" || Array.isArray(parsedMetadata)) {
+            return Response.json({ message: "Task metadata must be a JSON object" }, { status: 400 });
+        }
+        metadata = parsedMetadata as Record<string, unknown>;
+    }
+
     const headers: Record<string, string> = {};
     request.headers.forEach((value, key) => {
         const lower = key.toLowerCase();
@@ -269,8 +307,6 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
         headers[key] = value;
     });
 
-    const trace = beginRequestObservability(request);
-    const traceId = trace.traceId;
     delete headers.tracestate;
     delete headers.baggage;
     headers.traceparent = trace.traceparent;
@@ -306,6 +342,9 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
         maxPayloadBytes,
         idempotencyKey,
         traceId,
+        correlationId,
+        businessTaskId,
+        metadata,
         envelope: {
             trace: { project_ref: ref, traceparent: trace.traceparent, request_id: trace.requestId },
             method: request.method,

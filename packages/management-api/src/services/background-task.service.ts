@@ -42,12 +42,44 @@ export interface EnqueueBackgroundFunctionTaskInput {
   maxPayloadBytes?: number;
   idempotencyKey?: string | null;
   traceId: string;
+  correlationId?: string | null;
+  businessTaskId?: string | null;
+  metadata?: Record<string, unknown> | null;
 }
 
 const DEFAULT_TIMEOUT_SEC = 300;
 const MAX_TIMEOUT_SEC = 900;
 const DEFAULT_MAX_ATTEMPTS = 3;
 const MAX_MAX_ATTEMPTS = 10;
+const MAX_TASK_LINK_ID_BYTES = 255;
+const MAX_TASK_METADATA_BYTES = 64 * 1024;
+
+function captureTaskLinkId(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "string" || value.length === 0
+    || /[\u0000-\u001f\u007f]/.test(value)
+    || Buffer.byteLength(value, "utf8") > MAX_TASK_LINK_ID_BYTES) {
+    throw new InvalidBackgroundInvocationError();
+  }
+  return value;
+}
+
+function captureTaskMetadata(value: unknown): Record<string, unknown> | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (!isRecord(value)) throw new InvalidBackgroundInvocationError();
+  let metadata: unknown;
+  try {
+    metadata = copyTaskJson(value);
+  } catch {
+    throw new InvalidBackgroundInvocationError();
+  }
+  if (!isRecord(metadata) || Buffer.byteLength(JSON.stringify(metadata), "utf8") > MAX_TASK_METADATA_BYTES) {
+    throw new InvalidBackgroundInvocationError();
+  }
+  return metadata;
+}
 
 export class BackgroundTaskIdempotencyConflictError extends ConflictError {
   constructor() {
@@ -99,7 +131,7 @@ function captureEnqueueInput(value: unknown): EnqueueBackgroundFunctionTaskInput
   if (!isRecord(captured)) throw new InvalidBackgroundInvocationError();
   const allowed = new Set([
     "projectRef", "functionSlug", "functionVersion", "envelope", "timeoutSec",
-    "maxAttempts", "maxPayloadBytes", "idempotencyKey", "traceId",
+    "maxAttempts", "maxPayloadBytes", "idempotencyKey", "traceId", "correlationId", "businessTaskId", "metadata",
   ]);
   if (Object.keys(captured).some((key) => !allowed.has(key))) {
     throw new InvalidBackgroundInvocationError();
@@ -107,6 +139,7 @@ function captureEnqueueInput(value: unknown): EnqueueBackgroundFunctionTaskInput
   const {
     projectRef, functionSlug, functionVersion, envelope: rawEnvelope,
     timeoutSec, maxAttempts, maxPayloadBytes, idempotencyKey, traceId,
+    correlationId, businessTaskId, metadata: rawMetadata,
   } = captured;
   if (typeof projectRef !== "string" || projectRef.length === 0
     || typeof functionSlug !== "string" || functionSlug.length === 0
@@ -140,6 +173,9 @@ function captureEnqueueInput(value: unknown): EnqueueBackgroundFunctionTaskInput
     requested_timeout_sec: parsedEnvelope.requested_timeout_sec,
     ...(parsedEnvelope.trace === undefined ? {} : { trace: { ...parsedEnvelope.trace } }),
   };
+  const capturedCorrelationId = captureTaskLinkId(correlationId);
+  const capturedBusinessTaskId = captureTaskLinkId(businessTaskId);
+  const capturedMetadata = captureTaskMetadata(rawMetadata);
   return {
     projectRef,
     functionSlug,
@@ -150,6 +186,9 @@ function captureEnqueueInput(value: unknown): EnqueueBackgroundFunctionTaskInput
     ...(idempotencyKey === undefined ? {} : { idempotencyKey }),
     ...(maxPayloadBytes === undefined ? {} : { maxPayloadBytes }),
     envelope,
+    ...(capturedCorrelationId === undefined ? {} : { correlationId: capturedCorrelationId }),
+    ...(capturedBusinessTaskId === undefined ? {} : { businessTaskId: capturedBusinessTaskId }),
+    ...(capturedMetadata === undefined ? {} : { metadata: capturedMetadata }),
   };
 }
 
@@ -173,6 +212,9 @@ function taskReplayMatches(
     || task.timeout_sec !== timeoutSec
     || task.max_attempts !== maxAttempts
     || task.idempotency_key !== normalizedIdempotencyKey(input.idempotencyKey)
+    || task.correlation_id !== (input.correlationId ?? null)
+    || task.business_task_id !== (input.businessTaskId ?? null)
+    || !isDeepStrictEqual(task.metadata, input.metadata ?? null)
     || task.invoker_user_id !== invokerUserId
     || task.auth_authority_ref !== authAuthorityRef) {
     return false;
@@ -277,8 +319,11 @@ export async function enqueueBackgroundFunctionTask(
           timeout_sec,
           idempotency_key,
           trace_id,
+          correlation_id,
+          business_task_id,
           invoker_user_id,
-          auth_authority_ref
+          auth_authority_ref,
+          metadata
         )
         VALUES (
           ${input.projectRef},
@@ -292,8 +337,11 @@ export async function enqueueBackgroundFunctionTask(
           ${timeoutSec},
           ${idempotencyKey},
           ${input.traceId},
+          ${input.correlationId ?? null},
+          ${input.businessTaskId ?? null},
           ${invokerUserId}::uuid,
-          ${authAuthorityRef}
+          ${authAuthorityRef},
+          ${input.metadata ?? null}
         )
         RETURNING *
       `;

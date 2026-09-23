@@ -515,7 +515,7 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             const filters = parseTaskListQuery(request);
             if (filters.taskTypes?.includes("pgflow")) {
                 if (filters.taskTypes.length !== 1 || filters.functionSlug || filters.functionVersion
-                    || filters.onlyDeadLettered) throw new InvalidTaskListQueryError();
+                    || filters.correlationId || filters.businessTaskId || filters.onlyDeadLettered) throw new InvalidTaskListQueryError();
                 return await pgflowTaskService.list(params.ref, {
                     limit: filters.limit ?? 50,
                     ...(filters.statuses === undefined ? {} : { statuses: filters.statuses }),
@@ -538,6 +538,8 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
             task_type: t.Optional(t.String()),
             function_slug: t.Optional(t.String()),
             function_version: t.Optional(t.String()),
+            correlation_id: t.Optional(t.String()),
+            business_task_id: t.Optional(t.String()),
             dlq: t.Optional(t.String()),
             limit: t.Optional(t.String()),
             summary: t.Optional(t.String()),
@@ -568,6 +570,8 @@ export const taskRoutes = new Elysia({ prefix: "/v1/projects/:ref/tasks" })
     }, {
         query: t.Optional(t.Object({
             summary: t.Optional(t.String()),
+            correlation_id: t.Optional(t.String()),
+            business_task_id: t.Optional(t.String()),
             limit: t.Optional(t.String()),
         })),
         detail: { tags: ["tasks"], summary: "List dead-lettered tasks" },
