@@ -9,6 +9,7 @@
     "noEmit": true
   },
   "include": [
-    "test/consumer-node-next.ts"
+    "test/consumer-node-next.ts",
+    "test/consumer-contracts.ts"
   ]
 }

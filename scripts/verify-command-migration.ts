@@ -36,8 +36,11 @@ for (const name of ["contracts", "commands", "compiler", "db", "app", "app-svelt
   await run(cwd, ["run", "typecheck"]);
   await run(cwd, ["run", "typecheck:test"]);
   if (name === "db" || name === "supacloud-js") await run(cwd, ["-p", "tsconfig.commands.json"], resolve(cwd, "node_modules/.bin/tsc"));
+  // supacloud-js asserts the built export map and browser bundle, so its dist
+  // must exist before tests; other packages keep the source-first test order.
+  if (name === "supacloud-js") await run(cwd, ["run", "build"]);
   await run(cwd, ["test"]);
-  await run(cwd, ["run", "build"]);
+  if (name !== "supacloud-js") await run(cwd, ["run", "build"]);
   if (name === "supacloud-js") await run(cwd, ["run", "typecheck:consumer"]);
 }
 await run(root, ["run", "check:boundaries"]);
