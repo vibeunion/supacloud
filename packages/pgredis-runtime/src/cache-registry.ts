@@ -3,6 +3,7 @@ import { createPgListener, type PgListenerHandle } from "@postgresx/bun-listen";
 import { createBunSqlAdapter } from "@postgresx/noredis/adapters/bun";
 import { createPgKvCache, type PgKvCache, type PgKvCacheListenerFactory, type PgKvCacheNotifyOptions } from "@postgresx/noredis/kv";
 import type { PgSqlLike } from "@postgresx/noredis";
+import { createBudgetedAdapter, createDatabaseBudget, type DatabaseBudget } from "./database-budget";
 import { recordInvalidationPublish, recordTransactionRetry, recordTransactionRetryExhausted } from "./metrics";
 import {
   loadTenantDatabaseConfig,
@@ -114,6 +115,8 @@ export interface TenantCacheRegistryOptions {
   ) => Promise<TenantCacheBackend>;
   /** Overrides how tenant L1 invalidation is published and observed. */
   invalidationTransport?: InvalidationTransport;
+  /** Aggregate ceiling on concurrently held tenant database operations. */
+  maxTotalConnections?: number;
 }
 
 const CACHE_NAMESPACE = "supacloud-edge-runtime";
@@ -345,6 +348,7 @@ async function createPostgresBackend(
   l1MaxEntries: number,
   l1TtlMs: number,
   transport: InvalidationTransport,
+  budget: DatabaseBudget | undefined,
 ): Promise<TenantCacheBackend> {
   const sql = new SQL({
     url: config.databaseUrl,
@@ -353,7 +357,8 @@ async function createPostgresBackend(
     maxLifetime: 3_600,
     connectionTimeout: 10,
   });
-  const adapter = createBunSqlAdapter(sql);
+  const rawAdapter = createBunSqlAdapter(sql);
+  const adapter = budget ? createBudgetedAdapter(rawAdapter, budget) : rawAdapter;
   let listener: PgListenerHandle | null = null;
   let connectedUnsubscribe: (() => void) | null = null;
   const unsubscribeConnected = () => connectedUnsubscribe?.();
@@ -416,10 +421,14 @@ export class TenantCacheRegistry {
   private readonly now: () => number;
   private readonly loadConfig: NonNullable<TenantCacheRegistryOptions["loadConfig"]>;
   private readonly createBackend: NonNullable<TenantCacheRegistryOptions["createBackend"]>;
+  private readonly databaseBudgetState: DatabaseBudget | undefined;
 
   constructor(private readonly options: TenantCacheRegistryOptions) {
     this.now = options.now || Date.now;
     this.loadConfig = options.loadConfig || loadTenantDatabaseConfig;
+    this.databaseBudgetState = options.maxTotalConnections === undefined
+      ? undefined
+      : createDatabaseBudget(options.maxTotalConnections);
     this.createBackend = options.createBackend
       || ((ref, config, connectionsPerTenant, l1MaxEntries, l1TtlMs) => createPostgresBackend(
         ref,
@@ -428,6 +437,7 @@ export class TenantCacheRegistry {
         l1MaxEntries,
         l1TtlMs,
         options.invalidationTransport ?? createNotifyInvalidationTransport(PGREDIS_NOTIFY_CHANNEL),
+        this.databaseBudgetState,
       ));
   }
 
@@ -485,6 +495,12 @@ export class TenantCacheRegistry {
 
   size(): number {
     return this.entries.size;
+  }
+
+  databaseBudgetStats(): { inFlight: number; limit: number } | undefined {
+    return this.databaseBudgetState
+      ? { inFlight: this.databaseBudgetState.inFlight(), limit: this.databaseBudgetState.limit }
+      : undefined;
   }
 
   snapshot(): TenantCacheRegistrySnapshot {

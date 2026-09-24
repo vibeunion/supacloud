@@ -137,6 +137,7 @@ Runtime：
 ```dotenv
 PGREDIS_RUNTIME_INTERNAL_TOKEN=<same-internal-token>
 PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT=2
+PGREDIS_RUNTIME_MAX_TOTAL_CONNECTIONS=256
 PGREDIS_RUNTIME_L1_MAX_ENTRIES=1000
 PGREDIS_RUNTIME_L1_TTL_MS=30000
 PGREDIS_RUNTIME_CLEANUP_INTERVAL_MS=60000
@@ -150,6 +151,18 @@ Docker 部署中，Management API、Edge Runtime 与 `pgredis-runtime` 共享私
 同一内部令牌，并默认监听 `127.0.0.1:9011`，避免与宿主机 Imaginary 的 `9010` 冲突。
 可用 `PGREDIS_RUNTIME_PORT` 覆盖 systemd 端口，但安装器会拒绝已由 Imaginary 占用的 `9010`。
 
+## 连接与并发
+
+每个租户一个 Bun SQL 连接池，`PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT` 是该租户的突发上限；
+Bun 按需开连接，空闲租户通常只占一条。为了避免“多租户 × 每租户上限”在突发时压垮数据库，
+runtime 还有一个**进程级数据库操作预算**：
+
+- `PGREDIS_RUNTIME_MAX_TOTAL_CONNECTIONS`（默认 `MAX_TENANTS × CONNECTIONS_PER_TENANT`，默认
+  256）限制同时持有的租户数据库操作/事务数量。一个事务或一条语句占一个配额，等到可用才执行。
+- 因事务回调直接使用底层事务句柄，配额不会递归获取，不会自锁。
+- 因此可以“上调每租户上限（弹性突发）+ 收紧全局预算（保护数据库）”；不改预算时行为与过去
+  一致（默认预算等于理论最大值）。
+
 ## 可观测性
 
 `GET /internal/v1/admin/metrics`（需内部令牌）返回 Prometheus 文本格式（`text/plain;
@@ -162,6 +175,8 @@ version=0.0.4`），进程内累计，重启后清零：
 - `supacloud_pgredis_transaction_retry_exhausted_total`：重试耗尽的次数
 - `supacloud_pgredis_cross_instance_invalidation`：是否启用跨实例失效（1/0）
 - `supacloud_pgredis_active_tenants` / `supacloud_pgredis_tenant_capacity` / `supacloud_pgredis_l1_max_entries`
+- `supacloud_pgredis_database_operations_in_flight` / `supacloud_pgredis_database_operation_limit`
+  （后者为 0 表示未设置显式预算）
 
 当前不提供 L1 命中率：上游 `PgKvCache.stats()` 只暴露 `l1Size`/`l1Max`，没有命中/未命中
 计数器。需要命中率时要先在上游补齐计数，或在本层代理 L1。

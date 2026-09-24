@@ -343,6 +343,7 @@ describe("pgredis-runtime internal API", () => {
           };
         },
         size() { return 2; },
+        databaseBudgetStats() { return { inFlight: 1, limit: 8 }; },
         snapshot() {
           return {
             activeTenants: 2,
@@ -375,5 +376,7 @@ describe("pgredis-runtime internal API", () => {
     expect(body).toContain('supacloud_pgredis_cache_operations_total{op="get",outcome="ok"} 1');
     expect(body).toContain("supacloud_pgredis_cross_instance_invalidation 0");
     expect(body).toContain("supacloud_pgredis_active_tenants 2");
+    expect(body).toContain("supacloud_pgredis_database_operations_in_flight 1");
+    expect(body).toContain("supacloud_pgredis_database_operation_limit 8");
   });
 });

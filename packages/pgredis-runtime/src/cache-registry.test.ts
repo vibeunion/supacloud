@@ -659,6 +659,8 @@ describe("createTransactionalTenantCache", () => {
       tenantCapacity: 1,
       l1MaxEntries: 1,
       crossInstanceInvalidation: true,
+      databaseInFlight: 0,
+      databaseLimit: 0,
     });
     expect(text).toContain("supacloud_pgredis_transaction_retries_total 1");
     expect(text).toContain("supacloud_pgredis_transaction_retry_exhausted_total 0");
@@ -703,5 +705,32 @@ describe("InvalidationTransport", () => {
       },
     }, "delete", "a");
     expect(queries).toBe(0);
+  });
+});
+
+describe("connection budget", () => {
+  function registryWithBudget(maxTotalConnections?: number): TenantCacheRegistry {
+    return new TenantCacheRegistry({
+      tenantsDir: "/unused",
+      maxTenants: 2,
+      connectionsPerTenant: 2,
+      tenantIdleMs: 10_000,
+      l1MaxEntries: 100,
+      l1TtlMs: 1_000,
+      maxTotalConnections,
+      loadConfig: async () => ({
+        databaseUrl: "postgresql://role_tenant-a:secret@postgres/db",
+        fingerprint: "one",
+      }),
+      createBackend: async () => ({ cache: fakeCache(), async close() {} }),
+    });
+  }
+
+  test("exposes the aggregate database budget when configured", () => {
+    expect(registryWithBudget(3).databaseBudgetStats()).toEqual({ inFlight: 0, limit: 3 });
+  });
+
+  test("reports no budget when unconfigured", () => {
+    expect(registryWithBudget().databaseBudgetStats()).toBeUndefined();
   });
 });

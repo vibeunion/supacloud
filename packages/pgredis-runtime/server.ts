@@ -16,6 +16,7 @@ const registry = new TenantCacheRegistry({
   l1MaxEntries: config.l1MaxEntries,
   l1TtlMs: config.l1TtlMs,
   cleanupBatchSize: config.cleanupBatchSize,
+  maxTotalConnections: config.maxTotalConnections,
   invalidationTransport: config.singleInstance
     ? createLocalInvalidationTransport()
     : createNotifyInvalidationTransport(PGREDIS_NOTIFY_CHANNEL),
