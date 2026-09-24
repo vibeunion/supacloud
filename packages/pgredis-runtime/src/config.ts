@@ -6,6 +6,7 @@ export interface PgredisRuntimeConfig {
   maxRequestBodyBytes: number;
   maxValueBytes: number;
   maxTtlMs: number;
+  maxKeysPerRequest: number;
   maxTenants: number;
   connectionsPerTenant: number;
   tenantIdleMs: number;
@@ -54,6 +55,11 @@ export function loadPgredisRuntimeConfig(
       env.PGREDIS_RUNTIME_MAX_TTL_MS,
       31_536_000_000,
       "PGREDIS_RUNTIME_MAX_TTL_MS",
+    ),
+    maxKeysPerRequest: positiveInteger(
+      env.PGREDIS_RUNTIME_MAX_KEYS_PER_REQUEST,
+      100,
+      "PGREDIS_RUNTIME_MAX_KEYS_PER_REQUEST",
     ),
     maxTenants: positiveInteger(env.PGREDIS_RUNTIME_MAX_TENANTS, 128, "PGREDIS_RUNTIME_MAX_TENANTS"),
     connectionsPerTenant: positiveInteger(

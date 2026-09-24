@@ -11,11 +11,16 @@ import {
 
 export interface TenantCache {
   get<T = unknown>(key: string): Promise<T | null>;
+  mget(keys: readonly string[]): Promise<Map<string, unknown>>;
   set<T = unknown>(
     key: string,
     value: T,
     options?: { ttlMs?: number | null },
   ): Promise<boolean>;
+  mset<T = unknown>(
+    entries: ReadonlyArray<readonly [string, T]>,
+    options?: { ttlMs?: number | null },
+  ): Promise<void>;
   delete(key: string): Promise<boolean>;
   ttl(key: string): Promise<number | null>;
   getset<T>(
@@ -133,6 +138,10 @@ function deserializeJsonValue(value: unknown): unknown {
 
 interface TransactionCache {
   set<T = unknown>(key: string, value: T, options?: { ttlMs?: number | null }): Promise<boolean>;
+  mset<T = unknown>(
+    entries: Iterable<readonly [string, T]>,
+    options?: { ttlMs?: number | null },
+  ): Promise<void>;
   delete(key: string): Promise<boolean>;
   getdel<T = unknown>(key: string): Promise<T | null>;
   clearNamespace(): Promise<number>;
@@ -140,6 +149,7 @@ interface TransactionCache {
 
 interface LocalCache {
   get<T = unknown>(key: string): Promise<T | null>;
+  mget(keys: readonly string[]): Promise<Map<string, unknown>>;
   ttl(key: string): Promise<number | null>;
   invalidate(key: string): void;
   invalidateAll(): void;
@@ -171,11 +181,20 @@ export function createTransactionalTenantCache(
 
   return {
     get: <T = unknown>(key: string) => cache.get<T>(key),
+    mget: (keys: readonly string[]) => cache.mget(keys),
     ttl: (key) => cache.ttl(key),
     async set(key, value, options) {
       const writeAccepted = await transaction((_tx, txCache) => txCache.set(key, value, options));
       cache.invalidate(key);
       return writeAccepted;
+    },
+    async mset<T = unknown>(
+      entries: ReadonlyArray<readonly [string, T]>,
+      options?: { ttlMs?: number | null },
+    ) {
+      if (entries.length === 0) return;
+      await transaction((_tx, txCache) => txCache.mset(entries, options));
+      for (const [key] of entries) cache.invalidate(key);
     },
     async delete(key) {
       const deleted = await transaction((_tx, txCache) => txCache.delete(key));

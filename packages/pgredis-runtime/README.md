@@ -14,8 +14,10 @@ PostgreSQL 核心事务、JSONB、UNLOGGED 表和 LISTEN/NOTIFY；这些扩展�
 边界：
 
 - Edge Worker 只持有请求级 HTTP binding，不创建 PostgreSQL 连接或 L1。
-- v1 只提供 `get`、`set`、`delete`、`ttl`、原子 `getset` 和原子
-  `getdel`；不提供队列、限流或 Redis 协议。
+- v1 只提供 `get`、`set`、`delete`、`ttl`、原子 `getset`、原子
+  `getdel`，以及批量 `mget`/`mset`；不提供队列、限流或 Redis 协议。
+- 批量操作只消耗一次 HTTP 往返：`mget` 为单条 SQL，`mset` 为单个事务；单次请求的键
+  数量由 `PGREDIS_RUNTIME_MAX_KEYS_PER_REQUEST` 限制（默认 100）。
 - Management API 可通过独立内部令牌访问有界管理接口，提供平台/项目状态、
   精确键操作，以及必须匹配项目 Ref 的命名空间清空。Web Console 不直连本服务。
 - PGMQ 仍是 SupaCloud 唯一队列实现，Caddy 仍负责网关限流。

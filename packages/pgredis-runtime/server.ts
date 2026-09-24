@@ -17,6 +17,7 @@ const app = createPgredisRuntimeApp({
   capabilityMaxTtlMs: config.capabilityMaxTtlMs,
   maxValueBytes: config.maxValueBytes,
   maxTtlMs: config.maxTtlMs,
+  maxKeysPerRequest: config.maxKeysPerRequest,
   registry,
 });
 
