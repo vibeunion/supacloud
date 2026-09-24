@@ -30,6 +30,24 @@ describe("loadPgredisRuntimeConfig", () => {
     })).toThrow("PGREDIS_RUNTIME_MAX_KEYS_PER_REQUEST");
   });
 
+  test("parses the single-instance invalidation flag", () => {
+    expect(loadPgredisRuntimeConfig({
+      PGREDIS_RUNTIME_INTERNAL_TOKEN: "x".repeat(32),
+    }).singleInstance).toBeFalse();
+    expect(loadPgredisRuntimeConfig({
+      PGREDIS_RUNTIME_INTERNAL_TOKEN: "x".repeat(32),
+      PGREDIS_RUNTIME_SINGLE_INSTANCE: "true",
+    }).singleInstance).toBeTrue();
+    expect(loadPgredisRuntimeConfig({
+      PGREDIS_RUNTIME_INTERNAL_TOKEN: "x".repeat(32),
+      PGREDIS_RUNTIME_SINGLE_INSTANCE: "0",
+    }).singleInstance).toBeFalse();
+    expect(() => loadPgredisRuntimeConfig({
+      PGREDIS_RUNTIME_INTERNAL_TOKEN: "x".repeat(32),
+      PGREDIS_RUNTIME_SINGLE_INSTANCE: "maybe",
+    })).toThrow("PGREDIS_RUNTIME_SINGLE_INSTANCE");
+  });
+
   test("allows bounded expired-row cleanup tuning", () => {
     const config = loadPgredisRuntimeConfig({
       PGREDIS_RUNTIME_INTERNAL_TOKEN: "x".repeat(32),

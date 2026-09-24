@@ -14,6 +14,7 @@ export interface PgredisRuntimeConfig {
   l1TtlMs: number;
   cleanupIntervalMs: number;
   cleanupBatchSize: number;
+  singleInstance: boolean;
   capabilityMaxTtlMs: number;
 }
 
@@ -24,6 +25,14 @@ function positiveInteger(value: string | undefined, fallback: number, name: stri
     throw new Error(`${name} must be a positive integer`);
   }
   return parsed;
+}
+
+function booleanFlag(value: string | undefined, fallback: boolean, name: string): boolean {
+  if (value === undefined || value.trim() === "") return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true" || normalized === "1") return true;
+  if (normalized === "false" || normalized === "0") return false;
+  throw new Error(`${name} must be a boolean`);
 }
 
 export function loadPgredisRuntimeConfig(
@@ -91,6 +100,11 @@ export function loadPgredisRuntimeConfig(
       env.PGREDIS_RUNTIME_CLEANUP_BATCH_SIZE,
       500,
       "PGREDIS_RUNTIME_CLEANUP_BATCH_SIZE",
+    ),
+    singleInstance: booleanFlag(
+      env.PGREDIS_RUNTIME_SINGLE_INSTANCE,
+      false,
+      "PGREDIS_RUNTIME_SINGLE_INSTANCE",
     ),
     capabilityMaxTtlMs: positiveInteger(
       env.PGREDIS_RUNTIME_CAPABILITY_MAX_TTL_MS,

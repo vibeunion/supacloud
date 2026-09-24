@@ -1,5 +1,10 @@
 import { createPgredisRuntimeApp } from "./src/app";
-import { TenantCacheRegistry } from "./src/cache-registry";
+import {
+  createLocalInvalidationTransport,
+  createNotifyInvalidationTransport,
+  PGREDIS_NOTIFY_CHANNEL,
+  TenantCacheRegistry,
+} from "./src/cache-registry";
 import { loadPgredisRuntimeConfig } from "./src/config";
 
 const config = loadPgredisRuntimeConfig();
@@ -11,6 +16,9 @@ const registry = new TenantCacheRegistry({
   l1MaxEntries: config.l1MaxEntries,
   l1TtlMs: config.l1TtlMs,
   cleanupBatchSize: config.cleanupBatchSize,
+  invalidationTransport: config.singleInstance
+    ? createLocalInvalidationTransport()
+    : createNotifyInvalidationTransport(PGREDIS_NOTIFY_CHANNEL),
 });
 const app = createPgredisRuntimeApp({
   signingSecret: config.internalToken,
