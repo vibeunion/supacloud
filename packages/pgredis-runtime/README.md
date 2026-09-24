@@ -28,7 +28,8 @@ PostgreSQL 核心事务、JSONB、UNLOGGED 表和 LISTEN/NOTIFY；这些扩展�
 - PGMQ 仍是 SupaCloud 唯一队列实现，Caddy 仍负责网关限流。
 - 当前使用上游 `@postgresx/noredis` 的 `PgKvCache`，包括其 TTL 清理和 L1 失效实现。
   L1 仅存在于每租户 runtime client，并通过 PostgreSQL `LISTEN/NOTIFY`
-  跨实例失效；断线重连会清空该租户 L1。
+  跨实例失效；断线重连会清空该租户 L1。L1 命中/未命中计数由
+  `PgKvCache.stats()`（上游 0.8.0+）暴露，并汇总到 `/internal/v1/admin/metrics`。
 - `set`、`delete`、`getset`、`getdel` 的数据变更与失效通知在同一事务中提交；
   `getset` 使用可重试的 `SERIALIZABLE` 事务，避免交换结果与通知分离。
 - 缓存表为 `UNLOGGED`，只适合可重建缓存，不承担持久业务事实。

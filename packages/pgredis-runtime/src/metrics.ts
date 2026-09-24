@@ -83,6 +83,8 @@ export interface PgredisMetricGauges {
   activeTenants: number;
   tenantCapacity: number;
   l1MaxEntries: number;
+  l1Hits: number;
+  l1Misses: number;
   crossInstanceInvalidation: boolean;
   databaseInFlight: number;
   databaseLimit: number;
@@ -107,6 +109,7 @@ function renderDuration(op: CacheOperation, state: DurationState): string[] {
 }
 
 export function renderPgredisMetrics(gauges: PgredisMetricGauges): string {
+  const l1Reads = gauges.l1Hits + gauges.l1Misses;
   const lines: string[] = [
     "# HELP supacloud_pgredis_cache_operations_total Cache data-plane operations by op and outcome.",
     "# TYPE supacloud_pgredis_cache_operations_total counter",
@@ -153,6 +156,15 @@ export function renderPgredisMetrics(gauges: PgredisMetricGauges): string {
     "# HELP supacloud_pgredis_l1_max_entries Configured maximum L1 entries per tenant.",
     "# TYPE supacloud_pgredis_l1_max_entries gauge",
     `supacloud_pgredis_l1_max_entries ${gauges.l1MaxEntries}`,
+    "# HELP supacloud_pgredis_l1_hits L1 read hits across tenant caches currently held.",
+    "# TYPE supacloud_pgredis_l1_hits gauge",
+    `supacloud_pgredis_l1_hits ${gauges.l1Hits}`,
+    "# HELP supacloud_pgredis_l1_misses L1 read misses across tenant caches currently held.",
+    "# TYPE supacloud_pgredis_l1_misses gauge",
+    `supacloud_pgredis_l1_misses ${gauges.l1Misses}`,
+    "# HELP supacloud_pgredis_l1_hit_ratio L1 hit ratio across tenant caches currently held (0 when no reads).",
+    "# TYPE supacloud_pgredis_l1_hit_ratio gauge",
+    `supacloud_pgredis_l1_hit_ratio ${l1Reads === 0 ? 0 : gauges.l1Hits / l1Reads}`,
     "# HELP supacloud_pgredis_database_operations_in_flight Tenant database operations currently holding a budget permit.",
     "# TYPE supacloud_pgredis_database_operations_in_flight gauge",
     `supacloud_pgredis_database_operations_in_flight ${gauges.databaseInFlight}`,

@@ -74,7 +74,7 @@ describe("pgredis-runtime internal API", () => {
             activeTenants: 1,
             maxTenants: 2,
             connectionsPerTenant: 1,
-            l1: { enabled: true as const, maxEntries: 100, ttlMs: 1_000 },
+            l1: { enabled: true as const, maxEntries: 100, ttlMs: 1_000, hits: 0, misses: 0 },
             tenants: [],
           };
         },
@@ -154,7 +154,7 @@ describe("pgredis-runtime internal API", () => {
             activeTenants: 1,
             maxTenants: 8,
             connectionsPerTenant: 2,
-            l1: { enabled: true as const, maxEntries: 100, ttlMs: 1_000 },
+            l1: { enabled: true as const, maxEntries: 100, ttlMs: 1_000, hits: 0, misses: 0 },
             tenants: [{ projectRef: "tenant-a", leases: 0, lastUsedAt: "2026-07-27T00:00:00.000Z" }],
           };
         },
@@ -246,7 +246,7 @@ describe("pgredis-runtime internal API", () => {
             activeTenants: 0,
             maxTenants: 1,
             connectionsPerTenant: 1,
-            l1: { enabled: true as const, maxEntries: 1, ttlMs: 1 },
+            l1: { enabled: true as const, maxEntries: 1, ttlMs: 1, hits: 0, misses: 0 },
             tenants: [],
           };
         },
@@ -293,7 +293,7 @@ describe("pgredis-runtime internal API", () => {
             activeTenants: 1,
             maxTenants: 1,
             connectionsPerTenant: 1,
-            l1: { enabled: true as const, maxEntries: 1, ttlMs: 1 },
+            l1: { enabled: true as const, maxEntries: 1, ttlMs: 1, hits: 0, misses: 0 },
             tenants: [],
           };
         },
@@ -349,7 +349,7 @@ describe("pgredis-runtime internal API", () => {
             activeTenants: 2,
             maxTenants: 4,
             connectionsPerTenant: 2,
-            l1: { enabled: true as const, maxEntries: 100, ttlMs: 1_000 },
+            l1: { enabled: true as const, maxEntries: 100, ttlMs: 1_000, hits: 3, misses: 1 },
             tenants: [],
           };
         },
@@ -378,5 +378,8 @@ describe("pgredis-runtime internal API", () => {
     expect(body).toContain("supacloud_pgredis_active_tenants 2");
     expect(body).toContain("supacloud_pgredis_database_operations_in_flight 1");
     expect(body).toContain("supacloud_pgredis_database_operation_limit 8");
+    expect(body).toContain("supacloud_pgredis_l1_hits 3");
+    expect(body).toContain("supacloud_pgredis_l1_misses 1");
+    expect(body).toContain("supacloud_pgredis_l1_hit_ratio 0.75");
   });
 });

@@ -275,6 +275,8 @@ export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
         activeTenants: snapshot.activeTenants,
         tenantCapacity: snapshot.maxTenants,
         l1MaxEntries: snapshot.l1.maxEntries,
+        l1Hits: snapshot.l1.hits,
+        l1Misses: snapshot.l1.misses,
         crossInstanceInvalidation: options.crossInstanceInvalidation ?? true,
         databaseInFlight: database?.inFlight ?? 0,
         databaseLimit: database?.limit ?? 0,
