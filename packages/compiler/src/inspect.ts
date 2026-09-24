@@ -76,10 +76,7 @@ export function explainGraph(graph: ApplicationGraph, subject: string): string {
  * editing one feature: the subject module, its imports, and its dependents.
  */
 export function createContextPack(graph: ApplicationGraph, subject: string): ContextPack {
-  const subjectModule = graph.modules.find((module) => module.name === subject);
-  if (!subjectModule) {
-    throw new Error(`No module named "${subject}". Context packs require a module name.`);
-  }
+  const subjectModule = resolveContextModule(graph, subject);
 
   const byName = new Map(graph.modules.map((module) => [module.name, module]));
   const selected = new Set<string>([subjectModule.name]);
@@ -130,6 +127,7 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
     module.file,
     ...module.providers.map((provider) => provider.file),
     ...module.controllers.map((controller) => controller.file),
+    ...(graph.moduleHandlerFiles?.[module.name] ?? []),
     ...allAspects(module).flatMap((aspect) => aspect.file ? [aspect.file] : []),
   ]).concat(graphql ? [graphql.schema, ...queryDocuments] : []))].sort();
   const referencedTokens = new Set<string>();
@@ -161,6 +159,25 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
         .sort(),
     },
   };
+}
+
+function resolveContextModule(graph: ApplicationGraph, subject: string): ModuleNode {
+  // Exact module names retain precedence for existing callers.
+  const exact = graph.modules.find((module) => module.name === subject);
+  if (exact) return exact;
+  const matches = graph.modules.filter((module) =>
+    module.className === subject ||
+    module.providers.some((provider) => provider.token === subject || provider.useClass === subject) ||
+    module.controllers.some((controller) => controller.className === subject) ||
+    module.commands.some((command) => command.name === subject || command.className === subject) ||
+    (module.jobs ?? []).some((job) =>
+      job.name === subject || job.className === subject || job.serviceKey === subject) ||
+    module.queries.some((query) => query.name === subject || query.className === subject));
+  if (matches.length === 1) return matches[0]!;
+  if (matches.length > 1) {
+    throw new Error(`Ambiguous context target "${subject}". Select a module name: ${matches.map((module) => module.name).sort().join(", ")}`);
+  }
+  throw new Error(`No context target named "${subject}". Select a module name: ${graph.modules.map((module) => module.name).sort().join(", ") || "(none)"}`);
 }
 
 function allAspects(module: ModuleNode): AspectRefNode[] {

@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "commands": [
+    {
+      "name": "webhook.update.v1",
+      "className": "UpdateWebhook",
+      "module": "webhook",
+      "permission": "webhook.update",
+      "rpc": "webhookUpdate",
+      "transaction": "required",
+      "idempotency": "required",
+      "auditEvent": "webhook.updated"
+    }
+  ],
+  "queries": [],
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/webhooks/receipts/:key",
+      "module": "webhook",
+      "controller": "WebhookController",
+      "handler": "receipt",
+      "requestSchemas": {
+        "params": "WebhookKeySchema"
+      },
+      "responseSchemas": {
+        "200": "WebhookLookupSchema"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/webhooks/update",
+      "module": "webhook",
+      "controller": "WebhookController",
+      "handler": "update",
+      "requestSchemas": {
+        "body": "WebhookInputSchema",
+        "headers": "WebhookHeadersSchema"
+      },
+      "responseSchemas": {
+        "200": "WebhookReceiptSchema"
+      }
+    }
+  ],
+  "permissions": [
+    "webhook.update"
+  ],
+  "rpc": [
+    {
+      "command": "webhook.update.v1",
+      "adapter": "webhookUpdate"
+    }
+  ],
+  "events": [
+    {
+      "name": "webhook.updated",
+      "source": "command.audit",
+      "command": "webhook.update.v1"
+    }
+  ],
+  "fixtures": [],
+  "artifacts": {
+    "client": false,
+    "openapi": false,
+    "permissions": false,
+    "sdk": "generated-client",
+    "openapiDocument": "generated",
+    "permissionManifest": "generated"
+  }
+}

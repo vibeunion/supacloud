@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { analyzeProject } from "./analyze";
@@ -16,6 +16,9 @@ import {
 import { GOOD_PROJECT_FILES } from "./fixtures/good-project";
 import { writeFixtureProject } from "./fixtures/helpers";
 import type { ApplicationGraph } from "./types";
+import { createDependencyGraphCache } from "./incremental";
+import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./fixtures/runtime-source";
+import { renderApplication } from "./generate";
 
 let rootDir: string;
 let outDir: string;
@@ -29,6 +32,105 @@ beforeAll(async () => {
 });
 
 describe("compiler inspection", () => {
+  test("independently registered handlers retain source files and diagnostics across cached analysis", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-handler-context-"));
+    try {
+      await writeFixtureProject(root, {
+        "tsconfig.json": FIXTURE_TSCONFIG,
+        "runtime.ts": RUNTIME_SOURCE,
+        "feature.module.ts": `import { Module } from "./runtime";
+import { Approve } from "./approve";
+import { List } from "./list";
+@Module({ name: "feature", commands: [Approve], queries: [List] })
+export class FeatureModule {}`,
+        "approve.ts": `import { Command } from "./runtime";
+@Command({ name: "feature.approve", transaction: "requried" })
+export class Approve {}`,
+        "list.ts": `import { Query } from "./runtime";
+@Query({ name: "feature.list" })
+export class List {}`,
+      });
+      const cache = createDependencyGraphCache();
+      const initial = await analyzeProject(root, undefined, cache);
+      const cached = await analyzeProject(root, undefined, cache, []);
+      expect(cached.cacheStats?.reusedModules).toEqual(["feature"]);
+      for (const analyzed of [initial, cached]) {
+        expect(analyzed.modules[0]?.providers).toEqual([]);
+        for (const target of ["Approve", "feature.list"]) {
+          const pack = createContextPack(analyzed, target);
+          expect(pack.files).toEqual(["approve.ts", "feature.module.ts", "list.ts"]);
+          expect(pack.diagnostics).toContainEqual(expect.objectContaining({
+            code: "invalid-command-mode", file: "approve.ts",
+          }));
+          expect(pack).toEqual(createContextPack(analyzed, "feature"));
+        }
+        const options = { rootDir: root, outDir: join(root, "generated") };
+        const { moduleHandlerFiles: _handlerFiles, ...withoutInspectionMetadata } = analyzed;
+        expect(renderApplication(analyzed, options)).toEqual(renderApplication(withoutInspectionMetadata, options));
+      }
+      const previousEntry = cache.modules.get("feature")!;
+      delete previousEntry.handlerFiles;
+      const restored = await analyzeProject(root, undefined, cache, []);
+      expect(restored.cacheStats?.reanalyzedModules).toEqual(["feature"]);
+      expect(createContextPack(restored, "Approve").files).toContain("approve.ts");
+
+      await rename(join(root, "approve.ts"), join(root, "approved.ts"));
+      await rm(join(root, "list.ts"));
+      await writeFile(join(root, "feature.module.ts"), `import { Module } from "./runtime";
+import { Approve } from "./approved";
+@Module({ name: "feature", commands: [Approve] })
+export class FeatureModule {}`);
+      const moved = await analyzeProject(root, undefined, cache, ["approve.ts", "approved.ts", "list.ts", "feature.module.ts"]);
+      const movedPack = createContextPack(moved, "Approve");
+      expect(movedPack.files).toEqual(["approved.ts", "feature.module.ts"]);
+      expect(movedPack.diagnostics).toContainEqual(expect.objectContaining({
+        code: "invalid-command-mode", file: "approved.ts",
+      }));
+      expect(() => createContextPack(moved, "feature.list")).toThrow("No context target");
+
+      await writeFile(join(root, "feature.module.ts"), `import { Module } from "./runtime";
+@Module({ name: "feature" })
+export class FeatureModule {}`);
+      const empty = await analyzeProject(root, undefined, cache, ["feature.module.ts"]);
+      expect(createContextPack(empty, "feature").files).toEqual(["feature.module.ts"]);
+      const emptyCached = await analyzeProject(root, undefined, cache, []);
+      expect(emptyCached.cacheStats?.reusedModules).toEqual(["feature"]);
+      expect(emptyCached.moduleHandlerFiles?.feature).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("context resolves owned symbols to the same existing module pack", () => {
+    const expected = createContextPack(graph, "case");
+    for (const target of [
+      "CaseModule", "CaseService", "CASE_SERVICE", "DrizzleCaseRepository",
+      "CaseController", "AcceptCaseCommand", "case.accept",
+    ]) {
+      expect(createContextPack(graph, target)).toEqual(expected);
+    }
+  });
+
+  test("context resolves job and query names, classes and job service keys", () => {
+    const modules = graph.modules.map((module) => module.name === "case" ? {
+      ...module,
+      jobs: [{ name: "case.rebuild", className: "RebuildJob", serviceKey: "REBUILD", scope: "job" as const }],
+      queries: [{ name: "case.list", className: "ListCases" }],
+    } : module);
+    const fixture = { ...graph, modules };
+    for (const target of ["case.rebuild", "RebuildJob", "REBUILD", "case.list", "ListCases"]) {
+      expect(createContextPack(fixture, target)).toEqual(createContextPack(fixture, "case"));
+    }
+  });
+
+  test("context rejects ambiguous owners without changing exact module selection", () => {
+    const module = graph.modules.find((entry) => entry.name === "case")!;
+    const fixture = { ...graph, modules: [...graph.modules, { ...module, name: "other" }] };
+    expect(() => createContextPack(fixture, "CaseService")).toThrow('Select a module name: case, other');
+    expect(createContextPack(fixture, "case").subject).toBe("case");
+    expect(() => createContextPack(fixture, "missing")).toThrow('No context target named "missing"');
+  });
+
   test("context follows each direction without expanding unrelated shared-module siblings", () => {
     const audit = graph.modules.find((module) => module.name === "audit")!;
     const unrelated = { ...audit, name: "unrelated", imports: ["audit"], file: "src/unrelated.ts" };

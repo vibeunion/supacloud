@@ -54,7 +54,7 @@ Usage:
   supacloud-compiler dev     [rootDir] [options]
   supacloud-compiler graph   [rootDir] [options]
   supacloud-compiler explain <name> [rootDir] [options]
-  supacloud-compiler context <module> [rootDir] [options]
+  supacloud-compiler context <name> [rootDir] [options]
   supacloud-compiler doctor  [rootDir] [options]
   supacloud-compiler migrate [rootDir] [options]
   supacloud-compiler migration-assess [rootDir] [options]
@@ -525,7 +525,7 @@ async function run(): Promise<void> {
     }
   } else if (command === "context") {
     if (!query) {
-      console.error("Error: context requires a module name");
+      console.error("Error: context requires a module or owned symbol name");
       process.exit(1);
     }
     try {
