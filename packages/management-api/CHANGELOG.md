@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.86.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.86.1...management-api-v0.86.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **systemd:** make pgredis-runtime patroni dependency weak ([#1426](https://github.com/vibeunion/supacloud/issues/1426)) ([f87091e](https://github.com/vibeunion/supacloud/commit/f87091e133bd11a4718c0c93813f75d9710b8f8a))
+
 ## [0.86.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.86.0...management-api-v0.86.1) (2026-09-24)
 
 
