@@ -14,7 +14,7 @@ test.skipIf(process.env.SUPACLOUD_MANAGEMENT_TEST_NATIVE !== "1")(
         mock.module("../../src/repositories/project.repository", () => ({
             projectRepository: {
                 findByRef: async (ref: string) => ref === "missing" ? null : {
-                    ref, db_name: "fixture", config: { pgflow_enabled: enabled },
+                    ref, db_name: "fixture", deleted_at: null, config: { pgflow_enabled: enabled },
                 },
             },
         }));
@@ -45,14 +45,16 @@ test.skipIf(process.env.SUPACLOUD_MANAGEMENT_TEST_NATIVE !== "1")(
             CREATE TABLE pgflow._supacloud_state (
                 singleton boolean PRIMARY KEY DEFAULT true CHECK (singleton),
                 version text NOT NULL,
+                bundle_sha256 text NOT NULL,
                 enabled boolean NOT NULL DEFAULT true
             );
-            INSERT INTO pgflow._supacloud_state(version) VALUES ('0.16.0');
+            INSERT INTO pgflow._supacloud_state(version, bundle_sha256)
+            VALUES ('0.16.0', 'b72a75bc31adc1a441dfd7d900dcb4abe12d231999d744badc7a43b3e543a076');
             CREATE TABLE pgflow.step_states (
                 run_id uuid NOT NULL, step_slug text NOT NULL,
                 status text NOT NULL DEFAULT 'created',
                 created_at timestamptz DEFAULT NOW(), started_at timestamptz,
-                completed_at timestamptz, failed_at timestamptz,
+                completed_at timestamptz, failed_at timestamptz, skipped_at timestamptz,
                 PRIMARY KEY (run_id, step_slug)
             );
             CREATE TABLE pgflow.step_tasks (
@@ -60,6 +62,7 @@ test.skipIf(process.env.SUPACLOUD_MANAGEMENT_TEST_NATIVE !== "1")(
                 status text NOT NULL DEFAULT 'queued', attempts_count integer NOT NULL DEFAULT 0,
                 queued_at timestamptz DEFAULT NOW(), started_at timestamptz,
                 completed_at timestamptz, failed_at timestamptz,
+                last_requeued_at timestamptz, permanently_stalled_at timestamptz,
                 PRIMARY KEY (run_id, step_slug)
             );
             CREATE FUNCTION pgflow.start_flow(flow_slug text, input jsonb, run_id uuid)
@@ -94,8 +97,9 @@ test.skipIf(process.env.SUPACLOUD_MANAGEMENT_TEST_NATIVE !== "1")(
             VALUES (${task.id}::uuid, 'approval', 'started', NOW())
         `;
         await database`
-            INSERT INTO pgflow.step_tasks(run_id, step_slug, status, attempts_count, started_at)
-            VALUES (${task.id}::uuid, 'approval', 'started', 1, NOW())
+            INSERT INTO pgflow.step_tasks(
+                run_id, step_slug, status, attempts_count, started_at, permanently_stalled_at
+            ) VALUES (${task.id}::uuid, 'approval', 'started', 1, NOW(), NOW())
         `;
         const observed = await service.list("alpha", { limit: 20 });
         expect(observed).toHaveLength(1);
@@ -105,6 +109,7 @@ test.skipIf(process.env.SUPACLOUD_MANAGEMENT_TEST_NATIVE !== "1")(
             status: "running",
             total_steps: 1,
             finished_steps: 0,
+            blocked_reason: "PGFLOW_PERMANENTLY_STALLED",
             result: null,
         });
         expect(observed[0]?.executor).toMatchObject({
@@ -113,6 +118,9 @@ test.skipIf(process.env.SUPACLOUD_MANAGEMENT_TEST_NATIVE !== "1")(
             run_id: task.id,
         });
         expect("input" in (observed[0] ?? {})).toBe(false);
+        await database`UPDATE pgflow._supacloud_state SET bundle_sha256 = repeat('a', 64)`;
+        expect(await service.list("alpha", { limit: 20 })).toHaveLength(0);
+        await database`UPDATE pgflow._supacloud_state SET bundle_sha256 = 'b72a75bc31adc1a441dfd7d900dcb4abe12d231999d744badc7a43b3e543a076'`;
         await database`UPDATE pgflow.runs SET status = 'completed', output = '["done"]'::jsonb,
             completed_at = NOW() WHERE run_id = ${task.id}::uuid`;
         await database`UPDATE pgflow.step_states SET status = 'completed', completed_at = NOW()

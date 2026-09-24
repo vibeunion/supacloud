@@ -152,12 +152,12 @@ projection also filters the installation's project binding.
 Projects that already run a reviewed, project-scoped pgflow runtime but do not
 install `supacloud_worker.tasks` (for example an FA runtime using its own
 worker and lease tables) are observed through a read-only native fallback. The
-management API recognizes the managed pgflow marker, derives status and step
-counts directly from `pgflow.runs`, `pgflow.step_states` and
-`pgflow.step_tasks`, and never writes `project_tasks` or starts a worker. This
-fallback intentionally returns `result: null`; inputs, provider payloads and
-raw error text remain owned by the application domain and are not exposed by
-the platform observer.
+management API recognizes the managed pgflow marker (including its versioned
+bundle digest), derives status and step counts directly from `pgflow.runs`,
+`pgflow.step_states` and `pgflow.step_tasks`, and never writes `project_tasks`
+or starts a worker. This fallback intentionally returns `result: null`; inputs,
+provider payloads and raw error text remain owned by the application domain and
+are not exposed by the platform observer.
 
 The existing SDK can call `tasks.list({ taskType: "pgflow" })` and
 `tasks.get("pgflow:" + runId)`. Default task listing is unchanged. Mixing pgflow

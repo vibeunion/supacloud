@@ -6,6 +6,11 @@ import { getAuthRuntimeDescriptor } from "./auth-runtime.service";
 
 export const PGFLOW_TASK_TYPE = "pgflow";
 
+const PGFLOW_VERSION = "0.16.0";
+// Keep the legacy FA runtime admission tied to its reviewed platform bundle.
+const PGFLOW_RUNTIME_SHA256 =
+  "b72a75bc31adc1a441dfd7d900dcb4abe12d231999d744badc7a43b3e543a076";
+
 export class PgflowTaskError extends Error {
   constructor(public readonly status: 400 | 404 | 409 | 503, message: string) {
     super(message);
@@ -64,6 +69,7 @@ interface PgflowObjects {
   installation: boolean;
   control: boolean;
   legacyState: boolean;
+  legacyStateBundle: boolean;
 }
 
 async function readPgflowObjects(db: ReturnType<typeof getProjectDb>): Promise<PgflowObjects> {
@@ -74,7 +80,14 @@ async function readPgflowObjects(db: ReturnType<typeof getProjectDb>): Promise<P
       to_regclass('pgflow.step_tasks') IS NOT NULL AS "stepTasks",
       to_regclass('supacloud_worker.installation') IS NOT NULL AS installation,
       to_regclass('supacloud_worker.control') IS NOT NULL AS control,
-      to_regclass('pgflow._supacloud_state') IS NOT NULL AS "legacyState"
+      to_regclass('pgflow._supacloud_state') IS NOT NULL AS "legacyState",
+      EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_attribute
+        WHERE attrelid = to_regclass('pgflow._supacloud_state')
+          AND attname = 'bundle_sha256'
+          AND NOT attisdropped
+      ) AS "legacyStateBundle"
   `;
   return objects ?? {
     runs: false,
@@ -83,6 +96,7 @@ async function readPgflowObjects(db: ReturnType<typeof getProjectDb>): Promise<P
     installation: false,
     control: false,
     legacyState: false,
+    legacyStateBundle: false,
   };
 }
 
@@ -96,7 +110,7 @@ async function hasManagedPgflow(db: ReturnType<typeof getProjectDb>, projectRef:
       FROM supacloud_worker.installation
       WHERE singleton
     `;
-    if (!binding || binding.project_ref !== projectRef || binding.engine_version !== "0.16.0") return false;
+    if (!binding || binding.project_ref !== projectRef || binding.engine_version !== PGFLOW_VERSION) return false;
     if (objects.control) {
       const [control] = await db`SELECT enabled FROM supacloud_worker.control WHERE singleton`;
       if (!control) return false;
@@ -108,12 +122,15 @@ async function hasManagedPgflow(db: ReturnType<typeof getProjectDb>, projectRef:
   // database is already project-scoped, so the managed state marker is the
   // only binding available to the read-only observer.
   if (objects.legacyState) {
+    if (!objects.legacyStateBundle) return false;
     const [state] = await db`
-      SELECT version
+      SELECT version, bundle_sha256
       FROM pgflow._supacloud_state
       WHERE singleton
     `;
-    return state?.version === "0.16.0";
+    return state?.version === PGFLOW_VERSION
+      && typeof state.bundle_sha256 === "string"
+      && state.bundle_sha256.toLowerCase() === PGFLOW_RUNTIME_SHA256;
   }
 
   return false;
@@ -157,7 +174,7 @@ async function readNativeTasks(
       END AS status,
       jsonb_build_object(
         'kind', 'pgflow',
-        'version', '0.16.0',
+        'version', PGFLOW_VERSION,
         'definition', r.flow_slug,
         'run_id', r.run_id,
         'native_status', r.status
@@ -181,7 +198,7 @@ async function readNativeTasks(
       SELECT
         count(*)::int AS total_steps,
         count(*) FILTER (WHERE s.status IN ('completed', 'skipped'))::int AS finished_steps,
-        max(greatest(s.created_at, s.started_at, s.completed_at, s.failed_at)) AS updated_at
+        max(greatest(s.created_at, s.started_at, s.completed_at, s.failed_at, s.skipped_at)) AS updated_at
       FROM pgflow.step_states s
       WHERE s.run_id = r.run_id
     ) steps
@@ -190,8 +207,15 @@ async function readNativeTasks(
         bool_or(t.status = 'started') AS has_started,
         bool_or(t.status = 'queued' AND t.attempts_count > 0) AS has_retry,
         bool_or(t.attempts_count > 0) AS has_attempted,
-        false AS permanently_stalled,
-        max(greatest(t.queued_at, t.started_at, t.completed_at, t.failed_at)) AS updated_at
+        bool_or(t.permanently_stalled_at IS NOT NULL) AS permanently_stalled,
+        max(greatest(
+          t.queued_at,
+          t.started_at,
+          t.completed_at,
+          t.failed_at,
+          t.last_requeued_at,
+          t.permanently_stalled_at
+        )) AS updated_at
       FROM pgflow.step_tasks t
       WHERE t.run_id = r.run_id
     ) task_stats
