@@ -36,6 +36,8 @@ describe("pgredis-runtime platform boundary", () => {
     expect(runtimeUnit).toContain("ExecStart=/usr/local/bin/supacloud-pgredis-runtime");
     expect(runtimeUnit).toContain("User=supacloud-pgredis");
     expect(runtimeUnit).toContain("Environment=PGREDIS_RUNTIME_HOST=127.0.0.1");
+    expect(runtimeUnit).toContain("Wants=patroni.service");
+    expect(runtimeUnit).not.toContain("Requires=patroni.service");
     expect(runtimeUnit).toContain("127.0.0.1:@EDGE_RUNTIME_PORT@/health");
     expect(installer).toContain('PGREDIS_RUNTIME_PORT="${PGREDIS_RUNTIME_PORT:-9011}"');
     expect(installer).toContain("PGREDIS_RUNTIME_PORT=9010 conflicts with the SupaCloud Imaginary service");
