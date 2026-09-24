@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.56.3](https://github.com/vibeunion/supacloud/compare/cli-v0.56.2...cli-v0.56.3) (2026-09-24)
+
+
+### Bug Fixes
+
+* pin npm registry for reproducible installs in remaining packages ([#1414](https://github.com/vibeunion/supacloud/issues/1414)) ([8110f3c](https://github.com/vibeunion/supacloud/commit/8110f3c889ac48bc8e4cee35eb37ce7406d35587))
+
 ## [0.56.2](https://github.com/vibeunion/supacloud/compare/cli-v0.56.1...cli-v0.56.2) (2026-09-23)
 
 

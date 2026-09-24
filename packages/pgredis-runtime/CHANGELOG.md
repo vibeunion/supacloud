@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.6.1...pgredis-runtime-v0.6.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* pin npm registry for reproducible installs in remaining packages ([#1414](https://github.com/vibeunion/supacloud/issues/1414)) ([8110f3c](https://github.com/vibeunion/supacloud/commit/8110f3c889ac48bc8e4cee35eb37ce7406d35587))
+
 ## [0.6.1](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.6.0...pgredis-runtime-v0.6.1) (2026-09-11)
 
 

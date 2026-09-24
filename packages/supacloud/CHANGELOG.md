@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.19](https://github.com/vibeunion/supacloud/compare/supacloud-v0.12.18...supacloud-v0.12.19) (2026-09-24)
+
+
+### Bug Fixes
+
+* **supacloud:** pin npm registry for reproducible installs ([#1412](https://github.com/vibeunion/supacloud/issues/1412)) ([8cd352c](https://github.com/vibeunion/supacloud/commit/8cd352c5e7f9d90d80b48142bcf07bebe7b44aed))
+
 ## [0.12.18](https://github.com/vibeunion/supacloud/compare/supacloud-v0.12.17...supacloud-v0.12.18) (2026-09-24)
 
 
