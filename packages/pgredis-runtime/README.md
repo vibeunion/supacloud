@@ -18,6 +18,9 @@ PostgreSQL 核心事务、JSONB、UNLOGGED 表和 LISTEN/NOTIFY；这些扩展�
   `getdel`，以及批量 `mget`/`mset`；不提供队列、限流或 Redis 协议。
 - 批量操作只消耗一次 HTTP 往返：`mget` 为单条 SQL，`mset` 为单个事务；单次请求的键
   数量由 `PGREDIS_RUNTIME_MAX_KEYS_PER_REQUEST` 限制（默认 100）。
+- 跨实例失效由可插拔的 `InvalidationTransport` 抽象；单实例部署可用
+  `PGREDIS_RUNTIME_SINGLE_INSTANCE=true` 关闭 `pg_notify` 发布与 LISTEN 监听，仅保留
+  本地 L1 清理。
 - Management API 可通过独立内部令牌访问有界管理接口，提供平台/项目状态、
   精确键操作，以及必须匹配项目 Ref 的命名空间清空。Web Console 不直连本服务。
 - PGMQ 仍是 SupaCloud 唯一队列实现，Caddy 仍负责网关限流。

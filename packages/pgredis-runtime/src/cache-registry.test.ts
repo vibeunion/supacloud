@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { PgSqlLike } from "@postgresx/noredis";
 import {
   clearL1AfterListenerConnect,
+  createLocalInvalidationTransport,
+  createNotifyInvalidationTransport,
   createTransactionalTenantCache,
   TenantCacheRegistry,
   type TenantCache,
@@ -591,5 +593,75 @@ describe("createTransactionalTenantCache", () => {
     expect(calls).toEqual(["BEGIN", "MSET", "COMMIT"]);
     expect(invalidated).toEqual(["a", "b"]);
     expect(msetOptions).toEqual([{ ttlMs: 500 }]);
+  });
+
+  test("uses the injected invalidation publisher instead of the default pg_notify", async () => {
+    const published: Array<[string, string]> = [];
+    const tx: PgSqlLike = {
+      async unsafe<T>(query: string): Promise<T[]> {
+        if (query.includes("SELECT value")) return [{ value: { previous: true } }] as T[];
+        if (query.includes("pg_notify")) throw new Error("default publisher must not run");
+        return [];
+      },
+    };
+    const cache = createTransactionalTenantCache(
+      { async unsafe<T>(): Promise<T[]> { return []; }, begin: (operation) => operation(tx) },
+      {
+        async get() { return null; },
+        async mget() { return new Map<string, unknown>(); },
+        async ttl() { return null; },
+        invalidate() {},
+        invalidateAll() {},
+      },
+      () => fakeCache(),
+      undefined,
+      async (_tx, op, key) => {
+        published.push([op, key]);
+      },
+    );
+
+    await cache.getset("shared", { next: true }, (value) => value);
+    expect(published).toEqual([["set", "shared"]]);
+  });
+});
+
+describe("InvalidationTransport", () => {
+  test("notify transport wires one channel for listen and publish", async () => {
+    const transport = createNotifyInvalidationTransport("channel-a");
+    expect(transport.crossInstance).toBeTrue();
+    expect(transport.ownerNotifyOptions((() => ({})) as never)).toMatchObject({
+      channel: "channel-a",
+      clearL1OnReconnect: true,
+    });
+    expect(transport.transactionNotifyOptions()).toEqual({ channel: "channel-a" });
+
+    const calls: Array<{ query: string; params?: readonly unknown[] }> = [];
+    await transport.publish({
+      async unsafe<T>(query: string, params?: readonly unknown[]): Promise<T[]> {
+        calls.push({ query, params });
+        return [];
+      },
+    }, "set", "a");
+    expect(calls[0]?.query).toBe("SELECT pg_notify($1, $2)");
+    expect(calls[0]?.params).toEqual([
+      "channel-a",
+      JSON.stringify({ namespace: "supacloud-edge-runtime", op: "set", key: "a" }),
+    ]);
+  });
+
+  test("local transport disables cross-instance publish and listen", async () => {
+    const transport = createLocalInvalidationTransport();
+    expect(transport.crossInstance).toBeFalse();
+    expect(transport.ownerNotifyOptions((() => ({})) as never)).toBeFalse();
+    expect(transport.transactionNotifyOptions()).toBeFalse();
+
+    let queries = 0;
+    await transport.publish({
+      async unsafe<T>(): Promise<T[]> {
+        queries += 1;
+        return [];
+      },
+    }, "delete", "a");
+    expect(queries).toBe(0);
   });
 });

@@ -1,7 +1,7 @@
 import { SQL } from "bun";
 import { createPgListener, type PgListenerHandle } from "@postgresx/bun-listen";
 import { createBunSqlAdapter } from "@postgresx/noredis/adapters/bun";
-import { createPgKvCache, type PgKvCache } from "@postgresx/noredis/kv";
+import { createPgKvCache, type PgKvCache, type PgKvCacheListenerFactory, type PgKvCacheNotifyOptions } from "@postgresx/noredis/kv";
 import type { PgSqlLike } from "@postgresx/noredis";
 import {
   loadTenantDatabaseConfig,
@@ -111,11 +111,13 @@ export interface TenantCacheRegistryOptions {
     l1MaxEntries: number,
     l1TtlMs: number,
   ) => Promise<TenantCacheBackend>;
+  /** Overrides how tenant L1 invalidation is published and observed. */
+  invalidationTransport?: InvalidationTransport;
 }
 
 const CACHE_NAMESPACE = "supacloud-edge-runtime";
 const CACHE_TABLE = "public.supacloud_pgredis_kv";
-const NOTIFY_CHANNEL = "supacloud_pgredis_invalidate";
+export const PGREDIS_NOTIFY_CHANNEL = "supacloud_pgredis_invalidate";
 
 function isSerializationFailure(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
@@ -125,6 +127,63 @@ function isSerializationFailure(error: unknown): boolean {
 
 function notification(op: "set" | "delete", key: string): string {
   return JSON.stringify({ namespace: CACHE_NAMESPACE, op, key });
+}
+
+/** Publishes one invalidation within the caller's transaction. */
+export type InvalidationPublisher = (
+  tx: PgSqlLike,
+  op: "set" | "delete",
+  key: string,
+) => Promise<void>;
+
+/**
+ * Cross-instance L1 invalidation seam. The default transport publishes and
+ * listens on the shared PostgreSQL NOTIFY channel; a single-instance
+ * deployment can swap in a local-only transport that skips both while keeping
+ * local L1 invalidation intact.
+ */
+export interface InvalidationTransport {
+  readonly crossInstance: boolean;
+  ownerNotifyOptions(createListener: PgKvCacheListenerFactory): false | PgKvCacheNotifyOptions;
+  transactionNotifyOptions(): false | PgKvCacheNotifyOptions;
+  publish: InvalidationPublisher;
+}
+
+export function createNotifyInvalidationTransport(channel: string): InvalidationTransport {
+  const notifyOptions: PgKvCacheNotifyOptions = { channel };
+  return {
+    crossInstance: true,
+    ownerNotifyOptions(createListener) {
+      return { channel, clearL1OnReconnect: true, listener: createListener };
+    },
+    transactionNotifyOptions() {
+      return notifyOptions;
+    },
+    async publish(tx, op, key) {
+      await tx.unsafe("SELECT pg_notify($1, $2)", [channel, notification(op, key)]);
+    },
+  };
+}
+
+export function createLocalInvalidationTransport(): InvalidationTransport {
+  return {
+    crossInstance: false,
+    ownerNotifyOptions() {
+      return false;
+    },
+    transactionNotifyOptions() {
+      return false;
+    },
+    async publish() {},
+  };
+}
+
+async function defaultInvalidationPublisher(
+  tx: PgSqlLike,
+  op: "set" | "delete",
+  key: string,
+): Promise<void> {
+  await tx.unsafe("SELECT pg_notify($1, $2)", [PGREDIS_NOTIFY_CHANNEL, notification(op, key)]);
 }
 
 function deserializeJsonValue(value: unknown): unknown {
@@ -160,6 +219,7 @@ export function createTransactionalTenantCache(
   cache: LocalCache,
   createTransactionCache: (tx: PgSqlLike) => TransactionCache,
   cleanupExpired?: (limit?: number) => Promise<number>,
+  publishInvalidation: InvalidationPublisher = defaultInvalidationPublisher,
 ): TenantCache {
   const transaction = async <T>(
     operation: (tx: PgSqlLike, txCache: TransactionCache) => Promise<T>,
@@ -222,10 +282,7 @@ export function createTransactionalTenantCache(
                updated_at = NOW()`,
           [CACHE_NAMESPACE, key, serialized],
         );
-        await tx.unsafe("SELECT pg_notify($1, $2)", [
-          NOTIFY_CHANNEL,
-          notification("set", key),
-        ]);
+        await publishInvalidation(tx, "set", key);
         return rows[0] ? deserializeJsonValue(rows[0].value) : null;
       }, true);
       cache.invalidate(key);
@@ -280,6 +337,7 @@ async function createPostgresBackend(
   connectionsPerTenant: number,
   l1MaxEntries: number,
   l1TtlMs: number,
+  transport: InvalidationTransport,
 ): Promise<TenantCacheBackend> {
   const sql = new SQL({
     url: config.databaseUrl,
@@ -298,20 +356,18 @@ async function createPostgresBackend(
     namespace: CACHE_NAMESPACE,
     tableName: CACHE_TABLE,
     l1: { max: l1MaxEntries, ttlMs: l1TtlMs },
-    notify: {
-      channel: NOTIFY_CHANNEL,
-      clearL1OnReconnect: true,
-      listener: ({ channels, onNotify }) => {
-        listener = createPgListener(config.databaseUrl, channels, onNotify, { logger: false });
-        return listener;
-      },
-    },
+    notify: transport.ownerNotifyOptions(({ channels, onNotify }) => {
+      listener = createPgListener(config.databaseUrl, channels, onNotify, { logger: false });
+      return listener;
+    }),
   });
 
   try {
-    if (!listener) throw new Error("pgredis invalidation listener was not created");
-    connectedUnsubscribe = clearL1AfterListenerConnect(listener, cache);
-    await waitForListener(listener);
+    if (transport.crossInstance) {
+      if (!listener) throw new Error("pgredis invalidation listener was not created");
+      connectedUnsubscribe = clearL1AfterListenerConnect(listener, cache);
+      await waitForListener(listener);
+    }
     await cache.ensureSchema({ unlogged: true });
   } catch (error) {
     unsubscribeConnected();
@@ -328,9 +384,10 @@ async function createPostgresBackend(
       namespace: CACHE_NAMESPACE,
       tableName: CACHE_TABLE,
       l1: false,
-      notify: { channel: NOTIFY_CHANNEL },
+      notify: transport.transactionNotifyOptions(),
     }),
     cache.cleanupExpired.bind(cache),
+    transport.publish,
   );
 
   return {
@@ -356,7 +413,15 @@ export class TenantCacheRegistry {
   constructor(private readonly options: TenantCacheRegistryOptions) {
     this.now = options.now || Date.now;
     this.loadConfig = options.loadConfig || loadTenantDatabaseConfig;
-    this.createBackend = options.createBackend || createPostgresBackend;
+    this.createBackend = options.createBackend
+      || ((ref, config, connectionsPerTenant, l1MaxEntries, l1TtlMs) => createPostgresBackend(
+        ref,
+        config,
+        connectionsPerTenant,
+        l1MaxEntries,
+        l1TtlMs,
+        options.invalidationTransport ?? createNotifyInvalidationTransport(PGREDIS_NOTIFY_CHANNEL),
+      ));
   }
 
   async acquire(ref: string): Promise<TenantCacheLease> {

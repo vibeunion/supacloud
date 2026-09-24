@@ -63,6 +63,11 @@ Edge 和控制面均只提供已知键操作：
 `LISTEN/NOTIFY` 失效。单次请求的键数量默认上限为 100，可用
 `PGREDIS_RUNTIME_MAX_KEYS_PER_REQUEST` 调整（外部 schema 的硬上限为 512）。
 
+跨实例失效通过可插拔的 `InvalidationTransport` 抽象：默认实现使用共享 PostgreSQL
+NOTIFY 频道发布与监听。单实例部署可设置 `PGREDIS_RUNTIME_SINGLE_INSTANCE=true`，切换到
+本地传输：写路径不再发送 `pg_notify`，也不启动 LISTEN 监听，只保留提交后的本地 L1 清理。
+这不是语义变更——单实例本就不需要跨实例广播——但能省掉每次写的一次 `pg_notify`。
+
 所有写操作与失效通知在同一 PostgreSQL 事务中提交。项目命名空间清空通过
 `clearNamespace()` 在同一事务内删除数据并发送 `clearNamespace` 通知；本实例 L1 仅在事务
 提交成功后清空，其他实例由 `LISTEN/NOTIFY` 失效。事务失败时不会提前清空 L1 或广播已提交
