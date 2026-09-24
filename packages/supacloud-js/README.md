@@ -21,6 +21,36 @@ It does **not** replace [`@supabase/supabase-js`](https://www.npmjs.com/package/
 npm install @supacloud/js @supabase/supabase-js
 ```
 
+## Browser Command Contracts
+
+Applications that already use this SDK can import the existing framework-neutral
+command client from `@supacloud/js/contracts`. This optional browser entrypoint
+re-exports selected `@supacloud/contracts/client` APIs without loading the platform
+SDK, Supabase, Angular, Svelte, a database driver or browser storage.
+
+```ts
+import {
+  createAuthoritativeCommandClient,
+  createAuthenticatedFetch,
+  createCommandScope,
+} from "@supacloud/js/contracts";
+```
+
+There is no second command engine or new transport protocol. Input, acknowledgement
+and authoritative result decoders remain application-owned. The client sends at
+most one write and performs at most one read-only confirmation per invocation;
+an `unknown` outcome never authorizes a write retry.
+
+This is **not** `supacloud.commands`: that namespace calls service-role-only
+database RPCs and must not be wired into a browser admin action. Keep credentials,
+authorization, transactions, receipts and idempotency on the trusted server.
+The SDK root and existing task adapters are unchanged.
+
+See [svadmin integration](../../docs/svadmin-sdk-integration.md) for ownership,
+Svelte lifecycle integration, SDK compatibility gates and the next contract
+generation steps. This entrypoint is additive; it does not make an older svadmin
+peer range compatible with a newer SDK.
+
 ## Quick Start
 
 ```ts
