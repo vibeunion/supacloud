@@ -22,6 +22,14 @@ conservatively reported as `COMMAND_OUTCOME_UNKNOWN`, not proof of rollback.
 Circuit `isFailure` should exclude authorization, schema and domain rejection.
 Circuit state is local to the policy instance, not distributed.
 
+Both `createExecutionPolicy` and `createCommandRecoveryHandler` accept an optional
+`observer`. Exported `ExecutionPolicyEvent` and `CommandRecoveryEvent` report
+attempts, fixed decisions and recovery/settlement stages, never input, output or
+raw exception data. Observers are best-effort, not awaited, and cannot turn their
+own failures into command retries. A successful recovery lookup is not a
+successful acknowledgement; check the separate `complete` stage.
+See [composition and recovery](../../docs/framework-composition.md).
+
 Storage-independent durable execution. Depends only on `@supacloud/contracts`;
 no SQL driver, HTTP server, Svelte lifecycle or scheduler is bundled.
 

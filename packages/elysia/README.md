@@ -1,5 +1,11 @@
 # @supacloud/elysia
 
+For a cross-module composition shared by HTTP, event/scheduled workers and a
+trusted CLI, see the [fulfillment example](src/examples/fulfillment.ts) and
+[developer guide](../../docs/framework-composition.md). It reuses bound commands,
+explicit aspects and durable receipts, not a new workflow engine. Compensation
+is a separately authorized business command, never an assumed rollback.
+
 ## Compatibility and Acceptance Boundary
 
 The dependency range is not a claim that every allowed version has been tested.

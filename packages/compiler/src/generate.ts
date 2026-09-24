@@ -514,6 +514,8 @@ class ImportManager {
   private readonly entries = new Map<string, { path: string; exported: string; package: boolean }>();
   private readonly lookup = new Map<string, string>();
 
+  constructor(private readonly reserved: ReadonlySet<string> = new Set()) {}
+
   get size(): number {
     return this.entries.size;
   }
@@ -528,7 +530,7 @@ class ImportManager {
     if (existing !== undefined) return existing;
     let local = exported;
     let counter: number = 2;
-    while (this.entries.has(local)) {
+    while (this.entries.has(local) || this.reserved.has(local)) {
       local = `${exported}${counter}`;
       counter += 1;
     }
@@ -1148,7 +1150,7 @@ function orderProviders(providers: ProviderNode[]): ProviderNode[] {
 export function renderClient(graph: ApplicationGraph, options?: GenerateOptions): string {
   const rootDir = options?.rootDir ?? process.cwd();
   const outDir = options?.outDir ?? process.cwd();
-  const imports = new ImportManager();
+  const imports = new ImportManager(new Set(["ApiClientError", "ApiClientErrorCode", "ApiClientErrorDetails"]));
   const controllerEntries: string[] = [];
   const routeTypes: string[] = [];
   const schemaEntries: string[] = [];
@@ -1332,6 +1334,40 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "}",
     "",
     "export type ResponseDecoder<T> = (value: unknown) => T;",
+    "",
+    "export type ApiClientErrorCode = \"API_HTTP_ERROR\" | \"API_RESPONSE_INVALID\" | \"API_RESPONSE_UNDECLARED\";",
+    "",
+    "export interface ApiClientErrorDetails {",
+    "  code: ApiClientErrorCode;",
+    "  method: string;",
+    "  path: string;",
+    "  status: number;",
+    "  requestId?: string | null;",
+    "  response?: Response;",
+    "}",
+    "",
+    "/** Transport/contract metadata, not proof that a failed write rolled back. */",
+    "export class ApiClientError extends Error {",
+    "  readonly code: ApiClientErrorCode;",
+    "  readonly method: string;",
+    "  readonly path: string;",
+    "  readonly status: number;",
+    "  readonly requestId: string | undefined;",
+    "  /** Undeclared HTTP response for explicit inspection; excluded from JSON serialization. */",
+    "  readonly response: Response | undefined;",
+    "  constructor(message: string, details: ApiClientErrorDetails) {",
+    "    super(message);",
+    "    this.name = \"ApiClientError\";",
+    "    const { code, method, path, status, requestId, response } = details;",
+    "    this.code = code;",
+    "    this.method = method;",
+    "    this.path = path;",
+    "    this.status = status;",
+    "    this.requestId = requestId && /^[A-Za-z0-9._:-]{1,256}$/.test(requestId) ? requestId : undefined;",
+    "    this.response = response;",
+    "    Object.defineProperty(this, \"response\", { enumerable: false });",
+    "  }",
+    "}",
     "",
     "export type RouteMethod<",
     "  Options extends ClientRequestOptions = ClientRequestOptions,",
@@ -1629,16 +1665,21 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "    };",
     "    const response = await executeChain(0, { method, url, headers, body: options.body });",
     "    const declaredSchema = responseSchemas ? selectResponseSchema(response.status, responseSchemas) : undefined;",
+    "    const failure = (code: ApiClientErrorCode, message: string) => new ApiClientError(message, {",
+    "      code, method, path, status: response.status, requestId: response.headers.get(\"x-request-id\"),",
+    "      ...(code === \"API_HTTP_ERROR\" ? { response } : {}),",
+    "    });",
     "    if (!response.ok && declaredSchema === undefined) {",
-    "      const errBody = await response.text();",
-    "      throw new Error(`API request failed: ${method} ${path} -> ${response.status} ${errBody}`);",
+    "      throw failure(\"API_HTTP_ERROR\", `API request failed: ${method} ${path} -> ${response.status}`);",
     "    }",
     '    const contentType = response.headers?.get("content-type") ?? "";',
     "    let value: unknown;",
     "    if ([204, 205, 304].includes(response.status)) {",
     "      value = undefined;",
     '    } else if (contentType.includes("application/json") || contentType.includes("+json")) {',
-    "      value = await response.json();",
+    "      const responseText = await response.text();",
+    "      try { value = JSON.parse(responseText); }",
+    "      catch { throw failure(\"API_RESPONSE_INVALID\", \"Response is not valid JSON\"); }",
     '    } else if (responseKind === "binary" || contentType.includes("application/octet-stream")) {',
     "      value = await response.arrayBuffer();",
     '    } else if (responseKind === "stream") {',
@@ -1649,11 +1690,15 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "    if (!responseSchemas) return decode ? decode(value) : value;",
     "    if (declaredSchema === undefined) {",
     "      const transportSuccess = response.ok && (responseKind === \"binary\" || responseKind === \"stream\");",
-    "      if (!transportSuccess) throw new Error(`No response schema declared for HTTP ${response.status}`);",
+    "      if (!transportSuccess) throw failure(\"API_RESPONSE_UNDECLARED\", `No response schema declared for HTTP ${response.status}`);",
     "      return decode ? decode(value) : value;",
     "    }",
     ...(usesValue
-      ? ["    const checked = decodeResponseSchema(value, response.status, responseSchemas, { normalize: config.normalize ?? true });"]
+      ? [
+        "    let checked: unknown;",
+        "    try { checked = decodeResponseSchema(value, response.status, responseSchemas, { normalize: config.normalize ?? true }); }",
+        "    catch { throw failure(\"API_RESPONSE_INVALID\", \"Response does not match schema\"); }",
+      ]
       : ["    const checked = value;"]),
     "    return decode ? decode(checked) : checked;",
     "  }",
