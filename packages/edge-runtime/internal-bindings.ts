@@ -16,7 +16,12 @@ export interface PgredisRuntimeBindingConfig {
 
 export interface PgredisCacheBinding {
   get<T = unknown>(key: string): Promise<T | null>;
+  mget<T = unknown>(keys: readonly string[]): Promise<Array<T | null>>;
   set<T = unknown>(key: string, value: T, ttlMs?: number | null): Promise<boolean>;
+  mset<T = unknown>(
+    entries: ReadonlyArray<{ key: string; value: T }>,
+    ttlMs?: number | null,
+  ): Promise<number>;
   delete(key: string): Promise<boolean>;
   ttl(key: string): Promise<number | null>;
   getset<T = unknown>(key: string, value: T): Promise<T | null>;
@@ -51,8 +56,15 @@ export class PgredisBindingController {
     this.facade = Object.freeze({
       get: <T = unknown>(key: string) =>
         this.call<{ value: T | null }>({ op: "get", key }).then((result) => result.value),
+      mget: <T = unknown>(keys: readonly string[]) =>
+        this.call<{ values: Array<T | null> }>({ op: "mget", keys }).then((result) => result.values),
       set: <T = unknown>(key: string, value: T, ttlMs?: number | null) =>
         this.call<{ written: boolean }>({ op: "set", key, value, ttlMs }).then((result) => result.written),
+      mset: <T = unknown>(
+        entries: ReadonlyArray<{ key: string; value: T }>,
+        ttlMs?: number | null,
+      ) =>
+        this.call<{ written: number }>({ op: "mset", entries, ttlMs }).then((result) => result.written),
       delete: (key: string) => this.call<{ deleted: boolean }>({ op: "delete", key }).then((result) => result.deleted),
       ttl: (key: string) => this.call<{ ttlMs: number | null }>({ op: "ttl", key }).then((result) => result.ttlMs),
       getset: <T = unknown>(key: string, value: T) =>

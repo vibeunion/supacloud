@@ -5,7 +5,12 @@ import { InvalidCapabilityError, verifyPgredisCapability } from "./capability";
 import { pgredisExtensionPolicy } from "./extension-policy";
 import { PROJECT_REF_PATTERN, TenantConfigError } from "./tenant-config";
 
-type CacheOperation = "get" | "set" | "delete" | "ttl" | "getset" | "getdel";
+type CacheOperation = "get" | "set" | "delete" | "ttl" | "getset" | "getdel" | "mget" | "mset";
+
+const CACHE_KEY_SCHEMA = t.String({ minLength: 1, maxLength: 512 });
+// Outer schema bound; the effective limit is PGREDIS_RUNTIME_MAX_KEYS_PER_REQUEST.
+const MAX_BATCH_KEYS = 512;
+const DEFAULT_MAX_KEYS_PER_REQUEST = 100;
 
 export interface PgredisRuntimeAppOptions {
   signingSecret: string;
@@ -13,6 +18,7 @@ export interface PgredisRuntimeAppOptions {
   capabilityMaxTtlMs: number;
   maxValueBytes: number;
   maxTtlMs: number;
+  maxKeysPerRequest?: number;
   registry: Pick<TenantCacheRegistry, "acquire" | "size" | "snapshot" | "projectStatus">;
 }
 
@@ -27,6 +33,7 @@ async function executeCacheOperation(
   body: CacheRequest,
   maxValueBytes: number,
   maxTtlMs: number,
+  maxKeysPerRequest: number,
 ): Promise<Record<string, unknown>> {
   switch (body.op) {
     case "get":
@@ -41,6 +48,31 @@ async function executeCacheOperation(
       return {
         written: await cache.set(body.key, body.value, { ttlMs: body.ttlMs }),
       };
+    }
+    case "mget": {
+      if (body.keys.length > maxKeysPerRequest) {
+        throw new ClientRequestError("Cache batch exceeds the configured key limit");
+      }
+      const values = await cache.mget(body.keys);
+      return { values: body.keys.map((key) => values.get(key) ?? null) };
+    }
+    case "mset": {
+      if (body.entries.length > maxKeysPerRequest) {
+        throw new ClientRequestError("Cache batch exceeds the configured key limit");
+      }
+      if (body.ttlMs !== undefined && body.ttlMs !== null && body.ttlMs > maxTtlMs) {
+        throw new ClientRequestError("Cache TTL exceeds the configured maximum");
+      }
+      for (const entry of body.entries) {
+        if (jsonSize(entry.value) > maxValueBytes) {
+          throw new ClientRequestError("Cache value is missing or too large");
+        }
+      }
+      await cache.mset(
+        body.entries.map((entry) => [entry.key, entry.value] as const),
+        { ttlMs: body.ttlMs },
+      );
+      return { written: body.entries.length };
     }
     case "delete":
       return { deleted: await cache.delete(body.key) };
@@ -80,22 +112,46 @@ function requireInternalToken(request: Request, expectedToken: string): void {
   }
 }
 
-const cacheRequestSchema = t.Object({
-  op: t.Union([
-    t.Literal("get"),
-    t.Literal("set"),
-    t.Literal("delete"),
-    t.Literal("ttl"),
-    t.Literal("getset"),
-    t.Literal("getdel"),
-  ]),
-  key: t.String({ minLength: 1, maxLength: 512 }),
-  value: t.Optional(t.Unknown()),
-  ttlMs: t.Optional(t.Union([
-    t.Integer({ minimum: 0 }),
-    t.Null(),
-  ])),
-}, { additionalProperties: false });
+const cacheRequestSchema = t.Union([
+  t.Object({
+    op: t.Union([
+      t.Literal("get"),
+      t.Literal("delete"),
+      t.Literal("ttl"),
+      t.Literal("getdel"),
+    ]),
+    key: CACHE_KEY_SCHEMA,
+  }, { additionalProperties: false }),
+  t.Object({
+    op: t.Literal("set"),
+    key: CACHE_KEY_SCHEMA,
+    value: t.Unknown(),
+    ttlMs: t.Optional(t.Union([
+      t.Integer({ minimum: 0 }),
+      t.Null(),
+    ])),
+  }, { additionalProperties: false }),
+  t.Object({
+    op: t.Literal("getset"),
+    key: CACHE_KEY_SCHEMA,
+    value: t.Unknown(),
+  }, { additionalProperties: false }),
+  t.Object({
+    op: t.Literal("mget"),
+    keys: t.Array(CACHE_KEY_SCHEMA, { minItems: 1, maxItems: MAX_BATCH_KEYS }),
+  }, { additionalProperties: false }),
+  t.Object({
+    op: t.Literal("mset"),
+    entries: t.Array(
+      t.Object({ key: CACHE_KEY_SCHEMA, value: t.Unknown() }, { additionalProperties: false }),
+      { minItems: 1, maxItems: MAX_BATCH_KEYS },
+    ),
+    ttlMs: t.Optional(t.Union([
+      t.Integer({ minimum: 0 }),
+      t.Null(),
+    ])),
+  }, { additionalProperties: false }),
+]);
 type CacheRequest = Static<typeof cacheRequestSchema>;
 
 const projectRefSchema = t.String({
@@ -133,6 +189,7 @@ type AdminCacheRequest = Static<typeof adminCacheRequestSchema>;
 
 export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
   const adminToken = options.adminToken ?? options.signingSecret;
+  const maxKeysPerRequest = options.maxKeysPerRequest ?? DEFAULT_MAX_KEYS_PER_REQUEST;
   return new Elysia({ normalize: false })
     .onError(({ code, error, set }) => {
       if (code === "VALIDATION") {
@@ -230,6 +287,7 @@ export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
             adminRequest,
             options.maxValueBytes,
             options.maxTtlMs,
+            maxKeysPerRequest,
           );
         } finally {
           lease.release();
@@ -256,6 +314,7 @@ export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
             body,
             options.maxValueBytes,
             options.maxTtlMs,
+            maxKeysPerRequest,
           );
         } finally {
           lease.release();

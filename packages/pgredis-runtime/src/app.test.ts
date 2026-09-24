@@ -43,7 +43,14 @@ describe("pgredis-runtime internal API", () => {
     let releases = 0;
     const cache: TenantCache = {
       async get<T>(key: string) { calls.push(["get", key]); return { key } as T; },
+      async mget(keys: readonly string[]) {
+        calls.push(["mget", keys]);
+        const values = new Map<string, unknown>();
+        for (const key of keys) values.set(key, { key });
+        return values;
+      },
       async set(key, value, options) { calls.push(["set", key, value, options]); return true; },
+      async mset(entries) { calls.push(["mset", entries]); },
       async delete(key) { calls.push(["delete", key]); return true; },
       async ttl(key) { calls.push(["ttl", key]); return 500; },
       async getset<T>(key: string, value: T, _decode: (value: unknown) => T) { calls.push(["getset", key, value]); return "old" as T; },
@@ -89,7 +96,15 @@ describe("pgredis-runtime internal API", () => {
     expect(await (await app.handle(request({ op: "ttl", key: "a" }))).json()).toEqual({ ttlMs: 500 });
     expect(await (await app.handle(request({ op: "getset", key: "a", value: "new" }))).json()).toEqual({ value: "old" });
     expect(await (await app.handle(request({ op: "getdel", key: "a" }))).json()).toEqual({ value: "deleted" });
-    expect(releases).toBe(6);
+    expect(await (await app.handle(request({ op: "mget", keys: ["a", "b"] }))).json()).toEqual({
+      values: [{ key: "a" }, { key: "b" }],
+    });
+    expect(await (await app.handle(request({
+      op: "mset",
+      entries: [{ key: "a", value: 1 }, { key: "b", value: 2 }],
+      ttlMs: 500,
+    }))).json()).toEqual({ written: 2 });
+    expect(releases).toBe(8);
     expect(calls.map((entry) => (entry as unknown[])[0])).toEqual([
       "get",
       "set",
@@ -97,6 +112,8 @@ describe("pgredis-runtime internal API", () => {
       "ttl",
       "getset",
       "getdel",
+      "mget",
+      "mset",
     ]);
 
     expect((await app.handle(request({ op: "queue", key: "a" }))).status).toBe(400);
@@ -109,7 +126,11 @@ describe("pgredis-runtime internal API", () => {
     let releases = 0;
     const cache: TenantCache = {
       async get<T = unknown>(key: string): Promise<T | null> { return `value:${key}` as T; },
+      async mget(keys: readonly string[]) {
+        return new Map<string, unknown>(keys.map((key) => [key, `value:${key}`] as const));
+      },
       async set() { return true; },
+      async mset() {},
       async delete() { return true; },
       async ttl() { return 250; },
       async getset() { return null; },
@@ -200,12 +221,15 @@ describe("pgredis-runtime internal API", () => {
       capabilityMaxTtlMs: 600_000,
       maxValueBytes: 8,
       maxTtlMs: 10_000,
+      maxKeysPerRequest: 2,
       registry: {
         async acquire() {
           return {
             cache: {
               async get() { return null; },
+              async mget() { return new Map<string, unknown>(); },
               async set() { return true; },
+              async mset() {},
               async delete() { return false; },
               async ttl() { return null; },
               async getset() { return null; },
@@ -240,6 +264,9 @@ describe("pgredis-runtime internal API", () => {
 
     expect((await app.handle(request({ op: "get", key: "a" }, "Bearer wrong"))).status).toBe(401);
     expect((await app.handle(request({ op: "set", key: "a", value: "too-large" }))).status).toBe(400);
+    expect((await app.handle(request({ op: "mset", entries: [{ key: "a", value: "too-large" }] }))).status).toBe(400);
+    expect((await app.handle(request({ op: "mget", keys: ["a", "b", "c"] }))).status).toBe(400);
+    expect((await app.handle(request({ op: "mset", entries: [] }))).status).toBe(400);
     const health = await (await app.handle(new Request("http://localhost/health"))).json();
     expect(health).toMatchObject({
       l1: true,

@@ -52,9 +52,16 @@ Edge 和控制面均只提供已知键操作：
 - `ttl`
 - 原子 `getset`
 - 原子 `getdel`
+- 批量 `mget` / `mset`
 
 不提供 `KEYS`、`SCAN`、键前缀枚举或 Redis 协议。缓存表使用 `UNLOGGED`，数据必须可重建，
 不能作为持久业务事实。
+
+批量操作只消耗一次 HTTP 往返：`mget` 用一条 SQL 读取整批键，`mset` 在单个 PostgreSQL
+事务内写入整批键并由上游 `PgKvCache.mset` 统一发布失效通知。往返次数与延迟不随键数量线性
+增长。`mset` 可携带一个作用于整批的 `ttlMs`；提交成功后逐键清理本实例 L1，其他实例由
+`LISTEN/NOTIFY` 失效。单次请求的键数量默认上限为 100，可用
+`PGREDIS_RUNTIME_MAX_KEYS_PER_REQUEST` 调整（外部 schema 的硬上限为 512）。
 
 所有写操作与失效通知在同一 PostgreSQL 事务中提交。项目命名空间清空通过
 `clearNamespace()` 在同一事务内删除数据并发送 `clearNamespace` 通知；本实例 L1 仅在事务

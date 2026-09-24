@@ -10,7 +10,9 @@ import {
 function fakeCache(): TenantCache & { clearNamespace(): Promise<number> } {
   return {
     async get() { return null; },
+    async mget() { return new Map<string, unknown>(); },
     async set() { return true; },
+    async mset() {},
     async delete() { return true; },
     async ttl() { return null; },
     async getset() { return null; },
@@ -411,6 +413,7 @@ describe("createTransactionalTenantCache", () => {
       adapter,
       {
         async get() { return null; },
+        async mget() { return new Map<string, unknown>(); },
         async ttl() { return null; },
         invalidate(key) { invalidated.push(key); },
         invalidateAll() {},
@@ -444,6 +447,7 @@ describe("createTransactionalTenantCache", () => {
       },
       {
         async get() { return null; },
+        async mget() { return new Map<string, unknown>(); },
         async ttl() { return null; },
         invalidate() { invalidated = true; },
         invalidateAll() { invalidated = true; },
@@ -472,6 +476,7 @@ describe("createTransactionalTenantCache", () => {
       },
       {
         async get() { return null; },
+        async mget() { return new Map<string, unknown>(); },
         async ttl() { return null; },
         invalidate() {},
         invalidateAll() { calls.push("INVALIDATE_ALL"); },
@@ -505,6 +510,7 @@ describe("createTransactionalTenantCache", () => {
       },
       {
         async get() { return null; },
+        async mget() { return new Map<string, unknown>(); },
         async ttl() { return null; },
         invalidate() {},
         invalidateAll() {},
@@ -518,5 +524,72 @@ describe("createTransactionalTenantCache", () => {
 
     expect(await cache.cleanupExpired?.(20_000)).toBe(1);
     expect(cleanupLimit).toBe(10_000);
+  });
+
+  test("delegates batch reads to the upstream PgKvCache without opening a transaction", async () => {
+    const requested: string[][] = [];
+    let beginCount = 0;
+    const cache = createTransactionalTenantCache(
+      {
+        async unsafe<T>(): Promise<T[]> { return []; },
+        async begin<T>(operation: (transaction: PgSqlLike) => Promise<T>): Promise<T> {
+          beginCount += 1;
+          return operation({ async unsafe<U>(): Promise<U[]> { return []; } });
+        },
+      },
+      {
+        async get() { return null; },
+        async mget(keys: readonly string[]) {
+          requested.push([...keys]);
+          return new Map<string, unknown>(keys.map((key) => [key, `value:${key}`] as const));
+        },
+        async ttl() { return null; },
+        invalidate() {},
+        invalidateAll() {},
+      },
+      () => fakeCache(),
+    );
+
+    const values = await cache.mget(["a", "b"]);
+    expect(values.get("a")).toBe("value:a");
+    expect(beginCount).toBe(0);
+    expect(requested).toEqual([["a", "b"]]);
+  });
+
+  test("commits MSET in one transaction and invalidates every key locally", async () => {
+    const calls: string[] = [];
+    const invalidated: string[] = [];
+    const msetOptions: unknown[] = [];
+    const tx: PgSqlLike = { async unsafe<T>(): Promise<T[]> { return []; } };
+    const cache = createTransactionalTenantCache(
+      {
+        async unsafe<T>(): Promise<T[]> { return []; },
+        async begin<T>(operation: (transaction: PgSqlLike) => Promise<T>): Promise<T> {
+          calls.push("BEGIN");
+          const result = await operation(tx);
+          calls.push("COMMIT");
+          return result;
+        },
+      },
+      {
+        async get() { return null; },
+        async mget() { return new Map<string, unknown>(); },
+        async ttl() { return null; },
+        invalidate(key) { invalidated.push(key); },
+        invalidateAll() {},
+      },
+      () => ({
+        ...fakeCache(),
+        async mset(_entries, options) {
+          calls.push("MSET");
+          msetOptions.push(options);
+        },
+      }),
+    );
+
+    await cache.mset([["a", 1], ["b", 2]], { ttlMs: 500 });
+    expect(calls).toEqual(["BEGIN", "MSET", "COMMIT"]);
+    expect(invalidated).toEqual(["a", "b"]);
+    expect(msetOptions).toEqual([{ ttlMs: 500 }]);
   });
 });

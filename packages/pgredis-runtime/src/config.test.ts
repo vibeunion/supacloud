@@ -14,7 +14,20 @@ describe("loadPgredisRuntimeConfig", () => {
     expect(config.l1TtlMs).toBe(30_000);
     expect(config.cleanupIntervalMs).toBe(60_000);
     expect(config.cleanupBatchSize).toBe(500);
+    expect(config.maxKeysPerRequest).toBe(100);
     expect(config.capabilityMaxTtlMs).toBe(600_000);
+  });
+
+  test("allows bounded batch key tuning", () => {
+    const config = loadPgredisRuntimeConfig({
+      PGREDIS_RUNTIME_INTERNAL_TOKEN: "x".repeat(32),
+      PGREDIS_RUNTIME_MAX_KEYS_PER_REQUEST: "250",
+    });
+    expect(config.maxKeysPerRequest).toBe(250);
+    expect(() => loadPgredisRuntimeConfig({
+      PGREDIS_RUNTIME_INTERNAL_TOKEN: "x".repeat(32),
+      PGREDIS_RUNTIME_MAX_KEYS_PER_REQUEST: "0",
+    })).toThrow("PGREDIS_RUNTIME_MAX_KEYS_PER_REQUEST");
   });
 
   test("allows bounded expired-row cleanup tuning", () => {
