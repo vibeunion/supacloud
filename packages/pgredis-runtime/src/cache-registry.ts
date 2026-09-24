@@ -1,7 +1,7 @@
 import { SQL } from "bun";
 import { createPgListener, type PgListenerHandle } from "@postgresx/bun-listen";
 import { createBunSqlAdapter } from "@postgresx/noredis/adapters/bun";
-import { createPgKvCache, type PgKvCache, type PgKvCacheListenerFactory, type PgKvCacheNotifyOptions } from "@postgresx/noredis/kv";
+import { createPgKvCache, type PgKvCache, type PgKvCacheListenerFactory, type PgKvCacheNotifyOptions, type PgKvCacheStats } from "@postgresx/noredis/kv";
 import type { PgSqlLike } from "@postgresx/noredis";
 import { createBudgetedAdapter, createDatabaseBudget, type DatabaseBudget } from "./database-budget";
 import { recordInvalidationPublish, recordTransactionRetry, recordTransactionRetryExhausted } from "./metrics";
@@ -33,6 +33,7 @@ export interface TenantCache {
   getdel<T = unknown>(key: string): Promise<T | null>;
   flush(): Promise<number>;
   cleanupExpired?(limit?: number): Promise<number>;
+  stats?(): PgKvCacheStats;
 }
 
 interface TenantCacheBackend {
@@ -63,6 +64,10 @@ export interface TenantCacheRegistrySnapshot {
     enabled: true;
     maxEntries: number;
     ttlMs: number;
+    /** L1 read hits summed over the tenant caches currently held. */
+    hits: number;
+    /** L1 read misses summed over the tenant caches currently held. */
+    misses: number;
   };
   tenants: Array<{
     projectRef: string;
@@ -217,6 +222,7 @@ interface LocalCache {
   ttl(key: string): Promise<number | null>;
   invalidate(key: string): void;
   invalidateAll(): void;
+  stats?(): PgKvCacheStats;
 }
 
 export function createTransactionalTenantCache(
@@ -311,6 +317,7 @@ export function createTransactionalTenantCache(
     cleanupExpired: cleanupExpired
       ? (limit = 500) => cleanupExpired(Math.max(1, Math.min(Math.trunc(limit), 10_000)))
       : undefined,
+    stats: cache.stats ? () => cache.stats!() : undefined,
   };
 }
 
@@ -504,6 +511,14 @@ export class TenantCacheRegistry {
   }
 
   snapshot(): TenantCacheRegistrySnapshot {
+    let hits = 0;
+    let misses = 0;
+    for (const entry of this.entries.values()) {
+      const stats = entry.cache.stats?.();
+      if (!stats) continue;
+      hits += stats.l1Hits;
+      misses += stats.l1Misses;
+    }
     return {
       activeTenants: this.entries.size,
       maxTenants: this.options.maxTenants,
@@ -512,6 +527,8 @@ export class TenantCacheRegistry {
         enabled: true,
         maxEntries: this.options.l1MaxEntries,
         ttlMs: this.options.l1TtlMs,
+        hits,
+        misses,
       },
       tenants: [...this.entries.values()]
         .sort((left, right) => left.ref.localeCompare(right.ref))

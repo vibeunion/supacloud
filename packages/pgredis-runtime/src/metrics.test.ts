@@ -12,6 +12,8 @@ const gauges = {
   activeTenants: 3,
   tenantCapacity: 8,
   l1MaxEntries: 100,
+  l1Hits: 9,
+  l1Misses: 3,
   crossInstanceInvalidation: true,
   databaseInFlight: 5,
   databaseLimit: 40,
@@ -50,8 +52,17 @@ describe("pgredis metrics", () => {
     expect(text).toContain("supacloud_pgredis_active_tenants 3");
     expect(text).toContain("supacloud_pgredis_tenant_capacity 8");
     expect(text).toContain("supacloud_pgredis_l1_max_entries 100");
+    expect(text).toContain("supacloud_pgredis_l1_hits 9");
+    expect(text).toContain("supacloud_pgredis_l1_misses 3");
+    expect(text).toContain("supacloud_pgredis_l1_hit_ratio 0.75");
     expect(text).toContain("supacloud_pgredis_database_operations_in_flight 5");
     expect(text).toContain("supacloud_pgredis_database_operation_limit 40");
+  });
+
+  test("reports zero hit ratio when there were no L1 reads", () => {
+    resetPgredisMetrics();
+    const text = renderPgredisMetrics({ ...gauges, l1Hits: 0, l1Misses: 0 });
+    expect(text).toContain("supacloud_pgredis_l1_hit_ratio 0");
   });
 
   test("resets all series", () => {

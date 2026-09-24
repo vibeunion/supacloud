@@ -125,7 +125,7 @@ describe("TenantCacheRegistry", () => {
       activeTenants: 1,
       maxTenants: 4,
       connectionsPerTenant: 2,
-      l1: { enabled: true, maxEntries: 250, ttlMs: 2_000 },
+      l1: { enabled: true, maxEntries: 250, ttlMs: 2_000, hits: 0, misses: 0 },
       tenants: [{
         projectRef: "tenant-a",
         leases: 0,
@@ -658,12 +658,51 @@ describe("createTransactionalTenantCache", () => {
       activeTenants: 0,
       tenantCapacity: 1,
       l1MaxEntries: 1,
+      l1Hits: 0,
+      l1Misses: 0,
       crossInstanceInvalidation: true,
       databaseInFlight: 0,
       databaseLimit: 0,
     });
     expect(text).toContain("supacloud_pgredis_transaction_retries_total 1");
     expect(text).toContain("supacloud_pgredis_transaction_retry_exhausted_total 0");
+  });
+
+  test("exposes upstream L1 stats when the local cache provides them", async () => {
+    const cache = createTransactionalTenantCache(
+      {
+        async unsafe<T>(): Promise<T[]> { return []; },
+        begin: (operation) => operation({ async unsafe<U>(): Promise<U[]> { return []; } }),
+      },
+      {
+        async get() { return null; },
+        async mget() { return new Map<string, unknown>(); },
+        async ttl() { return null; },
+        invalidate() {},
+        invalidateAll() {},
+        stats: () => ({ namespace: "n", tableName: "t", l1Size: 2, l1Max: 10, l1Hits: 7, l1Misses: 1 }),
+      },
+      () => fakeCache(),
+    );
+    expect(cache.stats?.()).toMatchObject({ l1Hits: 7, l1Misses: 1 });
+  });
+
+  test("omits stats when the local cache has none", async () => {
+    const cache = createTransactionalTenantCache(
+      {
+        async unsafe<T>(): Promise<T[]> { return []; },
+        begin: (operation) => operation({ async unsafe<U>(): Promise<U[]> { return []; } }),
+      },
+      {
+        async get() { return null; },
+        async mget() { return new Map<string, unknown>(); },
+        async ttl() { return null; },
+        invalidate() {},
+        invalidateAll() {},
+      },
+      () => fakeCache(),
+    );
+    expect(cache.stats).toBeUndefined();
   });
 });
 

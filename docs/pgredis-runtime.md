@@ -175,11 +175,13 @@ version=0.0.4`），进程内累计，重启后清零：
 - `supacloud_pgredis_transaction_retry_exhausted_total`：重试耗尽的次数
 - `supacloud_pgredis_cross_instance_invalidation`：是否启用跨实例失效（1/0）
 - `supacloud_pgredis_active_tenants` / `supacloud_pgredis_tenant_capacity` / `supacloud_pgredis_l1_max_entries`
+- `supacloud_pgredis_l1_hits` / `supacloud_pgredis_l1_misses` / `supacloud_pgredis_l1_hit_ratio`
 - `supacloud_pgredis_database_operations_in_flight` / `supacloud_pgredis_database_operation_limit`
   （后者为 0 表示未设置显式预算）
 
-当前不提供 L1 命中率：上游 `PgKvCache.stats()` 只暴露 `l1Size`/`l1Max`，没有命中/未命中
-计数器。需要命中率时要先在上游补齐计数，或在本层代理 L1。
+L1 命中率来自上游 `PgKvCache.stats()`（自 `@postgresx/noredis@0.8.0` 起提供 `l1Hits`/`l1Misses`），
+按当前持有的租户缓存汇总。租户 cache 被淘汰/重建时其计数会重置，因此 hits/misses 是 gauge
+而非单调 counter；`hit_ratio` 在无读时为 0。
 
 ## 故障与回滚
 
