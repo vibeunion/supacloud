@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.8.0...pgredis-runtime-v0.9.0) (2026-09-24)
+
+
+### Features
+
+* **pgredis-runtime:** adopt @postgresx/noredis 0.11 and expose L1 health ([#1424](https://github.com/vibeunion/supacloud/issues/1424)) ([9af9266](https://github.com/vibeunion/supacloud/commit/9af9266fb84abc21a2028a4558d5f35a31cdc1cf))
+
 ## [0.8.0](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.7.0...pgredis-runtime-v0.8.0) (2026-09-24)
 
 
