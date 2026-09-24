@@ -85,6 +85,11 @@ export interface PgredisMetricGauges {
   l1MaxEntries: number;
   l1Hits: number;
   l1Misses: number;
+  l1NegativeHits: number;
+  l1InflightReads: number;
+  l1CoalescedReads: number;
+  l1Bytes: number;
+  l1PausedTenants: number;
   crossInstanceInvalidation: boolean;
   databaseInFlight: number;
   databaseLimit: number;
@@ -165,6 +170,21 @@ export function renderPgredisMetrics(gauges: PgredisMetricGauges): string {
     "# HELP supacloud_pgredis_l1_hit_ratio L1 hit ratio across tenant caches currently held (0 when no reads).",
     "# TYPE supacloud_pgredis_l1_hit_ratio gauge",
     `supacloud_pgredis_l1_hit_ratio ${l1Reads === 0 ? 0 : gauges.l1Hits / l1Reads}`,
+    "# HELP supacloud_pgredis_l1_negative_hits Reads served from a cached L2 miss across tenant caches currently held.",
+    "# TYPE supacloud_pgredis_l1_negative_hits gauge",
+    `supacloud_pgredis_l1_negative_hits ${gauges.l1NegativeHits}`,
+    "# HELP supacloud_pgredis_l1_inflight_reads Reads currently coalesced into an in-flight query.",
+    "# TYPE supacloud_pgredis_l1_inflight_reads gauge",
+    `supacloud_pgredis_l1_inflight_reads ${gauges.l1InflightReads}`,
+    "# HELP supacloud_pgredis_l1_coalesced_reads Reads that joined an in-flight query for the same key.",
+    "# TYPE supacloud_pgredis_l1_coalesced_reads gauge",
+    `supacloud_pgredis_l1_coalesced_reads ${gauges.l1CoalescedReads}`,
+    "# HELP supacloud_pgredis_l1_bytes Approximate bytes held across tenant L1 caches currently held.",
+    "# TYPE supacloud_pgredis_l1_bytes gauge",
+    `supacloud_pgredis_l1_bytes ${gauges.l1Bytes}`,
+    "# HELP supacloud_pgredis_l1_paused_tenants Tenants whose L1 is paused because the invalidation listener is unhealthy.",
+    "# TYPE supacloud_pgredis_l1_paused_tenants gauge",
+    `supacloud_pgredis_l1_paused_tenants ${gauges.l1PausedTenants}`,
     "# HELP supacloud_pgredis_database_operations_in_flight Tenant database operations currently holding a budget permit.",
     "# TYPE supacloud_pgredis_database_operations_in_flight gauge",
     `supacloud_pgredis_database_operations_in_flight ${gauges.databaseInFlight}`,

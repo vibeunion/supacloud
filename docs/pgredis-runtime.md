@@ -140,6 +140,9 @@ PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT=2
 PGREDIS_RUNTIME_MAX_TOTAL_CONNECTIONS=256
 PGREDIS_RUNTIME_L1_MAX_ENTRIES=1000
 PGREDIS_RUNTIME_L1_TTL_MS=30000
+PGREDIS_RUNTIME_L1_NEGATIVE_TTL_MS=0
+PGREDIS_RUNTIME_L1_MAX_BYTES=0
+PGREDIS_RUNTIME_L1_MAX_ENTRY_BYTES=0
 PGREDIS_RUNTIME_CLEANUP_INTERVAL_MS=60000
 PGREDIS_RUNTIME_CLEANUP_BATCH_SIZE=500
 PGREDIS_RUNTIME_MAX_KEYS_PER_REQUEST=100
@@ -163,6 +166,21 @@ runtime 还有一个**进程级数据库操作预算**：
 - 因此可以“上调每租户上限（弹性突发）+ 收紧全局预算（保护数据库）”；不改预算时行为与过去
   一致（默认预算等于理论最大值）。
 
+## L1 调优
+
+每个租户一个进程内 L1（上游 `PgKvCache`），默认按 `PGREDIS_RUNTIME_L1_MAX_ENTRIES`（1000）
+条目淘汰，`PGREDIS_RUNTIME_L1_TTL_MS`（30000）为本地 TTL：
+
+- `PGREDIS_RUNTIME_L1_NEGATIVE_TTL_MS`（0 关闭）：把 L2 缺失缓存一小段时间（建议 250ms），
+  降低对不存在键的重复回源；`set` 和删除通知会立即清除。
+- `PGREDIS_RUNTIME_L1_MAX_BYTES`（0 关闭）：超过近似字节上限时按 LRU 淘汰，防止少量大值
+  占用超出条目数预期的内存。
+- `PGREDIS_RUNTIME_L1_MAX_ENTRY_BYTES`（0 关闭）：拒绝缓存超过该大小的单值。
+
+并发读同一键会合并为一次数据库查询（上游 singleflight，默认开启）。失效监听不健康
+（`close`/`error`/重连中）时，L1 会清空并暂停，直到确认重新 `LISTEN`，避免在通知断档
+期间返回陈旧值；对应 `l1_paused_tenants` 指标。
+
 ## 可观测性
 
 `GET /internal/v1/admin/metrics`（需内部令牌）返回 Prometheus 文本格式（`text/plain;
@@ -176,12 +194,19 @@ version=0.0.4`），进程内累计，重启后清零：
 - `supacloud_pgredis_cross_instance_invalidation`：是否启用跨实例失效（1/0）
 - `supacloud_pgredis_active_tenants` / `supacloud_pgredis_tenant_capacity` / `supacloud_pgredis_l1_max_entries`
 - `supacloud_pgredis_l1_hits` / `supacloud_pgredis_l1_misses` / `supacloud_pgredis_l1_hit_ratio`
+- `supacloud_pgredis_l1_negative_hits`：由负缓存直接命中的读（无回源）
+- `supacloud_pgredis_l1_inflight_reads` / `supacloud_pgredis_l1_coalesced_reads`：读合并（singleflight）
+  进行中与合并次数
+- `supacloud_pgredis_l1_bytes`：当前持有的租户 L1 近似字节数
+- `supacloud_pgredis_l1_paused_tenants`：因失效监听不健康而暂停 L1 的租户数
 - `supacloud_pgredis_database_operations_in_flight` / `supacloud_pgredis_database_operation_limit`
   （后者为 0 表示未设置显式预算）
 
-L1 命中率来自上游 `PgKvCache.stats()`（自 `@postgresx/noredis@0.8.0` 起提供 `l1Hits`/`l1Misses`），
-按当前持有的租户缓存汇总。租户 cache 被淘汰/重建时其计数会重置，因此 hits/misses 是 gauge
-而非单调 counter；`hit_ratio` 在无读时为 0。
+L1 指标来自上游 `PgKvCache.stats()`（`@postgresx/noredis@0.8.0` 起提供 `l1Hits`/`l1Misses`，
+`0.8.1` 起提供 `l1Paused`，`0.9.0` 起提供 `inflightReads`/`coalescedReads`，`0.10.0` 起提供
+`l1NegativeHits`，`0.11.0` 起提供 `l1Bytes`/`l1MaxBytes`），按当前持有的租户缓存汇总。租户 cache
+被淘汰/重建时其计数会重置，因此这些值是 gauge 而非单调 counter；`hit_ratio` 在无读时为 0，且
+只统计正向命中（负缓存命中单独计入 `l1_negative_hits`）。
 
 ## 故障与回滚
 

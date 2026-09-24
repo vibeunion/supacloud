@@ -13,6 +13,7 @@
     "start": "bun run server.ts",
     "test": "bun test",
     "test:postgres": "bun test src/cache-registry.postgres.test.ts",
+    "benchmark:l1": "bun run scripts/l1-benchmark.ts",
     "typecheck": "bun x tsc --noEmit -p tsconfig.json",
     "build:amd64": "bun build server.ts --compile --target=bun-linux-x64 --outfile=supacloud-pgredis-runtime-linux-amd64",
     "build:arm64": "bun build server.ts --compile --target=bun-linux-arm64 --outfile=supacloud-pgredis-runtime-linux-arm64",
@@ -23,7 +24,7 @@
   },
   "dependencies": {
     "@postgresx/bun-listen": "0.3.2",
-    "@postgresx/noredis": "0.8.0",
+    "@postgresx/noredis": "0.11.0",
     "elysia": "^1.4.30"
   },
   "devDependencies": {

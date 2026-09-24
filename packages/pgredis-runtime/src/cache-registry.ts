@@ -56,6 +56,14 @@ export interface TenantCacheLease {
   release(): void;
 }
 
+export interface TenantCacheL1Options {
+  maxEntries: number;
+  ttlMs: number;
+  negativeTtlMs: number;
+  maxBytes: number;
+  maxEntryBytes: number;
+}
+
 export interface TenantCacheRegistrySnapshot {
   activeTenants: number;
   maxTenants: number;
@@ -68,6 +76,16 @@ export interface TenantCacheRegistrySnapshot {
     hits: number;
     /** L1 read misses summed over the tenant caches currently held. */
     misses: number;
+    /** Reads served from a cached L2 miss (negative cache). */
+    negativeHits: number;
+    /** Reads currently coalesced into an in-flight query. */
+    inflightReads: number;
+    /** Reads that joined an in-flight query for the same key. */
+    coalescedReads: number;
+    /** Approximate bytes held across the tenant L1 caches currently held. */
+    bytes: number;
+    /** Tenants whose L1 is paused because the invalidation listener is unhealthy. */
+    pausedTenants: number;
   };
   tenants: Array<{
     projectRef: string;
@@ -108,6 +126,9 @@ export interface TenantCacheRegistryOptions {
   tenantIdleMs: number;
   l1MaxEntries: number;
   l1TtlMs: number;
+  l1NegativeTtlMs?: number;
+  l1MaxBytes?: number;
+  l1MaxEntryBytes?: number;
   cleanupBatchSize?: number;
   now?: () => number;
   loadConfig?: (tenantsDir: string, ref: string) => Promise<TenantDatabaseConfig>;
@@ -115,8 +136,7 @@ export interface TenantCacheRegistryOptions {
     ref: string,
     config: TenantDatabaseConfig,
     connectionsPerTenant: number,
-    l1MaxEntries: number,
-    l1TtlMs: number,
+    l1: TenantCacheL1Options,
   ) => Promise<TenantCacheBackend>;
   /** Overrides how tenant L1 invalidation is published and observed. */
   invalidationTransport?: InvalidationTransport;
@@ -352,8 +372,7 @@ async function createPostgresBackend(
   _ref: string,
   config: TenantDatabaseConfig,
   connectionsPerTenant: number,
-  l1MaxEntries: number,
-  l1TtlMs: number,
+  l1: TenantCacheL1Options,
   transport: InvalidationTransport,
   budget: DatabaseBudget | undefined,
 ): Promise<TenantCacheBackend> {
@@ -374,7 +393,13 @@ async function createPostgresBackend(
     sql: adapter,
     namespace: CACHE_NAMESPACE,
     tableName: CACHE_TABLE,
-    l1: { max: l1MaxEntries, ttlMs: l1TtlMs },
+    l1: {
+      max: l1.maxEntries,
+      ttlMs: l1.ttlMs,
+      negativeTtlMs: l1.negativeTtlMs,
+      maxBytes: l1.maxBytes,
+      maxEntryBytes: l1.maxEntryBytes,
+    },
     notify: transport.ownerNotifyOptions(({ channels, onNotify }) => {
       listener = createPgListener(config.databaseUrl, channels, onNotify, { logger: false });
       return listener;
@@ -437,12 +462,11 @@ export class TenantCacheRegistry {
       ? undefined
       : createDatabaseBudget(options.maxTotalConnections);
     this.createBackend = options.createBackend
-      || ((ref, config, connectionsPerTenant, l1MaxEntries, l1TtlMs) => createPostgresBackend(
+      || ((ref, config, connectionsPerTenant, l1) => createPostgresBackend(
         ref,
         config,
         connectionsPerTenant,
-        l1MaxEntries,
-        l1TtlMs,
+        l1,
         options.invalidationTransport ?? createNotifyInvalidationTransport(PGREDIS_NOTIFY_CHANNEL),
         this.databaseBudgetState,
       ));
@@ -513,11 +537,21 @@ export class TenantCacheRegistry {
   snapshot(): TenantCacheRegistrySnapshot {
     let hits = 0;
     let misses = 0;
+    let negativeHits = 0;
+    let inflightReads = 0;
+    let coalescedReads = 0;
+    let bytes = 0;
+    let pausedTenants = 0;
     for (const entry of this.entries.values()) {
       const stats = entry.cache.stats?.();
       if (!stats) continue;
       hits += stats.l1Hits;
       misses += stats.l1Misses;
+      negativeHits += stats.l1NegativeHits;
+      inflightReads += stats.inflightReads;
+      coalescedReads += stats.coalescedReads;
+      bytes += stats.l1Bytes;
+      if (stats.l1Paused) pausedTenants += 1;
     }
     return {
       activeTenants: this.entries.size,
@@ -529,6 +563,11 @@ export class TenantCacheRegistry {
         ttlMs: this.options.l1TtlMs,
         hits,
         misses,
+        negativeHits,
+        inflightReads,
+        coalescedReads,
+        bytes,
+        pausedTenants,
       },
       tenants: [...this.entries.values()]
         .sort((left, right) => left.ref.localeCompare(right.ref))
@@ -599,8 +638,7 @@ export class TenantCacheRegistry {
         ref,
         config,
         this.options.connectionsPerTenant,
-        this.options.l1MaxEntries,
-        this.options.l1TtlMs,
+        this.l1Options(),
       );
       const entry = this.createEntry(ref, config.fingerprint, backend);
       let latestConfig: TenantDatabaseConfig;
@@ -628,6 +666,16 @@ export class TenantCacheRegistry {
     } finally {
       if (reservationActive) this.creating -= 1;
     }
+  }
+
+  private l1Options(): TenantCacheL1Options {
+    return {
+      maxEntries: this.options.l1MaxEntries,
+      ttlMs: this.options.l1TtlMs,
+      negativeTtlMs: this.options.l1NegativeTtlMs ?? 0,
+      maxBytes: this.options.l1MaxBytes ?? 0,
+      maxEntryBytes: this.options.l1MaxEntryBytes ?? 0,
+    };
   }
 
   private async evictForCapacity(): Promise<void> {

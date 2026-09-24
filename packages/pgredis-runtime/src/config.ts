@@ -13,6 +13,9 @@ export interface PgredisRuntimeConfig {
   tenantIdleMs: number;
   l1MaxEntries: number;
   l1TtlMs: number;
+  l1NegativeTtlMs: number;
+  l1MaxBytes: number;
+  l1MaxEntryBytes: number;
   cleanupIntervalMs: number;
   cleanupBatchSize: number;
   singleInstance: boolean;
@@ -24,6 +27,15 @@ function positiveInteger(value: string | undefined, fallback: number, name: stri
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
     throw new Error(`${name} must be a positive integer`);
+  }
+  return parsed;
+}
+
+function nonNegativeInteger(value: string | undefined, fallback: number, name: string): number {
+  if (value === undefined || value.trim() === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error(`${name} must be a non-negative integer`);
   }
   return parsed;
 }
@@ -102,6 +114,21 @@ export function loadPgredisRuntimeConfig(
       env.PGREDIS_RUNTIME_L1_TTL_MS,
       30_000,
       "PGREDIS_RUNTIME_L1_TTL_MS",
+    ),
+    l1NegativeTtlMs: nonNegativeInteger(
+      env.PGREDIS_RUNTIME_L1_NEGATIVE_TTL_MS,
+      0,
+      "PGREDIS_RUNTIME_L1_NEGATIVE_TTL_MS",
+    ),
+    l1MaxBytes: nonNegativeInteger(
+      env.PGREDIS_RUNTIME_L1_MAX_BYTES,
+      0,
+      "PGREDIS_RUNTIME_L1_MAX_BYTES",
+    ),
+    l1MaxEntryBytes: nonNegativeInteger(
+      env.PGREDIS_RUNTIME_L1_MAX_ENTRY_BYTES,
+      0,
+      "PGREDIS_RUNTIME_L1_MAX_ENTRY_BYTES",
     ),
     cleanupIntervalMs: positiveInteger(
       env.PGREDIS_RUNTIME_CLEANUP_INTERVAL_MS,

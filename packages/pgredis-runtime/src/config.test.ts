@@ -13,6 +13,9 @@ describe("loadPgredisRuntimeConfig", () => {
     expect(config.maxValueBytes).toBe(1_048_576);
     expect(config.l1MaxEntries).toBe(1_000);
     expect(config.l1TtlMs).toBe(30_000);
+    expect(config.l1NegativeTtlMs).toBe(0);
+    expect(config.l1MaxBytes).toBe(0);
+    expect(config.l1MaxEntryBytes).toBe(0);
     expect(config.cleanupIntervalMs).toBe(60_000);
     expect(config.cleanupBatchSize).toBe(500);
     expect(config.maxKeysPerRequest).toBe(100);
@@ -73,6 +76,22 @@ describe("loadPgredisRuntimeConfig", () => {
     });
     expect(config.cleanupIntervalMs).toBe(120_000);
     expect(config.cleanupBatchSize).toBe(250);
+  });
+
+  test("parses optional L1 negative cache and byte budget tuning", () => {
+    const config = loadPgredisRuntimeConfig({
+      PGREDIS_RUNTIME_INTERNAL_TOKEN: "x".repeat(32),
+      PGREDIS_RUNTIME_L1_NEGATIVE_TTL_MS: "250",
+      PGREDIS_RUNTIME_L1_MAX_BYTES: "8388608",
+      PGREDIS_RUNTIME_L1_MAX_ENTRY_BYTES: "65536",
+    });
+    expect(config.l1NegativeTtlMs).toBe(250);
+    expect(config.l1MaxBytes).toBe(8_388_608);
+    expect(config.l1MaxEntryBytes).toBe(65_536);
+    expect(() => loadPgredisRuntimeConfig({
+      PGREDIS_RUNTIME_INTERNAL_TOKEN: "x".repeat(32),
+      PGREDIS_RUNTIME_L1_MAX_BYTES: "-1",
+    })).toThrow("PGREDIS_RUNTIME_L1_MAX_BYTES");
   });
 
   test("rejects missing or short internal tokens", () => {
