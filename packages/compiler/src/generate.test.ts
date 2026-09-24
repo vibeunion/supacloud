@@ -1050,7 +1050,8 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
 
     expect(rendered.clientCode).toContain("export type ResponseDecoder<T> = (value: unknown) => T;");
     expect(rendered.clientCode).toContain("): Promise<unknown>;");
-    expect(rendered.clientCode).toContain("value = await response.json();");
+    expect(rendered.clientCode).toContain("const responseText = await response.text();");
+    expect(rendered.clientCode).toContain("value = JSON.parse(responseText);");
     expect(rendered.clientCode).toContain("return decode ? decode(value) : value;");
     expect(rendered.clientCode).not.toContain("response.json() as Promise<T>");
     expect(rendered.clientCode).not.toContain("response.text() as Promise<T>");

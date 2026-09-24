@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -175,6 +175,83 @@ test("generated client requires params when a params schema exists without a pat
     });
     expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
       .toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("changing the shared route contract rejects stale callers without handwritten client types", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-client-contract-evolution-"));
+  try {
+    const contractGraph: ApplicationGraph = {
+      ...graph,
+      modules: [{
+        ...graph.modules[0]!,
+        controllers: [{
+          ...graph.modules[0]!.controllers[0]!,
+          path: "/items",
+          schemaImports: { Body: "./schemas", Result: "./schemas" },
+          routes: [{ method: "POST", path: "/", handler: "create", body: "Body", responses: { 201: "Result" } }],
+        }],
+      }],
+    };
+    const diagnostics = () => {
+      const program = ts.createProgram([join(root, "consumer.ts")], {
+        strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
+        noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
+        ignoreDeprecations: "6.0", baseUrl: root,
+        paths: { "@sinclair/typebox": [typeboxPath] },
+      });
+      return ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));
+    };
+    await writeFixtureProject(root, {
+      "client.ts": renderClient(contractGraph, { rootDir: root, outDir: root }),
+      "schemas.ts": [
+        'import { Type } from "@sinclair/typebox";',
+        'export const Body = Type.Object({ amount: Type.Number() });',
+        'export const Result = Type.Object({ id: Type.String() });',
+      ].join("\n"),
+      "consumer.ts": [
+        'import { createApiClient, ApiClientError } from "./client";',
+        "const client = createApiClient();",
+        "const result = await client.items.create({ body: { amount: 10 } });",
+        "const id: string = result.id;",
+        "try { await client.items.create({ body: { amount: 20 } }); } catch (error) {",
+        "  if (error instanceof ApiClientError) { const status: number = error.status; void status; }",
+        "}",
+        "void id;",
+      ].join("\n"),
+    });
+    expect(diagnostics()).toEqual([]);
+    await writeFixtureProject(root, {
+      "schemas.ts": [
+        'import { Type } from "@sinclair/typebox";',
+        'export const Body = Type.Object({ total: Type.Number() });',
+        'export const Result = Type.Object({ receiptId: Type.String() });',
+      ].join("\n"),
+    });
+    const stale = diagnostics();
+    expect(stale.some((message) => message.includes("amount"))).toBe(true);
+    expect(stale.some((message) => message.includes("id"))).toBe(true);
+    await writeFixtureProject(root, {
+      "consumer.ts": [
+        'import { createApiClient } from "./client";',
+        "const result = await createApiClient().items.create({ body: { total: 10 } });",
+        "const receiptId: string = result.receiptId;",
+        "// @ts-expect-error The server contract, not a caller generic, determines the result.",
+        "const fabricated: number = result.receiptId;",
+        "void receiptId; void fabricated;",
+      ].join("\n"),
+    });
+    expect(diagnostics()).toEqual([]);
+    await symlink(join(import.meta.dir, "../node_modules"), join(root, "node_modules"), "dir");
+    const build = await Bun.build({ entrypoints: [join(root, "client.ts")], target: "browser" });
+    expect(build.success).toBe(true);
+    const browserCode = await build.outputs[0]!.text();
+    expect(browserCode).not.toContain("@supacloud/elysia");
+    expect(browserCode).not.toContain("@supacloud/commands");
+    expect(browserCode).not.toContain("class ItemsController");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
