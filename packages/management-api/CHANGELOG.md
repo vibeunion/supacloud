@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.86.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.85.0...management-api-v0.86.0) (2026-09-24)
+
+
+### Features
+
+* **tasks:** observe externally managed pgflow runs read-only ([#1411](https://github.com/vibeunion/supacloud/issues/1411)) ([3df9997](https://github.com/vibeunion/supacloud/commit/3df999711d452f9fab4647a131d506a1c61d2b0f))
+
 ## [0.85.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.84.0...management-api-v0.85.0) (2026-09-23)
 
 
