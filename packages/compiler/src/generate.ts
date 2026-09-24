@@ -399,8 +399,14 @@ export async function generateApplication(
   graph: ApplicationGraph,
   options: GenerateOptions,
 ): Promise<string[]> {
-  const rendered = renderApplication(graph, options);
+  return writeRenderedApplication(renderApplication(graph, options), options);
+}
 
+/** Shares the exact validated render with the emitter without regenerating artifacts. */
+export async function writeRenderedApplication(
+  rendered: RenderedArtifacts,
+  options: GenerateOptions,
+): Promise<string[]> {
   await mkdir(options.outDir, { recursive: true });
   const applicationPath = join(options.outDir, "application.ts");
   const manifestPath = join(options.outDir, "app.manifest.json");

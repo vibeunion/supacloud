@@ -59,6 +59,11 @@ try {
   }
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
   await run(["install", "--ignore-scripts"]);
+  await run(["-e", `import { bindCompiledCommand } from "@supacloud/elysia";
+import { createDiagnosticRepairPlan } from "@supacloud/compiler";
+if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPlan !== "function") {
+  throw new Error("Packed development-loop exports are missing");
+}`]);
   console.log("Starter: installed packed app/compiler/runtime and public third-party packages");
   console.log(await run(["run", "check"]));
   console.log(await run(["run", "build"]));
@@ -77,6 +82,11 @@ try {
   assert.ok(context.files.some((file: string) => file.endsWith("review.ts")));
   assert.ok(context.graphql.operations.some((operation: { name: string }) => operation.name === "ReviewList"));
   assert.ok(context.files.some((file: string) => file.endsWith("reviews.graphql")));
+  for (const target of ["ApproveReview", "ReviewController"]) {
+    const ownedContext = JSON.parse(await run([compiler, "context", target, "--json"]));
+    assert.equal(ownedContext.subject, context.subject);
+    assert.deepEqual(ownedContext, context, `Owned target ${target} must preserve module context`);
+  }
 
   const query = join(project, "src/review/reviews.graphql");
   const validQuery = await readFile(query, "utf8");

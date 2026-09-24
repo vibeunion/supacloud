@@ -8,6 +8,7 @@ import {
     compileProject,
     compileOptionsFromConfig,
     createContextPack,
+    createDiagnosticRepairPlan,
     doctorProject,
     loadSupacloudConfig,
     resolveSupacloudConfig,
@@ -337,7 +338,7 @@ function formatModuleContextPack(pack: ReturnType<typeof createContextPack>): st
 /**
  * `app context` is the AI entry point: the compiled graph and diagnostics as
  * structured data, so an agent does not need to scan the repository. A
- * `--target <module>` narrows the result to one module neighborhood.
+ * `--target <name>` resolves a module or owned symbol to its module neighborhood.
  */
 async function runContext(args: AppToolArguments): Promise<ToolResult> {
     const { root, configFile, outDir, result } = await projectCompileConfig(args);
@@ -360,7 +361,7 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
             compile: "supacloud app compile",
             context: "supacloud app context --format json",
             doctor: "supacloud app doctor",
-            fix: "supacloud app fix --fix <fix.json> --write",
+            fix: "supacloud app fix --fix <fix.json>",
             graph: "supacloud app graph --format json",
             explain: "supacloud app explain --target <name>",
         },
@@ -377,32 +378,11 @@ async function runContext(args: AppToolArguments): Promise<ToolResult> {
     ].join("\n"));
 }
 
-/**
- * `app doctor` reports actionable, fixable project health: stable check names,
- * diagnostics with file/line + hint, and a repairability verdict.
- */
-interface DoctorFixPlanEntry {
-    code: string;
-    errorCode?: string;
-    file?: string;
-    line?: number;
-    type: string;
-    targetFile: string;
-    command: string;
-}
-
-/** One-shot repair plan: every diagnostic that carries a machine-readable fix. */
-function doctorFixPlan(doctor: ReturnType<typeof doctorProject>): DoctorFixPlanEntry[] {
-    return (doctor.diagnostics ?? [])
-        .filter((diagnostic) => diagnostic.fix !== undefined)
-        .map((diagnostic) => ({
-            code: diagnostic.code,
-            ...(diagnostic.errorCode === undefined ? {} : { errorCode: diagnostic.errorCode }),
-            ...(diagnostic.file === undefined ? {} : { file: diagnostic.file }),
-            ...(diagnostic.line === undefined ? {} : { line: diagnostic.line }),
-            type: diagnostic.fix!.type,
-            targetFile: diagnostic.fix!.targetFile,
-            command: "supacloud app fix --fix <fix.json> --write",
+function doctorFixPlan(doctor: ReturnType<typeof doctorProject>) {
+    return createDiagnosticRepairPlan(doctor.diagnostics ?? [])
+        .map((repair) => ({
+            ...repair,
+            command: "supacloud app fix --fix <fix.json>",
         }));
 }
 
@@ -458,10 +438,13 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
     const { root, outDir, result } = await projectCompileConfig(args);
     const doctor = doctorProject(root, outDir, result.graph, result.upToDate, result.diagnostics);
     const fixPlan = doctorFixPlan(doctor);
+    const autoFixable = fixPlan.filter((repair) => repair.readiness === "preview").length;
+    const inputRequired = fixPlan.filter((repair) => repair.readiness === "input-required").length;
+    const manualFixes = fixPlan.filter((repair) => repair.readiness === "manual").length;
     const unwiredContracts = await findUnwiredContracts(root);
     if (args.format === "json") {
         return textResult(
-            JSON.stringify({ ok: doctor.errors === 0, autoFixable: fixPlan.length, fixPlan, unwiredContracts, ...doctor }, null, 2),
+            JSON.stringify({ ok: doctor.errors === 0, autoFixable, inputRequired, manualFixes, fixPlan, unwiredContracts, ...doctor }, null, 2),
             doctor.errors > 0,
         );
     }
@@ -473,8 +456,14 @@ async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
     lines.push(doctor.errors === 0
         ? "No blocking issues. Run `supacloud app compile` to refresh generated artifacts."
         : `${doctor.errors} blocking issue(s). Run \`supacloud app check\` for the full diagnostic list.`);
-    if (fixPlan.length > 0) {
-        lines.push(`${fixPlan.length} auto-fixable diagnostic(s): run \`supacloud app doctor --format json\`, save each \`fix\`, then \`supacloud app fix --fix <fix.json> --write\`.`);
+    if (autoFixable > 0) {
+        lines.push(`${autoFixable} preview-ready fix(es): run \`supacloud app doctor --format json\`, save each \`fix\`, then preview with \`supacloud app fix --fix <fix.json>\`. Add --write only after review.`);
+    }
+    if (inputRequired > 0 || manualFixes > 0) {
+        lines.push(`${inputRequired} fix(es) require explicit input; ${manualFixes} require manual implementation.`);
+        for (const repair of fixPlan.filter((entry) => entry.readiness !== "preview")) {
+            lines.push(`  ${repair.code}: ${repair.reason}`);
+        }
     }
     if (unwiredContracts.length > 0) {
         lines.push(`${unwiredContracts.length} unwired contract file(s): ${unwiredContracts.map((contract) => contract.file).join(", ")}. Import their schemas into a controller route or remove them.`);

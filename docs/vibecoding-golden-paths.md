@@ -3,6 +3,8 @@
 [English](vibecoding-golden-paths.md) | [简体中文](vibecoding-golden-paths.zh-CN.md)
 
 Status: target engineering experience, not a completion claim.
+Implemented changes and their verification boundaries are recorded in the
+[local acceptance report](vibecoding-acceptance.md).
 
 ## Outcome
 
@@ -51,7 +53,7 @@ top-level verbs are aliases with the same implementation and execution policy.
 
 ## Conventional project structure
 
-New projects use a fixed, AI-legible layout so an agent can locate the entry,
+The target is a fixed, AI-legible layout so an agent can locate the entry,
 business modules, generated files and protected files without scanning:
 
 ```text
@@ -62,6 +64,11 @@ src/
 generated/    # compiler output (do not hand-edit; checked for drift)
 supacloud.config.ts
 ```
+
+Current starters use `src/application.ts` and `src/review/`, `src/orders/` or
+`src/sync/`, depending on the template. Generators default to `src/features/`;
+pass `--dir` to select another module directory. The layout above is a target,
+not an enforced migration or a description of the current generated tree.
 
 `generated/**` is produced by the compiler and is intentionally committed so
 `supacloud check` can detect drift. Never edit `generated/**` directly.
@@ -91,7 +98,11 @@ cross-layer references and unconfigured provider capabilities.
 
 `supacloud context --format json` returns the compiled module graph, providers,
 routes/commands/jobs, diagnostics and the commands an agent should run. A
-`--target <module>` narrows the result to one module neighborhood. Agents read
+`--target <name>` narrows the result to one module neighborhood. Targets may be
+module names/classes or owned provider, controller, command, job and query names.
+The returned `subject` remains the canonical module name; ambiguous owners require
+an explicit module target. Existing module queries keep the same version-1 shape.
+Agents read
 structured context instead of scanning the repository, and never receive
 credentials or live user data.
 
@@ -112,7 +123,18 @@ capability.
 ## Executable diagnostics
 
 `doctor` returns more than "failed": a stable code, file/line, reason, repair
-suggestion, whether it is auto-fixable, and the command to apply the fix.
+suggestion, a complete `fix` payload, and a preview command. Each `fixPlan` entry
+has a `readiness` and `reason`:
+
+- `preview`: supported by the executor with explicit policy inputs present.
+- `input-required`: requires a permission, policy value, or concrete module import.
+- `manual`: the executor does not implement the suggested semantic change.
+
+The existing `autoFixable` count now counts only `preview` entries; `inputRequired`
+and `manualFixes` report the other suggestions. This corrects the old count, which
+included suggestions the executor could not apply. A preview-ready classification
+does not bypass AST checks, grant write permission, or prove business correctness.
+An invalid policy is never automatically replaced with a weaker one.
 
 ```bash
 supacloud context --format json > context.json
@@ -120,6 +142,37 @@ supacloud doctor --format json > doctor.json
 supacloud fix --fix fix.json          # preview
 supacloud fix --fix fix.json --write  # apply
 ```
+
+## Compatibility And Release
+
+### Shared Business Command Wiring
+
+`@supacloud/elysia` also offers opt-in `bindCompiledCommand`: a reusable binding
+for the compiled module, command class name, governance, handler and result
+decoder. HTTP controllers, Worker jobs and trusted server-side callers provide
+their current input, Request, verified identity context and scope on each call.
+The binding delegates to the existing direct execution/preview APIs; it does
+not replace route bindings, add a queue engine, or centralize business policy
+outside its owning module. See the
+[runtime example](../packages/elysia/README.md#bind-a-command-once).
+An explicitly supplied preview callback makes `preview` required in the inferred
+return type; dynamically optional preview configuration still requires narrowing.
+
+Do not wrap the same operation in both a route command binding and a direct
+bound call. Domain validation and host identity verification remain explicit.
+In-memory adapter parity proves execution behavior, not database atomicity.
+
+### Inspection Compatibility
+
+The inspection increment changes development inspection only. It does not change runtime
+DI, authorization, transactions, queues, frontend transports, deployment topology,
+or existing configuration and generated artifact formats.
+
+The CLI uses the local compiler during development so its tests exercise the
+matching implementation. Before publishing, release the compiler and use the
+existing `sync-compiler-dependency.mjs` release step to replace the local reference
+with the published version range. A local paired build is not an npm publication
+or production acceptance receipt.
 
 ## Non-goals
 
