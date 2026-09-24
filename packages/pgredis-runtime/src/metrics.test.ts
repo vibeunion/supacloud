@@ -13,6 +13,8 @@ const gauges = {
   tenantCapacity: 8,
   l1MaxEntries: 100,
   crossInstanceInvalidation: true,
+  databaseInFlight: 5,
+  databaseLimit: 40,
 };
 
 describe("pgredis metrics", () => {
@@ -48,6 +50,8 @@ describe("pgredis metrics", () => {
     expect(text).toContain("supacloud_pgredis_active_tenants 3");
     expect(text).toContain("supacloud_pgredis_tenant_capacity 8");
     expect(text).toContain("supacloud_pgredis_l1_max_entries 100");
+    expect(text).toContain("supacloud_pgredis_database_operations_in_flight 5");
+    expect(text).toContain("supacloud_pgredis_database_operation_limit 40");
   });
 
   test("resets all series", () => {

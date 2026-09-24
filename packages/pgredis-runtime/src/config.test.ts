@@ -9,6 +9,7 @@ describe("loadPgredisRuntimeConfig", () => {
     expect(config.port).toBe(9_010);
     expect(config.connectionsPerTenant).toBe(2);
     expect(config.maxTenants).toBe(128);
+    expect(config.maxTotalConnections).toBe(256);
     expect(config.maxValueBytes).toBe(1_048_576);
     expect(config.l1MaxEntries).toBe(1_000);
     expect(config.l1TtlMs).toBe(30_000);
@@ -28,6 +29,22 @@ describe("loadPgredisRuntimeConfig", () => {
       PGREDIS_RUNTIME_INTERNAL_TOKEN: "x".repeat(32),
       PGREDIS_RUNTIME_MAX_KEYS_PER_REQUEST: "0",
     })).toThrow("PGREDIS_RUNTIME_MAX_KEYS_PER_REQUEST");
+  });
+
+  test("derives the aggregate connection budget from tenant capacity", () => {
+    expect(loadPgredisRuntimeConfig({
+      PGREDIS_RUNTIME_INTERNAL_TOKEN: "x".repeat(32),
+      PGREDIS_RUNTIME_MAX_TENANTS: "10",
+      PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT: "4",
+    }).maxTotalConnections).toBe(40);
+    expect(loadPgredisRuntimeConfig({
+      PGREDIS_RUNTIME_INTERNAL_TOKEN: "x".repeat(32),
+      PGREDIS_RUNTIME_MAX_TOTAL_CONNECTIONS: "64",
+    }).maxTotalConnections).toBe(64);
+    expect(() => loadPgredisRuntimeConfig({
+      PGREDIS_RUNTIME_INTERNAL_TOKEN: "x".repeat(32),
+      PGREDIS_RUNTIME_MAX_TOTAL_CONNECTIONS: "0",
+    })).toThrow("PGREDIS_RUNTIME_MAX_TOTAL_CONNECTIONS");
   });
 
   test("parses the single-instance invalidation flag", () => {

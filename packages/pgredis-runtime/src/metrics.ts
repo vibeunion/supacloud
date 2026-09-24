@@ -84,6 +84,8 @@ export interface PgredisMetricGauges {
   tenantCapacity: number;
   l1MaxEntries: number;
   crossInstanceInvalidation: boolean;
+  databaseInFlight: number;
+  databaseLimit: number;
 }
 
 function escapeLabel(value: string): string {
@@ -151,6 +153,12 @@ export function renderPgredisMetrics(gauges: PgredisMetricGauges): string {
     "# HELP supacloud_pgredis_l1_max_entries Configured maximum L1 entries per tenant.",
     "# TYPE supacloud_pgredis_l1_max_entries gauge",
     `supacloud_pgredis_l1_max_entries ${gauges.l1MaxEntries}`,
+    "# HELP supacloud_pgredis_database_operations_in_flight Tenant database operations currently holding a budget permit.",
+    "# TYPE supacloud_pgredis_database_operations_in_flight gauge",
+    `supacloud_pgredis_database_operations_in_flight ${gauges.databaseInFlight}`,
+    "# HELP supacloud_pgredis_database_operation_limit Aggregate database operation budget (0 means no explicit budget).",
+    "# TYPE supacloud_pgredis_database_operation_limit gauge",
+    `supacloud_pgredis_database_operation_limit ${gauges.databaseLimit}`,
   );
 
   return `${lines.join("\n")}\n`;

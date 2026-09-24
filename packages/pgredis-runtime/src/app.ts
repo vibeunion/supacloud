@@ -21,7 +21,10 @@ export interface PgredisRuntimeAppOptions {
   maxTtlMs: number;
   maxKeysPerRequest?: number;
   crossInstanceInvalidation?: boolean;
-  registry: Pick<TenantCacheRegistry, "acquire" | "size" | "snapshot" | "projectStatus">;
+  registry: Pick<TenantCacheRegistry, "acquire" | "size" | "snapshot" | "projectStatus"> & {
+    /** Optional aggregate database operation budget, when configured. */
+    databaseBudgetStats?(): { inFlight: number; limit: number } | undefined;
+  };
 }
 
 function jsonSize(value: unknown): number {
@@ -266,12 +269,15 @@ export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
     .get("/internal/v1/admin/metrics", ({ request, set }) => {
       requireInternalToken(request, adminToken);
       const snapshot = options.registry.snapshot();
+      const database = options.registry.databaseBudgetStats?.();
       set.headers["content-type"] = "text/plain; version=0.0.4";
       return renderPgredisMetrics({
         activeTenants: snapshot.activeTenants,
         tenantCapacity: snapshot.maxTenants,
         l1MaxEntries: snapshot.l1.maxEntries,
         crossInstanceInvalidation: options.crossInstanceInvalidation ?? true,
+        databaseInFlight: database?.inFlight ?? 0,
+        databaseLimit: database?.limit ?? 0,
       });
     })
     .get(

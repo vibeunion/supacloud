@@ -21,6 +21,8 @@ PostgreSQL 核心事务、JSONB、UNLOGGED 表和 LISTEN/NOTIFY；这些扩展�
 - 跨实例失效由可插拔的 `InvalidationTransport` 抽象；单实例部署可用
   `PGREDIS_RUNTIME_SINGLE_INSTANCE=true` 关闭 `pg_notify` 发布与 LISTEN 监听，仅保留
   本地 L1 清理。
+- 每租户连接池按需开连接；进程级 `PGREDIS_RUNTIME_MAX_TOTAL_CONNECTIONS` 预算封顶同时
+  持有的数据库操作/事务，避免多租户突发压垮数据库。
 - Management API 可通过独立内部令牌访问有界管理接口，提供平台/项目状态、
   精确键操作，以及必须匹配项目 Ref 的命名空间清空。Web Console 不直连本服务。
 - PGMQ 仍是 SupaCloud 唯一队列实现，Caddy 仍负责网关限流。

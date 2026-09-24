@@ -9,6 +9,7 @@ export interface PgredisRuntimeConfig {
   maxKeysPerRequest: number;
   maxTenants: number;
   connectionsPerTenant: number;
+  maxTotalConnections: number;
   tenantIdleMs: number;
   l1MaxEntries: number;
   l1TtlMs: number;
@@ -48,6 +49,16 @@ export function loadPgredisRuntimeConfig(
     1_048_576,
     "PGREDIS_RUNTIME_MAX_VALUE_BYTES",
   );
+  const maxTenants = positiveInteger(
+    env.PGREDIS_RUNTIME_MAX_TENANTS,
+    128,
+    "PGREDIS_RUNTIME_MAX_TENANTS",
+  );
+  const connectionsPerTenant = positiveInteger(
+    env.PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT,
+    2,
+    "PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT",
+  );
 
   return {
     host: env.PGREDIS_RUNTIME_HOST?.trim() || "127.0.0.1",
@@ -70,11 +81,12 @@ export function loadPgredisRuntimeConfig(
       100,
       "PGREDIS_RUNTIME_MAX_KEYS_PER_REQUEST",
     ),
-    maxTenants: positiveInteger(env.PGREDIS_RUNTIME_MAX_TENANTS, 128, "PGREDIS_RUNTIME_MAX_TENANTS"),
-    connectionsPerTenant: positiveInteger(
-      env.PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT,
-      2,
-      "PGREDIS_RUNTIME_CONNECTIONS_PER_TENANT",
+    maxTenants,
+    connectionsPerTenant,
+    maxTotalConnections: positiveInteger(
+      env.PGREDIS_RUNTIME_MAX_TOTAL_CONNECTIONS,
+      maxTenants * connectionsPerTenant,
+      "PGREDIS_RUNTIME_MAX_TOTAL_CONNECTIONS",
     ),
     tenantIdleMs: positiveInteger(
       env.PGREDIS_RUNTIME_TENANT_IDLE_MS,
