@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.86.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.86.0...management-api-v0.86.1) (2026-09-24)
+
+
+### Bug Fixes
+
+* pin npm registry for reproducible installs in remaining packages ([#1414](https://github.com/vibeunion/supacloud/issues/1414)) ([8110f3c](https://github.com/vibeunion/supacloud/commit/8110f3c889ac48bc8e4cee35eb37ce7406d35587))
+
 ## [0.86.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.85.0...management-api-v0.86.0) (2026-09-24)
 
 
