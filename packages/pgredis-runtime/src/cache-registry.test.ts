@@ -8,6 +8,7 @@ import {
   TenantCacheRegistry,
   type TenantCache,
 } from "./cache-registry";
+import { renderPgredisMetrics, resetPgredisMetrics } from "./metrics";
 
 function fakeCache(): TenantCache & { clearNamespace(): Promise<number> } {
   return {
@@ -622,6 +623,45 @@ describe("createTransactionalTenantCache", () => {
 
     await cache.getset("shared", { next: true }, (value) => value);
     expect(published).toEqual([["set", "shared"]]);
+  });
+
+  test("counts serialization retries for the metrics endpoint", async () => {
+    resetPgredisMetrics();
+    let attempts = 0;
+    const tx: PgSqlLike = { async unsafe<T>(): Promise<T[]> { return []; } };
+    const adapter: PgSqlLike = {
+      async unsafe<T>(): Promise<T[]> { return []; },
+      async begin<T>(operation: (transaction: PgSqlLike) => Promise<T>): Promise<T> {
+        attempts += 1;
+        if (attempts === 1) {
+          const error = new Error("serialization failure") as Error & { code: string };
+          error.code = "40001";
+          throw error;
+        }
+        return operation(tx);
+      },
+    };
+    const cache = createTransactionalTenantCache(
+      adapter,
+      {
+        async get() { return null; },
+        async mget() { return new Map<string, unknown>(); },
+        async ttl() { return null; },
+        invalidate() {},
+        invalidateAll() {},
+      },
+      () => fakeCache(),
+    );
+
+    await cache.set("a", 1);
+    const text = renderPgredisMetrics({
+      activeTenants: 0,
+      tenantCapacity: 1,
+      l1MaxEntries: 1,
+      crossInstanceInvalidation: true,
+    });
+    expect(text).toContain("supacloud_pgredis_transaction_retries_total 1");
+    expect(text).toContain("supacloud_pgredis_transaction_retry_exhausted_total 0");
   });
 });
 

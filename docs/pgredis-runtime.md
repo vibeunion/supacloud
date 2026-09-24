@@ -141,12 +141,30 @@ PGREDIS_RUNTIME_L1_MAX_ENTRIES=1000
 PGREDIS_RUNTIME_L1_TTL_MS=30000
 PGREDIS_RUNTIME_CLEANUP_INTERVAL_MS=60000
 PGREDIS_RUNTIME_CLEANUP_BATCH_SIZE=500
+PGREDIS_RUNTIME_MAX_KEYS_PER_REQUEST=100
+PGREDIS_RUNTIME_SINGLE_INSTANCE=false
 ```
 
 Docker 部署中，Management API、Edge Runtime 与 `pgredis-runtime` 共享私有
 `edge-pgredis` 网络；只有 runtime 额外加入数据库私网。systemd 安装由 `install.sh` 生成并同步
 同一内部令牌，并默认监听 `127.0.0.1:9011`，避免与宿主机 Imaginary 的 `9010` 冲突。
 可用 `PGREDIS_RUNTIME_PORT` 覆盖 systemd 端口，但安装器会拒绝已由 Imaginary 占用的 `9010`。
+
+## 可观测性
+
+`GET /internal/v1/admin/metrics`（需内部令牌）返回 Prometheus 文本格式（`text/plain;
+version=0.0.4`），进程内累计，重启后清零：
+
+- `supacloud_pgredis_cache_operations_total{op,outcome}`：按操作与结果的计数
+- `supacloud_pgredis_cache_operation_duration_ms`：按 `op` 的耗时直方图（桶 + sum + count）
+- `supacloud_pgredis_invalidation_publishes_total{op}`：跨实例失效发布次数
+- `supacloud_pgredis_transaction_retries_total`：序列化失败后的重试次数
+- `supacloud_pgredis_transaction_retry_exhausted_total`：重试耗尽的次数
+- `supacloud_pgredis_cross_instance_invalidation`：是否启用跨实例失效（1/0）
+- `supacloud_pgredis_active_tenants` / `supacloud_pgredis_tenant_capacity` / `supacloud_pgredis_l1_max_entries`
+
+当前不提供 L1 命中率：上游 `PgKvCache.stats()` 只暴露 `l1Size`/`l1Max`，没有命中/未命中
+计数器。需要命中率时要先在上游补齐计数，或在本层代理 L1。
 
 ## 故障与回滚
 
