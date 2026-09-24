@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.25.2...edge-runtime-v0.26.0) (2026-09-24)
+
+
+### Features
+
+* **pgredis:** add batch mget/mset cache operations ([#1417](https://github.com/vibeunion/supacloud/issues/1417)) ([ce57b21](https://github.com/vibeunion/supacloud/commit/ce57b21089d29d49653f9f949aa54ad784843707))
+
 ## [0.25.2](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.25.1...edge-runtime-v0.25.2) (2026-09-24)
 
 

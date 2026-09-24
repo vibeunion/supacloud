@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.0](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.6.2...pgredis-runtime-v0.7.0) (2026-09-24)
+
+
+### Features
+
+* **pgredis:** add batch mget/mset cache operations ([#1417](https://github.com/vibeunion/supacloud/issues/1417)) ([ce57b21](https://github.com/vibeunion/supacloud/commit/ce57b21089d29d49653f9f949aa54ad784843707))
+* **pgredis:** expose Prometheus metrics for the cache data plane ([#1420](https://github.com/vibeunion/supacloud/issues/1420)) ([b42eb76](https://github.com/vibeunion/supacloud/commit/b42eb76ec3691839699ae85cc5bdfabb664ca339))
+* **pgredis:** make L1 invalidation transport pluggable with single-instance mode ([#1419](https://github.com/vibeunion/supacloud/issues/1419)) ([deb1a8e](https://github.com/vibeunion/supacloud/commit/deb1a8e3f8402db992b394c8597286efeb0df565))
+
 ## [0.6.2](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.6.1...pgredis-runtime-v0.6.2) (2026-09-24)
 
 
