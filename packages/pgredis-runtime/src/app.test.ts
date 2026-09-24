@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { describe, expect, test } from "bun:test";
 import { createPgredisRuntimeApp } from "./app";
 import { TenantCapacityError, type TenantCache } from "./cache-registry";
+import { resetPgredisMetrics } from "./metrics";
 
 const signingSecret = "internal-token-".padEnd(32, "x");
 
@@ -314,5 +315,65 @@ describe("pgredis-runtime internal API", () => {
     expect(await response.json()).toEqual({
       error: "pgredis runtime tenant capacity is temporarily exhausted",
     });
+  });
+
+  test("exposes Prometheus metrics behind the internal token", async () => {
+    resetPgredisMetrics();
+    const app = createPgredisRuntimeApp({
+      signingSecret,
+      capabilityMaxTtlMs: 600_000,
+      maxValueBytes: 1_024,
+      maxTtlMs: 10_000,
+      crossInstanceInvalidation: false,
+      registry: {
+        async acquire() {
+          return {
+            cache: {
+              async get<T = unknown>(key: string): Promise<T | null> { return `value:${key}` as T; },
+              async mget() { return new Map<string, unknown>(); },
+              async set() { return true; },
+              async mset() {},
+              async delete() { return false; },
+              async ttl() { return null; },
+              async getset() { return null; },
+              async getdel() { return null; },
+              async flush() { return 0; },
+            },
+            release() {},
+          };
+        },
+        size() { return 2; },
+        snapshot() {
+          return {
+            activeTenants: 2,
+            maxTenants: 4,
+            connectionsPerTenant: 2,
+            l1: { enabled: true as const, maxEntries: 100, ttlMs: 1_000 },
+            tenants: [],
+          };
+        },
+        async projectStatus(ref) {
+          return {
+            projectRef: ref,
+            configured: true,
+            active: true,
+            configurationCurrent: true,
+            leases: 0,
+            lastUsedAt: null,
+          };
+        },
+      },
+    });
+
+    expect((await app.handle(new Request("http://localhost/internal/v1/admin/metrics"))).status).toBe(401);
+    await app.handle(request({ op: "get", key: "a" }));
+
+    const response = await app.handle(adminRequest("/internal/v1/admin/metrics"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/plain");
+    const body = await response.text();
+    expect(body).toContain('supacloud_pgredis_cache_operations_total{op="get",outcome="ok"} 1');
+    expect(body).toContain("supacloud_pgredis_cross_instance_invalidation 0");
+    expect(body).toContain("supacloud_pgredis_active_tenants 2");
   });
 });

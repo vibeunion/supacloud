@@ -3,6 +3,7 @@ import { createPgListener, type PgListenerHandle } from "@postgresx/bun-listen";
 import { createBunSqlAdapter } from "@postgresx/noredis/adapters/bun";
 import { createPgKvCache, type PgKvCache, type PgKvCacheListenerFactory, type PgKvCacheNotifyOptions } from "@postgresx/noredis/kv";
 import type { PgSqlLike } from "@postgresx/noredis";
+import { recordInvalidationPublish, recordTransactionRetry, recordTransactionRetryExhausted } from "./metrics";
 import {
   loadTenantDatabaseConfig,
   TenantConfigError,
@@ -160,6 +161,7 @@ export function createNotifyInvalidationTransport(channel: string): Invalidation
       return notifyOptions;
     },
     async publish(tx, op, key) {
+      recordInvalidationPublish(op);
       await tx.unsafe("SELECT pg_notify($1, $2)", [channel, notification(op, key)]);
     },
   };
@@ -233,7 +235,12 @@ export function createTransactionalTenantCache(
           return operation(tx, createTransactionCache(tx));
         });
       } catch (error) {
-        if (!isSerializationFailure(error) || attempt === 2) throw error;
+        if (!isSerializationFailure(error)) throw error;
+        if (attempt === 2) {
+          recordTransactionRetryExhausted();
+          throw error;
+        }
+        recordTransactionRetry();
       }
     }
     throw new Error("pgredis transaction retry exhausted");

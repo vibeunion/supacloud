@@ -3,6 +3,7 @@ import { Elysia, t, type Static } from "elysia";
 import { TenantCapacityError, type TenantCache, type TenantCacheRegistry } from "./cache-registry";
 import { InvalidCapabilityError, verifyPgredisCapability } from "./capability";
 import { pgredisExtensionPolicy } from "./extension-policy";
+import { recordCacheOperation, renderPgredisMetrics } from "./metrics";
 import { PROJECT_REF_PATTERN, TenantConfigError } from "./tenant-config";
 
 type CacheOperation = "get" | "set" | "delete" | "ttl" | "getset" | "getdel" | "mget" | "mset";
@@ -19,6 +20,7 @@ export interface PgredisRuntimeAppOptions {
   maxValueBytes: number;
   maxTtlMs: number;
   maxKeysPerRequest?: number;
+  crossInstanceInvalidation?: boolean;
   registry: Pick<TenantCacheRegistry, "acquire" | "size" | "snapshot" | "projectStatus">;
 }
 
@@ -86,6 +88,24 @@ async function executeCacheOperation(
     }
     case "getdel":
       return { value: await cache.getdel(body.key) };
+  }
+}
+
+async function executeMeasuredCacheOperation(
+  cache: TenantCache,
+  body: CacheRequest,
+  maxValueBytes: number,
+  maxTtlMs: number,
+  maxKeysPerRequest: number,
+): Promise<Record<string, unknown>> {
+  const startedAt = performance.now();
+  try {
+    const result = await executeCacheOperation(cache, body, maxValueBytes, maxTtlMs, maxKeysPerRequest);
+    recordCacheOperation(body.op, "ok", performance.now() - startedAt);
+    return result;
+  } catch (error) {
+    recordCacheOperation(body.op, "error", performance.now() - startedAt);
+    throw error;
   }
 }
 
@@ -243,6 +263,17 @@ export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
         ...options.registry.snapshot(),
       };
     })
+    .get("/internal/v1/admin/metrics", ({ request, set }) => {
+      requireInternalToken(request, adminToken);
+      const snapshot = options.registry.snapshot();
+      set.headers["content-type"] = "text/plain; version=0.0.4";
+      return renderPgredisMetrics({
+        activeTenants: snapshot.activeTenants,
+        tenantCapacity: snapshot.maxTenants,
+        l1MaxEntries: snapshot.l1.maxEntries,
+        crossInstanceInvalidation: options.crossInstanceInvalidation ?? true,
+      });
+    })
     .get(
       "/internal/v1/admin/projects/:ref/status",
       async ({ params, request }) => {
@@ -282,7 +313,7 @@ export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
           if (adminRequest.op === "flush") {
             return { deleted: await lease.cache.flush() };
           }
-          return await executeCacheOperation(
+          return await executeMeasuredCacheOperation(
             lease.cache,
             adminRequest,
             options.maxValueBytes,
@@ -309,7 +340,7 @@ export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
         });
         const lease = await options.registry.acquire(capability.projectRef);
         try {
-          return await executeCacheOperation(
+          return await executeMeasuredCacheOperation(
             lease.cache,
             body,
             options.maxValueBytes,
