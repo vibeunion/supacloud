@@ -14,6 +14,11 @@ const gauges = {
   l1MaxEntries: 100,
   l1Hits: 9,
   l1Misses: 3,
+  l1NegativeHits: 2,
+  l1InflightReads: 1,
+  l1CoalescedReads: 4,
+  l1Bytes: 2_048,
+  l1PausedTenants: 1,
   crossInstanceInvalidation: true,
   databaseInFlight: 5,
   databaseLimit: 40,
@@ -55,6 +60,11 @@ describe("pgredis metrics", () => {
     expect(text).toContain("supacloud_pgredis_l1_hits 9");
     expect(text).toContain("supacloud_pgredis_l1_misses 3");
     expect(text).toContain("supacloud_pgredis_l1_hit_ratio 0.75");
+    expect(text).toContain("supacloud_pgredis_l1_negative_hits 2");
+    expect(text).toContain("supacloud_pgredis_l1_inflight_reads 1");
+    expect(text).toContain("supacloud_pgredis_l1_coalesced_reads 4");
+    expect(text).toContain("supacloud_pgredis_l1_bytes 2048");
+    expect(text).toContain("supacloud_pgredis_l1_paused_tenants 1");
     expect(text).toContain("supacloud_pgredis_database_operations_in_flight 5");
     expect(text).toContain("supacloud_pgredis_database_operation_limit 40");
   });

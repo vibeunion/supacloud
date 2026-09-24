@@ -15,6 +15,9 @@ const registry = new TenantCacheRegistry({
   tenantIdleMs: config.tenantIdleMs,
   l1MaxEntries: config.l1MaxEntries,
   l1TtlMs: config.l1TtlMs,
+  l1NegativeTtlMs: config.l1NegativeTtlMs,
+  l1MaxBytes: config.l1MaxBytes,
+  l1MaxEntryBytes: config.l1MaxEntryBytes,
   cleanupBatchSize: config.cleanupBatchSize,
   maxTotalConnections: config.maxTotalConnections,
   invalidationTransport: config.singleInstance

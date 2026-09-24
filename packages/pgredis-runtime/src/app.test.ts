@@ -74,7 +74,7 @@ describe("pgredis-runtime internal API", () => {
             activeTenants: 1,
             maxTenants: 2,
             connectionsPerTenant: 1,
-            l1: { enabled: true as const, maxEntries: 100, ttlMs: 1_000, hits: 0, misses: 0 },
+            l1: { enabled: true as const, maxEntries: 100, ttlMs: 1_000, hits: 0, misses: 0, negativeHits: 0, inflightReads: 0, coalescedReads: 0, bytes: 0, pausedTenants: 0 },
             tenants: [],
           };
         },
@@ -154,7 +154,7 @@ describe("pgredis-runtime internal API", () => {
             activeTenants: 1,
             maxTenants: 8,
             connectionsPerTenant: 2,
-            l1: { enabled: true as const, maxEntries: 100, ttlMs: 1_000, hits: 0, misses: 0 },
+            l1: { enabled: true as const, maxEntries: 100, ttlMs: 1_000, hits: 0, misses: 0, negativeHits: 0, inflightReads: 0, coalescedReads: 0, bytes: 0, pausedTenants: 0 },
             tenants: [{ projectRef: "tenant-a", leases: 0, lastUsedAt: "2026-07-27T00:00:00.000Z" }],
           };
         },
@@ -246,7 +246,7 @@ describe("pgredis-runtime internal API", () => {
             activeTenants: 0,
             maxTenants: 1,
             connectionsPerTenant: 1,
-            l1: { enabled: true as const, maxEntries: 1, ttlMs: 1, hits: 0, misses: 0 },
+            l1: { enabled: true as const, maxEntries: 1, ttlMs: 1, hits: 0, misses: 0, negativeHits: 0, inflightReads: 0, coalescedReads: 0, bytes: 0, pausedTenants: 0 },
             tenants: [],
           };
         },
@@ -293,7 +293,7 @@ describe("pgredis-runtime internal API", () => {
             activeTenants: 1,
             maxTenants: 1,
             connectionsPerTenant: 1,
-            l1: { enabled: true as const, maxEntries: 1, ttlMs: 1, hits: 0, misses: 0 },
+            l1: { enabled: true as const, maxEntries: 1, ttlMs: 1, hits: 0, misses: 0, negativeHits: 0, inflightReads: 0, coalescedReads: 0, bytes: 0, pausedTenants: 0 },
             tenants: [],
           };
         },
@@ -349,7 +349,7 @@ describe("pgredis-runtime internal API", () => {
             activeTenants: 2,
             maxTenants: 4,
             connectionsPerTenant: 2,
-            l1: { enabled: true as const, maxEntries: 100, ttlMs: 1_000, hits: 3, misses: 1 },
+            l1: { enabled: true as const, maxEntries: 100, ttlMs: 1_000, hits: 3, misses: 1, negativeHits: 2, inflightReads: 1, coalescedReads: 4, bytes: 2048, pausedTenants: 1 },
             tenants: [],
           };
         },
