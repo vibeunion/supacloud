@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.33.0...supacloud-js-v0.34.0) (2026-09-24)
+
+
+### Features
+
+* **supacloud-js:** expose browser contracts for svadmin integration ([#1428](https://github.com/vibeunion/supacloud/issues/1428)) ([4e97880](https://github.com/vibeunion/supacloud/commit/4e97880f5a82164a26326f0c48701401c964a41e))
+
 ## [0.33.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.32.0...supacloud-js-v0.33.0) (2026-09-23)
 
 
