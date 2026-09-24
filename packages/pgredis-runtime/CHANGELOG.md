@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.0](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.7.0...pgredis-runtime-v0.8.0) (2026-09-24)
+
+
+### Features
+
+* **pgredis:** bound aggregate tenant database concurrency ([#1421](https://github.com/vibeunion/supacloud/issues/1421)) ([53a895c](https://github.com/vibeunion/supacloud/commit/53a895c3400dd1e17460572c2e7e0bf7ec3d04ed))
+* **pgredis:** expose L1 hit ratio from upstream cache stats ([#1423](https://github.com/vibeunion/supacloud/issues/1423)) ([5ac9596](https://github.com/vibeunion/supacloud/commit/5ac9596d868cc80ce7524fe915f9dcdfdc6a7842))
+
 ## [0.7.0](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.6.2...pgredis-runtime-v0.7.0) (2026-09-24)
 
 
