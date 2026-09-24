@@ -613,6 +613,12 @@ AI Agent 可以只读取目标模块的上下文包，而不需要扫描整个�
 supacloud-compiler context case --root ./app --json
 ```
 
+Context targets also accept a module class, provider token/class, controller,
+command, job, or query name/class. They resolve to the owning module and return
+the same version-1 neighborhood pack (`subject` remains the module name).
+Exact module names keep precedence; an ambiguous symbol is rejected with the
+candidate module names instead of selecting an arbitrary owner.
+
 上下文包包含目标模块、直接和间接上下游模块、相关源码文件、路由/Command/provider
 图谱以及实际引用的平台 token。`compile --json` 和 `check --json` 会返回稳定的
 `ok`、`diagnostics`、`written`/`mismatches` 字段；可修复的诊断还会包含机器可消费的
@@ -624,6 +630,13 @@ supacloud-compiler context case --root ./app --json
 前置条件不满足时拒绝修改，并通过临时文件原子替换。
 CLI 修复的 `targetFile` 相对于配置的源码根目录解析，也可以用 `--root` 显式指定；
 JSON 修复文件本身仍相对于当前工作目录读取。
+
+`createDiagnosticRepairPlan(diagnostics)` classifies existing semantic fixes as
+`preview`, `input-required`, or `manual`, and retains each complete `fix` payload.
+It never infers a permission or a transaction/idempotency policy. `preview`
+means the executor supports the suggestion and its policy inputs are present,
+not that its AST preconditions have passed or that a write has been authorized.
+Unsupported fix types remain manual suggestions. Planning does not write files.
 
 上下游分别沿单一方向遍历，不会经过共享基础模块再扩散到无关兄弟业务。
 上下文包还包含准确的切面源文件、校验诊断和 `executionPlans`；`explain <module>`
@@ -640,10 +653,14 @@ JSON 修复文件本身仍相对于当前工作目录读取。
 ## 编译基准
 
 使用 `bun run benchmark` 运行固定 fixture 基准，输出 cold compile、增量
-compile、依赖失效耗时、重用/重析模块和生成产物字节数。基准是本地证据，
-不是跨机器性能承诺；2026-09-06 当前 fixture 的一次结果约为：
-`175.76ms` 冷编译、`18.88ms` 相同输入增量、`16.77ms` 单依赖失效、
-`9329` bytes。
+compile、依赖失效耗时、重用/重析模块和生成产物字节数。`generation` 额外报告
+同进程中旧双渲染路径与复用已校验渲染结果的对照：每组 25 次、7 组取中位数，
+交替测试顺序并共用预热产物缓存。编译入口复用一次渲染结果，公共
+`generateApplication(graph, options)` 调用方式不变。
+
+基准是本地证据，不是跨机器性能承诺，也不证明整次编译按相同比例加速。
+测试不以机器耗时比例作为通过条件。具体数据及限制见
+[本地验收记录](../../docs/vibecoding-acceptance.md#performance-evidence)。
 
 ## 开发
 

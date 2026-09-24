@@ -21,6 +21,12 @@ import {
 } from "./documentation";
 
 export type { ExecutionEvent, ExecutionObserver } from "./execution";
+export { bindCompiledCommand } from "./command-binding";
+export type {
+  CompiledCommandBinding,
+  CompiledCommandBindingOptions,
+  CompiledCommandCallContext,
+} from "./command-binding";
 export {
   createSchemaDecoder,
   assertResponseStatusDeclared,

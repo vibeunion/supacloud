@@ -1,5 +1,5 @@
 import { analyzeProject } from "./analyze";
-import { generateApplication, renderApplication, writeFileIfChanged } from "./generate";
+import { renderApplication, writeFileIfChanged, writeRenderedApplication } from "./generate";
 import type { CheckProjectResult, CompileOptions, CompileResult, Diagnostic } from "./types";
 import { validateGraph } from "./validate";
 import { access, readFile } from "node:fs/promises";
@@ -74,7 +74,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
     ...(options.cache ? { artifactHashes: options.cache.generatedHashes } : {}),
   };
   const written = !hasErrors || options.writeOnError === true
-    ? await generateApplication(graph, generatedOptions)
+    ? await writeRenderedApplication(rendered, generatedOptions)
     : [];
   if (!hasErrors) {
     for (const [filename, content] of Object.entries(graphql.files)) {

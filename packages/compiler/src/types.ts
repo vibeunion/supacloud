@@ -336,6 +336,8 @@ export interface ModuleNode {
 }
 
 export interface ApplicationGraph {
+  /** Handler declaration files by module, for inspection only; omitted from app.manifest.json. */
+  moduleHandlerFiles?: Record<string, string[]>;
   /** Offline query inventory for AI context. Kept in graphql.manifest.json, not app.manifest.json. */
   graphql?: GraphqlContractSummary;
   modules: ModuleNode[];
@@ -580,6 +582,8 @@ export interface WatchHandle {
 
 export interface CachedModuleEntry {
   module: ModuleNode;
+  /** Direct handler declarations retained for inspection on cache hits. */
+  handlerFiles?: string[];
   /** Files owned by this module (normalized relative paths). */
   ownedFiles: string[];
   /** File hash mapping for owned files. */

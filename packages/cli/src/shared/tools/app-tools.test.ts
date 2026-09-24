@@ -411,7 +411,7 @@ describe("app tools", () => {
         expect(pack.externalTokens).toContain("DB_CLIENT");
         expect(pack.allowedDependencies.dependencies).toEqual(expect.arrayContaining(["@supacloud/app", "@supacloud/elysia"]));
         expect(pack.commands.doctor).toContain("app doctor");
-        expect(pack.commands.fix).toContain("app fix");
+        expect(pack.commands.fix).toBe("supacloud app fix --fix <fix.json>");
 
         const module = await app({ action: "context", root, target: "case", format: "json" });
         const modulePack = JSON.parse(module.content[0].text);
@@ -419,6 +419,11 @@ describe("app tools", () => {
         expect(modulePack.modules.map((entry: { name: string }) => entry.name))
             .toEqual(expect.arrayContaining(["case", "audit"]));
         expect(modulePack.relatedModules.imports).toEqual(expect.arrayContaining(["audit"]));
+        for (const target of ["CaseModule", "CaseService", "case.accept", "case.rebuild"]) {
+            const result = await app({ action: "context", root, target, format: "json" });
+            expect(result.isError).toBe(false);
+            expect(JSON.parse(result.content[0].text)).toEqual(modulePack);
+        }
     });
 
     test("doctor reports actionable checks and passes after a clean compile", async () => {
@@ -427,6 +432,10 @@ describe("app tools", () => {
         expect(result.isError).toBe(false);
         const doctor = JSON.parse(result.content[0].text);
         expect(doctor.ok).toBe(true);
+        expect(doctor.autoFixable).toBe(0);
+        expect(doctor.inputRequired).toBe(0);
+        expect(doctor.manualFixes).toBe(0);
+        expect(doctor.fixPlan).toEqual([]);
         expect(doctor.checks.find((check: { name: string }) => check.name === "modules").ok).toBe(true);
         expect(doctor.checks.find((check: { name: string }) => check.name === "generated-artifacts").ok).toBe(true);
         expect(doctor.unwiredContracts.some((entry: { file: string }) => entry.file.includes("issue-invoice.contract.ts"))).toBe(true);
@@ -435,6 +444,72 @@ describe("app tools", () => {
         expect(text.isError).toBe(false);
         expect(text.content[0].text).toContain("No blocking issues");
         expect(text.content[0].text).toContain("unwired contract file(s)");
+    });
+
+    test("context rejects unknown and ambiguous targets without losing module lookup", async () => {
+        await expect(app({ action: "context", root, target: "not-a-symbol", format: "json" }))
+            .rejects.toThrow('No context target named "not-a-symbol"');
+        const isolatedRoot = mkdtempSync(join(tmpdir(), "supacloud-context-owners-"));
+        try {
+            const { mkdir, writeFile } = await import("node:fs/promises");
+            const { dirname } = await import("node:path");
+            for (const [relativePath, content] of Object.entries(FIXTURE_FILES)) {
+                const absolute = join(isolatedRoot, relativePath);
+                await mkdir(dirname(absolute), { recursive: true });
+                await writeFile(absolute, relativePath.startsWith("src/features/audit/")
+                    ? content.replaceAll("AuditService", "CaseService") : content, "utf8");
+            }
+            await expect(app({ action: "context", root: isolatedRoot, target: "CaseService", format: "json" }))
+                .rejects.toThrow("Select a module name: audit, case");
+            const result = await app({ action: "context", root: isolatedRoot, target: "case", format: "json" });
+            expect(JSON.parse(result.content[0].text).subject).toBe("case");
+            expect(existsSync(join(isolatedRoot, "generated"))).toBe(false);
+        } finally {
+            rmSync(isolatedRoot, { recursive: true, force: true });
+        }
+    });
+
+    test("doctor separates preview and manual repairs and exports an executable preview payload", async () => {
+        const isolatedRoot = mkdtempSync(join(tmpdir(), "supacloud-repair-readiness-"));
+        try {
+            const { mkdir, writeFile } = await import("node:fs/promises");
+            const { dirname } = await import("node:path");
+            for (const [relativePath, content] of Object.entries(FIXTURE_FILES)) {
+                const absolute = join(isolatedRoot, relativePath);
+                await mkdir(dirname(absolute), { recursive: true });
+                let source = content;
+                if (relativePath.endsWith("case.service.ts")) {
+                    source = source.replace("@Injectable()", '@Injectable({ scope: "request" })');
+                }
+                if (relativePath.endsWith("case.module.ts")) {
+                    source = source.replace("imports: [AuditModule]", "imports: []");
+                }
+                await writeFile(absolute, source, "utf8");
+            }
+            const result = await app({ action: "doctor", root: isolatedRoot, format: "json" });
+            const report = JSON.parse(result.content[0].text);
+            expect(report.fixPlan).toEqual(expect.arrayContaining([
+                expect.objectContaining({ type: "add_module_import", readiness: "preview" }),
+                expect.objectContaining({ type: "change_provider_scope", readiness: "manual" }),
+            ]));
+            const previewRepair = report.fixPlan.find((entry: { type: string }) => entry.type === "add_module_import");
+            const manualRepair = report.fixPlan.find((entry: { type: string }) => entry.type === "change_provider_scope");
+            expect(previewRepair.readiness).toBe("preview");
+            expect(manualRepair.readiness).toBe("manual");
+            expect(report.autoFixable).toBe(1);
+            expect(report.manualFixes).toBe(1);
+            expect(report.inputRequired).toBe(0);
+            const moduleFile = join(isolatedRoot, "src/features/case/case.module.ts");
+            const before = readFileSync(moduleFile, "utf8");
+            writeFileSync(join(isolatedRoot, "fix.json"), JSON.stringify(previewRepair.fix));
+            const preview = await app({ action: "fix", root: isolatedRoot, fix: "fix.json" });
+            expect(preview.isError).toBe(false);
+            expect(JSON.parse(preview.content[0].text).preview).toContain("imports: [AuditModule]");
+            expect(readFileSync(moduleFile, "utf8")).toBe(before);
+            expect(existsSync(join(isolatedRoot, "generated"))).toBe(false);
+        } finally {
+            rmSync(isolatedRoot, { recursive: true, force: true });
+        }
     });
 
     test("doctor surfaces fixable diagnostics and app fix previews then applies them", async () => {
@@ -459,14 +534,19 @@ describe("app tools", () => {
             expect(diagnostic).toBeTruthy();
             expect(diagnostic.errorCode).toBe("SC4012");
             expect(diagnostic.fix?.type).toBe("set_command_mode");
-            expect(report.autoFixable).toBeGreaterThan(0);
-            expect(report.fixPlan.some((entry: { type: string }) => entry.type === "set_command_mode")).toBe(true);
+            const repair = report.fixPlan.find((entry: { type: string }) => entry.type === "set_command_mode");
+            expect(repair.readiness).toBe("input-required");
+            expect(repair.fix).toEqual(diagnostic.fix);
+            expect(repair.command).not.toContain("--write");
+            expect(report.inputRequired).toBeGreaterThan(0);
+            expect(report.autoFixable).toBe(report.fixPlan.filter((entry: { readiness: string }) => entry.readiness === "preview").length);
 
             const text = await app({ action: "doctor", root: isolatedRoot });
             expect(text.content[0].text).toContain("SC4012");
             expect(text.content[0].text).toContain("fixable: set_command_mode");
             expect(text.content[0].text).toContain("hint:");
-            expect(text.content[0].text).toContain("auto-fixable");
+            expect(text.content[0].text).toContain("require explicit input");
+            expect(readFileSync(commandPath, "utf8")).toBe(invalid);
 
             writeFileSync(join(isolatedRoot, "fix.json"), JSON.stringify({ ...diagnostic.fix, value: "required" }));
             const preview = await app({ action: "fix", root: isolatedRoot, fix: "fix.json" });

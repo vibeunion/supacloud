@@ -117,5 +117,25 @@
   "externalTokens": [
     "REQUEST_CONTEXT",
     "WEBHOOK_ENVIRONMENT"
-  ]
+  ],
+  "commandGovernance": {
+    "defaults": {
+      "authorization": "required",
+      "audit": "required",
+      "idempotency": "required",
+      "transaction": "required"
+    },
+    "commands": [
+      {
+        "module": "webhook",
+        "className": "UpdateWebhook",
+        "name": "webhook.update.v1",
+        "permission": "webhook.update",
+        "rpc": "webhookUpdate",
+        "transaction": "required",
+        "audit": "webhook.updated",
+        "idempotency": "required"
+      }
+    ]
+  }
 }

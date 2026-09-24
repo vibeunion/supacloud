@@ -112,6 +112,67 @@ authorization infrastructure failure is 503, and redacted-input lookup is 410.
 See [the migration plan](../../docs/command-migration.md) for compiler policy,
 authentication replay changes, deployment order and rollback limitations.
 
+## Bind A Command Once
+
+`bindCompiledCommand` is an optional convenience layer over
+`executeCompiledCommand` and `previewCompiledCommand`. Register static wiring
+once and supply fresh trusted host context for each invocation:
+
+```ts
+import { bindCompiledCommand } from "@supacloud/elysia";
+
+const approve = bindCompiledCommand({
+  module: generatedApprovalModule,
+  command: "ApproveCommand", // compiled class name
+  governance,
+  handler: (input: ApproveInput, call) =>
+    approvalService.execute(input, call.requestContext),
+  decode: decodeApprovalResult,
+  preview: (input, call) =>
+    approvalService.preview(input, call.requestContext),
+});
+
+// In a trusted HTTP controller, Worker job, or server-side CLI adapter:
+const result = await approve.execute(input, {
+  request,
+  requestContext: verifiedContext,
+  services,
+  scope,
+});
+```
+
+The generated module, domain types, service, decoder and governance above are
+supplied by the application. The wrapper does not implement a second business
+model, permission system, transaction mechanism or identity provider.
+
+- A binding does not execute business code or capture a request identity.
+  Calls still resolve the descriptor and authorize each execution, including
+  idempotent replays. Static dependencies should be application-scoped; resolve
+  request/job-scoped services from the current `call.scope` instead of capturing
+  them in the binding.
+- `preview` is present only when a domain preview function was supplied.
+  An explicit callback makes it callable without a presence check; dynamically
+  optional configuration still requires checking `approve.preview`. It reuses the existing read-only
+  preview API: authorization and domain preview only, no command execution,
+  aspects, transaction, idempotency, RPC or audit.
+- Keep decoding/validating untrusted input at the existing ingress/domain
+  boundary. A TypeScript input type alone is not runtime validation.
+- An HTTP handler calling `approve.execute` must not also bind that same
+  command through route-level `command:` metadata. Choose one execution
+  boundary to avoid duplicate authorization or aspect execution. Likewise,
+  place command aspects on the business module, not a duplicate entry module.
+- Workers must resolve trusted identity in the host and explicitly construct
+  the call's `Request`, cancellation signal and idempotency context where
+  applicable. Do not infer identity from queue payloads. The binding adds no
+  retry, acknowledgement or scope-cleanup policy.
+- The result decoder still runs after execution or receipt replay. A decoding
+  failure does not prove rollback and must not trigger a blind retry.
+
+Existing direct APIs, route bindings, custom executors, RPC adapters and Worker
+transports remain available without adopting the binding. Local parity tests
+cover HTTP and Worker ingress with fake governance adapters; real database
+atomicity remains covered by the separate PostgreSQL acceptance gates.
+
 Runtime adapter that turns `@supacloud/compiler` output into a production-ready
 [Elysia](https://elysiajs.com/) application.
 

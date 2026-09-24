@@ -16,7 +16,7 @@
     {
       "name": "ApplicationGraph",
       "kind": "type",
-      "signature": "export interface ApplicationGraph {\n    graphql?: GraphqlContractSummary;\n    modules: ModuleNode[];\n    externalTokens: string[];\n    diagnostics?: Diagnostic[];\n    tokenNames?: Record<string, string>;\n    cacheStats?: {\n        reusedModules: string[];\n        reanalyzedModules: string[];\n    };\n}"
+      "signature": "export interface ApplicationGraph {\n    moduleHandlerFiles?: Record<string, string[]>;\n    graphql?: GraphqlContractSummary;\n    modules: ModuleNode[];\n    externalTokens: string[];\n    diagnostics?: Diagnostic[];\n    tokenNames?: Record<string, string>;\n    cacheStats?: {\n        reusedModules: string[];\n        reanalyzedModules: string[];\n    };\n}"
     },
     {
       "name": "AppliedDiagnosticFix",
@@ -56,7 +56,7 @@
     {
       "name": "CachedModuleEntry",
       "kind": "type",
-      "signature": "export interface CachedModuleEntry {\n    module: ModuleNode;\n    ownedFiles: string[];\n    fileHashes: Record<string, string>;\n    diagnostics?: Diagnostic[];\n}"
+      "signature": "export interface CachedModuleEntry {\n    module: ModuleNode;\n    handlerFiles?: string[];\n    ownedFiles: string[];\n    fileHashes: Record<string, string>;\n    diagnostics?: Diagnostic[];\n}"
     },
     {
       "name": "camelName",
@@ -152,6 +152,11 @@
       "name": "createDependencyGraphCache",
       "kind": "value",
       "signature": "export declare function createDependencyGraphCache(): DependencyGraphCache;"
+    },
+    {
+      "name": "createDiagnosticRepairPlan",
+      "kind": "value",
+      "signature": "export declare function createDiagnosticRepairPlan(diagnostics: readonly Diagnostic[]): DiagnosticRepair[];"
     },
     {
       "name": "createExecutionPlans",
@@ -277,6 +282,11 @@
       "name": "DiagnosticFix",
       "kind": "type",
       "signature": "export type DiagnosticFix = {\n    type: \"set_command_mode\";\n    targetFile: string;\n    command: string;\n    property: \"transaction\" | \"idempotency\";\n    expectedExpression: string;\n    value?: \"required\" | \"none\";\n} | {\n    type: \"add_module_import\";\n    targetFile: string;\n    module: string;\n    provider?: string;\n    importPath?: string;\n    symbol?: string;\n    targetModule?: string;\n} | {\n    type: \"add_provider\";\n    targetFile: string;\n    token: string;\n    module: string;\n} | {\n    type: \"mark_optional_dependency\";\n    targetFile: string;\n    owner: string;\n    token: string;\n} | {\n    type: \"change_provider_scope\";\n    targetFile: string;\n    provider: string;\n    from: Scope;\n    to: Scope;\n} | {\n    type: \"add_command_permission\";\n    targetFile: string;\n    command: string;\n    module: string;\n    permission?: string;\n} | {\n    type: \"add_route_parameter_binding\";\n    targetFile: string;\n    controller: string;\n    route: string;\n    parameter: string;\n    binding: \"param\" | \"query\";\n} | {\n    type: \"remove_route_body_binding\";\n    targetFile: string;\n    controller: string;\n    route: string;\n};"
+    },
+    {
+      "name": "DiagnosticRepair",
+      "kind": "type",
+      "signature": "export interface DiagnosticRepair {\n    code: string;\n    errorCode?: string;\n    file?: string;\n    line?: number;\n    type: DiagnosticFix[\"type\"];\n    targetFile: string;\n    fix: DiagnosticFix;\n    readiness: \"preview\" | \"input-required\" | \"manual\";\n    reason: string;\n}"
     },
     {
       "name": "diffOpenApiDocuments",

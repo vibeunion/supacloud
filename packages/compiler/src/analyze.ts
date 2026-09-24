@@ -108,6 +108,7 @@ interface AnalysisContext {
   tokensByName: Map<string, TokenInfo>;
   classesByName: Map<string, ClassInfo>;
   variablesByName: Map<string, VariableDeclaration>;
+  moduleHandlerFiles: Map<string, string[]>;
   diagnostics: Diagnostic[];
 }
 
@@ -205,6 +206,7 @@ export async function analyzeProject(
     tokensByName: new Map(),
     classesByName: new Map(),
     variablesByName: new Map(),
+    moduleHandlerFiles: new Map(),
     diagnostics: [],
   };
   const nativeTraitFiles = new Map<string, Set<string>>();
@@ -307,10 +309,11 @@ export async function analyzeProject(
       const hasChangedFile = entry.ownedFiles.some((f) => changedFiles.has(f));
       const moduleFileExists = currentFileHashes.has(entry.module.file);
       const isAffectedByDep = affectedModuleNames.has(modName);
-      if (!hasChangedFile && !isAffectedByDep && moduleFileExists) {
+      if (!hasChangedFile && !isAffectedByDep && moduleFileExists && entry.handlerFiles !== undefined) {
         modulesToKeep.set(modName, entry);
         reusedModules.push(modName);
         finalModules.push(entry.module);
+        ctx.moduleHandlerFiles.set(modName, entry.handlerFiles);
         if (entry.diagnostics) finalDiagnostics.push(...entry.diagnostics);
       }
     }
@@ -333,6 +336,7 @@ export async function analyzeProject(
 
       cache.modules.set(parsed.name, {
         module: parsed,
+        handlerFiles: ctx.moduleHandlerFiles.get(parsed.name) ?? [],
         ownedFiles: [...ownedFiles],
         fileHashes,
         diagnostics: moduleDiagnostics,
@@ -517,6 +521,7 @@ export async function analyzeProject(
     externalTokens,
     diagnostics: ctx.diagnostics.map(withDiagnosticMetadata),
     tokenNames,
+    moduleHandlerFiles: Object.fromEntries(ctx.moduleHandlerFiles),
     ...(cache ? { cacheStats: { reusedModules, reanalyzedModules } } : {}),
   };
 }
@@ -764,6 +769,9 @@ function parseModule(
   arrayProp(options, "commands").forEach(collectHandler);
   arrayProp(options, "jobs").forEach(collectHandler);
   arrayProp(options, "queries").forEach(collectHandler);
+  ctx.moduleHandlerFiles.set(name, [...new Set(
+    [...handlerClasses].map((cls) => sourcePath(ctx.rootDir, cls.getSourceFile().fileName)),
+  )].sort());
 
   const commands: CommandNode[] = [];
   const jobs: JobNode[] = [];

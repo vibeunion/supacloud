@@ -11,6 +11,8 @@ export type { DeliveryOptions, DeliveryPlan, DeliveryPlanResult, DeliveryTarget,
 export { generateFeatureSource, validateFeatureSpec } from "./feature";
 export { applyDiagnosticFix } from "./fixes";
 export type { AppliedDiagnosticFix, ApplyDiagnosticFixOptions } from "./fixes";
+export { createDiagnosticRepairPlan } from "./repair-plan";
+export type { DiagnosticRepair } from "./repair-plan";
 export { checkProject, compileProject } from "./compile";
 export { watchProject } from "./watch";
 export { migrateProject, SUPACLOUD_MIGRATIONS, migrateRouteResponse } from "./migrations";
