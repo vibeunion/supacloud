@@ -13,6 +13,7 @@ test("compiled route titles preserve Swagger summaries and host tags", async () 
       routes: [{
         method: "GET", path: "/environment", handler: "read",
         title: "Get project environment and platform version",
+        data: { openapi: { hide: true } },
         responses: { 200: t.Object({ ok: t.Boolean() }) },
       }],
     }],
@@ -26,6 +27,7 @@ test("compiled route titles preserve Swagger summaries and host tags", async () 
   expect(route?.hooks.detail).toMatchObject({
     summary: "Get project environment and platform version",
     tags: ["projects"],
+    hide: true,
   });
   const response = await app.handle(new Request("http://localhost/projects/environment"));
   expect(response.status).toBe(200);

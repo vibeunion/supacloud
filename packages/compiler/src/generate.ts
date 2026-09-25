@@ -1788,6 +1788,9 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
   for (const module of graph.modules) {
     for (const controller of module.controllers) {
       for (const route of controller.routes) {
+        const documentation = route.data?.openapi;
+        if (documentation !== null && typeof documentation === "object"
+          && "hide" in documentation && documentation.hide === true) continue;
         const fullPath = joinRoutePaths(controller.path, route.path);
         const responseEntries = normalizedResponseEntries(route.responses);
         const hasResponseMap = responseEntries.length > 0;

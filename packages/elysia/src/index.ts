@@ -1108,9 +1108,15 @@ export function createModulePlugin<
   for (const controller of compiled.controllers) {
     for (const route of controller.routes) {
       const path = joinPaths(controller.path, route.path);
+      const documentation = route.data?.openapi;
+      const hidden = documentation !== null && typeof documentation === "object"
+        && "hide" in documentation && documentation.hide === true;
       const schema = {
         ...toElysiaRouteSchema(route),
-        ...(route.title ? { detail: { summary: route.title } } : {}),
+        ...(route.title || hidden ? { detail: {
+          ...(route.title ? { summary: route.title } : {}),
+          ...(hidden ? { hide: true } : {}),
+        } } : {}),
       };
       const policies = compileHttpPolicies(route, path, options.httpPolicies);
       if (policies.length > 0) {
