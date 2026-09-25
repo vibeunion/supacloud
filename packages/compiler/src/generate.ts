@@ -200,7 +200,7 @@ function resolveFactoryValue(value: unknown): unknown {
 const scopeDestructions = new WeakMap<object, Promise<void>>();
 const platformDependencies = new WeakMap<object, Record<string, unknown>>();
 
-function retainPlatformDependencies(services: Record<string, unknown>, deps: Record<string, unknown>): Record<string, unknown> {
+function retainPlatformDependencies<T extends Record<string, unknown>>(services: T, deps: Record<string, unknown>): T {
   platformDependencies.set(services, deps);
   return services;
 }
