@@ -283,7 +283,7 @@ export function renderApplication(
       providers: mod.providers.filter((p) => p.providedIn !== "root" || p.multi || referencedTokens.has(p.token) || p.exported),
     }));
   }
-  const imports = new ImportManager();
+  const imports = new ImportManager(new Set(["CompiledApplicationModule"]));
 
   const factorySections: string[] = [];
   const descriptorEntries: string[] = [];
@@ -302,7 +302,14 @@ export function renderApplication(
     "",
     TYPE_GUARDS,
     "",
-    "export function createCompiledModules(): CompiledModule[] {",
+    ...(modules.length > 0 ? [
+      'export type CompiledApplicationModule = Omit<CompiledModule, "name" | "createServices"> & (',
+      ...modules.map((module) =>
+        `  | { name: ${JSON.stringify(module.name)}; createServices: typeof create${pascalName(module.name)}Services }`),
+      ");",
+    ] : ["export type CompiledApplicationModule = CompiledModule;"]),
+    "",
+    "export function createCompiledModules(): CompiledApplicationModule[] {",
     "  return [",
     ...descriptorEntries.map((entry) => indent(entry, 4) + ","),
     "  ];",
@@ -601,7 +608,7 @@ class ModuleGenerator {
   renderDescriptor(): string {
     const lines: string[] = [
       `{`,
-      `  name: ${JSON.stringify(this.module.name)},`,
+      `  name: ${JSON.stringify(this.module.name)} as const,`,
       `  createServices: create${this.pascal}Services,`,
     ];
     if (this.hasFactoryContent("request")) {
@@ -837,7 +844,7 @@ class ModuleGenerator {
       `function create${this.pascal}Services(`,
       `  deps: Record<string, unknown>,`,
       `  imported: Record<string, Record<string, unknown>>,`,
-      `): Record<string, unknown> {`,
+      `) {`,
       indent(this.renderFactoryBody("services"), 2),
       `}`,
     ].join("\n");

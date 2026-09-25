@@ -106,6 +106,11 @@ describe("generate：application.ts 关键内容", () => {
           imports: [], exports: [], commands: [], queries: [],
           providers: [
             {
+              token: "CompiledApplicationModule", kind: "class", tokenKind: "class", useClass: "CompiledApplicationModule",
+              importPath: "source", scope: "application", deps: [],
+              exported: false, file: "source.ts", line: 1,
+            },
+            {
               token: "Service", kind: "class", tokenKind: "class", useClass: "Service",
               importPath: "source", scope: "application", deps: ["DB"],
               exported: false, file: "source.ts", line: 1,
@@ -124,9 +129,13 @@ describe("generate：application.ts 关键内容", () => {
         }],
       };
       const rendered = renderApplication(graph, { rootDir: root, outDir: join(root, "generated") });
+      const unscoped = renderApplication({
+        ...graph, modules: graph.modules.map((module) => ({ ...module, controllers: [] })),
+      }, { rootDir: root, outDir: join(root, "generated") });
       await writeFixtureProject(root, {
         "source.ts": `
 export interface Db { save(value: string): string }
+export class CompiledApplicationModule { readonly tag = "reserved"; }
 export class Service { constructor(readonly db: Db) {} }
 export function makeLabel(db: Db): string { return db.save("label"); }
 export class HttpController {
@@ -135,8 +144,10 @@ export class HttpController {
 }
 `,
         "generated/application.ts": rendered.applicationCode,
+        "generated/unscoped.ts": unscoped.applicationCode,
         "consumer.ts": `
 import { createCompiledModules } from "./generated/application";
+import { createCompiledModules as createUnscopedModules } from "./generated/unscoped";
 interface RuntimeModule {
   controllers: Array<{
     scope: "application" | "request" | "job";
@@ -145,6 +156,27 @@ interface RuntimeModule {
 }
 const modules: RuntimeModule[] = createCompiledModules();
 void modules;
+const typed = createCompiledModules().find((module) => module.name === "typed")!;
+const moduleName: "typed" = typed.name;
+const services = typed.createServices({ db: { save: (value: string) => value } }, {});
+const reserved: "reserved" = services.compiledApplicationModule.tag;
+const label: string = services.label;
+const saved: string = services.service.db.save(label);
+// @ts-expect-error Generated service values must not decay to unknown or any.
+const invalidLabel: number = services.label;
+// @ts-expect-error Constructor-injected service methods retain their input contract.
+services.service.db.save(123);
+// @ts-expect-error Module names remain literal discriminants.
+const invalidName: "other" = typed.name;
+for (const module of createUnscopedModules()) {
+  const services = module.createServices({}, {});
+  if (module.createRequestScope) void module.createRequestScope(services, {});
+  if (module.destroyRequestScope) void module.destroyRequestScope({});
+  if (module.createJobScope) void module.createJobScope(services, {});
+  if (module.destroyJobScope) void module.destroyJobScope({});
+  void module.aspects;
+  void module.aspectPipeline;
+}
 `,
       });
       const program = ts.createProgram([join(root, "consumer.ts")], {
@@ -862,7 +894,7 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
                     path: "/info",
                     handler: "getInfo",
                     title: "System Information",
-                    data: { tier: "enterprise", public: false },
+                    data: { tier: "enterprise", public: false, httpPolicies: [{ name: "auth", options: { role: "reader" } }] },
                   },
                 ],
                 file: "src/meta.controller.ts",
@@ -880,9 +912,10 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     );
 
     expect(rendered.applicationCode).toContain('title: "System Information"');
-    expect(rendered.applicationCode).toContain('data: {"tier":"enterprise","public":false}');
+    expect(rendered.applicationCode).toContain('data: {"tier":"enterprise","public":false,"httpPolicies":[{"name":"auth","options":{"role":"reader"}}]}');
     expect(rendered.clientCode).toContain('"title": "System Information"');
     expect(rendered.clientCode).toContain('"tier": "enterprise"');
+    expect(rendered.clientCode).toContain('"httpPolicies"');
   });
 
   test("renderApplication preserves route contract classification in the compiled descriptor", () => {

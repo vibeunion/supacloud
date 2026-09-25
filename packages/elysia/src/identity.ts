@@ -106,7 +106,16 @@ export function createSupAuthRequestContext(options: SupAuthContextOptions) {
     const identity: SupAuthIdentity = { authenticated: true, subject, issuer, clientId };
     Object.defineProperty(identity, "accessToken", { value: token, enumerable: false });
     Object.freeze(identity);
-    const access = await resolveAccess(identity, request);
+    let access: SupAuthAccess | null;
+    try {
+      access = await resolveAccess(identity, request);
+    } catch {
+      // Null means denied. Exceptions are an unavailable dependency, never a
+      // public error supplied by an identity/database SDK.
+      throw new ApplicationError("Application access service unavailable", {
+        status: 503, code: "APPLICATION_ACCESS_UNAVAILABLE",
+      });
+    }
     if (!access || access.projectId !== projectId ||
       typeof access.tenantId !== "string" || !access.tenantId.trim() ||
       !Array.isArray(access.permissions) ||

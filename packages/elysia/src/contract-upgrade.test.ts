@@ -22,6 +22,10 @@ interface GeneratedClient {
 }
 
 test("fixed legacy fixture upgrades, compiles, types, serves and restores from a source checkpoint", async () => {
+  const started = performance.now();
+  const phase = (name: string) => {
+    if (process.env.SUPACLOUD_TEST_TIMINGS === "1") console.info(`contract-upgrade: ${name} ${Math.round(performance.now() - started)}ms`);
+  };
   const root = await mkdtemp(join(tmpdir(), "supacloud-contract-upgrade-"));
   let stop: (() => Promise<void>) | undefined;
   try {
@@ -46,26 +50,32 @@ test("fixed legacy fixture upgrades, compiles, types, serves and restores from a
       compilerOptions: {
         strict: true, experimentalDecorators: true, target: "ES2022",
         module: "ESNext", moduleResolution: "Bundler", skipLibCheck: true,
+        types: [],
       },
       include: ["src/**/*.ts"],
     }));
     const migrationOptions = {
       rootDir: root, include: ["src/**/*.ts"], fromVersion: "0.11.0", toVersion: "0.12.0",
     };
+    phase("migration preview start");
     const preview = await migrateProject(migrationOptions);
+    phase("migration preview end");
     expect(preview.issues).toEqual([]);
     expect(preview.changedFiles).toEqual(["src/application.ts"]);
     expect(await readFile(sourcePath, "utf8")).toBe(original);
     const applied = await migrateProject({ ...migrationOptions, write: true });
+    phase("migration write end");
     expect(applied.issues).toEqual([]);
     expect(applied.changedFiles).toEqual(["src/application.ts"]);
     expect((await migrateProject({ ...migrationOptions, write: true })).changedFiles).toEqual([]);
+    phase("migration idempotence end");
 
     const compileOptions = {
       rootDir: root, include: ["src/**/*.ts"], outDir: join(root, "generated"),
       strict: true, requireRouteContracts: true, generateClient: true, generateOpenApi: true,
     };
     const compilation = await compileProject(compileOptions);
+    phase("compilation end");
     expect(compilation.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
     expect(compilation.graph.modules).toHaveLength(1);
 
@@ -93,19 +103,39 @@ test("fixed legacy fixture upgrades, compiles, types, serves and restores from a
       ts.createProgram([join(root, source)], typeOptions),
     ).map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
     expect(diagnostics("consumer.ts")).toEqual([]);
+    phase("consumer TypeScript API end");
     // Prove the negative assertions really fail rather than relying on permissive types.
     await writeFile(join(root, "negative.ts"), consumer.replaceAll("// @ts-expect-error", "// expected failure"));
     expect(diagnostics("negative.ts").length).toBeGreaterThanOrEqual(3);
+    phase("negative TypeScript API end");
     for (const file of ["consumer.ts", "negative.ts"]) {
+      const configPath = join(root, `typecheck-${file}.json`);
+      await writeFile(configPath, JSON.stringify({
+        compilerOptions: {
+          strict: true, exactOptionalPropertyTypes: true, noEmit: true, skipLibCheck: true,
+          experimentalDecorators: true, target: "ES2022", module: "ESNext",
+          moduleResolution: "Bundler", types: [],
+        }, files: [file], include: [],
+      }));
       const child = Bun.spawn([
         resolve(import.meta.dir, "../node_modules/.bin/tsc"),
-        "--strict", "--exactOptionalPropertyTypes", "--noEmit", "--skipLibCheck",
-        "--experimentalDecorators", "--target", "ES2022", "--module", "ESNext",
-        "--moduleResolution", "Bundler", "--ignoreConfig", join(root, file),
+        "--project", configPath,
       ], { cwd: root, stdout: "pipe", stderr: "pipe" });
-      const [exit, stdout, stderr] = await Promise.all([
-        child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
-      ]);
+      let timedOut = false;
+      const deadline = setTimeout(() => { timedOut = true; child.kill("SIGKILL"); }, 60_000);
+      let result: [number, string, string];
+      try {
+        result = await Promise.all([
+          child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+        ]);
+      } finally {
+        clearTimeout(deadline);
+        if (child.exitCode === null) child.kill("SIGKILL");
+        await child.exited;
+      }
+      const [exit, stdout, stderr] = result;
+      expect(timedOut).toBe(false);
+      phase(`${file} TypeScript CLI end`);
       if (file === "consumer.ts") expect({ exit, stdout, stderr }).toEqual({ exit: 0, stdout: "", stderr: "" });
       else {
         expect(exit).not.toBe(0);
@@ -114,6 +144,7 @@ test("fixed legacy fixture upgrades, compiles, types, serves and restores from a
     }
 
     const generated: GeneratedApplication = await import(pathToFileURL(join(root, "generated/application.ts")).href);
+    phase("runtime start");
     const errors: unknown[] = [];
     const app = createApplication({
       modules: generated.createCompiledModules(),
@@ -172,6 +203,7 @@ test("fixed legacy fixture upgrades, compiles, types, serves and restores from a
     await rm(join(root, "generated"), { recursive: true });
     expect(await readFile(sourcePath, "utf8")).toBe(original);
     const restored = await compileProject(compileOptions);
+    phase("rollback compilation end");
     expect(restored.diagnostics.filter((diagnostic) => diagnostic.severity === "error")).toEqual([]);
     const rollbackUrl = pathToFileURL(join(root, "generated/application.ts"));
     rollbackUrl.searchParams.set("checkpoint", "restored");
@@ -184,4 +216,6 @@ test("fixed legacy fixture upgrades, compiles, types, serves and restores from a
     await stop?.();
     await rm(root, { recursive: true, force: true });
   }
-}, 30_000);
+  // Multiple real dependency graphs plus two isolated TS CLI runs are expensive
+  // on cold filesystems. Keep all positive/negative checks within a bounded budget.
+}, 600_000);
