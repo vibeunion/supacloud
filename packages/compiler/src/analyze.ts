@@ -26,7 +26,7 @@ import type {
   TokenKind,
 } from "./types";
 import { COMPILER_DIAGNOSTIC_CODES } from "./validate";
-import { camelName } from "./util";
+import { camelName, joinRoutePaths } from "./util";
 import { scanRuntimeDi } from "./static-di";
 
 const DEFAULT_INCLUDE = ["**/*.module.ts", "**/*.ts"];
@@ -1558,7 +1558,8 @@ function parseController(
       const pathParams: string[] = [];
       const paramRegex = /:([a-zA-Z0-9_]+)/g;
       let match: RegExpExecArray | null;
-      while ((match = paramRegex.exec(routePath)) !== null) {
+      const fullPath = joinRoutePaths(path, routePath);
+      while ((match = paramRegex.exec(fullPath)) !== null) {
         if (match[1] !== undefined) pathParams.push(match[1]);
       }
       if (pathParams.length > 0) route.pathParams = pathParams;

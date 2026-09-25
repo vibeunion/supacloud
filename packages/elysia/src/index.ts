@@ -64,6 +64,8 @@ export type {
 // ---------------------------------------------------------------------------
 
 export interface CompiledRoute {
+  /** Compiler-emitted route title, exposed as the OpenAPI operation summary. */
+  title?: string;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   path: string;
   /** Method name on the controller instance. */
@@ -1054,7 +1056,10 @@ export function createModulePlugin(
   for (const controller of compiled.controllers) {
     for (const route of controller.routes) {
       const path = joinPaths(controller.path, route.path);
-      const schema = toElysiaRouteSchema(route);
+      const schema = {
+        ...toElysiaRouteSchema(route),
+        ...(route.title ? { detail: { summary: route.title } } : {}),
+      };
 
       const handler = async (ctx: HttpContext) => {
         const requestContext = ctx.requestContext ?? await ctxFactory(ctx.request);
