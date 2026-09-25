@@ -76,6 +76,8 @@ export type {
 // ---------------------------------------------------------------------------
 
 export interface CompiledRoute {
+  parse?: "none";
+  allowDeleteBody?: true;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   path: string;
   /** Method name on the controller instance. */
@@ -1022,6 +1024,7 @@ export function createModulePlugin<
     "paramTransforms", "paramDefaults", "queryTransforms", "queryDefaults", "title", "data",
     // defineJsonContract can be spread into a route; these helpers are not hooks.
     "input", "result", "request",
+    "parse", "allowDeleteBody",
   ]);
   for (const controller of compiled.controllers) {
     for (const route of controller.routes) {
@@ -1030,6 +1033,14 @@ export function createModulePlugin<
         throw new ApplicationError(
           `Unsupported compiled route ${route.method} ${controller.path}${route.path}`
           + (unsupported.length > 0 ? `: ${unsupported.join(", ")}` : ""),
+          { code: "ROUTE_DESCRIPTOR_UNSUPPORTED" },
+        );
+      }
+      if ((route.parse !== undefined && route.parse !== "none")
+        || (route.parse === "none" && (route.body !== undefined || route.contract?.body !== "domain" || !route.contract.evidence?.trim()))
+        || (route.allowDeleteBody !== undefined && (route.allowDeleteBody !== true || route.method !== "DELETE" || route.body === undefined))) {
+        throw new ApplicationError(
+          `Invalid compiled body policy on ${route.method} ${controller.path}${route.path}`,
           { code: "ROUTE_DESCRIPTOR_UNSUPPORTED" },
         );
       }
@@ -1106,7 +1117,10 @@ export function createModulePlugin<
   for (const controller of compiled.controllers) {
     for (const route of controller.routes) {
       const path = joinPaths(controller.path, route.path);
-      const schema = toElysiaRouteSchema(route);
+      const schema = {
+        ...toElysiaRouteSchema(route),
+        ...(route.parse === "none" ? { parse: "none" as const } : {}),
+      };
       const policies = compileHttpPolicies(route, path, options.httpPolicies);
       if (policies.length > 0) {
         Object.assign(schema, {
