@@ -51,7 +51,7 @@
     "@svadmin/ui": "0.75.0",
     "@tanstack/svelte-query": "^6.1.48",
     "highlight.js": "^11.12.0",
-    "isomorphic-dompurify": "^4.2.0",
+    "isomorphic-dompurify": "^4.3.0",
     "lucide-svelte": "^1.0.1",
     "marked": "^18.0.13",
     "marked-highlight": "^2.2.4",
