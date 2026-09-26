@@ -5,6 +5,8 @@ import { UpdateWebhook } from "../webhook/update.command";
 import { WebhookController } from "../webhook/webhook.controller";
 
 export interface CompiledRoute {
+  parse?: "none";
+  allowDeleteBody?: true;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   path: string;
   handler: string;

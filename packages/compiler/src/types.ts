@@ -169,6 +169,8 @@ export interface HandlerParamNode {
 }
 
 export interface RouteNode {
+  parse?: "none";
+  allowDeleteBody?: true;
   contract?: {
     body?: "framework" | "domain";
     response?: "framework" | "native-json" | "binary" | "stream";
@@ -502,6 +504,8 @@ export interface ModuleBoundaryProfile {
 
 export interface ValidateOptions {
   strict?: boolean;
+  /** Reject route shapes that cannot coexist in an OpenAPI document. */
+  generateOpenApi?: boolean;
   moduleBoundaryPreset?: ModuleBoundaryPresetName;
   moduleBoundaries?: ModuleBoundaryRule[];
   /** Allow routes to bind directly to @Command (defaults to true). */

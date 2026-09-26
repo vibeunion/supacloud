@@ -44,6 +44,8 @@ function normalizedResponseEntries(
 }
 
 const INTERFACES = `export interface CompiledRoute {
+  parse?: "none";
+  allowDeleteBody?: true;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   path: string;
   handler: string;
@@ -758,6 +760,8 @@ class ModuleGenerator {
         if (route.contract !== undefined) {
           fields.push(`contract: ${JSON.stringify(route.contract)}`);
         }
+        if (route.parse === "none") fields.push('parse: "none"');
+        if (route.allowDeleteBody === true) fields.push("allowDeleteBody: true");
         if (route.schemaKinds !== undefined && Object.keys(route.schemaKinds).length > 0) {
           fields.push(`schemaKinds: ${JSON.stringify(route.schemaKinds)}`);
         }
@@ -1230,7 +1234,8 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
         }).filter((entry): entry is [string, { local: string; key: string }] => entry.length === 2));
         if (Object.keys(responseSchemas).length > 0) usesValue = true;
         const paramNames = [...new Set(
-          (fullPath.match(/:([a-zA-Z0-9_]+)/g) ?? []).map((p) => p.slice(1)),
+          [...(fullPath.match(/:([a-zA-Z0-9_]+)/g) ?? []).map((p) => p.slice(1)),
+            ...(fullPath.endsWith("/*") ? ["*"] : [])],
         )];
         const pathParamsType = paramNames.length > 0
           ? `{ ${paramNames.map((p) => `${/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(p) ? p : JSON.stringify(p)}: string | number`).join("; ")} }`
@@ -1239,7 +1244,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           ? `Static<typeof ${paramsSchema.local}>${paramNames.length > 0 ? ` & ${pathParamsType}` : ""}`
           : pathParamsType;
         const queryType = querySchema ? `Static<typeof ${querySchema.local}>` : "Record<string, unknown>";
-        const bodyType = bodySchema ? `Static<typeof ${bodySchema.local}>` : "unknown";
+        const bodyType = route.parse === "none" ? "BodyInit" : bodySchema ? `Static<typeof ${bodySchema.local}>` : "unknown";
         const headersType = headersSchema ? `Static<typeof ${headersSchema.local}>` : "Record<string, string>";
         const cookieType = cookieSchema ? `Static<typeof ${cookieSchema.local}>` : "Record<string, string | number | boolean>";
         const responseTypes = [
@@ -1280,6 +1285,8 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           ["queryDefaults", route.queryDefaults],
           ["title", route.title],
           ["data", route.data],
+          ["parse", route.parse],
+          ["allowDeleteBody", route.allowDeleteBody],
         ] as const) {
           if (value !== undefined) routeFields.push(`${key}: ${JSON.stringify(value)}`);
         }
@@ -1318,7 +1325,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           : "undefined";
         const responseKindArgument = responseKind === undefined ? "undefined" : JSON.stringify(responseKind);
         routeMethods.push(`
-    ${route.handler}: makeRoute<${requestTypeName}, ${responseType === "never" ? "never" : responseTypeName}>(${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}, ${responseSchemaArgument}, ${responseKindArgument}),`);
+    ${route.handler}: makeRoute<${requestTypeName}, ${responseType === "never" ? "never" : responseTypeName}>(${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}, ${responseSchemaArgument}, ${responseKindArgument}, ${route.parse === "none"}),`);
       }
 
       controllerEntries.push(`
@@ -1438,6 +1445,13 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     '    if (typeof value !== "string" && typeof value !== "number") throw new TypeError(`Missing route parameter: ${key}`);',
     "    return encodeURIComponent(String(value));",
     "  });",
+    '  if (path.endsWith("/*")) {',
+    '    const wildcard = params && Object.hasOwn(params, "*") ? params["*"] : undefined;',
+    '    if (typeof wildcard !== "string" && typeof wildcard !== "number") throw new TypeError("Missing route parameter: *");',
+    '    const segments = String(wildcard).split("/");',
+    '    if (segments.some(segment => segment === "." || segment === "..")) throw new TypeError("Wildcard dot segments are not supported by Fetch URLs");',
+    '    url = url.slice(0, -1) + segments.map(encodeURIComponent).join("/");',
+    "  }",
     "  if (query) {",
     "    const searchParams = new URLSearchParams();",
     "    for (const [k, v] of Object.entries(query)) {",
@@ -1624,6 +1638,10 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "export function createApiClient(config: ApiClientConfig = {}) {",
     "  const fetcher = config.fetch ?? globalThis.fetch.bind(globalThis);",
     '  const baseUrl = (config.baseUrl ?? "").replace(/\\/+$/, "");',
+    "  function rawBody(value: unknown): BodyInit {",
+    "    if (typeof value === \"string\" || value instanceof Blob || value instanceof FormData || value instanceof URLSearchParams || value instanceof ArrayBuffer || ArrayBuffer.isView(value) || value instanceof ReadableStream) return value as BodyInit;",
+    "    throw new TypeError(\"Raw routes require a BodyInit value; JSON encoding is not implicit\");",
+    "  }",
     "",
     "  async function request<T>(",
     "    method: string,",
@@ -1632,6 +1650,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "    decode: ResponseDecoder<T>,",
     `    responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>,`,
     "    responseKind?: string,",
+    "    raw?: boolean,",
     "  ): Promise<T>;",
     "  async function request<T>(",
     "    method: string,",
@@ -1640,6 +1659,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "    decode?: ResponseDecoder<T>,",
     `    responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>,`,
     "    responseKind?: string,",
+    "    raw?: boolean,",
     "  ): Promise<T | unknown>;",
     "  async function request(",
     "    method: string,",
@@ -1653,11 +1673,12 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "    decode?: ResponseDecoder<T>,",
     `    responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>,`,
     "    responseKind?: string,",
+    "    raw = false,",
     "  ): Promise<T | unknown> {",
     "    const url = `${baseUrl}${buildRouteUrl(path, options.params, options.query)}`;",
     '    const customHeaders = typeof config.headers === "function" ? await config.headers() : config.headers;',
     "    const headers: Record<string, string> = {",
-    '      "content-type": "application/json",',
+    '      ...(raw ? {} : { "content-type": "application/json" }),',
     "      ...customHeaders,",
     "      ...options.headers,",
     "    };",
@@ -1676,7 +1697,8 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "      return fetcher(reqPayload.url, {",
     "        method: reqPayload.method,",
     "        headers: reqPayload.headers,",
-    "        ...(reqPayload.body === undefined ? {} : { body: JSON.stringify(reqPayload.body) }),",
+    "        ...(reqPayload.body === undefined ? {} : { body: raw ? rawBody(reqPayload.body) : JSON.stringify(reqPayload.body) }),",
+    "        ...(raw && reqPayload.body instanceof ReadableStream ? { duplex: \"half\" } : {}),",
     "      });",
     "    };",
     "    const response = await executeChain(0, { method, url, headers, body: options.body });",
@@ -1719,13 +1741,13 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "    return decode ? decode(checked) : checked;",
     "  }",
     "",
-    `  function makeRoute<Options extends ClientRequestOptions, Result = never>(method: string, path: string, responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>, responseKind?: string): RouteMethod<Options, Result> {`,
+    `  function makeRoute<Options extends ClientRequestOptions, Result = never>(method: string, path: string, responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>, responseKind?: string, raw = false): RouteMethod<Options, Result> {`,
     "    function route<T>(options: Options, decode: ResponseDecoder<T>): Promise<T>;",
     "    function route(options: Options): Promise<Result>;",
     "    function route(options?: Options): Promise<unknown>;",
     "    function route<T>(options?: Options, decode?: ResponseDecoder<T>): Promise<T | unknown> {",
     "      const requestOptions = options ?? {};",
-    "      return request(method, path, requestOptions, decode, responseSchemas, responseKind);",
+    "      return request(method, path, requestOptions, decode, responseSchemas, responseKind, raw);",
     "    }",
     "    return route as RouteMethod<Options, Result>;",
     "  }",
@@ -1805,6 +1827,7 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
         const hasResponseMap = responseEntries.length > 0;
         const pathParams = [...new Set([
           ...(fullPath.match(/:([A-Za-z0-9_]+)/g) ?? []).map((item) => item.slice(1)),
+          ...(fullPath.endsWith("/*") ? ["*"] : []),
           ...(route.pathParams ?? []),
         ].filter((item) => item.length > 0))];
         const queryParams = [...new Set([
@@ -1855,6 +1878,8 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
             : {}),
           responseContentType,
           responseKind: responseKind ?? (route.nativeResponse ? "native-response" : undefined),
+          ...(route.parse === undefined ? {} : { parse: route.parse }),
+          ...(route.allowDeleteBody === undefined ? {} : { allowDeleteBody: route.allowDeleteBody }),
           module: module.name,
           controller: controller.className,
           handler: route.handler,
@@ -1940,6 +1965,8 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
     "  canMatch?: readonly string[];",
     "  canDeactivate?: readonly string[];",
     "  contract?: Record<string, unknown>;",
+    '  parse?: "none";',
+    "  allowDeleteBody?: true;",
     "  data?: Record<string, unknown>;",
     "  requiresAuth?: boolean;",
     "};",
@@ -2137,8 +2164,15 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
     '  return { $ref: `#/components/schemas/${encodeURIComponent(name).replaceAll("%2F", "/")}` };',
     "}",
     "",
+    "function wildcardParameterName(path: string): string {",
+    '  const names = new Set([...path.matchAll(/:([A-Za-z0-9_]+)/g)].map(match => match[1]));',
+    '  let name = "wildcard";',
+    '  while (names.has(name)) name += "_";',
+    "  return name;",
+    "}",
+    "",
     "function openApiPath(path: string): string {",
-    '  return path.replace(/:([A-Za-z0-9_]+)/g, "{$1}");',
+    '  return path.replace(/:([A-Za-z0-9_]+)/g, "{$1}").replace(/\\/\\*$/, `/{${wildcardParameterName(path)}}`);',
     "}",
     "",
     "function responseHasBody(status: string, kind: string | undefined): boolean {",
@@ -2168,7 +2202,7 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
     "  const parameters: Record<string, unknown>[] = [];",
     "  const paramsSchema = definition.paramsSchema ? OPENAPI_SCHEMA_REGISTRY[definition.paramsSchema as keyof typeof OPENAPI_SCHEMA_REGISTRY] : undefined;",
     "  for (const name of definition.pathParams) parameters.push({",
-    '    name, in: "path", required: true, schema: schemaProperty(paramsSchema, name),',
+    '    name: name === "*" ? wildcardParameterName(definition.path) : name, in: "path", required: true, schema: schemaProperty(paramsSchema, name),',
     "  });",
     "  const querySchema = definition.querySchema ? OPENAPI_SCHEMA_REGISTRY[definition.querySchema as keyof typeof OPENAPI_SCHEMA_REGISTRY] : undefined;",
     "  const queryNames = new Set([...(querySchema ? schemaPropertyNames(querySchema) : []), ...definition.queryParams]);",
@@ -2205,6 +2239,7 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
     "    operationId: definition.operationId, tags: [...definition.tags], summary: definition.summary, responses,",
     "    ...(parameters.length === 0 ? {} : { parameters }),",
     "    ...(definition.bodySchema ? { requestBody: { required: !schemaAllowsUndefined(OPENAPI_SCHEMA_REGISTRY[definition.bodySchema as keyof typeof OPENAPI_SCHEMA_REGISTRY]), content: { \"application/json\": { schema: schemaReference(definition.bodySchema) } } } } : {}),",
+    '    ...(definition.parse === "none" ? { requestBody: { required: false, description: "Raw request bytes; validation and media types are owned by the domain handler.", content: { "*/*": { schema: { type: "string", format: "binary" } } } } } : {}),',
     "    ...(definition.requiresAuth ? { security: [{ bearerAuth: [] }] } : {}),",
     "    \"x-supacloud\": {",
     "      module: definition.module, controller: definition.controller, handler: definition.handler,",
@@ -2214,6 +2249,8 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
     "      ...(definition.canMatch ? { canMatch: [...definition.canMatch] } : {}),",
     "      ...(definition.canDeactivate ? { canDeactivate: [...definition.canDeactivate] } : {}),",
     "      ...(definition.contract ? { contract: definition.contract } : {}),",
+    "      ...(definition.parse ? { parse: definition.parse } : {}),",
+    "      ...(definition.allowDeleteBody ? { allowDeleteBody: true } : {}),",
     "      ...(definition.data ? { data: definition.data } : {}),",
     "    },",
     "  };",

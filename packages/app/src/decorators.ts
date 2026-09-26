@@ -182,6 +182,10 @@ export type ResolveFn<T = unknown, TContext = import("./route_pipeline").RoutePi
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
 export interface RouteOptions<Schemas extends RouteContractSchemas = RouteContractSchemas> {
+  /** Leave the original Request body unread for domain-owned parsing. */
+  parse?: "none";
+  /** Explicit compatibility opt-in for existing DELETE endpoints with a body. */
+  allowDeleteBody?: true;
   /** Declared validation owner/transport; these labels are not runtime proof. */
   contract?: {
     body?: "framework" | "domain";

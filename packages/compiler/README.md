@@ -708,12 +708,42 @@ rechecks types instead of returning an unchecked cached result.
 Generated route calls require all path parameters and a decoder for typed
 responses. See [type safety and migration](../../docs/type-safety.md).
 
+### Raw Requests and Legacy DELETE Bodies
+
+`parse: "none"` leaves the original `Request` body unread. The route must declare
+`contract: { body: "domain", evidence: "path/to/acceptance.test.ts" }` and must not
+declare a parsed `body` schema or bind `@Body()`. Its domain handler is responsible
+for authentication ordering, content-type checks, bounded reading, cancellation
+and validation. The declaration does not prove those checks ran.
+
+Body policies accept explicit literals and statically resolvable object spreads.
+Dynamic spreads, computed keys and shorthand policies fail compilation rather
+than silently restoring default parsing. Generated clients accept `BodyInit`
+for raw routes, preserve bytes/streams, and do not assume JSON content type.
+The caller must set the domain's content type explicitly when required.
+The API and contract manifests retain the policy; OpenAPI describes the raw
+body without claiming a JSON schema.
+
+Existing DELETE endpoints with a JSON body can opt in with
+`allowDeleteBody: true` and an explicit body schema. This does not relax GET,
+HEAD or OPTIONS, and it does not bypass adapter request validation.
+
+Terminal `/*` routes support `@Param("*")` with a declared `"*"` params field.
+Generated clients require the wildcard value, encode each path segment, and
+preserve `/` separators. OpenAPI uses a collision-free named path parameter for
+the tail; this does not turn the endpoint into a fixed-depth JSON resource.
+Literal `.` and `..` tail segments are rejected because Fetch would normalize
+them and change the request target. Equivalent parameterized paths on the same
+HTTP method fail compilation when OpenAPI generation is enabled, instead of
+silently overwriting OpenAPI operations.
+
 ### Hidden Route Documentation
 
 Use `data: { openapi: { hide: true } }` to retain an endpoint at runtime while
 excluding it from generated OpenAPI and the Elysia Swagger view. Its compiled
 descriptor, contract manifest and client remain available. This is documentation
 metadata, not an authorization boundary.
+
 
 ## License
 
