@@ -1,7 +1,7 @@
 {
   "name": "@supacloud/devtools-contract",
   "version": "0.1.0",
-  "description": "Shared, redacted DevTools protocol contracts for SupaCloud clients and adapters",
+  "description": "Re-export of @vibeunion/devtools-protocol for SupaCloud DevTools adapters",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -17,6 +17,9 @@
     "build": "bun build src/index.ts --outdir dist --target node && tsc -p tsconfig.json --emitDeclarationOnly",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun test"
+  },
+  "dependencies": {
+    "@vibeunion/devtools-protocol": "^0.1.0"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
