@@ -364,6 +364,53 @@ describe("sdkProxyRoutes functions proxy", () => {
     });
   });
 
+  test("POST /functions/v1 persists application task links for platform observation", async () => {
+    await withSdkProxyTestContext(async ({ trackSpy }) => {
+      trackSpy(spyOn(projectService, "getBackgroundTaskSettings").mockResolvedValue({
+        ...DEFAULT_BACKGROUND_TASK_SETTINGS,
+      }));
+      trackSpy(spyOn(projectService, "getApiKeys").mockResolvedValue({
+        anon_key: "anon",
+        service_role_key: "service",
+      } as Awaited<ReturnType<typeof projectService.getApiKeys>>));
+      trackSpy(spyOn(edgeFunctionService, "getConfig").mockResolvedValue({
+        verify_jwt: false,
+        version: "7",
+        background_routes: ["/generate/crop"],
+      }));
+      const enqueueSpy = trackSpy(spyOn(backgroundTaskService, "enqueueBackgroundFunctionTask").mockResolvedValue({
+        id: "task_123",
+        project_ref: "proj_1",
+        task_type: "edge_function",
+        function_slug: "aorist-ai",
+        function_version: "7",
+        status: "pending",
+        attempt: 1,
+        max_attempts: 3,
+      } as Awaited<ReturnType<typeof backgroundTaskService.enqueueBackgroundFunctionTask>>));
+
+      const response = await request("/functions/v1/aorist-ai/generate/crop", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-project-ref": "proj_1",
+          "x-supacloud-correlation-id": "fa-run-123",
+          "x-supacloud-business-task-id": "fa-task-456",
+          "x-supacloud-task-metadata": JSON.stringify({ source: "fa", kind: "ocr" }),
+          apikey: "anon",
+        },
+        body: JSON.stringify({ ping: true }),
+      });
+
+      expect(response.status).toBe(202);
+      expect(enqueueSpy.mock.calls[0]?.[0]).toMatchObject({
+        correlationId: "fa-run-123",
+        businessTaskId: "fa-task-456",
+        metadata: { source: "fa", kind: "ocr" },
+      });
+    });
+  });
+
   test("auth proxy resolves tenant ports from projects.config", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       setSdkProxySqlForTests(async (...args: unknown[]) => {

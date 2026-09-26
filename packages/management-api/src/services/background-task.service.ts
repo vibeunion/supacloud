@@ -36,6 +36,12 @@ export interface EnqueueBackgroundFunctionTaskInput {
   maxPayloadBytes?: number;
   idempotencyKey?: string | null;
   traceId: string;
+  /** Opaque application correlation key; SupaCloud stores it without interpreting it. */
+  correlationId?: string | null;
+  /** Application-owned task identifier used to join platform execution to domain state. */
+  businessTaskId?: string | null;
+  /** Opaque application metadata for task observation and callbacks. */
+  metadata?: Record<string, unknown> | null;
 }
 
 const DEFAULT_TIMEOUT_SEC = 300;
@@ -101,8 +107,11 @@ export async function enqueueBackgroundFunctionTask(
         timeout_sec,
         idempotency_key,
         trace_id,
+        correlation_id,
+        business_task_id,
         invoker_user_id,
-        auth_authority_ref
+        auth_authority_ref,
+        metadata
       )
       VALUES (
         ${input.projectRef},
@@ -116,8 +125,11 @@ export async function enqueueBackgroundFunctionTask(
         ${timeoutSec},
         ${input.idempotencyKey || null},
         ${input.traceId},
+        ${input.correlationId || null},
+        ${input.businessTaskId || null},
         ${invokerUserId}::uuid,
-        ${authAuthorityRef}
+        ${authAuthorityRef},
+        ${JSON.stringify(input.metadata || {})}
       )
       ON CONFLICT (project_ref, idempotency_key)
       WHERE idempotency_key IS NOT NULL

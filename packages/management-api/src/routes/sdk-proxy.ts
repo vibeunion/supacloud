@@ -20,6 +20,8 @@ import { GOTRUE_USER_ID_PATTERN } from "../utils/project-user-lifecycle";
 import { beginRequestObservability } from "../utils/observability";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
+const MAX_TASK_LINK_ID_LENGTH = 255;
+const MAX_TASK_METADATA_BYTES = 64 * 1024;
 type SdkProxySql = (
     strings: TemplateStringsArray,
     ...values: unknown[]
@@ -199,6 +201,33 @@ function isTestTenantAuthAllowed(request: Request): boolean {
     return (process.env.BUN_ENV === 'test' || process.env.NODE_ENV === 'test') && isLoopbackRequestHost(request);
 }
 
+function readTaskLinkId(request: Request, headerName: string): string | null {
+    const value = request.headers.get(headerName)?.trim() || "";
+    if (!value) return null;
+    if (value.length > MAX_TASK_LINK_ID_LENGTH || /[\r\n\0]/.test(value)) {
+        throw new Error(`${headerName} must be at most ${MAX_TASK_LINK_ID_LENGTH} characters`);
+    }
+    return value;
+}
+
+function readTaskMetadata(request: Request): Record<string, unknown> | null {
+    const raw = request.headers.get("x-supacloud-task-metadata")?.trim() || "";
+    if (!raw) return null;
+    if (Buffer.byteLength(raw, "utf8") > MAX_TASK_METADATA_BYTES) {
+        throw new Error("x-supacloud-task-metadata is too large");
+    }
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(raw);
+    } catch {
+        throw new Error("x-supacloud-task-metadata must be valid JSON");
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        throw new Error("x-supacloud-task-metadata must be a JSON object");
+    }
+    return parsed as Record<string, unknown>;
+}
+
 async function verifyJwtPayload(ref: string, token: string): Promise<Record<string, unknown> | null> {
     try {
         const result = await verifyProjectJwtPayload(ref, token);
@@ -275,6 +304,24 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
     delete headers.baggage;
     headers.traceparent = trace.traceparent;
     headers["x-supacloud-trace-id"] = traceId;
+    let correlationId: string | null;
+    let businessTaskId: string | null;
+    let metadata: Record<string, unknown> | null;
+    try {
+        const suppliedCorrelationId = readTaskLinkId(request, "x-supacloud-correlation-id");
+        correlationId = suppliedCorrelationId
+            ?? (trace.correlationId.length <= MAX_TASK_LINK_ID_LENGTH ? trace.correlationId : trace.traceId);
+        businessTaskId = readTaskLinkId(request, "x-supacloud-business-task-id");
+        metadata = readTaskMetadata(request);
+    } catch (error: unknown) {
+        return new Response(JSON.stringify({
+            message: error instanceof Error ? error.message : "Invalid task metadata",
+            code: "INVALID_TASK_LINK",
+        }), {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+        });
+    }
     const idempotencyKey = request.headers.get("x-supacloud-idempotency-key")?.trim() || null;
     const authorization = request.headers.get("authorization");
     const apikey = request.headers.get("apikey");
@@ -306,6 +353,9 @@ async function maybeEnqueueAsyncFunction(request: Request, ref: string): Promise
         maxPayloadBytes,
         idempotencyKey,
         traceId,
+        correlationId,
+        businessTaskId,
+        metadata,
         envelope: {
             trace: { project_ref: ref, traceparent: trace.traceparent, request_id: trace.requestId },
             method: request.method,

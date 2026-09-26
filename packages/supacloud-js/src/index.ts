@@ -146,6 +146,8 @@ export type SupaCloudTaskListFilters = {
   status?: string | string[];
   taskType?: string | string[];
   functionSlug?: string;
+  correlationId?: string;
+  businessTaskId?: string;
   dlq?: boolean;
   limit?: number;
 };
@@ -589,6 +591,8 @@ function createQueryString(filters: SupaCloudTaskListFilters = {}): string {
   if (statuses?.length) params.set("status", statuses.join(","));
   if (taskTypes?.length) params.set("task_type", taskTypes.join(","));
   if (filters.functionSlug) params.set("function_slug", filters.functionSlug);
+  if (filters.correlationId) params.set("correlation_id", filters.correlationId);
+  if (filters.businessTaskId) params.set("business_task_id", filters.businessTaskId);
   if (filters.dlq) params.set("dlq", "true");
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
 
