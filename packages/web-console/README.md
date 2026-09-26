@@ -31,9 +31,9 @@ The production build outputs to `build/` directory. In production, the Managemen
 
 ## SVAdmin Styles
 
-The console uses `@svadmin/ui@0.75.0`, `@svadmin/core@0.55.0`,
-`@svadmin/ai-elements@0.10.0`, `@svadmin/sveltekit@0.11.9`, and
-`@svadmin/elysia@0.13.9`.
+The console uses `@svadmin/ui@0.78.2`, `@svadmin/core@0.58.0`,
+`@svadmin/ai-elements@0.10.3`, `@svadmin/sveltekit@0.12.2`, and
+`@svadmin/elysia@0.14.2`.
 
 Use versions published on npm when upgrading these packages. A GitHub release
 alone does not make a package version installable.
