@@ -95,6 +95,81 @@ These gates prove the stated scenarios, not a full historical npm upgrade matrix
 or all business-domain isolation. See [framework acceptance](../../docs/framework-acceptance.md)
 for the evidence boundaries and upgrade policy.
 
+## Native HTTP Context And Static DI
+
+Pass a native Elysia plugin as `http` to `createApplication`, `createTestApp`,
+or the options argument of `createModulePlugin`. `decorate` shares existing
+instances; `derive` runs before validation; `resolve` runs after validation.
+Use scoped/global hooks, or finish a context plugin with `.as("scoped")`.
+Local hooks retain native encapsulation and do not extend the consuming routes.
+
+```ts
+import { Elysia, t } from "elysia";
+import { createApplication } from "@supacloud/elysia";
+
+const http = new Elysia({ name: "application-context" })
+  .decorate("clock", { now: () => Date.now() })
+  .derive(({ clock }) => ({ startedAt: clock.now() }))
+  .guard({ query: t.Object({ locale: t.Optional(t.String()) }) })
+  .resolve(({ query }) => ({ locale: query.locale ?? "en" }))
+  .as("scoped");
+
+const app = createApplication({
+  http,
+  modules: compiledModules,
+  requestContext: (request, context) => ({
+    request,
+    startedAt: context.startedAt,
+    locale: context.locale,
+  }),
+}).get("/locale", ({ locale, clock }) => ({
+  locale,
+  now: clock.now(),
+}));
+```
+
+The second `requestContext` argument contains the validated HTTP inputs and
+the inferred native plugin extensions. Existing one-argument factories remain
+valid. Its result is passed to generated request-scoped constructors and the
+controller's `context`/`requestContext` input. It is built once per request;
+early resolver responses and validation failures do not construct DI scopes.
+Request scopes are created inside the existing governed handler and released
+after the response, including handler failures. They are not application
+singletons or native `resolve` hooks.
+
+Native routes added to the returned app retain the HTTP plugin's decorator,
+derive and resolve types. `createModulePlugin` also preserves the concrete
+`services` type supplied by its caller. Module service bags are attached by
+the module-local resolver, not merged into a root `decorator.services` bag;
+the service instances themselves remain shared. This prevents same-named
+services in sibling modules from overwriting each other's values or types.
+
+Fresh compiler output preserves literal module names and inferred application
+service factory results. Narrow a generated module by its `name`, call its
+`createServices`, and pass that result to `createModulePlugin` to retain the
+service types. Regenerate older artifacts to obtain this inference; explicitly
+annotating them as `CompiledModule[]` still intentionally widens the types.
+Compiled route schemas are runtime
+descriptors: their body/params/query/header/cookie fields in the application-wide
+context factory remain `unknown`-based instead of pretending to infer one
+route's schema for every route. Use shared guards for schema-typed native
+resolvers and the existing generated contracts for individual compiled routes.
+Do not store per-request identity or transaction handles in decorated singletons.
+
+The `http` plugin is composed into each compiled module and subsequently into
+the root for native routes. Keep it focused on reusable context extensions;
+register unrelated endpoints on the returned app. Hook execution is tested
+for named/anonymous plugins and scoped/global hooks without duplicate work.
+Anonymous extensions receive a stable internal plugin identity for native
+hook deduplication; the caller's plugin configuration is not mutated.
+This is native HTTP composition, not a replacement runtime DI container or
+an arbitrary native-hook passthrough in compiled route descriptors.
+
+`src/http-context.test.ts` covers lifecycle ordering, decoded inputs, failure
+short-circuiting, context/service type inference, cross-module composition and
+concurrent request isolation. Run it with `bun run typecheck:test` as well as
+`bun test src/http-context.test.ts`; runtime tests alone do not verify inference.
+
 ## Persistent Command Adapters
 
 `createPersistentCommandAdapter(command, { identity, input })` binds a
@@ -593,3 +668,180 @@ registration instead of silently disabling response validation.
 
 See [type safety and migration](../../docs/type-safety.md) and [command migration](../../docs/command-migration.md) for examples and
 the distinction between contract declarations and runtime verification.
+
+## Declarative HTTP Policies
+
+Business dependency wiring remains generated constructors and factories. HTTP
+policies are selected using existing compiler-preserved route metadata:
+
+```ts
+@Get("/:id", {
+  data: { httpPolicies: [{ name: "authenticated" }] },
+})
+getItem() { /* domain handler */ }
+```
+
+Register implementations at the HTTP composition root:
+
+```ts
+const app = createApplication({
+  modules: createCompiledModules(),
+  http: identityPlugin,
+  httpPolicies: {
+    authenticated: (options, route) => {
+      // Validate options here. This factory runs once per declared route policy.
+      return async ({ http }) => {
+        if (!http.identity) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+      };
+    },
+  },
+});
+```
+
+`identityPlugin` is an application-owned scoped/global Elysia plugin that verifies
+credentials and resolves `identity`; the adapter does not trust a raw user/tenant
+header as identity. Policy callbacks preserve its native context types.
+
+Policies become native route-local `beforeHandle` hooks. They execute sequentially
+after schema validation, native resolvers and the application request-context
+factory, but before compiled request-scope construction and command execution.
+Return `undefined` to continue or a `Response` to stop; thrown errors use the
+application error mapper. Native earlier hooks can still short-circuit the request.
+Unknown policies, malformed declarations and invalid factories reject startup.
+Routes without declarations do not install a policy hook.
+
+Use the registry for custom resource access or application-owned HTTP policies.
+For bundled security, rate limiting, caching and tracing, use the suite below. Shared factories
+must not retain mutable per-request state; use the callback's request/context.
+Cleanup belongs to native lifecycle hooks. Transactions, durable audit, idempotency
+and recovery remain in command governance, not HTTP policies.
+
+Policy metadata can appear in generated clients: never put secrets in options.
+Changes to declarations or registry configuration require creating a new application.
+
+### Built-In Security And Governance
+
+```ts
+import {
+  createApplication, createHttpPolicySuite, createHttpTelemetry,
+  createMemoryHttpRateLimitStore, createMemoryHttpCacheStore,
+} from "@supacloud/elysia";
+
+const suite = createHttpPolicySuite({
+  auth: supAuthOptions,
+  cacheNamespace: "release-2026-09-25",
+  rateLimitStore: createMemoryHttpRateLimitStore({ maxEntries: 10_000 }),
+  cacheStore: createMemoryHttpCacheStore({ maxEntries: 1_000, maxBytes: 8 * 1024 * 1024 }),
+});
+const app = createApplication({
+  ...suite,
+  modules: createCompiledModules(),
+  http: createHttpTelemetry((event) => logger.info(event)),
+});
+```
+
+`supAuthOptions` uses `createSupAuthRequestContext`'s existing configuration:
+trusted issuer, audience, application client ID, project ID, HTTPS JWKS endpoint
+and `resolveAccess` for current server-side tenant membership/permissions.
+JWT verification and membership resolution run on every credentialed request,
+including cache hits. They are not replaced by a tenant or user header.
+Requests without Authorization get an anonymous identity; public routes may
+remain anonymous. Invalid supplied credentials are rejected even on public routes.
+Use the suite's paired `requestContext`; the registry cannot trust fabricated
+context objects or forwarded subjects. Additional native context plugins may be
+composed with the telemetry plugin using ordinary Elysia `.use(...)`.
+
+Routes select built-ins through metadata (use `BuiltinHttpPolicyDeclaration`
+with TypeScript `satisfies` for author-time option checking):
+
+```ts
+@Get("/tenants/:tenant/items", {
+  data: {
+    httpPolicies: [
+      { name: "authenticated" },
+      { name: "tenant", options: { param: "tenant" } },
+      { name: "permission", options: { allOf: ["items.read"] } },
+      { name: "rateLimit", options: { limit: 120, windowMs: 60_000 } },
+      { name: "cache", options: { ttlMs: 5_000, maxBodyBytes: 262_144 } },
+    ],
+  },
+})
+listItems() { /* use the verified tenant in repository queries */ }
+```
+
+- `authenticated`: requires successful JWT verification and active application access.
+- `tenant`: matches a validated route parameter to that access record's tenant.
+  It is an HTTP boundary check, not automatic repository filtering or database RLS.
+- `permission`: requires every exact permission in `allOf`; no wildcard inference.
+- `rateLimit`: fixed-window quota scoped to route, issuer, application, actor and
+  tenant. It does not trust forwarded IP headers. Denials return 429 with
+  `Retry-After`; unavailable storage returns a sanitized 503. Anonymous/IP abuse
+  protection belongs at the trusted proxy or an explicitly configured native hook.
+- `cache`: authenticated, private GET query caching only; commands are rejected.
+  It must be last, so cache hits cannot skip declared permission or quota checks.
+  Keys hash trusted identity, permissions, complete URL and request headers
+  except the correlation ID. Credentials and query contents are not stored as keys.
+  Only successful plain JSON object/array results are stored. Native responses,
+  streams, errors, oversized output, cookies, Vary, custom response headers and
+  cache-control prohibitions are conservatively excluded. Conditional/range
+  requests and request no-cache/no-store bypass caching. Cache-read outages return
+  503; post-response write failures notify `onCacheWriteError` (sanitized warning
+  by default) without changing a completed response.
+- `createHttpTelemetry`: emits immutable request ID, method, static route template,
+  final status and duration after responses, including denied and invalid requests.
+  The response header and command/request context share the same correlation ID.
+  It never emits raw paths, query parameters, tokens, bodies or errors. Observer
+  failures cannot change business results. Connect the observer to your logger or
+  telemetry exporter; this is request tracing, not an OpenTelemetry backend.
+
+The memory stores are explicitly **single-process**. Quota capacity exhaustion
+fails closed rather than evicting active quotas; local cache storage is bounded
+by entry count and byte budget. They do not coordinate replicas.
+
+### Shared PostgreSQL Stores
+
+Apply `HTTP_POLICY_STORE_SQL` through normal migrations, then use
+`createPostgresHttpPolicyStores(database)`. Its database port takes a parameterized
+`query(text, parameters)` function; it does not own a pool or transaction scope:
+
+```ts
+const stores = createPostgresHttpPolicyStores({
+  query: async (text, parameters) => Array.from(await sql.unsafe(text, [...parameters])),
+});
+const suite = createHttpPolicySuite({ auth: supAuthOptions, cacheNamespace: deploymentId, ...stores });
+```
+
+Concurrent replicas share an atomic row-locked quota and persistent
+cache entries. Tables live in `supacloud_http` with no PUBLIC privileges. Grant
+only the server runtime's database role access; never expose store credentials to
+clients. Different applications/issuers/tenants/users have distinct keys.
+
+Schedule `stores.prune()` to remove expired rows and monitor database size.
+`cacheNamespace` is mandatory when a cache policy is declared. Use the same
+namespace across replicas of one release and a different namespace for every
+representation/schema/security-rule revision. This prevents old in-flight requests
+from repopulating the current release's cache; reusing a namespace opts into reuse.
+Use TTLs appropriate for stale-read tolerance and invoke `cacheStore.clear()` only
+after a confirmed write when explicit broad invalidation is desired. Clear advances
+a shared generation atomically; fills from older generations are rejected. Already
+in-flight HTTP responses are not cancelled. Custom stores must implement the same
+generation/check-and-write contract. Do not cache responses
+containing per-request IDs, nonces or time-sensitive authorization decisions.
+These stores do not provide business transactions or durable audit.
+
+### Reproducible Performance Checks
+
+Run `bun run bench:http-policy [output.json]`. Optional environment settings:
+`BENCH_REQUESTS`, `BENCH_ROUNDS`, `BENCH_CONCURRENCY`. It compares native static
+Elysia, compiled static DI, one no-op policy, and a full verified policy pipeline.
+The harness warms each case, rotates case order, validates every response and
+records throughput, P50/P95/P99, live heap deltas and RSS. Cache hits and misses
+are separate scenarios with asserted handler/hit/fill counts; sorting is outside
+the throughput timer.
+
+Loopback results include the same-process fetch client; heap deltas are affected
+by GC and are **not total allocation counts**. Full-policy results include local
+ES256 verification, not remote identity/database latency. See
+[acceptance evidence](../../docs/http-policy-acceptance.md) for the measured scope.
