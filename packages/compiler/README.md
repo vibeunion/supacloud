@@ -708,6 +708,13 @@ rechecks types instead of returning an unchecked cached result.
 Generated route calls require all path parameters and a decoder for typed
 responses. See [type safety and migration](../../docs/type-safety.md).
 
+### Hidden Route Documentation
+
+Use `data: { openapi: { hide: true } }` to retain an endpoint at runtime while
+excluding it from generated OpenAPI and the Elysia Swagger view. Its compiled
+descriptor, contract manifest and client remain available. This is documentation
+metadata, not an authorization boundary.
+
 ## License
 
 MIT
