@@ -737,6 +737,14 @@ them and change the request target. Equivalent parameterized paths on the same
 HTTP method fail compilation when OpenAPI generation is enabled, instead of
 silently overwriting OpenAPI operations.
 
+### Hidden Route Documentation
+
+Use `data: { openapi: { hide: true } }` to retain an endpoint at runtime while
+excluding it from generated OpenAPI and the Elysia Swagger view. Its compiled
+descriptor, contract manifest and client remain available. This is documentation
+metadata, not an authorization boundary.
+
+
 ## License
 
 MIT

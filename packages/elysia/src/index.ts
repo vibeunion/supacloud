@@ -78,13 +78,14 @@ export type {
 export interface CompiledRoute {
   parse?: "none";
   allowDeleteBody?: true;
+  /** Compiler-emitted route title, exposed as the OpenAPI operation summary. */
+  title?: string;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   path: string;
   /** Method name on the controller instance. */
   handler: string;
   /** Static metadata preserved by the compiler; HTTP policies are adapter-owned. */
   data?: Record<string, unknown>;
-  title?: string;
   /** TypeBox schema; validation is enabled only when the field is present. */
   body?: unknown;
   params?: unknown;
@@ -1117,9 +1118,16 @@ export function createModulePlugin<
   for (const controller of compiled.controllers) {
     for (const route of controller.routes) {
       const path = joinPaths(controller.path, route.path);
+      const documentation = route.data?.openapi;
+      const hidden = documentation !== null && typeof documentation === "object"
+        && "hide" in documentation && documentation.hide === true;
       const schema = {
         ...toElysiaRouteSchema(route),
         ...(route.parse === "none" ? { parse: "none" as const } : {}),
+        ...(route.title || hidden ? { detail: {
+          ...(route.title ? { summary: route.title } : {}),
+          ...(hidden ? { hide: true } : {}),
+        } } : {}),
       };
       const policies = compileHttpPolicies(route, path, options.httpPolicies);
       if (policies.length > 0) {

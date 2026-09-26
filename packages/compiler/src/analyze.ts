@@ -1582,7 +1582,8 @@ function parseController(
       const pathParams: string[] = [];
       const paramRegex = /:([a-zA-Z0-9_]+)/g;
       let match: RegExpExecArray | null;
-      while ((match = paramRegex.exec(routePath)) !== null) {
+      const fullPath = joinRoutePaths(path, routePath);
+      while ((match = paramRegex.exec(fullPath)) !== null) {
         if (match[1] !== undefined) pathParams.push(match[1]);
       }
       if (joinRoutePaths(path, routePath).endsWith("/*")) pathParams.push("*");

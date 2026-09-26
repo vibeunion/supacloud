@@ -200,6 +200,12 @@ function resolveFactoryValue(value: unknown): unknown {
 }
 
 const scopeDestructions = new WeakMap<object, Promise<void>>();
+const platformDependencies = new WeakMap<object, Record<string, unknown>>();
+
+function retainPlatformDependencies<T extends Record<string, unknown>>(services: T, deps: Record<string, unknown>): T {
+  platformDependencies.set(services, deps);
+  return services;
+}
 
 function destroyScopeInstances(
   scope: Record<string, unknown>,
@@ -952,7 +958,7 @@ class ModuleGenerator {
     const entries = [...returns.entries()].map(([key, expr]) =>
       key === expr ? key : `${key}: ${expr}`,
     );
-    lines.push(`return { ${entries.join(", ")} };`);
+    lines.push(`return retainPlatformDependencies({ ${entries.join(", ")} }, deps);`);
     return lines.join("\n");
   }
 
@@ -1098,6 +1104,9 @@ class ModuleGenerator {
         return this.depExpr(own.useExisting ?? token, kind, options);
       }
     }
+    if (own && factoryOfScope(own.scope) === "services" && kind !== "services" && !isSkipSelf && !isSelf) {
+      return `services.${camelName(token)}`;
+    }
     if (isSelf) {
       return isOptional ? "undefined" : `services.${camelName(token)}`;
     }
@@ -1118,13 +1127,13 @@ class ModuleGenerator {
       }
     }
 
-    if (isOptional && !this.graph.externalTokens.includes(token)) {
-      return "undefined";
-    }
-
     if (isSelf) return isOptional ? "undefined" : `services.${camelName(token)}`;
     if (kind === "services") return isOptional ? `(deps.${camelName(token)} ?? undefined)` : `deps.${camelName(token)}`;
-    // request/job factories have no deps parameter; platform/external tokens are also passed via services.
+    // Borrowed platform dependencies must not enter the module's owned service bag.
+    if (!own || isSkipSelf) {
+      const external = `platformDependencies.get(services)?.${camelName(token)}`;
+      return isOptional ? `(${external} ?? undefined)` : external;
+    }
     return isOptional ? `(services.${camelName(token)} ?? undefined)` : `services.${camelName(token)}`;
   }
 }
@@ -1810,6 +1819,9 @@ export function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions
   for (const module of graph.modules) {
     for (const controller of module.controllers) {
       for (const route of controller.routes) {
+        const documentation = route.data?.openapi;
+        if (documentation !== null && typeof documentation === "object"
+          && "hide" in documentation && documentation.hide === true) continue;
         const fullPath = joinRoutePaths(controller.path, route.path);
         const responseEntries = normalizedResponseEntries(route.responses);
         const hasResponseMap = responseEntries.length > 0;
