@@ -5,6 +5,8 @@ import { UpdateWebhook } from "../webhook/update.command";
 import { WebhookController } from "../webhook/webhook.controller";
 
 export interface CompiledRoute {
+  parse?: "none";
+  allowDeleteBody?: true;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   path: string;
   handler: string;
@@ -191,10 +193,14 @@ function destroyScopeInstances(
   return destruction;
 }
 
-export function createCompiledModules(): CompiledModule[] {
+export type CompiledApplicationModule = Omit<CompiledModule, "name" | "createServices"> & (
+  | { name: "webhook"; createServices: typeof createWebhookServices }
+);
+
+export function createCompiledModules(): CompiledApplicationModule[] {
   return [
     {
-      name: "webhook",
+      name: "webhook" as const,
       createServices: createWebhookServices,
       createRequestScope: createWebhookRequestScope,
       destroyRequestScope: destroyWebhookRequestScope,
@@ -247,7 +253,7 @@ export async function destroyApplication(services: Record<string, unknown>): Pro
 function createWebhookServices(
   deps: Record<string, unknown>,
   imported: Record<string, Record<string, unknown>>,
-): Record<string, unknown> {
+) {
   const updateWebhook = new UpdateWebhook(deps.webhookEnvironment as ConstructorParameters<typeof UpdateWebhook>[0]);
   return { updateWebhook };
 }

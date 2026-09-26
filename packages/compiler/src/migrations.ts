@@ -122,6 +122,9 @@ function isDefineRouteContractCall(node: ts.CallExpression, checker: ts.TypeChec
 }
 
 function isRouteDecoratorCall(node: ts.CallExpression, checker: ts.TypeChecker): boolean {
+  // Route options are the second argument. Avoid instantiating unrelated schema
+  // builder types (for example chained TypeBox transforms) without any options.
+  if (node.arguments.length < 2) return false;
   const name = node.expression.getText(node.getSourceFile());
   if (ts.isIdentifier(node.expression) && ROUTE_DECORATORS.has(node.expression.text)) return true;
   if (ROUTE_DECORATORS.has(name)) return true;
@@ -465,7 +468,11 @@ export async function migrateProject(options: MigrateProjectOptions): Promise<Mi
       const file = relative(rootDir, absoluteFile) || absoluteFile;
       const before = sourceByPath.get(absoluteFile);
       if (before === undefined) continue;
-      const result = projectResults?.results.get(absoluteFile) ?? migration.apply(before, file);
+      // A project plan already resolved every included file. Missing entries are
+      // unchanged, not a reason to re-run a context-free compiler per file.
+      const result = projectResults
+        ? projectResults.results.get(absoluteFile) ?? { changed: false, content: before, replacements: 0, issues: [] }
+        : migration.apply(before, file);
       sourceByPath.set(absoluteFile, result.content);
       if (result.changed && result.issues.length === 0) {
         pendingWrites.set(absoluteFile, result.content);
