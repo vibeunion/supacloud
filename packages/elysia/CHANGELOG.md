@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.19.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.18.0...elysia-v0.19.0) (2026-09-26)
+
+
+### Features
+
+* **compiler:** preserve raw body and wildcard transport contracts ([#1442](https://github.com/vibeunion/supacloud/issues/1442)) ([436146d](https://github.com/vibeunion/supacloud/commit/436146d0f7f74be1c53969a2fc4854b59976d01d))
+* **elysia:** preserve static DI and add native HTTP policy suite ([#1441](https://github.com/vibeunion/supacloud/issues/1441)) ([6a34a55](https://github.com/vibeunion/supacloud/commit/6a34a551aa42c18ffbeda8f57b791373c67b83d2))
+* **framework:** add command composition and recovery observability ([#1432](https://github.com/vibeunion/supacloud/issues/1432)) ([456efcd](https://github.com/vibeunion/supacloud/commit/456efcd807deabeb3f3df6d718c47c427673b1f5))
+* **framework:** improve vibecoding development workflow ([#1430](https://github.com/vibeunion/supacloud/issues/1430)) ([7bd35ff](https://github.com/vibeunion/supacloud/commit/7bd35ff216fd276f10643f0f13ae217375badc76))
+
+
+### Bug Fixes
+
+* **compiler:** preserve controller prefix params and route titles ([#1439](https://github.com/vibeunion/supacloud/issues/1439)) ([0c62a1f](https://github.com/vibeunion/supacloud/commit/0c62a1fcb784aa4ee43a952323d3126bde7c0e0b))
+
 ## [0.18.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.17.0...elysia-v0.18.0) (2026-09-19)
 
 
