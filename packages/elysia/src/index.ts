@@ -84,7 +84,6 @@ export interface CompiledRoute {
   handler: string;
   /** Static metadata preserved by the compiler; HTTP policies are adapter-owned. */
   data?: Record<string, unknown>;
-  title?: string;
   /** TypeBox schema; validation is enabled only when the field is present. */
   body?: unknown;
   params?: unknown;
