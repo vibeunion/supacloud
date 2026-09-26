@@ -49,7 +49,7 @@
     "@svadmin/elysia": "0.13.9",
     "@svadmin/sveltekit": "0.11.9",
     "@svadmin/ui": "0.75.0",
-    "@tanstack/svelte-query": "^6.1.48",
+    "@tanstack/svelte-query": "^6.2.3",
     "highlight.js": "^11.12.0",
     "isomorphic-dompurify": "^4.2.0",
     "lucide-svelte": "^1.0.1",
