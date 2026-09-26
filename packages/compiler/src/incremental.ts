@@ -186,6 +186,8 @@ function optionsKeyOf(options: CompileOptions): string {
     requireRouteContracts: options.requireRouteContracts,
     detectOrphanModules: options.detectOrphanModules,
     generateClient: options.generateClient,
+    generateOpenApi: options.generateOpenApi,
+    openApi: options.openApi,
     generatePermissions: options.generatePermissions,
     typeSafety: options.typeSafety,
     treeShakeUnusedProviders: options.treeShakeUnusedProviders,

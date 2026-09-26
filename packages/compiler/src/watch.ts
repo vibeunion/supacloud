@@ -5,6 +5,17 @@ import type { WatchEvent, WatchHandle, WatchOptions } from "./types";
 
 const DEFAULT_DEBOUNCE_MS = 100;
 
+function isCompilerConfigurationPath(rootDir: string, changedPath: string): boolean {
+  const relativePath = relative(rootDir, changedPath).split(sep).join("/");
+  return [
+    "supacloud.config.ts",
+    "supacloud.config.mts",
+    "supacloud.config.js",
+    "supacloud.config.mjs",
+    "tsconfig.json",
+  ].includes(relativePath) || /^tsconfig\.[^/]+\.json$/.test(relativePath);
+}
+
 /** Watch a project and keep the last successful generated artifacts active on errors. */
 export function watchProject(options: WatchOptions): WatchHandle {
   const rootDir = resolve(options.rootDir);
@@ -93,6 +104,7 @@ export function watchProject(options: WatchOptions): WatchHandle {
         const relativePath = relative(outDir, changedPath);
         if (!relativePath.startsWith("..") && relativePath !== "") return;
         if (/\.(tsx?|mts|cts)$/.test(changedPath)
+          || isCompilerConfigurationPath(rootDir, changedPath)
           || (options.graphql && (/\.(graphql|gql)$/.test(changedPath) || changedPath === schemaPath))) {
           schedule(relative(rootDir, changedPath));
         }

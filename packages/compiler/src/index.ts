@@ -14,6 +14,14 @@ export type { AppliedDiagnosticFix, ApplyDiagnosticFixOptions } from "./fixes";
 export { checkProject, compileProject } from "./compile";
 export { watchProject } from "./watch";
 export { migrateProject, SUPACLOUD_MIGRATIONS, migrateRouteResponse } from "./migrations";
+export { assessMigration, formatMigrationAssessment } from "./migration-assess";
+export type {
+  MigrationAssessmentFinding,
+  MigrationAssessmentOptions,
+  MigrationAssessmentResult,
+  MigrationAssessmentStatus,
+  MigrationRenderMode,
+} from "./migration-assess";
 export {
   createContextPack,
   createExecutionPlans,

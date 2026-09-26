@@ -14,6 +14,11 @@ import { DeliveryConfigurationError } from "./delivery-schema";
 import { buildDeliveryProject } from "./delivery-build";
 import { migrateProject } from "./migrations";
 import {
+  assessMigration,
+  formatMigrationAssessment,
+  type MigrationRenderMode,
+} from "./migration-assess";
+import {
   diffOpenApiDocuments,
   exportGeneratedOpenApiJson,
   formatOpenApiDiff,
@@ -31,6 +36,14 @@ function isModuleBoundaryPresetName(value: string | undefined): value is ModuleB
     || value === "domain-driven";
 }
 
+function isMigrationRenderMode(value: string | undefined): value is MigrationRenderMode {
+  return value === "unspecified"
+    || value === "browser"
+    || value === "ssr"
+    || value === "edge"
+    || value === "trusted-server";
+}
+
 function printUsage(): void {
   console.log(`
 @supacloud/compiler CLI
@@ -44,6 +57,7 @@ Usage:
   supacloud-compiler context <module> [rootDir] [options]
   supacloud-compiler doctor  [rootDir] [options]
   supacloud-compiler migrate [rootDir] [options]
+  supacloud-compiler migration-assess [rootDir] [options]
   supacloud-compiler plan    [rootDir] [options]
   supacloud-compiler build-delivery [rootDir] [options]
   supacloud-compiler openapi-export <openapi-module> <output.json> [options]
@@ -61,6 +75,7 @@ Commands:
   context             Extract an AI-sized module context pack
   doctor              Run project and generated-artifact health checks
   migrate             Preview or apply versioned source migrations
+  migration-assess    Produce a read-only migration compatibility report
   plan                Preview deterministic workload targets without writing or deploying
   build-delivery      Build independent local factories and an atomic delivery manifest (Bun)
   openapi-export      Export a generated OpenAPI module to a standalone JSON document
@@ -84,11 +99,16 @@ Options:
   --token-env <name>  Environment variable holding the intended user's access token
   --check             graphql-schema: compare the remote schema without changing the snapshot
   --debounce <ms>     Debounce source changes in dev mode (default: 100)
-  --json              Print machine-readable output for compile/check/graph/explain/context/doctor/plan/build-delivery/openapi-export/openapi-diff
+  --json              Print machine-readable output for compile/check/graph/explain/context/doctor/migration-assess/plan/build-delivery/openapi-export/openapi-diff
   --space <n>         openapi-export: JSON indentation (0-10, default: 2)
   --delivery <file>   plan/build-delivery: validated JSON configuration (overrides config.delivery)
   --dry-run           Preview a fix without writing the target file
   --write             Apply a fix or migration to disk (preview-only by default)
+  --from-version      Migration source-format checkpoint (requires --to-version)
+  --to-version        Migration target checkpoint; verifies installed dependencies
+  --baseline-openapi  OpenAPI baseline JSON for migration-assess
+  --current-openapi   Current OpenAPI JSON for migration-assess
+  --render-mode       Optional browser | ssr | edge | trusted-server label; SSR is never required
   --preset, -p <name> Architecture preset ('modular-monolith' | 'angular-enterprise' | 'clean-architecture')
   --help, -h          Show this help
 `);
@@ -113,7 +133,7 @@ async function run(): Promise<void> {
     if (args.includes("--check") && !result.upToDate) process.exitCode = 1;
     return;
   }
-  if (!command || !["compile", "check", "dev", "graph", "explain", "context", "doctor", "migrate", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
+  if (!command || !["compile", "check", "dev", "graph", "explain", "context", "doctor", "migrate", "migration-assess", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
     console.error(`Error: unknown command "${command}"`);
     printUsage();
     process.exit(1);
@@ -130,12 +150,17 @@ async function run(): Promise<void> {
   let query: string | undefined;
   let json: boolean = false;
   let dryRun = true;
+  let fromVersion: string | undefined;
+  let toVersion: string | undefined;
   let noGraphql = false;
   let projectUrl: string | undefined;
   let keyEnv: string | undefined;
   let tokenEnv: string | undefined;
   let checkSchema = false;
   let deliveryPath: string | undefined;
+  let baselineOpenApi: string | undefined;
+  let currentOpenApi: string | undefined;
+  let renderMode: MigrationRenderMode = "unspecified";
   const openApiDiffPaths: string[] = [];
   const openApiExportPaths: string[] = [];
   let openApiExportSpace: number | undefined;
@@ -220,8 +245,27 @@ async function run(): Promise<void> {
     } else if (arg === "--dry-run") {
       dryRun = true;
     } else if (arg === "--write") {
-      if (command === "plan") throw new Error("plan is read-only; --write is not supported");
+      if (command === "plan" || command === "migration-assess") throw new Error(`${command} is read-only; --write is not supported`);
       dryRun = false;
+    } else if (arg === "--baseline-openapi" || arg === "--current-openapi") {
+      if (command !== "migration-assess") throw new Error(`${arg} is only supported by migration-assess`);
+      const value = args[++i];
+      if (!value || value.startsWith("-")) throw new Error(`${arg} requires a JSON file path`);
+      if (arg === "--baseline-openapi") baselineOpenApi = value;
+      else currentOpenApi = value;
+    } else if (arg === "--render-mode") {
+      if (command !== "migration-assess") throw new Error("--render-mode is only supported by migration-assess");
+      const value = args[++i];
+      if (!isMigrationRenderMode(value)) {
+        throw new Error("--render-mode requires browser, ssr, edge or trusted-server");
+      }
+      renderMode = value;
+    } else if (arg === "--from-version" || arg === "--to-version") {
+      if (command !== "migrate") throw new Error(`${arg} is only supported by migrate`);
+      const value = args[++i];
+      if (!value || value.startsWith("-")) throw new Error(`${arg} requires a version`);
+      if (arg === "--from-version") fromVersion = value;
+      else toVersion = value;
     } else if (arg === "--preset" || arg === "-p") {
       const presetArg = args[++i];
       if (!isModuleBoundaryPresetName(presetArg)) {
@@ -280,6 +324,8 @@ async function run(): Promise<void> {
     const result = await migrateProject({
       rootDir: rootDir ? resolve(process.cwd(), rootDir) : process.cwd(),
       write: !dryRun,
+      ...(fromVersion === undefined ? {} : { fromVersion }),
+      ...(toVersion === undefined ? {} : { toVersion }),
     });
     if (json) {
       console.log(JSON.stringify(result, null, 2));
@@ -288,8 +334,8 @@ async function run(): Promise<void> {
       const lines = [`${action} ${result.changedFiles.length} file(s)`];
       for (const file of result.files) {
         lines.push(`  ${file.file}: ${file.replacements} replacement(s)`);
-        for (const issue of file.issues) lines.push(`  ${issue.file}:${issue.line ?? 0} ${issue.code}: ${issue.message}`);
       }
+      for (const issue of result.issues) lines.push(`  ${issue.file}:${issue.line ?? 0} ${issue.code}: ${issue.message}`);
       if (result.changedFiles.length === 0 && result.issues.length === 0) lines.push("  no migrations required");
       console.log(lines.join("\n"));
     }
@@ -361,6 +407,16 @@ async function run(): Promise<void> {
       : result.upToDate ? `GraphQL schema matches: ${result.path}`
       : `GraphQL schema drift: ${result.path}. Export the role-scoped snapshot and compile before promotion.`);
     if (!result.upToDate) process.exit(1);
+  } else if (command === "migration-assess") {
+    const result = await assessMigration({
+      projectDir: process.cwd(),
+      compile: compileDefaults,
+      ...(baselineOpenApi === undefined ? {} : { baselineOpenApiPath: baselineOpenApi }),
+      ...(currentOpenApi === undefined ? {} : { currentOpenApiPath: currentOpenApi }),
+      renderMode,
+    });
+    console.log(json ? JSON.stringify(result, null, 2) : formatMigrationAssessment(result));
+    if (result.status === "breaking" || result.status === "unsupported") process.exitCode = 1;
   } else if (command === "fix") {
     if (!query) throw new Error("fix requires a JSON file containing one DiagnosticFix");
     const fix = JSON.parse(await readFile(resolve(process.cwd(), query), "utf8"));
