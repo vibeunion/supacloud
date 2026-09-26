@@ -122,6 +122,7 @@ export function validateGraph(
   options: boolean | ValidateOptions = false,
 ): Diagnostic[] {
   const strict = typeof options === "boolean" ? options : (options.strict ?? false);
+  const generateOpenApi = typeof options === "object" && options.generateOpenApi === true;
   const diagnostics: Diagnostic[] = [];
   for (const module of graph.modules) {
     for (const owner of [...module.providers, ...module.controllers]) {
@@ -316,7 +317,8 @@ export function validateGraph(
 
         const fullPath = joinRoutePaths(controller.path, route.path);
         const rawFullPath = joinRawRoutePaths(controller.path, route.path);
-        const key = `${route.method} ${fullPath}`;
+        // OpenAPI cannot distinguish parameter names or a wildcard at the same path position.
+        const key = `${route.method} ${generateOpenApi ? fullPath.replace(/:[A-Za-z0-9_]+|\*$/g, "{}") : fullPath}`;
 
         // Detect OpenAPI-style {param} in route paths (SC3019)
         const openApiMatch = route.path.match(/\{([a-zA-Z0-9_]+)\}/);
@@ -524,7 +526,17 @@ export function validateGraph(
           }
         }
 
-        if ((route.method === "GET" || route.method === "HEAD" || route.method === "OPTIONS" || route.method === "DELETE") && (route.hasBodyBinding || route.body)) {
+        if (route.allowDeleteBody && (route.method !== "DELETE" || !route.body)) {
+          error("invalid-delete-body-opt-in",
+            `Route ${controller.className}.${route.handler} allowDeleteBody requires DELETE and an explicit body schema.`,
+            controller.file);
+        }
+        if (route.parse === "none" && (route.body || route.hasBodyBinding || route.contract?.body !== "domain" || !route.contract.evidence?.trim())) {
+          error("invalid-raw-body-contract",
+            `Route ${controller.className}.${route.handler} parse: "none" requires domain body ownership and evidence, without a parsed body schema or @Body binding.`,
+            controller.file);
+        }
+        if ((route.method === "GET" || route.method === "HEAD" || route.method === "OPTIONS" || (route.method === "DELETE" && !route.allowDeleteBody)) && (route.hasBodyBinding || route.body)) {
           error(
             "disallowed-body-on-get-delete",
             `Route handler ${controller.className}.${route.handler} binds @Body() or declares body schema on HTTP ${route.method} route '${route.path}'. Request bodies are not supported on ${route.method} requests.`,

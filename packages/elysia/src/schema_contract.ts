@@ -3,7 +3,7 @@ import {
   StatusMap,
   ElysiaCustomStatusResponse,
   type Cookie,
-  type Elysia,
+  type AnyElysia,
   type HTTPMethod,
   type InputSchema,
   type MaybePromise,
@@ -458,7 +458,7 @@ export function defineElysiaRoute<
 
 /** Register a contract-bound route while preserving Elysia's fluent app API. */
 export function registerElysiaRoute<
-  const App extends Elysia,
+  const App extends AnyElysia,
   const Method extends HTTPMethod,
   const Path extends string,
   const Schemas extends RouteContractSchemas,
