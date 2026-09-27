@@ -18,7 +18,7 @@ test('compiler publication resolves the shared delivery dependency', () => {
   };
   const result = prepareCommandPackage(input, siblings);
   assert.deepEqual(result.required, ['@supacloud/delivery@0.1.0']);
-  assert.equal(result.package.dependencies['@supacloud/delivery'], '0.1.0');
+  assert.deepEqual(result.package['dependencies'], { '@supacloud/delivery': '0.1.0' });
   assert.equal(input.dependencies['@supacloud/delivery'], 'file:../delivery');
 });
 test('publication resolves local dependencies and overrides without mutating development manifests', () => {

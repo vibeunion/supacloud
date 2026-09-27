@@ -637,7 +637,9 @@ jobs:
         run: bun run build:amd64
 
       - name: Install identity test dependencies
-        run: bun install --frozen-lockfile --cwd packages/elysia
+        run: |
+          bun run scripts/build-command-dependencies.ts elysia
+          bun install --frozen-lockfile --cwd packages/elysia
 
       - name: Run unit tests
         working-directory: packages/management-api
