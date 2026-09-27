@@ -443,7 +443,10 @@ export async function probePostgrestHealth(
 export function parsePostgrestActivity(output: string, exitCode: number): boolean {
     const activity = output.trim();
     if (exitCode === 0 && activity === "active") return true;
-    if (exitCode === 3 && (activity === "inactive" || activity === "failed")) return false;
+    // systemctl reports `unknown` with exit code 3 before the per-tenant unit
+    // has been installed. That is a valid stopped state during first
+    // provisioning and compensation cleanup.
+    if (exitCode === 3 && (activity === "inactive" || activity === "failed" || activity === "unknown")) return false;
     throw new Error("Unable to determine PostgREST systemd activity");
 }
 

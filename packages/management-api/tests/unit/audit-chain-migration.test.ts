@@ -15,7 +15,7 @@ function markerDatabase(markerExists: boolean): { database: SQL; calls: QueryCal
     async (strings: TemplateStringsArray, ...parameters: unknown[]) => {
       const query = strings.join("?");
       calls.push({ query, parameters });
-      if (query.includes("FROM platform_schema_migrations")) {
+      if (query.includes("FROM public.platform_schema_migrations")) {
         return markerExists ? [{ migration_key: AUDIT_CHAIN_SEQUENCE_MIGRATION_KEY }] : [];
       }
       return [];
@@ -55,6 +55,6 @@ describe("audit chain platform migration gate", () => {
     expect(fixture.calls).toHaveLength(2);
     expect(fixture.calls[0]?.query).toContain("pg_advisory_xact_lock");
     expect(fixture.calls[0]?.query).not.toContain("pg_advisory_xact_lock_shared");
-    expect(fixture.calls[1]?.query).toContain("FROM platform_schema_migrations");
+    expect(fixture.calls[1]?.query).toContain("FROM public.platform_schema_migrations");
   });
 });

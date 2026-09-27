@@ -31,7 +31,7 @@ async function resetAuditFixture(transaction: SQL): Promise<void> {
   await transaction.unsafe("DROP INDEX IF EXISTS audit_logs_chain_parent_unique_idx");
   await transaction.unsafe("DROP INDEX IF EXISTS audit_logs_chain_sequence_unique_idx");
   await transaction`DELETE FROM audit_log_checkpoints`;
-  await transaction`DELETE FROM platform_schema_migrations WHERE migration_key = ${AUDIT_CHAIN_SEQUENCE_MIGRATION_KEY}`;
+  await transaction`DELETE FROM public.platform_schema_migrations WHERE migration_key = ${AUDIT_CHAIN_SEQUENCE_MIGRATION_KEY}`;
   await transaction`DELETE FROM audit_logs`;
 }
 
@@ -73,7 +73,7 @@ async function insertCheckpointForHead(transaction: SQL, projectRef: string): Pr
 async function markerCount(transaction: SQL): Promise<number> {
   const [marker] = await transaction<{ count: number | string }[]>`
     SELECT count(*) AS count
-    FROM platform_schema_migrations
+    FROM public.platform_schema_migrations
     WHERE migration_key = ${AUDIT_CHAIN_SEQUENCE_MIGRATION_KEY}
   `;
   return Number(marker?.count || 0);
@@ -110,6 +110,34 @@ afterAll(async () => {
 }, 30_000);
 
 describe("audit chain explicit platform migration", () => {
+  test("keeps the migration marker in public when auth is first in search_path", async () => {
+    await withRollback(async (transaction) => {
+      await resetAuditFixture(transaction);
+      await transaction.unsafe(`
+        CREATE TABLE auth.platform_schema_migrations (
+          migration_key TEXT PRIMARY KEY,
+          details JSONB
+        )
+      `);
+      await transaction.unsafe("SET LOCAL search_path TO auth, public");
+
+      await migrateAuditChainSequences(transaction);
+
+      const [publicMarker] = await transaction<{ count: number | string }[]>`
+        SELECT count(*) AS count
+        FROM public.platform_schema_migrations
+        WHERE migration_key = ${AUDIT_CHAIN_SEQUENCE_MIGRATION_KEY}
+      `;
+      const [authMarker] = await transaction<{ count: number | string }[]>`
+        SELECT count(*) AS count
+        FROM auth.platform_schema_migrations
+        WHERE migration_key = ${AUDIT_CHAIN_SEQUENCE_MIGRATION_KEY}
+      `;
+      expect(Number(publicMarker?.count || 0)).toBe(1);
+      expect(Number(authMarker?.count || 0)).toBe(0);
+    });
+  }, 30_000);
+
   test("marks empty init and stays idempotent", async () => {
     await withRollback(async (transaction) => {
       await resetAuditFixture(transaction);
@@ -170,7 +198,7 @@ describe("audit chain explicit platform migration", () => {
       await resetAuditFixture(transaction);
       await insertLinearChain(transaction, "server-fast-path", 25_000, true);
       await transaction`
-        INSERT INTO platform_schema_migrations (migration_key)
+        INSERT INTO public.platform_schema_migrations (migration_key)
         VALUES (${AUDIT_CHAIN_SEQUENCE_MIGRATION_KEY})
       `;
       const startedAt = performance.now();
