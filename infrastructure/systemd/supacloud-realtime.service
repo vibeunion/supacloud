@@ -30,12 +30,12 @@ EnvironmentFile=-/etc/supabase/management-api.env
 # EnvironmentFile values override Environment values regardless of directive
 # order. Keep release-owned, non-secret selectors in the required service file
 # loaded last so stale management-api.env values cannot select an old runtime.
-Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime@sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb
+Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime@sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e
 Environment=REALTIME_CONTAINER_NAME=supacloud-realtime
 Environment=REALTIME_DB_USER=supabase_admin
 Environment=PG_DATABASE=supacloud_meta
 Environment=REALTIME_CONTAINER_ENV_FILE=/etc/supabase/realtime-container.env
-Environment=REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=2.133.0
+Environment=REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=2.138.1
 Environment=REALTIME_SLOT_ISOLATION_ARTIFACT_DIR=/opt/supacloud/realtime-slot-isolation
 Environment=REALTIME_SLOT_ISOLATION_MANIFEST=/opt/supacloud/realtime-slot-isolation/manifest.json
 Environment=REALTIME_SLOT_ISOLATION_BEAM=/opt/supacloud/realtime-slot-isolation/Elixir.Realtime.Tenants.ReplicationConnection.beam

@@ -1,4 +1,4 @@
-import type { StaticDecode, TSchema } from "@sinclair/typebox";
+import type { StaticDecode, TSchema } from "typebox";
 
 type StatusFamily = 1 | 2 | 3 | 4 | 5;
 

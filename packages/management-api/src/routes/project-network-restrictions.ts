@@ -71,6 +71,10 @@ export const projectNetworkRestrictionRoutes = new Elysia({
 })
   .get(
     "/:ref/network-restrictions",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get network restrictions" },
+    },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -80,46 +84,42 @@ export const projectNetworkRestrictionRoutes = new Elysia({
         (settings as Record<string, unknown>).network_restrictions,
       );
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["projects"], summary: "Get network restrictions" },
-    },
   )
   .post(
     "/:ref/network-restrictions",
-    async ({ params, body, request }) => {
-      const authError = await requireAdminAuth(request);
-      if (authError) return status(authError.status, authError.body);
-      return updateNetworkRestrictions(params.ref, body.allowed_address_ranges);
-    },
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({ allowed_address_ranges: t.Array(t.String()) }),
       detail: { tags: ["projects"], summary: "Update network restrictions" },
     },
-  )
-  .patch(
-    "/:ref/network-restrictions",
     async ({ params, body, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
       return updateNetworkRestrictions(params.ref, body.allowed_address_ranges);
     },
+  )
+  .patch(
+    "/:ref/network-restrictions",
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({ allowed_address_ranges: t.Array(t.String()) }),
       detail: { tags: ["projects"], summary: "Patch network restrictions" },
     },
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
+      return updateNetworkRestrictions(params.ref, body.allowed_address_ranges);
+    },
   )
   .delete(
     "/:ref/network-restrictions",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Remove network restrictions" },
+    },
     async ({ params, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
       return updateNetworkRestrictions(params.ref, []);
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["projects"], summary: "Remove network restrictions" },
     },
   );

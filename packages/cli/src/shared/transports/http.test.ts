@@ -565,6 +565,41 @@ describe("HttpTransport release mutation response boundary", () => {
         expect(JSON.stringify(response)).not.toContain(secretSentinel);
     });
 
+    test("bounds an opt-in PUT response without repeating the mutation", async () => {
+        let requests = 0;
+        globalThis.fetch = (async () => {
+            requests++;
+            return chunkedTextResponse(JSON.stringify({ value: "private-put-fixture".repeat(64) }), {}, 1024);
+        }) as unknown as typeof fetch;
+        const response = await createTransport().put("/resource", {}, { maxJsonBytes: 64 });
+        expect(response).toMatchObject({ ok: false, status: 200, responseReadError: true });
+        expect(requests).toBe(1);
+        expect(JSON.stringify(response)).not.toContain("private-put-fixture");
+    });
+
+    test("a stalled real PUT receipt ends at its body deadline without retry", async () => {
+        globalThis.fetch = originalFetch;
+        globalThis.setTimeout = originalSetTimeout;
+        globalThis.clearTimeout = originalClearTimeout;
+        let requests = 0;
+        const server = Bun.serve({
+            hostname: "127.0.0.1", port: 0,
+            fetch: () => {
+                requests++;
+                return new Response(new ReadableStream<Uint8Array>({
+                    start(controller) { controller.enqueue(new TextEncoder().encode('{"committed":')); },
+                }), { headers: { "Content-Type": "application/json" } });
+            },
+        });
+        servers.push(server);
+        const transport = new HttpTransport({ baseUrl: server.url.toString(), token: "test-token" });
+        const started = Date.now();
+        const response = await transport.put("/resource", {}, { maxJsonBytes: 1024, responseTimeoutMs: 20 });
+        expect(Date.now() - started).toBeLessThan(1500);
+        expect(response).toMatchObject({ ok: false, status: 200, responseReadError: true });
+        expect(requests).toBe(1);
+    });
+
     test.each([
         ["POST", (transport: HttpTransport) => transport.postReleaseMutation("/resource", { expected: "1" })],
         ["PATCH", (transport: HttpTransport) => transport.patchReleaseMutation("/resource", { expected: "1" })],
@@ -783,6 +818,12 @@ describe("HttpTransport raw binary mutations", () => {
     });
 
     test.each([
+        ["application multipart", (transport: HttpTransport) => transport.postMultipart(
+            "/applications/reviews/releases", new FormData(), {
+                maxJsonBytes: 1024,
+                responseTimeoutMs: 10,
+            },
+        )],
         ["JSON activation", (transport: HttpTransport) => transport.post("/frontend/activate", {}, {
             maxJsonBytes: 1024,
             responseTimeoutMs: 10,

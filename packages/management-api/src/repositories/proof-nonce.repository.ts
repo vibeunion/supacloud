@@ -1,8 +1,9 @@
 import type { SQL } from "bun";
-import { Type } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 import { sql } from "../db";
 import { AppError } from "../utils/errors";
+import { dateSchema } from "../utils/date-schema";
 
 export class ProofNonceUnavailableError extends AppError {
   constructor() {
@@ -13,7 +14,7 @@ export class ProofNonceUnavailableError extends AppError {
 
 const receiptSchema = Type.Array(Type.Object({
   nonce: Type.String({ minLength: 1, maxLength: 128 }),
-  expires_at: Type.Date(),
+  expires_at: dateSchema,
 }), { maxItems: 1 });
 
 export function parseProofNonceReceipt(value: unknown, nonce: string, expiresAt: Date): boolean {

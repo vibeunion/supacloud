@@ -25,29 +25,24 @@ async function runtimeHookStatus(ref: string, hookName: string) {
 }
 
 export const projectAuthHookRuntimeRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
-  .onBeforeHandle(async ({ params, request }) => {
+  .beforeHandle(async ({ params, request }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
   })
-  .get("/auth/hooks/:hookName/status", async ({ params }) => {
-    return runtimeHookStatus(params.ref, params.hookName);
-  }, {
+  .get("/auth/hooks/:hookName/status", {
     params: t.Object({ ref: t.String(), hookName: t.String() }),
     detail: { tags: ["auth"], summary: "Get live GoTrue HTTP Auth Hook status" },
-  })
-  .post("/auth/hooks/:hookName/verify", async ({ params }) => {
+  }, async ({ params }) => {
     return runtimeHookStatus(params.ref, params.hookName);
-  }, {
+  })
+  .post("/auth/hooks/:hookName/verify", {
     params: t.Object({ ref: t.String(), hookName: t.String() }),
     body: t.Optional(t.Object({})),
     detail: { tags: ["auth"], summary: "Verify a live GoTrue HTTP Auth Hook" },
+  }, async ({ params }) => {
+    return runtimeHookStatus(params.ref, params.hookName);
   })
-  .post("/auth/hooks/:hookName/messages/verify", async ({ params, body }) => {
-    if (!supportedHookName(params.hookName)) {
-      return status(404, { code: "NOT_FOUND", message: "GoTrue auth hook not found" });
-    }
-    return verifyAuthHookMessage(params.ref, params.hookName, body);
-  }, {
+  .post("/auth/hooks/:hookName/messages/verify", {
     params: t.Object({ ref: t.String(), hookName: t.String() }),
     body: t.Object({
       webhook_id: t.String({ maxLength: 256 }),
@@ -56,4 +51,9 @@ export const projectAuthHookRuntimeRoutes = new Elysia({ prefix: "/v1/projects/:
       body_base64: t.String({ maxLength: 700_000 }),
     }),
     detail: { tags: ["auth"], summary: "Verify and consume a GoTrue HTTP Auth Hook message" },
+  }, async ({ params, body }) => {
+    if (!supportedHookName(params.hookName)) {
+      return status(404, { code: "NOT_FOUND", message: "GoTrue auth hook not found" });
+    }
+    return verifyAuthHookMessage(params.ref, params.hookName, body);
   });

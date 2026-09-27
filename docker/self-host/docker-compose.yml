@@ -45,6 +45,7 @@ services:
       API_EXTERNAL_URL: ${PUBLIC_URL}/auth/v1
       GOTRUE_JWT_SECRET: ${JWT_SECRET}
       GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_ISSUER: ${PUBLIC_URL}/auth/v1
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
       GOTRUE_JWT_EXP: 3600
       GOTRUE_OPERATOR_TOKEN: ${MASTER_TOKEN}
@@ -68,7 +69,7 @@ services:
       GOTRUE_WEBAUTHN_RP_ORIGINS: ${WEBAUTHN_RP_ORIGINS:-${STUDIO_URL}}
 
   postgrest:
-    image: postgrest/postgrest:v16.3
+    image: postgrest/postgrest:v16.4
     restart: unless-stopped
     depends_on:
       postgres:
@@ -142,12 +143,13 @@ services:
       PGREDIS_RUNTIME_INTERNAL_URL: http://pgredis-runtime:9010
       PGREDIS_RUNTIME_INTERNAL_TOKEN: ${PGREDIS_RUNTIME_INTERNAL_TOKEN}
       PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS: ${PGREDIS_RUNTIME_INTERNAL_TIMEOUT_MS:-5000}
-      DASHBOARD_USERNAME: supabase
-      DASHBOARD_PASSWORD: supacloud
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-supabase}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
       SUPACLOUD_LOGS_ENABLED: "true"
       SUPACLOUD_LOG_COLLECTOR_JOURNAL_ENABLED: "false"
       VICTORIALOGS_URL: http://victorialogs:9428
       SUPACLOUD_PIPELINE_RUNTIME_MODE: unavailable
+      SUPACLOUD_REALTIME_CONTAINER_ENV_FILE: /run/secrets/supacloud-realtime-container.env
     volumes:
       - tenant-config:/etc/supabase/tenants
       - pgredis-tenant-config:/etc/supabase/pgredis-tenants
@@ -159,6 +161,12 @@ services:
       - type: bind
         source: ${LEGACY_SECRETS_MIGRATION_FILE}
         target: /run/secrets/supacloud-legacy-secrets-migration
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${REALTIME_CONTAINER_ENV_FILE:-./.realtime-container.env}
+        target: /run/secrets/supacloud-realtime-container.env
+        read_only: true
         bind:
           create_host_path: false
     ports:

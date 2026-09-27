@@ -15,6 +15,10 @@ import * as path from "node:path";
 import { assertValidIdentifier, assertValidDbName } from "../utils/validation";
 import { ensureMigrationLedgerMetadata } from "./migration-ledger";
 import { prepareProjectMigrationRole } from "./project-migration-role";
+import embeddedSupabaseSchema from "../db/schemas/supabase.sql" with { type: "text" };
+
+export const EMBEDDED_SUPABASE_SCHEMA = embeddedSupabaseSchema;
+const SUPABASE_BOOTSTRAP_VERSION = "2026-09-27";
 
 /** Escape a string value for use inside PostgreSQL dollar-quoted strings */
 function pgEscapePassword(password: string): string {
@@ -180,9 +184,10 @@ export class DatabaseService {
       }
     }
 
-    throw new Error(
-      `Unable to locate supabase.sql. Looked in: ${candidates.join(", ")}`,
-    );
+    // Compiled Management API binaries do not retain the source tree.
+    if (EMBEDDED_SUPABASE_SCHEMA.trim()) return EMBEDDED_SUPABASE_SCHEMA;
+
+    throw new Error(`Unable to locate supabase.sql. Looked in: ${candidates.join(", ")}`);
   }
 
   // Reuse global admin connection pool from db/index.ts
@@ -303,7 +308,7 @@ export class DatabaseService {
         await adminDb.unsafe(`GRANT ALL PRIVILEGES ON DATABASE "${dbName}" TO ${this.PG_USER}`);
       });
 
-      if (databaseCreated) {
+      if (databaseCreated || !await this.hasSupabaseSchema(dbName, dbUser)) {
         await this.applySupabaseSchema(dbName, projectRef, password);
       } else {
         await this.reconcileAuthenticatorRole(dbName, projectRef, password);
@@ -316,7 +321,7 @@ export class DatabaseService {
         await adminDb.unsafe(`
           GRANT CONNECT, TEMPORARY ON DATABASE "${dbName}" TO "${authenticatorRole}";
           GRANT CONNECT, TEMPORARY ON DATABASE "${dbName}" TO supabase_auth_admin;
-          GRANT CONNECT, TEMPORARY ON DATABASE "${dbName}" TO supabase_admin;
+          GRANT CONNECT, TEMPORARY, CREATE ON DATABASE "${dbName}" TO supabase_admin;
         `);
       });
 
@@ -378,6 +383,54 @@ export class DatabaseService {
     });
   }
 
+  private async hasSupabaseSchema(dbName: string, dbUser: string): Promise<boolean> {
+    return await this.withTenantDb(dbName, async (tenantDb) => {
+      const [inventory] = await tenantDb`
+        SELECT to_regclass('supacloud_platform.bootstrap_state') IS NOT NULL AS has_marker,
+          to_regclass('auth.users') IS NOT NULL AS auth_users,
+          to_regclass('storage.objects') IS NOT NULL AS storage_objects,
+          to_regnamespace('realtime') IS NOT NULL AS realtime_schema,
+          to_regclass('supabase_functions.migrations') IS NOT NULL AS schema_tail
+      `;
+      if (inventory?.has_marker) {
+        const [row] = await tenantDb`
+          SELECT schema_version FROM supacloud_platform.bootstrap_state WHERE singleton = TRUE
+        `;
+        if (row?.schema_version === SUPABASE_BOOTSTRAP_VERSION) return true;
+        throw new Error(`Tenant ${dbName} has an unrecognized bootstrap receipt`);
+      }
+      // Existing deployments predate receipts. Never replay bootstrap SQL over
+      // their policies or GoTrue-managed objects.
+      if (inventory?.auth_users && inventory?.storage_objects
+        && inventory?.realtime_schema && inventory?.schema_tail) {
+        const [access] = await tenantDb`
+          SELECT
+            (SELECT pg_get_userbyid(nspowner) = 'supabase_auth_admin'
+              FROM pg_namespace WHERE nspname = 'auth')
+            AND (SELECT pg_get_userbyid(relowner) = 'supabase_auth_admin'
+              FROM pg_class WHERE oid = to_regclass('auth.users'))
+            AND NOT EXISTS (
+              SELECT FROM pg_namespace WHERE nspname IN ('auth', 'storage', 'realtime', 'public')
+                AND NOT has_schema_privilege(${dbUser}, oid, 'USAGE')
+            )
+            AND NOT EXISTS (
+              SELECT FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+              CROSS JOIN unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) AS privilege
+              WHERE n.nspname IN ('auth', 'storage', 'realtime') AND c.relkind IN ('r', 'p')
+                AND NOT has_table_privilege(${dbUser}, c.oid, privilege)
+            ) AS ready
+        `;
+        if (access?.ready === true) return true;
+        throw new Error(`Tenant ${dbName} has incomplete bootstrap ownership or grants; repair it before provisioning`);
+      }
+      if (inventory?.auth_users || inventory?.storage_objects
+        || inventory?.realtime_schema || inventory?.schema_tail) {
+        throw new Error(`Tenant ${dbName} has an incomplete Supabase schema; repair it before provisioning`);
+      }
+      return false;
+    });
+  }
+
   private async prepareMigrationRole(dbName: string, dbUser: string): Promise<void> {
     const tenantDb = getProjectDb(dbName);
     await ensureMigrationLedgerMetadata(tenantDb);
@@ -391,6 +444,7 @@ export class DatabaseService {
     password: string,
   ): Promise<void> {
     const dbUser = resolveRoleName(projectRef);
+    const schemaSql = await this.loadSupabaseSchema();
     await this.withTenantDb(dbName, async (tenantDb) => {
       // Create core extensions unconditionally (PG native)
       await tenantDb.unsafe(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
@@ -423,139 +477,161 @@ export class DatabaseService {
         }
       }
 
-      // Create API roles - use double quotes to support hyphens
-      const authenticatorRole = resolveAuthenticatorName(projectRef);
-      const anonRole = `anon`;
-      const authenticatedRole = `authenticated`;
-      const serviceRole = `service_role`;
+      // Roll back the schema and its grants together; a failed first attempt
+      // must not leave a half-initialized database that a retry treats as ready.
+      await tenantDb.begin(async (tx) => {
+        // Create API roles - use double quotes to support hyphens
+        const authenticatorRole = resolveAuthenticatorName(projectRef);
+        const anonRole = `anon`;
+        const authenticatedRole = `authenticated`;
+        const serviceRole = `service_role`;
 
-      // Safe check identifiers
-      assertValidIdentifier("authenticatorRole", authenticatorRole);
+        // Safe check identifiers
+        assertValidIdentifier("authenticatorRole", authenticatorRole);
 
-      // PostgreSQL doesn't support CREATE ROLE IF NOT EXISTS, use DO block
-      await tenantDb.unsafe(`
-        DO $$
-        BEGIN
-          IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${anonRole}') THEN
-            CREATE ROLE ${anonRole} NOLOGIN NOINHERIT;
-          END IF;
-          IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${authenticatedRole}') THEN
-            CREATE ROLE ${authenticatedRole} NOLOGIN NOINHERIT;
-          END IF;
-          IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${serviceRole}') THEN
-            CREATE ROLE ${serviceRole} NOLOGIN NOINHERIT BYPASSRLS;
-          END IF;
-        END
-        $$;
-      `);
+        // PostgreSQL doesn't support CREATE ROLE IF NOT EXISTS, use DO block
+        await tx.unsafe(`
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${anonRole}') THEN
+              CREATE ROLE ${anonRole} NOLOGIN NOINHERIT;
+            END IF;
+            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${authenticatedRole}') THEN
+              CREATE ROLE ${authenticatedRole} NOLOGIN NOINHERIT;
+            END IF;
+            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${serviceRole}') THEN
+              CREATE ROLE ${serviceRole} NOLOGIN NOINHERIT BYPASSRLS;
+            END IF;
+          END
+          $$;
+        `);
 
-      await tenantDb.unsafe(`
-        CREATE ROLE "${authenticatorRole}" CONNECTION LIMIT 30 NOINHERIT LOGIN PASSWORD ${pgEscapePassword(password)};
-        GRANT ${anonRole}, ${authenticatedRole}, ${serviceRole} TO "${authenticatorRole}";
+        await tx.unsafe(`
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${authenticatorRole}') THEN
+              CREATE ROLE "${authenticatorRole}" CONNECTION LIMIT 30 NOINHERIT LOGIN PASSWORD ${pgEscapePassword(password)};
+            ELSE
+              ALTER ROLE "${authenticatorRole}" CONNECTION LIMIT 30 NOINHERIT LOGIN PASSWORD ${pgEscapePassword(password)};
+            END IF;
+          END $$;
+          GRANT ${anonRole}, ${authenticatedRole}, ${serviceRole} TO "${authenticatorRole}";
 
-        -- Set shorter timeout and same memory limits for API Role to prevent cascade failures
-        ALTER ROLE "${authenticatorRole}" SET statement_timeout = '15s';
-        ALTER ROLE "${authenticatorRole}" SET idle_in_transaction_session_timeout = '30s';
-        ALTER ROLE "${authenticatorRole}" SET work_mem = '4MB';
-      `);
+          -- Set shorter timeout and same memory limits for API Role to prevent cascade failures
+          ALTER ROLE "${authenticatorRole}" SET statement_timeout = '15s';
+          ALTER ROLE "${authenticatorRole}" SET idle_in_transaction_session_timeout = '30s';
+          ALTER ROLE "${authenticatorRole}" SET work_mem = '4MB';
+        `);
 
-      // Create Schema and grant access
-      await tenantDb.unsafe(`
-        CREATE SCHEMA IF NOT EXISTS extensions;
-        GRANT USAGE ON SCHEMA extensions TO ${anonRole}, ${authenticatedRole}, ${serviceRole}, "${dbUser}";
-        DO $$
-        BEGIN
-          IF EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = 'monitor') THEN
-            GRANT USAGE ON SCHEMA monitor TO ${anonRole}, ${authenticatedRole}, ${serviceRole}, "${dbUser}";
-          END IF;
-        END
-        $$;
-      `);
+        // Create Schema and grant access
+        await tx.unsafe(`
+          CREATE SCHEMA IF NOT EXISTS extensions;
+          GRANT USAGE ON SCHEMA extensions TO ${anonRole}, ${authenticatedRole}, ${serviceRole}, "${dbUser}";
+          DO $$
+          BEGIN
+            IF EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = 'monitor') THEN
+              GRANT USAGE ON SCHEMA monitor TO ${anonRole}, ${authenticatedRole}, ${serviceRole}, "${dbUser}";
+            END IF;
+          END
+          $$;
+        `);
 
-      // Ensure global admin roles exist with LOGIN capability and global password
-      // (This needs to be done before running supabase.sql to ensure roles exist)
-      await tenantDb.unsafe(`
-        DO $$
-        BEGIN
-          IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_auth_admin') THEN
-            CREATE ROLE supabase_auth_admin LOGIN CREATEROLE CREATEDB NOINHERIT PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
-          ELSE
-            ALTER ROLE supabase_auth_admin LOGIN CREATEROLE CREATEDB NOINHERIT PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
-          END IF;
+        // Ensure global admin roles exist with LOGIN capability and global password
+        // (This needs to be done before running supabase.sql to ensure roles exist)
+        await tx.unsafe(`
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_auth_admin') THEN
+              CREATE ROLE supabase_auth_admin LOGIN CREATEROLE CREATEDB NOINHERIT PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
+            ELSE
+              ALTER ROLE supabase_auth_admin LOGIN CREATEROLE CREATEDB NOINHERIT PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
+            END IF;
 
-          IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_admin') THEN
-            CREATE ROLE supabase_admin LOGIN BYPASSRLS REPLICATION PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
-          ELSE
-            ALTER ROLE supabase_admin LOGIN PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
-          END IF;
+            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_admin') THEN
+              CREATE ROLE supabase_admin LOGIN BYPASSRLS REPLICATION PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
+            ELSE
+              ALTER ROLE supabase_admin LOGIN PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
+            END IF;
 
-          IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_realtime_admin') THEN
-            CREATE ROLE supabase_realtime_admin LOGIN NOINHERIT CREATEROLE REPLICATION PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
-          ELSE
-            ALTER ROLE supabase_realtime_admin LOGIN NOINHERIT CREATEROLE REPLICATION PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
-          END IF;
-        END
-        $$;
-      `);
+            IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_realtime_admin') THEN
+              CREATE ROLE supabase_realtime_admin LOGIN NOINHERIT CREATEROLE REPLICATION PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
+            ELSE
+              ALTER ROLE supabase_realtime_admin LOGIN NOINHERIT CREATEROLE REPLICATION PASSWORD ${pgEscapePassword(this.PG_PASSWORD)};
+            END IF;
+          END
+          $$;
+        `);
 
-      // Load and execute full Supabase schema (Auth, Storage, Realtime/Walrus, etc)
-      try {
-        const schemaSql = await this.loadSupabaseSchema();
-        await tenantDb.unsafe(schemaSql);
-        await tenantDb.unsafe(renderAuthSchemaOwnershipSql());
-        await tenantDb.unsafe(renderPgStatStatementsCompatibilitySql());
-        logger.info(
-          `[services/database.service] Successfully applied supabase.sql to tenant ${dbName}`,
-        );
-      } catch (err: unknown) {
-        logger.error(
-          `[services/database.service] Error applying Supabase schema at ${dbName}`,
-          { error: err instanceof Error ? err.message : String(err) },
-        );
-        throw err;
-      }
+        // Load and execute full Supabase schema (Auth, Storage, Realtime/Walrus, etc)
+        try {
+          await tx.unsafe(schemaSql);
+          await tx.unsafe(renderAuthSchemaOwnershipSql());
+          await tx.unsafe(renderPgStatStatementsCompatibilitySql());
+        } catch (err: unknown) {
+          logger.error(
+            `[services/database.service] Error applying Supabase schema at ${dbName}`,
+            { error: err instanceof Error ? err.message : String(err) },
+          );
+          throw err;
+        }
 
-      // Grant specific tenant roles and schema access to the project owner role to ensure isolation without cluster powers
-      await tenantDb.unsafe(`
-        GRANT ${anonRole}, ${authenticatedRole}, ${serviceRole} TO "${dbUser}";
-        GRANT USAGE ON SCHEMA auth, storage, realtime TO "${dbUser}";
-        GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA auth, storage, realtime TO "${dbUser}";
-        GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA auth, storage, realtime TO "${dbUser}";
-        GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA auth, storage, realtime TO "${dbUser}";
-      `);
+        // Grant specific tenant roles and schema access to the project owner role to ensure isolation without cluster powers
+        await tx.unsafe(`
+          GRANT ${anonRole}, ${authenticatedRole}, ${serviceRole} TO "${dbUser}";
+          GRANT USAGE ON SCHEMA auth, storage, realtime TO "${dbUser}";
+          GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA auth, storage, realtime TO "${dbUser}";
+          GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA auth, storage, realtime TO "${dbUser}";
+          GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA auth, storage, realtime TO "${dbUser}";
+        `);
 
-      await tenantDb.unsafe(`
-        REVOKE ALL ON SCHEMA public FROM PUBLIC;
-        GRANT USAGE, CREATE ON SCHEMA public TO "${dbUser}";
-        GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA public TO "${dbUser}";
-        GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO "${dbUser}";
-        GRANT EXECUTE ON ALL ROUTINES IN SCHEMA public TO "${dbUser}";
-        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLES TO "${dbUser}";
-        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO "${dbUser}";
-        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON ROUTINES TO "${dbUser}";
-      `);
+        await tx.unsafe(`
+          REVOKE ALL ON SCHEMA public FROM PUBLIC;
+          GRANT USAGE, CREATE ON SCHEMA public TO "${dbUser}";
+          GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON ALL TABLES IN SCHEMA public TO "${dbUser}";
+          GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO "${dbUser}";
+          GRANT EXECUTE ON ALL ROUTINES IN SCHEMA public TO "${dbUser}";
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLES TO "${dbUser}";
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO "${dbUser}";
+          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT EXECUTE ON ROUTINES TO "${dbUser}";
+        `);
 
-      // Grant privileges
-      await tenantDb.unsafe(`
-        GRANT USAGE ON SCHEMA public TO ${anonRole}, ${authenticatedRole}, ${serviceRole};
-        GRANT ALL ON SCHEMA public TO ${authenticatedRole}, ${serviceRole};
-        GRANT USAGE ON SCHEMA auth TO ${anonRole}, ${authenticatedRole}, ${serviceRole};
+        // Grant privileges
+        await tx.unsafe(`
+          GRANT USAGE ON SCHEMA public TO ${anonRole}, ${authenticatedRole}, ${serviceRole};
+          GRANT ALL ON SCHEMA public TO ${authenticatedRole}, ${serviceRole};
+          GRANT USAGE ON SCHEMA auth TO ${anonRole}, ${authenticatedRole}, ${serviceRole};
 
-        -- GoTrue needs CREATE on public for schema_migrations table
-        GRANT ALL ON SCHEMA public TO supabase_auth_admin;
-        GRANT ALL ON SCHEMA auth TO supabase_auth_admin;
-        ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT ALL ON TABLES TO supabase_auth_admin;
-        ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT ALL ON SEQUENCES TO supabase_auth_admin;
+          -- GoTrue needs CREATE on public for schema_migrations table
+          GRANT ALL ON SCHEMA public TO supabase_auth_admin;
+          GRANT ALL ON SCHEMA auth TO supabase_auth_admin;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT ALL ON TABLES TO supabase_auth_admin;
+          ALTER DEFAULT PRIVILEGES IN SCHEMA auth GRANT ALL ON SEQUENCES TO supabase_auth_admin;
 
-        -- Existing application tables remain reachable by service_role. New
-        -- public tables must opt in to Data API exposure with explicit grants.
-        GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO service_role;
-        GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO service_role;
-        GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public TO service_role;
-        ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO postgres;
-        ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO postgres;
-        ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS TO postgres;
-      `);
+          -- Existing application tables remain reachable by service_role. New
+          -- public tables must opt in to Data API exposure with explicit grants.
+          GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO service_role;
+          GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO service_role;
+          GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA public TO service_role;
+          ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON TABLES TO postgres;
+          ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON SEQUENCES TO postgres;
+          ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA public GRANT ALL ON FUNCTIONS TO postgres;
+        `);
+
+        await tx.unsafe(`
+          CREATE SCHEMA IF NOT EXISTS supacloud_platform;
+          CREATE TABLE IF NOT EXISTS supacloud_platform.bootstrap_state (
+            singleton BOOLEAN PRIMARY KEY DEFAULT TRUE CHECK (singleton),
+            schema_version TEXT NOT NULL,
+            completed_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
+          );
+          INSERT INTO supacloud_platform.bootstrap_state(singleton, schema_version, completed_at)
+          VALUES (TRUE, '${SUPABASE_BOOTSTRAP_VERSION}', clock_timestamp())
+          ON CONFLICT (singleton) DO UPDATE
+            SET schema_version = EXCLUDED.schema_version,
+                completed_at = EXCLUDED.completed_at;
+        `);
+      });
+      logger.info(`[services/database.service] Successfully applied supabase.sql to tenant ${dbName}`);
     });
   }
 

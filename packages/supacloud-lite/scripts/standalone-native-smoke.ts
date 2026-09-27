@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { createSupaCloudClient } from '../test/helpers/supacloud-js-source.js'
 import packageJson from '../package.json' with { type: 'json' }
-import { executeBufferedCommand, withWindowsSubprocessRef } from './subprocess.js'
+import { executeBufferedCommand } from './subprocess.js'
 
 const packageDir = resolve(import.meta.dir, '..')
 const binary = resolveStandaloneBinary()
@@ -448,7 +448,7 @@ type NativeServer = ReturnType<typeof startNativeServer>
 
 async function stopNativeServer(server: NativeServer, checkCompleted: boolean): Promise<void> {
   server.processHandle.kill('SIGTERM')
-  const exitCode = await withWindowsSubprocessRef(() => server.processHandle.exited)
+  const exitCode = await server.processHandle.exited
   const [stdoutText, stderrText] = await Promise.all([server.stdout, server.stderr])
   if (!checkCompleted && stdoutText) console.error(`[standalone-native-smoke] stdout:\n${stdoutText}`)
   if (!checkCompleted && stderrText) console.error(`[standalone-native-smoke] stderr:\n${stderrText}`)

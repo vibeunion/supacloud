@@ -1,3 +1,5 @@
+import { emitCommandObservation, type CommandObserver } from "./observation";
+
 export class ExecutionPolicyError extends Error {
   constructor(readonly code: "CIRCUIT_OPEN" | "EXECUTION_ABORTED" | "EXECUTION_TIMEOUT" | "COMMAND_OUTCOME_UNKNOWN") {
     super(code);
@@ -6,8 +8,17 @@ export class ExecutionPolicyError extends Error {
 }
 
 type RetryDecision = "retry" | "rolled-back" | "stop";
+export interface ExecutionPolicyEvent {
+  kind: "read" | "command";
+  attempt: number;
+  phase: "started" | "succeeded" | "failed" | "retry" | "rejected";
+  reason?: RetryDecision | ExecutionPolicyError["code"];
+}
+
 export interface ExecutionPolicyOptions {
   kind: "read" | "command";
+  /** Metadata only. Attach operation/trace labels in the host's observer closure. */
+  observer?: CommandObserver<ExecutionPolicyEvent>;
   /** Cooperative cancellation. The operation must forward the signal to its driver. */
   timeoutMs?: number;
   retry?: {
@@ -28,7 +39,9 @@ export interface ExecutionPolicyOptions {
 export function createExecutionPolicy(options: ExecutionPolicyOptions) {
   const retry = options.retry ? { ...options.retry } : undefined;
   const circuit = options.circuit ? { ...options.circuit } : undefined;
-  const { kind, timeoutMs } = options;
+  const { kind, timeoutMs, observer } = options;
+  const emit = (event: Omit<ExecutionPolicyEvent, "kind">) =>
+    emitCommandObservation(observer, { kind, ...event });
   for (const value of [timeoutMs, retry?.maxAttempts, retry?.delayMs, circuit?.failureThreshold, circuit?.resetAfterMs]) {
     if (value !== undefined && (!Number.isSafeInteger(value) || value < 1 || value > 2_147_483_647)) {
       throw new TypeError("Execution policy values must be positive bounded integers");
@@ -41,9 +54,15 @@ export function createExecutionPolicy(options: ExecutionPolicyOptions) {
 
   return Object.freeze({
     async execute<Result>(run: (signal: AbortSignal) => Promise<Result>, parent?: AbortSignal): Promise<Result> {
-      if (parent?.aborted) throw new ExecutionPolicyError("EXECUTION_ABORTED");
+      if (parent?.aborted) {
+        emit({ attempt: 0, phase: "rejected", reason: "EXECUTION_ABORTED" });
+        throw new ExecutionPolicyError("EXECUTION_ABORTED");
+      }
       const halfOpen = openUntil !== 0;
-      if (halfOpen && (Date.now() < openUntil || probe)) throw new ExecutionPolicyError("CIRCUIT_OPEN");
+      if (halfOpen && (Date.now() < openUntil || probe)) {
+        emit({ attempt: 0, phase: "rejected", reason: "CIRCUIT_OPEN" });
+        throw new ExecutionPolicyError("CIRCUIT_OPEN");
+      }
       if (halfOpen) probe = true;
       const currentGeneration = generation;
       const controller = new AbortController();
@@ -58,8 +77,12 @@ export function createExecutionPolicy(options: ExecutionPolicyOptions) {
         ? "COMMAND_OUTCOME_UNKNOWN" : expired ? "EXECUTION_TIMEOUT" : "EXECUTION_ABORTED");
       try {
         for (let attempt = 1; ; attempt++) {
-          if (controller.signal.aborted) throw cancelled();
+          if (controller.signal.aborted) {
+            emit({ attempt, phase: "rejected", reason: cancelled().code });
+            throw cancelled();
+          }
           try {
+            emit({ attempt, phase: "started" });
             // Never race a write against a timer: retain ownership until its driver settles.
             const result = await run(controller.signal);
             if (controller.signal.aborted) throw cancelled();
@@ -67,14 +90,22 @@ export function createExecutionPolicy(options: ExecutionPolicyOptions) {
               failures = 0;
               if (halfOpen) { openUntil = 0; generation++; }
             }
+            emit({ attempt, phase: "succeeded" });
             return result;
           } catch (error) {
+            const unknownOutcome = kind === "command" && error !== null && typeof error === "object"
+              && "code" in error && error.code === "COMMAND_OUTCOME_UNKNOWN";
+            emit({
+              attempt, phase: "failed",
+              ...(controller.signal.aborted ? { reason: cancelled().code }
+                : unknownOutcome ? { reason: "COMMAND_OUTCOME_UNKNOWN" as const } : {}),
+            });
             if (controller.signal.aborted) throw cancelled();
-            if (kind === "command" && error !== null && typeof error === "object"
-              && "code" in error && error.code === "COMMAND_OUTCOME_UNKNOWN") throw error;
+            if (unknownOutcome) throw error;
             if (!retry || halfOpen || attempt >= retry.maxAttempts) throw error;
             const decision = retry.classify(error);
             if (decision !== "rolled-back" && !(kind === "read" && decision === "retry")) throw error;
+            emit({ attempt, phase: "retry", reason: decision });
             await new Promise<void>((resolve) => {
               const done = () => { clearTimeout(wait); controller.signal.removeEventListener("abort", done); resolve(); };
               const wait = setTimeout(done, retry.delayMs);

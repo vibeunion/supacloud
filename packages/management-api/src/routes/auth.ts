@@ -430,9 +430,15 @@ export async function safeProjectSettingsAuthConfig(
  *   - ./auth-users.ts
  */
 export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
-  .onBeforeHandle(requireAuthRuntimeManagement("configuration"))
+  .beforeHandle(requireAuthRuntimeManagement("configuration"))
   .get(
     "/providers",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      detail: { tags: ["auth"], summary: "List OAuth providers" },
+    },
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
@@ -466,17 +472,18 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       }
 
       return result;
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      detail: { tags: ["auth"], summary: "List OAuth providers" },
     }
   )
 
   .get(
     "/providers/:provider",
+    {
+      params: t.Object({
+        ref: t.String(),
+        provider: t.String(),
+      }),
+      detail: { tags: ["auth"], summary: "Get OAuth provider" },
+    },
     async ({ params, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -512,18 +519,24 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         redirect_uri: providerConfig.redirect_uri || null,
         secret_configured: secretStatus.configured,
       };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        provider: t.String(),
-      }),
-      detail: { tags: ["auth"], summary: "Get OAuth provider" },
     }
   )
 
   .post(
     "/providers/:provider",
+    {
+      params: t.Object({
+        ref: t.String(),
+        provider: t.String(),
+      }),
+      body: t.Object({
+        client_id: t.String({ minLength: 1 }),
+        client_secret: t.String({ minLength: 1 }),
+        redirect_uri: t.Optional(t.String()),
+        url: t.Optional(t.String()),
+      }),
+      detail: { tags: ["auth"], summary: "Create OAuth provider" },
+    },
     async ({ params, body, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -585,24 +598,24 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         secret_configured: true,
         ...(warning ? { warning } : {}),
       };
-    },
+    }
+  )
+
+  .patch(
+    "/providers/:provider",
     {
       params: t.Object({
         ref: t.String(),
         provider: t.String(),
       }),
       body: t.Object({
-        client_id: t.String({ minLength: 1 }),
-        client_secret: t.String({ minLength: 1 }),
+        client_id: t.Optional(t.String({ minLength: 1 })),
+        client_secret: t.Optional(t.String({ minLength: 1 })),
         redirect_uri: t.Optional(t.String()),
         url: t.Optional(t.String()),
       }),
-      detail: { tags: ["auth"], summary: "Create OAuth provider" },
-    }
-  )
-
-  .patch(
-    "/providers/:provider",
+      detail: { tags: ["auth"], summary: "Update OAuth provider" },
+    },
     async ({ params, body, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -675,24 +688,18 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         secret_configured: Boolean(effectiveSecret),
         ...(warning ? { warning } : {}),
       };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        provider: t.String(),
-      }),
-      body: t.Object({
-        client_id: t.Optional(t.String({ minLength: 1 })),
-        client_secret: t.Optional(t.String({ minLength: 1 })),
-        redirect_uri: t.Optional(t.String()),
-        url: t.Optional(t.String()),
-      }),
-      detail: { tags: ["auth"], summary: "Update OAuth provider" },
     }
   )
 
   .delete(
     "/providers/:provider",
+    {
+      params: t.Object({
+        ref: t.String(),
+        provider: t.String(),
+      }),
+      detail: { tags: ["auth"], summary: "Delete OAuth provider" },
+    },
     async ({ params, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -740,18 +747,17 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         id: provider,
         enabled: false,
       };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        provider: t.String(),
-      }),
-      detail: { tags: ["auth"], summary: "Delete OAuth provider" },
     }
   )
 
   .get(
     "/config",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      detail: { tags: ["auth"], summary: "Get auth config" },
+    },
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
@@ -760,17 +766,22 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
 
       const authConfig = (settings.auth as Record<string, unknown>) || {};
       return safeAuthConfig(params.ref, authConfig);
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      detail: { tags: ["auth"], summary: "Get auth config" },
     }
   )
 
   .patch(
     "/config",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      body: t.Record(t.String(), t.Unknown()),
+      detail: {
+        tags: ["auth"],
+        summary: "Update auth config",
+        description: "Provider linking accepts experimental.provider_linking_domains as a validated provider-to-domain map; the deprecated provider list is normalized forward.",
+      },
+    },
     async ({ params, body, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -846,22 +857,12 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       }
 
       return safeAuthConfig(params.ref, (updated?.auth || {}) as Record<string, unknown>);
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      body: t.Record(t.String(), t.Unknown()),
-      detail: {
-        tags: ["auth"],
-        summary: "Update auth config",
-        description: "Provider linking accepts experimental.provider_linking_domains as a validated provider-to-domain map; the deprecated provider list is normalized forward.",
-      },
     }
   )
 
   .get(
     "/supported-providers",
+    { detail: { tags: ["auth"], summary: "List supported OAuth providers" } },
     async () => {
       return {
         providers: SUPPORTED_OAUTH_PROVIDERS.map((p) => {
@@ -882,12 +883,17 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
           };
         }),
       };
-    },
-    { detail: { tags: ["auth"], summary: "List supported OAuth providers" } }
+    }
   )
 
   .get(
     "/studio/providers",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      detail: { tags: ["auth"], summary: "List providers for Studio" },
+    },
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
@@ -929,17 +935,24 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         providers,
         enabled_providers: Object.keys(providers).filter(p => (providers[p] as Record<string, unknown>).enabled),
       };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      detail: { tags: ["auth"], summary: "List providers for Studio" },
     }
   )
 
   .patch(
     "/studio/providers/:provider",
+    {
+      params: t.Object({
+        ref: t.String(),
+        provider: t.String(),
+      }),
+      body: t.Object({
+        enabled: t.Optional(t.Boolean()),
+        client_id: t.Optional(t.String()),
+        client_secret: t.Optional(t.String()),
+        redirect_uri: t.Optional(t.String()),
+      }),
+      detail: { tags: ["auth"], summary: "Update provider for Studio" },
+    },
     async ({ params, body, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -1017,24 +1030,17 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         secret_configured: body.enabled === false ? false : Boolean(effectiveSecret),
         ...(warning ? { warning } : {}),
       };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        provider: t.String(),
-      }),
-      body: t.Object({
-        enabled: t.Optional(t.Boolean()),
-        client_id: t.Optional(t.String()),
-        client_secret: t.Optional(t.String()),
-        redirect_uri: t.Optional(t.String()),
-      }),
-      detail: { tags: ["auth"], summary: "Update provider for Studio" },
     }
   )
 
   .get(
     "/wechat/providers",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      detail: { tags: ["auth"], summary: "List WeChat providers" },
+    },
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
@@ -1059,11 +1065,5 @@ export const authRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       }
 
       return { providers: result };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      detail: { tags: ["auth"], summary: "List WeChat providers" },
     }
   );

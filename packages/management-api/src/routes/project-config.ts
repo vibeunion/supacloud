@@ -157,16 +157,20 @@ function addConfigRoutes(section: string) {
   return new Elysia()
     .get(
       `/:ref/config/${section}`,
+      { params: t.Object({ ref: t.String() }) },
       async ({ params }: { params: { ref: string } }) => {
         const settings = await projectService.getProjectSettings(params.ref);
         if (!settings)
           return status(404, { message: "Project not found", code: "404" });
         return (settings as Record<string, unknown>)[section] || {};
       },
-      { params: t.Object({ ref: t.String() }) },
     )
     .patch(
       `/:ref/config/${section}`,
+      {
+        params: t.Object({ ref: t.String() }),
+        body: t.Record(t.String(), t.Unknown()),
+      },
       async ({
         params,
         body,
@@ -187,10 +191,6 @@ function addConfigRoutes(section: string) {
           [section]: { ...current, ...(typeof body === "object" ? body : {}) },
         });
         return (updated as Record<string, unknown>)?.[section] || {};
-      },
-      {
-        params: t.Object({ ref: t.String() }),
-        body: t.Record(t.String(), t.Unknown()),
       },
     );
 }
@@ -900,7 +900,7 @@ async function buildProjectSettingsResponse(
 export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Group guard: uniformly protects all project-scoped routes (including addConfigRoutes factory and .use subroutes),
   // preventing individual endpoint omissions that could allow delegated members/viewers to bypass tenant.config.read / operations.read
-  .onBeforeHandle(async ({ params, request }) => {
+  .beforeHandle(async ({ params, request }) => {
     const ref = (params as { ref?: string }).ref;
     if (!ref) return;
     const authError = await requireProjectOrAdminAuth(request, ref);
@@ -909,6 +909,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get project settings
   .get(
     "/:ref/settings",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+
+      detail: { tags: ["projects"], summary: "Get project settings" },
+},
     async ({ params }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (settings === null) {
@@ -923,18 +930,18 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return buildProjectSettingsResponse(params.ref, settings);
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-    
-      detail: { tags: ["projects"], summary: "Get project settings" },
-},
   )
 
   // Update project settings
   .put(
     "/:ref/settings",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      body: t.Record(t.String(), t.Unknown()),
+      detail: { tags: ["projects"], summary: "Update project settings" },
+    },
     async ({ params, body }) => {
       if (Object.prototype.hasOwnProperty.call(body, "scheduled_functions")) {
         return status(400, {
@@ -967,18 +974,18 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return buildProjectSettingsResponse(params.ref, settings);
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      body: t.Record(t.String(), t.Unknown()),
-      detail: { tags: ["projects"], summary: "Update project settings" },
-    },
   )
 
   // Get project API keys
   .get(
     "/:ref/api-keys",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+
+      detail: { tags: ["projects"], summary: "Get project API keys" },
+},
     async ({ params }) => {
       const keys = await projectService.getApiKeys(params.ref);
       if (!keys) {
@@ -991,18 +998,18 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         { name: "service_role", api_key: keys.service_role_key ? "********" : "" },
       ];
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-    
-      detail: { tags: ["projects"], summary: "Get project API keys" },
-},
   )
 
   // Rotate API keys
   .post(
     "/:ref/api-keys/rotate",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+
+      detail: { tags: ["projects"], summary: "Rotate legacy JWT API keys" },
+},
     async ({ params, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -1015,18 +1022,18 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         service_role_key: keys.service_role_key ? "********" : "",
       };
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-    
-      detail: { tags: ["projects"], summary: "Rotate legacy JWT API keys" },
-},
   )
 
   // Rotate opaque Publishable/Secret keys without invalidating user JWT sessions.
   .post(
     "/:ref/api-keys/rotate-opaque",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+
+      detail: { tags: ["projects"], summary: "Rotate opaque Publishable and Secret keys" },
+},
     async ({ params, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -1036,22 +1043,11 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return keys;
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-
-      detail: { tags: ["projects"], summary: "Rotate opaque Publishable and Secret keys" },
-},
   )
 
   // Get logs
   .get(
     "/:ref/logs",
-    async ({ params, query, set }) => {
-      const logs = await projectService.queryLogs(params.ref, query.type);
-      return logs;
-    },
     {
       params: t.Object({
         ref: t.String(),
@@ -1059,9 +1055,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       query: t.Object({
         type: t.Optional(t.String()),
       }),
-    
+
       detail: { tags: ["projects"], summary: "Get project logs" },
 },
+    async ({ params, query, set }) => {
+      const logs = await projectService.queryLogs(params.ref, query.type);
+      return logs;
+    },
   )
 
   .use(projectNetworkRestrictionRoutes)
@@ -1069,6 +1069,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get custom domain
   .get(
     "/:ref/custom-hostname",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+
+      detail: { tags: ["projects"], summary: "Get custom hostname" },
+},
     async ({ params, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -1078,18 +1085,17 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return buildCustomHostnameResponse(domainInfo);
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-    
-      detail: { tags: ["projects"], summary: "Get custom hostname" },
-},
   )
 
   // Add custom domain
   .post(
     "/:ref/custom-hostname",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({ custom_hostname: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Add custom hostname" },
+},
     async ({ params, body, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -1109,16 +1115,17 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         data: {},
       };
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Object({ custom_hostname: t.String() }),
-    
-      detail: { tags: ["projects"], summary: "Add custom hostname" },
-},
   )
 
   .delete(
     "/:ref/custom-hostname",
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Delete custom hostname" },
+
+    },
     async ({ params, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -1131,17 +1138,15 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return { custom_hostname: null, status: "0_not_started", data: {} };
     },
-    {
-
-      params: t.Object({ ref: t.String() }),
-
-      detail: { tags: ["projects"], summary: "Delete custom hostname" },
-
-    },
   )
 
   .post(
     "/:ref/custom-hostname/verify",
+    {
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Verify custom hostname" },
+},
     async ({ params, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -1161,16 +1166,18 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         custom_hostname: domainInfo,
       };
     },
-    {
-      params: t.Object({ ref: t.String() }),
-    
-      detail: { tags: ["projects"], summary: "Verify custom hostname" },
-},
   )
 
   // Get Auth config (Studio compatible format)
   .get(
     "/:ref/config/auth",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+
+      detail: { tags: ["projects"], summary: "Get auth config" },
+},
     async ({ params }) => {
       const managedError = getAuthRuntimeManagedError(params.ref, "configuration");
       if (managedError) return status(409, managedError);
@@ -1181,18 +1188,23 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
 
       return await buildAuthConfigResponse(params.ref, settings);
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-    
-      detail: { tags: ["projects"], summary: "Get auth config" },
-},
   )
 
   // Modify Auth config (supports deep copy override for third-party Providers)
   .patch(
     "/:ref/config/auth",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      body: t.Record(t.String(), t.Unknown()),
+
+      detail: {
+        tags: ["projects"],
+        summary: "Update auth config",
+        description: "Provider linking accepts experimental.provider_linking_domains as a validated provider-to-domain map; the deprecated provider list is normalized forward.",
+      },
+},
     async ({ params, body }) => {
       const managedError = getAuthRuntimeManagedError(params.ref, "configuration");
       if (managedError) return status(409, managedError);
@@ -1499,23 +1511,18 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         (freshSettings || updated || { ...settings, auth: mergedAuth }) as Record<string, unknown>,
       );
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      body: t.Record(t.String(), t.Unknown()),
-    
-      detail: {
-        tags: ["projects"],
-        summary: "Update auth config",
-        description: "Provider linking accepts experimental.provider_linking_domains as a validated provider-to-domain map; the deprecated provider list is normalized forward.",
-      },
-},
   )
 
   // --- Config CRUD (database, postgrest, storage, realtime) via factory ---
   .get(
     "/:ref/config/database",
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get database config" },
+
+    },
     async ({ params }) => {
       const projectSettings = await projectService.getProjectSettings(params.ref);
       if (!projectSettings)
@@ -1547,17 +1554,16 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         });
       }
     },
-    {
-
-      params: t.Object({ ref: t.String() }),
-
-      detail: { tags: ["projects"], summary: "Get database config" },
-
-    },
   )
 
   .patch(
     "/:ref/config/pooler",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Record(t.String(), t.Unknown()),
+
+      detail: { tags: ["projects"], summary: "Update pooler config" },
+},
     async ({ params, body }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
@@ -1573,16 +1579,17 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       });
       return (updated as Record<string, unknown>)?.pooler || {};
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Record(t.String(), t.Unknown()),
-    
-      detail: { tags: ["projects"], summary: "Update pooler config" },
-},
   )
 
   .get(
     "/:ref/database/replication",
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get database replication info" },
+
+    },
     async ({ params }) => {
       const { getProjectDb, resolveDbName } = await import("../db");
       const dbName = await resolveDbName(params.ref);
@@ -1692,17 +1699,19 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         }),
       };
     },
-    {
-
-      params: t.Object({ ref: t.String() }),
-
-      detail: { tags: ["projects"], summary: "Get database replication info" },
-
-    },
   )
 
   .get(
     "/:ref/types/python",
+    {
+      params: t.Object({ ref: t.String() }),
+      query: t.Object(
+        { schemas: t.Optional(t.String()) },
+        { additionalProperties: true },
+      ),
+
+      detail: { tags: ["projects"], summary: "Generate Python types" },
+},
     async ({ params, query }) => {
       const { getProjectDb, resolveDbName } = await import("../db");
       const dbName = await resolveDbName(params.ref);
@@ -1742,18 +1751,15 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return { types: py };
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      query: t.Object(
-        { schemas: t.Optional(t.String()) },
-        { additionalProperties: true },
-      ),
-    
-      detail: { tags: ["projects"], summary: "Generate Python types" },
-},
   )
   .patch(
     "/:ref/config/database",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Record(t.String(), t.Unknown()),
+
+      detail: { tags: ["projects"], summary: "Update database config" },
+},
     async ({ params, body }) => {
       let patch;
       try {
@@ -1842,15 +1848,13 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         });
       }
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Record(t.String(), t.Unknown()),
-    
-      detail: { tags: ["projects"], summary: "Update database config" },
-},
   )
   .get(
     "/:ref/config/postgrest",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get PostgREST exposed schemas" },
+    },
     async ({ params }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) return status(404, { message: "Project not found", code: "404" });
@@ -1867,13 +1871,17 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         });
       }
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["projects"], summary: "Get PostgREST exposed schemas" },
-    },
   )
   .patch(
     "/:ref/config/postgrest",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        exposed_schemas: t.Array(t.String(), { maxItems: 16 }),
+        expected_revision: t.Optional(t.String({ pattern: "^[0-9a-f]{64}$" })),
+      }),
+      detail: { tags: ["projects"], summary: "Update PostgREST exposed schemas" },
+    },
     async ({ params, body }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) return status(404, { message: "Project not found", code: "404" });
@@ -1893,19 +1901,18 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         throw error;
       }
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Object({
-        exposed_schemas: t.Array(t.String(), { maxItems: 16 }),
-        expected_revision: t.Optional(t.String({ pattern: "^[0-9a-f]{64}$" })),
-      }),
-      detail: { tags: ["projects"], summary: "Update PostgREST exposed schemas" },
-    },
   )
 
   // Config Storage — with official default fields
   .get(
     "/:ref/config/storage",
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get storage config" },
+
+    },
     async ({ params }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
@@ -1917,16 +1924,15 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         >) || {};
       return buildStorageConfigResponse(raw);
     },
-    {
-
-      params: t.Object({ ref: t.String() }),
-
-      detail: { tags: ["projects"], summary: "Get storage config" },
-
-    },
   )
   .patch(
     "/:ref/config/storage",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Record(t.String(), t.Unknown()),
+
+      detail: { tags: ["projects"], summary: "Update storage config" },
+},
     async ({ params, body }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
@@ -1948,17 +1954,18 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         >) || {};
       return buildStorageConfigResponse(raw);
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Record(t.String(), t.Unknown()),
-    
-      detail: { tags: ["projects"], summary: "Update storage config" },
-},
   )
 
   // Config Realtime — with official default fields
   .get(
     "/:ref/config/realtime",
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get realtime config" },
+
+    },
     async ({ params }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
@@ -1970,16 +1977,15 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         >) || {};
       return buildRealtimeConfigResponse(raw);
     },
-    {
-
-      params: t.Object({ ref: t.String() }),
-
-      detail: { tags: ["projects"], summary: "Get realtime config" },
-
-    },
   )
   .patch(
     "/:ref/config/realtime",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Record(t.String(), t.Unknown()),
+
+      detail: { tags: ["projects"], summary: "Update realtime config" },
+},
     async ({ params, body }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
@@ -2008,17 +2014,18 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         ...buildRealtimeConfigResponse(raw),
       };
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Record(t.String(), t.Unknown()),
-    
-      detail: { tags: ["projects"], summary: "Update realtime config" },
-},
   )
 
   // Get PgBouncer config (for Studio display)
   .get(
     "/:ref/pgbouncer",
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get PgBouncer config" },
+
+    },
     async ({ params }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings)
@@ -2031,18 +2038,15 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         }
       );
     },
-    {
-
-      params: t.Object({ ref: t.String() }),
-
-      detail: { tags: ["projects"], summary: "Get PgBouncer config" },
-
-    },
   )
 
   // Consolidated pooling state — declared endpoints and project identities only.
   .get(
     "/:ref/pooling-state",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get project pooling state" },
+    },
     async ({ params, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -2079,15 +2083,18 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         });
       }
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["projects"], summary: "Get project pooling state" },
-    },
   )
 
   // Get Postgres DB config — required by CLI `supabase link` (V1GetPostgresConfig)
   .get(
     "/:ref/config/postgres",
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get Postgres config" },
+
+    },
     async ({ params }) => {
       const { getProjectDb, resolveDbName } = await import("../db");
       const dbName = await resolveDbName(params.ref);
@@ -2129,18 +2136,18 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         };
       }
     },
-    {
-
-      params: t.Object({ ref: t.String() }),
-
-      detail: { tags: ["projects"], summary: "Get Postgres config" },
-
-    },
   )
 
   // Get Pooler config — required by CLI `supabase link` (GetPoolerConfig)
   .get(
     "/:ref/config/pooler",
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get pooler config" },
+
+    },
     async ({ params }) => {
       const { config: appConfig } = await import("../config");
 
@@ -2159,18 +2166,18 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         direct_connection_string: `postgresql://${dbUser}:[YOUR-PASSWORD]@${pgHost}:${pgPort}/${dbName}`,
       };
     },
-    {
-
-      params: t.Object({ ref: t.String() }),
-
-      detail: { tags: ["projects"], summary: "Get pooler config" },
-
-    },
   )
 
   // Get Storage policies — required by Studio Storage > Policies page (P0-15)
   .get(
     "/:ref/storage/policies",
+    {
+
+      params: t.Object({ ref: t.String() }),
+
+      detail: { tags: ["projects"], summary: "Get storage policies" },
+
+    },
     async ({ params }) => {
       const { getProjectDb, resolveDbName } = await import("../db");
       const dbName = await resolveDbName(params.ref);
@@ -2205,18 +2212,17 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         return [];
       }
     },
-    {
-
-      params: t.Object({ ref: t.String() }),
-
-      detail: { tags: ["projects"], summary: "Get storage policies" },
-
-    },
   )
 
   // Get Types (Studio calls this path — delegates to /types/typescript)
   .get(
     "/:ref/types",
+    {
+      params: t.Object({ ref: t.String() }),
+      query: t.Optional(t.Object({ included_schemas: t.Optional(t.String()) })),
+
+      detail: { tags: ["projects"], summary: "Get generated types" },
+},
     async ({ params, query, set }) => {
       const { getProjectDb, resolveDbName } = await import("../db");
       const dbName = await resolveDbName(params.ref);
@@ -2288,17 +2294,17 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         };
       }
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      query: t.Optional(t.Object({ included_schemas: t.Optional(t.String()) })),
-    
-      detail: { tags: ["projects"], summary: "Get generated types" },
-},
   )
 
   // Get Typescript Types — Real schema reflection (P0-5)
   .get(
     "/:ref/types/typescript",
+    {
+      params: t.Object({ ref: t.String() }),
+      query: t.Optional(t.Object({ included_schemas: t.Optional(t.String()) })),
+
+      detail: { tags: ["projects"], summary: "Generate TypeScript types" },
+},
     async ({ params, query }) => {
       const { getProjectDb, resolveDbName } = await import("../db");
       const dbName = await resolveDbName(params.ref);
@@ -2535,16 +2541,14 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         };
       }
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      query: t.Optional(t.Object({ included_schemas: t.Optional(t.String()) })),
-    
-      detail: { tags: ["projects"], summary: "Generate TypeScript types" },
-},
   )
 
   .get(
     "/:ref/gateway/routes",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "List controlled custom gateway routes" },
+    },
     async ({ params, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -2557,30 +2561,10 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(500, { message: error instanceof Error ? error.message : String(error), code: "500" });
       }
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["projects"], summary: "List controlled custom gateway routes" },
-    },
   )
 
   .post(
     "/:ref/gateway/routes",
-    async ({ params, body, request }) => {
-      const authError = await requireAdminAuth(request);
-      if (authError) return status(authError.status, authError.body);
-      const settings = await projectService.getProjectSettings(params.ref);
-      if (!settings)
-        return status(404, { message: "Project not found", code: "404" });
-      try {
-        const route = customGatewayRouteBody(body);
-        const current = readCustomGatewayRoutes(settings).filter((item) => item.id !== route.id);
-        const result = await applyCustomGatewayRoutes(params.ref, settings, [...current, route]);
-        if (!result.ok) return status(result.status, result.body);
-        return { success: true, route };
-      } catch (error: unknown) {
-        return status(400, { message: error instanceof Error ? error.message : String(error), code: "400" });
-      }
-    },
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({
@@ -2604,10 +2588,6 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }),
       detail: { tags: ["projects"], summary: "Create or replace a controlled custom gateway route" },
     },
-  )
-
-  .put(
-    "/:ref/gateway/routes/:routeId",
     async ({ params, body, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -2615,7 +2595,7 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       if (!settings)
         return status(404, { message: "Project not found", code: "404" });
       try {
-        const route = customGatewayRouteBody(body, params.routeId);
+        const route = customGatewayRouteBody(body);
         const current = readCustomGatewayRoutes(settings).filter((item) => item.id !== route.id);
         const result = await applyCustomGatewayRoutes(params.ref, settings, [...current, route]);
         if (!result.ok) return status(result.status, result.body);
@@ -2624,6 +2604,10 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(400, { message: error instanceof Error ? error.message : String(error), code: "400" });
       }
     },
+  )
+
+  .put(
+    "/:ref/gateway/routes/:routeId",
     {
       params: t.Object({ ref: t.String(), routeId: t.String() }),
       body: t.Object({
@@ -2646,10 +2630,30 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }),
       detail: { tags: ["projects"], summary: "Replace a controlled custom gateway route" },
     },
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
+      const settings = await projectService.getProjectSettings(params.ref);
+      if (!settings)
+        return status(404, { message: "Project not found", code: "404" });
+      try {
+        const route = customGatewayRouteBody(body, params.routeId);
+        const current = readCustomGatewayRoutes(settings).filter((item) => item.id !== route.id);
+        const result = await applyCustomGatewayRoutes(params.ref, settings, [...current, route]);
+        if (!result.ok) return status(result.status, result.body);
+        return { success: true, route };
+      } catch (error: unknown) {
+        return status(400, { message: error instanceof Error ? error.message : String(error), code: "400" });
+      }
+    },
   )
 
   .delete(
     "/:ref/gateway/routes/:routeId",
+    {
+      params: t.Object({ ref: t.String(), routeId: t.String() }),
+      detail: { tags: ["projects"], summary: "Delete a controlled custom gateway route" },
+    },
     async ({ params, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -2666,15 +2670,30 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(400, { message: error instanceof Error ? error.message : String(error), code: "400" });
       }
     },
-    {
-      params: t.Object({ ref: t.String(), routeId: t.String() }),
-      detail: { tags: ["projects"], summary: "Delete a controlled custom gateway route" },
-    },
   )
 
   // Update gateway config (rate limiting, CORS, JWT)
   .post(
     "/:ref/gateway/config",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      body: t.Object({
+        rate_limit_tier: t.Optional(
+          t.Union([
+            t.Literal("free"),
+            t.Literal("pro"),
+            t.Literal("enterprise"),
+          ]),
+        ),
+        cors_origins: t.Optional(t.String()),
+        jwt_enabled: t.Optional(t.Boolean()),
+        jwt_secret: t.Optional(t.String()),
+      }),
+
+      detail: { tags: ["projects"], summary: "Update gateway config" },
+},
     async ({ params, body, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -2693,30 +2712,15 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return result;
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      body: t.Object({
-        rate_limit_tier: t.Optional(
-          t.Union([
-            t.Literal("free"),
-            t.Literal("pro"),
-            t.Literal("enterprise"),
-          ]),
-        ),
-        cors_origins: t.Optional(t.String()),
-        jwt_enabled: t.Optional(t.Boolean()),
-        jwt_secret: t.Optional(t.String()),
-      }),
-    
-      detail: { tags: ["projects"], summary: "Update gateway config" },
-},
   )
 
   // Get gateway certificate automation settings
   .get(
     "/:ref/gateway/certificate",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get project gateway certificate settings" },
+    },
     async ({ params, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -2726,24 +2730,11 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return settings;
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["projects"], summary: "Get project gateway certificate settings" },
-    },
   )
 
   // Save certificate automation settings
   .put(
     "/:ref/gateway/certificate",
-    async ({ params, body, request }) => {
-      const authError = await requireAdminAuth(request);
-      if (authError) return status(authError.status, authError.body);
-      const settings = await certificateService.updateSettings(params.ref, body);
-      if (!settings) {
-        return status(404, { message: "Project not found", code: "404" });
-      }
-      return settings;
-    },
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({
@@ -2757,20 +2748,20 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }),
       detail: { tags: ["projects"], summary: "Save project gateway certificate settings" },
     },
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
+      const settings = await certificateService.updateSettings(params.ref, body);
+      if (!settings) {
+        return status(404, { message: "Project not found", code: "404" });
+      }
+      return settings;
+    },
   )
 
   // Issue or renew a certificate with lego, then deploy it into gateway certificates.
   .post(
     "/:ref/gateway/certificate/issue",
-    async ({ params, body, request }) => {
-      const authError = await requireAdminAuth(request);
-      if (authError) return status(authError.status, authError.body);
-      const result = await certificateService.issueWithLego(params.ref, body);
-      if (!result.success) {
-        return status(500, { message: result.error || "Certificate issuance failed", output: result.output, code: "500" });
-      }
-      return result;
-    },
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({
@@ -2784,11 +2775,29 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }),
       detail: { tags: ["projects"], summary: "Issue or renew a gateway certificate with lego" },
     },
+    async ({ params, body, request }) => {
+      const authError = await requireAdminAuth(request);
+      if (authError) return status(authError.status, authError.body);
+      const result = await certificateService.issueWithLego(params.ref, body);
+      if (!result.success) {
+        return status(500, { message: result.error || "Certificate issuance failed", output: result.output, code: "500" });
+      }
+      return result;
+    },
   )
 
   // Upload an existing certificate/key pair and bind it to gateway hostnames.
   .post(
     "/:ref/gateway/certificate/deploy",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        cert: t.String(),
+        key: t.String(),
+        domains: t.Optional(t.Array(t.String())),
+      }),
+      detail: { tags: ["projects"], summary: "Deploy an existing certificate into gateway" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -2802,20 +2811,19 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return result;
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Object({
-        cert: t.String(),
-        key: t.String(),
-        domains: t.Optional(t.Array(t.String())),
-      }),
-      detail: { tags: ["projects"], summary: "Deploy an existing certificate into gateway" },
-    },
   )
 
   // Rebuild ALL tenant gateway configs (propagate CORS / template changes)
   .post(
     "/:ref/gateway/rebuild-all",
+    {
+      params: t.Object({ ref: t.String() }),
+      query: t.Object({ clean: t.Optional(t.String()) }),
+      detail: {
+        tags: ["projects"],
+        summary: "Rebuild all tenant gateway configs",
+      },
+    },
     async ({ request, query }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -2839,14 +2847,6 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return { ...result, frontend, clean };
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      query: t.Object({ clean: t.Optional(t.String()) }),
-      detail: {
-        tags: ["projects"],
-        summary: "Rebuild all tenant gateway configs",
-      },
-    },
   )
 
   // --- Programmable Rate Limiting (gateway provider) ---
@@ -2854,6 +2854,10 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Get current rate limit config for a project
   .get(
     "/:ref/gateway/rate-limit",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get project rate limit config" },
+    },
     async ({ params }) => {
       const rateLimit = await gatewayService.getRateLimit(params.ref);
       if (rateLimit === null) {
@@ -2864,15 +2868,27 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return rateLimit;
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["projects"], summary: "Get project rate limit config" },
-    },
   )
 
   // Set rate limit — supports tier presets OR custom values
   .put(
     "/:ref/gateway/rate-limit",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        tier: t.Optional(
+          t.Union([
+            t.Literal("free"),
+            t.Literal("pro"),
+            t.Literal("enterprise"),
+          ]),
+        ),
+        second: t.Optional(t.Number()),
+        minute: t.Optional(t.Number()),
+        hour: t.Optional(t.Number()),
+      }),
+      detail: { tags: ["projects"], summary: "Set project rate limit" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -2894,22 +2910,6 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return { success: true, message: "Rate limit updated" };
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Object({
-        tier: t.Optional(
-          t.Union([
-            t.Literal("free"),
-            t.Literal("pro"),
-            t.Literal("enterprise"),
-          ]),
-        ),
-        second: t.Optional(t.Number()),
-        minute: t.Optional(t.Number()),
-        hour: t.Optional(t.Number()),
-      }),
-      detail: { tags: ["projects"], summary: "Set project rate limit" },
-    },
   )
 
   // --- Tenant Custom Path Rate Limiting ---
@@ -2917,6 +2917,21 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
   // Set custom rate limit for a specific path
   .put(
     "/:ref/gateway/custom-rate-limits",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        path: t.String({
+          description: "Base path to rate limit. e.g. /rest/v1/payments",
+        }),
+        second: t.Optional(t.Number()),
+        minute: t.Optional(t.Number()),
+        hour: t.Optional(t.Number()),
+      }),
+      detail: {
+        tags: ["projects"],
+        summary: "Set a custom rate limit for a specific path",
+      },
+    },
     async ({ params, body, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -2973,26 +2988,23 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         message: `Custom rate limit set for ${body.path}`,
       };
     },
+  )
+
+  // Remove custom rate limit for a specific path
+  .delete(
+    "/:ref/gateway/custom-rate-limits",
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({
         path: t.String({
           description: "Base path to rate limit. e.g. /rest/v1/payments",
         }),
-        second: t.Optional(t.Number()),
-        minute: t.Optional(t.Number()),
-        hour: t.Optional(t.Number()),
       }),
       detail: {
         tags: ["projects"],
-        summary: "Set a custom rate limit for a specific path",
+        summary: "Remove a custom rate limit for a specific path",
       },
     },
-  )
-
-  // Remove custom rate limit for a specific path
-  .delete(
-    "/:ref/gateway/custom-rate-limits",
     async ({ params, body, request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) return status(authError.status, authError.body);
@@ -3028,17 +3040,5 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         success: true,
         message: `Custom rate limit removed for ${body.path}`,
       };
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Object({
-        path: t.String({
-          description: "Base path to rate limit. e.g. /rest/v1/payments",
-        }),
-      }),
-      detail: {
-        tags: ["projects"],
-        summary: "Remove a custom rate limit for a specific path",
-      },
     },
   );

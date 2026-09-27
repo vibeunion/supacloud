@@ -391,12 +391,12 @@ export async function initDatabase() {
     await sql.unsafe(`
       DO $$
       BEGIN
-        IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_realtime_admin') THEN
-          CREATE ROLE supabase_realtime_admin LOGIN NOINHERIT CREATEROLE REPLICATION PASSWORD ${sqlStringLiteral(password)};
-        ELSE
-          ALTER ROLE supabase_realtime_admin LOGIN NOINHERIT CREATEROLE REPLICATION PASSWORD ${sqlStringLiteral(password)};
-        END IF;
-      END
+          IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'supabase_realtime_admin') THEN
+            CREATE ROLE supabase_realtime_admin LOGIN NOINHERIT CREATEROLE REPLICATION PASSWORD ${sqlStringLiteral(password)};
+          ELSE
+            ALTER ROLE supabase_realtime_admin LOGIN NOINHERIT CREATEROLE REPLICATION PASSWORD ${sqlStringLiteral(password)};
+          END IF;
+        END
       $$;
     `);
 

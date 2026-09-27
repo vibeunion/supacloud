@@ -1,5 +1,5 @@
 import type { SQL } from "bun";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { createPgListener } from "../../src/lib/pg-listen";
 import { fixtureRows } from "./fixture-rows";
 import { waitForPostgresFixture } from "./native-postgres";

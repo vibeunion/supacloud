@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:t
 import * as fs from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { parseTaskJsonObject } from "../../src/utils/task-record";
 
 const functionsRoot = await fs.mkdtemp(join(homedir(), ".supacloud-project-functions-"));
 const originalFunctionsDir = process.env.EDGE_FUNCTIONS_DIR;
@@ -13,6 +14,8 @@ const actualDb = await import("../../src/db");
 const { jwtService } = await import("../../src/services/jwt.service");
 const { edgeFunctionService } = await import("../../src/services/edge-function.service");
 const { config } = await import("../../src/config");
+const { StorageService } = await import("../../src/services/storage.service");
+const storageStatusSpy = spyOn(StorageService, "getStatus");
 
 const jwtServiceMock = {
   generateProjectRef: spyOn(jwtService, "generateProjectRef"),
@@ -209,6 +212,12 @@ describe("ProjectService - Comprehensive", () => {
     tenantRuntimeServiceMock.pauseProjectRuntime.mockReset();
     tenantRuntimeServiceMock.resumeProjectRuntime.mockReset();
     tenantRuntimeServiceMock.restartRuntime.mockReset();
+    tenantRuntimeServiceMock.getProjectServiceStatuses.mockReset();
+    tenantRuntimeServiceMock.getProjectServiceStatuses.mockResolvedValue([
+      { id: "storage", name: "storage", status: "ACTIVE_HEALTHY", healthy: true },
+    ]);
+    storageStatusSpy.mockReset();
+    storageStatusSpy.mockResolvedValue({ status: "unmounted", backend: "local", healthy: false });
     realtimeServiceMock.updateTenant.mockReset();
     withProjectMigrationLocks.mockClear();
     migrationLocked = false;
@@ -326,8 +335,9 @@ describe("ProjectService - Comprehensive", () => {
     expect(projectRepositoryMock.create).toHaveBeenCalled();
     expect(taskRepositoryMock.createTask).toHaveBeenCalledWith("newref1234", "provision_db", {
       dbPassword: "dbpassword",
-      domain: undefined,
     });
+    const payload = taskRepositoryMock.createTask.mock.calls[0]![2];
+    expect(parseTaskJsonObject(payload)).toEqual({ dbPassword: "dbpassword" });
   });
 
   test("createProject accepts custom region", async () => {
@@ -422,7 +432,6 @@ describe("ProjectService - Comprehensive", () => {
     expect(projectRepositoryMock.updateStatus).not.toHaveBeenCalledWith("test123abc", "active");
     expect(taskRepositoryMock.createTask).toHaveBeenCalledWith("test123abc", "provision_db", {
       dbPassword: "password123",
-      domain: undefined,
     });
   });
 
@@ -448,6 +457,61 @@ describe("ProjectService - Comprehensive", () => {
     const result = await service.getProjectStatus("test123abc");
     expect(result?.status).toBe("active");
     expect(result?.database).toBe("healthy");
+  });
+
+  test("getProjectStatus falls back to the configured storage backend", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    tenantRuntimeServiceMock.getProjectServiceStatuses.mockResolvedValueOnce([]);
+    storageStatusSpy.mockResolvedValueOnce({ status: "mounted", backend: "local", healthy: true });
+
+    expect((await service.getProjectStatus("test123abc"))?.storage).toBe("healthy");
+    expect(storageStatusSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("getProjectStatus preserves an unhealthy storage result", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    tenantRuntimeServiceMock.getProjectServiceStatuses.mockResolvedValueOnce([]);
+
+    expect((await service.getProjectStatus("test123abc"))?.storage).toBe("unhealthy");
+    expect(storageStatusSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("getProjectStatus handles a storage probe failure", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    tenantRuntimeServiceMock.getProjectServiceStatuses.mockResolvedValueOnce([]);
+    storageStatusSpy.mockRejectedValueOnce(new Error("storage unavailable"));
+
+    expect((await service.getProjectStatus("test123abc"))?.storage).toBe("unhealthy");
+  });
+
+  test("getProjectHealth uses the configured storage backend", async () => {
+    projectRepositoryMock.findByRef.mockResolvedValueOnce(mockProject);
+    storageStatusSpy.mockResolvedValueOnce({ status: "mounted", backend: "local", healthy: true });
+
+    const result = await service.getProjectHealth("test123abc");
+    expect(result?.services.find((entry) => entry.name === "Storage")?.status).toBe("ACTIVE_HEALTHY");
+    expect(storageStatusSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("a running systemd unit cannot override backend failure in either project endpoint", async () => {
+    const bin = await fs.mkdtemp(join(functionsRoot, "probe-bin-"));
+    await fs.symlink("/usr/bin/true", join(bin, "systemctl"));
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${bin}:${previousPath ?? ""}`;
+    projectRepositoryMock.findByRef.mockResolvedValue(mockProject);
+    tenantRuntimeServiceMock.getProjectServiceStatuses.mockResolvedValue([
+      { id: "storage", name: "storage", status: "UNHEALTHY", healthy: false },
+    ]);
+    try {
+      const health = await service.getProjectHealth("test123abc");
+      expect(health?.services.find((entry) => entry.name === "GoTrue")?.status).toBe("ACTIVE_HEALTHY");
+      expect(health?.services.find((entry) => entry.name === "Storage")?.status).toBe("INACTIVE");
+      expect((await service.getProjectStatus("test123abc"))?.storage).toBe("unhealthy");
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      await fs.rm(bin, { recursive: true, force: true });
+    }
   });
 
   test("restartProject reloads runtime", async () => {

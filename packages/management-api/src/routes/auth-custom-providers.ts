@@ -67,44 +67,44 @@ async function proxyCustomProviderAdmin(
 }
 
 export const authCustomProviderRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth/custom-providers" })
-  .onBeforeHandle(requireAuthRuntimeManagement("providers"))
-  .get("/", ({ params, query }) => {
-    const search = query.type ? `?type=${encodeURIComponent(query.type)}` : "";
-    return proxyCustomProviderAdmin(params.ref, `/admin/custom-providers${search}`);
-  }, {
+  .beforeHandle(requireAuthRuntimeManagement("providers"))
+  .get("/", {
     params: t.Object({ ref: t.String() }),
     query: t.Object({ type: t.Optional(t.Union([t.Literal("oauth2"), t.Literal("oidc")])) }),
     detail: { tags: ["auth"], summary: "List custom OAuth/OIDC providers" },
+  }, ({ params, query }) => {
+    const search = query.type ? `?type=${encodeURIComponent(query.type)}` : "";
+    return proxyCustomProviderAdmin(params.ref, `/admin/custom-providers${search}`);
   })
-  .post("/", ({ params, body }) => proxyCustomProviderAdmin(params.ref, "/admin/custom-providers", {
-    method: "POST",
-    body: JSON.stringify(body),
-  }), {
+  .post("/", {
     params: t.Object({ ref: t.String() }),
     body: t.Record(t.String(), t.Unknown()),
     detail: { tags: ["auth"], summary: "Create custom OAuth/OIDC provider" },
-  })
-  .get("/:identifier", ({ params }) => proxyCustomProviderAdmin(
-    params.ref,
-    `/admin/custom-providers/${encodeURIComponent(params.identifier)}`,
-  ), {
+  }, ({ params, body }) => proxyCustomProviderAdmin(params.ref, "/admin/custom-providers", {
+    method: "POST",
+    body: JSON.stringify(body),
+  }))
+  .get("/:identifier", {
     params: t.Object({ ref: t.String(), identifier: t.String() }),
     detail: { tags: ["auth"], summary: "Get custom OAuth/OIDC provider" },
-  })
-  .put("/:identifier", ({ params, body }) => proxyCustomProviderAdmin(
+  }, ({ params }) => proxyCustomProviderAdmin(
     params.ref,
     `/admin/custom-providers/${encodeURIComponent(params.identifier)}`,
-    { method: "PUT", body: JSON.stringify(body) },
-  ), {
+  ))
+  .put("/:identifier", {
     params: t.Object({ ref: t.String(), identifier: t.String() }),
     body: t.Record(t.String(), t.Unknown()),
     detail: { tags: ["auth"], summary: "Update custom OAuth/OIDC provider" },
-  })
-  .delete("/:identifier", ({ params }) => proxyCustomProviderAdmin(
+  }, ({ params, body }) => proxyCustomProviderAdmin(
+    params.ref,
+    `/admin/custom-providers/${encodeURIComponent(params.identifier)}`,
+    { method: "PUT", body: JSON.stringify(body) },
+  ))
+  .delete("/:identifier", {
+    params: t.Object({ ref: t.String(), identifier: t.String() }),
+    detail: { tags: ["auth"], summary: "Delete custom OAuth/OIDC provider" },
+  }, ({ params }) => proxyCustomProviderAdmin(
     params.ref,
     `/admin/custom-providers/${encodeURIComponent(params.identifier)}`,
     { method: "DELETE" },
-  ), {
-    params: t.Object({ ref: t.String(), identifier: t.String() }),
-    detail: { tags: ["auth"], summary: "Delete custom OAuth/OIDC provider" },
-  });
+  ));

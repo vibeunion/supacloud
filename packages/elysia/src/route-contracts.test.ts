@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { status, t } from "elysia";
+import { Type } from "typebox";
 import { createApplication, type CompiledModule } from "./index";
 
 test("enforces headers and cookies and validates status-code response maps", async () => {
@@ -46,7 +47,7 @@ test("enforces headers and cookies and validates status-code response maps", asy
 });
 
 test("passes Elysia-decoded headers to compiled handlers", async () => {
-  const decodedHeader = t.Transform(t.String())
+  const decodedHeader = Type.Codec(t.String())
     .Decode((value) => Number(value))
     .Encode(String);
   const module: CompiledModule = {

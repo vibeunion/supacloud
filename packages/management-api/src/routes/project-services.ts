@@ -28,6 +28,10 @@ export const projectServiceRouteInternals = {
 export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
     "/:ref/runtime-snapshot",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get canonical project runtime snapshot" },
+    },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -42,15 +46,17 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         });
       }
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["projects"], summary: "Get canonical project runtime snapshot" },
-    },
   )
 
   // Get project health status
   .get(
     "/:ref/health",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      detail: { tags: ["projects"], summary: "Get project health status" },
+    },
     async ({ params, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project) {
@@ -67,17 +73,17 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         return { status: "healthy", services: [] };
       }
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      detail: { tags: ["projects"], summary: "Get project health status" },
-    },
   )
 
   // Get project status (legacy compatibility)
   .get(
     "/:ref/status",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      detail: { tags: ["projects"], summary: "Get project status" },
+    },
     async ({ params, set }) => {
       const projectStatus = await projectService.getProjectStatus(params.ref);
       if (!projectStatus) {
@@ -85,17 +91,17 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return projectStatus;
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      detail: { tags: ["projects"], summary: "Get project status" },
-    },
   )
 
   // Get project usage metrics — real pg_stat data (P0-6)
   .get(
     "/:ref/usage",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      detail: { tags: ["projects"], summary: "Get project usage metrics" },
+    },
     async ({ params, set }) => {
       const project = await projectService.getProject(params.ref);
       if (!project) {
@@ -187,17 +193,17 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
         };
       }
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      detail: { tags: ["projects"], summary: "Get project usage metrics" },
-    },
   )
 
   // Restart project
   .post(
     "/:ref/restart",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      detail: { tags: ["projects"], summary: "Restart project" },
+    },
     async ({ params, request }) => {
       const authRuntime = getAuthRuntimeDescriptor(params.ref);
       const authError = authRuntime.mode === "owner"
@@ -217,17 +223,15 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return { ref: params.ref, message: "Project restart initiated" };
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      detail: { tags: ["projects"], summary: "Restart project" },
-    },
   )
 
   // Get project services status list (Supabase Studio compatibility)
   .get(
     "/:ref/services",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "List project services status" },
+    },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -238,15 +242,15 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
 
       return tenantRuntimeService.getProjectServiceStatuses(params.ref, project.config, "studio");
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["projects"], summary: "List project services status" },
-    },
   )
 
   // PostgREST runtime status (desired/actual state and last error)
   .get(
     "/:ref/services/postgrest/status",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get PostgREST runtime status" },
+    },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -256,15 +260,19 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return tenantRuntimeService.statusPostgrest(params.ref);
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["projects"], summary: "Get PostgREST runtime status" },
-    },
   )
 
   // Individual service control (start/stop/restart)
   .post(
     "/:ref/services/:service/:action",
+    {
+      params: t.Object({
+        ref: t.String(),
+        service: t.String(),
+        action: t.String(),
+      }),
+      detail: { tags: ["projects"], summary: "Control a project service" },
+    },
     async ({ params, request, set }) => {
       const { ref, service, action } = params;
       const authError = await requireProjectOrAdminAuth(request, params.ref);
@@ -379,13 +387,5 @@ export const projectServiceRoutes = new Elysia({ prefix: "/v1/projects" })
           code: "500",
         };
       }
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        service: t.String(),
-        action: t.String(),
-      }),
-      detail: { tags: ["projects"], summary: "Control a project service" },
     },
   );

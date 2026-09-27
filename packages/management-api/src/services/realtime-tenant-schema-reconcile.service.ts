@@ -12,13 +12,13 @@ const DATABASE_OID_PATTERN = /^[1-9]\d{0,9}$/;
 const REPLACEMENT_EPOCH_PATTERN = /^(none|[0-9a-f]{64})$/;
 const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
-const OFFICIAL_REALTIME_RUNTIME_VERSION = "2.133.0";
+const OFFICIAL_REALTIME_RUNTIME_VERSION = "2.138.1";
 const OFFICIAL_REALTIME_MANIFEST_SHA256 =
   "4cbd8c1a606febe2c8740ca5e1ff3f2026a9db34ea09aec537457f901fb8382a";
 const OFFICIAL_REALTIME_PROFILE_SHA256 =
-  "6aa438f04e2960df7e1fe4515e99e6d527271f248129fe07d61fe8d27872dafd";
+  "b1109c7cfa7132351e8bd2a6cffbff5e60c01dcd9b54f9e2103a7de5b1e540a3";
 const OFFICIAL_REALTIME_SCHEMA_TREE_SHA256 =
-  "1f82dfc5cc6f68d04f1cffe0c7ed29c93dd0e9271647be02c46622fe2947e19f";
+  "89cae15f960cb164424ebdee2d8e29b5276f72438c87aaa91c442104ef822984";
 const OFFICIAL_PGDELTA_WRAPPER_SHA256 =
   "65a2ac788d7b2f4f177b759b37642c9e5d0c2c4841b2d0e611f2e31be995d799";
 const OFFICIAL_PGDELTA_BUNDLE_SHA256_BY_ARCH = {
@@ -36,14 +36,14 @@ const OFFICIAL_PGDELTA_EXPANDED_SHA256_BY_ARCH = {
 // The image digest is part of the reviewed release identity. A mutable tag is
 // not sufficient for a destructive tenant-schema reconciliation.
 export const OFFICIAL_REALTIME_IMAGE_DIGEST =
-  "sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb";
+  "sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e";
 const OFFICIAL_REALTIME_IMAGE_MANIFEST_DIGEST_BY_ARCH = {
-  amd64: "sha256:109c6ea8ecd6c84c3b36047fe78a055c27702f6d9e19c441958b129a9bd468c3",
-  arm64: "sha256:172c1b386ed7b5969bd7fbce8e31b3c65050e0c39f4191bd637d6de811b81315",
+  amd64: "sha256:023cd658da8212c67d12eb1a43914bab67e1a3ea51f731a385ad7596d8226ec0",
+  arm64: "sha256:839743c3294d69d9eef0d2909338b40be1da1fe58114129e510dfd2fe2020c79",
 } as const;
 const OFFICIAL_REALTIME_IMAGE_CONFIG_DIGEST_BY_ARCH = {
-  amd64: "sha256:bcaec521eb08dc811d88119ee5bcac7671188d8937cffc12d3bf23c890bb636b",
-  arm64: "sha256:1ee6d7247f3f3809289524539cd06f6f86d4c50e5639d1ef28f388a9e4fefaa4",
+  amd64: "sha256:b069a8f97f0d05eadd5a18aebce08f051b3b8e07d6c120eef457f5d24f2523dd",
+  arm64: "sha256:ecc1bc4f347e7565b290ddd68c0079e3e9b0f8cad7ba06d1ee686135bfaa1b97",
 } as const;
 export type EffectiveAclEntry = [grantee: string, grantor: string, privilege: string, grantable: boolean];
 
@@ -70,6 +70,14 @@ const OFFICIAL_WAL_COLUMN_REPAIR_FILE_SHA256 = new Map([
 ]);
 const OFFICIAL_WAL_COLUMN_REPAIR_AGGREGATE_SHA256 =
   "c7ca6e42fbcb9a6e3ab981bef6577b7911692df322ceb09b1530706871a92d8b";
+
+// pg-delta excludes default privileges and postgres ACLs. Only the official
+// migrator may certify these permission changes, including cascading revokes.
+const OFFICIAL_PERMISSION_MIGRATIONS = [
+  "20260914120000",
+  "20260916120000",
+  "20260922120000",
+] as const;
 
 export type PgdeltaStatus = "changes" | "no_changes";
 
@@ -1834,6 +1842,15 @@ export class RealtimeTenantSchemaReconcileService {
     if (!walColumnInspectionEqual(verifiedSchema.walColumn, afterSchema.walColumn)) {
       throw new Error(
         "realtime.wal_column catalog changed during release verification; ledger was not modified",
+      );
+    }
+    const pendingPermissionMigrations = OFFICIAL_PERMISSION_MIGRATIONS.filter(
+      (version) => plan.migrationVersions.includes(version)
+        && !verifiedSchema.tenantLedgerVersions.includes(version),
+    );
+    if (pendingPermissionMigrations.length > 0) {
+      throw new Error(
+        `official Realtime permission migrations must run before ledger synchronization: ${pendingPermissionMigrations.join(", ")}; pgdelta no_changes does not verify these privileges`,
       );
     }
     await this.assertDatabaseIdentity(plan.projectRef, plan.databaseIdentity, "database ledger synchronization");

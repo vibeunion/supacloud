@@ -3,7 +3,6 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createProjectBackend } from '../src/project-runtime.js'
-import { withWindowsSubprocessRef } from '../scripts/subprocess.js'
 
 const cliPath = resolve(import.meta.dir, '../src/cli.ts')
 
@@ -40,11 +39,11 @@ async function readCliKeys(projectDir: string): Promise<ProjectKeys> {
     stdout: 'pipe',
     stderr: 'pipe',
   })
-  const [exitCode, standardOutput, standardError] = await withWindowsSubprocessRef(() => Promise.all([
+  const [exitCode, standardOutput, standardError] = await Promise.all([
     cliProcess.exited,
     new Response(cliProcess.stdout).text(),
     new Response(cliProcess.stderr).text(),
-  ]))
+  ])
   expect(exitCode).toBe(0)
   expect(standardError).toBe('')
   return parseProjectKeys(standardOutput)

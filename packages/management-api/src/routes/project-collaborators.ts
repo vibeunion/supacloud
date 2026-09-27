@@ -14,12 +14,14 @@ function toHttpError(error: unknown) {
 }
 
 export const projectCollaboratorRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
-  .onBeforeHandle(async ({ params, request }) => {
+  .beforeHandle(async ({ params, request }) => {
     if (isInvitationAcceptanceRequest(request)) return;
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
   })
-  .get("/collaborators", async ({ params, request }) => {
+  .get("/collaborators", {
+    detail: { tags: ["collaborators"], summary: "List project collaborators" },
+  }, async ({ params, request }) => {
     try {
       return await projectCollaboratorService.list(
         params.ref,
@@ -28,10 +30,15 @@ export const projectCollaboratorRoutes = new Elysia({ prefix: "/v1/projects/:ref
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    detail: { tags: ["collaborators"], summary: "List project collaborators" },
   })
-  .post("/collaborators", async ({ params, body, request, set }) => {
+  .post("/collaborators", {
+    body: t.Object({
+      principal_id: t.String(),
+      email: t.Optional(t.Nullable(t.String())),
+      role: t.String(),
+    }, { additionalProperties: false }),
+    detail: { tags: ["collaborators"], summary: "Add a project collaborator" },
+  }, async ({ params, body, request, set }) => {
     try {
       const actor = await resolveTrustedPrincipal(request, params.ref);
       const collaborator = await projectCollaboratorService.create(params.ref, body, actor);
@@ -40,29 +47,24 @@ export const projectCollaboratorRoutes = new Elysia({ prefix: "/v1/projects/:ref
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    body: t.Object({
-      principal_id: t.String(),
-      email: t.Optional(t.Nullable(t.String())),
-      role: t.String(),
-    }, { additionalProperties: false }),
-    detail: { tags: ["collaborators"], summary: "Add a project collaborator" },
   })
-  .patch("/collaborators/:collaboratorId", async ({ params, body, request }) => {
+  .patch("/collaborators/:collaboratorId", {
+    body: t.Object({
+      role: t.Optional(t.String()),
+      status: t.Optional(t.String()),
+    }, { additionalProperties: false }),
+    detail: { tags: ["collaborators"], summary: "Update a project collaborator" },
+  }, async ({ params, body, request }) => {
     try {
       const actor = await resolveTrustedPrincipal(request, params.ref);
       return await projectCollaboratorService.update(params.ref, params.collaboratorId, body, actor);
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    body: t.Object({
-      role: t.Optional(t.String()),
-      status: t.Optional(t.String()),
-    }, { additionalProperties: false }),
-    detail: { tags: ["collaborators"], summary: "Update a project collaborator" },
   })
-  .delete("/collaborators/:collaboratorId", async ({ params, request }) => {
+  .delete("/collaborators/:collaboratorId", {
+    detail: { tags: ["collaborators"], summary: "Remove a project collaborator" },
+  }, async ({ params, request }) => {
     try {
       const actor = await resolveTrustedPrincipal(request, params.ref);
       const collaborator = await projectCollaboratorService.remove(params.ref, params.collaboratorId, actor);
@@ -70,20 +72,25 @@ export const projectCollaboratorRoutes = new Elysia({ prefix: "/v1/projects/:ref
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    detail: { tags: ["collaborators"], summary: "Remove a project collaborator" },
   })
-  .get("/collaborator-invitations", async ({ params, request }) => {
+  .get("/collaborator-invitations", {
+    detail: { tags: ["collaborators"], summary: "List project collaborator invitations" },
+  }, async ({ params, request }) => {
     try {
       const actor = await resolveTrustedPrincipal(request, params.ref);
       return await projectCollaboratorService.listInvitations(params.ref, actor);
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    detail: { tags: ["collaborators"], summary: "List project collaborator invitations" },
   })
-  .post("/collaborator-invitations", async ({ params, body, request, set }) => {
+  .post("/collaborator-invitations", {
+    body: t.Object({
+      email: t.String(),
+      role: t.String(),
+      ttl_hours: t.Optional(t.Number({ minimum: 1, maximum: 720 })),
+    }, { additionalProperties: false }),
+    detail: { tags: ["collaborators"], summary: "Invite a project collaborator" },
+  }, async ({ params, body, request, set }) => {
     try {
       const actor = await resolveTrustedPrincipal(request, params.ref);
       const invitation = await projectCollaboratorService.invite(params.ref, body, actor);
@@ -92,25 +99,21 @@ export const projectCollaboratorRoutes = new Elysia({ prefix: "/v1/projects/:ref
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    body: t.Object({
-      email: t.String(),
-      role: t.String(),
-      ttl_hours: t.Optional(t.Number({ minimum: 1, maximum: 720 })),
-    }, { additionalProperties: false }),
-    detail: { tags: ["collaborators"], summary: "Invite a project collaborator" },
   })
-  .post("/collaborator-invitations/:invitationId/resend", async ({ params, request }) => {
+  .post("/collaborator-invitations/:invitationId/resend", {
+    detail: { tags: ["collaborators"], summary: "Resend a project collaborator invitation" },
+  }, async ({ params, request }) => {
     try {
       const actor = await resolveTrustedPrincipal(request, params.ref);
       return await projectCollaboratorService.resend(params.ref, params.invitationId, actor);
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    detail: { tags: ["collaborators"], summary: "Resend a project collaborator invitation" },
   })
-  .post("/collaborator-invitations/:invitationId/accept", async ({ params, body, request }) => {
+  .post("/collaborator-invitations/:invitationId/accept", {
+    body: t.Object({ token: t.String() }, { additionalProperties: false }),
+    detail: { tags: ["collaborators"], summary: "Accept a project collaborator invitation" },
+  }, async ({ params, body, request }) => {
     try {
       const principal = await resolveInvitationPrincipal(request, params.ref);
       return await projectCollaboratorService.accept({
@@ -122,11 +125,10 @@ export const projectCollaboratorRoutes = new Elysia({ prefix: "/v1/projects/:ref
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    body: t.Object({ token: t.String() }, { additionalProperties: false }),
-    detail: { tags: ["collaborators"], summary: "Accept a project collaborator invitation" },
   })
-  .delete("/collaborator-invitations/:invitationId", async ({ params, request }) => {
+  .delete("/collaborator-invitations/:invitationId", {
+    detail: { tags: ["collaborators"], summary: "Revoke a project collaborator invitation" },
+  }, async ({ params, request }) => {
     try {
       const actor = await resolveTrustedPrincipal(request, params.ref);
       const invitation = await projectCollaboratorService.revokeInvitation(params.ref, params.invitationId, actor);
@@ -134,6 +136,4 @@ export const projectCollaboratorRoutes = new Elysia({ prefix: "/v1/projects/:ref
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    detail: { tags: ["collaborators"], summary: "Revoke a project collaborator invitation" },
   });

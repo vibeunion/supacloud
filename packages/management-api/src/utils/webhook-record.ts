@@ -1,5 +1,6 @@
-import { Type, type Static } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
+import { Type, type Static } from "typebox";
+import { Value } from "typebox/value";
+import { dateSchema } from "./date-schema";
 
 const nullableText = Type.Union([Type.String(), Type.Null()]);
 const webhookSchema = Type.Object({
@@ -13,9 +14,9 @@ const webhookSchema = Type.Object({
   enabled: Type.Boolean(),
   api_version: Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$" }),
   created_by: nullableText,
-  created_at: Type.Date(),
-  updated_at: Type.Date(),
-  deleted_at: Type.Union([Type.Date(), Type.Null()]),
+  created_at: dateSchema,
+  updated_at: dateSchema,
+  deleted_at: Type.Union([dateSchema, Type.Null()]),
   has_secret: Type.Optional(Type.Boolean()),
 });
 export type WebhookRecord = Static<typeof webhookSchema>;

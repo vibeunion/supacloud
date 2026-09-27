@@ -152,6 +152,30 @@ packages, actual installation, compiler/typecheck/test/build, HTTP behavior,
 environment isolation, artifact drift and semantic watch/restart. The Project CLI
 CI job runs this gate. It cleans up its temporary project and server.
 
+The gate prefers cached Bun metadata (`--prefer-offline`) for dependency
+installation, while still fetching missing packages on a cold cache. This avoids
+unnecessary registry re-resolution of cached third-party dependencies alongside
+the local tarball overrides. Each generated consumer then runs a second install
+with `--offline --frozen-lockfile --ignore-scripts`; failure is fatal, not a skipped
+verification. Workspace package installs retain `--frozen-lockfile`. Local
+tarballs and their overrides remain the source of the candidate packages; this
+is not a source-symlink shortcut.
+
+Commands using the bounded runner report working directory, arguments and elapsed time.
+A command timeout (120 seconds) reports the failing stage and is never accepted
+as an expected negative test. An unresponsive child receives SIGKILL one second
+after SIGTERM. A cold-cache install still requires registry availability; the
+offline second pass is not evidence that an empty cache works without a network.
+
+Run `bun test scripts/check_app_starter.test.ts` for the bounded installation
+regression tests, including transitive local tarball overrides, a clean frozen
+offline reinstall, and child timeout cleanup. These tests do not rebuild
+workspace packages or start a database and do not replace the complete gate.
+For local native PostgreSQL coverage, use
+`bun --no-env-file scripts/check_app_starter.ts --postgres-bin /path/to/postgresql/bin`.
+The complete gate rebuilds workspace `dist` directories; coordinate with other
+active builders before running it in a shared checkout.
+
 For a generated application's CI, commit `generated/` after initial compilation,
 then run `bun run check:generated` before regenerating files, followed by
 `bun run typecheck` and `bun run test`. The bootstrap `check` script regenerates

@@ -6,9 +6,9 @@ import { pgmqService } from "../../src/services/pgmq.service";
 import { taskProjectFixture } from "../helpers/task-fixtures";
 import { withNativePostgres } from "../helpers/native-postgres";
 
-const image = "ghcr.io/pgmq/pg18-pgmq@sha256:bfb3537068ce453609744518ece92b178ac89dff53747d47ca6fab91c2fc66a6";
+const image = "ghcr.io/pgmq/pg18-pgmq@sha256:2dd8ac92a1c0eb121d6ea5b12b3f7c015813ae58945a940451d4683afd5a19c2";
 
-test("PGMQ 1.10.0 executes actual service create/send/read/archive/delete/metrics operations", async () => {
+test("PGMQ 1.13.0 executes actual service create/send/read/archive/delete/metrics operations", async () => {
   await withNativePostgres(async db => {
     const find = spyOn(projectRepository, "findByRef").mockResolvedValue(
       taskProjectFixture({ ref: "proj_1", db_name: "fixture", deleted_at: null }));
@@ -17,7 +17,7 @@ test("PGMQ 1.10.0 executes actual service create/send/read/archive/delete/metric
       await pgmqService.createQueue("proj_1", "jobs");
       await pgmqService.createQueue("proj_1", "fast", { unlogged: true });
       const version = await db`SELECT extversion FROM pg_extension WHERE extname = 'pgmq'`;
-      expect(version[0].extversion).toBe("1.10.0");
+      expect(version[0].extversion).toBe("1.13.0");
       const queues = await pgmqService.listQueues("proj_1");
       expect(queues.find(queue => queue.queue_name === "jobs")).toMatchObject({ is_unlogged: false, is_partitioned: false });
       expect(queues.find(queue => queue.queue_name === "fast")).toMatchObject({ is_unlogged: true, is_partitioned: false });

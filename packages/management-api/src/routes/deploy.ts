@@ -4,7 +4,15 @@ import { logger } from "../utils/logger";
 import { requireAdminAuth } from "../middleware/auth";
 
 export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
-  .post("/", async ({ body, request }) => {
+  .post("/", {
+    body: t.Object({
+      app: t.String(),
+      tenant: t.String(),
+      artifact: t.String(),
+      config: t.Any(),
+    }),
+    detail: { tags: ["frontend"], summary: "Trigger a deployment" },
+  }, async ({ body, request }) => {
     const authError = await requireAdminAuth(request);
     if (authError) return status(authError.status, authError.body);
     try {
@@ -27,16 +35,14 @@ export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
         code: "500",
       });
     }
-  }, {
+  })
+  .post("/rollback", {
     body: t.Object({
       app: t.String(),
-      tenant: t.String(),
-      artifact: t.String(),
-      config: t.Any(),
+      version: t.Optional(t.String()),
     }),
-    detail: { tags: ["frontend"], summary: "Trigger a deployment" },
-  })
-  .post("/rollback", async ({ body, request }) => {
+    detail: { tags: ["frontend"], summary: "Rollback a deployment" },
+  }, async ({ body, request }) => {
     const authError = await requireAdminAuth(request);
     if (authError) return status(authError.status, authError.body);
     try {
@@ -50,14 +56,14 @@ export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
         code: "500",
       });
     }
-  }, {
-    body: t.Object({
-      app: t.String(),
-      version: t.Optional(t.String()),
-    }),
-    detail: { tags: ["frontend"], summary: "Rollback a deployment" },
   })
-  .get("/history", async ({ query }) => {
+  .get("/history", {
+    query: t.Object({
+      app: t.Optional(t.String()),
+      limit: t.Optional(t.String()),
+    }),
+    detail: { tags: ["frontend"], summary: "Get deployment history" },
+  }, async ({ query }) => {
     try {
       const app = query.app;
       const limit = parseInt(query.limit ?? "20") || 20;
@@ -76,14 +82,13 @@ export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
         code: "500",
       });
     }
-  }, {
+  })
+  .get("/versions", {
     query: t.Object({
       app: t.Optional(t.String()),
-      limit: t.Optional(t.String()),
     }),
-    detail: { tags: ["frontend"], summary: "Get deployment history" },
-  })
-  .get("/versions", async ({ query }) => {
+    detail: { tags: ["frontend"], summary: "List available deployment versions" },
+  }, async ({ query }) => {
     try {
       if (!query.app) {
         return status(400, {
@@ -108,9 +113,4 @@ export const deployRoutes = new Elysia({ prefix: "/v1/deploy" })
         code: "500",
       });
     }
-  }, {
-    query: t.Object({
-      app: t.Optional(t.String()),
-    }),
-    detail: { tags: ["frontend"], summary: "List available deployment versions" },
   });

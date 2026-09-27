@@ -12,9 +12,20 @@ import { requireAuthRuntimeManagement } from "./auth-runtime";
  * WeChat OAuth routes — miniprogram, official account (mp), and open platform
  */
 export const wechatAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
-  .onBeforeHandle(requireAuthRuntimeManagement("providers"))
+  .beforeHandle(requireAuthRuntimeManagement("providers"))
   .post(
     "/wechat/miniprogram",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      body: t.Object({
+        app_id: t.String({ minLength: 1 }),
+        app_secret: t.String({ minLength: 1 }),
+        deploy_function: t.Optional(t.Boolean({ default: true })),
+      }),
+      detail: { tags: ["auth"], summary: "Configure WeChat Mini Program login" },
+    },
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
@@ -66,7 +77,11 @@ export const wechatAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         message: "WeChat Mini Program login configured successfully, Edge Function deployed",
         function_slug: "wechat-login",
       };
-    },
+    }
+  )
+
+  .post(
+    "/wechat/mp",
     {
       params: t.Object({
         ref: t.String(),
@@ -74,14 +89,11 @@ export const wechatAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       body: t.Object({
         app_id: t.String({ minLength: 1 }),
         app_secret: t.String({ minLength: 1 }),
+        redirect_uri: t.Optional(t.String()),
         deploy_function: t.Optional(t.Boolean({ default: true })),
       }),
-      detail: { tags: ["auth"], summary: "Configure WeChat Mini Program login" },
-    }
-  )
-
-  .post(
-    "/wechat/mp",
+      detail: { tags: ["auth"], summary: "Configure WeChat Official Account login" },
+    },
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
@@ -140,7 +152,11 @@ export const wechatAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         function_slug: "wechat-mp-login",
         is_standard_oauth: false,
       };
-    },
+    }
+  )
+
+  .post(
+    "/wechat/open",
     {
       params: t.Object({
         ref: t.String(),
@@ -149,14 +165,9 @@ export const wechatAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         app_id: t.String({ minLength: 1 }),
         app_secret: t.String({ minLength: 1 }),
         redirect_uri: t.Optional(t.String()),
-        deploy_function: t.Optional(t.Boolean({ default: true })),
       }),
-      detail: { tags: ["auth"], summary: "Configure WeChat Official Account login" },
-    }
-  )
-
-  .post(
-    "/wechat/open",
+      detail: { tags: ["auth"], summary: "Configure WeChat Open Platform login" },
+    },
     async ({ params, body, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
@@ -212,17 +223,6 @@ export const wechatAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         message: "WeChat Open Platform login configured successfully (Standard OAuth2.0)",
         is_standard_oauth: true,
       };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      body: t.Object({
-        app_id: t.String({ minLength: 1 }),
-        app_secret: t.String({ minLength: 1 }),
-        redirect_uri: t.Optional(t.String()),
-      }),
-      detail: { tags: ["auth"], summary: "Configure WeChat Open Platform login" },
     }
   );
 

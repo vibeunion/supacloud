@@ -29,7 +29,8 @@ read_request_value() {
 operation=$(read_request_value operation) || { echo "ERROR: Invalid systemd unit operation" >&2; exit 1; }
 unit_name=$(read_request_value unit_name) || { echo "ERROR: Invalid systemd unit name" >&2; exit 1; }
 if [[ ! "$unit_name" =~ ^supacloud-(pgrst|gotrue)@\.service$ \
-    && ! "$unit_name" =~ ^supacloud-frontend-[a-z0-9-]{1,64}\.service$ ]]; then
+    && ! "$unit_name" =~ ^supacloud-frontend-[a-z0-9-]{1,64}\.service$ \
+    && ! "$unit_name" =~ ^supacloud-application-[a-z0-9-]{1,20}-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}-[a-z][a-z0-9-]{0,62}\.service$ ]]; then
     echo "ERROR: Systemd unit is outside the SupaCloud allow-list" >&2
     exit 1
 fi
@@ -47,13 +48,17 @@ validate_environment_file() {
             [[ "$value" =~ ^/var/supacloud/frontends/([a-z0-9-]{1,20})/([a-f0-9]{8})/\.env$ ]] || return 1
             [[ "$unit_name" == "supacloud-frontend-${BASH_REMATCH[1]}-${BASH_REMATCH[2]}.service" ]]
             ;;
+        supacloud-application-*.service)
+            [[ "$value" =~ ^/var/supacloud/application-runtime/([a-z0-9-]{1,20})/([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})/([a-z][a-z0-9-]{0,62})\.env$ ]] || return 1
+            [[ "$unit_name" == "supacloud-application-${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]}.service" ]]
+            ;;
         *) return 1 ;;
     esac
 }
 
 validate_unit_content() {
     local section="" line key value user="" group="" seen_unit=0 seen_service=0 seen_install=0 seen_nnp=0 seen_env_file=0
-    local unit_bytes environment_file_ok=0
+    local unit_bytes environment_file_ok=0 environment_file=""
     unit_bytes=$(wc -c < "$source_file")
     (( unit_bytes > 0 && unit_bytes <= 16384 )) || return 1
     cmp -s "$source_file" <(LC_ALL=C tr -d '\000-\011\013-\037\177' < "$source_file") || return 1
@@ -79,7 +84,7 @@ validate_unit_content() {
             Service:CPUWeight|Service:Environment|Service:EnvironmentFile|Service:ExecReload|Service:ExecStart|\
             Service:Group|Service:LimitNOFILE|Service:MemoryMax|Service:NoNewPrivileges|Service:ProtectHome|\
             Service:ProtectSystem|Service:ReadOnlyPaths|Service:Restart|Service:RestartSec|\
-            Service:SyslogIdentifier|Service:Type|Service:User|Service:WorkingDirectory|\
+            Service:SyslogIdentifier|Service:TimeoutStopSec|Service:Type|Service:User|Service:WorkingDirectory|\
             Install:WantedBy) ;;
             *) return 1 ;;
         esac
@@ -93,6 +98,7 @@ validate_unit_content() {
         if [[ "$key" == EnvironmentFile ]]; then
             [[ "$seen_env_file" == 0 ]] && validate_environment_file "$value" || return 1
             seen_env_file=1
+            environment_file="$value"
         fi
         if [[ "$key" == User ]]; then
             [[ -z "$user" && "$value" =~ ^supacloud-(%i|[a-z0-9-]{1,20})$ ]] || return 1
@@ -111,6 +117,9 @@ validate_unit_content() {
         return 1
     fi
     if [[ "$unit_name" == supacloud-frontend-* && "$unit_name" != supacloud-frontend-${user#supacloud-}-* ]]; then
+        return 1
+    fi
+    if [[ "$unit_name" == supacloud-application-* && "$environment_file" != /var/supacloud/application-runtime/${user#supacloud-}/* ]]; then
         return 1
     fi
 }

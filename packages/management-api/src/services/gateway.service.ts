@@ -16,6 +16,10 @@ import { GOTRUE_USER_ID_POSTGRES_PATTERN } from "../utils/project-user-lifecycle
 import { assertUniqueCaddyIds, runCaddyStartupPreflight } from "./caddy-startup-preflight";
 import { FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE } from "./frontend-release-contract";
 import {
+    APPLICATION_ROUTE_PREFIX, applicationGatewayProjectRef, applicationGatewayRoute, assertApplicationGatewayHosts,
+    verifyApplicationGatewayRoutes, verifyApplicationGatewayActivationAbsent, type ApplicationGatewayInput,
+} from "./application-gateway";
+import {
     type CaddyHeaderValue,
     type CaddyMatcher,
     type CaddyRoute,
@@ -239,6 +243,9 @@ export interface GatewayProvider {
     configureStudioDomain(domain: string, port: number): Promise<void>;
     upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }): Promise<{ success: boolean; certificateId?: string; error?: string }>;
     configureFrontendRoute(route: FrontendGatewayRoute): Promise<void>;
+    configureApplicationRoute(input: ApplicationGatewayInput): Promise<void>;
+    verifyApplicationRoute(input: ApplicationGatewayInput): Promise<void>;
+    verifyApplicationRouteAbsent(input: ApplicationGatewayInput): Promise<void>;
     removeFrontendRoute(projectRef: string, deploymentId: string): Promise<void>;
     readFrontendStaticRoot(projectRef: string, deploymentId: string): Promise<string | null>;
     setupHostedAuthRoutes(): Promise<{ success: boolean; error?: string }>;
@@ -465,6 +472,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         const routes = [...managedRoutes, ...this.makeSecurityRateLimitRoutes(managedRoutes)]
             .sort((a, b) => this.compareRoutesForCaddy(a, b))
             .map((route) => this.renderRouteForCaddy(route));
+        assertApplicationGatewayHosts(routes);
         routes.push(this.makeUnmatchedHostRoute());
 
         return {
@@ -591,11 +599,13 @@ export class CaddyGatewayProvider implements GatewayProvider {
     private async prepareCleanRebuildUnlocked(): Promise<void> {
         await this.hydrateFromDiskIfUninitialized();
         await this.hydrateCertificatesFromDisk();
-        const globalRoutes = Array.from(this.routesById.entries()).filter(([id]) =>
+        // Application routes are activation-owned, not reconstructed from frontend deployments.
+        const preservedRoutes = Array.from(this.routesById.entries()).filter(([id]) =>
             id.startsWith("route-custom-gateway-_global-") || id.startsWith("route-frontend-_global-")
+            || id.startsWith(APPLICATION_ROUTE_PREFIX)
         );
         this.routesById.clear();
-        for (const [id, route] of globalRoutes) this.routesById.set(id, route);
+        for (const [id, route] of preservedRoutes) this.routesById.set(id, route);
         this.rateLimits.clear();
         this.customRateLimits.clear();
         this.hydrated = true;
@@ -1017,7 +1027,15 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     private async writeAndLoadCurrentConfig(): Promise<void> {
-        const next = this.baseConfig();
+        let next: CaddyConfig;
+        try {
+            next = this.baseConfig();
+        } catch (error) {
+            // Validation happened before /load; discard an invalid reconciler candidate.
+            const context = this.operationContext.getStore();
+            if (context?.token === this.operationToken) this.restoreMutableState(context.previousSnapshot);
+            throw error;
+        }
         await fs.mkdir(path.dirname(config.caddyConfigPath), { recursive: true });
         const tmpPath = `${config.caddyConfigPath}.tmp-${Date.now()}-${Math.random().toString(36).slice(2)}`;
         await fs.writeFile(tmpPath, JSON.stringify(next, null, 2));
@@ -1151,7 +1169,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     private projectRouteIds(projectRef: string): string[] {
         return Array.from(this.routesById.keys()).filter((id) =>
-            id.includes(`-${projectRef}-`) || id.endsWith(`-${projectRef}`),
+            !id.startsWith(APPLICATION_ROUTE_PREFIX)
+            && (id.includes(`-${projectRef}-`) || id.endsWith(`-${projectRef}`)),
         );
     }
 
@@ -1756,6 +1775,16 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
             const routes = [
                 adminUserDeleteRoute,
+                // Legacy API keys need the same OIDC credential translation as
+                // opaque keys before reaching the local GoTrue admin API.
+                ...(!externalAuthUpstream || sharedAuthProxy ? [this.makeRoute({
+                    id: caddyRouteId(projectRef, "auth-admin"),
+                    hosts: [...hosts, ...authHosts],
+                    path: ["/auth/v1/admin", "/auth/v1/admin/*"],
+                    upstream: `${hostIp}:${config.port}`,
+                    projectRef,
+                    corsOrigins,
+                })] : []),
                 restOpenApiRoute,
                 ...opaqueRoutes,
                 this.makeRoute({ id: caddyRouteId(projectRef, "rest"), hosts, path: "/rest/v1*", upstream: `${hostIp}:${pgrstPort}`, projectRef, stripPrefix: "/rest/v1", corsOrigins }),
@@ -1839,6 +1868,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             for (const route of routes) this.routesById.set(String(route["@id"]), route);
             if (externalAuthUpstream) {
                 this.routesById.delete(caddyRouteId(projectRef, "opaque-auth"));
+                if (!sharedAuthProxy) this.routesById.delete(caddyRouteId(projectRef, "auth-admin"));
             }
             if (authHosts.length > 0) {
                 if (!externalAuthUpstream) {
@@ -1899,7 +1929,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     private async addProjectDomainsUnlocked(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         await this.hydrateFromDiskIfUninitialized();
-        const existingKinds = ["opaque-rest", "opaque-graphql", "opaque-auth", "auth-admin-user-delete", "rest", "graphql", "auth", "gotrue-well-known", "functions", "storage", "realtime-api", "realtime", "management", "acme"];
+        const existingKinds = ["opaque-rest", "opaque-graphql", "opaque-auth", "auth-admin-user-delete", "auth-admin", "rest", "graphql", "auth", "gotrue-well-known", "functions", "storage", "realtime-api", "realtime", "management", "acme"];
         for (const kind of existingKinds) {
             const route = this.routesById.get(caddyRouteId(projectRef, kind));
             const matches = Array.isArray(route?.match) ? route.match as Record<string, unknown>[] : [];
@@ -1923,6 +1953,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         const remove = new Set([...apiDomains, ...studioDomains].map(normalizeCaddyHost));
         for (const route of this.routesById.values()) {
             const id = String(route["@id"] || "");
+            if (id.startsWith(APPLICATION_ROUTE_PREFIX)) continue;
             if (!id.includes(`-${projectRef}-`)) continue;
             const matches = Array.isArray(route.match) ? route.match as Record<string, unknown>[] : [];
             for (const match of matches) {
@@ -1941,7 +1972,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     private async removeServiceUnlocked(projectRef: string): Promise<{ success: boolean; error?: string }> {
         await this.hydrateFromDiskIfUninitialized();
-        const ids = Array.from(this.routesById.keys()).filter((id) => id.includes(`-${projectRef}-`) || id.endsWith(`-${projectRef}`));
+        const ids = Array.from(this.routesById.keys()).filter((id) =>
+            id.startsWith(APPLICATION_ROUTE_PREFIX)
+                ? applicationGatewayProjectRef(id) === projectRef
+                : id.includes(`-${projectRef}-`) || id.endsWith(`-${projectRef}`));
         await this.removeRoutes(ids);
         return { success: true };
     }
@@ -2089,6 +2123,46 @@ export class CaddyGatewayProvider implements GatewayProvider {
         this.certsById.set(certificateId, { certificate: certPath, key: keyPath });
         await this.persistAndLoad();
         return { success: true, certificateId };
+    }
+
+    async configureApplicationRoute(input: ApplicationGatewayInput): Promise<void> {
+        const owned = structuredClone(input);
+        const { id, route } = applicationGatewayRoute(owned);
+        await this.serializeOperation(async () => {
+            if (this.deferredPersistDepth > 0) throw new Error("APPLICATION_GATEWAY_DEFERRED_WRITE");
+            if (route) await this.putRoute(route);
+            else await this.removeRoutes([id]);
+            await this.verifyApplicationRouteUnlocked(owned);
+        });
+    }
+
+    async verifyApplicationRoute(input: ApplicationGatewayInput): Promise<void> {
+        const owned = structuredClone(input);
+        await this.serializeOperation(() => this.verifyApplicationRouteUnlocked(owned));
+    }
+
+    private async verifyApplicationRouteUnlocked(input: ApplicationGatewayInput): Promise<void> {
+        const response = await this.caddyRequest("/config/apps/http/servers/supacloud/routes");
+        if (!response.ok) throw new Error(`Caddy application read-back failed with ${response.status}`);
+        verifyApplicationGatewayRoutes(await response.json(), input);
+        const durable = await this.readDurableConfig();
+        verifyApplicationGatewayRoutes(durable?.apps?.http?.servers?.supacloud?.routes, input);
+    }
+
+    private async verifyApplicationRouteAbsentUnlocked(input: ApplicationGatewayInput): Promise<void> {
+        applicationGatewayRoute(input);
+        const response = await this.caddyRequest("/config/apps/http/servers/supacloud/routes");
+        if (!response.ok) throw new Error(`Caddy application read-back failed with ${response.status}`);
+        const liveRoutes = await response.json();
+        verifyApplicationGatewayActivationAbsent(liveRoutes, input);
+        const durable = await this.readDurableConfig();
+        const durableRoutes = durable?.apps?.http?.servers?.supacloud?.routes;
+        verifyApplicationGatewayActivationAbsent(durableRoutes, input);
+    }
+
+    async verifyApplicationRouteAbsent(input: ApplicationGatewayInput): Promise<void> {
+        const owned = structuredClone(input);
+        await this.serializeOperation(() => this.verifyApplicationRouteAbsentUnlocked(owned));
     }
 
     async configureFrontendRoute(route: FrontendGatewayRoute): Promise<void> {
@@ -2291,6 +2365,9 @@ export class GatewayService implements GatewayProvider {
     configureStudioDomain(domain: string, port: number) { return this.provider.configureStudioDomain(domain, port); }
     upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }) { return this.provider.upsertCertificateForSnis(opts); }
     configureFrontendRoute(route: FrontendGatewayRoute) { return this.provider.configureFrontendRoute(route); }
+    configureApplicationRoute(input: ApplicationGatewayInput) { return this.provider.configureApplicationRoute(input); }
+    verifyApplicationRoute(input: ApplicationGatewayInput) { return this.provider.verifyApplicationRoute(input); }
+    verifyApplicationRouteAbsent(input: ApplicationGatewayInput) { return this.provider.verifyApplicationRouteAbsent(input); }
     removeFrontendRoute(projectRef: string, deploymentId: string) { return this.provider.removeFrontendRoute(projectRef, deploymentId); }
     readFrontendStaticRoot(projectRef: string, deploymentId: string) { return this.provider.readFrontendStaticRoot(projectRef, deploymentId); }
     setupHostedAuthRoutes() { return this.provider.setupHostedAuthRoutes(); }

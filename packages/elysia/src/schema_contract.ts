@@ -1,15 +1,14 @@
 import {
-  getSchemaValidator,
+  Validator,
+  t,
   StatusMap,
-  ElysiaCustomStatusResponse,
+  ElysiaStatus,
   type Cookie,
-  type Elysia,
-  type HTTPMethod,
+  type AnyElysia,
   type InputSchema,
-  type MaybePromise,
-  type TSchema,
-  type UnwrapSchema,
 } from "elysia";
+import type { HTTPMethod, MaybePromise } from "elysia/types";
+import type { TSchema, StaticDecode as UnwrapSchema } from "typebox";
 import type {
   ResponseMapSelector as AppResponseMapSelector,
   RouteContractSchemas as AppRouteContractSchemas,
@@ -107,26 +106,12 @@ type ResponseStatusCodes<Value> = NumericResponseCodes<Value>
 
 type DecodedSchema<Value> = Value extends TSchema ? UnwrapSchema<Value> : unknown;
 
-type DecodedResponse<Schemas extends RouteContractSchemas> = ResponseField<Schemas> extends infer Response
-  ? Response extends TSchema
-    ? DecodedSchema<Response>
-    : Response extends Readonly<Record<string | number, unknown>>
-    ? DecodedSchema<Response[keyof Response]>
-    : DecodedSchema<Response>
-  : unknown;
-
-type StatusResponse<Schemas extends RouteContractSchemas> = ResponseField<Schemas> extends infer Response
-  ? Response extends TSchema
-    ? never
-    : Response extends Readonly<Record<string | number, unknown>>
-    ? {
-        [Code in ResponseStatusCodes<Response>]: ElysiaCustomStatusResponse<
-          Code,
-          DecodedSchema<ResponseSchemaForCode<Response, Code>>
-        >
-      }[ResponseStatusCodes<Response>]
-    : never
-  : never;
+type StatusResponse<Schemas extends RouteContractSchemas> =
+  [DeclaredResponses<Schemas>] extends [never] ? never : {
+    [Code in ResponseStatusCodes<DeclaredResponses<Schemas>>]: ElysiaStatus<
+      Code, DecodedSchema<ResponseSchemaForCode<DeclaredResponses<Schemas>, Code>>
+    >
+  }[ResponseStatusCodes<DeclaredResponses<Schemas>>];
 
 /**
  * A plain handler return is sent as the default HTTP 200 response.  When a
@@ -134,13 +119,12 @@ type StatusResponse<Schemas extends RouteContractSchemas> = ResponseField<Schema
  * valid here; every other payload must use `status(code, value)` so its
  * status and schema stay coupled at runtime.
  */
-type PlainResponse<Schemas extends RouteContractSchemas> = ResponseField<Schemas> extends infer Response
-  ? Response extends Readonly<Record<string | number, unknown>>
-    ? AllowsPlainSuccessResponse<Response> extends true
-      ? DecodedSchema<ResponseSchemaForCode<Response, 200>>
-      : never
-    : DecodedResponse<Schemas>
-  : never;
+type PlainResponse<Schemas extends RouteContractSchemas> =
+  [DeclaredResponses<Schemas>] extends [never]
+    ? DecodedSchema<LegacyResponse<Schemas>>
+    : AllowsPlainSuccessResponse<DeclaredResponses<Schemas>> extends true
+      ? DecodedSchema<ResponseSchemaForCode<DeclaredResponses<Schemas>, 200>>
+      : never;
 
 type ElysiaRouteOutput<Schemas extends RouteContractSchemas> =
   | PlainResponse<Schemas>
@@ -177,28 +161,18 @@ type DecodedCookie<Schemas extends RouteContractSchemas> = DecodedField<Schemas,
     : Record<string, Cookie<unknown>>
   : Record<string, Cookie<unknown>>;
 
-type StatusCode<Schemas extends RouteContractSchemas> = ResponseField<Schemas> extends infer Response
-  ? Response extends TSchema
-    ? never
-    : Response extends Readonly<Record<string | number, unknown>>
-    ? ResponseStatusCodes<Response>
-    : never
-  : never;
+type StatusCode<Schemas extends RouteContractSchemas> =
+  [DeclaredResponses<Schemas>] extends [never] ? never : ResponseStatusCodes<DeclaredResponses<Schemas>>;
 
-type StatusResponseValue<Schemas extends RouteContractSchemas, Code extends number> = ResponseField<Schemas> extends infer Response
-  ? Response extends TSchema
-    ? DecodedSchema<Response>
-    : Response extends Readonly<Record<string | number, unknown>>
-    ? DecodedSchema<ResponseSchemaForCode<Response, Code>>
-    : DecodedSchema<Response>
-  : unknown;
+type StatusResponseValue<Schemas extends RouteContractSchemas, Code extends number> =
+  DecodedSchema<ResponseSchemaForCode<DeclaredResponses<Schemas>, Code>>;
 
 type RouteStatus<Schemas extends RouteContractSchemas> = [StatusCode<Schemas>] extends [never]
-  ? <const Code extends number, const Value>(code: Code, response: Value) => ElysiaCustomStatusResponse<Code, Value>
+  ? <const Code extends number, const Value>(code: Code, response: Value) => ElysiaStatus<Code, Value>
   : <const Code extends StatusCode<Schemas>, const Value extends StatusResponseValue<Schemas, Code>>(
       code: Code,
       response: Value,
-    ) => ElysiaCustomStatusResponse<Code, Value>;
+    ) => ElysiaStatus<Code, Value>;
 
 /** Elysia-compatible decoded context inferred from one route contract and path. */
 export type ElysiaRouteContext<
@@ -264,7 +238,7 @@ const RESPONSE_STATUS_PATTERN = /^[1-5]\d{2}$/;
 
 function isSchema(value: unknown): boolean {
   return value !== null && typeof value === "object"
-    && (TYPEBOX_KIND in value || "~standard" in value);
+    && (TYPEBOX_KIND in value || "~kind" in value || "~standard" in value);
 }
 
 function isJsonSchemaObject(value: unknown): boolean {
@@ -328,8 +302,8 @@ export function responseStatusDeclared(
 
 export function responseStatusOf(value: unknown, configuredStatus: number | string | undefined): number {
   if (value instanceof Response) return value.status;
-  if (value instanceof ElysiaCustomStatusResponse) {
-    const code = value.code;
+  if (value instanceof ElysiaStatus) {
+    const code = value.status;
     if (typeof code === "number" && Number.isInteger(code) && code >= RESPONSE_STATUS_MIN && code <= RESPONSE_STATUS_MAX) {
       return code;
     }
@@ -458,7 +432,7 @@ export function defineElysiaRoute<
 
 /** Register a contract-bound route while preserving Elysia's fluent app API. */
 export function registerElysiaRoute<
-  const App extends Elysia,
+  const App extends AnyElysia,
   const Method extends HTTPMethod,
   const Path extends string,
   const Schemas extends RouteContractSchemas,
@@ -477,11 +451,11 @@ export function registerElysiaRoute<
     }
     return value;
   };
-  app.route(
+  app.method(
     route.method,
     route.path,
-    handler as ((context: unknown) => unknown),
     toElysiaRouteSchema(route.contract),
+    handler as ((context: unknown) => unknown),
   );
   return app;
 }
@@ -509,13 +483,18 @@ export function createSchemaDecoder<const Schema extends TSchema>(
   schema: Schema,
   options: SchemaDecoderOptions = {},
 ) {
-  const validator = getSchemaValidator(schema, {
-    coerce: options.coerce ?? false,
+  const validator = Validator.create(schema, {
+    ...(options.coerce ? { coerces: [[[
+      ["number", (value: Record<string, unknown>) => t.Numeric(value)],
+      ["integer", (value: Record<string, unknown>) => t.IntegerString(value)],
+      ["boolean", (value: Record<string, unknown>) => t.BooleanString(value)],
+    ]]] as NonNullable<Parameters<typeof Validator.create>[1]>["coerces"] } : {}),
     normalize: options.normalize ?? true,
   });
   return (value: unknown): UnwrapSchema<Schema> => {
     try {
-      return validator.parse(value);
+      if (validator.isAsync) throw new SchemaContractError();
+      return validator.FromSync(value as never) as UnwrapSchema<Schema>;
     } catch {
       throw new SchemaContractError();
     }

@@ -43,6 +43,10 @@ function secretCapability(request: Request): CollaboratorCapability {
 export const projectControlSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
     "/:ref/control-secrets/:scope",
+    {
+      params: t.Object({ ref: t.String(), scope: t.String() }),
+      detail: { tags: ["projects"], summary: "List masked control secret status" },
+    },
     async ({ params, request }) => {
       const authError = await requireSecretProject(request, params.ref);
       if (authError) return authError;
@@ -52,13 +56,13 @@ export const projectControlSecretsRoutes = new Elysia({ prefix: "/v1/projects" }
       const items = await projectControlSecretsService.listStatuses(params.ref, params.scope);
       return { items, total: items.length };
     },
-    {
-      params: t.Object({ ref: t.String(), scope: t.String() }),
-      detail: { tags: ["projects"], summary: "List masked control secret status" },
-    },
   )
   .get(
     "/:ref/control-secrets/:scope/:name",
+    {
+      params: t.Object({ ref: t.String(), scope: t.String(), name: t.String() }),
+      detail: { tags: ["projects"], summary: "Get masked control secret status" },
+    },
     async ({ params, request }) => {
       const authError = await requireSecretProject(request, params.ref);
       if (authError) return authError;
@@ -71,13 +75,14 @@ export const projectControlSecretsRoutes = new Elysia({ prefix: "/v1/projects" }
         return invalidSecretInput(error);
       }
     },
-    {
-      params: t.Object({ ref: t.String(), scope: t.String(), name: t.String() }),
-      detail: { tags: ["projects"], summary: "Get masked control secret status" },
-    },
   )
   .put(
     "/:ref/control-secrets/:scope/:name",
+    {
+      params: t.Object({ ref: t.String(), scope: t.String(), name: t.String() }),
+      body: t.Object({ value: t.String({ minLength: 1, maxLength: 24576 }) }),
+      detail: { tags: ["projects"], summary: "Create or rotate a control secret without revealing it" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireSecretProject(request, params.ref);
       if (authError) return authError;
@@ -90,14 +95,13 @@ export const projectControlSecretsRoutes = new Elysia({ prefix: "/v1/projects" }
         return invalidSecretInput(error);
       }
     },
-    {
-      params: t.Object({ ref: t.String(), scope: t.String(), name: t.String() }),
-      body: t.Object({ value: t.String({ minLength: 1, maxLength: 24576 }) }),
-      detail: { tags: ["projects"], summary: "Create or rotate a control secret without revealing it" },
-    },
   )
   .delete(
     "/:ref/control-secrets/:scope/:name",
+    {
+      params: t.Object({ ref: t.String(), scope: t.String(), name: t.String() }),
+      detail: { tags: ["projects"], summary: "Delete a control secret" },
+    },
     async ({ params, request }) => {
       const authError = await requireSecretProject(request, params.ref);
       if (authError) return authError;
@@ -109,9 +113,5 @@ export const projectControlSecretsRoutes = new Elysia({ prefix: "/v1/projects" }
       } catch (error) {
         return invalidSecretInput(error);
       }
-    },
-    {
-      params: t.Object({ ref: t.String(), scope: t.String(), name: t.String() }),
-      detail: { tags: ["projects"], summary: "Delete a control secret" },
     },
   );

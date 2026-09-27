@@ -87,9 +87,9 @@ test("standalone plugins enforce the same output error boundary without capturin
     .use(createModulePlugin(compiled, compiled.createServices({}, {}), undefined, {
       commandExecutor: (_invocation, next) => next(),
     }))
-    .get("/host", () => { throw new Error("host failure"); }, {
+    .get("/host", {
       error: () => Response.json({ code: "HOST_ERROR" }, { status: 502 }),
-    });
+    }, () => { throw new Error("host failure"); });
   const response = await app.handle(new Request("http://localhost/receipt", { method: "POST" }));
   expect(response.status).toBe(500);
   expect((await response.json()).code).toBe("RESPONSE_VALIDATION_ERROR");

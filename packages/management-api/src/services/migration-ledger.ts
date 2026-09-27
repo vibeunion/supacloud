@@ -37,8 +37,9 @@ export class MigrationLedgerDivergenceError extends Error {
 
 function postgresErrorCode(error: unknown): string | null {
   if (!error || typeof error !== "object") return null;
-  const code = (error as { code?: unknown }).code;
-  return typeof code === "string" ? code : null;
+  const postgresError = error as { code?: unknown; errno?: unknown };
+  return [postgresError.code, postgresError.errno]
+    .find((code): code is string => typeof code === "string" && /^[0-9A-Z]{5}$/.test(code)) ?? null;
 }
 
 function normalizeStatements(rawStatements: unknown): string[] {
@@ -82,8 +83,9 @@ async function readLedgerTable(
   try {
     return normalizeRows(await database.unsafe(`
       SELECT version::text AS version, name, statements,
-             NULL::text AS checksum, NULL::text AS applied_at
-      FROM ${tableName}
+             to_jsonb(migration)->>'checksum' AS checksum,
+             to_jsonb(migration)->>'inserted_at' AS applied_at
+      FROM ${tableName} AS migration
       ORDER BY version ASC
     `));
   } catch (error: unknown) {
@@ -114,13 +116,34 @@ function assertCanonicalIncludesLegacy(
   }
 }
 
-export async function readMigrationLedger(database: MigrationLedgerSql): Promise<MigrationLedgerEntry[]> {
+async function readMigrationLedgers(database: MigrationLedgerSql) {
   const canonical = await readLedgerTable(database, "supabase_migrations.schema_migrations");
   const legacy = await readLedgerTable(database, "public.schema_migrations");
+  return { canonical, legacy };
+}
+
+function selectMigrationLedger({ canonical, legacy }: Awaited<ReturnType<typeof readMigrationLedgers>>) {
   if (canonical && legacy) assertCanonicalIncludesLegacy(canonical, legacy);
   if (canonical && canonical.length > 0) return canonical;
   if (legacy && legacy.length > 0) return legacy;
   return canonical ?? legacy ?? [];
+}
+
+export async function readMigrationLedger(database: MigrationLedgerSql): Promise<MigrationLedgerEntry[]> {
+  return selectMigrationLedger(await readMigrationLedgers(database));
+}
+
+/** A read-only projection: never initialize, reconcile or repair either ledger. */
+export async function readMigrationInventory(database: MigrationLedgerSql) {
+  const ledgers = await readMigrationLedgers(database);
+  const conflicts = [...(ledgers.canonical ?? []), ...(ledgers.legacy ?? [])]
+    .filter(row => row.stored_checksum !== null && row.stored_checksum !== row.checksum);
+  if (conflicts.length) throw new MigrationLedgerDivergenceError([], [...new Set(conflicts.map(row => row.version))]);
+  const rows = selectMigrationLedger(ledgers);
+  return rows.map(row => ({
+    version: row.version, name: row.name, statements: row.statements,
+    statement_count: row.statements.length, checksum: row.checksum, applied_at: row.applied_at,
+  }));
 }
 
 async function ensureCanonicalLedger(database: MigrationLedgerSql): Promise<void> {

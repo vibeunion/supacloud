@@ -174,17 +174,19 @@ export class RealtimeService {
      * connection-level failures (fetch throws) while waiting for container startup; HTTP response-level
      * errors (4xx/5xx, excluding 409) are not retried, as they are logic errors that must fail fast.
      */
-    async registerTenant(config: RealtimeTenantConfig): Promise<boolean> {
+    async registerTenant(config: RealtimeTenantConfig, options: { signal?: AbortSignal } = {}): Promise<boolean> {
         const tenantPayload = await this.authoritativeTenantPayload(config);
         // CI cold start Realtime containers often require ~20-40s before accepting connections; provide sufficient retry window.
         const MAX_ATTEMPTS = Number(process.env.REALTIME_REGISTER_MAX_ATTEMPTS || 12);
         const BACKOFF_MS = Number(process.env.REALTIME_REGISTER_BACKOFF_MS || 3000);
         for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+            if (options.signal?.aborted) return false;
             try {
                 const res = await fetch(`${this.adminUrl}/api/tenants`, {
                     method: "POST",
                     headers: await this.authHeaders(),
                     body: JSON.stringify(tenantPayload),
+                    signal: options.signal,
                 });
 
                 if (res.ok || res.status === 409) {
@@ -197,6 +199,7 @@ export class RealtimeService {
                 logger.error(`[Realtime] Failed to register tenant ${config.projectRef}:`, { status: res.status, error: errText });
                 return false;
             } catch (err: unknown) {
+                if (options.signal?.aborted) return false;
                 const msg = err instanceof Error ? err.message : String(err);
                 // Connection-level failure (container not ready): retry instead of immediately failing, avoiding CI race conditions.
                 if (attempt < MAX_ATTEMPTS && isConnectionError(msg)) {
@@ -255,13 +258,15 @@ export class RealtimeService {
     /**
      * Update tenant configuration (e.g., after password rotation).
      */
-    async updateTenant(config: RealtimeTenantConfig): Promise<boolean> {
+    async updateTenant(config: RealtimeTenantConfig, options: { signal?: AbortSignal } = {}): Promise<boolean> {
+        if (options.signal?.aborted) return false;
         const tenantPayload = await this.authoritativeTenantPayload(config);
         try {
             const res = await fetch(`${this.adminUrl}/api/tenants/${config.projectRef}`, {
                 method: "PUT",
                 headers: await this.authHeaders(),
                 body: JSON.stringify(tenantPayload),
+                signal: options.signal,
             });
 
             if (res.ok) {

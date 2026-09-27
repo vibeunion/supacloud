@@ -12,7 +12,7 @@ V1 的目标不是复刻完整 Supabase 平台控制面，而是让现有应用�
 
 ### 状态
 
-- 运行时：npm 包需要 Bun 1.4+；单二进制发行版已内嵌 Bun 和 PGlite 资源
+- 运行时：npm 包需要 Bun 1.4.2+；单二进制发行版已内嵌 Bun 和 PGlite 资源
 - 数据库：PGlite 0.5.8，或 native PostgreSQL
 - 项目模型：单进程、单项目，内部 project ref 固定为 `local`
 - 客户端：直接使用官方 `@supabase/supabase-js`
@@ -473,7 +473,7 @@ The goal of V1 is not to replicate the full Supabase platform control plane, but
 
 ### Status
 
-- Runtime: the npm package requires Bun 1.4+; the single-binary release embeds Bun and PGlite assets
+- Runtime: the npm package requires Bun 1.4.2+; the single-binary release embeds Bun and PGlite assets
 - Database: PGlite 0.5.8, or native PostgreSQL
 - Project model: single process, single project, with an internal project ref fixed as `local`
 - Client: uses the official `@supabase/supabase-js` directly

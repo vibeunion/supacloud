@@ -50,6 +50,7 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
 
   .get(
     "/:ref/database/webhooks",
+    { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "List database webhooks" } },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -73,12 +74,30 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
           reason_code: "database_webhooks_not_available",
         });
       }
-    },
-    { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "List database webhooks" } }
+    }
   )
 
   .post(
     "/:ref/database/webhooks",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        hook_table_id: t.Optional(t.Number()),
+        table_id: t.Optional(t.Number()),
+        hook_name: t.String(),
+        hook_schema: t.Optional(t.String()),
+        schema_name: t.Optional(t.String()),
+        hook_table: t.Optional(t.String()),
+        table_name: t.Optional(t.String()),
+        request_url: t.Optional(t.String()),
+        hook_url: t.Optional(t.String()),
+        request_headers: t.Optional(t.Record(t.String(), t.String())),
+        events: t.Optional(t.Array(t.String())),
+        is_rls_enabled: t.Optional(t.Boolean()),
+        is_enabled: t.Optional(t.Boolean()),
+      }),
+      detail: { tags: ["auth"], summary: "Create database webhook" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -105,30 +124,12 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
       } catch (err: unknown) {
         return status(500, { message: "Failed to create webhook", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Object({
-        hook_table_id: t.Optional(t.Number()),
-        table_id: t.Optional(t.Number()),
-        hook_name: t.String(),
-        hook_schema: t.Optional(t.String()),
-        schema_name: t.Optional(t.String()),
-        hook_table: t.Optional(t.String()),
-        table_name: t.Optional(t.String()),
-        request_url: t.Optional(t.String()),
-        hook_url: t.Optional(t.String()),
-        request_headers: t.Optional(t.Record(t.String(), t.String())),
-        events: t.Optional(t.Array(t.String())),
-        is_rls_enabled: t.Optional(t.Boolean()),
-        is_enabled: t.Optional(t.Boolean()),
-      }),
-      detail: { tags: ["auth"], summary: "Create database webhook" },
     }
   )
 
   .get(
     "/:ref/database/webhooks/:id",
+    { params: t.Object({ ref: t.String(), id: t.String() }), detail: { tags: ["auth"], summary: "Get database webhook" } },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -148,12 +149,25 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
       } catch (err: unknown) {
         return status(500, { message: "Failed to get webhook", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
-    },
-    { params: t.Object({ ref: t.String(), id: t.String() }), detail: { tags: ["auth"], summary: "Get database webhook" } }
+    }
   )
 
   .patch(
     "/:ref/database/webhooks/:id",
+    {
+      params: t.Object({ ref: t.String(), id: t.String() }),
+      body: t.Object({
+        hook_name: t.Optional(t.String()),
+        hook_table_id: t.Optional(t.Number()),
+        hook_schema: t.Optional(t.String()),
+        hook_table: t.Optional(t.String()),
+        request_url: t.Optional(t.String()),
+        request_headers: t.Optional(t.Record(t.String(), t.String())),
+        events: t.Optional(t.Array(t.String())),
+        is_rls_enabled: t.Optional(t.Boolean()),
+      }),
+      detail: { tags: ["auth"], summary: "Update database webhook" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -184,25 +198,12 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
       } catch (err: unknown) {
         return status(500, { message: "Failed to update webhook", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
-    },
-    {
-      params: t.Object({ ref: t.String(), id: t.String() }),
-      body: t.Object({
-        hook_name: t.Optional(t.String()),
-        hook_table_id: t.Optional(t.Number()),
-        hook_schema: t.Optional(t.String()),
-        hook_table: t.Optional(t.String()),
-        request_url: t.Optional(t.String()),
-        request_headers: t.Optional(t.Record(t.String(), t.String())),
-        events: t.Optional(t.Array(t.String())),
-        is_rls_enabled: t.Optional(t.Boolean()),
-      }),
-      detail: { tags: ["auth"], summary: "Update database webhook" },
     }
   )
 
   .delete(
     "/:ref/database/webhooks/:id",
+    { params: t.Object({ ref: t.String(), id: t.String() }), detail: { tags: ["auth"], summary: "Delete database webhook" } },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -218,12 +219,12 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
       } catch (err: unknown) {
         return status(500, { message: "Failed to delete webhook", code: "500" });
       }
-    },
-    { params: t.Object({ ref: t.String(), id: t.String() }), detail: { tags: ["auth"], summary: "Delete database webhook" } }
+    }
   )
 
   .get(
     "/:ref/auth/hooks",
+    { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "List auth hooks" } },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -249,12 +250,16 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
         };
       }
       return redactAuditValue(response);
-    },
-    { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "List auth hooks" } }
+    }
   )
 
   .patch(
     "/:ref/auth/hooks",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Record(t.String(), t.Unknown()),
+      detail: { tags: ["auth"], summary: "Update auth hooks" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -315,10 +320,5 @@ export const authHooksRoutes = new Elysia({ prefix: "/v1/projects" })
           },
         ]),
       ));
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Record(t.String(), t.Unknown()),
-      detail: { tags: ["auth"], summary: "Update auth hooks" },
     }
   );

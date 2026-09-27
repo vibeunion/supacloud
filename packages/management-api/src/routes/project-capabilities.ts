@@ -113,11 +113,14 @@ async function detectBusinessOrganizationCapability(): Promise<Capability> {
 }
 
 export const projectCapabilityRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
-  .onBeforeHandle(async ({ params, request }) => {
+  .beforeHandle(async ({ params, request }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
   })
-  .get("/capabilities", async ({ params }) => {
+  .get("/capabilities", {
+    params: t.Object({ ref: t.String() }),
+    detail: { tags: ["projects"], summary: "Get project platform capabilities" },
+  }, async ({ params }) => {
     const project = await projectRepository.findByRef(params.ref);
     if (!project) return status(404, { message: "Project not found", code: "NOT_FOUND" });
 
@@ -160,11 +163,11 @@ export const projectCapabilityRoutes = new Elysia({ prefix: "/v1/projects/:ref" 
       storage_backend: config.storageType || "s3",
       capabilities,
     };
-  }, {
-    params: t.Object({ ref: t.String() }),
-    detail: { tags: ["projects"], summary: "Get project platform capabilities" },
   })
-  .get("/environment", async ({ params }) => {
+  .get("/environment", {
+    params: t.Object({ ref: t.String() }),
+    detail: { tags: ["projects"], summary: "Get project environment and platform version" },
+  }, async ({ params }) => {
     const project = await projectRepository.findByRef(params.ref);
     if (!project) return status(404, { message: "Project not found", code: "NOT_FOUND" });
 
@@ -176,7 +179,4 @@ export const projectCapabilityRoutes = new Elysia({ prefix: "/v1/projects/:ref" 
       auth_runtime: "gotrue",
       storage_backend: config.storageType || "s3",
     };
-  }, {
-    params: t.Object({ ref: t.String() }),
-    detail: { tags: ["projects"], summary: "Get project environment and platform version" },
   });

@@ -81,7 +81,11 @@ const redirectStatus = Type.Optional(Type.Union([
 const ok = (res: any) => (res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`);
 const simple = (res: any, msg: string) => (res.ok ? `✅ ${msg}` : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`);
 
-export function registerGatewayTools(server: ToolServer, http: HttpTransport, options: { projectRef?: string } = {}): void {
+export function registerGatewayTools(
+    server: ToolServer,
+    http: Pick<HttpTransport, "get" | "post" | "put" | "delete">,
+    options: { projectRef?: string; refPriority?: "argument" | "project" } = {},
+): void {
     const { projectRef } = options;
 
     server.tool(
@@ -138,7 +142,7 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
         },
         async (args: any) => {
             const resolveRef = (override?: string) => {
-                const ref = override || projectRef;
+                const ref = options.refPriority === "project" ? projectRef || override : override || projectRef;
                 if (!ref) throw new Error("'ref' is required for this action");
                 return ref;
             };

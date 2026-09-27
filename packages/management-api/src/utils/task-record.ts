@@ -1,12 +1,13 @@
-import { Type } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 import type { ProjectTask, ProjectTaskAttempt } from "../db";
 import { isRecord } from "./project-config";
+import { dateSchema } from "./date-schema";
 
 const text = Type.String();
 const nullableText = Type.Union([text, Type.Null()]);
 const counter = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
-const nullableDate = Type.Union([Type.Date(), Type.Null()]);
+const nullableDate = Type.Union([dateSchema, Type.Null()]);
 const jsonObject = Type.Record(Type.String(), Type.Unknown());
 const taskStatus = Type.Union([
   Type.Literal("pending"), Type.Literal("leased"), Type.Literal("running"),
@@ -28,7 +29,7 @@ const taskSchema = Type.Object({
   auth_authority_ref: Type.String({ minLength: 1 }),
   metadata: Type.Union([jsonObject, Type.Null()]),
   function_slug: nullableText, function_version: nullableText,
-  created_at: Type.Date(), updated_at: Type.Date(),
+  created_at: dateSchema, updated_at: dateSchema,
 });
 const attemptLogsSchema = Type.Array(Type.Object({
   timestamp: Type.String({ minLength: 1 }),
@@ -40,11 +41,11 @@ const attemptSchema = Type.Object({
   project_ref: Type.String({ minLength: 1 }),
   attempt_no: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   status: taskStatus,
-  started_at: Type.Date(), completed_at: nullableDate,
+  started_at: dateSchema, completed_at: nullableDate,
   duration_ms: Type.Union([counter, Type.Null()]), error: nullableText,
   response_status: Type.Union([Type.Integer({ minimum: 100, maximum: 599 }), Type.Null()]),
   logs: Type.Union([attemptLogsSchema, Type.Null()]),
-  created_at: Type.Date(), updated_at: Type.Date(),
+  created_at: dateSchema, updated_at: dateSchema,
 });
 
 export class InvalidTaskRecordError extends Error {

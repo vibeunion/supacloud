@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Patch the pinned Supabase Realtime 2.133.0 source for tenant slot isolation.
+"""Patch the pinned Supabase Realtime 2.138.1 source for tenant slot isolation.
 
 The patch is intentionally narrow: it only accepts the reviewed upstream
-``replication_connection.ex`` from a Realtime 2.133.0 checkout, and it writes
+``replication_connection.ex`` from a Realtime 2.138.1 checkout, and it writes
 the result atomically. Refusing an unknown source is important here because
 silently applying a text patch to a later Realtime release can produce a BEAM
 module whose ABI no longer matches the runtime image.
@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 
 
-EXPECTED_REALTIME_VERSION = "2.133.0"
+EXPECTED_REALTIME_VERSION = "2.138.1"
 EXPECTED_SOURCE_RELATIVE_PATH = Path("lib/realtime/tenants/replication_connection.ex")
 REPLICATION_SLOT_NAME_LIMIT = 63
 

@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import type { AnyElysia, Elysia } from "elysia";
 import {
   ApplicationError, createApplication, requireIdempotencyKey,
   type ApplicationOptions, type CommandGovernance, type CommandInvocation, type TrustedRequestIdentity,
@@ -41,7 +42,7 @@ export interface MemoryStorage {
   setPolicy(policy?: (operation: "put" | "get" | "delete" | "list", bucket: string, key: string) => boolean): void;
 }
 
-export interface MemorySandboxOptions extends Omit<ApplicationOptions, "deps" | "requestContext"> {
+export interface MemorySandboxOptions<Http extends AnyElysia = Elysia> extends Omit<ApplicationOptions<Http>, "deps" | "requestContext"> {
   /** Stable identity used by every request unless overridden by requestContext. */
   identity?: TrustedRequestIdentity;
   /** Stable request id used when the request does not provide x-request-id. */
@@ -49,7 +50,7 @@ export interface MemorySandboxOptions extends Omit<ApplicationOptions, "deps" | 
   /** Extend the platform dependency bag without replacing memory dependencies. */
   deps?: Record<string, unknown>;
   /** Replace the default deterministic request context factory. */
-  requestContext?: ApplicationOptions["requestContext"];
+  requestContext?: ApplicationOptions<Http>["requestContext"];
   /** Enable the test-only permission, receipt, transaction and audit adapters. */
   memoryGovernance?: boolean;
 }
@@ -240,7 +241,9 @@ class DefaultMemoryStorage implements MemoryStorage {
  * PostgreSQL or S3 emulators. They are sufficient for fast command and HTTP
  * behavior tests while keeping production adapters replaceable.
  */
-export function createMemorySandbox(options: MemorySandboxOptions = {}): MemorySandbox {
+export function createMemorySandbox<const Http extends AnyElysia = Elysia>(
+  options: MemorySandboxOptions<Http> = {},
+): MemorySandbox {
   const db = new DefaultMemoryDatabase();
   const storage = new DefaultMemoryStorage();
   const policy = createMemoryPolicy();

@@ -73,6 +73,149 @@ test("starter routes use explicit status response maps", () => {
     expect(source).not.toContain("response: ReviewResult");
 });
 
+test("the review handler awaits storage before reporting a successful transition", () => {
+    const files = appStarterFiles("example");
+    const source = files["src/review/review.ts"];
+    expect(source).toContain('readReview(await this.store.get("reviews", id))');
+    expect(source).toContain('await this.store.set("reviews", id, next)');
+    expect(source).toContain("value: Review): void | Promise<void>");
+    expect(source).toContain("async execute(id: string, expectedVersion: number): Promise<Review>");
+    expect(files["README.md"]).toContain("without replacing the");
+    expect(files["README.md"]).toContain("awaiting a write alone does not establish durability or atomicity");
+});
+
+test("approval attachments use a compiled job and an explicit durable host contract", () => {
+    const files = appStarterFiles("example");
+    expect(files["src/review/review.ts"]).toContain("jobs: [VerifyReviewAttachment]");
+    expect(files["src/review/attachment.ts"]).toContain('name: "review.verify-attachment"');
+    expect(files["src/review/attachment.ts"]).toContain('scope: "job"');
+    expect(files["src/review/attachment.ts"]).toContain("await this.store.readAttachment(input)");
+    expect(files["src/review/attachment.ts"]).toContain("return this.store.recordAttachment(input");
+    expect(files["tests/attachment.test.ts"]).toContain("Commit failed");
+    expect(files["README.md"]).toContain("Approval Attachments");
+});
+
+test("the reference PostgreSQL host is shipped separately from synthetic test identity and migration execution", () => {
+    const files = appStarterFiles("example");
+    const host = requireValue(files["src/delivery-host.ts"]);
+    const adapter = requireValue(files["src/host/review-postgres.ts"]);
+    const schema = requireValue(files["migrations/001-review.sql"]);
+    expect(host).toContain("createBunCommandDatabase(pool)");
+    expect(host).toContain('required("SUPAUTH_JWKS_URL")');
+    expect(host).not.toContain("keyResolver");
+    expect(host).not.toContain("CREATE TABLE");
+    expect(adapter).toContain("createTransactionalCommand");
+    expect(adapter).toContain("FOR UPDATE OF r,m FOR SHARE OF a");
+    expect(adapter).toContain("Review database project/tenant binding mismatch");
+    for (const source of [adapter, host]) {
+        expect(source).not.toContain("Synthetic");
+        expect(source).not.toContain("node:assert");
+        expect(source).not.toContain("SignJWT");
+    }
+    expect(schema).toContain("can_approve boolean NOT NULL DEFAULT false");
+    expect(schema).toContain("ENABLE ROW LEVEL SECURITY");
+    expect(schema).not.toContain("INSERT INTO");
+    expect(files["tests/postgres-host.test.ts"]).toContain("never falls back");
+    const manifest = JSON.parse(requireValue(files["package.json"]));
+    for (const name of ["commands", "contracts", "db"]) {
+        expect(manifest.dependencies[`@supacloud/${name}`]).toMatch(/^\^\d+\.\d+\.\d+/);
+    }
+});
+
+test("starter distinguishes bounded execution context from unredacted source inspection", () => {
+    const readme = appStarterFiles("example")["README.md"];
+    expect(readme).toContain("--events execution-events.json --request-id request-123 --json");
+    expect(readme).toContain("Ordinary context can include declared source expressions");
+    expect(readme).toContain("input/output size limits");
+    expect(readme).toContain("Never put credentials or business data in");
+});
+
+test("attachment adapters ship separately from test fault injection and provisioning", () => {
+    const files = appStarterFiles("example");
+    const adapter = requireValue(files["src/host/review-attachments.ts"]);
+    const schema = requireValue(files["migrations/002-review-attachments.sql"]);
+    expect(adapter).toContain("SupaCloudArtifactsClient");
+    expect(adapter).toContain("supacloud_workflows.start_run");
+    expect(adapter).toContain("$3::text::jsonb");
+    expect(adapter).toContain("$4::text::jsonb");
+    expect(adapter).toContain("m.enabled AND m.can_approve");
+    expect(adapter).toContain("FOR UPDATE OF r,a,m FOR SHARE OF p");
+    expect(adapter).toContain("Conflicting durable attachment result");
+    for (const forbidden of ["node:assert", "Synthetic", "failCommit", "CREATE TABLE", "management-not-used"]) {
+        expect(adapter).not.toContain(forbidden);
+    }
+    expect(schema).toContain("object_path text NOT NULL UNIQUE");
+    expect(schema).toContain("ALTER TABLE public.starter_attachments ENABLE ROW LEVEL SECURITY");
+    expect(schema).toContain("ALTER TABLE public.starter_attachment_results ENABLE ROW LEVEL SECURITY");
+    expect(schema).not.toContain("INSERT INTO");
+    const manifest = JSON.parse(requireValue(files["package.json"]));
+    expect(manifest.dependencies["@supacloud/js"]).toMatch(/^\^\d+\.\d+\.\d+/);
+    expect(manifest.dependencies["@supabase/supabase-js"]).toMatch(/^\^\d+\.\d+\.\d+/);
+});
+
+test("attachment worker uses explicit queue ownership and a fatal delivery signal", () => {
+    const files = appStarterFiles("example");
+    const worker = requireValue(files["src/host/review-attachment-worker.ts"]);
+    const host = requireValue(files["src/delivery-worker.ts"]);
+    expect(worker).toContain('queueOwnership !== "exclusive-review-attachments"');
+    expect(worker).toContain('claim.workflowVersion !== "1"');
+    expect(worker).toContain('claim.stepKey !== "verify"');
+    expect(worker).toContain("AND run_id=$3");
+    expect(worker).toContain("failure: failure.promise");
+    expect(worker).toContain("halted = true");
+    expect(host).toContain("failure: worker.failure");
+    expect(host).toContain('required("REVIEW_QUEUE_OWNERSHIP")');
+    for (const source of [worker, host]) {
+        expect(source).not.toContain("Synthetic");
+        expect(source).not.toContain("CREATE TABLE");
+        expect(source).not.toContain("process.exit(");
+    }
+});
+
+test("uploads are compiled routes with identity-derived paths and a separate migration", () => {
+    const files = appStarterFiles("example");
+    const feature = requireValue(files["src/review/uploads.ts"]);
+    const adapter = requireValue(files["src/host/review-uploads.ts"]);
+    const schema = requireValue(files["migrations/003-review-uploads.sql"]);
+    expect(feature).toContain('"/:id/attachment-upload"');
+    expect(feature).toContain('"/:id/attachment-registration"');
+    expect(feature).toContain("@Inject(REQUEST_CONTEXT)");
+    expect(feature).toContain("UPLOADS_UNAVAILABLE");
+    expect(adapter).toContain("requireTrustedIdentity");
+    expect(adapter).toContain('name: "review.attach"');
+    expect(adapter).toContain("review.attachment-bound");
+    expect(adapter).toContain("FOR UPDATE OF r,m FOR SHARE OF p");
+    expect(adapter).not.toContain(".remove(");
+    expect(schema).toContain("ADD COLUMN storage_subject uuid UNIQUE");
+    expect(schema).toContain("FOR INSERT TO authenticated");
+    expect(schema).toContain("FOR SELECT TO authenticated");
+    expect(schema).toContain("AS RESTRICTIVE FOR ALL TO authenticated");
+    expect(schema).toContain("AS RESTRICTIVE FOR UPDATE TO authenticated");
+    expect(schema).toContain("AS RESTRICTIVE FOR DELETE TO authenticated");
+    expect(schema).toContain("1048576");
+    expect(files["src/delivery-host.ts"]).toContain('process.env.REVIEW_ATTACHMENTS');
+    expect(files["src/delivery-host.ts"]).toContain("afterApproved: durable?.enqueue");
+});
+
+test("runtime roles separate HTTP writes from worker results without granting schema ownership", () => {
+    const files = appStarterFiles("example");
+    const schema = requireValue(files["migrations/004-review-runtime-roles.sql"]);
+    expect(schema).toContain("CREATE ROLE starter_review_http NOLOGIN NOSUPERUSER");
+    expect(schema).toContain("CREATE ROLE starter_review_worker NOLOGIN NOSUPERUSER");
+    expect(schema).toContain("NOBYPASSRLS");
+    expect(schema).toContain("starter_backend_member_immutable");
+    expect(schema).toContain("AS RESTRICTIVE FOR UPDATE");
+    expect(schema).toContain("WITH CHECK (false)");
+    expect(schema).toContain("GRANT INSERT ON public.starter_attachments TO starter_review_http");
+    expect(schema).toContain("GRANT SELECT,INSERT ON public.starter_attachment_results TO starter_review_worker");
+    expect(schema).not.toContain("GRANT ALL");
+    expect(schema).not.toContain("PASSWORD");
+    expect(files["README.md"]).toContain("separately privileged");
+    expect(files["supacloud.config.ts"]).toContain('executor: "operator-provisioning"');
+    expect(files["supacloud.config.ts"]).toContain('source: "migrations/003-review-uploads.sql"');
+    expect(files["supacloud.config.ts"]).toContain('name: "review_uploads", executor: "operator-provisioning"');
+});
+
 test("starter documents Database First without representing its synthetic fixture as a deployed schema", () => {
     const files = appStarterFiles("example");
     expect(files["graphql/schema.graphql"]).toContain("SYNTHETIC TEST FIXTURE ONLY");

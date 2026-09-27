@@ -1,0 +1,79 @@
+import { strict as assert } from "node:assert";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildDeliveryProject, compileOptionsFromConfig, loadSupacloudConfig } from "@supacloud/compiler";
+
+// Packed-package acceptance for a stateless HTTP target, not a production business host.
+const config = await loadSupacloudConfig();
+const options = compileOptionsFromConfig(config);
+const hostPath = join(options.rootDir, "delivery-host.ts");
+const detached = await mkdtemp(join(tmpdir(), "starter-delivery-"));
+let child: ReturnType<typeof Bun.spawn> | undefined;
+const interrupt = () => child?.kill("SIGTERM");
+process.once("SIGINT", interrupt);
+process.once("SIGTERM", interrupt);
+try {
+  await writeFile(hostPath, `import {createApplication, type CompiledModule} from "@supacloud/elysia";
+export function createDeliveryApplication(modules: CompiledModule[]) {
+  const app = createApplication({modules});
+  return {fetch: (request: Request) => app.handle(request), close() {}};
+}
+`);
+  const settings = {version: 1, build: {httpApplications: [{target: "api", source: "delivery-host.ts"}]}};
+  const built = await buildDeliveryProject(options, settings);
+  assert.ok(built.ok, JSON.stringify(built.diagnostics));
+  assert.equal(built.manifest.deploymentReady, false);
+  const object = built.manifest.objects.find((item) => item.name === "api");
+  assert.ok(object);
+  assert.equal(object.entryKind, "bun-http-application");
+  const rebuilt = await buildDeliveryProject(options, settings);
+  assert.ok(rebuilt.ok, JSON.stringify(rebuilt.diagnostics));
+  assert.deepEqual(rebuilt.written, []);
+  await cp(join(options.outDir, "delivery/objects", object.objectId, "bundle"), detached, {recursive: true});
+  const bundle = await readFile(join(detached, "index.js"), "utf8");
+  assert.ok(!bundle.includes("@typescript/typescript6"));
+  assert.ok(!bundle.includes("Local demo:"));
+  child = Bun.spawn([process.execPath, "--no-env-file", "index.js"], {
+    cwd: detached, env: {PATH: process.env.PATH, PORT: "0", HOST: "127.0.0.1"},
+    stdout: "pipe", stderr: "pipe",
+  });
+  assert.ok(child.stdout && typeof child.stdout !== "number");
+  const errors = child.stderr && typeof child.stderr !== "number" ? new Response(child.stderr).text() : Promise.resolve("");
+  const reader = child.stdout.getReader();
+  const timeout = setTimeout(() => child?.kill("SIGKILL"), 20_000);
+  try {
+    let text = "";
+    while (!text.includes("\n")) {
+      const {done, value} = await reader.read();
+      if (done) throw new Error("Packed HTTP delivery exited before readiness: " + await errors);
+      text += new TextDecoder().decode(value);
+    }
+    const event = JSON.parse(text.split("\n")[0]!);
+    assert.equal(event.event, "delivery-http-listening");
+    const origin = new URL(event.url);
+    assert.equal(origin.hostname, "127.0.0.1");
+    assert.deepEqual(await (await fetch(new URL("/orders/health", origin))).json(), {ok: true});
+    assert.deepEqual(await (await fetch(new URL("/orders/example", origin))).json(), {id: "example", name: "demo"});
+    const created = await fetch(new URL("/orders", origin), {
+      method: "POST", headers: {"content-type": "application/json"}, body: JSON.stringify({name: "delivered"}),
+    });
+    assert.equal(created.status, 201);
+    assert.deepEqual(await created.json(), {id: "demo", name: "delivered"});
+    child.kill("SIGTERM");
+    assert.equal(await child.exited, 0);
+    assert.equal(await errors, "");
+  } finally {
+    clearTimeout(timeout);
+    reader.releaseLock();
+    if (child.exitCode === null) {child.kill("SIGKILL"); await child.exited;}
+    await errors;
+  }
+  console.log("Starter delivery: packed HTTP target, detached GET/POST, immutable reuse and graceful shutdown passed; deployment not verified");
+} finally {
+  if (child?.exitCode === null) {child.kill("SIGKILL"); await child.exited;}
+  process.removeListener("SIGINT", interrupt);
+  process.removeListener("SIGTERM", interrupt);
+  await rm(hostPath, {force: true});
+  await rm(detached, {recursive: true, force: true});
+}

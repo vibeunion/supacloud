@@ -142,6 +142,7 @@ export interface Config {
   /** Optional project ref that exclusively owns the local GoTrue runtime. */
   authRuntimeOwnerRef: string;
   portRange: string;
+  applicationRuntimePortRange: string;
   gotrueSmtpAdminEmail: string;
   gotrueSmtpHost: string;
   gotrueSmtpUser: string;
@@ -340,6 +341,7 @@ export const config: Config = {
   gotruePortBase: Number(getEnv("GOTRUE_PORT_BASE", "3200")),
   authRuntimeOwnerRef: getEnv("SUPACLOUD_AUTH_RUNTIME_OWNER_REF", "").trim(),
   portRange: getEnv("PORT_RANGE", "3100-3299"),
+  applicationRuntimePortRange: getEnv("SUPACLOUD_APPLICATION_PORT_RANGE", "20000-29999"),
   gotrueSmtpAdminEmail: getEnv("GOTRUE_SMTP_ADMIN_EMAIL", ""),
   gotrueSmtpHost: getEnv("GOTRUE_SMTP_HOST", ""),
   gotrueSmtpUser: getEnv("GOTRUE_SMTP_USER", ""),

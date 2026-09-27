@@ -28,6 +28,10 @@ export function requireAuthRuntimeManagement(resource: AuthRuntimeManagedResourc
 export const authRuntimeRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
   .get(
     "/runtime",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["auth"], summary: "Get project auth runtime ownership" },
+    },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -38,9 +42,5 @@ export const authRuntimeRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" }
       }
 
       return getAuthRuntimeDescriptor(params.ref);
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["auth"], summary: "Get project auth runtime ownership" },
     },
   );

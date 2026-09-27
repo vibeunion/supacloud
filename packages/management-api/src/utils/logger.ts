@@ -1,10 +1,11 @@
-type LogMeta = Record<string, unknown> | string | Error | undefined;
+type LogMeta = unknown;
 
 function normalizeMeta(meta: LogMeta): Record<string, unknown> | undefined {
     if (meta === undefined) return undefined;
     if (typeof meta === "string") return { detail: meta };
     if (meta instanceof Error) return { error: meta.message, stack: meta.stack };
-    return meta;
+    if (meta !== null && typeof meta === "object" && !Array.isArray(meta)) return { ...meta };
+    return { detail: meta };
 }
 
 function log(level: string, message: string, meta?: LogMeta) {

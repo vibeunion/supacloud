@@ -1,0 +1,105 @@
+import { strict as assert } from "node:assert";
+import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildDeliveryProject, compileOptionsFromConfig, loadSupacloudConfig } from "@supacloud/compiler";
+
+// Packed process-host acceptance only. This single test claim is not a durable queue.
+const config = await loadSupacloudConfig();
+const options = compileOptionsFromConfig(config);
+const hostPath = join(options.rootDir, "delivery-worker.ts");
+const detached = await mkdtemp(join(tmpdir(), "starter-worker-delivery-"));
+let child: ReturnType<typeof Bun.spawn> | undefined;
+const interruption = new AbortController();
+const interrupt = () => { interruption.abort(); child?.kill("SIGTERM"); };
+process.once("SIGINT", interrupt);
+process.once("SIGTERM", interrupt);
+try {
+  await writeFile(hostPath, `import {createWorker, type CompiledModule} from "@supacloud/elysia";
+export function createDeliveryWorker(modules: CompiledModule[]) {
+  let claimed: boolean = false;
+  const worker = createWorker({
+    modules, pollIntervalMs: 10, workerId: "packed-test",
+    transport: {
+      async claim(signal) {
+        signal.throwIfAborted();
+        if (claimed) return null;
+        claimed = true;
+        return {id: "test", jobName: "sync.orders", input: {}};
+      },
+      async ack(_claim, output) {
+        if (!process.env.JOB_RECEIPT) throw new Error("Missing test receipt path");
+        await Bun.write(process.env.JOB_RECEIPT, JSON.stringify(output));
+      },
+      fail() {throw new Error("Packed test job failed");},
+    },
+  });
+  return {start: () => worker.start(), async close() {
+    await worker.stop();
+    if (process.env.CLOSE_RECEIPT) await Bun.write(process.env.CLOSE_RECEIPT, "closed");
+  }};
+}
+`);
+  const settings = {
+    version: 1, runtime: {processIsolation: true, durableQueue: true, capabilities: []},
+    build: {workerApplications: [{target: "jobs", source: "delivery-worker.ts"}]},
+  };
+  interruption.signal.throwIfAborted();
+  const built = await buildDeliveryProject(options, settings);
+  assert.ok(built.ok, JSON.stringify(built.diagnostics));
+  assert.equal(built.manifest.deploymentReady, false);
+  const object = built.manifest.objects.find(item => item.name === "jobs");
+  assert.ok(object);
+  assert.equal(object.entryKind, "bun-worker-application");
+  const rebuilt = await buildDeliveryProject(options, settings);
+  assert.ok(rebuilt.ok, JSON.stringify(rebuilt.diagnostics));
+  assert.deepEqual(rebuilt.written, []);
+  interruption.signal.throwIfAborted();
+  await cp(join(options.outDir, "delivery/objects", object.objectId, "bundle"), detached, {recursive: true});
+  const bundle = await readFile(join(detached, "index.js"), "utf8");
+  assert.ok(!bundle.includes("@typescript/typescript6"));
+  assert.ok(!bundle.includes("Local demo:"));
+  const jobReceipt = join(detached, "job.json"), closeReceipt = join(detached, "closed");
+  child = Bun.spawn([process.execPath, "--no-env-file", "index.js"], {
+    cwd: detached,
+    env: {PATH: process.env.PATH, JOB_RECEIPT: jobReceipt, CLOSE_RECEIPT: closeReceipt},
+    stdout: "pipe", stderr: "pipe",
+  });
+  assert.ok(child.stdout && typeof child.stdout !== "number");
+  assert.ok(child.stderr && typeof child.stderr !== "number");
+  const errors = new Response(child.stderr).text();
+  const reader = child.stdout.getReader();
+  const deadline = setTimeout(() => child?.kill("SIGKILL"), 20_000);
+  try {
+    let output = "";
+    while (!output.includes("\n")) {
+      const chunk = await reader.read();
+      if (chunk.done) throw new Error("Packed worker exited before startup");
+      output += new TextDecoder().decode(chunk.value);
+      assert.ok(output.length < 16_384);
+    }
+    assert.deepEqual(JSON.parse(output.split("\n")[0]!), {event: "delivery-worker-started"});
+    while (!await Bun.file(jobReceipt).exists()) {
+      if (child.exitCode !== null) throw new Error("Packed worker exited before Job acknowledgement");
+      await Bun.sleep(10);
+    }
+    child.kill("SIGTERM");
+    assert.equal(await child.exited, 0);
+    assert.deepEqual(JSON.parse(await readFile(jobReceipt, "utf8")), {ok: true});
+    assert.equal(await readFile(closeReceipt, "utf8"), "closed");
+    assert.equal(await errors, "");
+    interruption.signal.throwIfAborted();
+  } finally {
+    clearTimeout(deadline);
+    reader.releaseLock();
+    if (child.exitCode === null) {child.kill("SIGKILL"); await child.exited;}
+    await errors;
+  }
+  console.log("Starter worker delivery: packed executable, detached compiled Job/ack, immutable reuse and graceful shutdown passed; durable queue/deployment not verified");
+} finally {
+  if (child?.exitCode === null) {child.kill("SIGKILL"); await child.exited;}
+  process.removeListener("SIGINT", interrupt);
+  process.removeListener("SIGTERM", interrupt);
+  await rm(hostPath, {force: true});
+  await rm(detached, {recursive: true, force: true});
+}

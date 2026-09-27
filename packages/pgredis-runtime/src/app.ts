@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
-import { Elysia, t, type Static } from "elysia";
+import { Elysia, t } from "elysia";
+import type { Static } from "elysia/type";
 import { TenantCapacityError, type TenantCache, type TenantCacheRegistry } from "./cache-registry";
 import { InvalidCapabilityError, verifyPgredisCapability } from "./capability";
 import { pgredisExtensionPolicy } from "./extension-policy";
@@ -214,7 +215,8 @@ export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
   const adminToken = options.adminToken ?? options.signingSecret;
   const maxKeysPerRequest = options.maxKeysPerRequest ?? DEFAULT_MAX_KEYS_PER_REQUEST;
   return new Elysia({ normalize: false })
-    .onError(({ code, error, set }) => {
+    .error(({ error, set }) => {
+    const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
       if (code === "VALIDATION") {
         set.status = 400;
         return { error: "Invalid cache request" };
@@ -289,28 +291,31 @@ export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
     })
     .get(
       "/internal/v1/admin/projects/:ref/status",
+      {
+        params: t.Object({ ref: projectRefSchema }),
+      },
       async ({ params, request }) => {
         requireInternalToken(request, adminToken);
         return await options.registry.projectStatus(params.ref);
       },
-      {
-        params: t.Object({ ref: projectRefSchema }),
-      },
     )
     .post(
       "/internal/v1/admin/projects/:ref/refresh",
+      {
+        params: t.Object({ ref: projectRefSchema }),
+      },
       async ({ params, request }) => {
         requireInternalToken(request, adminToken);
         const lease = await options.registry.acquire(params.ref);
         lease.release();
         return await options.registry.projectStatus(params.ref);
       },
-      {
-        params: t.Object({ ref: projectRefSchema }),
-      },
     )
     .post(
       "/internal/v1/admin/cache",
+      {
+        body: adminCacheRequestSchema,
+      },
       async ({ body, request }) => {
         requireInternalToken(request, adminToken);
         const adminRequest: AdminCacheRequest = body;
@@ -337,12 +342,12 @@ export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
           lease.release();
         }
       },
-      {
-        body: adminCacheRequestSchema,
-      },
     )
     .post(
       "/internal/v1/cache",
+      {
+        body: cacheRequestSchema,
+      },
       async ({ body, request }) => {
         const authorization = request.headers.get("authorization") || "";
         const capabilityToken = authorization.startsWith("Bearer ")
@@ -363,9 +368,6 @@ export function createPgredisRuntimeApp(options: PgredisRuntimeAppOptions) {
         } finally {
           lease.release();
         }
-      },
-      {
-        body: cacheRequestSchema,
       },
     );
 }

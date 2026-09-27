@@ -2,6 +2,7 @@ import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import * as fs from "node:fs/promises";
 import { config } from "../../src/config";
 import { StorageService } from "../../src/services/storage.service";
+import { tenantRuntimeService } from "../../src/services/tenant-runtime.service";
 
 const originalStorageType = config.storageType;
 const originalStorageMountPoint = config.storageMountPoint;
@@ -54,5 +55,46 @@ describe("StorageService.getStatus", () => {
       reason: "object_storage_http_error",
       reasonStatus: 503,
     });
+  });
+});
+
+describe("tenant Storage health readback", () => {
+  const runtime = tenantRuntimeService as unknown as {
+    checkStorageHealth(): Promise<string>;
+  };
+
+  test("uses the configured filesystem root without an S3 request", async () => {
+    config.storageType = "local";
+    config.storageMountPoint = "/var/lib/supabase/storage";
+    const statfsSpy = spyOn(fs, "statfs").mockResolvedValue({
+      bsize: 1024, blocks: 1_000, bavail: 250,
+    } as Awaited<ReturnType<typeof fs.statfs>>);
+    const fetchSpy = mock(async () => { throw new Error("S3 must not be probed"); });
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+    try {
+      expect(await runtime.checkStorageHealth()).toBe("ACTIVE_HEALTHY");
+      expect(statfsSpy).toHaveBeenCalledWith(config.storageMountPoint);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      statfsSpy.mockRestore();
+    }
+  });
+
+  test.each([403, 503])("does not classify HTTP %s as healthy", async (status) => {
+    config.storageType = "s3";
+    globalThis.fetch = mock(async () => new Response(null, { status })) as typeof fetch;
+    expect(await runtime.checkStorageHealth()).toBe("INACTIVE");
+  });
+
+  test("reports a missing configured filesystem root as unhealthy", async () => {
+    config.storageType = "juicefs";
+    config.storageMountPoint = "/missing/storage";
+    const statfsSpy = spyOn(fs, "statfs").mockRejectedValue(new Error("ENOENT"));
+    try {
+      expect(await runtime.checkStorageHealth()).toBe("INACTIVE");
+      expect(statfsSpy).toHaveBeenCalledWith("/missing/storage");
+    } finally {
+      statfsSpy.mockRestore();
+    }
   });
 });

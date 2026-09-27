@@ -1,0 +1,562 @@
+import { strict as assert } from "node:assert";
+import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createClient } from "@supabase/supabase-js";
+import { SupaCloudArtifactsClient, SupaCloudWorkflowsClient } from "@supacloud/js";
+import { executeJob, type ExecutionEvent, type SupAuthRequestContext } from "@supacloud/elysia";
+import type { CommandTransaction } from "@supacloud/db";
+import { createCompiledModules } from "../generated/application";
+import { createReviewAttachmentAdapters } from "../src/host/review-attachments";
+import { createReviewAttachmentWorker } from "../src/host/review-attachment-worker";
+import { createReviewUploadAdapters } from "../src/host/review-uploads";
+import type { ReviewUploadPort } from "../src/review/uploads";
+import { verifyAttachmentWorkerDelivery } from "./attachment-worker-delivery";
+import { verifyReviewDelivery } from "./review-delivery";
+import { setupRuntimeRoleConnections } from "./runtime-roles";
+import { buildReferenceDeliveryArchive, prepareArchivedDelivery } from "./delivery-archive";
+import { buildReferenceUpgradeArchive, verifyReferenceUpgradeRefused } from "./delivery-compatibility";
+import { readDeliveryMigrationArchive } from "@supacloud/compiler";
+import type { VerificationDatabase } from "./persistence";
+
+export interface AttachmentDatabase extends VerificationDatabase {
+  configureIdentity(options: {
+    context(request: Request): Promise<SupAuthRequestContext>;
+    resolveLocalSubject(identity: SupAuthRequestContext["identity"]): Promise<string | null>;
+  }): void;
+  readonly storage: { url: string; anonKey: string; serviceRoleKey: string };
+  workerConnection?(): Promise<{ socketPath: string; database: string; username: string }>;
+}
+
+export async function setupStarterAttachments(options: {
+  database: AttachmentDatabase;
+  context(request: Request): Promise<SupAuthRequestContext>;
+  tokens: { owner: string; other: string };
+  seed(): Promise<string>;
+  approve(id: string, key: string): Promise<Response>;
+  setAuditFailure(enabled: boolean): void;
+  onExecution?(event: Readonly<ExecutionEvent>): void;
+  application(uploads: ReviewUploadPort): Promise<{ handle(request: Request): Promise<Response> }>;
+  signal: AbortSignal;
+}) {
+  const { database } = options;
+  const subjects = { owner: "11111111-1111-4111-8111-111111111111", other: "22222222-2222-4222-8222-222222222222" };
+  database.configureIdentity({
+    context: options.context,
+    async resolveLocalSubject(identity) { return subjects[identity.subject as keyof typeof subjects] ?? null; },
+  });
+  const query = (sql: string, parameters: readonly (string | number)[] = []) =>
+    database.transaction((tx) => tx.query(sql, parameters));
+  const rows = (value: unknown): Record<string, unknown>[] => {
+    assert.ok(Array.isArray(value));
+    return value.map((entry: unknown) => {
+      assert.ok(entry !== null && typeof entry === "object" && !Array.isArray(entry));
+      return entry as Record<string, unknown>;
+    });
+  };
+  await database.exec(await readFile(new URL("../migrations/002-review-attachments.sql", import.meta.url), "utf8"));
+  await database.exec(await readFile(new URL("../migrations/003-review-uploads.sql", import.meta.url), "utf8"));
+  await database.exec(`
+    UPDATE public.starter_members SET storage_subject='${subjects.owner}' WHERE subject='owner';
+    UPDATE public.starter_members SET storage_subject='${subjects.other}' WHERE subject='other';
+    CREATE POLICY fixture_broad_storage ON storage.objects FOR ALL TO authenticated USING (true) WITH CHECK (true);
+  `);
+  const client = (bearer: string, apiKey = database.storage.anonKey) => createClient(database.storage.url, apiKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    global: { headers: { Authorization: `Bearer ${bearer}` } },
+  });
+  const service = client(database.storage.serviceRoleKey, database.storage.serviceRoleKey);
+  const owner = client(options.tokens.owner), other = client(options.tokens.other);
+  const sdk = { artifacts: new SupaCloudArtifactsClient(service), workflows: new SupaCloudWorkflowsClient(service) };
+  const bucket = "review-attachments";
+  const body = new TextEncoder().encode("private approval evidence");
+  const sha256 = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", body)),
+    (byte) => byte.toString(16).padStart(2, "0")).join("");
+  let failUploadBinding = false, verifyBindingRollback = true;
+  let revokeUploadBeforeBinding = false, uploadAuthorizations = 0;
+  const attach = async () => {
+    const reviewId = await options.seed(), artifactId = crypto.randomUUID(), runId = artifactId;
+    const path = `${subjects.owner}/${reviewId}/${artifactId}.txt`;
+    assert.equal((await uploadRequest(reviewId, artifactId, "upload", options.tokens.other)).status, 403);
+    const preview = await uploadRequest(reviewId, artifactId, "upload");
+    assert.equal(preview.status, 200, await preview.clone().text());
+    assert.deepEqual(await preview.json(), { artifactId, bucketId: bucket, objectPath: path });
+    assert.ok((await other.storage.from(bucket).upload(path, body)).error, "Another subject must not upload to the owner's review");
+    assert.ok((await other.storage.from(bucket).upload(`${subjects.other}/${reviewId}/${artifactId}.txt`, body)).error,
+      "A valid subject prefix must not grant access to someone else's review");
+    const uploaded = await owner.storage.from(bucket).upload(path, body, { contentType: "text/plain" });
+    assert.equal(uploaded.error, null);
+    const replacement = new TextEncoder().encode("tampered");
+    assert.ok((await owner.storage.from(bucket).update(path, replacement, { contentType: "text/plain" })).error,
+      "Uploaded bytes must already be protected from user mutation before registration");
+    assert.ok((await owner.storage.from(bucket).upload(path, replacement, { contentType: "text/plain", upsert: true })).error);
+    await owner.storage.from(bucket).remove([path]);
+    assert.equal(await (await owner.storage.from(bucket).download(path)).data?.text(), new TextDecoder().decode(body));
+    assert.ok((await other.storage.from(bucket).download(path)).error, "Private evidence must not be readable by another subject");
+    await query("UPDATE public.starter_reviews SET owner_id='other' WHERE id=$1", [reviewId]);
+    try {
+      assert.ok((await owner.storage.from(bucket).download(path)).error,
+        "An unchanged subject prefix must not bypass a review ownership transfer");
+    } finally {
+      await query("UPDATE public.starter_reviews SET owner_id='owner' WHERE id=$1", [reviewId]);
+    }
+    const restored = await owner.storage.from(bucket).download(path);
+    assert.equal(restored.error, null);
+    assert.equal(await restored.data?.text(), new TextDecoder().decode(body));
+    assert.equal((await uploadRequest(reviewId, artifactId, "registration", options.tokens.other)).status, 403);
+    if (verifyBindingRollback) {
+      failUploadBinding = true;
+      try { assert.equal((await uploadRequest(reviewId, artifactId, "registration")).status, 503); }
+      finally { failUploadBinding = false; }
+      assert.ok(await sdk.artifacts.get(artifactId), "Immutable evidence must survive a binding failure");
+      assert.equal(rows(await query("SELECT review_id FROM public.starter_attachments WHERE review_id=$1", [reviewId])).length, 0);
+      verifyBindingRollback = false;
+    }
+    const registered = await uploadRequest(reviewId, artifactId, "registration");
+    assert.equal(registered.status, 200, await registered.clone().text());
+    const expected = { artifactId, runId, objectPath: path, sha256, bytes: body.byteLength };
+    assert.deepEqual(await registered.json(), expected);
+    assert.deepEqual(await (await uploadRequest(reviewId, artifactId, "registration")).json(), expected);
+    assert.equal(rows(await query(
+      "SELECT count(*)::integer AS count FROM supacloud_commands.execution_audit WHERE operation_key=$1", [artifactId],
+    ))[0]?.count, 1);
+    assert.ok((await service.storage.from(bucket).update(path, new TextEncoder().encode("changed"))).error,
+      "Even service-role writes must respect the immutable registry");
+    assert.ok((await service.storage.from(bucket).remove([path])).error);
+    return { reviewId, artifactId, runId, path };
+  };
+  let failCommit = false;
+  let invalidateBeforeCommit = false;
+  let invalidateReviewId = "";
+  let authorizedReads = 0;
+  const adapterOptions = {
+    projectId: "starter-test", tenantId: "starter-test", service,
+    database: {
+      transaction: async <T>(run: (tx: CommandTransaction) => Promise<T>) => {
+        if (revokeUploadBeforeBinding && uploadAuthorizations === 1) {
+          revokeUploadBeforeBinding = false;
+          await query("UPDATE public.starter_members SET enabled=false WHERE subject='owner'");
+        }
+        if (invalidateBeforeCommit && authorizedReads === 1) {
+          invalidateBeforeCommit = false;
+          await query("UPDATE public.starter_reviews SET version=version+1 WHERE id=$1", [invalidateReviewId]);
+        }
+        return database.transaction(tx => run({
+          async query(text, parameters) {
+            const value = await tx.query(text, parameters);
+            if (text.startsWith("SELECT a.object_path") && invalidateBeforeCommit) authorizedReads++;
+            if (text.startsWith("SELECT m.storage_subject") && revokeUploadBeforeBinding) uploadAuthorizations++;
+            if (text.startsWith("INSERT INTO public.starter_attachment_results") && failCommit) {
+              throw new Error("Synthetic attachment commit failure");
+            }
+            if (text.startsWith("INSERT INTO public.starter_attachments ") && failUploadBinding) {
+              throw new Error("Synthetic upload binding failure");
+            }
+            return value;
+          },
+        }));
+      },
+    },
+  };
+  await assert.rejects(createReviewAttachmentAdapters({ ...adapterOptions, tenantId: "other" }), /binding mismatch/);
+  await assert.rejects(createReviewAttachmentAdapters({ ...adapterOptions, projectId: "other" }), /binding mismatch/);
+  const { store, enqueue } = await createReviewAttachmentAdapters(adapterOptions);
+  const uploadApp = await options.application(await createReviewUploadAdapters(adapterOptions));
+  const uploadRequest = (reviewId: string, artifactId: string, action: string, bearer = options.tokens.owner, expectedVersion = 1) =>
+    uploadApp.handle(new Request("http://localhost/reviews/" + reviewId + "/attachment-" + action, {
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + bearer },
+      body: JSON.stringify({ artifactId, expectedVersion }),
+    }));
+  const verifyUploads = async () => {
+    await database.exec("INSERT INTO storage.buckets(id,name,public) VALUES ('unrelated-fixture','unrelated-fixture',false)");
+    const unrelated = owner.storage.from("unrelated-fixture");
+    assert.equal((await unrelated.upload("test.txt", body, { contentType: "text/plain" })).error, null);
+    const updatedBody = "Updated unrelated bucket content";
+    assert.equal((await unrelated.update("test.txt", updatedBody, { contentType: "text/plain" })).error, null);
+    const updatedObject = await unrelated.download("test.txt");
+    assert.equal(updatedObject.error, null);
+    assert.equal(await updatedObject.data?.text(), updatedBody,
+      "Attachment fences must permit actual updates in an unrelated bucket");
+    assert.equal((await unrelated.remove(["test.txt"])).error, null,
+      "Attachment fences must not change the unrelated bucket's explicitly granted permissions");
+    const deletedObject = await unrelated.download("test.txt");
+    assert.equal(deletedObject.data, null);
+    assert.ok(deletedObject.error, "The unrelated bucket object must actually be removed");
+    assert.equal(rows(await query(
+      "SELECT id FROM storage.objects WHERE bucket_id=$1 AND name=$2", ["unrelated-fixture", "test.txt"],
+    )).length, 0);
+    const reviewId = await options.seed(), artifactId = crypto.randomUUID();
+    const path = subjects.owner + "/" + reviewId + "/" + artifactId + ".txt";
+    const foreignReview = await options.seed();
+    await query("UPDATE public.starter_reviews SET owner_id='other' WHERE id=$1", [foreignReview]);
+    const forged = await uploadApp.handle(new Request("http://localhost/reviews/" + foreignReview + "/attachment-upload", {
+      method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + options.tokens.owner },
+      body: JSON.stringify({ reviewId, artifactId, expectedVersion: 1, objectPath: path }),
+    }));
+    assert.ok(forged.status === 403 || forged.status === 422, "Body fields must not override route identity or server-derived paths");
+    assert.equal((await uploadRequest(reviewId, artifactId, "upload", options.tokens.owner, 2)).status, 403);
+    assert.equal((await owner.storage.from(bucket).upload(path, new Uint8Array(1048577), { contentType: "text/plain" })).data, null);
+    assert.ok((await owner.storage.from(bucket).upload(path, body, { contentType: "image/png" })).error);
+    await query("UPDATE public.starter_members SET can_approve=false WHERE subject='owner'");
+    try {
+      assert.equal((await uploadRequest(reviewId, artifactId, "upload")).status, 403);
+      assert.ok((await owner.storage.from(bucket).upload(path, body, { contentType: "text/plain" })).error);
+    } finally { await query("UPDATE public.starter_members SET can_approve=true WHERE subject='owner'"); }
+    assert.equal((await owner.storage.from(bucket).upload(path, body, { contentType: "text/plain" })).error, null);
+    revokeUploadBeforeBinding = true;
+    try {
+      assert.equal((await uploadRequest(reviewId, artifactId, "registration")).status, 403);
+      assert.ok(await sdk.artifacts.get(artifactId));
+      assert.equal(rows(await query("SELECT review_id FROM public.starter_attachments WHERE review_id=$1", [reviewId])).length, 0);
+      for (const table of ["execution_receipts", "execution_audit"]) {
+        assert.equal(rows(await query(`SELECT count(*)::integer AS count FROM supacloud_commands.${table} WHERE operation_key=$1`,
+          [artifactId]))[0]?.count, 0);
+      }
+      assert.ok((await owner.storage.from(bucket).download(path)).error);
+    } finally {
+      revokeUploadBeforeBinding = false;
+      await query("UPDATE public.starter_members SET enabled=true WHERE subject='owner'");
+    }
+    assert.equal((await uploadRequest(reviewId, artifactId, "registration")).status, 200);
+    const competing = crypto.randomUUID(), competingPath = subjects.owner + "/" + reviewId + "/" + competing + ".txt";
+    assert.equal((await owner.storage.from(bucket).upload(competingPath, body, { contentType: "text/plain" })).error, null);
+    assert.equal((await uploadRequest(reviewId, competing, "registration")).status, 409);
+    assert.ok(await sdk.artifacts.get(competing), "Conflicting immutable evidence is retained, not silently deleted");
+  };
+  const execute = async (input: unknown) => {
+    const modules = createCompiledModules();
+    const compiled = modules.find((module) => module.jobs?.some((job) => job.name === "review.verify-attachment"));
+    assert.ok(compiled);
+    const job = compiled.jobs?.find((job) => job.name === "review.verify-attachment");
+    assert.ok(job);
+    return executeJob(compiled, compiled.createServices({ dbClient: store }, {}), job, input,
+      { workerId: "attachment-test-worker", requestId: "starter-attachment-job" }, {}, undefined, options.onExecution);
+  };
+  const claim = async (visibilityTimeoutSeconds = 30) => {
+    const claimed = await sdk.workflows.claim({ workerId: "attachment-test-worker", visibilityTimeoutSeconds });
+    assert.ok(claimed?.status === "claimed", "Expected a claim from the canonical workflow queue");
+    return claimed;
+  };
+  const attempt = (claimed: Awaited<ReturnType<typeof claim>>) => ({
+    stepId: claimed.stepId, messageId: claimed.messageId, attempt: claimed.attempt, workerId: claimed.workerId,
+  });
+  const count = async (reviewId: string) => rows(await query(
+    "SELECT count(*)::integer AS count FROM public.starter_attachment_results WHERE review_id=$1", [reviewId],
+  ))[0]?.count;
+  const until = async (check: () => Promise<boolean>) => {
+    const deadline = Date.now() + 20_000;
+    while (!await check()) {
+      assert.ok(Date.now() < deadline, "Attachment worker did not produce the expected durable receipt");
+      await Bun.sleep(20);
+    }
+  };
+  const workerOptions = {
+    ...adapterOptions, modules: createCompiledModules(), workflows: sdk.workflows,
+    workerId: "reference-worker", queueOwnership: "exclusive-review-attachments" as const, pollIntervalMs: 10,
+  };
+  const verifyWorker = async () => {
+    await assert.rejects(createReviewAttachmentWorker({ ...workerOptions, modules: [] }), /compiled reference Job/);
+    const queued = await attach();
+    assert.equal((await options.approve(queued.reviewId, crypto.randomUUID())).status, 200);
+    let retries = 0;
+    failCommit = true;
+    const retrying = await createReviewAttachmentWorker({
+      ...workerOptions,
+      workflows: {
+        claim: request => sdk.workflows.claim(request),
+        complete: request => sdk.workflows.complete(request),
+        fail: request => sdk.workflows.fail(request),
+        async retry(request) {
+          const receipt = await sdk.workflows.retry(request);
+          failCommit = false;
+          retries++;
+          return receipt;
+        },
+      },
+    });
+    try {
+      await retrying.start();
+      await until(async () => (await sdk.workflows.get(queued.runId))?.status === "completed");
+      assert.equal(retries, 1);
+      assert.equal(await count(queued.reviewId), 1);
+    } finally { failCommit = false; await retrying.close(); }
+
+    const uncertain = await attach(), pending = await attach();
+    assert.equal((await options.approve(uncertain.reviewId, crypto.randomUUID())).status, 200);
+    assert.equal((await options.approve(pending.reviewId, crypto.randomUUID())).status, 200);
+    let claims = 0, failed = 0;
+    const losingReceipt = await createReviewAttachmentWorker({
+      ...workerOptions,
+      workflows: {
+        async claim(request) { claims++; return sdk.workflows.claim(request); },
+        async complete(request) {
+          await sdk.workflows.complete(request);
+          throw new Error("Synthetic lost confirmation containing private data");
+        },
+        retry: request => { failed++; return sdk.workflows.retry(request); },
+        fail: request => { failed++; return sdk.workflows.fail(request); },
+      },
+    });
+    try {
+      await losingReceipt.start();
+      await assert.rejects(Promise.race([
+        losingReceipt.failure,
+        Bun.sleep(10_000).then(() => { throw new Error("Missing fatal receipt signal"); }),
+      ]), /requires recovery/);
+      await losingReceipt.close();
+      assert.equal(claims, 1, "An uncertain completion must stop further claims");
+      assert.equal(failed, 0, "An uncertain completion must not be converted into a retry/failure");
+      assert.equal((await sdk.workflows.get(uncertain.runId))?.status, "completed");
+      assert.equal(await count(uncertain.reviewId), 1);
+      assert.equal(await count(pending.reviewId), 0);
+    } finally { await losingReceipt.close(); }
+    const resumed = await createReviewAttachmentWorker(workerOptions);
+    try {
+      await resumed.start();
+      await until(async () => (await sdk.workflows.get(pending.runId))?.status === "completed");
+      assert.equal(await count(pending.reviewId), 1);
+    } finally { await resumed.close(); }
+
+    const lostRetry = await attach();
+    assert.equal((await options.approve(lostRetry.reviewId, crypto.randomUUID())).status, 200);
+    let retryReceipts = 0, afterRetryClaims = 0;
+    failCommit = true;
+    const uncertainRetry = await createReviewAttachmentWorker({
+      ...workerOptions,
+      workflows: {
+        async claim(request) { afterRetryClaims++; return sdk.workflows.claim(request); },
+        complete: request => sdk.workflows.complete(request),
+        fail: request => sdk.workflows.fail(request),
+        async retry(request) {
+          await sdk.workflows.retry(request);
+          retryReceipts++;
+          throw new Error("Synthetic lost retry receipt");
+        },
+      },
+    });
+    try {
+      await uncertainRetry.start();
+      await assert.rejects(Promise.race([
+        uncertainRetry.failure, Bun.sleep(10_000).then(() => { throw new Error("Missing retry failure signal"); }),
+      ]), /requires recovery/);
+      await uncertainRetry.close();
+      assert.equal(retryReceipts, 1);
+      assert.equal(afterRetryClaims, 1);
+      assert.equal(await count(lostRetry.reviewId), 0);
+    } finally {
+      failCommit = false;
+      await uncertainRetry.close();
+      await sdk.workflows.cancel(lostRetry.runId, "Test cleanup");
+    }
+
+    for (const variant of [
+      { workflowName: "unsupported", workflowVersion: "1", firstStepKey: "verify" },
+      { workflowName: "review.verify-attachment", workflowVersion: "2", firstStepKey: "verify" },
+      { workflowName: "review.verify-attachment", workflowVersion: "1", firstStepKey: "unexpected" },
+      { workflowName: "review.verify-attachment", workflowVersion: "1", firstStepKey: "verify" },
+    ]) {
+      const runId = crypto.randomUUID();
+      await sdk.workflows.start({
+        ...variant, runId, maxAttempts: 3, input: { reviewId: pending.reviewId, artifactId: pending.artifactId, version: 2 },
+      });
+      const worker = await createReviewAttachmentWorker(workerOptions);
+      try {
+        await worker.start();
+        await assert.rejects(Promise.race([
+          worker.failure, Bun.sleep(10_000).then(() => { throw new Error("Missing queue ownership failure"); }),
+        ]), /requires recovery/);
+        await worker.close();
+        const run = await sdk.workflows.get(runId);
+        assert.equal(run?.status, "running", "A foreign workflow must not be failed or completed");
+        assert.equal(run?.steps[0]?.attempts, 1);
+      } finally { await worker.close(); await sdk.workflows.cancel(runId, "Test cleanup"); }
+    }
+    return "sdk-claim-compiled-job-retry-complete-fatal-settlement";
+  };
+  return {
+    enqueue,
+    async verify() {
+      await verifyUploads();
+      const attachment = await attach(), key = crypto.randomUUID();
+      options.setAuditFailure(true);
+      try { assert.equal((await options.approve(attachment.reviewId, key)).status, 503); }
+      finally { options.setAuditFailure(false); }
+      assert.equal(await sdk.workflows.get(attachment.runId), null, "Approval rollback must not leave an asynchronous run");
+      assert.equal((await options.approve(attachment.reviewId, key)).status, 200);
+      assert.equal((await options.approve(attachment.reviewId, key)).status, 200);
+      assert.equal((await uploadRequest(attachment.reviewId, attachment.artifactId, "registration")).status, 200);
+      assert.equal((await uploadRequest(attachment.reviewId, crypto.randomUUID(), "upload")).status, 403);
+      const first = await claim();
+      assert.equal(first.runId, attachment.runId);
+      failCommit = true;
+      try { await assert.rejects(execute(first.input), /Synthetic attachment commit failure/); }
+      finally { failCommit = false; }
+      assert.equal(await count(attachment.reviewId), 0);
+      await sdk.workflows.retry({ ...attempt(first), errorMessage: "Test commit failure", delaySeconds: 0 });
+      const second = await claim(15);
+      assert.equal(second.attempt, 2);
+      const expected = { reviewId: attachment.reviewId, artifactId: attachment.artifactId, version: 2, sha256, bytes: body.byteLength };
+      assert.deepEqual(await execute(second.input), expected);
+      assert.equal(await count(attachment.reviewId), 1);
+      for (const change of [
+        { sql: "UPDATE public.starter_members SET can_approve=false WHERE subject='owner'",
+          restore: "UPDATE public.starter_members SET can_approve=true WHERE subject='owner'", error: /authorization or review revision/ },
+        { sql: "UPDATE public.starter_application SET tenant_id='other'",
+          restore: "UPDATE public.starter_application SET tenant_id='starter-test'", error: /authorization or review revision/ },
+        { sql: "UPDATE public.starter_application SET project_id='other'",
+          restore: "UPDATE public.starter_application SET project_id='starter-test'", error: /authorization or review revision/ },
+        { sql: "UPDATE public.starter_attachments SET object_path='wrong-path' WHERE review_id=$1",
+          restore: "UPDATE public.starter_attachments SET object_path=$2 WHERE review_id=$1", error: /Invalid attachment artifact/ },
+      ]) {
+        const scoped = change.sql.includes("$1");
+        await query(change.sql, scoped ? [attachment.reviewId] : []);
+        try { await assert.rejects(execute(second.input), change.error); }
+        finally { await query(change.restore, scoped ? [attachment.reviewId, attachment.path] : []); }
+      }
+      await assert.rejects(store.recordAttachment(expected, { ...expected, bytes: expected.bytes + 1 }),
+        /Conflicting durable attachment result/);
+      await query("UPDATE public.starter_members SET enabled=false WHERE subject='owner'");
+      try { await assert.rejects(execute(second.input), /authorization or review revision/); }
+      finally { await query("UPDATE public.starter_members SET enabled=true WHERE subject='owner'"); }
+      assert.equal(await count(attachment.reviewId), 1);
+      // Lose the acknowledgement after the result commit, restart, then wait for the actual lease to expire.
+      await database.restart();
+      await Bun.sleep(15_100);
+      const third = await claim();
+      assert.equal(third.runId, attachment.runId);
+      assert.equal(third.attempt, 3);
+      await assert.rejects(sdk.workflows.complete({ ...attempt(second), runOutput: expected }));
+      assert.deepEqual(await execute(third.input), expected);
+      assert.equal(await count(attachment.reviewId), 1, "Redelivery must not duplicate the durable effect");
+      assert.equal((await sdk.workflows.complete({ ...attempt(third), runOutput: expected })).status, "completed");
+      assert.equal((await sdk.workflows.complete({ ...attempt(third), runOutput: expected })).idempotent, true);
+      assert.equal(await sdk.workflows.claim({ workerId: "attachment-test-worker" }), null);
+
+      const stale = await attach();
+      assert.equal((await options.approve(stale.reviewId, crypto.randomUUID())).status, 200);
+      const staleClaim = await claim();
+      invalidateReviewId = stale.reviewId;
+      invalidateBeforeCommit = true;
+      await assert.rejects(execute(staleClaim.input), /authorization or review revision/);
+      assert.equal(await count(stale.reviewId), 0);
+      assert.equal((await sdk.workflows.fail({ ...attempt(staleClaim), errorMessage: "Review revision changed" })).status, "failed");
+      const worker = await verifyWorker();
+      let deliveredWorker: unknown = "not-run-native-socket-required";
+      let deliveredUploads: unknown = "not-run-native-socket-required";
+      let compatibility: unknown = "not-run-native-socket-required";
+      if (database.workerConnection) {
+        const connection = await database.workerConnection();
+        const runtimeConnections = await setupRuntimeRoleConnections(database, connection);
+        const archiveRoot = await mkdtemp(join(tmpdir(), "review-reference-archive-"));
+        try {
+          const archived = await buildReferenceDeliveryArchive(join(archiveRoot, "build"), options.signal);
+          const upgraded = await buildReferenceUpgradeArchive(join(archiveRoot, "upgraded"), options.signal);
+          assert.notEqual(upgraded.api.objectId, archived.api.objectId);
+          assert.notEqual(upgraded.jobs.objectId, archived.jobs.objectId);
+          const copiedManifest = join(archiveRoot, "tampered", "delivery.manifest.json");
+          const copied = await prepareArchivedDelivery(archived.api, "api", join(archiveRoot, "tampered"));
+          await appendFile(join(copied.bundle, "index.js"), "\n// Controlled archive corruption\n");
+          await assert.rejects(prepareArchivedDelivery(
+            { ...archived.api, manifestPath: copiedManifest }, "api", join(archiveRoot, "rejected-corruption"),
+          ), /Invalid delivery migration archive/);
+          await assert.rejects(prepareArchivedDelivery(
+            archived.jobs, "api", join(archiveRoot, "rejected-target"),
+          ), /Invalid delivery migration archive/);
+          await verifyReferenceUpgradeRefused({
+            artifact: upgraded.api, target: "api", connection: runtimeConnections.http, signal: options.signal,
+          });
+          await verifyReferenceUpgradeRefused({
+            artifact: upgraded.jobs, target: "jobs", connection: runtimeConnections.worker, signal: options.signal,
+          });
+          const retained: Array<{ reviewId: string; revision: string; result: unknown }> = [];
+          const stages: Array<{ phase: string; httpObjectId: string; workerObjectId: string }> = [];
+          const runStage = async (
+            phase: "original" | "upgraded" | "rollback", artifacts: typeof archived,
+          ) => {
+            const artifactId = crypto.randomUUID();
+            let deliveredReviewId = "";
+            const http = await verifyReviewDelivery({
+              database, connection: runtimeConnections.http, storage: database.storage, signal: options.signal,
+              artifact: artifacts.api,
+              async beforeApproval(origin, bearer, reviewId) {
+                deliveredReviewId = reviewId;
+                const call = (action: string, token = bearer) => fetch(new URL("/reviews/" + reviewId + "/attachment-" + action, origin), {
+                  method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + token },
+                  body: JSON.stringify({ artifactId, expectedVersion: 1 }), signal: options.signal,
+                });
+                assert.equal((await call("upload", "")).status, 401);
+                const preview = await call("upload");
+                assert.equal(preview.status, 200, await preview.clone().text());
+                const location = await preview.json();
+                assert.equal(location.objectPath, subjects.owner + "/" + reviewId + "/" + artifactId + ".txt");
+                assert.equal((await owner.storage.from(bucket).upload(location.objectPath, body, { contentType: "text/plain" })).error, null);
+                const registered = await call("registration");
+                assert.equal(registered.status, 200, await registered.clone().text());
+                assert.deepEqual(await registered.json(), {
+                  artifactId, runId: artifactId, objectPath: location.objectPath, sha256, bytes: body.byteLength,
+                });
+                assert.equal((await call("registration")).status, 200);
+              },
+            });
+            assert.ok(deliveredReviewId);
+            assert.equal(http.objectId, artifacts.api.objectId);
+            assert.equal((await sdk.workflows.get(artifactId))?.status, "queued",
+              "The detached HTTP approval transaction must submit the workflow");
+            const expected = { reviewId: deliveredReviewId, artifactId, version: 2, sha256, bytes: body.byteLength };
+            const worker = await verifyAttachmentWorkerDelivery({
+              database, connection: runtimeConnections.worker, runId: artifactId, artifact: artifacts.jobs,
+              expected, verifyUnknownWorkflow: phase === "rollback", signal: options.signal,
+            });
+            assert.equal(worker.objectId, artifacts.jobs.objectId);
+            retained.push({ reviewId: deliveredReviewId, revision: phase === "upgraded" ? "v2" : "v1", result: expected });
+            stages.push({ phase, httpObjectId: http.objectId, workerObjectId: worker.objectId });
+            deliveredUploads = http;
+            deliveredWorker = worker;
+          };
+          const verifyRetained = async () => {
+            for (const item of retained) {
+              assert.deepEqual(rows(await query(
+                "SELECT result,writer_revision FROM public.starter_attachment_results WHERE review_id=$1", [item.reviewId],
+              )), [{ result: item.result, writer_revision: item.revision }]);
+            }
+          };
+          await runStage("original", archived);
+          const httpMigrations = await readDeliveryMigrationArchive(upgraded.api.manifestPath, "api");
+          const workerMigrations = await readDeliveryMigrationArchive(upgraded.jobs.manifestPath, "jobs");
+          assert.deepEqual(workerMigrations.migrations, httpMigrations.migrations);
+          const migration = httpMigrations.migrations.find(item => item.version === "5");
+          assert.ok(migration);
+          assert.equal(migration.executor, "project-migration");
+          // Owned fixture DDL only: no platform migration execution receipt is asserted.
+          await database.exec(migration.sql);
+          await verifyRetained();
+          await runStage("upgraded", upgraded);
+          await verifyRetained();
+          await database.restart();
+          const restartedConnection = await database.workerConnection();
+          assert.notEqual(restartedConnection.socketPath, runtimeConnections.http.socketPath);
+          runtimeConnections.http = { ...restartedConnection, username: runtimeConnections.http.username };
+          runtimeConnections.worker = { ...restartedConnection, username: runtimeConnections.worker.username };
+          await verifyRetained();
+          await runStage("rollback", archived);
+          await verifyRetained();
+          assert.equal(stages[0]!.httpObjectId, stages[2]!.httpObjectId);
+          assert.equal(stages[0]!.workerObjectId, stages[2]!.workerObjectId);
+          compatibility = {
+            stages, beforeMigration: "both-upgraded-hosts-refused", migration: "verified-archive-local-fixture-ddl",
+            data: "original-and-upgraded-results-retained-after-restart-and-application-rollback",
+            fullPlatform: "not-run", dataRecovery: "not-proven",
+          };
+        } finally { await rm(archiveRoot, { recursive: true, force: true }); }
+      }
+      return { storage: "private-http-persistent", artifact: "immutable", submission: "approval-transaction",
+        execution: "compiled-job", retry: "commit-rollback", acknowledgement: "restart-and-redelivery",
+        staleRevision: "denied-after-read-before-commit", revokedMembership: "denied-on-replay",
+        adapters: "shipped-postgres", projectBinding: "database-rechecked", revokedPermission: "denied-on-replay",
+        objectPath: "registry-binding-checked", conflictingResult: "denied",
+        uploads: "compiled-routes-server-digest-audited-binding", storagePolicies: "restrictive-with-broad-policy",
+        bindingFailure: "immutable-orphan-retained", revokedBeforeBinding: "no-binding-receipt-audit",
+        worker, deliveredUploads, deliveredWorker, compatibility, fullPlatform: "not-run" };
+    },
+  };
+}

@@ -50,6 +50,7 @@ services:
       GOTRUE_SITE_URL: http://localhost:${CADDY_HTTP_PORT:-8000}
       GOTRUE_JWT_SECRET: ${JWT_SECRET}
       GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_ISSUER: http://localhost:${CADDY_HTTP_PORT:-8000}/auth/v1
       GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
       GOTRUE_JWT_EXP: 3600
       API_EXTERNAL_URL: http://localhost:${CADDY_HTTP_PORT:-8000}/auth/v1
@@ -75,7 +76,7 @@ services:
       - supacloud-dev
 
   postgrest:
-    image: postgrest/postgrest:v16.3
+    image: postgrest/postgrest:v16.4
     restart: always
     environment:
       PGRST_DB_URI: postgres://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/postgres

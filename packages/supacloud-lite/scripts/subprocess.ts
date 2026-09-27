@@ -1,17 +1,3 @@
-/**
- * Keep subprocess collection bounded for external Bun consumers while preserving
- * the stable runtime's Windows IOCP behavior.
- */
-export async function withWindowsSubprocessRef<T>(operation: () => Promise<T>): Promise<T> {
-  if (process.platform !== 'win32') return await operation()
-  const eventLoopRef = setInterval(() => {}, 1000)
-  try {
-    return await operation()
-  } finally {
-    clearInterval(eventLoopRef)
-  }
-}
-
 export interface BufferedCommandOptions {
   command: string[]
   cwd: string
@@ -55,9 +41,9 @@ function spawnBufferedCommand(options: BufferedCommandOptions, signal: AbortSign
 }
 
 async function collectBufferedCommand(processHandle: ReturnType<typeof spawnBufferedCommand>) {
-  return await withWindowsSubprocessRef(() => Promise.all([
+  return await Promise.all([
     processHandle.exited,
     new Response(processHandle.stdout).text(),
     new Response(processHandle.stderr).text(),
-  ]))
+  ])
 }

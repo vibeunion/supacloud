@@ -50,19 +50,25 @@ async function saveBranches(parentRef: string, branches: BranchRecord[]): Promis
 }
 
 export const branchRoutes = new Elysia({ prefix: "/v1/projects/:ref/branches" })
-  .onBeforeHandle(async ({ params, request }) => {
+  .beforeHandle(async ({ params, request }) => {
     const authError = await authMiddleware.requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
   })
-  .get("", async ({ params }) => {
+  .get("", {
+    detail: { tags: ["branches"], summary: "List project branches" },
+  }, async ({ params }) => {
     const project = await projectRepository.findByRef(params.ref);
     if (!project) return status(404, { error: "Project not found" });
     const branches = readBranches(project.config);
     return { project_ref: params.ref, branches };
-  }, {
-    detail: { tags: ["branches"], summary: "List project branches" },
   })
-  .post("", async ({ params, body }) => {
+  .post("", {
+    body: t.Object({
+      name: t.String(),
+      data_mode: t.Optional(t.Union([t.Literal("schema_only"), t.Literal("full_clone")])),
+    }),
+    detail: { tags: ["branches"], summary: "Create a preview branch" },
+  }, async ({ params, body }) => {
     const input = body as { name: string; data_mode?: BranchDataMode };
     if (!input.name?.trim()) {
       return status(400, { error: "Branch name is required" });
@@ -123,14 +129,10 @@ export const branchRoutes = new Elysia({ prefix: "/v1/projects/:ref/branches" })
       });
 
     return { created: true, project_ref: params.ref, branch: record };
-  }, {
-    body: t.Object({
-      name: t.String(),
-      data_mode: t.Optional(t.Union([t.Literal("schema_only"), t.Literal("full_clone")])),
-    }),
-    detail: { tags: ["branches"], summary: "Create a preview branch" },
   })
-  .delete("/:branchRef", async ({ params }) => {
+  .delete("/:branchRef", {
+    detail: { tags: ["branches"], summary: "Delete a preview branch" },
+  }, async ({ params }) => {
     const parent = await projectRepository.findByRef(params.ref);
     if (!parent) return status(404, { error: "Parent project not found" });
 
@@ -168,10 +170,10 @@ export const branchRoutes = new Elysia({ prefix: "/v1/projects/:ref/branches" })
       });
 
     return { deleted: true, project_ref: params.ref, branch_ref: params.branchRef };
-  }, {
-    detail: { tags: ["branches"], summary: "Delete a preview branch" },
   })
-  .get("/:branchRef/promote/plan", async ({ params }) => {
+  .get("/:branchRef/promote/plan", {
+    detail: { tags: ["branches"], summary: "Plan safe migration promotion from a preview branch" },
+  }, async ({ params }) => {
     const parent = await projectRepository.findByRef(params.ref);
     if (!parent) return status(404, { error: "Parent project not found" });
 
@@ -192,10 +194,16 @@ export const branchRoutes = new Elysia({ prefix: "/v1/projects/:ref/branches" })
       logger.error(`[branches] failed to plan branch promotion ${params.branchRef}`, { error: message });
       return status(500, { error: message });
     }
-  }, {
-    detail: { tags: ["branches"], summary: "Plan safe migration promotion from a preview branch" },
   })
-  .post("/:branchRef/promote", async ({ params, body, request }) => {
+  .post("/:branchRef/promote", {
+    body: t.Optional(t.Object({
+      mode: t.Optional(t.Union([t.Literal("migrations"), t.Literal("replace_database")])),
+      plan_checksum: t.Optional(t.String({ minLength: 64, maxLength: 64 })),
+      confirm_destructive: t.Optional(t.Boolean()),
+      confirmation: t.Optional(t.String()),
+    })),
+    detail: { tags: ["branches"], summary: "Promote reviewed migrations or explicitly replace the parent database" },
+  }, async ({ params, body, request }) => {
     const parent = await projectRepository.findByRef(params.ref);
     if (!parent) return status(404, { error: "Parent project not found" });
 
@@ -298,12 +306,4 @@ export const branchRoutes = new Elysia({ prefix: "/v1/projects/:ref/branches" })
       logger.error(`[branches] failed to promote migrations from ${params.branchRef}`, { error: message });
       return status(500, { error: message, code: "promotion_failed" });
     }
-  }, {
-    body: t.Optional(t.Object({
-      mode: t.Optional(t.Union([t.Literal("migrations"), t.Literal("replace_database")])),
-      plan_checksum: t.Optional(t.String({ minLength: 64, maxLength: 64 })),
-      confirm_destructive: t.Optional(t.Boolean()),
-      confirmation: t.Optional(t.String()),
-    })),
-    detail: { tags: ["branches"], summary: "Promote reviewed migrations or explicitly replace the parent database" },
   });

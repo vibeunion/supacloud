@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import { create as createTar, list as listTar } from 'tar'
 import { createProjectBackend, ensureProjectSecrets, resolveProjectPaths } from '../src/project-runtime.js'
 import { createSnapshot, restoreSnapshot } from '../src/snapshot.js'
-import { withWindowsSubprocessRef } from '../scripts/subprocess.js'
 import { createSymlinkIfPermitted } from './support/symlink.js'
 
 const temporaryDirectories: string[] = []
@@ -296,13 +295,11 @@ async function runCli(args: string[]): Promise<string> {
     stderr: 'pipe',
     env: process.env,
   })
-  return await withWindowsSubprocessRef(async () => {
-    const [exitCode, stdout, stderr] = await Promise.all([
-      processHandle.exited,
-      new Response(processHandle.stdout).text(),
-      new Response(processHandle.stderr).text(),
-    ])
-    if (exitCode !== 0) throw new Error(`CLI failed (${exitCode}): ${stderr || stdout}`)
-    return stdout
-  })
+  const [exitCode, stdout, stderr] = await Promise.all([
+    processHandle.exited,
+    new Response(processHandle.stdout).text(),
+    new Response(processHandle.stderr).text(),
+  ])
+  if (exitCode !== 0) throw new Error(`CLI failed (${exitCode}): ${stderr || stdout}`)
+  return stdout
 }

@@ -1,3 +1,5 @@
+import { createDefaultApplicationRouteComposition } from "../services/application-deployment-composition";
+
 export { projectRoutes } from "./projects";
 export { projectDashboardRoutes } from "./project-dashboard";
 export { projectSecretsRoutes } from "./project-secrets";
@@ -28,6 +30,10 @@ export { authOAuthServerRoutes } from "./auth-oauth-server";
 export { authCustomProviderRoutes } from "./auth-custom-providers";
 export { authMfaRoutes } from "./auth-mfa";
 export { frontendRoutes } from "./frontend";
+export { createApplicationRoutes } from "./applications";
+const defaultApplicationRouteComposition = createDefaultApplicationRouteComposition();
+export const applicationRoutes = defaultApplicationRouteComposition.routes;
+export { createDefaultApplicationRouteComposition };
 export { webhookRoutes } from "./webhook";
 export { deployRoutes } from "./deploy";
 export { chatRoutes } from "./chat";

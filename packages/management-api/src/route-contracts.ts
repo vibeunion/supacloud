@@ -1,4 +1,4 @@
-import type { AnyElysia } from "elysia";
+import { unwrapSchema } from "@elysia/openapi/openapi";
 
 /**
  * The schema fields exposed by a Management API route projection.
@@ -43,6 +43,8 @@ export interface ManagementRouteLike {
   };
   websocket?: unknown;
 };
+
+type ManagementRouteSource = { readonly routes: readonly ManagementRouteLike[] };
 
 const DOCUMENTED_HTTP_METHODS = new Set([
   "GET",
@@ -179,7 +181,7 @@ export function isManagementDocumentedRoute(route: ManagementRouteLike): boolean
  * declaration source.
  */
 export function collectManagementRouteContracts(
-  app: Pick<AnyElysia, "routes">,
+  app: ManagementRouteSource,
   options: ManagementRouteProjectionOptions = {},
 ): readonly ManagementRouteContract[] {
   const projected = app.routes
@@ -207,7 +209,7 @@ export function collectManagementRouteContracts(
 
 /** Projection used by OpenAPI and generated HTTP client tooling. */
 export function collectManagementDocumentedRouteContracts(
-  app: Pick<AnyElysia, "routes">,
+  app: ManagementRouteSource,
 ): readonly ManagementRouteContract[] {
   return collectManagementRouteContracts(app, { documentedOnly: true });
 }
@@ -215,12 +217,12 @@ export function collectManagementDocumentedRouteContracts(
 /**
  * Add schema fields that the stock Swagger adapter cannot represent itself.
  * The adapter already owns operation and response generation; this function
- * only projects cookie parameters from the same Elysia route table and never
+ * projects cookies and custom-parser bodies from the same Elysia route table and never
  * creates a second route declaration.
  */
 export function augmentManagementOpenApiDocument(
   document: unknown,
-  app: Pick<AnyElysia, "routes">,
+  app: ManagementRouteSource,
 ): unknown {
   if (!isRecord(document) || !isRecord(document.paths)) return document;
 
@@ -232,10 +234,28 @@ export function augmentManagementOpenApiDocument(
     const method = contract.method.toLowerCase();
     const operation = pathItem[method];
     if (!isRecord(operation)) continue;
+    const projected = { ...operation };
+    let operationChanged = false;
+    const body = contract.schemas.body;
+    if (body !== undefined && isRecord(operation.requestBody)) {
+      const requestBody = { ...operation.requestBody };
+      const required = !isRecord(body) || body["~optional"] !== true;
+      if (requestBody.required !== required) {
+        requestBody.required = required;
+        operationChanged = true;
+      }
+      if (isRecord(requestBody.content) && Object.keys(requestBody.content).length === 0) {
+        const schema = unwrapSchema(body as Parameters<typeof unwrapSchema>[0]);
+        if (schema) {
+          requestBody.content = { "application/json": { schema } };
+          operationChanged = true;
+        }
+      }
+      projected.requestBody = requestBody;
+    }
 
     const cookieSchema = contract.schemas.cookie;
     const cookieProperties = schemaProperties(cookieSchema);
-    if (Object.keys(cookieProperties).length === 0) continue;
 
     const parameters = Array.isArray(operation.parameters) ? [...operation.parameters] : [];
     const originalParameterCount = parameters.length;
@@ -255,11 +275,15 @@ export function augmentManagementOpenApiDocument(
       existing.add(key);
     }
 
-    if (parameters.length === originalParameterCount) continue;
+    if (parameters.length !== originalParameterCount) {
+      projected.parameters = parameters;
+      operationChanged = true;
+    }
+    if (!operationChanged) continue;
 
     paths[toManagementOpenApiPath(contract.path)] = {
       ...pathItem,
-      [method]: { ...operation, parameters },
+      [method]: projected,
     };
     changed = true;
   }

@@ -45,7 +45,7 @@ async function applyRlsContext(tx: import("bun").SQL, payload: Record<string, un
 }
 
 async function upsertLogicalBucket(db: import("bun").SQL, bucket: LogicalBucketInput): Promise<void> {
-  const allowedMimeTypes = bucket.allowedMimeTypes?.length ? bucket.allowedMimeTypes : null;
+  const allowedMimeTypes = bucket.allowedMimeTypes?.length ? db.array(bucket.allowedMimeTypes, "TEXT") : null;
   await db`
     INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, created_at, updated_at)
     VALUES (${bucket.id}, ${bucket.name}, ${bucket.public}, ${bucket.fileSizeLimit || null}, ${allowedMimeTypes}, now(), now())
@@ -91,9 +91,10 @@ export class StorageRLS {
     }
     const dbName = await resolveDbName(ref);
     const db = getProjectDb(dbName);
+    const allowedMimeTypes = bucket.allowedMimeTypes?.length ? db.array(bucket.allowedMimeTypes, "TEXT") : null;
     const rows = await db`
       INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types, created_at, updated_at)
-      VALUES (${bucket.id}, ${bucket.name}, ${bucket.public}, ${bucket.fileSizeLimit || null}, ${bucket.allowedMimeTypes?.length ? bucket.allowedMimeTypes : null}, now(), now())
+      VALUES (${bucket.id}, ${bucket.name}, ${bucket.public}, ${bucket.fileSizeLimit || null}, ${allowedMimeTypes}, now(), now())
       ON CONFLICT (id) DO NOTHING
       RETURNING id
     `;

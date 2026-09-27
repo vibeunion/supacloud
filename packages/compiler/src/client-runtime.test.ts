@@ -295,3 +295,42 @@ test("generated client rejects structured responses whose HTTP status is absent 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("generated client preserves successful streams and declared JSON errors on the same route", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-client-stream-"));
+  try {
+    const streamGraph: ApplicationGraph = {
+      ...graph, modules: [{
+        ...graph.modules[0]!,
+        controllers: [{
+          ...graph.modules[0]!.controllers[0]!,
+          schemaImports: { Conflict: "src/contracts" },
+          routes: [{
+            method: "GET", path: "/events", handler: "events",
+            responses: { 409: "Conflict" },
+            contract: { response: "stream", evidence: "client-runtime.test.ts" },
+          }],
+        }],
+      }],
+    };
+    await writeFixtureProject(root, {
+      "generated/client.ts": renderClient(streamGraph, { rootDir: root, outDir: join(root, "generated") }),
+      "src/contracts.ts": 'export const Conflict = { type: "object", properties: { conflict: { type: "boolean" } }, required: ["conflict"] };',
+    });
+    const generated = await import(pathToFileURL(join(root, "generated/client.ts")).href);
+    const body = "data: ready\n\n";
+    let requests = 0;
+    const client = generated.createApiClient({
+      fetch: async () => ++requests === 1
+        ? new Response(body, { headers: { "content-type": "text/event-stream" } })
+        : Response.json({ conflict: true }, { status: 409 }),
+    });
+    const stream = await client.items.events();
+    expect(stream).toBeInstanceOf(ReadableStream);
+    expect(await new Response(stream).text()).toBe(body);
+    expect(await client.items.events()).toEqual({ conflict: true });
+    expect(requests).toBe(2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

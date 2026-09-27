@@ -1,7 +1,8 @@
 import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { swagger } from "@elysiajs/swagger";
+import { openapi } from "@elysia/openapi";
 import { Elysia } from "elysia";
 import { config } from "../../src/config";
+import { augmentManagementOpenApiDocument } from "../../src/route-contracts";
 
 const requireProjectOrAdminAuth = mock(() => Promise.resolve(null));
 const getProject = mock(() => Promise.resolve({ ref: "proj_1", config: {} }));
@@ -131,7 +132,12 @@ const recordUserDeletionUncertaintySpy = spyOn(
 );
 
 const { userManagementRoutes } = await import("../../src/routes/auth-users");
-const app = new Elysia().use(swagger()).use(userManagementRoutes);
+const app = new Elysia()
+  .afterHandle(({ request, responseValue }) => new URL(request.url).pathname === "/swagger/json"
+    ? augmentManagementOpenApiDocument(responseValue, app)
+    : responseValue)
+  .use(openapi({ path: "/swagger" }))
+  .use(userManagementRoutes);
 const originalFetch = globalThis.fetch;
 
 function request(path: string, init: RequestInit = {}) {
@@ -469,6 +475,21 @@ describe("userManagementRoutes", () => {
     expect(completeUserDeletion).toHaveBeenCalledTimes(1);
   });
 
+  test.each([
+    ["malformed JSON", "{", 400],
+    ["invalid soft-delete flag", JSON.stringify({ should_soft_delete: "true" }), 422],
+  ])("rejects %s before deleting a user", async (_name, body, status) => {
+    const upstream = mock(async () => Response.json({ id: USER_ID }));
+    globalThis.fetch = upstream as unknown as typeof fetch;
+    const res = await request(`/v1/projects/proj_1/auth/users/${USER_ID}`, {
+      method: "DELETE",
+      body,
+    });
+    expect(res.status).toBe(status);
+    expect(upstream).not.toHaveBeenCalled();
+    expect(markUserDeletionStarted).not.toHaveBeenCalled();
+  });
+
   test("uses a trusted direct GoTrue URL without falling back through the SDK proxy", async () => {
     const upstreamUrls: string[] = [];
     globalThis.fetch = mock(async (input: string | URL | Request) => {
@@ -772,8 +793,21 @@ describe("userManagementRoutes", () => {
 
   test("keeps unsupported admin mutations out of OpenAPI", async () => {
     const response = await request("/swagger/json");
+    expect(response.status).toBe(200);
     const specification = await response.json() as { paths: Record<string, unknown> };
-
+    expect(specification.paths).toHaveProperty("/v1/projects/{ref}/auth/users/{id}");
+    expect(specification.paths["/v1/projects/{ref}/auth/users/{id}"]).toMatchObject({
+      delete: {
+        requestBody: {
+          required: false,
+          content: {
+            "application/json": {
+              schema: { properties: { should_soft_delete: { type: "boolean" } } },
+            },
+          },
+        },
+      },
+    });
     expect(specification.paths).not.toHaveProperty(
       "/v1/projects/{ref}/auth/users/{id}/sessions/{sessionId}/revoke",
     );

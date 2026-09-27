@@ -1,4 +1,5 @@
 import { assertValidDbName, assertValidIdentifier } from "../utils/validation";
+import { PLATFORM_PUBLIC_ROUTINE_VALUES_SQL, renderPlatformRpcOwnershipSql } from "./platform-ownership";
 
 interface MigrationAdminSql {
   unsafe(statement: string): Promise<unknown>;
@@ -132,6 +133,10 @@ export function renderProjectMigrationRoleSql(dbName: string, dbUser: string): s
         WHERE n.nspname = 'public'
           AND pg_get_userbyid(p.proowner) <> ${userLiteral}
           AND NOT EXISTS (
+            SELECT 1 FROM (VALUES ${PLATFORM_PUBLIC_ROUTINE_VALUES_SQL}) AS platform(signature, private_schema)
+            WHERE p.oid = to_regprocedure(platform.signature)
+          )
+          AND NOT EXISTS (
             SELECT 1 FROM pg_depend d
             WHERE d.classid = 'pg_proc'::regclass
               AND d.objid = p.oid
@@ -179,6 +184,7 @@ export function renderProjectMigrationRoleSql(dbName: string, dbUser: string): s
       END LOOP;
     END
     $migration_owner$;
+    ${renderPlatformRpcOwnershipSql()}
   `;
 }
 

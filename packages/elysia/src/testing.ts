@@ -1,8 +1,6 @@
-import type { Elysia } from "elysia";
-
 /** Issue an in-process request against an Elysia app. */
 export function testRequest(
-  app: Elysia,
+  app: { handle(request: Request): Response | Promise<Response> },
   path: string,
   init?: RequestInit,
 ): Promise<Response> {

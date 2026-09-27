@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 
 const REQUEST_DIR = "/run/supacloud-unit-requests";
-const MANAGED_UNIT_PATTERN = /^(?:supacloud-(?:pgrst|gotrue)@\.service|supacloud-frontend-[a-z0-9-]{1,64}\.service)$/;
+const MANAGED_UNIT_PATTERN = /^(?:supacloud-(?:pgrst|gotrue)@\.service|supacloud-frontend-[a-z0-9-]{1,64}\.service|supacloud-application-[a-z0-9-]{1,20}-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}-[a-z][a-z0-9-]{0,62}\.service)$/;
 const MANAGED_IDENTITY_PATTERN = /^supacloud-(?:%i|[a-z0-9-]{1,20})$/;
 const MAX_UNIT_BYTES = 16 * 1024;
 const UNIT_DIRECTIVES = new Set([
@@ -13,7 +13,7 @@ const SERVICE_DIRECTIVES = new Set([
   "AmbientCapabilities", "CapabilityBoundingSet", "Group", "LimitNOFILE", "LockPersonality",
   "MemoryMax", "NoNewPrivileges", "PrivateTmp", "ProtectHome", "ProtectSystem",
   "ReadOnlyPaths", "RestrictRealtime", "RestrictSUIDSGID", "Restart", "RestartSec", "SyslogIdentifier",
-  "Type", "User", "WorkingDirectory",
+  "TimeoutStopSec", "Type", "User", "WorkingDirectory",
 ]);
 const INSTALL_DIRECTIVES = new Set(["WantedBy"]);
 
@@ -84,6 +84,10 @@ function recordIdentity(unitName: string, state: UnitPolicyState, key: string, v
 }
 
 function isAllowedEnvironmentFile(unitName: string, value: string): boolean {
+  if (unitName.startsWith("supacloud-application-")) {
+    const match = value.match(/^\/var\/supacloud\/application-runtime\/([a-z0-9-]{1,20})\/([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})\/([a-z][a-z0-9-]{0,62})\.env$/);
+    return !!match && unitName === `supacloud-application-${match[1]}-${match[2]}-${match[3]}.service`;
+  }
   if (unitName === "supacloud-pgrst@.service") {
     return /^\/etc\/supabase\/[A-Za-z0-9_-]{1,64}\/%i\.env$/.test(value);
   }
@@ -133,9 +137,14 @@ function validateUnitIdentity(unitName: string, state: UnitPolicyState): void {
   if (unitName.startsWith("supacloud-frontend-") && !unitName.startsWith(`supacloud-frontend-${state.user.slice(10)}-`)) {
     throw new Error(`Systemd unit ${unitName} does not match its tenant identity`);
   }
+  if (unitName.startsWith("supacloud-application-")
+    && !state.environmentFile.startsWith(`/var/supacloud/application-runtime/${state.user.slice(10)}/`)) {
+    throw new Error(`Systemd unit ${unitName} does not match its tenant identity`);
+  }
 }
 
 export function assertManagedSystemdUnitContent(unitName: string, content: string): void {
+  assertManagedUnitName(unitName);
   if (!content || Buffer.byteLength(content, "utf8") > MAX_UNIT_BYTES || /[\x00-\x09\x0b-\x1f\x7f]/.test(content)) {
     throw new Error(`Systemd unit ${unitName} has invalid content`);
   }

@@ -9,7 +9,14 @@ import {
 const PROJECT_REF_PATTERN = /^[A-Za-z0-9_-]{1,20}$/;
 
 export const projectMutationRoutes = new Elysia({ prefix: "/v1/projects/:ref/mutations" })
-  .get("/:mutationId", async ({ params }) => {
+  .get("/:mutationId", {
+    beforeHandle: async ({ params, request }) => {
+      if (!PROJECT_REF_PATTERN.test(params.ref)) return status(400, { error: "Project ref is invalid" });
+      const authError = await requireProjectOrAdminAuth(request, params.ref);
+      if (authError) return status(authError.status, authError.body);
+    },
+    detail: { tags: ["mutations"], summary: "Read a durable project mutation" },
+  }, async ({ params }) => {
     if (!isProjectMutationId(params.mutationId)) {
       return status(400, { error: "mutation_id must be a UUIDv4" });
     }
@@ -19,17 +26,10 @@ export const projectMutationRoutes = new Elysia({ prefix: "/v1/projects/:ref/mut
     });
     if (!mutation) return status(404, { error: "Mutation not found" });
     return { project_ref: params.ref, mutation: publicProjectMutation(mutation) };
-  }, {
-    beforeHandle: async ({ params, request }) => {
-      if (!PROJECT_REF_PATTERN.test(params.ref)) return status(400, { error: "Project ref is invalid" });
-      const authError = await requireProjectOrAdminAuth(request, params.ref);
-      if (authError) return status(authError.status, authError.body);
-    },
-    detail: { tags: ["mutations"], summary: "Read a durable project mutation" },
   })
-  .post("/:mutationId/reconcile", () => {
-    return status(403, { error: "Mutation reconciliation is not permitted" });
-  }, {
+  .post("/:mutationId/reconcile", {
     parse: "none",
     detail: { tags: ["mutations"], summary: "Reject external mutation reconciliation" },
+  }, () => {
+    return status(403, { error: "Mutation reconciliation is not permitted" });
   });

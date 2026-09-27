@@ -44,7 +44,13 @@ export function createStudioAuthRoutes(options: StudioAuthRoutesOptions = {}) {
   const audit = options.audit ?? logAuditEvent;
 
   return new Elysia({ name: "studio-auth-routes" })
-    .post("/auth/login", async ({ body, request, set }) => {
+    .post("/auth/login", {
+      body: t.Object({
+        username: t.String({ minLength: 1, maxLength: 320 }),
+        password: t.String({ minLength: 1, maxLength: 4096 }),
+      }),
+      detail: { tags: ["auth"], summary: "Studio login" },
+    }, async ({ body, request, set }) => {
       if (isCrossOriginBrowserRequest(request)) {
         set.status = 403;
         await audit({
@@ -97,14 +103,10 @@ export function createStudioAuthRoutes(options: StudioAuthRoutesOptions = {}) {
         username: result.username,
         expires_at: result.expiresAt.toISOString(),
       };
-    }, {
-      body: t.Object({
-        username: t.String({ minLength: 1, maxLength: 320 }),
-        password: t.String({ minLength: 1, maxLength: 4096 }),
-      }),
-      detail: { tags: ["auth"], summary: "Studio login" },
     })
-    .post("/auth/refresh", async ({ request, set }) => {
+    .post("/auth/refresh", {
+      detail: { tags: ["auth"], summary: "Refresh Studio session" },
+    }, async ({ request, set }) => {
       if (!isSameOriginStudioRequest(request)) {
         set.status = 403;
         return { success: false, message: "Cross-origin session request denied", code: "403" };
@@ -134,10 +136,10 @@ export function createStudioAuthRoutes(options: StudioAuthRoutesOptions = {}) {
         username: refreshed.session.username,
         expires_at: refreshed.session.expiresAt.toISOString(),
       };
-    }, {
-      detail: { tags: ["auth"], summary: "Refresh Studio session" },
     })
-    .get("/auth/session", async ({ request, set }) => {
+    .get("/auth/session", {
+      detail: { tags: ["auth"], summary: "Inspect Studio session" },
+    }, async ({ request, set }) => {
       const token = readStudioSessionToken(request);
       const session = token ? await service.verify(token) : null;
       if (!session) {
@@ -149,10 +151,10 @@ export function createStudioAuthRoutes(options: StudioAuthRoutesOptions = {}) {
         username: session.username,
         expires_at: session.expiresAt.toISOString(),
       };
-    }, {
-      detail: { tags: ["auth"], summary: "Inspect Studio session" },
     })
-    .post("/auth/logout", async ({ request, set }) => {
+    .post("/auth/logout", {
+      detail: { tags: ["auth"], summary: "Studio logout" },
+    }, async ({ request, set }) => {
       if (!isSameOriginStudioRequest(request)) {
         set.status = 403;
         return { success: false, message: "Cross-origin session request denied", code: "403" };
@@ -162,8 +164,6 @@ export function createStudioAuthRoutes(options: StudioAuthRoutesOptions = {}) {
       set.headers["set-cookie"] = sessionCookie("", 0);
       await audit({ request, status: 200, action: "studio_logout", metadata: {} });
       return { success: true };
-    }, {
-      detail: { tags: ["auth"], summary: "Studio logout" },
     });
 }
 

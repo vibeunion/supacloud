@@ -13,6 +13,7 @@
   "packages/commands": "0.6.0",
   "packages/app-svelte": "0.3.1",
   "packages/app": "0.16.0",
+  "packages/delivery": "0.1.0",
   "packages/compiler": "0.25.0",
   "packages/elysia": "0.18.0",
   "packages/db": "0.8.0",

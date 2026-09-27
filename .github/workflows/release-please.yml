@@ -415,6 +415,16 @@ jobs:
       - name: Verify npm publisher
         run: npm --version
 
+      - name: Publish delivery contracts to NPM
+        if: ${{ always() && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true) }}
+        working-directory: packages/delivery
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
       - name: Publish command contracts to NPM
         # Contracts are the root of the command package graph. Recheck them on
         # every release so a failed first publication is retried automatically.
@@ -520,7 +530,9 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
-          bun install --frozen-lockfile
+          node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
+          bun install --lockfile-only --registry https://registry.npmjs.org
+          bun install --frozen-lockfile --registry https://registry.npmjs.org
           bun run build
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
@@ -548,6 +560,7 @@ jobs:
             exit 1
           fi
           node "$GITHUB_WORKSPACE/.github/scripts/sync-compiler-dependency.mjs"
+          node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
           bun install --lockfile-only --registry https://registry.npmjs.org
           bun install --frozen-lockfile --registry https://registry.npmjs.org
           bun run build

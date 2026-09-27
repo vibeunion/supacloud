@@ -1,5 +1,5 @@
-import { Type, type Static, type TObject } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
+import { Type, type Static, type TObject } from "typebox";
+import { Value } from "typebox/value";
 
 export function fixtureRows<T extends TObject>(schema: T, value: unknown): Static<T>[] {
   if (!Value.Check(Type.Array(schema), value)) {

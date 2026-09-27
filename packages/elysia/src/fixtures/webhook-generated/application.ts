@@ -191,10 +191,14 @@ function destroyScopeInstances(
   return destruction;
 }
 
-export function createCompiledModules(): CompiledModule[] {
+export type CompiledApplicationModule = Omit<CompiledModule, "name" | "createServices"> & (
+  | { name: "webhook"; createServices: typeof createWebhookServices }
+);
+
+export function createCompiledModules(): CompiledApplicationModule[] {
   return [
     {
-      name: "webhook",
+      name: "webhook" as const,
       createServices: createWebhookServices,
       createRequestScope: createWebhookRequestScope,
       destroyRequestScope: destroyWebhookRequestScope,
@@ -226,7 +230,8 @@ export async function initializeApplication(services: Record<string, unknown>): 
 }
 
 export async function destroyApplication(services: Record<string, unknown>): Promise<void> {
-  const destroyRef = services.destroyRef ?? services["supacloud.destroy-ref"];
+  const destroyRef = (Object.prototype.propertyIsEnumerable.call(services, "destroyRef") ? services.destroyRef : undefined)
+    ?? (Object.prototype.propertyIsEnumerable.call(services, "supacloud.destroy-ref") ? services["supacloud.destroy-ref"] : undefined);
   if (isRecord(destroyRef) && isFunction(destroyRef.destroy)) {
     await destroyRef.destroy();
   } else if (isRecord(destroyRef) && Array.isArray(destroyRef._teardowns)) {
@@ -247,7 +252,7 @@ export async function destroyApplication(services: Record<string, unknown>): Pro
 function createWebhookServices(
   deps: Record<string, unknown>,
   imported: Record<string, Record<string, unknown>>,
-): Record<string, unknown> {
+) {
   const updateWebhook = new UpdateWebhook(deps.webhookEnvironment as ConstructorParameters<typeof UpdateWebhook>[0]);
   return { updateWebhook };
 }

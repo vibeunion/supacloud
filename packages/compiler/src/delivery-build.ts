@@ -5,16 +5,19 @@ import * as ts from "@typescript/typescript6";
 import { checkProject } from "./compile";
 import { createDeliveryPlan } from "./delivery-plan";
 import { parseDeliveryOptions, type DeliveryDiagnostic } from "./delivery-schema";
-import { parseDeliveryBuildManifest, parseDeliveryBuildResult, type DeliveryBuildResult, type DeliveryObject } from "./delivery-build-schema";
+import { deliveryObjectDigest, parseDeliveryBuildManifest, parseDeliveryBuildResult, type DeliveryBuildResult, type DeliveryObject } from "./delivery-build-schema";
 import { renderDeliveryTarget } from "./delivery-render";
 import { bundleDeliveryTarget } from "./delivery-bundle";
+import { renderDeliveryHttpEntry } from "./delivery-http";
+import { renderDeliveryWorkerEntry } from "./delivery-worker";
+import { prepareDeliveryMigrations } from "./delivery-migrations";
 import { artifactInventory, canonical, digest, exists, inside, noLinks, publishPointer, readOwned, reserveOutput, sourceInventory, writeArtifact } from "./delivery-files";
 import { scanGeneratedArtifacts } from "./type-safety";
 import type { CompileOptions } from "./types";
 
 const producer = "@supacloud/compiler/delivery-build-v1" as const;
 
-/** Build local, independently importable factories. Never activates remote Functions. */
+/** Build immutable factories or explicit process hosts; never activate remote services. */
 export async function buildDeliveryProject(
   options: CompileOptions,
   delivery?: unknown,
@@ -70,6 +73,24 @@ export async function buildDeliveryProject(
     }
     const assetOwners = assets.map((asset) => `${asset.target}/${asset.path}`);
     if (new Set(assetOwners).size !== assetOwners.length) throw new Error("Duplicate target asset path.");
+    const httpApplications = settings.build?.httpApplications ?? [];
+    const workerApplications = settings.build?.workerApplications ?? [];
+    const hosts = new Map<string, { path: string; hash: string; kind: "http" | "worker" }>();
+    for (const [kind, applications] of [["http", httpApplications], ["worker", workerApplications]] as const) {
+      for (const app of applications) {
+        if (hosts.has(app.target)) throw new Error("Duplicate delivery application host.");
+        const target = planned.plan.targets.find((target) => target.name === app.target);
+        if (!target || (kind === "worker" ? target.kind !== "jobs" : target.kind === "jobs")) {
+          throw new Error("Delivery host kind does not match its target.");
+        }
+        const path = resolve(sourceRoot, app.source);
+        if (inside(generatedRoot, path) || !/\.[cm]?ts$/.test(path)) throw new Error("Hosts require application TypeScript source.");
+        hosts.set(app.target, { path, kind, hash: digest(await readOwned(sourceRoot, path)) });
+      }
+    }
+
+    phase = "migration-inputs";
+    const migrations = await prepareDeliveryMigrations(project, generatedRoot, settings.build?.migrations);
 
     phase = "output-ownership";
     output = await reserveOutput(project, buildRoot);
@@ -83,6 +104,16 @@ export async function buildDeliveryProject(
     const objects: DeliveryObject[] = [];
     const candidates: Array<{ path: string; object: DeliveryObject }> = [];
     const snapshots = new Map([...sources, ...configInputs]);
+    for (const [path, hash] of migrations.inputs) {
+      const previous = snapshots.get(path);
+      if (previous !== undefined && previous !== hash) throw new Error("Migration changed during analysis.");
+      snapshots.set(path, hash);
+    }
+    for (const host of hosts.values()) {
+      const previous = snapshots.get(host.path);
+      if (previous !== undefined && previous !== host.hash) throw new Error("Delivery host changed during analysis.");
+      snapshots.set(host.path, host.hash);
+    }
 
     // Configuration and dependency resolution inputs invalidate every affected build.
     // Bun resolves afresh on every invocation; there is no persisted "skip bundler" cache.
@@ -120,8 +151,14 @@ export async function buildDeliveryProject(
       const rendered = renderDeliveryTarget(checked.graph, target, {
         ...options, rootDir: sourceRoot, outDir: generatedDirectory,
       });
+      const host = hosts.get(target.name);
+      const entryKind = host?.kind === "http" ? "bun-http-application"
+        : host?.kind === "worker" ? "bun-worker-application" : "compiled-module-factory";
+      const applicationCode = rendered.applicationCode
+        + (host?.kind === "http" ? renderDeliveryHttpEntry(generatedDirectory, host.path)
+          : host?.kind === "worker" ? renderDeliveryWorkerEntry(generatedDirectory, host.path) : "");
       const generated: Record<string, string> = {
-        "application.ts": rendered.applicationCode,
+        "application.ts": applicationCode,
         ...(rendered.clientCode === undefined ? {} : { "client.ts": rendered.clientCode }),
         ...(rendered.permissionsCode === undefined ? {} : { "permissions.ts": rendered.permissionsCode }),
       };
@@ -148,8 +185,14 @@ export async function buildDeliveryProject(
         }
       }
 
-      const bundled = await bundleDeliveryTarget(target.name, rendered.applicationCode, project, join(stage, "generated"), settings);
+      phase = `target:${target.name}:bundle`;
+      const bundled = await bundleDeliveryTarget(target.name, applicationCode, project, generatedDirectory, settings);
+      phase = `target:${target.name}:host-resolution`;
+      if (host && bundled.inputs.get(host.path) !== host.hash) {
+        throw new Error("Delivery host resolution did not match its declared source.");
+      }
       bundledTargets.push(target.name);
+      phase = `target:${target.name}:inventory`;
       for (const [path, hash] of bundled.inputs) {
         const previousHash = snapshots.get(path);
         if (previousHash !== undefined && previousHash !== hash) throw new Error("Shared source changed between target builds; retry.");
@@ -158,8 +201,10 @@ export async function buildDeliveryProject(
       for (const [path, bytes] of bundled.files) await writeArtifact(stage, path, bytes);
       await writeArtifact(stage, "bundle/package.json", canonical({ type: "module", private: true }));
       await writeArtifact(stage, "bundle/app.manifest.json", rendered.manifestJson);
+      await writeArtifact(stage, "bundle/execution-context.json", rendered.executionSnapshot);
+      for (const [path, bytes] of migrations.files) await writeArtifact(stage, path, bytes);
       await writeArtifact(stage, "bundle/target.json", canonical({
-        target, entryKind: "compiled-module-factory", deploymentReady: false,
+        target, entryKind, deploymentReady: false,
       }));
       const assetInputs: Record<string, string> = {};
       for (const asset of assets.filter((asset) => asset.target === target.name)) {
@@ -176,16 +221,20 @@ export async function buildDeliveryProject(
         target, generated, toolchain, configuration,
         build: { minify: settings.build?.minify ?? true,
           environmentContract: settings.build?.environmentContract,
+          migrations: settings.build?.migrations,
+          httpApplication: httpApplications.find((app) => app.target === target.name),
+          workerApplication: workerApplications.find((app) => app.target === target.name),
           assets: assets.filter((asset) => asset.target === target.name) },
         inputs: Object.fromEntries([...bundled.inputs].map(([path, hash]) =>
           [relative(project, path).split(sep).join("/"), hash])),
         assets: assetInputs,
+        ...(migrations.entries.length ? { migrations: migrations.entries } : {}),
       }));
       const files = await artifactInventory(stage);
       const object: DeliveryObject = {
         name: target.name, inputDigest,
-        objectId: digest(canonical({ inputDigest, files })),
-        entrypoint: "bundle/index.js", entryKind: "compiled-module-factory",
+        objectId: deliveryObjectDigest({ inputDigest, files, entryKind }),
+        entrypoint: "bundle/index.js", entryKind,
         runtimeImports: bundled.runtimeImports, files,
       };
       objects.push(object);

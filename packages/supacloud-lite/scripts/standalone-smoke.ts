@@ -2,7 +2,7 @@ import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/p
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import packageJson from '../package.json' with { type: 'json' }
-import { executeBufferedCommand, withWindowsSubprocessRef } from './subprocess.js'
+import { executeBufferedCommand } from './subprocess.js'
 
 const packageDir = resolve(import.meta.dir, '..')
 const binary = resolveStandaloneBinary()
@@ -247,7 +247,7 @@ async function withServer(options: ServerOptions, check: (url: string) => Promis
   } finally {
     console.log(`[standalone-smoke] ${options.phaseLabel}: stop`)
     processHandle.kill('SIGTERM')
-    const exitCode = await withWindowsSubprocessRef(() => processHandle.exited)
+    const exitCode = await processHandle.exited
     const expectedExitCode = expectedStandaloneShutdownExitCode()
     console.log(
       `[standalone-smoke] ${options.phaseLabel}: ${exitCode === expectedExitCode ? 'ok' : 'failed'} (exit ${exitCode})`,

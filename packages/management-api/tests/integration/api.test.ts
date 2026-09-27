@@ -39,7 +39,7 @@ const testApp = new Elysia()
 
     return { authorized: true, authError: null };
   })
-  .onBeforeHandle(({ authorized, authError }) => {
+  .beforeHandle(({ authorized, authError }) => {
     if (authorized === false) {
       return { error: authError || "Unauthorized" };
     }
@@ -62,6 +62,13 @@ const testApp = new Elysia()
   // Create project
   .post(
     "/v1/projects",
+    {
+      body: t.Object({
+        name: t.String({ minLength: 1, maxLength: 100 }),
+        region: t.Optional(t.String()),
+        organization_id: t.Optional(t.String()),
+      }),
+    },
     ({ body, set }) => {
       const ref = `test${++projectCounter}`;
       const project = {
@@ -80,19 +87,13 @@ const testApp = new Elysia()
       mockProjects.set(ref, project);
       set.status = 201;
       return project;
-    },
-    {
-      body: t.Object({
-        name: t.String({ minLength: 1, maxLength: 100 }),
-        region: t.Optional(t.String()),
-        organization_id: t.Optional(t.String()),
-      }),
     }
   )
 
   // Get project details
   .get(
     "/v1/projects/:ref",
+    { params: t.Object({ ref: t.String() }) },
     ({ params, set }) => {
       const project = mockProjects.get(params.ref);
       if (!project || project.deleted_at) {
@@ -100,13 +101,16 @@ const testApp = new Elysia()
         return { error: "Project not found" };
       }
       return project;
-    },
-    { params: t.Object({ ref: t.String() }) }
+    }
   )
 
   // Update project
   .patch(
     "/v1/projects/:ref",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({ name: t.Optional(t.String({ minLength: 1, maxLength: 100 })) }),
+    },
     ({ params, body, set }) => {
       const project = mockProjects.get(params.ref);
       if (!project || project.deleted_at) {
@@ -116,16 +120,13 @@ const testApp = new Elysia()
       if (body.name) project.name = body.name;
       project.updated_at = new Date();
       return { ref: params.ref };
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Object({ name: t.Optional(t.String({ minLength: 1, maxLength: 100 })) }),
     }
   )
 
   // Delete project
   .delete(
     "/v1/projects/:ref",
+    { params: t.Object({ ref: t.String() }) },
     ({ params, set }) => {
       const project = mockProjects.get(params.ref);
       if (!project || project.deleted_at) {
@@ -135,13 +136,13 @@ const testApp = new Elysia()
       project.deleted_at = new Date();
       project.status = "deleted";
       return { ref: params.ref };
-    },
-    { params: t.Object({ ref: t.String() }) }
+    }
   )
 
   // Pause project
   .post(
     "/v1/projects/:ref/pause",
+    { params: t.Object({ ref: t.String() }) },
     ({ params, set }) => {
       const project = mockProjects.get(params.ref);
       if (!project || project.deleted_at) {
@@ -150,13 +151,13 @@ const testApp = new Elysia()
       }
       project.status = "paused";
       return { ref: params.ref, status: "paused" };
-    },
-    { params: t.Object({ ref: t.String() }) }
+    }
   )
 
   // Restore project
   .post(
     "/v1/projects/:ref/restore",
+    { params: t.Object({ ref: t.String() }) },
     ({ params, set }) => {
       const project = mockProjects.get(params.ref);
       if (!project || project.deleted_at) {
@@ -165,13 +166,13 @@ const testApp = new Elysia()
       }
       project.status = "active";
       return { ref: params.ref, status: "active" };
-    },
-    { params: t.Object({ ref: t.String() }) }
+    }
   )
 
   // Health status
   .get(
     "/v1/projects/:ref/health",
+    { params: t.Object({ ref: t.String() }) },
     ({ params, set }) => {
       const project = mockProjects.get(params.ref);
       if (!project || project.deleted_at) {
@@ -187,13 +188,13 @@ const testApp = new Elysia()
           realtime: "ACTIVE_HEALTHY",
         },
       };
-    },
-    { params: t.Object({ ref: t.String() }) }
+    }
   )
 
   // Project status
   .get(
     "/v1/projects/:ref/status",
+    { params: t.Object({ ref: t.String() }) },
     ({ params, set }) => {
       const project = mockProjects.get(params.ref);
       if (!project || project.deleted_at) {
@@ -201,13 +202,13 @@ const testApp = new Elysia()
         return { error: "Project not found" };
       }
       return { status: project.status, database: "healthy", storage: "healthy" };
-    },
-    { params: t.Object({ ref: t.String() }) }
+    }
   )
 
   // Restart project
   .post(
     "/v1/projects/:ref/restart",
+    { params: t.Object({ ref: t.String() }) },
     ({ params, set }) => {
       const project = mockProjects.get(params.ref);
       if (!project || project.deleted_at) {
@@ -215,13 +216,13 @@ const testApp = new Elysia()
         return { error: "Project not found" };
       }
       return { ref: params.ref, message: "Project restart initiated" };
-    },
-    { params: t.Object({ ref: t.String() }) }
+    }
   )
 
   // Project settings
   .get(
     "/v1/projects/:ref/settings",
+    { params: t.Object({ ref: t.String() }) },
     ({ params, set }) => {
       const project = mockProjects.get(params.ref);
       if (!project || project.deleted_at) {
@@ -229,13 +230,16 @@ const testApp = new Elysia()
         return { error: "Project not found" };
       }
       return project.config;
-    },
-    { params: t.Object({ ref: t.String() }) }
+    }
   )
 
   // Update project settings
   .put(
     "/v1/projects/:ref/settings",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Record(t.String(), t.Unknown()),
+    },
     ({ params, body, set }) => {
       const project = mockProjects.get(params.ref);
       if (!project || project.deleted_at) {
@@ -244,16 +248,13 @@ const testApp = new Elysia()
       }
       project.config = { ...project.config, ...body };
       return project.config;
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Record(t.String(), t.Unknown()),
     }
   )
 
   // API keys
   .get(
     "/v1/projects/:ref/api-keys",
+    { params: t.Object({ ref: t.String() }) },
     ({ params, set }) => {
       const project = mockProjects.get(params.ref);
       if (!project || project.deleted_at) {
@@ -264,8 +265,7 @@ const testApp = new Elysia()
         anon_key: `mock.anon.key.${params.ref}`,
         service_role_key: `mock.service.key.${params.ref}`,
       };
-    },
-    { params: t.Object({ ref: t.String() }) }
+    }
   );
 
 const BASE = "http://localhost";

@@ -76,6 +76,9 @@ export function decodedSchema<TInput extends TSchema, TOutput extends TSchema>(
 }
 
 export function schemaEnumValues(schema: TSchema): string[] {
+    if (typeof schema.const === "string" || typeof schema.const === "number") {
+        return [String(schema.const)];
+    }
     if (!Array.isArray(schema.anyOf)) return [];
     return schema.anyOf.flatMap((branch: unknown) => {
         if (typeof branch !== "object" || branch === null || !("const" in branch)) return [];

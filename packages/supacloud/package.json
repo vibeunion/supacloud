@@ -35,7 +35,8 @@
     "@supacloud/admin": "^0.22.3"
   },
   "overrides": {
-    "@supacloud/compiler": "file:../compiler"
+    "@supacloud/compiler": "file:../compiler",
+    "@supacloud/delivery": "file:../delivery"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",

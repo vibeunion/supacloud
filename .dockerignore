@@ -1,0 +1,17 @@
+.git
+.gitignore
+.agents
+.tmp-svadmin-pr
+node_modules
+**/node_modules
+**/.bun
+**/dist
+**/build
+**/.svelte-kit
+**/.next
+**/coverage
+**/*.tsbuildinfo
+*.log
+backups
+tmp
+.DS_Store

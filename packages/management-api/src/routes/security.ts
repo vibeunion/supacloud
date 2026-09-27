@@ -27,7 +27,10 @@ function isValidHostname(value: string): boolean {
 }
 
 export const securityRoutes = new Elysia({ prefix: "/v1/security" })
-    .post('/firewall/allow', async ({ body, request }) => {
+    .post('/firewall/allow', {
+        body: t.Object({ port: t.Number(), ip: t.String() }),
+        detail: { tags: ["security"], summary: "Add firewall allow rule" },
+    }, async ({ body, request }) => {
         const denied = await adminOnly(request);
         if (denied) return denied;
         const { port, ip } = body;
@@ -35,11 +38,11 @@ export const securityRoutes = new Elysia({ prefix: "/v1/security" })
             return status(400, { error: "Invalid firewall rule input" });
         }
         return await addFirewallRule(port, ip);
-    }, {
-        body: t.Object({ port: t.Number(), ip: t.String() }),
-        detail: { tags: ["security"], summary: "Add firewall allow rule" },
     })
-    .post('/firewall/deny', async ({ body, request }) => {
+    .post('/firewall/deny', {
+        body: t.Object({ port: t.Number(), ip: t.String() }),
+        detail: { tags: ["security"], summary: "Remove firewall allow rule" },
+    }, async ({ body, request }) => {
         const denied = await adminOnly(request);
         if (denied) return denied;
         const { port, ip } = body;
@@ -47,11 +50,11 @@ export const securityRoutes = new Elysia({ prefix: "/v1/security" })
             return status(400, { error: "Invalid firewall rule input" });
         }
         return await removeFirewallRule(port, ip);
-    }, {
-        body: t.Object({ port: t.Number(), ip: t.String() }),
-        detail: { tags: ["security"], summary: "Remove firewall allow rule" },
     })
-    .post('/ssl/request', async ({ body, request }) => {
+    .post('/ssl/request', {
+        body: t.Object({ domain: t.String() }),
+        detail: { tags: ["security"], summary: "Request SSL certificate for domain" },
+    }, async ({ body, request }) => {
         const denied = await adminOnly(request);
         if (denied) return denied;
         const { domain } = body;
@@ -59,7 +62,4 @@ export const securityRoutes = new Elysia({ prefix: "/v1/security" })
             return status(400, { error: "Invalid domain" });
         }
         return await requestSsl(domain);
-    }, {
-        body: t.Object({ domain: t.String() }),
-        detail: { tags: ["security"], summary: "Request SSL certificate for domain" },
     });

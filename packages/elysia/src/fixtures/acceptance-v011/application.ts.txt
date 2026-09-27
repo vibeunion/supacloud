@@ -1,9 +1,9 @@
 import { Body, Controller, Get, Injectable, Module, Post, Query } from "@supacloud/app";
-import { Type, type Static, type StaticDecode } from "@sinclair/typebox";
+import { Type, type Static, type StaticDecode } from "typebox";
 import { status } from "elysia";
 
 export const QuerySchema = Type.Object({
-  count: Type.Transform(Type.String()).Decode(Number).Encode(String),
+  count: Type.Codec(Type.String()).Decode(Number).Encode(String),
 });
 export const BodySchema = Type.Object({
   note: Type.Optional(Type.Union([Type.String(), Type.Null()])),

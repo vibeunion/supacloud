@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { Type } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 import {
   SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SHA256,
   SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_SIZE,
@@ -1370,17 +1370,17 @@ describe("runtime companion version assets", () => {
     const selfHostCompose = readRepoFile("docker/self-host/docker-compose.yml");
     const postgresDockerfile = readRepoFile("docker/self-host/postgres/Dockerfile");
 
-    expect(installer).toContain('local JFS_VER="1.4.0"');
-    expect(installer).toContain('COMPOSE_VERSION="v5.3.1"');
+    expect(installer).toContain('local JFS_VER="1.4.1"');
+    expect(installer).toContain('COMPOSE_VERSION="v5.5.1"');
     expect(installer).toContain("Docker Buildx >= 0.17 for 'compose build'");
     expect(installer).toContain('CADDY_VERSION:-2.11.4');
     expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.4}"');
 
-    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.3"');
+    expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.4"');
     expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.197.0"');
     const realtimeDigest =
-      "sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb";
-    expect(installer).toContain('REALTIME_BASE_IMAGE="public.ecr.aws/supabase/realtime:v2.133.0"');
+      "sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e";
+    expect(installer).toContain('REALTIME_BASE_IMAGE="public.ecr.aws/supabase/realtime:v2.138.1"');
     expect(installer).toContain(
       `REALTIME_PINNED_IMAGE="public.ecr.aws/supabase/realtime@${realtimeDigest}"`,
     );
@@ -1388,22 +1388,22 @@ describe("runtime companion version assets", () => {
       `Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime@${realtimeDigest}`,
     );
     expect(realtimeUnit).toContain(
-      "Environment=REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=2.133.0",
+      "Environment=REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=2.138.1",
     );
-    expect(workflow).toContain("image: public.ecr.aws/supabase/realtime:v2.133.0");
+    expect(workflow).toContain("image: public.ecr.aws/supabase/realtime:v2.138.1");
     expect(workflow).not.toContain("public.ecr.aws/supabase/realtime:v2.129.0");
     for (const compose of [devCompose, selfHostCompose]) {
       expect(compose).toContain("image: supacloud-caddy:2.11.4-ratelimit");
       expect(compose).toContain("supabase/gotrue:v2.197.0");
-      expect(compose).toContain("postgrest/postgrest:v16.3");
+      expect(compose).toContain("postgrest/postgrest:v16.4");
     }
-    expect(workflow).toContain("postgrest/postgrest:v16.3");
+    expect(workflow).toContain("postgrest/postgrest:v16.4");
     expect(workflow).toContain("supabase/gotrue:v2.197.0");
     expect(postgresDockerfile).toContain("FROM postgres:18-bookworm");
     expect(devCompose).toContain("context: ../self-host/postgres");
     expect(selfHostCompose).toContain("context: ./postgres");
     expect(workflow).toContain("SupaCloud deployment remains PostgreSQL 18");
-    expect(workflow).toContain("image: supabase/postgres:17.6.1.143");
+    expect(workflow).toContain("image: supabase/postgres:17.6.1.177");
 
     const upgradeNotes = readRepoFile("docs/platform-component-upgrade-notes.md");
     expect(upgradeNotes).toContain("v5 删除内部构建器");

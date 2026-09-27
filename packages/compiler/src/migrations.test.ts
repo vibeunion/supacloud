@@ -20,6 +20,20 @@ const unrelated = { response: Result };
   expect(result.content).toContain("const unrelated = { response: Result }");
 });
 
+test("schema builder calls without a route-options argument remain untouched", () => {
+  const source = `
+const QuerySchema = Type.Transform(Type.String()).Decode(Number).Encode(String);
+const single = Get("/without-options");
+@Get("/items", { query: QuerySchema, response: Result })
+class ItemsController {}
+`;
+  const result = migrateRouteResponse(source, "src/schema.ts");
+  expect(result.replacements).toBe(1);
+  expect(result.content).toContain("Type.Transform(Type.String()).Decode(Number).Encode(String)");
+  expect(result.content).toContain('Get("/without-options")');
+  expect(result.content).toContain("responses: { 200: Result }");
+});
+
 test("migrates route options resolved through a local const and defineRouteContract", () => {
   const result = migrateRouteResponse(`
 const defineRouteContract = <T>(value: T): T => value;
@@ -57,6 +71,23 @@ test("project migration is atomic when one file needs manual conflict resolution
   expect(await readFile(goodPath, "utf8")).toBe(good);
   expect(await readFile(conflictPath, "utf8")).toBe(conflict);
   await rm(root, { recursive: true, force: true });
+});
+
+test("unchanged project files do not fall back to context-free per-file migration", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-migration-unchanged-"));
+  const apply = spyOn(SUPACLOUD_MIGRATIONS[0]!, "apply").mockImplementation(() => {
+    throw new Error("The project migration already analyzed this file");
+  });
+  try {
+    await writeFile(join(root, "source.ts"), 'const options = { response: {} };');
+    const result = await migrateProject({ rootDir: root });
+    expect(result.changedFiles).toEqual([]);
+    expect(result.issues).toEqual([]);
+    expect(apply).not.toHaveBeenCalled();
+  } finally {
+    apply.mockRestore();
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("project migration follows route contracts across files and only changes the declaration", async () => {

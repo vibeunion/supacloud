@@ -1,6 +1,19 @@
 import { CommandError, commandIdentifier, decodeCommandJson, decodeDurableCommandReceipt, type CommandAuthorization, type DurableCommandReceipt } from "@supacloud/contracts";
 import { checkAuthorization, type RecoveryPrincipal } from "./context";
 import type { OperationReference } from "./store";
+import { emitCommandObservation, type CommandObserver } from "./observation";
+
+export interface CommandRecoveryEvent {
+  command: string;
+  commandId: string;
+  stepId: string;
+  attempt: number;
+  stage: "recover" | "complete" | "retry" | "fail";
+  phase: "started" | "succeeded" | "failed";
+  /** Fixed reason codes, never raw lookup or transport errors. */
+  reason?: "COMMAND_INPUT_EXPIRED" | "COMMAND_RECEIPT_INVALID"
+    | "COMMAND_RECOVERY_FAILED" | "COMMAND_RECOVERY_REQUIRED";
+}
 
 export interface RecoverableCommand {
   recover(principal: RecoveryPrincipal, reference: OperationReference): Promise<DurableCommandReceipt<unknown> | null>;
@@ -58,10 +71,12 @@ export function createCommandRecoveryHandler(options: {
   commands: Readonly<Record<string, RecoverableCommand>>;
   authorize(): CommandAuthorization | Promise<CommandAuthorization>;
   retryDelaySeconds: number;
+  observer?: CommandObserver<CommandRecoveryEvent>;
 }) {
   const tenantId = commandIdentifier(options.tenantId);
   const principal = { subject: commandIdentifier(options.principal.subject) };
   const commands = { ...options.commands }, workflows = options.workflows, authorize = options.authorize;
+  const observer = options.observer;
   const delaySeconds = options.retryDelaySeconds;
   if (!Number.isSafeInteger(delaySeconds) || delaySeconds < 0 || delaySeconds > 86400) throw new TypeError("Invalid recovery delay");
   return {
@@ -72,31 +87,58 @@ export function createCommandRecoveryHandler(options: {
       await checkAuthorization(authorize);
       const command = commands[reference.command];
       if (!command) throw new CommandError("COMMAND_REJECTED");
+      const observe = async <Result>(
+        stage: CommandRecoveryEvent["stage"],
+        run: () => Promise<Result>,
+        reason?: CommandRecoveryEvent["reason"],
+      ): Promise<Result> => {
+        const emit = (phase: CommandRecoveryEvent["phase"]) => emitCommandObservation(observer, {
+          command: reference.command, commandId, stepId: attempt.stepId, attempt: attempt.attempt,
+          stage, phase, ...(reason === undefined ? {} : { reason }),
+        });
+        emit("started");
+        try {
+          const result = await run();
+          emit("succeeded");
+          return result;
+        } catch (error) {
+          emit("failed");
+          throw error;
+        }
+      };
       let receipt: DurableCommandReceipt<unknown> | null;
       try {
-        const raw = await command.recover({ ...principal }, { ...reference });
-        receipt = raw === null ? null : decodeDurableCommandReceipt(raw, decodeCommandJson);
-        if (receipt !== null) {
-          if (receipt.dispatchKey !== commandId) throw new CommandError("COMMAND_RECEIPT_INVALID");
-          for (const key of ["tenantId", "actorId", "command", "operationId"] as const) {
-            if (receipt[key] !== reference[key]) throw new CommandError("COMMAND_RECEIPT_INVALID");
+        receipt = await observe("recover", async () => {
+          const raw = await command.recover({ ...principal }, { ...reference });
+          const decoded = raw === null ? null : decodeDurableCommandReceipt(raw, decodeCommandJson);
+          if (decoded !== null) {
+            if (decoded.dispatchKey !== commandId) throw new CommandError("COMMAND_RECEIPT_INVALID");
+            for (const key of ["tenantId", "actorId", "command", "operationId"] as const) {
+              if (decoded[key] !== reference[key]) throw new CommandError("COMMAND_RECEIPT_INVALID");
+            }
           }
-        }
+          return decoded;
+        });
       } catch (error) {
         if (error instanceof CommandError && (error.code === "COMMAND_INPUT_EXPIRED" || error.code === "COMMAND_RECEIPT_INVALID")) {
-          await workflows.fail({ ...attempt, errorMessage: error.code });
+          const reason = error.code;
+          await observe("fail", () => workflows.fail({ ...attempt, errorMessage: reason }), reason);
           return "failed";
         }
-        await workflows.retry({ ...attempt, errorMessage: "COMMAND_RECOVERY_FAILED", delaySeconds });
+        await observe("retry", () => workflows.retry({
+          ...attempt, errorMessage: "COMMAND_RECOVERY_FAILED", delaySeconds,
+        }), "COMMAND_RECOVERY_FAILED");
         return "retry";
       }
       // Acknowledgement failures propagate. Redelivery only repeats safe recovery.
       if (receipt?.status === "confirmed" && receipt.audit === "complete") {
         const output = { commandId, status: "confirmed", audit: "complete" };
-        await workflows.complete({ ...attempt, stepOutput: output, runOutput: output });
+        await observe("complete", () => workflows.complete({ ...attempt, stepOutput: output, runOutput: output }));
         return "completed";
       }
-      await workflows.retry({ ...attempt, errorMessage: "COMMAND_RECOVERY_REQUIRED", delaySeconds });
+      await observe("retry", () => workflows.retry({
+        ...attempt, errorMessage: "COMMAND_RECOVERY_REQUIRED", delaySeconds,
+      }), "COMMAND_RECOVERY_REQUIRED");
       return "retry";
     },
   };

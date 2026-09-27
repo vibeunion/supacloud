@@ -272,6 +272,7 @@ describe("CaddyGatewayProvider", () => {
         const storageResumable = routes.find((route: any) => route["@id"] === "route-project-testref123-storage-resumable");
         const functions = routes.find((route: any) => route["@id"] === "route-project-testref123-functions");
         const adminUserDelete = routes.find((route: any) => route["@id"] === "route-project-testref123-auth-admin-user-delete");
+        const admin = routes.find((route: any) => route["@id"] === "route-project-testref123-auth-admin");
         const realtime = routes.find((route: any) => route["@id"] === "route-project-testref123-realtime");
         const management = routes.find((route: any) => route["@id"] === "route-project-testref123-management");
 
@@ -288,6 +289,13 @@ describe("CaddyGatewayProvider", () => {
         expect(opaqueRest?.match?.[1]?.header_regexp?.Authorization?.pattern).toContain("Bearer");
         expect(opaqueRest?.handle?.at(-1)?.upstreams?.[0]?.dial).toBe("127.0.0.1:9090");
         expect(adminUserDelete?.match?.[0]?.method).toEqual(["DELETE"]);
+        expect(admin?.match?.[0]?.path).toEqual(["/auth/v1/admin", "/auth/v1/admin/*"]);
+        expect(admin?.match?.[0]?.method).toBeUndefined();
+        expect(admin?.handle?.at(-1)?.upstreams?.[0]?.dial).toBe("127.0.0.1:9090");
+        expect(admin?.handle?.some((handler: any) => handler.strip_path_prefix)).toBe(false);
+        expect(routes.indexOf(admin)).toBeLessThan(
+            routes.findIndex((route: any) => route["@id"] === "route-project-testref123-auth"),
+        );
         expect(adminUserDelete?.match?.[0]?.path_regexp?.pattern).toContain("/auth/v1/admin/users/");
         expect(adminUserDelete?.handle?.at(-1)?.upstreams?.[0]?.dial).toBe("127.0.0.1:9090");
         expect(routes.indexOf(adminUserDelete)).toBeLessThan(
@@ -496,6 +504,7 @@ describe("CaddyGatewayProvider", () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);
         const provider = new CaddyGatewayProvider();
+        expect((await provider.setupUpstream("bizproj", 3000, 3372)).success).toBe(true);
 
         const result = await provider.setupUpstream("bizproj", 3000, 3372, {
             api_domain: "api.biz.example.com",
@@ -529,6 +538,7 @@ describe("CaddyGatewayProvider", () => {
         const wellKnown = routes.find((route: any) => route["@id"] === "route-project-bizproj-gotrue-well-known");
         const authDomain = routes.find((route: any) => route["@id"] === "route-project-bizproj-auth-domain-auth");
         const adminUserDelete = routes.find((route: any) => route["@id"] === "route-project-bizproj-auth-admin-user-delete");
+        expect(routes.some((route: any) => route["@id"] === "route-project-bizproj-auth-admin")).toBe(false);
 
         const restProxy = rest?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
         const functionsProxy = functions?.handle?.find((handler: any) => handler.handler === "reverse_proxy");
@@ -2528,12 +2538,14 @@ describe("CaddyGatewayProvider route headers", () => {
 
         const storage = routes.find((route: any) => route["@id"] === "route-project-domaintest-storage");
         const opaqueRest = routes.find((route: any) => route["@id"] === "route-project-domaintest-opaque-rest");
+        const authAdmin = routes.find((route: any) => route["@id"] === "route-project-domaintest-auth-admin");
         expect(storage).toBeDefined();
         // Custom API domain should appear in the storage route hosts
         const hosts = storage?.match?.[0]?.host ?? [];
         expect(hosts).toContain("api.custom.example.com");
         expect(opaqueRest?.match).toHaveLength(2);
         expect(opaqueRest?.match?.every((matcher: any) => matcher.host?.includes("api.custom.example.com"))).toBe(true);
+        expect(authAdmin?.match?.[0]?.host).toContain("api.custom.example.com");
 
         // All routes with the custom domain must still have correct headers
         const storageProxy = storage?.handle?.find((h: any) => h.handler === "reverse_proxy");

@@ -4,7 +4,6 @@ import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { waitForShutdown } from '../src/shutdown.js'
-import { withWindowsSubprocessRef } from '../scripts/subprocess.js'
 
 const cliPath = resolve(import.meta.dir, '../src/cli.ts')
 
@@ -127,11 +126,11 @@ async function runCli(projectDir: string, command: string[]) {
     stdout: 'pipe',
     stderr: 'pipe',
   })
-  const [exitCode, stdout, stderr] = await withWindowsSubprocessRef(() => Promise.all([
+  const [exitCode, stdout, stderr] = await Promise.all([
     processHandle.exited,
     new Response(processHandle.stdout).text(),
     new Response(processHandle.stderr).text(),
-  ]))
+  ])
   return { exitCode, stdout, stderr, durationMs: performance.now() - startedAt }
 }
 
@@ -144,11 +143,11 @@ async function runCliWithPreload(preloadPath: string, eventsPath: string) {
     stderr: 'pipe',
     env: { ...process.env, SUPACLOUD_LITE_LIFECYCLE_EVENTS: eventsPath },
   })
-  const [exitCode, stdout, stderr] = await withWindowsSubprocessRef(() => Promise.all([
+  const [exitCode, stdout, stderr] = await Promise.all([
     processHandle.exited,
     new Response(processHandle.stdout).text(),
     new Response(processHandle.stderr).text(),
-  ]))
+  ])
   return { exitCode, stdout, stderr }
 }
 
@@ -158,7 +157,7 @@ async function stopCli(cliRun: ReturnType<typeof startCli>, signal: NodeJS.Signa
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
   }
-  return await withWindowsSubprocessRef(() => cliRun.processHandle.exited)
+  return await cliRun.processHandle.exited
 }
 
 async function assertShutdownHandlerClosesProject(signal: NodeJS.Signals): Promise<void> {

@@ -93,6 +93,12 @@ cd docker/self-host
 python3 init-env.py --public-url https://api.example.com --studio-url https://studio.example.com --output .env
 ```
 
+The command also creates the private `DASHBOARD_PASSWORD`, the one-shot
+`.legacy-secrets-migration.env`, and the Realtime `API_JWT_SECRET` file named
+by `REALTIME_CONTAINER_ENV_FILE`. GoTrue, Realtime, PostgREST, and Management
+must continue to use the same canonical JWT secret; do not point the Realtime
+file at a second SupAuth issuer.
+
 Then boot the stack:
 
 ```bash

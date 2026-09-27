@@ -1,5 +1,13 @@
 # @supacloud/compiler
 
+Generated HTTP clients export `ApiClientError` with `code`, `method`, route
+`path`, `status` and a bounded `requestId`. Undeclared HTTP errors no longer
+embed raw response bodies in their message; explicit inspection remains
+available through the non-enumerable `response` property. Declared non-2xx
+response unions, caller decoders, binary/stream routes and GraphQL stay intact.
+These errors do not prove write rollback and do not add automatic retries.
+See [typed clients and recovery](../../docs/framework-composition.md).
+
 ## Unified Database Contracts
 
 `supacloud-compiler database-contracts database-contracts.json` generates a shared

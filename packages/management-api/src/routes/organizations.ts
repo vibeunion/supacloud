@@ -38,23 +38,32 @@ function formatError(error: unknown) {
 }
 
 export const organizationRoutes = new Elysia({ prefix: "/v1/organizations" })
-    .get("/", async () => {
+    .get("/", { detail: { tags: ["organizations"], summary: "List organizations" } }, async () => {
         const orgs = await organizationService.listOrganizations();
         return orgs.map(formatOrg);
-    }, { detail: { tags: ["organizations"], summary: "List organizations" } })
-    .get("", async () => {
+    })
+    .get("", { detail: { tags: ["organizations"], summary: "List organizations" } }, async () => {
         const orgs = await organizationService.listOrganizations();
         return orgs.map(formatOrg);
-    }, { detail: { tags: ["organizations"], summary: "List organizations" } })
-    .get("/:slug", async ({ params }) => {
+    })
+    .get("/:slug", { detail: { tags: ["organizations"], summary: "Get organization by slug" } }, async ({ params }) => {
         const org = await organizationService.getOrganizationBySlug(params.slug);
         if (!org) {
             return status(404, { message: "Organization not found", code: "404" });
         }
         return formatOrg(org);
-    }, { detail: { tags: ["organizations"], summary: "Get organization by slug" } })
+    })
     .post(
         "/",
+        {
+            body: t.Object({
+                name: t.String(),
+                slug: t.Optional(t.String()),
+                plan: t.Optional(t.String()),
+                owner_id: t.Optional(t.Nullable(t.String())),
+            }),
+            detail: { tags: ["organizations"], summary: "Create organization" },
+        },
         async ({ body, request, set }) => {
             const authError = await requireAdminAuth(request);
             if (authError) return status(authError.status, authError.body);
@@ -65,29 +74,10 @@ export const organizationRoutes = new Elysia({ prefix: "/v1/organizations" })
             } catch (error) {
                 return formatError(error);
             }
-        },
-        {
-            body: t.Object({
-                name: t.String(),
-                slug: t.Optional(t.String()),
-                plan: t.Optional(t.String()),
-                owner_id: t.Optional(t.Nullable(t.String())),
-            }),
-            detail: { tags: ["organizations"], summary: "Create organization" },
         }
     )
     .patch(
         "/:slug",
-        async ({ params, body, request }) => {
-            const authError = await requireAdminAuth(request);
-            if (authError) return status(authError.status, authError.body);
-            try {
-                const org = await organizationService.updateOrganization(params.slug, body);
-                return formatOrg(org);
-            } catch (error) {
-                return formatError(error);
-            }
-        },
         {
             params: t.Object({ slug: t.String() }),
             body: t.Object({
@@ -97,10 +87,21 @@ export const organizationRoutes = new Elysia({ prefix: "/v1/organizations" })
                 owner_id: t.Optional(t.Nullable(t.String())),
             }),
             detail: { tags: ["organizations"], summary: "Update organization" },
+        },
+        async ({ params, body, request }) => {
+            const authError = await requireAdminAuth(request);
+            if (authError) return status(authError.status, authError.body);
+            try {
+                const org = await organizationService.updateOrganization(params.slug, body);
+                return formatOrg(org);
+            } catch (error) {
+                return formatError(error);
+            }
         }
     )
     .delete(
         "/:slug",
+        { params: t.Object({ slug: t.String() }), detail: { tags: ["organizations"], summary: "Delete organization" } },
         async ({ params, request }) => {
             const authError = await requireAdminAuth(request);
             if (authError) return status(authError.status, authError.body);
@@ -110,11 +111,11 @@ export const organizationRoutes = new Elysia({ prefix: "/v1/organizations" })
             } catch (error) {
                 return formatError(error);
             }
-        },
-        { params: t.Object({ slug: t.String() }), detail: { tags: ["organizations"], summary: "Delete organization" } }
+        }
     )
     .get(
         "/:slug/members",
+        { params: t.Object({ slug: t.String() }), detail: { tags: ["organizations"], summary: "List organization members" } },
         async ({ params, request }) => {
             const authError = await requireAdminAuth(request);
             if (authError) return status(authError.status, authError.body);
@@ -124,11 +125,19 @@ export const organizationRoutes = new Elysia({ prefix: "/v1/organizations" })
             } catch (error) {
                 return formatError(error);
             }
-        },
-        { params: t.Object({ slug: t.String() }), detail: { tags: ["organizations"], summary: "List organization members" } }
+        }
     )
     .post(
         "/:slug/members",
+        {
+            params: t.Object({ slug: t.String() }),
+            body: t.Object({
+                email: t.String(),
+                role: t.Optional(t.String()),
+                user_id: t.Optional(t.Nullable(t.String())),
+            }),
+            detail: { tags: ["organizations"], summary: "Add organization member" },
+        },
         async ({ params, body, request, set }) => {
             const authError = await requireAdminAuth(request);
             if (authError) return status(authError.status, authError.body);
@@ -139,19 +148,11 @@ export const organizationRoutes = new Elysia({ prefix: "/v1/organizations" })
             } catch (error) {
                 return formatError(error);
             }
-        },
-        {
-            params: t.Object({ slug: t.String() }),
-            body: t.Object({
-                email: t.String(),
-                role: t.Optional(t.String()),
-                user_id: t.Optional(t.Nullable(t.String())),
-            }),
-            detail: { tags: ["organizations"], summary: "Add organization member" },
         }
     )
     .delete(
         "/:slug/members/:id",
+        { params: t.Object({ slug: t.String(), id: t.String() }), detail: { tags: ["organizations"], summary: "Remove organization member" } },
         async ({ params, request }) => {
             const authError = await requireAdminAuth(request);
             if (authError) return status(authError.status, authError.body);
@@ -161,6 +162,5 @@ export const organizationRoutes = new Elysia({ prefix: "/v1/organizations" })
             } catch (error) {
                 return formatError(error);
             }
-        },
-        { params: t.Object({ slug: t.String(), id: t.String() }), detail: { tags: ["organizations"], summary: "Remove organization member" } }
+        }
     );

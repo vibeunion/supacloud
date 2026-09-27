@@ -1,0 +1,64 @@
+import { strict as assert } from "node:assert";
+import { readFile } from "node:fs/promises";
+import { SQL } from "bun";
+import type { VerificationDatabase } from "./persistence";
+
+type Connection = { socketPath: string; database: string; username: string };
+
+/** Only called for the owned native-Lite cluster and its private test socket. */
+export async function setupRuntimeRoleConnections(database: VerificationDatabase, connection: Connection) {
+  await database.exec(await readFile(new URL("../migrations/004-review-runtime-roles.sql", import.meta.url), "utf8"));
+  await database.exec(`
+    CREATE ROLE starter_http_login LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+    CREATE ROLE starter_worker_login LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+    GRANT starter_review_http TO starter_http_login;
+    GRANT starter_review_worker TO starter_worker_login;
+  `);
+  const connections = {
+    http: { ...connection, username: "starter_http_login" },
+    worker: { ...connection, username: "starter_worker_login" },
+  };
+  for (const [kind, login] of Object.entries(connections)) {
+    const pool = new SQL({
+      adapter: "postgres", path: login.socketPath, database: login.database,
+      username: login.username, max: 1, connectionTimeout: 5,
+    });
+    try {
+      const roles = await pool.unsafe(`SELECT current_user AS name, session_user AS login,
+        rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolreplication
+        FROM pg_roles WHERE rolname=current_user`);
+      assert.deepEqual({ ...roles[0] }, { name: login.username, login: login.username,
+        rolsuper: false, rolbypassrls: false, rolcreaterole: false, rolcreatedb: false, rolreplication: false });
+      assert.equal((await pool.unsafe("SELECT * FROM public.starter_application")).length, 1);
+      const denied = async (sql: string) =>
+        assert.rejects(pool.unsafe(sql), /permission denied|row-level security|must be owner/);
+      await denied("CREATE TABLE public.runtime_role_forbidden(id integer)");
+      await denied("ALTER TABLE public.starter_reviews ADD COLUMN forbidden integer");
+      await denied("TRUNCATE public.starter_reviews");
+      await denied("SET ROLE service_role");
+      await denied("SET ROLE " + (kind === "http" ? "starter_review_worker" : "starter_review_http"));
+      await denied("UPDATE public.starter_members SET enabled=false WHERE subject='owner'");
+      await denied("UPDATE public.starter_members SET subject=subject WHERE subject='owner'");
+      await denied("UPDATE public.starter_application SET singleton=singleton");
+      await denied("UPDATE public.starter_application SET tenant_id='forbidden'");
+      await denied("DELETE FROM public.starter_reviews WHERE false");
+      await denied("DELETE FROM public.starter_attachments WHERE false");
+      await denied("UPDATE public.starter_attachments SET review_id=review_id");
+      if (kind === "http") {
+        await denied("INSERT INTO public.starter_attachment_results VALUES ('missing',2,gen_random_uuid(),'{}')");
+        await denied("UPDATE supacloud_commands.execution_audit SET event='forbidden'");
+        await denied("UPDATE supacloud_commands.execution_receipts SET result='{}'");
+        await denied("DELETE FROM supacloud_commands.execution_audit WHERE false");
+      } else {
+        await denied("UPDATE public.starter_reviews SET state='approved'");
+        await denied("UPDATE public.starter_reviews SET id=id");
+        await denied("INSERT INTO public.starter_attachments VALUES ('missing',gen_random_uuid(),'owner',gen_random_uuid(),'forbidden')");
+        await denied("UPDATE public.starter_attachment_results SET result='{}'");
+        await denied("DELETE FROM public.starter_attachment_results WHERE false");
+        await denied("SELECT * FROM supacloud_commands.execution_receipts");
+        await denied("SELECT supacloud_workflows.start_run(gen_random_uuid(),'forbidden','1','step','{}',1)");
+      }
+    } finally { await pool.close({ timeout: 5 }); }
+  }
+  return connections;
+}

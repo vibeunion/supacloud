@@ -1,5 +1,5 @@
-import type { Static, TSchema } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
+import type { Static, TSchema } from "typebox";
+import { Value } from "typebox/value";
 
 export interface ConfigIssue {
   readonly path: string;
@@ -23,7 +23,7 @@ export function decodeConfig<T extends TSchema>(
 ): Static<T> {
   if (!Value.Check(schema, value)) {
     throw new ConfigValidationError(name, [...Value.Errors(schema, value)].map((error) => ({
-      path: error.path || "/",
+      path: "path" in error && typeof error.path === "string" ? error.path : "/",
       message: error.message,
     })));
   }

@@ -1,0 +1,70 @@
+import { strict as assert } from "node:assert";
+import { cp, mkdir, readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
+import {
+  buildDeliveryProject, compileOptionsFromConfig, loadSupacloudConfig,
+  parseDeliveryBuildManifest, readDeliveryMigrationArchive,
+} from "@supacloud/compiler";
+
+export interface ArchivedDelivery {
+  manifestPath: string;
+  objectId: string;
+}
+
+/** Copy first, then verify the exact owned snapshot that will be executed. */
+export async function prepareArchivedDelivery(
+  artifact: ArchivedDelivery, target: "api" | "jobs", directory: string,
+) {
+  assert.match(artifact.objectId, /^[a-f0-9]{64}$/);
+  await mkdir(directory, { recursive: true });
+  const manifestPath = join(directory, "delivery.manifest.json");
+  await cp(artifact.manifestPath, manifestPath);
+  await cp(join(dirname(artifact.manifestPath), "objects", artifact.objectId),
+    join(directory, "objects", artifact.objectId), { recursive: true });
+  const archive = await readDeliveryMigrationArchive(manifestPath, target);
+  assert.equal(archive.objectId, artifact.objectId);
+  const manifest = parseDeliveryBuildManifest(JSON.parse(await readFile(manifestPath, "utf8")));
+  assert.equal(manifest.deploymentReady, false);
+  assert.equal(manifest.objects.find(object => object.name === target)?.entryKind,
+    target === "api" ? "bun-http-application" : "bun-worker-application");
+  return { bundle: join(directory, "objects", archive.objectId, "bundle"), archive };
+}
+
+export async function buildReferenceDeliveryArchive(directory: string, signal: AbortSignal, revision: 1 | 2 = 1) {
+  signal.throwIfAborted();
+  const project = dirname(dirname(import.meta.path));
+  const config = await loadSupacloudConfig(project);
+  const compile = compileOptionsFromConfig(config, project);
+  const settings = {
+    version: 1,
+    runtime: { processIsolation: true, durableQueue: true, capabilities: [] },
+    build: {
+      migrations: [
+        ...(config.delivery?.build?.migrations ?? []),
+        ...(revision === 2 ? [{
+          source: "migrations/005-reference-compatibility.sql", version: "5",
+          name: "reference_compatibility", executor: "project-migration" as const,
+        }] : []),
+      ],
+      httpApplications: [{ target: "api", source: revision === 2 ? "delivery-host-v2.ts" : "delivery-host.ts" }],
+      workerApplications: [{ target: "jobs", source: revision === 2 ? "delivery-worker-v2.ts" : "delivery-worker.ts" }],
+    },
+  };
+  const built = await buildDeliveryProject(compile, settings);
+  assert.ok(built.ok, JSON.stringify(built.diagnostics));
+  signal.throwIfAborted();
+  const again = await buildDeliveryProject(compile, settings);
+  assert.ok(again.ok, JSON.stringify(again.diagnostics));
+  assert.deepEqual(again.written, []);
+  signal.throwIfAborted();
+  await cp(join(compile.outDir, "delivery"), directory, { recursive: true });
+  const manifestPath = join(directory, "delivery.manifest.json");
+  const select = async (target: "api" | "jobs"): Promise<ArchivedDelivery> => {
+    const archive = await readDeliveryMigrationArchive(manifestPath, target);
+    assert.equal(archive.migrations.length, revision === 2 ? 5 : 4);
+    assert.equal(archive.migrations.filter(item => item.executor === "project-migration").length, revision === 2 ? 3 : 2);
+    assert.equal(archive.migrations.filter(item => item.executor === "operator-provisioning").length, 2);
+    return { manifestPath, objectId: archive.objectId };
+  };
+  return { api: await select("api"), jobs: await select("jobs") };
+}

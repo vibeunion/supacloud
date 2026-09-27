@@ -1,6 +1,8 @@
 export { analyzeProject } from "./analyze";
 export { createDeliveryPlan, planDeliveryProject, formatDeliveryPlan } from "./delivery-plan";
 export { buildDeliveryProject } from "./delivery-build";
+export { readDeliveryMigrationArchive } from "./delivery-migration-archive";
+export type { DeliveryMigrationArchive } from "./delivery-migration-archive";
 export { DeliveryBuildManifestSchema, DeliveryBuildResultSchema, parseDeliveryBuildManifest, parseDeliveryBuildResult } from "./delivery-build-schema";
 export type { DeliveryBuildManifest, DeliveryBuildResult, DeliveryObject } from "./delivery-build-schema";
 export {
@@ -10,6 +12,8 @@ export {
 export type { DeliveryOptions, DeliveryPlan, DeliveryPlanResult, DeliveryTarget, DeliveryDiagnostic } from "./delivery-schema";
 export { generateFeatureSource, validateFeatureSpec } from "./feature";
 export { applyDiagnosticFix } from "./fixes";
+export { createExecutionContextPack, readExecutionMetadata, EXECUTION_CONTEXT_LIMITS, ExecutionContextError } from "./execution-context";
+export type { ExecutionContextPack } from "./execution-context";
 export type { AppliedDiagnosticFix, ApplyDiagnosticFixOptions } from "./fixes";
 export { createDiagnosticRepairPlan } from "./repair-plan";
 export type { DiagnosticRepair } from "./repair-plan";

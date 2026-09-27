@@ -190,13 +190,11 @@ export class ProjectService {
     }
   }
 
-  /** Check if the storage backend (S3/MinIO) is reachable */
+  /** Probe the configured backend, including filesystem-backed storage. */
   private async checkStorageHealth(): Promise<boolean> {
     try {
-      const res = await fetch(`${config.s3Endpoint}/minio/health/live`, {
-        signal: AbortSignal.timeout(3000),
-      });
-      return res.ok;
+      const { StorageService } = await import("./storage.service");
+      return (await StorageService.getStatus()).healthy;
     } catch {
       return false;
     }
@@ -210,15 +208,6 @@ export class ProjectService {
       if (storage?.healthy || storage?.status === "ACTIVE_HEALTHY") return true;
     } catch {
       // Ignore tenant service status probe exceptions and fall back to local probe.
-    }
-
-    try {
-      const result = await $`systemctl is-active ${`supacloud-storage@${ref}`}`
-        .nothrow()
-        .quiet();
-      if (result.exitCode === 0) return true;
-    } catch {
-      // Ignore systemd probe exceptions and fall back to shared storage probe.
     }
 
     return await this.checkStorageHealth();
@@ -340,7 +329,7 @@ export class ProjectService {
       // Start Saga by enqueuing the first task
       await taskRepository.createTask(projectRef, "provision_db", {
         dbPassword,
-        domain,
+        ...(domain === undefined ? {} : { domain }),
       });
       logger.info(
         `[Saga] Initiated resource provisioning for project ${projectRef}`,
@@ -501,14 +490,12 @@ export class ProjectService {
       pgrstStatus,
       gotrueStatus,
       realtimeSystemd,
-      storagePerTenant,
       gatewaySystemd,
       realtimeDocker,
     ] = await Promise.all([
       checkService(`supacloud-pgrst@${ref}`),
       checkService(`supacloud-gotrue@${ref}`),
       checkService("supacloud-realtime"),
-      checkService(`supacloud-storage@${ref}`),
       checkService("supacloud-caddy"),
       checkContainer("supacloud-realtime"),
     ]);
@@ -542,10 +529,10 @@ export class ProjectService {
       }
     }
 
-    // Evaluate storage status based on checking MinIO/S3 reachability
+    // Use the same backend-aware probe as the project status endpoint.
     const isStorageReachable = await this.checkStorageHealth();
     const storageStatus =
-      storagePerTenant === "ACTIVE_HEALTHY" || isStorageReachable
+      isStorageReachable
         ? "ACTIVE_HEALTHY"
         : "INACTIVE";
 

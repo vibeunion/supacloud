@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { stringEnum } from "./schema";
+import type { ToolSchema } from "./schema";
+import { registerDatabaseTools } from "./tools/database-tools";
 import { authorizeExecution, executionMode, validateExecutionPolicyCoverage } from "./execution-policy";
 import type { ResolvedContext } from "./context";
 
@@ -176,6 +178,28 @@ describe("CLI execution policy", () => {
         })).toThrow("SUPACLOUD_READ_ONLY=true");
     });
 
+    test("classifies application release reads and uploads", () => {
+        expect(executionMode("applications", "list_releases", {})).toBe("read");
+        expect(executionMode("applications", "get_release", {})).toBe("read");
+        expect(executionMode("applications", "get_runtime", {})).toBe("read");
+        expect(executionMode("applications", "get_configuration", {})).toBe("read");
+        expect(executionMode("applications", "put_configuration", {})).toBe("write");
+        expect(executionMode("applications", "activate_release", {})).toBe("write");
+        expect(executionMode("applications", "reconcile_activation", {})).toBe("write");
+        expect(executionMode("applications", "retire_activation", {})).toBe("write");
+        expect(executionMode("applications", "upload_release", {})).toBe("write");
+        expect(() => authorizeExecution("applications", { action: "upload_release", ref: "prod-ref" }, {
+            context: context(),
+        })).toThrow("--confirm-production prod-ref");
+        expect(() => authorizeExecution("applications", { action: "upload_release", ref: "prod-ref" }, {
+            context: context(),
+            confirmProduction: "prod-ref",
+        })).not.toThrow();
+        expect(() => authorizeExecution("applications", { action: "upload_release", ref: "prod-ref" }, {
+            context: context({ production: false, environment: "test", readOnly: true }),
+        })).toThrow("SUPACLOUD_READ_ONLY=true");
+    });
+
     test("classifies Function, Scheduled Function, and Storage lifecycle actions", () => {
         expect(executionMode("database", "lint_migrations", {})).toBe("local");
         expect(executionMode("database", "lint", {})).toBe("local");
@@ -271,6 +295,36 @@ describe("CLI execution policy", () => {
         expect(executionMode("supabase", "push", { dry_run: true })).toBe("read");
         expect(() => authorizeExecution("supabase", { action: "db_dump" }, { context: context() }))
             .not.toThrow();
+    });
+
+    test("allows same-project delivery migration plans in read-only production profiles", () => {
+        const action = "delivery_migration_plan";
+        expect(executionMode("database", action, {})).toBe("read");
+        expect(() => authorizeExecution("database", { action, ref: "prod-ref" }, {
+            context: context({ readOnly: true }),
+        })).not.toThrow();
+        expect(() => authorizeExecution("database", { action, ref: "other-ref" }, {
+            context: context({ readOnly: true }),
+            confirmProduction: "other-ref",
+        })).toThrow("cannot target a different project");
+        expect(() => authorizeExecution("database", { action: "apply_migration", ref: "prod-ref" }, {
+            context: context({ readOnly: true }),
+            confirmProduction: "prod-ref",
+        })).toThrow("SUPACLOUD_READ_ONLY=true");
+        expect(() => authorizeExecution("database", { action: "apply_migration", ref: "prod-ref" }, {
+            context: context(),
+        })).toThrow("--confirm-production prod-ref");
+    });
+
+    test("covers the actual registered database action catalog before CLI startup", () => {
+        let registered = 0;
+        registerDatabaseTools({
+            tool(_name: string, _description: string, schema: ToolSchema) {
+                registered++;
+                validateExecutionPolicyCoverage({ database: { schema } });
+            },
+        }, undefined);
+        expect(registered).toBe(1);
     });
 
     test("always rejects diagnostics repair in production", () => {

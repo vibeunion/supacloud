@@ -2,9 +2,19 @@ import { lstat, mkdir, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { STARTER_ENVIRONMENT, STARTER_ENVIRONMENT_TEST } from "./app-starter-environment";
 import { appTemplateFiles, type StarterTemplate } from "./app-starter-templates";
+import { STARTER_REVIEW_JOB, STARTER_REVIEW_JOB_TEST } from "./app-starter-review-job";
+import { STARTER_ATTACHMENT_POSTGRES, STARTER_ATTACHMENT_SCHEMA } from "./app-starter-attachments";
+import { STARTER_ATTACHMENT_WORKER, STARTER_ATTACHMENT_DELIVERY_WORKER } from "./app-starter-attachment-worker";
+import { STARTER_UPLOAD_FEATURE, STARTER_UPLOAD_SCHEMA, STARTER_UPLOAD_ADAPTER } from "./app-starter-upload";
+import { STARTER_RUNTIME_ROLES_SCHEMA } from "./app-starter-roles";
+import { STARTER_REVIEW_DELIVERY_HOST, STARTER_REVIEW_POSTGRES, STARTER_REVIEW_POSTGRES_TEST, STARTER_REVIEW_SCHEMA } from "./app-starter-postgres";
 import compilerMetadata from "../../../../compiler/package.json" with { type: "json" };
 import appMetadata from "../../../../app/package.json" with { type: "json" };
 import elysiaMetadata from "../../../../elysia/package.json" with { type: "json" };
+import commandsMetadata from "../../../../commands/package.json" with { type: "json" };
+import contractsMetadata from "../../../../contracts/package.json" with { type: "json" };
+import dbMetadata from "../../../../db/package.json" with { type: "json" };
+import sdkMetadata from "../../../../supacloud-js/package.json" with { type: "json" };
 
 const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
@@ -30,7 +40,12 @@ export function appStarterFiles(name: string): Record<string, string> {
             dependencies: {
                 "@supacloud/app": `^${appMetadata.version}`,
                 "@supacloud/elysia": `^${elysiaMetadata.version}`,
-                elysia: "^1.4.30",
+                "@supacloud/commands": `^${commandsMetadata.version}`,
+                "@supacloud/contracts": `^${contractsMetadata.version}`,
+                "@supacloud/db": `^${dbMetadata.version}`,
+                "@supacloud/js": `^${sdkMetadata.version}`,
+                "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
+                elysia: "2.0.0-beta.19",
             },
             devDependencies: {
                 "@supacloud/compiler": `^${compilerMetadata.version}`,
@@ -66,6 +81,17 @@ export default defineSupacloudConfig({
   detectOrphanModules: true,
   graphql: { schema: "graphql/schema.graphql" },
   commandCapabilities: { permission: true, transaction: true, idempotency: true, audit: true },
+  delivery: {
+    version: 1,
+    build: {
+      migrations: [
+        { source: "migrations/001-review.sql", version: "1", name: "review", executor: "project-migration" },
+        { source: "migrations/002-review-attachments.sql", version: "2", name: "review_attachments", executor: "project-migration" },
+        { source: "migrations/003-review-uploads.sql", version: "3", name: "review_uploads", executor: "operator-provisioning" },
+        { source: "migrations/004-review-runtime-roles.sql", version: "4", name: "review_runtime_roles", executor: "operator-provisioning" },
+      ],
+    },
+  },
 });
 `,
         "graphql/schema.graphql": `# Offline query-contract example, not a deployed database schema.
@@ -210,6 +236,8 @@ export function createCompiledModules(): never {
 } from "@supacloud/app";
 import { ApplicationError, assertFeatureTransition } from "@supacloud/elysia";
 import { t } from "elysia";
+import { VerifyReviewAttachment } from "./attachment";
+import { ReviewUploads, ReviewUploadsController, type ReviewUploadPort } from "./uploads";
 
 export const reviewSpec = defineFeatureSpec({
   name: "review",
@@ -226,9 +254,9 @@ export const reviewSpec = defineFeatureSpec({
 
 interface Review { state: string; version: number }
 // Production implementations must bind both operations to the current transaction.
-export interface ReviewStore {
+export interface ReviewStore extends Partial<ReviewUploadPort> {
   get(table: string, key: string): unknown;
-  set(table: string, key: string, value: Review): void;
+  set(table: string, key: string, value: Review): void | Promise<void>;
 }
 
 export const Params = t.Object({ id: t.String({ minLength: 1 }) });
@@ -261,8 +289,8 @@ function readReview(value: unknown): Review {
 export class ApproveReview {
   constructor(@Inject(DB_CLIENT) private readonly store: ReviewStore) {}
 
-  execute(id: string, expectedVersion: number): Review {
-    const current = readReview(this.store.get("reviews", id));
+  async execute(id: string, expectedVersion: number): Promise<Review> {
+    const current = readReview(await this.store.get("reviews", id));
     if (current.version !== expectedVersion) {
       throw new ApplicationError("Review state or version changed", { status: 409, code: "REVIEW_CONFLICT" });
     }
@@ -270,7 +298,7 @@ export class ApproveReview {
       state: assertFeatureTransition(reviewSpec, current.state, "approve"),
       version: current.version + 1,
     };
-    this.store.set("reviews", id, next);
+    await this.store.set("reviews", id, next);
     return next;
   }
 }
@@ -283,16 +311,31 @@ export class ReviewController {
   health(): { ok: boolean } { return { ok: true }; }
 
   @Post("/:id/approve", { command: ApproveReview, params: Params, body: ApproveBody, responses: { 200: ReviewResult } })
-  approve(@Param("id") id: string, @Body() body: { expectedVersion: number }): Review {
+  approve(@Param("id") id: string, @Body() body: { expectedVersion: number }): Promise<Review> {
     return this.approveReview.execute(id, body.expectedVersion);
   }
 }
 
 export const ReviewFeature = defineFeatureSlice({
   name: "review", tags: ["type:feature"], spec: reviewSpec,
-  providers: [ApproveReview], controllers: [ReviewController],
+  providers: [ApproveReview, VerifyReviewAttachment, ReviewUploads], controllers: [ReviewController, ReviewUploadsController],
+  jobs: [VerifyReviewAttachment],
 });
 `,
+        "src/review/attachment.ts": STARTER_REVIEW_JOB,
+        "src/review/uploads.ts": STARTER_UPLOAD_FEATURE,
+        "src/host/review-uploads.ts": STARTER_UPLOAD_ADAPTER,
+        "src/host/review-postgres.ts": STARTER_REVIEW_POSTGRES,
+        "src/host/review-attachments.ts": STARTER_ATTACHMENT_POSTGRES,
+        "src/host/review-attachment-worker.ts": STARTER_ATTACHMENT_WORKER,
+        "src/delivery-worker.ts": STARTER_ATTACHMENT_DELIVERY_WORKER,
+        "src/delivery-host.ts": STARTER_REVIEW_DELIVERY_HOST,
+        "migrations/001-review.sql": STARTER_REVIEW_SCHEMA,
+        "migrations/002-review-attachments.sql": STARTER_ATTACHMENT_SCHEMA,
+        "migrations/003-review-uploads.sql": STARTER_UPLOAD_SCHEMA,
+        "migrations/004-review-runtime-roles.sql": STARTER_RUNTIME_ROLES_SCHEMA,
+        "tests/postgres-host.test.ts": STARTER_REVIEW_POSTGRES_TEST,
+        "tests/attachment.test.ts": STARTER_REVIEW_JOB_TEST,
         "tests/review.test.ts": `import { expect, test } from "bun:test";
 import { createApp } from "../src/application";
 import { createDemo } from "../scripts/sandbox";
@@ -457,9 +500,77 @@ Import createApp from dist/application.js in your trusted host and supply:
 - requestContext from verified identity, never a body-supplied actor;
 - commandGovernance authorization, durable idempotency, transaction and audit adapters.
 
-The demo store uses synchronous get/set. Replace it and ApproveReview with your
-async database repository or a transactional RPC before production use. The
-authoritative database must lock or compare row versions, enforce authorization,
+The starter also includes src/host/review-postgres.ts and src/delivery-host.ts.
+The PostgreSQL adapter executes the same compiled approval handler with durable
+receipts, audit, current membership/ownership checks on replay and transaction-bound
+storage. It is specific to review.approve and rejects unconfigured commands.
+Its database is dedicated to one project/tenant, checked against
+public.starter_application at startup and during authorization.
+
+The migration owner must apply the platform command-persistence schema and
+migrations/001-review.sql, provision the project/tenant binding and current
+memberships. After migrations 002-003, an administrator can apply
+migrations/004-review-runtime-roles.sql to create the NOLOGIN, non-superuser,
+non-BYPASSRLS roles starter_review_http and starter_review_worker. These names
+are cluster-wide and reserved for this reference application; existing names
+cause failure instead of silently adopting unknown privileges. Use a separate
+application cluster or explicitly reviewed role naming for additional instances.
+Provision separate unprivileged LOGIN accounts outside source control and grant
+each exactly its matching runtime role, never the migration owner or service_role.
+Keep public schema CREATE revoked from PUBLIC on the target database; verify
+inherited grants and default privileges before activating the accounts.
+The HTTP role can approve, bind attachments, append receipts/audits and start
+Workflows. The Worker database role can read authorization records and insert
+immutable results, but cannot approve, bind or start Workflows through SQL.
+Row-lock column privileges have restrictive RLS checks preventing authority
+record updates. Backend object authorization remains in the trusted adapters;
+these roles do not establish per-request RLS identity. The Storage/Workflow
+service key remains separately privileged and requires platform acceptance.
+The local native-Lite detached hosts use separate restricted LOGIN accounts;
+fixture setup and other test profiles still use the owned migration role.
+This is not production-role acceptance. Ordinary API clients cannot edit membership
+or the database binding. No migration, binding, member or review is auto-created
+by the HTTP host. This SQL file is not a migration runner or a recovery receipt.
+
+The starter's delivery.build.migrations explicitly declares these four files.
+Immutable targets archive their exact bytes and a migrations.json inventory;
+project migrations and operator provisioning use separate directories.
+001-002 declare project migration handling. 003 changes Storage policies and
+004 creates cluster-wide roles, so both declare operator provisioning; ordinary
+project-role permission to perform those changes has not been established.
+These raw SQL hashes are not the platform ledger's normalized-statement
+checksums. Building or copying an archive never applies SQL, proves compatibility
+or authorizes execution. Reconcile with the selected environment's canonical
+ledger and use the existing platform migration flow for project migrations;
+operator provisioning requires its separate administrator path.
+Keep the platform Commands/Workflow prerequisites and their versions under
+platform management. They are not silently copied into application migrations.
+
+For an immutable executable HTTP build, configure delivery.build.httpApplications
+with target "api" and source "delivery-host.ts". The declared attachment Job also
+requires an explicitly selected runtime with process isolation and a durable
+queue; configure delivery.runtime only after that target is selected. Then run
+\`bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js build\`.
+Inject DATABASE_URL, APP_TENANT_ID, SUPACLOUD_PROJECT_ID, SUPAUTH_ISSUER,
+SUPAUTH_AUDIENCE, SUPAUTH_CLIENT_ID and SUPAUTH_JWKS_URL at runtime.
+Identity uses the configured remote JWKS verifier, never a synthetic local key.
+PORT/HOST and shutdown are owned by the delivery runtime; the host closes its pool.
+Do not include runtime secrets in the source tree or build inputs.
+
+The Job output remains a factory unless a worker host is explicitly selected.
+Without REVIEW_ATTACHMENTS=enabled this HTTP host delivers approval only and
+authenticated upload requests return 501. With that setting, SUPACLOUD_URL and
+SUPACLOUD_SERVICE_ROLE_KEY are required; shipped adapters register/bind uploads
+and enqueue attachment verification through afterApproved in the approval
+transaction. A separately delivered worker consumes it.
+An HTTP listener or immutable build does not prove full-platform identity,
+migration compatibility, activation, application rollback or data recovery.
+
+The demo store uses synchronous get/set. ApproveReview awaits both operations,
+so an async database repository can implement ReviewStore without replacing the
+business handler. Bind that repository to the command's current transaction;
+awaiting a write alone does not establish durability or atomicity.
+The authoritative database must lock or compare row versions, enforce authorization,
 and commit transition, idempotency receipt and audit atomically. For distributed
 side effects use a transactional outbox. Client state machines are projections,
 not a security boundary. Missing declared runtime adapters reject application
@@ -489,18 +600,93 @@ Before production acceptance, test legitimate SupAuth sessions across two
 applications, cross-project denial, invalid/expired credentials and permission
 revocation. The local memory tests are not proof of these integration guarantees.
 
+## Approval Attachments
+
+src/review/attachment.ts declares review.verify-attachment. Its input contains
+only review ID, approved revision and immutable artifact ID, never a signed URL
+or a user token. The compiled Job checks the uploaded bytes against the registered
+digest and awaits a durable result. It does not create a queue, upload objects,
+grant access or implement its own retry engine.
+
+The trusted host must upload through private Storage, validate current ownership,
+register an immutable Artifact and bind it to the review. Commit approval and
+Workflow submission in the same database transaction. A separate worker claims
+the existing Workflow and invokes the compiled Job with a ReviewAttachmentStore.
+Its reader authorizes the worker independently; its writer rechecks the review
+revision/artifact binding and persists the result idempotently before acknowledgement.
+After a lost acknowledgement, reconcile that result instead of repeating effects.
+
+src/host/review-attachments.ts supplies createReviewAttachmentAdapters with a
+durable store and enqueue callback for the approval adapter's afterApproved hook.
+Apply migrations/002-review-attachments.sql with the migration owner; no process
+automatically provisions attachment tables or grants backend permissions.
+Provision the Artifact/Storage service client and database for the same project.
+The adapter checks the database project/tenant, current approval permission,
+ownership and revision, exact registered object path, type and size. It rejects
+conflicting durable results instead of treating any previous result as success.
+The service endpoint's project binding remains the host operator's responsibility.
+Apply migrations/003-review-uploads.sql and explicitly provision each member's
+storage_subject using the platform's verified external-identity mapping.
+The migration creates a private 1 MiB text/plain bucket, member/review read
+policies and Storage INSERT/SELECT policies. Restrictive ownership and
+UPDATE/DELETE fences prevent ordinary authenticated users from changing bytes
+before Artifact registration even if broader permissive Storage policies exist.
+These fences are bucket-scoped and do not grant access to other buckets.
+Service-role provisioning, identity mapping and backend privileges still require
+platform-specific review; the server service key must never reach callers.
+
+POST /reviews/:id/attachment-upload accepts artifactId (a client-generated UUID)
+and expectedVersion, and returns the identity-derived private bucket/path.
+Upload there using the caller's authenticated Storage client, never a service
+key or upsert. POST /reviews/:id/attachment-registration with the same body
+computes the digest on the server, registers the immutable Artifact, then binds
+it through a durable review.attach transaction with audit. These routes belong
+to the compiled ApplicationGraph; they are not hidden host fetch handlers.
+Registration is explicitly two-phase, not a distributed transaction: a failed
+binding can leave an immutable orphan. Retry the same artifactId/body; do not
+delete immutable evidence after an uncertain result. Current ownership,
+membership, permission, project/tenant and revision are rechecked before binding
+and on replay. The same binding can replay after its corresponding approval;
+new uploads cannot be prepared once the review is approved.
+
+src/delivery-worker.ts supplies a separate executable worker host. Bind it with
+delivery.build.workerApplications: [{ target: "jobs", source: "delivery-worker.ts" }].
+It uses the existing Workflow SDK and the compiled attachment Job, not a second
+retry engine. Inject SUPACLOUD_URL, SUPACLOUD_SERVICE_ROLE_KEY,
+SUPACLOUD_PROJECT_ID, APP_TENANT_ID, REVIEW_WORKER_ID and DATABASE_URL.
+Alternatively use DATABASE_SOCKET_PATH with DATABASE_NAME and DATABASE_USER,
+but never alongside DATABASE_URL. Secrets belong only in runtime configuration.
+REVIEW_QUEUE_OWNERSHIP must be exclusive-review-attachments: the Workflow claim
+API is shared and unfiltered, so this worker cannot safely share it with other
+workflow types. Unknown workflows, versions, steps, unbound run IDs and uncertain
+claim/settlement receipts latch a fatal failure and stop new claims. Unknown
+claims remain unsettled for operator recovery, not automatically failed.
+Ordinary Job failures use canonical Workflow retry/fail; completion follows the
+committed idempotent result. The host's failure promise makes the executable exit
+nonzero with bounded cleanup. Restart only after investigating an ownership or
+receipt failure; repeated automatic restart can exhaust an unknown run's attempts.
+
+The memory demo does not start this worker. The included unit tests exercise the
+handler contract, not production Storage, queue delivery or external identity.
+
 ## Inspection And Repair
 
 \`\`\`sh
 bunx supacloud-compiler context review --root src --json
+bunx supacloud-compiler context review --root src --events execution-events.json --request-id request-123 --json
 bunx supacloud-compiler explain review --root src
 bunx supacloud-compiler check --json
 bunx supacloud-compiler fix ./fix.json --dry-run
 \`\`\`
 
 Context packs include directional dependencies, relevant aspect files, diagnostics
-and static execution plans. Share these rather than credentials or production
-data. Fixes default to preview; use --write only after reviewing the selected
+and static execution plans. Ordinary context can include declared source expressions;
+inspect it before sharing. The optional --events example expects a trusted host
+to capture approved onExecution metadata in { "version": 1, "events": [...] }.
+It selects one opaque request ID, omits payloads and source expressions, and applies
+input/output size limits. It does not read arbitrary logs, prove deployment versions,
+identify a root cause or apply repairs. Never put credentials or business data in
+request IDs. Fixes default to preview; use --write only after reviewing the selected
 policy. Invalid transaction/idempotency modes fail compilation instead of
 silently disabling governance. onExecution receives metadata-only trace events;
 durable audit still belongs to the command governance adapter.

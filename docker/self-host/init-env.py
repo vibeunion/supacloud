@@ -125,6 +125,12 @@ def prepare_legacy_migration_file(output_path: Path, legacy_key: str) -> None:
         raise ValueError("legacy migration input must not be group/world accessible")
 
 
+def prepare_realtime_container_env(output_path: Path, jwt_secret: str) -> None:
+    if any(control in jwt_secret for control in ("\0", "\r", "\n")):
+        raise ValueError("JWT_SECRET must not contain control characters")
+    write_private_env(output_path, f"API_JWT_SECRET={jwt_secret}\n")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Generate docker/self-host/.env for SupaCloud",
@@ -165,6 +171,11 @@ def main() -> None:
         help="Management API secret encryption key",
     )
     parser.add_argument(
+        "--dashboard-password",
+        default="",
+        help="Management dashboard password; generated and preserved when omitted",
+    )
+    parser.add_argument(
         "--legacy-secrets-encryption-key",
         default="",
         help="One-shot key for migrating enc:v1 values created before key separation",
@@ -200,6 +211,16 @@ def main() -> None:
         args.output.with_name(".legacy-secrets-migration.env")
         if args.output
         else Path("./.legacy-secrets-migration.env")
+    )
+    realtime_container_env_path = (
+        args.output.with_name(".realtime-container.env")
+        if args.output
+        else Path("./.realtime-container.env")
+    )
+    dashboard_password = (
+        args.dashboard_password
+        or read_env_value(args.output, "DASHBOARD_PASSWORD")
+        or secrets.token_urlsafe(18)
     )
 
     bff_signing_secret = (
@@ -290,12 +311,15 @@ def main() -> None:
         f"ANON_KEY={anon_key}",
         f"SERVICE_ROLE_KEY={service_role_key}",
         f"MASTER_TOKEN={args.master_token}",
+        "DASHBOARD_USERNAME=supabase",
+        f"DASHBOARD_PASSWORD={dashboard_password}",
         f"PGREDIS_RUNTIME_INTERNAL_TOKEN={pgredis_runtime_token}",
         f"SECRETS_ENCRYPTION_KEY={args.secrets_encryption_key}",
         f"GOTRUE_DB_ENCRYPTION_KEY_ID={gotrue_encryption_key_id}",
         f"GOTRUE_DB_ENCRYPTION_KEY={gotrue_encryption_key}",
         f"GOTRUE_DB_DECRYPTION_KEYS={gotrue_encryption_key_id}:{gotrue_encryption_key}",
         f"LEGACY_SECRETS_MIGRATION_FILE={legacy_migration_path}",
+        f"REALTIME_CONTAINER_ENV_FILE={realtime_container_env_path}",
         f"SUPAOAUTH_BFF_SIGNING_SECRET={bff_signing_secret}",
         f"PUBLIC_URL={args.public_url}",
         f"STUDIO_URL={args.studio_url}",
@@ -323,6 +347,7 @@ def main() -> None:
     if args.output:
         try:
             prepare_legacy_migration_file(legacy_migration_path, args.legacy_secrets_encryption_key)
+            prepare_realtime_container_env(realtime_container_env_path, args.jwt_secret)
         except ValueError as error:
             parser.error(str(error))
         write_private_env(args.output, env_payload)
