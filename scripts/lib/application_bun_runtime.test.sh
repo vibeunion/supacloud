@@ -9,12 +9,15 @@ mkdir -p "$TMP_DIR/home/bin"
 printf '#!/bin/sh\nprintf "1.4.2\\n"\n' > "$TMP_DIR/home/bin/bun"
 chmod 0755 "$TMP_DIR/home/bin/bun"
 umask 0077
+# These calls use the sourced function before the deliberate failure stub below.
+# shellcheck disable=SC2218
 install_application_bun_runtime "$TMP_DIR/home/bin/bun" "1.4.2" "$TMP_DIR/runtime"
+# shellcheck disable=SC2218
 install_application_bun_runtime "$TMP_DIR/home/bin/bun" "1.4.2" "$TMP_DIR/runtime"
 [[ ! -L "$TMP_DIR/runtime/1.4.2/bun" ]]
 [[ "$("$TMP_DIR/runtime/1.4.2/bun" --version)" == "1.4.2" ]]
 [[ "$(ls -ld "$TMP_DIR/runtime/1.4.2/bun" | cut -c 1-10)" == "-rwxr-xr-x" ]]
-rm -rf "$TMP_DIR/home"
+rm -rf -- "${TMP_DIR:?}/home"
 [[ "$("$TMP_DIR/runtime/1.4.2/bun" --version)" == "1.4.2" ]]
 if install_application_bun_runtime "$TMP_DIR/runtime/1.4.2/bun" "1.4.3" "$TMP_DIR/runtime"; then
     echo "accepted an unexpected Bun version" >&2
