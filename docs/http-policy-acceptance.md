@@ -60,9 +60,9 @@ The following findings were fixed and covered by regressions:
   Command runtime in that isolated database.
 - No production databases, remote accounts, commits, pushes or deployments.
 
-## Evidence
+## Original Workspace Evidence
 
-Final frozen-source verification:
+Final frozen-source verification in the original development workspace:
 
 - Elysia full suite: **275 passed, 0 failed, 0 skipped**, 32 files, 1116 assertions,
   499.53 seconds. Real PostgreSQL/PGMQ runtime tests were enabled.
@@ -144,3 +144,36 @@ adding a policy improves performance or costs nothing. Native-static has fewer
 responsibilities than the adapter; full security includes cryptographic and
 storage work. No isolated DI overhead percentage or production throughput
 guarantee is inferred from these results.
+
+## Merge Follow-Up
+
+Parent: the scoped implementation and local acceptance above.
+Source: user request "全部完成后合并到 main".
+Reason: authorize a scoped commit, pull request and merge after candidate validation.
+
+The merge candidate is based on `origin/main` at `456efcd8`, in an isolated
+worktree. Other pending delivery, CLI, management API and borrowed-resource
+changes are excluded. Third-party dependencies are reused locally, but all
+SupaCloud dependencies are rebuilt from candidate sources. The original
+workspace evidence and benchmark above are historical, not a certification
+of the extracted candidate. Production deployment remains out of scope.
+
+Candidate verification:
+
+- Elysia full suite: **274 passed, 0 failed, 0 skipped**, 31 files,
+  1112 assertions, 435.98 seconds, with real PostgreSQL 18.4 and PGMQ 1.10.0.
+  The unrelated borrowed-resource test is not part of this candidate.
+- Compiler generation and migrations: **49 passed, 0 failed**, 236 assertions.
+- Contracts, app, commands, database, compiler and Elysia JS/declaration builds
+  passed from candidate sources; Elysia test type checking passed.
+- Workspace boundaries passed for 21 packages. Public API checks passed:
+  app 301 exports, compiler 162 exports.
+- Both independent reviewers found no extraction omissions or blocking changes.
+- The initial database run used the wrong local server port and failed to connect.
+  After explicitly starting the isolated server on port 55439, the complete
+  Elysia suite passed as recorded above; the server was then stopped.
+- Additional compiler-wide testing returned 416 passes and two GraphQL consumer
+  timeouts at their existing 20-second deadlines. Isolated source-CLI reruns
+  also timed out. The GraphQL CLI, generation and test files are unchanged
+  from the base. This is not recorded as a full compiler-suite pass; required
+  clean CI must pass before merge.

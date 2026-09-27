@@ -26,7 +26,7 @@ import type {
   TokenKind,
 } from "./types";
 import { COMPILER_DIAGNOSTIC_CODES } from "./validate";
-import { camelName } from "./util";
+import { camelName, joinRoutePaths } from "./util";
 import { scanRuntimeDi } from "./static-di";
 
 const DEFAULT_INCLUDE = ["**/*.module.ts", "**/*.ts"];
@@ -976,6 +976,30 @@ function resolveStaticObjectLiteral(
   return ts.isObjectLiteralExpression(input) ? input : undefined;
 }
 
+function routePolicyProperty(
+  object: ObjectLiteralExpression,
+  name: string,
+  ctx: AnalysisContext,
+  seen = new Set<ts.Node>(),
+): { value?: Expression; unresolved: boolean } {
+  if (seen.has(object)) return { unresolved: true };
+  const ancestry = new Set(seen).add(object);
+  let result: { value?: Expression; unresolved: boolean } = { unresolved: false };
+  for (const property of object.properties) {
+    if (ts.isSpreadAssignment(property)) {
+      const spread = resolveStaticObjectLiteral(property.expression, ctx);
+      const nested = spread ? routePolicyProperty(spread, name, ctx, ancestry) : { unresolved: true };
+      if (nested.unresolved || nested.value !== undefined) result = nested;
+    } else if (ts.isComputedPropertyName(property.name)) {
+      result = { unresolved: true };
+    } else if (propertyName(property.name) === name) {
+      result = ts.isPropertyAssignment(property)
+        ? { value: property.initializer, unresolved: false } : { unresolved: true };
+    }
+  }
+  return result;
+}
+
 function commandModeProp(
   object: ObjectLiteralExpression,
   name: string,
@@ -1558,9 +1582,11 @@ function parseController(
       const pathParams: string[] = [];
       const paramRegex = /:([a-zA-Z0-9_]+)/g;
       let match: RegExpExecArray | null;
-      while ((match = paramRegex.exec(routePath)) !== null) {
+      const fullPath = joinRoutePaths(path, routePath);
+      while ((match = paramRegex.exec(fullPath)) !== null) {
         if (match[1] !== undefined) pathParams.push(match[1]);
       }
+      if (joinRoutePaths(path, routePath).endsWith("/*")) pathParams.push("*");
       if (pathParams.length > 0) route.pathParams = pathParams;
 
       const paramBindings: string[] = [];
@@ -1702,6 +1728,24 @@ function parseController(
       const optionsArg = args[1];
       const optionsObject = resolveStaticObjectLiteral(optionsArg, ctx);
       if (optionsObject) {
+        const parsePolicy = routePolicyProperty(optionsObject, "parse", ctx);
+        const deletePolicy = routePolicyProperty(optionsObject, "allowDeleteBody", ctx);
+        if (parsePolicy.unresolved || deletePolicy.unresolved) {
+          ctx.diagnostics.push({ severity: "error", code: "unresolved-route-body-policy", file,
+            message: `Route ${route.handler} body policy must be statically resolvable; dynamic spreads, computed keys and shorthand policies are unsupported.` });
+        }
+        const parse = parsePolicy.value;
+        if (parse) {
+          if (ts.isStringLiteral(parse) && parse.text === "none") route.parse = "none";
+          else ctx.diagnostics.push({ severity: "error", code: "invalid-route-parser", file,
+            message: `Route ${route.handler} parse must be the literal "none".` });
+        }
+        const allowDeleteBody = deletePolicy.value;
+        if (allowDeleteBody) {
+          if (allowDeleteBody.kind === ts.SyntaxKind.TrueKeyword) route.allowDeleteBody = true;
+          else ctx.diagnostics.push({ severity: "error", code: "invalid-delete-body-opt-in", file,
+            message: `Route ${route.handler} allowDeleteBody must be the literal true.` });
+        }
         const legacyResponseExpr = getProp(optionsObject, "response");
         const responsesExpr = getProp(optionsObject, "responses");
         if (legacyResponseExpr !== undefined && responsesExpr !== undefined) {

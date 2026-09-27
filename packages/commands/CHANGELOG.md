@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/vibeunion/supacloud/compare/commands-v0.6.0...commands-v0.7.0) (2026-09-26)
+
+
+### Features
+
+* **framework:** add command composition and recovery observability ([#1432](https://github.com/vibeunion/supacloud/issues/1432)) ([456efcd](https://github.com/vibeunion/supacloud/commit/456efcd807deabeb3f3df6d718c47c427673b1f5))
+
 ## [0.6.0](https://github.com/vibeunion/supacloud/compare/commands-v0.5.0...commands-v0.6.0) (2026-09-22)
 
 

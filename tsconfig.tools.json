@@ -21,6 +21,6 @@
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true
   },
-  "include": ["scripts/**/*.ts"],
+  "include": ["scripts/**/*.ts", "packages/management-api/src/types/**/*.d.ts"],
   "exclude": ["node_modules", "dist", "scripts/fixtures"]
 }

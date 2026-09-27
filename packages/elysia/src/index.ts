@@ -80,13 +80,16 @@ export type {
 // ---------------------------------------------------------------------------
 
 export interface CompiledRoute {
+  parse?: "none";
+  allowDeleteBody?: true;
+  /** Compiler-emitted route title, exposed as the OpenAPI operation summary. */
+  title?: string;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
   path: string;
   /** Method name on the controller instance. */
   handler: string;
   /** Static metadata preserved by the compiler; HTTP policies are adapter-owned. */
   data?: Record<string, unknown>;
-  title?: string;
   /** TypeBox schema; validation is enabled only when the field is present. */
   body?: unknown;
   params?: unknown;
@@ -1030,6 +1033,7 @@ export function createModulePlugin<
     "paramTransforms", "paramDefaults", "queryTransforms", "queryDefaults", "title", "data",
     // defineJsonContract can be spread into a route; these helpers are not hooks.
     "input", "result", "request",
+    "parse", "allowDeleteBody",
   ]);
   for (const controller of compiled.controllers) {
     for (const route of controller.routes) {
@@ -1038,6 +1042,14 @@ export function createModulePlugin<
         throw new ApplicationError(
           `Unsupported compiled route ${route.method} ${controller.path}${route.path}`
           + (unsupported.length > 0 ? `: ${unsupported.join(", ")}` : ""),
+          { code: "ROUTE_DESCRIPTOR_UNSUPPORTED" },
+        );
+      }
+      if ((route.parse !== undefined && route.parse !== "none")
+        || (route.parse === "none" && (route.body !== undefined || route.contract?.body !== "domain" || !route.contract.evidence?.trim()))
+        || (route.allowDeleteBody !== undefined && (route.allowDeleteBody !== true || route.method !== "DELETE" || route.body === undefined))) {
+        throw new ApplicationError(
+          `Invalid compiled body policy on ${route.method} ${controller.path}${route.path}`,
           { code: "ROUTE_DESCRIPTOR_UNSUPPORTED" },
         );
       }
@@ -1115,7 +1127,22 @@ export function createModulePlugin<
   for (const controller of compiled.controllers) {
     for (const route of controller.routes) {
       const path = joinPaths(controller.path, route.path);
-      const schema = toElysiaRouteSchema(route);
+      const documentation = route.data?.openapi;
+      const hidden = documentation !== null && typeof documentation === "object"
+        && "hide" in documentation && documentation.hide === true;
+      const tags = documentation !== null && typeof documentation === "object"
+        && "tags" in documentation && Array.isArray(documentation.tags)
+        ? documentation.tags.filter((tag): tag is string => typeof tag === "string")
+        : undefined;
+      const schema = {
+        ...toElysiaRouteSchema(route),
+        ...(route.parse === "none" ? { parse: "none" as const } : {}),
+        ...(route.title || hidden || tags ? { detail: {
+          ...(route.title ? { summary: route.title } : {}),
+          ...(hidden ? { hide: true } : {}),
+          ...(tags ? { tags } : {}),
+        } } : {}),
+      };
       const policies = compileHttpPolicies(route, path, options.httpPolicies);
       if (policies.length > 0) {
         Object.assign(schema, {

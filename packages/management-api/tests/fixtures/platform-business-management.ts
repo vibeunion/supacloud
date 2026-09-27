@@ -87,7 +87,8 @@ export function requireBusinessManagementProject(value: unknown, ref: string): b
   assert.equal(project.ref, ref);
   assert.ok(typeof project.name === "string" && project.name.startsWith("platform-app-acceptance-default-"),
     "Dedicated default-management acceptance tenant required");
-  return typeof project.status === "string" && project.status.toLowerCase() === "active";
+  return typeof project.status === "string"
+    && ["active", "active_healthy"].includes(project.status.toLowerCase());
 }
 
 /** Preserve the API's classification, including platform-inventory out-of-order conflicts. */

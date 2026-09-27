@@ -27,6 +27,8 @@ export interface ContractManifest {
     /** Status-aware response schemas; legacy responseSchema remains for compatibility. */
     responseSchemas?: Record<string, string>;
     evidence?: string;
+    parse?: "none";
+    allowDeleteBody?: true;
   }>;
   permissions: string[];
   rpc: Array<{ command: string; adapter: string }>;
@@ -99,6 +101,8 @@ export function buildContractManifest(
             ),
           }),
           ...(route.contract?.evidence === undefined ? {} : { evidence: route.contract.evidence }),
+          ...(route.parse === undefined ? {} : { parse: route.parse }),
+          ...(route.allowDeleteBody === undefined ? {} : { allowDeleteBody: route.allowDeleteBody }),
         });
       }
     }

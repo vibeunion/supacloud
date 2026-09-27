@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/vibeunion/supacloud/compare/app-v0.16.0...app-v0.17.0) (2026-09-26)
+
+
+### Features
+
+* **compiler:** preserve raw body and wildcard transport contracts ([#1442](https://github.com/vibeunion/supacloud/issues/1442)) ([436146d](https://github.com/vibeunion/supacloud/commit/436146d0f7f74be1c53969a2fc4854b59976d01d))
+
 ## [0.16.0](https://github.com/vibeunion/supacloud/compare/app-v0.15.0...app-v0.16.0) (2026-09-22)
 
 

@@ -56,6 +56,7 @@ test("only the dedicated default tenant is eligible, and creating is not activat
   const project = { ref, name: "platform-app-acceptance-default-20260927", status: "creating" };
   expect(requireBusinessManagementProject(project, ref)).toBe(false);
   expect(requireBusinessManagementProject({ ...project, status: "active" }, ref)).toBe(true);
+  expect(requireBusinessManagementProject({ ...project, status: "ACTIVE_HEALTHY" }, ref)).toBe(true);
   expect(() => requireBusinessManagementProject({ ...project, ref: "foreign" }, ref)).toThrow();
   expect(() => requireBusinessManagementProject({ ...project, name: "platform-app-acceptance-business" }, ref)).toThrow();
 });
