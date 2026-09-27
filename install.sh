@@ -4447,8 +4447,9 @@ ensure_realtime_metadata_schema() (
     # Database creation belongs to the installer, not the runtime login.
     # The installer configures postgres with POSTGRES_PASSWORD.
     [[ -n "${POSTGRES_PASSWORD:-}" ]] || return 1
+    local realtime_db_user="$PGUSER"
     PGUSER=postgres PGPASSWORD="$POSTGRES_PASSWORD" \
-        psql -X -w -q -v ON_ERROR_STOP=1 -v realtime_db_user="$PGUSER" -f - <<'SQL' || return 1
+        psql -X -w -q -v ON_ERROR_STOP=1 -v realtime_db_user="$realtime_db_user" -f - <<'SQL' || return 1
 CREATE SCHEMA IF NOT EXISTS _realtime AUTHORIZATION :"realtime_db_user";
 DO $$
 BEGIN
