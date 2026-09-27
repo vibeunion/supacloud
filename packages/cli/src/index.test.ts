@@ -158,6 +158,7 @@ describe("supacloud-cli process contract", () => {
         const buildDirectory = join(sandbox, "dist");
         const build = Bun.spawnSync([
             process.execPath, "build", "src/index.ts", "--outdir", buildDirectory, "--target", "node",
+            "--conditions=supacloud-source",
         ], { cwd: PACKAGE_ROOT });
         expect(build.exitCode).toBe(0);
         const builtEntry = join(buildDirectory, "index.js");

@@ -145,6 +145,7 @@ jobs:
           (cd packages/cli && bun install --frozen-lockfile --ignore-scripts)
           (cd packages/db && bun install --frozen-lockfile --ignore-scripts)
           (cd packages/management-api && bun install --frozen-lockfile)
+          (cd packages/supacloud-lite && bun install --frozen-lockfile)
           (cd packages/compiler && bun run build)
 
       - name: Run workspace architecture gates
@@ -210,6 +211,7 @@ jobs:
             working-directory: packages/cli
             script: |
               bun install --frozen-lockfile
+              (cd ../delivery && bun run build)
               bun run typecheck
               bun test src
               bun run build
@@ -229,6 +231,7 @@ jobs:
               bun install --frozen-lockfile
               (cd ../cli && bun install --frozen-lockfile)
               (cd ../compiler && bun install --frozen-lockfile && bun run build)
+              (cd ../management-api && bun install --frozen-lockfile)
               bun run typecheck
               bun test src
               bun run build
@@ -254,6 +257,8 @@ jobs:
           - name: App Compiler
             working-directory: packages/compiler
             script: |
+              bun run ../../scripts/build-command-dependencies.ts elysia
+              (cd ../elysia && bun install --frozen-lockfile && bun run build)
               bun install --frozen-lockfile
               bun run typecheck
               bun run typecheck:test
@@ -415,6 +420,8 @@ jobs:
           bun install --frozen-lockfile --cwd packages/delivery
           bun install --frozen-lockfile --cwd packages/commands
           bun install --frozen-lockfile --cwd packages/compiler
+          bun run scripts/build-command-dependencies.ts elysia
+          (cd packages/elysia && bun install --frozen-lockfile && bun run build)
       - name: Verify native command and Workflow boundaries
         env:
           SUPACLOUD_COMMAND_TEST_URL: postgres://postgres:local-command-test-only@127.0.0.1:5432/supacloud_commands_test
@@ -628,6 +635,9 @@ jobs:
       - name: Compile management API
         working-directory: packages/management-api
         run: bun run build:amd64
+
+      - name: Install identity test dependencies
+        run: bun install --frozen-lockfile --cwd packages/elysia
 
       - name: Run unit tests
         working-directory: packages/management-api
@@ -1150,6 +1160,7 @@ jobs:
       - command-workflow-integration
       - supacloud-lite-windows
       - supacloud-lite-standalone-native
+      - application-activation-native
       - docker-and-scripts-checks
       - unit-test
       - postgres-18-compatibility
@@ -1169,6 +1180,7 @@ jobs:
           COMMAND_WORKFLOW: ${{ needs.command-workflow-integration.result }}
           SUPACLOUD_LITE_WINDOWS: ${{ needs.supacloud-lite-windows.result }}
           SUPACLOUD_LITE_STANDALONE: ${{ needs.supacloud-lite-standalone-native.result }}
+          APPLICATION_ACTIVATION_NATIVE: ${{ needs.application-activation-native.result }}
           DOCKER_AND_SCRIPTS: ${{ needs.docker-and-scripts-checks.result }}
           UNIT_TESTS: ${{ needs.unit-test.result }}
           POSTGRES_18: ${{ needs.postgres-18-compatibility.result }}
@@ -1184,6 +1196,7 @@ jobs:
             "$COMMAND_WORKFLOW" \
             "$SUPACLOUD_LITE_WINDOWS" \
             "$SUPACLOUD_LITE_STANDALONE" \
+            "$APPLICATION_ACTIVATION_NATIVE" \
             "$DOCKER_AND_SCRIPTS" \
             "$UNIT_TESTS" \
             "$POSTGRES_18" \
