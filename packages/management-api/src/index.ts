@@ -41,7 +41,7 @@ import { isS3DataPlaneRequest } from "./utils/storage-s3-paths";
 import { studioAuthRoutes } from "./routes/studio-auth";
 import { caddyAskRoutes } from "./routes/caddy-ask";
 import { mcpRoutes } from "./mcp/server";
-import { validationErrorResponse } from "./utils/http-validation";
+import { parseErrorResponse, validationErrorResponse } from "./utils/http-validation";
 import {
   collectManagementDocumentedRouteContracts,
   collectManagementRouteContracts,
@@ -316,6 +316,9 @@ const app = new Elysia({ strictPath: false })
     const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
     set.headers ??= {};
     applyObservabilityHeaders(set.headers, beginRequestObservability(request));
+    if (code === "PARSE") {
+      return parseErrorResponse(set, new URL(request.url).pathname);
+    }
     if (code === "VALIDATION") {
       return validationErrorResponse(set);
     }
@@ -858,6 +861,12 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       })
       .error("global", async ({ request, error, set }) => {
     const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
+        if (code === "PARSE") {
+          if (shouldAuditRequest(request)) {
+            await logAuditEvent({ request, status: 400, action: "error:PARSE" });
+          }
+          return parseErrorResponse(set, new URL(request.url).pathname);
+        }
         if (code === "VALIDATION") {
           if (shouldAuditRequest(request)) {
             await logAuditEvent({ request, status: 400, action: "error:VALIDATION" });

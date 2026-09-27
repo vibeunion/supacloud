@@ -97,6 +97,12 @@ export const databaseExtensionRoutes = new Elysia({ prefix: "/v1/projects/:ref/d
         set.status = 500;
         return { message: "Internal server error", code: "INTERNAL_ERROR" };
     })
+    .get('', {
+        response: { 200: jsonResponseSchema },
+        detail: { tags: ["extensions"], summary: "List database extensions" },
+    }, async ({ params }) => {
+        return await extensionService.listExtensions(params.ref);
+    })
     .get('/', {
         response: { 200: jsonResponseSchema },
         detail: { tags: ["extensions"], summary: "List database extensions" },
