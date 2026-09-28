@@ -208,6 +208,95 @@ describe("native Elysia and compiled adapter conformance", () => {
     expect(calls).toBe(0);
   });
 
+  test.each([
+    { name: "missing auth", token: undefined, failure: undefined, status: 401, code: "unauthenticated", writes: 0, audits: 0, mappings: 0 },
+    { name: "denied permission", token: "reader", failure: undefined, status: 403, code: "permission_denied", writes: 0, audits: 0, mappings: 0 },
+    { name: "successful write", token: "writer", failure: undefined, status: 200, code: "written", writes: 1, audits: 1, mappings: 0 },
+    { name: "trusted upstream failure", token: "writer", failure: "upstream", status: 502, code: "invalid_upstream_response", writes: 0, audits: 0, mappings: 1 },
+    { name: "audit failure after write", token: "writer", failure: "audit", status: 500, code: "audit_failed", writes: 1, audits: 1, mappings: 1 },
+  ] as const)("incremental sibling routes preserve $name without replay", async (scenario) => {
+    class InvalidUpstreamResponse extends Error {}
+    class AuditFailure extends Error {}
+    const counts = {
+      native: { calls: 0, writes: 0, audits: 0, mappings: 0 },
+      compiled: { calls: 0, writes: 0, audits: 0, mappings: 0 },
+    };
+    const events = { native: [] as string[], compiled: [] as string[] };
+    type RouteKind = keyof typeof counts;
+    const routeKind = (request: Request): RouteKind =>
+      new URL(request.url).pathname === "/native" ? "native" : "compiled";
+    const mapError = (kind: RouteKind, error: unknown) => {
+      counts[kind].mappings++;
+      events[kind].push("error");
+      if (error instanceof InvalidUpstreamResponse) {
+        return Response.json({ code: "invalid_upstream_response" }, { status: 502 });
+      }
+      if (error instanceof AuditFailure) {
+        return Response.json({ code: "audit_failed" }, { status: 500 });
+      }
+      return Response.json({ code: "unexpected_error" }, { status: 500 });
+    };
+    const write = (kind: RouteKind) => {
+      counts[kind].calls++;
+      events[kind].push("handler");
+      if (scenario.failure === "upstream") {
+        throw new InvalidUpstreamResponse("private upstream payload");
+      }
+      counts[kind].writes++;
+      events[kind].push("write");
+      return { code: "written" };
+    };
+    const compiled = moduleFor(() => write("compiled"), { path: "/compiled" });
+    const app = new Elysia()
+      .beforeHandle(({ request }) => {
+        const kind = routeKind(request);
+        events[kind].push("authenticate");
+        const token = request.headers.get("authorization");
+        if (!token) return status(401, { code: "unauthenticated" });
+        events[kind].push("authorize");
+        if (token !== "Bearer writer") return status(403, { code: "permission_denied" });
+      })
+      .afterHandle(({ request, responseValue }) => {
+        if (!responseValue || typeof responseValue !== "object"
+          || !("code" in responseValue) || responseValue.code !== "written") return;
+        const kind = routeKind(request);
+        counts[kind].audits++;
+        events[kind].push("audit");
+        if (scenario.failure === "audit") throw new AuditFailure("private audit detail");
+      })
+      .use(new Elysia().post("/native", {
+        error: ({ error }) => mapError("native", error),
+      }, () => write("native")))
+      .use(createModulePlugin(compiled, compiled.createServices({}, {}), undefined, {
+        errorMapper: (error) => mapError("compiled", error),
+      }));
+    const results = [];
+    for (const kind of ["native", "compiled"] as const) {
+      const response = await app.handle(new Request(`http://localhost/${kind}`, {
+        method: "POST",
+        headers: scenario.token ? { authorization: `Bearer ${scenario.token}` } : {},
+      }));
+      expect(response.status).toBe(scenario.status);
+      expect(await response.clone().json()).toEqual({ code: scenario.code });
+      results.push(await snapshot(response));
+      expect(counts[kind]).toEqual({
+        calls: scenario.token === "writer" ? 1 : 0,
+        writes: scenario.writes,
+        audits: scenario.audits,
+        mappings: scenario.mappings,
+      });
+    }
+    expect(results[1]).toEqual(results[0]);
+    const expectedEvents = ["authenticate"];
+    if (scenario.token) expectedEvents.push("authorize");
+    if (scenario.token === "writer") expectedEvents.push("handler");
+    if (scenario.writes) expectedEvents.push("write");
+    if (scenario.audits) expectedEvents.push("audit");
+    if (scenario.mappings) expectedEvents.push("error");
+    expect(events.native).toEqual(expectedEvents);
+    expect(events.compiled).toEqual(expectedEvents);
+  });
+
   test("keeps local sibling hooks encapsulated", async () => {
     const root = () => new Elysia().use(
       new Elysia().beforeHandle(() => status(418, "local")).get("/local", () => "unused"),

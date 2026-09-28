@@ -43,6 +43,36 @@ network listener. It is included in the normal `bun test` discovery.
 | Unsupported route descriptors | Unsupported methods/native hooks rejected before registration |
 | Duplicate protocol package copies | Known command errors retain their status; unknown codes remain internal |
 
+### Incremental Native Route Adoption
+
+The conformance suite also mounts a native route and a compiled sibling in one
+Elysia host. Shared `beforeHandle` authentication/authorization and `afterHandle`
+audit hooks exercise five paths: missing authentication (401), denied permission
+(403), a successful write (200), a custom upstream contract error (502), and an
+audit failure after a write (500). Both routes must preserve the same response
+and hook order. Denials execute neither handler nor write; upstream failure
+executes no write; audit failure leaves exactly one recorded write and must not
+replay the handler within that invocation.
+
+Keep existing HTTP authentication hooks at the native host boundary when
+adopting a module incrementally. Configure the compiled module's `errorMapper`
+explicitly to preserve an existing public error contract, such as
+`502 invalid_upstream_response`; do not assume a native sibling's route-local
+error handler also owns compiled errors. Map only recognized errors and redact
+private upstream/audit details.
+
+This fixture uses hand-authored `CompiledModule` descriptors, local identity
+stubs and in-memory side-effect counters. It does not exercise compiler code
+generation, command-governance audit/transaction adapters, real SupAuth/GoTrue,
+Management API calls, published-package installation, cross-request retries or
+durable idempotency. A failed audit response is not evidence that a remote write
+was rolled back. Consumers still need authoritative state readback or a durable
+receipt before deciding whether to retry.
+
+The fixture targets the exact versions above. In particular, it does not prove
+that an existing Elysia 1.4 application can install this Elysia 2 beta adapter
+without a separate version migration and consumer acceptance.
+
 ### Intentional Adapter Semantics
 
 - Default parse failures return HTTP 400 with `PARSE_ERROR`; request schema
