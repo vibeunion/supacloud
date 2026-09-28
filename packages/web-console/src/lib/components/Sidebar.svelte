@@ -50,6 +50,7 @@
   ] : []);
 
   const buildItems = $derived(projectRef ? [
+    { titleKey: "Applications.title", icon: Box, href: `/project/${projectRef}/applications` },
     { titleKey: "Navigation.auth", icon: Users, href: `/project/${projectRef}/auth` },
     { titleKey: "Navigation.storage", icon: Box, href: `/project/${projectRef}/storage` },
     { titleKey: "Navigation.edge_functions", icon: Zap, href: `/project/${projectRef}/functions` },

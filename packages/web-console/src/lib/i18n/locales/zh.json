@@ -1,4 +1,14 @@
 {
+  "Applications": {
+    "title": "应用", "application": "应用 ID", "environment": "环境 ID",
+    "open": "打开", "scope_required": "请填写应用和环境 ID。",
+    "runtime": "运行状态", "loading": "加载中", "unavailable": "数据不可用，请刷新重试。",
+    "changed": "观察期间激活记录发生变化，请刷新重新观察。",
+    "no_active": "没有当前激活记录", "ready": "已就绪", "not_ready": "未就绪",
+    "release": "Release ID", "activation": "激活 ID", "configuration": "配置 ID",
+    "target": "目标", "kind": "类型", "status": "状态", "releases": "已存发布包",
+    "no_releases": "没有已存发布包", "stored_at": "存储时间", "previous": "上一页", "next": "下一页"
+  },
   "GlobalDashboard": {
     "welcome": "欢迎回来，系统管理员",
     "subtitle": "今日 SupaCloud 平台运行状态概览。",

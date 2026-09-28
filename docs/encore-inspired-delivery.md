@@ -2850,8 +2850,10 @@ Acceptance still to close:
    HTTP/Worker/reconcile/rollback chain.
 3. The new CLI workflow against that same live target, beyond local contract
    and loopback transport tests.
-4. A read-only Application Dashboard using existing graph and runtime sources.
-   This is not implemented by adding CLI aliases.
+4. Extend the read-only Application Dashboard beyond the implemented
+   runtime/readiness and cursor-paginated stored-release view. ApplicationGraph,
+   gateway observation, queue statistics and activation history still need
+   their own data sources; stored releases are not proven rollback candidates.
 5. PR environment provisioning, activation, smoke and cleanup. Existing Git
    auto-branching provisions database branches; it is not yet the full
    application preview lifecycle.
@@ -2859,7 +2861,7 @@ Acceptance still to close:
    functions/triggers, RLS, serving Storage objects, Realtime metadata,
    activation manifests and gateway configuration.
 
-No dashboard, preview lifecycle or full-platform recovery completion is
+No full dashboard, preview lifecycle or full-platform recovery completion is
 inferred from the workflow or compatibility changes.
 
 The separate SupAuth worktree adds v2.197.0 as the current compatibility target,
@@ -2879,3 +2881,18 @@ No ready-to-run bundle or installed application verifier was found in the
 inspected locations. These are unfinished setup/implementation tasks, not
 evidence of a failed activation and not a reason to substitute the older
 direct-systemd fixture.
+
+The first read-only console page is available at
+`/project/:ref/applications?application=:id&environment=:environment`.
+It uses the existing runtime and release endpoints, keeps their failures
+independent, clears stale observations on scope changes, handles cursor
+pagination, and makes no writes. Empty active state is distinct from failed
+observation. Browser checks with fixture responses cover desktop and 390px
+mobile layouts, not live platform acceptance.
+
+SupAuth PR #129 contains the version matrix update. Its first live CI run
+observed v2.196.0 on the configured tenant and rejected the v2.197.0 default
+before creating a compatibility session. CI/nightly now expose the same
+explicit version selection for session preparation and verification; the
+default remains v2.197.0. Do not weaken this check or count an older-version
+regression run as v2.197.0 live acceptance.
