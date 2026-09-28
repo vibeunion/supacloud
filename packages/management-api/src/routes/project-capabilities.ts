@@ -10,6 +10,7 @@ import { normalizeProjectConfig } from "../utils/project-config";
 import { normalizeProjectRoutingConfig, resolveTenantPorts } from "../utils/project-routing";
 import { config } from "../config";
 import { detectOrganizationJitCapability } from "../services/organization-jit-capability.service";
+import { projectStorageService } from "../services/project-storage.service";
 import pkg from "../../package.json";
 
 type Capability = {
@@ -123,6 +124,7 @@ export const projectCapabilityRoutes = new Elysia({ prefix: "/v1/projects/:ref" 
   }, async ({ params }) => {
     const project = await projectRepository.findByRef(params.ref);
     if (!project) return status(404, { message: "Project not found", code: "NOT_FOUND" });
+    const storage = await projectStorageService.describe(params.ref);
 
     const authRuntime = getAuthRuntimeDescriptor(params.ref);
     const oauthGrants = await detectGoTrueOAuthGrants(authRuntime.authority_project_ref);
@@ -150,7 +152,7 @@ export const projectCapabilityRoutes = new Elysia({ prefix: "/v1/projects/:ref" 
         authority_project_ref: authRuntime.authority_project_ref,
         managed_by_owner: authRuntime.mode === "shared",
       },
-      storage_v1: available("supacloud", "v1"),
+      storage_v1: storage.available ? available("supacloud", "v1") : unavailable("supacloud", storage.reason ?? "storage_configuration_unavailable"),
       edge_runtime_streaming_upload_v1: available("supacloud", "v1"),
     };
 
@@ -160,7 +162,7 @@ export const projectCapabilityRoutes = new Elysia({ prefix: "/v1/projects/:ref" 
       environment: process.env.NODE_ENV || "production",
       auth_runtime: "gotrue",
       schema_version: 1,
-      storage_backend: config.storageType || "s3",
+      storage_backend: storage.backend,
       capabilities,
     };
   })
@@ -170,6 +172,7 @@ export const projectCapabilityRoutes = new Elysia({ prefix: "/v1/projects/:ref" 
   }, async ({ params }) => {
     const project = await projectRepository.findByRef(params.ref);
     if (!project) return status(404, { message: "Project not found", code: "NOT_FOUND" });
+    const storage = await projectStorageService.describe(params.ref);
 
     return {
       project_ref: params.ref,
@@ -177,6 +180,6 @@ export const projectCapabilityRoutes = new Elysia({ prefix: "/v1/projects/:ref" 
       environment: process.env.NODE_ENV || "production",
       schema_version: 1,
       auth_runtime: "gotrue",
-      storage_backend: config.storageType || "s3",
+      storage_backend: storage.backend,
     };
   });

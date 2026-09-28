@@ -11,6 +11,10 @@ import {
     normalizedStorageFileSizeLimit,
     storageBucketInputError,
 } from "../services/storage-bucket-contract";
+import { createProjectStorageConfigRoutes } from "./project-storage-config";
+import { projectStorageService } from "../services/project-storage.service";
+import { getStorageDriver } from "../services/storage.adapter";
+import { ProjectStorageError } from "../services/project-storage-contract";
 import { StorageRLS } from "../services/storage-rls";
 import { StorageVectorError, StorageVectorService } from "../services/storage-vector.service";
 import { logger } from "../utils/logger";
@@ -132,10 +136,12 @@ async function ensureImageTransformAccess(request: Request, ref: string, bucket:
     return await requireProjectOrAdminAuth(request, ref);
 }
 
-function buildSourceUrl(bucket: string, path: string): string {
+async function buildSourceUrl(ref: string, bucket: string, path: string): Promise<string> {
     if (!isValidBucketName(bucket)) throw new Error("Invalid bucket name");
     const normalizedPath = normalizeObjectPath(path);
     if (!normalizedPath) throw new Error("Invalid object path");
+    const scoped = await getStorageDriver().getInternalSourceUrl?.(ref, bucket, normalizedPath);
+    if (scoped !== undefined) return scoped;
     const base = S3_ENDPOINT.endsWith('/') ? S3_ENDPOINT.slice(0, -1) : S3_ENDPOINT;
     return `${base}/${encodeURIComponent(bucket)}/${normalizedPath.split("/").map(encodeURIComponent).join("/")}`;
 }
@@ -427,8 +433,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         let sourceUrl: string;
         try {
-            sourceUrl = buildSourceUrl(bucket, path);
-        } catch {
+            sourceUrl = await buildSourceUrl(params.ref, bucket, path);
+        } catch (error) {
+            if (error instanceof ProjectStorageError) return status(error.statusCode, { message: error.message, code: error.code });
             return status(400, { message: 'Invalid source path', code: '400' });
         }
 
@@ -468,8 +475,8 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         try {
             const res = await fetch(imaginaryUrl);
             if (!res.ok) {
-                const errText = await res.text();
-                logger.error(`Imaginary ${operation} failed:`, { status: res.status, error: errText });
+                await res.body?.cancel();
+                logger.error(`Imaginary ${operation} failed:`, { status: res.status });
                 return status(502, { message: "Image transform failed", code: "502" });
             }
 
@@ -479,7 +486,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             set.headers['X-Image-Engine'] = 'imaginary/libvips';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
-            logger.error('Image transform proxy error:', { error: err instanceof Error ? err.message : String(err) });
+            logger.error('Image transform proxy failed');
             return status(502, { message: 'Image processing service unavailable', code: '502' });
         }
     })
@@ -497,8 +504,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         let sourceUrl: string;
         try {
-            sourceUrl = buildSourceUrl(params.bucket, path);
-        } catch {
+            sourceUrl = await buildSourceUrl(params.ref, params.bucket, path);
+        } catch (error) {
+            if (error instanceof ProjectStorageError) return status(error.statusCode, { message: error.message, code: error.code });
             return status(400, { message: 'Invalid source path', code: '400' });
         }
         const p = new URLSearchParams({
@@ -511,7 +519,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         try {
             const res = await fetch(`${IMAGINARY_URL}/smartcrop?${p.toString()}`);
-            if (!res.ok) return status(502, { message: await res.text(), code: '502' });
+            if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
@@ -530,8 +538,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         let sourceUrl: string;
         try {
-            sourceUrl = buildSourceUrl(params.bucket, path);
-        } catch {
+            sourceUrl = await buildSourceUrl(params.ref, params.bucket, path);
+        } catch (error) {
+            if (error instanceof ProjectStorageError) return status(error.statusCode, { message: error.message, code: error.code });
             return status(400, { message: 'Invalid source path', code: '400' });
         }
         const p = new URLSearchParams({
@@ -548,7 +557,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         try {
             const res = await fetch(`${IMAGINARY_URL}/watermark?${p.toString()}`);
-            if (!res.ok) return status(502, { message: await res.text(), code: '502' });
+            if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
@@ -567,8 +576,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         let sourceUrl: string;
         try {
-            sourceUrl = buildSourceUrl(params.bucket, path);
-        } catch {
+            sourceUrl = await buildSourceUrl(params.ref, params.bucket, path);
+        } catch (error) {
+            if (error instanceof ProjectStorageError) return status(error.statusCode, { message: error.message, code: error.code });
             return status(400, { message: 'Invalid source path', code: '400' });
         }
         const p = new URLSearchParams({
@@ -582,7 +592,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         try {
             const res = await fetch(`${IMAGINARY_URL}/blur?${p.toString()}`);
-            if (!res.ok) return status(502, { message: await res.text(), code: '502' });
+            if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
@@ -601,15 +611,16 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         let sourceUrl: string;
         try {
-            sourceUrl = buildSourceUrl(params.bucket, path);
-        } catch {
+            sourceUrl = await buildSourceUrl(params.ref, params.bucket, path);
+        } catch (error) {
+            if (error instanceof ProjectStorageError) return status(error.statusCode, { message: error.message, code: error.code });
             return status(400, { message: 'Invalid source path', code: '400' });
         }
         const p = new URLSearchParams({ url: sourceUrl });
 
         try {
             const res = await fetch(`${IMAGINARY_URL}/info?${p.toString()}`);
-            if (!res.ok) return status(502, { message: await res.text(), code: '502' });
+            if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             return res.json();
         } catch (err: unknown) {
             return status(502, { message: 'Image info service unavailable', code: '502' });
@@ -626,8 +637,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         let sourceUrl: string;
         try {
-            sourceUrl = buildSourceUrl(params.bucket, path);
-        } catch {
+            sourceUrl = await buildSourceUrl(params.ref, params.bucket, path);
+        } catch (error) {
+            if (error instanceof ProjectStorageError) return status(error.statusCode, { message: error.message, code: error.code });
             return status(400, { message: 'Invalid source path', code: '400' });
         }
         const p = new URLSearchParams({
@@ -639,7 +651,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
         try {
             const res = await fetch(`${IMAGINARY_URL}/thumbnail?${p.toString()}`);
-            if (!res.ok) return status(502, { message: await res.text(), code: '502' });
+            if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
@@ -660,7 +672,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         }
     });
 
-export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/storage" })
+const existingProjectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/storage" })
     .get('/buckets', {
         params: StorageProjectParams,
         detail: { tags: ["storage"], summary: "List project storage buckets" },
@@ -771,3 +783,8 @@ export const projectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/stor
             new_revision: null,
         };
     });
+
+// Keep admin configuration hooks local to their own plugin.
+export const projectStorageRoutes = new Elysia()
+    .use(existingProjectStorageRoutes)
+    .use(createProjectStorageConfigRoutes({ authorize: requireAdminAuth, storage: projectStorageService }));

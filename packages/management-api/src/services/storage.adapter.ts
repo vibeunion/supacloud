@@ -1,3 +1,4 @@
+import { ProjectStorageRouter } from "./project-storage-router";
 import { config } from "../config";
 import { logger } from "../utils/logger";
 import { normalizeCiS3Endpoint } from "../utils/sdk-parity";
@@ -54,6 +55,8 @@ function resolveRealPath(p: string): string {
 }
 
 export interface StorageDriver {
+  /** Internal image-processing transport only; never a browser delivery URL. */
+  getInternalSourceUrl?(projectRef: string, bucket: string, key: string): Promise<string | undefined>;
   createBucket(projectRef: string, bucket: string): Promise<boolean>;
   deleteBucket(projectRef: string, bucket: string): Promise<BucketDeletionResult>;
   emptyBucket(projectRef: string, bucket: string): Promise<boolean>;
@@ -74,7 +77,7 @@ export interface StorageDriver {
     data: Blob | Buffer | Uint8Array | ArrayBuffer | ReadableStream,
     contentType: string,
     expectedEtag: string | null,
-  ): Promise<ConditionalUploadResult>;
+  ): Promise<ConditionalUploadResult | null>;
   copyFile(
     projectRef: string,
     srcBucket: string,
@@ -856,13 +859,25 @@ export class S3Driver implements StorageDriver {
   }
 }
 
-let activeDriver: StorageDriver | null = null;
-export function getStorageDriver(): StorageDriver {
-  if (!activeDriver) {
-    activeDriver =
+let legacyDriver: StorageDriver | null = null;
+function getLegacyStorageDriver(): StorageDriver {
+  if (!legacyDriver) {
+    legacyDriver =
       config.storageType === "juicefs" || config.storageType === "local"
         ? new JuiceFSDriver()
         : new S3Driver();
+  }
+  return legacyDriver;
+}
+
+// Shared code, not shared credentials: the project is resolved on each operation.
+let activeDriver: StorageDriver | null = null;
+export function getStorageDriver(): StorageDriver {
+  if (!activeDriver) {
+    activeDriver = new ProjectStorageRouter(async (ref, operation) => {
+      const { withProjectStorageDriver } = await import("./project-storage.service");
+      return withProjectStorageDriver(ref, getLegacyStorageDriver(), operation);
+    });
   }
   return activeDriver;
 }
