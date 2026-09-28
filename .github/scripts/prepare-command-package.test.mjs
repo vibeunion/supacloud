@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { assertPublishedDependencies, isNpmNotFoundError, prepareCommandPackage } from './prepare-command-package.mjs';
 import { REGISTRY_RETRY_DELAYS_MS } from './npm-registry-visibility.mjs';
 import { resolveManagementRecovery } from './recover-management-release.mjs';
@@ -123,7 +125,7 @@ test('Management recovery fails closed when the signing workflow is newer than t
 });
 test('Management recovery pins source and preserves signed non-overwriting publication', () => {
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
-  assert.match(workflow, /if: \$\{\{ inputs\.recover_management_tag == '' \}\}/);
+  assert.match(workflow, /if: \$\{\{ inputs\.recover_management_tag == '' && inputs\.recover_elysia != true \}\}/);
   assert.match(workflow, /ref: \$\{\{ needs\.release-please\.outputs\.management_api_source_commit \|\| needs\.release-please\.outputs\.management_api_tag_name \}\}/);
   const management = workflow.split('  publish-management-api-binaries:')[1]?.split('  publish-edge-runtime-binaries:')[0] ?? '';
   assert.match(management, /--source-commit "\$\(git rev-parse HEAD\)"/);
@@ -219,12 +221,41 @@ test('elysia builds local fixtures before preparing its isolated publication', (
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
   const block = workflow.split('- name: Publish elysia adapter to NPM')[1]?.split('\n      - name:')[0];
   assert.ok(block);
-  assert.match(block, /git archive HEAD \| tar -x -C "\$build_root"/);
+  assert.match(block, /git -C "\$GITHUB_WORKSPACE" archive HEAD \| tar -x -C "\$build_root"/);
   assert.match(block, /cd "\$build_root\/packages\/elysia"/);
   assert.match(block, /build-command-dependencies\.ts elysia[\s\S]*bun install --frozen-lockfile[\s\S]*bun run build[\s\S]*prepare-command-package\.mjs[\s\S]*publish-npm-package\.mjs/);
   const publication = block.split('prepare-command-package.mjs')[1];
   assert.ok(publication);
   assert.doesNotMatch(publication, /bun install/);
+});
+test('elysia archive setup preserves sibling paths when invoked from its package directory', () => {
+  const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
+  const block = workflow.split('- name: Publish elysia adapter to NPM')[1]?.split('\n      - name:')[0];
+  const setup = block?.split('run: |')[1]?.split('bun run ../../scripts/build-command-dependencies.ts')[0];
+  assert.ok(setup);
+  execFileSync('bash', ['-e', '-o', 'pipefail', '-c', `${setup}
+    test -f package.json
+    test -f ../compiler/package.json
+    test -f ../../.github/scripts/prepare-command-package.mjs
+  `], {
+    cwd: fileURLToPath(new URL('../../packages/elysia', import.meta.url)),
+    env: { ...process.env, GITHUB_WORKSPACE: fileURLToPath(new URL('../../', import.meta.url)) },
+    stdio: 'pipe',
+  });
+});
+test('targeted Elysia recovery skips unrelated publications and release creation', () => {
+  const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /recover_elysia:\n\s+description: Retry only the Elysia adapter publication[\s\S]*?type: boolean/);
+  assert.match(workflow, /if: \$\{\{ inputs\.recover_management_tag == '' && inputs\.recover_elysia != true \}\}/);
+  const job = workflow.split('\n  publish-npm:\n')[1]?.split('\n  sync-')[0];
+  assert.ok(job);
+  assert.match(job, /inputs\.recover_elysia == true && github\.ref == 'refs\/heads\/main'/);
+  const steps = job.split('\n      - name:');
+  for (const step of steps.filter((entry) => entry.trimStart().startsWith('Publish '))) {
+    const condition = step.split('\n').find((line) => line.trimStart().startsWith('if:'));
+    assert.ok(condition);
+    assert.equal(condition.includes('inputs.recover_elysia == true'), step.includes('Publish elysia adapter to NPM'));
+  }
 });
 test('elysia publication preserves beta support without waiting for build-only overrides', () => {
   const input = JSON.parse(readFileSync(new URL('../../packages/elysia/package.json', import.meta.url), 'utf8'));
@@ -247,7 +278,7 @@ test('recovery runs the command package graph after a tag-only release', () => {
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
   assert.match(workflow, /recover_npm:\n\s+description: Retry missing command-package publications[\s\S]*?type: boolean/);
   assert.match(workflow,
-    /publish-npm:\n\s+needs: release-please[\s\S]*?if: \$\{\{ always\(\) && inputs\.recover_management_tag == '' && \(needs\.release-please\.outputs\.releases_created == 'true' \|\| inputs\.recover_npm == true\) \}\}/);
+    /publish-npm:\n\s+needs: release-please[\s\S]*?if: \$\{\{ always\(\) && inputs\.recover_management_tag == '' && \(needs\.release-please\.outputs\.releases_created == 'true' \|\| inputs\.recover_npm == true \|\| \(inputs\.recover_elysia == true && github\.ref == 'refs\/heads\/main'\)\) \}\}/);
   const contracts = workflow.indexOf('name: Publish command contracts');
   const commands = workflow.indexOf('name: Publish durable commands');
   assert.match(workflow.slice(contracts, commands), /inputs\.recover_npm == true/);
