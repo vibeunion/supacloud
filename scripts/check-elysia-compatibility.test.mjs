@@ -162,3 +162,42 @@ test('accepts current local schema snapshots', (t) => {
   });
   assert.deepEqual(checkElysiaCompatibility(f.root), []);
 });
+
+test('rejects stale populated schema snapshots in the Lite consumer lock', (t) => {
+  for (const name of ['app', 'compiler', 'delivery']) {
+    const f = fixture(t);
+    f.edit('packages/supacloud-lite/bun.lock', (p) => {
+      p.packages[`@supacloud/elysia/@supacloud/${name}`] = [
+        `@supacloud/${name}@file:../${name}`,
+        { dependencies: { '@sinclair/typebox': '^0.34.52' } },
+      ];
+    });
+    assert.match(checkElysiaCompatibility(f.root).join('\n'), /stale local schema metadata/);
+  }
+});
+
+test('rejects mixed legacy and active schema dependencies in populated snapshots', (t) => {
+  for (const directory of ['elysia', 'supacloud-lite']) {
+    const f = fixture(t);
+    f.edit(`packages/${directory}/bun.lock`, (p) => {
+      p.packages['@supacloud/app'] = ['@supacloud/app@file:../app', {
+        dependencies: { typebox: '1.3.34', '@sinclair/typebox': '^0.34.52' },
+      }];
+    });
+    assert.match(checkElysiaCompatibility(f.root).join('\n'), /stale local schema metadata/);
+  }
+});
+
+test('distinguishes missing schema dependencies from empty Bun deduplication placeholders', (t) => {
+  for (const directory of ['elysia', 'supacloud-lite']) {
+    const f = fixture(t);
+    f.edit(`packages/${directory}/bun.lock`, (p) => {
+      p.packages['@supacloud/compiler'] = ['@supacloud/compiler@file:../compiler', {
+        devDependencies: { typescript: '^7.0.2' },
+      }];
+    });
+    assert.match(checkElysiaCompatibility(f.root).join('\n'), /stale local schema metadata/);
+    f.edit(`packages/${directory}/bun.lock`, (p) => { p.packages['@supacloud/compiler'][1] = {}; });
+    assert.deepEqual(checkElysiaCompatibility(f.root), []);
+  }
+});

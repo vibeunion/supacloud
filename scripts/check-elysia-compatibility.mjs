@@ -91,11 +91,14 @@ export function checkElysiaCompatibility(root) {
       }
     }
     for (const entry of Object.values(lock.packages ?? {})) {
-      if (manifest.name === '@supacloud/elysia' && Array.isArray(entry)
-        && /^@supacloud\/(?:app|compiler|delivery)@file:/.test(entry[0] ?? '')
-        && entry[1]?.dependencies !== undefined
-        && (entry[1]?.dependencies?.typebox !== matrix.packages.typebox
-          || entry[1]?.dependencies?.['@sinclair/typebox'] !== undefined)) {
+      // Bun can preserve populated file: snapshots across a frozen install.
+      // Empty entries are Bun deduplication placeholders, not full manifests.
+      if (['packages/elysia', 'packages/supacloud-lite'].includes(directory)
+        && Array.isArray(entry) && typeof entry[0] === 'string'
+        && /^@supacloud\/(?:app|compiler|delivery)@file:/.test(entry[0])
+        && entry[1] && Object.keys(entry[1]).length > 0
+        && (entry[1].dependencies?.typebox !== matrix.packages.typebox
+          || entry[1].dependencies?.['@sinclair/typebox'] !== undefined)) {
         problems.push(`${lockPath}: stale local schema metadata for ${entry[0]}`);
       }
       if (Array.isArray(entry) && typeof entry[0] === 'string'
