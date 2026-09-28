@@ -588,4 +588,60 @@ describe("storage management routes", () => {
     expect(res.status).toBe(401);
     bucketSpy.mockRestore();
   });
+
+  test("image transforms stream source bytes to imaginary instead of a remote url", async () => {
+    const bucketSpy = spyOn(StorageRLS, "getLogicalBucket").mockResolvedValue({
+      id: "evidence",
+      name: "evidence",
+      public: true,
+    });
+    const downloadSpy = spyOn(StorageService, "getDownloadResponse").mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3, 4]), { headers: { "content-type": "image/tiff" } }),
+    );
+    const calls: Array<{ url: string; method?: string; contentType?: string }> = [];
+    const fetcher = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      calls.push({ url: String(input), method: init?.method, contentType: (init?.headers as Record<string, string>)?.["Content-Type"] });
+      return new Response("png", { headers: { "content-type": "image/png" } });
+    });
+    try {
+      const res = await request("/v1/storage/proj_1/transform/thumbnail/evidence/scan.tiff?format=png&width=64");
+      expect(res.status).toBe(200);
+      expect(downloadSpy).toHaveBeenCalledWith("proj_1", "evidence", "scan.tiff");
+      expect(calls).toHaveLength(1);
+      expect(calls[0].method).toBe("POST");
+      expect(calls[0].contentType).toBe("image/tiff");
+      expect(new URL(calls[0].url).searchParams.get("url")).toBeNull();
+      expect(new URL(calls[0].url).searchParams.get("type")).toBe("png");
+    } finally {
+      fetcher.mockRestore();
+      downloadSpy.mockRestore();
+      bucketSpy.mockRestore();
+    }
+  });
+
+  test("image transforms report a missing source object as 404 and oversized sources as 413", async () => {
+    const bucketSpy = spyOn(StorageRLS, "getLogicalBucket").mockResolvedValue({
+      id: "evidence",
+      name: "evidence",
+      public: true,
+    });
+    const downloadSpy = spyOn(StorageService, "getDownloadResponse").mockResolvedValue(null);
+    const fetcher = spyOn(globalThis, "fetch");
+    try {
+      const missing = await request("/v1/storage/proj_1/transform/thumbnail/evidence/missing.tiff");
+      expect(missing.status).toBe(404);
+      expect(await missing.json()).toMatchObject({ code: "404" });
+      downloadSpy.mockResolvedValue(
+        new Response("x", { headers: { "content-type": "image/tiff", "content-length": String(64 * 1024 * 1024 + 1) } }),
+      );
+      const oversized = await request("/v1/storage/proj_1/transform/thumbnail/evidence/huge.tiff");
+      expect(oversized.status).toBe(413);
+      expect(await oversized.json()).toMatchObject({ code: "413" });
+      expect(fetcher).not.toHaveBeenCalled();
+    } finally {
+      fetcher.mockRestore();
+      downloadSpy.mockRestore();
+      bucketSpy.mockRestore();
+    }
+  });
 });
