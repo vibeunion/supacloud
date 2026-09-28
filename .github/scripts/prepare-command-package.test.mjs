@@ -45,7 +45,7 @@ test('publish E404 reports OIDC configuration checks instead of polling visibili
     name: '@supacloud/delivery',
     version: '0.2.0',
     runNpm: async (args) => {
-      calls.push(args[0]);
+      calls.push(args[0] ?? '');
       throw notFoundError('@supacloud/delivery@0.2.0');
     },
     sleep: async () => assert.fail('Rejected publication must not retry visibility'),
