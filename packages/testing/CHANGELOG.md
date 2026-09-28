@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/vibeunion/supacloud/compare/testing-v0.5.1...testing-v0.5.2) (2026-09-28)
+
+
+### Miscellaneous Chores
+
+* adopt AGPL-3.0-only licensing ([#1481](https://github.com/vibeunion/supacloud/issues/1481)) ([8787ad9](https://github.com/vibeunion/supacloud/commit/8787ad9466ebba8f487d28bf62d5f79a220b0ab8))
+
 ## [0.5.1](https://github.com/vibeunion/supacloud/compare/testing-v0.5.0...testing-v0.5.1) (2026-09-11)
 
 

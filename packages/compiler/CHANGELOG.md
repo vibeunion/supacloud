@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.4](https://github.com/vibeunion/supacloud/compare/compiler-v0.27.3...compiler-v0.27.4) (2026-09-28)
+
+
+### Miscellaneous Chores
+
+* adopt AGPL-3.0-only licensing ([#1481](https://github.com/vibeunion/supacloud/issues/1481)) ([8787ad9](https://github.com/vibeunion/supacloud/commit/8787ad9466ebba8f487d28bf62d5f79a220b0ab8))
+
 ## [0.27.3](https://github.com/vibeunion/supacloud/compare/compiler-v0.27.2...compiler-v0.27.3) (2026-09-28)
 
 
