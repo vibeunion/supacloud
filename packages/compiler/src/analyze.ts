@@ -1780,11 +1780,7 @@ function parseController(
             const importPath = importPathOf(schemaExpr, ctx);
             if (importPath) schemaImports[schemaExpr.text] = importPath;
             const declaration = resolveDeclaration(schemaExpr, ctx)[0];
-            const typeName = ctx.checker.typeToString(ctx.checker.getTypeAtLocation(schemaExpr));
-            const initializer = declaration && ts.isVariableDeclaration(declaration) ? declaration.initializer : undefined;
-            const opaque = /\bT(?:Unknown|Any)\b/.test(typeName) ||
-              (initializer && ts.isCallExpression(initializer) && ts.isPropertyAccessExpression(initializer.expression) &&
-                ["Unknown", "Any"].includes(initializer.expression.name.text));
+            const opaque = isOpaqueSchema(schemaExpr, declaration, ctx);
             (route.schemaKinds ??= {})[field] = opaque ? "opaque" : "declared";
           }
         }
@@ -1837,11 +1833,7 @@ function parseController(
             const importPath = importPathOf(schemaExpr, ctx);
             if (importPath) schemaImports[schemaExpr.text] = importPath;
             const declaration = resolveDeclaration(schemaExpr, ctx)[0];
-            const typeName = ctx.checker.typeToString(ctx.checker.getTypeAtLocation(schemaExpr));
-            const initializer = declaration && ts.isVariableDeclaration(declaration) ? declaration.initializer : undefined;
-            const opaque = /\bT(?:Unknown|Any)\b/.test(typeName) ||
-              (initializer && ts.isCallExpression(initializer) && ts.isPropertyAccessExpression(initializer.expression) &&
-                ["Unknown", "Any"].includes(initializer.expression.name.text));
+            const opaque = isOpaqueSchema(schemaExpr, declaration, ctx);
             const previousKind = route.schemaKinds?.response;
             (route.schemaKinds ??= {}).response = opaque || previousKind === "opaque" ? "opaque" : "declared";
           }
@@ -2103,12 +2095,42 @@ function jobSchemaKind(
   declaration: ts.Declaration,
   ctx: AnalysisContext,
 ): JobSchemaKind {
-  const typeName = ctx.checker.typeToString(ctx.checker.getTypeAtLocation(identifier));
-  const initializer = ts.isVariableDeclaration(declaration) ? declaration.initializer : undefined;
-  const opaque = /\bT(?:Unknown|Any)\b/.test(typeName) ||
-    (initializer && ts.isCallExpression(initializer) && ts.isPropertyAccessExpression(initializer.expression) &&
-      ["Unknown", "Any"].includes(initializer.expression.name.text));
-  return opaque ? "opaque" : "declared";
+  return isOpaqueSchema(identifier, declaration, ctx) ? "opaque" : "declared";
+}
+
+/** 判断边界自身是否接受任意值，不把嵌套扩展字段误当作整个边界无校验。 */
+function isOpaqueSchema(
+  identifier: Identifier,
+  declaration: ts.Declaration | undefined,
+  ctx: AnalysisContext,
+): boolean {
+  function opaque(type: ts.Type, seen: Set<ts.Type>): boolean {
+    if (seen.has(type)) return false;
+    const nextSeen = new Set(seen).add(type);
+    const kindProperty = type.getProperty("~kind");
+    const kind = kindProperty && ctx.checker.getTypeOfSymbolAtLocation(kindProperty, identifier);
+    if (kind?.isStringLiteral()) {
+      if (kind.value === "Unknown" || kind.value === "Any") return true;
+      if (kind.value === "Union" || kind.value === "Intersect") {
+        const property = type.getProperty(kind.value === "Union" ? "anyOf" : "allOf");
+        if (!property) return true;
+        const members = ctx.checker.getIndexTypeOfType(
+          ctx.checker.getTypeOfSymbolAtLocation(property, identifier), ts.IndexKind.Number,
+        );
+        if (!members) return true;
+        const branches = members.isUnion() ? members.types : [members];
+        return kind.value === "Union"
+          ? branches.some((branch) => opaque(branch, nextSeen))
+          : branches.every((branch) => opaque(branch, nextSeen));
+      }
+      return false;
+    }
+    return /^T(?:Unknown|Any)\b/.test(ctx.checker.typeToString(type));
+  }
+  if (opaque(ctx.checker.getTypeAtLocation(identifier), new Set())) return true;
+  const initializer = declaration && ts.isVariableDeclaration(declaration) ? declaration.initializer : undefined;
+  return Boolean(initializer && ts.isCallExpression(initializer) && ts.isPropertyAccessExpression(initializer.expression)
+    && ["Unknown", "Any"].includes(initializer.expression.name.text));
 }
 
 function checkedRpc(meta: ObjectLiteralExpression, ctx: AnalysisContext): string | undefined {
