@@ -175,3 +175,41 @@ bindings are active: it would ignore the binding and use legacy storage. Rollbac
 requires quiescing affected project traffic first and retaining the encrypted
 configuration and upstream objects; resume only with a version that understands
 the bindings. Do not delete a binding to "repair" a failed connection.
+# PM review acceptance
+
+The operator's job is to bind an unused project to its own storage and retain
+predictable access, isolation, and failure behavior. This change does not add a
+console workflow, migration, failover, or bucket-level backend selection.
+
+```gherkin
+Scenario: Isolated projects
+  Given two projects bound to separate S3 namespaces
+  When they upload the same logical bucket and object name concurrently
+  Then each project reads only its own content
+
+Scenario: Preserve object metadata
+  Given an object uploaded with an explicit content type
+  When the object is downloaded or copied to another logical bucket
+  Then its content type and bytes are preserved
+
+Scenario: Fail closed
+  Given a disabled, corrupt, or unapproved project binding
+  When storage is accessed
+  Then access fails without using platform storage
+
+Scenario: Safe configuration lifecycle
+  Given an occupied project or a stale configuration revision
+  When an administrator attempts to bind or update storage
+  Then the operation conflicts without changing the binding
+
+Scenario: Credential privacy
+  Given a configuration request containing credentials
+  When authorization or parsing fails
+  Then the response does not expose credentials
+```
+
+Review verification (2026-09-28): the real Bun S3 HTTP fixture reproduced lost
+download MIME metadata before the fix. Downloads now read stored metadata with
+`stat()`, and the fixture checks that copying preserves it as well.
+Native PostgreSQL concurrency and cloud-provider acceptance remain release gates;
+in-memory registry tests do not prove those properties.

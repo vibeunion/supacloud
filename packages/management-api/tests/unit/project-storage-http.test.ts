@@ -65,6 +65,7 @@ test("project storage summaries and unexpected failures never expose credentials
 
 function s3Fixture(accessKey: string) {
   const objects = new Map<string, Uint8Array>();
+  const contentTypes = new Map<string, string>();
   const authorizations: string[] = [];
   const xml = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;');
   const server = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
@@ -73,7 +74,11 @@ function s3Fixture(accessKey: string) {
     if (!authorization.includes(`Credential=${accessKey}/`)) return new Response("AccessDenied", { status: 403 });
     const url = new URL(request.url);
     const key = decodeURIComponent(url.pathname).replace(/^\/project-assets\//, "");
-    if (request.method === "PUT") { objects.set(key, new Uint8Array(await request.arrayBuffer())); return new Response(null, { headers: { ETag: '"fixture"' } }); }
+    if (request.method === "PUT") {
+      objects.set(key, new Uint8Array(await request.arrayBuffer()));
+      contentTypes.set(key, request.headers.get("content-type") ?? "application/octet-stream");
+      return new Response(null, { headers: { ETag: '"fixture"' } });
+    }
     if (request.method === "DELETE") { objects.delete(key); return new Response(null, { status: 204 }); }
     if (url.searchParams.get("list-type") === "2") {
       const prefix = url.searchParams.get("prefix") ?? "";
@@ -82,7 +87,7 @@ function s3Fixture(accessKey: string) {
     }
     const bytes = objects.get(key);
     if (!bytes) return new Response(null, { status: 404 });
-    return new Response(request.method === "HEAD" ? null : Uint8Array.from(bytes), { headers: { "Content-Type": "text/plain", "Content-Length": String(bytes.byteLength), ETag: '"fixture"' } });
+    return new Response(request.method === "HEAD" ? null : Uint8Array.from(bytes), { headers: { "Content-Type": contentTypes.get(key)!, "Content-Length": String(bytes.byteLength), ETag: '"fixture"', "Last-Modified": "Thu, 01 Jan 2026 00:00:00 GMT" } });
   } });
   return { server, objects, authorizations };
 }
@@ -98,10 +103,17 @@ test("real Bun S3 clients keep concurrent projects on separate signed HTTP backe
     const da = driver("projecta", a, "key-a"), db = driver("projectb", b, "key-b");
     await Promise.all([da.uploadFile("projecta", "avatars", "same.txt", new TextEncoder().encode("A"), "text/plain"),
       db.uploadFile("projectb", "avatars", "same.txt", new TextEncoder().encode("B"), "text/plain")]);
-    expect(await (await da.getDownloadResponse("projecta", "avatars", "same.txt"))!.text()).toBe("A");
+    const downloaded = await da.getDownloadResponse("projecta", "avatars", "same.txt");
+    expect(downloaded!.headers.get("content-type")).toBe("text/plain;charset=utf-8");
+    expect(await downloaded!.text()).toBe("A");
+    await da.copyFile("projecta", "avatars", "same.txt", "copies", "copied.bin");
+    const copied = await da.getDownloadResponse("projecta", "copies", "copied.bin");
+    expect(copied!.headers.get("content-type")).toBe(downloaded!.headers.get("content-type"));
+    expect(await copied!.text()).toBe("A");
     expect(await (await db.getDownloadResponse("projectb", "avatars", "same.txt"))!.text()).toBe("B");
     expect((await da.listFiles("projecta", "avatars")).map((entry) => entry.name)).toEqual(["same.txt"]);
     await da.emptyBucket("projecta", "avatars");
+    await da.emptyBucket("projecta", "copies");
     expect(a.objects.size).toBe(0);
     expect(b.objects.size).toBe(1);
     expect(a.authorizations.every((value) => value.includes("Credential=key-a/"))).toBe(true);

@@ -36,7 +36,7 @@ function memoryClient() {
     },
     file(key) {
       return {
-        get type() { return values.get(key)?.type; },
+        async stat() { check(); return { type: values.get(key)!.type }; },
         async exists() { check(); calls.push({ action: 'exists', key }); return values.has(key); },
         async arrayBuffer() { check(); return Uint8Array.from(values.get(key)!.bytes).buffer; },
         async write(bytes, options) { check(); calls.push({ action: 'write', key }); values.set(key, { bytes: Uint8Array.from(bytes), type: options.type }); },

@@ -8,8 +8,8 @@ export interface ProjectS3Client {
     contents?: ObjectEntry[]; isTruncated?: boolean; nextContinuationToken?: string;
   }>;
   file(key: string): {
-    type?: string | undefined;
     exists(): Promise<boolean>;
+    stat(): Promise<{ type: string }>;
     arrayBuffer(): Promise<ArrayBuffer>;
     write(data: Uint8Array, options: { type: string }): Promise<unknown>;
     delete(): Promise<unknown>;
@@ -149,8 +149,10 @@ export class ProjectS3Driver implements StorageDriver {
     return this.perform(async () => {
       const file = this.client.file(target);
       if (!(await file.exists())) return null;
+      // S3File.type is a local Blob default, not the stored object's Content-Type.
+      const metadata = await file.stat();
       const bytes = await file.arrayBuffer();
-      return new Response(bytes, { headers: { 'content-type': file.type || 'application/octet-stream', 'content-length': String(bytes.byteLength) } });
+      return new Response(bytes, { headers: { 'content-type': metadata.type || 'application/octet-stream', 'content-length': String(bytes.byteLength) } });
     });
   }
   async getInternalSourceUrl(ref: string, bucket: string, key: string): Promise<string> {
