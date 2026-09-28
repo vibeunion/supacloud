@@ -15,7 +15,7 @@
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target node --conditions=supacloud-source",
-    "pretypecheck": "bun install --cwd ../compiler --frozen-lockfile && bun run --cwd ../compiler build && bun install --frozen-lockfile",
+    "pretypecheck": "bun install --cwd ../delivery --frozen-lockfile && bun install --cwd ../compiler --frozen-lockfile && bun run --cwd ../compiler build && bun install --frozen-lockfile",
     "prepublishOnly": "bun run build",
     "typecheck": "tsc --noEmit"
   },
