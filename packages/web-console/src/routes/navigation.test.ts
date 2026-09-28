@@ -23,6 +23,11 @@ describe("console navigation information architecture", () => {
     expect(sidebarSource).not.toContain("reports/advisors");
   });
 
+  test("exposes the scoped application dashboard from project navigation", () => {
+    expect(sidebarSource).toContain('titleKey: "Applications.title"');
+    expect(sidebarSource).toContain("/applications");
+  });
+
   test("keeps API connection and mobile navigation in the global project header", () => {
     expect(rootLayoutSource).toContain('Navigation.connect_api');
     expect(rootLayoutSource).toContain('id="mobile-navigation"');

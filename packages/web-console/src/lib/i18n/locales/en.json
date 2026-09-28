@@ -1,4 +1,14 @@
 {
+  "Applications": {
+    "title": "Applications", "application": "Application ID", "environment": "Environment ID",
+    "open": "Open", "scope_required": "Application and environment IDs are required.",
+    "runtime": "Runtime", "loading": "Loading", "unavailable": "Data unavailable. Refresh to retry.",
+    "changed": "Activation changed during observation. Refresh to observe again.",
+    "no_active": "No active activation record", "ready": "Ready", "not_ready": "Not ready",
+    "release": "Release ID", "activation": "Activation ID", "configuration": "Configuration ID",
+    "target": "Target", "kind": "Kind", "status": "Status", "releases": "Stored releases",
+    "no_releases": "No stored releases", "stored_at": "Stored at", "previous": "Previous", "next": "Next"
+  },
   "GlobalDashboard": {
     "welcome": "Welcome back, Admin",
     "subtitle": "Here's what's happening with your SupaCloud platform today.",
