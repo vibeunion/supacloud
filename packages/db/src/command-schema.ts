@@ -77,7 +77,8 @@ DROP TRIGGER IF EXISTS execution_rejection_audit ON supacloud_commands.execution
 CREATE CONSTRAINT TRIGGER execution_rejection_audit
 AFTER INSERT OR UPDATE ON supacloud_commands.execution_receipts
 DEFERRABLE INITIALLY DEFERRED
-FOR EACH ROW EXECUTE FUNCTION supacloud_commands.require_rejection_audit();
+FOR EACH ROW WHEN (NEW.status = 'rejected')
+EXECUTE FUNCTION supacloud_commands.require_rejection_audit();
 CREATE OR REPLACE FUNCTION supacloud_commands.enqueue_execution_recovery()
 RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $recovery$
 DECLARE submission jsonb;
