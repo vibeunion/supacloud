@@ -58,7 +58,7 @@ describe("native Elysia and compiled adapter conformance", () => {
   test("records the exact exercised runtime and schema versions", async () => {
     const matrix: unknown = await Bun.file(new URL("../compatibility.json", import.meta.url)).json();
     const packages: Record<string, string> = {};
-    for (const name of ["elysia", "typescript", "@sinclair/typebox", "@typescript/typescript6"] as const) {
+    for (const name of ["elysia", "typescript", "typebox", "exact-mirror", "@typescript/typescript6"] as const) {
       const manifest: unknown = JSON.parse(await readFile(
         new URL(`../node_modules/${name}/package.json`, import.meta.url), "utf8",
       ));

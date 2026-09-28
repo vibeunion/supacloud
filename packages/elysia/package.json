@@ -59,7 +59,7 @@
     "@supacloud/commands": "file:../commands"
   },
   "peerDependencies": {
-    "elysia": ">=2.0.0-beta.19 <3"
+    "elysia": "2.0.0-beta.19"
   },
   "devDependencies": {
     "@supacloud/compiler": "file:../compiler",
