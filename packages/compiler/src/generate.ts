@@ -1264,15 +1264,15 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           ? `{ ${paramNames.map((p) => `${/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(p) ? p : JSON.stringify(p)}: string | number`).join("; ")} }`
           : "Record<string, string | number>";
         const paramsType = paramsSchema
-          ? `Static<typeof ${paramsSchema.local}>${paramNames.length > 0 ? ` & ${pathParamsType}` : ""}`
+          ? `StaticDecode<typeof ${paramsSchema.local}>${paramNames.length > 0 ? ` & ${pathParamsType}` : ""}`
           : pathParamsType;
-        const queryType = querySchema ? `Static<typeof ${querySchema.local}>` : "Record<string, unknown>";
-        const bodyType = route.parse === "none" ? "BodyInit" : bodySchema ? `Static<typeof ${bodySchema.local}>` : "unknown";
-        const headersType = headersSchema ? `Static<typeof ${headersSchema.local}>` : "Record<string, string>";
-        const cookieType = cookieSchema ? `Static<typeof ${cookieSchema.local}>` : "Record<string, string | number | boolean>";
+        const queryType = querySchema ? `StaticDecode<typeof ${querySchema.local}>` : "Record<string, unknown>";
+        const bodyType = route.parse === "none" ? "BodyInit" : bodySchema ? `StaticDecode<typeof ${bodySchema.local}>` : "unknown";
+        const headersType = headersSchema ? `StaticDecode<typeof ${headersSchema.local}>` : "Record<string, string>";
+        const cookieType = cookieSchema ? `StaticDecode<typeof ${cookieSchema.local}>` : "Record<string, string | number | boolean>";
         const responseTypes = [
-          ...(responseSchema ? [`Static<typeof ${responseSchema.local}>`] : []),
-          ...Object.values(responseSchemas).map((ref) => `Static<typeof ${ref.local}>`),
+          ...(responseSchema ? [`StaticDecode<typeof ${responseSchema.local}>`] : []),
+          ...Object.values(responseSchemas).map((ref) => `StaticDecode<typeof ${ref.local}>`),
         ];
         const responseType = responseTypes.length > 0 ? responseTypes.join(" | ") : "never";
         const requiredRequestFields = [
@@ -1362,7 +1362,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
   return [
     HEADER,
     "",
-    ...(usesStatic ? ['import type { Static } from "typebox";'] : []),
+    ...(usesStatic ? ['import type { StaticDecode } from "typebox";'] : []),
     ...generatedImports,
     ...(usesStatic || generatedImports.length > 0 ? [""] : []),
     "export interface ClientRequestOptions<",
@@ -1514,7 +1514,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
       "}",
       "",
       "function schemaReferenceTarget(ref: string, root: unknown): unknown {",
-      "  const localRef = ref.startsWith(\"#/$defs/\") ? ref.slice(8) : ref.startsWith(\"#/definitions/\") ? ref.slice(14) : ref.startsWith(\"#/components/schemas/\") ? ref.slice(21) : undefined;",
+      "  const localRef = ref.startsWith(\"#/$defs/\") ? ref.slice(8) : ref.startsWith(\"#/definitions/\") ? ref.slice(14) : ref.startsWith(\"#/components/schemas/\") ? ref.slice(21) : ref.startsWith(\"#\") ? undefined : ref;",
       "  if (localRef !== undefined && isRecord(root)) {",
       "    const defs = ref.startsWith(\"#/definitions/\") ? root.definitions : ref.startsWith(\"#/components/schemas/\") ? root.components : root.$defs;",
       "    if (ref.startsWith(\"#/components/schemas/\") && isRecord(defs)) {",
@@ -1601,18 +1601,18 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
       "    const output: Record<string, unknown> = {};",
       "    for (const [name, item] of Object.entries(value)) {",
       "      const propertySchema = properties[name];",
-      "      if (propertySchema !== undefined) { output[name] = decodeSchemaValue(propertySchema, item, root, new Set(seenRefs), normalize); continue; }",
+      "      if (propertySchema !== undefined) { output[name] = decodeSchemaValue(propertySchema, item, root, new Set<string>(), normalize); continue; }",
       "      let matched = false;",
       "      for (const [pattern, patternSchema] of Object.entries(patterns)) {",
       "        let applies = false; try { applies = new RegExp(pattern).test(name); } catch { return schemaError(); }",
-      "        if (applies) { output[name] = decodeSchemaValue(patternSchema, item, root, new Set(seenRefs), normalize); matched = true; }",
+      "        if (applies) { output[name] = decodeSchemaValue(patternSchema, item, root, new Set<string>(), normalize); matched = true; }",
       "      }",
       "      if (matched) continue;",
       "      if (schema.additionalProperties === false || schema.unevaluatedProperties === false || schema.additionalProperties === undefined) {",
       "        if (normalize) continue;",
       "        return schemaError();",
       "      }",
-      "      if (isRecord(schema.additionalProperties)) output[name] = decodeSchemaValue(schema.additionalProperties, item, root, new Set(seenRefs), normalize);",
+      "      if (isRecord(schema.additionalProperties)) output[name] = decodeSchemaValue(schema.additionalProperties, item, root, new Set<string>(), normalize);",
       "      else if (schema.additionalProperties === true) output[name] = item;",
       "    }",
       "    return output;",
@@ -1625,11 +1625,11 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
       "    const tuple = Array.isArray(schema.prefixItems) ? schema.prefixItems : Array.isArray(schema.items) ? schema.items : undefined;",
       "    if (tuple) {",
       "      if (schema.additionalItems === false && value.length > tuple.length) return schemaError();",
-      "      return value.map((item, index) => index < tuple.length ? decodeSchemaValue(tuple[index], item, root, new Set(seenRefs), normalize) : schema.items && !Array.isArray(schema.items) ? decodeSchemaValue(schema.items, item, root, new Set(seenRefs), normalize) : item);",
+      "      return value.map((item, index) => index < tuple.length ? decodeSchemaValue(tuple[index], item, root, new Set<string>(), normalize) : schema.items && !Array.isArray(schema.items) ? decodeSchemaValue(schema.items, item, root, new Set<string>(), normalize) : item);",
       "    }",
       "    if (schema.items === undefined || schema.items === true) return value;",
       "    if (schema.items === false && value.length > 0) return schemaError();",
-      "    return value.map((item) => decodeSchemaValue(schema.items, item, root, new Set(seenRefs), normalize));",
+      "    return value.map((item) => decodeSchemaValue(schema.items, item, root, new Set<string>(), normalize));",
       "  }",
       "  if (schema.type === \"string\") {",
       "    if (typeof value !== \"string\") return schemaError();",
