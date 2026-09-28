@@ -8,13 +8,19 @@ is a separately authorized business command, never an assumed rollback.
 
 ## Compatibility and Acceptance Boundary
 
-The dependency range is not a claim that every allowed version has been tested.
-The focused conformance suite was verified with Bun 1.4.2 and Elysia 1.4.30.
-The package declares Elysia `^1.4.30` as a peer and TypeScript `^7.0.2` as a
-development dependency. `compatibility.json` records the exact exercised tuple,
-including the compiler's separate TypeScript 6 semantic API. The contract-upgrade
-gate checks both that semantic API and the TypeScript 7 CLI. These tests do not
-establish a wider version matrix or Node.js runtime compatibility.
+The Elysia peer and development dependency are pinned to `2.0.0-beta.19`.
+`compatibility.json` records the acceptance target: Bun 1.4.2, Elysia
+2.0.0-beta.19, `typebox` 1.3.34, `exact-mirror` 1.2.6, TypeScript CLI 7.0.2
+and the compiler's separate TypeScript 6 semantic API 6.0.2. The matrix is a
+required target, not proof of an execution. See the dated, commit-specific
+[framework acceptance record](../../docs/framework-acceptance.md) for actual
+results. The contract-upgrade gate checks both TypeScript engines. These tests
+do not establish a wider beta version matrix or Node.js runtime compatibility.
+
+Keep the exact Elysia peer until additional versions have their own acceptance
+evidence. A server using this adapter still installs Elysia; application metadata
+and business modules need not import native Elysia types. See the
+[dependency boundary and upgrade policy](../../docs/elysia-compatibility.md).
 
 Run `bun run test:conformance` in this package after building the local
 `@supacloud/contracts` and `@supacloud/app` dependencies and installing this
@@ -99,9 +105,11 @@ for the evidence boundaries and upgrade policy.
 
 Pass a native Elysia plugin as `http` to `createApplication`, `createTestApp`,
 or the options argument of `createModulePlugin`. `decorate` shares existing
-instances; `derive` runs before validation; `resolve` runs after validation.
-Use scoped/global hooks, or finish a context plugin with `.as("scoped")`.
-Local hooks retain native encapsulation and do not extend the consuming routes.
+instances. In Elysia 2, `derive` runs after validation; do not assume the Elysia 1
+pre-validation derive/resolve split. Use `.derive("plugin", callback)` for a
+shared derived context, or finish a guarded context plugin with `.as("plugin")`.
+Global hooks use `.as("global")`. Local hooks retain native encapsulation and
+do not extend the consuming routes.
 
 ```ts
 import { Elysia, t } from "elysia";
@@ -109,10 +117,12 @@ import { createApplication } from "@supacloud/elysia";
 
 const http = new Elysia({ name: "application-context" })
   .decorate("clock", { now: () => Date.now() })
-  .derive(({ clock }) => ({ startedAt: clock.now() }))
   .guard({ query: t.Object({ locale: t.Optional(t.String()) }) })
-  .resolve(({ query }) => ({ locale: query.locale ?? "en" }))
-  .as("scoped");
+  .derive(({ clock, query }) => ({
+    startedAt: clock.now(),
+    locale: query.locale ?? "en",
+  }))
+  .as("plugin");
 
 const app = createApplication({
   http,
@@ -132,13 +142,13 @@ The second `requestContext` argument contains the validated HTTP inputs and
 the inferred native plugin extensions. Existing one-argument factories remain
 valid. Its result is passed to generated request-scoped constructors and the
 controller's `context`/`requestContext` input. It is built once per request;
-early resolver responses and validation failures do not construct DI scopes.
+early derived-context responses and validation failures do not construct DI scopes.
 Request scopes are created inside the existing governed handler and released
 after the response, including handler failures. They are not application
-singletons or native `resolve` hooks.
+singletons or native context hooks.
 
-Native routes added to the returned app retain the HTTP plugin's decorator,
-derive and resolve types. `createModulePlugin` also preserves the concrete
+Native routes added to the returned app retain the HTTP plugin's decorator
+and derived context types. `createModulePlugin` also preserves the concrete
 `services` type supplied by its caller. Module service bags are attached by
 the module-local resolver, not merged into a root `decorator.services` bag;
 the service instances themselves remain shared. This prevents same-named
@@ -153,13 +163,13 @@ Compiled route schemas are runtime
 descriptors: their body/params/query/header/cookie fields in the application-wide
 context factory remain `unknown`-based instead of pretending to infer one
 route's schema for every route. Use shared guards for schema-typed native
-resolvers and the existing generated contracts for individual compiled routes.
+context derivation and the existing generated contracts for individual compiled routes.
 Do not store per-request identity or transaction handles in decorated singletons.
 
 The `http` plugin is composed into each compiled module and subsequently into
 the root for native routes. Keep it focused on reusable context extensions;
 register unrelated endpoints on the returned app. Hook execution is tested
-for named/anonymous plugins and scoped/global hooks without duplicate work.
+for named/anonymous plugins and plugin/global hooks without duplicate work.
 Anonymous extensions receive a stable internal plugin identity for native
 hook deduplication; the caller's plugin configuration is not mutated.
 This is native HTTP composition, not a replacement runtime DI container or
@@ -298,7 +308,7 @@ Runtime adapter that turns `@supacloud/compiler` output into a production-ready
 ## Installation
 
 ```bash
-bun add @supacloud/elysia elysia
+bun add --exact @supacloud/elysia elysia@2.0.0-beta.19
 ```
 
 ## Usage
@@ -383,7 +393,7 @@ read-back protocol. A custom `errorMapper` can override this public envelope.
 
 Native `Response` objects are passed through by Elysia, including JSON responses.
 Use `validatedJsonResponse` to opt into validation when constructing a native
-JSON response. Otherwise handlers must validate their JSON payload themselves.
+JSON response. Otherwise handlers must validate their JSON payloads themselves.
 The adapter does not consume or parse binary/streaming responses.
 
 Jobs are executed explicitly with `executeJob(compiledModule, services, job,
@@ -657,9 +667,8 @@ does not add Eden-style client inference to an existing Elysia instance; the
 compiler-generated client remains the source of transport types.
 
 Response maps may use concrete statuses, `1XX`-`5XX` families, and `default`.
-Because Elysia 1.4 only compiles numeric response keys, the adapter expands
-family/default entries to concrete validators before registration. Exact
-statuses take precedence over families, which take precedence over `default`.
+The adapter expands family/default entries to concrete validators before
+registration. Exact statuses take precedence over families, which take precedence over `default`.
 An actual status absent from a structured response map fails the route contract
 before Elysia can silently accept a default `200`; binary/stream routes may
 intentionally leave successful transport statuses unschematized when only their
@@ -700,12 +709,12 @@ const app = createApplication({
 });
 ```
 
-`identityPlugin` is an application-owned scoped/global Elysia plugin that verifies
+`identityPlugin` is an application-owned plugin/global Elysia context plugin that verifies
 credentials and resolves `identity`; the adapter does not trust a raw user/tenant
 header as identity. Policy callbacks preserve its native context types.
 
 Policies become native route-local `beforeHandle` hooks. They execute sequentially
-after schema validation, native resolvers and the application request-context
+after schema validation, native context derivation and the application request-context
 factory, but before compiled request-scope construction and command execution.
 Return `undefined` to continue or a `Response` to stop; thrown errors use the
 application error mapper. Native earlier hooks can still short-circuit the request.

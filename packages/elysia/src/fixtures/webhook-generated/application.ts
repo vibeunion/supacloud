@@ -161,6 +161,12 @@ function resolveFactoryValue(value: unknown): unknown {
 }
 
 const scopeDestructions = new WeakMap<object, Promise<void>>();
+const platformDependencies = new WeakMap<object, Record<string, unknown>>();
+
+function retainPlatformDependencies<T extends Record<string, unknown>>(services: T, deps: Record<string, unknown>): T {
+  platformDependencies.set(services, deps);
+  return services;
+}
 
 function destroyScopeInstances(
   scope: Record<string, unknown>,
@@ -256,7 +262,7 @@ function createWebhookServices(
   imported: Record<string, Record<string, unknown>>,
 ) {
   const updateWebhook = new UpdateWebhook(deps.webhookEnvironment as ConstructorParameters<typeof UpdateWebhook>[0]);
-  return { updateWebhook };
+  return retainPlatformDependencies({ updateWebhook }, deps);
 }
 async function createWebhookRequestScope(
   services: Record<string, unknown>,

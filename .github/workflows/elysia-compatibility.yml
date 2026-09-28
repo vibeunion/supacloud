@@ -1,0 +1,91 @@
+name: Elysia Compatibility
+
+on:
+  pull_request:
+    branches: ["main", "dev"]
+  push:
+    branches: ["main", "dev"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: elysia-compatibility-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  policy:
+    name: Elysia dependency policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24.x"
+      - name: Test dependency policy regressions
+        run: node --test scripts/check-elysia-compatibility.test.mjs
+      - name: Check declarations, schema tuple, lock metadata and templates
+        run: node scripts/check-elysia-compatibility.mjs
+
+  lockfiles:
+    name: Elysia reproducible lockfiles
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - name: Reconcile local dependency snapshots with the pinned Bun
+        run: |
+          bun --revision
+          bun install --lockfile-only --ignore-scripts --cwd packages/elysia
+          bun install --lockfile-only --ignore-scripts --cwd packages/supacloud-lite
+      - name: Reject uncommitted lockfile changes
+        run: |
+          git diff --binary -- packages/elysia/bun.lock packages/supacloud-lite/bun.lock > elysia-lockfiles.patch
+          git diff --exit-code -- packages/elysia/bun.lock packages/supacloud-lite/bun.lock
+      - name: Preserve lockfile audit evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: elysia-lockfile-audit
+          path: |
+            packages/elysia/bun.lock
+            packages/supacloud-lite/bun.lock
+            elysia-lockfiles.patch
+          retention-days: 3
+          if-no-files-found: error
+
+  conformance:
+    name: Elysia beta runtime conformance
+    needs: policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - name: Build local adapter dependencies
+        run: bun run scripts/build-command-dependencies.ts elysia
+      - name: Install the pinned adapter graph
+        working-directory: packages/elysia
+        run: bun install --frozen-lockfile
+      - name: Verify beta HTTP and generated-contract behavior
+        working-directory: packages/elysia
+        run: |
+          bun run generate:example
+          bun run typecheck
+          bun run typecheck:test
+          bun run test:conformance
+          bun test src/http-context.test.ts src/readme-context.test.ts
+          bun run test:contract-upgrade
