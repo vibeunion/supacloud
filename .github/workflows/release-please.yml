@@ -590,11 +590,17 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
-          node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
-          bun install --lockfile-only --registry https://registry.npmjs.org
-          bun install --frozen-lockfile --registry https://registry.npmjs.org
+          # Earlier publish steps rewrite sibling manifests. Build from the
+          # same commit in isolation so build-only packages need not be on npm.
+          build_root="$(mktemp -d)"
+          trap 'rm -rf "$build_root"' EXIT
+          git archive HEAD | tar -x -C "$build_root"
+          cd "$build_root/packages/elysia"
+          bun run ../../scripts/build-command-dependencies.ts elysia
+          bun install --frozen-lockfile
           bun run build
-          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+          node ../../.github/scripts/prepare-command-package.mjs
+          node ../../.github/scripts/publish-npm-package.mjs
 
       - name: Publish testing utilities to NPM
         if: ${{ always() && (needs.release-please.outputs.testing_released == 'true' || inputs.recover_npm == true) }}
