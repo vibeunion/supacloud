@@ -119,7 +119,7 @@ const DEFAULT_EDGE_RUNTIME_CAPACITY_DROPIN = "/etc/systemd/system/supacloud-edge
 const DEFAULT_MANAGEMENT_PRIVILEGE_DROPIN = "/etc/systemd/system/supacloud.service.d/40-management-privilege.conf";
 const DEFAULT_EMBEDDED_EDGE_PRIVILEGE_DROPIN = "/etc/systemd/system/supacloud.service.d/50-embedded-edge-privilege.conf";
 const DEFAULT_EDGE_WORKER_POOL_SIZE = 20;
-const DEFAULT_EDGE_BACKGROUND_WORKER_POOL_SIZE = 20;
+const DEFAULT_EDGE_BACKGROUND_WORKER_POOL_SIZE = 2;
 const DEFAULT_EDGE_RESOURCE_RATIO = 0.6;
 const DEFAULT_EDGE_TASKS_MAX = 256;
 const WEB_CONSOLE_DIR_ENV_KEY = "WEB_CONSOLE_DIR";
@@ -987,9 +987,13 @@ export function resolveEdgeRuntimeCapacityConfig(input: EdgeRuntimeCapacityInput
         env.SUPACLOUD_EDGE_WORKER_POOL_SIZE || env.WORKER_POOL_SIZE,
         DEFAULT_EDGE_WORKER_POOL_SIZE,
     );
+    const defaultBackgroundWorkerPoolSize = Math.max(
+        1,
+        Math.min(workerPoolSize, DEFAULT_EDGE_BACKGROUND_WORKER_POOL_SIZE),
+    );
     const backgroundWorkerPoolSize = positiveInteger(
         env.SUPACLOUD_EDGE_BACKGROUND_WORKER_POOL_SIZE || env.BACKGROUND_WORKER_POOL_SIZE,
-        DEFAULT_EDGE_BACKGROUND_WORKER_POOL_SIZE,
+        defaultBackgroundWorkerPoolSize,
     );
     const cpuQuotaPercent = positiveInteger(
         env.SUPACLOUD_EDGE_CPU_QUOTA_PERCENT,
@@ -1019,7 +1023,8 @@ export function buildEdgeRuntimeCapacityDropIn(config: EdgeRuntimeCapacityConfig
     return `[Service]
 # Managed by supacloud upgrade. These values are deliberately applied in a
 # late drop-in so stale low worker/resource limits from older installs do not
-# keep foreground Edge Function reads queued behind a small pool.
+# keep foreground Edge Function reads queued behind a small pool. Background
+# capacity stays bounded separately because every idle Bun Worker retains memory.
 Environment=WORKER_POOL_SIZE=${config.workerPoolSize}
 Environment=BACKGROUND_WORKER_POOL_SIZE=${config.backgroundWorkerPoolSize}
 MemoryHigh=${formatSystemdMemory(config.memoryHighMb)}
