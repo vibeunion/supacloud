@@ -35,11 +35,17 @@ function readWebhookConfig(projectConfig: Record<string, unknown> | null | undef
 }
 
 export const taskEventRoutes = new Elysia({ prefix: "/v1/projects/:ref/task-events" })
-  .onBeforeHandle(async ({ params, request }) => {
+  .beforeHandle(async ({ params, request }) => {
     const authError = await authMiddleware.requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
   })
-  .post("/webhook", async ({ params, body }) => {
+  .post("/webhook", {
+    body: t.Object({
+      url: t.String(),
+      secret: t.Optional(t.String()),
+    }),
+    detail: { tags: ["task-events"], summary: "Register a task lifecycle webhook" },
+  }, async ({ params, body }) => {
     const input = body as { url: string; secret?: string };
     const url = input.url?.trim();
     if (!url || !/^https:\/\//i.test(url)) {
@@ -66,14 +72,10 @@ export const taskEventRoutes = new Elysia({ prefix: "/v1/projects/:ref/task-even
     }
 
     return { registered: true, project_ref: params.ref, url };
-  }, {
-    body: t.Object({
-      url: t.String(),
-      secret: t.Optional(t.String()),
-    }),
-    detail: { tags: ["task-events"], summary: "Register a task lifecycle webhook" },
   })
-  .delete("/webhook", async ({ params }) => {
+  .delete("/webhook", {
+    detail: { tags: ["task-events"], summary: "Unregister the task lifecycle webhook" },
+  }, async ({ params }) => {
     const project = await projectRepository.findByRef(params.ref);
     if (!project) {
       return status(404, { error: "Project not found" });
@@ -92,10 +94,10 @@ export const taskEventRoutes = new Elysia({ prefix: "/v1/projects/:ref/task-even
     }
 
     return { unregistered: true, project_ref: params.ref };
-  }, {
-    detail: { tags: ["task-events"], summary: "Unregister the task lifecycle webhook" },
   })
-  .get("/webhook", async ({ params }) => {
+  .get("/webhook", {
+    detail: { tags: ["task-events"], summary: "Inspect the task lifecycle webhook" },
+  }, async ({ params }) => {
     const project = await projectRepository.findByRef(params.ref);
     if (!project) {
       return status(404, { error: "Project not found" });
@@ -111,6 +113,4 @@ export const taskEventRoutes = new Elysia({ prefix: "/v1/projects/:ref/task-even
       url: webhook.url,
       has_secret: !!webhook.secret,
     };
-  }, {
-    detail: { tags: ["task-events"], summary: "Inspect the task lifecycle webhook" },
   });

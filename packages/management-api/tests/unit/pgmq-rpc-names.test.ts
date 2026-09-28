@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { withNativePostgres } from "../helpers/native-postgres";
 import { replaceSqlModuleBlock } from "../../src/db/sql-module-sync";
 
-const image = "ghcr.io/pgmq/pg18-pgmq@sha256:bfb3537068ce453609744518ece92b178ac89dff53747d47ca6fab91c2fc66a6";
+const image = "ghcr.io/pgmq/pg18-pgmq@sha256:2dd8ac92a1c0eb121d6ea5b12b3f7c015813ae58945a940451d4683afd5a19c2";
 const moduleSql = await readFile(new URL("../../src/db/sql-modules/pgmq-public.sql", import.meta.url), "utf8");
 
 test("all real public RPCs reject noncanonical and reserved names before mutating queues", async () => {

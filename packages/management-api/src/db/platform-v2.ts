@@ -9,6 +9,8 @@ import {
 } from "../utils/project-user-lifecycle";
 import { config } from "../config";
 import { migrateProjectMutationJournal } from "./project-mutation-migration";
+import { ensureApplicationConfigurationSchema } from "./application-configuration-schema";
+import { ensureApplicationRuntimeAllocationSchema } from "./application-runtime-allocation-schema";
 import { executeSqlStatements } from "./sql-statements";
 
 function configuredAuthAuthoritySql(): { backfill: string; expected: string; constant: string } {
@@ -566,6 +568,8 @@ export async function ensurePlatformV2Schema(transaction: SQL): Promise<void> {
       AND NULLIF(o.owner_id, '') IS NOT NULL
     ON CONFLICT (project_ref, principal_id) DO NOTHING
   `;
+  await ensureApplicationConfigurationSchema(transaction);
+  await ensureApplicationRuntimeAllocationSchema(transaction);
 }
 
 export async function ensurePlatformV2SchemaInTransaction(controlPlaneDb: SQL): Promise<void> {

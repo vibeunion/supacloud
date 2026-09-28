@@ -262,7 +262,7 @@ async function configureKmsRs256Signing(
   await currentContext(ctx, nextAuth);
 
   try {
-    await tenantRuntimeService.applyAuthConfig(ref, currentAuth, nextAuth);
+    await tenantRuntimeService.applyAuthConfig(ref, currentAuth, nextAuth, { refreshVerifiers: true });
   } catch (error: unknown) {
     logger.warn("[auth-oauth-server] Failed to apply RS256 KMS signing config", {
       ref,
@@ -395,7 +395,7 @@ async function migrateProjectToOidc(
   await currentContext(ctx, nextAuth);
 
   try {
-    await tenantRuntimeService.applyAuthConfig(ref, currentAuth, nextAuth);
+    await tenantRuntimeService.applyAuthConfig(ref, currentAuth, nextAuth, { refreshVerifiers: true });
   } catch (error: unknown) {
     logger.warn("[auth-oauth-server] Failed to apply OAuth/OIDC migration", {
       ref,
@@ -409,8 +409,8 @@ async function migrateProjectToOidc(
 }
 
 export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
-  .onRequest(({ set }) => { set.headers["cache-control"] = "no-store"; })
-  .onError(({ error }) => {
+  .request(({ set }) => { set.headers["cache-control"] = "no-store"; })
+  .error(({ error }) => {
     if (error instanceof ExternalOAuthManagementError) {
       return Response.json({
         code: "AUTH_RUNTIME_NOT_LOCAL", message: "OAuth management is not available for a non-local Auth runtime",
@@ -420,9 +420,10 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       return Response.json(error.toJSON(), { status: 503, headers: { "cache-control": "no-store" } });
     }
   })
-  .onBeforeHandle(requireAuthRuntimeManagement("oauth"))
+  .beforeHandle(requireAuthRuntimeManagement("oauth"))
   .get(
     "/oauth-server",
+    { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "Get OAuth server status" } },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -432,17 +433,9 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       await currentContext(ctx);
       return result;
     },
-    { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "Get OAuth server status" } },
   )
   .post(
     "/oauth-server/migrate",
-    async ({ params, body, request }) => {
-      return migrateProjectToOidc(
-        params.ref,
-        request,
-        body,
-      );
-    },
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({
@@ -451,13 +444,17 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       }),
       detail: { tags: ["auth"], summary: "Migrate project auth to OIDC signing keys" },
     },
+    async ({ params, body, request }) => {
+      return migrateProjectToOidc(
+        params.ref,
+        request,
+        body,
+      );
+    },
   )
 
   .post(
     "/oauth-server/kms-rs256",
-    async ({ params, body, request }) => {
-      return configureKmsRs256Signing(params.ref, request, body);
-    },
     {
       params: t.Object({ ref: t.String() }),
       body: t.Object({
@@ -468,9 +465,13 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       }),
       detail: { tags: ["auth"], summary: "Configure RS256 JWT signing backed by AWS KMS" },
     },
+    async ({ params, body, request }) => {
+      return configureKmsRs256Signing(params.ref, request, body);
+    },
   )
   .get(
     "/oauth-clients",
+    { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "List OAuth clients" } },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -478,10 +479,10 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
       return proxyGoTrueAdmin(ctx, { kind: "list" }, request);
     },
-    { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "List OAuth clients" } },
   )
   .post(
     "/oauth-clients",
+    { params: t.Object({ ref: t.String() }), body: OAUTH_CLIENT_BODY, detail: { tags: ["auth"], summary: "Create OAuth client" } },
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -489,10 +490,10 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
       return proxyGoTrueAdmin(ctx, { kind: "create", input: body }, request);
     },
-    { params: t.Object({ ref: t.String() }), body: OAUTH_CLIENT_BODY, detail: { tags: ["auth"], summary: "Create OAuth client" } },
   )
   .get(
     "/oauth-clients/:clientId",
+    { params: t.Object({ ref: t.String(), clientId: t.String() }), detail: { tags: ["auth"], summary: "Get OAuth client" } },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -500,10 +501,10 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
       return proxyGoTrueAdmin(ctx, { kind: "get", clientId: params.clientId }, request);
     },
-    { params: t.Object({ ref: t.String(), clientId: t.String() }), detail: { tags: ["auth"], summary: "Get OAuth client" } },
   )
   .put(
     "/oauth-clients/:clientId",
+    { params: t.Object({ ref: t.String(), clientId: t.String() }), body: OAUTH_CLIENT_UPDATE_BODY, detail: { tags: ["auth"], summary: "Update OAuth client" } },
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -511,10 +512,10 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
       return proxyGoTrueAdmin(ctx, { kind: "update", clientId: params.clientId, input: body }, request);
     },
-    { params: t.Object({ ref: t.String(), clientId: t.String() }), body: OAUTH_CLIENT_UPDATE_BODY, detail: { tags: ["auth"], summary: "Update OAuth client" } },
   )
   .delete(
     "/oauth-clients/:clientId",
+    { params: t.Object({ ref: t.String(), clientId: t.String() }), detail: { tags: ["auth"], summary: "Delete OAuth client" } },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -522,10 +523,10 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
       return proxyGoTrueAdmin(ctx, { kind: "delete", clientId: params.clientId }, request);
     },
-    { params: t.Object({ ref: t.String(), clientId: t.String() }), detail: { tags: ["auth"], summary: "Delete OAuth client" } },
   )
   .post(
     "/oauth-clients/:clientId/regenerate-secret",
+    { params: t.Object({ ref: t.String(), clientId: t.String() }), detail: { tags: ["auth"], summary: "Regenerate OAuth client secret" } },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -533,5 +534,4 @@ export const authOAuthServerRoutes = new Elysia({ prefix: "/v1/projects/:ref/aut
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
       return proxyGoTrueAdmin(ctx, { kind: "regenerate", clientId: params.clientId }, request);
     },
-    { params: t.Object({ ref: t.String(), clientId: t.String() }), detail: { tags: ["auth"], summary: "Regenerate OAuth client secret" } },
   );

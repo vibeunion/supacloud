@@ -96,6 +96,20 @@ finally:
 PY
 }
 
+# Container --env-file values are literal, unlike systemd EnvironmentFile.
+supacloud_raw_env_value() {
+    python3 - "$1" "$2" <<'PY'
+import sys
+from pathlib import Path
+
+for line in Path(sys.argv[1]).read_text().splitlines():
+    key, separator, value = line.partition("=")
+    if separator and key == sys.argv[2]:
+        print(value, end="")
+        break
+PY
+}
+
 supacloud_env_value() {
     local env_file="$1"
     local key="$2"

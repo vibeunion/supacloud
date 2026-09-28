@@ -3,7 +3,6 @@ import { testTimeout } from './helpers/timeouts.js'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { withWindowsSubprocessRef } from '../scripts/subprocess.js'
 import { createProjectBackend } from '../src/project-runtime.js'
 
 const cliPath = resolve(import.meta.dir, '../src/cli.ts')
@@ -116,11 +115,11 @@ async function runCli(projectDir: string, command: string[]) {
     stdout: 'pipe',
     stderr: 'pipe',
   })
-  const [exitCode, stdout, stderr] = await withWindowsSubprocessRef(() => Promise.all([
+  const [exitCode, stdout, stderr] = await Promise.all([
     cliProcess.exited,
     new Response(cliProcess.stdout).text(),
     new Response(cliProcess.stderr).text(),
-  ]))
+  ])
   return { exitCode, stdout, stderr }
 }
 

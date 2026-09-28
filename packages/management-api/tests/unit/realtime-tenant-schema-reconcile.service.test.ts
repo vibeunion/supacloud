@@ -496,6 +496,7 @@ class FakeStore implements RealtimeTenantSchemaReconcileStore {
 
 class FakeRpc implements RealtimeTenantSchemaRpc {
   migrationsRan = 1;
+  migrationVersions = [...RELEASE_VERSIONS];
   plans: RealtimePgdeltaPlan[] = [];
   operations: string[] = [];
   updateError?: Error;
@@ -510,10 +511,10 @@ class FakeRpc implements RealtimeTenantSchemaRpc {
   async inspect(projectRef: string): Promise<RealtimeRuntimeSnapshot> {
     this.operations.push("rpc-inspect");
     return {
-      runtimeVersion: "2.133.0",
+      runtimeVersion: "2.138.1",
       tenantExternalId: projectRef,
       tenantMigrationsRan: this.migrationsRan,
-      migrationVersions: [...RELEASE_VERSIONS],
+      migrationVersions: [...this.migrationVersions],
     };
   }
 
@@ -579,6 +580,25 @@ async function backupReceipt(identity = databaseIdentity()): Promise<string> {
 }
 
 describe("RealtimeTenantSchemaReconcileService", () => {
+  test.each(["20260914120000", "20260916120000", "20260922120000"])(
+    "does not certify permission migration %s from a pgdelta no_changes result",
+    async (version) => {
+      const store = new FakeStore();
+      store.inventory = emptyLegacyInventory();
+      const rpc = new FakeRpc();
+      rpc.migrationVersions.push(version);
+      rpc.plans.push(NO_CHANGES, NO_CHANGES, NO_CHANGES);
+      const service = new RealtimeTenantSchemaReconcileService(rpc, store);
+      const plan = await service.plan("tenant_one");
+      await expect(service.apply(plan, {
+        backupReceiptPath: await backupReceipt(),
+        verifyBackupCatalog,
+      })).rejects.toThrow("official Realtime permission migrations must run");
+      expect(store.inserted).toBe(false);
+      expect(rpc.operations).not.toContain("rpc-update-ledger-count");
+    },
+  );
+
   test("guards platform ACL revokes against raw catalog entries", async () => {
     const source = await readFile(
       new URL("../../scripts/reconcile-realtime-tenant-schema.ts", import.meta.url),
@@ -1224,7 +1244,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
       if (joined.includes("set -- /app/lib/realtime-*/priv/repo")) {
         return {
           exitCode: 0,
-          stdout: "PGDELTA=/usr/local/bin/pgdelta\nSCHEMA=/app/lib/realtime-2.133.0/priv/repo/tenant_schema\nPROFILE=/app/lib/realtime-2.133.0/priv/repo/pgdelta_profile.json\nMANIFEST=/app/lib/realtime-2.133.0/priv/repo/tenant_schema/.pgdelta-export.json\n",
+          stdout: "PGDELTA=/usr/local/bin/pgdelta\nSCHEMA=/app/lib/realtime-2.138.1/priv/repo/tenant_schema\nPROFILE=/app/lib/realtime-2.138.1/priv/repo/pgdelta_profile.json\nMANIFEST=/app/lib/realtime-2.138.1/priv/repo/tenant_schema/.pgdelta-export.json\n",
           stderr: "",
         };
       }
@@ -1264,7 +1284,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
       if (joined.includes("set -- /app/lib/realtime-*/priv/repo")) {
         return {
           exitCode: 0,
-          stdout: "PGDELTA=/usr/local/bin/pgdelta\nSCHEMA=/app/lib/realtime-2.133.0/priv/repo/tenant_schema\nPROFILE=/app/lib/realtime-2.133.0/priv/repo/pgdelta_profile.json\nMANIFEST=/app/lib/realtime-2.133.0/priv/repo/tenant_schema/.pgdelta-export.json\n",
+          stdout: "PGDELTA=/usr/local/bin/pgdelta\nSCHEMA=/app/lib/realtime-2.138.1/priv/repo/tenant_schema\nPROFILE=/app/lib/realtime-2.138.1/priv/repo/pgdelta_profile.json\nMANIFEST=/app/lib/realtime-2.138.1/priv/repo/tenant_schema/.pgdelta-export.json\n",
           stderr: "",
         };
       }
@@ -1301,7 +1321,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
     expect(pgdeltaCall?.argv.join(" ")).not.toContain("top-secret-database-password");
     expect(pgdeltaCall?.argv.join(" ")).toContain("postgresql://supabase_admin@127.0.0.1:5432/supa_tenant_one");
     expect(pgdeltaCall?.argv.join(" ")).toContain("--dir /tmp/supacloud-realtime-reconcile.test1/schema");
-    expect(pgdeltaCall?.argv.join(" ")).not.toContain("/app/lib/realtime-2.133.0/priv/repo/tenant_schema");
+    expect(pgdeltaCall?.argv.join(" ")).not.toContain("/app/lib/realtime-2.138.1/priv/repo/tenant_schema");
     expect(calls.filter((call) => call.argv.join(" ").includes("supacloud-stage-schema")).length)
       .toBe(SCHEMA_FILES.length + 1);
   });
@@ -1325,7 +1345,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
       }),
     });
 
-    await expect(rpc.inspect("tenant_one")).rejects.toThrow("verified 2.133.0 digest");
+    await expect(rpc.inspect("tenant_one")).rejects.toThrow("verified 2.138.1 digest");
     expect(calls).toHaveLength(1);
   });
 
@@ -1338,7 +1358,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
             Image: `sha256:${"f".repeat(64)}`,
             Descriptor: {
               annotations: {
-                note: "sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb",
+                note: "sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e",
               },
             },
           }),
@@ -1356,7 +1376,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
       }),
     });
 
-    await expect(rpc.inspect("tenant_one")).rejects.toThrow("verified 2.133.0 digest");
+    await expect(rpc.inspect("tenant_one")).rejects.toThrow("verified 2.138.1 digest");
   });
 
   test("rejects conflicting known image identity fields", async () => {
@@ -1365,7 +1385,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
         return {
           exitCode: 0,
           stdout: JSON.stringify({
-            Image: "sha256:bcaec521eb08dc811d88119ee5bcac7671188d8937cffc12d3bf23c890bb636b",
+            Image: "sha256:b069a8f97f0d05eadd5a18aebce08f051b3b8e07d6c120eef457f5d24f2523dd",
             ImageDigest: `sha256:${"f".repeat(64)}`,
           }),
           stderr: "",
@@ -1382,7 +1402,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
       }),
     });
 
-    await expect(rpc.inspect("tenant_one")).rejects.toThrow("verified 2.133.0 digest");
+    await expect(rpc.inspect("tenant_one")).rejects.toThrow("verified 2.138.1 digest");
   });
 
   test("rejects conflicting aliases for the same known image identity field", async () => {
@@ -1391,8 +1411,8 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
         return {
           exitCode: 0,
           stdout: JSON.stringify({
-            Image: "sha256:bcaec521eb08dc811d88119ee5bcac7671188d8937cffc12d3bf23c890bb636b",
-            ImageDigest: "sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb",
+            Image: "sha256:b069a8f97f0d05eadd5a18aebce08f051b3b8e07d6c120eef457f5d24f2523dd",
+            ImageDigest: "sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e",
             imageDigest: `sha256:${"f".repeat(64)}`,
           }),
           stderr: "",
@@ -1409,12 +1429,12 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
       }),
     });
 
-    await expect(rpc.inspect("tenant_one")).rejects.toThrow("verified 2.133.0 digest");
+    await expect(rpc.inspect("tenant_one")).rejects.toThrow("verified 2.138.1 digest");
   });
 
   test("rejects conflicts across every explicit image identity alias group", async () => {
-    const officialIndex = "sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb";
-    const officialConfig = "bcaec521eb08dc811d88119ee5bcac7671188d8937cffc12d3bf23c890bb636b";
+    const officialIndex = "sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e";
+    const officialConfig = "b069a8f97f0d05eadd5a18aebce08f051b3b8e07d6c120eef457f5d24f2523dd";
     const bad = `sha256:${"f".repeat(64)}`;
     const cases: Array<Record<string, unknown>> = [
       { Image: officialConfig, ImageID: bad },
@@ -1452,7 +1472,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
         }),
       });
 
-      await expect(rpc.inspect("tenant_one")).rejects.toThrow("verified 2.133.0 digest");
+      await expect(rpc.inspect("tenant_one")).rejects.toThrow("verified 2.138.1 digest");
     }
   });
 
@@ -1462,7 +1482,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
         return {
           exitCode: 0,
           stdout: JSON.stringify({
-            Id: "974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb",
+            Id: "7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e",
             Image: "f".repeat(64),
           }),
           stderr: "",
@@ -1479,20 +1499,20 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
       }),
     });
 
-    await expect(rpc.inspect("tenant_one")).rejects.toThrow("verified 2.133.0 digest");
+    await expect(rpc.inspect("tenant_one")).rejects.toThrow("verified 2.138.1 digest");
   });
 
   test("rejects malformed non-exact digests in populated known fields", async () => {
     for (const imageDigest of [
-      "junk sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb trailing",
-      "sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefbf",
+      "junk sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e trailing",
+      "sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567ef",
     ]) {
       const rpc = new ContainerRealtimeTenantSchemaRpc(async (argv) => {
         if (argv.includes("inspect")) {
           return {
             exitCode: 0,
             stdout: JSON.stringify({
-              Image: "bcaec521eb08dc811d88119ee5bcac7671188d8937cffc12d3bf23c890bb636b",
+              Image: "b069a8f97f0d05eadd5a18aebce08f051b3b8e07d6c120eef457f5d24f2523dd",
               ImageDigest: imageDigest,
             }),
             stderr: "",
@@ -1509,7 +1529,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
         }),
       });
 
-      await expect(rpc.inspect("tenant_one")).rejects.toThrow("verified 2.133.0 digest");
+      await expect(rpc.inspect("tenant_one")).rejects.toThrow("verified 2.138.1 digest");
     }
   });
 
@@ -1521,9 +1541,9 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
           stdout: JSON.stringify({
             Id: "7e47e076f15caa923c5289a53ff5aa009ea5f0cebb1bb37f9eb0a11524ce78c1",
             Name: "supacloud-realtime",
-            Image: "bcaec521eb08dc811d88119ee5bcac7671188d8937cffc12d3bf23c890bb636b",
-            ImageName: "public.ecr.aws/supabase/realtime:v2.133.0",
-            ImageDigest: "sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb",
+            Image: "b069a8f97f0d05eadd5a18aebce08f051b3b8e07d6c120eef457f5d24f2523dd",
+            ImageName: "public.ecr.aws/supabase/realtime:v2.138.1",
+            ImageDigest: "sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e",
             Architecture: null,
             ImageManifestDescriptor: null,
             RepoDigests: null,
@@ -1533,7 +1553,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
       }
       if (argv.includes("rpc")) {
         const payload = Buffer.from(JSON.stringify({
-          runtimeVersion: "2.133.0",
+          runtimeVersion: "2.138.1",
           tenantExternalId: "tenant_one",
           tenantMigrationsRan: 1,
           migrationVersions: RELEASE_VERSIONS,
@@ -1551,7 +1571,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
       }),
     });
 
-    await expect(rpc.inspect("tenant_one")).resolves.toMatchObject({ runtimeVersion: "2.133.0" });
+    await expect(rpc.inspect("tenant_one")).resolves.toMatchObject({ runtimeVersion: "2.138.1" });
   });
 
   test("accepts the pinned Docker ARM64 index and platform manifest identity", async () => {
@@ -1560,9 +1580,9 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
         return {
           exitCode: 0,
           stdout: JSON.stringify({
-            Image: "sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb",
+            Image: "sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e",
             ImageManifestDescriptor: {
-              digest: "sha256:172c1b386ed7b5969bd7fbce8e31b3c65050e0c39f4191bd637d6de811b81315",
+              digest: "sha256:839743c3294d69d9eef0d2909338b40be1da1fe58114129e510dfd2fe2020c79",
               platform: { architecture: "arm64", os: "linux" },
             },
           }),
@@ -1571,7 +1591,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
       }
       if (argv.includes("rpc")) {
         const payload = Buffer.from(JSON.stringify({
-          runtimeVersion: "2.133.0",
+          runtimeVersion: "2.138.1",
           tenantExternalId: "tenant_one",
           tenantMigrationsRan: 1,
           migrationVersions: RELEASE_VERSIONS,
@@ -1589,7 +1609,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
       }),
     });
 
-    await expect(rpc.inspect("tenant_one")).resolves.toMatchObject({ runtimeVersion: "2.133.0" });
+    await expect(rpc.inspect("tenant_one")).resolves.toMatchObject({ runtimeVersion: "2.138.1" });
   });
 
   test("rejects an official manifest when it does not match the inspected architecture", async () => {
@@ -1598,9 +1618,9 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
         return {
           exitCode: 0,
           stdout: JSON.stringify({
-            Image: "sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb",
+            Image: "sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e",
             ImageManifestDescriptor: {
-              digest: "sha256:109c6ea8ecd6c84c3b36047fe78a055c27702f6d9e19c441958b129a9bd468c3",
+              digest: "sha256:023cd658da8212c67d12eb1a43914bab67e1a3ea51f731a385ad7596d8226ec0",
               platform: { architecture: "arm64", os: "linux" },
             },
           }),
@@ -1618,7 +1638,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
       }),
     });
 
-    await expect(rpc.inspect("tenant_one")).rejects.toThrow("verified 2.133.0 digest");
+    await expect(rpc.inspect("tenant_one")).rejects.toThrow("verified 2.138.1 digest");
   });
 
   test("keeps the database password out of apply argv", async () => {
@@ -1629,7 +1649,7 @@ describe("ContainerRealtimeTenantSchemaRpc", () => {
       if (joined.includes("set -- /app/lib/realtime-*/priv/repo")) {
         return {
           exitCode: 0,
-          stdout: "PGDELTA=/usr/local/bin/pgdelta\nSCHEMA=/app/lib/realtime-2.133.0/priv/repo/tenant_schema\nPROFILE=/app/lib/realtime-2.133.0/priv/repo/pgdelta_profile.json\nMANIFEST=/app/lib/realtime-2.133.0/priv/repo/tenant_schema/.pgdelta-export.json\n",
+          stdout: "PGDELTA=/usr/local/bin/pgdelta\nSCHEMA=/app/lib/realtime-2.138.1/priv/repo/tenant_schema\nPROFILE=/app/lib/realtime-2.138.1/priv/repo/pgdelta_profile.json\nMANIFEST=/app/lib/realtime-2.138.1/priv/repo/tenant_schema/.pgdelta-export.json\n",
           stderr: "",
         };
       }

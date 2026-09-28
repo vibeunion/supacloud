@@ -510,9 +510,11 @@ export class HttpTransport {
     async postMultipart<T = unknown>(
         path: string,
         formData: FormData,
-        options?: { timeoutMs?: number },
+        options?: HttpPostOptions,
     ): Promise<HttpResult<T>> {
         const timeoutMs = validatedPostTimeout(options);
+        const maxJsonBytes = validatedJsonResponseLimit(options?.maxJsonBytes);
+        const responseTimeoutMs = validatedResponseTimeout(options?.responseTimeoutMs);
         try {
             const headers = { Authorization: `Bearer ${this.token}` };
             const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
@@ -520,6 +522,12 @@ export class HttpTransport {
                 headers,
                 body: formData,
             }, timeoutMs, this.insecureTls);
+            if (maxJsonBytes !== undefined) {
+                const data = await boundedResponseJson(res, maxJsonBytes, responseTimeoutMs);
+                return data === null
+                    ? responseReadFailure<T>(res.status)
+                    : { ok: res.ok, status: res.status, data: data as T };
+            }
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {
@@ -541,13 +549,22 @@ export class HttpTransport {
         }
     }
 
-    async put<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
+    async put<T = unknown>(path: string, body?: unknown, options?: HttpPostOptions): Promise<HttpResult<T>> {
+        const timeoutMs = validatedPostTimeout(options);
+        const maxJsonBytes = validatedJsonResponseLimit(options?.maxJsonBytes);
+        const responseTimeoutMs = validatedResponseTimeout(options?.responseTimeoutMs);
         try {
             const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
                 method: "PUT",
                 headers: this.headers(),
                 body: body ? JSON.stringify(body) : undefined,
-            }, DEFAULT_TIMEOUT, this.insecureTls);
+            }, timeoutMs, this.insecureTls);
+            if (maxJsonBytes !== undefined) {
+                const data = await boundedResponseJson(res, maxJsonBytes, responseTimeoutMs);
+                return data === null
+                    ? responseReadFailure<T>(res.status)
+                    : { ok: res.ok, status: res.status, data: data as T };
+            }
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {

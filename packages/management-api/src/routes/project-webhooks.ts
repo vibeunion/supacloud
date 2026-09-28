@@ -33,7 +33,7 @@ function actorId(request: Request): string {
 }
 
 export const projectWebhookRoutes = new Elysia({ prefix: "/v1/projects/:ref/webhooks" })
-  .onBeforeHandle(async ({ params, request }) => {
+  .beforeHandle(async ({ params, request }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
     try {
@@ -42,16 +42,23 @@ export const projectWebhookRoutes = new Elysia({ prefix: "/v1/projects/:ref/webh
       return toHttpError(error);
     }
   })
-  .get("", async ({ params }) => {
+  .get("", {
+    detail: { tags: ["webhooks"], summary: "List project webhooks" },
+  }, async ({ params }) => {
     try {
       return await webhookDeliveryService.listWebhooks(params.ref);
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    detail: { tags: ["webhooks"], summary: "List project webhooks" },
   })
-  .post("", async ({ params, body, request, set }) => {
+  .post("", {
+    body: t.Object({
+      url: t.String(),
+      events: t.Array(t.String()),
+      enabled: t.Optional(t.Boolean()),
+    }, { additionalProperties: false }),
+    detail: { tags: ["webhooks"], summary: "Create a durable project webhook" },
+  }, async ({ params, body, request, set }) => {
     try {
       const webhook = await webhookDeliveryService.createWebhook(params.ref, body, actorId(request));
       set.status = 201;
@@ -59,24 +66,8 @@ export const projectWebhookRoutes = new Elysia({ prefix: "/v1/projects/:ref/webh
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    body: t.Object({
-      url: t.String(),
-      events: t.Array(t.String()),
-      enabled: t.Optional(t.Boolean()),
-    }, { additionalProperties: false }),
-    detail: { tags: ["webhooks"], summary: "Create a durable project webhook" },
   })
-  .post("/events", async ({ params, body, request, set }) => {
-    try {
-      const idempotencyKey = request.headers.get("idempotency-key") || body.idempotency_key || "";
-      const result = await webhookDeliveryService.enqueueEvent(params.ref, body, idempotencyKey, actorId(request));
-      set.status = 202;
-      return result;
-    } catch (error) {
-      return toHttpError(error);
-    }
-  }, {
+  .post("/events", {
     body: t.Object({
       id: t.Optional(t.String()),
       type: t.String(),
@@ -86,8 +77,27 @@ export const projectWebhookRoutes = new Elysia({ prefix: "/v1/projects/:ref/webh
       idempotency_key: t.Optional(t.String()),
     }, { additionalProperties: false }),
     detail: { tags: ["webhooks"], summary: "Persist a project webhook event in the durable outbox" },
+  }, async ({ params, body, request, set }) => {
+    try {
+      const idempotencyKey = request.headers.get("idempotency-key") || body.idempotency_key || "";
+      const result = await webhookDeliveryService.enqueueEvent(params.ref, body, idempotencyKey, actorId(request));
+      set.status = 202;
+      return result;
+    } catch (error) {
+      return toHttpError(error);
+    }
   })
-  .get("/:webhookId/deliveries", async ({ params, query }) => {
+  .get("/:webhookId/deliveries", {
+    query: t.Object({
+      cursor: t.Optional(t.String()),
+      limit: t.Optional(t.String()),
+      status: t.Optional(t.String()),
+      event: t.Optional(t.String()),
+      from: t.Optional(t.String()),
+      to: t.Optional(t.String()),
+    }, { additionalProperties: true }),
+    detail: { tags: ["webhooks"], summary: "List webhook deliveries with cursor pagination" },
+  }, async ({ params, query }) => {
     try {
       return await webhookDeliveryService.listDeliveries(params.ref, params.webhookId, {
         cursor: query.cursor,
@@ -100,27 +110,19 @@ export const projectWebhookRoutes = new Elysia({ prefix: "/v1/projects/:ref/webh
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    query: t.Object({
-      cursor: t.Optional(t.String()),
-      limit: t.Optional(t.String()),
-      status: t.Optional(t.String()),
-      event: t.Optional(t.String()),
-      from: t.Optional(t.String()),
-      to: t.Optional(t.String()),
-    }, { additionalProperties: true }),
-    detail: { tags: ["webhooks"], summary: "List webhook deliveries with cursor pagination" },
   })
-  .get("/:webhookId/deliveries/:deliveryId", async ({ params }) => {
+  .get("/:webhookId/deliveries/:deliveryId", {
+    detail: { tags: ["webhooks"], summary: "Get one webhook delivery attempt" },
+  }, async ({ params }) => {
     try {
       return await webhookDeliveryService.getDelivery(params.ref, params.webhookId, params.deliveryId);
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    detail: { tags: ["webhooks"], summary: "Get one webhook delivery attempt" },
   })
-  .post("/:webhookId/deliveries/:deliveryId/replay", async ({ params, request, set }) => {
+  .post("/:webhookId/deliveries/:deliveryId/replay", {
+    detail: { tags: ["webhooks"], summary: "Replay an immutable webhook delivery" },
+  }, async ({ params, request, set }) => {
     try {
       const result = await webhookDeliveryService.replayDelivery(
         params.ref,
@@ -133,12 +135,13 @@ export const projectWebhookRoutes = new Elysia({ prefix: "/v1/projects/:ref/webh
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    detail: { tags: ["webhooks"], summary: "Replay an immutable webhook delivery" },
   })
   // One-minor compatibility alias. It reads v2 delivery records and never
   // falls back to the old config blob.
-  .get("/:webhookId/logs", async ({ params, query }) => {
+  .get("/:webhookId/logs", {
+    query: t.Object({ cursor: t.Optional(t.String()), limit: t.Optional(t.String()) }, { additionalProperties: true }),
+    detail: { tags: ["webhooks"], summary: "List webhook deliveries (deprecated logs alias)", deprecated: true },
+  }, async ({ params, query }) => {
     try {
       return await webhookDeliveryService.listDeliveries(params.ref, params.webhookId, {
         cursor: query.cursor,
@@ -147,11 +150,11 @@ export const projectWebhookRoutes = new Elysia({ prefix: "/v1/projects/:ref/webh
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    query: t.Object({ cursor: t.Optional(t.String()), limit: t.Optional(t.String()) }, { additionalProperties: true }),
-    detail: { tags: ["webhooks"], summary: "List webhook deliveries (deprecated logs alias)", deprecated: true },
   })
-  .post("/:webhookId/replay", async ({ params, body, request, set }) => {
+  .post("/:webhookId/replay", {
+    body: t.Object({ delivery_id: t.Optional(t.String()) }, { additionalProperties: true }),
+    detail: { tags: ["webhooks"], summary: "Replay a webhook delivery (deprecated alias)", deprecated: true },
+  }, async ({ params, body, request, set }) => {
     try {
       if (!body.delivery_id) throw new ValidationError("delivery_id is required; custom replay payloads are not supported");
       const result = await webhookDeliveryService.replayDelivery(
@@ -165,20 +168,20 @@ export const projectWebhookRoutes = new Elysia({ prefix: "/v1/projects/:ref/webh
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    body: t.Object({ delivery_id: t.Optional(t.String()) }, { additionalProperties: false }),
-    detail: { tags: ["webhooks"], summary: "Replay a webhook delivery (deprecated alias)", deprecated: true },
   })
-  .post("/:webhookId/rotate-secret", async ({ params }) => {
+  .post("/:webhookId/rotate-secret", {
+    detail: { tags: ["webhooks"], summary: "Rotate a webhook signing secret" },
+  }, async ({ params }) => {
     try {
       return await webhookDeliveryService.rotateSecret(params.ref, params.webhookId);
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    detail: { tags: ["webhooks"], summary: "Rotate a webhook signing secret" },
   })
-  .post("/:webhookId/test", async ({ params, body, request, set }) => {
+  .post("/:webhookId/test", {
+    body: t.Optional(t.Record(t.String(), t.Unknown())),
+    detail: { tags: ["webhooks"], summary: "Queue a server-generated webhook test event" },
+  }, async ({ params, body, request, set }) => {
     try {
       if (body && Object.keys(body).length > 0) {
         throw new ValidationError("test payload is server-generated and cannot be supplied by the caller");
@@ -189,40 +192,37 @@ export const projectWebhookRoutes = new Elysia({ prefix: "/v1/projects/:ref/webh
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    body: t.Optional(t.Record(t.String(), t.Unknown())),
-    detail: { tags: ["webhooks"], summary: "Queue a server-generated webhook test event" },
   })
-  .get("/:webhookId", async ({ params }) => {
+  .get("/:webhookId", {
+    detail: { tags: ["webhooks"], summary: "Get a project webhook" },
+  }, async ({ params }) => {
     try {
       return await webhookDeliveryService.getWebhook(params.ref, params.webhookId);
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    detail: { tags: ["webhooks"], summary: "Get a project webhook" },
   })
-  .put("/:webhookId", async ({ params, body }) => {
-    try {
-      return await webhookDeliveryService.updateWebhook(params.ref, params.webhookId, body);
-    } catch (error) {
-      return toHttpError(error);
-    }
-  }, {
+  .put("/:webhookId", {
     body: t.Object({
       url: t.Optional(t.String()),
       events: t.Optional(t.Array(t.String())),
       enabled: t.Optional(t.Boolean()),
     }, { additionalProperties: false }),
     detail: { tags: ["webhooks"], summary: "Update a project webhook" },
+  }, async ({ params, body }) => {
+    try {
+      return await webhookDeliveryService.updateWebhook(params.ref, params.webhookId, body);
+    } catch (error) {
+      return toHttpError(error);
+    }
   })
-  .delete("/:webhookId", async ({ params }) => {
+  .delete("/:webhookId", {
+    detail: { tags: ["webhooks"], summary: "Delete a project webhook" },
+  }, async ({ params }) => {
     try {
       await webhookDeliveryService.deleteWebhook(params.ref, params.webhookId);
       return { deleted: true, webhook_id: params.webhookId };
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    detail: { tags: ["webhooks"], summary: "Delete a project webhook" },
   });

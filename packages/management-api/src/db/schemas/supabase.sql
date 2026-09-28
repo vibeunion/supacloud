@@ -24,11 +24,17 @@ BEGIN
     IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_storage_admin') THEN
         CREATE ROLE supabase_storage_admin NOLOGIN NOINHERIT;
     END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'dashboard_user') THEN
+        CREATE ROLE dashboard_user NOLOGIN NOINHERIT;
+    END IF;
 END
 $$;
 
 -- Ensure existing clusters also grant replication to supabase_admin
 ALTER ROLE supabase_admin WITH REPLICATION;
+-- Official Realtime migrations define functions with SET log_min_messages.
+GRANT SET ON PARAMETER log_min_messages TO supabase_admin;
+GRANT supabase_realtime_admin TO supabase_admin WITH ADMIN TRUE, INHERIT TRUE, SET TRUE;
 
 -- Grant roles to postgres/authenticator
 GRANT anon TO postgres;
@@ -479,6 +485,9 @@ CREATE SCHEMA IF NOT EXISTS realtime;
 ALTER SCHEMA realtime OWNER TO supabase_admin;
 GRANT USAGE, CREATE ON SCHEMA realtime TO supabase_admin, supabase_realtime_admin;
 GRANT USAGE ON SCHEMA realtime TO anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA public TO supabase_admin, supabase_realtime_admin;
+-- CDC evaluates each subscription using its JWT role and claims.
+GRANT anon, authenticated, service_role TO supabase_admin WITH INHERIT FALSE, SET TRUE;
 
 -- Official Realtime migrations own the schema's tables, types, and protocol functions.
 -- SupaCloud only installs its LISTEN/NOTIFY and task-publication helpers here.

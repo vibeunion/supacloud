@@ -13,6 +13,10 @@ import {
 export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
     "/:ref/internal/runtime-env",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get project runtime environment" },
+    },
     async ({ params, request, set }) => {
       const auth = await getAuthContext(request);
       if ("status" in auth) return status(auth.status, auth.body);
@@ -25,14 +29,14 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
       set.headers["x-supacloud-runtime-env-revision"] = runtimeEnvRevision(params.ref, env);
       return env;
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["projects"], summary: "Get project runtime environment" },
-    },
   )
 
   .get(
     "/:ref/secrets",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "List project secrets" },
+    },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -50,14 +54,20 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
           value: "********",
         }));
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["projects"], summary: "List project secrets" },
-    },
   )
 
   .post(
     "/:ref/secrets",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Array(
+        t.Object({
+          name: t.String({ maxLength: 256 }),
+          value: t.String({ maxLength: 24576 }),
+        }),
+      ),
+      detail: { tags: ["projects"], summary: "Create or update project secrets" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -83,20 +93,15 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return {};
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Array(
-        t.Object({
-          name: t.String({ maxLength: 256 }),
-          value: t.String({ maxLength: 24576 }),
-        }),
-      ),
-      detail: { tags: ["projects"], summary: "Create or update project secrets" },
-    },
   )
 
   .delete(
     "/:ref/secrets",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Array(t.Union([t.String(), t.Object({ name: t.String() })])),
+      detail: { tags: ["projects"], summary: "Bulk delete project secrets" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -128,15 +133,14 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return {};
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Array(t.Union([t.String(), t.Object({ name: t.String() })])),
-      detail: { tags: ["projects"], summary: "Bulk delete project secrets" },
-    },
   )
 
   .delete(
     "/:ref/secrets/:name",
+    {
+      params: t.Object({ ref: t.String(), name: t.String() }),
+      detail: { tags: ["projects"], summary: "Delete a project secret by name" },
+    },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -154,9 +158,5 @@ export const projectSecretsRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(503, { message: "Runtime environment invalidation failed", code: "503" });
       }
       return {};
-    },
-    {
-      params: t.Object({ ref: t.String(), name: t.String() }),
-      detail: { tags: ["projects"], summary: "Delete a project secret by name" },
     },
   );

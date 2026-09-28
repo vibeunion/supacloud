@@ -73,7 +73,7 @@ export function beginRequestObservability(request: Request): RequestObservabilit
 }
 
 export function applyObservabilityHeaders(
-  headers: Record<string, string | number>,
+  headers: Record<string, string | number | string[]>,
   context: RequestObservabilityContext,
 ): void {
   headers["x-request-id"] ??= context.requestId;

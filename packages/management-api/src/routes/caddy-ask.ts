@@ -81,6 +81,13 @@ export function createCaddyAskRoutes(options: CaddyAskRoutesOptions = {}) {
 
   return new Elysia({ name: "caddy-ask-routes" }).get(
     "/v1/gateway/caddy/ask",
+    {
+      query: t.Object({
+        domain: t.Optional(t.String({ maxLength: 512 })),
+        host: t.Optional(t.String({ maxLength: 512 })),
+      }),
+      detail: { tags: ["gateway"], summary: "Authorize Caddy On-Demand TLS domain" },
+    },
     async ({ query, request }) => {
       const peerAddress = resolvePeerAddress(request);
       const forwardedClient = hasForwardedClientAddress(request);
@@ -125,13 +132,6 @@ export function createCaddyAskRoutes(options: CaddyAskRoutesOptions = {}) {
         ? undefined
         : { "retry-after": String(result.retryAfterSeconds) };
       return new Response(responseText(result), { status: result.status, headers });
-    },
-    {
-      query: t.Object({
-        domain: t.Optional(t.String({ maxLength: 512 })),
-        host: t.Optional(t.String({ maxLength: 512 })),
-      }),
-      detail: { tags: ["gateway"], summary: "Authorize Caddy On-Demand TLS domain" },
     },
   );
 }

@@ -49,21 +49,25 @@
   "dependencies": {
     "@supacloud/app": "file:../app",
     "@supacloud/contracts": "file:../contracts",
-    "jose": "^6.2.11"
+    "exact-mirror": "1.2.6",
+    "jose": "^6.2.11",
+    "typebox": "1.3.34"
   },
   "overrides": {
+    "@supacloud/delivery": "file:../delivery",
     "@supacloud/contracts": "file:../contracts",
     "@supacloud/commands": "file:../commands"
   },
   "peerDependencies": {
-    "elysia": "^1.4.30"
+    "elysia": ">=2.0.0-beta.19 <3"
   },
   "devDependencies": {
     "@supacloud/compiler": "file:../compiler",
+    "@supacloud/delivery": "file:../delivery",
     "@supacloud/commands": "file:../commands",
     "@supacloud/db": "file:../db",
     "@types/bun": "^1.4.2",
-    "elysia": "^1.4.30",
+    "elysia": "2.0.0-beta.19",
     "typescript": "^7.0.2"
   }
 }

@@ -1,0 +1,289 @@
+import { strict as assert } from "node:assert";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { decodeJwt, exportJWK, generateKeyPair, SignJWT } from "jose";
+import { buildDeliveryProject, compileOptionsFromConfig, loadSupacloudConfig } from "@supacloud/compiler";
+import type { CommandDatabase } from "@supacloud/db";
+import { prepareArchivedDelivery, type ArchivedDelivery } from "./delivery-archive";
+
+export interface ReviewDeliveryIdentity {
+  issuer: string;
+  audience: string;
+  clientId: string;
+  jwksUrl: string;
+  ownerSubject: string;
+  otherSubject: string;
+  tokens: { owner: string; other: string; wrongAudience: string };
+  /** Monotonic counter scoped to this fixture's JWKS endpoint/consumers. */
+  jwksRequestCount(): Promise<number>;
+}
+
+// Runtime settings cannot override identity, database, listener or TLS verification.
+export type ReviewDeliveryRuntimeEnv = Partial<Record<
+  "PATH" | "TZ" | "HTTP_PROXY" | "HTTPS_PROXY" | "NO_PROXY" | "NODE_EXTRA_CA_CERTS", string
+>>;
+
+// The default profile uses a local issuer; injected identity still uses real signature verification.
+export async function verifyReviewDelivery(options: {
+  database: CommandDatabase;
+  databaseUrl?: string;
+  connection?: { socketPath: string; database: string; username: string };
+  storage?: { url: string; serviceRoleKey: string };
+  beforeApproval?(origin: URL, bearer: string, reviewId: string): Promise<void>;
+  signal: AbortSignal;
+  artifact?: ArchivedDelivery;
+  identity?: ReviewDeliveryIdentity;
+  binding?: { projectId: string; tenantId: string; wrongTenantId: string };
+  runtimeEnv?: ReviewDeliveryRuntimeEnv;
+}) {
+  const binding = options.binding ?? {
+    projectId: "starter-test", tenantId: "starter-test", wrongTenantId: "other",
+  };
+  assert.ok(Object.values(binding).every(value => typeof value === "string" && value.trim()));
+  assert.notEqual(binding.tenantId, binding.wrongTenantId);
+  for (const name of Object.keys(options.runtimeEnv ?? {})) {
+    assert.ok(["PATH", "TZ", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "NODE_EXTRA_CA_CERTS"].includes(name),
+      "Unsupported fixture runtime environment setting");
+  }
+  if (options.identity) {
+    const identity = options.identity;
+    assert.ok([identity.audience, identity.clientId, identity.ownerSubject, identity.otherSubject,
+      ...Object.values(identity.tokens)].every(value => typeof value === "string" && value.trim()),
+    "Injected identity requires subjects and all authentication test tokens");
+    assert.notEqual(identity.ownerSubject, identity.otherSubject);
+    assert.equal(typeof identity.jwksRequestCount, "function", "Injected identity requires JWKS observation");
+    // These checks validate test inputs only; the detached host still verifies signatures.
+    for (const [bearer, subject, audienceMatches] of [
+      [identity.tokens.owner, identity.ownerSubject, true],
+      [identity.tokens.other, identity.otherSubject, true],
+      [identity.tokens.wrongAudience, identity.ownerSubject, false],
+    ] as const) {
+      let claims: ReturnType<typeof decodeJwt>;
+      try { claims = decodeJwt(bearer); }
+      catch { throw new Error("Invalid injected test token"); }
+      assert.ok(claims.sub === subject && claims.iss === identity.issuer &&
+        (claims.client_id ?? claims.azp) === identity.clientId && claims.role === "authenticated",
+      "Injected token identity does not match its test case");
+      const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+      assert.ok(audiences.includes(identity.audience) === audienceMatches,
+        "Injected token audience does not match its test case");
+    }
+    for (const endpoint of [identity.issuer, identity.jwksUrl]) {
+      const parsed = new URL(endpoint);
+      assert.ok(parsed.protocol === "https:" && !parsed.username && !parsed.password && !parsed.hash,
+        "Identity endpoints must be credential-free HTTPS URLs");
+    }
+  }
+  let artifact = options.artifact;
+  if (!artifact) {
+    const project = fileURLToPath(new URL("..", import.meta.url));
+    const config = await loadSupacloudConfig(project);
+    const compile = compileOptionsFromConfig(config, project);
+    options.signal.throwIfAborted();
+    const built = await buildDeliveryProject(compile, {
+      version: 1,
+      // This owned native test target has canonical Workflow SQL and child processes.
+      // The Job artifact stays a factory; this declaration does not activate a worker.
+      runtime: { processIsolation: true, durableQueue: true, capabilities: [] },
+      build: {
+        migrations: config.delivery?.build?.migrations,
+        httpApplications: [{ target: "api", source: "delivery-host.ts" }],
+      },
+    });
+    options.signal.throwIfAborted();
+    assert.ok(built.ok, JSON.stringify(built.diagnostics));
+    const object = built.manifest.objects.find(entry => entry.name === "api");
+    assert.ok(object);
+    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/")).length, 4);
+    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/project-migration/")).length, 2);
+    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/operator-provisioning/")).length, 2);
+    assert.equal(object.entryKind, "bun-http-application");
+    assert.equal(built.manifest.deploymentReady, false);
+    assert.equal(built.manifest.objects.find(entry => entry.name === "jobs")?.entryKind, "compiled-module-factory");
+    artifact = { manifestPath: join(compile.outDir, "delivery/delivery.manifest.json"), objectId: object.objectId };
+  }
+  const detached = await mkdtemp(join(tmpdir(), "review-delivery-"));
+  let child: ReturnType<typeof Bun.spawn> | undefined;
+  let issuer: ReturnType<typeof Bun.serve> | undefined;
+  const interrupt = () => child?.kill("SIGTERM");
+  options.signal.addEventListener("abort", interrupt, { once: true });
+  try {
+    options.signal.throwIfAborted();
+    const { bundle: bundleDirectory } = await prepareArchivedDelivery(artifact, "api", detached);
+    let certificate: string | undefined;
+    let key: string | undefined;
+    let keys: Awaited<ReturnType<typeof generateKeyPair>> | undefined;
+    let publicKey: (Record<string, unknown> & { kid: string }) | undefined;
+    let jwksRequests = 0;
+    if (!options.identity) {
+      certificate = join(detached, "localhost.crt");
+      key = join(detached, "localhost.key");
+      const openssl = Bun.spawn([
+        "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1",
+        "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1",
+        "-keyout", key, "-out", certificate,
+      ], { stdout: "ignore", stderr: "pipe" });
+      const cancelCertificate = () => openssl.kill("SIGTERM");
+      options.signal.addEventListener("abort", cancelCertificate, { once: true });
+      const certificateDeadline = setTimeout(() => openssl.kill("SIGKILL"), 15_000);
+      try {
+        const [code] = await Promise.all([openssl.exited, new Response(openssl.stderr).text()]);
+        assert.equal(code, 0, "Could not generate the local JWKS test certificate");
+        options.signal.throwIfAborted();
+      } finally {
+        clearTimeout(certificateDeadline);
+        options.signal.removeEventListener("abort", cancelCertificate);
+        if (openssl.exitCode === null) { openssl.kill("SIGKILL"); await openssl.exited; }
+      }
+      keys = await generateKeyPair("ES256");
+      publicKey = { ...await exportJWK(keys.publicKey), kid: "local-delivery-test", alg: "ES256", use: "sig" };
+      issuer = Bun.serve({
+        hostname: "127.0.0.1", port: 0, tls: { cert: Bun.file(certificate), key: Bun.file(key) },
+        fetch(request) {
+          if (new URL(request.url).pathname !== "/jwks") return new Response(null, { status: 404 });
+          jwksRequests++;
+          return Response.json({ keys: [publicKey] });
+        },
+      });
+    }
+    const issuerUrl = options.identity?.issuer ?? issuer!.url.origin;
+    const jwksUrl = options.identity?.jwksUrl ?? issuerUrl + "/jwks";
+    const token = (subject: string, audience = "starter-test") => {
+      assert.ok(keys && publicKey, "Injected identity requires explicit test tokens");
+      return new SignJWT({
+        client_id: "starter-client", role: "authenticated",
+      }).setProtectedHeader({ alg: "ES256", kid: publicKey.kid }).setIssuer(issuerUrl).setAudience(audience)
+        .setSubject(subject).setIssuedAt().setExpirationTime("5m").sign(keys.privateKey);
+    };
+    const ownerSubject = options.identity?.ownerSubject ?? "owner";
+    const ownerToken = options.identity?.tokens.owner ?? await token("owner");
+    const env = {
+      PATH: process.env.PATH, ...options.runtimeEnv,
+      PORT: "0", HOST: "127.0.0.1", ...(certificate ? { NODE_EXTRA_CA_CERTS: certificate } : {}),
+      ...(options.connection ? {
+        DATABASE_SOCKET_PATH: options.connection.socketPath, DATABASE_NAME: options.connection.database,
+        DATABASE_USER: options.connection.username,
+      } : { DATABASE_URL: options.databaseUrl }),
+      ...(options.storage ? { REVIEW_ATTACHMENTS: "enabled", SUPACLOUD_URL: options.storage.url,
+        SUPACLOUD_SERVICE_ROLE_KEY: options.storage.serviceRoleKey } : {}),
+      APP_TENANT_ID: binding.tenantId,
+      SUPACLOUD_PROJECT_ID: binding.projectId, SUPAUTH_ISSUER: options.identity?.issuer ?? issuerUrl,
+      SUPAUTH_AUDIENCE: options.identity?.audience ?? "starter-test",
+      SUPAUTH_CLIENT_ID: options.identity?.clientId ?? "starter-client", SUPAUTH_JWKS_URL: jwksUrl,
+    };
+    const bundle = await readFile(join(bundleDirectory, "index.js"), "utf8");
+    if (options.databaseUrl) assert.ok(!bundle.includes(options.databaseUrl));
+    if (options.storage) assert.ok(!bundle.includes(options.storage.serviceRoleKey));
+    for (const bearer of Object.values(options.identity?.tokens ?? {})) {
+      assert.ok(!bundle.includes(bearer), "Injected tokens must not appear in the bundle");
+    }
+    assert.ok(!bundle.includes("@typescript/typescript6"));
+    const query = async (text: string, parameters: readonly (string | boolean)[] = []) => {
+      const records = await options.database.transaction(tx => tx.query(text, parameters));
+      assert.ok(Array.isArray(records));
+      return Array.from(records);
+    };
+    const reviewId = crypto.randomUUID(), operation = crypto.randomUUID();
+    await query("INSERT INTO public.starter_reviews VALUES($1,$2,'draft',1)", [reviewId, ownerSubject]);
+    let started = 0;
+    const countJwks = async () => {
+      const count = options.identity ? await options.identity.jwksRequestCount() : jwksRequests;
+      assert.ok(Number.isSafeInteger(count) && count >= 0, "Invalid JWKS request counter");
+      return count;
+    };
+    const initialJwksRequests = await countJwks();
+    for (const phase of ["initial", "restarted", "wrong-tenant"] as const) {
+      options.signal.throwIfAborted();
+      const previousJwksRequests = await countJwks();
+      child = Bun.spawn([process.execPath, "--no-env-file", "index.js"], {
+        cwd: bundleDirectory, env: { ...env, ...(phase === "wrong-tenant" ? { APP_TENANT_ID: binding.wrongTenantId } : {}) },
+        stdout: "pipe", stderr: "pipe",
+      });
+      assert.ok(child.stdout && typeof child.stdout !== "number");
+      assert.ok(child.stderr && typeof child.stderr !== "number");
+      const errors = new Response(child.stderr).text();
+      const reader = child.stdout.getReader();
+      const deadline = setTimeout(() => child?.kill("SIGKILL"), 30_000);
+      try {
+        let output = "";
+        while (!output.includes("\n")) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          output += new TextDecoder().decode(chunk.value);
+          assert.ok(output.length < 16_384, "Unexpected host output before listener event");
+        }
+        if (phase === "wrong-tenant") {
+          assert.equal(await child.exited, 1);
+          assert.equal(output, "");
+          assert.equal(await errors, [
+            JSON.stringify({
+              event: "review-host-initialization-failed",
+              stage: options.storage ? "attachments" : "postgres",
+              code: "UNKNOWN",
+            }),
+            "Delivery HTTP startup failed.",
+            "",
+          ].join("\n"));
+          continue;
+        }
+        assert.ok(output.includes("\n"), "Detached review host failed before listener event");
+        const event = JSON.parse(output.split("\n")[0]!);
+        assert.equal(event.event, "delivery-http-listening");
+        const origin = new URL(event.url);
+        assert.equal(origin.hostname, "127.0.0.1");
+        started++;
+        if (phase === "initial") await options.beforeApproval?.(origin, ownerToken, reviewId);
+        const approve = (bearer: string, version = 1) => fetch(new URL(`/reviews/${reviewId}/approve`, origin), {
+          method: "POST", headers: {
+            "content-type": "application/json", "idempotency-key": operation,
+            ...(bearer ? { authorization: `Bearer ${bearer}` } : {}),
+          }, body: JSON.stringify({ expectedVersion: version }),
+          signal: options.signal,
+        });
+        assert.equal((await approve("")).status, 401);
+        assert.equal((await approve(options.identity?.tokens.wrongAudience ?? await token("owner", "other"))).status, 401);
+        assert.equal((await approve(options.identity?.tokens.other ?? await token("other"))).status, 403);
+        const response = await approve(ownerToken);
+        assert.equal(response.status, 200, await response.clone().text());
+        assert.deepEqual(await response.json(), { state: "approved", version: 2 });
+        assert.ok(await countJwks() > previousJwksRequests, "Detached process did not request configured JWKS");
+        assert.equal((await approve(ownerToken, 2)).status, 409);
+        await query("UPDATE public.starter_members SET enabled=false WHERE subject=$1", [ownerSubject]);
+        try { assert.equal((await approve(ownerToken)).status, 403); }
+        finally { await query("UPDATE public.starter_members SET enabled=true WHERE subject=$1", [ownerSubject]); }
+        child.kill("SIGTERM");
+        assert.equal(await child.exited, 0);
+        assert.equal(await errors, "");
+      } finally {
+        clearTimeout(deadline);
+        reader.releaseLock();
+        if (child.exitCode === null) { child.kill("SIGKILL"); await child.exited; }
+        const stderr = await errors;
+        if (options.databaseUrl) assert.ok(!stderr.includes(options.databaseUrl));
+        if (options.storage) assert.ok(!stderr.includes(options.storage.serviceRoleKey));
+        for (const bearer of Object.values(options.identity?.tokens ?? {})) {
+          assert.ok(!stderr.includes(bearer), "Injected tokens must not appear in host diagnostics");
+        }
+      }
+    }
+    assert.equal(started, 2);
+    assert.ok(await countJwks() - initialJwksRequests >= 2,
+      "Each detached process must use the configured HTTPS JWKS endpoint");
+    assert.deepEqual(await query("SELECT state,version FROM public.starter_reviews WHERE id=$1", [reviewId]),
+      [{ state: "approved", version: 2 }]);
+    for (const table of ["execution_receipts", "execution_audit"]) {
+      assert.deepEqual(await query(`SELECT count(*)::integer AS count FROM supacloud_commands.${table} WHERE operation_key=$1`, [operation]),
+        [{ count: 1 }]);
+    }
+    return { host: "detached-postgresql", replay: "process-restarted",
+      identity: options.identity ? "injected-issuer-https-jwks" : "local-https-jwks-not-live-SupAuth",
+      binding: "wrong-tenant-refused", objectId: artifact.objectId, deploymentVerified: false };
+  } finally {
+    if (child?.exitCode === null) { child.kill("SIGKILL"); await child.exited; }
+    await issuer?.stop(true);
+    options.signal.removeEventListener("abort", interrupt);
+    await rm(detached, { recursive: true, force: true });
+  }
+}

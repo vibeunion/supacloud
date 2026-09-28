@@ -1,7 +1,7 @@
 import { Elysia } from "elysia";
 
 export const userRoutes = new Elysia({ prefix: "/v1" })
-    .get("/profile", async () => {
+    .get("/profile", { detail: { tags: ["user"], summary: "Get user profile" } }, async () => {
         // Simulate Supabase official profile response
         return {
             id: "00000000-0000-0000-0000-000000000000",
@@ -12,10 +12,10 @@ export const userRoutes = new Elysia({ prefix: "/v1" })
             mobile: null,
             is_alpha_user: true,
         };
-    }, { detail: { tags: ["user"], summary: "Get user profile" } })
-    .get("/me", async () => {
+    })
+    .get("/me", { detail: { tags: ["user"], summary: "Get current user" } }, async () => {
         return {
             id: "00000000-0000-0000-0000-000000000000",
             email: "admin@supacloud.local",
         };
-    }, { detail: { tags: ["user"], summary: "Get current user" } });
+    });

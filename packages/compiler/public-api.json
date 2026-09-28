@@ -159,6 +159,11 @@
       "signature": "export declare function createDiagnosticRepairPlan(diagnostics: readonly Diagnostic[]): DiagnosticRepair[];"
     },
     {
+      "name": "createExecutionContextPack",
+      "kind": "value",
+      "signature": "export declare function createExecutionContextPack(graph: ApplicationGraph, subject: string, observations: unknown, requestId: string): ExecutionContextPack;"
+    },
+    {
       "name": "createExecutionPlans",
       "kind": "value",
       "signature": "export declare function createExecutionPlans(graph: ApplicationGraph): ExecutionPlan[];"
@@ -217,6 +222,11 @@
       "name": "DeliveryDiagnostic",
       "kind": "type",
       "signature": "export type DeliveryDiagnostic = Static<typeof DeliveryDiagnosticSchema>;"
+    },
+    {
+      "name": "DeliveryMigrationArchive",
+      "kind": "type",
+      "signature": "export interface DeliveryMigrationArchive {\n    target: string;\n    objectId: string;\n    artifactVerified: true;\n    migrations: Array<Static<typeof entrySchema> & {\n        sql: string;\n    }>;\n}"
     },
     {
       "name": "DeliveryObject",
@@ -302,6 +312,21 @@
       "name": "DoctorResult",
       "kind": "type",
       "signature": "export interface DoctorResult {\n    checks: Array<{\n        name: string;\n        ok: boolean;\n        detail: string;\n    }>;\n    diagnostics: ApplicationGraph[\"diagnostics\"];\n    errors: number;\n}"
+    },
+    {
+      "name": "EXECUTION_CONTEXT_LIMITS",
+      "kind": "value",
+      "signature": "export declare const EXECUTION_CONTEXT_LIMITS: {\n    readonly inputBytes: number;\n    readonly inputEvents: number;\n    readonly outputBytes: number;\n    readonly events: number;\n    readonly modules: number;\n    readonly files: number;\n    readonly diagnostics: number;\n    readonly plans: number;\n};"
+    },
+    {
+      "name": "ExecutionContextError",
+      "kind": "both",
+      "signature": "export declare class ExecutionContextError extends Error {\n    readonly code: \"EXECUTION_METADATA_INVALID\" | \"EXECUTION_METADATA_UNREADABLE\" | \"EXECUTION_CONTEXT_NOT_FOUND\" | \"EXECUTION_CONTEXT_TOO_LARGE\";\n    constructor(code: \"EXECUTION_METADATA_INVALID\" | \"EXECUTION_METADATA_UNREADABLE\" | \"EXECUTION_CONTEXT_NOT_FOUND\" | \"EXECUTION_CONTEXT_TOO_LARGE\");\n}"
+    },
+    {
+      "name": "ExecutionContextPack",
+      "kind": "type",
+      "signature": "export interface ExecutionContextPack {\n    version: 1;\n    subject: string;\n    requestId: string;\n    correlation: \"current-graph-only\";\n    deploymentVerified: false;\n    eventsTrusted: false;\n    modules: Array<{\n        name: string;\n        file?: string;\n    }>;\n    files: string[];\n    executionPlans: ExecutionPlan[];\n    events: Array<ExecutionMetadata & {\n        index: number;\n        module: string;\n    }>;\n    diagnostics: Array<{\n        code: string;\n        severity: \"error\" | \"warn\";\n        file?: string;\n        line?: number;\n        repair?: {\n            type: string;\n            readiness: \"preview\" | \"input-required\" | \"manual\";\n        };\n    }>;\n    omitted: {\n        events: number;\n        modules: number;\n        files: number;\n        diagnostics: number;\n        plans: number;\n        unmatchedEvents: number;\n    };\n    limits: typeof EXECUTION_CONTEXT_LIMITS;\n}"
     },
     {
       "name": "ExecutionPlan",
@@ -622,6 +647,16 @@
       "name": "QueryNode",
       "kind": "type",
       "signature": "export interface QueryNode {\n    className: string;\n    name: string;\n}"
+    },
+    {
+      "name": "readDeliveryMigrationArchive",
+      "kind": "value",
+      "signature": "export declare function readDeliveryMigrationArchive(manifestPath: string, target: string): Promise<DeliveryMigrationArchive>;"
+    },
+    {
+      "name": "readExecutionMetadata",
+      "kind": "value",
+      "signature": "export declare function readExecutionMetadata(path: string): Promise<unknown>;"
     },
     {
       "name": "readOpenApiJson",

@@ -3,7 +3,7 @@ import type { EnvironmentProviders } from "./provider";
 import { flattenProviders } from "./provider";
 import type { Scope } from "./scope";
 import { DEFAULT_SCOPE } from "./scope";
-import type { StaticDecode, TSchema } from "@sinclair/typebox";
+import type { StaticDecode, TSchema } from "typebox";
 import {
   Host as AngularHost,
   Inject as AngularInject,

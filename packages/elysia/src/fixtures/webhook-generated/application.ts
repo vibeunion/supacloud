@@ -232,7 +232,8 @@ export async function initializeApplication(services: Record<string, unknown>): 
 }
 
 export async function destroyApplication(services: Record<string, unknown>): Promise<void> {
-  const destroyRef = services.destroyRef ?? services["supacloud.destroy-ref"];
+  const destroyRef = (Object.prototype.propertyIsEnumerable.call(services, "destroyRef") ? services.destroyRef : undefined)
+    ?? (Object.prototype.propertyIsEnumerable.call(services, "supacloud.destroy-ref") ? services["supacloud.destroy-ref"] : undefined);
   if (isRecord(destroyRef) && isFunction(destroyRef.destroy)) {
     await destroyRef.destroy();
   } else if (isRecord(destroyRef) && Array.isArray(destroyRef._teardowns)) {

@@ -33,9 +33,9 @@ EDGE_RUNTIME_SOURCE_DIR="${SUPACLOUD_EDGE_RUNTIME_SOURCE_DIR:-/opt/supacloud/edg
 EDGE_RUNTIME_SOURCE_INPUT_DIR="${SUPACLOUD_EDGE_RUNTIME_SOURCE_INPUT_DIR:-${SCRIPT_DIR}/packages/edge-runtime}"
 PGREDIS_RUNTIME_ENV_FILE="${SUPACLOUD_PGREDIS_RUNTIME_ENV_FILE:-/etc/supabase/pgredis-runtime.env}"
 REALTIME_SERVICE_ENV_FILE="${SUPACLOUD_REALTIME_SERVICE_ENV_FILE:-/etc/supabase/realtime-service.env}"
-REALTIME_SLOT_ISOLATION_RUNTIME_VERSION="${SUPACLOUD_REALTIME_SLOT_ISOLATION_RUNTIME_VERSION:-2.133.0}"
-REALTIME_BASE_IMAGE="public.ecr.aws/supabase/realtime:v2.133.0"
-REALTIME_PINNED_IMAGE="public.ecr.aws/supabase/realtime@sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb"
+REALTIME_SLOT_ISOLATION_RUNTIME_VERSION="${SUPACLOUD_REALTIME_SLOT_ISOLATION_RUNTIME_VERSION:-2.138.1}"
+REALTIME_BASE_IMAGE="public.ecr.aws/supabase/realtime:v2.138.1"
+REALTIME_PINNED_IMAGE="public.ecr.aws/supabase/realtime@sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e"
 REALTIME_SLOT_ISOLATION_ARTIFACT_DIR="${SUPACLOUD_REALTIME_SLOT_ISOLATION_ARTIFACT_DIR:-/opt/supacloud/realtime-slot-isolation}"
 REALTIME_SLOT_ISOLATION_LAUNCHER_FILE="${SUPACLOUD_REALTIME_SLOT_ISOLATION_LAUNCHER_FILE:-/usr/local/libexec/supacloud/realtime-launcher}"
 REALTIME_SLOT_ISOLATION_BUILD_FILE="${SUPACLOUD_REALTIME_SLOT_ISOLATION_BUILD_FILE:-/usr/local/libexec/supacloud/build-realtime-slot-isolation}"
@@ -68,6 +68,8 @@ XCADDY_VERSION="${XCADDY_VERSION:-v0.4.7}"
 
 # shellcheck source=scripts/lib/install_config.sh
 source "${SCRIPT_DIR}/scripts/lib/install_config.sh"
+# shellcheck source=scripts/lib/application_bun_runtime.sh
+source "${SCRIPT_DIR}/scripts/lib/application_bun_runtime.sh"
 # shellcheck source=scripts/lib/edge_runtime_source.sh
 source "${SCRIPT_DIR}/scripts/lib/edge_runtime_source.sh"
 EDGE_RUNTIME_EXTERNAL_IDENTITY_MODE="source"
@@ -210,6 +212,7 @@ ensure_bun_version() {
     fi
 
     if [[ "$current_version" == "$required_version" ]]; then
+        install_application_bun_runtime "$(command -v bun)" "$required_version" || return 1
         log_info "Bun already installed: $current_version"
         return 0
     fi
@@ -241,6 +244,7 @@ ensure_bun_version() {
 
     current_version="$(bun --version 2>/dev/null || true)"
     if [[ "$current_version" == "$required_version" ]]; then
+        install_application_bun_runtime "$(command -v bun)" "$required_version" || return 1
         log_info "Bun installed: $current_version"
     else
         log_warn "Bun installer completed, but expected $required_version and found ${current_version:-unknown}"
@@ -1234,7 +1238,7 @@ EOF
 install_juicefs() {
     log_step "Preparing JuiceFS (Postgres LO)..."
     
-    local JFS_VER="1.4.0"
+    local JFS_VER="1.4.1"
     local ARCH=$(uname -m)
     local OS=$(uname -s | tr '[:upper:]' '[:lower:]')
     local JFS_URL=""
@@ -1409,7 +1413,7 @@ configure_pgbackrest_juicefs() {
 install_docker_compose() {
     log_step "Checking Docker Compose..."
     
-    COMPOSE_VERSION="v5.3.1"
+    COMPOSE_VERSION="v5.5.1"
     
     # The standalone binary is preferred on both Docker and Podman hosts. Skip
     # re-downloading it when the target version is already present. Previously the
@@ -4419,6 +4423,59 @@ write_realtime_container_env() {
     fi
 }
 
+ensure_realtime_metadata_schema() (
+    local container_env="$1"
+    local key value
+    # Bootstrap the exact database selected by the candidate, not the
+    # Management API database or an inherited psql connection default.
+    for key in DB_HOST DB_PORT DB_USER DB_PASSWORD DB_NAME; do
+        value=$(supacloud_raw_env_value "$container_env" "$key") || return 1
+        [[ -n "$value" ]] || {
+            log_error "Realtime candidate is missing $key"
+            return 1
+        }
+        case "$key" in
+            DB_HOST) export PGHOST="$value" ;;
+            DB_PORT) export PGPORT="$value" ;;
+            DB_USER) export PGUSER="$value" ;;
+            DB_PASSWORD) export PGPASSWORD="$value" ;;
+            DB_NAME) export PGDATABASE="$value" ;;
+        esac
+    done
+    export PGCONNECT_TIMEOUT=10 PGSSLMODE=disable
+    unset PGHOSTADDR PGSERVICE PGSERVICEFILE PGOPTIONS
+    # Database creation belongs to the installer, not the runtime login.
+    # The installer configures postgres with POSTGRES_PASSWORD.
+    [[ -n "${POSTGRES_PASSWORD:-}" ]] || return 1
+    local realtime_db_user="$PGUSER"
+    PGUSER=postgres PGPASSWORD="$POSTGRES_PASSWORD" \
+        psql -X -w -q -v ON_ERROR_STOP=1 -v realtime_db_user="$realtime_db_user" -f - <<'SQL' || return 1
+CREATE SCHEMA IF NOT EXISTS _realtime AUTHORIZATION :"realtime_db_user";
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_realtime_admin') THEN
+    CREATE ROLE supabase_realtime_admin NOLOGIN NOINHERIT;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'dashboard_user') THEN
+    CREATE ROLE dashboard_user NOLOGIN NOINHERIT;
+  END IF;
+END $$;
+-- Upstream migrations switch roles when creating objects, then alter those
+-- objects as the runtime login. NOINHERIT logins need this membership explicitly.
+GRANT supabase_realtime_admin TO :"realtime_db_user" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE;
+GRANT SET ON PARAMETER log_min_messages TO :"realtime_db_user";
+SQL
+    psql -X -w -q -v ON_ERROR_STOP=1 -f - <<'SQL'
+DO $$
+BEGIN
+  IF NOT has_schema_privilege(current_user, '_realtime', 'USAGE')
+     OR NOT has_schema_privilege(current_user, '_realtime', 'CREATE') THEN
+    RAISE EXCEPTION 'Realtime database user requires USAGE and CREATE on _realtime';
+  END IF;
+END $$;
+SQL
+)
+
 write_realtime_service_env() {
     local target_file="$1"
     local image="$2"
@@ -4434,7 +4491,7 @@ write_realtime_service_env() {
         REALTIME_DB_USER "$database_user" \
         PG_DATABASE supacloud_meta \
         REALTIME_CONTAINER_ENV_FILE "$container_env_file" \
-        REALTIME_SLOT_ISOLATION_RUNTIME_VERSION "${REALTIME_SLOT_ISOLATION_RUNTIME_VERSION:-2.133.0}" \
+        REALTIME_SLOT_ISOLATION_RUNTIME_VERSION "${REALTIME_SLOT_ISOLATION_RUNTIME_VERSION:-2.138.1}" \
         REALTIME_SLOT_ISOLATION_ARTIFACT_DIR "$artifact_dir" \
         REALTIME_SLOT_ISOLATION_MANIFEST "$manifest_file" \
         REALTIME_SLOT_ISOLATION_BEAM "$beam_file" \
@@ -5014,6 +5071,14 @@ deploy_realtime_service_transaction() (
     fi
     if ! prepare_realtime_install_candidate "$transaction_dir" "$runtime_bin" "$image" "$unit_source"; then
         log_error "Realtime candidate build or validation failed before live state was changed"
+        rm -rf -- "$transaction_dir"
+        trap - HUP INT TERM
+        return 1
+    fi
+    # Additive bootstrap is intentionally retained if later activation fails.
+    # Never drop an existing Realtime metadata schema during service rollback.
+    if ! ensure_realtime_metadata_schema "${transaction_dir}/candidate-container.env"; then
+        log_error "Realtime metadata schema bootstrap failed before live service state was changed"
         rm -rf -- "$transaction_dir"
         trap - HUP INT TERM
         return 1

@@ -66,7 +66,7 @@ function policyScenario(mode: "hit" | "miss"): Scenario {
   }) };
 }
 const scenarios: Scenario[] = [
-  { name: "native-static", app: new Elysia().get("/:tenant", () => ({ value: 42 }), { params }) },
+  { name: "native-static", app: new Elysia().get("/:tenant", { params }, () => ({ value: 42 })) },
   { name: "compiled-static", app: createApplication({ modules: [compiled()] }) },
   { name: "compiled-one-noop-policy", app: createApplication({
     modules: [compiled([{ name: "noop" }])], httpPolicies: { noop: () => () => {} },

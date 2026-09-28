@@ -1,4 +1,5 @@
 import { Elysia, status } from "elysia";
+import { websocket } from "elysia/websocket";
 import type { AnyElysia } from "elysia";
 import { logger } from "./utils/logger";
 import { runBootstrapOrExit } from "./runtime/bootstrap-fatal";
@@ -17,7 +18,7 @@ process.on("unhandledRejection", (reason: unknown) => {
   });
 });
 
-import { swagger } from "@elysiajs/swagger";
+import { openapi } from "@elysia/openapi";
 
 import { config } from "./config";
 import { checkAuth, isInvitationAcceptanceRequest } from "./middleware/auth";
@@ -40,7 +41,7 @@ import { isS3DataPlaneRequest } from "./utils/storage-s3-paths";
 import { studioAuthRoutes } from "./routes/studio-auth";
 import { caddyAskRoutes } from "./routes/caddy-ask";
 import { mcpRoutes } from "./mcp/server";
-import { validationErrorResponse } from "./utils/http-validation";
+import { parseErrorResponse, validationErrorResponse } from "./utils/http-validation";
 import {
   collectManagementDocumentedRouteContracts,
   collectManagementRouteContracts,
@@ -305,14 +306,19 @@ async function reconcileGatewayBeforeServe(): Promise<void> {
 let routeProjectionSource: Pick<AnyElysia, "routes"> | undefined;
 
 const app = new Elysia({ strictPath: false })
-  .onRequest(({ request, set }) => {
+  .use(websocket())
+  .request(({ request, set }) => {
     const context = beginRequestObservability(request);
     set.headers ??= {};
     applyObservabilityHeaders(set.headers, context);
   })
-  .onError({ as: "global" }, ({ request, code, error, set }) => {
+  .error("global", ({ request, error, set }) => {
+    const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
     set.headers ??= {};
     applyObservabilityHeaders(set.headers, beginRequestObservability(request));
+    if (code === "PARSE") {
+      return parseErrorResponse(set, new URL(request.url).pathname);
+    }
     if (code === "VALIDATION") {
       return validationErrorResponse(set);
     }
@@ -339,7 +345,7 @@ const app = new Elysia({ strictPath: false })
   })
   // Elysia's Swagger adapter omits cookie parameters. Project that field from
   // the same compiled route table before the adapter serializes its document.
-  .onAfterHandle(({ request, response }) => {
+  .afterHandle(({ request, responseValue: response }) => {
     if (new URL(request.url).pathname !== "/swagger/json") return response;
     return routeProjectionSource === undefined
       ? response
@@ -347,7 +353,9 @@ const app = new Elysia({ strictPath: false })
   })
   // Swagger docs
   .use(
-    swagger({
+    openapi({
+      path: "/swagger",
+      specPath: "/swagger/json",
       documentation: {
         info: {
           title: "SupaCloud Management API",
@@ -421,7 +429,7 @@ const app = new Elysia({ strictPath: false })
   )
 
   // Rate limit headers + API version (Studio compatibility)
-  .onAfterHandle(({ request, set }) => {
+  .afterHandle(({ request, set }) => {
     set.headers ??= {};
     applyObservabilityHeaders(set.headers, beginRequestObservability(request));
     set.headers["x-ratelimit-limit"] ??= "1000";
@@ -431,7 +439,7 @@ const app = new Elysia({ strictPath: false })
     );
     set.headers["x-supabase-api-version"] = "2024-01-01";
   })
-  .onAfterResponse({ as: "global" }, ({ request, response, set }) => {
+  .afterResponse("global", ({ request, responseValue: response, set }) => {
     const observation = recordRequestObservation(
       request, response instanceof Response ? response.status : Number(set.status || 200),
     );
@@ -785,6 +793,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
     authCustomProviderRoutes,
     authMfaRoutes,
     frontendRoutes,
+    applicationRoutes,
     webhookRoutes,
     deployRoutes,
     chatRoutes,
@@ -814,14 +823,14 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
 
   return (
     new Elysia({ name: "api-routes" })
-      .onRequest(({ request }) => {
+      .request(({ request }) => {
         if (isDisabledMutationReconciliation(request)) {
           return status(403, { error: "Mutation reconciliation is not permitted" });
         }
       })
       .use(bffProofBodyCapture)
       // Auth guard runs before every route in this group
-      .onBeforeHandle(async ({ request, set }) => {
+      .beforeHandle(async ({ request, set }) => {
         const rateLimit = checkRateLimit(request);
         for (const [key, value] of Object.entries(rateLimit.headers)) {
           set.headers[key] = value;
@@ -845,12 +854,19 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
           }
         }
       })
-      .onAfterHandle(async ({ request, set }) => {
+      .afterHandle(async ({ request, set }) => {
         if (shouldAuditRequest(request)) {
           await logAuditEvent({ request, status: Number(set.status || 200) });
         }
       })
-      .onError({ as: "global" }, async ({ request, code, error, set }) => {
+      .error("global", async ({ request, error, set }) => {
+    const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
+        if (code === "PARSE") {
+          if (shouldAuditRequest(request)) {
+            await logAuditEvent({ request, status: 400, action: "error:PARSE" });
+          }
+          return parseErrorResponse(set, new URL(request.url).pathname);
+        }
         if (code === "VALIDATION") {
           if (shouldAuditRequest(request)) {
             await logAuditEvent({ request, status: 400, action: "error:VALIDATION" });
@@ -909,6 +925,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(authCustomProviderRoutes)
       .use(authMfaRoutes)
       .use(frontendRoutes)
+      .use(applicationRoutes)
       .use(webhookRoutes)
       .use(deployRoutes)
       .use(chatRoutes)

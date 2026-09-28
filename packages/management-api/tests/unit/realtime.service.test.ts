@@ -222,6 +222,32 @@ describe("RealtimeService tenant payloads", () => {
 });
 
 describe("RealtimeService registration retry", () => {
+  test("cancelled tenant writes do not issue requests", async () => {
+    let calls = 0;
+    globalThis.fetch = (async () => { calls++; return new Response("{}"); }) as typeof fetch;
+    const service = new RealtimeService();
+    const tenant = { projectRef: "cancelref", dbName: "postgres", dbPassword: "postgres", jwtSecret: "synthetic" };
+    const signal = AbortSignal.abort();
+    expect(await service.registerTenant(tenant, { signal })).toBe(false);
+    expect(await service.updateTenant(tenant, { signal })).toBe(false);
+    expect(calls).toBe(0);
+  });
+
+  test.each(["registerTenant", "updateTenant"] as const)("%s cancels an in-flight request without replay", async (method) => {
+    const controller = new AbortController();
+    let calls = 0;
+    globalThis.fetch = (async (_url, init) => {
+      calls++;
+      expect(init?.signal).toBe(controller.signal);
+      controller.abort();
+      throw new Error("ECONNRESET");
+    }) as typeof fetch;
+    const service = new RealtimeService();
+    const tenant = { projectRef: "cancelref", dbName: "postgres", dbPassword: "postgres", jwtSecret: "synthetic" };
+    expect(await service[method](tenant, { signal: controller.signal })).toBe(false);
+    expect(calls).toBe(1);
+  });
+
   // Shorten backoff in tests to avoid the default 3s * retries exceeding the 5s unit test timeout
   const origBackoff = process.env.REALTIME_REGISTER_BACKOFF_MS;
   const origAttempts = process.env.REALTIME_REGISTER_MAX_ATTEMPTS;

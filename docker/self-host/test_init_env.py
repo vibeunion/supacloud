@@ -72,11 +72,13 @@ class InitEnvTests(unittest.TestCase):
             first_pgredis_token = parsed_env(env_path)["PGREDIS_RUNTIME_INTERNAL_TOKEN"]
             first_pgsodium_key = parsed_env(env_path)["PGSODIUM_KEY"]
             first_vault_key = parsed_env(env_path)["VAULT_KEY"]
+            first_dashboard_password = parsed_env(env_path)["DASHBOARD_PASSWORD"]
             second_run = subprocess.run(command, check=True, capture_output=True, text=True)
             second_secret = parsed_env(env_path)["SUPAOAUTH_BFF_SIGNING_SECRET"]
             second_pgredis_token = parsed_env(env_path)["PGREDIS_RUNTIME_INTERNAL_TOKEN"]
             second_pgsodium_key = parsed_env(env_path)["PGSODIUM_KEY"]
             second_vault_key = parsed_env(env_path)["VAULT_KEY"]
+            second_dashboard_password = parsed_env(env_path)["DASHBOARD_PASSWORD"]
 
             self.assertEqual(first_run.stdout, "")
             self.assertEqual(second_run.stdout, "")
@@ -87,6 +89,8 @@ class InitEnvTests(unittest.TestCase):
             self.assertGreaterEqual(len(first_pgredis_token), 32)
             self.assertNotIn(first_pgredis_token, {master_token, encryption_key, first_secret})
             self.assertEqual(second_pgredis_token, first_pgredis_token)
+            self.assertGreaterEqual(len(first_dashboard_password), 12)
+            self.assertEqual(second_dashboard_password, first_dashboard_password)
             self.assertEqual(parsed_env(env_path)["ENABLE_PGSODIUM"], "true")
             self.assertEqual(parsed_env(env_path)["ENABLE_SUPABASE_VAULT"], "true")
             self.assertRegex(first_pgsodium_key, r"^[0-9a-f]{64}$")
@@ -105,6 +109,10 @@ class InitEnvTests(unittest.TestCase):
             self.assertTrue(migration_path.exists())
             self.assertEqual(migration_path.read_text(encoding="utf-8"), "")
             self.assertEqual(stat.S_IMODE(migration_path.stat().st_mode), 0o600)
+            realtime_path = Path(generated["REALTIME_CONTAINER_ENV_FILE"])
+            self.assertTrue(realtime_path.exists())
+            self.assertEqual(realtime_path.read_text(encoding="utf-8"), f"API_JWT_SECRET={generated['JWT_SECRET']}\n")
+            self.assertEqual(stat.S_IMODE(realtime_path.stat().st_mode), 0o600)
 
     def test_rejects_a_shared_management_secret(self) -> None:
         shared_secret = "shared-secret-0123456789abcdef0123456789abcdef"
@@ -194,6 +202,8 @@ class InitEnvTests(unittest.TestCase):
             dev_compose,
         )
         self.assertIn("\nSUPAOAUTH_BFF_SIGNING_SECRET=\n", env_example)
+        self.assertIn("DASHBOARD_PASSWORD=", env_example)
+        self.assertIn("REALTIME_CONTAINER_ENV_FILE=", env_example)
         self.assertNotIn("LEGACY_SECRETS_ENCRYPTION_KEY:", self_host_compose)
         self.assertIn("LEGACY_SECRETS_MIGRATION_FILE", self_host_compose)
         self.assertNotIn("GOTRUE_EXPERIMENTAL_PROVIDER_LINKING_DOMAINS", self_host_compose)
@@ -204,7 +214,9 @@ class InitEnvTests(unittest.TestCase):
         dev_compose = (REPO_ROOT / "docker/dev/docker-compose.yml").read_text(encoding="utf-8")
 
         self.assertIn("API_EXTERNAL_URL: ${PUBLIC_URL}/auth/v1", self_host_compose)
+        self.assertIn("GOTRUE_JWT_ISSUER: ${PUBLIC_URL}/auth/v1", self_host_compose)
         self.assertIn("API_EXTERNAL_URL: http://localhost:${CADDY_HTTP_PORT:-8000}/auth/v1", dev_compose)
+        self.assertIn("GOTRUE_JWT_ISSUER: http://localhost:${CADDY_HTTP_PORT:-8000}/auth/v1", dev_compose)
         for compose in (self_host_compose, dev_compose):
             self.assertIn("GOTRUE_CUSTOM_OAUTH_ENABLED:", compose)
             self.assertIn("GOTRUE_SECURITY_DATABASE_ENCRYPTION_ENCRYPT:", compose)

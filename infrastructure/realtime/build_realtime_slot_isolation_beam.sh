@@ -5,14 +5,14 @@
 # remain those of the official release.
 set -euo pipefail
 
-REALTIME_VERSION="${REALTIME_SLOT_ISOLATION_RUNTIME_VERSION:-2.133.0}"
+REALTIME_VERSION="${REALTIME_SLOT_ISOLATION_RUNTIME_VERSION:-2.138.1}"
 REALTIME_SOURCE_REPOSITORY="${REALTIME_SLOT_ISOLATION_SOURCE_REPOSITORY:-https://github.com/supabase/realtime.git}"
-REALTIME_SOURCE_COMMIT="${REALTIME_SLOT_ISOLATION_SOURCE_COMMIT:-139f4f2c5d1ae28a7892c03d462d16dc9efe89a9}"
+REALTIME_SOURCE_COMMIT="${REALTIME_SLOT_ISOLATION_SOURCE_COMMIT:-ba9b550891b7b591954fc6c67a180634bc128624}"
 REALTIME_SOURCE_FILE="lib/realtime/tenants/replication_connection.ex"
-REALTIME_SOURCE_FILE_SHA256="4b61b97af2f8325963fe58a4f2eb32a52ea4af2af10f9051ab858207f6dd03e6"
-REALTIME_PATCHED_SOURCE_FILE_SHA256="ca3a4b989f7601ed8a4eb7fe84635dc547fc0667f097aeb6cadb9b101d8ac02a"
-REALTIME_BASE_IMAGE="public.ecr.aws/supabase/realtime:v2.133.0"
-REALTIME_IMAGE_INDEX_DIGEST="sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb"
+REALTIME_SOURCE_FILE_SHA256="91467fc0bcb380a66cdeb548a060212652f6e39d0d6024854a45ef7496d2f17a"
+REALTIME_PATCHED_SOURCE_FILE_SHA256="359a26b3c195a29e10d8a82c1f81e8b972c6e9ffbf61636a83d7e587c3672ac6"
+REALTIME_BASE_IMAGE="public.ecr.aws/supabase/realtime:v2.138.1"
+REALTIME_IMAGE_INDEX_DIGEST="sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e"
 REALTIME_RESOLVED_IMAGE="public.ecr.aws/supabase/realtime@$REALTIME_IMAGE_INDEX_DIGEST"
 REALTIME_IMAGE="${REALTIME_IMAGE:-$REALTIME_BASE_IMAGE}"
 REALTIME_BUILDER_IMAGE_INDEX_DIGEST="sha256:5db16aff7fdc118d4b268c7104f3c0409049b3255d503e08ca00a7e29050a408"
@@ -32,13 +32,13 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     cat <<'USAGE'
 Usage: build_realtime_slot_isolation_beam.sh [OUTPUT_DIR]
 
-Build the pinned Realtime 2.133.0 tenant-slot isolation BEAM artifact.
+Build the pinned Realtime 2.138.1 tenant-slot isolation BEAM artifact.
 The output directory contains the module BEAM and manifest.json.
 USAGE
     exit 0
 fi
 
-if [[ "$REALTIME_VERSION" != "2.133.0" ]]; then
+if [[ "$REALTIME_VERSION" != "2.138.1" ]]; then
     printf 'unsupported Realtime slot-isolation runtime: %s\n' "$REALTIME_VERSION" >&2
     exit 1
 fi
@@ -46,7 +46,7 @@ fi
     printf 'slot-isolation requires the pinned Realtime source repository\n' >&2
     exit 1
 }
-[[ "$REALTIME_SOURCE_COMMIT" == "139f4f2c5d1ae28a7892c03d462d16dc9efe89a9" ]] || {
+[[ "$REALTIME_SOURCE_COMMIT" == "ba9b550891b7b591954fc6c67a180634bc128624" ]] || {
     printf 'slot-isolation requires the pinned Realtime source commit\n' >&2
     exit 1
 }
@@ -98,13 +98,13 @@ case "$(uname -m)" in
 esac
 case "$REALTIME_ARCHITECTURE" in
     amd64)
-        REALTIME_PLATFORM_MANIFEST_DIGEST="sha256:109c6ea8ecd6c84c3b36047fe78a055c27702f6d9e19c441958b129a9bd468c3"
-        REALTIME_CONFIG_DIGEST="sha256:bcaec521eb08dc811d88119ee5bcac7671188d8937cffc12d3bf23c890bb636b"
+        REALTIME_PLATFORM_MANIFEST_DIGEST="sha256:023cd658da8212c67d12eb1a43914bab67e1a3ea51f731a385ad7596d8226ec0"
+        REALTIME_CONFIG_DIGEST="sha256:b069a8f97f0d05eadd5a18aebce08f051b3b8e07d6c120eef457f5d24f2523dd"
         BUILDER_PLATFORM_MANIFEST_DIGEST="sha256:77d1ed571b8fd66d60940c030d24a0f3a0ca48735155534e3132e8209ae56b86"
         ;;
     arm64)
-        REALTIME_PLATFORM_MANIFEST_DIGEST="sha256:172c1b386ed7b5969bd7fbce8e31b3c65050e0c39f4191bd637d6de811b81315"
-        REALTIME_CONFIG_DIGEST="sha256:1ee6d7247f3f3809289524539cd06f6f86d4c50e5639d1ef28f388a9e4fefaa4"
+        REALTIME_PLATFORM_MANIFEST_DIGEST="sha256:839743c3294d69d9eef0d2909338b40be1da1fe58114129e510dfd2fe2020c79"
+        REALTIME_CONFIG_DIGEST="sha256:ecc1bc4f347e7565b290ddd68c0079e3e9b0f8cad7ba06d1ee686135bfaa1b97"
         BUILDER_PLATFORM_MANIFEST_DIGEST="sha256:51030f0252b08486eeb38e27fe6cf2e9769538594244734a7184ad8d6236be10"
         ;;
 esac
@@ -230,7 +230,19 @@ def verify(image, role, index_digest, platform_digest, config_digest=None):
     if actual_id and not actual_id.startswith("sha256:"):
         actual_id = "sha256:" + actual_id
     if config_digest and actual_id != config_digest:
-        raise SystemExit(f"{role} image config digest is outside the trust root")
+        # Docker's containerd store exposes the OCI index as Id. Accept only
+        # that exact alias with a matching typed descriptor, never an arbitrary Id.
+        descriptor = data.get("Descriptor") or {}
+        if not (
+            actual_id == index_digest
+            and isinstance(descriptor, dict)
+            and descriptor.get("digest") == index_digest
+            and descriptor.get("mediaType") in {
+                "application/vnd.oci.image.index.v1+json",
+                "application/vnd.docker.distribution.manifest.list.v2+json",
+            }
+        ):
+            raise SystemExit(f"{role} image config digest is outside the trust root")
 
     observed_digests = {str(data.get("Digest") or "")}
     observed_digests.update(str(value).rsplit("@", 1)[-1] for value in (data.get("RepoDigests") or []))

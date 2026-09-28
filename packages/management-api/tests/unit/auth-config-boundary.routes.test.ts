@@ -1223,6 +1223,33 @@ describe("SupAuth auth config boundary", () => {
 });
 
 describe("TenantRuntimeService auth config runtime impact", () => {
+  test("explicit signing reconciliation retries all consumers after a persisted partial apply", async () => {
+    const events: string[] = [];
+    const auth = { oauth_server: { jwt_jwks: { keys: [{ kid: "current" }] } } };
+    let unavailable = true;
+    authApplyInternals.applyGotrueAuthConfig = async () => {
+      events.push("gotrue");
+      return { authRuntime: { mode: "owner" }, status: {} };
+    };
+    authApplyInternals.refreshProjectPostgrestVerifier = async () => { events.push("postgrest"); };
+    authApplyInternals.refreshProjectRealtimeVerifier = async () => {
+      events.push("realtime");
+      if (unavailable) throw new Error("realtime unavailable");
+    };
+    authApplyInternals.refreshSharedAuthDependents = async () => { events.push("dependents"); };
+    const reconcile = () => originalApplyAuthConfig.call(
+      tenantRuntimeService, "auth-owner", auth, auth, { refreshVerifiers: true },
+    );
+
+    await expect(reconcile()).rejects.toThrow("realtime unavailable");
+    await expect(reconcile()).rejects.toThrow("realtime unavailable");
+    expect(events).toEqual(["gotrue", "postgrest", "realtime", "gotrue", "postgrest", "realtime"]);
+    unavailable = false;
+    events.length = 0;
+    await reconcile();
+    expect(events).toEqual(["gotrue", "postgrest", "realtime", "dependents"]);
+  });
+
   test("session-only owner changes apply GoTrue without PostgREST refresh or dependent fan-out", async () => {
     const events: string[] = [];
     authApplyInternals.applyGotrueAuthConfig = async () => {
@@ -1247,6 +1274,40 @@ describe("TenantRuntimeService auth config runtime impact", () => {
     );
 
     expect(events).toEqual(["gotrue"]);
+  });
+
+  test("unchanged owner signing retries preserve dependent failure until fan-out succeeds", async () => {
+    const events: string[] = [];
+    const auth = { oauth_server: { jwt_jwks: { keys: [{ kid: "current" }] } } };
+    let unavailable = true;
+    authApplyInternals.applyGotrueAuthConfig = async () => ({
+      authRuntime: { mode: "owner" }, status: {},
+    });
+    authApplyInternals.refreshProjectPostgrestVerifier = async (ref) => {
+      events.push(`postgrest:${ref}`);
+    };
+    authApplyInternals.refreshProjectRealtimeVerifier = async (ref) => {
+      events.push(`realtime:${ref}`);
+      if (ref === "tenant-a" && unavailable) throw new Error("dependent unavailable");
+    };
+    authApplyInternals.listSharedAuthDependentRefs = async () => ["tenant-a", "tenant-b"];
+    const reconcile = () => originalApplyAuthConfig.call(
+      tenantRuntimeService, "auth-owner", auth, auth, { refreshVerifiers: true },
+    );
+    for (let attempt = 0; attempt < 2; attempt++) {
+      events.length = 0;
+      await expect(reconcile()).rejects.toMatchObject({
+        code: "SUPAUTH_DEPENDENT_REFRESH_FAILED", failedRefs: ["tenant-a"],
+      });
+      expect(events).toEqual([
+        "postgrest:auth-owner", "realtime:auth-owner",
+        "postgrest:tenant-a", "realtime:tenant-a", "postgrest:tenant-b", "realtime:tenant-b",
+      ]);
+    }
+    unavailable = false;
+    events.length = 0;
+    await reconcile();
+    expect(events).toHaveLength(6);
   });
 
   test("owner signing changes refresh local PostgREST and fan out dependents exactly once", async () => {

@@ -396,7 +396,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         set.status = 204;
         return '';
     })
-    .onAfterHandle(({ headers, set }) => {
+    .afterHandle(({ headers, set }) => {
         const origin = headers['origin'] || headers['Origin'] || '';
         if (origin && !set.headers['Access-Control-Allow-Origin']) {
             set.headers['Access-Control-Allow-Origin'] = origin;
@@ -414,7 +414,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // If accessed directly (bypassing the gateway), getProjectRef returns '' and each
     // route already returns 400 "Missing tenant reference". This guard adds
     // defense-in-depth logging for monitoring direct-access attempts.
-    .onBeforeHandle(async ({ headers, request }) => {
+    .beforeHandle(async ({ headers, request }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) {
             logger.warn('[StorageCompat] Request without project ref detected', {
@@ -426,19 +426,19 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     })
     
     // Inject standard Supabase compatibility headers on all API responses
-    .onAfterHandle(({ set }) => {
+    .afterHandle(({ set }) => {
         set.headers['x-supabase-api-version'] = new Date().toISOString().slice(0, 10).replace(/-/g, '').substring(0, 8);
         set.headers['sb-gateway-version'] = '1.0.0';
     })
 
     // Keep the Supabase-compatible health path inside the tenant-bound storage
     // surface so it cannot fall through to the Web Console SPA catch-all.
-    .get('/status', async () => {
+    .get('/status', { detail: { tags: ["storage"], summary: "Get storage service status" } }, async () => {
         return await StorageService.getStatus();
-    }, { detail: { tags: ["storage"], summary: "Get storage service status" } })
+    })
 
     // GET /constraints â Storage upload size and protocol constraints
-    .get('/constraints', async () => {
+    .get('/constraints', { detail: { tags: ["storage"], summary: "Get storage upload size and protocol constraints" } }, async () => {
         return {
             max_upload_size_bytes: STORAGE_UPLOAD_MAX_BYTES,
             max_upload_size_mb: Math.floor(STORAGE_UPLOAD_MAX_BYTES / (1024 * 1024)),
@@ -446,14 +446,16 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             tus_chunk_max_size_bytes: TUS_MAX_CHUNK_SIZE,
             streaming_upload_supported: true,
         };
-    }, { detail: { tags: ["storage"], summary: "Get storage upload size and protocol constraints" } })
+    })
 
     // ════════════════════════════════════════════════════════
     // BUCKET Operations
     // ════════════════════════════════════════════════════════
 
     // GET /bucket — List all buckets
-    .get('/bucket', async ({ headers, query }) => {
+    .get('/bucket', {
+        detail: { tags: ["storage"], summary: "List storage buckets" },
+    }, async ({ headers, query }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
         const auth = headers['authorization'];
@@ -480,12 +482,22 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         } catch (e: any) {
             return status(403, { statusCode: "403", error: 'Forbidden', message: e.message || 'Access Denied' });
         }
-    }, {
-        detail: { tags: ["storage"], summary: "List storage buckets" },
     })
 
     // POST /bucket — Create a bucket  
-    .post('/bucket', async ({ headers, body }) => {
+    .post('/bucket', {
+        body: t.Object({
+            id: t.Optional(t.String()),
+            name: t.Optional(t.String()),
+            public: t.Optional(t.Boolean()),
+            type: t.Optional(t.String()),
+            fileSizeLimit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
+            allowedMimeTypes: t.Optional(t.Union([t.Array(t.String()), t.Null()])),
+            file_size_limit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
+            allowed_mime_types: t.Optional(t.Union([t.Array(t.String()), t.Null()]))
+        }),
+        detail: { tags: ["storage"], summary: "Create a storage bucket" },
+    }, async ({ headers, body }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
         
@@ -525,22 +537,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             updated_at: new Date().toISOString(),
             type: body.type || 'STANDARD',
         };
-    }, {
-        body: t.Object({
-            id: t.Optional(t.String()),
-            name: t.Optional(t.String()),
-            public: t.Optional(t.Boolean()),
-            type: t.Optional(t.String()),
-            fileSizeLimit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
-            allowedMimeTypes: t.Optional(t.Union([t.Array(t.String()), t.Null()])),
-            file_size_limit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
-            allowed_mime_types: t.Optional(t.Union([t.Array(t.String()), t.Null()]))
-        }),
-        detail: { tags: ["storage"], summary: "Create a storage bucket" },
     })
 
     // GET /bucket/:id — Get bucket details
-    .get('/bucket/:id', async ({ params, headers }) => {
+    .get('/bucket/:id', {
+        detail: { tags: ["storage"], summary: "Get bucket details" },
+    }, async ({ params, headers }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
         const auth = headers['authorization'];
@@ -565,14 +567,22 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         } catch (e: any) {
              return status(403, { statusCode: "403", error: 'Forbidden', message: e.message || 'Access Denied' });
         }
-    }, {
-        detail: { tags: ["storage"], summary: "Get bucket details" },
     })
 
     // DELETE /bucket/:id — Delete bucket
     
     // PUT /bucket/:id — Update bucket
-    .put('/bucket/:id', async ({ params, headers, body }) => {
+    .put('/bucket/:id', {
+        body: t.Object({
+            name: t.Optional(t.String()),
+            public: t.Optional(t.Boolean()),
+            fileSizeLimit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
+            allowedMimeTypes: t.Optional(t.Union([t.Array(t.String()), t.Null()])),
+            file_size_limit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
+            allowed_mime_types: t.Optional(t.Union([t.Array(t.String()), t.Null()]))
+        }),
+        detail: { tags: ["storage"], summary: "Update bucket settings" },
+    }, async ({ params, headers, body }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
         const auth = headers['authorization'];
@@ -596,20 +606,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         } catch (e: any) {
             return status(403, { statusCode: "403", error: 'Forbidden', message: e.message || 'Access Denied' });
         }
-    }, {
-        body: t.Object({
-            name: t.Optional(t.String()),
-            public: t.Optional(t.Boolean()),
-            fileSizeLimit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
-            allowedMimeTypes: t.Optional(t.Union([t.Array(t.String()), t.Null()])),
-            file_size_limit: t.Optional(t.Union([t.String(), t.Number(), t.Null()])),
-            allowed_mime_types: t.Optional(t.Union([t.Array(t.String()), t.Null()]))
-        }),
-        detail: { tags: ["storage"], summary: "Update bucket settings" },
     })
 
     // POST /bucket/:id/empty — Empty bucket
-    .post('/bucket/:id/empty', async ({ params, headers }) => {
+    .post('/bucket/:id/empty', {
+        detail: { tags: ["storage"], summary: "Empty bucket contents" },
+    }, async ({ params, headers }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
         const auth = headers['authorization'];
@@ -628,11 +630,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         // 3. Logical delete bucket
         await StorageRLS.emptyLogicalBucket(ref, auth, params.id, false);
         return { message: "Successfully emptied" };
-    }, {
-        detail: { tags: ["storage"], summary: "Empty bucket contents" },
     })
 
-    .delete('/bucket/:id', async ({ params, headers }) => {
+    .delete('/bucket/:id', {
+        detail: { tags: ["storage"], summary: "Delete a bucket" },
+    }, async ({ params, headers }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
         const auth = headers['authorization'];
@@ -673,8 +675,6 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return status(500, { statusCode: "500", error: 'Internal', message: 'Bucket deletion outcome is unknown' });
         }
         return { message: "Successfully deleted" };
-    }, {
-        detail: { tags: ["storage"], summary: "Delete a bucket" },
     })
 
     // ════════════════════════════════════════════════════════
@@ -682,7 +682,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // supabase.storage.from('bucket').upload('path/to/file', fileBody)
     // ════════════════════════════════════════════════════════
 
-    .post('/object/:bucket/*', async ({ params, headers, request, set }) => {
+    .post('/object/:bucket/*', { parse: 'none', detail: { tags: ["storage"], summary: "Upload a file" } },
+    async ({ params, headers, request, set }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
@@ -750,11 +751,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             logger.error('SDK upload error:', { error: err instanceof Error ? err.message : String(err) });
             return status(500, { statusCode: "500", error: 'Internal', message: 'Upload failed' });
         }
-    },
-    { parse: 'none', detail: { tags: ["storage"], summary: "Upload a file" } })
+    })
 
     // PUT /object/:bucket/* — Upsert (same as upload but always overwrites)
-    .put('/object/:bucket/*', async ({ params, headers, request }) => {
+    .put('/object/:bucket/*', { parse: 'none', detail: { tags: ["storage"], summary: "Upsert a file" } },
+    async ({ params, headers, request }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
@@ -790,15 +791,16 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             }
             return status(500, { statusCode: "500", error: 'Internal', message: 'Upsert failed' });
         }
-    },
-    { parse: 'none', detail: { tags: ["storage"], summary: "Upsert a file" } })
+    })
 
     // ════════════════════════════════════════════════════════
     // OBJECT DOWNLOAD — GET /object/public/:bucket/*
     // supabase.storage.from('bucket').getPublicUrl('path')
     // ════════════════════════════════════════════════════════
 
-    .get('/object/public/:bucket/*', async ({ params, headers, set, query }) => {
+    .get('/object/public/:bucket/*', {
+        detail: { tags: ["storage"], summary: "Download public file" },
+    }, async ({ params, headers, set, query }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
@@ -832,12 +834,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
         }
-    }, {
-        detail: { tags: ["storage"], summary: "Download public file" },
     })
 
     // GET /object/authenticated/:bucket/* — Download (requires auth)
-    .get('/object/authenticated/:bucket/*', async ({ params, headers, set, query }) => {
+    .get('/object/authenticated/:bucket/*', {
+        detail: { tags: ["storage"], summary: "Download authenticated file" },
+    }, async ({ params, headers, set, query }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
@@ -868,13 +870,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
         }
-    }, {
-        detail: { tags: ["storage"], summary: "Download authenticated file" },
     })
 
     
     // GET /object/info/:bucket/* — File metadata
-    .get('/object/info/public/:bucket/*', async ({ params, headers }) => {
+    .get('/object/info/public/:bucket/*', {
+        detail: { tags: ["storage"], summary: "Get public file metadata" },
+    }, async ({ params, headers }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         
@@ -885,10 +887,10 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!info) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object not found' });
 
         return info;
-    }, {
-        detail: { tags: ["storage"], summary: "Get public file metadata" },
     })
-    .get('/object/info/:bucket/*', async ({ params, headers }) => {
+    .get('/object/info/:bucket/*', {
+        detail: { tags: ["storage"], summary: "Get file metadata" },
+    }, async ({ params, headers }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         
@@ -899,12 +901,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!info) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object not found' });
 
         return info;
-    }, {
-        detail: { tags: ["storage"], summary: "Get file metadata" },
     })
 
     // HEAD /object/:bucket/* — Check if an object exists
-    .head('/object/:bucket/*', async ({ params, headers }) => {
+    .head('/object/:bucket/*', {
+        detail: { tags: ["storage"], summary: "Check if object exists" },
+    }, async ({ params, headers }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
 
@@ -928,13 +930,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!s3Response || !s3Response.ok) return status(404, { statusCode: "404", error: 'Not Found', message: 'Object not found' });
         
         return status(200, '');
-    }, {
-        detail: { tags: ["storage"], summary: "Check if object exists" },
     })
 
     // GET /object/:bucket/* — Download file (authenticated, generic path)
     // SDK calls: GET /object/{bucketId}/{filePath}
-    .get('/object/:bucket/*', async ({ params, headers, set, query }) => {
+    .get('/object/:bucket/*', {
+        detail: { tags: ["storage"], summary: "Download file" },
+    }, async ({ params, headers, set, query }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
@@ -965,8 +967,6 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
         }
-    }, {
-        detail: { tags: ["storage"], summary: "Download file" },
     })
 
     // ════════════════════════════════════════════════════════
@@ -975,7 +975,15 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // SDK calls: POST /object/sign/{bucketId}/{filePath} with body { expiresIn }
     // ════════════════════════════════════════════════════════
 
-    .post('/object/sign/:bucket/*', async ({ params, headers, body, request }) => {
+    .post('/object/sign/:bucket/*', {
+        body: t.Optional(t.Object({
+            url: t.Optional(t.String()),
+            path: t.Optional(t.String()),
+            expiresIn: t.Optional(t.Number()),
+            transform: t.Optional(t.Any())
+        })),
+        detail: { tags: ["storage"], summary: "Create a signed URL" },
+    }, async ({ params, headers, body, request }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const payload = body || {};
         const filePath = params['*'] || String(payload.url || payload.path || '').replace(/^\//, '');
@@ -999,19 +1007,21 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         return {
             signedURL: buildSignedPath(`${signPrefix}/${params.bucket}/${filePath}`, expiresAt, token, transform),
         };
-    }, {
-        body: t.Optional(t.Object({
-            url: t.Optional(t.String()),
-            path: t.Optional(t.String()),
-            expiresIn: t.Optional(t.Number()),
-            transform: t.Optional(t.Any())
-        })),
-        detail: { tags: ["storage"], summary: "Create a signed URL" },
     })
 
     // POST /object/sign/:bucket — Batch signed URLs (no wildcard path)
     // supabase.storage.from('bucket').createSignedUrls(['path1', 'path2'], expiresIn)
-    .post('/object/sign/:bucket', async ({ params, headers, body, request }) => {
+    .post('/object/sign/:bucket', {
+        body: t.Object({
+            paths: t.Optional(t.Array(t.String())),
+            url: t.Optional(t.String()),
+            path: t.Optional(t.String()),
+            expiresIn: t.Optional(t.Number()),
+            transform: t.Optional(t.Record(t.String(), t.Unknown())),
+            download: t.Optional(t.Union([t.String(), t.Boolean()])),
+        }),
+        detail: { tags: ["storage"], summary: "Create batch signed URLs" },
+    }, async ({ params, headers, body, request }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         
         // If body has paths array, it's a batch request
@@ -1069,11 +1079,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const origin = getRequestOrigin(request as unknown as Request);
         const downloadOption = typeof body.download !== 'undefined' ? body.download : undefined;
         return {
-            signedURL: origin + buildSignedPath(`/object/sign/${params.bucket}/${filePath}`, expiresAt, token, body.transform, downloadOption as any),
+            signedURL: origin + buildSignedPath(`/object/sign/${params.bucket}/${filePath}`, expiresAt, token, body.transform, downloadOption),
         };
-    }, {
-        body: t.Any(),
-        detail: { tags: ["storage"], summary: "Create batch signed URLs" },
     })
 
     // ════════════════════════════════════════════════════════
@@ -1081,7 +1088,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // supabase.storage.from('bucket').createSignedUploadUrl('path')
     // ════════════════════════════════════════════════════════
 
-    .post('/object/upload/sign/:bucket/*', async ({ params, headers, request }) => {
+    .post('/object/upload/sign/:bucket/*', {
+        detail: { tags: ["storage"], summary: "Create signed upload URL" },
+    }, async ({ params, headers, request }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
@@ -1113,12 +1122,11 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             // storage-js prepends the storage base URL client-side, so this must stay relative.
             url: `/object/upload/sign/${params.bucket}/${filePath}?token=${token}`,
         };
-    }, {
-        detail: { tags: ["storage"], summary: "Create signed upload URL" },
     })
 
     // PUT /object/upload/sign/:bucket/* — Upload using signed URL
-    .put('/object/upload/sign/:bucket/*', async ({ params, headers, request, query }) => {
+    .put('/object/upload/sign/:bucket/*', { parse: 'none', detail: { tags: ["storage"], summary: "Upload using signed URL" } },
+    async ({ params, headers, request, query }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
@@ -1181,11 +1189,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: err instanceof Error ? err.message : String(err) });
         }
-    },
-    { parse: 'none', detail: { tags: ["storage"], summary: "Upload using signed URL" } })
+    })
 
     // GET /object/sign/:bucket/* — Serve signed file (validates token)
-    .get('/object/sign/:bucket/*', async ({ params, headers, query, set }) => {
+    .get('/object/sign/:bucket/*', {
+        detail: { tags: ["storage"], summary: "Download signed file" },
+    }, async ({ params, headers, query, set }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
@@ -1219,12 +1228,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: 'Download failed' });
         }
-    }, {
-        detail: { tags: ["storage"], summary: "Download signed file" },
     })
 
     // GET /render/image/sign/:bucket/* — Serve signed transformed image
-    .get('/render/image/sign/:bucket/*', async ({ params, headers, query, set }) => {
+    .get('/render/image/sign/:bucket/*', {
+        detail: { tags: ["storage"], summary: "Download signed transformed image" },
+    }, async ({ params, headers, query, set }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
@@ -1241,12 +1250,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
-    }, {
-        detail: { tags: ["storage"], summary: "Download signed transformed image" },
     })
 
     // GET /render/image/authenticated/:bucket/* — Download authenticated transformed file
-    .get('/render/image/authenticated/:bucket/*', async ({ params, headers, query, set }) => {
+    .get('/render/image/authenticated/:bucket/*', {
+        detail: { tags: ["storage"], summary: "Download authenticated transformed image" },
+    }, async ({ params, headers, query, set }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
@@ -1256,8 +1265,6 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!permitted.permitted) return status(403, { statusCode: "403", error: 'Forbidden', message: permitted.error || 'Access Denied.' });
 
         return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
-    }, {
-        detail: { tags: ["storage"], summary: "Download authenticated transformed image" },
     })
 
     // ════════════════════════════════════════════════════════
@@ -1265,7 +1272,19 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // supabase.storage.from('bucket').list('folder', { limit, offset, sortBy })
     // ════════════════════════════════════════════════════════
 
-    .post('/object/list/:bucket', async ({ params, headers, body }) => {
+    .post('/object/list/:bucket', {
+        body: t.Optional(t.Object({
+            prefix: t.Optional(t.String()),
+            limit: t.Optional(t.Number()),
+            offset: t.Optional(t.Number()),
+            search: t.Optional(t.String()),
+            sortBy: t.Optional(t.Object({
+                column: t.Optional(t.String()),
+                order: t.Optional(t.String())
+            }))
+        })),
+        detail: { tags: ["storage"], summary: "List objects in bucket" },
+    }, async ({ params, headers, body }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const auth = headers['authorization'];
 
@@ -1306,25 +1325,27 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 } : null
             };
         });
-    }, {
-        body: t.Optional(t.Object({
-            prefix: t.Optional(t.String()),
-            limit: t.Optional(t.Number()),
-            offset: t.Optional(t.Number()),
-            search: t.Optional(t.String()),
-            sortBy: t.Optional(t.Object({
-                column: t.Optional(t.String()),
-                order: t.Optional(t.String())
-            }))
-        })),
-        detail: { tags: ["storage"], summary: "List objects in bucket" },
     })
 
     // ════════════════════════════════════════════════════════
     // OBJECT LIST V2 — POST /object/list-v2/:bucket
     // ════════════════════════════════════════════════════════
 
-    .post('/object/list-v2/:bucket', async ({ params, headers, body }) => {
+    .post('/object/list-v2/:bucket', {
+        body: t.Optional(t.Object({
+            prefix: t.Optional(t.String()),
+            limit: t.Optional(t.Number()),
+            offset: t.Optional(t.Number()),
+            cursor: t.Optional(t.String()),
+            with_delimiter: t.Optional(t.Boolean()),
+            search: t.Optional(t.String()),
+            sortBy: t.Optional(t.Object({
+                column: t.Optional(t.String()),
+                order: t.Optional(t.String())
+            }))
+        })),
+        detail: { tags: ["storage"], summary: "List objects in bucket (v2)" },
+    }, async ({ params, headers, body }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const auth = headers['authorization'];
 
@@ -1393,20 +1414,6 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const nextCursor = hasNext ? Buffer.from(String(offset + limit)).toString('base64') : null;
 
         return { nextCursor, objects, folders, hasNext };
-    }, {
-        body: t.Optional(t.Object({
-            prefix: t.Optional(t.String()),
-            limit: t.Optional(t.Number()),
-            offset: t.Optional(t.Number()),
-            cursor: t.Optional(t.String()),
-            with_delimiter: t.Optional(t.Boolean()),
-            search: t.Optional(t.String()),
-            sortBy: t.Optional(t.Object({
-                column: t.Optional(t.String()),
-                order: t.Optional(t.String())
-            }))
-        })),
-        detail: { tags: ["storage"], summary: "List objects in bucket (v2)" },
     })
 
     // ════════════════════════════════════════════════════════
@@ -1414,7 +1421,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // supabase.storage.from('bucket').remove(['path1', 'path2'])
     // ════════════════════════════════════════════════════════
 
-    .delete('/object/:bucket', async ({ params, headers, body }) => {
+    .delete('/object/:bucket', {
+        body: t.Optional(t.Object({
+            prefixes: t.Optional(t.Array(t.String()))
+        })),
+        detail: { tags: ["storage"], summary: "Batch delete objects" },
+    }, async ({ params, headers, body }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const prefixes = body?.prefixes || [];
         const auth = headers['authorization'];
@@ -1464,18 +1476,22 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         }
 
         return successfulDeletes;
-    }, {
-        body: t.Optional(t.Object({
-            prefixes: t.Optional(t.Array(t.String()))
-        })),
-        detail: { tags: ["storage"], summary: "Batch delete objects" },
     })
 
     // ════════════════════════════════════════════════════════
     // OBJECT MOVE / COPY
     // ════════════════════════════════════════════════════════
 
-    .post('/object/move', async ({ headers, body }) => {
+    .post('/object/move', {
+        body: t.Object({
+            bucketId: t.Optional(t.String()),
+            sourceKey: t.Optional(t.String()),
+            destinationBucketId: t.Optional(t.String()),
+            destinationBucket: t.Optional(t.String()),
+            destinationKey: t.Optional(t.String())
+        }),
+        detail: { tags: ["storage"], summary: "Move an object" },
+    }, async ({ headers, body }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
         const auth = headers['authorization'];
@@ -1518,18 +1534,19 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: err instanceof Error ? err.message : String(err) });
         }
-    }, {
+    })
+
+    .post('/object/copy', {
         body: t.Object({
             bucketId: t.Optional(t.String()),
             sourceKey: t.Optional(t.String()),
             destinationBucketId: t.Optional(t.String()),
             destinationBucket: t.Optional(t.String()),
             destinationKey: t.Optional(t.String())
-        }),
-        detail: { tags: ["storage"], summary: "Move an object" },
-    })
 
-    .post('/object/copy', async ({ headers, body }) => {
+        }),
+        detail: { tags: ["storage"], summary: "Copy an object" },
+    }, async ({ headers, body }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         if (!ref) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing tenant reference' });
         const auth = headers['authorization'];
@@ -1568,16 +1585,6 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         } catch (err: unknown) {
             return status(500, { statusCode: "500", error: 'Internal', message: err instanceof Error ? err.message : String(err) });
         }
-    }, {
-        body: t.Object({
-            bucketId: t.Optional(t.String()),
-            sourceKey: t.Optional(t.String()),
-            destinationBucketId: t.Optional(t.String()),
-            destinationBucket: t.Optional(t.String()),
-            destinationKey: t.Optional(t.String())
-
-        }),
-        detail: { tags: ["storage"], summary: "Copy an object" },
     })
 
     // ════════════════════════════════════════════════════════
@@ -1585,7 +1592,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // supabase.storage.from('bucket').download('path', { transform: { width, height } })
     // ════════════════════════════════════════════════════════
 
-    .get('/render/image/public/:bucket/*', async ({ params, headers, query, set }) => {
+    .get('/render/image/public/:bucket/*', {
+        detail: { tags: ["storage"], summary: "Transform public image" },
+    }, async ({ params, headers, query, set }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { message: 'Missing file path' });
@@ -1594,8 +1603,6 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!bucket || !bucket.public) return status(400, { message: 'Bucket is not public' });
 
         return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, true);
-    }, {
-        detail: { tags: ["storage"], summary: "Transform public image" },
     })
 
     // ════════════════════════════════════════════════════════
@@ -1604,18 +1611,20 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // ════════════════════════════════════════════════════════
 
     // OPTIONS /upload/resumable — TUS capabilities discovery
-    .options('/upload/resumable', ({ set }) => {
+    .options('/upload/resumable', {
+        detail: { tags: ["storage"], summary: "TUS capabilities discovery" },
+    }, ({ set }) => {
         set.headers['Tus-Resumable'] = '1.0.0';
         set.headers['Tus-Version'] = '1.0.0';
         set.headers['Tus-Extension'] = 'creation,termination';
         set.headers['Tus-Max-Size'] = String(TUS_MAX_SIZE);
         return '';
-    }, {
-        detail: { tags: ["storage"], summary: "TUS capabilities discovery" },
     })
 
     // POST /upload/resumable — Create a new resumable upload
-    .post('/upload/resumable', async ({ headers, set }) => {
+    .post('/upload/resumable', {
+        detail: { tags: ["storage"], summary: "Create a resumable upload" },
+    }, async ({ headers, set }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const uploadLength = Number(headers['upload-length'] || 0);
 
@@ -1687,12 +1696,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         set.headers['Location'] = `/storage/v1/upload/resumable/${uploadId}`;
         set.status = 201;
         return '';
-    }, {
-        detail: { tags: ["storage"], summary: "Create a resumable upload" },
     })
 
     // HEAD /upload/resumable/:uploadId — Get current upload offset
-    .head('/upload/resumable/:uploadId', async ({ params, headers, set }) => {
+    .head('/upload/resumable/:uploadId', {
+        detail: { tags: ["storage"], summary: "Get TUS upload offset" },
+    }, async ({ params, headers, set }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
         if (!upload) return status(404, { message: 'Upload not found' });
@@ -1703,12 +1712,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         set.headers['Upload-Length'] = String(upload.totalSize);
         set.headers['Cache-Control'] = 'no-store';
         return '';
-    }, {
-        detail: { tags: ["storage"], summary: "Get TUS upload offset" },
     })
 
     // PATCH /upload/resumable/:uploadId — Upload a chunk
-    .patch('/upload/resumable/:uploadId', async ({ params, headers, request, set }) => {
+    .patch('/upload/resumable/:uploadId', {
+        detail: { tags: ["storage"], summary: "Upload a TUS chunk" },
+    }, async ({ params, headers, request, set }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
         if (!upload) return status(404, { message: 'Upload not found' });
@@ -1775,12 +1784,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         set.status = 204;
         return '';
-    }, {
-        detail: { tags: ["storage"], summary: "Upload a TUS chunk" },
     })
 
     // DELETE /upload/resumable/:uploadId — Abort a resumable upload
-    .delete('/upload/resumable/:uploadId', async ({ params, headers, set }) => {
+    .delete('/upload/resumable/:uploadId', {
+        detail: { tags: ["storage"], summary: "Abort resumable upload" },
+    }, async ({ params, headers, set }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const upload = await TusStore.get(params.uploadId);
         if (upload && upload.ref !== ref) return status(403, { message: 'Cross-project upload access denied' });
@@ -1788,14 +1797,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         set.headers['Tus-Resumable'] = '1.0.0';
         set.status = 204;
         return '';
-    }, {
-        detail: { tags: ["storage"], summary: "Abort resumable upload" },
     })
 
     // ════════════════════════════════════════════════════════
     // Supabase Storage Vector API (service-role / secret-key only)
     // ════════════════════════════════════════════════════════
-    .post('/vector/CreateVectorBucket', async ({ headers, body, set }) => {
+    .post('/vector/CreateVectorBucket', { detail: { tags: ["storage", "vector"], summary: "Create a vector bucket" } }, async ({ headers, body, set }) => {
         const input = body as Record<string, unknown>;
         const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.createBucket(ref, requiredVectorString(input, 'vectorBucketName')),
@@ -1805,8 +1812,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return '';
         }
         return result;
-    }, { detail: { tags: ["storage", "vector"], summary: "Create a vector bucket" } })
-    .post('/vector/DeleteVectorBucket', async ({ headers, body, set }) => {
+    })
+    .post('/vector/DeleteVectorBucket', { detail: { tags: ["storage", "vector"], summary: "Delete a vector bucket" } }, async ({ headers, body, set }) => {
         const input = body as Record<string, unknown>;
         const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.deleteBucket(ref, requiredVectorString(input, 'vectorBucketName')),
@@ -1816,14 +1823,14 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return '';
         }
         return result;
-    }, { detail: { tags: ["storage", "vector"], summary: "Delete a vector bucket" } })
-    .post('/vector/GetVectorBucket', async ({ headers, body }) => {
+    })
+    .post('/vector/GetVectorBucket', { detail: { tags: ["storage", "vector"], summary: "Get a vector bucket" } }, async ({ headers, body }) => {
         const input = body as Record<string, unknown>;
         return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.getBucket(ref, requiredVectorString(input, 'vectorBucketName')),
         );
-    }, { detail: { tags: ["storage", "vector"], summary: "Get a vector bucket" } })
-    .post('/vector/ListVectorBuckets', async ({ headers, body }) => {
+    })
+    .post('/vector/ListVectorBuckets', { detail: { tags: ["storage", "vector"], summary: "List vector buckets" } }, async ({ headers, body }) => {
         const input = body as Record<string, unknown>;
         return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.listBuckets(ref, {
@@ -1832,8 +1839,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 prefix: optionalVectorString(input, 'prefix'),
             }),
         );
-    }, { detail: { tags: ["storage", "vector"], summary: "List vector buckets" } })
-    .post('/vector/CreateIndex', async ({ headers, body, set }) => {
+    })
+    .post('/vector/CreateIndex', { detail: { tags: ["storage", "vector"], summary: "Create a vector index" } }, async ({ headers, body, set }) => {
         const input = body as Record<string, unknown>;
         const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.createIndex(ref, {
@@ -1850,8 +1857,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return '';
         }
         return result;
-    }, { detail: { tags: ["storage", "vector"], summary: "Create a vector index" } })
-    .post('/vector/DeleteIndex', async ({ headers, body, set }) => {
+    })
+    .post('/vector/DeleteIndex', { detail: { tags: ["storage", "vector"], summary: "Delete a vector index" } }, async ({ headers, body, set }) => {
         const input = body as Record<string, unknown>;
         const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.deleteIndex(
@@ -1865,8 +1872,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return '';
         }
         return result;
-    }, { detail: { tags: ["storage", "vector"], summary: "Delete a vector index" } })
-    .post('/vector/GetIndex', async ({ headers, body }) => {
+    })
+    .post('/vector/GetIndex', { detail: { tags: ["storage", "vector"], summary: "Get a vector index" } }, async ({ headers, body }) => {
         const input = body as Record<string, unknown>;
         return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.getIndex(
@@ -1875,8 +1882,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 requiredVectorString(input, 'indexName'),
             ),
         );
-    }, { detail: { tags: ["storage", "vector"], summary: "Get a vector index" } })
-    .post('/vector/ListIndexes', async ({ headers, body }) => {
+    })
+    .post('/vector/ListIndexes', { detail: { tags: ["storage", "vector"], summary: "List vector indexes" } }, async ({ headers, body }) => {
         const input = body as Record<string, unknown>;
         return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.listIndexes(ref, {
@@ -1886,8 +1893,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 prefix: optionalVectorString(input, 'prefix'),
             }),
         );
-    }, { detail: { tags: ["storage", "vector"], summary: "List vector indexes" } })
-    .post('/vector/PutVectors', async ({ headers, body, set }) => {
+    })
+    .post('/vector/PutVectors', { detail: { tags: ["storage", "vector"], summary: "Put vectors" } }, async ({ headers, body, set }) => {
         const input = body as Record<string, unknown>;
         const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.putVectors(ref, {
@@ -1901,8 +1908,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return '';
         }
         return result;
-    }, { detail: { tags: ["storage", "vector"], summary: "Put vectors" } })
-    .post('/vector/DeleteVectors', async ({ headers, body, set }) => {
+    })
+    .post('/vector/DeleteVectors', { detail: { tags: ["storage", "vector"], summary: "Delete vectors" } }, async ({ headers, body, set }) => {
         const input = body as Record<string, unknown>;
         const result = await runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.deleteVectors(ref, {
@@ -1916,8 +1923,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return '';
         }
         return result;
-    }, { detail: { tags: ["storage", "vector"], summary: "Delete vectors" } })
-    .post('/vector/GetVectors', async ({ headers, body }) => {
+    })
+    .post('/vector/GetVectors', { detail: { tags: ["storage", "vector"], summary: "Get vectors" } }, async ({ headers, body }) => {
         const input = body as Record<string, unknown>;
         return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.getVectors(ref, {
@@ -1928,8 +1935,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 returnMetadata: optionalVectorBoolean(input, 'returnMetadata'),
             }),
         );
-    }, { detail: { tags: ["storage", "vector"], summary: "Get vectors" } })
-    .post('/vector/ListVectors', async ({ headers, body }) => {
+    })
+    .post('/vector/ListVectors', { detail: { tags: ["storage", "vector"], summary: "List vectors" } }, async ({ headers, body }) => {
         const input = body as Record<string, unknown>;
         return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.listVectors(ref, {
@@ -1943,8 +1950,8 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 returnMetadata: optionalVectorBoolean(input, 'returnMetadata'),
             }),
         );
-    }, { detail: { tags: ["storage", "vector"], summary: "List vectors" } })
-    .post('/vector/QueryVectors', async ({ headers, body }) => {
+    })
+    .post('/vector/QueryVectors', { detail: { tags: ["storage", "vector"], summary: "Query vectors" } }, async ({ headers, body }) => {
         const input = body as Record<string, unknown>;
         return runVectorOperation(headers as Record<string, string | undefined>, (ref) =>
             StorageVectorService.queryVectors(ref, {
@@ -1957,10 +1964,12 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
                 returnMetadata: optionalVectorBoolean(input, 'returnMetadata'),
             }),
         );
-    }, { detail: { tags: ["storage", "vector"], summary: "Query vectors" } })
+    })
 
     // Analytics Buckets remain explicitly unavailable until their query/data plane is implemented.
-    .all('/iceberg/*', async ({ set }) => {
+    .all('/iceberg/*', {
+        detail: { tags: ["storage"], summary: "Iceberg analytics stub" },
+    }, async ({ set }) => {
         set.status = 501;
         return {
             statusCode: "501",
@@ -1972,8 +1981,6 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             reason: 'storage_iceberg_not_enabled',
             message: 'Storage analytics backed by Iceberg tables are not available on this SupaCloud cluster.',
         };
-    }, {
-        detail: { tags: ["storage"], summary: "Iceberg analytics stub" },
     });
 
 

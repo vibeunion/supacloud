@@ -9,6 +9,7 @@ import {
 interface MockSql {
     (strings: TemplateStringsArray, ...values: unknown[]): Promise<unknown[]>;
     unsafe: ReturnType<typeof mock>;
+    begin: ReturnType<typeof mock>;
     close: ReturnType<typeof mock>;
     mockResolvedValueOnce: (value: unknown) => void;
 }
@@ -16,6 +17,7 @@ interface MockSql {
 function createMockSql(): MockSql {
     const fn = mock((strings: unknown) => Promise.resolve([]));
     (fn as unknown as Record<string, unknown>).unsafe = mock(() => Promise.resolve([]));
+    (fn as unknown as Record<string, unknown>).begin = mock((run: (tx: unknown) => Promise<unknown>) => run(fn));
     (fn as unknown as Record<string, unknown>).close = mock(() => Promise.resolve());
     return fn as unknown as MockSql;
 }
@@ -68,18 +70,25 @@ describe("DatabaseService", () => {
   });
 
   describe("createDatabase", () => {
-    test("should return result object", async () => {
+  test("should return result object", async () => {
       const result = await databaseService.createDatabase("testref123", "testpass");
       expect(result.success).toBe(true);
+      expect(applySupabaseSchemaSpy).toHaveBeenCalledWith("supa_testref123", "testref123", "testpass");
       expect(mockSql.unsafe).toHaveBeenCalled();
       expect(mockSql.unsafe).toHaveBeenCalledWith(expect.stringContaining(
         'GRANT CONNECT, TEMPORARY ON DATABASE "supa_testref123" TO "authenticator_testref123"',
+      ));
+      expect(mockSql.unsafe).toHaveBeenCalledWith(expect.stringContaining(
+        'GRANT CONNECT, TEMPORARY, CREATE ON DATABASE "supa_testref123" TO supabase_admin',
       ));
     });
 
     test("reconciles tenant login passwords when the database already exists", async () => {
       applySupabaseSchemaSpy.mockClear();
-      (mockSql as unknown as ReturnType<typeof mock>).mockResolvedValueOnce([{ exists: 1 }]);
+      (mockSql as unknown as ReturnType<typeof mock>)
+        .mockResolvedValueOnce([{ exists: 1 }])
+        .mockResolvedValueOnce([{ has_marker: true }])
+        .mockResolvedValueOnce([{ schema_version: "2026-09-27" }]);
 
       const result = await databaseService.createDatabase("testref123", "replacement-pass");
 
@@ -91,6 +100,65 @@ describe("DatabaseService", () => {
       expect(mockSql.unsafe).toHaveBeenCalledWith(expect.stringContaining(
         'ALTER ROLE "authenticator_testref123" CONNECTION LIMIT 30 NOINHERIT LOGIN PASSWORD',
       ));
+    });
+
+    test("repairs an existing database whose first schema application was interrupted", async () => {
+      applySupabaseSchemaSpy.mockClear();
+      (mockSql as unknown as ReturnType<typeof mock>)
+        .mockResolvedValueOnce([{ exists: 1 }])
+        .mockResolvedValueOnce([{ auth_users: false, storage_objects: false, realtime_schema: false }]);
+
+      const result = await databaseService.createDatabase("testref123", "replacement-pass");
+
+      expect(result.success).toBe(true);
+      expect(applySupabaseSchemaSpy).toHaveBeenCalledWith(
+        "supa_testref123",
+        "testref123",
+        "replacement-pass",
+      );
+    });
+
+    test("does not replay initialization over a partially populated legacy schema", async () => {
+      applySupabaseSchemaSpy.mockClear();
+      (mockSql as unknown as ReturnType<typeof mock>)
+        .mockResolvedValueOnce([{ exists: 1 }])
+        .mockResolvedValueOnce([{ auth_users: true, storage_objects: true, realtime_schema: true, schema_tail: false }]);
+      const result = await databaseService.createDatabase("testref123", "testpass");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("incomplete Supabase schema");
+      expect(applySupabaseSchemaSpy).not.toHaveBeenCalled();
+    });
+
+    test("preserves initialized legacy databases without a receipt", async () => {
+      applySupabaseSchemaSpy.mockClear();
+      (mockSql as unknown as ReturnType<typeof mock>)
+        .mockResolvedValueOnce([{ exists: 1 }])
+        .mockResolvedValueOnce([{ auth_users: true, storage_objects: true, realtime_schema: true, schema_tail: true }])
+        .mockResolvedValueOnce([{ ready: true }]);
+      expect((await databaseService.createDatabase("testref123", "testpass")).success).toBe(true);
+      expect(applySupabaseSchemaSpy).not.toHaveBeenCalled();
+    });
+
+    test("rejects a legacy schema whose ownership or grants never completed", async () => {
+      applySupabaseSchemaSpy.mockClear();
+      (mockSql as unknown as ReturnType<typeof mock>)
+        .mockResolvedValueOnce([{ exists: 1 }])
+        .mockResolvedValueOnce([{ auth_users: true, storage_objects: true, realtime_schema: true, schema_tail: true }])
+        .mockResolvedValueOnce([{ ready: false }]);
+      const result = await databaseService.createDatabase("testref123", "testpass");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("ownership or grants");
+      expect(applySupabaseSchemaSpy).not.toHaveBeenCalled();
+    });
+
+    test("does not interpret an unreadable bootstrap inventory as an empty database", async () => {
+      applySupabaseSchemaSpy.mockClear();
+      (mockSql as unknown as ReturnType<typeof mock>)
+        .mockResolvedValueOnce([{ exists: 1 }])
+        .mockRejectedValueOnce(new Error("inventory unavailable"));
+      const result = await databaseService.createDatabase("testref123", "testpass");
+      expect(result).toEqual({ success: false, error: "inventory unavailable" });
+      expect(applySupabaseSchemaSpy).not.toHaveBeenCalled();
     });
   });
 
@@ -116,14 +184,19 @@ describe("DatabaseService", () => {
       applySupabaseSchemaSpy.mockRestore();
       const service = new DatabaseService();
       const tenantSql = createMockSql();
+      const transactionSql = createMockSql();
+      tenantSql.begin = mock((run: (tx: MockSql) => Promise<unknown>) => run(transactionSql));
       spyOn(DatabaseService.prototype as any, "getTenantDb").mockReturnValue(tenantSql);
       spyOn(DatabaseService.prototype as any, "loadSupabaseSchema").mockResolvedValue("SELECT 'tenant schema loaded';");
 
       await (service as unknown as { applySupabaseSchema(dbName: string, projectRef: string, password: string): Promise<void> })
         .applySupabaseSchema("supa_testref123", "testref123", "testpass");
 
-      expect(tenantSql.unsafe).toHaveBeenCalledWith("SELECT 'tenant schema loaded';");
-      expect(tenantSql.unsafe).toHaveBeenCalledWith(expect.stringContaining('ALTER SCHEMA auth OWNER TO "supabase_auth_admin"'));
+      expect(tenantSql.unsafe).not.toHaveBeenCalledWith("SELECT 'tenant schema loaded';");
+      expect(tenantSql.begin).toHaveBeenCalled();
+      expect(transactionSql.unsafe).toHaveBeenCalledWith("SELECT 'tenant schema loaded';");
+      expect(transactionSql.unsafe).toHaveBeenCalledWith(expect.stringContaining('ALTER SCHEMA auth OWNER TO "supabase_auth_admin"'));
+      expect(transactionSql.unsafe).toHaveBeenLastCalledWith(expect.stringContaining("INSERT INTO supacloud_platform.bootstrap_state"));
     });
   });
 

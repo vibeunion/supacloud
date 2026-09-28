@@ -3,7 +3,9 @@ import { ScalingService } from "../services/scaling.service";
 import { requireAdminAuth } from "../middleware/auth";
 
 export const scalingRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
-    .get("/scaling", async ({ params, request }) => {
+    .get("/scaling", {
+        detail: { tags: ["scaling"], summary: "Get project scaling state" },
+    }, async ({ params, request }) => {
         const authError = await requireAdminAuth(request);
         if (authError) return status(authError.status, authError.body);
         const state = await ScalingService.getScalingState(params.ref);
@@ -13,10 +15,13 @@ export const scalingRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
             tiers: ScalingService.listComputeTiers(),
             ...state,
         };
-    }, {
-        detail: { tags: ["scaling"], summary: "Get project scaling state" },
     })
-    .post("/scaling/compute", async ({ params, body, request }) => {
+    .post("/scaling/compute", {
+        body: t.Object({
+            target_tier: t.String()
+        }),
+        detail: { tags: ["scaling"], summary: "Upgrade project compute tier" },
+    }, async ({ params, body, request }) => {
         const authError = await requireAdminAuth(request);
         if (authError) return status(authError.status, authError.body);
 
@@ -28,13 +33,13 @@ export const scalingRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
         } catch (err: unknown) {
             return status(500, { success: false, message: (err instanceof Error ? err.message : String(err)), code: "500" });
         }
-    }, {
+    })
+    .post("/scaling", {
         body: t.Object({
             target_tier: t.String()
         }),
         detail: { tags: ["scaling"], summary: "Upgrade project compute tier" },
-    })
-    .post("/scaling", async ({ params, body, request }) => {
+    }, async ({ params, body, request }) => {
         const authError = await requireAdminAuth(request);
         if (authError) return status(authError.status, authError.body);
 
@@ -46,13 +51,13 @@ export const scalingRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
         } catch (err: unknown) {
             return status(500, { success: false, message: (err instanceof Error ? err.message : String(err)), code: "500" });
         }
-    }, {
+    })
+    .post("/upgrade", {
         body: t.Object({
             target_tier: t.String()
         }),
         detail: { tags: ["scaling"], summary: "Upgrade project compute tier" },
-    })
-    .post("/upgrade", async ({ params, body, request }) => {
+    }, async ({ params, body, request }) => {
         const authError = await requireAdminAuth(request);
         if (authError) return status(authError.status, authError.body);
 
@@ -64,13 +69,14 @@ export const scalingRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
         } catch (err: unknown) {
             return status(500, { success: false, message: (err instanceof Error ? err.message : String(err)), code: "500" });
         }
-    }, {
-        body: t.Object({
-            target_tier: t.String()
-        }),
-        detail: { tags: ["scaling"], summary: "Upgrade project compute tier" },
     })
-    .post("/scaling/replicas", async ({ params, body, request }) => {
+    .post("/scaling/replicas", {
+        body: t.Object({
+            replica_ip: t.String(),
+            region: t.Optional(t.String()),
+        }),
+        detail: { tags: ["scaling"], summary: "Add a read replica to project" },
+    }, async ({ params, body, request }) => {
         const authError = await requireAdminAuth(request);
         if (authError) return status(authError.status, authError.body);
 
@@ -81,14 +87,14 @@ export const scalingRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
         } catch (err: unknown) {
             return status(500, { success: false, message: (err instanceof Error ? err.message : String(err)), code: "500" });
         }
-    }, {
+    })
+    .post("/upgrade/replicas", {
         body: t.Object({
             replica_ip: t.String(),
             region: t.Optional(t.String()),
         }),
         detail: { tags: ["scaling"], summary: "Add a read replica to project" },
-    })
-    .post("/upgrade/replicas", async ({ params, body, request }) => {
+    }, async ({ params, body, request }) => {
         const authError = await requireAdminAuth(request);
         if (authError) return status(authError.status, authError.body);
 
@@ -99,10 +105,4 @@ export const scalingRoutes = new Elysia({ prefix: "/v1/projects/:ref" })
         } catch (err: unknown) {
             return status(500, { success: false, message: (err instanceof Error ? err.message : String(err)), code: "500" });
         }
-    }, {
-        body: t.Object({
-            replica_ip: t.String(),
-            region: t.Optional(t.String()),
-        }),
-        detail: { tags: ["scaling"], summary: "Add a read replica to project" },
     });

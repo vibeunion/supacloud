@@ -22,18 +22,18 @@ const operationSchema = t.Union([
   t.Object({
     op: t.Union([t.Literal("get"), t.Literal("delete"), t.Literal("ttl"), t.Literal("getdel")]),
     key: keySchema,
-  }, { additionalProperties: false }),
+  }, { additionalProperties: true }),
   t.Object({
     op: t.Literal("set"),
     key: keySchema,
     value: t.Unknown(),
     ttl_ms: t.Optional(t.Union([t.Integer({ minimum: 0 }), t.Null()])),
-  }, { additionalProperties: false }),
+  }, { additionalProperties: true }),
   t.Object({
     op: t.Literal("getset"),
     key: keySchema,
     value: t.Unknown(),
-  }, { additionalProperties: false }),
+  }, { additionalProperties: true }),
 ]);
 
 export function createPgredisRoutes(dependencies: PgredisRoutesDependencies = {}) {
@@ -45,35 +45,38 @@ export function createPgredisRoutes(dependencies: PgredisRoutesDependencies = {}
     ?? tenantRuntimeService.ensurePgredisTenantConfig.bind(tenantRuntimeService);
 
   const platformRoutes = new Elysia({ prefix: "/v1/cache" })
-    .onBeforeHandle(async ({ request }) => {
+    .beforeHandle(async ({ request }) => {
       const authError = await requireAdmin(request);
       if (authError) return status(authError.status, authError.body);
     })
-    .get("", () => service.platformStatus(), {
+    .get("", {
       detail: { tags: ["cache"], summary: "Get pgredis runtime platform status" },
-    });
+    }, () => service.platformStatus());
 
   const projectRoutes = new Elysia({ prefix: "/v1/projects/:ref/cache" })
-    .onBeforeHandle(async ({ params, request }) => {
+    .beforeHandle(async ({ params, request }) => {
       const authError = await requireProject(request, params.ref);
       if (authError) return status(authError.status, authError.body);
     })
-    .get("", async ({ params }) => {
+    .get("", {
+      detail: { tags: ["cache"], summary: "Get project cache status" },
+    }, async ({ params }) => {
       const project = await findProject(params.ref);
       if (!project) return status(404, { message: "Project not found", code: "NOT_FOUND" });
       return await service.projectStatus(params.ref);
-    }, {
-      detail: { tags: ["cache"], summary: "Get project cache status" },
     })
-    .post("/refresh", async ({ params }) => {
+    .post("/refresh", {
+      detail: { tags: ["cache"], summary: "Refresh the project cache configuration" },
+    }, async ({ params }) => {
       const project = await findProject(params.ref);
       if (!project) return status(404, { message: "Project not found", code: "NOT_FOUND" });
       await prepareProject(params.ref);
       return await service.refresh(params.ref);
-    }, {
-      detail: { tags: ["cache"], summary: "Refresh the project cache configuration" },
     })
-    .post("/operations", async ({ params, body }) => {
+    .post("/operations", {
+      body: operationSchema,
+      detail: { tags: ["cache"], summary: "Execute an exact-key project cache operation" },
+    }, async ({ params, body }) => {
       const project = await findProject(params.ref);
       if (!project) return status(404, { message: "Project not found", code: "NOT_FOUND" });
       const input = body as
@@ -89,11 +92,13 @@ export function createPgredisRoutes(dependencies: PgredisRoutesDependencies = {}
         operation = { op: input.op, key: input.key };
       }
       return await service.execute(params.ref, operation);
-    }, {
-      body: operationSchema,
-      detail: { tags: ["cache"], summary: "Execute an exact-key project cache operation" },
     })
-    .post("/flush", async ({ params, body }) => {
+    .post("/flush", {
+      body: t.Object({ confirmation: t.String({ minLength: 1, maxLength: 64 }) }, {
+        additionalProperties: false,
+      }),
+      detail: { tags: ["cache"], summary: "Flush the project cache namespace" },
+    }, async ({ params, body }) => {
       const project = await findProject(params.ref);
       if (!project) return status(404, { message: "Project not found", code: "NOT_FOUND" });
       if (body.confirmation !== params.ref) {
@@ -103,15 +108,10 @@ export function createPgredisRoutes(dependencies: PgredisRoutesDependencies = {}
         });
       }
       return await service.flush(params.ref);
-    }, {
-      body: t.Object({ confirmation: t.String({ minLength: 1, maxLength: 64 }) }, {
-        additionalProperties: false,
-      }),
-      detail: { tags: ["cache"], summary: "Flush the project cache namespace" },
     });
 
   return new Elysia({ name: "pgredis-routes" })
-    .onError(({ error, set }) => {
+    .error(({ error, set }) => {
       if (!isAppError(error)) return;
       set.status = error.statusCode;
       return error.toJSON();

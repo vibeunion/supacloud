@@ -23,13 +23,16 @@ async function projectGuard(ref: string): Promise<boolean> {
 }
 
 export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
-  .onBeforeHandle(async ({ params, request }) => {
+  .beforeHandle(async ({ params, request }) => {
     const authError = await authMiddleware.requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
   })
 
   // ── Tables ──────────────────────────────────────────────────
-  .get("/tables", async ({ params, query }) => {
+  .get("/tables", {
+    query: t.Object({ schema: t.Optional(t.String()) }),
+    detail: { tags: ["pg-meta"], summary: "List tables" },
+  }, async ({ params, query }) => {
     if (!(await projectGuard(params.ref))) return status(404, { error: "Project not found" });
     const schema = (query.schema as string) || "public";
     const schemasParam = schema === "*" ? "" : `AND schemaname = '${schema.replace(/'/g, "''")}'`;
@@ -46,13 +49,13 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
     } catch (err) {
       return status(500, { error: err instanceof Error ? err.message : String(err) });
     }
-  }, {
-    query: t.Object({ schema: t.Optional(t.String()) }),
-    detail: { tags: ["pg-meta"], summary: "List tables" },
   })
 
   // ── Columns ─────────────────────────────────────────────────
-  .get("/columns", async ({ params, query }) => {
+  .get("/columns", {
+    query: t.Object({ schema: t.Optional(t.String()) }),
+    detail: { tags: ["pg-meta"], summary: "List columns" },
+  }, async ({ params, query }) => {
     if (!(await projectGuard(params.ref))) return status(404, { error: "Project not found" });
     const schema = (query.schema as string) || "public";
     const schemaFilter = schema === "*" ? "" : `AND table_schema = '${schema.replace(/'/g, "''")}'`;
@@ -70,13 +73,12 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
     } catch (err) {
       return status(500, { error: err instanceof Error ? err.message : String(err) });
     }
-  }, {
-    query: t.Object({ schema: t.Optional(t.String()) }),
-    detail: { tags: ["pg-meta"], summary: "List columns" },
   })
 
   // ── Indexes ─────────────────────────────────────────────────
-  .get("/indexes", async ({ params }) => {
+  .get("/indexes", {
+    detail: { tags: ["pg-meta"], summary: "List indexes" },
+  }, async ({ params }) => {
     if (!(await projectGuard(params.ref))) return status(404, { error: "Project not found" });
     try {
       const rows = await queryTenant(
@@ -90,12 +92,12 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
     } catch (err) {
       return status(500, { error: err instanceof Error ? err.message : String(err) });
     }
-  }, {
-    detail: { tags: ["pg-meta"], summary: "List indexes" },
   })
 
   // ── Roles ───────────────────────────────────────────────────
-  .get("/roles", async ({ params }) => {
+  .get("/roles", {
+    detail: { tags: ["pg-meta"], summary: "List roles" },
+  }, async ({ params }) => {
     if (!(await projectGuard(params.ref))) return status(404, { error: "Project not found" });
     try {
       const rows = await queryTenant(
@@ -110,12 +112,12 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
     } catch (err) {
       return status(500, { error: err instanceof Error ? err.message : String(err) });
     }
-  }, {
-    detail: { tags: ["pg-meta"], summary: "List roles" },
   })
 
   // ── Schemas ─────────────────────────────────────────────────
-  .get("/schemas", async ({ params }) => {
+  .get("/schemas", {
+    detail: { tags: ["pg-meta"], summary: "List schemas" },
+  }, async ({ params }) => {
     if (!(await projectGuard(params.ref))) return status(404, { error: "Project not found" });
     try {
       const rows = await queryTenant(
@@ -131,12 +133,12 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
     } catch (err) {
       return status(500, { error: err instanceof Error ? err.message : String(err) });
     }
-  }, {
-    detail: { tags: ["pg-meta"], summary: "List schemas" },
   })
 
   // ── Functions ───────────────────────────────────────────────
-  .get("/functions", async ({ params }) => {
+  .get("/functions", {
+    detail: { tags: ["pg-meta"], summary: "List functions" },
+  }, async ({ params }) => {
     if (!(await projectGuard(params.ref))) return status(404, { error: "Project not found" });
     try {
       const rows = await queryTenant(
@@ -155,12 +157,12 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
     } catch (err) {
       return status(500, { error: err instanceof Error ? err.message : String(err) });
     }
-  }, {
-    detail: { tags: ["pg-meta"], summary: "List functions" },
   })
 
   // ── Triggers ────────────────────────────────────────────────
-  .get("/triggers", async ({ params }) => {
+  .get("/triggers", {
+    detail: { tags: ["pg-meta"], summary: "List triggers" },
+  }, async ({ params }) => {
     if (!(await projectGuard(params.ref))) return status(404, { error: "Project not found" });
     try {
       const rows = await queryTenant(
@@ -175,12 +177,12 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
     } catch (err) {
       return status(500, { error: err instanceof Error ? err.message : String(err) });
     }
-  }, {
-    detail: { tags: ["pg-meta"], summary: "List triggers" },
   })
 
   // ── Policies (RLS) ──────────────────────────────────────────
-  .get("/policies", async ({ params }) => {
+  .get("/policies", {
+    detail: { tags: ["pg-meta"], summary: "List RLS policies" },
+  }, async ({ params }) => {
     if (!(await projectGuard(params.ref))) return status(404, { error: "Project not found" });
     try {
       const rows = await queryTenant(
@@ -194,12 +196,12 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
     } catch (err) {
       return status(500, { error: err instanceof Error ? err.message : String(err) });
     }
-  }, {
-    detail: { tags: ["pg-meta"], summary: "List RLS policies" },
   })
 
   // ── Publications ────────────────────────────────────────────
-  .get("/publications", async ({ params }) => {
+  .get("/publications", {
+    detail: { tags: ["pg-meta"], summary: "List publications" },
+  }, async ({ params }) => {
     if (!(await projectGuard(params.ref))) return status(404, { error: "Project not found" });
     try {
       const rows = await queryTenant(
@@ -212,12 +214,12 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
     } catch (err) {
       return status(500, { error: err instanceof Error ? err.message : String(err) });
     }
-  }, {
-    detail: { tags: ["pg-meta"], summary: "List publications" },
   })
 
   // ── Views ───────────────────────────────────────────────────
-  .get("/views", async ({ params }) => {
+  .get("/views", {
+    detail: { tags: ["pg-meta"], summary: "List views" },
+  }, async ({ params }) => {
     if (!(await projectGuard(params.ref))) return status(404, { error: "Project not found" });
     try {
       const rows = await queryTenant(
@@ -231,12 +233,12 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
     } catch (err) {
       return status(500, { error: err instanceof Error ? err.message : String(err) });
     }
-  }, {
-    detail: { tags: ["pg-meta"], summary: "List views" },
   })
 
   // ── Materialized Views ──────────────────────────────────────
-  .get("/materialized-views", async ({ params }) => {
+  .get("/materialized-views", {
+    detail: { tags: ["pg-meta"], summary: "List materialized views" },
+  }, async ({ params }) => {
     if (!(await projectGuard(params.ref))) return status(404, { error: "Project not found" });
     try {
       const rows = await queryTenant(
@@ -250,12 +252,12 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
     } catch (err) {
       return status(500, { error: err instanceof Error ? err.message : String(err) });
     }
-  }, {
-    detail: { tags: ["pg-meta"], summary: "List materialized views" },
   })
 
   // ── Foreign Tables ──────────────────────────────────────────
-  .get("/foreign-tables", async ({ params }) => {
+  .get("/foreign-tables", {
+    detail: { tags: ["pg-meta"], summary: "List foreign tables" },
+  }, async ({ params }) => {
     if (!(await projectGuard(params.ref))) return status(404, { error: "Project not found" });
     try {
       const rows = await queryTenant(
@@ -269,12 +271,12 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
     } catch (err) {
       return status(500, { error: err instanceof Error ? err.message : String(err) });
     }
-  }, {
-    detail: { tags: ["pg-meta"], summary: "List foreign tables" },
   })
 
   // ── Types (enums + composite) ───────────────────────────────
-  .get("/types", async ({ params }) => {
+  .get("/types", {
+    detail: { tags: ["pg-meta"], summary: "List custom types" },
+  }, async ({ params }) => {
     if (!(await projectGuard(params.ref))) return status(404, { error: "Project not found" });
     try {
       const rows = await queryTenant(
@@ -292,12 +294,12 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
     } catch (err) {
       return status(500, { error: err instanceof Error ? err.message : String(err) });
     }
-  }, {
-    detail: { tags: ["pg-meta"], summary: "List custom types" },
   })
 
   // ── Extensions ──────────────────────────────────────────────
-  .get("/extensions", async ({ params }) => {
+  .get("/extensions", {
+    detail: { tags: ["pg-meta"], summary: "List installed extensions" },
+  }, async ({ params }) => {
     if (!(await projectGuard(params.ref))) return status(404, { error: "Project not found" });
     try {
       const rows = await queryTenant(
@@ -311,12 +313,12 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
     } catch (err) {
       return status(500, { error: err instanceof Error ? err.message : String(err) });
     }
-  }, {
-    detail: { tags: ["pg-meta"], summary: "List installed extensions" },
   })
 
   // ── Constraints ─────────────────────────────────────────────
-  .get("/constraints", async ({ params }) => {
+  .get("/constraints", {
+    detail: { tags: ["pg-meta"], summary: "List constraints" },
+  }, async ({ params }) => {
     if (!(await projectGuard(params.ref))) return status(404, { error: "Project not found" });
     try {
       const rows = await queryTenant(
@@ -334,6 +336,4 @@ export const pgMetaRoutes = new Elysia({ prefix: "/v1/projects/:ref/pg-meta" })
     } catch (err) {
       return status(500, { error: err instanceof Error ? err.message : String(err) });
     }
-  }, {
-    detail: { tags: ["pg-meta"], summary: "List constraints" },
   });

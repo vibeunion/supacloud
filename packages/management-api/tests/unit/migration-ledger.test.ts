@@ -3,6 +3,7 @@ import {
   ensureMigrationLedgerMetadata,
   MigrationLedgerDivergenceError,
   readMigrationLedger,
+  readMigrationInventory,
 } from "../../src/services/migration-ledger";
 
 function postgresError(code: string, message: string): Error {
@@ -138,6 +139,26 @@ describe("migration ledger compatibility", () => {
     await expect(readMigrationLedger(database)).rejects.toBeInstanceOf(MigrationLedgerDivergenceError);
   });
 
+  test("inventory preserves stored checksum evidence even when timestamp metadata is absent", async () => {
+    const queries: string[] = [];
+    const database = { unsafe: async (query: string) => {
+      queries.push(query);
+      if (query.includes("public.schema_migrations")) throw postgresError("42P01", "missing");
+      if (query.includes("checksum, inserted_at")) throw postgresError("42703", "missing timestamp");
+      return [{ version: "1", name: "example", statements: ["SELECT 1"], checksum: "f".repeat(64), applied_at: null }];
+    } };
+    await expect(readMigrationInventory(database)).rejects.toMatchObject({ conflictingVersions: ["1"] });
+    expect(queries.some(query => query.includes("to_jsonb(migration)->>'checksum'"))).toBe(true);
+  });
+
+  test("inventory validates legacy stored checksums before choosing canonical rows", async () => {
+    const database = { unsafe: async (query: string) => [{
+      version: "1", name: "example", statements: ["SELECT 1"],
+      checksum: query.includes("supabase_migrations") ? null : "f".repeat(64), applied_at: null,
+    }] };
+    await expect(readMigrationInventory(database)).rejects.toMatchObject({ conflictingVersions: ["1"] });
+  });
+
   test("fails closed when canonical and legacy SQL differ for the same version", async () => {
     const database = {
       unsafe: async (query: string) => query.includes("supabase_migrations.schema_migrations")
@@ -163,5 +184,16 @@ describe("migration ledger compatibility", () => {
     const database = { unsafe: async () => { throw permission; } };
 
     await expect(readMigrationLedger(database)).rejects.toBe(permission);
+  });
+
+  test("recognizes Bun SQL errno without hiding permission or connectivity failures", async () => {
+    for (const errno of ["42P01", "3F000"]) {
+      const error = Object.assign(new Error("missing ledger"), { code: "ERR_POSTGRES_SERVER_ERROR", errno });
+      expect(await readMigrationLedger({ unsafe: async () => { throw error; } })).toEqual([]);
+    }
+    for (const errno of ["42501", "08006"]) {
+      const error = Object.assign(new Error("unavailable"), { code: "ERR_POSTGRES_SERVER_ERROR", errno });
+      await expect(readMigrationLedger({ unsafe: async () => { throw error; } })).rejects.toBe(error);
+    }
   });
 });

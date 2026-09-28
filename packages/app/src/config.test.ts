@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { ConfigValidationError, decodeConfig } from "./config";
 
 describe("TypeBox configuration decoding", () => {

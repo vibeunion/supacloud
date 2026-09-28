@@ -116,14 +116,14 @@ describe("native Elysia and compiled adapter conformance", () => {
         label: t.String(), session: t.String(),
       }),
     };
-    const native = new Elysia({ normalize: true }).post("/probe/:id", (ctx) => ({
+    const native = new Elysia({ normalize: true }).post("/probe/:id", schemas, (ctx) => ({
       name: ctx.body.name,
       id: ctx.params.id,
       count: ctx.query.count,
       label: ctx.headers["x-label"],
       session: ctx.cookie.session.value,
       extra: "removed",
-    }), schemas);
+    }));
     const adapted = new Elysia({ normalize: true }).use(pluginFor((input) => ({
       name: (input.body as { name: string }).name,
       id: input.params?.id,
@@ -152,7 +152,7 @@ describe("native Elysia and compiled adapter conformance", () => {
   test("keeps declared status-code responses", async () => {
     const responses = { 409: t.Object({ conflict: t.Boolean() }) };
     const handler = () => status(409, { conflict: true });
-    const native = new Elysia().post("/probe", handler, { response: responses });
+    const native = new Elysia().post("/probe", { response: responses }, handler);
     const adapted = new Elysia().use(pluginFor(handler, { responses }));
     const request = jsonRequest("{}");
     const result = await adapted.handle(request.clone());
@@ -177,9 +177,9 @@ describe("native Elysia and compiled adapter conformance", () => {
     const nativeEvents: string[] = [];
     const adapterEvents: string[] = [];
     const root = (events: string[]) => new Elysia()
-      .onRequest(() => { events.push("request"); })
-      .onBeforeHandle(() => { events.push("before"); })
-      .onAfterHandle(() => { events.push("after"); });
+      .request(() => { events.push("request"); })
+      .beforeHandle(() => { events.push("before"); })
+      .afterHandle(() => { events.push("after"); });
     const native = root(nativeEvents).use(new Elysia().post("/probe", () => {
       nativeEvents.push("handler");
       return { ok: true };
@@ -198,7 +198,7 @@ describe("native Elysia and compiled adapter conformance", () => {
   test("parent early return prevents controller execution", async () => {
     let calls = 0;
     const handler = () => { calls++; return { ok: true }; };
-    const root = () => new Elysia().onBeforeHandle(() => status(403, "denied"));
+    const root = () => new Elysia().beforeHandle(() => status(403, "denied"));
     const native = root().use(new Elysia().post("/probe", handler));
     const adapted = root().use(pluginFor(handler));
     const request = jsonRequest("{}");
@@ -210,7 +210,7 @@ describe("native Elysia and compiled adapter conformance", () => {
 
   test("keeps local sibling hooks encapsulated", async () => {
     const root = () => new Elysia().use(
-      new Elysia().onBeforeHandle(() => status(418, "local")).get("/local", () => "unused"),
+      new Elysia().beforeHandle(() => status(418, "local")).get("/local", () => "unused"),
     );
     const native = root().use(new Elysia().post("/probe", () => "ok"));
     const adapted = root().use(pluginFor(() => "ok"));
@@ -225,7 +225,7 @@ describe("native Elysia and compiled adapter conformance", () => {
     let calls = 0;
     const handler = () => { calls++; return "unreachable"; };
     const body = t.Object({ name: t.String() });
-    const native = new Elysia().post("/probe", handler, { body });
+    const native = new Elysia().post("/probe", { body }, handler);
     const adapted = new Elysia().use(pluginFor(handler, { body }));
     const request = jsonRequest('{"name":123}');
     const result = await adapted.handle(request.clone());
@@ -242,7 +242,7 @@ describe("native Elysia and compiled adapter conformance", () => {
       let calls = 0;
       const handler = () => { calls++; return "unreachable"; };
       const body = t.Object({ name: t.String() });
-      const native = new Elysia().post("/probe", handler, { body });
+      const native = new Elysia().post("/probe", { body }, handler);
       const adapted = new Elysia().use(pluginFor(handler, { body }));
       const request = jsonRequest(payload);
       const result = await adapted.handle(request.clone());

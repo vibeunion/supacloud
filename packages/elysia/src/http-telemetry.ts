@@ -21,7 +21,7 @@ export type HttpTelemetryObserver = (event: Readonly<HttpTelemetryEvent>) => voi
 export function createHttpTelemetry(observe: HttpTelemetryObserver) {
   const starts = new WeakMap<Request, { time: number; requestId: string }>();
   return new Elysia()
-    .onRequest(({ request, set }) => {
+    .request(({ request, set }) => {
       const supplied = request.headers.get("x-request-id");
       const requestId = supplied && /^[A-Za-z0-9._:-]{1,128}$/.test(supplied) ? supplied : crypto.randomUUID();
       starts.set(request, { time: performance.now(), requestId });
@@ -29,8 +29,8 @@ export function createHttpTelemetry(observe: HttpTelemetryObserver) {
       set.headers["x-request-id"] = requestId;
     })
     // Elysia's fast 404 path skips afterResponse without a registered error hook.
-    .onError(() => undefined)
-    .onAfterResponse(async ({ request, response, set, route }) => {
+    .error(() => undefined)
+    .afterResponse(async ({ request, responseValue: response, set, route }) => {
       const start = starts.get(request);
       if (!start) return;
       starts.delete(request);

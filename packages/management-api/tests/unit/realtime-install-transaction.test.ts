@@ -24,7 +24,7 @@ setDefaultTimeout(20_000);
 
 type ServiceState = "active" | "inactive" | "activating";
 type EnableState = "enabled" | "disabled";
-type FailureMode = "none" | "build" | "health" | "health-corrupt-snapshot" | "daemon-reload";
+type FailureMode = "none" | "build" | "database" | "health" | "health-corrupt-snapshot" | "daemon-reload";
 
 interface Fixture {
   root: string;
@@ -134,6 +134,20 @@ function createFixture(
   writeFileSync(systemState, `${serviceState}\n`);
   writeFileSync(enableStatePath, `${enableState}\n`);
   for (const log of [systemctlLog, runtimeLog, curlLog]) writeFileSync(log, "");
+
+  writeExecutable(join(bin, "psql"), [
+    "#!/usr/bin/env bash",
+    "set -euo pipefail",
+    'printf "%s\\n" "$@" >> "$FAKE_DATABASE_ARGS"',
+    'printf "%s\\n" "$PGHOST" "$PGPORT" "$PGUSER" "$PGDATABASE" >> "$FAKE_DATABASE_CONNECTION"',
+    'test "$PGPASSWORD" = "$POSTGRES_PASSWORD"',
+    'test "$PGCONNECT_TIMEOUT" = 10',
+    'test "$PGSSLMODE" = disable',
+    'test -z "${PGHOSTADDR:-}${PGSERVICE:-}${PGSERVICEFILE:-}${PGOPTIONS:-}"',
+    'cat >> "$FAKE_DATABASE_SQL"',
+    'test "$FAKE_DATABASE_FAIL" != true',
+    "",
+  ].join("\n"));
 
   writeExecutable(join(sourceAssets, "realtime-launcher.sh"), [
     "#!/usr/bin/env bash",
@@ -347,6 +361,10 @@ function runTransaction(
     FAKE_ENABLE_STATE: fixture.enableState,
     FAKE_DAEMON_FAILURE_MARKER: fixture.daemonFailureMarker,
     FAKE_IMAGE_REFERENCE: fixture.image,
+    FAKE_DATABASE_ARGS: join(fixture.root, "database-args"),
+    FAKE_DATABASE_CONNECTION: join(fixture.root, "database-connection"),
+    FAKE_DATABASE_SQL: join(fixture.root, "database.sql"),
+    FAKE_DATABASE_FAIL: failure === "database" ? "true" : "false",
     FAKE_REALTIME_BUILD_FAIL: failure === "build" ? "true" : "false",
     FAKE_REALTIME_HEALTH_FAIL:
       failure === "health" || failure === "health-corrupt-snapshot" ? "true" : "false",
@@ -411,6 +429,53 @@ afterEach(() => {
 });
 
 describe("Realtime installer transaction", () => {
+  test("database bootstrap failure leaves the live service generation untouched", () => {
+    const fixture = createFixture();
+    const result = runTransaction(fixture, "database");
+
+    expectTransactionFunctionWasCalled(result);
+    expect(result.status, `${result.stdout}\n${result.stderr}`).not.toBe(0);
+    expect(`${result.stdout}\n${result.stderr}`).toContain("metadata schema bootstrap failed");
+    expectPriorFiles(fixture);
+    expect(readFileSync(fixture.systemState, "utf8").trim()).toBe("active");
+    expect(readFileSync(fixture.systemctlLog, "utf8")).not.toMatch(/restart|stop|daemon-reload/);
+    expectNoTransactionSnapshot(fixture);
+  });
+
+  test("bootstraps the candidate database without inheriting management connection defaults", () => {
+    const fixture = createFixture();
+    const result = runTransaction(fixture, "none", {
+      INTERNAL_IP: "realtime-db.internal",
+      REALTIME_DB_USER: "realtime_operator",
+      PGHOST: "wrong-host",
+      PGHOSTADDR: "192.0.2.1",
+      PGPORT: "6543",
+      PGUSER: "wrong-user",
+      PGDATABASE: "supacloud_meta",
+      PGSERVICE: "wrong-service",
+      PGSERVICEFILE: "/nonexistent/service.conf",
+      PGOPTIONS: "-c search_path=wrong_schema",
+      POSTGRES_PASSWORD: "  literal='password'\\with-spaces  ",
+    });
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(readFileSync(join(fixture.root, "database-connection"), "utf8"))
+      .toBe("realtime-db.internal\n5432\npostgres\npostgres\nrealtime-db.internal\n5432\nrealtime_operator\npostgres\n");
+    const sql = readFileSync(join(fixture.root, "database.sql"), "utf8");
+    expect(sql).toContain('CREATE SCHEMA IF NOT EXISTS _realtime AUTHORIZATION :"realtime_db_user";');
+    expect(sql).toContain("CREATE ROLE supabase_realtime_admin NOLOGIN NOINHERIT;");
+    expect(sql).toContain("CREATE ROLE dashboard_user NOLOGIN NOINHERIT;");
+    expect(sql).toContain('GRANT supabase_realtime_admin TO :"realtime_db_user" WITH ADMIN TRUE, INHERIT TRUE, SET TRUE;');
+    expect(sql).toContain('GRANT SET ON PARAMETER log_min_messages TO :"realtime_db_user";');
+    expect(sql).toContain("has_schema_privilege(current_user, '_realtime', 'USAGE')");
+    expect(sql).toContain("has_schema_privilege(current_user, '_realtime', 'CREATE')");
+    expect(sql).not.toMatch(/DROP|ALTER ROLE|PASSWORD/);
+    const args = readFileSync(join(fixture.root, "database-args"), "utf8");
+    expect(args).toContain("ON_ERROR_STOP=1");
+    expect(args).not.toContain("database-secret");
+    expectNoTransactionSnapshot(fixture);
+  });
+
   test("rejects a non-steady service state before pulling an image", () => {
     const fixture = createFixture("activating", "enabled");
     const result = runTransaction(fixture, "none");

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { t } from "elysia";
+import { Type } from "typebox";
 import * as ts from "@typescript/typescript6";
 import { compileProject, migrateProject } from "@supacloud/compiler";
 import { createApplication, type CompiledModule } from "./index";
@@ -158,7 +159,7 @@ test("fixed legacy fixture upgrades, compiles, types, serves and restores from a
     const generatedClient: GeneratedClient = await import(pathToFileURL(join(root, "generated/client.ts")).href);
     const client = generatedClient.createApiClient({ baseUrl: server.url.origin });
     expect(() => generatedClient.decodeResponseSchema("7", 200, {
-      "200": t.Transform(t.String()).Decode(Number).Encode(String),
+      "200": Type.Codec(t.String()).Decode(Number).Encode(String),
     })).toThrow("Response schema transforms are unsupported");
     expect(await client.acceptance.read({ query: { count: "7" } })).toEqual({ note: null, count: 7 });
     expect(await client.acceptance.write({ body: {} })).toEqual({ note: null, count: 0 });

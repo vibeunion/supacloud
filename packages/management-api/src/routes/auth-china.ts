@@ -12,9 +12,15 @@ const CHINA_PROVIDERS: ChinaOAuthProvider[] = ["qq", "weibo", "alipay", "dingtal
  * China OAuth provider routes — QQ, Weibo, Alipay, DingTalk, Douyin, etc.
  */
 export const chinaAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
-  .onBeforeHandle(requireAuthRuntimeManagement("providers"))
+  .beforeHandle(requireAuthRuntimeManagement("providers"))
   .get(
     "/china/providers",
+    {
+      params: t.Object({
+        ref: t.String(),
+      }),
+      detail: { tags: ["auth"], summary: "List China OAuth providers" },
+    },
     async ({ params, set }) => {
       const settings = await projectService.getProjectSettings(params.ref);
       if (!settings) {
@@ -38,17 +44,24 @@ export const chinaAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
       }
 
       return { providers: result };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-      }),
-      detail: { tags: ["auth"], summary: "List China OAuth providers" },
     }
   )
 
   .post(
     "/china/:provider",
+    {
+      params: t.Object({
+        ref: t.String(),
+        provider: t.String(),
+      }),
+      body: t.Object({
+        app_id: t.String({ minLength: 1 }),
+        app_secret: t.String({ minLength: 1 }),
+        redirect_uri: t.Optional(t.String()),
+        deploy_function: t.Optional(t.Boolean({ default: true })),
+      }),
+      detail: { tags: ["auth"], summary: "Configure China OAuth provider" },
+    },
     async ({ params, body, set }) => {
       const provider = params.provider as ChinaOAuthProvider;
 
@@ -101,19 +114,6 @@ export const chinaAuthRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
         function_slug: `${provider}-login`,
         is_standard_oauth: info.isStandardOAuth,
       };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        provider: t.String(),
-      }),
-      body: t.Object({
-        app_id: t.String({ minLength: 1 }),
-        app_secret: t.String({ minLength: 1 }),
-        redirect_uri: t.Optional(t.String()),
-        deploy_function: t.Optional(t.Boolean({ default: true })),
-      }),
-      detail: { tags: ["auth"], summary: "Configure China OAuth provider" },
     }
   );
 

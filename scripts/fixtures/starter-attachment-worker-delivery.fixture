@@ -1,0 +1,181 @@
+import { strict as assert } from "node:assert";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+import { createClient } from "@supabase/supabase-js";
+import { SupaCloudWorkflowsClient } from "@supacloud/js";
+import { buildDeliveryProject, compileOptionsFromConfig, loadSupacloudConfig } from "@supacloud/compiler";
+import type { AttachmentDatabase } from "./attachments";
+import type { ReviewAttachmentResult } from "../src/review/attachment";
+import { SQL } from "bun";
+import { createBunCommandDatabase } from "@supacloud/db/bun";
+import { createReviewAttachmentAdapters } from "../src/host/review-attachments";
+import { prepareArchivedDelivery, type ArchivedDelivery } from "./delivery-archive";
+
+export async function verifyAttachmentWorkerDelivery(options: {
+  database: AttachmentDatabase;
+  connection: { socketPath: string; database: string; username: string };
+  runId: string;
+  expected: ReviewAttachmentResult;
+  artifact?: ArchivedDelivery;
+  verifyUnknownWorkflow?: boolean;
+  signal?: AbortSignal;
+}) {
+  options.signal?.throwIfAborted();
+  let artifact = options.artifact;
+  if (!artifact) {
+    const root = dirname(dirname(import.meta.path));
+    const config = await loadSupacloudConfig(root);
+    const compile = compileOptionsFromConfig(config, root);
+    const settings = {
+      version: 1, runtime: { processIsolation: true, durableQueue: true, capabilities: [] },
+      build: {
+        migrations: config.delivery?.build?.migrations,
+        workerApplications: [{ target: "jobs", source: "delivery-worker.ts" }],
+      },
+    };
+    const built = await buildDeliveryProject(compile, settings);
+    assert.ok(built.ok, JSON.stringify(built.diagnostics));
+    assert.equal(built.manifest.deploymentReady, false);
+    const object = built.manifest.objects.find(item => item.name === "jobs");
+    assert.ok(object);
+    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/")).length, 4);
+    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/project-migration/")).length, 2);
+    assert.equal(object.files.filter(file => file.path.startsWith("bundle/migrations/operator-provisioning/")).length, 2);
+    assert.equal(object.entryKind, "bun-worker-application");
+    const again = await buildDeliveryProject(compile, settings);
+    assert.ok(again.ok, JSON.stringify(again.diagnostics));
+    assert.deepEqual(again.written, []);
+    artifact = { manifestPath: join(compile.outDir, "delivery/delivery.manifest.json"), objectId: object.objectId };
+  }
+  const service = createClient(options.database.storage.url, options.database.storage.serviceRoleKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  });
+  const workflows = new SupaCloudWorkflowsClient(service);
+  const resultCount = async () => {
+    const rows = await options.database.transaction(tx => tx.query(
+      "SELECT count(*)::integer AS count FROM public.starter_attachment_results WHERE review_id=$1",
+      [options.expected.reviewId],
+    ));
+    assert.ok(Array.isArray(rows));
+    return rows[0]?.count;
+  };
+  const pool = new SQL({
+    adapter: "postgres", path: options.connection.socketPath,
+    database: options.connection.database, username: options.connection.username, connectionTimeout: 5,
+  });
+  try {
+    const database = createBunCommandDatabase(pool);
+    const adapters = await createReviewAttachmentAdapters({
+      projectId: "starter-test", tenantId: "starter-test", service,
+      database: {
+        transaction: run => database.transaction(async tx => {
+          let written = false;
+          const result = await run({
+            async query(text, parameters) {
+              const value = await tx.query(text, parameters);
+              if (text.startsWith("INSERT INTO public.starter_attachment_results")) written = true;
+              return value;
+            },
+          });
+          if (written) throw new Error("Controlled driver parity rollback");
+          return result;
+        }),
+      },
+    });
+    const attachment = await adapters.store.readAttachment(options.expected);
+    assert.equal(attachment.body.byteLength, options.expected.bytes);
+    await assert.rejects(
+      database.transaction(tx => adapters.enqueue(tx, options.expected.reviewId, options.expected.version)),
+      /permission denied/,
+      "The Worker database account cannot enqueue Workflows",
+    );
+    assert.equal((await workflows.get(options.runId))?.status, "queued");
+    await assert.rejects(adapters.store.recordAttachment(options.expected, options.expected), /Controlled driver parity rollback/);
+  } finally { await pool.close({ timeout: 5 }); }
+  assert.equal(await resultCount(), 0, "Driver preflight must not persist the detached worker's result");
+  const detached = await mkdtemp(join(tmpdir(), "review-workflow-delivery-"));
+  let child: ReturnType<typeof Bun.spawn> | undefined;
+  const interrupt = () => child?.kill("SIGTERM");
+  process.once("SIGINT", interrupt);
+  process.once("SIGTERM", interrupt);
+  options.signal?.addEventListener("abort", interrupt, { once: true });
+  try {
+    const { bundle } = await prepareArchivedDelivery(artifact, "jobs", detached);
+    const source = await readFile(join(bundle, "index.js"), "utf8");
+    assert.ok(!source.includes("Synthetic"));
+    assert.ok(!source.includes("@typescript/typescript6"));
+    const run = async (foreign: boolean) => {
+      options.signal?.throwIfAborted();
+      child = Bun.spawn([process.execPath, "--no-env-file", "index.js"], {
+        cwd: bundle, stdout: "pipe", stderr: "pipe",
+        env: {
+          PATH: process.env.PATH, DATABASE_SOCKET_PATH: options.connection.socketPath,
+          DATABASE_NAME: options.connection.database, DATABASE_USER: options.connection.username,
+          SUPACLOUD_URL: options.database.storage.url, SUPACLOUD_SERVICE_ROLE_KEY: options.database.storage.serviceRoleKey,
+          SUPACLOUD_PROJECT_ID: "starter-test", APP_TENANT_ID: "starter-test",
+          REVIEW_QUEUE_OWNERSHIP: "exclusive-review-attachments", REVIEW_WORKER_ID: "detached-attachment-worker",
+          SHUTDOWN_TIMEOUT_MS: "5000",
+        },
+      });
+      assert.ok(child.stdout && typeof child.stdout !== "number");
+      assert.ok(child.stderr && typeof child.stderr !== "number");
+      const errors = new Response(child.stderr).text();
+      const output = new Response(child.stdout).text();
+      let exited = false;
+      const exit = child.exited.then(code => { exited = true; return code; });
+      const deadline = setTimeout(() => child?.kill("SIGKILL"), 30_000);
+      try {
+        if (foreign) {
+          assert.equal(await exit, 1);
+          const stderr = await errors;
+          assert.ok(stderr.includes("Delivery worker runtime failed."));
+          for (const privateValue of [options.database.storage.serviceRoleKey, options.connection.socketPath]) {
+            assert.ok(!stderr.includes(privateValue));
+          }
+        } else {
+          for (;;) {
+            const receipt = await workflows.get(options.runId);
+            if (receipt?.status === "completed") break;
+            assert.ok(receipt?.status === "queued" || receipt?.status === "running",
+              "Delivered attachment workflow reached a terminal failure");
+            assert.equal(exited, false, "Delivered attachment worker exited before completion");
+            await Bun.sleep(20);
+          }
+          child.kill("SIGTERM");
+          assert.equal(await exit, 0);
+          assert.equal(await errors, "");
+          assert.ok((await output).includes('"event":"delivery-worker-started"'));
+          assert.deepEqual((await workflows.get(options.runId))?.output, options.expected);
+          assert.equal(await resultCount(), 1, "The detached worker must produce exactly one durable result");
+        }
+      } finally {
+        clearTimeout(deadline);
+        if (child.exitCode === null) { child.kill("SIGKILL"); await child.exited; }
+        await errors;
+        await output;
+      }
+    };
+    await run(false);
+    if (options.verifyUnknownWorkflow !== false) {
+      const foreignRun = crypto.randomUUID();
+      await workflows.start({ runId: foreignRun, workflowName: "unsupported", workflowVersion: "1", firstStepKey: "verify", maxAttempts: 3 });
+      try {
+        await run(true);
+        const foreign = await workflows.get(foreignRun);
+        assert.equal(foreign?.status, "running");
+        assert.equal(foreign?.steps[0]?.attempts, 1);
+      } finally { await workflows.cancel(foreignRun, "Test cleanup"); }
+    }
+    return { host: "detached-native-lite", queue: "actual-workflow-sdk-lite-sql", output: "durable-compiled-job",
+      databaseRole: "restricted-worker-login",
+      unknownWorkflow: options.verifyUnknownWorkflow === false ? "not-run" : "nonzero-exit-unsettled",
+      objectId: artifact.objectId, deploymentVerified: false };
+  } finally {
+    if (child?.exitCode === null) { child.kill("SIGKILL"); await child.exited; }
+    process.removeListener("SIGINT", interrupt);
+    process.removeListener("SIGTERM", interrupt);
+    options.signal?.removeEventListener("abort", interrupt);
+    await rm(detached, { recursive: true, force: true });
+  }
+}

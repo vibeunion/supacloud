@@ -42,6 +42,18 @@ export function getProjectLogUnits(ref: string, service?: string): string[] {
 export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" })
     .get(
         "",
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            query: t.Object({
+                limit: t.Optional(t.String()),
+                offset: t.Optional(t.String()),
+                service: t.Optional(t.String()),
+                search: t.Optional(t.String()),
+                start: t.Optional(t.String()),
+                end: t.Optional(t.String()),
+            }),
+            detail: { tags: ["projects"], summary: "Get project logs" }
+        },
         async ({ params, query, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return status(authError.status, authError.body);
@@ -86,23 +98,16 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
                     backend: "victorialogs",
                 });
             }
-        },
-        {
-            params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            query: t.Object({
-                limit: t.Optional(t.String()),
-                offset: t.Optional(t.String()),
-                service: t.Optional(t.String()),
-                search: t.Optional(t.String()),
-                start: t.Optional(t.String()),
-                end: t.Optional(t.String()),
-            }),
-            detail: { tags: ["projects"], summary: "Get project logs" }
         }
     )
 
     .get(
         "/stream",
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            query: t.Object({ service: t.Optional(t.String()) }),
+            detail: { tags: ["projects"], summary: "Stream project logs via SSE" }
+        },
         async ({ params, query, set, request }) => {
             const { ref } = params;
 
@@ -213,10 +218,5 @@ export const projectLogsRoutes = new Elysia({ prefix: "/v1/projects/:ref/logs" }
                     "X-Accel-Buffering": "no",
                 }
             });
-        },
-        {
-            params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            query: t.Object({ service: t.Optional(t.String()) }),
-            detail: { tags: ["projects"], summary: "Stream project logs via SSE" }
         }
     );

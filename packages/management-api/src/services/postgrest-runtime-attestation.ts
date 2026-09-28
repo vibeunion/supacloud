@@ -12,6 +12,7 @@ import {
   type PostgrestProcessIdentity,
   type PostgrestRuntimeIdentity,
 } from "./postgrest-process-identity";
+import { logger } from "../utils/logger";
 
 export type { PostgrestProcessIdentity } from "./postgrest-process-identity";
 
@@ -425,20 +426,35 @@ async function attestActivePostgrestRuntime(
   pointerBefore: ControlPointerObservation,
   systemdBefore: SystemdProcessIdentity,
 ): Promise<PostgrestAttestation> {
+  let phase = "process-before";
+  let systemdAfter: SystemdProcessIdentity | null = null;
+  let beforeProcess: PostgrestProcessIdentity | null = null;
+  let afterProcess: PostgrestProcessIdentity | null = null;
+  let health: "healthy" | "unhealthy" | "unknown" = "unknown";
+  let loadedRevision: string | null = null;
   try {
-    const beforeProcess = await operations.processIdentity(systemdBefore.mainPid, runtimeIdentity);
+    beforeProcess = await operations.processIdentity(systemdBefore.mainPid, runtimeIdentity);
+    phase = "executable";
     const expectedExecutable = await realpath(request.postgrestBinary);
-    const health = await operations.health(request.port);
+    phase = "health";
+    health = await operations.health(request.port);
+    phase = "config";
     const configArgument = managedConfigArgument(beforeProcess.commandLine);
     const loaded = configArgument ? await loadedGeneration(configArgument, request, ownership) : null;
+    loadedRevision = loaded?.revision ?? null;
+    phase = "pointer-after";
     const pointerAfter = await controlPointerObservation(request, ownership);
-    const systemdAfter = await operations.systemdMainProcess(request.unit);
+    phase = "systemd-after";
+    systemdAfter = await operations.systemdMainProcess(request.unit);
     const changedUnit = changedUnitAttestation(request, systemdAfter, health);
     if (changedUnit) return changedUnit;
-    const afterProcess = await operations.processIdentity(systemdAfter.mainPid, runtimeIdentity);
+    phase = "process-after";
+    afterProcess = await operations.processIdentity(systemdAfter.mainPid, runtimeIdentity);
+    phase = "compare";
     if (!sameProcess(systemdBefore, systemdAfter, beforeProcess, afterProcess)) {
       return failureAttestation(request.desiredRevision, "unreachable", health);
     }
+    phase = "generation";
     return generationAttestation({
       request,
       pointerBefore,
@@ -451,7 +467,46 @@ async function attestActivePostgrestRuntime(
       health,
       loaded,
     });
-  } catch {
+  } catch (error: unknown) {
+    logger.warn("[PostgREST] Runtime attestation failed", {
+      projectRef: request.projectRef,
+      unit: request.unit,
+      phase,
+      desiredRevision: request.desiredRevision,
+      loadedRevision,
+      systemdBefore: {
+        activity: systemdBefore.activity,
+        mainPid: systemdBefore.mainPid,
+        invocationId: systemdBefore.invocationId,
+        startMonotonic: systemdBefore.startMonotonic,
+      },
+      systemdAfter: systemdAfter
+        ? {
+          activity: systemdAfter.activity,
+          mainPid: systemdAfter.mainPid,
+          invocationId: systemdAfter.invocationId,
+          startMonotonic: systemdAfter.startMonotonic,
+        }
+        : null,
+      beforeProcess: beforeProcess
+        ? {
+          executable: beforeProcess.executable,
+          commandLine: beforeProcess.commandLine,
+          environmentNames: beforeProcess.environmentNames,
+          startId: beforeProcess.startId,
+        }
+        : null,
+      afterProcess: afterProcess
+        ? {
+          executable: afterProcess.executable,
+          commandLine: afterProcess.commandLine,
+          environmentNames: afterProcess.environmentNames,
+          startId: afterProcess.startId,
+        }
+        : null,
+      health,
+      error: error instanceof Error ? error.message : String(error),
+    });
     return failureAttestation(request.desiredRevision, "unreachable", "unknown");
   }
 }

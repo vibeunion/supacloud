@@ -23,10 +23,11 @@ async function getGoTrueHeaders(ref: string) {
 }
 
 export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
-  .onBeforeHandle(requireAuthRuntimeManagement("sso"))
+  .beforeHandle(requireAuthRuntimeManagement("sso"))
 
   .get(
     "/:ref/auth/sso/providers",
+    { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "List SSO providers" } },
     async ({ params, set }) => {
       const ctx = await getGoTrueHeaders(params.ref);
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
@@ -53,12 +54,25 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
           reason_code: "gotrue_sso_unavailable",
         });
       }
-    },
-    { params: t.Object({ ref: t.String() }), detail: { tags: ["auth"], summary: "List SSO providers" } }
+    }
   )
 
   .post(
     "/:ref/auth/sso/providers",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        type: t.Literal("saml"),
+        resource_id: t.Optional(t.String()),
+        domains: t.Optional(t.Array(t.String())),
+        metadata_xml: t.Optional(t.String()),
+        metadata_url: t.Optional(t.String()),
+        attribute_mapping: t.Optional(t.Record(t.String(), t.Unknown())),
+        name_id_format: t.Optional(t.String()),
+        disabled: t.Optional(t.Boolean()),
+      }),
+      detail: { tags: ["auth"], summary: "Create SSO provider" },
+    },
     async ({ params, body, set }) => {
       const ctx = await getGoTrueHeaders(params.ref);
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
@@ -83,25 +97,12 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
       } catch (err: unknown) {
         return status(500, { message: "Failed to create SSO provider", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Object({
-        type: t.Literal("saml"),
-        resource_id: t.Optional(t.String()),
-        domains: t.Optional(t.Array(t.String())),
-        metadata_xml: t.Optional(t.String()),
-        metadata_url: t.Optional(t.String()),
-        attribute_mapping: t.Optional(t.Record(t.String(), t.Unknown())),
-        name_id_format: t.Optional(t.String()),
-        disabled: t.Optional(t.Boolean()),
-      }),
-      detail: { tags: ["auth"], summary: "Create SSO provider" },
     }
   )
 
   .get(
     "/:ref/auth/sso/providers/:id",
+    { params: t.Object({ ref: t.String(), id: t.String() }), detail: { tags: ["auth"], summary: "Get SSO provider" } },
     async ({ params, set }) => {
       const ctx = await getGoTrueHeaders(params.ref);
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
@@ -123,12 +124,25 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
       } catch (err: unknown) {
         return status(500, { message: "Failed to get SSO provider", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
-    },
-    { params: t.Object({ ref: t.String(), id: t.String() }), detail: { tags: ["auth"], summary: "Get SSO provider" } }
+    }
   )
 
   .put(
     "/:ref/auth/sso/providers/:id",
+    {
+      params: t.Object({ ref: t.String(), id: t.String() }),
+      body: t.Object({
+        type: t.Optional(t.Literal("saml")),
+        resource_id: t.Optional(t.String()),
+        domains: t.Optional(t.Array(t.String())),
+        metadata_xml: t.Optional(t.String()),
+        metadata_url: t.Optional(t.String()),
+        attribute_mapping: t.Optional(t.Record(t.String(), t.Unknown())),
+        name_id_format: t.Optional(t.String()),
+        disabled: t.Optional(t.Boolean()),
+      }),
+      detail: { tags: ["auth"], summary: "Update SSO provider" },
+    },
     async ({ params, body, set }) => {
       const ctx = await getGoTrueHeaders(params.ref);
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
@@ -153,25 +167,12 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
       } catch (err: unknown) {
         return status(500, { message: "Failed to update SSO provider", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
-    },
-    {
-      params: t.Object({ ref: t.String(), id: t.String() }),
-      body: t.Object({
-        type: t.Optional(t.Literal("saml")),
-        resource_id: t.Optional(t.String()),
-        domains: t.Optional(t.Array(t.String())),
-        metadata_xml: t.Optional(t.String()),
-        metadata_url: t.Optional(t.String()),
-        attribute_mapping: t.Optional(t.Record(t.String(), t.Unknown())),
-        name_id_format: t.Optional(t.String()),
-        disabled: t.Optional(t.Boolean()),
-      }),
-      detail: { tags: ["auth"], summary: "Update SSO provider" },
     }
   )
 
   .delete(
     "/:ref/auth/sso/providers/:id",
+    { params: t.Object({ ref: t.String(), id: t.String() }), detail: { tags: ["auth"], summary: "Delete SSO provider" } },
     async ({ params, set }) => {
       const ctx = await getGoTrueHeaders(params.ref);
       if (!ctx) return status(404, { message: "Project not found", code: "404" });
@@ -194,6 +195,5 @@ export const authSsoRoutes = new Elysia({ prefix: "/v1/projects" })
       } catch (err: unknown) {
         return status(500, { message: "Failed to delete SSO provider", code: "500", details: err instanceof Error ? err.message : String(err) });
       }
-    },
-    { params: t.Object({ ref: t.String(), id: t.String() }), detail: { tags: ["auth"], summary: "Delete SSO provider" } }
+    }
   );

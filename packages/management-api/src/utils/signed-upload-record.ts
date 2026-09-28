@@ -1,5 +1,5 @@
-import { Type } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 import type { SignedUpload } from "../services/storage-store";
 
 const text = Type.String({ minLength: 1, pattern: "^[^\\u0000]+$" });

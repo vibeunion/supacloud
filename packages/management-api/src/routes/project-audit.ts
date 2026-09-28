@@ -282,7 +282,7 @@ function authorizedActor(request: Request): TrustedPrincipal {
 }
 
 export const projectAuditRoutes = new Elysia({ prefix: "/v1/projects/:ref/audit" })
-  .onBeforeHandle(async ({ params, request }) => {
+  .beforeHandle(async ({ params, request }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
     try {
@@ -291,7 +291,22 @@ export const projectAuditRoutes = new Elysia({ prefix: "/v1/projects/:ref/audit"
       return toHttpError(error);
     }
   })
-  .get("", async ({ params, query }) => {
+  .get("", {
+    query: t.Object({
+      event_type: t.Optional(t.String()),
+      resource_type: t.Optional(t.String()),
+      resource_id: t.Optional(t.String()),
+      actor_id: t.Optional(t.String()),
+      status: t.Optional(t.Numeric({ minimum: 100, maximum: 599, multipleOf: 1 })),
+      method: t.Optional(t.String({ pattern: HTTP_METHOD_TOKEN_PATTERN })),
+      limit: t.Optional(t.String()),
+      offset: t.Optional(t.String()),
+      cursor: t.Optional(t.String()),
+      from: t.Optional(t.String()),
+      to: t.Optional(t.String()),
+    }, { additionalProperties: true }),
+    detail: { tags: ["audit"], summary: "Query append-only project audit logs" },
+  }, async ({ params, query }) => {
     const filters = filtersFromQuery(query);
     const limit = parseLimit(query.limit);
     const cursorValue = optionalString(query.cursor);
@@ -309,23 +324,19 @@ export const projectAuditRoutes = new Elysia({ prefix: "/v1/projects/:ref/audit"
       total,
       next_cursor: hasMore && pageRows.length > 0 ? encodeCursor(pageRows[pageRows.length - 1]) : null,
     };
-  }, {
-    query: t.Object({
-      event_type: t.Optional(t.String()),
-      resource_type: t.Optional(t.String()),
-      resource_id: t.Optional(t.String()),
-      actor_id: t.Optional(t.String()),
-      status: t.Optional(t.Numeric({ minimum: 100, maximum: 599, multipleOf: 1 })),
-      method: t.Optional(t.String({ pattern: HTTP_METHOD_TOKEN_PATTERN })),
-      limit: t.Optional(t.String()),
-      offset: t.Optional(t.String()),
-      cursor: t.Optional(t.String()),
-      from: t.Optional(t.String()),
-      to: t.Optional(t.String()),
-    }, { additionalProperties: true }),
-    detail: { tags: ["audit"], summary: "Query append-only project audit logs" },
   })
-  .post("/events", async ({ params, body, request, set }) => {
+  .post("/events", {
+    body: t.Object({
+      event_type: t.String(),
+      // Accepted for wire compatibility but intentionally ignored as authority.
+      actor_id: t.Optional(t.Nullable(t.String())),
+      actor_type: t.Optional(t.Nullable(t.String())),
+      resource_type: t.String(),
+      resource_id: t.String(),
+      details: t.Optional(t.Record(t.String(), t.Unknown())),
+    }, { additionalProperties: false }),
+    detail: { tags: ["audit"], summary: "Record a product audit event with verified actor" },
+  }, async ({ params, body, request, set }) => {
     try {
       const actor = authorizedActor(request);
       if (!body.event_type.trim() || !body.resource_type.trim() || !body.resource_id.trim()) {
@@ -352,24 +363,15 @@ export const projectAuditRoutes = new Elysia({ prefix: "/v1/projects/:ref/audit"
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    body: t.Object({
-      event_type: t.String(),
-      // Accepted for wire compatibility but intentionally ignored as authority.
-      actor_id: t.Optional(t.Nullable(t.String())),
-      actor_type: t.Optional(t.Nullable(t.String())),
-      resource_type: t.String(),
-      resource_id: t.String(),
-      details: t.Optional(t.Record(t.String(), t.Unknown())),
-    }, { additionalProperties: false }),
-    detail: { tags: ["audit"], summary: "Record a product audit event with verified actor" },
   })
-  .get("/integrity", async ({ params }) => {
-    return verifyProjectAuditIntegrity(params.ref);
-  }, {
+  .get("/integrity", {
     detail: { tags: ["audit"], summary: "Read project audit integrity checkpoint" },
+  }, async ({ params }) => {
+    return verifyProjectAuditIntegrity(params.ref);
   })
-  .get("/exports", async ({ params }) => {
+  .get("/exports", {
+    detail: { tags: ["audit"], summary: "List project audit exports" },
+  }, async ({ params }) => {
     const rows = await sql`
       SELECT id, project_ref, actor, format, filters, status, row_count, checksum,
              checkpoint_hash, expires_at, created_at, completed_at, error
@@ -377,19 +379,8 @@ export const projectAuditRoutes = new Elysia({ prefix: "/v1/projects/:ref/audit"
       ORDER BY created_at DESC LIMIT 100
     `;
     return { items: rows, total: rows.length };
-  }, {
-    detail: { tags: ["audit"], summary: "List project audit exports" },
   })
-  .post("/exports", async ({ params, body, request, set }) => {
-    try {
-      const principal = authorizedActor(request);
-      const record = await createAuditExport(params.ref, body, principal.id);
-      set.status = 201;
-      return { ...record, download_url: `/v1/projects/${params.ref}/audit/exports/${record.id}/download` };
-    } catch (error) {
-      return toHttpError(error);
-    }
-  }, {
+  .post("/exports", {
     body: t.Object({
       format: t.Optional(t.Union([t.Literal("jsonl"), t.Literal("csv")])),
       event_type: t.Optional(t.String()),
@@ -403,8 +394,19 @@ export const projectAuditRoutes = new Elysia({ prefix: "/v1/projects/:ref/audit"
       limit: t.Optional(t.Number({ minimum: 1, maximum: 50000 })),
     }, { additionalProperties: false }),
     detail: { tags: ["audit"], summary: "Create a bounded project audit export" },
+  }, async ({ params, body, request, set }) => {
+    try {
+      const principal = authorizedActor(request);
+      const record = await createAuditExport(params.ref, body, principal.id);
+      set.status = 201;
+      return { ...record, download_url: `/v1/projects/${params.ref}/audit/exports/${record.id}/download` };
+    } catch (error) {
+      return toHttpError(error);
+    }
   })
-  .get("/exports/:exportId/download", async ({ params }) => {
+  .get("/exports/:exportId/download", {
+    detail: { tags: ["audit"], summary: "Download a project audit export" },
+  }, async ({ params }) => {
     const [record] = await sql`
       SELECT format, content, checksum FROM audit_exports
       WHERE project_ref = ${params.ref} AND id = ${params.exportId}
@@ -420,10 +422,10 @@ export const projectAuditRoutes = new Elysia({ prefix: "/v1/projects/:ref/audit"
         "cache-control": "private, no-store",
       },
     });
-  }, {
-    detail: { tags: ["audit"], summary: "Download a project audit export" },
   })
-  .get("/exports/:exportId", async ({ params }) => {
+  .get("/exports/:exportId", {
+    detail: { tags: ["audit"], summary: "Get a project audit export" },
+  }, async ({ params }) => {
     const [record] = await sql`
       SELECT id, project_ref, actor, format, filters, status, row_count, checksum,
              checkpoint_hash, expires_at, created_at, completed_at, error
@@ -431,10 +433,11 @@ export const projectAuditRoutes = new Elysia({ prefix: "/v1/projects/:ref/audit"
     `;
     if (!record) return status(404, { message: "Audit export not found", code: "NOT_FOUND" });
     return { ...record, download_url: record.status === "completed" ? `/v1/projects/${params.ref}/audit/exports/${record.id}/download` : null };
-  }, {
-    detail: { tags: ["audit"], summary: "Get a project audit export" },
   })
-  .get("/:logId", async ({ params, query, request }) => {
+  .get("/:logId", {
+    query: t.Object({ include_sensitive: t.Optional(t.String()) }, { additionalProperties: false }),
+    detail: { tags: ["audit"], summary: "Get a project audit log entry" },
+  }, async ({ params, query, request }) => {
     try {
       if (query.include_sensitive && !["true", "false"].includes(query.include_sensitive)) {
         throw new ValidationError("include_sensitive must be true or false");
@@ -456,7 +459,4 @@ export const projectAuditRoutes = new Elysia({ prefix: "/v1/projects/:ref/audit"
     } catch (error) {
       return toHttpError(error);
     }
-  }, {
-    query: t.Object({ include_sensitive: t.Optional(t.String()) }, { additionalProperties: false }),
-    detail: { tags: ["audit"], summary: "Get a project audit log entry" },
   });

@@ -2,6 +2,7 @@ import type { ApplicationGraph } from "./types";
 import type { DeliveryTarget } from "./delivery-schema";
 import { renderApplication, type GenerateOptions } from "./generate";
 import { joinRoutePaths } from "./util";
+import { serializedExecutionSnapshot } from "./execution-snapshot";
 
 /** Keep conservative service factories while restricting exposed route/job descriptors. */
 export function renderDeliveryTarget(
@@ -27,5 +28,8 @@ export function renderDeliveryTarget(
     externalTokens: target.externalTokens,
   };
   // Existing root-provider pruning does not treat Jobs as roots; preserve all providers here.
-  return renderApplication(projected, { ...options, treeShakeUnusedProviders: false });
+  return {
+    ...renderApplication(projected, { ...options, treeShakeUnusedProviders: false }),
+    executionSnapshot: serializedExecutionSnapshot(projected),
+  };
 }

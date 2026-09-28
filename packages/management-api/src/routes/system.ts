@@ -12,7 +12,9 @@ import { realtimeService } from "../services/realtime.service";
  */
 export const systemRoutes = new Elysia({ name: "system" })
 
-  .get("/v1/system/info", async ({ request }) => {
+  .get("/v1/system/info", {
+    detail: { tags: ["monitor"], summary: "Get system information" },
+  }, async ({ request }) => {
     const context = await auth.getAuthContext(request);
     if ("status" in context) return status(context.status, context.body);
     if (context.role !== "master" && context.role !== "admin") {
@@ -24,24 +26,22 @@ export const systemRoutes = new Elysia({ name: "system" })
       logger.error("[System] Failed to collect system info", { error });
       return status(503, { code: "SYSTEM_INFO_UNAVAILABLE", message: "System information unavailable" });
     }
-  }, {
-    detail: { tags: ["monitor"], summary: "Get system information" },
   })
 
   // Check Realtime CDC prerequisites on Postgres cluster
-  .get("/v1/system/realtime/prerequisites", async () => {
-    return await realtimeService.checkCdcPrerequisites();
-  }, {
+  .get("/v1/system/realtime/prerequisites", {
     detail: { tags: ["monitor"], summary: "Check Realtime CDC prerequisites" },
+  }, async () => {
+    return await realtimeService.checkCdcPrerequisites();
   })
 
   // Ensure supabase_admin role has REPLICATION attribute, then return latest check
-  .post("/v1/system/realtime/prerequisites/ensure", async ({ request }) => {
+  .post("/v1/system/realtime/prerequisites/ensure", {
+    detail: { tags: ["monitor"], summary: "Ensure Realtime replication is configured" },
+  }, async ({ request }) => {
     const authError = await auth.requireAdminAuth(request);
     if (authError) return status(authError.status, authError.body);
     const ensure = await realtimeService.ensureSupabaseAdminReplication();
     const current = await realtimeService.checkCdcPrerequisites();
     return { ensure, current };
-  }, {
-    detail: { tags: ["monitor"], summary: "Ensure Realtime replication is configured" },
   });

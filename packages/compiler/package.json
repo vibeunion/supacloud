@@ -23,7 +23,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/cli.ts --outdir dist --target node --external @typescript/typescript6 --external graphql --external '@graphql-codegen/*'",
+    "build:js": "bun build src/index.ts src/cli.ts src/delivery-bundle-worker.ts --outdir dist --target node --conditions=supacloud-source --external @typescript/typescript6 --external graphql --external '@graphql-codegen/*'",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build && bun run test:package",
@@ -47,7 +47,8 @@
     "directory": "packages/compiler"
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.34.52",
+    "@supacloud/delivery": "file:../delivery",
+    "typebox": "1.3.34",
     "@graphql-codegen/core": "^6.2.0",
     "@graphql-codegen/typed-document-node": "^7.1.0",
     "@graphql-codegen/typescript-operations": "^6.1.6",

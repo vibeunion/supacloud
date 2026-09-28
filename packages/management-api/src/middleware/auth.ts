@@ -160,7 +160,7 @@ const CAPABILITY_FAMILY_RULES: readonly CapabilityFamilyRule[] = [
   { prefixes: ["/database/migrations"], read: "database.migrations.read", manage: "database.migrations.manage" },
   {
     prefixes: [
-      "/auto-branching", "/backups", "/branches", "/dashboard", "/database", "/diagnostics",
+      "/applications", "/auto-branching", "/backups", "/branches", "/dashboard", "/database", "/diagnostics",
       "/cache", "/extensions", "/frontend", "/functions", "/log-drains", "/logs", "/pg-meta", "/scaling",
       "/mutations", "/pipelines", "/scheduled-functions", "/services", "/storage", "/task-events", "/tasks", "/types",
     ],

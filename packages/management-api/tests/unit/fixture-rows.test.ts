@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { fixtureRow, fixtureRows } from "../helpers/fixture-rows";
 
 const schema = Type.Object({

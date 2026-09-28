@@ -145,11 +145,11 @@ test("cache bypasses native responses, cookies, errors, oversized output and req
   for (const scenario of ["native", "cookie", "error", "large", "request-no-store", "vary", "response-no-store"]) {
     let writes = 0;
     const suite = createHttpPolicySuite({ auth: auth(), cacheNamespace: "test-v1", cacheStore: createMemoryHttpCacheStore() });
-    const http = new Elysia().onBeforeHandle(({ set }) => {
+    const http = new Elysia().beforeHandle(({ set }) => {
       if (scenario === "cookie") set.headers["set-cookie"] = "session=test; HttpOnly";
       if (scenario === "vary") set.headers.vary = "accept-language";
       if (scenario === "response-no-store") set.headers["cache-control"] = "no-store";
-    }).as("scoped");
+    }).as("plugin");
     const app = createApplication({
       ...suite, http,
       modules: [fixture([...guards, { name: "cache", options: { ttlMs: 1000, maxBodyBytes: 32 } }], () => {
@@ -262,6 +262,35 @@ test("response validation failures never populate the cache", async () => {
     await settle();
   }
   expect(writes).toBe(2);
+});
+
+test("cache awaits promise-returning Standard Schema validation and never stores failures", async () => {
+  for (const valid of [true, false]) {
+    let calls = 0;
+    const suite = createHttpPolicySuite({
+      auth: auth(), cacheNamespace: "async-schema", cacheStore: createMemoryHttpCacheStore(),
+    });
+    const module = fixture([...guards, { name: "cache", options: { ttlMs: 10000 } }],
+      () => ({ value: ++calls }));
+    module.controllers[0]!.routes[0]!.response = {
+      "~standard": {
+        version: 1,
+        vendor: "async-response-test",
+        validate(value: unknown) {
+          return Promise.resolve(valid ? { value } : { issues: [{ message: "Invalid response" }] });
+        },
+      },
+    };
+    const app = createApplication({ ...suite, modules: [module] });
+    const credential = await token();
+    for (let index = 0; index < 2; index++) {
+      const response = await app.handle(request(credential));
+      expect(response.status).toBe(valid ? 200 : 500);
+      if (valid) expect(await response.json()).toEqual({ value: 1 });
+      await settle();
+    }
+    expect(calls).toBe(valid ? 1 : 2);
+  }
 });
 
 test("real HTTP serves protected cache and telemetry with fresh per-request correlation", async () => {

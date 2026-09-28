@@ -130,12 +130,12 @@ export function createDocumentationPlugin(
     reserve(specPath);
     reserve(uiPath);
     const title = options.openApi.title ?? "OpenAPI Documentation";
-    app.get(specPath, async () => jsonResponse(await resolveSource(options.openApi!.document)), {
+    app.get(specPath, {
       detail: { hide: true },
-    });
-    app.get(uiPath, () => new Response(renderViewerPage(title, specPath, "json"), {
+    }, async () => jsonResponse(await resolveSource(options.openApi!.document)));
+    app.get(uiPath, { detail: { hide: true } }, () => new Response(renderViewerPage(title, specPath, "json"), {
       headers: { "content-type": "text/html; charset=utf-8" },
-    }), { detail: { hide: true } });
+    }));
   }
 
   if (options.graphql) {
@@ -144,12 +144,12 @@ export function createDocumentationPlugin(
     reserve(schemaPath);
     reserve(uiPath);
     const title = options.graphql.title ?? "GraphQL Schema";
-    app.get(schemaPath, async () => textResponse(await resolveSource(options.graphql!.schema)), {
+    app.get(schemaPath, {
       detail: { hide: true },
-    });
-    app.get(uiPath, () => new Response(renderViewerPage(title, schemaPath, "text"), {
+    }, async () => textResponse(await resolveSource(options.graphql!.schema)));
+    app.get(uiPath, { detail: { hide: true } }, () => new Response(renderViewerPage(title, schemaPath, "text"), {
       headers: { "content-type": "text/html; charset=utf-8" },
-    }), { detail: { hide: true } });
+    }));
   }
 
   return app;

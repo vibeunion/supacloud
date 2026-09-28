@@ -4,6 +4,8 @@ import { readFile } from "node:fs/promises";
 import { analyzeProject } from "./analyze";
 import { checkProject, compileProject } from "./compile";
 import { createContextPack, doctorProject, explainGraph, formatGraph } from "./inspect";
+import { createExecutionContextPack, readExecutionMetadata, ExecutionContextError } from "./execution-context";
+import { createDeliveryExecutionContextPack, DeliveryContextError } from "./delivery-context";
 import { watchProject } from "./watch";
 import type { Diagnostic, ModuleBoundaryPresetName } from "./types";
 import { compileOptionsFromConfig, loadSupacloudConfig, resolveSupacloudConfig } from "./config";
@@ -77,7 +79,7 @@ Commands:
   migrate             Preview or apply versioned source migrations
   migration-assess    Produce a read-only migration compatibility report
   plan                Preview deterministic workload targets without writing or deploying
-  build-delivery      Build independent local factories and an atomic delivery manifest (Bun)
+  build-delivery      Build local factories or explicit HTTP/worker hosts and an atomic manifest (Bun)
   openapi-export      Export a generated OpenAPI module to a standalone JSON document
   openapi-diff        Compare two OpenAPI JSON documents and fail on breaking changes
   graphql-schema      Explicitly export a caller-scoped schema to the configured local file
@@ -100,6 +102,10 @@ Options:
   --check             graphql-schema: compare the remote schema without changing the snapshot
   --debounce <ms>     Debounce source changes in dev mode (default: 100)
   --json              Print machine-readable output for compile/check/graph/explain/context/doctor/migration-assess/plan/build-delivery/openapi-export/openapi-diff
+  --events <file>     Read bounded execution metadata for context (requires --request-id and --json)
+  --request-id <id>   Select one opaque request ID from --events; context remains read-only
+  --delivery-manifest <file>  Correlate context using an immutable build, not current source
+  --delivery-target <name>    Target in --delivery-manifest (requires execution metadata)
   --space <n>         openapi-export: JSON indentation (0-10, default: 2)
   --delivery <file>   plan/build-delivery: validated JSON configuration (overrides config.delivery)
   --dry-run           Preview a fix without writing the target file
@@ -148,6 +154,10 @@ async function run(): Promise<void> {
   let preset: ModuleBoundaryPresetName | undefined;
   let debounceMs: number = 100;
   let query: string | undefined;
+  let executionEventsPath: string | undefined;
+  let executionRequestId: string | undefined;
+  let contextManifest: string | undefined;
+  let contextTarget: string | undefined;
   let json: boolean = false;
   let dryRun = true;
   let fromVersion: string | undefined;
@@ -240,11 +250,20 @@ async function run(): Promise<void> {
         throw new Error("openapi-export --space must be an integer from 0 to 10");
       }
       openApiExportSpace = space;
+    } else if (arg === "--events" || arg === "--request-id" || arg === "--delivery-manifest" || arg === "--delivery-target") {
+      if (command !== "context") throw new Error("Execution metadata options are only supported by context");
+      const value = args[++i];
+      if (!value || value.startsWith("-")) throw new Error("Execution metadata option requires a value");
+      if (arg === "--events") executionEventsPath = value;
+      else if (arg === "--request-id") executionRequestId = value;
+      else if (arg === "--delivery-manifest") contextManifest = value;
+      else contextTarget = value;
     } else if (arg === "--json") {
       json = true;
     } else if (arg === "--dry-run") {
       dryRun = true;
     } else if (arg === "--write") {
+      if (command === "context") throw new Error("context is read-only; --write is not supported");
       if (command === "plan" || command === "migration-assess") throw new Error(`${command} is read-only; --write is not supported`);
       dryRun = false;
     } else if (arg === "--baseline-openapi" || arg === "--current-openapi") {
@@ -285,6 +304,31 @@ async function run(): Promise<void> {
     } else if (deliveryCommand) {
       throw new Error("Unsupported plan argument");
     }
+  }
+
+  if (executionEventsPath !== undefined || executionRequestId !== undefined) {
+    if (!executionEventsPath || !executionRequestId || !json || !dryRun) {
+      throw new Error("Execution context requires --events, --request-id and --json; --write is not supported");
+    }
+  }
+
+  if (contextManifest !== undefined || contextTarget !== undefined) {
+    if (!contextManifest || !contextTarget || !executionEventsPath || !executionRequestId || !query || !json || !dryRun) {
+      throw new Error("Build context requires a manifest, target, subject, events, request ID and --json");
+    }
+    try {
+      const pack = await createDeliveryExecutionContextPack(
+        contextManifest, contextTarget, query, await readExecutionMetadata(resolve(executionEventsPath)), executionRequestId,
+      );
+      console.log(JSON.stringify(pack, null, 2));
+    } catch (error) {
+      console.log(JSON.stringify({ ok: false,
+        error: error instanceof DeliveryContextError || error instanceof ExecutionContextError
+          ? error.code : "DELIVERY_CONTEXT_INVALID",
+      }, null, 2));
+      process.exitCode = 1;
+    }
+    return;
   }
 
   if (openApiDiffCommand) {
@@ -530,6 +574,12 @@ async function run(): Promise<void> {
     }
     try {
       const result = await checkProject(compileDefaults);
+      if (executionEventsPath && executionRequestId) {
+        const pack = createExecutionContextPack({ ...result.graph, diagnostics: result.diagnostics }, query,
+          await readExecutionMetadata(resolve(process.cwd(), executionEventsPath)), executionRequestId);
+        console.log(JSON.stringify(pack, null, 2));
+        return;
+      }
       const pack = createContextPack({ ...result.graph, diagnostics: result.diagnostics }, query);
       if (json) {
         console.log(JSON.stringify(pack, null, 2));
@@ -553,7 +603,9 @@ async function run(): Promise<void> {
       if (json) {
         console.log(JSON.stringify({
           ok: false,
-          error: error instanceof Error ? error.message : String(error),
+          error: executionEventsPath
+            ? (error instanceof ExecutionContextError ? error.code : "EXECUTION_CONTEXT_UNAVAILABLE")
+            : error instanceof Error ? error.message : String(error),
         }, null, 2));
       } else {
         console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);

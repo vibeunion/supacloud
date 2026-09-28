@@ -14,6 +14,7 @@ import {
   ensureMigrationLedgerMetadata,
   MigrationLedgerDivergenceError,
   readMigrationLedger,
+  readMigrationInventory,
   reconcileMigrationLedgerVersions,
 } from "../services/migration-ledger";
 import {
@@ -1267,6 +1268,20 @@ async function executeProjectSqlRoute({
 export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" })
     .get(
         "/tables",
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            query: t.Object({
+                skip: t.Optional(t.String()),
+                limit: t.Optional(t.String()),
+                _page: t.Optional(t.String()),
+                _limit: t.Optional(t.String()),
+                _sort: t.Optional(t.String()),
+                _order: t.Optional(t.String()),
+                query: t.Optional(t.String()),
+                q: t.Optional(t.String()),
+            }, { additionalProperties: true }),
+            detail: { tags: ["projects"], summary: "List database tables" },
+        },
         async ({ params, query, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -1318,24 +1333,25 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     status: 500,
                 };
             }
-        },
-        {
-            params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            query: t.Object({
-                skip: t.Optional(t.String()),
-                limit: t.Optional(t.String()),
-                _page: t.Optional(t.String()),
-                _limit: t.Optional(t.String()),
-                _sort: t.Optional(t.String()),
-                _order: t.Optional(t.String()),
-                query: t.Optional(t.String()),
-                q: t.Optional(t.String()),
-            }, { additionalProperties: true }),
-            detail: { tags: ["projects"], summary: "List database tables" },
         }
     )
     .post(
         "/tables",
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            body: t.Object({
+                schema: t.Optional(t.String({ minLength: 1 })),
+                name: t.String({ minLength: 1 }),
+                columns: t.Array(t.Object({
+                    name: t.String({ minLength: 1 }),
+                    type: t.Union(TABLE_COLUMN_TYPES.map((type) => t.Literal(type))),
+                    nullable: t.Optional(t.Boolean()),
+                    primaryKey: t.Optional(t.Boolean()),
+                    identity: t.Optional(t.Boolean()),
+                }), { minItems: 1, maxItems: 64 }),
+            }),
+            detail: { tags: ["projects"], summary: "Create a database table through the migration ledger" },
+        },
         async ({ params, body, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -1360,24 +1376,17 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return failure;
             }
         },
-        {
-            params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            body: t.Object({
-                schema: t.Optional(t.String({ minLength: 1 })),
-                name: t.String({ minLength: 1 }),
-                columns: t.Array(t.Object({
-                    name: t.String({ minLength: 1 }),
-                    type: t.Union(TABLE_COLUMN_TYPES.map((type) => t.Literal(type))),
-                    nullable: t.Optional(t.Boolean()),
-                    primaryKey: t.Optional(t.Boolean()),
-                    identity: t.Optional(t.Boolean()),
-                }), { minItems: 1, maxItems: 64 }),
-            }),
-            detail: { tags: ["projects"], summary: "Create a database table through the migration ledger" },
-        },
     )
     .get(
         "/tables/:schema/:table/columns",
+        {
+            params: t.Object({
+                ref: t.String({ minLength: 1 }),
+                schema: t.String({ minLength: 1 }),
+                table: t.String({ minLength: 1 }),
+            }),
+            detail: { tags: ["projects"], summary: "List columns for a database table" },
+        },
         async ({ params, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -1418,18 +1427,27 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     status: 500,
                 };
             }
-        },
+        }
+    )
+    .get(
+        "/tables/:schema/:table/rows",
         {
             params: t.Object({
                 ref: t.String({ minLength: 1 }),
                 schema: t.String({ minLength: 1 }),
                 table: t.String({ minLength: 1 }),
             }),
-            detail: { tags: ["projects"], summary: "List columns for a database table" },
-        }
-    )
-    .get(
-        "/tables/:schema/:table/rows",
+            query: t.Object({
+                skip: t.Optional(t.String()),
+                limit: t.Optional(t.String()),
+                _page: t.Optional(t.String()),
+                _limit: t.Optional(t.String()),
+                _sort: t.Optional(t.String()),
+                _order: t.Optional(t.String()),
+                q: t.Optional(t.String()),
+            }, { additionalProperties: true }),
+            detail: { tags: ["projects"], summary: "List rows in a database table" },
+        },
         async ({ params, query, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -1478,27 +1496,14 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     status: 500,
                 };
             }
-        },
-        {
-            params: t.Object({
-                ref: t.String({ minLength: 1 }),
-                schema: t.String({ minLength: 1 }),
-                table: t.String({ minLength: 1 }),
-            }),
-            query: t.Object({
-                skip: t.Optional(t.String()),
-                limit: t.Optional(t.String()),
-                _page: t.Optional(t.String()),
-                _limit: t.Optional(t.String()),
-                _sort: t.Optional(t.String()),
-                _order: t.Optional(t.String()),
-                q: t.Optional(t.String()),
-            }, { additionalProperties: true }),
-            detail: { tags: ["projects"], summary: "List rows in a database table" },
         }
     )
     .get(
         "/materialized-views",
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            detail: { tags: ["projects"], summary: "List materialized views" },
+        },
         async ({ params, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -1530,14 +1535,20 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 ORDER BY schemaname, matviewname
             `;
             return rows;
-        },
-        {
-            params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            detail: { tags: ["projects"], summary: "List materialized views" },
         }
     )
     .post(
         "/materialized-views",
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            body: t.Object({
+                schema: t.Optional(t.String()),
+                name: t.String({ minLength: 1 }),
+                definition: t.String({ minLength: 1 }),
+                withData: t.Optional(t.Boolean()),
+            }),
+            detail: { tags: ["projects"], summary: "Create materialized view" },
+        },
         async ({ params, body, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -1574,20 +1585,21 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     status: 400,
                 };
             }
-        },
-        {
-            params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            body: t.Object({
-                schema: t.Optional(t.String()),
-                name: t.String({ minLength: 1 }),
-                definition: t.String({ minLength: 1 }),
-                withData: t.Optional(t.Boolean()),
-            }),
-            detail: { tags: ["projects"], summary: "Create materialized view" },
         }
     )
     .post(
         "/materialized-views/:schema/:name/refresh",
+        {
+            params: t.Object({
+                ref: t.String({ minLength: 1 }),
+                schema: t.String({ minLength: 1 }),
+                name: t.String({ minLength: 1 }),
+            }),
+            body: t.Object({
+                concurrently: t.Optional(t.Boolean()),
+            }),
+            detail: { tags: ["projects"], summary: "Refresh materialized view" },
+        },
         async ({ params, body, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -1619,21 +1631,21 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     status: 400,
                 };
             }
-        },
+        }
+    )
+    .delete(
+        "/materialized-views/:schema/:name",
         {
             params: t.Object({
                 ref: t.String({ minLength: 1 }),
                 schema: t.String({ minLength: 1 }),
                 name: t.String({ minLength: 1 }),
             }),
-            body: t.Object({
-                concurrently: t.Optional(t.Boolean()),
+            query: t.Object({
+                if_exists: t.Optional(t.String()),
             }),
-            detail: { tags: ["projects"], summary: "Refresh materialized view" },
-        }
-    )
-    .delete(
-        "/materialized-views/:schema/:name",
+            detail: { tags: ["projects"], summary: "Drop materialized view" },
+        },
         async ({ params, query, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -1668,21 +1680,20 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     status: 400,
                 };
             }
-        },
-        {
-            params: t.Object({
-                ref: t.String({ minLength: 1 }),
-                schema: t.String({ minLength: 1 }),
-                name: t.String({ minLength: 1 }),
-            }),
-            query: t.Object({
-                if_exists: t.Optional(t.String()),
-            }),
-            detail: { tags: ["projects"], summary: "Drop materialized view" },
         }
     )
     .post(
         "/rls-test",
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            body: t.Object({
+                query: t.String({ minLength: 1, maxLength: 100_000 }),
+                role: t.Union([t.Literal("anon"), t.Literal("authenticated")]),
+                user_id: t.Optional(t.String()),
+                email: t.Optional(t.String({ maxLength: 320 })),
+            }),
+            detail: { tags: ["projects", "database"], summary: "Test a SELECT query with RLS role impersonation" },
+        },
         async ({ params, body, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -1713,27 +1724,9 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return { message: pgError.message || "RLS test failed", code: pgError.code || "400", details: pgError.details || null, hint: pgError.hint || null, status: 400 };
             }
         },
-        {
-            params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            body: t.Object({
-                query: t.String({ minLength: 1, maxLength: 100_000 }),
-                role: t.Union([t.Literal("anon"), t.Literal("authenticated")]),
-                user_id: t.Optional(t.String()),
-                email: t.Optional(t.String({ maxLength: 320 })),
-            }),
-            detail: { tags: ["projects", "database"], summary: "Test a SELECT query with RLS role impersonation" },
-        },
     )
     .post(
         "/query",
-        async ({ params, body, set, request }) => {
-            return executeProjectSqlRoute({
-                projectRef: params.ref,
-                body: body as Record<string, unknown>,
-                request,
-                set,
-            });
-        },
         {
             params: t.Object({ ref: t.String({ minLength: 1 }) }),
             body: t.Object({
@@ -1744,10 +1737,22 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 query_id: t.Optional(t.String({ minLength: 16, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" })),
             }),
             detail: { tags: ["projects"], summary: "Execute a SQL query with mode control" },
+        },
+        async ({ params, body, set, request }) => {
+            return executeProjectSqlRoute({
+                projectRef: params.ref,
+                body: body as Record<string, unknown>,
+                request,
+                set,
+            });
         }
     )
     .get(
         "/query-performance",
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            detail: { tags: ["projects", "database"], summary: "Read query performance statistics" },
+        },
         async ({ params, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -1780,14 +1785,21 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     status: 503,
                 };
             }
-        },
-        {
-            params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            detail: { tags: ["projects", "database"], summary: "Read query performance statistics" },
         }
     )
     .post(
         "/sql",
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            body: t.Object({
+                sql: t.Optional(t.String()),
+                query: t.Optional(t.String()),
+                mode: t.Optional(t.Union([t.Literal("read"), t.Literal("migration"), t.Literal("admin")])),
+                admin: t.Optional(t.Boolean()),
+                query_id: t.Optional(t.String({ minLength: 16, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" })),
+            }),
+            detail: { tags: ["projects"], summary: "Execute a SQL statement with mode control" },
+        },
         async ({ params, body, set, request }) => {
             const sqlQuery = typeof body.query === "string" && body.query
                 ? body.query
@@ -1804,21 +1816,17 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 set,
                 skipReplacementJournalCheck: true,
             });
-        },
-        {
-            params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            body: t.Object({
-                sql: t.Optional(t.String()),
-                query: t.Optional(t.String()),
-                mode: t.Optional(t.Union([t.Literal("read"), t.Literal("migration"), t.Literal("admin")])),
-                admin: t.Optional(t.Boolean()),
-                query_id: t.Optional(t.String({ minLength: 16, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" })),
-            }),
-            detail: { tags: ["projects"], summary: "Execute a SQL statement with mode control" },
         }
     )
     .post(
         "/sql/:query_id/cancel",
+        {
+            params: t.Object({
+                ref: t.String({ minLength: 1 }),
+                query_id: t.String({ minLength: 16, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
+            }),
+            detail: { tags: ["projects"], summary: "Cancel a running SQL query" },
+        },
         async ({ params, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -1856,17 +1864,20 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 set.status = 500;
                 return { message: "Failed to cancel SQL query", code: "QUERY_CANCEL_FAILED", status: 500 };
             }
-        },
-        {
-            params: t.Object({
-                ref: t.String({ minLength: 1 }),
-                query_id: t.String({ minLength: 16, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }),
-            }),
-            detail: { tags: ["projects"], summary: "Cancel a running SQL query" },
         }
     )
     .post(
         "/migrations/baseline",
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            body: t.Object({
+                migrations: t.Array(t.Object({
+                    version: t.String({ minLength: 1, maxLength: 19, pattern: "^[0-9]+$" }),
+                    name: t.String({ minLength: 1, maxLength: 255 }),
+                }), { minItems: 1, maxItems: 1000 }),
+            }),
+            detail: { tags: ["projects"], summary: "Record schema-equivalent migrations without executing DDL" },
+        },
         async ({ params, body, request, set }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -1896,19 +1907,14 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 return failure;
             }
         },
-        {
-            params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            body: t.Object({
-                migrations: t.Array(t.Object({
-                    version: t.String({ minLength: 1, maxLength: 19, pattern: "^[0-9]+$" }),
-                    name: t.String({ minLength: 1, maxLength: 255 }),
-                }), { minItems: 1, maxItems: 1000 }),
-            }),
-            detail: { tags: ["projects"], summary: "Record schema-equivalent migrations without executing DDL" },
-        },
     )
     .post(
         "/migrations",
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            body: t.Record(t.String(), t.Unknown()),
+            detail: { tags: ["projects"], summary: "Apply a database migration" },
+        },
         async ({ params, body, request, set }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) {
@@ -1960,15 +1966,43 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 set.status = failure.status;
                 return failure;
             }
-        },
-        {
-            params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            body: t.Record(t.String(), t.Unknown()),
-            detail: { tags: ["projects"], summary: "Apply a database migration" },
         }
     )
     .get(
+        "/migrations/inventory",
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            detail: { tags: ["projects"], summary: "Read migration inventory without initializing or repairing ledgers" },
+        },
+        async ({ params, set, request }) => {
+            const authError = await requireProjectOrAdminAuth(request, params.ref);
+            if (authError) return projectAuthResponse(authError, set);
+            const project = await projectService.getProject(params.ref);
+            if (!project) {
+                set.status = 404;
+                return { message: "Project not found", code: "404", status: 404 };
+            }
+            try {
+                const projectDb = getProjectDb(await resolveDbName(params.ref));
+                const migrations = await readMigrationInventory(projectDb);
+                return { project_ref: params.ref, read_only: true as const, migrations };
+            } catch (error: unknown) {
+                const diverged = error instanceof MigrationLedgerDivergenceError;
+                set.status = diverged ? 409 : 503;
+                return {
+                    message: "Read-only migration inventory is unavailable; no ledger repair was attempted",
+                    code: diverged ? "migration_ledger_diverged" : "migration_ledger_unavailable",
+                    status: diverged ? 409 : 503,
+                };
+            }
+        },
+    )
+    .get(
         "/migrations",
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            detail: { tags: ["projects"], summary: "List applied database migrations" },
+        },
         async ({ params, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -2004,14 +2038,11 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                     status: 503,
                 };
             }
-        },
-        {
-            params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            detail: { tags: ["projects"], summary: "List applied database migrations" },
         }
     )
     .get(
         "/constraints",
+        { params: t.Object({ ref: t.String({ minLength: 1 }) }), detail: { tags: ["projects"], summary: "List database constraints" } },
         async ({ params, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -2060,11 +2091,11 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             } catch {
                 return [];
             }
-        },
-        { params: t.Object({ ref: t.String({ minLength: 1 }) }), detail: { tags: ["projects"], summary: "List database constraints" } }
+        }
     )
     .get(
         "/functions",
+        { params: t.Object({ ref: t.String({ minLength: 1 }) }), detail: { tags: ["projects"], summary: "List database functions" } },
         async ({ params, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -2111,11 +2142,11 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             } catch {
                 return [];
             }
-        },
-        { params: t.Object({ ref: t.String({ minLength: 1 }) }), detail: { tags: ["projects"], summary: "List database functions" } }
+        }
     )
     .get(
         "/triggers",
+        { params: t.Object({ ref: t.String({ minLength: 1 }) }), detail: { tags: ["projects"], summary: "List database triggers" } },
         async ({ params, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -2172,11 +2203,11 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             } catch {
                 return [];
             }
-        },
-        { params: t.Object({ ref: t.String({ minLength: 1 }) }), detail: { tags: ["projects"], summary: "List database triggers" } }
+        }
     )
     .get(
         "/publications",
+        { params: t.Object({ ref: t.String({ minLength: 1 }) }), detail: { tags: ["projects"], summary: "List database publications" } },
         async ({ params, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -2230,11 +2261,15 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             } catch {
                 return [];
             }
-        },
-        { params: t.Object({ ref: t.String({ minLength: 1 }) }), detail: { tags: ["projects"], summary: "List database publications" } }
+        }
     )
     .get(
         "/linter",
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            query: t.Object({ schema: t.Optional(t.String()) }),
+            detail: { tags: ["projects"], summary: "Run built-in database linter on project database" },
+        },
         async ({ params, query, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -2278,15 +2313,15 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 set.status = 500;
                 return { message: "Database linter failed", code: "LINTER_FAILED", status: 500 };
             }
-        },
-        {
-            params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            query: t.Object({ schema: t.Optional(t.String()) }),
-            detail: { tags: ["projects"], summary: "Run built-in database linter on project database" },
         }
     )
     .get(
         "/rpc-catalog",
+        {
+            params: t.Object({ ref: t.String({ minLength: 1 }) }),
+            query: t.Object({ schemas: t.Optional(t.String()) }),
+            detail: { tags: ["projects"], summary: "Introspect RPC catalog with smart tags and signatures" },
+        },
         async ({ params, query, set, request }) => {
             const authError = await requireProjectOrAdminAuth(request, params.ref);
             if (authError) return projectAuthResponse(authError, set);
@@ -2332,10 +2367,5 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
                 set.status = 500;
                 return { message: "RPC catalog inspection failed", code: "RPC_CATALOG_FAILED", status: 500 };
             }
-        },
-        {
-            params: t.Object({ ref: t.String({ minLength: 1 }) }),
-            query: t.Object({ schemas: t.Optional(t.String()) }),
-            detail: { tags: ["projects"], summary: "Introspect RPC catalog with smart tags and signatures" },
         }
     );

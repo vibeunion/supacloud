@@ -3,7 +3,7 @@ import type { HttpPolicy, HttpPolicyResponseContext } from "./http-policy";
 import type { HttpCacheStore } from "./http-policy-stores";
 import { ApplicationError } from "./index";
 import { policyKey, principalKey } from "./http-policy-suite";
-import { mapResponse } from "elysia/adapter/web-standard/handler";
+import { WebStandardAdapter } from "elysia/adapter/web-standard";
 
 interface CachePolicyOptions {
   store: HttpCacheStore;
@@ -83,7 +83,11 @@ export function createCachePolicy(options: CachePolicyOptions): HttpPolicy {
   policy.terminal = true;
   policy.mapResponse = async (context) => {
     if (!misses.has(context.http.request) || !mayStore(context)) return;
-    const response = await mapResponse(context.response, context.http.set, context.http.request);
+    // Elysia 2 maps before validating. Validate the value before converting it
+    // to a Response, whose body is intentionally exempt from native validation.
+    const value = context.encodeResponse ? await context.encodeResponse(context.response) : context.response;
+    const response = await WebStandardAdapter.response.map(value, context.http.set, context.http.request);
+    if (!(response instanceof Response)) throw new Error("HTTP response mapping did not return a Response");
     const body = boundedBody(response.clone(), options.maxBodyBytes).catch(() => {
       try { options.onWriteError(); } catch {}
       return undefined;

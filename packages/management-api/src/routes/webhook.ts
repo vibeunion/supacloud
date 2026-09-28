@@ -1,4 +1,5 @@
-import { Elysia, t, type Static, status } from "elysia";
+import { Elysia, t, status } from "elysia";
+import type { Static } from "elysia/type";
 import { logger } from "../utils/logger";
 import { frontendService } from "../services/frontend.service";
 import type { FrontendDeployment } from "../types/frontend";
@@ -115,6 +116,10 @@ async function verifyGitHubSignature(
 export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
   .post(
     "/github",
+    {
+      body: WebhookBodySchema,
+      detail: { tags: ["webhook"], summary: "Handle GitHub push webhook" },
+    },
     async ({ body, headers }) => {
       const event = headers[WEBHOOK_EVENT_HEADER] || headers["x-github-event"];
       const signature = headers[WEBHOOK_SECRET_HEADER] || headers["x-hub-signature-256"];
@@ -238,16 +243,13 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
         deployments: results,
         auto_branching: autoBranchResults,
       };
-    },
-    {
-      body: WebhookBodySchema,
-      detail: { tags: ["webhook"], summary: "Handle GitHub push webhook" },
     }
   )
 
   // ─── GitLab Webhook ───
   .post(
     "/gitlab",
+    { body: WebhookBodySchema, detail: { tags: ["webhook"], summary: "Handle GitLab push webhook" } },
     async ({ body, headers }) => {
       const event = headers["x-gitlab-event"] || "";
       if (event !== "Push Hook") return { message: "Event ignored", event };
@@ -261,13 +263,13 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
       const token = headers["x-gitlab-token"];
 
       return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitlab", token);
-    },
-    { body: WebhookBodySchema, detail: { tags: ["webhook"], summary: "Handle GitLab push webhook" } }
+    }
   )
 
   // ─── Gitee Webhook ───
   .post(
     "/gitee",
+    { body: WebhookBodySchema, detail: { tags: ["webhook"], summary: "Handle Gitee push webhook" } },
     async ({ body, headers }) => {
       const event = headers["x-gitee-event"] || (body as WebhookPayload)?.hook_name;
       if (event !== "push_hooks" && event !== "Push Hook") return { message: "Event ignored", event };
@@ -281,13 +283,13 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
       const token = headers["x-gitee-token"] || (payload.password || "");
 
       return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitee", token);
-    },
-    { body: WebhookBodySchema, detail: { tags: ["webhook"], summary: "Handle Gitee push webhook" } }
+    }
   )
 
   // ─── GitCode (CSDN) Webhook ───
   .post(
     "/gitcode",
+    { body: WebhookBodySchema, detail: { tags: ["webhook"], summary: "Handle GitCode push webhook" } },
     async ({ body, headers }) => {
       const event = headers["x-gitcode-event"] || headers["x-gitlab-event"] || "";
       if (event !== "Push Hook" && event !== "push") return { message: "Event ignored", event };
@@ -301,12 +303,22 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
       const token = headers["x-gitcode-token"] || headers["x-gitlab-token"];
 
       return await triggerDeployForGit(gitUrl, branch, commitSha, commitMessage, repoName, "gitcode", token);
-    },
-    { body: WebhookBodySchema, detail: { tags: ["webhook"], summary: "Handle GitCode push webhook" } }
+    }
   )
 
   .post(
     "/deploy",
+    {
+      body: t.Object({
+        deployment_id: t.String(),
+        project_ref: t.String(),
+        git_url: t.Optional(t.String()),
+        branch: t.Optional(t.String()),
+        commit_sha: t.Optional(t.String()),
+        commit_message: t.Optional(t.String()),
+      }),
+      detail: { tags: ["webhook"], summary: "Trigger deployment via API token" },
+    },
     async ({ body, headers }) => {
       const authHeader = headers["authorization"] || headers["Authorization"];
 
@@ -366,22 +378,23 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
         url: buildResult.url,
         error: buildResult.error,
       };
-    },
-    {
-      body: t.Object({
-        deployment_id: t.String(),
-        project_ref: t.String(),
-        git_url: t.Optional(t.String()),
-        branch: t.Optional(t.String()),
-        commit_sha: t.Optional(t.String()),
-        commit_message: t.Optional(t.String()),
-      }),
-      detail: { tags: ["webhook"], summary: "Trigger deployment via API token" },
     }
   )
 
   .post(
     "/callback",
+    {
+      body: t.Object({
+        deployment_id: t.String(),
+        project_ref: t.String(),
+        record_id: t.String(),
+        status: t.Union([
+          t.Literal("pending"), t.Literal("building"), t.Literal("success"), t.Literal("failed"),
+        ]),
+        build_log: t.Optional(t.String()),
+      }),
+      detail: { tags: ["webhook"], summary: "Receive deployment build callback" },
+    },
     async ({ body, headers }) => {
       const authHeader = headers["authorization"] || headers["Authorization"];
 
@@ -408,16 +421,6 @@ export const webhookRoutes = new Elysia({ prefix: "/v1/webhooks" })
       );
 
       return { message: "Callback received", record_id, status: deployStatus };
-    },
-    {
-      body: t.Object({
-        deployment_id: t.String(),
-        project_ref: t.String(),
-        record_id: t.String(),
-        status: t.Enum({ pending: "pending", building: "building", success: "success", failed: "failed" }),
-        build_log: t.Optional(t.String()),
-      }),
-      detail: { tags: ["webhook"], summary: "Receive deployment build callback" },
     }
   );
 

@@ -207,6 +207,122 @@ release has been activated. Production uploads and activations require the
 normal exact `--confirm-production <ref>` value, and
 `SUPACLOUD_READ_ONLY=true` blocks both mutations.
 
+### Immutable application releases
+
+Store a compiler-built HTTP/Worker application as one immutable release:
+
+```bash
+supacloud-cli applications upload_release --ref abc123 --id reviews \
+  --manifest_path ./generated/delivery/delivery.manifest.json
+supacloud-cli applications list_releases --ref abc123 --id reviews --limit 50
+supacloud-cli applications get_release --ref abc123 --id reviews --release_id <sha256>
+supacloud-cli applications get_runtime --ref abc123 --id reviews --environment_id test
+```
+
+Upload verifies executable objects, transfers their inventory with multipart
+form data, and checks the returned application-bound release identity. It does
+not activate HTTP/Worker processes or execute migrations. Lists use release-ID
+ordering; pass `--cursor <next_cursor>` for the next page. An unknown upload
+outcome includes the expected release ID so `get_release` can verify it.
+Uploads follow the existing read-only and exact production-confirmation rules.
+`get_runtime` observes the current activation without starting it. A null
+readiness result means no active release has been recorded. A non-null report
+binds readiness to the environment, release, activation and target processes;
+it does not claim that every business dependency or transaction has been tested.
+
+### Versioned application configuration
+
+Configuration revisions bind a complete target inventory to one application
+environment. Saving a revision does not allocate ports, start processes, change
+traffic or migrate data:
+
+```bash
+supacloud-cli applications get_configuration --ref abc123 --id reviews --environment_id test
+supacloud-cli applications put_configuration --ref abc123 --id reviews --environment_id test \
+  --configuration_path ./application.test.json
+supacloud-cli applications get_configuration --ref abc123 --id reviews --environment_id test \
+  --configuration_id <uuid>
+```
+
+Example configuration write file:
+
+```json
+{
+  "configuration_id": "01234567-89ab-4def-8123-456789abcdef",
+  "expected_configuration_id": null,
+  "configuration": {
+    "bun_version": "1.4.2",
+    "targets": [
+      {
+        "name": "api",
+        "kind": "http",
+        "hosts": ["reviews.example.test"],
+        "environment": { "LOG_LEVEL": "info" }
+      },
+      { "name": "jobs", "kind": "worker", "hosts": [], "environment": {} }
+    ]
+  }
+}
+```
+
+Generate a new UUIDv4 for each new revision. Use the current configuration ID
+as `expected_configuration_id`, or `null` for an environment without a saved
+configuration. The file replaces the entire configuration; omitted variables
+are not carried over. HTTP targets require lowercase exact hosts; Worker
+targets have no hosts. Runtime-owned variables such as `PORT` cannot be supplied.
+
+The control plane encrypts values with its configured secret-encryption key.
+API and CLI reads return names only; keep local files with values out of version
+control. An identical retry with the same revision ID returns the original
+receipt and never moves a newer head backward. A changed request using the same
+ID or a stale expected revision returns a conflict. An unknown result preserves
+the revision ID for `get_configuration` verification; the CLI does not replay
+the write automatically. Reads without an ID show the current head.
+
+Writes follow the normal read-only and exact production-confirmation policy.
+Programmatic `activateConfigured` selects an explicit configuration revision,
+checks its target inventory against the release and retains that revision ID
+in activation state/runtime feedback. It now obtains persistent server-selected
+ports rather than accepting caller ports. Allocation is bound to the release,
+activation, environment, Bun version and configuration revision; a retry retains
+the same ports. The default single-host pool is `20000-29999`, configurable with
+`SUPACLOUD_APPLICATION_PORT_RANGE`. Existing configured platform pools,
+persisted tenant port overrides and current loopback listeners are excluded.
+
+Reservations do not expire automatically and are not deleted with project
+metadata. Exhaustion is an explicit error; reusing a port still requires a
+verified stopped/unrouted retirement path. Manual low-level runtimes and other
+daemons must stay outside this application pool because their lifecycle does
+not participate in its reservations. The public activation write API remains
+unavailable pending compatibility and recovery integration.
+
+Composed hosts can register `POST .../environments/:environmentId/activations`
+and `POST .../activations/:activationId/reconcile` by supplying an
+`ApplicationDeploymentService` with its required compatibility verifier.
+The default Management API instance does not yet enable these endpoints.
+For an explicitly composed test host:
+
+```bash
+supacloud-cli applications activate_release --ref abc123 --id reviews --environment_id test \
+  --release_id <release-sha256> --configuration_id <configuration-uuid> \
+  --activation_id <new-uuid> --expected_activation_id absent
+supacloud-cli applications reconcile_activation --ref abc123 --id reviews --environment_id test \
+  --release_id <release-sha256> --activation_id <same-uuid>
+supacloud-cli applications retire_activation --ref abc123 --id reviews --environment_id test \
+  --activation_id <stopped-and-unrouted-uuid>
+```
+
+Retirement is addressed by activation ID, not release ID. Supplying `release_id`
+to `retire_activation` is rejected locally before any request is sent.
+
+For upgrades or explicit application rollback, supply the currently active
+activation UUID instead of `absent`. Both actions are writes. The CLI checks
+receipt identity and preserves the requested activation ID on unknown outcomes;
+it does not retry writes. Reconciliation only confirms already committed state,
+not an interrupted early-stage activation, and does not replay runtime effects.
+Retirement requires the composed host's stopped/unrouted verifier and keeps the
+activation ID as an audit tombstone; the CLI does not retry unknown outcomes.
+
 ### Verified release controls
 
 `release` is an official CLI entry point for verified Management API controls
@@ -408,6 +524,27 @@ migration versions, checksum
 drift, and statement-count mismatches instead of treating them as an empty
 ledger. `database list_migrations` remains available with its legacy SQL-backed,
 human-readable behavior.
+
+`database delivery_migration_plan` compares one immutable target's declared SQL
+with the separate read-only `/database/migrations/inventory` endpoint:
+
+```bash
+supacloud-cli database delivery_migration_plan --ref abc123 \
+  --delivery_manifest /archive/delivery/delivery.manifest.json --delivery_target api
+```
+
+The entire target inventory is verified before the API request, without loading
+current application source. Output contains hashes and statuses, not SQL.
+`ledger-match` means the version, name and normalized single-statement-array
+checksum match; raw SQL SHA-256 is reported separately. Baseline markers are not
+execution evidence. Name/checksum conflicts and out-of-order pending migrations
+return errors. Operator provisioning always requires separate verification.
+`ledgerCompatible` reports only identity/order checks: it does not prove old/new
+application compatibility, authorize migration execution, or validate deployment.
+This command never applies SQL, repairs a ledger, or activates an application.
+The server endpoint performs only ledger reads, unlike the older migration-list
+endpoint which may initialize or reconcile metadata. Older servers without the
+read-only endpoint fail closed; the command never falls back to the older GET.
 
 Bucket list/get output includes the metadata `revision`. Update and delete reject
 stale revisions with HTTP 409. Delete additionally requires `require_empty=true`;

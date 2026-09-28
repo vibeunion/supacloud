@@ -54,6 +54,13 @@ function withPublisher(run: (fixture: {
 }
 
 describe("PostgreSQL image release contract", () => {
+  test("allows Realtime wal2json decoding as a distinct output plugin", () => {
+    const bootstrap = read("docker/self-host/postgres/initdb/00-configure-postgres.sh");
+    expect(bootstrap).toContain(
+      "ALTER SYSTEM SET output_plugin_libraries = 'pgoutput', 'test_decoding', 'wal2json';",
+    );
+    expect(bootstrap).not.toContain("output_plugin_libraries = 'pgoutput, test_decoding, wal2json'");
+  });
   test("packages durable independently of runtime activation on both architectures", () => {
     expect(dockerfile).not.toContain("ARG ENABLE_PG_DURABLE");
     expect(dockerfile).toContain('if [ "$TARGETARCH" = arm64 ]');

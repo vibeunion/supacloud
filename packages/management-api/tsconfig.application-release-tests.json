@@ -1,0 +1,32 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "types": ["bun"],
+    "noEmit": true
+  },
+  "include": [
+    "src/types/*.d.ts",
+    "src/services/application-release-storage.ts",
+    "src/services/application-runtime.ts",
+    "src/services/application-runtime-files.ts",
+    "src/services/application-activation.ts",
+    "src/services/application-active-storage.ts",
+    "src/services/application-readiness.ts",
+    "src/services/application-gateway.ts",
+    "src/services/application-migrations.ts",
+    "src/services/application-deployment.ts",
+    "src/services/application-configuration.ts",
+    "src/services/application-runtime-allocation.ts",
+    "tests/unit/application-release-storage.test.ts",
+    "tests/unit/application-runtime.test.ts",
+    "tests/unit/application-runtime-allocation.test.ts",
+    "tests/unit/application-activation.test.ts",
+    "tests/unit/application-readiness.test.ts",
+    "tests/unit/application-runtime.routes.test.ts",
+    "tests/unit/application-activation.routes.test.ts",
+    "tests/unit/application-gateway.test.ts",
+    "tests/unit/application-migrations.test.ts",
+    "tests/unit/application-deployment.test.ts"
+  ]
+}

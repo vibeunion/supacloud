@@ -122,8 +122,8 @@ export async function handleGrafanaRequest(request: Request): Promise<Response> 
 }
 
 export const grafanaProxyRoutes = new Elysia({ name: "grafana-proxy" })
-  .all("/grafana", handler, { detail: { tags: ["monitoring"], summary: "Proxy Grafana root" } })
-  .all("/grafana/*", handler, { detail: { tags: ["monitoring"], summary: "Proxy Grafana assets and dashboards" } });
+  .all("/grafana", { detail: { tags: ["monitoring"], summary: "Proxy Grafana root" } }, handler)
+  .all("/grafana/*", { detail: { tags: ["monitoring"], summary: "Proxy Grafana assets and dashboards" } }, handler);
 
 export const grafanaProxyInternals = {
   buildGrafanaTargetUrl,

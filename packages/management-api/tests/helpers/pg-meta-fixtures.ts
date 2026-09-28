@@ -1,4 +1,4 @@
-import type { Static } from "@sinclair/typebox";
+import type { Static } from "typebox";
 import type { pgMetaRowSchemas } from "../../src/utils/pg-meta-contract";
 
 export const pgMetaFixtures: {

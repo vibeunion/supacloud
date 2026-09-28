@@ -227,33 +227,23 @@ function activationConflict(error: unknown) {
 }
 
 export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
-  .get("/:ref/function-releases", async ({ params, request }) => {
+  .get("/:ref/function-releases", {
+    detail: { tags: ["frontend"], summary: "Get the current function release status for a project" },
+  }, async ({ params, request }) => {
     const denied = await requireFunctionManagementAuth(request, params.ref);
     if (denied) return denied;
     const { projectReleaseService } = await import("../services/project-release.service");
     return projectReleaseService.status(params.ref);
-  }, {
-    detail: { tags: ["frontend"], summary: "Get the current function release status for a project" },
   })
-  .get("/:ref/function-releases/:mutationId", async ({ params, request }) => {
+  .get("/:ref/function-releases/:mutationId", {
+    detail: { tags: ["frontend"], summary: "Get a specific function release mutation status" },
+  }, async ({ params, request }) => {
     const denied = await requireFunctionManagementAuth(request, params.ref);
     if (denied) return denied;
     const { projectReleaseService } = await import("../services/project-release.service");
     return projectReleaseService.status(params.ref, params.mutationId);
-  }, {
-    detail: { tags: ["frontend"], summary: "Get a specific function release mutation status" },
   })
-  .post("/:ref/function-releases", async ({ params, request, body }) => {
-    const denied = await requireFunctionManagementAuth(request, params.ref);
-    if (denied) return denied;
-    const principal = await getVerifiedRequestPrincipal(request);
-    if (!principal) return status(401, { error: "Verified release principal is required" });
-    const { projectReleaseService } = await import("../services/project-release.service");
-    return projectReleaseService.publish({
-      projectRef: params.ref, mutationId: body.mutation_id,
-      expectedReleaseId: body.expected_release_id, functions: body.functions, principal,
-    });
-  }, {
+  .post("/:ref/function-releases", {
     body: t.Object({
       mutation_id: t.String({ format: "uuid" }),
       expected_release_id: t.Union([t.Null(), t.String({ format: "uuid" })]),
@@ -263,15 +253,18 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       }, { additionalProperties: false }), { minItems: 1, maxItems: 128 }),
     }, { additionalProperties: false }),
     detail: { tags: ["frontend"], summary: "Publish an atomic multi-function release manifest" },
-  })
-  .post("/:ref/functions/:slug/stage", async ({ params, request, body }) => {
+  }, async ({ params, request, body }) => {
     const denied = await requireFunctionManagementAuth(request, params.ref);
     if (denied) return denied;
-    const { edgeFunctionService } = await import("../services/edge-function.service");
-    return edgeFunctionService.stageVersion({
-      ref: params.ref, slug: params.slug, code: body.code, config: body.config,
+    const principal = await getVerifiedRequestPrincipal(request);
+    if (!principal) return status(401, { error: "Verified release principal is required" });
+    const { projectReleaseService } = await import("../services/project-release.service");
+    return projectReleaseService.publish({
+      projectRef: params.ref, mutationId: body.mutation_id,
+      expectedReleaseId: body.expected_release_id, functions: body.functions, principal,
     });
-  }, {
+  })
+  .post("/:ref/functions/:slug/stage", {
     body: t.Object({
       code: t.String({ minLength: 1, maxLength: 10 * 1024 * 1024 }),
       config: t.Optional(t.Object({
@@ -281,17 +274,24 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       }, { additionalProperties: false })),
     }, { additionalProperties: false }),
     detail: { tags: ["frontend"], summary: "Stage an immutable function version without activation" },
+  }, async ({ params, request, body }) => {
+    const denied = await requireFunctionManagementAuth(request, params.ref);
+    if (denied) return denied;
+    const { edgeFunctionService } = await import("../services/edge-function.service");
+    return edgeFunctionService.stageVersion({
+      ref: params.ref, slug: params.slug, code: body.code, config: body.config,
+    });
   })
   .get(
     "/:ref/functions",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["frontend"], summary: "List edge functions" },
+    },
     async ({ params, request }) => {
       const authError = await requireFunctionManagementAuth(request, params.ref);
       if (authError) return authError;
       return projectService.listFunctions(params.ref);
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["frontend"], summary: "List edge functions" },
     },
   )
 
@@ -299,6 +299,19 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
   // POST /v1/projects/:ref/functions/deploy?slug=hello-world
   .post(
     "/:ref/functions/deploy",
+    {
+      params: t.Object({ ref: t.String() }),
+      query: t.Object(
+        { slug: t.Optional(t.String()), bundleOnly: t.Optional(t.String()) },
+        { additionalProperties: true },
+      ),
+      body: t.Object({
+        metadata: t.Optional(t.Any()),
+        file: t.Optional(t.Any()),
+      }),
+      type: "multipart",
+      detail: { tags: ["frontend"], summary: "Deploy function via multipart upload" },
+    },
     async ({ params, body, query, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -428,23 +441,44 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         updated_at: now,
       };
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      query: t.Object(
-        { slug: t.Optional(t.String()), bundleOnly: t.Optional(t.String()) },
-        { additionalProperties: true },
-      ),
-      body: t.Object({
-        metadata: t.Optional(t.Any()),
-        file: t.Optional(t.Any()),
-      }),
-      type: "multipart",
-      detail: { tags: ["frontend"], summary: "Deploy function via multipart upload" },
-    },
   )
 
   .post(
     "/:ref/functions",
+    {
+      params: t.Object({ ref: t.String() }),
+      query: t.Object(
+        {
+          slug: t.Optional(t.String()),
+          name: t.Optional(t.String()),
+          verify_jwt: t.Optional(t.String()),
+          entrypoint_path: t.Optional(t.String()),
+          import_map_path: t.Optional(t.String()),
+          background_routes: t.Optional(t.Array(t.String())),
+          framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
+          capabilities: t.Optional(functionCapabilitiesSchema),
+          limits: t.Optional(functionLimitsSchema),
+          expected_activation_id: t.Optional(expectedActivationIdSchema),
+        },
+        { additionalProperties: true },
+      ),
+      body: t.Optional(
+        t.Object({
+          slug: t.Optional(t.String()),
+          name: t.Optional(t.String()),
+          body: t.Optional(t.String()),
+          code: t.Optional(t.String()),
+          verify_jwt: t.Optional(t.Boolean()),
+          background_routes: t.Optional(t.Array(t.String())),
+          framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
+          capabilities: t.Optional(functionCapabilitiesSchema),
+          limits: t.Optional(functionLimitsSchema),
+          expected_active_version: t.Optional(expectedActiveVersionSchema),
+          expected_activation_id: t.Optional(expectedActivationIdSchema),
+        }),
+      ),
+      detail: { tags: ["frontend"], summary: "Create or deploy an edge function" },
+    },
     async ({ params, body, query, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -550,26 +584,16 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         preheat: deployResult?.preheat ?? null,
       };
     },
+  )
+
+  // Bulk upsert functions (official Management API)
+  .put(
+    "/:ref/functions",
     {
       params: t.Object({ ref: t.String() }),
-      query: t.Object(
-        {
-          slug: t.Optional(t.String()),
-          name: t.Optional(t.String()),
-          verify_jwt: t.Optional(t.String()),
-          entrypoint_path: t.Optional(t.String()),
-          import_map_path: t.Optional(t.String()),
-          background_routes: t.Optional(t.Array(t.String())),
-          framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
-          capabilities: t.Optional(functionCapabilitiesSchema),
-          limits: t.Optional(functionLimitsSchema),
-          expected_activation_id: t.Optional(expectedActivationIdSchema),
-        },
-        { additionalProperties: true },
-      ),
-      body: t.Optional(
+      body: t.Array(
         t.Object({
-          slug: t.Optional(t.String()),
+          slug: t.String(),
           name: t.Optional(t.String()),
           body: t.Optional(t.String()),
           code: t.Optional(t.String()),
@@ -578,17 +602,12 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
           capabilities: t.Optional(functionCapabilitiesSchema),
           limits: t.Optional(functionLimitsSchema),
-          expected_active_version: t.Optional(expectedActiveVersionSchema),
-          expected_activation_id: t.Optional(expectedActivationIdSchema),
+          expected_active_version: expectedActiveVersionSchema,
+          expected_activation_id: expectedActivationIdSchema,
         }),
       ),
-      detail: { tags: ["frontend"], summary: "Create or deploy an edge function" },
+      detail: { tags: ["frontend"], summary: "Bulk upsert edge functions" },
     },
-  )
-
-  // Bulk upsert functions (official Management API)
-  .put(
-    "/:ref/functions",
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -663,29 +682,14 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         ? status(500, { functions: results })
         : results;
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Array(
-        t.Object({
-          slug: t.String(),
-          name: t.Optional(t.String()),
-          body: t.Optional(t.String()),
-          code: t.Optional(t.String()),
-          verify_jwt: t.Optional(t.Boolean()),
-          background_routes: t.Optional(t.Array(t.String())),
-          framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
-          capabilities: t.Optional(functionCapabilitiesSchema),
-          limits: t.Optional(functionLimitsSchema),
-          expected_active_version: expectedActiveVersionSchema,
-          expected_activation_id: expectedActivationIdSchema,
-        }),
-      ),
-      detail: { tags: ["frontend"], summary: "Bulk upsert edge functions" },
-    },
   )
 
   .get(
     "/:ref/functions/:slug",
+    {
+      params: t.Object({ ref: t.String(), slug: t.String() }),
+      detail: { tags: ["frontend"], summary: "Get edge function details" },
+    },
     async ({ params, request }) => {
       const authError = await requireFunctionManagementAuth(request, params.ref);
       if (authError) return authError;
@@ -721,14 +725,15 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         code,
       };
     },
-    {
-      params: t.Object({ ref: t.String(), slug: t.String() }),
-      detail: { tags: ["frontend"], summary: "Get edge function details" },
-    },
   )
 
   .post(
     "/:ref/functions/:slug/invoke",
+    {
+      params: t.Object({ ref: t.String(), slug: t.String() }),
+      body: t.Optional(t.Any()),
+      detail: { tags: ["frontend"], summary: "Invoke an edge function" },
+    },
     async ({ params, request, body }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -763,15 +768,14 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(502, { message: `Edge Runtime unreachable: ${msg}`, code: "502" });
       }
     },
-    {
-      params: t.Object({ ref: t.String(), slug: t.String() }),
-      body: t.Optional(t.Any()),
-      detail: { tags: ["frontend"], summary: "Invoke an edge function" },
-    },
   )
 
   .get(
     "/:ref/functions/:slug/source",
+    {
+      params: t.Object({ ref: t.String(), slug: t.String() }),
+      detail: { tags: ["frontend"], summary: "Get function source code" },
+    },
     async ({ params, request }) => {
       const authError = await requireFunctionManagementAuth(request, params.ref);
       if (authError) return authError;
@@ -786,14 +790,14 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return { code };
     },
-    {
-      params: t.Object({ ref: t.String(), slug: t.String() }),
-      detail: { tags: ["frontend"], summary: "Get function source code" },
-    },
   )
 
   .get(
     "/:ref/functions/:slug/versions",
+    {
+      params: t.Object({ ref: t.String(), slug: t.String() }),
+      detail: { tags: ["frontend"], summary: "List function versions" },
+    },
     async ({ params, request }) => {
       const authError = await requireFunctionManagementAuth(request, params.ref);
       if (authError) return authError;
@@ -801,14 +805,18 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         await import("../services/edge-function.service");
       return edgeFunctionService.listVersions(params.ref, params.slug);
     },
-    {
-      params: t.Object({ ref: t.String(), slug: t.String() }),
-      detail: { tags: ["frontend"], summary: "List function versions" },
-    },
   )
 
   .get(
     "/:ref/functions/:slug/versions/:version",
+    {
+      params: t.Object({
+        ref: t.String(),
+        slug: t.String(),
+        version: t.String(),
+      }),
+      detail: { tags: ["frontend"], summary: "Get a specific function version" },
+    },
     async ({ params, request }) => {
       const authError = await requireFunctionManagementAuth(request, params.ref);
       if (authError) return authError;
@@ -826,18 +834,22 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return version;
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-        slug: t.String(),
-        version: t.String(),
-      }),
-      detail: { tags: ["frontend"], summary: "Get a specific function version" },
-    },
   )
 
   .post(
     "/:ref/functions/:slug/versions/:version/activate",
+    {
+      params: t.Object({
+        ref: t.String(),
+        slug: t.String(),
+        version: functionVersionSchema,
+      }),
+      body: t.Object({
+        expected_active_version: expectedActiveVersionSchema,
+        expected_activation_id: expectedActivationIdSchema,
+      }),
+      detail: { tags: ["frontend"], summary: "Activate a function version" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -877,24 +889,16 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         throw error;
       }
     },
-    {
-      params: t.Object({
-        ref: t.String(),
-        slug: t.String(),
-        version: functionVersionSchema,
-      }),
-      body: t.Object({
-        expected_active_version: expectedActiveVersionSchema,
-        expected_activation_id: expectedActivationIdSchema,
-      }),
-      detail: { tags: ["frontend"], summary: "Activate a function version" },
-    },
   )
 
   // Download function source body (supabase CLI compatibility)
   // Official: GET /v1/projects/:ref/functions/:slug/body → octet-stream
   .get(
     "/:ref/functions/:slug/body",
+    {
+      params: t.Object({ ref: t.String(), slug: t.String() }),
+      detail: { tags: ["frontend"], summary: "Download function source body" },
+    },
     async ({ params, request, set }) => {
       const authError = await requireFunctionManagementAuth(request, params.ref);
       if (authError) return authError;
@@ -918,14 +922,32 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         `attachment; filename="${params.slug}.js"`;
       return bundled;
     },
-    {
-      params: t.Object({ ref: t.String(), slug: t.String() }),
-      detail: { tags: ["frontend"], summary: "Download function source body" },
-    },
   )
 
   .post(
     "/:ref/functions/:slug",
+    {
+      params: t.Object({ ref: t.String(), slug: t.String() }),
+      body: t.Object({
+        code: t.Optional(t.String()),
+        body: t.Optional(t.String()),
+        minify: t.Optional(t.Boolean()),
+        prebundled: t.Optional(t.Boolean()),
+        expected_sha256: t.Optional(t.String({
+          pattern: EDGE_FUNCTION_SHA256_HEX_PATTERN,
+          minLength: 64,
+          maxLength: 64,
+        })),
+        verify_jwt: t.Optional(t.Boolean()),
+        background_routes: t.Optional(t.Array(t.String())),
+        framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
+        capabilities: t.Optional(functionCapabilitiesSchema),
+        limits: t.Optional(functionLimitsSchema),
+        expected_active_version: expectedActiveVersionSchema,
+        expected_activation_id: expectedActivationIdSchema,
+      }),
+      detail: { tags: ["frontend"], summary: "Deploy function code by slug" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -976,32 +998,26 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         config: deployment.config,
       };
     },
+  )
+
+  .patch(
+    "/:ref/functions/:slug",
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
       body: t.Object({
-        code: t.Optional(t.String()),
+        name: t.Optional(t.String()),
         body: t.Optional(t.String()),
-        minify: t.Optional(t.Boolean()),
-        prebundled: t.Optional(t.Boolean()),
-        expected_sha256: t.Optional(t.String({
-          pattern: EDGE_FUNCTION_SHA256_HEX_PATTERN,
-          minLength: 64,
-          maxLength: 64,
-        })),
+        code: t.Optional(t.String()),
         verify_jwt: t.Optional(t.Boolean()),
         background_routes: t.Optional(t.Array(t.String())),
         framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
         capabilities: t.Optional(functionCapabilitiesSchema),
         limits: t.Optional(functionLimitsSchema),
-        expected_active_version: expectedActiveVersionSchema,
+        expected_active_version: t.Optional(expectedActiveVersionSchema),
         expected_activation_id: expectedActivationIdSchema,
       }),
-      detail: { tags: ["frontend"], summary: "Deploy function code by slug" },
+      detail: { tags: ["frontend"], summary: "Update function code or config" },
     },
-  )
-
-  .patch(
-    "/:ref/functions/:slug",
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -1094,26 +1110,26 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         updated_at: now,
       };
     },
+  )
+
+  .post(
+    "/:ref/functions/:slug/bundle",
     {
       params: t.Object({ ref: t.String(), slug: t.String() }),
       body: t.Object({
-        name: t.Optional(t.String()),
-        body: t.Optional(t.String()),
-        code: t.Optional(t.String()),
+        files: t.Record(t.String(), t.String()),
+        entrypoint: t.Optional(t.String()),
+        minify: t.Optional(t.Boolean()),
         verify_jwt: t.Optional(t.Boolean()),
         background_routes: t.Optional(t.Array(t.String())),
         framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
         capabilities: t.Optional(functionCapabilitiesSchema),
         limits: t.Optional(functionLimitsSchema),
-        expected_active_version: t.Optional(expectedActiveVersionSchema),
+        expected_active_version: expectedActiveVersionSchema,
         expected_activation_id: expectedActivationIdSchema,
       }),
-      detail: { tags: ["frontend"], summary: "Update function code or config" },
+      detail: { tags: ["frontend"], summary: "Deploy function bundle" },
     },
-  )
-
-  .post(
-    "/:ref/functions/:slug/bundle",
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -1164,26 +1180,18 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         config: deployment.config,
       };
     },
-    {
-      params: t.Object({ ref: t.String(), slug: t.String() }),
-      body: t.Object({
-        files: t.Record(t.String(), t.String()),
-        entrypoint: t.Optional(t.String()),
-        minify: t.Optional(t.Boolean()),
-        verify_jwt: t.Optional(t.Boolean()),
-        background_routes: t.Optional(t.Array(t.String())),
-        framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
-        capabilities: t.Optional(functionCapabilitiesSchema),
-        limits: t.Optional(functionLimitsSchema),
-        expected_active_version: expectedActiveVersionSchema,
-        expected_activation_id: expectedActivationIdSchema,
-      }),
-      detail: { tags: ["frontend"], summary: "Deploy function bundle" },
-    },
   )
 
   .delete(
     "/:ref/functions",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        slug: t.String(),
+        expected_activation_id: expectedActivationIdSchema,
+      }),
+      detail: { tags: ["frontend"], summary: "Delete function by slug in body" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -1220,18 +1228,15 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         config: removal.config,
       };
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Object({
-        slug: t.String(),
-        expected_activation_id: expectedActivationIdSchema,
-      }),
-      detail: { tags: ["frontend"], summary: "Delete function by slug in body" },
-    },
   )
 
   .delete(
     "/:ref/functions/:slug",
+    {
+      params: t.Object({ ref: t.String(), slug: t.String() }),
+      body: t.Object({ expected_activation_id: expectedActivationIdSchema }),
+      detail: { tags: ["frontend"], summary: "Delete an edge function" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -1261,15 +1266,14 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         config: removal.config,
       };
     },
-    {
-      params: t.Object({ ref: t.String(), slug: t.String() }),
-      body: t.Object({ expected_activation_id: expectedActivationIdSchema }),
-      detail: { tags: ["frontend"], summary: "Delete an edge function" },
-    },
   )
 
   .get(
     "/:ref/functions/:slug/check",
+    {
+      params: t.Object({ ref: t.String(), slug: t.String() }),
+      detail: { tags: ["frontend"], summary: "Check function runtime status" },
+    },
     async ({ params, request }) => {
       const authError = await requireFunctionManagementAuth(request, params.ref);
       if (authError) return authError;
@@ -1285,14 +1289,14 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return result;
     },
-    {
-      params: t.Object({ ref: t.String(), slug: t.String() }),
-      detail: { tags: ["frontend"], summary: "Check function runtime status" },
-    },
   )
 
   .get(
     "/:ref/functions/:slug/config",
+    {
+      params: t.Object({ ref: t.String(), slug: t.String() }),
+      detail: { tags: ["frontend"], summary: "Get function configuration" },
+    },
     async ({ params, request }) => {
       const authError = await requireFunctionManagementAuth(request, params.ref);
       if (authError) return authError;
@@ -1310,14 +1314,22 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         activation_id: state.config.activation_id,
       };
     },
-    {
-      params: t.Object({ ref: t.String(), slug: t.String() }),
-      detail: { tags: ["frontend"], summary: "Get function configuration" },
-    },
   )
 
   .patch(
     "/:ref/functions/:slug/config",
+    {
+      params: t.Object({ ref: t.String(), slug: t.String() }),
+      body: t.Object({
+        verify_jwt: t.Optional(t.Boolean()),
+        background_routes: t.Optional(t.Array(t.String())),
+        framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
+        capabilities: t.Optional(functionCapabilitiesSchema),
+        limits: t.Optional(functionLimitsSchema),
+        expected_activation_id: expectedActivationIdSchema,
+      }),
+      detail: { tags: ["frontend"], summary: "Update function configuration" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -1346,22 +1358,22 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         throw error;
       }
     },
-    {
-      params: t.Object({ ref: t.String(), slug: t.String() }),
-      body: t.Object({
-        verify_jwt: t.Optional(t.Boolean()),
-        background_routes: t.Optional(t.Array(t.String())),
-        framework: t.Optional(t.Union(EDGE_FUNCTION_FRAMEWORKS.map((value) => t.Literal(value)))),
-        capabilities: t.Optional(functionCapabilitiesSchema),
-        limits: t.Optional(functionLimitsSchema),
-        expected_activation_id: expectedActivationIdSchema,
-      }),
-      detail: { tags: ["frontend"], summary: "Update function configuration" },
-    },
   )
 
   .get(
     "/:ref/functions/:slug/logs",
+    {
+      params: t.Object({ ref: t.String(), slug: t.String() }),
+      query: t.Object(
+        {
+          limit: t.Optional(t.String()),
+          offset: t.Optional(t.String()),
+          version: t.Optional(t.String()),
+        },
+        { additionalProperties: true },
+      ),
+      detail: { tags: ["frontend"], summary: "Get function logs" },
+    },
     async ({ params, query, request }) => {
       const authError = await requireFunctionManagementAuth(request, params.ref);
       if (authError) return authError;
@@ -1381,23 +1393,12 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       );
       return { logs, total: logs.length };
     },
-    {
-      params: t.Object({ ref: t.String(), slug: t.String() }),
-      query: t.Object(
-        {
-          limit: t.Optional(t.String()),
-          offset: t.Optional(t.String()),
-          version: t.Optional(t.String()),
-        },
-        { additionalProperties: true },
-      ),
-      detail: { tags: ["frontend"], summary: "Get function logs" },
-    },
   )
 
   // Function Secrets — Project-level (Studio compatibility)
   .get(
     "/:ref/functions/secrets",
+    { params: t.Object({ ref: t.String() }), detail: { tags: ["frontend"], summary: "List function secrets (project-level)" } },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -1417,10 +1418,14 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           updated_at: secret.updated_at ?? new Date().toISOString(),
         }));
     },
-    { params: t.Object({ ref: t.String() }), detail: { tags: ["frontend"], summary: "List function secrets (project-level)" } },
   )
   .post(
     "/:ref/functions/secrets",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Array(t.Object({ name: t.String(), value: t.String() })),
+      detail: { tags: ["frontend"], summary: "Create function secrets" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -1439,14 +1444,14 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return {};
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Array(t.Object({ name: t.String(), value: t.String() })),
-      detail: { tags: ["frontend"], summary: "Create function secrets" },
-    },
   )
   .delete(
     "/:ref/functions/secrets",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Array(t.String()),
+      detail: { tags: ["frontend"], summary: "Delete function secrets" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -1463,16 +1468,12 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return {};
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Array(t.String()),
-      detail: { tags: ["frontend"], summary: "Delete function secrets" },
-    },
   )
 
   // Function Secrets — Per-function level
   .get(
     "/:ref/functions/:slug/secrets",
+    { params: t.Object({ ref: t.String(), slug: t.String() }), detail: { tags: ["frontend"], summary: "List per-function secrets" } },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -1486,10 +1487,14 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
           updated_at: s.updated_at ?? new Date().toISOString(),
         }));
     },
-    { params: t.Object({ ref: t.String(), slug: t.String() }), detail: { tags: ["frontend"], summary: "List per-function secrets" } },
   )
   .post(
     "/:ref/functions/:slug/secrets",
+    {
+      params: t.Object({ ref: t.String(), slug: t.String() }),
+      body: t.Array(t.Object({ name: t.String(), value: t.String() })),
+      detail: { tags: ["frontend"], summary: "Create per-function secrets" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -1508,14 +1513,14 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return {};
     },
-    {
-      params: t.Object({ ref: t.String(), slug: t.String() }),
-      body: t.Array(t.Object({ name: t.String(), value: t.String() })),
-      detail: { tags: ["frontend"], summary: "Create per-function secrets" },
-    },
   )
   .delete(
     "/:ref/functions/:slug/secrets",
+    {
+      params: t.Object({ ref: t.String(), slug: t.String() }),
+      body: t.Array(t.String()),
+      detail: { tags: ["frontend"], summary: "Delete per-function secrets" },
+    },
     async ({ params, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -1533,10 +1538,5 @@ export const projectFunctionsRoutes = new Elysia({ prefix: "/v1/projects" })
         });
       }
       return {};
-    },
-    {
-      params: t.Object({ ref: t.String(), slug: t.String() }),
-      body: t.Array(t.String()),
-      detail: { tags: ["frontend"], summary: "Delete per-function secrets" },
     },
   );

@@ -185,7 +185,7 @@ async function authenticate(request: Request, ref: string): Promise<boolean> {
 }
 
 export const storageS3Routes = new Elysia({ prefix: "/v1/storage/:ref/s3" })
-  .onBeforeHandle(async ({ params, request, set }) => {
+  .beforeHandle(async ({ params, request, set }) => {
     if (new URL(request.url).pathname.endsWith("/credentials")) {
       const authResult = await getAuthContext(request);
       if ("status" in authResult) {
@@ -208,7 +208,9 @@ export const storageS3Routes = new Elysia({ prefix: "/v1/storage/:ref/s3" })
   // GET /credentials -> Return S3 credentials for the project.
   // This returns long-lived secrets, so it requires admin or service_role auth
   // (not the lightweight S3 bearer auth that the onBeforeHandle gate applies).
-  .get("/credentials", async ({ params, request, set }) => {
+  .get("/credentials", {
+    detail: { tags: ["storage-s3"], summary: "Get or provision S3 credentials" },
+  }, async ({ params, request, set }) => {
     const authResult = await getAuthContext(request);
     if ("status" in authResult) {
       set.status = authResult.status;
@@ -229,22 +231,23 @@ export const storageS3Routes = new Elysia({ prefix: "/v1/storage/:ref/s3" })
       return { error: "Project not found" };
     }
     return { project_ref: params.ref, ...credentials };
-  }, {
-    detail: { tags: ["storage-s3"], summary: "Get or provision S3 credentials" },
   })
 
   // GET / -> ListBuckets
-  .get("/", async ({ params }) => {
+  .get("/", {
+    detail: { tags: ["storage-s3"], summary: "S3 ListBuckets" },
+  }, async ({ params }) => {
     const buckets = await StorageService.listBuckets(params.ref);
     return new Response(buildListBucketsXml(params.ref, buckets), {
       headers: { "Content-Type": "application/xml" },
     });
-  }, {
-    detail: { tags: ["storage-s3"], summary: "S3 ListBuckets" },
   })
 
   // GET /:bucket -> ListObjects
-  .get("/:bucket", async ({ params, set }) => {
+  .get("/:bucket", {
+    params: t.Object({ ref: t.String(), bucket: t.String() }),
+    detail: { tags: ["storage-s3"], summary: "S3 ListObjects" },
+  }, async ({ params, set }) => {
     try {
       const objects = await StorageService.listFiles(params.ref, params.bucket);
       return new Response(buildListObjectsXml(params.bucket, objects), {
@@ -253,26 +256,26 @@ export const storageS3Routes = new Elysia({ prefix: "/v1/storage/:ref/s3" })
     } catch {
       return s3Error("NoSuchBucket", "The specified bucket does not exist", 404);
     }
-  }, {
-    params: t.Object({ ref: t.String(), bucket: t.String() }),
-    detail: { tags: ["storage-s3"], summary: "S3 ListObjects" },
   })
 
   // PUT /:bucket -> CreateBucket
-  .put("/:bucket", async ({ params, set }) => {
+  .put("/:bucket", {
+    params: t.Object({ ref: t.String(), bucket: t.String() }),
+    detail: { tags: ["storage-s3"], summary: "S3 CreateBucket" },
+  }, async ({ params, set }) => {
     const result = await StorageService.createBucket(params.ref, params.bucket);
     if (!result.success) {
       return s3Error("BucketAlreadyExists", result.error || "Bucket creation failed", 409);
     }
     set.status = 200;
     return "";
-  }, {
-    params: t.Object({ ref: t.String(), bucket: t.String() }),
-    detail: { tags: ["storage-s3"], summary: "S3 CreateBucket" },
   })
 
   // DELETE /:bucket -> DeleteBucket (only when empty)
-  .delete("/:bucket", async ({ params, set }) => {
+  .delete("/:bucket", {
+    params: t.Object({ ref: t.String(), bucket: t.String() }),
+    detail: { tags: ["storage-s3"], summary: "S3 DeleteBucket" },
+  }, async ({ params, set }) => {
     const result = await StorageService.deleteBucket(params.ref, params.bucket);
     if (!result.success) {
       if (result.error === "Bucket is not empty") {
@@ -282,13 +285,13 @@ export const storageS3Routes = new Elysia({ prefix: "/v1/storage/:ref/s3" })
     }
     set.status = 204;
     return "";
-  }, {
-    params: t.Object({ ref: t.String(), bucket: t.String() }),
-    detail: { tags: ["storage-s3"], summary: "S3 DeleteBucket" },
   })
 
   // HEAD /:bucket -> HeadBucket
-  .route("HEAD", "/:bucket", async ({ params, set }) => {
+  .method("HEAD", "/:bucket", {
+    params: t.Object({ ref: t.String(), bucket: t.String() }),
+    detail: { tags: ["storage-s3"], summary: "S3 HeadBucket" },
+  }, async ({ params, set }) => {
     const buckets = await StorageService.listBuckets(params.ref);
     const exists = buckets.some((b) => String(b.name || b.id) === params.bucket);
     if (!exists) {
@@ -297,13 +300,13 @@ export const storageS3Routes = new Elysia({ prefix: "/v1/storage/:ref/s3" })
     }
     set.status = 200;
     return "";
-  }, {
-    params: t.Object({ ref: t.String(), bucket: t.String() }),
-    detail: { tags: ["storage-s3"], summary: "S3 HeadBucket" },
   })
 
   // PUT /:bucket/* -> PutObject
-  .put("/:bucket/*", async ({ params, request, set }) => {
+  .put("/:bucket/*", {
+    params: t.Object({ ref: t.String(), bucket: t.String(), ["*"]: t.String() }),
+    detail: { tags: ["storage-s3"], summary: "S3 PutObject" },
+  }, async ({ params, request, set }) => {
     const key = params["*"];
     if (!key) return s3Error("InvalidRequest", "Missing object key", 400);
     const body = request.body;
@@ -352,13 +355,13 @@ export const storageS3Routes = new Elysia({ prefix: "/v1/storage/:ref/s3" })
     set.headers["ETag"] = `"${crypto.randomUUID()}"`;
     set.status = 200;
     return "";
-  }, {
-    params: t.Object({ ref: t.String(), bucket: t.String(), ["*"]: t.String() }),
-    detail: { tags: ["storage-s3"], summary: "S3 PutObject" },
   })
 
   // GET /:bucket/* -> GetObject
-  .get("/:bucket/*", async ({ params }) => {
+  .get("/:bucket/*", {
+    params: t.Object({ ref: t.String(), bucket: t.String(), ["*"]: t.String() }),
+    detail: { tags: ["storage-s3"], summary: "S3 GetObject" },
+  }, async ({ params }) => {
     const key = params["*"];
     if (!key) return s3Error("InvalidRequest", "Missing object key", 400);
 
@@ -367,13 +370,13 @@ export const storageS3Routes = new Elysia({ prefix: "/v1/storage/:ref/s3" })
       return s3Error("NoSuchKey", "The specified key does not exist", 404);
     }
     return res;
-  }, {
-    params: t.Object({ ref: t.String(), bucket: t.String(), ["*"]: t.String() }),
-    detail: { tags: ["storage-s3"], summary: "S3 GetObject" },
   })
 
   // HEAD /:bucket/* -> HeadObject
-  .route("HEAD", "/:bucket/*", async ({ params, set }) => {
+  .method("HEAD", "/:bucket/*", {
+    params: t.Object({ ref: t.String(), bucket: t.String(), ["*"]: t.String() }),
+    detail: { tags: ["storage-s3"], summary: "S3 HeadObject" },
+  }, async ({ params, set }) => {
     const key = params["*"];
     if (!key) {
       set.status = 400;
@@ -388,20 +391,17 @@ export const storageS3Routes = new Elysia({ prefix: "/v1/storage/:ref/s3" })
     set.headers["Content-Length"] = res.headers.get("content-length") || "0";
     set.status = 200;
     return "";
-  }, {
-    params: t.Object({ ref: t.String(), bucket: t.String(), ["*"]: t.String() }),
-    detail: { tags: ["storage-s3"], summary: "S3 HeadObject" },
   })
 
   // DELETE /:bucket/* -> DeleteObject
-  .delete("/:bucket/*", async ({ params, set }) => {
+  .delete("/:bucket/*", {
+    params: t.Object({ ref: t.String(), bucket: t.String(), ["*"]: t.String() }),
+    detail: { tags: ["storage-s3"], summary: "S3 DeleteObject" },
+  }, async ({ params, set }) => {
     const key = params["*"];
     if (!key) return s3Error("InvalidRequest", "Missing object key", 400);
     const ok = await StorageService.deleteFile(params.ref, params.bucket, key);
     if (!ok) return s3Error("InternalError", "Failed to delete object", 500);
     set.status = 204;
     return "";
-  }, {
-    params: t.Object({ ref: t.String(), bucket: t.String(), ["*"]: t.String() }),
-    detail: { tags: ["storage-s3"], summary: "S3 DeleteObject" },
   });

@@ -10,6 +10,9 @@ interface QueryCall {
 const transactionCalls: QueryCall[] = [];
 let existingMigrationRows: Array<Record<string, unknown>> = [];
 let transactionFailure: Error | null = null;
+let inventoryRows: Array<Record<string, unknown>> = [];
+let legacyInventoryRows: Array<Record<string, unknown>> = [];
+let inventoryFailure: Error | null = null;
 
 const transaction = Object.assign(
   mock((strings: TemplateStringsArray, ...values: unknown[]) => {
@@ -34,7 +37,13 @@ const connection = {
   release: mock(() => undefined),
 };
 const roleDb = { reserve: mock(async () => connection) };
-const adminDb = Object.assign(mock(async () => []), { unsafe: mock(async () => []) });
+const adminDb = Object.assign(mock(async () => []), { unsafe: mock(async (query: string) => {
+  if (query.trimStart().startsWith("SELECT")) {
+    if (inventoryFailure) throw inventoryFailure;
+    return query.includes("FROM supabase_migrations.schema_migrations") ? inventoryRows : legacyInventoryRows;
+  }
+  return [];
+}) });
 const managementDb = mock((strings: TemplateStringsArray) => {
   if (strings.join("?").includes("SELECT db_name, db_user, db_password")) {
     return Promise.resolve([{
@@ -47,7 +56,7 @@ const managementDb = mock((strings: TemplateStringsArray) => {
 });
 
 const getProject = mock(async () => ({ ref: "proj_1" }));
-const requireProjectOrAdminAuth = mock(async () => undefined);
+const requireProjectOrAdminAuth = mock(async (): Promise<undefined | { status: number; body: { error: string } }> => undefined);
 const issueMigrationLedgerLease = mock(async (_database: unknown, version: string) => ({
   token: `token-${version}`,
   tokenHash: `token-hash-${version}`,
@@ -56,6 +65,8 @@ const releaseMigrationLedgerLease = mock(async () => undefined);
 const prepareProjectMigrationRole = mock(async () => undefined);
 const withProjectMigrationLocks = mock(async (_scope: unknown, operation: () => Promise<unknown>) => operation());
 const assertInactive = mock(async () => undefined);
+const ensureMigrationLedgerMetadata = mock(async () => undefined);
+const reconcileMigrationLedgerVersions = mock(async () => undefined);
 
 const actualDb = await import("../../src/db");
 mock.module("../../src/db", () => ({
@@ -74,8 +85,8 @@ mock.module("../../src/middleware/auth", () => ({
 const actualLedger = await import("../../src/services/migration-ledger");
 mock.module("../../src/services/migration-ledger", () => ({
   ...actualLedger,
-  ensureMigrationLedgerMetadata: mock(async () => undefined),
-  reconcileMigrationLedgerVersions: mock(async () => undefined),
+  ensureMigrationLedgerMetadata,
+  reconcileMigrationLedgerVersions,
 }));
 const actualLock = await import("../../src/services/migration-lock");
 mock.module("../../src/services/migration-lock", () => ({
@@ -122,12 +133,24 @@ function migrationRequest(migration: { version: string; name: string; sql: strin
   }));
 }
 
+function expectNoLedgerWrites() {
+  expect(ensureMigrationLedgerMetadata).not.toHaveBeenCalled();
+  expect(reconcileMigrationLedgerVersions).not.toHaveBeenCalled();
+  expect(prepareProjectMigrationRole).not.toHaveBeenCalled();
+  expect(issueMigrationLedgerLease).not.toHaveBeenCalled();
+  expect(connection.begin).not.toHaveBeenCalled();
+}
+
 describe("database migration baseline route", () => {
   beforeEach(() => {
     resetEnsuredMigrationTablesForTests();
     transactionCalls.length = 0;
     existingMigrationRows = [];
     transactionFailure = null;
+    inventoryRows = [];
+    legacyInventoryRows = [];
+    inventoryFailure = null;
+    adminDb.unsafe.mockClear();
     transaction.mockClear();
     transaction.unsafe.mockClear();
     connection.begin.mockClear();
@@ -141,6 +164,56 @@ describe("database migration baseline route", () => {
     prepareProjectMigrationRole.mockClear();
     withProjectMigrationLocks.mockClear();
     assertInactive.mockClear();
+    ensureMigrationLedgerMetadata.mockClear();
+    reconcileMigrationLedgerVersions.mockClear();
+  });
+
+  test("read-only inventory returns a bound empty result using SELECT only", async () => {
+    const response = await app.handle(new Request("http://localhost/v1/projects/proj_1/database/migrations/inventory"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ project_ref: "proj_1", read_only: true, migrations: [] });
+    expect(adminDb.unsafe.mock.calls).toHaveLength(2);
+    expect(adminDb.unsafe.mock.calls.every(([query]) => query.trimStart().startsWith("SELECT"))).toBe(true);
+    expectNoLedgerWrites();
+  });
+
+  test("read-only inventory never creates missing ledger tables", async () => {
+    inventoryFailure = Object.assign(new Error("relation missing"), { code: "42P01" });
+    const response = await app.handle(new Request("http://localhost/v1/projects/proj_1/database/migrations/inventory"));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ project_ref: "proj_1", read_only: true, migrations: [] });
+    expect(adminDb.unsafe.mock.calls.every(([query]) => query.trimStart().startsWith("SELECT"))).toBe(true);
+    expectNoLedgerWrites();
+  });
+
+  test("read-only inventory rejects stored checksum drift without repair or SQL disclosure", async () => {
+    inventoryRows = [{ version: "1", name: "review", statements: ["SELECT 'private-inventory-value';"], checksum: "0".repeat(64) }];
+    const response = await app.handle(new Request("http://localhost/v1/projects/proj_1/database/migrations/inventory"));
+    expect(response.status).toBe(409);
+    const text = await response.text();
+    expect(text).toContain("migration_ledger_diverged");
+    expect(text).not.toContain("private-inventory-value");
+    expect(adminDb.unsafe.mock.calls.every(([query]) => query.trimStart().startsWith("SELECT"))).toBe(true);
+    expectNoLedgerWrites();
+  });
+
+  test("read-only inventory authorizes before reading the project database", async () => {
+    requireProjectOrAdminAuth.mockResolvedValueOnce({ status: 403, body: { error: "forbidden" } });
+    const response = await app.handle(new Request("http://localhost/v1/projects/proj_1/database/migrations/inventory"));
+    expect(response.status).toBe(403);
+    expect(getProject).not.toHaveBeenCalled();
+    expect(adminDb.unsafe).not.toHaveBeenCalled();
+    expectNoLedgerWrites();
+  });
+
+  test("read-only inventory rejects canonical/legacy divergence without reconciliation", async () => {
+    inventoryRows = [{ version: "1", name: "review", statements: ["SELECT 1;"] }];
+    legacyInventoryRows = [{ version: "2", name: "other", statements: ["SELECT 2;"] }];
+    const response = await app.handle(new Request("http://localhost/v1/projects/proj_1/database/migrations/inventory"));
+    expect(response.status).toBe(409);
+    expect((await response.json() as { code: string }).code).toBe("migration_ledger_diverged");
+    expect(adminDb.unsafe.mock.calls.every(([query]) => query.trimStart().startsWith("SELECT"))).toBe(true);
+    expectNoLedgerWrites();
   });
 
   test("records baseline markers atomically without executing migration SQL", async () => {

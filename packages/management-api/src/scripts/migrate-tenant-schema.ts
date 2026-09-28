@@ -1,5 +1,6 @@
 import { sql, resolveDbName, resolveSlotName } from '../db';
 import { SQL_MODULES } from '../db/sql-modules';
+import { renderPlatformRpcOwnershipSql } from '../services/platform-ownership';
 import { databaseService } from '../services/database.service';
 import { TENANT_PUBLIC_SCHEMA_ACCESS_SQL } from '../services/tenant-public-schema-access';
 import { logger } from '../utils/logger';
@@ -322,6 +323,11 @@ GRANT ALL ON ALL TABLES IN SCHEMA storage TO supabase_storage_admin;
 CREATE SCHEMA IF NOT EXISTS realtime;
 ALTER SCHEMA realtime OWNER TO supabase_admin;
 GRANT USAGE, CREATE ON SCHEMA realtime TO supabase_admin, supabase_realtime_admin;
+GRANT USAGE ON SCHEMA public TO supabase_admin, supabase_realtime_admin;
+GRANT anon, authenticated, service_role TO supabase_admin WITH INHERIT FALSE, SET TRUE;
+DO $$ BEGIN
+  EXECUTE format('GRANT CREATE ON DATABASE %I TO supabase_admin', current_database());
+END $$;
 -- Official Realtime migrations own tables, types, and protocol functions in this schema.
 
 GRANT ALL ON ALL TABLES IN SCHEMA auth TO supabase_auth_admin;
@@ -489,6 +495,7 @@ ${SQL_MODULES["commands-public"]}
 
 -- 17c. Immutable Storage artifact metadata and lineage.
 ${SQL_MODULES["artifacts-public"]}
+${renderPlatformRpcOwnershipSql()}
 
 -- 18. Realtime WAL logical replication support
 DO $$

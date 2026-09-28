@@ -6,6 +6,9 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { Type } from "@sinclair/typebox";
+import {
+    readDeliveryMigrationArchive, buildDeliveryMigrationPlan as deliveryMigrationPlan, type DeliveryMigrationArchive,
+} from "@supacloud/delivery";
 import { projectRefPathSegment } from "../project-ref";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
@@ -513,7 +516,7 @@ export function registerDatabaseTools(
         "list_extensions", "extension_catalog", "rls_status", "rls_policies",
         "list_auth_users", "get_auth_user",
         "connections", "stats", "slow_queries",
-        "list_migrations", "migration_inventory", "project_url", "generate_types",
+        "list_migrations", "migration_inventory", "delivery_migration_plan", "project_url", "generate_types",
         "database_lint", "db_lint", "rpc_catalog", "list_rpcs",
     ] as const;
     const writeActions = ["execute", "apply_migration", "push_migrations", "baseline_migrations", "create_table_rls", "enable_extension", "disable_extension"] as const;
@@ -551,6 +554,8 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
             limit: optional(Type.Number(), "[list_auth_users] Max users (default: 20)"),
             // migration
             name: optional(Type.String(), "[apply_migration] Migration name"),
+            delivery_manifest: optional(Type.String(), "[delivery_migration_plan] Local immutable delivery manifest"),
+            delivery_target: optional(Type.String(), "[delivery_migration_plan] Target name from the delivery manifest"),
             // create_table_rls
             columns: optional(Type.String(), "[create_table_rls] Column definitions"),
             policy_mode: optional(stringEnum(["deny_all", "owner"]), "[create_table_rls] RLS policy mode (default: deny_all)"),
@@ -569,6 +574,39 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
             const ref = args.ref || projectRef;
             const schema = args.schema || "public";
             const schemas = args.schemas || ["public"];
+
+            if (action === "delivery_migration_plan") {
+                const failure = (code: string, httpStatus: number | null = null): DatabaseToolResponse => ({
+                    isError: true, content: [{ type: "text", text: JSON.stringify({
+                        ok: false, operation: "database.delivery_migration_plan",
+                        error: { code, http_status: httpStatus },
+                    }) }],
+                });
+                if (typeof args.delivery_manifest !== "string" || !args.delivery_manifest
+                    || typeof args.delivery_target !== "string" || !args.delivery_target
+                    || ["sql", "file", "dir", "name", "admin", "mode", "dry_run"].some(key => args[key] !== undefined)) {
+                    return failure("INVALID_INPUT");
+                }
+                let path: string;
+                try { path = migrationInventoryPath(ref) + "/inventory"; }
+                catch { return failure("INVALID_INPUT"); }
+                let archive: DeliveryMigrationArchive;
+                try { archive = await readDeliveryMigrationArchive(args.delivery_manifest, args.delivery_target); }
+                catch { return failure("INVALID_ARTIFACT"); }
+                let response: HttpResult<unknown>;
+                try { response = await managementHttp().get(path, { maxResponseBytes: MAX_MIGRATION_INVENTORY_BYTES }); }
+                catch { return failure("HTTP_ERROR"); }
+                if (!response.ok) return failure("HTTP_ERROR", response.transportError ? null : response.status);
+                const body = recordPayload(response.data);
+                const inventory = body?.read_only === true && body.project_ref === ref
+                    ? migrationInventory(body.migrations) : null;
+                if (!inventory) return failure("INVALID_RESPONSE", response.status);
+                const plan = deliveryMigrationPlan(archive, inventory, ref);
+                return {
+                    ...(plan.ledgerCompatible ? {} : { isError: true }),
+                    content: [{ type: "text" as const, text: JSON.stringify(plan, null, 2) }],
+                };
+            }
 
             // Resolve SQL from --file if provided (avoids shell $$ and ; escaping)
             if (args.file && !args.sql && action !== "lint_migrations" && action !== "lint") {

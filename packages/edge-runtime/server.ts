@@ -1,7 +1,6 @@
 import "./url-import-plugin";
 import { projectReleaseFunctionManifest } from "./project-release";
 import { Elysia } from "elysia";
-import cors from "@elysiajs/cors";
 import {
   WorkerPool,
   resolveMaxHttpBodySizeBytes,
@@ -1350,7 +1349,7 @@ async function abortFunctionActivationFence(
 }
 
 async function handleFunctionRequest(
-  c: { params: Record<string, string>; headers: Record<string, string | undefined>; request: Request; set: { headers: Record<string, string | number> } },
+  c: { params: Record<string, string>; headers: Record<string, string | undefined>; request: Request; set: { headers: Record<string, string | number | string[]> } },
   functionName: string,
 ) {
   const projectRef = c.headers["x-project-ref"];
@@ -1426,14 +1425,8 @@ async function handleFunctionRequest(
 }
 
 const app = new Elysia()
-  // Functions own their CORS policy (origin allowlists, custom headers), so
-  // OPTIONS preflight must reach the function instead of being answered by the
-  // platform. Keep the plugin only for its request lifecycle hook, but do not
-  // synthesize an allow-origin value for a function that rejected the origin.
-  .use(cors({
-    preflight: false,
-    origin: false,
-  }))
+  // Functions own CORS, including OPTIONS. The platform must not add headers
+  // that grant an origin or credentials rejected by the function.
   .get("/health", () => ({
     status: "ok",
     instanceId: RUNTIME_INSTANCE_ID,

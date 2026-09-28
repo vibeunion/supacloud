@@ -162,6 +162,14 @@ test("does not inline environment values and rejects computed imports", async ()
     expect(status).toBe(0);
     await writeFixtureProject(project, { "entry.ts": 'const name = "./runtime"; export const load = () => import(name);' });
     await expect(bundleDeliveryTarget("api", 'export { load } from "./entry.ts";', project, project, {version: 1})).rejects.toThrow();
+    for (const minify of [false, true]) {
+      const business = await bundleDeliveryTarget("api",
+        'export function resolveFeature(registry: {require(name: string): unknown}) { return registry.require("business-feature"); }',
+        project, project, {version: 1, build: {minify}});
+      expect(business.files.has("bundle/index.js")).toBe(true);
+      await expect(bundleDeliveryTarget("api", 'export const remote = () => import("https://example.invalid/module.js");',
+        project, project, {version: 1, build: {minify}})).rejects.toThrow();
+    }
   } finally {
     if (previous === undefined) delete process.env[variable]; else process.env[variable] = previous;
     await rm(project, { recursive: true, force: true });

@@ -41,11 +41,11 @@ describe("native HTTP context composition", () => {
     const catalog = { prefix: "tenant:" };
     const http = new Elysia()
       .decorate("catalog", catalog)
-      .derive({ as: "scoped" }, ({ headers, catalog }) => {
+      .derive("plugin", ({ headers, catalog }) => {
         calls.push("derive");
         return { tenant: catalog.prefix + headers["x-tenant"] };
       })
-      .resolve({ as: "scoped" }, ({ tenant, params, body }) => {
+      .derive("plugin", ({ tenant, params, body }) => {
         calls.push("resolve");
         expect(typeof params.id).toBe("number");
         return { identity: { tenant }, validated: body };
@@ -72,24 +72,24 @@ describe("native HTTP context composition", () => {
     expect(calls).toEqual(["derive", "resolve", "context", "scope", "destroy"]);
   });
 
-  test("invalid input runs derive but never resolve, context factory or scope", async () => {
+  test("invalid input stops before Elysia 2 derive, context factory and scope", async () => {
     const calls: string[] = [];
     const http = new Elysia()
-      .derive({ as: "scoped" }, () => { calls.push("derive"); return {}; })
-      .resolve({ as: "scoped" }, () => { calls.push("resolve"); return {}; });
+      .derive("plugin", () => { calls.push("derive"); return {}; })
+      .derive("plugin", () => { calls.push("resolve"); return {}; });
     const app = createApplication({
       http, modules: [fixture(calls)],
       requestContext: () => { calls.push("context"); return {}; },
     });
     expect((await app.handle(request("bad", 12))).status).toBe(422);
-    expect(calls).toEqual(["derive"]);
+    expect(calls).toEqual([]);
   });
 
   test("native routes retain decorator, derive and resolve inference after composition", async () => {
     const http = new Elysia()
       .decorate("catalog", { count: 7 })
-      .derive({ as: "scoped" }, () => ({ tenant: "demo" }))
-      .resolve({ as: "scoped" }, ({ tenant }) => ({ actor: { tenant } }));
+      .derive("plugin", () => ({ tenant: "demo" }))
+      .derive("plugin", ({ tenant }) => ({ actor: { tenant } }));
     const app = createApplication({ http }).get("/native", ({ catalog, tenant, actor }) => {
       const count: number = catalog.count;
       const name: string = actor.tenant;
@@ -116,8 +116,8 @@ describe("native HTTP context composition", () => {
   test("concurrent requests keep extensions and request scopes isolated", async () => {
     const calls: string[] = [];
     const http = new Elysia()
-      .derive({ as: "scoped" }, ({ headers }) => ({ tenant: headers["x-tenant"] }))
-      .resolve({ as: "scoped" }, async ({ tenant }) => {
+      .derive("plugin", ({ headers }) => ({ tenant: headers["x-tenant"] }))
+      .derive("plugin", async ({ tenant }) => {
         await Bun.sleep(tenant === "1" ? 5 : 0);
         return { identity: { tenant } };
       });
@@ -137,8 +137,8 @@ describe("native HTTP context composition", () => {
       const calls: string[] = [];
       const scoped = new Elysia({ name: `extensions-${scope}` })
         .decorate("catalog", { count: 1 })
-        .derive({ as: "scoped" }, () => { calls.push("derive"); return { tenant: "demo" }; })
-        .resolve({ as: "scoped" }, ({ tenant }) => { calls.push("resolve"); return { actor: tenant }; });
+        .derive("plugin", () => { calls.push("derive"); return { tenant: "demo" }; })
+        .derive("plugin", ({ tenant }) => { calls.push("resolve"); return { actor: tenant }; });
       const second = fixture(calls);
       second.name = "second";
       second.controllers[0]!.path = "/other";
@@ -171,7 +171,7 @@ describe("native HTTP context composition", () => {
 
   test("resolver early responses skip context construction and DI", async () => {
     const calls: string[] = [];
-    const http = new Elysia().resolve({ as: "scoped" }, ({ status }) => status(403, "denied"));
+    const http = new Elysia().derive("plugin", ({ status }) => status(403, "denied"));
     const app = createApplication({
       http, modules: [fixture(calls)],
       requestContext: () => { calls.push("context"); return {}; },
@@ -182,7 +182,7 @@ describe("native HTTP context composition", () => {
 
   test("resolver errors use the adapter error mapper without creating a scope", async () => {
     const calls: string[] = [];
-    const http = new Elysia().resolve({ as: "scoped" }, () => { throw new Error("private"); });
+    const http = new Elysia().derive("plugin", () => { throw new Error("private"); });
     const app = createApplication({
       http, modules: [fixture(calls)],
       errorMapper: (_error, context) => {
@@ -199,12 +199,12 @@ describe("native HTTP context composition", () => {
   test("native guard schemas type validated resolve inputs", async () => {
     const http = new Elysia()
       .guard({ body: t.Object({ name: t.String() }) })
-      .resolve(({ body }) => {
+      .derive(({ body }) => {
         const name: string = body.name;
         // @ts-expect-error The schema must retain its inferred type.
         const invalid: number = body.name;
         return { label: name.toUpperCase() };
-      }).as("scoped");
+      }).as("plugin");
     const app = createApplication({
       http, modules: [fixture([])],
       requestContext: (_request, { label }) => ({ label }),
@@ -228,7 +228,7 @@ describe("native HTTP context composition", () => {
   test("null context is built only once and cannot be replaced by native context fields", async () => {
     const calls: string[] = [];
     const app = createApplication({
-      http: new Elysia().resolve({ as: "scoped" }, () => ({ requestContext: { forged: true } })),
+      http: new Elysia().derive("plugin", () => ({ requestContext: { forged: true } })),
       modules: [fixture(calls)],
       requestContext: () => { calls.push("context"); return null; },
     });
@@ -257,7 +257,7 @@ describe("native HTTP context composition", () => {
   test("test app and memory sandbox preserve HTTP extension inference", async () => {
     const http = new Elysia()
       .decorate("catalog", { count: 7 })
-      .resolve({ as: "scoped" }, ({ catalog }) => ({ total: catalog.count }));
+      .derive("plugin", ({ catalog }) => ({ total: catalog.count }));
     const app = createTestApp({ http }).get("/count", ({ total }) => total);
     expect(await (await app.handle(new Request("http://localhost/count"))).json()).toBe(7);
     const sandbox = createMemorySandbox({
@@ -273,7 +273,7 @@ describe("native HTTP context composition", () => {
   });
 
   test("standalone module plugins infer the HTTP extension in the factory", async () => {
-    const http = new Elysia().resolve({ as: "scoped" }, () => ({ label: "standalone" }));
+    const http = new Elysia().derive("plugin", () => ({ label: "standalone" }));
     const plugin = createModulePlugin(fixture([]), {}, (_request, context) => {
       const label: string = context.label;
       // @ts-expect-error The options argument supplies contextual types to the factory.
@@ -290,7 +290,7 @@ describe("native HTTP context composition", () => {
       controller: { run: () => { throw new Error("private"); } },
     });
     const app = createApplication({
-      http: new Elysia().resolve({ as: "scoped" }, () => ({ trace: "request-1" })),
+      http: new Elysia().derive("plugin", () => ({ trace: "request-1" })),
       modules: [module],
       requestContext: (_request, context) => ({ trace: context.trace }),
       errorMapper: (_error, context) => {
@@ -306,8 +306,8 @@ describe("native HTTP context composition", () => {
   test("anonymous global hooks execute once across modules and native routes", async () => {
     const calls: string[] = [];
     const http = new Elysia()
-      .derive({ as: "global" }, () => { calls.push("derive"); return { label: "global" }; })
-      .resolve({ as: "global" }, ({ label }) => { calls.push("resolve"); return { actor: label }; });
+      .derive("global", () => { calls.push("derive"); return { label: "global" }; })
+      .derive("global", ({ label }) => { calls.push("resolve"); return { actor: label }; });
     const second = fixture(calls);
     second.name = "second";
     second.controllers[0]!.path = "/other";

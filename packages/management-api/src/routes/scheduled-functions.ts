@@ -116,20 +116,22 @@ function scheduleHeaders(
 }
 
 export const scheduledFunctionRoutes = new Elysia({ prefix: "/v1/projects/:ref/scheduled-functions" })
-  .onBeforeHandle(async ({ params, request }) => {
+  .beforeHandle(async ({ params, request }) => {
     if (!PROJECT_REF_PATTERN.test(params.ref)) return status(400, { error: "Project ref is invalid" });
     const authError = await authMiddleware.requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
   })
-  .get("", async ({ params }) => {
+  .get("", {
+    detail: { tags: ["scheduled-functions"], summary: "List scheduled functions" },
+  }, async ({ params }) => {
     const project = await projectRepository.findByRef(params.ref);
     if (!project) return status(404, { error: "Project not found" });
     const schedules = scheduledFunctionsFromProjectConfig(project.config).map(publicScheduledFunction);
     return { project_ref: params.ref, schedules };
-  }, {
-    detail: { tags: ["scheduled-functions"], summary: "List scheduled functions" },
   })
-  .get("/:scheduleId", async ({ params }) => {
+  .get("/:scheduleId", {
+    detail: { tags: ["scheduled-functions"], summary: "Get a scheduled function" },
+  }, async ({ params }) => {
     if (!SCHEDULE_ID_PATTERN.test(params.scheduleId)) return status(400, { error: "Scheduled function ID is invalid" });
     const project = await projectRepository.findByRef(params.ref);
     if (!project) return status(404, { error: "Project not found" });
@@ -137,10 +139,19 @@ export const scheduledFunctionRoutes = new Elysia({ prefix: "/v1/projects/:ref/s
       .find((candidate) => candidate.id === params.scheduleId);
     if (!schedule) return status(404, { error: "Scheduled function not found" });
     return { project_ref: params.ref, schedule: publicScheduledFunction(schedule) };
-  }, {
-    detail: { tags: ["scheduled-functions"], summary: "Get a scheduled function" },
   })
-  .post("", async ({ params, body }) => {
+  .post("", {
+    body: t.Object({
+      request_id: t.String(),
+      name: t.String(),
+      slug: t.String(),
+      cron: t.String(),
+      method: t.Union([t.Literal("GET"), t.Literal("POST")]),
+      body: t.Optional(t.Record(t.String(), t.Unknown())),
+      headers: t.Optional(t.Record(t.String(), t.String())),
+    }),
+    detail: { tags: ["scheduled-functions"], summary: "Create a scheduled function" },
+  }, async ({ params, body }) => {
     const input = body as ScheduleCreateInput;
     const validation = validatedScheduleCreateInput(input);
     if ("error" in validation) return status(400, validation);
@@ -179,19 +190,20 @@ export const scheduledFunctionRoutes = new Elysia({ prefix: "/v1/projects/:ref/s
       request_id: input.request_id,
       schedule: publicScheduledFunction(mutation.schedule),
     };
-  }, {
+  })
+  .patch("/:scheduleId", {
     body: t.Object({
       request_id: t.String(),
-      name: t.String(),
-      slug: t.String(),
-      cron: t.String(),
-      method: t.Union([t.Literal("GET"), t.Literal("POST")]),
+      expected_updated_at: t.String(),
+      name: t.Optional(t.String()),
+      cron: t.Optional(t.String()),
+      method: t.Optional(t.Union([t.Literal("GET"), t.Literal("POST")])),
       body: t.Optional(t.Record(t.String(), t.Unknown())),
       headers: t.Optional(t.Record(t.String(), t.String())),
+      enabled: t.Optional(t.Boolean()),
     }),
-    detail: { tags: ["scheduled-functions"], summary: "Create a scheduled function" },
-  })
-  .patch("/:scheduleId", async ({ params, body }) => {
+    detail: { tags: ["scheduled-functions"], summary: "Update a scheduled function" },
+  }, async ({ params, body }) => {
     if (!SCHEDULE_ID_PATTERN.test(params.scheduleId)) return status(400, { error: "Scheduled function ID is invalid" });
     const input = body as SchedulePatchInput;
     const validationError = schedulePatchError(input);
@@ -222,20 +234,11 @@ export const scheduledFunctionRoutes = new Elysia({ prefix: "/v1/projects/:ref/s
       previous_updated_at: input.expected_updated_at,
       schedule: publicScheduledFunction(mutation.schedule),
     };
-  }, {
-    body: t.Object({
-      request_id: t.String(),
-      expected_updated_at: t.String(),
-      name: t.Optional(t.String()),
-      cron: t.Optional(t.String()),
-      method: t.Optional(t.Union([t.Literal("GET"), t.Literal("POST")])),
-      body: t.Optional(t.Record(t.String(), t.Unknown())),
-      headers: t.Optional(t.Record(t.String(), t.String())),
-      enabled: t.Optional(t.Boolean()),
-    }),
-    detail: { tags: ["scheduled-functions"], summary: "Update a scheduled function" },
   })
-  .delete("/:scheduleId", async ({ params, query }) => {
+  .delete("/:scheduleId", {
+    query: t.Object({ expected_updated_at: t.String() }),
+    detail: { tags: ["scheduled-functions"], summary: "Delete a scheduled function" },
+  }, async ({ params, query }) => {
     if (!SCHEDULE_ID_PATTERN.test(params.scheduleId)) return status(400, { error: "Scheduled function ID is invalid" });
     if (!isCanonicalScheduledFunctionTimestamp(query.expected_updated_at)) {
       return status(400, { error: "expected_updated_at must be a canonical UTC timestamp" });
@@ -258,11 +261,10 @@ export const scheduledFunctionRoutes = new Elysia({ prefix: "/v1/projects/:ref/s
       schedule_id: params.scheduleId,
       deleted_updated_at: mutation.deletedUpdatedAt,
     };
-  }, {
-    query: t.Object({ expected_updated_at: t.String() }),
-    detail: { tags: ["scheduled-functions"], summary: "Delete a scheduled function" },
   })
-  .post("/:scheduleId/trigger", async ({ params }) => {
+  .post("/:scheduleId/trigger", {
+    detail: { tags: ["scheduled-functions"], summary: "Manually trigger a scheduled function" },
+  }, async ({ params }) => {
     if (!SCHEDULE_ID_PATTERN.test(params.scheduleId)) return status(400, { error: "Scheduled function ID is invalid" });
     const project = await projectRepository.findByRef(params.ref);
     if (!project) return status(404, { error: "Project not found" });
@@ -274,6 +276,4 @@ export const scheduledFunctionRoutes = new Elysia({ prefix: "/v1/projects/:ref/s
     const invocation = await scheduledFunctionWorker.triggerOnce(params.ref, target);
     if (!invocation.ok) return status(502, { error: invocation.error });
     return { triggered: true, project_ref: params.ref, schedule_id: params.scheduleId, status: invocation.status };
-  }, {
-    detail: { tags: ["scheduled-functions"], summary: "Manually trigger a scheduled function" },
   });

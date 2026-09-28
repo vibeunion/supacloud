@@ -1,5 +1,6 @@
-import { Type, type Static } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
+import { Type, type Static } from "typebox";
+import { Value } from "typebox/value";
+import { dateSchema } from "./date-schema";
 
 const identifier = Type.String({ pattern: "^[A-Za-z_][A-Za-z0-9_]{0,62}(?![\\s\\S])" });
 const name = Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9 _.-]{0,99}(?![\\s\\S])" });
@@ -108,8 +109,8 @@ const rowSchema = Type.Object({
   destination_secret_encrypted: Type.String({ minLength: 1 }),
   settings: Type.Unknown(),
   desired_state: Type.Union([Type.Literal("running"), Type.Literal("stopped")]),
-  created_at: Type.Date(),
-  updated_at: Type.Date(),
+  created_at: dateSchema,
+  updated_at: dateSchema,
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {

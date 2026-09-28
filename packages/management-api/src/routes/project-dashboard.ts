@@ -65,6 +65,10 @@ function nonLocalAuth(policy: AuthExecutionPolicy) {
 export const projectDashboardRoutes = new Elysia({ prefix: "/v1/projects" })
   .get(
     "/:ref/dashboard/summary",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { tags: ["projects"], summary: "Get project dashboard summary" },
+    },
     async ({ params, request, set }) => {
       const context = await auth.getAuthContext(request);
       if ("status" in context) return status(context.status as 401 | 403, context.body);
@@ -177,10 +181,6 @@ export const projectDashboardRoutes = new Elysia({ prefix: "/v1/projects" })
         tasks,
         active_queries: activeQueries,
       };
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { tags: ["projects"], summary: "Get project dashboard summary" },
     },
   );
 

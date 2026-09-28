@@ -2869,25 +2869,12 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         }
     }
 
-    /** Check storage health: try systemd first, then S3 endpoint as fallback */
+    /** Report the configured backend's health, not only process liveness. */
     private async checkStorageHealth(): Promise<string> {
-        const systemdResult = await this.checkSystemService("supacloud-storage");
-        if (systemdResult === "ACTIVE_HEALTHY") return "ACTIVE_HEALTHY";
-        // Fallback: probe the S3 health endpoint (accept any response, not just 2xx)
         try {
-            await fetch(`${config.s3Endpoint}/minio/health/live`, {
-                signal: AbortSignal.timeout(3000),
-            });
-            // Any response (even 4xx) means the storage service is reachable
-            return "ACTIVE_HEALTHY";
+            const { StorageService } = await import("./storage.service");
+            return (await StorageService.getStatus()).healthy ? "ACTIVE_HEALTHY" : "INACTIVE";
         } catch { /* ignore */ }
-        // Final fallback: for juicefs mode, check the mount directory
-        if (config.storageType === "juicefs") {
-            try {
-                const result = await $`test -d /var/lib/juicefs`.nothrow().quiet();
-                if (result.exitCode === 0) return "ACTIVE_HEALTHY";
-            } catch { /* ignore */ }
-        }
         return "INACTIVE";
     }
 
@@ -3129,9 +3116,12 @@ $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog;
         ref: string,
         previousAuth: Record<string, unknown>,
         nextAuth: Record<string, unknown>,
+        options: { refreshVerifiers?: boolean } = {},
     ): Promise<GotrueRuntimeStatus> {
         const applied = await this.applyGotrueAuthConfig(ref);
-        if (!authConfigChangesPostgrestVerifier(previousAuth, nextAuth)) return applied.status;
+        // Signing configuration may already be persisted after a partial apply.
+        // Explicit migration retries must reconcile consumers even without a diff.
+        if (!options.refreshVerifiers && !authConfigChangesPostgrestVerifier(previousAuth, nextAuth)) return applied.status;
 
         await this.refreshProjectPostgrestVerifier(ref);
         await this.refreshProjectRealtimeVerifier(ref);

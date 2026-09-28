@@ -4,7 +4,6 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { withWindowsSubprocessRef } from '../scripts/subprocess.js'
 
 const cliPath = resolve(import.meta.dir, '../src/cli.ts')
 const packageRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -154,11 +153,11 @@ async function runCli(projectDir: string, command: string[]) {
     stdout: 'pipe',
     stderr: 'pipe',
   })
-  const [exitCode, stdout, stderr] = await withWindowsSubprocessRef(() => Promise.all([
+  const [exitCode, stdout, stderr] = await Promise.all([
     cliProcess.exited,
     new Response(cliProcess.stdout).text(),
     new Response(cliProcess.stderr).text(),
-  ]))
+  ])
   return { exitCode, stdout, stderr }
 }
 

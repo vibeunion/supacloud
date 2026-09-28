@@ -5,7 +5,7 @@ import type { ToolSchema } from "../schema";
 
 type Callback = (args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>;
 
-function captureGatewayTool(http: Record<string, (...args: any[]) => Promise<any>>) {
+function captureGatewayTool(http: Record<string, (...args: any[]) => Promise<any>>, options: { projectRef?: string } = {}) {
     let schema: ToolSchema | undefined;
     let callback: Callback | undefined;
     registerGatewayTools(
@@ -17,12 +17,25 @@ function captureGatewayTool(http: Record<string, (...args: any[]) => Promise<any
             },
         } as any,
         http as any,
+        options,
     );
     if (!schema || !callback) throw new Error("gateway tool was not registered");
     return { schema, callback };
 }
 
 describe("admin gateway CLI tool", () => {
+    test("keeps the configured project ahead of an argument override", async () => {
+        const calls: string[] = [];
+        const { callback } = captureGatewayTool({
+            get: async (path: string) => {
+                calls.push(path);
+                return { ok: true, status: 200, data: { routes: [] } };
+            },
+        }, { projectRef: "configured" });
+        await callback({ action: "routes", ref: "override" });
+        expect(calls).toEqual(["/v1/projects/configured/gateway/routes"]);
+    });
+
     test("requires ref when no projectRef default (admin always needs explicit ref)", async () => {
         const { callback } = captureGatewayTool({
             get: async () => ({ ok: true, status: 200, data: { routes: [] } }),

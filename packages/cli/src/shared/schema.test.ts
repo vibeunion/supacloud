@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Type } from "@sinclair/typebox";
-import { decodedSchema, parseToolArguments, stringEnum } from "./schema";
+import { decodedSchema, parseToolArguments, schemaEnumValues, stringEnum } from "./schema";
 
 describe("TypeBox CLI schema boundary", () => {
     test("parses typed arguments and rejects unknown flags", () => {
@@ -27,4 +27,18 @@ describe("TypeBox CLI schema boundary", () => {
         expect(parseToolArguments({ hostname: lowercase }, { hostname: " EXAMPLE.COM " }))
             .toEqual({ hostname: "example.com" });
     });
+});
+
+test("enum metadata includes single literals and multiple alternatives", () => {
+    expect(schemaEnumValues(stringEnum(["only"]))).toEqual(["only"]);
+    expect(schemaEnumValues(Type.Literal(1))).toEqual(["1"]);
+    expect(schemaEnumValues(stringEnum(["first", "second"]))).toEqual(["first", "second"]);
+    expect(schemaEnumValues(Type.String())).toEqual([]);
+});
+
+test("single-value metadata keeps argument validation strict", () => {
+    const schema = { action: stringEnum(["only"]) };
+    expect(parseToolArguments(schema, { action: "only" })).toEqual({ action: "only" });
+    expect(() => parseToolArguments(schema, { action: "other" })).toThrow("Invalid arguments");
+    expect(() => parseToolArguments(schema, { action: "only", extra: true })).toThrow("Invalid arguments");
 });

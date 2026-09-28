@@ -32,9 +32,9 @@ function observeDuration(durationMs: number, status = 200): void {
 describe("request observability", () => {
   test("after-response lifecycle records native statuses and error statuses exactly once", async () => {
     const app = new Elysia()
-      .onRequest(({ request }) => { beginRequestObservability(request); })
-      .onError(({ set }) => { set.status = 422; return { code: "REJECTED" }; })
-      .onAfterResponse(({ request, response, set }) => {
+      .request(({ request }) => { beginRequestObservability(request); })
+      .error(({ set }) => { set.status = 422; return { code: "REJECTED" }; })
+      .afterResponse(({ request, responseValue: response, set }) => {
         recordRequestObservation(request, response instanceof Response ? response.status : Number(set.status || 200));
       })
       .get("/native", () => new Response("unavailable", { status: 503 }))

@@ -44,7 +44,7 @@ function probe(port: number, bytes: number): Promise<{ status: number; body: str
 
 test("real HTTP listener accepts large headers through 501 MiB and rejects one byte over", async () => {
   const app = new Elysia()
-    .post("/upload", () => new Response("application gate reached", { status: 401 }), { parse: "none" })
+    .post("/upload", { parse: "none" }, () => new Response("application gate reached", { status: 401 }))
     .listen({ hostname: "127.0.0.1", port: 0, maxRequestBodySize: resolveMaxHttpBodySizeBytes("501") });
   try {
     const port = app.server?.port;

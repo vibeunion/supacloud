@@ -8,7 +8,7 @@ import { renderClient } from "./generate";
 import type { ApplicationGraph } from "./types";
 import { writeFixtureProject } from "./fixtures/helpers";
 
-const typeboxPath = join(import.meta.dir, "../node_modules/@sinclair/typebox");
+const typeboxPath = join(import.meta.dir, "../node_modules/typebox");
 
 const graph: ApplicationGraph = {
   externalTokens: [],
@@ -50,7 +50,7 @@ test("generated client requires inherited path parameters and a decoder for type
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
       ignoreDeprecations: "6.0",
       baseUrl: root,
-      paths: { "@sinclair/typebox": [typeboxPath] },
+      paths: { "typebox": [typeboxPath] },
     });
     expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
       .toEqual([]);
@@ -101,7 +101,7 @@ test("generated client requires request sections covered by route schemas", asyn
     await writeFixtureProject(root, {
       "client.ts": renderClient(schemaGraph),
       "schemas.ts": [
-        'import { Type } from "@sinclair/typebox";',
+        'import { Type } from "typebox";',
         'export const Body = Type.Object({ name: Type.String() });',
         'export const Headers = Type.Object({ authorization: Type.String() });',
         'export const Cookie = Type.Object({ session: Type.String() });',
@@ -126,7 +126,7 @@ test("generated client requires request sections covered by route schemas", asyn
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
       ignoreDeprecations: "6.0",
       baseUrl: root,
-      paths: { "@sinclair/typebox": [typeboxPath] },
+      paths: { "typebox": [typeboxPath] },
     });
     expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
       .toEqual([]);
@@ -154,7 +154,7 @@ test("generated client requires params when a params schema exists without a pat
     await writeFixtureProject(root, {
       "client.ts": renderClient(paramsGraph),
       "schemas.ts": [
-        'import { Type } from "@sinclair/typebox";',
+        'import { Type } from "typebox";',
         'export const Params = Type.Object({ owner: Type.String() });',
       ].join("\n"),
       "consumer.ts": [
@@ -171,7 +171,7 @@ test("generated client requires params when a params schema exists without a pat
       noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
       moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
       ignoreDeprecations: "6.0", baseUrl: root,
-      paths: { "@sinclair/typebox": [typeboxPath] },
+      paths: { "typebox": [typeboxPath] },
     });
     expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
       .toEqual([]);
@@ -201,14 +201,14 @@ test("changing the shared route contract rejects stale callers without handwritt
         noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
         moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
         ignoreDeprecations: "6.0", baseUrl: root,
-        paths: { "@sinclair/typebox": [typeboxPath] },
+        paths: { "typebox": [typeboxPath] },
       });
       return ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));
     };
     await writeFixtureProject(root, {
       "client.ts": renderClient(contractGraph, { rootDir: root, outDir: root }),
       "schemas.ts": [
-        'import { Type } from "@sinclair/typebox";',
+        'import { Type } from "typebox";',
         'export const Body = Type.Object({ amount: Type.Number() });',
         'export const Result = Type.Object({ id: Type.String() });',
       ].join("\n"),
@@ -226,7 +226,7 @@ test("changing the shared route contract rejects stale callers without handwritt
     expect(diagnostics()).toEqual([]);
     await writeFixtureProject(root, {
       "schemas.ts": [
-        'import { Type } from "@sinclair/typebox";',
+        'import { Type } from "typebox";',
         'export const Body = Type.Object({ total: Type.Number() });',
         'export const Result = Type.Object({ receiptId: Type.String() });',
       ].join("\n"),

@@ -96,6 +96,22 @@ function writeEdgeRuntimeSourceIdentity(root: string) {
 }
 
 describe("installer configuration persistence", () => {
+  test.each([
+    "  spaces at both ends  ",
+    '"literal quotes"',
+    "'literal single quotes'",
+    String.raw`equals=a\b\$value`,
+  ])("raw container env preserves literal value %j", (value) => {
+    const path = join(makeTempDir(), "container.env");
+    writeFileSync(path, `OTHER=value\nDB_PASSWORD=${value}\n`);
+    const result = runBash(
+      'source scripts/lib/install_config.sh && supacloud_raw_env_value "$RAW_ENV" DB_PASSWORD',
+      { RAW_ENV: path },
+    );
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toBe(value);
+  });
+
   test("recognizes only Unit-scoped systemd start limits as canonical", () => {
     const dir = makeTempDir();
     const canonical = join(dir, "canonical.service");

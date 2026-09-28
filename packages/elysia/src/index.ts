@@ -1,4 +1,5 @@
-import { Elysia, type AnyElysia, type InferContext, type StatusMap, type TSchema } from "elysia";
+import { Elysia, setupTypebox, Validator, type AnyElysia, type Context, type StatusMap } from "elysia";
+import type { TSchema } from "typebox";
 import type {
   CommandRuntimeAudit,
   CommandRuntimeAuthorizer,
@@ -31,6 +32,9 @@ import {
   createDocumentationPlugin,
   type ApplicationDocumentationOptions,
 } from "./documentation";
+
+// Compiled route schemas may not retain a `t` import after bundling.
+setupTypebox();
 
 export type { ExecutionEvent, ExecutionObserver } from "./execution";
 export { bindCompiledCommand } from "./command-binding";
@@ -504,7 +508,7 @@ function contextPlugin<const Http extends AnyElysia = Elysia>(http?: Http) {
   // modules. Re-export inherited scoped hooks without promoting private ones.
   return new Elysia({ name: "supacloud:http-context", seed })
     .use((http ?? new Elysia()) as Http)
-    .as("scoped");
+    .as("plugin");
 }
 
 function mountHttp<const Http extends AnyElysia = Elysia>(http?: Http, name?: string, normalize = true) {
@@ -512,7 +516,11 @@ function mountHttp<const Http extends AnyElysia = Elysia>(http?: Http, name?: st
 }
 
 export type ApplicationHttpContext<Http extends AnyElysia = Elysia> =
-  Omit<InferContext<ReturnType<typeof mountHttp<Http>>>, "body" | "params" | "query" | "headers" | "cookie">
+  Omit<Context<{}, {
+    decorator: Http["~Singleton"]["decorator"];
+    store: Http["~Singleton"]["store"];
+    derive: Http["~Singleton"]["derive"] & Http["~Ephemeral"]["derive"];
+  }>, "body" | "params" | "query" | "headers" | "cookie">
   & Pick<HttpContext, "body" | "params" | "query" | "headers" | "cookie">;
 
 export type HttpRequestContextFactory<Http extends AnyElysia = Elysia, Value = unknown> = (
@@ -1078,7 +1086,7 @@ export function createModulePlugin<
     : (options.commandExecutor ?? governanceExecutor);
 
   const plugin = mountHttp(options.http, `supacloud:${compiled.name}`, options.normalize ?? true)
-    .resolve(async (context) => {
+    .derive(async (context) => {
       const requestContext = await ctxFactory(context.request, context as ApplicationHttpContext<Http>);
       requestContexts.set(context.request, requestContext);
       // Elysia merges decorators across siblings. Resolve the original map
@@ -1090,7 +1098,7 @@ export function createModulePlugin<
   const requestScopes = new WeakMap<Request, Record<string, unknown>>();
   if (compiled.destroyRequestScope) {
     const destroyRequestScope = compiled.destroyRequestScope;
-    plugin.onAfterResponse(async ({ request }) => {
+    plugin.afterResponse(async ({ request }) => {
       const scope = requestScopes.get(request);
       if (!scope) return;
       requestScopes.delete(request);
@@ -1102,7 +1110,8 @@ export function createModulePlugin<
     });
   }
   // Bind before routes and keep the handler local to its module's request context.
-  plugin.onError(async ({ code, error, request }) => {
+  plugin.error(async ({ error, request }) => {
+    const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
     const context: ErrorContext = {
       request,
       requestContext: requestContexts.get(request),
@@ -1121,12 +1130,17 @@ export function createModulePlugin<
       const documentation = route.data?.openapi;
       const hidden = documentation !== null && typeof documentation === "object"
         && "hide" in documentation && documentation.hide === true;
+      const tags = documentation !== null && typeof documentation === "object"
+        && "tags" in documentation && Array.isArray(documentation.tags)
+        ? documentation.tags.filter((tag): tag is string => typeof tag === "string")
+        : undefined;
       const schema = {
         ...toElysiaRouteSchema(route),
         ...(route.parse === "none" ? { parse: "none" as const } : {}),
-        ...(route.title || hidden ? { detail: {
+        ...(route.title || hidden || tags ? { detail: {
           ...(route.title ? { summary: route.title } : {}),
           ...(hidden ? { hide: true } : {}),
+          ...(tags ? { tags } : {}),
         } } : {}),
       };
       const policies = compileHttpPolicies(route, path, options.httpPolicies);
@@ -1149,13 +1163,26 @@ export function createModulePlugin<
       const responsePolicies = policies.filter((policy) => policy.afterResponse);
       const mappingPolicies = policies.filter((policy) => policy.mapResponse);
       if (mappingPolicies.length > 0) {
+        const responseValidators = Validator.response(schema.response, { normalize: options.normalize ?? true });
         Object.assign(schema, {
-          mapResponse: async (context: ApplicationHttpContext<Http> & { response: unknown }) => {
-            let response = context.response;
+          mapResponse: async (context: ApplicationHttpContext<Http> & { responseValue: unknown }) => {
+            let response = context.responseValue;
             let mapped: Response | undefined;
             for (const policy of mappingPolicies) {
               const result = await policy.mapResponse!({
                 http: context, requestContext: requestContexts.get(context.request), response,
+                encodeResponse: async (value) => {
+                  const validator = responseValidators?.[responseStatusOf(value, context.set.status)];
+                  if (!validator) return value;
+                  if (!("EncodeFrom" in validator) || typeof validator.EncodeFrom !== "function") {
+                    throw new ApplicationError("Response validation failed", { code: "RESPONSE_VALIDATION_FAILED" });
+                  }
+                  if ("mayReturnPromise" in validator && validator.mayReturnPromise
+                    && "From" in validator && typeof validator.From === "function") {
+                    return await Reflect.apply(validator.From, validator, [value, "response", true]);
+                  }
+                  return await Reflect.apply(validator.EncodeFrom, validator, [value, "response"]);
+                },
               });
               if (result !== undefined) {
                 if (!(result instanceof Response)) throw new Error("HTTP response policies must return Response or undefined");
@@ -1169,12 +1196,12 @@ export function createModulePlugin<
       }
       if (responsePolicies.length > 0) {
         Object.assign(schema, {
-          afterResponse: async (context: ApplicationHttpContext<Http> & { response: unknown }) => {
+          afterResponse: async (context: ApplicationHttpContext<Http> & { responseValue: unknown }) => {
             for (const policy of responsePolicies) {
               await policy.afterResponse!({
                 http: context,
                 requestContext: requestContexts.get(context.request),
-                response: context.response,
+                response: context.responseValue,
               });
             }
           },
@@ -1286,25 +1313,25 @@ export function createModulePlugin<
 
       switch (route.method) {
         case "GET":
-          routeRegistrar.get(path, handler, schema);
+          routeRegistrar.get(path, schema, handler);
           break;
         case "POST":
-          routeRegistrar.post(path, handler, schema);
+          routeRegistrar.post(path, schema, handler);
           break;
         case "PUT":
-          routeRegistrar.put(path, handler, schema);
+          routeRegistrar.put(path, schema, handler);
           break;
         case "PATCH":
-          routeRegistrar.patch(path, handler, schema);
+          routeRegistrar.patch(path, schema, handler);
           break;
         case "DELETE":
-          routeRegistrar.delete(path, handler, schema);
+          routeRegistrar.delete(path, schema, handler);
           break;
         case "HEAD":
-          routeRegistrar.head(path, handler, schema);
+          routeRegistrar.head(path, schema, handler);
           break;
         case "OPTIONS":
-          routeRegistrar.options(path, handler, schema);
+          routeRegistrar.options(path, schema, handler);
           break;
       }
     }
@@ -1454,7 +1481,8 @@ function isPublicApplicationError(error: unknown): error is PublicApplicationErr
 export function createApplication<const Http extends AnyElysia = Elysia>(
   options: ApplicationOptions<Http>,
 ) {
-  const app = new Elysia({ name: options.name ?? "supacloud:app", normalize: options.normalize ?? true });
+  const app = new Elysia({ name: options.name ?? "supacloud:app", normalize: options.normalize ?? true })
+    .use(contextPlugin(options.http).as("global"));
   if (options.documentation) app.use(createDocumentationPlugin(options.documentation));
   const configuredContextFactory = options.requestContext ?? defaultRequestContext;
   const contextCache = new WeakMap<Request, Promise<unknown>>();
@@ -1470,12 +1498,12 @@ export function createApplication<const Http extends AnyElysia = Elysia>(
   for (const module of options.modules ?? []) {
     const services = module.createServices(options.deps ?? {}, imported);
     imported[module.name] = services;
-    app.use(createModulePlugin(module, services, ctxFactory, options, imported));
+    // The root owns shared HTTP hooks; mounting them again on each module
+    // duplicates anonymous global hooks in Elysia 2.
+    app.use(createModulePlugin(module, services, ctxFactory, { ...options, http: undefined }, imported));
   }
 
-  // Install root extensions after compiled routes: each module already owns
-  // its hooks. Installing earlier would execute anonymous hooks twice.
-  return app.use(contextPlugin(options.http));
+  return app;
 }
 
 /** Semantic alias of createApplication for readable tests. */

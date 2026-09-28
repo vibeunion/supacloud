@@ -212,26 +212,33 @@ function releaseError(error: unknown) {
 
 export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" })
   // Group guard: delegated proofs must pass operations capability checks to prevent unauthorized deployments or env updates
-  .onBeforeHandle(async ({ params, request }) => {
+  .beforeHandle(async ({ params, request }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
   })
   .get(
     "/deployments",
-    async ({ params }) => {
-      const deployments = await frontendService.listDeployments(params.ref);
-      return { deployments: deployments.map(toFrontendDeploymentResponse) };
-    },
     {
       params: t.Object({
         ref: t.String(),
       }),
       detail: { tags: ["frontend"], summary: "List frontend deployments" },
+    },
+    async ({ params }) => {
+      const deployments = await frontendService.listDeployments(params.ref);
+      return { deployments: deployments.map(toFrontendDeploymentResponse) };
     }
   )
 
   .get(
     "/deployments/:id",
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+      detail: { tags: ["frontend"], summary: "Get a frontend deployment" },
+    },
     async ({ params, set }) => {
       const deployment = await frontendService.getDeployment(params.ref, params.id);
       if (!deployment) {
@@ -241,34 +248,31 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         ...toFrontendDeploymentResponse(deployment), env_revision: createFrontendEnvironmentRevision(deployment),
         configuration_revision: createFrontendConfigurationRevision(deployment),
       };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        id: t.String(),
-      }),
-      detail: { tags: ["frontend"], summary: "Get a frontend deployment" },
     }
   )
 
   .get(
     "/deployments/:id/releases",
+    {
+      params: t.Object({ ref: t.String(), id: t.String() }),
+      query: t.Object({ cursor: t.Optional(t.String()), limit: t.Optional(t.String()) }),
+      detail: { tags: ["frontend"], summary: "List verified immutable frontend releases" },
+    },
     async ({ params, query }) => {
       try {
         return await frontendReleaseService.listReleases(params.ref, params.id, releasePage(query));
       } catch (error: unknown) {
         return releaseError(error);
       }
-    },
-    {
-      params: t.Object({ ref: t.String(), id: t.String() }),
-      query: t.Object({ cursor: t.Optional(t.String()), limit: t.Optional(t.String()) }),
-      detail: { tags: ["frontend"], summary: "List verified immutable frontend releases" },
     }
   )
 
   .get(
     "/deployments/:id/releases/:releaseId",
+    {
+      params: t.Object({ ref: t.String(), id: t.String(), releaseId: t.String() }),
+      detail: { tags: ["frontend"], summary: "Get a verified immutable frontend release" },
+    },
     async ({ params }) => {
       try {
         return {
@@ -279,15 +283,16 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       } catch (error: unknown) {
         return releaseError(error);
       }
-    },
-    {
-      params: t.Object({ ref: t.String(), id: t.String(), releaseId: t.String() }),
-      detail: { tags: ["frontend"], summary: "Get a verified immutable frontend release" },
     }
   )
 
   .post(
     "/deployments/:id/releases",
+    {
+      params: t.Object({ ref: t.String(), id: t.String() }),
+      parse: "none",
+      detail: { tags: ["frontend"], summary: "Create a verified immutable prebuilt static release" },
+    },
     async ({ params, request }) => {
       try {
         assertImmutableReleaseContentType(request);
@@ -305,16 +310,20 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       } catch (error: unknown) {
         return releaseError(error);
       }
-    },
-    {
-      params: t.Object({ ref: t.String(), id: t.String() }),
-      parse: "none",
-      detail: { tags: ["frontend"], summary: "Create a verified immutable prebuilt static release" },
     }
   )
 
   .post(
     "/deployments/:id/releases/:releaseId/activate",
+    {
+      params: t.Object({ ref: t.String(), id: t.String(), releaseId: t.String() }),
+      body: t.Object({
+        mutation_id: t.String(),
+        expected_active_release_id: t.String(),
+        expected_activation_id: t.String(),
+      }),
+      detail: { tags: ["frontend"], summary: "CAS activate an immutable static frontend release" },
+    },
     async ({ params, body, request }) => {
       try {
         await frontendReleaseService.assertMutationSupported(params.ref, params.id);
@@ -331,26 +340,11 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       } catch (error: unknown) {
         return releaseError(error);
       }
-    },
-    {
-      params: t.Object({ ref: t.String(), id: t.String(), releaseId: t.String() }),
-      body: t.Object({
-        mutation_id: t.String(),
-        expected_active_release_id: t.String(),
-        expected_activation_id: t.String(),
-      }),
-      detail: { tags: ["frontend"], summary: "CAS activate an immutable static frontend release" },
     }
   )
 
   .post(
     "/deployments",
-    async ({ params, body, set }) => {
-      const deployment = await frontendService.createDeployment(params.ref, body);
-
-      set.status = 201;
-      return toFrontendDeploymentResponse(deployment);
-    },
     {
       params: t.Object({
         ref: t.String(),
@@ -368,26 +362,17 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         env_vars: t.Optional(t.Record(t.String(), t.String())),
       }),
       detail: { tags: ["frontend"], summary: "Create a frontend deployment" },
+    },
+    async ({ params, body, set }) => {
+      const deployment = await frontendService.createDeployment(params.ref, body);
+
+      set.status = 201;
+      return toFrontendDeploymentResponse(deployment);
     }
   )
 
   .patch(
     "/deployments/:id",
-    async ({ params, body, set }) => {
-      const deployment = await frontendService.updateDeployment(params.ref, params.id, body);
-
-      if (!deployment) {
-                return status(404, { message: "Deployment not found", code: "404" });
-      }
-
-      if (deployment.project_ref !== params.ref || deployment.id !== params.id) {
-        return status(502, { code: "INVALID_RECEIPT", message: "Invalid deployment update receipt" });
-      }
-      return {
-        ...toFrontendDeploymentResponse(deployment),
-        success: true, operation: "update_deployment", deployment_id: params.id,
-      };
-    },
     {
       params: t.Object({
         ref: t.String(),
@@ -405,11 +390,38 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         env_vars: t.Optional(t.Record(t.String(), t.String())),
       }),
       detail: { tags: ["frontend"], summary: "Update a frontend deployment" },
+    },
+    async ({ params, body, set }) => {
+      const deployment = await frontendService.updateDeployment(params.ref, params.id, body);
+
+      if (!deployment) {
+                return status(404, { message: "Deployment not found", code: "404" });
+      }
+
+      if (deployment.project_ref !== params.ref || deployment.id !== params.id) {
+        return status(502, { code: "INVALID_RECEIPT", message: "Invalid deployment update receipt" });
+      }
+      return {
+        ...toFrontendDeploymentResponse(deployment),
+        success: true, operation: "update_deployment", deployment_id: params.id,
+      };
     }
   )
 
   .put(
     "/deployments/:id/configuration",
+    {
+      params: t.Object({ ref: t.String(), id: t.String() }),
+      body: t.Object({
+        expected_revision: t.Optional(t.String({ minLength: 1, maxLength: 256 })),
+        configuration: t.Object({
+          build_command: t.String(), output_dir: t.String(), install_command: t.String(),
+          node_version: t.String(), health_check_path: t.String(),
+        }),
+        git: t.Object({ url: t.String(), branch: t.String() }),
+      }),
+      detail: { tags: ["frontend"], summary: "Save build and Git configuration together" },
+    },
     async ({ params, body }) => {
       if (body.expected_revision === undefined) {
         return status(428, { code: "CONFIGURATION_PRECONDITION_REQUIRED", message: "Read the configuration before replacing it" });
@@ -437,22 +449,17 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         configuration_revision: createFrontendConfigurationRevision(deployment),
       };
     },
-    {
-      params: t.Object({ ref: t.String(), id: t.String() }),
-      body: t.Object({
-        expected_revision: t.Optional(t.String({ minLength: 1, maxLength: 256 })),
-        configuration: t.Object({
-          build_command: t.String(), output_dir: t.String(), install_command: t.String(),
-          node_version: t.String(), health_check_path: t.String(),
-        }),
-        git: t.Object({ url: t.String(), branch: t.String() }),
-      }),
-      detail: { tags: ["frontend"], summary: "Save build and Git configuration together" },
-    },
   )
 
   .delete(
     "/deployments/:id",
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+      detail: { tags: ["frontend"], summary: "Delete a frontend deployment" },
+    },
     async ({ params, set }) => {
       const deletion = await frontendService.deleteDeployment(params.ref, params.id);
       if (deletion === "active") {
@@ -469,18 +476,22 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         success: true, operation: "delete_deployment", project_ref: params.ref, deployment_id: params.id,
         message: "Deployment deleted successfully",
       };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        id: t.String(),
-      }),
-      detail: { tags: ["frontend"], summary: "Delete a frontend deployment" },
     }
   )
 
   .post(
     "/deployments/:id/deploy/git",
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+      body: t.Object({
+        git_url: t.String(),
+        branch: t.Optional(t.String({ default: "main" })),
+      }),
+      detail: { tags: ["frontend"], summary: "Deploy from git repository" },
+    },
     async ({ params, body, set }) => {
       const deployment = await frontendService.getDeployment(params.ref, params.id);
       if (!deployment) {
@@ -495,22 +506,19 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       );
 
       return result;
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        id: t.String(),
-      }),
-      body: t.Object({
-        git_url: t.String(),
-        branch: t.Optional(t.String({ default: "main" })),
-      }),
-      detail: { tags: ["frontend"], summary: "Deploy from git repository" },
     }
   )
 
   .post(
     "/deployments/:id/deploy/upload",
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+      body: t.Any(),
+      detail: { tags: ["frontend"], summary: "Deploy from uploaded zip" },
+    },
     async ({ params, body, request, set }) => {
       const deployment = await frontendService.getDeployment(params.ref, params.id);
       if (!deployment) {
@@ -595,19 +603,18 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       } finally {
         await rm(tempDir, { recursive: true, force: true });
       }
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        id: t.String(),
-      }),
-      body: t.Any(),
-      detail: { tags: ["frontend"], summary: "Deploy from uploaded zip" },
     }
   )
 
   .post(
     "/deployments/:id/redeploy",
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+      detail: { tags: ["frontend"], summary: "Redeploy a frontend deployment" },
+    },
     async ({ params, set }) => {
       const deployment = await frontendService.getDeployment(params.ref, params.id);
       if (!deployment) {
@@ -620,33 +627,39 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
       const result = await frontendService.deployFromSource(params.ref, params.id, sourceDir);
       if (result.deployment_id !== params.id) return status(502, { message: "Invalid build result", code: "INVALID_RECEIPT" });
       return { ...result, project_ref: params.ref, operation: "redeploy" };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        id: t.String(),
-      }),
-      detail: { tags: ["frontend"], summary: "Redeploy a frontend deployment" },
     }
   )
 
   .get(
     "/deployments/:id/logs",
-    async ({ params, set }) => {
-      const buildLog = await frontendService.getBuildLog(params.ref, params.id);
-      return { project_ref: params.ref, deployment_id: params.id, logs: buildLog };
-    },
     {
       params: t.Object({
         ref: t.String(),
         id: t.String(),
       }),
       detail: { tags: ["frontend"], summary: "Get deployment build logs" },
+    },
+    async ({ params, set }) => {
+      const buildLog = await frontendService.getBuildLog(params.ref, params.id);
+      return { project_ref: params.ref, deployment_id: params.id, logs: buildLog };
     }
   )
 
   .put(
     "/deployments/:id/env",
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+      body: t.Object({
+        mode: t.Optional(t.Union([t.Literal("merge"), t.Literal("replace")])),
+        expected_revision: t.Optional(t.String({ minLength: 1, maxLength: 256 })),
+        env_vars: t.Optional(t.Record(t.String(), t.String())),
+        env_entries: t.Optional(t.Array(t.Object({ name: t.String(), value: t.String() }), { maxItems: 256 })),
+      }),
+      detail: { tags: ["frontend"], summary: "Set deployment environment variables" },
+    },
     async ({ params, body, set }) => {
       if ((body.env_vars === undefined) === (body.env_entries === undefined)) {
         return status(400, { code: "INVALID_ENV_INPUT", message: "Provide one environment representation" });
@@ -694,31 +707,11 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         env_revision: createFrontendEnvironmentRevision(deployment),
         ...(body.expected_revision === undefined ? {} : { previous_env_revision: body.expected_revision }),
       };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        id: t.String(),
-      }),
-      body: t.Object({
-        mode: t.Optional(t.Union([t.Literal("merge"), t.Literal("replace")])),
-        expected_revision: t.Optional(t.String({ minLength: 1, maxLength: 256 })),
-        env_vars: t.Optional(t.Record(t.String(), t.String())),
-        env_entries: t.Optional(t.Array(t.Object({ name: t.String(), value: t.String() }), { maxItems: 256 })),
-      }),
-      detail: { tags: ["frontend"], summary: "Set deployment environment variables" },
     }
   )
 
   .post(
     "/deployments/:id/domains",
-    async ({ params, body, set }) => {
-      const deployment = await frontendService.addCustomDomain(params.ref, params.id, body.domain);
-      if (!deployment) {
-                return status(404, { message: "Deployment not found", code: "404" });
-      }
-      return toFrontendDeploymentResponse(deployment);
-    },
     {
       params: t.Object({
         ref: t.String(),
@@ -728,11 +721,26 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         domain: t.String(),
       }),
       detail: { tags: ["frontend"], summary: "Add a custom domain" },
+    },
+    async ({ params, body, set }) => {
+      const deployment = await frontendService.addCustomDomain(params.ref, params.id, body.domain);
+      if (!deployment) {
+                return status(404, { message: "Deployment not found", code: "404" });
+      }
+      return toFrontendDeploymentResponse(deployment);
     }
   )
 
   .delete(
     "/deployments/:id/domains/:domain",
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+        domain: t.String(),
+      }),
+      detail: { tags: ["frontend"], summary: "Remove a custom domain" },
+    },
     async ({ params, set }) => {
       const deployment = await frontendService.removeCustomDomain(
         params.ref,
@@ -751,19 +759,12 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         ...toFrontendDeploymentResponse(deployment), success: true, operation: "remove_domain",
         deployment_id: params.id, domain: params.domain,
       };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        id: t.String(),
-        domain: t.String(),
-      }),
-      detail: { tags: ["frontend"], summary: "Remove a custom domain" },
     }
   )
 
   .get(
     "/frameworks",
+    { detail: { tags: ["frontend"], summary: "List supported frontend frameworks" } },
     async () => {
       return {
         frameworks: Object.entries(FRAMEWORK_DEFAULTS).map(([id, config]) => ({
@@ -772,19 +773,11 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
           defaults: config,
         })),
       };
-    },
-    { detail: { tags: ["frontend"], summary: "List supported frontend frameworks" } }
+    }
   )
 
   .post(
     "/deployments/:id/tokens",
-    async ({ params, body, set }) => {
-      const result = await frontendService.createDeployToken(params.ref, params.id, body.name);
-      if (!result) {
-                return status(404, { message: "Deployment not found", code: "404" });
-      }
-      return result;
-    },
     {
       params: t.Object({
         ref: t.String(),
@@ -794,26 +787,41 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         name: t.String({ minLength: 1 }),
       }),
       detail: { tags: ["frontend"], summary: "Create a deploy token" },
+    },
+    async ({ params, body, set }) => {
+      const result = await frontendService.createDeployToken(params.ref, params.id, body.name);
+      if (!result) {
+                return status(404, { message: "Deployment not found", code: "404" });
+      }
+      return result;
     }
   )
 
   .get(
     "/deployments/:id/tokens",
-    async ({ params, set }) => {
-      const tokens = await frontendService.listDeployTokens(params.ref, params.id);
-      return { project_ref: params.ref, deployment_id: params.id, tokens };
-    },
     {
       params: t.Object({
         ref: t.String(),
         id: t.String(),
       }),
       detail: { tags: ["frontend"], summary: "List deploy tokens" },
+    },
+    async ({ params, set }) => {
+      const tokens = await frontendService.listDeployTokens(params.ref, params.id);
+      return { project_ref: params.ref, deployment_id: params.id, tokens };
     }
   )
 
   .delete(
     "/deployments/:id/tokens/:tokenId",
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+        tokenId: t.String(),
+      }),
+      detail: { tags: ["frontend"], summary: "Delete a deploy token" },
+    },
     async ({ params, set }) => {
       const success = await frontendService.deleteDeployToken(params.ref, params.id, params.tokenId);
       if (success === false) {
@@ -824,19 +832,22 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         success: true, operation: "delete_token", project_ref: params.ref, deployment_id: params.id,
         token_id: params.tokenId, message: "Token deleted successfully",
       };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        id: t.String(),
-        tokenId: t.String(),
-      }),
-      detail: { tags: ["frontend"], summary: "Delete a deploy token" },
     }
   )
 
   .put(
     "/deployments/:id/git",
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+      body: t.Object({
+        git_url: t.String(),
+        branch: t.Optional(t.String({ default: "main" })),
+      }),
+      detail: { tags: ["frontend"], summary: "Set git configuration" },
+    },
     async ({ params, body, set }) => {
       const deployment = await frontendService.setGitConfig(
         params.ref,
@@ -854,40 +865,36 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         ...toFrontendDeploymentResponse(deployment),
         success: true, operation: "update_git", deployment_id: params.id,
       };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        id: t.String(),
-      }),
-      body: t.Object({
-        git_url: t.String(),
-        branch: t.Optional(t.String({ default: "main" })),
-      }),
-      detail: { tags: ["frontend"], summary: "Set git configuration" },
     }
   )
 
   .get(
     "/deployments/:id/records",
-    async ({ params, set }) => {
-      const records = await frontendService.listDnsRecords(params.ref, params.id);
-      if (!records) {
-        return status(404, { message: "Deployment not found", code: "404" });
-      }
-      return { records };
-    },
     {
       params: t.Object({
         ref: t.String(),
         id: t.String(),
       }),
       detail: { tags: ["frontend"], summary: "List DNS records" },
+    },
+    async ({ params, set }) => {
+      const records = await frontendService.listDnsRecords(params.ref, params.id);
+      if (!records) {
+        return status(404, { message: "Deployment not found", code: "404" });
+      }
+      return { records };
     }
   )
 
   .get(
     "/deployments/:id/deployment-records",
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+      detail: { tags: ["frontend"], summary: "List deployment records" },
+    },
     async ({ params, set }) => {
       const records = await frontendService.listDeploymentRecords(params.ref, params.id);
       const deployment = await frontendService.getDeployment(params.ref, params.id);
@@ -898,18 +905,19 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
           build_log: maskFrontendBuildLog(record.build_log, secrets),
         })),
       };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        id: t.String(),
-      }),
-      detail: { tags: ["frontend"], summary: "List deployment records" },
     }
   )
 
   .get(
     "/deployments/:id/deployment-records/:recordId",
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+        recordId: t.String(),
+      }),
+      detail: { tags: ["frontend"], summary: "Get a deployment record" },
+    },
     async ({ params, set }) => {
       const record = await frontendService.getDeploymentRecord(params.ref, params.id, params.recordId);
       if (!record) {
@@ -923,13 +931,5 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
           Object.values(deployment?.env_vars || {}),
         ),
       };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        id: t.String(),
-        recordId: t.String(),
-      }),
-      detail: { tags: ["frontend"], summary: "Get a deployment record" },
     }
   );

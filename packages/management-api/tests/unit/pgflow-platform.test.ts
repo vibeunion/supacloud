@@ -61,5 +61,5 @@ test("canonical installation supports idempotent pause, preserves runs and denie
     await expect(readPgflowState(db,"other-project")).rejects.toThrow("binding");
     await db`UPDATE supacloud_worker.migrations SET sha256='invalid' WHERE version='supacloud_001'`;
     await expect(setPgflowEnabled(db,"project-one",false)).rejects.toThrow("checksum");
-  }, { image: "ghcr.io/pgmq/pg18-pgmq:v1.10.0" });
+  }, { image: "ghcr.io/pgmq/pg18-pgmq:v1.13.0" });
 }, 120_000);

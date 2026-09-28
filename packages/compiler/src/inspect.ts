@@ -221,7 +221,7 @@ export function createExecutionPlans(graph: ApplicationGraph): ExecutionPlan[] {
     })),
     ...module.commands.map((command): ExecutionPlan => ({
       module: module.name, kind: "command", name: command.name, command: command.name,
-      stages: ["authorize",
+      stages: ["commandExecutor", "authorize",
         ...(command.rpc ? [`rpc:${command.rpc}`] : [
           ...(command.idempotency === "required" ? ["idempotency"] : []),
           ...(command.transaction === "required" ? ["transaction"] : []),

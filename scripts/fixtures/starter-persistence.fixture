@@ -1,0 +1,237 @@
+import { strict as assert } from "node:assert";
+import { readFile } from "node:fs/promises";
+import { generateKeyPair, SignJWT } from "jose";
+import { COMMAND_PERSISTENCE_SQL, type CommandDatabase, type CommandTransaction } from "@supacloud/db";
+import { ApplicationError, createApplication, type ExecutionEvent } from "@supacloud/elysia";
+import { createApp } from "../src/application";
+import { createReviewPostgresAdapters } from "../src/host/review-postgres";
+import { createCompiledModules } from "../generated/application";
+import { setupStarterAttachments, type AttachmentDatabase } from "./attachments";
+
+export interface VerificationDatabase extends CommandDatabase {
+  exec(sql: string): Promise<void>;
+  restart(): Promise<void>;
+}
+
+interface Review { state: "draft" | "approved"; version: number }
+
+function record(value: unknown): Record<string, unknown> {
+  assert.ok(value !== null && typeof value === "object" && !Array.isArray(value));
+  return value as Record<string, unknown>;
+}
+function rows(value: unknown): Record<string, unknown>[] {
+  assert.ok(Array.isArray(value));
+  return value.map(record);
+}
+function result(value: unknown): Review {
+  const item = record(value);
+  assert.ok(item.state === "draft" || item.state === "approved");
+  assert.ok(typeof item.version === "number" && Number.isSafeInteger(item.version) && item.version > 0);
+  return { state: item.state, version: item.version };
+}
+
+/** Exercises the installed starter's compiled handler, not a second approval implementation. */
+export async function verifyPersistentStarter(
+  database: VerificationDatabase,
+  verification: { onExecution?(event: Readonly<ExecutionEvent>): void; signal?: AbortSignal } = {},
+) {
+  await database.exec(COMMAND_PERSISTENCE_SQL);
+  await database.exec(await readFile(new URL("../migrations/001-review.sql", import.meta.url), "utf8"));
+  await database.exec(`
+    INSERT INTO public.starter_application(project_id,tenant_id) VALUES ('starter-test','starter-test');
+    INSERT INTO public.starter_members(subject,can_approve) VALUES ('owner',true),('other',true);
+  `);
+  const query = (sql: string, parameters: readonly (string | number | boolean | null)[] = []) =>
+    database.transaction((tx) => tx.query(sql, parameters));
+  const events: ExecutionEvent[] = [];
+  const observe = (event: Readonly<ExecutionEvent>) => {
+    events.push(event);
+    verification.onExecution?.(event);
+  };
+  let failWrite = false, failAudit = false, executions = 0;
+  let enqueueAttachment: ((tx: CommandTransaction, id: string, version: number) => Promise<void>) | undefined;
+  // Inject faults at the database boundary, outside the shipped host adapter.
+  const observedDatabase: CommandDatabase = {
+    transaction: run => database.transaction(tx => run({
+      async query(text, parameters) {
+        const value = await tx.query(text, parameters);
+        if (text.startsWith("UPDATE public.starter_reviews SET state=")) {
+          executions++;
+          if (failWrite) throw new Error("Synthetic failure after asynchronous write");
+        }
+        if (text.startsWith("INSERT INTO supacloud_commands.execution_audit") && failAudit) {
+          throw new Error("Synthetic audit failure");
+        }
+        return value;
+      },
+    })),
+  };
+  const keys = await generateKeyPair("ES256");
+  const issuer = "https://identity.example.test";
+  const token = (subject: string, audience = "starter-test") => new SignJWT({
+    client_id: "starter-client", role: "authenticated",
+  }).setProtectedHeader({ alg: "ES256" }).setIssuer(issuer).setAudience(audience)
+    .setSubject(subject).setIssuedAt().setExpirationTime("5m").sign(keys.privateKey);
+  const tokens = { owner: await token("owner"), other: await token("other") };
+  const identity = {
+    issuer, audience: "starter-test", clientId: "starter-client", projectId: "starter-test",
+    jwksUrl: issuer + "/jwks", keyResolver: async () => keys.publicKey,
+  };
+  const adapterOptions = {
+    database: observedDatabase, identity, tenantId: "starter-test",
+    afterApproved: async (tx: CommandTransaction, id: string, version: number) =>
+      enqueueAttachment?.(tx, id, version),
+  };
+  await assert.rejects(createReviewPostgresAdapters({ ...adapterOptions, tenantId: "other" }), /binding mismatch/);
+  await assert.rejects(createReviewPostgresAdapters({
+    ...adapterOptions, identity: { ...identity, projectId: "other" },
+  }), /binding mismatch/);
+  const adapters = await createReviewPostgresAdapters(adapterOptions);
+  const context = adapters.requestContext;
+  const application = async () => createApp({
+    ...await createReviewPostgresAdapters(adapterOptions), onExecution: observe,
+  });
+  let app = await application();
+  assert.equal((await app.handle(new Request("http://localhost/reviews/" + crypto.randomUUID() + "/attachment-upload", {
+    method: "POST", headers: { "content-type": "application/json", authorization: "Bearer " + tokens.owner },
+    body: JSON.stringify({ artifactId: crypto.randomUUID(), expectedVersion: 1 }),
+  }))).status, 501, "The approval-only host must not fall back to privileged upload handling");
+  const request = (id: string, key: string, options: { bearer?: string; version?: number; requestId?: string } = {}) => app.handle(new Request(
+    `http://localhost/reviews/${id}/approve`, {
+      method: "POST", headers: {
+        "content-type": "application/json", "idempotency-key": key, "x-request-id": options.requestId ?? "persistent-review",
+        ...(options.bearer === "" ? {} : { authorization: `Bearer ${options.bearer ?? tokens.owner}` }),
+      },
+      body: JSON.stringify({ expectedVersion: options.version ?? 1 }),
+    },
+  ));
+  const seed = async () => {
+    const id = crypto.randomUUID();
+    await query("INSERT INTO public.starter_reviews(id,owner_id,state,version) VALUES($1,'owner','draft',1)", [id]);
+    return id;
+  };
+  const state = async (id: string) => result(rows(await query(
+    "SELECT state,version FROM public.starter_reviews WHERE id=$1", [id],
+  ))[0]);
+  const count = async (table: "execution_receipts" | "execution_audit", key: string) => rows(await query(
+    `SELECT count(*)::integer AS count FROM supacloud_commands.${table} WHERE operation_key=$1`, [key],
+  ))[0]?.count;
+
+  const id = await seed(), key = crypto.randomUUID();
+  for (const bearer of ["", await token("owner", "wrong-audience")]) {
+    assert.equal((await request(id, key, { bearer })).status, 401);
+  }
+  assert.equal((await request(id, key, { bearer: tokens.other })).status, 403);
+  assert.deepEqual(await state(id), { state: "draft", version: 1 });
+  const simultaneous = await Promise.all(Array.from({ length: 8 }, () => request(id, key)));
+  for (const response of simultaneous) {
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.deepEqual(await response.json(), { state: "approved", version: 2 });
+  }
+  assert.equal(executions, 1);
+  assert.equal(await count("execution_receipts", key), 1);
+  assert.equal(await count("execution_audit", key), 1);
+  assert.deepEqual(await state(id), { state: "approved", version: 2 });
+  await database.restart();
+  app = await application();
+  assert.equal((await request(id, key)).status, 200);
+  assert.equal(executions, 1, "Reopening the database and recreating the app must preserve idempotency");
+  await query("UPDATE public.starter_application SET tenant_id='other'");
+  try {
+    const mismatched = await request(id, key);
+    assert.equal(mismatched.status, 403, "Changing the database binding must invalidate a running host's replay authorization");
+    assert.ok((await mismatched.text()).includes("APPLICATION_ACCESS_DENIED"));
+  } finally { await query("UPDATE public.starter_application SET tenant_id='starter-test'"); }
+  assert.equal((await request(id, key)).status, 200);
+  assert.equal((await request(id, key, { version: 2 })).status, 409);
+  assert.equal((await request(id, crypto.randomUUID())).status, 409);
+  const permissionId = await seed(), permissionKey = crypto.randomUUID();
+  await query("UPDATE public.starter_members SET can_approve=false WHERE subject='owner'");
+  for (const [target, operation] of [[id, key], [permissionId, permissionKey]] as const) {
+    const response = await request(target, operation, {
+      requestId: target === id ? "starter-permission-denied" : "starter-unrelated-failure",
+    });
+    assert.equal(response.status, 403);
+    assert.ok((await response.text()).includes("REVIEW_PERMISSION_DENIED"));
+  }
+  assert.deepEqual(await state(permissionId), { state: "draft", version: 1 });
+  assert.equal(await count("execution_receipts", permissionKey), 0);
+  await query("UPDATE public.starter_members SET can_approve=true WHERE subject='owner'");
+  assert.equal((await request(id, key)).status, 200);
+  await query("UPDATE public.starter_reviews SET owner_id='other' WHERE id=$1", [id]);
+  assert.equal((await request(id, key)).status, 403, "Object ownership changes must invalidate replay authorization");
+  await query("UPDATE public.starter_reviews SET owner_id='owner' WHERE id=$1", [id]);
+  assert.equal((await request(id, key)).status, 200);
+  await query("UPDATE public.starter_members SET enabled=false WHERE subject='owner'");
+  const disabled = await request(id, key);
+  assert.equal(disabled.status, 403);
+  assert.ok((await disabled.text()).includes("APPLICATION_ACCESS_DENIED"));
+  await query("UPDATE public.starter_members SET enabled=true WHERE subject='owner'");
+  assert.equal((await request(id, key)).status, 200);
+  assert.equal(executions, 1);
+  assert.equal(await count("execution_audit", key), 1);
+
+  const racedId = await seed(), raceKeys = [crypto.randomUUID(), crypto.randomUUID()];
+  const raced = await Promise.all(raceKeys.map((operation) => request(racedId, operation)));
+  assert.deepEqual(raced.map((response) => response.status).sort(), [200, 409]);
+  assert.deepEqual(await state(racedId), { state: "approved", version: 2 });
+  const receipts = await Promise.all(raceKeys.map((operation) => count("execution_receipts", operation)));
+  const audits = await Promise.all(raceKeys.map((operation) => count("execution_audit", operation)));
+  assert.deepEqual(receipts.sort(), [0, 1]);
+  assert.deepEqual(audits.sort(), [0, 1]);
+
+  for (const failure of ["write", "audit"] as const) {
+    const rollbackId = await seed(), rollbackKey = crypto.randomUUID();
+    failWrite = failure === "write"; failAudit = failure === "audit";
+    const response = await request(rollbackId, rollbackKey);
+    assert.equal(response.status, 503);
+    assert.ok(!(await response.text()).includes("Synthetic"));
+    assert.deepEqual(await state(rollbackId), { state: "draft", version: 1 });
+    assert.equal(await count("execution_receipts", rollbackKey), 0);
+    assert.equal(await count("execution_audit", rollbackKey), 0);
+    failWrite = false; failAudit = false;
+    assert.equal((await request(rollbackId, rollbackKey)).status, 200);
+    assert.equal(await count("execution_receipts", rollbackKey), 1);
+    assert.equal(await count("execution_audit", rollbackKey), 1);
+  }
+  const executorReview = await seed(), executorKey = crypto.randomUUID();
+  app = createApplication({
+    name: "starter-executor-check", modules: createCompiledModules(), deps: adapters.deps,
+    requestContext: adapters.requestContext, onExecution: observe,
+    async commandExecutor() {
+      throw new ApplicationError("Executor unavailable", { status: 503, code: "EXECUTOR_UNAVAILABLE" });
+    },
+  });
+  try {
+    assert.equal((await request(executorReview, executorKey, { requestId: "starter-executor-failure" })).status, 503);
+    assert.deepEqual(await state(executorReview), { state: "draft", version: 1 });
+    assert.equal(await count("execution_receipts", executorKey), 0);
+    assert.deepEqual(events.filter((event) => event.requestId === "starter-executor-failure")
+      .map((event) => [event.stage, event.phase]), [["commandExecutor", "started"], ["commandExecutor", "failed"]]);
+  } finally { app = await application(); }
+
+  let attachments: Record<string, unknown> | "not-run-no-storage" = "not-run-no-storage";
+  if ("storage" in database && "configureIdentity" in database) {
+    const attachmentScenario = await setupStarterAttachments({
+      database: database as AttachmentDatabase, context, tokens,
+      seed, approve: request, onExecution: observe,
+      signal: verification.signal ?? new AbortController().signal,
+      async application(uploads) {
+        return createApp({ ...await createReviewPostgresAdapters({ ...adapterOptions, uploads }), onExecution: observe });
+      },
+      setAuditFailure(enabled) { failAudit = enabled; },
+    });
+    enqueueAttachment = attachmentScenario.enqueue;
+    attachments = await attachmentScenario.verify();
+  }
+  assert.ok(events.some((event) => event.kind === "command" && event.stage === "handler" && event.phase === "succeeded"));
+  assert.ok(events.some((event) => event.phase === "failed"));
+  assert.ok(events.some((event) => event.requestId === "persistent-review"));
+  for (const event of events) {
+    assert.ok(Object.keys(event).every((field) =>
+      ["kind", "operation", "stage", "phase", "requestId", "durationMs"].includes(field)));
+  }
+  assert.ok(!JSON.stringify(events).includes(tokens.owner));
+  return { authenticated: "signed-local-token", concurrency: 8, replay: "database-reopened",
+    rollback: ["write", "audit"], objectAuthorization: "passed", tracing: "metadata-only", attachments };
+}

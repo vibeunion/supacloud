@@ -85,6 +85,12 @@
       "initial-version": "0.1.0",
       "changelog-path": "CHANGELOG.md"
     },
+    "packages/delivery": {
+      "release-type": "node",
+      "component": "delivery",
+      "initial-version": "0.1.0",
+      "changelog-path": "CHANGELOG.md"
+    },
     "packages/compiler": {
       "release-type": "node",
       "component": "compiler",

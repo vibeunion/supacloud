@@ -77,7 +77,7 @@ class ApplySlotIsolationTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def write_project(self, version: str = "2.133.0") -> None:
+    def write_project(self, version: str = "2.138.1") -> None:
         (self.root / "mix.exs").write_text(
             f'defmodule Realtime.MixProject do\n  use Mix.Project\n\n  def project do\n    [\n      app: :realtime,\n      version: "{version}"\n    ]\n  end\nend\n',
             encoding="utf-8",
@@ -135,7 +135,7 @@ class ApplySlotIsolationTests(unittest.TestCase):
     def test_rejects_wrong_version_before_mutation(self) -> None:
         self.write_project("2.132.0")
         original = self.source_path.read_text(encoding="utf-8")
-        with self.assertRaisesRegex(PATCHER.PatchError, "expected 2.133.0"):
+        with self.assertRaisesRegex(PATCHER.PatchError, "expected 2.138.1"):
             PATCHER.apply_patch(self.source_path)
         self.assertEqual(self.source_path.read_text(encoding="utf-8"), original)
 

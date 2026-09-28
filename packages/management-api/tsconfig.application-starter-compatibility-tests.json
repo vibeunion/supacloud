@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "../..",
+    "types": ["bun"],
+    "noEmit": true
+  },
+  "include": [
+    "src/types/*.d.ts",
+    "src/scripts/verify-starter-compatibility.ts",
+    "tests/unit/application-starter-compatibility-native.test.ts",
+    "tests/unit/application-starter-connection-native.test.ts",
+    "../../scripts/lib/starter-connection-precedence.test.ts"
+  ]
+}

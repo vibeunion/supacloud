@@ -35,24 +35,24 @@ const pipelineBody = t.Object({
 });
 
 export const pipelineRoutes = new Elysia({ prefix: "/v1/projects/:ref/pipelines" })
-  .get("/", async ({ params, request, set }) => {
+  .get("/", { detail: { tags: ["projects", "pipelines"], summary: "List CDC pipelines" } }, async ({ params, request, set }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return authResponse(authError, set);
     return run(set, () => pipelineService.list(params.ref));
-  }, { detail: { tags: ["projects", "pipelines"], summary: "List CDC pipelines" } })
-  .post("/", async ({ params, body, request, set }) => {
+  })
+  .post("/", { body: pipelineBody, detail: { tags: ["projects", "pipelines"], summary: "Create a BigQuery CDC pipeline" } }, async ({ params, body, request, set }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return authResponse(authError, set);
     const result = await run(set, () => pipelineService.create(params.ref, body));
     if (!(result as { status?: number }).status) set.status = 201;
     return result;
-  }, { body: pipelineBody, detail: { tags: ["projects", "pipelines"], summary: "Create a BigQuery CDC pipeline" } })
-  .get("/:id", async ({ params, request, set }) => {
+  })
+  .get("/:id", { detail: { tags: ["projects", "pipelines"], summary: "Get CDC pipeline status" } }, async ({ params, request, set }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return authResponse(authError, set);
     return run(set, async () => (await pipelineService.find(params.ref, params.id)).public);
-  }, { detail: { tags: ["projects", "pipelines"], summary: "Get CDC pipeline status" } })
-  .post("/:id/:action", async ({ params, request, set }) => {
+  })
+  .post("/:id/:action", { detail: { tags: ["projects", "pipelines"], summary: "Start, stop, or restart a CDC pipeline" } }, async ({ params, request, set }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return authResponse(authError, set);
     if (!(["start", "stop", "restart"] as string[]).includes(params.action)) {
@@ -60,9 +60,9 @@ export const pipelineRoutes = new Elysia({ prefix: "/v1/projects/:ref/pipelines"
       return { message: "Unknown pipeline action", code: "pipeline_action_not_found", status: 404 };
     }
     return run(set, () => pipelineService.action(params.ref, params.id, params.action as "start" | "stop" | "restart"));
-  }, { detail: { tags: ["projects", "pipelines"], summary: "Start, stop, or restart a CDC pipeline" } })
-  .delete("/:id", async ({ params, request, set }) => {
+  })
+  .delete("/:id", { detail: { tags: ["projects", "pipelines"], summary: "Delete a CDC pipeline" } }, async ({ params, request, set }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return authResponse(authError, set);
     return run(set, () => pipelineService.remove(params.ref, params.id));
-  }, { detail: { tags: ["projects", "pipelines"], summary: "Delete a CDC pipeline" } });
+  });

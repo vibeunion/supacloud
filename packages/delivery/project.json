@@ -1,0 +1,6 @@
+{
+  "name": "@supacloud/delivery",
+  "tags": ["scope:core", "type:library"],
+  "projectType": "library",
+  "sourceRoot": "packages/delivery/src"
+}

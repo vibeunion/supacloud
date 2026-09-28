@@ -13,6 +13,8 @@ export interface HttpPolicyContext<Http extends AnyElysia = Elysia> {
 
 export interface HttpPolicyResponseContext<Http extends AnyElysia = Elysia> extends HttpPolicyContext<Http> {
   response: unknown;
+  /** Validate and encode before replacing a handler value with a native Response. */
+  encodeResponse?: (value: unknown) => unknown | Promise<unknown>;
 }
 
 export type HttpPolicy<Http extends AnyElysia = Elysia> =

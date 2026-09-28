@@ -155,7 +155,7 @@ describe("authOAuthServerRoutes", () => {
     expect(typeof oauth.key_id).toBe("string");
     expect(Array.isArray(record(oauth.jwt_jwks).keys)).toBe(true);
     expect(typeof oauth.migrated_at).toBe("string");
-    expect(applySpy).toHaveBeenCalledWith("proj_1", {}, auth);
+    expect(applySpy).toHaveBeenCalledWith("proj_1", {}, auth, { refreshVerifiers: true });
     const jwtKeys = records(oauth.jwt_keys);
     expect(jwtKeys).toHaveLength(1);
     expect(jwtKeys.find((key) => key.alg === "ES256")).toMatchObject({
@@ -207,7 +207,7 @@ describe("authOAuthServerRoutes", () => {
     const publicKey = record(publicKeys[0]);
     expect(publicKey).toMatchObject({ kty: "RSA", alg: "RS256", kid: "kms-key-1", key_ops: ["verify"] });
     expect(publicKey["aws:kms:arn"]).toBeUndefined();
-    expect(applySpy).toHaveBeenCalledWith("proj_1", {}, auth);
+    expect(applySpy).toHaveBeenCalledWith("proj_1", {}, auth, { refreshVerifiers: true });
 
     applySpy.mockRejectedValueOnce(new Error("runtime apply failed"));
     const unavailable = await post("/oauth-server/kms-rs256", kmsInput);

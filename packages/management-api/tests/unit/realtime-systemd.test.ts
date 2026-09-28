@@ -72,13 +72,13 @@ describe("Realtime systemd deployment", () => {
     expect(unit).toContain("ExecStartPre=/usr/local/libexec/supacloud/realtime-launcher --validate-only");
     expect(unit).toContain("LogsDirectory=supacloud");
     expect(unit).toContain(
-      "Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime@sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb",
+      "Environment=REALTIME_IMAGE=public.ecr.aws/supabase/realtime@sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e",
     );
     expect(unit).toContain("Environment=REALTIME_CONTAINER_NAME=supacloud-realtime");
     expect(unit).toContain("Environment=REALTIME_DB_USER=supabase_admin");
     expect(unit).toContain("Environment=PG_DATABASE=supacloud_meta");
     expect(unit).toContain("Environment=REALTIME_CONTAINER_ENV_FILE=/etc/supabase/realtime-container.env");
-    expect(unit).toContain("Environment=REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=2.133.0");
+    expect(unit).toContain("Environment=REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=2.138.1");
     expect(unit).toContain("Environment=REALTIME_SLOT_ISOLATION_ARTIFACT_DIR=/opt/supacloud/realtime-slot-isolation");
     expect(unit).toContain("Environment=REALTIME_SLOT_ISOLATION_MANIFEST=/opt/supacloud/realtime-slot-isolation/manifest.json");
     expect(unit).toContain("Environment=REALTIME_SLOT_ISOLATION_BEAM=/opt/supacloud/realtime-slot-isolation/Elixir.Realtime.Tenants.ReplicationConnection.beam");
@@ -167,7 +167,7 @@ describe("Realtime systemd deployment", () => {
     expect(rendered.serviceEnvText).not.toContain("STALE_SERVICE_KEY");
     expect(rendered.serviceEnvText).not.toContain("REALTIME_API_SECRET");
     expect(rendered.unitText).toContain("ExecStart=/usr/local/libexec/supacloud/realtime-launcher");
-    expect(rendered.serviceEnvText).toContain("REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=\"2.133.0\"");
+    expect(rendered.serviceEnvText).toContain("REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=\"2.138.1\"");
     expect(rendered.serviceEnvText).toContain("REALTIME_SLOT_ISOLATION_MANIFEST=");
     expect(rendered.serviceEnvText).toContain("REALTIME_SLOT_ISOLATION_BEAM=");
     expect(rendered.serviceEnvText).toContain("REALTIME_SLOT_ISOLATION_VERIFY_SCRIPT=");
@@ -225,7 +225,7 @@ describe("Realtime systemd deployment", () => {
     for (const [key, value] of serviceEnvironment) effectiveEnvironment.set(key, value);
 
     expect(effectiveEnvironment.get("REALTIME_IMAGE")).toBe(
-      "public.ecr.aws/supabase/realtime@sha256:974f7db71f140f54c63c8d7a8d8643109704c3ee99ff735678a803fdfbfdcefb",
+      "public.ecr.aws/supabase/realtime@sha256:7a6d995635f747b566079e51b1a1388dded8b2d0dfef1eda5afe98f6c9e5567e",
     );
     expect(effectiveEnvironment.get("REALTIME_CONTAINER_NAME")).toBe("supacloud-realtime");
     expect(effectiveEnvironment.get("REALTIME_DB_USER")).toBe("supabase_admin");
@@ -246,7 +246,7 @@ describe("Realtime systemd deployment", () => {
       return value;
     });
     expect(effectiveCommand).toBe("/usr/local/libexec/supacloud/realtime-launcher");
-    expect(effectiveEnvironment.get("REALTIME_SLOT_ISOLATION_RUNTIME_VERSION")).toBe("2.133.0");
+    expect(effectiveEnvironment.get("REALTIME_SLOT_ISOLATION_RUNTIME_VERSION")).toBe("2.138.1");
     expect(effectiveEnvironment.get("REALTIME_SLOT_ISOLATION_ARTIFACT_DIR")).toBe(
       "/opt/supacloud/realtime-slot-isolation",
     );
@@ -257,7 +257,7 @@ describe("Realtime systemd deployment", () => {
       "/usr/local/libexec/supacloud/verify_slot_isolation_artifact.py",
     );
 
-    const customImage = "registry.example.test/supabase/realtime:v2.133.0-custom";
+    const customImage = "registry.example.test/supabase/realtime:v2.138.1-custom";
     const custom = renderRealtimeEnv(undefined, undefined, customImage);
     expect(custom.result.status).toBe(0);
     expect(custom.serviceEnvText).toContain(`REALTIME_IMAGE="${customImage}"\n`);

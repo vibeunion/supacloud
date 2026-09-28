@@ -12,11 +12,13 @@ const runBody = t.Optional(t.Object({
 }));
 
 const diagnosticsApi = new Elysia({ prefix: "/v1/diagnostics" })
-  .onBeforeHandle(async ({ request }) => {
+  .beforeHandle(async ({ request }) => {
     const authError = await requireAdminAuth(request);
     if (authError) return status(authError.status, authError.body);
   })
-  .get("/checks", () => {
+  .get("/checks", {
+    detail: { tags: ["diagnostics"], summary: "List available diagnostic checks" },
+  }, () => {
     return getAllChecks().map((check) => ({
       id: check.id,
       name: check.name,
@@ -26,64 +28,65 @@ const diagnosticsApi = new Elysia({ prefix: "/v1/diagnostics" })
       severity: check.severity,
       repairable: check.repairable,
     }));
-  }, {
-    detail: { tags: ["diagnostics"], summary: "List available diagnostic checks" },
   })
-  .post("/runs", async ({ request, body }) => {
-    return diag.runDiagnostics("platform", undefined, body?.check_ids);
-  }, {
+  .post("/runs", {
     body: runBody,
     detail: { tags: ["diagnostics"], summary: "Run platform-level diagnostics" },
+  }, async ({ request, body }) => {
+    return diag.runDiagnostics("platform", undefined, body?.check_ids);
   })
-  .get("/runs/:id", async ({ params }) => {
+  .get("/runs/:id", {
+    params: t.Object({ id: t.String() }),
+    detail: { tags: ["diagnostics"], summary: "Get diagnostic run status" },
+  }, async ({ params }) => {
     const run = await diag.getRun(params.id);
     if (!run) return status(404, { error: "Run not found" });
     return run;
-  }, {
-    params: t.Object({ id: t.String() }),
-    detail: { tags: ["diagnostics"], summary: "Get diagnostic run status" },
   })
-  .get("/runs/:id/results", async ({ params }) => {
+  .get("/runs/:id/results", {
+    params: t.Object({ id: t.String() }),
+    detail: { tags: ["diagnostics"], summary: "Get diagnostic run results" },
+  }, async ({ params }) => {
     const run = await diag.getRun(params.id);
     if (!run) return status(404, { error: "Run not found" });
     return { run, results: await diag.getRunResults(params.id) };
-  }, {
-    params: t.Object({ id: t.String() }),
-    detail: { tags: ["diagnostics"], summary: "Get diagnostic run results" },
   })
-  .get("/runs", async ({ query }) => {
-    return diag.listRuns({
-      scope: query.scope === "platform" || query.scope === "project" ? query.scope : undefined,
-      projectRef: query.project_ref || undefined,
-      limit: query.limit ? parseInt(query.limit, 10) : 20,
-    });
-  }, {
+  .get("/runs", {
     query: t.Object({
       scope: t.Optional(t.String()),
       project_ref: t.Optional(t.String()),
       limit: t.Optional(t.String()),
     }),
     detail: { tags: ["diagnostics"], summary: "List diagnostic runs" },
+  }, async ({ query }) => {
+    return diag.listRuns({
+      scope: query.scope === "platform" || query.scope === "project" ? query.scope : undefined,
+      projectRef: query.project_ref || undefined,
+      limit: query.limit ? parseInt(query.limit, 10) : 20,
+    });
   })
-  .post("/results/:id/repair", async ({ params, request }) => {
-    return diag.executeRepair(params.id);
-  }, {
+  .post("/results/:id/repair", {
     params: t.Object({ id: t.String() }),
     detail: { tags: ["diagnostics"], summary: "Repair a diagnostic issue (admin only)" },
+  }, async ({ params, request }) => {
+    return diag.executeRepair(params.id);
   })
-  .post("/baseline", async ({ request, body }) => {
-    const scope = body.scope === "project" ? "project" : "platform";
-    return diag.snapshotBaseline(scope, body.project_ref || undefined);
-  }, {
+  .post("/baseline", {
     body: t.Object({
       scope: t.Optional(t.String()),
       project_ref: t.Optional(t.String()),
     }),
     detail: { tags: ["diagnostics"], summary: "Snapshot diagnostic baseline (admin only)" },
+  }, async ({ request, body }) => {
+    const scope = body.scope === "project" ? "project" : "platform";
+    return diag.snapshotBaseline(scope, body.project_ref || undefined);
   });
 
 const projectDiagnosticsApi = new Elysia({ prefix: "/v1/projects/:ref/diagnostics" })
-  .get("/checks", async ({ params, request }) => {
+  .get("/checks", {
+    params: t.Object({ ref: t.String() }),
+    detail: { tags: ["diagnostics"], summary: "List project diagnostic checks" },
+  }, async ({ params, request }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
     return getAllChecks()
@@ -96,20 +99,21 @@ const projectDiagnosticsApi = new Elysia({ prefix: "/v1/projects/:ref/diagnostic
         severity: check.severity,
         repairable: check.repairable,
       }));
-  }, {
-    params: t.Object({ ref: t.String() }),
-    detail: { tags: ["diagnostics"], summary: "List project diagnostic checks" },
   })
-  .post("/runs", async ({ params, request, body }) => {
-    const authError = await requireProjectOrAdminAuth(request, params.ref);
-    if (authError) return status(authError.status, authError.body);
-    return diag.runDiagnostics("project", params.ref, body?.check_ids);
-  }, {
+  .post("/runs", {
     params: t.Object({ ref: t.String() }),
     body: runBody,
     detail: { tags: ["diagnostics"], summary: "Run project-level diagnostics" },
+  }, async ({ params, request, body }) => {
+    const authError = await requireProjectOrAdminAuth(request, params.ref);
+    if (authError) return status(authError.status, authError.body);
+    return diag.runDiagnostics("project", params.ref, body?.check_ids);
   })
-  .get("/runs", async ({ params, request, query }) => {
+  .get("/runs", {
+    params: t.Object({ ref: t.String() }),
+    query: t.Object({ limit: t.Optional(t.String()) }),
+    detail: { tags: ["diagnostics"], summary: "List project diagnostic runs" },
+  }, async ({ params, request, query }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
     return diag.listRuns({
@@ -117,12 +121,11 @@ const projectDiagnosticsApi = new Elysia({ prefix: "/v1/projects/:ref/diagnostic
       projectRef: params.ref,
       limit: query.limit ? parseInt(query.limit, 10) : 20,
     });
-  }, {
-    params: t.Object({ ref: t.String() }),
-    query: t.Object({ limit: t.Optional(t.String()) }),
-    detail: { tags: ["diagnostics"], summary: "List project diagnostic runs" },
   })
-  .get("/runs/:id", async ({ params, request }) => {
+  .get("/runs/:id", {
+    params: t.Object({ ref: t.String(), id: t.String() }),
+    detail: { tags: ["diagnostics"], summary: "Get project diagnostic run" },
+  }, async ({ params, request }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
     const run = await diag.getRun(params.id);
@@ -130,11 +133,11 @@ const projectDiagnosticsApi = new Elysia({ prefix: "/v1/projects/:ref/diagnostic
       return status(404, { error: "Run not found" });
     }
     return run;
-  }, {
-    params: t.Object({ ref: t.String(), id: t.String() }),
-    detail: { tags: ["diagnostics"], summary: "Get project diagnostic run" },
   })
-  .get("/runs/:id/results", async ({ params, request }) => {
+  .get("/runs/:id/results", {
+    params: t.Object({ ref: t.String(), id: t.String() }),
+    detail: { tags: ["diagnostics"], summary: "Get project diagnostic results" },
+  }, async ({ params, request }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
     const run = await diag.getRun(params.id);
@@ -142,9 +145,6 @@ const projectDiagnosticsApi = new Elysia({ prefix: "/v1/projects/:ref/diagnostic
       return status(404, { error: "Run not found" });
     }
     return { run, results: await diag.getRunResults(params.id) };
-  }, {
-    params: t.Object({ ref: t.String(), id: t.String() }),
-    detail: { tags: ["diagnostics"], summary: "Get project diagnostic results" },
   });
 
 export const diagnosticsRoutes = new Elysia({ name: "diagnostics-routes" })

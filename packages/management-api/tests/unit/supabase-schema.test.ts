@@ -27,6 +27,10 @@ describe("supabase bootstrap schema", () => {
     }
     expect(readRepoFile("src/scripts/migrate-tenant-schema.ts"))
       .toContain("${TENANT_PUBLIC_SCHEMA_ACCESS_SQL}");
+    expect(readRepoFile("src/services/tenant-runtime-migration.ts"))
+      .toContain("GRANT USAGE ON SCHEMA public TO supabase_admin, supabase_realtime_admin;");
+    expect(readRepoFile("src/scripts/migrate-tenant-schema.ts"))
+      .toContain("GRANT USAGE ON SCHEMA public TO supabase_admin, supabase_realtime_admin;");
   });
 
   test("exports the extracted tenant runtime migration used by the service", () => {
@@ -565,6 +569,8 @@ describe("supabase bootstrap schema", () => {
     expect(ALTER_TENANT_SQL).toContain(realtimeSchemaContract);
 
     for (const source of sources) {
+      expect(source).toContain("GRANT USAGE ON SCHEMA public TO supabase_admin, supabase_realtime_admin;");
+      expect(source).toContain("GRANT anon, authenticated, service_role TO supabase_admin WITH INHERIT FALSE, SET TRUE;");
       expect(source).toMatch(/create\s+schema\s+if\s+not\s+exists\s+realtime/i);
       expect(source).toContain(realtimeSchemaContract);
       for (const definition of officialDefinitions) {

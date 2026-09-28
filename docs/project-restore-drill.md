@@ -144,3 +144,18 @@ the logical case verified eight checks and the PITR case verified nine.
 Durations are synthetic fixture measurements, not production recovery guarantees.
 The documented operational image still requires its own build, digest pinning
 and approved production-snapshot acceptance.
+
+Local rerun on September 26, 2026 used the repository's
+`supacloud-restore-drill:local-20260926` image on the explicit `orbstack`
+Docker context. PostgreSQL 18, pgBackRest 2.59.1 and Bun 1.4.2 were exercised
+in fresh containers:
+
+- `logical-full`: 8 checks, RPO 455 ms, RTO 3339 ms.
+- `pgbackrest`: 9 checks, RPO 2714 ms, RTO 3078 ms, including the
+  post-target transaction absence check.
+
+Both runs rejected duplicate drill IDs without changing the signed receipt and
+rejected a corrupted object before database restore. This strengthens the local
+independent-data-recovery evidence, but remains synthetic data and does not
+prove an approved production snapshot, production RPO/RTO, or full-platform
+application rollback.

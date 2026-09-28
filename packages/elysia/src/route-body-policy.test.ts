@@ -15,7 +15,7 @@ test('parse: "none" preserves request identity and malformed JSON until authoriz
     method: "POST", path: "/raw", handler: "raw", parse: "none",
     contract: { body: "domain", response: "binary", evidence: "route-body-policy.test.ts" },
   });
-  const app = new Elysia().onBeforeHandle(({ request }) => {
+  const app = new Elysia().beforeHandle(({ request }) => {
     if (!request.headers.has("authorization")) return new Response("denied", { status: 401 });
   }).use(createModulePlugin(module, {
     controller: { raw: async (input: { context: Request }) => {

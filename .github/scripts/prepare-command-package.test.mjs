@@ -9,7 +9,18 @@ const siblings = new Map([
   ['@supacloud/contracts', { name: '@supacloud/contracts', version: '0.1.0' }],
   ['@supacloud/commands', { name: '@supacloud/commands', version: '0.1.0' }],
   ['@supacloud/db', { name: '@supacloud/db', version: '0.6.0' }],
+  ['@supacloud/delivery', { name: '@supacloud/delivery', version: '0.1.0' }],
 ]);
+test('compiler publication resolves the shared delivery dependency', () => {
+  const input = {
+    name: '@supacloud/compiler',
+    dependencies: { '@supacloud/delivery': 'file:../delivery' },
+  };
+  const result = prepareCommandPackage(input, siblings);
+  assert.deepEqual(result.required, ['@supacloud/delivery@0.1.0']);
+  assert.deepEqual(result.package['dependencies'], { '@supacloud/delivery': '0.1.0' });
+  assert.equal(input.dependencies['@supacloud/delivery'], 'file:../delivery');
+});
 test('publication resolves local dependencies and overrides without mutating development manifests', () => {
   const input = {
     name: '@supacloud/elysia',
@@ -59,10 +70,13 @@ test('release order and preparation cover every package using local command depe
   const elysia = workflow.indexOf('name: Publish elysia adapter');
   const cli = workflow.indexOf('name: Publish cli to NPM');
   const admin = workflow.indexOf('name: Publish admin to NPM');
+  const delivery = workflow.indexOf('name: Publish delivery contracts to NPM');
+  const compiler = workflow.indexOf('name: Publish app compiler to NPM');
+  assert.ok(delivery > 0 && compiler > delivery && cli > compiler);
   assert.ok(contracts > 0 && commands > contracts && database > commands && app > database && svelte > contracts && elysia > database);
   assert.ok(cli > 0 && admin > cli, 'admin must publish after its CLI dependency');
   assert.ok(contracts < workflow.indexOf('name: Publish supacloud-js'));
-  for (const name of ['admin', 'commands', 'app', 'app-svelte', 'db', 'elysia', 'supacloud-js']) {
+  for (const name of ['admin', 'commands', 'app', 'app-svelte', 'db', 'compiler', 'elysia', 'supacloud-js']) {
     const block = workflow.split(`working-directory: packages/${name}\n`)[1]?.split('\n      - name:')[0];
     assert.ok(block);
     assert.match(block, /prepare-command-package\.mjs[\s\S]*bun install --lockfile-only[\s\S]*bun install --frozen-lockfile/);
@@ -77,6 +91,7 @@ test('recovery runs the command package graph after a tag-only release', () => {
   const commands = workflow.indexOf('name: Publish durable commands');
   assert.match(workflow.slice(contracts, commands), /inputs\.recover_npm == true/);
   for (const stepName of [
+    'Publish delivery contracts to NPM',
     'Publish supacloud-js to NPM',
     'Publish durable commands to NPM',
     'Publish database governance to NPM',

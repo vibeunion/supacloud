@@ -16,6 +16,7 @@ on:
       - "packages/function-adapter/**"
       - "packages/app/**"
       - "packages/compiler/**"
+      - "packages/delivery/**"
       - "packages/elysia/**"
       - "packages/db/**"
       - "packages/testing/**"
@@ -94,6 +95,8 @@ jobs:
       - name: Install dependencies
         working-directory: packages/management-api
         run: bun install --frozen-lockfile
+      - name: Install delivery dependencies
+        run: bun install --frozen-lockfile --cwd packages/delivery
 
       - name: Type check
         working-directory: packages/management-api
@@ -132,11 +135,18 @@ jobs:
       - name: Install compiler dependencies
         working-directory: packages/compiler
         run: bun install --frozen-lockfile
+      - name: Install delivery dependencies
+        run: bun install --frozen-lockfile --cwd packages/delivery
 
       - name: Prepare app public API dependencies
         run: |
           bun run scripts/build-command-dependencies.ts app
           (cd packages/app && bun install --frozen-lockfile)
+          (cd packages/cli && bun install --frozen-lockfile --ignore-scripts)
+          (cd packages/db && bun install --frozen-lockfile --ignore-scripts)
+          (cd packages/management-api && bun install --frozen-lockfile)
+          (cd packages/supacloud-lite && bun install --frozen-lockfile)
+          (cd packages/compiler && bun run build)
 
       - name: Run workspace architecture gates
         run: |
@@ -201,6 +211,7 @@ jobs:
             working-directory: packages/cli
             script: |
               bun install --frozen-lockfile
+              (cd ../delivery && bun run build)
               bun run typecheck
               bun test src
               bun run build
@@ -218,6 +229,9 @@ jobs:
             working-directory: packages/admin
             script: |
               bun install --frozen-lockfile
+              (cd ../cli && bun install --frozen-lockfile)
+              (cd ../compiler && bun install --frozen-lockfile && bun run build)
+              (cd ../management-api && bun install --frozen-lockfile)
               bun run typecheck
               bun test src
               bun run build
@@ -243,11 +257,19 @@ jobs:
           - name: App Compiler
             working-directory: packages/compiler
             script: |
+              bun run ../../scripts/build-command-dependencies.ts elysia
+              (cd ../elysia && bun install --frozen-lockfile && bun run build)
               bun install --frozen-lockfile
               bun run typecheck
               bun run typecheck:test
               bun test
               bun run build
+              (cd ../management-api && bun install --frozen-lockfile)
+              (cd ../management-api && bun run typecheck:application-releases)
+              (cd ../cli && bun install --frozen-lockfile)
+              (cd ../delivery && bun install --frozen-lockfile && bun run typecheck && bun run build)
+              bun test --timeout 60000 ../../scripts/lib/application-release-storage.test.ts
+              bun ../../.github/scripts/delivery-package.acceptance.mjs
               bun run ../../scripts/audit_dependencies.ts
           - name: Elysia Adapter
             working-directory: packages/elysia
@@ -337,6 +359,9 @@ jobs:
           node --version
           bun --version
 
+      - name: Install delivery dependencies
+        run: bun install --frozen-lockfile --cwd packages/delivery
+
       - name: Run package checks
         working-directory: ${{ matrix.working-directory }}
         run: ${{ matrix.script }}
@@ -372,7 +397,7 @@ jobs:
     timeout-minutes: 15
     services:
       postgres:
-        image: ghcr.io/pgmq/pg18-pgmq:v1.10.0
+        image: ghcr.io/pgmq/pg18-pgmq:v1.13.0
         env:
           POSTGRES_PASSWORD: local-command-test-only
           POSTGRES_DB: supacloud_commands_test
@@ -389,6 +414,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
+      - name: Install command workflow dependencies
+        run: |
+          bun install --frozen-lockfile --cwd packages/contracts
+          bun install --frozen-lockfile --cwd packages/delivery
+          bun install --frozen-lockfile --cwd packages/commands
+          bun install --frozen-lockfile --cwd packages/compiler
+          bun run scripts/build-command-dependencies.ts elysia
+          (cd packages/elysia && bun install --frozen-lockfile && bun run build)
       - name: Verify native command and Workflow boundaries
         env:
           SUPACLOUD_COMMAND_TEST_URL: postgres://postgres:local-command-test-only@127.0.0.1:5432/supacloud_commands_test
@@ -469,6 +502,36 @@ jobs:
           SUPACLOUD_LITE_STANDALONE_BINARY: dist/standalone/supacloud-lite-linux-x64
         run: bun run test:standalone:native
 
+  application-activation-native:
+    name: Application Activation Native PostgreSQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install local test dependencies
+        run: |
+          (cd packages/delivery && bun install --frozen-lockfile)
+          (cd packages/management-api && bun install --frozen-lockfile)
+          sudo apt-get update
+          sudo apt-get install -y postgresql
+      - name: Verify activation journal on an owned cluster
+        run: |
+          postgres_bin=""
+          for candidate in /usr/lib/postgresql/*/bin; do
+            if [[ -x "$candidate/initdb" && -x "$candidate/pg_ctl" ]]; then
+              postgres_bin="$candidate"
+            fi
+          done
+          test -n "$postgres_bin"
+          "$postgres_bin/postgres" --version
+          SUPACLOUD_STARTER_POSTGRES_BIN="$postgres_bin" \
+            bun --no-env-file test scripts/lib/application-activation-native.test.ts scripts/lib/application-migrations-native.test.ts
+
   docker-and-scripts-checks:
     name: Docker & Scripts Checks
     runs-on: ubuntu-latest
@@ -488,6 +551,11 @@ jobs:
           docker compose -f docker/dev/docker-compose.yml config --quiet
           docker compose -f docker/self-host/docker-compose.yml config --quiet
 
+      - name: Install systemd renderer test dependencies
+        run: |
+          (cd packages/delivery && bun install --frozen-lockfile)
+          (cd packages/management-api && bun install --frozen-lockfile)
+
       - name: Validate shell script syntax
         run: |
           for script in install.sh setup.sh switch.sh scripts/pre_start_recovery.sh infrastructure/realtime/*.sh; do
@@ -498,6 +566,7 @@ jobs:
           bash scripts/lib/installer_pg_hba.test.sh
           bash scripts/lib/tenant_user.test.sh
           bash scripts/lib/systemd_unit_broker.test.sh
+          bash scripts/lib/application_bun_runtime.test.sh
           bash scripts/lib/edge_runtime_source.test.sh
 
       - name: Validate Realtime slot-isolation trust root
@@ -556,6 +625,9 @@ jobs:
         working-directory: packages/management-api
         run: bun run sql:check
 
+      - name: Install delivery dependencies
+        run: bun install --frozen-lockfile --cwd packages/delivery
+
       - name: Enforce canonical SQL module coverage
         working-directory: packages/management-api
         run: bun run test:sql-modules
@@ -563,6 +635,11 @@ jobs:
       - name: Compile management API
         working-directory: packages/management-api
         run: bun run build:amd64
+
+      - name: Install identity test dependencies
+        run: |
+          bun run scripts/build-command-dependencies.ts elysia
+          bun install --frozen-lockfile --cwd packages/elysia
 
       - name: Run unit tests
         working-directory: packages/management-api
@@ -615,7 +692,9 @@ jobs:
 
       - name: Install Management API dependencies
         working-directory: packages/management-api
-        run: bun install --frozen-lockfile
+        run: |
+          bun install --frozen-lockfile --cwd ../delivery
+          bun install --frozen-lockfile
 
       - name: Initialize Docker metadata database
         working-directory: packages/management-api
@@ -704,7 +783,7 @@ jobs:
     services:
       postgres:
         # Upstream Supabase compatibility fixture only. SupaCloud deployment remains PostgreSQL 18.
-        image: supabase/postgres:17.6.1.143
+        image: supabase/postgres:17.6.1.177
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -715,7 +794,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
       postgrest:
-        image: postgrest/postgrest:v16.3
+        image: postgrest/postgrest:v16.4
         ports:
           - 3000:3000
         env:
@@ -747,7 +826,7 @@ jobs:
           API_EXTERNAL_URL: http://127.0.0.1:9090
           GOTRUE_OPERATOR_TOKEN: super-secret-jwt-token-with-at-least-32-characters-long
       realtime:
-        image: public.ecr.aws/supabase/realtime:v2.133.0
+        image: public.ecr.aws/supabase/realtime:v2.138.1
         ports:
           - 4000:4000
         env:
@@ -833,6 +912,7 @@ jobs:
       - name: Install dependencies
         working-directory: packages/management-api
         run: |
+          bun install --frozen-lockfile --cwd ../delivery
           bun install --frozen-lockfile
           cd ../edge-runtime && bun install --frozen-lockfile
 
@@ -878,8 +958,8 @@ jobs:
           done
           if [ "${realtime_ready}" != "true" ]; then
             echo "::error title=Realtime service not ready::Realtime did not become reachable on :4000"
-            docker ps -a --filter "ancestor=public.ecr.aws/supabase/realtime:v2.133.0" || true
-            realtime_container_id="$(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.133.0" | head -n1)"
+            docker ps -a --filter "ancestor=public.ecr.aws/supabase/realtime:v2.138.1" || true
+            realtime_container_id="$(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.138.1" | head -n1)"
             if [ -n "${realtime_container_id}" ]; then
               echo "--- Realtime container status ---"
               docker inspect --format='{{.State.Status}} exit={{.State.ExitCode}} err={{.State.Error}} oom={{.State.OOMKilled}} restart={{.RestartCount}}' "${realtime_container_id}" || true
@@ -929,7 +1009,7 @@ jobs:
         run: |
           echo "Restarting Auth and Realtime Containers..."
           docker start $(docker ps -a -q --filter "ancestor=supabase/gotrue:v2.197.0") || true
-          docker start $(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.133.0") || true
+          docker start $(docker ps -a -q --filter "ancestor=public.ecr.aws/supabase/realtime:v2.138.1") || true
           sleep 4
 
       - name: Launch API & Execute Full Defenses
@@ -1061,6 +1141,7 @@ jobs:
       - name: Typecheck Caddy build contracts
         working-directory: packages/management-api
         run: |
+          bun install --frozen-lockfile --cwd ../delivery
           bun install --frozen-lockfile
           bun run typecheck:caddy-tests
 
@@ -1081,6 +1162,7 @@ jobs:
       - command-workflow-integration
       - supacloud-lite-windows
       - supacloud-lite-standalone-native
+      - application-activation-native
       - docker-and-scripts-checks
       - unit-test
       - postgres-18-compatibility
@@ -1100,6 +1182,7 @@ jobs:
           COMMAND_WORKFLOW: ${{ needs.command-workflow-integration.result }}
           SUPACLOUD_LITE_WINDOWS: ${{ needs.supacloud-lite-windows.result }}
           SUPACLOUD_LITE_STANDALONE: ${{ needs.supacloud-lite-standalone-native.result }}
+          APPLICATION_ACTIVATION_NATIVE: ${{ needs.application-activation-native.result }}
           DOCKER_AND_SCRIPTS: ${{ needs.docker-and-scripts-checks.result }}
           UNIT_TESTS: ${{ needs.unit-test.result }}
           POSTGRES_18: ${{ needs.postgres-18-compatibility.result }}
@@ -1115,6 +1198,7 @@ jobs:
             "$COMMAND_WORKFLOW" \
             "$SUPACLOUD_LITE_WINDOWS" \
             "$SUPACLOUD_LITE_STANDALONE" \
+            "$APPLICATION_ACTIVATION_NATIVE" \
             "$DOCKER_AND_SCRIPTS" \
             "$UNIT_TESTS" \
             "$POSTGRES_18" \
@@ -1174,6 +1258,7 @@ jobs:
       - name: Build Linux primary binaries
         working-directory: packages/management-api
         run: |
+          bun install --frozen-lockfile --cwd ../delivery
           mkdir -p dist
           bun run build:linux
           mv supacloud-linux-amd64 dist/

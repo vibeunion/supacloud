@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
-import { swagger } from "@elysiajs/swagger";
+import { openapi } from "@elysia/openapi";
 import { Elysia } from "elysia";
 
 const USER_ID = "00000000-0000-4000-8000-000000000001";
@@ -66,7 +66,7 @@ const resolveDbNameSpy = spyOn(dbModule, "resolveDbName").mockResolvedValue("sup
 const getProjectDbSpy = spyOn(dbModule, "getProjectDb").mockReturnValue(tenantDb as never);
 
 const { authMfaRoutes } = await import("../../src/routes/auth-mfa");
-const app = new Elysia().use(swagger()).use(authMfaRoutes);
+const app = new Elysia().use(openapi({ path: "/swagger" })).use(authMfaRoutes);
 const originalFetch = globalThis.fetch;
 
 function request(path: string, init: RequestInit = {}) {
@@ -176,6 +176,7 @@ describe("authMfaRoutes", () => {
     });
 
     const openApiResponse = await request("/swagger/json");
+    expect(openApiResponse.status).toBe(200);
     const openApi = await openApiResponse.json() as {
       paths: Record<string, { get?: unknown; post?: unknown }>;
     };

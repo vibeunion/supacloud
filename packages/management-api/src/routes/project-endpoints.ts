@@ -63,7 +63,8 @@ function endpointProjection(project: ProjectEndpointRoutingSource) {
 }
 
 export const projectEndpointRoutes = new Elysia({ prefix: "/v1/projects" })
-  .onError(({ code, error, set }) => {
+  .error(({ error, set }) => {
+    const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
     if (code === "VALIDATION") return validationErrorResponse(set);
     logger.error(`[ProjectEndpoints] Unhandled error [${code}]:`, error);
     set.status = code === "NOT_FOUND" ? 404 : 500;
@@ -74,6 +75,15 @@ export const projectEndpointRoutes = new Elysia({ prefix: "/v1/projects" })
   })
   .get(
     "/endpoints",
+    {
+      response: {
+        200: t.Array(V1ProjectEndpointsResponseSchema),
+        401: ProjectEndpointErrorSchema,
+        403: ProjectEndpointErrorSchema,
+        500: ProjectEndpointErrorSchema,
+      },
+      detail: { tags: ["projects"], summary: "List authoritative project endpoint projections" },
+    },
     async ({ request }) => {
       const authError = await requireAdminAuth(request);
       if (authError) {
@@ -92,18 +102,20 @@ export const projectEndpointRoutes = new Elysia({ prefix: "/v1/projects" })
       }
       return projects.map(endpointProjection);
     },
-    {
-      response: {
-        200: t.Array(V1ProjectEndpointsResponseSchema),
-        401: ProjectEndpointErrorSchema,
-        403: ProjectEndpointErrorSchema,
-        500: ProjectEndpointErrorSchema,
-      },
-      detail: { tags: ["projects"], summary: "List authoritative project endpoint projections" },
-    },
   )
   .get(
     "/:ref/endpoint/projection",
+    {
+      params: t.Object({ ref: t.String({ minLength: 1, maxLength: 20 }) }),
+      response: {
+        200: V1ProjectEndpointsResponseSchema,
+        401: ProjectEndpointErrorSchema,
+        403: ProjectEndpointErrorSchema,
+        404: ProjectEndpointErrorSchema,
+        500: ProjectEndpointErrorSchema,
+      },
+      detail: { tags: ["projects"], summary: "Get an authoritative project endpoint projection" },
+    },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) {
@@ -118,16 +130,5 @@ export const projectEndpointRoutes = new Elysia({ prefix: "/v1/projects" })
         return status(404, { message: "Project not found", code: "404" });
       }
       return endpointProjection(project);
-    },
-    {
-      params: t.Object({ ref: t.String({ minLength: 1, maxLength: 20 }) }),
-      response: {
-        200: V1ProjectEndpointsResponseSchema,
-        401: ProjectEndpointErrorSchema,
-        403: ProjectEndpointErrorSchema,
-        404: ProjectEndpointErrorSchema,
-        500: ProjectEndpointErrorSchema,
-      },
-      detail: { tags: ["projects"], summary: "Get an authoritative project endpoint projection" },
     },
   );

@@ -857,9 +857,9 @@ export async function reconcileProjectMutation(
 export async function readProjectMutation(input: {
   projectRef: string;
   mutationId: string;
-}): Promise<ProjectMutationState | null> {
+}, database: SQL = sql): Promise<ProjectMutationState | null> {
   assertMutationIdentity(input.projectRef, input.mutationId);
-  const [row] = await sql`
+  const [row] = await database`
     SELECT * FROM project_mutations
     WHERE project_ref = ${input.projectRef} AND mutation_id = ${input.mutationId}
   ` as StoredProjectMutationRow[];

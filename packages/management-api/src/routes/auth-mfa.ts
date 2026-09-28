@@ -159,9 +159,18 @@ async function goTrueError(response: Response, fallbackMessage: string) {
 }
 
 export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
-  .onBeforeHandle(requireAuthRuntimeManagement("mfa"))
+  .beforeHandle(requireAuthRuntimeManagement("mfa"))
   .get(
     "/:ref/auth/factors",
+    {
+      params: t.Object({ ref: t.String() }),
+      query: t.Object({
+        user_id: t.Optional(t.String()),
+        page: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+      }),
+      detail: { tags: ["auth"], summary: "List GoTrue TOTP factors" },
+    },
     async ({ params, query }) => {
       const page = parsePositiveInteger(query.page, 1, MAX_PAGE);
       const limit = parsePositiveInteger(query.limit, DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE);
@@ -196,30 +205,25 @@ export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
         return mfaStorageError(error);
       }
     },
-    {
-      params: t.Object({ ref: t.String() }),
-      query: t.Object({
-        user_id: t.Optional(t.String()),
-        page: t.Optional(t.String()),
-        limit: t.Optional(t.String()),
-      }),
-      detail: { tags: ["auth"], summary: "List GoTrue TOTP factors" },
-    },
   )
   .post(
     "/:ref/auth/factors",
+    {
+      params: t.Object({ ref: t.String() }),
+      detail: { hide: true },
+    },
     () => status(501, {
       code: "CAPABILITY_UNAVAILABLE",
       message: "TOTP enrollment must be completed by the signed-in user through GoTrue",
       reason_code: "gotrue_user_mfa_ceremony_required",
     }),
-    {
-      params: t.Object({ ref: t.String() }),
-      detail: { hide: true },
-    },
   )
   .delete(
     "/:ref/auth/factors/:id",
+    {
+      params: t.Object({ ref: t.String(), id: t.String() }),
+      detail: { tags: ["auth"], summary: "Delete a GoTrue TOTP factor" },
+    },
     async ({ params, set }) => {
       if (!GOTRUE_UUID_PATTERN.test(params.id)) {
         return status(400, { code: "VALIDATION_ERROR", message: "GoTrue factor id must be a UUID" });
@@ -307,9 +311,5 @@ export const authMfaRoutes = new Elysia({ prefix: "/v1/projects" })
         }
       }
       return { success: true, id: params.id, source: "gotrue" };
-    },
-    {
-      params: t.Object({ ref: t.String(), id: t.String() }),
-      detail: { tags: ["auth"], summary: "Delete a GoTrue TOTP factor" },
     },
   );

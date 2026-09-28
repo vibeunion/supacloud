@@ -16,7 +16,13 @@ import { getPlatformSetting } from "../services/platform-settings.service";
 export const chatRoutes = new Elysia({ name: "chat-proxy" })
 
   // ─── POST /v1/chat/completions ─────────────────────────────────
-  .post("/v1/chat/completions", async ({ body, set }) => {
+  .post("/v1/chat/completions", {
+    body: t.Object({
+      model: t.Optional(t.String()),
+      stream: t.Optional(t.Boolean())
+    }, { additionalProperties: true }),
+    detail: { tags: ["tasks"], summary: "Proxy chat completion request" },
+  }, async ({ body, set }) => {
     // 1. Read dynamic config from DB
     const [aiApiBase, aiApiKey, aiModel] = await Promise.all([
       getPlatformSetting("ai_api_base"),
@@ -93,17 +99,13 @@ export const chatRoutes = new Elysia({ name: "chat-proxy" })
         },
       };
     }
-  }, {
-    body: t.Object({
-      model: t.Optional(t.String()),
-      stream: t.Optional(t.Boolean())
-    }, { additionalProperties: true }),
-    detail: { tags: ["tasks"], summary: "Proxy chat completion request" },
   })
 
   // ─── GET /v1/chat/config ───────────────────────────────────────
   // Returns a redacted view of current AI configuration (for frontend display)
-  .get("/v1/chat/config", async () => {
+  .get("/v1/chat/config", {
+    detail: { tags: ["tasks"], summary: "Get chat proxy configuration" },
+  }, async () => {
     const [aiApiBase, aiModel] = await Promise.all([
       getPlatformSetting("ai_api_base"),
       getPlatformSetting("ai_model"),
@@ -113,6 +115,4 @@ export const chatRoutes = new Elysia({ name: "chat-proxy" })
       apiBase: aiApiBase || null,
       model: aiModel || null,
     };
-  }, {
-    detail: { tags: ["tasks"], summary: "Get chat proxy configuration" },
   });

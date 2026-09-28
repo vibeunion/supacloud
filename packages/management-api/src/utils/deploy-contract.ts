@@ -1,7 +1,8 @@
 import path from "node:path";
 import { lstat, readlink } from "node:fs/promises";
-import { Type, type Static } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
+import { Type, type Static } from "typebox";
+import { Value } from "typebox/value";
+import { dateSchema } from "./date-schema";
 
 const text = Type.String({ minLength: 1, pattern: "^[^\\u0000-\\u001f\\u007f]+(?![\\s\\S])" });
 const staticSchema = Type.Object({
@@ -129,7 +130,7 @@ export function readDeployRequest(value: unknown): DeployRequest {
 const rowSchema = Type.Object({
   id: text, app: text, tenant: text, version: Type.String(),
   status: Type.Union([Type.Literal("success"), Type.Literal("failed"), Type.Literal("rolled_back")]),
-  deployed_at: Type.Date(), triggered_by: text, config: Type.Unknown(),
+  deployed_at: dateSchema, triggered_by: text, config: Type.Unknown(),
 });
 
 export function readDeploymentRows(value: unknown, expected: { app?: string; version?: string; status?: string } = {}) {

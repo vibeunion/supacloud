@@ -1,5 +1,4 @@
 import { createHash } from "node:crypto";
-import { fingerprint, parse } from "libpg-query";
 
 function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -25,6 +24,7 @@ export interface SqlAnalysis {
 
 /** PostgreSQL 18 grammar, not regex-based SQL rewriting. Names group overloads conservatively. */
 export async function analyzeSql(sql: string): Promise<SqlAnalysis> {
+  const { fingerprint, parse } = await import("libpg-query");
   const result: unknown = await parse(sql);
   const defines = new Set<string>(), touches = new Set<string>(), references = new Set<string>(), review = new Set<string>();
   const qualified = (kind: string, parts: string[]): string | undefined => {
@@ -93,6 +93,7 @@ export async function analyzeSql(sql: string): Promise<SqlAnalysis> {
 
 /** Read-only admission check; PostgreSQL READ ONLY and least-privilege grants remain mandatory. */
 export async function assertReadSql(sql: string): Promise<string> {
+  const { fingerprint, parse } = await import("libpg-query");
   const tree: unknown = await parse(sql);
   if (!record(tree) || !Array.isArray(tree["stmts"]) || tree["stmts"].length !== 1) throw new Error("Expected one read statement");
   const entry: unknown = tree["stmts"][0];

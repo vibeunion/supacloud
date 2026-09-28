@@ -1,0 +1,132 @@
+import { strict as assert } from "node:assert";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { buildReferenceDeliveryArchive, prepareArchivedDelivery, type ArchivedDelivery } from "./delivery-archive";
+
+// Only the generated, owned test project is modified; shipped starter sources stay unchanged.
+export async function buildReferenceUpgradeArchive(directory: string, signal: AbortSignal) {
+  const project = dirname(dirname(import.meta.path));
+  const adapter = join(project, "src/host/review-attachments.ts");
+  const original = await readFile(adapter, "utf8");
+  const before = "INSERT INTO public.starter_attachment_results VALUES($1,$2,$3,$4::text::jsonb)";
+  const after = "INSERT INTO public.starter_attachment_results " +
+    "(review_id,version,artifact_id,result,writer_revision) VALUES($1,$2,$3,$4::text::jsonb,'v2')";
+  assert.equal(original.split(before).length, 2, "Reference Worker insertion contract changed");
+  const files = new Map([
+    ["migrations/005-reference-compatibility.sql", `
+ALTER TABLE public.starter_application ADD COLUMN delivery_revision integer NOT NULL DEFAULT 2;
+ALTER TABLE public.starter_attachment_results ADD COLUMN writer_revision text NOT NULL DEFAULT 'v1';
+`],
+    ["src/reference-revision.ts", `import { SQL } from "bun";
+export async function requireReferenceRevision(signal: AbortSignal) {
+  signal.throwIfAborted();
+  const socket = process.env.DATABASE_SOCKET_PATH;
+  if (socket && process.env.DATABASE_URL) throw new Error("Conflicting database connection settings");
+  const connection: SQL.Options = socket
+    ? { adapter: "postgres", path: socket, database: process.env.DATABASE_NAME, username: process.env.DATABASE_USER }
+    : (() => {
+      if (!process.env.DATABASE_URL) throw new Error("Missing reference database connection");
+      const url = new URL(process.env.DATABASE_URL);
+      if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") throw new Error("Invalid reference database URL");
+      return {
+        adapter: "postgres", url: url.href, hostname: url.hostname.replace(/^\\[|\\]$/g, ""), port: Number(url.port || 5432),
+        username: decodeURIComponent(url.username), password: decodeURIComponent(url.password),
+        database: decodeURIComponent(url.pathname.slice(1)),
+      };
+    })();
+  if (!socket && !process.env.DATABASE_URL) throw new Error("Missing reference database connection");
+  const pool = new SQL({
+    ...connection, max: 1, connectionTimeout: 5,
+  });
+  try {
+    const value: unknown = await pool.unsafe("SELECT delivery_revision FROM public.starter_application WHERE singleton");
+    if (!Array.isArray(value) || value.length !== 1) throw new Error("Reference revision mismatch");
+    const row: unknown = value[0];
+    if (row === null || typeof row !== "object" || !("delivery_revision" in row) || row.delivery_revision !== 2) {
+      throw new Error("Reference revision mismatch");
+    }
+    signal.throwIfAborted();
+  } catch (error: unknown) {
+    if (error !== null && typeof error === "object"
+      && (("code" in error && error.code === "42703") || ("errno" in error && error.errno === "42703"))) {
+      console.log(JSON.stringify({ event: "reference-schema-rejected", reason: "missing-revision" }));
+    }
+    throw new Error("Reference compatibility revision unavailable");
+  } finally { await pool.close({ timeout: 5 }); }
+}
+`],
+    ["src/delivery-host-v2.ts", `import { createDeliveryApplication as original } from "./delivery-host";
+import { requireReferenceRevision } from "./reference-revision";
+export async function createDeliveryApplication(...args: Parameters<typeof original>) {
+  await requireReferenceRevision(args[1].signal);
+  return original(...args);
+}
+`],
+    ["src/delivery-worker-v2.ts", `import { createDeliveryWorker as original } from "./delivery-worker";
+import { requireReferenceRevision } from "./reference-revision";
+export async function createDeliveryWorker(...args: Parameters<typeof original>) {
+  await requireReferenceRevision(args[1].signal);
+  return original(...args);
+}
+`],
+  ]);
+  const created: string[] = [];
+  try {
+    for (const [relative, contents] of files) {
+      signal.throwIfAborted();
+      const path = join(project, relative);
+      await writeFile(path, contents, { flag: "wx" });
+      created.push(path);
+    }
+    await writeFile(adapter, original.replace(before, after));
+    return await buildReferenceDeliveryArchive(directory, signal, 2);
+  } finally {
+    try { await writeFile(adapter, original); }
+    finally { await Promise.all(created.map(path => rm(path, { force: true }))); }
+  }
+}
+
+export async function verifyReferenceUpgradeRefused(options: {
+  artifact: ArchivedDelivery;
+  target: "api" | "jobs";
+  connection: { socketPath: string; database: string; username: string };
+  signal: AbortSignal;
+}) {
+  const directory = await mkdtemp(join(tmpdir(), "reference-upgrade-refused-"));
+  let child: ReturnType<typeof Bun.spawn> | undefined;
+  const interrupt = () => child?.kill("SIGTERM");
+  options.signal.addEventListener("abort", interrupt, { once: true });
+  try {
+    const { bundle } = await prepareArchivedDelivery(options.artifact, options.target, directory);
+    options.signal.throwIfAborted();
+    child = Bun.spawn([process.execPath, "--no-env-file", "index.js"], {
+      cwd: bundle, stdout: "pipe", stderr: "pipe",
+      env: {
+        PATH: process.env.PATH, DATABASE_SOCKET_PATH: options.connection.socketPath,
+        DATABASE_NAME: options.connection.database, DATABASE_USER: options.connection.username,
+        HOST: "127.0.0.1", PORT: "0", SHUTDOWN_TIMEOUT_MS: "5000",
+      },
+    });
+    assert.ok(child.stdout && typeof child.stdout !== "number");
+    assert.ok(child.stderr && typeof child.stderr !== "number");
+    const deadline = setTimeout(() => child?.kill("SIGKILL"), 15_000);
+    try {
+      const [exit, stdout, stderr] = await Promise.all([
+        child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+      ]);
+      options.signal.throwIfAborted();
+      assert.equal(exit, 1);
+      assert.equal(stdout.trim(), JSON.stringify({ event: "reference-schema-rejected", reason: "missing-revision" }));
+      assert.equal(stderr.trim(), options.target === "api"
+        ? "Delivery HTTP startup failed." : "Delivery worker startup failed.");
+    } finally {
+      clearTimeout(deadline);
+      if (child.exitCode === null) { child.kill("SIGKILL"); await child.exited; }
+    }
+  } finally {
+    options.signal.removeEventListener("abort", interrupt);
+    if (child?.exitCode === null) { child.kill("SIGKILL"); await child.exited; }
+    await rm(directory, { recursive: true, force: true });
+  }
+}

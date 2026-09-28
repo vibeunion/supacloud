@@ -25,7 +25,9 @@
   "dependencies": {
     "@postgresx/bun-listen": "0.3.2",
     "@postgresx/noredis": "0.11.0",
-    "elysia": "^1.4.30"
+    "elysia": "2.0.0-beta.19",
+    "exact-mirror": "1.2.6",
+    "typebox": "1.3.34"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",

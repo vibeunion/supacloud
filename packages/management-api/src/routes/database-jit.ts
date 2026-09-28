@@ -24,29 +24,25 @@ async function run<T>(set: { status?: number | string }, operation: () => Promis
 }
 
 export const databaseJitRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" })
-  .get("/jit-access", async ({ params, request, set }) => {
+  .get("/jit-access", { detail: { tags: ["projects", "database"], summary: "Get temporary database access state" } }, async ({ params, request, set }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return authResponse(authError, set);
     return run(set, () => jitDatabaseAccessService.state(params.ref));
-  }, { detail: { tags: ["projects", "database"], summary: "Get temporary database access state" } })
-  .put("/jit-access", async ({ params, body, request, set }) => {
+  })
+  .put("/jit-access", {
+    body: t.Object({ state: t.Union([t.Literal("enabled"), t.Literal("disabled")]) }),
+    detail: { tags: ["projects", "database"], summary: "Enable or disable temporary database access" },
+  }, async ({ params, body, request, set }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return authResponse(authError, set);
     return run(set, () => jitDatabaseAccessService.setState(params.ref, body.state as JitAccessState));
-  }, {
-    body: t.Object({ state: t.Union([t.Literal("enabled"), t.Literal("disabled")]) }),
-    detail: { tags: ["projects", "database"], summary: "Enable or disable temporary database access" },
   })
-  .get("/jit", async ({ params, request, set }) => {
+  .get("/jit", { detail: { tags: ["projects", "database"], summary: "List temporary database access rules" } }, async ({ params, request, set }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return authResponse(authError, set);
     return run(set, () => jitDatabaseAccessService.listRules(params.ref));
-  }, { detail: { tags: ["projects", "database"], summary: "List temporary database access rules" } })
-  .put("/jit", async ({ params, body, request, set }) => {
-    const authError = await requireProjectOrAdminAuth(request, params.ref);
-    if (authError) return authResponse(authError, set);
-    return run(set, () => jitDatabaseAccessService.replaceRules(params.ref, body));
-  }, {
+  })
+  .put("/jit", {
     body: t.Object({
       user_id: t.String({ minLength: 1, maxLength: 200 }),
       user_roles: t.Array(t.Object({
@@ -60,20 +56,24 @@ export const databaseJitRoutes = new Elysia({ prefix: "/v1/projects/:ref/databas
       }), { maxItems: 32 }),
     }),
     detail: { tags: ["projects", "database"], summary: "Replace temporary database access rules for a user" },
-  })
-  .post("/jit/credentials", async ({ params, body, request, set }) => {
+  }, async ({ params, body, request, set }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return authResponse(authError, set);
-    return run(set, () => jitDatabaseAccessService.issueCredential(params.ref, body));
-  }, {
+    return run(set, () => jitDatabaseAccessService.replaceRules(params.ref, body));
+  })
+  .post("/jit/credentials", {
     body: t.Object({
       user_id: t.String({ minLength: 1, maxLength: 200 }),
       role: t.String({ minLength: 1, maxLength: 63 }),
     }),
     detail: { tags: ["projects", "database"], summary: "Issue a temporary PostgreSQL credential" },
+  }, async ({ params, body, request, set }) => {
+    const authError = await requireProjectOrAdminAuth(request, params.ref);
+    if (authError) return authResponse(authError, set);
+    return run(set, () => jitDatabaseAccessService.issueCredential(params.ref, body));
   })
-  .delete("/jit/credentials/:id", async ({ params, request, set }) => {
+  .delete("/jit/credentials/:id", { detail: { tags: ["projects", "database"], summary: "Revoke a temporary PostgreSQL credential" } }, async ({ params, request, set }) => {
     const authError = await requireProjectOrAdminAuth(request, params.ref);
     if (authError) return authResponse(authError, set);
     return run(set, () => jitDatabaseAccessService.revokeCredential(params.ref, params.id));
-  }, { detail: { tags: ["projects", "database"], summary: "Revoke a temporary PostgreSQL credential" } });
+  });

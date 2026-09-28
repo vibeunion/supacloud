@@ -23,6 +23,27 @@ test('drains both output pipes while waiting for a command to exit', async () =>
   expect(execution.stderr).toHaveLength(outputBytes)
 }, 10_000)
 
+test('waits for an unref subprocess to exit without an event-loop hold', async () => {
+  const execution = await executeBufferedCommand({
+    command: [bunExecutable, '-e', `
+      const child = Bun.spawn({
+        cmd: [process.execPath, '-e', ''],
+        stdout: 'ignore',
+        stderr: 'ignore',
+      })
+      child.unref()
+      const exitCode = await child.exited
+      if (exitCode !== 0) throw new Error('unref subprocess failed')
+    `],
+    cwd: import.meta.dir,
+    env: process.env,
+    timeoutMs: 5_000,
+  })
+
+  expect(execution.timedOut).toBe(false)
+  expect(execution.exitCode).toBe(0)
+}, 10_000)
+
 test('force-terminates a command at its bounded timeout', async () => {
   const startedAt = performance.now()
   const execution = await executeBufferedCommand({

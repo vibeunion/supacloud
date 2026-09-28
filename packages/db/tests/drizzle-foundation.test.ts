@@ -44,7 +44,7 @@ function docker(args: string[]): string {
 
 beforeAll(async () => {
   docker(["run", "--rm", "-d", "--name", container, "-e", "POSTGRES_HOST_AUTH_METHOD=trust",
-    "-e", "POSTGRES_DB=supacloud_drizzle_test", "-p", "127.0.0.1::5432", "ghcr.io/pgmq/pg18-pgmq:v1.10.0"]);
+    "-e", "POSTGRES_DB=supacloud_drizzle_test", "-p", "127.0.0.1::5432", "ghcr.io/pgmq/pg18-pgmq:v1.13.0"]);
   started = true;
   const port = docker(["port", container, "5432/tcp"]).split(":").at(-1);
   if (!port || !/^\d+$/.test(port)) throw new Error("Invalid local PostgreSQL port");

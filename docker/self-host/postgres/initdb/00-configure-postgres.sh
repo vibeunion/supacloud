@@ -63,6 +63,8 @@ ALTER SYSTEM SET cron.database_name = :'cron_database';
 ALTER SYSTEM SET wal_level = 'logical';
 ALTER SYSTEM SET max_wal_senders = '10';
 ALTER SYSTEM SET max_replication_slots = '10';
+-- PostgreSQL 18 output plugins are allowlisted at cluster level.
+ALTER SYSTEM SET output_plugin_libraries = 'pgoutput', 'test_decoding', 'wal2json';
 ALTER SYSTEM SET track_io_timing = 'on';
 ALTER SYSTEM SET log_min_duration_statement = '1000';
 SQL

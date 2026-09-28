@@ -23,7 +23,7 @@ export function renderGraphqlValidators(source: string, operationNames: readonly
   const host = ts.createCompilerHost(options);
   const getSourceFile = host.getSourceFile.bind(host);
   host.getSourceFile = (path, languageVersion, onError, shouldCreateNewSourceFile) =>
-    path === fileName ? ts.createSourceFile(path, source, languageVersion, true)
+    resolve(path) === fileName ? ts.createSourceFile(path, source, languageVersion, true)
       : getSourceFile(path, languageVersion, onError, shouldCreateNewSourceFile);
   const program = ts.createProgram([fileName], options, host);
   const diagnostics = ts.getPreEmitDiagnostics(program);

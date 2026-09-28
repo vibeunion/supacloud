@@ -1,5 +1,5 @@
-import { Type, type TSchema } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
+import { Type, type TSchema } from "typebox";
+import { Value } from "typebox/value";
 
 const name = Type.String({ minLength: 1 });
 const text = Type.String();
@@ -98,8 +98,21 @@ export function readPgMetaDatabase(value: unknown, projectRef: string): string |
   return value.db_name;
 }
 
+function containsSparseArray(value: unknown, seen = new Set<object>()): boolean {
+  if (value === null || typeof value !== "object" || seen.has(value)) return false;
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index++) {
+      if (!Object.hasOwn(value, index) || containsSparseArray(value[index], seen)) return true;
+    }
+  } else {
+    return Object.values(value).some((entry) => containsSparseArray(entry, seen));
+  }
+  return false;
+}
+
 export function readPgMetaRows<S extends TSchema>(schema: S, value: unknown) {
-  if (!Array.isArray(value)) throw new InvalidPgMetaRowsError();
+  if (!Array.isArray(value) || containsSparseArray(value)) throw new InvalidPgMetaRowsError();
   return Array.from(value, (row: unknown) => {
     if (!Value.Check(schema, row)) throw new InvalidPgMetaRowsError();
     return Value.Clone(row);

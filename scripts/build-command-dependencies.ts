@@ -3,12 +3,12 @@ import { resolve } from "node:path";
 
 const dependencies: Readonly<Record<string, readonly string[]>> = {
   "supacloud-js": ["contracts"],
-  "supacloud-lite": ["contracts", "supacloud-js"],
+  "supacloud-lite": ["contracts", "supacloud-js", "commands", "delivery", "compiler", "db", "app", "elysia"],
   app: ["contracts"],
-  db: ["contracts", "commands", "compiler"],
+  db: ["contracts", "commands", "delivery", "compiler"],
   commands: ["contracts"],
   "app-svelte": ["contracts"],
-  elysia: ["contracts", "commands", "db", "app", "compiler"],
+  elysia: ["contracts", "commands", "delivery", "compiler", "db", "app"],
 };
 const consumer = process.argv[2];
 if (consumer === undefined || !Object.hasOwn(dependencies, consumer)) {

@@ -417,9 +417,26 @@ async function searchGoTrueUsers(ref: string, search: string, page: number, limi
  * User Management routes — Admin API proxy to GoTrue
  */
 export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
-  .onBeforeHandle(requireAuthRuntimeManagement("users"))
+  .beforeHandle(requireAuthRuntimeManagement("users"))
   .get(
     "/users",
+    {
+      params: t.Object({ ref: t.String() }),
+      query: t.Object({
+        skip: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+        page: t.Optional(t.String()),
+        per_page: t.Optional(t.String()),
+        _page: t.Optional(t.String()),
+        _limit: t.Optional(t.String()),
+        _sort: t.Optional(t.String()),
+        _order: t.Optional(t.String()),
+        search: t.Optional(t.String()),
+        email_like: t.Optional(t.String()),
+        q: t.Optional(t.String()),
+      }, { additionalProperties: true }),
+      detail: { tags: ["auth"], summary: "List users" },
+    },
     async ({ params, query, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -484,27 +501,24 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         // JSON envelope so the data provider can render pagination correctly.
         total: Number.isFinite(parsedTotal) ? parsedTotal : list.length,
       };
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      query: t.Object({
-        skip: t.Optional(t.String()),
-        limit: t.Optional(t.String()),
-        page: t.Optional(t.String()),
-        per_page: t.Optional(t.String()),
-        _page: t.Optional(t.String()),
-        _limit: t.Optional(t.String()),
-        _sort: t.Optional(t.String()),
-        _order: t.Optional(t.String()),
-        search: t.Optional(t.String()),
-        email_like: t.Optional(t.String()),
-        q: t.Optional(t.String()),
-      }, { additionalProperties: true }),
-      detail: { tags: ["auth"], summary: "List users" },
     }
   )
   .post(
     "/users",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        email: t.Optional(t.String()),
+        phone: t.Optional(t.String()),
+        password: t.Optional(t.String()),
+        email_confirm: t.Optional(t.Boolean()),
+        phone_confirm: t.Optional(t.Boolean()),
+        user_metadata: t.Optional(t.Any()),
+        app_metadata: t.Optional(t.Any()),
+        ban_duration: t.Optional(t.String()),
+      }, { additionalProperties: true }),
+      detail: { tags: ["auth"], summary: "Create user" },
+    },
     async ({ params, body, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -542,25 +556,21 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
 
       return res.json();
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Object({
-        email: t.Optional(t.String()),
-        phone: t.Optional(t.String()),
-        password: t.Optional(t.String()),
-        email_confirm: t.Optional(t.Boolean()),
-        phone_confirm: t.Optional(t.Boolean()),
-        user_metadata: t.Optional(t.Any()),
-        app_metadata: t.Optional(t.Any()),
-        ban_duration: t.Optional(t.String()),
-      }, { additionalProperties: true }),
-      detail: { tags: ["auth"], summary: "Create user" },
     }
   )
 
   .post(
     "/users/invite",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        email: t.String(),
+        user_metadata: t.Optional(t.Any()),
+        app_metadata: t.Optional(t.Any()),
+        redirectTo: t.Optional(t.String()),
+      }, { additionalProperties: true }),
+      detail: { tags: ["auth"], summary: "Invite user by email" },
+    },
     async ({ params, body, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -594,21 +604,19 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
 
       return res.json();
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Object({
-        email: t.String(),
-        user_metadata: t.Optional(t.Any()),
-        app_metadata: t.Optional(t.Any()),
-        redirectTo: t.Optional(t.String()),
-      }, { additionalProperties: true }),
-      detail: { tags: ["auth"], summary: "Invite user by email" },
     }
   )
 
   .get(
     "/users/:id/sessions",
+    {
+      params: t.Object({ ref: t.String(), id: t.String() }),
+      query: t.Object({
+        page: t.Optional(t.String()),
+        limit: t.Optional(t.String()),
+      }, { additionalProperties: true }),
+      detail: { tags: ["auth"], summary: "List authoritative GoTrue sessions and AAL for a user" },
+    },
     async ({ params, query, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -619,18 +627,14 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       const limit = Math.min(100, Math.max(1, Number.parseInt(query.limit || "50", 10) || 50));
       return listGoTrueUserSessions(params.ref, params.id, page, limit);
     },
-    {
-      params: t.Object({ ref: t.String(), id: t.String() }),
-      query: t.Object({
-        page: t.Optional(t.String()),
-        limit: t.Optional(t.String()),
-      }, { additionalProperties: true }),
-      detail: { tags: ["auth"], summary: "List authoritative GoTrue sessions and AAL for a user" },
-    },
   )
 
   .post(
     "/users/:id/sessions/:sessionId/revoke",
+    {
+      params: t.Object({ ref: t.String(), id: t.String(), sessionId: t.String() }),
+      detail: { hide: true },
+    },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -642,14 +646,14 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         "gotrue_admin_session_revoke_unavailable",
       );
     },
-    {
-      params: t.Object({ ref: t.String(), id: t.String(), sessionId: t.String() }),
-      detail: { hide: true },
-    },
   )
 
   .delete(
     "/users/:id/identities/:identityId",
+    {
+      params: t.Object({ ref: t.String(), id: t.String(), identityId: t.String() }),
+      detail: { hide: true },
+    },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -661,14 +665,15 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         "gotrue_admin_identity_unlink_unavailable",
       );
     },
-    {
-      params: t.Object({ ref: t.String(), id: t.String(), identityId: t.String() }),
-      detail: { hide: true },
-    },
   )
 
   .get(
     "/users/:id/grants",
+    {
+      params: t.Object({ ref: t.String(), id: t.String() }),
+      query: t.Object({ include_revoked: t.Optional(t.String()) }, { additionalProperties: true }),
+      detail: { tags: ["auth"], summary: "List authoritative GoTrue OAuth grants for a user" },
+    },
     async ({ params, query, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -678,15 +683,14 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         return gotrueGrantError(error);
       }
     },
-    {
-      params: t.Object({ ref: t.String(), id: t.String() }),
-      query: t.Object({ include_revoked: t.Optional(t.String()) }, { additionalProperties: true }),
-      detail: { tags: ["auth"], summary: "List authoritative GoTrue OAuth grants for a user" },
-    },
   )
 
   .delete(
     "/users/:id/grants/:clientId",
+    {
+      params: t.Object({ ref: t.String(), id: t.String(), clientId: t.String() }),
+      detail: { hide: true },
+    },
     async ({ params, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -696,14 +700,15 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         return gotrueGrantError(error);
       }
     },
-    {
-      params: t.Object({ ref: t.String(), id: t.String(), clientId: t.String() }),
-      detail: { hide: true },
-    },
   )
 
   .get(
     "/oauth-clients/:clientId/grants",
+    {
+      params: t.Object({ ref: t.String(), clientId: t.String() }),
+      query: t.Object({ include_revoked: t.Optional(t.String()) }, { additionalProperties: true }),
+      detail: { tags: ["auth"], summary: "List authoritative GoTrue OAuth grants for an application" },
+    },
     async ({ params, query, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -717,15 +722,15 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         return gotrueGrantError(error);
       }
     },
-    {
-      params: t.Object({ ref: t.String(), clientId: t.String() }),
-      query: t.Object({ include_revoked: t.Optional(t.String()) }, { additionalProperties: true }),
-      detail: { tags: ["auth"], summary: "List authoritative GoTrue OAuth grants for an application" },
-    },
   )
 
   .post(
     "/users/:id/suspend",
+    {
+      params: t.Object({ ref: t.String(), id: t.String() }),
+      body: t.Optional(t.Record(t.String(), t.Unknown())),
+      detail: { tags: ["auth"], summary: "Suspend a GoTrue user" },
+    },
     async ({ params, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -747,15 +752,14 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
       return res.json();
     },
-    {
-      params: t.Object({ ref: t.String(), id: t.String() }),
-      body: t.Optional(t.Record(t.String(), t.Unknown())),
-      detail: { tags: ["auth"], summary: "Suspend a GoTrue user" },
-    },
   )
 
   .post(
     "/users/:id/unsuspend",
+    {
+      params: t.Object({ ref: t.String(), id: t.String() }),
+      detail: { tags: ["auth"], summary: "Restore a suspended GoTrue user" },
+    },
     async ({ params, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -777,14 +781,14 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
       return res.json();
     },
-    {
-      params: t.Object({ ref: t.String(), id: t.String() }),
-      detail: { tags: ["auth"], summary: "Restore a suspended GoTrue user" },
-    },
   )
 
   .post(
     "/users/:id/mfa/:factorId/reset",
+    {
+      params: t.Object({ ref: t.String(), id: t.String(), factorId: t.String() }),
+      detail: { tags: ["auth"], summary: "Unenroll a GoTrue MFA factor" },
+    },
     async ({ params, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -808,14 +812,17 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       const payload = await res.json().catch(() => ({}));
       return { reset: true, factor_id: params.factorId, result: payload };
     },
-    {
-      params: t.Object({ ref: t.String(), id: t.String(), factorId: t.String() }),
-      detail: { tags: ["auth"], summary: "Unenroll a GoTrue MFA factor" },
-    },
   )
 
   .get(
     "/users/:id",
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+      detail: { tags: ["auth"], summary: "Get user" },
+    },
     async ({ params, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -839,18 +846,28 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
 
       return res.json();
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        id: t.String(),
-      }),
-      detail: { tags: ["auth"], summary: "Get user" },
     }
   )
 
   .put(
     "/users/:id",
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+      body: t.Object({
+        email: t.Optional(t.String()),
+        phone: t.Optional(t.String()),
+        password: t.Optional(t.String()),
+        email_confirm: t.Optional(t.Boolean()),
+        phone_confirm: t.Optional(t.Boolean()),
+        user_metadata: t.Optional(t.Any()),
+        app_metadata: t.Optional(t.Any()),
+        ban_duration: t.Optional(t.String()),
+      }, { additionalProperties: true }),
+      detail: { tags: ["auth"], summary: "Replace user" },
+    },
     async ({ params, body, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -879,12 +896,13 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
 
       return res.json();
-    },
+    }
+  )
+
+  .patch(
+    "/users/:id",
     {
-      params: t.Object({
-        ref: t.String(),
-        id: t.String(),
-      }),
+      params: t.Object({ ref: t.String(), id: t.String() }),
       body: t.Object({
         email: t.Optional(t.String()),
         phone: t.Optional(t.String()),
@@ -895,12 +913,8 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         app_metadata: t.Optional(t.Any()),
         ban_duration: t.Optional(t.String()),
       }, { additionalProperties: true }),
-      detail: { tags: ["auth"], summary: "Replace user" },
-    }
-  )
-
-  .patch(
-    "/users/:id",
+      detail: { tags: ["auth"], summary: "Update user" },
+    },
     async ({ params, body, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -929,25 +943,24 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
 
       return res.json();
-    },
-    {
-      params: t.Object({ ref: t.String(), id: t.String() }),
-      body: t.Object({
-        email: t.Optional(t.String()),
-        phone: t.Optional(t.String()),
-        password: t.Optional(t.String()),
-        email_confirm: t.Optional(t.Boolean()),
-        phone_confirm: t.Optional(t.Boolean()),
-        user_metadata: t.Optional(t.Any()),
-        app_metadata: t.Optional(t.Any()),
-        ban_duration: t.Optional(t.String()),
-      }, { additionalProperties: true }),
-      detail: { tags: ["auth"], summary: "Update user" },
     }
   )
 
   .delete(
     "/users/:id",
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+      body: t.Optional(t.Object({ should_soft_delete: t.Optional(t.Boolean()) })),
+      async parse({ request, contentType }) {
+        if (contentType !== "application/json" && !contentType.endsWith("+json")) return;
+        const text = await request.text();
+        return text.length === 0 ? {} : JSON.parse(text);
+      },
+      detail: { tags: ["auth"], summary: "Delete user" },
+    },
     async ({ params, set, body, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -1169,19 +1182,18 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         return { ...(deletionPayload as Record<string, unknown>), deletion_status: "deleted" };
       }
       return { id: userId, deleted: true, deletion_status: "deleted" };
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        id: t.String(),
-      }),
-      body: t.Optional(t.Object({ should_soft_delete: t.Optional(t.Boolean()) })),
-      detail: { tags: ["auth"], summary: "Delete user" },
     }
   )
 
   .get(
     "/users/:id/factors",
+    {
+      params: t.Object({
+        ref: t.String(),
+        id: t.String(),
+      }),
+      detail: { tags: ["auth"], summary: "List user MFA factors" },
+    },
     async ({ params, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -1205,18 +1217,26 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
 
       return res.json();
-    },
-    {
-      params: t.Object({
-        ref: t.String(),
-        id: t.String(),
-      }),
-      detail: { tags: ["auth"], summary: "List user MFA factors" },
     }
   )
 
   .post(
     "/generate_link",
+    {
+      params: t.Object({ ref: t.String() }),
+      body: t.Object({
+        type: t.String(),
+        email: t.Optional(t.String()),
+        password: t.Optional(t.String()),
+        new_email: t.Optional(t.String()),
+        phone: t.Optional(t.String()),
+        new_phone: t.Optional(t.String()),
+        redirect_to: t.Optional(t.String()),
+        data: t.Optional(t.Record(t.String(), t.Unknown())),
+        gotrue_meta_security: t.Optional(t.Record(t.String(), t.Unknown())),
+      }, { additionalProperties: true }),
+      detail: { tags: ["auth"], summary: "Generate auth link" },
+    },
     async ({ params, body, set, request }) => {
       const authError = await requireProjectOrAdminAuth(request, params.ref);
       if (authError) return status(authError.status, authError.body);
@@ -1243,20 +1263,5 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
       }
 
       return res.json();
-    },
-    {
-      params: t.Object({ ref: t.String() }),
-      body: t.Object({
-        type: t.String(),
-        email: t.Optional(t.String()),
-        password: t.Optional(t.String()),
-        new_email: t.Optional(t.String()),
-        phone: t.Optional(t.String()),
-        new_phone: t.Optional(t.String()),
-        redirect_to: t.Optional(t.String()),
-        data: t.Optional(t.Record(t.String(), t.Unknown())),
-        gotrue_meta_security: t.Optional(t.Record(t.String(), t.Unknown())),
-      }, { additionalProperties: true }),
-      detail: { tags: ["auth"], summary: "Generate auth link" },
     }
   );

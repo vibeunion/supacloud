@@ -1,3 +1,4 @@
+import { jsonResponseSchema } from "../utils/json-response-schema";
 import { Elysia, t, status } from "elysia";
 import {
     listBackups,
@@ -31,9 +32,12 @@ function logicalBackupErrorResponse(error: unknown) {
 }
 
 const projectBackupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/backups" })
-    .get('/', async ({ params, request }) => {
+    .get('/', {
+        response: { 200: jsonResponseSchema, 404: ErrorResponse, 503: ErrorResponse },
+        detail: { tags: ["backups"], summary: "List project backups" },
+    }, async ({ params, request, set }) => {
         const authError = await requireProjectOrAdminAuth(request, params.ref);
-        if (authError) return status(authError.status, authError.body);
+        if (authError) { set.status = authError.status; return authError.body; }
 
         const project = await projectRepository.findByRef(params.ref);
         if (!project) return status(404, { message: "Project not found" });
@@ -45,13 +49,20 @@ const projectBackupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
             }
             throw error;
         }
-    }, {
-        response: { 200: t.Any(), 404: ErrorResponse, 503: ErrorResponse },
-        detail: { tags: ["backups"], summary: "List project backups" },
     })
-    .post('/', async ({ params, body, request }) => {
+    .post('/', {
+        body: t.Object({
+            type: t.Optional(t.Union([
+                t.Literal('full'),
+                t.Literal('incr'),
+                t.Literal('diff'),
+            ])),
+        }),
+        response: { 200: jsonResponseSchema, 404: ErrorResponse, 503: ErrorResponse },
+        detail: { tags: ["backups"], summary: "Create a database backup" },
+    }, async ({ params, body, request, set }) => {
         const authError = await requireAdminAuth(request);
-        if (authError) return status(authError.status, authError.body);
+        if (authError) { set.status = authError.status; return authError.body; }
 
         const project = await projectRepository.findByRef(params.ref);
         if (!project) return status(404, { message: "Project not found" });
@@ -63,45 +74,49 @@ const projectBackupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
             }
             throw error;
         }
-    }, {
-        body: t.Object({
-            type: t.Optional(t.Union([
-                t.Literal('full'),
-                t.Literal('incr'),
-                t.Literal('diff'),
-            ])),
-        }),
-        response: { 200: t.Any(), 404: ErrorResponse, 503: ErrorResponse },
-        detail: { tags: ["backups"], summary: "Create a database backup" },
     })
-    .get('/logical', async ({ params: { ref }, request }) => {
+    .get('/logical', {
+        response: { 200: jsonResponseSchema, 400: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 503: ErrorResponse },
+        detail: { tags: ["backups"], summary: "List verified logical-full backups" },
+    }, async ({ params: { ref }, request, set }) => {
         const authError = await requireAdminAuth(request);
-        if (authError) return status(authError.status, authError.body);
+        if (authError) { set.status = authError.status; return authError.body; }
         try {
             return { backups: await listLogicalBackups(ref) };
         } catch (error: unknown) {
             return logicalBackupErrorResponse(error);
         }
-    }, {
-        response: { 200: t.Any(), 400: ErrorResponse, 404: ErrorResponse, 503: ErrorResponse },
-        detail: { tags: ["backups"], summary: "List verified logical-full backups" },
     })
-    .post('/logical', async ({ params: { ref }, request }) => {
+    .post('/logical', {
+        response: { 200: jsonResponseSchema, 400: ErrorResponse, 404: ErrorResponse, 409: ErrorResponse, 503: ErrorResponse },
+        detail: { tags: ["backups"], summary: "Create a verified logical-full backup" },
+    }, async ({ params: { ref }, request, set }) => {
         const authError = await requireAdminAuth(request);
-        if (authError) return status(authError.status, authError.body);
+        if (authError) { set.status = authError.status; return authError.body; }
         disableLogicalBackupMutationIdleTimeout(request);
         try {
             return { backup: await createLogicalBackup(ref) };
         } catch (error: unknown) {
             return logicalBackupErrorResponse(error);
         }
-    }, {
-        response: { 200: t.Any(), 400: ErrorResponse, 404: ErrorResponse, 503: ErrorResponse },
-        detail: { tags: ["backups"], summary: "Create a verified logical-full backup" },
     })
-    .post('/logical/restore', async ({ params: { ref }, body, request }) => {
+    .post('/logical/restore', {
+        body: t.Object({
+            backup_id: t.Optional(t.String()),
+            expected_sha256: t.Optional(t.String()),
+            confirmation: t.Optional(t.String()),
+        }),
+        response: {
+            200: jsonResponseSchema,
+            400: ErrorResponse,
+            404: ErrorResponse,
+            409: ErrorResponse,
+            503: ErrorResponse,
+        },
+        detail: { tags: ["backups"], summary: "Restore a verified logical-full backup" },
+    }, async ({ params: { ref }, body, request, set }) => {
         const authError = await requireAdminAuth(request);
-        if (authError) return status(authError.status, authError.body);
+        if (authError) { set.status = authError.status; return authError.body; }
         if (!body.backup_id || !body.expected_sha256 || !body.confirmation) {
             return status(400, {
                 message: "backup_id, expected_sha256 and confirmation are required",
@@ -128,27 +143,22 @@ const projectBackupRoutes = new Elysia({ prefix: "/v1/projects/:ref/database/bac
         } catch (error: unknown) {
             return logicalBackupErrorResponse(error);
         }
-    }, {
-        body: t.Object({
-            backup_id: t.Optional(t.String()),
-            expected_sha256: t.Optional(t.String()),
-            confirmation: t.Optional(t.String()),
-        }),
-        response: {
-            200: t.Any(),
-            400: ErrorResponse,
-            404: ErrorResponse,
-            409: ErrorResponse,
-            503: ErrorResponse,
-        },
-        detail: { tags: ["backups"], summary: "Restore a verified logical-full backup" },
     });
 
 export const backupRoutes = new Elysia()
     .use(projectBackupRoutes)
-    .post('/v1/platform/backups/restore', async ({ body, request }) => {
+    .post('/v1/platform/backups/restore', {
+        body: t.Object({ target: t.String(), confirmation: t.String() }),
+        response: {
+            200: jsonResponseSchema,
+            400: ErrorResponse,
+            409: ErrorResponse,
+            503: ErrorResponse,
+        },
+        detail: { tags: ["backups"], summary: "Restore the physical cluster to a point in time" },
+    }, async ({ body, request, set }) => {
         const authError = await requireAdminAuth(request);
-        if (authError) return status(authError.status, authError.body);
+        if (authError) { set.status = authError.status; return authError.body; }
         if (body.confirmation !== `RESTORE_CLUSTER:${body.target}`) {
             return status(400, { message: "Exact cluster restore confirmation is required" });
         }
@@ -170,13 +180,4 @@ export const backupRoutes = new Elysia()
             }
             return status(400, { message: err instanceof Error ? err.message : "Invalid restore request" });
         }
-    }, {
-        body: t.Object({ target: t.String(), confirmation: t.String() }),
-        response: {
-            200: t.Any(),
-            400: ErrorResponse,
-            409: ErrorResponse,
-            503: ErrorResponse,
-        },
-        detail: { tags: ["backups"], summary: "Restore the physical cluster to a point in time" },
     });

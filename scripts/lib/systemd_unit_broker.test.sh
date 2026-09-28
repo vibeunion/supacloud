@@ -28,7 +28,7 @@ render_canonical_postgrest_unit() {
       import { renderPostgrestSystemdTemplate } from "./src/services/postgrest-systemd-template";
       process.stdout.write(renderPostgrestSystemdTemplate({
         postgrestRts: "-N2 -A8m",
-        postgrestBinary: "/opt/supacloud/postgrest-v16.3/bin/postgrest",
+        postgrestBinary: "/opt/supacloud/postgrest-v16.4/bin/postgrest",
         tenantConfigDir: "/etc/supabase/tenants",
         memoryMax: "64M",
         cpuWeight: 20,
@@ -129,3 +129,29 @@ if PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token" >/dev/null 2>&1;
   echo "broker accepted a frontend unit without its environment file" >&2
   exit 1
 fi
+
+application_unit="supacloud-application-demo-01234567-89ab-4def-8123-456789abcdef-api.service"
+printf 'operation=install\nunit_name=%s\n' "$application_unit" > "$TMP_DIR/requests/$token.request"
+(
+  cd "$ROOT_DIR/packages/management-api"
+  bun -e '
+    import { applicationRuntimePlan } from "./src/services/application-runtime";
+    import { runtimeInput } from "./tests/helpers/application-runtime";
+    process.stdout.write(applicationRuntimePlan(runtimeInput()).targets[0].unitContent);
+  '
+) > "$TMP_DIR/requests/$token.unit"
+cp "$TMP_DIR/requests/$token.unit" "$TMP_DIR/application.unit"
+PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token"
+grep -Fq 'TimeoutStopSec=15' "$TMP_DIR/units/$application_unit"
+
+for replacement in \
+  's#/api.env#/jobs.env#' \
+  's#supacloud-demo#supacloud-other#g' \
+  's#EnvironmentFile=#EnvironmentFile=-#'; do
+  printf 'operation=install\nunit_name=%s\n' "$application_unit" > "$TMP_DIR/requests/$token.request"
+  sed "$replacement" "$TMP_DIR/application.unit" > "$TMP_DIR/requests/$token.unit"
+  if PATH="$TMP_DIR/bin:$PATH" bash "$TMP_DIR/broker.sh" "$token" >/dev/null 2>&1; then
+    echo "broker accepted an application runtime identity mismatch" >&2
+    exit 1
+  fi
+done

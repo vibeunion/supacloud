@@ -337,7 +337,8 @@ export function renderApplication(
     "}",
     "",
     "export async function destroyApplication(services: Record<string, unknown>): Promise<void> {",
-    '  const destroyRef = services.destroyRef ?? services["supacloud.destroy-ref"];',
+    '  const destroyRef = (Object.prototype.propertyIsEnumerable.call(services, "destroyRef") ? services.destroyRef : undefined)',
+    '    ?? (Object.prototype.propertyIsEnumerable.call(services, "supacloud.destroy-ref") ? services["supacloud.destroy-ref"] : undefined);',
     '  if (isRecord(destroyRef) && isFunction(destroyRef.destroy)) {',
     "    await destroyRef.destroy();",
     "  } else if (isRecord(destroyRef) && Array.isArray(destroyRef._teardowns)) {",
@@ -955,10 +956,32 @@ class ModuleGenerator {
       lines.push(`return scope;`);
       return lines.join("\n");
     }
+    // Scoped factories have no deps argument. Carry only external tokens they
+    // actually read from services, without exposing the entire host dependency bag.
     const entries = [...returns.entries()].map(([key, expr]) =>
       key === expr ? key : `${key}: ${expr}`,
     );
-    lines.push(`return retainPlatformDependencies({ ${entries.join(", ")} }, deps);`);
+    const borrowed = new Set<string>();
+    for (const node of [...this.module.providers, ...this.module.controllers]) {
+      const scopeKind = factoryOfScope(node.scope);
+      if (scopeKind === "services") continue;
+      for (const token of node.deps) {
+        if (!this.graph.externalTokens.includes(token)) continue;
+        const key = camelName(token);
+        const expression = this.depExpr(token, scopeKind, this.depOptions(node, token));
+        if (expression === `services.${key}` || expression === `(services.${key} ?? undefined)`) {
+          if (!returns.has(key)) borrowed.add(key);
+        }
+      }
+    }
+    if (borrowed.size > 0) {
+      // Borrowed host resources must not enter enumerable instance teardown or
+      // the Worker's merged owned-services collection.
+      const descriptors = [...borrowed].map((key) => `${key}: { value: deps.${key} }`);
+      lines.push(`return retainPlatformDependencies(Object.defineProperties({ ${entries.join(", ")} }, { ${descriptors.join(", ")} }), deps);`);
+    } else {
+      lines.push(`return retainPlatformDependencies({ ${entries.join(", ")} }, deps);`);
+    }
     return lines.join("\n");
   }
 
@@ -1129,11 +1152,11 @@ class ModuleGenerator {
 
     if (isSelf) return isOptional ? "undefined" : `services.${camelName(token)}`;
     if (kind === "services") return isOptional ? `(deps.${camelName(token)} ?? undefined)` : `deps.${camelName(token)}`;
-    // Borrowed platform dependencies must not enter the module's owned service bag.
-    if (!own || isSkipSelf) {
+    if (isSkipSelf) {
       const external = `platformDependencies.get(services)?.${camelName(token)}`;
       return isOptional ? `(${external} ?? undefined)` : external;
     }
+    // request/job factories have no deps parameter; platform/external tokens are also passed via services.
     return isOptional ? `(services.${camelName(token)} ?? undefined)` : `services.${camelName(token)}`;
   }
 }
@@ -1339,7 +1362,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
   return [
     HEADER,
     "",
-    ...(usesStatic ? ['import type { Static } from "@sinclair/typebox";'] : []),
+    ...(usesStatic ? ['import type { Static } from "typebox";'] : []),
     ...generatedImports,
     ...(usesStatic || generatedImports.length > 0 ? [""] : []),
     "export interface ClientRequestOptions<",
@@ -1528,7 +1551,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
       "function decodeSchemaValue(schema: unknown, value: unknown, root: unknown = schema, seenRefs = new Set<string>(), normalize = true): unknown {",
       "  if (schema === true) return value;",
       "  if (schema === false || !isRecord(schema)) return schemaError();",
-      "  if (Object.getOwnPropertySymbols(schema).some((symbol) => String(symbol).includes(\"Transform\"))) throw new Error(\"Response schema transforms are unsupported by the generated decoder\");",
+      "  if (\"~codec\" in schema || Object.getOwnPropertySymbols(schema).some((symbol) => String(symbol).includes(\"Transform\"))) throw new Error(\"Response schema transforms are unsupported by the generated decoder\");",
       "  if (typeof schema.$ref === \"string\") {",
       "    if (seenRefs.has(schema.$ref)) return schemaError();",
       "    const target = schemaReferenceTarget(schema.$ref, root);",

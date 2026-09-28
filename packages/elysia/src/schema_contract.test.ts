@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { Elysia, status, t } from "elysia";
+import { Type } from "typebox";
 import { createApplication, type CompiledModule } from "./index";
 import {
   createSchemaDecoder,
@@ -60,7 +61,7 @@ test("the same contract rejects invalid HTTP input before writes and invalid out
 });
 
 test("schema transforms preserve the decoded output type", () => {
-  const decode = createSchemaDecoder(t.Transform(t.String()).Decode((value) => value.length).Encode(String));
+  const decode = createSchemaDecoder(Type.Codec(t.String()).Decode((value) => value.length).Encode(String));
   const length: number = decode("abc");
   expect(length).toBe(3);
 });
@@ -331,7 +332,10 @@ test("rejects an undeclared plain response status before Elysia can silently acc
   const invalid = registerElysiaRoute(new Elysia(), invalidRoute);
   const response = await invalid.handle(new Request("http://localhost/created-only-invalid"));
   expect(response.status).toBe(500);
-  expect(await response.text()).toBe("Response validation failed");
+  expect(await response.json()).toMatchObject({
+    status: 500,
+    detail: "Response validation failed",
+  });
 });
 
 test("rejects response selectors that Elysia would otherwise ignore", () => {

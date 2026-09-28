@@ -77,11 +77,13 @@ function sanitizeDrain(drain: LogDrainConfig): LogDrainConfig {
 }
 
 export const logDrainRoutes = new Elysia({ prefix: "/v1/projects/:ref/log-drains" })
-  .onBeforeHandle(async ({ params, request }) => {
+  .beforeHandle(async ({ params, request }) => {
     const authError = await authMiddleware.requireProjectOrAdminAuth(request, params.ref);
     if (authError) return status(authError.status, authError.body);
   })
-  .get("", async ({ params }) => {
+  .get("", {
+    detail: { tags: ["log-drains"], summary: "List configured log drains" },
+  }, async ({ params }) => {
     const project = await projectRepository.findByRef(params.ref);
     if (!project) {
       return status(404, { error: "Project not found" });
@@ -94,10 +96,16 @@ export const logDrainRoutes = new Elysia({ prefix: "/v1/projects/:ref/log-drains
     }));
 
     return { project_ref: params.ref, drains };
-  }, {
-    detail: { tags: ["log-drains"], summary: "List configured log drains" },
   })
-  .post("", async ({ params, body }) => {
+  .post("", {
+    body: t.Object({
+      name: t.String(),
+      type: t.Union([t.Literal("webhook"), t.Literal("datadog"), t.Literal("loki"), t.Literal("elasticsearch")]),
+      url: t.String(),
+      token: t.Optional(t.String()),
+    }),
+    detail: { tags: ["log-drains"], summary: "Create a log drain" },
+  }, async ({ params, body }) => {
     const input = body as { name: string; type: LogDrainType; url: string; token?: string };
 
     if (!input.name?.trim()) {
@@ -146,16 +154,16 @@ export const logDrainRoutes = new Elysia({ prefix: "/v1/projects/:ref/log-drains
       project_ref: params.ref,
       drain: { ...newDrain, has_token: !!newDrain.token, token: newDrain.token ? "********" : undefined },
     };
-  }, {
-    body: t.Object({
-      name: t.String(),
-      type: t.Union([t.Literal("webhook"), t.Literal("datadog"), t.Literal("loki"), t.Literal("elasticsearch")]),
-      url: t.String(),
-      token: t.Optional(t.String()),
-    }),
-    detail: { tags: ["log-drains"], summary: "Create a log drain" },
   })
-  .patch("/:drainId", async ({ params, body }) => {
+  .patch("/:drainId", {
+    body: t.Object({
+      name: t.Optional(t.String()),
+      url: t.Optional(t.String()),
+      token: t.Optional(t.String()),
+      enabled: t.Optional(t.Boolean()),
+    }),
+    detail: { tags: ["log-drains"], summary: "Update a log drain" },
+  }, async ({ params, body }) => {
     const input = body as Partial<Pick<LogDrainConfig, "name" | "url" | "token" | "enabled">>;
 
     const project = await projectRepository.findByRef(params.ref);
@@ -198,16 +206,10 @@ export const logDrainRoutes = new Elysia({ prefix: "/v1/projects/:ref/log-drains
       project_ref: params.ref,
       drain: { ...updatedDrain, has_token: !!updatedDrain.token, token: updatedDrain.token ? "********" : undefined },
     };
-  }, {
-    body: t.Object({
-      name: t.Optional(t.String()),
-      url: t.Optional(t.String()),
-      token: t.Optional(t.String()),
-      enabled: t.Optional(t.Boolean()),
-    }),
-    detail: { tags: ["log-drains"], summary: "Update a log drain" },
   })
-  .delete("/:drainId", async ({ params }) => {
+  .delete("/:drainId", {
+    detail: { tags: ["log-drains"], summary: "Delete a log drain" },
+  }, async ({ params }) => {
     const project = await projectRepository.findByRef(params.ref);
     if (!project) {
       return status(404, { error: "Project not found" });
@@ -228,8 +230,6 @@ export const logDrainRoutes = new Elysia({ prefix: "/v1/projects/:ref/log-drains
     }
 
     return { deleted: true, project_ref: params.ref, drain_id: params.drainId };
-  }, {
-    detail: { tags: ["log-drains"], summary: "Delete a log drain" },
   });
 
 /**
