@@ -1265,7 +1265,24 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         // therefore have no storage.objects row for object RLS. The project service
         // role or an admin may still transform them; everyone else keeps object RLS.
         const privilegedFailure = await requireProjectOrAdminAuth(request, ref);
+        let projectServiceRole = false;
         if (privilegedFailure) {
+            // Storage URLs have no /projects/:ref segment for management auth.
+            // Verify against the resolved tenant, preserving bearer precedence.
+            const token = headers.authorization ?? headers.apikey;
+            if (ref && token) {
+                try {
+                    const claims = await StorageRLS.verifyToken(ref, token) as {
+                        role?: string;
+                        __allow_service_role?: boolean;
+                    };
+                    projectServiceRole = claims.role === 'service_role' && claims.__allow_service_role === true;
+                } catch {
+                    // Invalid or foreign credentials must still pass object RLS.
+                }
+            }
+        }
+        if (privilegedFailure && !projectServiceRole) {
             const permitted = await StorageRLS.authorizeAction(ref, headers['authorization'], 'download', params.bucket, filePath);
             if (!permitted.permitted) return status(403, { statusCode: "403", error: 'Forbidden', message: permitted.error || 'Access Denied.' });
         }

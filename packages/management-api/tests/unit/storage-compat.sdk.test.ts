@@ -695,7 +695,7 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     expect(payload.signedURL).toContain("wm_opacity=0.4");
   });
 
-  test("project service role can transform objects without storage.objects metadata", async () => {
+  test("admin can transform objects without storage.objects metadata", async () => {
     // 直写 S3 的租户应用没有 storage.objects 行，对象 RLS 会拒绝；service role/admin 仍应放行。
     const rlsSpy = spyOn(StorageRLS, "authorizeAction").mockResolvedValue({ permitted: false, error: "Object not found" });
     const infoSpy = spyOn(StorageRLS, "getObjectInfo").mockResolvedValue(null);
@@ -721,6 +721,45 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
       fetchSpy.mockRestore();
       downloadSpy.mockRestore();
       infoSpy.mockRestore();
+      rlsSpy.mockRestore();
+    }
+  });
+
+  test("tenant-verified service credentials bypass missing metadata without granting user or foreign access", async () => {
+    const rlsSpy = spyOn(StorageRLS, "authorizeAction").mockResolvedValue({ permitted: false, error: "Object not found" });
+    const verifySpy = spyOn(StorageRLS, "verifyToken").mockImplementation(async (ref, token) => {
+      expect(ref).toBe("test_mock");
+      if (token === "Bearer foreign-service") throw new Error("tenant not found");
+      return {
+        role: token === "Bearer ordinary-user" ? "authenticated" : "service_role",
+        __allow_service_role: token === "Bearer project-service" || token === "project-secret",
+      };
+    });
+    const infoSpy = spyOn(StorageRLS, "getObjectInfo").mockResolvedValue(null);
+    const downloadSpy = spyOn(StorageService, "getDownloadResponse").mockImplementation(async () =>
+      new Response(new Uint8Array([1, 2, 3]), { headers: { "Content-Type": "image/tiff" } }),
+    );
+    const fetchSpy = spyOn(globalThis, "fetch").mockImplementation(async () =>
+      new Response("png", { headers: { "content-type": "image/png" } }),
+    );
+    try {
+      for (const authorization of ["Bearer project-service", "Bearer ordinary-user", "Bearer foreign-service", "Bearer forged-role"]) {
+        rlsSpy.mockClear();
+        downloadSpy.mockClear();
+        const response = await request("/storage/v1/render/image/authenticated/avatars/scan.tiff?width=64&format=png", {
+          headers: { host: "localhost", apikey: "test-token", authorization },
+        });
+        const allowed = authorization === "Bearer project-service";
+        expect(response.status).toBe(allowed ? 200 : 403);
+        expect(rlsSpy).toHaveBeenCalledTimes(allowed ? 0 : 1);
+        expect(downloadSpy).toHaveBeenCalledTimes(allowed ? 1 : 0);
+      }
+      expect(verifySpy).toHaveBeenCalledWith("test_mock", "Bearer project-service");
+    } finally {
+      fetchSpy.mockRestore();
+      downloadSpy.mockRestore();
+      infoSpy.mockRestore();
+      verifySpy.mockRestore();
       rlsSpy.mockRestore();
     }
   });
