@@ -30,6 +30,39 @@ Failed compilation preserves the previous generated artifacts.
 Without a config file, an explicit `--root` retains the legacy source-directory
 behavior.
 
+### Application delivery
+
+```sh
+supacloud-cli app plan --root . --format json
+supacloud-cli app build --root .
+supacloud-cli app upload --ref PROJECT --id orders --manifest_path generated/delivery/delivery.manifest.json
+supacloud-cli app configure --ref PROJECT --id orders --environment_id test --configuration_path configuration.json
+supacloud-cli app deploy --ref PROJECT --id orders --environment_id test --release_id RELEASE_SHA256 --configuration_id CONFIG_UUID --activation_id NEW_UUID --expected_activation_id absent
+supacloud-cli app status --ref PROJECT --id orders --environment_id test
+supacloud-cli app reconcile --ref PROJECT --id orders --environment_id test --release_id RELEASE_SHA256 --activation_id ACTIVATION_UUID
+supacloud-cli app rollback --ref PROJECT --id orders --environment_id test --release_id OLD_RELEASE_SHA256 --configuration_id CONFIG_UUID --activation_id NEW_UUID --expected_activation_id CURRENT_UUID
+supacloud-cli app retire --ref PROJECT --id orders --environment_id test --activation_id ACTIVATION_UUID
+```
+
+`plan` and `build` read `delivery` in `supacloud.config.ts`; `--root` is the
+project directory, with sources defaulting to `src`. Plan writes no artifacts.
+Its topology digest is not a release digest or deployment approval. Build needs
+Bun and produces the compiler's immutable manifest beneath configured `outDir`.
+Build, upload and configure only prepare artifacts or configuration, never deploy.
+
+Remote actions delegate to `applications` and retain its original receipt,
+identity validation, read-only and production-confirmation checks. Upload returns
+the release ID; configuration writes use the existing JSON contract with an
+explicit revision and expected revision. Deploy and rollback require an explicit
+release, configuration, new activation ID and expected current activation ID.
+Rollback activates the selected old release; it does not downgrade schema or
+restore data. Server compatibility checks still apply.
+
+Status returns the server's runtime/readiness report, not an inferred successful
+deployment. An unknown mutation outcome remains unknown; reconcile the same
+activation identity rather than blindly deploying again. These commands require
+Management API credentials except local plan/build and authoring commands.
+
 ### Framework source upgrades
 
 Breaking source-contract changes use the compiler's migration command, which is
