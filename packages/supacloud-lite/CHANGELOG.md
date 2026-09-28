@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.16.1...supacloud-lite-v0.17.0) (2026-09-28)
+
+
+### Features
+
+* integrate application delivery and platform runtime support ([#1453](https://github.com/vibeunion/supacloud/issues/1453)) ([68594fb](https://github.com/vibeunion/supacloud/commit/68594fb67937091bf274a02b33da0d51d31d7b3a))
+
 ## [0.16.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.16.0...supacloud-lite-v0.16.1) (2026-09-15)
 
 

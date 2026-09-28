@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/vibeunion/supacloud/compare/admin-v0.22.3...admin-v0.23.0) (2026-09-28)
+
+
+### Features
+
+* integrate application delivery and platform runtime support ([#1453](https://github.com/vibeunion/supacloud/issues/1453)) ([68594fb](https://github.com/vibeunion/supacloud/commit/68594fb67937091bf274a02b33da0d51d31d7b3a))
+
 ## [0.22.3](https://github.com/vibeunion/supacloud/compare/admin-v0.22.2...admin-v0.22.3) (2026-09-22)
 
 
