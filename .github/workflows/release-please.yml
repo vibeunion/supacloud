@@ -422,7 +422,7 @@ jobs:
       - name: Generate SHA256SUMS
         working-directory: packages/supacloud-lite/dist/standalone
         run: |
-          cp ../../LICENSE SUPACLOUD-LITE-APACHE-2.0.txt
+          cp ../../LICENSE SUPACLOUD-LITE-AGPL-3.0.txt
           cp ../../THIRD_PARTY_NOTICES.md THIRD_PARTY_NOTICES.md
           cp ../../LICENSES/*.txt .
           sha256sum * > SHA256SUMS

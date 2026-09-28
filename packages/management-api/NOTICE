@@ -1,0 +1,22 @@
+SupaCloud
+Copyright 2025 SupaCloud Contributors
+
+SupaCloud project-owned code in this revision is licensed under the GNU
+Affero General Public License, version 3 only (AGPL-3.0-only). The complete
+license is provided in LICENSE. This is not an "or later" grant.
+
+This program is distributed without any warranty; without even the implied
+warranty of merchantability or fitness for a particular purpose.
+
+Third-party components, incorporated upstream code, and their copyright,
+license and attribution notices retain their original terms. This notice
+does not replace those terms or claim ownership of third-party work.
+
+Earlier SupaCloud code was distributed under Apache-2.0 or MIT as indicated
+in its original files and package metadata. Previously granted permissions
+are not revoked by this change. The historical Apache-2.0 text is preserved
+in LICENSE-APACHE-2.0.txt. Retain any applicable upstream MIT notices as well.
+
+Before publishing this licensing change, maintainers must confirm authority
+to license the affected contributions and compatibility of incorporated
+third-party code. This notice is not evidence of contributor consent.

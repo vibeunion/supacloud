@@ -12,7 +12,7 @@
     "./durable": { "types": "./dist/durable.d.ts", "import": "./dist/durable.js" },
     "./workbench": { "types": "./dist/workbench-http.d.ts", "import": "./dist/workbench-http.js" }
   },
-  "files": ["dist", "sql", "web", "README.md"],
+  "files": ["dist", "sql", "web", "README.md", "NOTICE", "LICENSE-APACHE-2.0.txt"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -27,7 +27,7 @@
     "@types/bun": "1.4.2",
     "typescript": "7.0.2"
   },
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "https://github.com/vibeunion/supacloud.git",
