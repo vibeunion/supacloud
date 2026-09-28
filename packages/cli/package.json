@@ -15,7 +15,7 @@
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target node --conditions=supacloud-source",
-    "pretypecheck": "bun install --cwd ../compiler --frozen-lockfile && bun run --cwd ../compiler build && bun install --frozen-lockfile",
+    "pretypecheck": "bun install --cwd ../delivery --frozen-lockfile && bun install --cwd ../compiler --frozen-lockfile && bun run --cwd ../compiler build && bun install --frozen-lockfile",
     "prepublishOnly": "bun run build",
     "typecheck": "tsc --noEmit"
   },
@@ -33,7 +33,7 @@
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.52",
-    "@supacloud/compiler": "file:../compiler",
+    "@supacloud/compiler": "^0.27.1",
     "@supacloud/delivery": "file:../delivery",
     "@supacloud/db": "^0.2.0",
     "fflate": "^0.8.3",
