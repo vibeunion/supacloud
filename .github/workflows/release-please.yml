@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      recover_elysia:
+        description: Retry only the Elysia adapter publication
+        required: false
+        default: false
+        type: boolean
       recover_management_tag:
         description: Build and attest an existing empty Management release from its exact tag
         required: false
@@ -78,7 +83,7 @@ jobs:
         run: node .github/scripts/recover-management-release.mjs
 
       - uses: googleapis/release-please-action@v5
-        if: ${{ inputs.recover_management_tag == '' }}
+        if: ${{ inputs.recover_management_tag == '' && inputs.recover_elysia != true }}
         id: release
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
@@ -443,7 +448,7 @@ jobs:
     needs: release-please
     # A previous release can leave a Git tag behind after npm publication
     # fails. Allow an explicit recovery run without creating another release.
-    if: ${{ always() && inputs.recover_management_tag == '' && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true) }}
+    if: ${{ always() && inputs.recover_management_tag == '' && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true || (inputs.recover_elysia == true && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-latest
     environment: npm-publish
     permissions:
@@ -631,7 +636,7 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish elysia adapter to NPM
-        if: ${{ always() && (needs.release-please.outputs.elysia_released == 'true' || inputs.recover_npm == true) }}
+        if: ${{ always() && (needs.release-please.outputs.elysia_released == 'true' || inputs.recover_npm == true || inputs.recover_elysia == true) }}
         working-directory: packages/elysia
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -640,7 +645,7 @@ jobs:
           # same commit in isolation so build-only packages need not be on npm.
           build_root="$(mktemp -d)"
           trap 'rm -rf "$build_root"' EXIT
-          git archive HEAD | tar -x -C "$build_root"
+          git -C "$GITHUB_WORKSPACE" archive HEAD | tar -x -C "$build_root"
           cd "$build_root/packages/elysia"
           bun run ../../scripts/build-command-dependencies.ts elysia
           bun install --frozen-lockfile
