@@ -33,6 +33,8 @@
     }
   },
   "files": [
+    "NOTICE",
+    "LICENSE-APACHE-2.0.txt",
     "dist",
     "README.md",
     "MIGRATION_BINDINGS.md"
@@ -55,7 +57,7 @@
     "rls",
     "postgresql"
   ],
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "https://github.com/vibeunion/supacloud.git",
