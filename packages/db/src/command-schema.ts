@@ -19,15 +19,18 @@ CREATE TABLE IF NOT EXISTS supacloud_commands.execution_receipts (
   input_fingerprint text NOT NULL CHECK (input_fingerprint ~ '^[a-f0-9]{64}$'),
   input_payload text,
   dispatch_key uuid NOT NULL DEFAULT gen_random_uuid() UNIQUE,
-  status text NOT NULL CHECK (status IN ('pending', 'unknown', 'confirmed')),
+  status text NOT NULL CHECK (status IN ('pending', 'unknown', 'confirmed', 'rejected')),
   audit_state text NOT NULL CHECK (audit_state IN ('pending', 'complete')),
   result jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (tenant_id, actor_id, command, operation_key),
   CHECK ((status = 'confirmed') = (result IS NOT NULL)),
-  CHECK (audit_state <> 'complete' OR status = 'confirmed'),
-  CHECK (kind <> 'transactional' OR (status = 'confirmed' AND audit_state = 'complete'))
+  CONSTRAINT execution_receipts_audit_terminal_check CHECK (
+    (audit_state <> 'complete' OR status IN ('confirmed', 'rejected'))
+    AND (status <> 'rejected' OR audit_state = 'complete')),
+  CONSTRAINT execution_receipts_transactional_check CHECK (
+    kind <> 'transactional' OR (status = 'confirmed' AND audit_state = 'complete'))
 );
 CREATE TABLE IF NOT EXISTS supacloud_commands.execution_audit (
   tenant_id text NOT NULL,
@@ -42,6 +45,40 @@ CREATE TABLE IF NOT EXISTS supacloud_commands.execution_audit (
     REFERENCES supacloud_commands.execution_receipts (tenant_id, actor_id, command, operation_key)
 );
 REVOKE ALL ON supacloud_commands.execution_receipts, supacloud_commands.execution_audit FROM PUBLIC;
+CREATE OR REPLACE FUNCTION supacloud_commands.protect_terminal_execution()
+RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $terminal$
+BEGIN
+  IF OLD.status IN ('confirmed','rejected') AND (
+    NEW.status IS DISTINCT FROM OLD.status OR NEW.result IS DISTINCT FROM OLD.result
+    OR (OLD.audit_state = 'complete' AND NEW.audit_state IS DISTINCT FROM OLD.audit_state)) THEN
+    RAISE EXCEPTION 'SUPACLOUD_COMMAND_TERMINAL_RECEIPT';
+  END IF;
+  RETURN NEW;
+END
+$terminal$;
+CREATE OR REPLACE TRIGGER execution_terminal_guard
+BEFORE UPDATE ON supacloud_commands.execution_receipts
+FOR EACH ROW EXECUTE FUNCTION supacloud_commands.protect_terminal_execution();
+
+CREATE OR REPLACE FUNCTION supacloud_commands.require_rejection_audit()
+RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $rejection$
+BEGIN
+  IF NEW.status = 'rejected' AND NOT EXISTS (
+    SELECT FROM supacloud_commands.execution_audit a
+    WHERE a.tenant_id=NEW.tenant_id AND a.actor_id=NEW.actor_id
+      AND a.command=NEW.command AND a.operation_key=NEW.operation_key
+  ) THEN
+    RAISE EXCEPTION 'SUPACLOUD_COMMAND_REJECTION_AUDIT_REQUIRED';
+  END IF;
+  RETURN NEW;
+END
+$rejection$;
+DROP TRIGGER IF EXISTS execution_rejection_audit ON supacloud_commands.execution_receipts;
+CREATE CONSTRAINT TRIGGER execution_rejection_audit
+AFTER INSERT OR UPDATE ON supacloud_commands.execution_receipts
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW WHEN (NEW.status = 'rejected')
+EXECUTE FUNCTION supacloud_commands.require_rejection_audit();
 CREATE OR REPLACE FUNCTION supacloud_commands.enqueue_execution_recovery()
 RETURNS trigger LANGUAGE plpgsql SET search_path = '' AS $recovery$
 DECLARE submission jsonb;
@@ -57,7 +94,8 @@ BEGIN
     END IF;
     RETURN NEW;
   END IF;
-  IF NEW.kind = 'external' AND (NEW.status <> 'confirmed' OR NEW.audit_state <> 'complete') THEN
+  IF NEW.kind = 'external' AND NEW.status <> 'rejected'
+    AND (NEW.status <> 'confirmed' OR NEW.audit_state <> 'complete') THEN
     PERFORM supacloud_workflows.start_run(
       NEW.dispatch_key, 'supacloud.command.reconcile', '1', 'reconcile',
       jsonb_build_object('commandId', NEW.dispatch_key, 'tenantId', NEW.tenant_id,
@@ -106,6 +144,18 @@ BEGIN
 END
 $migration$;
 ALTER TABLE supacloud_commands.execution_receipts ALTER COLUMN input_fingerprint SET NOT NULL;
+ALTER TABLE supacloud_commands.execution_receipts
+  DROP CONSTRAINT IF EXISTS execution_receipts_status_check,
+  DROP CONSTRAINT IF EXISTS execution_receipts_check1,
+  DROP CONSTRAINT IF EXISTS execution_receipts_transactional_check,
+  DROP CONSTRAINT IF EXISTS execution_receipts_audit_terminal_check;
+ALTER TABLE supacloud_commands.execution_receipts
+  ADD CONSTRAINT execution_receipts_status_check CHECK (status IN ('pending','unknown','confirmed','rejected')),
+  ADD CONSTRAINT execution_receipts_transactional_check CHECK (
+    kind <> 'transactional' OR (status = 'confirmed' AND audit_state = 'complete')),
+  ADD CONSTRAINT execution_receipts_audit_terminal_check CHECK (
+    (audit_state <> 'complete' OR status IN ('confirmed','rejected'))
+    AND (status <> 'rejected' OR audit_state = 'complete'));
 DO $constraint$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_constraint
@@ -121,7 +171,7 @@ DO $backfill$
 DECLARE r record;
 BEGIN
   FOR r IN SELECT * FROM supacloud_commands.execution_receipts
-    WHERE kind='external' AND (status<>'confirmed' OR audit_state<>'complete')
+    WHERE kind='external' AND status<>'rejected' AND (status<>'confirmed' OR audit_state<>'complete')
       AND NOT EXISTS(SELECT FROM supacloud_workflows.runs w WHERE w.id=dispatch_key)
   LOOP
     PERFORM supacloud_workflows.start_run(

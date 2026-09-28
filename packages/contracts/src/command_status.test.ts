@@ -19,3 +19,9 @@ test("execution and workflow states are independent and share one global identit
     expect(() => decodeCommandStatus(value)).toThrow();
   }
 });
+test("completed recovery preserves rejected execution without a success result", () => {
+  const execution = { tenantId: "tenant", actorId: "actor", command: "remote", operationId: "local-key",
+    dispatchKey: "operation", status: "rejected", audit: "complete" } satisfies DurableCommandReceipt<CommandJson>;
+  expect(decodeCommandStatus({ kind: "execution", commandId: "operation", execution, workflow }))
+    .toEqual({ kind: "execution", commandId: "operation", execution, workflow });
+});

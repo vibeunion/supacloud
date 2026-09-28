@@ -131,8 +131,8 @@ export function createCommandRecoveryHandler(options: {
         return "retry";
       }
       // Acknowledgement failures propagate. Redelivery only repeats safe recovery.
-      if (receipt?.status === "confirmed" && receipt.audit === "complete") {
-        const output = { commandId, status: "confirmed", audit: "complete" };
+      if ((receipt?.status === "confirmed" || receipt?.status === "rejected") && receipt.audit === "complete") {
+        const output = { commandId, status: receipt.status, audit: "complete" };
         await observe("complete", () => workflows.complete({ ...attempt, stepOutput: output, runOutput: output }));
         return "completed";
       }

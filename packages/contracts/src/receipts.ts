@@ -49,6 +49,7 @@ export interface CommandReference extends CommandIdentity {
 export type DurableCommandReceipt<Result> = CommandReference & (
   | { status: "pending"; audit: "pending" }
   | { status: "unknown"; audit: "pending" }
+  | { status: "rejected"; audit: "complete" }
   | { status: "confirmed"; audit: "pending" | "complete"; result: Result }
 );
 
@@ -98,6 +99,9 @@ export function decodeDurableCommandReceipt<Result>(
     ...identity, command: commandIdentifier(value.command),
     operationId: commandIdentifier(value.operationId), dispatchKey: commandIdentifier(value.dispatchKey),
   };
+  if (value.status === "rejected" && value.audit === "complete" && !("result" in value)) {
+    return { ...reference, status: "rejected", audit: "complete" };
+  }
   if (value.status === "confirmed" && (value.audit === "pending" || value.audit === "complete") && "result" in value) {
     return { ...reference, status: "confirmed", audit: value.audit, result: result(value.result) };
   }
