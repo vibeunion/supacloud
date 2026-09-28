@@ -6,10 +6,12 @@ skipped database test is not success.
 
 ## Supported Baseline
 
-The recorded tuple is Bun 1.4.2, Elysia 1.4.30, TypeBox 0.34.52,
-TypeScript CLI 7.0.2 and TypeScript semantic API 6.0.2.
-`packages/elysia/compatibility.json` is checked against installed versions.
+The current acceptance target is Bun 1.4.2, Elysia 2.0.0-beta.19,
+`typebox` 1.3.34, `exact-mirror` 1.2.6, TypeScript CLI 7.0.2 and
+TypeScript semantic API 6.0.2. `packages/elysia/compatibility.json` is checked
+against installed versions. The adapter's Elysia peer is exact during beta.
 Dependency upgrades must update this tuple deliberately and rerun the gates.
+A target declaration is not proof that those gates passed on a particular commit.
 
 Native HTTP schema decoding, status responses, parent lifecycle order and local
 plugin encapsulation are compared against native Elysia. Public error envelopes,
@@ -36,6 +38,7 @@ assertions with snapshot updates or broad test-count claims.
 | Types, generated runtime and OpenAPI | elysia: `bun run test:contract-upgrade` | Actual compiler, generated client, real HTTP, nullable/optional fields, wire transforms, status union, positive and negative checks in both TypeScript engines |
 | Versioned migration | compiler: `bun test src/migrations.test.ts` | Registry path selection, dependency rejection, preview, idempotence, conflicts, simulated write failure and recovery |
 | Upgrade and restore | elysia: `bun run test:contract-upgrade` | Fixed legacy source fixture upgraded and executed; source checkpoint restored, artifacts regenerated, restored handler exercised |
+| README native context | elysia: `bun test src/readme-context.test.ts` and `bun run typecheck:test` | Exact documentation/example parity, inferred native context and compiled request scope |
 
 Build local contracts and app JavaScript/declarations, compiler JavaScript/
 declarations, and commands/db JavaScript before installing elysia's local file
@@ -80,9 +83,30 @@ release combinations, production authentication, consumer business correctness
 and deployment acceptance. Those remain distinct gates; passing this baseline
 does not justify claiming complete Angular/Elysia alignment.
 
-## Local Execution Record
+## Elysia 2 CI Execution Record — 2026-09-28
 
-On the baseline recorded above, focused executions completed with:
+[Elysia Compatibility run 36385009092](https://github.com/vibeunion/supacloud/actions/runs/36385009092)
+tested PR head `f0105ecb84c8982917ffa4b98b7956db95d56fae` via its merge commit
+`31fd8efdc86ee6b7f021a09c7e65e60b42856a56` on Ubuntu 24.04 with
+Bun `1.4.2+744846f84`. The job log records:
+
+- Local dependency builds and the adapter's `bun install --frozen-lockfile`: passed.
+- Example generation, `typecheck` and `typecheck:test`: passed.
+- Conformance: 17 passed, 0 failed, 59 assertions.
+- Contract upgrade/restore: 1 passed, 0 failed, 28 assertions.
+
+That job did not execute the PostgreSQL runtime-safety gate or packed-package
+installation. It also did not audit whether re-normalizing the locks changes
+local dependency snapshots. The separate lockfile reproducibility job now checks
+that property and preserves its exact output for review. Later commits, including
+README/example changes, require their own CI results; this is not a claim that
+the latest PR head or the full Management API CI is green.
+
+## Historical Local Execution Record — Elysia 1.4
+
+The following original record used Bun 1.4.2, Elysia 1.4.30,
+`@sinclair/typebox` 0.34.52, TypeScript CLI 7.0.2 and semantic API 6.0.2.
+It is retained as historical evidence, not relabeled as an Elysia 2 run:
 
 - Conformance: 17 tests, 59 assertions.
 - Real HTTP/PostgreSQL safety: 4 tests, 53 assertions.
