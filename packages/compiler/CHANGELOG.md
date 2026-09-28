@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.2](https://github.com/vibeunion/supacloud/compare/compiler-v0.27.1...compiler-v0.27.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* **compiler:** classify TypeBox opacity at schema boundaries ([#1471](https://github.com/vibeunion/supacloud/issues/1471)) ([ca4ba73](https://github.com/vibeunion/supacloud/commit/ca4ba733c1ac885f6bd52fda8c68afe8c4df792a))
+
 ## [0.27.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.27.0...compiler-v0.27.1) (2026-09-28)
 
 
