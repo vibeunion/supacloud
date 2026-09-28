@@ -690,6 +690,9 @@ jobs:
 
       - name: Synchronize umbrella dependencies
         id: synchronize
+        env:
+          SUPACLOUD_SYNC_CLI: ${{ needs.release-please.outputs.cli_released == 'true' || inputs.recover_npm == true }}
+          SUPACLOUD_SYNC_ADMIN: ${{ needs.release-please.outputs.admin_released == 'true' || inputs.recover_npm == true }}
         run: |
           if ! sync_output="$(node .github/scripts/sync-supacloud-dependencies.mjs)"; then
             echo "Dependency synchronization failed." >&2
@@ -706,10 +709,18 @@ jobs:
 
       - name: Wait for published dependencies
         if: ${{ steps.synchronize.outputs.changed == 'true' }}
+        env:
+          SUPACLOUD_SYNC_CLI: ${{ needs.release-please.outputs.cli_released == 'true' || inputs.recover_npm == true }}
+          SUPACLOUD_SYNC_ADMIN: ${{ needs.release-please.outputs.admin_released == 'true' || inputs.recover_npm == true }}
         run: |
-          cli_version="$(node -p "require('./packages/cli/package.json').version")"
-          admin_version="$(node -p "require('./packages/admin/package.json').version")"
-          for spec in "@supacloud/cli@$cli_version" "@supacloud/admin@$admin_version"; do
+          specs=()
+          if [[ "$SUPACLOUD_SYNC_CLI" == "true" ]]; then
+            specs+=("@supacloud/cli@$(node -p "require('./packages/cli/package.json').version")")
+          fi
+          if [[ "$SUPACLOUD_SYNC_ADMIN" == "true" ]]; then
+            specs+=("@supacloud/admin@$(node -p "require('./packages/admin/package.json').version")")
+          fi
+          for spec in "${specs[@]}"; do
             published=""
             for attempt in $(seq 1 12); do
               published="$(npm view "$spec" version 2>/dev/null || true)"
@@ -729,10 +740,20 @@ jobs:
       - name: Regenerate and verify umbrella lockfile
         if: ${{ steps.synchronize.outputs.changed == 'true' }}
         working-directory: packages/supacloud
+        env:
+          SUPACLOUD_SYNC_CLI: ${{ needs.release-please.outputs.cli_released == 'true' || inputs.recover_npm == true }}
+          SUPACLOUD_SYNC_ADMIN: ${{ needs.release-please.outputs.admin_released == 'true' || inputs.recover_npm == true }}
         run: |
           bun install --lockfile-only --registry https://registry.npmjs.org
           bun install --frozen-lockfile --registry https://registry.npmjs.org
-          for package_name in cli admin; do
+          packages=()
+          if [[ "$SUPACLOUD_SYNC_CLI" == "true" ]]; then
+            packages+=(cli)
+          fi
+          if [[ "$SUPACLOUD_SYNC_ADMIN" == "true" ]]; then
+            packages+=(admin)
+          fi
+          for package_name in "${packages[@]}"; do
             expected="$(node -p "require('../$package_name/package.json').version")"
             installed="$(node -p "require('./node_modules/@supacloud/$package_name/package.json').version")"
             if [[ "$installed" != "$expected" ]]; then

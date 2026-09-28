@@ -84,6 +84,23 @@ describe('SupaCloud umbrella dependency sync', () => {
     }
   });
 
+  test('only synchronizes packages published by the current run', () => {
+    const packages = packagesWithRanges('^0.14.4', '^0.7.6', '0.14.5', '0.8.0');
+
+    const cliOnly = syncSupacloudDependencies({ ...packages, released: { cli: true, admin: false } });
+    assert.equal(cliOnly.changed, true);
+    assert.equal(cliOnly.package.dependencies['@supacloud/cli'], '^0.14.5');
+    assert.equal(cliOnly.package.dependencies['@supacloud/admin'], '^0.7.6');
+
+    const adminOnly = syncSupacloudDependencies({ ...packages, released: { cli: false, admin: true } });
+    assert.equal(adminOnly.changed, true);
+    assert.equal(adminOnly.package.dependencies['@supacloud/cli'], '^0.14.4');
+    assert.equal(adminOnly.package.dependencies['@supacloud/admin'], '^0.8.0');
+
+    const none = syncSupacloudDependencies({ ...packages, released: { cli: false, admin: false } });
+    assert.equal(none.changed, false);
+  });
+
   test('rejects an Admin candidate below the ^0.7.6 lower bound', () => {
     const packages = packagesWithRanges('^0.14.4', '^0.7.6', '0.14.4', '0.7.5');
     assert.throws(() => syncSupacloudDependencies(packages), /candidate 0\.7\.5 is below current lower bound \^0\.7\.6/);
@@ -176,6 +193,8 @@ describe('SupaCloud umbrella dependency sync', () => {
     assert.match(workflow, /if ! sync_output="\$\(node \.github\/scripts\/sync-supacloud-dependencies\.mjs\)"; then\n\s+echo "Dependency synchronization failed\." >&2\n\s+exit 1\n\s+fi/);
     assert.match(workflow, /changed=true\|changed=false/);
     assert.match(workflow, /printf '%s\\n' "\$sync_output" >> "\$GITHUB_OUTPUT"/);
+    assert.match(workflow, /SUPACLOUD_SYNC_CLI: \$\{\{ needs\.release-please\.outputs\.cli_released == 'true' \|\| inputs\.recover_npm == true \}\}/);
+    assert.match(workflow, /SUPACLOUD_SYNC_ADMIN: \$\{\{ needs\.release-please\.outputs\.admin_released == 'true' \|\| inputs\.recover_npm == true \}\}/);
     assert.match(workflow, /- name: Wait for published dependencies\n\s+if: \$\{\{ steps\.synchronize\.outputs\.changed == 'true' \}\}/);
     assert.match(workflow, /- name: Regenerate and verify umbrella lockfile\n\s+if: \$\{\{ steps\.synchronize\.outputs\.changed == 'true' \}\}/);
     assert.match(workflow, /- name: Open dependency synchronization PR\n\s+if: \$\{\{ steps\.synchronize\.outputs\.changed == 'true' \}\}/);
