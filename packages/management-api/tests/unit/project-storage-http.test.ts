@@ -3,6 +3,7 @@ import { Elysia } from "elysia";
 import { S3Client } from "bun";
 import { createProjectStorageConfigRoutes, type ProjectStorageRouteDependencies } from "../../src/routes/project-storage-config";
 import { parseProjectS3Settings, publicProjectStorage, type ProjectS3Configuration } from "../../src/services/project-storage-contract";
+import type { StorageDriver } from "../../src/services/storage.adapter";
 import { ProjectS3Driver } from "../../src/services/project-s3-driver";
 
 const credentials = { accessKeyId: "project-key", secretAccessKey: "not-for-responses" };
@@ -13,12 +14,19 @@ const configuration: ProjectS3Configuration = {
 
 function managementFixture(allowed = true) {
   const calls: string[] = [];
+  const source = {} as StorageDriver;
   const dependencies: ProjectStorageRouteDependencies = {
     authorize: async () => allowed ? undefined : { status: 403, body: { error: "Forbidden" } },
+    source: () => source,
     storage: {
       async get(ref) { calls.push(`get:${ref}`); return publicProjectStorage(configuration); },
       async put(ref, _settings, _expected) { calls.push(`put:${ref}`); return publicProjectStorage(configuration); },
       async probe(ref) { calls.push(`probe:${ref}`); return { backend: "s3", reachable: true, listable: true, writable: "not_tested" }; },
+      async plan(ref) { calls.push(`plan:${ref}`); return { buckets: 0, objects: 0, fingerprint: "empty" }; },
+      async adopt(ref, _settings, _expected, _source) {
+        calls.push(`adopt:${ref}`);
+        return { ...publicProjectStorage(configuration), adopted: { buckets: 0, objects: 0, fingerprint: "empty" } };
+      },
     },
   };
   const app = new Elysia().use(createProjectStorageConfigRoutes(dependencies))
@@ -61,6 +69,29 @@ test("project storage summaries and unexpected failures never expose credentials
   const failure = await app.handle(new Request(configUrl));
   expect(failure.status).toBe(503);
   expect(await failure.text()).not.toContain(credentials.secretAccessKey);
+});
+
+test("adoption plan and adopt routes require admin and delegate to the registry", async () => {
+  const denied = managementFixture(false);
+  for (const [url, method] of [[`${configUrl}/adoption-plan`, "GET"], [`${configUrl}/adopt`, "POST"]] as const) {
+    const response = await denied.app.handle(new Request(url, {
+      method,
+      ...(method === "POST" ? { body: JSON.stringify({ expected_revision: null, settings: credentials }) } : {}),
+    }));
+    expect(response.status).toBe(403);
+  }
+  expect(denied.calls).toEqual([]);
+
+  const allowed = managementFixture();
+  const plan = await allowed.app.handle(new Request(`${configUrl}/adoption-plan`));
+  expect(plan.status).toBe(200);
+  expect(await plan.json()).toEqual({ buckets: 0, objects: 0, fingerprint: "empty" });
+  const adopt = await allowed.app.handle(new Request(`${configUrl}/adopt`, {
+    method: "POST", body: JSON.stringify({ expected_revision: null, settings: configuration }),
+  }));
+  expect(adopt.status).toBe(200);
+  expect((await adopt.json()).adopted.objects).toBe(0);
+  expect(allowed.calls).toEqual(["plan:projecta", "adopt:projecta"]);
 });
 
 function s3Fixture(accessKey: string) {

@@ -7,10 +7,14 @@ credentials and physical buckets. All logical Storage buckets in one project use
 that project's single backend. Existing Storage API paths, project identity and
 RLS remain authoritative. Clients never choose an upstream URL or credential.
 
-Non-goals: bucket-level backend selection, failover, replication, migration,
-import of existing upstream objects, cross-project copy, console UI, or changing
-SupaCloud Lite's independent runtime. This implementation adds management APIs;
-it does not add a new project-creation UI or change legacy provisioning scripts.
+Non-goals: bucket-level backend selection, failover, replication, offline/large
+migration, import of upstream objects that the platform does not already serve
+for the project, cross-project copy, console UI, or changing SupaCloud Lite's
+independent runtime. Online adoption of a project's current platform objects
+("Adoption of an already-used project" below) is in scope; large or foreign
+datasets still need an offline migration. This implementation adds management
+APIs; it does not add a new project-creation UI or change legacy provisioning
+scripts.
 
 Required review areas: Bun/TypeScript, Elysia local-hook scope, project identity,
 control-secret encryption, PostgreSQL transaction boundaries and error redaction.
@@ -78,12 +82,47 @@ operation keeps its immutable client snapshot. Internal image links live at most
 60 seconds and must be treated as sensitive by the image processor's logging.
 
 A first binding is rejected when the project already has logical buckets,
-objects, multipart metadata, TUS sessions or signed-upload sessions. This is not
-a migration tool. Previously orphaned upstream objects are not imported or moved.
-Same-endpoint/same-bucket overlapping prefixes across configured projects are
-rejected, including disabled projects. Alternate DNS aliases for the same
-physical service cannot be recognized automatically: prefer a dedicated bucket
-and restrict credentials to the project namespace at the provider.
+objects, multipart metadata, TUS sessions or signed-upload sessions. Use the
+adoption flow below to migrate an already-used project instead. Previously
+orphaned upstream objects are not imported or moved. Same-endpoint/same-bucket
+overlapping prefixes across configured projects are rejected, including disabled
+projects. Alternate DNS aliases for the same physical service cannot be
+recognized automatically: prefer a dedicated bucket and restrict credentials to
+the project namespace at the provider.
+
+### Adoption of an already-used project
+
+`PUT /config` is intentionally a no-op for a project that already has objects.
+To move an existing project onto its own backend without losing the platform
+objects, use the adoption flow:
+
+1. `GET /v1/projects/:ref/storage/config/adoption-plan` returns a read-only
+   inventory (`buckets`, `objects`, and an opaque `fingerprint`). It never copies
+   or mutates anything and is safe to call repeatedly.
+2. `POST /v1/projects/:ref/storage/config/adopt` with the same settings body as
+   `PUT /config` and `expected_revision: null`.
+
+Adoption copies every inventoried object from the project's current (platform)
+backend to the configured project backend, verifies each copy by re-reading it
+and comparing the SHA-256 digest, and only then writes the binding. It is a first
+binding: a project that already has a binding returns `STORAGE_CONFIG_CONFLICT`.
+
+- It is **non-destructive**: source objects are never deleted, so the cutover is
+  inspectable and the platform copy remains available for recovery.
+- It is **idempotent**: re-running overwrites and re-verifies the copies. Partial
+  work from an aborted run is harmless.
+- It **fails closed on drift**: the inventory fingerprint is recomputed inside
+  the final exclusive-lock transaction. If any source write or delete landed
+  during the copy, adoption returns `STORAGE_ADOPTION_SOURCE_CHANGED` (409) and
+  writes no binding.
+- It is **bounded**: projects with more than 10,000 objects return
+  `STORAGE_ADOPTION_LIMIT` (413) and need an offline migration.
+
+The copy runs outside the database transaction; only the final re-check and the
+binding write are transactional. Operators should still quiesce project traffic
+for the duration: a concurrent legacy operation blocks on the shared lock while
+the binding commits, and drift aborts the cutover rather than dropping a write.
+Removing the binding afterwards is deliberately unsupported.
 
 ### Probe
 
@@ -151,6 +190,7 @@ cd packages/management-api
 bun test tests/unit/project-storage.test.ts
 bun test tests/unit/project-storage-http.test.ts
 bun test tests/unit/project-storage-boundaries.test.ts
+bun test tests/unit/project-storage-adoption.test.ts
 PROJECT_STORAGE_CONCURRENCY_TEST_DATABASE_URL=postgres://... bun test tests/integration/project-storage-concurrency.test.ts
 bun run typecheck
 bun run test:unit
@@ -174,9 +214,11 @@ Do not count skipped provider/database tests as successful validation.
 
 ## Rollout, risk and rollback
 
-Roll out code before registering projects. There is no data migration and no new
-schema or package dependency. Keep dedicated customer namespaces and provider IAM
-policies; review capacity limits before large-file workloads. Explicit origin
+Roll out code before registering projects. There is no schema or package
+dependency. Adoption copies existing platform objects without deleting them, so
+the source remains available for recovery; run it during a quiesced window and
+verify the plan before binding. Keep dedicated customer namespaces and provider
+IAM policies; review capacity limits before large-file workloads. Explicit origin
 approvals must be propagated consistently to all Management API instances.
 
 Removing an approved origin or setting `enabled:false` fails new operations for

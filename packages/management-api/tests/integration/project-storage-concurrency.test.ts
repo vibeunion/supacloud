@@ -6,6 +6,7 @@ import {
   PROJECT_STORAGE_SECRET,
   ProjectStorageError,
   parseProjectS3Settings,
+  type ProjectStorageInventory,
 } from "../../src/services/project-storage-contract";
 import type { StorageDriver } from "../../src/services/storage.adapter";
 
@@ -36,6 +37,11 @@ let database: SQL;
 let hooks: {
   registry: ReturnType<typeof createProjectStorageRegistry>;
   configuredRefs: string[];
+  adoption: {
+    inventory: ProjectStorageInventory;
+    migrated: string[];
+    driftOnMigrate: boolean;
+  };
 };
 
 beforeAll(async () => {
@@ -73,6 +79,11 @@ beforeAll(async () => {
   database = new SQL(scopedUrl, { max: 4 });
 
   const configuredRefs: string[] = [];
+  const adoption = {
+    inventory: { buckets: 1, objects: 2, fingerprint: "fp-1", entries: [{ bucket: "b", key: "k.txt" }] } as ProjectStorageInventory,
+    migrated: [] as string[],
+    driftOnMigrate: false,
+  };
   const registry = createProjectStorageRegistry({
     database,
     getProjectDb: () => database,
@@ -84,9 +95,14 @@ beforeAll(async () => {
       configuredRefs.push(configuration.projectRef);
       return { tag: "configured" } as unknown as StorageDriver;
     },
+    inventory: async () => adoption.inventory,
+    migrate: async (ref) => {
+      adoption.migrated.push(ref);
+      if (adoption.driftOnMigrate) adoption.inventory = { ...adoption.inventory, fingerprint: `${adoption.inventory.fingerprint}-drift` };
+    },
     probe: async () => ({ backend: "s3", reachable: true, listable: true, writable: "not_tested" }),
   });
-  hooks = { registry, configuredRefs };
+  hooks = { registry, configuredRefs, adoption };
 
   await database`INSERT INTO projects (ref, db_name, status, deleted_at) VALUES ('projecta', 'db_a', 'active', NULL)`;
 });
@@ -210,6 +226,37 @@ test.skipIf(!adminUrl)(
       .rejects.toThrow("STORAGE_CONFIG_UNAVAILABLE");
     const rows = await database`SELECT project_ref FROM project_control_secrets WHERE project_ref = 'projectd'`;
     expect(rows.length).toBe(0);
+  },
+  timeout,
+);
+
+test.skipIf(!adminUrl)(
+  "adoption copies then binds on PostgreSQL and aborts without binding on source drift",
+  async () => {
+    // Earlier tests leave an intentionally corrupt binding; the overlap scan
+    // reserves unknown namespaces, so clear it before adoption.
+    await database`DELETE FROM project_control_secrets WHERE project_ref = 'projectb'`;
+    await database`INSERT INTO projects (ref, db_name, status, deleted_at) VALUES ('adoptee', 'db_adopt', 'active', NULL)`;
+    const bound = await hooks.registry.adopt("adoptee", settingsFor("adoptee-assets"), null, {} as StorageDriver);
+    expect(bound.configured).toBe(true);
+    expect(bound.adopted.objects).toBe(2);
+    expect(hooks.adoption.migrated).toContain("adoptee");
+    const rows = await database`SELECT project_ref FROM project_control_secrets WHERE project_ref = 'adoptee'`;
+    expect(rows.length).toBe(1);
+
+    await database`INSERT INTO projects (ref, db_name, status, deleted_at) VALUES ('adoptee2', 'db_adopt2', 'active', NULL)`;
+    hooks.adoption.driftOnMigrate = true;
+    let failure: unknown;
+    try {
+      await hooks.registry.adopt("adoptee2", settingsFor("adoptee2-assets"), null, {} as StorageDriver);
+    } catch (error) {
+      failure = error;
+    } finally {
+      hooks.adoption.driftOnMigrate = false;
+    }
+    expect((failure as ProjectStorageError).code).toBe("STORAGE_ADOPTION_SOURCE_CHANGED");
+    const drifted = await database`SELECT project_ref FROM project_control_secrets WHERE project_ref = 'adoptee2'`;
+    expect(drifted.length).toBe(0);
   },
   timeout,
 );
