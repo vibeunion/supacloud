@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.27.0...compiler-v0.27.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* **compiler:** preserve TypeBox module refs and recursive client contracts ([#1464](https://github.com/vibeunion/supacloud/issues/1464)) ([459b9e6](https://github.com/vibeunion/supacloud/commit/459b9e6bf9c010c0bedc1ab9a5cd3b8bae62179f))
+
 ## [0.27.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.26.0...compiler-v0.27.0) (2026-09-28)
 
 
