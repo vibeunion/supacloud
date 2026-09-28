@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/vibeunion/supacloud/compare/db-v0.8.0...db-v0.9.0) (2026-09-28)
+
+
+### Features
+
+* integrate application delivery and platform runtime support ([#1453](https://github.com/vibeunion/supacloud/issues/1453)) ([68594fb](https://github.com/vibeunion/supacloud/commit/68594fb67937091bf274a02b33da0d51d31d7b3a))
+
 ## [0.8.0](https://github.com/vibeunion/supacloud/compare/db-v0.7.1...db-v0.8.0) (2026-09-16)
 
 

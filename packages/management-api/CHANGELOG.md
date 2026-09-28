@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.87.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.86.2...management-api-v0.87.0) (2026-09-28)
+
+
+### Features
+
+* integrate application delivery and platform runtime support ([#1453](https://github.com/vibeunion/supacloud/issues/1453)) ([68594fb](https://github.com/vibeunion/supacloud/commit/68594fb67937091bf274a02b33da0d51d31d7b3a))
+
+
+### Bug Fixes
+
+* **management-api:** restore platform bootstrap and schema-qualified audit markers ([#1454](https://github.com/vibeunion/supacloud/issues/1454)) ([6655e19](https://github.com/vibeunion/supacloud/commit/6655e19a348e1e5ce3006122de464a6aaf521c51))
+
 ## [0.86.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.86.1...management-api-v0.86.2) (2026-09-24)
 
 
