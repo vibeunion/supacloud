@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.89.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.89.0...management-api-v0.89.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* **storage:** verify project service auth for image transforms ([#1498](https://github.com/vibeunion/supacloud/issues/1498)) ([d6402ab](https://github.com/vibeunion/supacloud/commit/d6402abcf5df75ab405f6db6708da17888e5a91f))
+
 ## [0.89.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.88.2...management-api-v0.89.0) (2026-09-28)
 
 
