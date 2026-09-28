@@ -120,7 +120,7 @@ jobs:
         working-directory: packages/delivery
         run: bun install --frozen-lockfile
 
-      - name: Install dependencies
+      - name: Install management API dependencies
         working-directory: packages/management-api
         run: bun install --frozen-lockfile
 

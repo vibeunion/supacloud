@@ -617,16 +617,17 @@ jobs:
           node --version
           bun --version
 
-      - name: Install dependencies
+      - name: Install delivery dependencies
+        working-directory: packages/delivery
+        run: bun install --frozen-lockfile
+
+      - name: Install management API dependencies
         working-directory: packages/management-api
         run: bun install --frozen-lockfile
 
       - name: Check canonical SQL modules
         working-directory: packages/management-api
         run: bun run sql:check
-
-      - name: Install delivery dependencies
-        run: bun install --frozen-lockfile --cwd packages/delivery
 
       - name: Enforce canonical SQL module coverage
         working-directory: packages/management-api
