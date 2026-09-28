@@ -8,10 +8,11 @@ is a separately authorized business command, never an assumed rollback.
 
 ## Compatibility and Acceptance Boundary
 
-The dependency range is not a claim that every allowed version has been tested.
-The focused conformance suite was verified with Bun 1.4.2 and Elysia 1.4.30.
-The package declares Elysia `^1.4.30` as a peer and TypeScript `^7.0.2` as a
-development dependency. `compatibility.json` records the exact exercised tuple,
+While Elysia 2 remains in beta, the runtime compatibility boundary is deliberately
+pinned to the exact version exercised by the focused conformance suite: Bun 1.4.2
+and Elysia 2.0.0-beta.19. The package declares Elysia `2.0.0-beta.19` as a peer
+and TypeScript `^7.0.2` as a development dependency. Do not widen the Elysia
+peer range until a broader version matrix has been exercised deliberately. `compatibility.json` records the exact exercised tuple,
 including the compiler's separate TypeScript 6 semantic API. The contract-upgrade
 gate checks both that semantic API and the TypeScript 7 CLI. These tests do not
 establish a wider version matrix or Node.js runtime compatibility.
