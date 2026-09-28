@@ -2161,7 +2161,7 @@ describe("upgrade edge-runtime capacity defaults", () => {
     });
 
     expect(config.workerPoolSize).toBe(20);
-    expect(config.backgroundWorkerPoolSize).toBe(20);
+    expect(config.backgroundWorkerPoolSize).toBe(2);
     expect(config.cpuQuotaPercent).toBe(120);
     expect(config.memoryMaxMb).toBe(1228);
     expect(config.memoryHighMb).toBe(982);
@@ -2190,6 +2190,17 @@ describe("upgrade edge-runtime capacity defaults", () => {
       memoryHighMb: 400,
       tasksMax: 128,
     });
+  });
+
+  test("does not default background capacity above a smaller foreground pool", () => {
+    const config = resolveEdgeRuntimeCapacityConfig({
+      env: { SUPACLOUD_EDGE_WORKER_POOL_SIZE: "1" },
+      cpuCount: 2,
+      totalMemoryMb: 2048,
+    });
+
+    expect(config.workerPoolSize).toBe(1);
+    expect(config.backgroundWorkerPoolSize).toBe(1);
   });
 
   test("writes a late systemd drop-in that overrides stale low limits", () => {

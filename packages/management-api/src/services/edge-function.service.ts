@@ -453,6 +453,7 @@ type FunctionLogsIdentity = {
 
 type FunctionLogsOperations = {
   lstat: typeof fs.lstat;
+  readdir: typeof fs.readdir;
   mkdir: typeof fs.mkdir;
   chmod: typeof fs.chmod;
   run: (command: string[]) => Promise<void>;
@@ -460,6 +461,7 @@ type FunctionLogsOperations = {
 
 const defaultFunctionLogsOperations: FunctionLogsOperations = {
   lstat: fs.lstat,
+  readdir: fs.readdir,
   mkdir: fs.mkdir,
   chmod: fs.chmod,
   run: async (command: string[]) => {
@@ -538,12 +540,24 @@ export async function ensureFunctionLogsDirectory(
   if (identity.isRoot) {
     await operations.chmod(logDirectory, 0o755);
     if (identity.user) {
+      const owner = `${identity.user}:${identity.group || identity.user}`;
       await operations.run([
         "chown",
         "-h",
-        `${identity.user}:${identity.group || identity.user}`,
+        owner,
         logDirectory,
       ]);
+      const entries = await operations.readdir(logDirectory, { withFileTypes: true });
+      for (const entry of entries) {
+        if (!entry.isFile() || !entry.name.endsWith(".log")) continue;
+        const logFile = path.join(logDirectory, entry.name);
+        const logInfo = await operations.lstat(logFile).catch((error: unknown) => {
+          if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+          throw error;
+        });
+        if (!logInfo?.isFile() || logInfo.isSymbolicLink()) continue;
+        await operations.run(["chown", "-h", owner, logFile]);
+      }
     }
   }
 }
