@@ -135,3 +135,30 @@ test('checks the resolved active schema tuple, not only declared versions', (t) 
   f.edit('packages/elysia/bun.lock', (p) => { p.packages.typebox[0] = 'typebox@1.3.33'; });
   assert.match(checkElysiaCompatibility(f.root).join('\n'), /resolved typebox must match compatibility.json/);
 });
+
+test('rejects stale direct and nested local schema snapshots in the adapter lock', (t) => {
+  for (const name of ['app', 'compiler', 'delivery', 'compiler/@supacloud/delivery']) {
+    const f = fixture(t);
+    const localName = name.split('/').at(-1);
+    f.edit('packages/elysia/bun.lock', (p) => {
+      p.packages[`@supacloud/${name}`] = [
+        `@supacloud/${localName}@file:../${localName}`,
+        { dependencies: { '@sinclair/typebox': '^0.34.52' } },
+      ];
+    });
+    assert.match(checkElysiaCompatibility(f.root).join('\n'), /stale local schema metadata/);
+  }
+});
+
+test('accepts current local schema snapshots', (t) => {
+  const f = fixture(t);
+  f.edit('packages/elysia/bun.lock', (p) => {
+    p.packages['@supacloud/app'] = [
+      '@supacloud/app@file:../app', { dependencies: { typebox: '1.3.34' } },
+    ];
+    p.packages['@supacloud/compiler/@supacloud/delivery'] = [
+      '@supacloud/delivery@file:../delivery', {},
+    ];
+  });
+  assert.deepEqual(checkElysiaCompatibility(f.root), []);
+});

@@ -57,6 +57,8 @@ and local `file:../elysia` peer snapshots. Its regression tests run with
 `node --test scripts/check-elysia-compatibility.test.mjs` and do not need Bun or
 installed dependencies. This is a declaration/lock-metadata gate, not a scan of
 all source imports and not a substitute for `bun install --frozen-lockfile`.
+The adapter lock's local app/compiler/delivery schema snapshots are checked too,
+including nested copies, so an old schema graph cannot pass on root pins alone.
 
 The Elysia Compatibility workflow separately builds local dependencies, installs
 with the frozen lockfile, checks types, and runs native/adapter HTTP conformance
