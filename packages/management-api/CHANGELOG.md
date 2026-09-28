@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.87.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.87.0...management-api-v0.87.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* **ci:** avoid ECR data limit for Realtime fixture ([#1458](https://github.com/vibeunion/supacloud/issues/1458)) ([17cac42](https://github.com/vibeunion/supacloud/commit/17cac424cd521ccb1624e7bf4bb5caeb6708c59b))
+* **ci:** bootstrap delivery dependencies for binary releases ([#1456](https://github.com/vibeunion/supacloud/issues/1456)) ([e5cdc86](https://github.com/vibeunion/supacloud/commit/e5cdc868c75e7e0884215127374442ca29d522ce))
+
 ## [0.87.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.86.2...management-api-v0.87.0) (2026-09-28)
 
 
