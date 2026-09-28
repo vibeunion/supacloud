@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.89.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.88.2...management-api-v0.89.0) (2026-09-28)
+
+
+### Features
+
+* **cli:** add application delivery workflow ([#1490](https://github.com/vibeunion/supacloud/issues/1490)) ([da5b4e4](https://github.com/vibeunion/supacloud/commit/da5b4e4098b0478553cc09876217441e24aa8f04))
+
 ## [0.88.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.88.1...management-api-v0.88.2) (2026-09-28)
 
 
