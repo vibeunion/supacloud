@@ -14,6 +14,14 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.58.2](https://github.com/vibeunion/supacloud/compare/cli-v0.58.1...cli-v0.58.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#1473](https://github.com/vibeunion/supacloud/issues/1473)) ([677e3f8](https://github.com/vibeunion/supacloud/commit/677e3f82b10793dcdb843ed422760f516aa3b0a6))
+* pin Elysia 2 beta compatibility boundary ([#1467](https://github.com/vibeunion/supacloud/issues/1467)) ([bdb2a2e](https://github.com/vibeunion/supacloud/commit/bdb2a2e658cae4160f2a774b5c459d1a2d8fb601))
+
 ## [0.58.1](https://github.com/vibeunion/supacloud/compare/cli-v0.58.0...cli-v0.58.1) (2026-09-28)
 
 
