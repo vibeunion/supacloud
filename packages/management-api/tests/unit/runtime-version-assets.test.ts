@@ -1390,8 +1390,21 @@ describe("runtime companion version assets", () => {
     expect(realtimeUnit).toContain(
       "Environment=REALTIME_SLOT_ISOLATION_RUNTIME_VERSION=2.138.1",
     );
-    expect(workflow).toContain("image: public.ecr.aws/supabase/realtime:v2.138.1");
-    expect(workflow).not.toContain("public.ecr.aws/supabase/realtime:v2.129.0");
+    const ciWorkflow = Bun.YAML.parse(workflow) as {
+      jobs: Record<string, {
+        services?: Record<string, { image: string }>;
+        steps: { name?: string; run?: string }[];
+      }>;
+    };
+    const integrationJob = ciWorkflow.jobs["integration-test"];
+    expect(integrationJob?.services?.realtime?.image).toBe(
+      "ghcr.io/supabase/realtime:v2.138.1",
+    );
+    expect(workflow).not.toContain("public.ecr.aws/supabase/realtime");
+    expect(integrationJob?.steps.find((step) => step.name === "Wait for CI services")?.run)
+      .toContain('realtime_container_id="${{ job.services.realtime.id }}"');
+    expect(integrationJob?.steps.find((step) => step.name === "Restart flaky services")?.run)
+      .toContain('docker start "${{ job.services.realtime.id }}"');
     for (const compose of [devCompose, selfHostCompose]) {
       expect(compose).toContain("image: supacloud-caddy:2.11.4-ratelimit");
       expect(compose).toContain("supabase/gotrue:v2.197.0");
