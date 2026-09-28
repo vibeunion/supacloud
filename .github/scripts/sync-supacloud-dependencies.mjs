@@ -58,7 +58,7 @@ function synchronizedRange(currentRange, candidatePackage, dependencyName) {
   return `^${candidateVersion}`;
 }
 
-export function syncSupacloudDependencies({ supacloudPackage, cliPackage, adminPackage }) {
+export function syncSupacloudDependencies({ supacloudPackage, cliPackage, adminPackage, released }) {
   if (!supacloudPackage?.dependencies || typeof supacloudPackage.dependencies !== 'object') {
     throw new Error('supacloud package has no dependencies object');
   }
@@ -68,6 +68,10 @@ export function syncSupacloudDependencies({ supacloudPackage, cliPackage, adminP
   let changed = false;
 
   for (const [dependencyName, candidateName] of MANAGED_DEPENDENCIES) {
+    // Only synchronize packages that this run actually published. A local
+    // version bumped by a release that never reached npm must not advance the
+    // umbrella range, otherwise the lockfile references an unavailable version.
+    if (released !== undefined && released[candidateName] !== true) continue;
     const currentRange = nextPackage.dependencies[dependencyName];
     const nextRange = synchronizedRange(currentRange, candidates[candidateName], dependencyName);
     if (nextPackage.dependencies[dependencyName] !== nextRange) {
@@ -102,7 +106,11 @@ function isMainModule() {
 if (isMainModule()) {
   try {
     const repository = await repositoryPackages();
-    const synchronization = syncSupacloudDependencies(repository);
+    const released = {
+      cli: process.env.SUPACLOUD_SYNC_CLI === 'true',
+      admin: process.env.SUPACLOUD_SYNC_ADMIN === 'true',
+    };
+    const synchronization = syncSupacloudDependencies({ ...repository, released });
     if (synchronization.changed) {
       await writeFile(repository.supacloudPath, `${JSON.stringify(synchronization.package, null, 2)}\n`);
     }
