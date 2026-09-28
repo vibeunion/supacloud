@@ -866,6 +866,7 @@ describe("edgeFunctionService log directory preparation", () => {
       { user: "supacloud-edge", group: "supacloud-edge", isRoot: true },
       {
         lstat,
+        readdir,
         mkdir,
         chmod,
         run: async (command) => {
@@ -902,6 +903,7 @@ describe("edgeFunctionService log directory preparation", () => {
           }
           return directoryInfo;
         }) as typeof lstat,
+        readdir,
         mkdir: (async () => {
           mkdirCalls += 1;
           throw Object.assign(new Error("created by peer"), { code: "EEXIST" });
@@ -926,6 +928,7 @@ describe("edgeFunctionService log directory preparation", () => {
 
     const prepared = await ensureEdgeFunctionLogsForExistingProjects(rootDirectory, {
       lstat,
+      readdir,
       mkdir,
       chmod,
       run: async () => {},
@@ -948,10 +951,46 @@ describe("edgeFunctionService log directory preparation", () => {
       { user: "supacloud-edge", group: "supacloud-edge", isRoot: false },
       {
         lstat,
+        readdir,
         mkdir,
         chmod,
         run: async () => {},
       },
     )).rejects.toThrow("Function log directory is not trusted");
+  });
+
+  test("repairs top-level runtime log ownership without following symlinks or nested backups", async () => {
+    const projectDirectory = join(functionsRoot, "proj_log_files");
+    const logDirectory = join(projectDirectory, ".logs");
+    const runtimeLog = join(logDirectory, "function.log");
+    const nestedDirectory = join(logDirectory, "deploy-backup");
+    const nestedLog = join(nestedDirectory, "function.log");
+    const outsideLog = join(projectDirectory, "outside.log");
+    const linkedLog = join(logDirectory, "linked.log");
+    await mkdir(nestedDirectory, { recursive: true });
+    await writeFile(runtimeLog, "runtime\n");
+    await writeFile(nestedLog, "backup\n");
+    await writeFile(outsideLog, "outside\n");
+    await symlink(outsideLog, linkedLog);
+
+    const calls: string[][] = [];
+    await ensureFunctionLogsDirectory(
+      projectDirectory,
+      { user: "supacloud-edge", group: "supacloud-edge", isRoot: true },
+      {
+        lstat,
+        readdir,
+        mkdir,
+        chmod,
+        run: async (command) => {
+          calls.push(command);
+        },
+      },
+    );
+
+    expect(calls).toEqual([
+      ["chown", "-h", "supacloud-edge:supacloud-edge", logDirectory],
+      ["chown", "-h", "supacloud-edge:supacloud-edge", runtimeLog],
+    ]);
   });
 });

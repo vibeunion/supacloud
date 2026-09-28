@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.89.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.89.1...management-api-v0.89.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* **edge-runtime:** bound background capacity and repair log ownership ([#1497](https://github.com/vibeunion/supacloud/issues/1497)) ([0370080](https://github.com/vibeunion/supacloud/commit/0370080a9a333542732e34ba3b11efea49c14fd8))
+
 ## [0.89.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.89.0...management-api-v0.89.1) (2026-09-28)
 
 

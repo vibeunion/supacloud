@@ -228,7 +228,13 @@ exit 1
   test("integration tests build and run the same supported Caddy image", () => {
     const integration = workflowJob(workflow, "integration-test");
     expect(integration).toContain(
-      "docker build --tag supacloud-caddy:2.11.4-ratelimit docker/self-host/caddy",
+      "uses: docker/build-push-action@v7",
+    );
+    expect(integration).toContain("context: docker/self-host/caddy");
+    expect(integration).toContain("load: true");
+    expect(integration).toContain("cache-from: type=gha,scope=caddy-integration");
+    expect(integration).toContain(
+      "cache-to: type=gha,scope=caddy-integration,mode=max,ignore-error=true",
     );
     expect(integration).toContain("supacloud-caddy:2.11.4-ratelimit list-modules");
     expect(integration).toContain("grep -Fx http.handlers.rate_limit");
