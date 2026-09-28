@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.87.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.87.1...management-api-v0.87.2) (2026-09-28)
+
+
+### Bug Fixes
+
+* **ci:** recover empty management releases from exact tags ([#1459](https://github.com/vibeunion/supacloud/issues/1459)) ([9597609](https://github.com/vibeunion/supacloud/commit/9597609cb27b2a3279ece102b757637cc8fd993f))
+
 ## [0.87.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.87.0...management-api-v0.87.1) (2026-09-28)
 
 
