@@ -40,7 +40,8 @@ export function prepareCommandPackage(candidate, siblings) {
       const version = packageVersion(sibling, name);
       stableVersionPrecedence(version, name);
       entries[name] = version;
-      if (section !== 'devDependencies') required.add(`${name}@${version}`);
+      // Overrides only affect the root install, not consumers of this package.
+      if (section !== 'devDependencies' && section !== 'overrides') required.add(`${name}@${version}`);
     }
   }
   return { package: next, required: [...required].sort() };

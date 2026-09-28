@@ -152,11 +152,39 @@ test('release order and preparation cover every package using local command depe
   assert.ok(contracts > 0 && commands > contracts && database > commands && app > database && svelte > contracts && elysia > database);
   assert.ok(cli > 0 && admin > cli, 'admin must publish after its CLI dependency');
   assert.ok(contracts < workflow.indexOf('name: Publish supacloud-js'));
-  for (const name of ['admin', 'commands', 'app', 'app-svelte', 'db', 'compiler', 'elysia', 'supacloud-js']) {
+  for (const name of ['admin', 'commands', 'app', 'app-svelte', 'db', 'compiler', 'supacloud-js']) {
     const block = workflow.split(`working-directory: packages/${name}\n`)[1]?.split('\n      - name:')[0];
     assert.ok(block);
     assert.match(block, /prepare-command-package\.mjs[\s\S]*bun install --lockfile-only[\s\S]*bun install --frozen-lockfile/);
   }
+});
+test('elysia builds local fixtures before preparing its isolated publication', () => {
+  const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
+  const block = workflow.split('- name: Publish elysia adapter to NPM')[1]?.split('\n      - name:')[0];
+  assert.ok(block);
+  assert.match(block, /git archive HEAD \| tar -x -C "\$build_root"/);
+  assert.match(block, /cd "\$build_root\/packages\/elysia"/);
+  assert.match(block, /build-command-dependencies\.ts elysia[\s\S]*bun install --frozen-lockfile[\s\S]*bun run build[\s\S]*prepare-command-package\.mjs[\s\S]*publish-npm-package\.mjs/);
+  const publication = block.split('prepare-command-package.mjs')[1];
+  assert.ok(publication);
+  assert.doesNotMatch(publication, /bun install/);
+});
+test('elysia publication preserves beta support without waiting for build-only overrides', () => {
+  const input = JSON.parse(readFileSync(new URL('../../packages/elysia/package.json', import.meta.url), 'utf8'));
+  const localSiblings = new Map(
+    ['app', 'contracts', 'commands', 'delivery', 'compiler', 'db'].map((directory) => {
+      const pkg = JSON.parse(readFileSync(new URL(`../../packages/${directory}/package.json`, import.meta.url), 'utf8'));
+      return [pkg.name, pkg];
+    }),
+  );
+  const result = prepareCommandPackage(input, localSiblings);
+  assert.deepEqual(result.required, ['app', 'contracts'].map((name) => {
+    const pkg = localSiblings.get(`@supacloud/${name}`);
+    return `${pkg.name}@${pkg.version}`;
+  }));
+  assert.deepEqual(result.package['peerDependencies'], { elysia: '>=2.0.0-beta.19 <3' });
+  assert.equal(input.overrides['@supacloud/delivery'], 'file:../delivery');
+  assert.doesNotMatch(JSON.stringify(result.package), /file:|workspace:|link:/);
 });
 test('recovery runs the command package graph after a tag-only release', () => {
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
