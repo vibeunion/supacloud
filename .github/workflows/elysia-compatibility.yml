@@ -42,9 +42,9 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
-      # One-time repair of inherited file: snapshots; removed after committing
-      # the Bun-normalized output. Registry resolutions/integrities are not edited.
-      - name: Seed inherited local snapshots from checked-out manifests
+      # One-time repair; remove after reviewing/committing Bun-normalized output.
+      # Reuse checked-in registry entries rather than silently updating ranges.
+      - name: Seed inherited populated snapshots and their existing locked dependencies
         run: |
           bun --eval '
             import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -56,10 +56,13 @@ jobs:
               const manifest = JSON.parse(readFileSync(path, "utf8"));
               manifests.set(manifest.name, manifest);
             }
+            const db = parseLockfile(readFileSync("packages/db/bun.lock", "utf8"));
+            const lite = parseLockfile(readFileSync("packages/supacloud-lite/bun.lock", "utf8"));
             for (const path of ["packages/elysia/bun.lock", "packages/supacloud-lite/bun.lock"]) {
               const lock = parseLockfile(readFileSync(path, "utf8"));
               for (const entry of Object.values(lock.packages)) {
                 if (!Array.isArray(entry) || typeof entry[0] !== "string" || !entry[0].includes("@file:")) continue;
+                if (!entry[1] || Object.keys(entry[1]).length === 0) continue;
                 const name = entry[0].split("@file:")[0];
                 const manifest = manifests.get(name);
                 if (!manifest) throw new Error(`Missing local manifest: ${name}`);
@@ -70,6 +73,16 @@ jobs:
                 const optional = Object.entries(manifest.peerDependenciesMeta ?? {}).filter(([, value]) => value.optional).map(([name]) => name);
                 if (optional.length) metadata.optionalPeers = optional;
                 entry[1] = metadata;
+              }
+              if (path === "packages/elysia/bun.lock") {
+                for (const name of ["libpg-query", "@pgsql/types"]) {
+                  if (!db.packages[name]) throw new Error(`Missing locked DB dependency: ${name}`);
+                  lock.packages[name] ??= db.packages[name];
+                }
+                for (const name of ["@types/node", "undici-types"]) {
+                  if (!lite.packages[name]) throw new Error(`Missing locked app dependency: ${name}`);
+                  lock.packages[name] = lite.packages[name];
+                }
               }
               writeFileSync(path, JSON.stringify(lock, null, 2) + "\n");
             }
@@ -119,4 +132,5 @@ jobs:
           bun run typecheck
           bun run typecheck:test
           bun run test:conformance
+          bun test src/http-context.test.ts src/readme-context.test.ts
           bun run test:contract-upgrade
