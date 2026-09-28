@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.20.0...elysia-v0.20.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* pin Elysia 2 beta compatibility boundary ([#1467](https://github.com/vibeunion/supacloud/issues/1467)) ([bdb2a2e](https://github.com/vibeunion/supacloud/commit/bdb2a2e658cae4160f2a774b5c459d1a2d8fb601))
+
 ## [0.20.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.19.0...elysia-v0.20.0) (2026-09-28)
 
 

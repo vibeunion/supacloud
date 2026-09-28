@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.88.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.87.2...management-api-v0.88.0) (2026-09-28)
+
+
+### Features
+
+* **storage:** support independent S3 backends per project ([#1470](https://github.com/vibeunion/supacloud/issues/1470)) ([9d1efa3](https://github.com/vibeunion/supacloud/commit/9d1efa338d71e06127d1d1656d54b771f78bce14))
+
 ## [0.87.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.87.1...management-api-v0.87.2) (2026-09-28)
 
 

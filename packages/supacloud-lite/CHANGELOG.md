@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.17.0...supacloud-lite-v0.17.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* pin Elysia 2 beta compatibility boundary ([#1467](https://github.com/vibeunion/supacloud/issues/1467)) ([bdb2a2e](https://github.com/vibeunion/supacloud/commit/bdb2a2e658cae4160f2a774b5c459d1a2d8fb601))
+
 ## [0.17.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.16.1...supacloud-lite-v0.17.0) (2026-09-28)
 
 
