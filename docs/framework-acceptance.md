@@ -6,7 +6,7 @@ skipped database test is not success.
 
 ## Supported Baseline
 
-The recorded tuple is Bun 1.4.2, Elysia 1.4.30, TypeBox 0.34.52,
+The recorded tuple is Bun 1.4.2, Elysia 2.0.0-beta.19, TypeBox 0.34.52,
 TypeScript CLI 7.0.2 and TypeScript semantic API 6.0.2.
 `packages/elysia/compatibility.json` is checked against installed versions.
 Dependency upgrades must update this tuple deliberately and rerun the gates.
