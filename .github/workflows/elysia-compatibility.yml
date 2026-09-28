@@ -45,8 +45,8 @@ jobs:
       - name: Reconcile local dependency snapshots with the pinned Bun
         run: |
           bun --revision
-          bun install --lockfile-only --ignore-scripts --cwd packages/elysia
-          bun install --lockfile-only --ignore-scripts --cwd packages/supacloud-lite
+          bun install --lockfile-only --force --ignore-scripts --cwd packages/elysia
+          bun install --lockfile-only --force --ignore-scripts --cwd packages/supacloud-lite
       - name: Reject uncommitted lockfile changes
         run: |
           git diff --binary -- packages/elysia/bun.lock packages/supacloud-lite/bun.lock > elysia-lockfiles.patch
