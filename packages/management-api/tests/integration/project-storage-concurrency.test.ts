@@ -80,7 +80,7 @@ beforeAll(async () => {
 
   const configuredRefs: string[] = [];
   const adoption = {
-    inventory: { buckets: 1, objects: 2, fingerprint: "fp-1", entries: [{ bucket: "b", key: "k.txt" }] } as ProjectStorageInventory,
+    inventory: { buckets: 1, objects: 2, fingerprint: "fp-1", entries: [{ bucket: "b", key: "k.txt", digest: "digest", contentType: "text/plain" }] } as ProjectStorageInventory,
     migrated: [] as string[],
     driftOnMigrate: false,
   };

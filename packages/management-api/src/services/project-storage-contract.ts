@@ -10,8 +10,8 @@ export class ProjectStorageError extends Error {
 
 /**
  * Hard cap for the synchronous adoption migration. The migration runs while the
- * project is expected to be quiesced; keeping it bounded keeps the final
- * exclusive-lock transaction short. Larger projects need an offline migration.
+ * project is quiesced under an exclusive lock for the whole copy and cutover.
+ * Larger projects need an offline migration.
  */
 export const PROJECT_STORAGE_ADOPTION_MAX_OBJECTS = 10000;
 
@@ -19,9 +19,9 @@ export const PROJECT_STORAGE_ADOPTION_MAX_OBJECTS = 10000;
 export interface ProjectStorageInventory {
   buckets: number;
   objects: number;
-  /** Stable over keys and modification timestamps; changes on any write or delete. */
+  /** Covers bucket names, object keys, content hashes and MIME metadata. */
   fingerprint: string;
-  entries: { bucket: string; key: string }[];
+  entries: { bucket: string; key: string; digest: string; contentType: string }[];
 }
 
 /** The public, non-secret result of an adoption plan or completed adoption. */

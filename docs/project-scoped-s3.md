@@ -118,10 +118,13 @@ binding: a project that already has a binding returns `STORAGE_CONFIG_CONFLICT`.
 - It is **bounded**: projects with more than 10,000 objects return
   `STORAGE_ADOPTION_LIMIT` (413) and need an offline migration.
 
-The copy runs outside the database transaction; only the final re-check and the
-binding write are transactional. Operators should still quiesce project traffic
-for the duration: a concurrent legacy operation blocks on the shared lock while
-the binding commits, and drift aborts the cutover rather than dropping a write.
+Namespace validation, copy, verification and binding run under the same registry
+and project exclusive locks. No destination writes occur before conflict checks.
+Operators must quiesce project traffic for the duration: platform operations and
+other binding changes wait until the transaction ends. This is not a zero-pause
+migration. Fingerprints cover content hashes, MIME metadata and bucket names,
+not modification timestamps. External writers bypassing the platform must also
+be stopped; the database locks cannot fence them.
 Removing the binding afterwards is deliberately unsupported.
 
 ### Probe

@@ -195,24 +195,20 @@ export function createProjectStorageRegistry(dependencies: ProjectStorageDepende
       const migrate = dependencies.migrate;
       if (!inventory || !migrate) throw new ProjectStorageError("STORAGE_CONFIG_UNAVAILABLE");
       try {
-        // Copy outside the database transaction so a large project does not hold
-        // a transaction (or the exclusive lock) for the whole transfer. A
-        // concurrent legacy write is detected by the fingerprint re-check below
-        // and aborts without writing the binding.
-        const before = await inventory(ref, source);
-        if (before.objects > PROJECT_STORAGE_ADOPTION_MAX_OBJECTS) {
-          throw new ProjectStorageError("STORAGE_ADOPTION_LIMIT", 413);
-        }
-        const draft: ProjectS3Configuration = { ...parsed, version: 1, projectRef: ref, revision: crypto.randomUUID() };
-        const target = configuredDriver(draft);
-        await migrate(ref, source, target, before);
-
         return await sql.begin(async (transaction) => {
           await transaction`SELECT pg_advisory_xact_lock(hashtextextended('supacloud:project-storage:registry', 0))`;
           await transaction`SELECT pg_advisory_xact_lock(hashtextextended(${lockName(ref)}, 0))`;
           await assertActiveProject(transaction, ref);
           if (await readConfig(transaction, ref)) throw new ProjectStorageError("STORAGE_CONFIG_CONFLICT", 409);
           await assertNoNamespaceOverlap(transaction, ref, parsed);
+          // Reserve the namespace and fence platform IO until the binding commits.
+          const before = await inventory(ref, source);
+          if (before.objects > PROJECT_STORAGE_ADOPTION_MAX_OBJECTS) {
+            throw new ProjectStorageError("STORAGE_ADOPTION_LIMIT", 413);
+          }
+          const draft: ProjectS3Configuration = { ...parsed, version: 1, projectRef: ref, revision: crypto.randomUUID() };
+          const target = configuredDriver(draft);
+          await migrate(ref, source, target, before);
           // Re-inventory under the exclusive lock: a legacy op that committed
           // before the lock is visible here, and a legacy op that starts after
           // is blocked until the binding exists. Any drift aborts the cutover.

@@ -13,19 +13,25 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 
 /**
  * Read-only inventory of every object currently visible to the platform driver
- * for a project. The fingerprint is stable over keys and modification times, so
- * any write or delete between the plan and the bind changes it.
+ * for a project. Include bytes and MIME metadata rather than trusting timestamp
+ * precision to detect same-key rewrites.
  */
 export async function inventoryProjectObjects(ref: string, source: StorageDriver): Promise<ProjectStorageInventory> {
   const buckets = await source.listBuckets(ref);
-  const entries: { bucket: string; key: string }[] = [];
+  const entries: ProjectStorageInventory["entries"] = [];
   const parts: string[] = [];
   for (const bucket of buckets) {
+    parts.push(JSON.stringify(["bucket", bucket.name]));
     const files = await source.listFiles(ref, bucket.name);
     const sorted = [...files].sort((left, right) => left.name.localeCompare(right.name));
     for (const file of sorted) {
-      entries.push({ bucket: bucket.name, key: file.name });
-      parts.push(`${bucket.name}\u0000${file.name}\u0000${file.updated ?? ""}`);
+      const response = await source.getDownloadResponse(ref, bucket.name, file.name);
+      if (!response) throw new ProjectStorageError("STORAGE_BACKEND_UNAVAILABLE");
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const digest = await sha256Hex(bytes);
+      const contentType = response.headers.get("content-type") ?? "application/octet-stream";
+      entries.push({ bucket: bucket.name, key: file.name, digest, contentType });
+      parts.push(JSON.stringify(["object", bucket.name, file.name, digest, contentType]));
     }
   }
   parts.sort();
@@ -53,12 +59,17 @@ export async function migrateProjectObjects(
     if (!downloaded) throw new ProjectStorageError("STORAGE_BACKEND_UNAVAILABLE");
     const bytes = new Uint8Array(await downloaded.arrayBuffer());
     const contentType = downloaded.headers.get("content-type") ?? "application/octet-stream";
+    if (await sha256Hex(bytes) !== entry.digest || contentType !== entry.contentType) {
+      throw new ProjectStorageError("STORAGE_ADOPTION_SOURCE_CHANGED", 409);
+    }
     const uploaded = await target.uploadFile(ref, entry.bucket, entry.key, bytes, contentType);
     if (!uploaded) throw new ProjectStorageError("STORAGE_BACKEND_UNAVAILABLE");
     const readback = await target.getDownloadResponse(ref, entry.bucket, entry.key);
     if (!readback) throw new ProjectStorageError("STORAGE_BACKEND_UNAVAILABLE");
     const copy = new Uint8Array(await readback.arrayBuffer());
-    if (copy.byteLength !== bytes.byteLength || await sha256Hex(copy) !== await sha256Hex(bytes)) {
+    if (copy.byteLength !== bytes.byteLength
+      || await sha256Hex(copy) !== entry.digest
+      || (readback.headers.get("content-type") ?? "application/octet-stream") !== entry.contentType) {
       throw new ProjectStorageError("STORAGE_BACKEND_UNAVAILABLE");
     }
   }

@@ -125,7 +125,7 @@ test("inventory counts objects and changes its fingerprint when a source object 
   expect(first.buckets).toBe(1);
   const again = await inventoryProjectObjects("fa", source.driver);
   expect(again.fingerprint).toBe(first.fingerprint);
-  source.buckets.get("bucket")!.get("a.txt")!.updated = "2030-01-01T00:00:00.000Z";
+  source.buckets.get("bucket")!.get("a.txt")!.bytes = new TextEncoder().encode("other");
   const changed = await inventoryProjectObjects("fa", source.driver);
   expect(changed.fingerprint).not.toBe(first.fingerprint);
 });
@@ -175,6 +175,7 @@ test("adopt requires a first binding, a disjoint namespace and a bounded invento
     ...parseProjectS3Settings(settings), version: 1, projectRef: "fa", revision: crypto.randomUUID(),
   }));
   await expect(existing.registry.adopt("fa", settings, null, existing.source.driver)).rejects.toThrow("STORAGE_CONFIG_CONFLICT");
+  expect(existing.target.writes).toEqual([]);
 
   const overlapping = registryFixture();
   overlapping.database.stored.set("other", JSON.stringify({
@@ -182,6 +183,7 @@ test("adopt requires a first binding, a disjoint namespace and a bounded invento
   }));
   const held = overlapping.registry.adopt("fa", settings, null, overlapping.source.driver);
   await expect(held).rejects.toThrow("STORAGE_CONFIG_CONFLICT");
+  expect(overlapping.target.writes).toEqual([]);
 
   const huge: ProjectStorageInventory = { buckets: 1, objects: 10001, fingerprint: "x", entries: [] };
   const limited = registryFixture({ inventory: async () => huge });
