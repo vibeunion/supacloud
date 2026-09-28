@@ -1,7 +1,7 @@
 {
   "name": "@supacloud/management-api",
   "license": "AGPL-3.0-only",
-  "version": "0.88.2",
+  "version": "0.89.0",
   "description": "SupaCloud Multi-tenant Management API",
   "type": "module",
   "scripts": {
