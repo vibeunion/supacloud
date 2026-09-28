@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.42.3...web-console-v0.43.0) (2026-09-28)
+
+
+### Features
+
+* **console:** add read-only application dashboard ([#1493](https://github.com/vibeunion/supacloud/issues/1493)) ([38bf51a](https://github.com/vibeunion/supacloud/commit/38bf51a6424ed5c5cc45361e4d89e77be31eb927))
+
 ## [0.42.3](https://github.com/vibeunion/supacloud/compare/web-console-v0.42.2...web-console-v0.42.3) (2026-09-28)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/vibeunion/supacloud/compare/db-v0.9.1...db-v0.10.0) (2026-09-28)
+
+
+### Features
+
+* **commands:** persist definitive external rejections ([#1496](https://github.com/vibeunion/supacloud/issues/1496)) ([5c1b816](https://github.com/vibeunion/supacloud/commit/5c1b816e138b7d0415224076621a937142965ea3))
+
 ## [0.9.1](https://github.com/vibeunion/supacloud/compare/db-v0.9.0...db-v0.9.1) (2026-09-28)
 
 
