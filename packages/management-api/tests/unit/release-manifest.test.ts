@@ -156,7 +156,7 @@ describe("signed release manifest", () => {
     const edgePackage = readFileSync(join(repoRoot, "packages/edge-runtime/package.json"), "utf8");
     expect(workflow).toContain("Generate strict Management release manifest");
     expect(workflow).toContain("Generate strict Edge Runtime release manifest");
-    expect(workflow.match(/SUPACLOUD-RELEASE\.attestation\.jsonl/g)).toHaveLength(2);
+    expect(workflow.match(/install -m 0600 "\$ATTESTATION_BUNDLE" /g)).toHaveLength(2);
     expect(workflow.match(/id: attest-(?:management|edge-runtime)-release/g)).toHaveLength(2);
     expect(managementPackage).toContain('"release:manifest"');
     expect(edgePackage).toContain('"release:manifest"');
