@@ -17,6 +17,9 @@ export function resolveManagementRecovery(input, run = execute) {
   }
   const sourceCommit = run('git', ['rev-parse', '--verify', `refs/tags/${input.tag}^{commit}`]);
   if (!/^[0-9a-f]{40}$/.test(sourceCommit)) throw new Error('Invalid release commit');
+  if (sourceCommit !== input.workflowCommit) {
+    throw new Error('Historical recovery requires a provenance protocol upgrade: the tag commit differs from the signing workflow commit');
+  }
   run('git', ['merge-base', '--is-ancestor', sourceCommit, 'HEAD']);
   const manifest = JSON.parse(run('git', ['show', `${sourceCommit}:packages/management-api/package.json`]));
   if (`management-api-v${manifest.version}` !== input.tag) {
@@ -40,6 +43,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     event: process.env.GITHUB_EVENT_NAME,
     recoverNpm: process.env.RECOVER_NPM,
     tag: process.env.RELEASE_TAG,
+    workflowCommit: process.env.GITHUB_SHA,
   });
   appendFileSync(process.env.GITHUB_OUTPUT, `tag=${result.tag}\nsource_commit=${result.sourceCommit}\n`);
 }

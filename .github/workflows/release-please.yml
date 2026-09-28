@@ -176,6 +176,22 @@ jobs:
           ATTESTATION_BUNDLE: ${{ steps.attest-management-release.outputs.bundle-path }}
         run: install -m 0600 "$ATTESTATION_BUNDLE" release-assets/SUPACLOUD-RELEASE.attestation.jsonl
 
+      - name: Verify recovered assets against the offline upgrade policy
+        if: ${{ inputs.recover_management_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for artifact in release-assets/*; do
+            [[ "$artifact" == *.attestation.jsonl ]] && continue
+            gh attestation verify "$artifact" \
+              --bundle release-assets/SUPACLOUD-RELEASE.attestation.jsonl \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-please.yml" \
+              --source-ref refs/heads/main \
+              --source-digest "$(git rev-parse HEAD)" \
+              --deny-self-hosted-runners
+          done
+
       - name: Upload binaries to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}

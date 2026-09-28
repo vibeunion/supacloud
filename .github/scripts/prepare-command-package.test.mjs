@@ -11,6 +11,7 @@ const recoveryInput = {
   event: 'workflow_dispatch',
   recoverNpm: 'false',
   tag: 'management-api-v0.87.0',
+  workflowCommit: 'a'.repeat(40),
 };
 const recoveryCommit = 'a'.repeat(40);
 function recoveryRunner(overrides = {}) {
@@ -53,6 +54,12 @@ test('Management recovery rejects unmerged commits, mismatched versions and occu
     { release: { tagName: 'management-api-v0.86.0' } },
   ]) assert.throws(() => resolveManagementRecovery(recoveryInput, recoveryRunner(overrides)));
 });
+test('Management recovery fails closed when the signing workflow is newer than the tagged source', () => {
+  assert.throws(
+    () => resolveManagementRecovery({ ...recoveryInput, workflowCommit: 'b'.repeat(40) }, recoveryRunner()),
+    /provenance protocol upgrade/,
+  );
+});
 test('Management recovery pins source and preserves signed non-overwriting publication', () => {
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
   assert.match(workflow, /if: \$\{\{ inputs\.recover_management_tag == '' \}\}/);
@@ -60,6 +67,8 @@ test('Management recovery pins source and preserves signed non-overwriting publi
   const management = workflow.split('  publish-management-api-binaries:')[1].split('  publish-edge-runtime-binaries:')[0];
   assert.match(management, /--source-commit "\$\(git rev-parse HEAD\)"/);
   assert.match(management, /uses: actions\/attest-build-provenance@v4/);
+  assert.match(management, /--source-digest "\$\(git rev-parse HEAD\)"/);
+  assert.ok(management.indexOf('name: Verify recovered assets') < management.indexOf('name: Upload binaries'));
   const recoveryUpload = management.split('if [[ -n "$RECOVERY_TAG" ]]; then')[1].split('else')[0];
   assert.match(recoveryUpload, /refs\/tags\/\$RELEASE_TAG\^\{commit\}/);
   assert.match(recoveryUpload, /\.assets \| length/);
