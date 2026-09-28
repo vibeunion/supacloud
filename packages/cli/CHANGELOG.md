@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.58.4](https://github.com/vibeunion/supacloud/compare/cli-v0.58.3...cli-v0.58.4) (2026-09-28)
+
+
+### Miscellaneous Chores
+
+* adopt AGPL-3.0-only licensing ([#1481](https://github.com/vibeunion/supacloud/issues/1481)) ([8787ad9](https://github.com/vibeunion/supacloud/commit/8787ad9466ebba8f487d28bf62d5f79a220b0ab8))
+
 ## [0.58.3](https://github.com/vibeunion/supacloud/compare/cli-v0.58.2...cli-v0.58.3) (2026-09-28)
 
 

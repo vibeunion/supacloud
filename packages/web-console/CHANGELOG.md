@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.42.3](https://github.com/vibeunion/supacloud/compare/web-console-v0.42.2...web-console-v0.42.3) (2026-09-28)
+
+
+### Miscellaneous Chores
+
+* adopt AGPL-3.0-only licensing ([#1481](https://github.com/vibeunion/supacloud/issues/1481)) ([8787ad9](https://github.com/vibeunion/supacloud/commit/8787ad9466ebba8f487d28bf62d5f79a220b0ab8))
+
 ## [0.42.2](https://github.com/vibeunion/supacloud/compare/web-console-v0.42.1...web-console-v0.42.2) (2026-09-26)
 
 
