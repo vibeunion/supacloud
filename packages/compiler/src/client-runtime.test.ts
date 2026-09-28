@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -256,6 +256,82 @@ test("generated client validates structured JSON constraints and local refs", as
     expect(() => generated.decodeResponseSchema("no", 200, {
       200: { not: { const: "no" } },
     })).toThrow("Response does not match schema");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("generated client decodes Type.Module recursive references at every depth", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-client-module-"));
+  try {
+    const baseModule = graph.modules[0]!;
+    const baseController = baseModule.controllers[0]!;
+    const recursiveGraph: ApplicationGraph = {
+      ...graph,
+      modules: [{ ...baseModule, controllers: [{
+        ...baseController,
+        schemaImports: { Node: "src/contracts" },
+        routes: [{ method: "GET", path: "/tree", handler: "tree", response: "Node" }],
+      }] }],
+    };
+    await writeFixtureProject(root, {
+      "generated/client.ts": renderClient(recursiveGraph, { rootDir: root, outDir: join(root, "generated") }),
+      "src/contracts.ts": [
+        'import { Type } from "typebox";',
+        'export const Node = Type.Module({ Node: Type.Object({ id: Type.String(), next: Type.Optional(Type.Ref("Node")) }) }).Node;',
+      ].join("\n"),
+    });
+    await symlink(join(import.meta.dir, "../node_modules"), join(root, "node_modules"), "dir");
+    const generated = await import(pathToFileURL(join(root, "generated/client.ts")).href);
+    const { Node } = await import(pathToFileURL(join(root, "src/contracts.ts")).href);
+    const tree = { id: "root", next: { id: "child", next: { id: "leaf" } } };
+    expect(generated.decodeResponseSchema(tree, 200, { 200: Node })).toEqual(tree);
+    expect(() => generated.decodeResponseSchema({ id: "root", next: { id: 42 } }, 200, { 200: Node }))
+      .toThrow("Response does not match schema");
+    expect(() => generated.decodeResponseSchema("stuck", 200, { 200: { $defs: { Loop: { $ref: "Loop" } }, $ref: "Loop" } }))
+      .toThrow("Response does not match schema");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("generated client sends encoded Codec request values without re-encoding", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-client-codec-runtime-"));
+  try {
+    const baseModule = graph.modules[0]!;
+    const baseController = baseModule.controllers[0]!;
+    const codecGraph: ApplicationGraph = {
+      ...graph,
+      modules: [{ ...baseModule, controllers: [{
+        ...baseController,
+        schemaImports: { Body: "src/contracts", Query: "src/contracts", Result: "src/contracts" },
+        routes: [{ method: "POST", path: "/codec", handler: "codec", body: "Body", query: "Query", response: "Result" }],
+      }] }],
+    };
+    await writeFixtureProject(root, {
+      "generated/client.ts": renderClient(codecGraph, { rootDir: root, outDir: join(root, "generated") }),
+      "src/contracts.ts": [
+        'import { Type } from "typebox";',
+        'const Count = Type.Codec(Type.String()).Decode(Number).Encode(String);',
+        'export const Body = Type.Object({ amount: Count });',
+        'export const Query = Type.Object({ count: Count });',
+        'export const Result = Type.Object({ ok: Type.Boolean() });',
+      ].join("\n"),
+    });
+    await symlink(join(import.meta.dir, "../node_modules"), join(root, "node_modules"), "dir");
+    const generated = await import(pathToFileURL(join(root, "generated/client.ts")).href);
+    const seen: { url: string; body: unknown }[] = [];
+    const client = generated.createApiClient({
+      baseUrl: "https://example.test",
+      fetch: async (url: string, init: RequestInit) => {
+        seen.push({ url, body: init.body });
+        return Response.json({ ok: true });
+      },
+    });
+    await client.items.codec({ body: { amount: "10" }, query: { count: "7" } });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.url).toBe("https://example.test/items/codec?count=7");
+    expect(seen[0]!.body).toBe('{"amount":"10"}');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
