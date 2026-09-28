@@ -4,6 +4,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { Type } from "@sinclair/typebox";
 import {
     applyDiagnosticFix,
+    buildDeliveryProject,
     checkProject,
     compileProject,
     compileOptionsFromConfig,
@@ -11,14 +12,50 @@ import {
     createDiagnosticRepairPlan,
     doctorProject,
     loadSupacloudConfig,
+    formatDeliveryPlan,
+    planDeliveryProject,
     resolveSupacloudConfig,
     type Diagnostic,
     type ModuleNode,
 } from "@supacloud/compiler";
-import { optional, stringEnum, withDescription } from "../schema";
+import { optional, parseToolArguments, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import { buildToolDefinitions, type AppManifest } from "./app-tool-export";
 import { initializeAppProject } from "./app-starter";
+import { APPLICATION_TOOL_SCHEMA } from "./application-tools";
+
+const REMOTE_APP_ACTIONS = {
+    upload: "upload_release",
+    configure: "put_configuration",
+    deploy: "activate_release",
+    status: "get_runtime",
+    rollback: "activate_release",
+    reconcile: "reconcile_activation",
+    retire: "retire_activation",
+} as const;
+
+export interface AppToolOptions {
+    getApplications?: () => ((args: Record<string, unknown>) => Promise<ToolResult>) | undefined;
+    projectRef?: string;
+}
+
+const REMOTE_APP_DESCRIPTIONS: Record<string, string> = {
+    ref: "[upload/configure/deploy/status/rollback/reconcile/retire] Project ref (defaults to context)",
+    id: "[upload/configure/deploy/status/rollback/reconcile/retire] Application ID",
+    environment_id: "[configure/deploy/status/rollback/reconcile/retire] Environment ID",
+    configuration_id: "[deploy/rollback] Required immutable configuration revision",
+    activation_id: "[deploy/rollback/reconcile/retire] Required explicit activation ID",
+    expected_activation_id: "[deploy/rollback] Required current activation ID, or absent for first activation",
+    configuration_path: "[configure] Configuration write JSON including revision and expected revision",
+    manifest_path: "[upload] Local delivery.manifest.json",
+    release_id: "[deploy/rollback/reconcile] Required immutable application release ID",
+};
+
+const REMOTE_APP_SCHEMA: ToolSchema = Object.fromEntries(
+    Object.entries(APPLICATION_TOOL_SCHEMA)
+        .filter(([name]) => name !== "action")
+        .map(([name, schema]) => [name, optional(schema, REMOTE_APP_DESCRIPTIONS[name])]),
+);
 
 type ToolServer = {
     tool: (
@@ -30,7 +67,17 @@ type ToolServer = {
 };
 
 export interface AppToolArguments {
-    action: "init" | "generate" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "doctor" | "fix";
+    action: "init" | "generate" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "doctor" | "fix"
+        | "plan" | "build" | keyof typeof REMOTE_APP_ACTIONS;
+    ref?: string;
+    id?: string;
+    environment_id?: string;
+    configuration_id?: string;
+    activation_id?: string;
+    expected_activation_id?: string | null;
+    configuration_path?: string;
+    manifest_path?: string;
+    release_id?: string;
     kind?: "module" | "command" | "query" | "controller" | "job" | "contract";
     template?: "http" | "command" | "edge";
     name?: string;
@@ -62,7 +109,7 @@ async function initProject(args: AppToolArguments): Promise<ToolResult> {
 }
 
 export interface ToolResult {
-    isError: boolean;
+    isError?: boolean;
     content: Array<{ type: "text"; text: string }>;
 }
 
@@ -756,8 +803,37 @@ async function runExportTools(args: AppToolArguments): Promise<ToolResult> {
     return textResult(summary);
 }
 
-export async function runAppTool(request: AppToolArguments): Promise<ToolResult> {
+async function runDelivery(args: AppToolArguments): Promise<ToolResult> {
+    const root = resolve(args.root || process.cwd());
+    const loaded = await loadSupacloudConfig(root);
+    const options = compileOptionsFromConfig({
+        ...loaded,
+        ...(args.out_dir === undefined ? {} : { outDir: resolve(root, args.out_dir) }),
+        ...(args.include === undefined ? {} : { include: parseInclude(args.include) }),
+        ...(args.strict === undefined ? {} : { strict: args.strict }),
+    }, root);
+    if (args.action === "plan") {
+        const result = await planDeliveryProject(options, loaded.delivery);
+        return textResult(args.format === "json" ? JSON.stringify(result, null, 2) : formatDeliveryPlan(result), !result.ok);
+    }
+    const result = await buildDeliveryProject(options, loaded.delivery);
+    return textResult(JSON.stringify(result, null, 2), !result.ok);
+}
+
+export async function runAppTool(request: AppToolArguments, options: AppToolOptions = {}): Promise<ToolResult> {
+    if (Object.hasOwn(REMOTE_APP_ACTIONS, request.action)) {
+        const delegate = options.getApplications?.();
+        if (!delegate) return textResult("App remote actions require a Management API context.", true);
+        const action = REMOTE_APP_ACTIONS[request.action as keyof typeof REMOTE_APP_ACTIONS];
+        const args = parseToolArguments(APPLICATION_TOOL_SCHEMA, {
+            ...request, action, ref: request.ref ?? options.projectRef,
+        });
+        // Preserve the original receipt, including unknown outcomes. Never infer a rollback or retry.
+        return delegate(args);
+    }
     switch (request.action) {
+        case "plan":
+        case "build": return runDelivery(request);
         case "init": return initProject(request);
         case "generate": return generateScaffold(request);
         case "compile": return runCompile(request);
@@ -773,28 +849,30 @@ export async function runAppTool(request: AppToolArguments): Promise<ToolResult>
     }
 }
 
-export function registerAppTools(server: ToolServer): void {
+export function registerAppTools(server: ToolServer, options: AppToolOptions = {}): void {
     server.tool(
         "app",
-        "Local @supacloud/app framework commands: init, scaffold, compile, check, graph, explain, export-tools, AI context/doctor and fix. Actions: init, generate, compile, check, graph, explain, export-tools, context, doctor, fix",
+        "Application authoring and delivery. Plan is read-only; build, upload and configure never deploy. Deploy/rollback explicitly activate a release; rollback never downgrades schema.",
         {
-            action: withDescription(stringEnum(["init", "generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix"]), "App action"),
+            ...REMOTE_APP_SCHEMA,
+            action: withDescription(stringEnum(["init", "generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix",
+                "plan", "build", "upload", "configure", "deploy", "status", "rollback", "reconcile", "retire"]), "App action; upload/configure only prepare, rollback activates an explicit old release without schema downgrade"),
             kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract"]), "[generate] Scaffold kind"),
             template: optional(stringEnum(["http", "command", "edge"]), "[init] Golden-path template (default: command)"),
             name: optional(Type.String(), "[init/generate] Project or object name"),
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
             dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
             force: optional(Type.Boolean(), "[generate] Overwrite existing files"),
-            root: optional(Type.String(), "Project directory containing supacloud.config.ts (default: current directory)"),
+            root: optional(Type.String(), "[plan/build/compile/check] Project directory containing supacloud.config.ts (default: current directory)"),
             include: optional(Type.String(), "[compile/check] Comma-separated glob patterns for source files"),
-            out_dir: optional(Type.String(), "[compile/export-tools] Output directory (default: <root>/generated)"),
+            out_dir: optional(Type.String(), "[compile/plan/build/export-tools] Output directory (default: configured outDir)"),
             strict: optional(Type.Boolean(), "[compile/check] Promote warnings to errors"),
-            format: optional(stringEnum(["text", "json"]), "[graph/export-tools] Output format (default: text)"),
+            format: optional(stringEnum(["text", "json"]), "[plan/graph/export-tools] Output format (default: text)"),
             target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / job name / module name"),
             fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
             write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
         },
-        runAppTool,
+        (request) => runAppTool(request, options),
     );
 }
 

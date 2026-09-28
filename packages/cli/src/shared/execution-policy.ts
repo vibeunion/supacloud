@@ -75,7 +75,11 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         write: ["send", "receive", "ack", "release", "fail", "retry", "delete_message", "update_settings"],
     },
     ai: { local: ["show_skill", "install_skill"] },
-    app: { local: ["init", "generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix"] },
+    app: {
+        local: ["init", "generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix", "plan", "build"],
+        read: ["status"],
+        write: ["upload", "configure", "deploy", "rollback", "reconcile", "retire"],
+    },
     db: { local: ["lint", "explain"], read: ["module_check"] },
     dev: { read: ["status"], write: ["sync", "watch", "migrate"] },
 };
