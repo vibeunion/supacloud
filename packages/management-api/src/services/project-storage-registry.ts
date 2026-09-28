@@ -119,7 +119,16 @@ export function createProjectStorageRegistry(dependencies: ProjectStorageDepende
               WHERE scope = ${scope} AND name = ${name} AND project_ref <> ${ref}
             ` as Array<{ project_ref: string; value_encrypted: string }>;
             for (const row of others) {
-              const other = parseStoredProjectS3(row.project_ref, JSON.parse(decryptSecret(row.value_encrypted)));
+              // An unreadable binding cannot serve storage, so it cannot leak an
+              // overlapping namespace in practice. Skipping it keeps one corrupt
+              // project from bricking every unrelated first binding; a later
+              // repair still re-runs this same overlap check.
+              let other: Readonly<ProjectS3Configuration>;
+              try {
+                other = parseStoredProjectS3(row.project_ref, JSON.parse(decryptSecret(row.value_encrypted)));
+              } catch {
+                continue;
+              }
               if (overlappingStorageNamespace(other, parsed)) throw new ProjectStorageError("STORAGE_CONFIG_CONFLICT", 409);
             }
           }

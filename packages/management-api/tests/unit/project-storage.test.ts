@@ -253,3 +253,12 @@ test('disabled, corrupt, or no-longer-approved configurations do not fall back',
   await assert.rejects(enabled.registry.withDriver('projecta', {} as StorageDriver, async () => { called = true; }), unavailable);
   assert.equal(called, false);
 });
+
+test('an unreadable binding of another project does not block a new binding', async () => {
+  const state = fixture();
+  // A row that cannot be decrypted/parsed belongs to a project that cannot serve
+  // storage; it must not brick an unrelated project's first binding.
+  state.stored.set('projectx', 'corrupt-not-decryptable');
+  const created = await state.registry.put('projecta', settings(), null);
+  assert.equal(created.configured, true);
+});
