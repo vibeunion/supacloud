@@ -338,6 +338,13 @@ EXAMPLES
   ${preferredCommand} app generate --kind job --module billing --name sync-orders
   ${preferredCommand} app generate --kind contract --module billing --name issue-invoice
   ${preferredCommand} app compile --root .
+  ${preferredCommand} app plan --root . --format json
+  ${preferredCommand} app build --root .
+  ${preferredCommand} app upload --ref abc123 --id orders --manifest_path generated/delivery/delivery.manifest.json
+  ${preferredCommand} app configure --ref abc123 --id orders --environment_id test --configuration_path configuration.json
+  ${preferredCommand} app deploy --ref abc123 --id orders --environment_id test --release_id <sha256> --configuration_id <uuid> --activation_id <uuid> --expected_activation_id absent
+  ${preferredCommand} app status --ref abc123 --id orders --environment_id test
+  ${preferredCommand} app rollback --ref abc123 --id orders --environment_id test --release_id <old-sha256> --configuration_id <uuid> --activation_id <new-uuid> --expected_activation_id <current-uuid>
   ${preferredCommand} app check --root . --strict
   ${preferredCommand} app graph --root . --format json
   ${preferredCommand} app explain --target CaseService
@@ -593,6 +600,10 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     })));
     assign(captureTools((server) => registerFrontendTools(server as any, http)));
     assign(captureTools((server) => registerApplicationTools(server, http)));
+    Object.assign(tools, captureTools((server) => registerAppTools(server as any, {
+        getApplications: () => tools.applications?.callback,
+        projectRef: context.projectRef || undefined,
+    })));
     assign(captureTools((server) => registerDeployTools(server as any, http, {
         projectRef: context.projectRef || undefined,
         cwd: process.cwd(),

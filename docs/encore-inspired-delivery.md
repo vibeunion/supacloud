@@ -3,7 +3,7 @@
 Status: PARTIAL. Local evidence is not platform integration or production acceptance.
 Source: user request on 2026-09-24 to implement the Encore-inspired direction.
 
-## Current Acceptance Status (2026-09-27)
+## Current Acceptance Status (2026-09-28)
 
 Current priority: run the same representative business workflow end to end on
 the dedicated full-platform target. Individual Auth, Storage, Realtime, queue,
@@ -13,8 +13,9 @@ must not be promoted to full acceptance of the business workflow.
 Current verified evidence:
 
 - Management API and CLI typechecks pass for the current delivery source.
-- SupAuth compatibility PR #124 is open with five checks passing; it is not
-  merged and is not full-platform acceptance.
+- SupAuth compatibility PR #124 merged on 2026-09-27 as
+  `a324c4403195c3b69feebb44854d01e40ff999b2`. This is code integration,
+  not live collaborator/RBAC acceptance.
 - Native activation/allocation verification passes with 11 tests.
 - Dedicated-platform evidence covers OIDC discovery and signed login/refresh,
   OAuth PKCE, Storage/PostgREST RLS, Realtime transport/CDC, queue transport,
@@ -28,15 +29,23 @@ Current verified evidence:
 
 Current blockers:
 
-- The same upload/approval/async-worker business workflow has not completed
-  through the full platform with its real identity, storage, queue and worker
-  authorization boundaries.
-- The complete starter/native regression attempt stopped during dependency
-  resolution, before executing business fixtures; that regression remains open.
-- The default Management API still does not mount application activation writes
-  with a real application compatibility verifier.
-- Full-platform old/new migration compatibility, application rollback, and
-  independent application-data recovery remain unclosed.
+- The shipped upload/approval/async-worker workflow passed the dedicated
+  systemd business fixture, but not the default Management API activation path.
+- The complete local starter/native regression passed as recorded below.
+  This does not close full-platform acceptance.
+- Default activation composition includes a real compatibility verifier,
+  runtime, readiness and gateway; their combined live API workflow remains
+  unverified.
+- Business upgrade/rollback and independent record/object recovery have scoped
+  evidence below. Full-platform migration-ledger compatibility and recovery of
+  schema, roles/grants, functions/triggers, RLS, serving Storage, Realtime,
+  activation manifests and gateway configuration remain unclosed.
+- Live SupAuth collaborator/RBAC acceptance still needs a real GoTrue-backed
+  subject; the emulator's virtual `admin` subject was rejected.
+- Datas capacity is no longer a blocker. On 2026-09-28 the acceptance VM reported
+  533 GB available and the actual `supacloud-management-api` unit was running
+  with HTTP 200 from `/health`. There is no `supacloud.service` unit.
+  Default-activation project `ttzatqixbiaxhyratbvh` remains INACTIVE.
 
 The historical entries below retain their original dates and outcomes. Earlier
 Realtime failures, the incorrect unchanged-config migration retry, and
@@ -2813,3 +2822,60 @@ SupAuth SSO, or full application recovery. Those acceptance items remain
 PARTIAL until their actual workflows pass. Other old Docker projects and
 images were not migrated or deleted. Code integration is not production
 deployment or production acceptance.
+
+### Application Workflow Follow-Up (2026-09-28)
+
+Parent: the delivery contract above. Source: user instruction to implement the
+six-item application-delivery follow-up. Reason: expose the existing delivery
+primitives as a usable workflow while closing compatibility and live evidence
+gaps. This does not authorize production changes.
+
+The CLI adds local `app plan` and `app build`, and delegates `app upload`,
+`configure`, `deploy`, `status`, `rollback`, `reconcile` and `retire` to the
+existing application API contracts. The executable is `supacloud-cli`; the bare
+`supacloud` name remains reserved for the server. See the CLI README for exact
+arguments.
+
+Plan has no release digest: it describes topology before a build exists.
+Upload establishes the server-scoped release identity, configure establishes
+an immutable configuration revision, and activation establishes runtime
+identity. These distinct receipts are preserved rather than manufacturing one
+successful deployment receipt for every phase. Rollback requires a selected
+old release and new activation identity; it never downgrades the schema.
+
+Acceptance still to close:
+
+1. A real collaborator/RBAC run on SupAuth's updated GoTrue version matrix.
+2. Datas default Management API upload/migration-plan/activate/gateway/readiness/
+   HTTP/Worker/reconcile/rollback chain.
+3. The new CLI workflow against that same live target, beyond local contract
+   and loopback transport tests.
+4. A read-only Application Dashboard using existing graph and runtime sources.
+   This is not implemented by adding CLI aliases.
+5. PR environment provisioning, activation, smoke and cleanup. Existing Git
+   auto-branching provisions database branches; it is not yet the full
+   application preview lifecycle.
+6. Independent full-platform restoration, including schema, roles/grants,
+   functions/triggers, RLS, serving Storage objects, Realtime metadata,
+   activation manifests and gateway configuration.
+
+No dashboard, preview lifecycle or full-platform recovery completion is
+inferred from the workflow or compatibility changes.
+
+The separate SupAuth worktree adds v2.197.0 as the current compatibility target,
+retains v2.192.0 as the floor and v2.196.0 as a regression target, and shares
+the exact version policy between session preparation and the OAuth fixture.
+Both v2.196.0 and v2.197.0 retain `offline_access` assertions. Local tests
+validate this policy; no live three-version compatibility run is claimed.
+
+The Datas inspection located the original and upgraded immutable archives in
+`/var/lib/supacloud-delivery-acceptance/business-C0DrqF/` and the protected
+Management API environment at `/etc/supabase/management-api.env`. The running
+services need no restart. Remaining test setup is project provisioning,
+real migration-ledger population, distinct runtime role connections,
+GoTrue-backed test identities, the compiled Linux verifier and a launcher
+that calls `runPlatformBusinessManagement` with those private inputs.
+No ready-to-run bundle or installed application verifier was found in the
+inspected locations. These are unfinished setup/implementation tasks, not
+evidence of a failed activation and not a reason to substitute the older
+direct-systemd fixture.
