@@ -5,10 +5,12 @@ WORKDIR /app
 
 COPY package.json bun.lock* ./
 COPY packages/edge-runtime/package.json ./packages/edge-runtime/package.json
+COPY packages/edge-runtime/bun.lock ./packages/edge-runtime/bun.lock
 
 RUN bun install
 
 COPY packages/edge-runtime ./packages/edge-runtime
+RUN cd /app/packages/edge-runtime && bun install --frozen-lockfile
 
 WORKDIR /app/packages/edge-runtime
 

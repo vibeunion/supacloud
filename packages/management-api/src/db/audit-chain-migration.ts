@@ -62,7 +62,7 @@ function assertNoViolations(label: string, violation: ViolationCount | undefined
 async function migrationIsCompleted(transaction: SQL): Promise<boolean> {
   const [marker] = await transaction`
     SELECT migration_key
-    FROM platform_schema_migrations
+    FROM public.platform_schema_migrations
     WHERE migration_key = ${AUDIT_CHAIN_SEQUENCE_MIGRATION_KEY}
   `;
   return marker?.migration_key === AUDIT_CHAIN_SEQUENCE_MIGRATION_KEY;
@@ -248,7 +248,7 @@ async function recordMigrationMarker(transaction: SQL): Promise<void> {
     project_chain_count: Number(summary?.project_chain_count || 0),
   });
   await transaction`
-    INSERT INTO platform_schema_migrations (migration_key, details)
+    INSERT INTO public.platform_schema_migrations (migration_key, details)
     VALUES (${AUDIT_CHAIN_SEQUENCE_MIGRATION_KEY}, ${details}::jsonb)
   `;
 }

@@ -48,13 +48,14 @@ describe("PostgREST health probe", () => {
 });
 
 describe("PostgREST systemd activity parser", () => {
-  test("accepts only systemctl's canonical active and inactive results", () => {
+  test("accepts active, inactive, failed, and not-yet-installed results", () => {
     expect(parsePostgrestActivity("active\n", 0)).toBe(true);
     expect(parsePostgrestActivity("inactive\n", 3)).toBe(false);
     expect(parsePostgrestActivity("failed\n", 3)).toBe(false);
+    expect(parsePostgrestActivity("unknown\n", 3)).toBe(false);
   });
 
-  test("rejects empty, unknown, and contradictory exit-state pairs", () => {
+  test("rejects empty and contradictory exit-state pairs", () => {
     const contradictions: Array<[string, number]> = [
       ["", 0],
       ["unknown\n", 4],

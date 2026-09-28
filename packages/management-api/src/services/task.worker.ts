@@ -219,7 +219,12 @@ export class TaskWorker {
 
                     // Start tenant-specific PostgREST process
                     const startRes = await databaseService.startRuntime(project_ref);
-                    if (!startRes.success) return false;
+                    if (!startRes.success) {
+                        logger.error(`[TaskWorker] provision_runtime failed for ${project_ref}`, {
+                            error: startRes.error || "Runtime start returned unsuccessful status",
+                        });
+                        return false;
+                    }
 
                     // Extract port numbers from output
                     const portMatch = startRes.output.match(/PORT=(\d+)/);

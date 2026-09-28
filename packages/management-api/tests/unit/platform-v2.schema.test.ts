@@ -112,7 +112,7 @@ describe("platform v2 schema contract", () => {
     expect(auditMigration).toContain("WITH RECURSIVE resolved_audit_chain AS");
     expect(auditMigration).toContain("child.previous_hash = parent.event_hash");
     expect(auditMigration).toContain("UPDATE audit_logs audit");
-    expect(auditMigration).toContain("INSERT INTO platform_schema_migrations");
+    expect(auditMigration).toContain("INSERT INTO public.platform_schema_migrations");
     expect(auditMigration).toContain("DROP TRIGGER IF EXISTS audit_logs_append_only");
   });
 
@@ -128,6 +128,18 @@ describe("platform v2 schema contract", () => {
     expect(serverEntrypoint).toContain("await assertPlatformMigrationCompleted(controlPlaneSql)");
     expect(serverEntrypoint.indexOf("await assertPlatformMigrationCompleted(controlPlaneSql)"))
       .toBeLessThan(serverEntrypoint.indexOf("await migrateLegacyProjectWebhooks(controlPlaneSql)"));
+  });
+
+  test("full-platform bootstrap preserves Supabase auth and Storage RLS contracts", () => {
+    expect(databaseInit).toContain("CREATE OR REPLACE FUNCTION auth.uid()");
+    expect(databaseInit).toContain("CREATE OR REPLACE FUNCTION auth.jwt()");
+    expect(databaseInit).toContain("ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY");
+    expect(databaseInit).toContain("ALTER TABLE storage.s3_multipart_uploads ENABLE ROW LEVEL SECURITY");
+    expect(databaseInit).toContain("CREATE POLICY \"Allow authenticated read on storage.objects\"");
+    expect(databaseInit).toContain("CREATE POLICY \"Allow authenticated insert on storage.objects\"");
+    expect(databaseInit).toContain("CREATE POLICY \"Allow authenticated multipart uploads\"");
+    expect(databaseInit).toContain("REVOKE ALL ON ALL TABLES IN SCHEMA storage FROM anon");
+    expect(databaseInit).toContain("GRANT SELECT ON ALL TABLES IN SCHEMA storage TO anon");
   });
 
   test("serializes task activation with durable GoTrue user deletion fences", () => {

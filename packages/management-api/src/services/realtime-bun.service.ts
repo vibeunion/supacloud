@@ -46,6 +46,17 @@ interface RealtimeSubscriptionState {
     token?: string;
 }
 
+type SqlListenHandle = {
+    unlisten(): Promise<void> | void;
+};
+
+type ListenableSql = SQL & {
+    listen(
+        channel: string,
+        callback: (payload: string) => void | Promise<void>,
+    ): Promise<SqlListenHandle>;
+};
+
 export interface RealtimeBunServiceDependencies {
     resolveDatabase: (projectRef: string) => Promise<SQL | null>;
     verifyJwt: (projectRef: string, token: string) => Promise<ProjectJwtVerification | null>;
@@ -155,7 +166,9 @@ export class RealtimeBunService {
             if (hasWal2json) {
                 this.startWalPolling(projectRef, db);
             } else {
-                const listener = await db.listen('realtime_changes', async (payload: string) => {
+                // Bun supports SQL LISTEN at runtime, but older @types/bun releases
+                // do not expose the method on SQL. Keep the runtime contract narrow.
+                const listener = await (db as unknown as ListenableSql).listen('realtime_changes', async (payload: string) => {
                     try {
                         const parsed = JSON.parse(payload);
                         await this.filterAndEmit(projectRef, parsed);

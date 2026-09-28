@@ -366,6 +366,8 @@ export async function initDatabase() {
 
   async function initializeControlPlaneSchema(transaction: TransactionSQL): Promise<void> {
     sql = transaction;
+    // Shared self-host logins may default to auth for GoTrue migrations.
+    await sql.unsafe("SET LOCAL search_path TO public");
 
     // Check current database
     const [dbInfo] =
@@ -768,18 +770,77 @@ export async function initDatabase() {
         `Database initialized successfully! Public tables verified: ${finalPublicCount}/12`,
       );
 
-      // In CI mode where tests rewrite db_name to 'postgres', we must create Storage relations
+      // Full-platform self-host and CI runs share the control-plane database with
+      // PostgREST/GoTrue, so they need the minimal native Storage relations too.
       let storageTableCount = 0;
-      if (process.env.CI || process.env.GITHUB_ACTIONS || process.env.TEST_FIXED_JWT_SECRET) {
+      const shouldInitializeStorage =
+        process.env.SUPACLOUD_FULL_PLATFORM_BOOTSTRAP === "true"
+        || process.env.CI
+        || process.env.GITHUB_ACTIONS
+        || process.env.TEST_FIXED_JWT_SECRET;
+      if (shouldInitializeStorage) {
         logger.info(
           "Initializing Storage schemas natively for E2E CI routing...",
         );
         const storageDDL = `
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+              CREATE ROLE anon NOLOGIN NOINHERIT;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+              CREATE ROLE authenticated NOLOGIN NOINHERIT;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
+              CREATE ROLE service_role NOLOGIN NOINHERIT BYPASSRLS;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+              CREATE ROLE supabase_admin LOGIN NOINHERIT BYPASSRLS;
+            END IF;
+          END
+          $$;
+          CREATE SCHEMA IF NOT EXISTS auth;
+          ALTER ROLE postgres SET search_path TO auth, public;
+          DO $$
+          BEGIN
+            IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'supabase_auth_admin') THEN
+              ALTER ROLE supabase_auth_admin SET search_path TO auth, public;
+            END IF;
+          END
+          $$;
           CREATE SCHEMA IF NOT EXISTS storage;
+          CREATE SCHEMA IF NOT EXISTS graphql_public;
+          CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid AS $$
+          BEGIN
+            RETURN COALESCE(
+              nullif(current_setting('request.jwt.claim.sub', true), ''),
+              (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')
+            )::uuid;
+          EXCEPTION
+            WHEN invalid_text_representation THEN
+              RETURN NULL;
+          END
+          $$ LANGUAGE plpgsql STABLE;
+          CREATE OR REPLACE FUNCTION auth.jwt() RETURNS jsonb AS $$
+            SELECT COALESCE(
+              nullif(current_setting('request.jwt.claims', true), ''),
+              '{}'
+            )::jsonb
+          $$ LANGUAGE SQL STABLE;
+          CREATE OR REPLACE FUNCTION auth.role() RETURNS text AS $$
+            SELECT COALESCE(
+              nullif(current_setting('request.jwt.claim.role', true), ''),
+              (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'role'),
+              'anon'
+            )::text
+          $$ LANGUAGE SQL STABLE;
+          GRANT EXECUTE ON FUNCTION auth.uid(), auth.jwt(), auth.role()
+            TO anon, authenticated, service_role;
           CREATE TABLE IF NOT EXISTS storage.buckets (
               id text not null primary key,
               name text not null,
               owner uuid,
+              owner_id text,
               created_at timestamptz default now(),
               updated_at timestamptz default now(),
               public boolean default false,
@@ -792,13 +853,19 @@ export async function initDatabase() {
               bucket_id text references storage.buckets,
               name text,
               owner uuid,
+              owner_id text,
               created_at timestamptz default now(),
               updated_at timestamptz default now(),
               last_accessed_at timestamptz default now(),
               metadata jsonb,
+              user_metadata jsonb,
               path_tokens text[] generated always as (string_to_array(name, '/')) stored,
               version text default gen_random_uuid()
           );
+          ALTER TABLE storage.buckets ADD COLUMN IF NOT EXISTS owner_id text;
+          ALTER TABLE storage.objects ADD COLUMN IF NOT EXISTS owner_id text;
+          ALTER TABLE storage.objects ADD COLUMN IF NOT EXISTS user_metadata jsonb;
+          ALTER TABLE storage.objects ALTER COLUMN owner SET DEFAULT auth.uid();
           CREATE UNIQUE INDEX IF NOT EXISTS idx_objects_bucketid_name ON storage.objects (bucket_id, name);
           CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads (
               id text not null primary key,
@@ -819,9 +886,90 @@ export async function initDatabase() {
               owner_id uuid,
               created_at timestamptz not null default now()
           );
+          ALTER TABLE storage.s3_multipart_uploads ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE storage.s3_multipart_uploads_parts ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE storage.buckets ENABLE ROW LEVEL SECURITY;
+          ALTER TABLE storage.objects ENABLE ROW LEVEL SECURITY;
+          REVOKE ALL ON ALL TABLES IN SCHEMA storage FROM anon;
+          GRANT SELECT ON ALL TABLES IN SCHEMA storage TO anon;
+          GRANT ALL ON ALL TABLES IN SCHEMA storage TO authenticated, service_role;
+          GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO authenticated, service_role;
+          DO $$
+          BEGIN
+            CREATE POLICY "Public buckets are viewable by everyone."
+              ON storage.buckets FOR SELECT USING (true);
+          EXCEPTION WHEN duplicate_object THEN NULL;
+          END
+          $$;
+          DO $$
+          BEGIN
+            CREATE POLICY "Authenticated users can view all buckets."
+              ON storage.buckets FOR SELECT TO authenticated USING (true);
+          EXCEPTION WHEN duplicate_object THEN NULL;
+          END
+          $$;
+          DO $$
+          BEGIN
+            CREATE POLICY "Allow public read on storage.objects"
+              ON storage.objects FOR SELECT
+              USING (bucket_id IN (SELECT id FROM storage.buckets WHERE public = true));
+          EXCEPTION WHEN duplicate_object THEN NULL;
+          END
+          $$;
+          DO $$
+          BEGIN
+            CREATE POLICY "Allow authenticated read on storage.objects"
+              ON storage.objects FOR SELECT TO authenticated
+              USING (auth.uid() = owner);
+          EXCEPTION WHEN duplicate_object THEN NULL;
+          END
+          $$;
+          DO $$
+          BEGIN
+            CREATE POLICY "Allow authenticated insert on storage.objects"
+              ON storage.objects FOR INSERT TO authenticated
+              WITH CHECK (bucket_id IN (SELECT id FROM storage.buckets) AND auth.uid() = owner);
+          EXCEPTION WHEN duplicate_object THEN NULL;
+          END
+          $$;
+          DO $$
+          BEGIN
+            CREATE POLICY "Allow authenticated update on storage.objects"
+              ON storage.objects FOR UPDATE TO authenticated
+              USING (auth.uid() = owner) WITH CHECK (auth.uid() = owner);
+          EXCEPTION WHEN duplicate_object THEN NULL;
+          END
+          $$;
+          DO $$
+          BEGIN
+            CREATE POLICY "Allow authenticated delete on storage.objects"
+              ON storage.objects FOR DELETE TO authenticated
+              USING (auth.uid() = owner);
+          EXCEPTION WHEN duplicate_object THEN NULL;
+          END
+          $$;
+          DO $$
+          BEGIN
+            CREATE POLICY "Allow authenticated multipart uploads"
+              ON storage.s3_multipart_uploads FOR ALL TO authenticated
+              USING (owner_id = auth.uid())
+              WITH CHECK (owner_id = auth.uid());
+          EXCEPTION WHEN duplicate_object THEN NULL;
+          END
+          $$;
+          DO $$
+          BEGIN
+            CREATE POLICY "Allow authenticated multipart upload parts"
+              ON storage.s3_multipart_uploads_parts FOR ALL TO authenticated
+              USING (owner_id = auth.uid())
+              WITH CHECK (owner_id = auth.uid());
+          EXCEPTION WHEN duplicate_object THEN NULL;
+          END
+          $$;
           GRANT ALL PRIVILEGES ON SCHEMA storage TO postgres, supabase_admin;
           GRANT USAGE ON SCHEMA storage TO anon, authenticated, service_role;
-          GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA storage TO postgres, supabase_admin, anon, authenticated, service_role;
+          GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA storage TO postgres, supabase_admin, authenticated, service_role;
+          GRANT SELECT ON ALL TABLES IN SCHEMA storage TO anon;
           GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA storage TO postgres, supabase_admin, anon, authenticated, service_role;
           GRANT ALL PRIVILEGES ON ALL ROUTINES IN SCHEMA storage TO postgres, supabase_admin, anon, authenticated, service_role;
         `;
@@ -841,7 +989,7 @@ export async function initDatabase() {
         );
       }
 
-      if ((process.env.CI || process.env.GITHUB_ACTIONS || process.env.TEST_FIXED_JWT_SECRET) && storageTableCount < 4) {
+      if (shouldInitializeStorage && storageTableCount < 4) {
         throw new Error(
           `Storage schema injection verified but failed. Expected 4 storage tables, got ${storageTableCount}`,
         );
