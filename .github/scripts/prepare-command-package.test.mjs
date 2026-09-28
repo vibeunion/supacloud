@@ -4,6 +4,63 @@ import { readFileSync } from 'node:fs';
 import { assertPublishedDependencies, isNpmNotFoundError, prepareCommandPackage } from './prepare-command-package.mjs';
 import { REGISTRY_RETRY_DELAYS_MS } from './npm-registry-visibility.mjs';
 import { resolveManagementRecovery } from './recover-management-release.mjs';
+import { publishNpmPackage } from './publish-npm-package.mjs';
+
+test('failed delivery publication blocks its consumers without blocking independent packages', () => {
+  const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
+  /** @param {string} name */
+  const step = (name) => workflow.split(`- name: ${name}\n`)[1]?.split('\n      - name:')[0] ?? '';
+  assert.match(step('Publish delivery contracts to NPM'), /id: publish_delivery/);
+  for (const name of ['Publish app compiler to NPM', 'Publish cli to NPM', 'Publish admin to NPM']) {
+    assert.match(step(name), /!cancelled\(\) && steps\.publish_delivery\.outcome == 'success'/);
+    assert.match(step(name), /inputs\.recover_npm == true/);
+  }
+  assert.match(step('Publish app compiler to NPM'), /id: publish_compiler/);
+  assert.match(step('Publish cli to NPM'), /id: publish_cli/);
+  for (const name of ['Publish cli to NPM', 'Publish admin to NPM']) {
+    // A skipped compiler step still permits CLI-only and admin-only releases.
+    assert.match(step(name), /steps\.publish_compiler\.outcome != 'failure'/);
+  }
+  assert.match(step('Publish admin to NPM'), /steps\.publish_cli\.outcome != 'failure'/);
+  assert.doesNotMatch(step('Publish command contracts to NPM'), /steps\.publish_delivery/);
+});
+
+test('delivery and compiler publish with OIDC without bootstrap token injection', () => {
+  const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
+  const job = workflow.split('\n  publish-npm:\n')[1]?.split(/\n  [a-z][a-z-]+:\n/)[0] ?? '';
+  assert.match(job, /environment: npm-publish/);
+  assert.match(job, /id-token: write/);
+  assert.match(job, /runs-on: ubuntu-latest/);
+  for (const name of ['Publish delivery contracts to NPM', 'Publish app compiler to NPM']) {
+    const step = job.split(`- name: ${name}\n`)[1]?.split('\n      - name:')[0] ?? '';
+    assert.match(step, /publish-npm-package\.mjs/);
+    assert.doesNotMatch(step, /NODE_AUTH_TOKEN|NPM_BOOTSTRAP_TOKEN/);
+  }
+});
+
+test('publish E404 reports OIDC configuration checks instead of polling visibility', async () => {
+  /** @type {string[]} */
+  const calls = [];
+  await assert.rejects(publishNpmPackage({
+    name: '@supacloud/delivery',
+    version: '0.2.0',
+    runNpm: async (args) => {
+      calls.push(args[0]);
+      throw notFoundError('@supacloud/delivery@0.2.0');
+    },
+    sleep: async () => assert.fail('Rejected publication must not retry visibility'),
+  }), (error) => {
+    assert.ok(error instanceof Error);
+    assert.match(error.message, /npm rejected publication of @supacloud\/delivery@0\.2\.0 with E404; this is not registry propagation delay/);
+    assert.match(error.message, /Trusted Publisher configured for @supacloud\/delivery/);
+    assert.match(error.message, /workflow filename, environment name, and permission for direct npm publish/);
+    assert.match(error.message, /publish it manually first, then configure its Trusted Publisher/);
+    assert.match(error.message, /npm whoami does not verify OIDC authentication/);
+    assert.doesNotMatch(error.message, /NPM_BOOTSTRAP_TOKEN/);
+    return true;
+  });
+  assert.deepEqual(calls, ['view', 'publish']);
+});
 
 const recoveryInput = {
   repository: 'vibeunion/supacloud',
