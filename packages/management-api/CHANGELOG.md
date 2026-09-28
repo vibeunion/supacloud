@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.88.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.88.0...management-api-v0.88.1) (2026-09-28)
+
+
+### Bug Fixes
+
+* **storage:** allow project service role to transform metadata-free objects ([#1483](https://github.com/vibeunion/supacloud/issues/1483)) ([9bd5853](https://github.com/vibeunion/supacloud/commit/9bd585373d2c9dc5c2466cc44b470696fcac0536))
+* **storage:** source image transforms via the storage driver ([#1479](https://github.com/vibeunion/supacloud/issues/1479)) ([1935b87](https://github.com/vibeunion/supacloud/commit/1935b87d82d673bf1e57167b33c4f9306bfc0d2d))
+
 ## [0.88.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.87.2...management-api-v0.88.0) (2026-09-28)
 
 
