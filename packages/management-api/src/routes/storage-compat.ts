@@ -55,6 +55,7 @@ import {
     signedUrlPayload,
     verifyLegacySignedToken,
 } from "./storage-compat.helpers";
+import { requireProjectOrAdminAuth } from "../middleware/auth";
 
 const DEFAULT_TUS_MAX_SIZE_BYTES = 500 * 1024 * 1024;
 const STORAGE_UPLOAD_MAX_BYTES = Number(process.env.STORAGE_UPLOAD_MAX_BYTES || config.maxRequestBodySize || 100 * 1024 * 1024);
@@ -1255,14 +1256,19 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     // GET /render/image/authenticated/:bucket/* — Download authenticated transformed file
     .get('/render/image/authenticated/:bucket/*', {
         detail: { tags: ["storage"], summary: "Download authenticated transformed image" },
-    }, async ({ params, headers, query, set }) => {
+    }, async ({ params, headers, query, set, request }) => {
         const ref = await getProjectRef(headers as Record<string, string | undefined>);
         const filePath = params['*'];
         if (!filePath) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Missing file path' });
 
-        const auth = headers['authorization'];
-        const permitted = await StorageRLS.authorizeAction(ref, auth, 'download', params.bucket, filePath);
-        if (!permitted.permitted) return status(403, { statusCode: "403", error: 'Forbidden', message: permitted.error || 'Access Denied.' });
+        // Tenant apps may write objects straight to the bucket (e.g. direct S3) and
+        // therefore have no storage.objects row for object RLS. The project service
+        // role or an admin may still transform them; everyone else keeps object RLS.
+        const privilegedFailure = await requireProjectOrAdminAuth(request, ref);
+        if (privilegedFailure) {
+            const permitted = await StorageRLS.authorizeAction(ref, headers['authorization'], 'download', params.bucket, filePath);
+            if (!permitted.permitted) return status(403, { statusCode: "403", error: 'Forbidden', message: permitted.error || 'Access Denied.' });
+        }
 
         return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
     })
