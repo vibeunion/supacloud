@@ -18,7 +18,12 @@ test("receipt decoding rejects impossible states and validates committed results
   };
   expect(decodeDurableCommandReceipt({ ...reference, status: "confirmed", audit: "complete", result: true }, decode))
     .toMatchObject({ status: "confirmed", result: true });
+  expect(decodeDurableCommandReceipt({ ...reference, status: "rejected", audit: "complete" }, () => {
+    throw new Error("Rejected receipts must not decode a success result");
+  })).toEqual({ ...reference, status: "rejected", audit: "complete" });
   for (const value of [null, {}, { ...reference, status: "pending", audit: "complete" },
+    { ...reference, status: "rejected", audit: "pending" },
+    { ...reference, status: "rejected", audit: "complete", result: null },
     { ...reference, status: "unknown", audit: "pending", result: true },
     { ...reference, status: "confirmed", audit: "pending", result: "true" }]) {
     expect(() => decodeDurableCommandReceipt(value, decode)).toThrow();

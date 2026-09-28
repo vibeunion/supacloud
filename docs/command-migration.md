@@ -99,6 +99,7 @@ try {
 | --- | --- | --- |
 | pending / audit=pending | 意图已持久化，可能尚未发出或仍在进行 | 查回执或只读对账，不重发 |
 | unknown / audit=pending | 无法确认业务结果 | `reconcile` / `reconcileByReference` 或人工核实 |
+| rejected / audit=complete | 下游明确拒绝，且拒绝审计与本地回执已在同一事务提交 | 返回同一拒绝回执；不发送、不查询、不进入恢复重试 |
 | confirmed / audit=pending | 已匹配权威结果，但审计未完成 | `flushAudit` / `flushAuditByReference` |
 | confirmed / audit=complete | 业务已确认且本地审计完成 | 可解除相应页面锁 |
 
@@ -166,6 +167,26 @@ try {
 清理输入后，交互式按编号恢复会返回 `COMMAND_INPUT_EXPIRED` / HTTP 410；提供原输入的授权
 重放仍能返回同一回执，同键不同输入仍报冲突。前端不要因 410 删除锁或生成新操作号。
 需要长期按编号查阅时，应调整保留期或提供领域自己的只读归档入口。
+
+### 明确拒绝与结果未知
+
+外部命令可显式提供 `rejection.isDefinitiveWriteFailure`，但必须由业务适配器基于
+可信的下游错误语义判断；框架不会把任意 HTTP 4xx、超时或认证刷新失败默认当成拒绝。
+分类器抛错、返回非 `true`，或拒绝回执/拒绝审计事务提交失败时，结果仍为
+`COMMAND_OUTCOME_UNKNOWN`，原始持久意图保留，后续不得自动重发。
+
+只有以下操作在同一数据库事务成功后才会产生 `rejected` 终态：
+
+1. 锁定并重新读取当前回执，确认它仍是 pending/unknown；
+2. 写入拒绝审计；
+3. 将回执转为 `rejected`，并完成拒绝审计；
+4. 提交事务。
+
+`confirmed` 和 `rejected` 都是终态。陈旧的 lookup、reconcile、恢复 worker 或旧版本
+写入不能覆盖它们。恢复工作流可以完成投递，但输出仍保留 `status: rejected`，不能被解释为
+业务成功。升级已有命令表时，必须先停止旧恢复 worker 和旧写入进程，在迁移事务中安装新的
+状态约束、终态保护、拒绝审计约束及恢复过滤，再启动新版本；仅执行
+`CREATE TABLE IF NOT EXISTS` 不会升级现有表。
 
 ## Svelte 与认证接入
 

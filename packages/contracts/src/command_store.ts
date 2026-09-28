@@ -26,6 +26,8 @@ export interface CommandStoreSession<Transaction> {
   insert(record: StoredCommand): Promise<void>;
   confirm(reference: OperationReference, result: unknown): Promise<void>;
   markUnknown(reference: OperationReference): Promise<void>;
+  /** Optional terminal rejection; caller must persist rejection audit in the same transaction. */
+  reject?(reference: OperationReference): Promise<void>;
   audit(reference: OperationReference, event: string, details: unknown): Promise<void>;
   completeAudit(reference: OperationReference): Promise<void>;
 }
@@ -49,6 +51,6 @@ export interface CommandRecoveryStore {
   redactCompleted(scope: RecoveryScope & { before: number; limit: number }): Promise<number>;
 }
 export interface CommandRetentionStore {
-  /** Retains receipt and fingerprint; never redacts pending or unaudited operations. */
+  /** Retains receipt and fingerprint; only confirmed/rejected, fully audited operations may be redacted. */
   redactCompleted(scope: RecoveryScope & { before: number; limit: number }): Promise<number>;
 }
