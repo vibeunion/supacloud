@@ -1397,7 +1397,7 @@ describe("runtime companion version assets", () => {
       }>;
     };
     const integrationJob = ciWorkflow.jobs["integration-test"];
-    expect(integrationJob?.services?.realtime?.image).toBe(
+    expect(integrationJob?.services?.["realtime"]?.image).toBe(
       "ghcr.io/supabase/realtime:v2.138.1",
     );
     expect(workflow).not.toContain("public.ecr.aws/supabase/realtime");
