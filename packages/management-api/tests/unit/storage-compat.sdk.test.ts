@@ -695,6 +695,36 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     expect(payload.signedURL).toContain("wm_opacity=0.4");
   });
 
+  test("project service role can transform objects without storage.objects metadata", async () => {
+    // 直写 S3 的租户应用没有 storage.objects 行，对象 RLS 会拒绝；service role/admin 仍应放行。
+    const rlsSpy = spyOn(StorageRLS, "authorizeAction").mockResolvedValue({ permitted: false, error: "Object not found" });
+    const infoSpy = spyOn(StorageRLS, "getObjectInfo").mockResolvedValue(null);
+    const downloadSpy = spyOn(StorageService, "getDownloadResponse").mockResolvedValue(
+      new Response(new Uint8Array([1, 2, 3]), { headers: { "Content-Type": "image/tiff" } }),
+    );
+    const fetchSpy = spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("png", { headers: { "content-type": "image/png" } }),
+    );
+    try {
+      const privileged = await request("/storage/v1/render/image/authenticated/avatars/scan.tiff?width=64&format=png", {
+        headers: { host: "localhost", apikey: "test-token", authorization: "Bearer dev-master-token" },
+      });
+      expect(privileged.status).toBe(200);
+      expect(rlsSpy).not.toHaveBeenCalled();
+
+      const denied = await request("/storage/v1/render/image/authenticated/avatars/scan.tiff?width=64&format=png", {
+        headers: { host: "localhost", apikey: "test-token" },
+      });
+      expect(denied.status).toBe(403);
+      expect(rlsSpy).toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+      downloadSpy.mockRestore();
+      infoSpy.mockRestore();
+      rlsSpy.mockRestore();
+    }
+  });
+
   test("signed upload flow matches createSignedUploadUrl + uploadToSignedUrl", async () => {
     const uploadSpy = spyOn(StorageService, "uploadFile").mockResolvedValue(true);
 
