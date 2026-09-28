@@ -99,6 +99,7 @@ try {
 | --- | --- | --- |
 | pending / audit=pending | 意图已持久化，可能尚未发出或仍在进行 | 查回执或只读对账，不重发 |
 | unknown / audit=pending | 无法确认业务结果 | `reconcile` / `reconcileByReference` 或人工核实 |
+| rejected / audit=complete | 下游明确拒绝，且拒绝审计与本地回执已在同一事务提交 | 返回同一拒绝回执；不发送、不查询、不进入恢复重试 |
 | confirmed / audit=pending | 已匹配权威结果，但审计未完成 | `flushAudit` / `flushAuditByReference` |
 | confirmed / audit=complete | 业务已确认且本地审计完成 | 可解除相应页面锁 |
 
@@ -115,7 +116,8 @@ try {
 
 - 直接外部执行使用 `supacloud.command.reconcile`；原提交命令继续原 `command.<name>` Workflow。
 - 任务只包含操作引用，不复制加密输入；初始恢复预算为 20 次，耗尽由现有 Workflow 死信处理。
-- `run` 返回 `completed`、`retry` 或 `failed`；只有业务 confirmed 且审计 complete 才完成步骤。
+- `run` 返回 `completed`、`retry` 或 `failed`；只有 confirmed/rejected 终态且审计 complete 才完成步骤。
+  rejected 仍保留在工作流输出中，步骤投递完成不代表业务成功。
 - 领取、可见性超时、重试计数和旧 attempt 拒绝全部复用 Workflow/PGMQ。
 - 传输或确认响应丢失时保留重投能力，但重投只运行对账和补审计，永不调用 send。
 - 宿主 dispatcher 必须识别其他 Workflow，不能把不认识的任务当作恢复任务丢弃或确认。
@@ -166,6 +168,49 @@ try {
 清理输入后，交互式按编号恢复会返回 `COMMAND_INPUT_EXPIRED` / HTTP 410；提供原输入的授权
 重放仍能返回同一回执，同键不同输入仍报冲突。前端不要因 410 删除锁或生成新操作号。
 需要长期按编号查阅时，应调整保留期或提供领域自己的只读归档入口。
+
+### 明确拒绝与结果未知
+
+外部命令可显式提供 `rejection.isDefinitiveWriteFailure`，但必须由业务适配器基于
+可信的下游错误语义判断；框架不会把任意 HTTP 4xx、超时或认证刷新失败默认当成拒绝。
+分类器抛错或返回非 `true` 时，继续现有只读对账：权威结果匹配可确认成功，否则保持未知。
+拒绝回执/拒绝审计事务提交失败时返回 `COMMAND_OUTCOME_UNKNOWN`，不能报告确定拒绝。
+两种情况下原始持久意图都保留，后续不得自动重发。
+
+只有以下操作在同一数据库事务成功后才会产生 `rejected` 终态：
+
+1. 锁定并重新读取当前回执，确认它仍是 pending/unknown；
+2. 写入拒绝审计；
+3. 将回执转为 `rejected`，并完成拒绝审计；
+4. 提交事务。
+
+`confirmed` 和 `rejected` 都是终态。陈旧的 lookup、reconcile、恢复 worker 或旧版本
+写入不能覆盖它们。恢复工作流可以完成投递，但输出仍保留 `status: rejected`，不能被解释为
+业务成功。升级已有命令表时，必须先停止旧恢复 worker 和旧写入进程，在迁移事务中安装新的
+状态约束、终态保护、拒绝审计约束及恢复过滤，再启动新版本；仅执行
+`CREATE TABLE IF NOT EXISTS` 不会升级现有表。
+
+已有表使用 `COMMAND_PERSISTENCE_UPGRADE_SQL`，新表使用 `COMMAND_PERSISTENCE_SQL`。
+在开启 `rejection` 策略前，同时升级 contracts 解码器、commands 执行器与恢复 worker、
+db adapter，以及消费回执的 SDK/应用。旧 decoder 不认识新状态，不能把旧客户端解析失败
+当作业务失败；默认不配置此策略的命令不会主动产生拒绝回执。数据库约束防止旧写入覆盖
+新终态，但不能使旧 worker 或旧客户端自动理解新协议。
+
+拒绝原因属于领域适配器：通过独立的 `rejection.audit` 记录经过脱敏的目标信息，不持久化
+原始上游异常或凭据。成功审计回调不会用于拒绝。自定义 store 可以继续不实现可选的
+`reject`；配置拒绝策略却缺少该能力时，执行器在发送前失败关闭。
+
+无法消除的窗口是“下游已明确拒绝、进程在本地拒绝事务提交前崩溃”。此时丢失拒绝证据，
+只能保留 pending/unknown 并只读恢复；不能把查询不到结果推定为 rejected。拒绝审计也不提供
+跨服务事务。已有 rejected 回执存在时不要回滚到旧解码器或收紧为旧状态 CHECK；
+应保留新读取/恢复能力并关闭新策略，或按正式数据迁移方案处理，不能删除回执丢失去重证据。
+
+该能力的原生数据库回归位于 `packages/db/tests/command-rejection.integration.test.ts`。
+先按 `scripts/prepare-command-test-database.ts` 初始化专用 loopback
+`supacloud_commands_test` 数据库，再带 `SUPACLOUD_COMMAND_TEST_URL` 运行这个单文件。
+测试要求独占该测试数据库，会调整恢复队列可见性，并在回滚事务内替换历史表结构；
+不能对业务数据库或其他并行测试使用的数据库执行。未设置连接时跳过；
+CI 可设置 `REQUIRE_COMMAND_REJECTION_INTEGRATION=1` 强制缺少连接时报错。
 
 ## Svelte 与认证接入
 

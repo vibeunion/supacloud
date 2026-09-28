@@ -39,6 +39,22 @@ test("unknown and audit-pending states request Workflow retry, never success", a
     expect(f.actions[0]).toMatchObject({ name: "retry", request: { delaySeconds: 30, errorMessage: "COMMAND_RECOVERY_REQUIRED" } });
   }
 });
+test("rejected recovery completes with the rejected outcome and still requires authorization", async () => {
+  const rejected: DurableCommandReceipt<unknown> = {
+    ...reference, dispatchKey: "command-id", status: "rejected", audit: "complete",
+  };
+  const f = fixture(async () => rejected);
+  expect(await f.handler.run(claim)).toBe("completed");
+  expect(f.actions).toEqual([{ name: "complete", request: {
+    stepId: "step", messageId: claim.messageId, attempt: 1, workerId: "worker",
+    stepOutput: { commandId: "command-id", status: "rejected", audit: "complete" },
+    runOutput: { commandId: "command-id", status: "rejected", audit: "complete" },
+  } }]);
+  const denied = fixture(async () => rejected);
+  await expect(createCommandRecoveryHandler({ ...denied.options, authorize: () => "deny" }).run(claim))
+    .rejects.toMatchObject({ code: "COMMAND_REJECTED" });
+  expect(denied.actions).toEqual([]);
+});
 test("transient failures are sanitized, invalid receipts and expired input fail the workflow", async () => {
   const transient = fixture(async () => { throw new Error("secret"); });
   expect(await transient.handler.run(claim)).toBe("retry");

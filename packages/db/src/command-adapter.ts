@@ -106,25 +106,29 @@ export function createPostgresCommandStore<Transaction extends CommandTransactio
       if (submission !== undefined) {
         const attempt = { stepId: submission.stepId, messageId: submission.messageId, attempt: submission.attempt, workerId: submission.workerId };
         const commandId = submission.commandId;
-        if (record.kind === "external") {
+        if (record.kind === "external" && receipt.status !== "rejected") {
           await tx.query("SELECT public.supacloud_workflow_advance($1::text::jsonb)", [JSON.stringify({
             ...attempt, output: { commandId, status: "intent-recorded" }, nextStepKey: "reconcile",
             nextInput: { commandId, tenantId: receipt.tenantId, actorId: receipt.actorId, command: receipt.command, operationId: receipt.operationId },
             nextMaxAttempts: 20,
           })]);
         } else {
-          const output = { commandId, status: "confirmed", audit: "complete" };
+          const output = { commandId, status: receipt.status, audit: "complete" };
           await tx.query("SELECT public.supacloud_workflow_complete($1::text::jsonb)", [JSON.stringify({ ...attempt, stepOutput: output, runOutput: output })]);
         }
       }
     },
     async confirm(ref, result) {
       await tx.query(`UPDATE supacloud_commands.execution_receipts SET status='confirmed',result=$5::text::jsonb,updated_at=now()
-        WHERE ${where} AND status<>'confirmed'`, [...keys(ref), canonicalCommandJson(result)]);
+        WHERE ${where} AND status IN ('pending','unknown')`, [...keys(ref), canonicalCommandJson(result)]);
     },
     async markUnknown(ref) {
       await tx.query(`UPDATE supacloud_commands.execution_receipts SET status='unknown',updated_at=now()
-        WHERE ${where} AND status<>'confirmed'`, keys(ref));
+        WHERE ${where} AND status IN ('pending','unknown')`, keys(ref));
+    },
+    async reject(ref) {
+      await tx.query(`UPDATE supacloud_commands.execution_receipts SET status='rejected',audit_state='complete',updated_at=now()
+        WHERE ${where} AND kind='external' AND status IN ('pending','unknown')`, keys(ref));
     },
     async audit(ref, event, details) {
       await tx.query(`INSERT INTO supacloud_commands.execution_audit
@@ -150,7 +154,7 @@ export function createPostgresCommandStore<Transaction extends CommandTransactio
     async redactCompleted(options) {
       return transaction(async (tx) => rows(await tx.query(`WITH candidates AS (
         SELECT tenant_id,actor_id,command,operation_key FROM supacloud_commands.execution_receipts
-        WHERE ${selected} AND status='confirmed' AND audit_state='complete' AND input_payload IS NOT NULL
+        WHERE ${selected} AND status IN ('confirmed','rejected') AND audit_state='complete' AND input_payload IS NOT NULL
           AND updated_at<to_timestamp($3::double precision/1000)
         ORDER BY updated_at LIMIT $4 FOR UPDATE SKIP LOCKED
       ) UPDATE supacloud_commands.execution_receipts r SET input_payload=NULL FROM candidates c

@@ -56,6 +56,44 @@ The storage interfaces are owned by contracts and re-exported here as types.
 Other stores must provide equivalent transaction and receipt guarantees; merely
 implementing the TypeScript interface does not prove persistence correctness.
 
+### Definitive Remote Rejection
+
+`createExternalCommand` accepts an optional `rejection` policy alongside the
+existing success `audit`. This is a durable outcome, not just an HTTP error
+mapping. Configure it only when a downstream adapter can prove that the specific
+dispatch was rejected before any business effect:
+
+```ts
+rejection: {
+  isDefinitiveWriteFailure: (error) =>
+    error instanceof ProviderRefusedBeforeEffect,
+  audit: {
+    event: "webhook.update.rejected",
+    details: (input) => ({ target: input.id }),
+  },
+},
+```
+
+`ProviderRefusedBeforeEffect` represents an application-owned, trusted adapter
+error. Do not classify an arbitrary HTTP 401/403/409 as definitive: an upstream
+may already have applied the write before a later audit or response failed.
+Network failures, timeouts and classifier exceptions still use read-only
+reconciliation. An authoritative match can confirm the operation; otherwise its
+outcome stays unknown. There is no automatic redispatch.
+
+The store must support `session.reject`; opt-in without that capability fails
+before inserting an intent or sending. The rejection audit and
+`{ status: "rejected", audit: "complete" }` receipt commit atomically. No success
+`result` is present. A failed rejection transaction reports
+`COMMAND_OUTCOME_UNKNOWN`, never a definitive denial. The optional rejection
+audit `write(transaction, input)` must use that same local transaction, not call
+a remote audit service.
+
+Repeated execution, lookup and recovery preserve the rejected terminal receipt
+and still enforce authorization and operation identity. A `rejected` receipt is
+distinct from a preflight `COMMAND_REJECTED` exception: it is durable evidence for
+that operation, not permission to generate a new key and blindly retry.
+
 ## Recovery
 
 Interactive methods reauthorize the original actor. Worker `recover` requires
@@ -66,13 +104,15 @@ assumes that a cancelled or failed request rolled back.
 Pass `supacloud.workflows` as the handler's `workflows` port. The existing dispatcher
 routes reconcile steps to `run(claim)` and other steps to their registered handlers.
 PGMQ/Workflow owns delivery, visibility, attempts and dead-letter state. Completion
-requires confirmed business output and complete audit, not merely a successful
-lookup call. Bound lookup duration and monitor failed/unknown operations.
+requires a confirmed or rejected terminal receipt and complete audit, not merely
+a successful lookup call. A completed recovery workflow retains `rejected` in its
+output and does not imply business success. Bound lookup duration and monitor
+failed/unknown operations.
 
 Redaction keeps fingerprints and receipts: same-input explicit replay deduplicates;
 different input conflicts; reference-only lookup returns `COMMAND_INPUT_EXPIRED`.
 Never issue a new operation just because the old input expired.
-Already confirmed/audited receipts can still acknowledge a delayed recovery step
+Already confirmed or rejected, audited receipts can still acknowledge a delayed recovery step
 after input redaction. Retention is a separate maintenance operation.
 
 See [breaking changes, schema upgrade, release and rollback](../../docs/command-migration.md).
