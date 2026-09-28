@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
-import { NPM_REGISTRY, viewRegistryVersion, waitForRegistryVersion } from './npm-registry-visibility.mjs';
+import { isNpmNotFoundError, NPM_REGISTRY, viewRegistryVersion, waitForRegistryVersion } from './npm-registry-visibility.mjs';
 
 const execFileAsync = promisify(execFile);
 const PUBLISH_ARGUMENTS = ['publish', '--provenance', '--access', 'public', `--registry=${NPM_REGISTRY}`];
@@ -52,7 +52,23 @@ export async function publishNpmPackage(options) {
     return { packageSpec, status: /** @type {const} */ ('already-published') };
   }
 
-  const published = await runNpm(PUBLISH_ARGUMENTS);
+  let published;
+  try {
+    published = await runNpm(PUBLISH_ARGUMENTS);
+  } catch (error) {
+    if (isNpmNotFoundError(error)) {
+      throw new Error(
+        `npm rejected publication of ${packageSpec} with E404; this is not registry propagation delay. `
+        + `Check the npm Trusted Publisher configured for ${name}: GitHub owner/repository, `
+        + 'workflow filename, environment name, and permission for direct npm publish. '
+        + 'If the package has never been published, publish it manually first, then configure its Trusted Publisher. '
+        + 'Verify id-token: write and an OIDC-capable npm CLI in the publishing job; '
+        + 'npm whoami does not verify OIDC authentication.',
+        { cause: error },
+      );
+    }
+    throw error;
+  }
   const stdout = typeof published.stdout === 'string' ? published.stdout : '';
   const stderr = typeof published.stderr === 'string' ? published.stderr : '';
   try {

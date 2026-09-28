@@ -473,10 +473,9 @@ jobs:
         run: npm --version
 
       - name: Publish delivery contracts to NPM
+        id: publish_delivery
         if: ${{ always() && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/delivery
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
           bun install --frozen-lockfile
           bun run build
@@ -582,10 +581,9 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish app compiler to NPM
-        if: ${{ always() && (needs.release-please.outputs.compiler_released == 'true' || inputs.recover_npm == true) }}
+        id: publish_compiler
+        if: ${{ !cancelled() && steps.publish_delivery.outcome == 'success' && (needs.release-please.outputs.compiler_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/compiler
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
           node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
           bun install --lockfile-only --registry https://registry.npmjs.org
@@ -594,7 +592,8 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish cli to NPM
-        if: ${{ always() && (needs.release-please.outputs.cli_released == 'true' || inputs.recover_npm == true) }}
+        id: publish_cli
+        if: ${{ !cancelled() && steps.publish_delivery.outcome == 'success' && steps.publish_compiler.outcome != 'failure' && (needs.release-please.outputs.cli_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/cli
         run: |
           # npm packages cannot contain a local `file:` dependency. The CLI
@@ -626,7 +625,7 @@ jobs:
       # Admin consumes the published CLI package. Keep it after CLI so a
       # same-run release never waits for a dependency that has not published.
       - name: Publish admin to NPM
-        if: ${{ always() && (needs.release-please.outputs.admin_released == 'true' || inputs.recover_npm == true) }}
+        if: ${{ !cancelled() && steps.publish_delivery.outcome == 'success' && steps.publish_compiler.outcome != 'failure' && steps.publish_cli.outcome != 'failure' && (needs.release-please.outputs.admin_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/admin
         run: |
           node "$GITHUB_WORKSPACE/.github/scripts/prepare-command-package.mjs"
