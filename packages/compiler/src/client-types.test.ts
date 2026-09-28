@@ -180,6 +180,57 @@ test("generated client infers Type.Module recursive request and response contrac
   }
 });
 
+test("generated client uses encoded request types and decoded response types for Codecs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-client-codec-types-"));
+  try {
+    const codecGraph: ApplicationGraph = {
+      externalTokens: [],
+      modules: [{
+        name: "items", className: "ItemsModule", file: "items.ts", line: 1,
+        imports: [], providers: [], commands: [], queries: [], exports: [],
+        controllers: [{
+          className: "ItemsController", path: "/items", scope: "application",
+          deps: [], file: "items.ts", importPath: "./items",
+          schemaImports: { Body: "./schemas", Query: "./schemas", Result: "./schemas" },
+          routes: [{ method: "POST", path: "/create", handler: "create", body: "Body", query: "Query", response: "Result" }],
+        }],
+      }],
+    };
+    await writeFixtureProject(root, {
+      "client.ts": renderClient(codecGraph),
+      "schemas.ts": [
+        'import { Type } from "typebox";',
+        'const Count = Type.Codec(Type.String()).Decode(Number).Encode(String);',
+        'export const Body = Type.Object({ amount: Count });',
+        'export const Query = Type.Object({ count: Count });',
+        'export const Result = Type.Object({ total: Count });',
+      ].join("\n"),
+      "consumer.ts": [
+        'import { createApiClient } from "./client";',
+        "const client = createApiClient();",
+        'const result = client.items.create({ body: { amount: "10" }, query: { count: "7" } });',
+        'const typed: Promise<{ total: number }> = result;',
+        "// @ts-expect-error Requests carry the encoded wire value, not the decoded number.",
+        'client.items.create({ body: { amount: 10 }, query: { count: "7" } });',
+        "// @ts-expect-error Requests carry the encoded wire value, not the decoded number.",
+        'client.items.create({ body: { amount: "10" }, query: { count: 7 } });',
+        "void typed;",
+      ].join("\n"),
+    });
+    const program = ts.createProgram([join(root, "consumer.ts")], {
+      strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
+      noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
+      ignoreDeprecations: "6.0", baseUrl: root,
+      paths: { typebox: [typeboxPath] },
+    });
+    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
+      .toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("generated client requires params when a params schema exists without a path token", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-client-params-schema-"));
   try {

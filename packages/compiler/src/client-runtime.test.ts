@@ -295,6 +295,48 @@ test("generated client decodes Type.Module recursive references at every depth",
   }
 });
 
+test("generated client sends encoded Codec request values without re-encoding", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-client-codec-runtime-"));
+  try {
+    const baseModule = graph.modules[0]!;
+    const baseController = baseModule.controllers[0]!;
+    const codecGraph: ApplicationGraph = {
+      ...graph,
+      modules: [{ ...baseModule, controllers: [{
+        ...baseController,
+        schemaImports: { Body: "src/contracts", Query: "src/contracts", Result: "src/contracts" },
+        routes: [{ method: "POST", path: "/codec", handler: "codec", body: "Body", query: "Query", response: "Result" }],
+      }] }],
+    };
+    await writeFixtureProject(root, {
+      "generated/client.ts": renderClient(codecGraph, { rootDir: root, outDir: join(root, "generated") }),
+      "src/contracts.ts": [
+        'import { Type } from "typebox";',
+        'const Count = Type.Codec(Type.String()).Decode(Number).Encode(String);',
+        'export const Body = Type.Object({ amount: Count });',
+        'export const Query = Type.Object({ count: Count });',
+        'export const Result = Type.Object({ ok: Type.Boolean() });',
+      ].join("\n"),
+    });
+    await symlink(join(import.meta.dir, "../node_modules"), join(root, "node_modules"), "dir");
+    const generated = await import(pathToFileURL(join(root, "generated/client.ts")).href);
+    const seen: { url: string; body: unknown }[] = [];
+    const client = generated.createApiClient({
+      baseUrl: "https://example.test",
+      fetch: async (url: string, init: RequestInit) => {
+        seen.push({ url, body: init.body });
+        return Response.json({ ok: true });
+      },
+    });
+    await client.items.codec({ body: { amount: "10" }, query: { count: "7" } });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.url).toBe("https://example.test/items/codec?count=7");
+    expect(seen[0]!.body).toBe('{"amount":"10"}');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("generated client rejects structured responses whose HTTP status is absent from the map", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-client-status-contract-"));
   try {

@@ -1264,12 +1264,12 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           ? `{ ${paramNames.map((p) => `${/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(p) ? p : JSON.stringify(p)}: string | number`).join("; ")} }`
           : "Record<string, string | number>";
         const paramsType = paramsSchema
-          ? `StaticDecode<typeof ${paramsSchema.local}>${paramNames.length > 0 ? ` & ${pathParamsType}` : ""}`
+          ? `StaticEncode<typeof ${paramsSchema.local}>${paramNames.length > 0 ? ` & ${pathParamsType}` : ""}`
           : pathParamsType;
-        const queryType = querySchema ? `StaticDecode<typeof ${querySchema.local}>` : "Record<string, unknown>";
-        const bodyType = route.parse === "none" ? "BodyInit" : bodySchema ? `StaticDecode<typeof ${bodySchema.local}>` : "unknown";
-        const headersType = headersSchema ? `StaticDecode<typeof ${headersSchema.local}>` : "Record<string, string>";
-        const cookieType = cookieSchema ? `StaticDecode<typeof ${cookieSchema.local}>` : "Record<string, string | number | boolean>";
+        const queryType = querySchema ? `StaticEncode<typeof ${querySchema.local}>` : "Record<string, unknown>";
+        const bodyType = route.parse === "none" ? "BodyInit" : bodySchema ? `StaticEncode<typeof ${bodySchema.local}>` : "unknown";
+        const headersType = headersSchema ? `StaticEncode<typeof ${headersSchema.local}>` : "Record<string, string>";
+        const cookieType = cookieSchema ? `StaticEncode<typeof ${cookieSchema.local}>` : "Record<string, string | number | boolean>";
         const responseTypes = [
           ...(responseSchema ? [`StaticDecode<typeof ${responseSchema.local}>`] : []),
           ...Object.values(responseSchemas).map((ref) => `StaticDecode<typeof ${ref.local}>`),
@@ -1362,7 +1362,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
   return [
     HEADER,
     "",
-    ...(usesStatic ? ['import type { StaticDecode } from "typebox";'] : []),
+    ...(usesStatic ? ['import type { StaticDecode, StaticEncode } from "typebox";'] : []),
     ...generatedImports,
     ...(usesStatic || generatedImports.length > 0 ? [""] : []),
     "export interface ClientRequestOptions<",
