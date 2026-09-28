@@ -62,7 +62,7 @@ env:
 jobs:
   lint-and-typecheck:
     name: Lint & Type Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -112,7 +112,7 @@ jobs:
 
   architecture-governance:
     name: Architecture Governance
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -158,7 +158,7 @@ jobs:
 
   package-checks:
     name: Package Checks (${{ matrix.name }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
@@ -368,7 +368,7 @@ jobs:
 
   generate-sbom:
     name: Generate CycloneDX SBOM
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -393,7 +393,7 @@ jobs:
 
   command-workflow-integration:
     name: Command Workflow Integration
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     services:
       postgres:
@@ -466,7 +466,7 @@ jobs:
 
   supacloud-lite-standalone-native:
     name: SupaCloud Lite Standalone (Native PostgreSQL)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
@@ -504,7 +504,7 @@ jobs:
 
   application-activation-native:
     name: Application Activation Native PostgreSQL
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout code
@@ -534,7 +534,7 @@ jobs:
 
   docker-and-scripts-checks:
     name: Docker & Scripts Checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -587,7 +587,7 @@ jobs:
 
   unit-test:
     name: Unit Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -647,7 +647,7 @@ jobs:
 
   postgres-18-compatibility:
     name: SupaCloud PostgreSQL 18 Compatibility
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       POSTGRES_PASSWORD: postgres
@@ -778,7 +778,7 @@ jobs:
 
   integration-test:
     name: Integration & Compliance Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     services:
       postgres:
@@ -1075,7 +1075,7 @@ jobs:
 
   shell-scripts-lint:
     name: Shell Scripts Lint
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
 
     steps:
@@ -1106,7 +1106,7 @@ jobs:
 
   caddy-edge-proxy-smoke:
     name: Caddy Edge Proxy Smoke
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -1130,6 +1130,8 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
+          # xcaddy creates its module in a temporary directory; this repo has no go.mod.
+          cache: false
 
       - name: Install edge-runtime dependencies
         working-directory: packages/edge-runtime
@@ -1170,7 +1172,7 @@ jobs:
       - shell-scripts-lint
       - caddy-edge-proxy-smoke
       - generate-sbom
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
 
     steps:
@@ -1215,7 +1217,7 @@ jobs:
   build-binaries:
     name: Build Binaries
     needs: [lint-and-typecheck, architecture-governance, package-checks, generate-sbom, docker-and-scripts-checks, unit-test, integration-test, shell-scripts-lint, caddy-edge-proxy-smoke]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
 
     steps:
@@ -1236,12 +1238,18 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
+          # xcaddy creates its module in a temporary directory; this repo has no go.mod.
+          cache: false
 
       - name: Show runtime versions
         run: |
           node --version
           go version
           bun --version
+
+      - name: Install delivery dependencies
+        working-directory: packages/delivery
+        run: bun install --frozen-lockfile
 
       - name: Install dependencies
         working-directory: packages/management-api
@@ -1258,7 +1266,6 @@ jobs:
       - name: Build Linux primary binaries
         working-directory: packages/management-api
         run: |
-          bun install --frozen-lockfile --cwd ../delivery
           mkdir -p dist
           bun run build:linux
           mv supacloud-linux-amd64 dist/

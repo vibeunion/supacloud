@@ -59,6 +59,58 @@ function workflowJob(source: string, job: string): string {
 }
 
 describe("Caddy release build reproducibility", () => {
+  test.each([
+    { source: workflow, job: "build-binaries" },
+    { source: releaseWorkflow, job: "publish-management-api-binaries" },
+  ])("$job installs delivery dependencies before the consumer and binary builds", ({ source, job }) => {
+    const parsed = Bun.YAML.parse(source) as {
+      jobs: Record<string, {
+        steps: { "working-directory"?: string; run?: string }[];
+      }>;
+    };
+    const steps = parsed.jobs[job]?.steps ?? [];
+    const deliveryInstall = steps.findIndex((step) =>
+      step["working-directory"] === "packages/delivery"
+      && step.run?.trim() === "bun install --frozen-lockfile",
+    );
+    const consumerInstall = steps.findIndex((step) =>
+      step["working-directory"] === "packages/management-api"
+      && step.run?.trim() === "bun install --frozen-lockfile",
+    );
+    const binaryBuilds = steps
+      .map((step, index) => ({ step, index }))
+      .filter(({ step }) => /bun run build:(linux|macos)/.test(step.run ?? "")
+        && step["working-directory"] === "packages/management-api");
+    expect(deliveryInstall).toBeGreaterThanOrEqual(0);
+    expect(consumerInstall).toBeGreaterThan(deliveryInstall);
+    expect(binaryBuilds.length).toBeGreaterThan(0);
+    for (const { index } of binaryBuilds) expect(index).toBeGreaterThan(consumerInstall);
+  });
+
+  test("Go setup disables module caching for temporary xcaddy modules", () => {
+    for (const source of [workflow, releaseWorkflow]) {
+      const parsed = Bun.YAML.parse(source) as {
+        jobs: Record<string, { steps?: { uses?: string; with?: Record<string, unknown> }[] }>;
+      };
+      const setups = Object.values(parsed.jobs)
+        .flatMap((job) => job.steps ?? [])
+        .filter((step) => step.uses?.startsWith("actions/setup-go@"));
+      expect(setups.length).toBeGreaterThan(0);
+      for (const step of setups) expect(step.with?.["cache"]).toBe(false);
+    }
+  });
+
+  test("management CI pins Linux runners without changing the Windows lane", () => {
+    const parsed = Bun.YAML.parse(workflow) as {
+      jobs: Record<string, { "runs-on": string }>;
+    };
+    for (const [id, job] of Object.entries(parsed.jobs)) {
+      expect(job["runs-on"]).toBe(
+        id === "supacloud-lite-windows" ? "windows-latest" : "ubuntu-24.04",
+      );
+    }
+  });
+
   test("source, installer, Docker, and release builds pin the same Go and xcaddy versions", () => {
     for (const source of [builder, installer]) {
       expect(source).toContain('GO_VERSION="${GO_VERSION:-1.27.1}"');
