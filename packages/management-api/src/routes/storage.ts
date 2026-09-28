@@ -13,7 +13,7 @@ import {
 } from "../services/storage-bucket-contract";
 import { createProjectStorageConfigRoutes } from "./project-storage-config";
 import { projectStorageService } from "../services/project-storage.service";
-import { getLegacyStorageDriver, getStorageDriver } from "../services/storage.adapter";
+import { getLegacyStorageDriver } from "../services/storage.adapter";
 import { ProjectStorageError } from "../services/project-storage-contract";
 import { StorageRLS } from "../services/storage-rls";
 import { StorageVectorError, StorageVectorService } from "../services/storage-vector.service";
@@ -98,12 +98,8 @@ async function runProjectVectorOperation(ref: string, operation: string, body: R
 
 // ── Imaginary Config ──────────────────────────────────────────────
 const IMAGINARY_URL = config.imaginaryUrl;
-const S3_ENDPOINT  = config.s3Endpoint;
+const MAX_TRANSFORM_SOURCE_BYTES = 64 * 1024 * 1024;
 
-/**
- * Build the internal S3 URL for imaginary to fetch the source image from.
- * imaginary will pull the image via HTTP from this URL.
- */
 function isValidBucketName(bucket: string): boolean {
     return /^[a-zA-Z0-9._-]+$/.test(bucket);
 }
@@ -136,14 +132,51 @@ async function ensureImageTransformAccess(request: Request, ref: string, bucket:
     return await requireProjectOrAdminAuth(request, ref);
 }
 
-async function buildSourceUrl(ref: string, bucket: string, path: string): Promise<string> {
+type TransformSource = { bytes: ArrayBuffer; contentType: string };
+
+class TransformSourceTooLargeError extends Error {}
+
+/**
+ * Load the source image through the storage driver. Transform routes no longer
+ * hand imaginary a remote URL: private buckets need no anonymous access and the
+ * imaginary `-enable-url-source` flag is not required.
+ */
+async function loadTransformSource(ref: string, bucket: string, path: string): Promise<TransformSource | null> {
     if (!isValidBucketName(bucket)) throw new Error("Invalid bucket name");
     const normalizedPath = normalizeObjectPath(path);
     if (!normalizedPath) throw new Error("Invalid object path");
-    const scoped = await getStorageDriver().getInternalSourceUrl?.(ref, bucket, normalizedPath);
-    if (scoped !== undefined) return scoped;
-    const base = S3_ENDPOINT.endsWith('/') ? S3_ENDPOINT.slice(0, -1) : S3_ENDPOINT;
-    return `${base}/${encodeURIComponent(bucket)}/${normalizedPath.split("/").map(encodeURIComponent).join("/")}`;
+    const response = await StorageService.getDownloadResponse(ref, bucket, normalizedPath);
+    if (!response) return null;
+    const declaredLength = Number(response.headers.get("content-length") ?? "");
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_TRANSFORM_SOURCE_BYTES) {
+        throw new TransformSourceTooLargeError();
+    }
+    const bytes = await response.arrayBuffer();
+    if (bytes.byteLength > MAX_TRANSFORM_SOURCE_BYTES) throw new TransformSourceTooLargeError();
+    return { bytes, contentType: response.headers.get("content-type") || "application/octet-stream" };
+}
+
+async function resolveTransformSource(request: Request, ref: string, bucket: string, path: string | undefined) {
+    if (!path) return { error: status(400, { message: "Missing file path", code: "400" }) };
+    const authError = await ensureImageTransformAccess(request, ref, bucket);
+    if (authError) return { error: status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) }) };
+    try {
+        const source = await loadTransformSource(ref, bucket, path);
+        if (!source) return { error: status(404, { message: "Object not found", code: "404" }) };
+        return { source };
+    } catch (error) {
+        if (error instanceof TransformSourceTooLargeError) return { error: status(413, { message: "Image source too large", code: "413" }) };
+        if (error instanceof ProjectStorageError) return { error: status(error.statusCode, { message: error.message, code: error.code }) };
+        return { error: status(400, { message: "Invalid source path", code: "400" }) };
+    }
+}
+
+async function runImaginary(operation: string, params: URLSearchParams, source: TransformSource): Promise<Response> {
+    return await fetch(`${IMAGINARY_URL}/${operation}?${params.toString()}`, {
+        method: "POST",
+        headers: { "Content-Type": source.contentType },
+        body: source.bytes,
+    });
 }
 
 function logStorageMetadataFailure(message: string, ref: string, bucketName: string, error: unknown): void {
@@ -426,22 +459,11 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     // This is the exact pattern that supabase-js SDK sends for .download(path, { transform })
     .get('/:ref/render/image/public/:bucket/*', { detail: { tags: ["storage"], summary: "Render a public image with transforms" } }, async ({ params, query, request, set }) => {
         const bucket = params.bucket;
-        const path = params['*'];
-        if (!path) return status(400, { message: 'Missing file path', code: '400' });
-        const authError = await ensureImageTransformAccess(request, params.ref, bucket);
-        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
-
-        let sourceUrl: string;
-        try {
-            sourceUrl = await buildSourceUrl(params.ref, bucket, path);
-        } catch (error) {
-            if (error instanceof ProjectStorageError) return status(error.statusCode, { message: error.message, code: error.code });
-            return status(400, { message: 'Invalid source path', code: '400' });
-        }
+        const resolved = await resolveTransformSource(request, params.ref, bucket, params['*']);
+        if ('error' in resolved) return resolved.error;
 
         // ── Map Supabase transform params → imaginary params ──
         const imaginaryParams = new URLSearchParams();
-        imaginaryParams.set('url', sourceUrl);
 
         // width / height (Supabase standard)
         if (query.width)  imaginaryParams.set('width',  String(query.width));
@@ -470,10 +492,8 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
             imaginaryParams.set('force', 'true');
         }
 
-        const imaginaryUrl = `${IMAGINARY_URL}/${operation}?${imaginaryParams.toString()}`;
-
         try {
-            const res = await fetch(imaginaryUrl);
+            const res = await runImaginary(operation, imaginaryParams, resolved.source);
             if (!res.ok) {
                 await res.body?.cancel();
                 logger.error(`Imaginary ${operation} failed:`, { status: res.status });
@@ -497,20 +517,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     // Smart Crop: intelligent focus-point detection
     // GET /v1/storage/:ref/transform/smartcrop/:bucket/*?width=300&height=300
     .get('/:ref/transform/smartcrop/:bucket/*', { detail: { tags: ["storage"], summary: "Smart crop an image with focus detection" } }, async ({ params, query, request, set }) => {
-        const path = params['*'];
-        if (!path) return status(400, { message: 'Missing file path', code: '400' });
-        const authError = await ensureImageTransformAccess(request, params.ref, params.bucket);
-        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
-
-        let sourceUrl: string;
-        try {
-            sourceUrl = await buildSourceUrl(params.ref, params.bucket, path);
-        } catch (error) {
-            if (error instanceof ProjectStorageError) return status(error.statusCode, { message: error.message, code: error.code });
-            return status(400, { message: 'Invalid source path', code: '400' });
-        }
+        const resolved = await resolveTransformSource(request, params.ref, params.bucket, params['*']);
+        if ('error' in resolved) return resolved.error;
         const p = new URLSearchParams({
-            url: sourceUrl,
             width:   String(query.width  || 300),
             height:  String(query.height || 300),
             quality: String(query.quality || 80),
@@ -518,7 +527,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         });
 
         try {
-            const res = await fetch(`${IMAGINARY_URL}/smartcrop?${p.toString()}`);
+            const res = await runImaginary('smartcrop', p, resolved.source);
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
@@ -531,20 +540,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     // Watermark: overlay text or image watermark
     // GET /v1/storage/:ref/transform/watermark/:bucket/*?text=ACME&font=sans&opacity=0.5
     .get('/:ref/transform/watermark/:bucket/*', { detail: { tags: ["storage"], summary: "Apply watermark to an image" } }, async ({ params, query, request, set }) => {
-        const path = params['*'];
-        if (!path) return status(400, { message: 'Missing file path', code: '400' });
-        const authError = await ensureImageTransformAccess(request, params.ref, params.bucket);
-        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
-
-        let sourceUrl: string;
-        try {
-            sourceUrl = await buildSourceUrl(params.ref, params.bucket, path);
-        } catch (error) {
-            if (error instanceof ProjectStorageError) return status(error.statusCode, { message: error.message, code: error.code });
-            return status(400, { message: 'Invalid source path', code: '400' });
-        }
+        const resolved = await resolveTransformSource(request, params.ref, params.bucket, params['*']);
+        if ('error' in resolved) return resolved.error;
         const p = new URLSearchParams({
-            url: sourceUrl,
             text:      query.text   || 'SupaCloud',
             font:      query.font   || 'sans bold 14',
             opacity:   String(query.opacity || 0.3),
@@ -556,7 +554,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         if (query.height) p.set('height', String(query.height));
 
         try {
-            const res = await fetch(`${IMAGINARY_URL}/watermark?${p.toString()}`);
+            const res = await runImaginary('watermark', p, resolved.source);
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
@@ -569,20 +567,9 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     // Blur: apply gaussian blur (useful for placeholder images / LQIP)
     // GET /v1/storage/:ref/transform/blur/:bucket/*?sigma=10&width=20
     .get('/:ref/transform/blur/:bucket/*', { detail: { tags: ["storage"], summary: "Apply gaussian blur to an image" } }, async ({ params, query, request, set }) => {
-        const path = params['*'];
-        if (!path) return status(400, { message: 'Missing file path', code: '400' });
-        const authError = await ensureImageTransformAccess(request, params.ref, params.bucket);
-        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
-
-        let sourceUrl: string;
-        try {
-            sourceUrl = await buildSourceUrl(params.ref, params.bucket, path);
-        } catch (error) {
-            if (error instanceof ProjectStorageError) return status(error.statusCode, { message: error.message, code: error.code });
-            return status(400, { message: 'Invalid source path', code: '400' });
-        }
+        const resolved = await resolveTransformSource(request, params.ref, params.bucket, params['*']);
+        if ('error' in resolved) return resolved.error;
         const p = new URLSearchParams({
-            url: sourceUrl,
             sigma:   String(query.sigma || 10),
             quality: String(query.quality || 60),
             type:    query.format || 'webp',
@@ -591,7 +578,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         if (query.height) p.set('height', String(query.height));
 
         try {
-            const res = await fetch(`${IMAGINARY_URL}/blur?${p.toString()}`);
+            const res = await runImaginary('blur', p, resolved.source);
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
@@ -604,22 +591,12 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     // Image Info: extract metadata (dimensions, EXIF, color space) without downloading full image
     // GET /v1/storage/:ref/transform/info/:bucket/*
     .get('/:ref/transform/info/:bucket/*', { detail: { tags: ["storage"], summary: "Get image metadata and dimensions" } }, async ({ params, request }) => {
-        const path = params['*'];
-        if (!path) return status(400, { message: 'Missing file path', code: '400' });
-        const authError = await ensureImageTransformAccess(request, params.ref, params.bucket);
-        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
-
-        let sourceUrl: string;
-        try {
-            sourceUrl = await buildSourceUrl(params.ref, params.bucket, path);
-        } catch (error) {
-            if (error instanceof ProjectStorageError) return status(error.statusCode, { message: error.message, code: error.code });
-            return status(400, { message: 'Invalid source path', code: '400' });
-        }
-        const p = new URLSearchParams({ url: sourceUrl });
+        const resolved = await resolveTransformSource(request, params.ref, params.bucket, params['*']);
+        if ('error' in resolved) return resolved.error;
+        const p = new URLSearchParams();
 
         try {
-            const res = await fetch(`${IMAGINARY_URL}/info?${p.toString()}`);
+            const res = await runImaginary('info', p, resolved.source);
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             return res.json();
         } catch (err: unknown) {
@@ -630,27 +607,16 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     // Thumbnail: generate a small, fast thumbnail (great for file browsers / galleries)
     // GET /v1/storage/:ref/transform/thumbnail/:bucket/*?width=150
     .get('/:ref/transform/thumbnail/:bucket/*', { detail: { tags: ["storage"], summary: "Generate a thumbnail for an image" } }, async ({ params, query, request, set }) => {
-        const path = params['*'];
-        if (!path) return status(400, { message: 'Missing file path', code: '400' });
-        const authError = await ensureImageTransformAccess(request, params.ref, params.bucket);
-        if (authError) return status(authError.status as 401 | 403, { message: authError.body.error, code: String(authError.status) });
-
-        let sourceUrl: string;
-        try {
-            sourceUrl = await buildSourceUrl(params.ref, params.bucket, path);
-        } catch (error) {
-            if (error instanceof ProjectStorageError) return status(error.statusCode, { message: error.message, code: error.code });
-            return status(400, { message: 'Invalid source path', code: '400' });
-        }
+        const resolved = await resolveTransformSource(request, params.ref, params.bucket, params['*']);
+        if ('error' in resolved) return resolved.error;
         const p = new URLSearchParams({
-            url: sourceUrl,
             width:   String(query.width  || 150),
             quality: String(query.quality || 70),
             type:    query.format || 'webp',
         });
 
         try {
-            const res = await fetch(`${IMAGINARY_URL}/thumbnail?${p.toString()}`);
+            const res = await runImaginary('thumbnail', p, resolved.source);
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';

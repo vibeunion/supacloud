@@ -173,8 +173,11 @@ binding. One corrupt project row therefore cannot block every unrelated first
 binding; a later repair of that project re-runs the same overlap check.
 
 Existing public/signed Storage API URLs remain unchanged. The management image
-routes request an internal, short-lived presigned URL for the same project
-namespace. Upstream image errors do not expose that URL to callers or logs.
+routes load the source object through the project's storage driver and forward
+the bytes to the image service, so private buckets need no anonymous or
+presigned source URL and the service's remote-URL flag is not required. Sources
+larger than 64 MiB are rejected with `413`; upstream image errors do not expose
+storage coordinates to callers or logs.
 Project capability/environment responses report the resolved backend rather than
 only the instance default. The instance-level storage status remains an instance
 probe; use the project config probe for a project's external S3.
