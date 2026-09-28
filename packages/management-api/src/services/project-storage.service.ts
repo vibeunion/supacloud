@@ -6,7 +6,8 @@ import { decryptSecret, encryptSecret } from "../utils/secret-crypto";
 import type { StorageDriver } from "./storage.adapter";
 import { ProjectS3Driver } from "./project-s3-driver";
 import { createProjectStorageRegistry } from "./project-storage-registry";
-import { inventoryProjectObjects, migrateProjectObjects } from "./project-storage-migration";
+import { migrateProjectObjects } from "./project-storage-migration";
+import { createProjectStorageInventory } from "./project-storage-inventory";
 import {
   ProjectStorageError,
   type ProjectS3Configuration,
@@ -27,7 +28,7 @@ export const projectStorageService = createProjectStorageRegistry({
   allowedOrigins: () => process.env.SUPACLOUD_PROJECT_S3_ALLOWED_ORIGINS ?? "",
   defaultBackend: () => config.storageType || "s3",
   createDriver: createConfiguredProjectS3Driver,
-  inventory: inventoryProjectObjects,
+  inventory: createProjectStorageInventory({ database: sql, getProjectDb }),
   migrate: migrateProjectObjects,
   async probe(configuration) {
     const url = new URL(configuration.endpoint);

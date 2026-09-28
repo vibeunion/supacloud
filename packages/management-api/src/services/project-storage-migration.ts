@@ -11,18 +11,32 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
+/** A complete catalogue supplied by the project's authoritative metadata. */
+export interface ProjectStorageManifest {
+  buckets: string[];
+  objects: { bucket: string; key: string }[];
+}
+
 /**
- * Read-only inventory of every object currently visible to the platform driver
- * for a project. Include bytes and MIME metadata rather than trusting timestamp
- * precision to detect same-key rewrites.
+ * Hash all catalogue entries, including bytes and MIME metadata rather than
+ * trusting timestamps. Production adoption supplies a tenant metadata manifest;
+ * the driver-listing path is retained for standalone, complete test drivers.
  */
-export async function inventoryProjectObjects(ref: string, source: StorageDriver): Promise<ProjectStorageInventory> {
-  const buckets = await source.listBuckets(ref);
+export async function inventoryProjectObjects(
+  ref: string,
+  source: StorageDriver,
+  manifest?: ProjectStorageManifest,
+): Promise<ProjectStorageInventory> {
+  const buckets = manifest
+    ? manifest.buckets.map((name) => ({ name }))
+    : await source.listBuckets(ref);
   const entries: ProjectStorageInventory["entries"] = [];
   const parts: string[] = [];
   for (const bucket of buckets) {
     parts.push(JSON.stringify(["bucket", bucket.name]));
-    const files = await source.listFiles(ref, bucket.name);
+    const files = manifest
+      ? manifest.objects.filter((object) => object.bucket === bucket.name).map((object) => ({ name: object.key }))
+      : await source.listFiles(ref, bucket.name);
     const sorted = [...files].sort((left, right) => left.name.localeCompare(right.name));
     for (const file of sorted) {
       const response = await source.getDownloadResponse(ref, bucket.name, file.name);
