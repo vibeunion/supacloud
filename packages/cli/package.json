@@ -8,6 +8,8 @@
     "supacloud-cli": "dist/index.js"
   },
   "files": [
+    "NOTICE",
+    "LICENSE-APACHE-2.0.txt",
     "dist",
     "README.md",
     "skills"
@@ -25,7 +27,7 @@
     "deploy",
     "supabase"
   ],
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "https://github.com/vibeunion/supacloud.git",

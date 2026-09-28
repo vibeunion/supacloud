@@ -754,4 +754,10 @@ supacloud/
 
 ## License
 
-MIT
+本项目采用 GNU Affero General Public License version 3 only
+（`AGPL-3.0-only`），详见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。
+
+如果你修改本项目并通过网络向用户提供服务，AGPLv3 第 13 条要求向这些
+远程交互用户提供对应修改版本的源代码。允许符合许可证的商业使用和云托管，
+不要求向本项目付费。第三方组件保留各自许可证；本次变更不撤销已发布版本
+原有的许可授权。

@@ -72,6 +72,6 @@ Bun runtime notice 包含 JavaScriptCore/WebKit 的 LGPL-2 说明、静态链接
 
 GitHub Release 在校验和与 provenance 生成前同时加入以下许可证资产：
 
-- SupaCloud Lite 自身 Apache-2.0 许可证：从 `LICENSE` 复制为 `SUPACLOUD-LITE-APACHE-2.0.txt`
+- SupaCloud Lite 自身 AGPL-3.0-only 许可证：从仓库根目录 `LICENSE` 复制为 `SUPACLOUD-LITE-AGPL-3.0.txt`
 - 本文件：`THIRD_PARTY_NOTICES.md`
 - `LICENSES/*.txt` 下的全部第三方许可证及 runtime notices

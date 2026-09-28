@@ -821,3 +821,14 @@ Key installation settings:
 - [Supabase Self-Hosting](https://supabase.com/docs/guides/self-hosting)
 
 ---
+
+## License
+
+SupaCloud is licensed under the GNU Affero General Public License version 3
+only (`AGPL-3.0-only`). See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+If you modify the program and let users interact with it remotely over a
+network, section 13 requires offering those users the Corresponding Source
+of your modified version. Commercial use and compliant hosting are permitted.
+Third-party components retain their own licenses. Previously released copies
+retain the permissions granted under their original licenses.
