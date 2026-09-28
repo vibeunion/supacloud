@@ -42,11 +42,43 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.2"
+      # One-time repair of inherited file: snapshots; removed after committing
+      # the Bun-normalized output. Registry resolutions/integrities are not edited.
+      - name: Seed inherited local snapshots from checked-out manifests
+        run: |
+          bun --eval '
+            import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+            import { parseLockfile } from "./scripts/check-elysia-compatibility.mjs";
+            const manifests = new Map();
+            for (const entry of readdirSync("packages", { withFileTypes: true })) {
+              const path = `packages/${entry.name}/package.json`;
+              if (!entry.isDirectory() || !existsSync(path)) continue;
+              const manifest = JSON.parse(readFileSync(path, "utf8"));
+              manifests.set(manifest.name, manifest);
+            }
+            for (const path of ["packages/elysia/bun.lock", "packages/supacloud-lite/bun.lock"]) {
+              const lock = parseLockfile(readFileSync(path, "utf8"));
+              for (const entry of Object.values(lock.packages)) {
+                if (!Array.isArray(entry) || typeof entry[0] !== "string" || !entry[0].includes("@file:")) continue;
+                const name = entry[0].split("@file:")[0];
+                const manifest = manifests.get(name);
+                if (!manifest) throw new Error(`Missing local manifest: ${name}`);
+                const metadata = {};
+                for (const field of ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies", "bin"]) {
+                  if (manifest[field] !== undefined) metadata[field] = manifest[field];
+                }
+                const optional = Object.entries(manifest.peerDependenciesMeta ?? {}).filter(([, value]) => value.optional).map(([name]) => name);
+                if (optional.length) metadata.optionalPeers = optional;
+                entry[1] = metadata;
+              }
+              writeFileSync(path, JSON.stringify(lock, null, 2) + "\n");
+            }
+          '
       - name: Reconcile local dependency snapshots with the pinned Bun
         run: |
           bun --revision
-          bun install --lockfile-only --force --ignore-scripts --cwd packages/elysia
-          bun install --lockfile-only --force --ignore-scripts --cwd packages/supacloud-lite
+          bun install --lockfile-only --ignore-scripts --cwd packages/elysia
+          bun install --lockfile-only --ignore-scripts --cwd packages/supacloud-lite
       - name: Reject uncommitted lockfile changes
         run: |
           git diff --binary -- packages/elysia/bun.lock packages/supacloud-lite/bun.lock > elysia-lockfiles.patch
