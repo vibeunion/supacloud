@@ -202,14 +202,14 @@ test.skipIf(!adminUrl)(
 );
 
 test.skipIf(!adminUrl)(
-  "a corrupt binding of another project does not brick unrelated first bindings",
+  "a corrupt binding blocks first bindings with unknown namespace overlap",
   async () => {
-    // projectb already holds an unreadable binding from the previous test. A
-    // fresh project must still be bindable; overlap scanning may not fail the
-    // whole operation because one unrelated project row is corrupt.
+    // projectb holds an unreadable binding; no namespace can be proven disjoint.
     await database`INSERT INTO projects (ref, db_name, status, deleted_at) VALUES ('projectd', 'db_d', 'active', NULL)`;
-    const bound = await hooks.registry.put("projectd", settingsFor("projectd-assets"), null);
-    expect(bound.configured).toBe(true);
+    await expect(hooks.registry.put("projectd", settingsFor("projectd-assets"), null))
+      .rejects.toThrow("STORAGE_CONFIG_UNAVAILABLE");
+    const rows = await database`SELECT project_ref FROM project_control_secrets WHERE project_ref = 'projectd'`;
+    expect(rows.length).toBe(0);
   },
   timeout,
 );

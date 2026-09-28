@@ -254,11 +254,14 @@ test('disabled, corrupt, or no-longer-approved configurations do not fall back',
   assert.equal(called, false);
 });
 
-test('an unreadable binding of another project does not block a new binding', async () => {
+test('an unreadable binding reserves its unknown namespace until recovery', async () => {
   const state = fixture();
-  // A row that cannot be decrypted/parsed belongs to a project that cannot serve
-  // storage; it must not brick an unrelated project's first binding.
-  state.stored.set('projectx', 'corrupt-not-decryptable');
-  const created = await state.registry.put('projecta', settings(), null);
-  assert.equal(created.configured, true);
+  await state.registry.put('projectb', settings(), null);
+  const original = state.stored.get('projectb')!;
+  state.stored.set('projectb', 'corrupt-not-decryptable');
+  await assert.rejects(state.registry.put('projecta', settings(), null), unavailable);
+  assert.equal(state.stored.has('projecta'), false);
+  state.stored.set('projectb', original);
+  await assert.rejects(state.registry.put('projecta', settings(), null), conflict);
+  assert.equal(state.stored.has('projecta'), false);
 });
