@@ -14,6 +14,10 @@ const recoveryInput = {
   workflowCommit: 'a'.repeat(40),
 };
 const recoveryCommit = 'a'.repeat(40);
+/**
+ * @param {{ commit?: string, unmerged?: boolean, version?: string, release?: Record<string, unknown> }} [overrides]
+ * @returns {(command: string, args: readonly string[]) => string}
+ */
 function recoveryRunner(overrides = {}) {
   return (command, args) => {
     if (command === 'git' && args[0] === 'rev-parse') return overrides.commit ?? recoveryCommit;
@@ -42,7 +46,7 @@ test('Management recovery rejects untrusted context and malformed tags before re
     { tag: 'management-api-v0.87.0-beta' }, { tag: 'edge-runtime-v0.87.0' },
   ]) {
     let called = false;
-    assert.throws(() => resolveManagementRecovery({ ...recoveryInput, ...input }, () => { called = true; }));
+    assert.throws(() => resolveManagementRecovery({ ...recoveryInput, ...input }, () => { called = true; return ''; }));
     assert.equal(called, false);
   }
 });
@@ -64,12 +68,12 @@ test('Management recovery pins source and preserves signed non-overwriting publi
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
   assert.match(workflow, /if: \$\{\{ inputs\.recover_management_tag == '' \}\}/);
   assert.match(workflow, /ref: \$\{\{ needs\.release-please\.outputs\.management_api_source_commit \|\| needs\.release-please\.outputs\.management_api_tag_name \}\}/);
-  const management = workflow.split('  publish-management-api-binaries:')[1].split('  publish-edge-runtime-binaries:')[0];
+  const management = workflow.split('  publish-management-api-binaries:')[1]?.split('  publish-edge-runtime-binaries:')[0] ?? '';
   assert.match(management, /--source-commit "\$\(git rev-parse HEAD\)"/);
   assert.match(management, /uses: actions\/attest-build-provenance@v4/);
   assert.match(management, /--source-digest "\$\(git rev-parse HEAD\)"/);
   assert.ok(management.indexOf('name: Verify recovered assets') < management.indexOf('name: Upload binaries'));
-  const recoveryUpload = management.split('if [[ -n "$RECOVERY_TAG" ]]; then')[1].split('else')[0];
+  const recoveryUpload = management.split('if [[ -n "$RECOVERY_TAG" ]]; then')[1]?.split('else')[0] ?? '';
   assert.match(recoveryUpload, /refs\/tags\/\$RELEASE_TAG\^\{commit\}/);
   assert.match(recoveryUpload, /\.assets \| length/);
   assert.match(recoveryUpload, /gh release upload "\$RELEASE_TAG" release-assets\/\*/);
