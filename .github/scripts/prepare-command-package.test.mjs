@@ -3,6 +3,69 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { assertPublishedDependencies, isNpmNotFoundError, prepareCommandPackage } from './prepare-command-package.mjs';
 import { REGISTRY_RETRY_DELAYS_MS } from './npm-registry-visibility.mjs';
+import { resolveManagementRecovery } from './recover-management-release.mjs';
+
+const recoveryInput = {
+  repository: 'vibeunion/supacloud',
+  ref: 'refs/heads/main',
+  event: 'workflow_dispatch',
+  recoverNpm: 'false',
+  tag: 'management-api-v0.87.0',
+};
+const recoveryCommit = 'a'.repeat(40);
+function recoveryRunner(overrides = {}) {
+  return (command, args) => {
+    if (command === 'git' && args[0] === 'rev-parse') return overrides.commit ?? recoveryCommit;
+    if (command === 'git' && args[0] === 'merge-base') {
+      assert.deepEqual(args, ['merge-base', '--is-ancestor', recoveryCommit, 'HEAD']);
+      if (overrides.unmerged) throw new Error('Not on main');
+      return '';
+    }
+    if (command === 'git' && args[0] === 'show') return JSON.stringify({ version: overrides.version ?? '0.87.0' });
+    if (command === 'gh') return JSON.stringify({
+      tagName: recoveryInput.tag, isDraft: false, isPrerelease: false, assets: [], ...overrides.release,
+    });
+    throw new Error('Unexpected recovery command');
+  };
+}
+test('Management recovery resolves the exact tagged commit without creating a release', () => {
+  assert.deepEqual(resolveManagementRecovery(recoveryInput, recoveryRunner()), {
+    tag: recoveryInput.tag, sourceCommit: recoveryCommit,
+  });
+});
+test('Management recovery rejects untrusted context and malformed tags before reading commands', () => {
+  for (const input of [
+    { ref: 'refs/heads/feature' }, { event: 'push' }, { repository: 'other/repo' },
+    { recoverNpm: 'true' }, { tag: 'main' }, { tag: 'management-api-v0.87.0\ninjected=true' },
+    { tag: 'management-api-v0.87.0\n' },
+    { tag: 'management-api-v0.87.0-beta' }, { tag: 'edge-runtime-v0.87.0' },
+  ]) {
+    let called = false;
+    assert.throws(() => resolveManagementRecovery({ ...recoveryInput, ...input }, () => { called = true; }));
+    assert.equal(called, false);
+  }
+});
+test('Management recovery rejects unmerged commits, mismatched versions and occupied releases', () => {
+  for (const overrides of [
+    { commit: 'not-a-sha' }, { unmerged: true }, { version: '0.88.0' },
+    { release: { assets: [{ name: 'existing-binary' }] } }, { release: { assets: null } },
+    { release: { isDraft: true } }, { release: { isPrerelease: true } },
+    { release: { tagName: 'management-api-v0.86.0' } },
+  ]) assert.throws(() => resolveManagementRecovery(recoveryInput, recoveryRunner(overrides)));
+});
+test('Management recovery pins source and preserves signed non-overwriting publication', () => {
+  const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /if: \$\{\{ inputs\.recover_management_tag == '' \}\}/);
+  assert.match(workflow, /ref: \$\{\{ needs\.release-please\.outputs\.management_api_source_commit \|\| needs\.release-please\.outputs\.management_api_tag_name \}\}/);
+  const management = workflow.split('  publish-management-api-binaries:')[1].split('  publish-edge-runtime-binaries:')[0];
+  assert.match(management, /--source-commit "\$\(git rev-parse HEAD\)"/);
+  assert.match(management, /uses: actions\/attest-build-provenance@v4/);
+  const recoveryUpload = management.split('if [[ -n "$RECOVERY_TAG" ]]; then')[1].split('else')[0];
+  assert.match(recoveryUpload, /refs\/tags\/\$RELEASE_TAG\^\{commit\}/);
+  assert.match(recoveryUpload, /\.assets \| length/);
+  assert.match(recoveryUpload, /gh release upload "\$RELEASE_TAG" release-assets\/\*/);
+  assert.doesNotMatch(recoveryUpload, /--clobber/);
+});
 
 const siblings = new Map([
   ['@supacloud/cli', { name: '@supacloud/cli', version: '0.14.4' }],
@@ -86,7 +149,7 @@ test('recovery runs the command package graph after a tag-only release', () => {
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
   assert.match(workflow, /recover_npm:\n\s+description: Retry missing command-package publications[\s\S]*?type: boolean/);
   assert.match(workflow,
-    /publish-npm:\n\s+needs: release-please[\s\S]*?if: \$\{\{ always\(\) && \(needs\.release-please\.outputs\.releases_created == 'true' \|\| inputs\.recover_npm == true\) \}\}/);
+    /publish-npm:\n\s+needs: release-please[\s\S]*?if: \$\{\{ always\(\) && inputs\.recover_management_tag == '' && \(needs\.release-please\.outputs\.releases_created == 'true' \|\| inputs\.recover_npm == true\) \}\}/);
   const contracts = workflow.indexOf('name: Publish command contracts');
   const commands = workflow.indexOf('name: Publish durable commands');
   assert.match(workflow.slice(contracts, commands), /inputs\.recover_npm == true/);

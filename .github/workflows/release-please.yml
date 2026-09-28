@@ -17,6 +17,11 @@ on:
         required: false
         default: false
         type: boolean
+      recover_management_tag:
+        description: Build and attest an existing empty Management release from its exact tag
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: release-please-${{ github.ref }}
@@ -34,8 +39,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
-      management_api_released: ${{ steps.release.outputs['packages/management-api--release_created'] }}
-      management_api_tag_name: ${{ steps.release.outputs['packages/management-api--tag_name'] }}
+      management_api_released: ${{ steps.recovery.outputs.tag != '' && 'true' || steps.release.outputs['packages/management-api--release_created'] }}
+      management_api_tag_name: ${{ steps.recovery.outputs.tag || steps.release.outputs['packages/management-api--tag_name'] }}
+      management_api_source_commit: ${{ steps.recovery.outputs.source_commit }}
       edge_runtime_released: ${{ steps.release.outputs['packages/edge-runtime--release_created'] }}
       edge_runtime_tag_name: ${{ steps.release.outputs['packages/edge-runtime--tag_name'] }}
       pgredis_runtime_released: ${{ steps.release.outputs['packages/pgredis-runtime--release_created'] }}
@@ -56,7 +62,23 @@ jobs:
       db_released: ${{ steps.release.outputs['packages/db--release_created'] }}
       testing_released: ${{ steps.release.outputs['packages/testing--release_created'] }}
     steps:
+      - name: Checkout recovery control scripts
+        if: ${{ inputs.recover_management_tag != '' }}
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Validate empty Management release recovery
+        if: ${{ inputs.recover_management_tag != '' }}
+        id: recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.recover_management_tag }}
+          RECOVER_NPM: ${{ inputs.recover_npm }}
+        run: node .github/scripts/recover-management-release.mjs
+
       - uses: googleapis/release-please-action@v5
+        if: ${{ inputs.recover_management_tag == '' }}
         id: release
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
@@ -75,7 +97,7 @@ jobs:
       - name: Checkout release tag
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-please.outputs.management_api_tag_name }}
+          ref: ${{ needs.release-please.outputs.management_api_source_commit || needs.release-please.outputs.management_api_tag_name }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -141,8 +163,7 @@ jobs:
         working-directory: packages/management-api
         env:
           RELEASE_TAG: ${{ needs.release-please.outputs.management_api_tag_name }}
-          SOURCE_COMMIT: ${{ github.sha }}
-        run: bun run release:manifest --assets-dir ../../release-assets --tag "$RELEASE_TAG" --source-commit "$SOURCE_COMMIT"
+        run: bun run release:manifest --assets-dir ../../release-assets --tag "$RELEASE_TAG" --source-commit "$(git rev-parse HEAD)"
 
       - name: Attest management release artifacts
         id: attest-management-release
@@ -159,7 +180,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           RELEASE_TAG: ${{ needs.release-please.outputs.management_api_tag_name }}
-        run: gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          RECOVERY_TAG: ${{ inputs.recover_management_tag }}
+        run: |
+          if [[ -n "$RECOVERY_TAG" ]]; then
+            git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
+            test "$(gh release view "$RELEASE_TAG" --json assets --jq '.assets | length')" = 0
+            gh release upload "$RELEASE_TAG" release-assets/*
+          else
+            gh release upload "$RELEASE_TAG" release-assets/* --clobber
+          fi
 
 
   publish-edge-runtime-binaries:
@@ -397,7 +427,7 @@ jobs:
     needs: release-please
     # A previous release can leave a Git tag behind after npm publication
     # fails. Allow an explicit recovery run without creating another release.
-    if: ${{ always() && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true) }}
+    if: ${{ always() && inputs.recover_management_tag == '' && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true) }}
     runs-on: ubuntu-latest
     environment: npm-publish
     permissions:
