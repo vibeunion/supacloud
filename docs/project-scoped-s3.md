@@ -118,8 +118,17 @@ backend. Backend errors are sanitized rather than reported as an empty bucket.
 The registry serializes initial binding with legacy object IO using PostgreSQL
 advisory locks. Configured operations do not hold a database transaction across
 S3 IO. All namespace-changing registration is serialized, and updates use an
-expected revision. Native PostgreSQL concurrency acceptance remains a separate
-verification requirement; the in-memory SQL unit fixture is not that evidence.
+expected revision. Native PostgreSQL concurrency acceptance is covered by
+`tests/integration/project-storage-concurrency.test.ts`, which runs against a
+real PostgreSQL in CI and proves that a first binding waits for in-flight legacy
+IO on a separate connection, that a corrupt binding fails closed without falling
+back, and that two concurrent bindings have a single winner. The in-memory SQL
+unit fixture remains the fast check, not the concurrency evidence.
+
+A binding whose stored record cannot be decrypted or parsed belongs to a project
+that cannot serve storage, so it is skipped when evaluating overlap for a new
+binding. One corrupt project row therefore cannot block every unrelated first
+binding; a later repair of that project re-runs the same overlap check.
 
 Existing public/signed Storage API URLs remain unchanged. The management image
 routes request an internal, short-lived presigned URL for the same project
@@ -142,6 +151,7 @@ cd packages/management-api
 bun test tests/unit/project-storage.test.ts
 bun test tests/unit/project-storage-http.test.ts
 bun test tests/unit/project-storage-boundaries.test.ts
+PROJECT_STORAGE_CONCURRENCY_TEST_DATABASE_URL=postgres://... bun test tests/integration/project-storage-concurrency.test.ts
 bun run typecheck
 bun run test:unit
 ```
