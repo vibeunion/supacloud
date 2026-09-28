@@ -2,6 +2,7 @@ import type { SQL } from "bun";
 import { sql } from "../db";
 import { encryptSecretIfNeeded, decryptSecretIfNeeded } from "../utils/secret-crypto";
 import { ValidationError } from "../utils/errors";
+import { PROJECT_STORAGE_SECRET } from "./project-storage-contract";
 
 export const CONTROL_SECRET_SCOPES = ["captcha", "connector", "auth-hook"] as const;
 export type ControlSecretScope = (typeof CONTROL_SECRET_SCOPES)[number];
@@ -22,6 +23,12 @@ export class ControlSecretUnavailableError extends Error {
   constructor(scope: ControlSecretScope, name: string, projectRef: string) {
     super(`Missing managed ${scope} secret "${name}" for project ${projectRef}`);
     this.name = "ControlSecretUnavailableError";
+  }
+}
+
+function assertNonStorageSecret(scope: string, name: string): void {
+  if (scope === PROJECT_STORAGE_SECRET.scope && name === PROJECT_STORAGE_SECRET.name) {
+    throw new ValidationError("Use the project storage configuration endpoint for this managed secret");
   }
 }
 
@@ -124,12 +131,14 @@ export const projectControlSecretsService = {
 
   async upsert(projectRef: string, scope: string, name: string, value: string): Promise<ControlSecretStatus> {
     assertScope(scope);
+    assertNonStorageSecret(scope, name);
     await storeManagedControlSecret(sql, { projectRef, scope, name, secretValue: value });
     return this.getStatus(projectRef, scope, name);
   },
 
   async remove(projectRef: string, scope: string, name: string): Promise<ControlSecretStatus> {
     assertScope(scope);
+    assertNonStorageSecret(scope, name);
     await removeManagedControlSecret(sql, { projectRef, scope, name });
     return statusFromRow(scope, name);
   },
@@ -137,6 +146,7 @@ export const projectControlSecretsService = {
   /** Internal runtime-only read. Never expose this value from an HTTP route. */
   async readValue(projectRef: string, scope: string, name: string): Promise<string | null> {
     assertScope(scope);
+    assertNonStorageSecret(scope, name);
     return readManagedControlSecret(sql, { projectRef, scope, name });
   },
 
