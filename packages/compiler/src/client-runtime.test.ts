@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -256,6 +256,40 @@ test("generated client validates structured JSON constraints and local refs", as
     expect(() => generated.decodeResponseSchema("no", 200, {
       200: { not: { const: "no" } },
     })).toThrow("Response does not match schema");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("generated client decodes Type.Module recursive references at every depth", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-client-module-"));
+  try {
+    const baseModule = graph.modules[0]!;
+    const baseController = baseModule.controllers[0]!;
+    const recursiveGraph: ApplicationGraph = {
+      ...graph,
+      modules: [{ ...baseModule, controllers: [{
+        ...baseController,
+        schemaImports: { Node: "src/contracts" },
+        routes: [{ method: "GET", path: "/tree", handler: "tree", response: "Node" }],
+      }] }],
+    };
+    await writeFixtureProject(root, {
+      "generated/client.ts": renderClient(recursiveGraph, { rootDir: root, outDir: join(root, "generated") }),
+      "src/contracts.ts": [
+        'import { Type } from "typebox";',
+        'export const Node = Type.Module({ Node: Type.Object({ id: Type.String(), next: Type.Optional(Type.Ref("Node")) }) }).Node;',
+      ].join("\n"),
+    });
+    await symlink(join(import.meta.dir, "../node_modules"), join(root, "node_modules"), "dir");
+    const generated = await import(pathToFileURL(join(root, "generated/client.ts")).href);
+    const { Node } = await import(pathToFileURL(join(root, "src/contracts.ts")).href);
+    const tree = { id: "root", next: { id: "child", next: { id: "leaf" } } };
+    expect(generated.decodeResponseSchema(tree, 200, { 200: Node })).toEqual(tree);
+    expect(() => generated.decodeResponseSchema({ id: "root", next: { id: 42 } }, 200, { 200: Node }))
+      .toThrow("Response does not match schema");
+    expect(() => generated.decodeResponseSchema("stuck", 200, { 200: { $defs: { Loop: { $ref: "Loop" } }, $ref: "Loop" } }))
+      .toThrow("Response does not match schema");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
