@@ -165,7 +165,9 @@ test('elysia builds local fixtures before preparing its isolated publication', (
   assert.match(block, /git archive HEAD \| tar -x -C "\$build_root"/);
   assert.match(block, /cd "\$build_root\/packages\/elysia"/);
   assert.match(block, /build-command-dependencies\.ts elysia[\s\S]*bun install --frozen-lockfile[\s\S]*bun run build[\s\S]*prepare-command-package\.mjs[\s\S]*publish-npm-package\.mjs/);
-  assert.doesNotMatch(block.split('prepare-command-package.mjs')[1], /bun install/);
+  const publication = block.split('prepare-command-package.mjs')[1];
+  assert.ok(publication);
+  assert.doesNotMatch(publication, /bun install/);
 });
 test('elysia publication preserves beta support without waiting for build-only overrides', () => {
   const input = JSON.parse(readFileSync(new URL('../../packages/elysia/package.json', import.meta.url), 'utf8'));
@@ -180,7 +182,7 @@ test('elysia publication preserves beta support without waiting for build-only o
     const pkg = localSiblings.get(`@supacloud/${name}`);
     return `${pkg.name}@${pkg.version}`;
   }));
-  assert.deepEqual(result.package.peerDependencies, { elysia: '>=2.0.0-beta.19 <3' });
+  assert.deepEqual(result.package['peerDependencies'], { elysia: '>=2.0.0-beta.19 <3' });
   assert.equal(input.overrides['@supacloud/delivery'], 'file:../delivery');
   assert.doesNotMatch(JSON.stringify(result.package), /file:|workspace:|link:/);
 });
