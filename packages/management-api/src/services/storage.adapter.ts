@@ -860,7 +860,7 @@ export class S3Driver implements StorageDriver {
 }
 
 let legacyDriver: StorageDriver | null = null;
-function getLegacyStorageDriver(): StorageDriver {
+export function getLegacyStorageDriver(): StorageDriver {
   if (!legacyDriver) {
     legacyDriver =
       config.storageType === "juicefs" || config.storageType === "local"

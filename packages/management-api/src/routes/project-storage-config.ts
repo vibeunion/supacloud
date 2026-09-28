@@ -1,6 +1,7 @@
 import { Elysia, status, t } from "elysia";
 import type { requireAdminAuth } from "../middleware/auth";
 import type { createProjectStorageRegistry } from "../services/project-storage-registry";
+import type { StorageDriver } from "../services/storage.adapter";
 import { ProjectStorageError } from "../services/project-storage-contract";
 
 const params = t.Object({ ref: t.String({ pattern: '^[A-Za-z0-9_-]{1,20}$' }) });
@@ -37,7 +38,9 @@ function safeError(error: unknown) {
 
 export interface ProjectStorageRouteDependencies {
   authorize: typeof requireAdminAuth;
-  storage: Pick<ReturnType<typeof createProjectStorageRegistry>, "get" | "put" | "probe">;
+  storage: Pick<ReturnType<typeof createProjectStorageRegistry>, "get" | "put" | "probe" | "plan" | "adopt">;
+  /** The project's current (platform) storage driver, used only for adoption. */
+  source: () => StorageDriver;
 }
 
 export function createProjectStorageConfigRoutes(dependencies: ProjectStorageRouteDependencies) {
@@ -65,5 +68,18 @@ export function createProjectStorageConfigRoutes(dependencies: ProjectStorageRou
       params, parse: 'none', detail: { tags: ['storage'], summary: 'Probe the configured S3 prefix without creating objects' },
     }, async ({ params }) => {
       try { return await dependencies.storage.probe(params.ref); } catch (error) { return safeError(error); }
+    })
+    .get('/config/adoption-plan', {
+      params, detail: { tags: ['storage'], summary: 'Read-only inventory of the objects an adoption would copy' },
+    }, async ({ params }) => {
+      try { return await dependencies.storage.plan(params.ref, dependencies.source()); } catch (error) { return safeError(error); }
+    })
+    .post('/config/adopt', {
+      params, parse: 'none', detail: { tags: ['storage'], summary: 'Copy and verify existing objects, then bind the project backend' },
+    }, async ({ params, request }) => {
+      try {
+        const input = await configurationBody(request);
+        return await dependencies.storage.adopt(params.ref, input.settings, input.expectedRevision, dependencies.source());
+      } catch (error) { return safeError(error); }
     });
 }

@@ -2,10 +2,33 @@
 export const PROJECT_STORAGE_SECRET = { scope: "connector", name: "supacloud.storage.s3" } as const;
 
 export class ProjectStorageError extends Error {
-  constructor(readonly code: "STORAGE_CONFIG_INVALID" | "STORAGE_CONFIG_CONFLICT" | "STORAGE_CONFIG_UNAVAILABLE" | "STORAGE_BACKEND_UNAVAILABLE", readonly statusCode: 400 | 409 | 503 = 503) {
+  constructor(readonly code: "STORAGE_CONFIG_INVALID" | "STORAGE_CONFIG_CONFLICT" | "STORAGE_CONFIG_UNAVAILABLE" | "STORAGE_BACKEND_UNAVAILABLE" | "STORAGE_ADOPTION_SOURCE_CHANGED" | "STORAGE_ADOPTION_LIMIT", readonly statusCode: 400 | 409 | 413 | 503 = 503) {
     super(code);
     this.name = "ProjectStorageError";
   }
+}
+
+/**
+ * Hard cap for the synchronous adoption migration. The migration runs while the
+ * project is expected to be quiesced; keeping it bounded keeps the final
+ * exclusive-lock transaction short. Larger projects need an offline migration.
+ */
+export const PROJECT_STORAGE_ADOPTION_MAX_OBJECTS = 10000;
+
+/** A read-only inventory of a project's current (platform) objects. */
+export interface ProjectStorageInventory {
+  buckets: number;
+  objects: number;
+  /** Stable over keys and modification timestamps; changes on any write or delete. */
+  fingerprint: string;
+  entries: { bucket: string; key: string }[];
+}
+
+/** The public, non-secret result of an adoption plan or completed adoption. */
+export interface ProjectStorageAdoptionPlan {
+  buckets: number;
+  objects: number;
+  fingerprint: string;
 }
 
 export interface ProjectS3Settings {

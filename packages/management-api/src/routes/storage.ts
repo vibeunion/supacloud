@@ -13,7 +13,7 @@ import {
 } from "../services/storage-bucket-contract";
 import { createProjectStorageConfigRoutes } from "./project-storage-config";
 import { projectStorageService } from "../services/project-storage.service";
-import { getStorageDriver } from "../services/storage.adapter";
+import { getLegacyStorageDriver, getStorageDriver } from "../services/storage.adapter";
 import { ProjectStorageError } from "../services/project-storage-contract";
 import { StorageRLS } from "../services/storage-rls";
 import { StorageVectorError, StorageVectorService } from "../services/storage-vector.service";
@@ -787,4 +787,4 @@ const existingProjectStorageRoutes = new Elysia({ prefix: "/v1/projects/:ref/sto
 // Keep admin configuration hooks local to their own plugin.
 export const projectStorageRoutes = new Elysia()
     .use(existingProjectStorageRoutes)
-    .use(createProjectStorageConfigRoutes({ authorize: requireAdminAuth, storage: projectStorageService }));
+    .use(createProjectStorageConfigRoutes({ authorize: requireAdminAuth, storage: projectStorageService, source: getLegacyStorageDriver }));
