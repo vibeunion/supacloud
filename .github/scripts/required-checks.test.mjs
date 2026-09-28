@@ -70,6 +70,44 @@ test('the CI script checks run this regression suite', () => {
   assert.match(job('docker-and-scripts-checks'), /^ {10}node --test \.github\/scripts\/required-checks\.test\.mjs$/m);
 });
 
+test('package checks use bounded high concurrency', () => {
+  assert.match(job('package-checks'), /^ {6}max-parallel: 12$/m);
+});
+
+test('Windows Lite checks restore Bun cache before installation', () => {
+  const windows = job('supacloud-lite-windows');
+  assert.match(windows, /^ {6}- name: Restore Windows Bun package cache$/m);
+  assert.match(windows, /^ {8}uses: actions\/cache@v6$/m);
+  assert.match(windows, /^ {10}path: ~\/\.bun\/install\/cache$/m);
+  assert.ok(windows.indexOf('Restore Windows Bun package cache') < windows.indexOf('Prepare Windows Lite dependencies'));
+  assert.match(windows, /bun install --frozen-lockfile/);
+  assert.match(windows, /bun run check/);
+  assert.match(windows, /bun run \.\.\/\.\.\/scripts\/audit_dependencies\.ts/);
+  assert.doesNotMatch(windows, /cache-hit|continue-on-error/);
+});
+
+test('binary builds remain downstream of the aggregate quality gate', () => {
+  assert.match(job('build-binaries'), /^ {4}needs: \[required-checks\]$/m);
+  assert.doesNotMatch(job('build-binaries'), /always\(\)|continue-on-error/);
+});
+
+test('Caddy caches never replace native build and smoke checks', () => {
+  for (const id of ['caddy-edge-proxy-smoke', 'build-binaries']) {
+    const source = job(id);
+    assert.doesNotMatch(source.split(/^ {4}steps:/m)[0], /\$\{\{ runner\./);
+    assert.ok(source.indexOf('Configure Caddy Go cache paths') >= 0);
+    assert.ok(source.indexOf('Configure Caddy Go cache paths') < source.indexOf('Restore Caddy Go cache'));
+    assert.ok(source.includes('echo "GOCACHE=$RUNNER_TEMP/caddy-go-build" >> "$GITHUB_ENV"'));
+    assert.ok(source.includes('echo "GOMODCACHE=$RUNNER_TEMP/caddy-go-mod" >> "$GITHUB_ENV"'));
+    assert.match(source, /path: \|\n {12}\$\{\{ env\.GOCACHE \}\}\n {12}\$\{\{ env\.GOMODCACHE \}\}/);
+    assert.match(source, /hashFiles\('scripts\/build_supacloud_caddy\.sh', 'docker\/self-host\/caddy\/Dockerfile'\)/);
+    assert.match(source, /go install github\.com\/caddyserver\/xcaddy\/cmd\/xcaddy@\$\{XCADDY_VERSION\}/);
+    assert.match(source, /bash scripts\/build_supacloud_caddy\.sh/);
+    assert.doesNotMatch(source, /cache-hit|continue-on-error/);
+  }
+  assert.match(job('caddy-edge-proxy-smoke'), /bash scripts\/test_supacloud_caddy_edge_proxy\.sh/);
+});
+
 test('the aggregate succeeds only when all required jobs succeed', () => {
   const result = runGate();
   assert.equal(result.status, 0, result.stderr);

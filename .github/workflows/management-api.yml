@@ -162,7 +162,7 @@ jobs:
     timeout-minutes: 20
     strategy:
       fail-fast: false
-      max-parallel: 8
+      max-parallel: 12
       matrix:
         include:
           - name: Web Console
@@ -414,6 +414,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: ${{ env.BUN_VERSION }}
+      - name: Restore command workflow dependency cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ env.BUN_VERSION }}-command-workflow-${{ hashFiles('packages/*/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ runner.arch }}-${{ env.BUN_VERSION }}-command-workflow-
+
       - name: Install command workflow dependencies
         run: |
           bun install --frozen-lockfile --cwd packages/contracts
@@ -451,7 +459,15 @@ jobs:
           node --version
           bun --version
 
-      - name: Check SupaCloud Lite on Windows
+      - name: Restore Windows Bun package cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: bun-${{ runner.os }}-${{ runner.arch }}-${{ env.BUN_VERSION }}-lite-${{ hashFiles('packages/*/bun.lock') }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ runner.arch }}-${{ env.BUN_VERSION }}-lite-
+
+      - name: Prepare Windows Lite dependencies
         shell: pwsh
         working-directory: packages/supacloud-lite
         run: |
@@ -459,8 +475,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           bun install --frozen-lockfile
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Check SupaCloud Lite on Windows
+        shell: pwsh
+        working-directory: packages/supacloud-lite
+        run: |
           bun run check
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Audit Windows Lite dependencies
+        shell: pwsh
+        working-directory: packages/supacloud-lite
+        run: |
           bun run ../../scripts/audit_dependencies.ts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -881,8 +907,18 @@ jobs:
           restore-keys: |
             bun-${{ runner.os }}-${{ env.BUN_VERSION }}-
 
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
       - name: Build Caddy integration image
-        run: docker build --tag supacloud-caddy:2.11.4-ratelimit docker/self-host/caddy
+        uses: docker/build-push-action@v7
+        with:
+          context: docker/self-host/caddy
+          load: true
+          push: false
+          tags: supacloud-caddy:2.11.4-ratelimit
+          cache-from: type=gha,scope=caddy-integration
+          cache-to: type=gha,scope=caddy-integration,mode=max,ignore-error=true
 
       - name: Start MinIO fixture
         run: |
@@ -1140,6 +1176,21 @@ jobs:
           # xcaddy creates its module in a temporary directory; this repo has no go.mod.
           cache: false
 
+      - name: Configure Caddy Go cache paths
+        run: |
+          echo "GOCACHE=$RUNNER_TEMP/caddy-go-build" >> "$GITHUB_ENV"
+          echo "GOMODCACHE=$RUNNER_TEMP/caddy-go-mod" >> "$GITHUB_ENV"
+
+      - name: Restore Caddy Go cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
+          key: caddy-go-${{ runner.os }}-${{ runner.arch }}-${{ env.GO_VERSION }}-${{ env.XCADDY_VERSION }}-${{ hashFiles('scripts/build_supacloud_caddy.sh', 'docker/self-host/caddy/Dockerfile') }}
+          restore-keys: |
+            caddy-go-${{ runner.os }}-${{ runner.arch }}-${{ env.GO_VERSION }}-${{ env.XCADDY_VERSION }}-
+
       - name: Install edge-runtime dependencies
         working-directory: packages/edge-runtime
         run: bun install --frozen-lockfile
@@ -1223,7 +1274,7 @@ jobs:
 
   build-binaries:
     name: Build Binaries
-    needs: [lint-and-typecheck, architecture-governance, package-checks, generate-sbom, docker-and-scripts-checks, unit-test, integration-test, shell-scripts-lint, caddy-edge-proxy-smoke]
+    needs: [required-checks]
     runs-on: ubuntu-24.04
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/dev')
 
@@ -1253,6 +1304,22 @@ jobs:
           node --version
           go version
           bun --version
+
+      - name: Configure Caddy Go cache paths
+        run: |
+          echo "GOCACHE=$RUNNER_TEMP/caddy-go-build" >> "$GITHUB_ENV"
+          echo "GOMODCACHE=$RUNNER_TEMP/caddy-go-mod" >> "$GITHUB_ENV"
+
+      - name: Restore Caddy Go cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ${{ env.GOCACHE }}
+            ${{ env.GOMODCACHE }}
+          key: caddy-go-${{ runner.os }}-${{ runner.arch }}-${{ env.GO_VERSION }}-${{ env.XCADDY_VERSION }}-binaries-${{ hashFiles('scripts/build_supacloud_caddy.sh', 'docker/self-host/caddy/Dockerfile') }}
+          restore-keys: |
+            caddy-go-${{ runner.os }}-${{ runner.arch }}-${{ env.GO_VERSION }}-${{ env.XCADDY_VERSION }}-binaries-
+            caddy-go-${{ runner.os }}-${{ runner.arch }}-${{ env.GO_VERSION }}-${{ env.XCADDY_VERSION }}-
 
       - name: Install delivery dependencies
         working-directory: packages/delivery
