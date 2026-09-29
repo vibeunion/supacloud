@@ -9,8 +9,7 @@ describe("createSupaCloudFramework", () => {
     const app = createSupaCloudFramework({
       name: "framework-fixture",
       http: new Elysia({ name: "fixture-http" })
-        .decorate("version", "v1")
-        .as("scoped"),
+        .decorate("version", "v1"),
     }).get("/health", {
       query: t.Object({}),
     }, ({ version }) => ({ version }));
