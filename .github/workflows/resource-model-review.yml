@@ -19,6 +19,8 @@ jobs:
           bun-version: '1.4.2'
       - name: Install locked test dependencies
         run: |
+          bun install --frozen-lockfile --cwd packages/contracts
+          bun run --cwd packages/contracts build
           bun install --frozen-lockfile --cwd packages/delivery
           bun install --frozen-lockfile --cwd packages/compiler
           bun install --frozen-lockfile --cwd packages/app
@@ -54,10 +56,11 @@ jobs:
           bun test src/decorators.test.ts src/infra-resource-metadata.test.ts 2>&1 | tee /tmp/resource-review-app.log
       - name: Compiler and app source and test type checks
         run: |
-          bun run --cwd packages/compiler typecheck
-          bun run --cwd packages/compiler typecheck:test
-          bun run --cwd packages/app typecheck
-          bun run --cwd packages/app typecheck:test
+          set -o pipefail
+          bun run --cwd packages/compiler typecheck 2>&1 | tee /tmp/resource-review-compiler-types.log
+          bun run --cwd packages/compiler typecheck:test 2>&1 | tee /tmp/resource-review-compiler-test-types.log
+          bun run --cwd packages/app typecheck 2>&1 | tee /tmp/resource-review-app-types.log
+          bun run --cwd packages/app typecheck:test 2>&1 | tee /tmp/resource-review-app-test-types.log
       - name: Diagnostic documentation and diff checks
         run: |
           bun scripts/check_diagnostic_docs.ts
