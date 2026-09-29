@@ -2,29 +2,68 @@ name: Delivery Context Review
 on:
   push:
     branches: [review/delivery-context-1518]
-    paths: [.github/workflows/delivery-context-review.yml]
+    paths: [.github/workflows/delivery-context-review.yml, '.review/**']
 permissions:
-  contents: read
+  contents: write
 jobs:
-  source:
+  verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
-          persist-credentials: false
-      - name: Export pinned source and exact PR delta
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Assemble pinned product repairs
         run: |
           set -euo pipefail
-          mkdir -p /tmp/delivery-review
-          git archive --format=tar.gz 822e9026bead5cee9006c83a3f5bfa45cf59c3ed > /tmp/delivery-review/main.tar.gz
-          git archive --format=tar.gz 2427b9fbbc4f8db97494e572de5bfd6e83dac4a2 > /tmp/delivery-review/pr1518.tar.gz
-          git diff 8bf40fc5988aaf075c7c3d8a319798bb11e366fd 2427b9fbbc4f8db97494e572de5bfd6e83dac4a2 > /tmp/delivery-review/pr1518.patch
-          git ls-tree -r 822e9026bead5cee9006c83a3f5bfa45cf59c3ed > /tmp/delivery-review/main-tree.txt
-          git ls-tree -r 2427b9fbbc4f8db97494e572de5bfd6e83dac4a2 > /tmp/delivery-review/pr1518-tree.txt
+          mkdir -p /tmp/review-evidence
+          python3 .review/repair.py
+          git diff --check
+      - name: Build the normal compiler test prerequisites
+        run: |
+          set -euo pipefail
+          bun run scripts/build-command-dependencies.ts elysia 2>&1 | tee /tmp/review-evidence/dependencies.log
+          (cd packages/elysia && bun install --frozen-lockfile && bun run build) 2>&1 | tee -a /tmp/review-evidence/dependencies.log
+          bun install --frozen-lockfile --cwd packages/compiler
+      - name: Verify compiler source and test types, full suite and build
+        run: |
+          set -euo pipefail
+          bun run --cwd packages/compiler typecheck 2>&1 | tee /tmp/review-evidence/typecheck.log
+          bun run --cwd packages/compiler typecheck:test 2>&1 | tee -a /tmp/review-evidence/typecheck.log
+          bun test packages/compiler 2>&1 | tee /tmp/review-evidence/compiler-tests.log
+          bun run --cwd packages/compiler build 2>&1 | tee /tmp/review-evidence/build.log
+          bun scripts/check_public_api.ts --update 2>&1 | tee /tmp/review-evidence/contracts.log
+          bun scripts/check_public_api.ts 2>&1 | tee -a /tmp/review-evidence/contracts.log
+          bun scripts/check_diagnostic_docs.ts 2>&1 | tee -a /tmp/review-evidence/contracts.log
+          node scripts/check-readme-docs.mjs 2>&1 | tee -a /tmp/review-evidence/contracts.log
+          git diff --exit-code -- packages/app/public-api.json
+          git diff --check
+      - name: Preserve only validated product blobs on the isolated branch
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add docs/application-development-context.md docs/encore-alignment-roadmap.md packages/compiler/public-api.json packages/compiler/src/application-development.ts packages/compiler/src/application-development-delivery.test.ts packages/compiler/src/application-development-validation.test.ts packages/compiler/src/delivery-build.ts packages/compiler/src/delivery-context.ts packages/compiler/src/delivery-render.ts packages/compiler/src/index.ts
+          git commit -m 'fix(compiler): validate delivered development contexts and bound archive output'
+          git push origin HEAD:refs/heads/review/delivery-context-1518
+          python3 - <<'PY'
+          import json, subprocess
+          def git(*args): return subprocess.check_output(['git', *args], text=True).strip()
+          paths=git('diff','--name-only','822e9026bead5cee9006c83a3f5bfa45cf59c3ed','HEAD','--','docs','packages').splitlines()
+          result={'commit':git('rev-parse','HEAD'),'files':[{'path':p,'mode':'100644','type':'blob','sha':git('rev-parse','HEAD:'+p)} for p in paths]}
+          open('/tmp/review-evidence/manifest.json','w').write(json.dumps(result,indent=2))
+          print(json.dumps(result))
+          PY
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: delivery-context-pinned-sources
-          path: /tmp/delivery-review
-          retention-days: 3
+          name: delivery-context-review-evidence
+          path: /tmp/review-evidence
+          retention-days: 7
