@@ -23,6 +23,7 @@
 - [Multi-Tenant Architecture](./architecture-multi-tenant.md) - Multi-tenant architecture design
 - [Multi-Tenant Management](./multi-tenant-management.md) - Management API specification, auth boundaries, and operational hardening
 - [Enterprise Architecture Readiness](./enterprise-architecture-readiness.md) - Infrastructure boundaries, SLO model, recovery acceptance, and release governance ([中文](./enterprise-architecture-readiness.zh-CN.md))
+- [Encore Alignment Roadmap](./encore-alignment-roadmap.md) - Proposed next-stage application model, local run entry, execution timeline, dev console/MCP and full-app preview (PROPOSAL)
 
 ## Deployment
 
