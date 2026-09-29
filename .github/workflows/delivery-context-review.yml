@@ -1,0 +1,30 @@
+name: Delivery Context Review
+on:
+  push:
+    branches: [review/delivery-context-1518]
+    paths: [.github/workflows/delivery-context-review.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Export pinned source and exact PR delta
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/delivery-review
+          git archive --format=tar.gz 822e9026bead5cee9006c83a3f5bfa45cf59c3ed > /tmp/delivery-review/main.tar.gz
+          git archive --format=tar.gz 2427b9fbbc4f8db97494e572de5bfd6e83dac4a2 > /tmp/delivery-review/pr1518.tar.gz
+          git diff 8bf40fc5988aaf075c7c3d8a319798bb11e366fd 2427b9fbbc4f8db97494e572de5bfd6e83dac4a2 > /tmp/delivery-review/pr1518.patch
+          git ls-tree -r 822e9026bead5cee9006c83a3f5bfa45cf59c3ed > /tmp/delivery-review/main-tree.txt
+          git ls-tree -r 2427b9fbbc4f8db97494e572de5bfd6e83dac4a2 > /tmp/delivery-review/pr1518-tree.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: delivery-context-pinned-sources
+          path: /tmp/delivery-review
+          retention-days: 3
