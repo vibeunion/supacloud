@@ -76,7 +76,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     },
     ai: { local: ["show_skill", "install_skill"] },
     app: {
-        local: ["init", "generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix", "plan", "build"],
+        local: ["init", "generate", "dev", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix", "plan", "build"],
         read: ["status"],
         write: ["upload", "configure", "deploy", "rollback", "reconcile", "retire"],
     },

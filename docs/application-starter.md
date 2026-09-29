@@ -24,6 +24,14 @@ bun run check
 bun run dev
 ```
 
+The published CLI also exposes the same local loop through an application-level
+entry, without reaching for a remote test server:
+
+```sh
+supacloud-cli app dev --profile fast          # local/ephemeral, safe defaults
+supacloud-cli app dev --profile integration   # requires an explicit database URL
+```
+
 The project CLI binary also supports `supacloud-cli app init`. Initialization is
 local, needs no account or API token, never installs dependencies automatically,
 and refuses non-empty or symlink targets. A `.git` directory is allowed. `--force`
@@ -54,6 +62,28 @@ hand-edit exported schemas or add GraphQL resolver classes. After database/grant
 changes and before promotion, use `graphql-schema --check` against the selected
 database, then refresh intentionally and run generated-artifact, type and RLS
 checks. Offline compilation does not attest database provenance or freshness.
+
+## Local Development Entry
+
+`bun run dev` (the generated starter's watch/recompile/restart loop) and
+`supacloud-cli app dev` share one application graph and one compiler. `app dev`
+compiles, reports diagnostics and watches; it never syncs files to a remote host.
+Remote test-server sync, migration generation and remote reload remain
+`supacloud dev sync`, `supacloud dev migrate` and `supacloud dev watch`.
+
+| Profile | Intended use | Requirement |
+| --- | --- | --- |
+| `fast` (default) | Write business code, inspect routes and check contracts quickly | Local/ephemeral dependencies; no external database is required |
+| `integration` | Verify production dependency semantics | An explicit `--database-url` or `SUPACLOUD_DEV_DATABASE_URL`; never inferred or defaulted |
+
+The command prints the selected profile, project root, output directory, the
+database mode (with credentials redacted) and the modules written. It also prints
+what the selected profile does **not** verify, so "zero configuration" never means
+hidden configuration. `--once` performs a single validation pass; omit it to watch.
+
+The first slice does **not** connect to, migrate or seed the integration database,
+and does not provision queue or object-storage adapters. Those steps require an
+explicitly selected environment and remain separate follow-ups.
 
 ## Environment Contract
 

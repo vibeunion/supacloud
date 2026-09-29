@@ -104,6 +104,12 @@ supacloud-cli app dev --profile fast
 supacloud-cli app dev --profile integration
 ```
 
+> **第一切片已实现（2026-09-29）**：`supacloud-cli app dev` 已提供 profile 感知的
+> 统一入口：编译、诊断、watch，并明确报告当前 profile、数据库模式（凭据脱敏）与
+> “未验证项”；`fast` 无需外部数据库，`integration` 必须显式提供数据库 URL，否则拒绝。
+> “解析资源绑定 → 连接依赖 → 迁移/seed → 启动应用与任务”仍待后续切片。
+> 详见 [Application Starter](./application-starter.md#local-development-entry)。
+
 | 模式 | 目标 | 约束 |
 | --- | --- | --- |
 | fast | 快速写业务、看接口、验证契约 | 可用 Lite/PGlite 或明确标识的轻量适配器 |
