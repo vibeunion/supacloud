@@ -74,6 +74,8 @@ export type {
   GraphqlDocumentationOptions,
   OpenApiDocumentationOptions,
 } from "./documentation";
+export { createSupaCloudFramework } from "./framework";
+export type { SupaCloudFrameworkOptions } from "./framework";
 
 // ---------------------------------------------------------------------------
 // Compiled module contract (mirrors @supacloud/compiler output)
