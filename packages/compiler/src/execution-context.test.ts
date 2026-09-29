@@ -112,6 +112,10 @@ test("unsupported fields, malformed metadata and absent traces fail without echo
     envelope([{ ...event, error: "PRIVATE_INPUT" }]),
     envelope([{ ...event, durationMs: -1 }]),
     envelope([{ ...event, durationMs: Infinity }]),
+    envelope([{ ...event, attempt: 0 }]),
+    envelope([{ ...event, attempt: 1.5 }]),
+    envelope([{ ...event, attempt: "1" }]),
+    envelope([{ ...event, traceId: "bad id" }]),
     envelope([{ ...event, requestId: "PRIVATE_INPUT\n" }]),
     envelope([{ ...event, operation: "bad\nname" }]),
     envelope([{ ...event, kind: { toString: () => "command" } }]),
@@ -188,4 +192,43 @@ test("file reader rejects malformed, oversized and non-file inputs without revea
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("execution context builds an ordered per-attempt business timeline", () => {
+  const pack = createExecutionContextPack(graph(), "review", envelope([
+    { ...event, stage: "commandExecutor", phase: "succeeded", durationMs: 1 },
+    { ...event, stage: "authorize", phase: "succeeded", durationMs: 2 },
+    { ...event, stage: "idempotency", phase: "succeeded", durationMs: 3 },
+    { ...event, stage: "transaction", phase: "started", durationMs: 4 },
+    { ...event, stage: "transaction", phase: "failed", durationMs: 5, attempt: 1 },
+    { ...event, stage: "commandExecutor", phase: "succeeded", durationMs: 1, attempt: 2, traceId: "trace-one" },
+    { ...event, stage: "handler", phase: "succeeded", durationMs: 6, attempt: 2, traceId: "trace-one" },
+  ]), "trace-one");
+  expect(pack.timeline).toHaveLength(1);
+  const entry = pack.timeline[0]!;
+  expect(entry).toMatchObject({ kind: "command", operation: "review.approve", module: "review" });
+  expect(entry.declaredStages).toContain("transaction");
+  expect(entry.declaredStages).toContain("handler");
+  expect(entry.attempts.map((attempt) => attempt.attempt)).toEqual([1, 2]);
+
+  const first = entry.attempts[0]!;
+  expect(first.stages.map((stage) => stage.stage))
+    .toEqual(["commandExecutor", "authorize", "idempotency", "transaction", "transaction"]);
+  expect(first.failed).toBe(true);
+  expect(first.complete).toBe(false);
+  expect(first.missingStages).toEqual(["handler"]);
+  expect(first.unexpectedStages).toEqual([]);
+
+  const second = entry.attempts[1]!;
+  expect(second.complete).toBe(true);
+  expect(second.failed).toBe(false);
+  expect(second.traceIds).toEqual(["trace-one"]);
+  expect(second.missingStages).toEqual(["authorize", "idempotency", "transaction"]);
+});
+
+test("events without an attempt field remain a single first attempt", () => {
+  const pack = createExecutionContextPack(graph(), "review", envelope([event]), "trace-one");
+  expect(pack.timeline[0]!.attempts).toHaveLength(1);
+  expect(pack.timeline[0]!.attempts[0]!.attempt).toBe(1);
+  expect(pack.omitted.timeline).toBe(0);
 });
