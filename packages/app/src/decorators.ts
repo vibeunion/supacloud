@@ -26,6 +26,7 @@ export const COMMAND_METADATA = "supacloud:command";
 export const JOB_METADATA = "supacloud:job";
 export const QUERY_METADATA = "supacloud:query";
 export const CONTROLLER_METADATA = "supacloud:controller";
+export const INFRA_RESOURCE_METADATA = "supacloud:infra-resource";
 export const ROUTES_METADATA = "supacloud:routes";
 export const INJECT_PARAMS_METADATA = "supacloud:inject-params";
 export const OPTIONAL_PARAMS_METADATA = "supacloud:optional-params";
@@ -67,6 +68,31 @@ export interface InjectableMeta {
   deps: ProviderDep[];
 }
 
+export type InfraResourceKind = "database" | "bucket" | "queue" | "config" | "secret";
+export type InfraResourceOperation = "read" | "write" | "publish" | "consume";
+
+/**
+ * Declares one logical infrastructure resource. This is a declaration only: it
+ * never carries credentials and never creates cloud resources. The platform
+ * binds the logical name to a concrete resource per environment.
+ */
+export interface InfraResourceOptions {
+  /** Stable logical name consumed by the application graph and environment bindings. */
+  name: string;
+  kind: InfraResourceKind;
+}
+
+export interface InfraResourceMeta {
+  name: string;
+  kind: InfraResourceKind;
+}
+
+/** A module/command/job declaring which resource it uses, and how. */
+export interface InfraResourceUse {
+  resource: Type<unknown>;
+  operations?: InfraResourceOperation[];
+}
+
 export interface ModuleOptions {
   name: string;
   /** Tags for architectural boundary governance (e.g. ['scope:case', 'type:feature']). */
@@ -77,14 +103,18 @@ export interface ModuleOptions {
   commands?: Array<Type<unknown>>;
   jobs?: Array<Type<unknown>>;
   queries?: Array<Type<unknown>>;
+  /** Logical infrastructure resources this module requires. Declaration only; no credentials. */
+  resources?: Array<Type<unknown>>;
   /** Explicit static aspects applied to every route and command in this module. */
   aspects?: Aspect[];
   exports?: Token[];
 }
 
-export interface ModuleMeta extends Required<Omit<ModuleOptions, "exports" | "tags" | "aspects">> {
+export interface ModuleMeta extends Required<Omit<ModuleOptions, "exports" | "tags" | "aspects" | "resources">> {
   tags?: string[];
   aspects: Aspect[];
+  /** Present only when the module declared one or more resources. */
+  resources?: Array<Type<unknown>>;
   exports: Token[];
 }
 
@@ -102,6 +132,8 @@ export interface CommandOptions {
   idempotency?: "required" | "none";
   /** Automatically discover and register without manual module declaration. */
   standalone?: boolean;
+  /** Infrastructure resources this command uses, with the operations it performs. */
+  uses?: InfraResourceUse[];
   /** Explicit static aspects applied around this command invocation. */
   aspects?: Aspect[];
 }
@@ -138,6 +170,8 @@ export interface JobOptions<
   idempotency?: JobIdempotency;
   /** Explicit static aspects applied around this job invocation. */
   aspects?: Aspect[];
+  /** Infrastructure resources this job uses, with the operations it performs. */
+  uses?: InfraResourceUse[];
 }
 
 export type JobMeta<
@@ -425,6 +459,7 @@ export function Module(options: ModuleOptions): ClassDecorator {
       commands: options.commands ?? [],
       jobs: options.jobs ?? [],
       queries: options.queries ?? [],
+      ...(options.resources ? { resources: options.resources } : {}),
       aspects: options.aspects ?? [],
       exports: options.exports ?? [],
     };
@@ -434,6 +469,22 @@ export function Module(options: ModuleOptions): ClassDecorator {
 
 export function getModuleMeta(target: object): ModuleMeta | undefined {
   return readOwnOrInherited(target, MODULE_METADATA);
+}
+
+/**
+ * Declares a logical infrastructure resource for the application graph. The
+ * decorator stores metadata only; it does not provision, connect or authorize
+ * anything at runtime.
+ */
+export function InfraResource(options: InfraResourceOptions): ClassDecorator {
+  return (target) => {
+    const meta: InfraResourceMeta = { name: options.name, kind: options.kind };
+    defineMetadata(target, INFRA_RESOURCE_METADATA, meta);
+  };
+}
+
+export function getInfraResourceMeta(target: object): InfraResourceMeta | undefined {
+  return readOwnOrInherited(target, INFRA_RESOURCE_METADATA);
 }
 
 export function Command(options: CommandOptions): ClassDecorator {

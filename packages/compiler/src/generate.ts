@@ -374,6 +374,8 @@ export function renderApplication(
     version: number;
     modules: ModuleNode[];
     externalTokens: string[];
+    resources?: NonNullable<ApplicationGraph["resources"]>;
+    resourceUses?: NonNullable<ApplicationGraph["resourceUses"]>;
     commandGovernance: {
       defaults: { authorization: "required"; audit: "required"; idempotency: "required"; transaction: "required" };
       commands: typeof commandGovernance;
@@ -382,6 +384,8 @@ export function renderApplication(
     version: 1,
     modules: graph.modules,
     externalTokens: graph.externalTokens,
+    ...(graph.resources ? { resources: graph.resources } : {}),
+    ...(graph.resourceUses ? { resourceUses: graph.resourceUses } : {}),
     commandGovernance: {
       defaults: { authorization: "required", audit: "required", idempotency: "required", transaction: "required" },
       commands: commandGovernance,

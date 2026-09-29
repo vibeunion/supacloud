@@ -146,7 +146,7 @@
     {
       "name": "CommandOptions",
       "kind": "type",
-      "signature": "export interface CommandOptions {\n    name: string;\n    rpc?: string;\n    permission: string;\n    transaction?: \"required\" | \"none\";\n    audit?: string;\n    idempotency?: \"required\" | \"none\";\n    standalone?: boolean;\n    aspects?: Aspect[];\n}"
+      "signature": "export interface CommandOptions {\n    name: string;\n    rpc?: string;\n    permission: string;\n    transaction?: \"required\" | \"none\";\n    audit?: string;\n    idempotency?: \"required\" | \"none\";\n    standalone?: boolean;\n    uses?: InfraResourceUse[];\n    aspects?: Aspect[];\n}"
     },
     {
       "name": "CommandOutcome",
@@ -519,6 +519,11 @@
       "signature": "export declare function getHostParams(target: object): number[];"
     },
     {
+      "name": "getInfraResourceMeta",
+      "kind": "value",
+      "signature": "export declare function getInfraResourceMeta(target: object): InfraResourceMeta | undefined;"
+    },
+    {
       "name": "getInjectableMeta",
       "kind": "value",
       "signature": "export declare function getInjectableMeta(target: object): InjectableMeta | undefined;"
@@ -704,6 +709,41 @@
       "signature": "export interface HttpRequestPayload {\n    method: string;\n    url: string;\n    headers: Record<string, string>;\n    body?: unknown;\n    context?: HttpContext;\n    replay?: HttpReplayPolicy;\n    signal?: AbortSignal;\n}"
     },
     {
+      "name": "INFRA_RESOURCE_METADATA",
+      "kind": "value",
+      "signature": "export declare const INFRA_RESOURCE_METADATA = \"supacloud:infra-resource\";"
+    },
+    {
+      "name": "InfraResource",
+      "kind": "value",
+      "signature": "export declare function InfraResource(options: InfraResourceOptions): ClassDecorator;"
+    },
+    {
+      "name": "InfraResourceKind",
+      "kind": "type",
+      "signature": "export type InfraResourceKind = \"database\" | \"bucket\" | \"queue\" | \"config\" | \"secret\";"
+    },
+    {
+      "name": "InfraResourceMeta",
+      "kind": "type",
+      "signature": "export interface InfraResourceMeta {\n    name: string;\n    kind: InfraResourceKind;\n}"
+    },
+    {
+      "name": "InfraResourceOperation",
+      "kind": "type",
+      "signature": "export type InfraResourceOperation = \"read\" | \"write\" | \"publish\" | \"consume\";"
+    },
+    {
+      "name": "InfraResourceOptions",
+      "kind": "type",
+      "signature": "export interface InfraResourceOptions {\n    name: string;\n    kind: InfraResourceKind;\n}"
+    },
+    {
+      "name": "InfraResourceUse",
+      "kind": "type",
+      "signature": "export interface InfraResourceUse {\n    resource: Type<unknown>;\n    operations?: InfraResourceOperation[];\n}"
+    },
+    {
       "name": "inject",
       "kind": "value",
       "signature": "export declare function inject<T>(token: Token<T>, options: InjectFlags | undefined): T | undefined;\nexport declare function inject<T>(token: Token<T>, options?: InjectFlags & {\n    optional?: false;\n}): T;\nexport declare function inject<T>(token: Token<T>, options?: InjectFlags): T | undefined;"
@@ -876,7 +916,7 @@
     {
       "name": "JobOptions",
       "kind": "type",
-      "signature": "export interface JobOptions<TInputSchema extends TSchema = TSchema, TOutputSchema extends TSchema = TSchema> {\n    name: string;\n    input?: TInputSchema;\n    output?: TOutputSchema;\n    mode?: JobMode;\n    timeoutSec?: number;\n    maxAttempts?: number;\n    idempotency?: JobIdempotency;\n    aspects?: Aspect[];\n}"
+      "signature": "export interface JobOptions<TInputSchema extends TSchema = TSchema, TOutputSchema extends TSchema = TSchema> {\n    name: string;\n    input?: TInputSchema;\n    output?: TOutputSchema;\n    mode?: JobMode;\n    timeoutSec?: number;\n    maxAttempts?: number;\n    idempotency?: JobIdempotency;\n    aspects?: Aspect[];\n    uses?: InfraResourceUse[];\n}"
     },
     {
       "name": "JobOutput",
@@ -941,12 +981,12 @@
     {
       "name": "ModuleMeta",
       "kind": "type",
-      "signature": "export interface ModuleMeta extends Required<Omit<ModuleOptions, \"exports\" | \"tags\" | \"aspects\">> {\n    tags?: string[];\n    aspects: Aspect[];\n    exports: Token[];\n}"
+      "signature": "export interface ModuleMeta extends Required<Omit<ModuleOptions, \"exports\" | \"tags\" | \"aspects\" | \"resources\">> {\n    tags?: string[];\n    aspects: Aspect[];\n    resources?: Array<Type<unknown>>;\n    exports: Token[];\n}"
     },
     {
       "name": "ModuleOptions",
       "kind": "type",
-      "signature": "export interface ModuleOptions {\n    name: string;\n    tags?: string[];\n    imports?: Array<Type<unknown>>;\n    providers?: Array<Provider | EnvironmentProviders>;\n    controllers?: Array<Type<unknown>>;\n    commands?: Array<Type<unknown>>;\n    jobs?: Array<Type<unknown>>;\n    queries?: Array<Type<unknown>>;\n    aspects?: Aspect[];\n    exports?: Token[];\n}"
+      "signature": "export interface ModuleOptions {\n    name: string;\n    tags?: string[];\n    imports?: Array<Type<unknown>>;\n    providers?: Array<Provider | EnvironmentProviders>;\n    controllers?: Array<Type<unknown>>;\n    commands?: Array<Type<unknown>>;\n    jobs?: Array<Type<unknown>>;\n    queries?: Array<Type<unknown>>;\n    resources?: Array<Type<unknown>>;\n    aspects?: Aspect[];\n    exports?: Token[];\n}"
     },
     {
       "name": "NavigationExtras",
