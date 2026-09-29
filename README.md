@@ -120,6 +120,7 @@ Binding is an administrator operation. Existing platform objects require the doc
 | Surface | What to verify |
 | --- | --- |
 | Repository vs releases | A merged change on `main` is not proof that the corresponding package or binary has been published. |
+| Pigsty installation baseline | Installation defaults pin `v4.5.0`. Follow the [current pin and upgrade checks](docs/upgrade-to-pigsty-4.5.md); historical migration identifiers are not the current version. |
 | Elysia and schemas | The exact beta/version tuple lives in [compatibility.json](packages/elysia/compatibility.json). Actual results are dated in the [acceptance record](docs/framework-acceptance.md); the tuple alone is not an execution result. |
 | Generated contracts | Upgrade compiler, TypeBox schemas, generated clients and runtime adapters together. Regenerate and run [contract migration checks](docs/route-contract-migration.md). |
 | Supabase clients and CLI | Compatibility covers documented and tested protocols/workflows, not all Supabase Cloud features or every upstream version. |

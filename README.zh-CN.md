@@ -120,6 +120,7 @@ curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh |
 | 范围 | 需要核实的内容 |
 | --- | --- |
 | 仓库与发布版本 | 代码已合并到 `main`，不等于对应软件包或二进制已发布。 |
+| Pigsty 安装基线 | 安装默认版本固定为 `v4.5.0`。请遵循[当前版本与升级检查](docs/upgrade-to-pigsty-4.5.md)，历史迁移标识不代表当前版本。 |
 | Elysia 与 Schema | 精确的 beta 与依赖组合见 [compatibility.json](packages/elysia/compatibility.json)。实际结果见带日期的[验收记录](docs/framework-acceptance.md)，目标组合本身不代表已执行验收。 |
 | 生成契约 | 编译器、TypeBox Schema、生成客户端与运行时适配器需要协同升级；重新生成并执行[契约迁移检查](docs/route-contract-migration.md)。 |
 | Supabase 客户端与 CLI | 兼容性限定在已说明、已测试的协议和工作流，不覆盖所有 Supabase Cloud 功能或全部上游版本。 |
