@@ -1,0 +1,32 @@
+name: README Documentation
+
+on:
+  pull_request:
+    branches: ["main", "dev"]
+  push:
+    branches: ["main", "dev"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: readme-docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  readme:
+    name: README docs and bilingual diagrams
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24.x"
+      - name: Test documentation checks
+        run: node --test scripts/readme-docs.test.mjs
+      - name: Verify local links, translations and generated diagrams
+        run: node scripts/check-readme-docs.mjs
