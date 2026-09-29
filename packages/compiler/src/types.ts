@@ -15,6 +15,42 @@ export type ProviderKind = "class" | "value" | "factory" | "existing";
 
 export type TokenKind = "injection-token" | "class";
 
+export type InfraResourceKind = "database" | "bucket" | "queue" | "config" | "secret";
+
+export type InfraResourceOperation = "read" | "write" | "publish" | "consume";
+
+/**
+ * A logical infrastructure resource declared with `@InfraResource`. It carries
+ * no credentials and is never provisioned by the compiler; it only names what
+ * the application requires. Environment bindings resolve the name per target.
+ */
+export interface InfraResourceNode {
+  /** Stable logical name shared across environments. */
+  name: string;
+  kind: InfraResourceKind;
+  className: string;
+  file: string;
+  line: number;
+  /** Relative module path of the declaring class (for import generation). */
+  importPath: string;
+}
+
+export interface InfraResourceUseRef {
+  /** Logical resource name. */
+  resource: string;
+  operations: InfraResourceOperation[];
+}
+
+/** One module/command/job resource use, kept for inspection and validation. */
+export interface ResourceUseNode extends InfraResourceUseRef {
+  module: string;
+  /** Command name when the use is declared on a command. */
+  command?: string;
+  /** Job name when the use is declared on a Job. */
+  job?: string;
+  resourceClass: string;
+}
+
 export interface FunctionalInjectNode {
   /** Logical token name used by the application graph. */
   token: string;
@@ -262,6 +298,8 @@ export interface CommandNode {
   idempotency: "required" | "none";
   /** Automatically registered without manual module declaration. */
   standalone?: boolean;
+  /** Infrastructure resources this command uses, with the declared operations. */
+  uses?: InfraResourceUseRef[];
   /** Explicit aspects applied around this command. */
   aspects?: AspectRefNode[];
 }
@@ -287,6 +325,8 @@ export interface JobNode {
   maxAttempts?: number;
   /** Adapter-owned idempotency requirement. */
   idempotency?: JobIdempotency;
+  /** Infrastructure resources this job uses, with the declared operations. */
+  uses?: InfraResourceUseRef[];
   aspects?: AspectRefNode[];
 }
 
@@ -330,6 +370,8 @@ export interface ModuleNode {
   commands: CommandNode[];
   jobs?: JobNode[];
   queries: QueryNode[];
+  /** Logical infrastructure resource names this module requires. */
+  resources?: string[];
   /** Explicit aspects applied to all routes and commands in this module. */
   aspects?: AspectRefNode[];
   /** Exported token names. */
@@ -340,6 +382,10 @@ export interface ModuleNode {
 export interface ApplicationGraph {
   /** Handler declaration files by module, for inspection only; omitted from app.manifest.json. */
   moduleHandlerFiles?: Record<string, string[]>;
+  /** Declared logical infrastructure resources, deduplicated by name. */
+  resources?: InfraResourceNode[];
+  /** Module/command/job resource uses, sorted deterministically. */
+  resourceUses?: ResourceUseNode[];
   /** Offline query inventory for AI context. Kept in graphql.manifest.json, not app.manifest.json. */
   graphql?: GraphqlContractSummary;
   modules: ModuleNode[];

@@ -41,6 +41,10 @@ export function Query(_options: Record<string, unknown>) {
   return () => {};
 }
 
+export function InfraResource(_options: { name: string; kind: string }) {
+  return () => {};
+}
+
 export function Controller(_path: string) {
   return () => {};
 }

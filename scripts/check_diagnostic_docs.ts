@@ -181,6 +181,35 @@ list() {}`,
 list() {}`,
   SC5001: `@Injectable({ providedIn: "root" })
 class UnusedService {}`,
+  SC8101: `@InfraResource({ name: "orders-db", kind: "database" })
+class OrdersDatabase {}
+@InfraResource({ name: "orders-db", kind: "bucket" })
+class OrdersBucket {}`,
+  SC8102: `class NotAResource {}
+@Module({ name: "orders", resources: [NotAResource] })
+class OrdersModule {}`,
+  SC8103: `@InfraResource({ name: "orders-db", kind: "database" })
+class OrdersDatabase {}
+@Command({
+  name: "orders.create",
+  permission: "orders.create",
+  uses: [{ resource: OrdersDatabase, operations: ["write"] }],
+})
+class CreateOrderCommand {}
+@Module({ name: "orders", commands: [CreateOrderCommand] })
+class OrdersModule {}`,
+  SC8104: `@InfraResource({ name: "cache", kind: "redis" })
+class Cache {}`,
+  SC8105: `@InfraResource({ name: "orders-db", kind: "database" })
+class OrdersDatabase {}
+@Command({
+  name: "orders.create",
+  permission: "orders.create",
+  uses: [{ resource: OrdersDatabase, operations: ["delete"] }],
+})
+class CreateOrderCommand {}
+@Module({ name: "orders", resources: [OrdersDatabase], commands: [CreateOrderCommand] })
+class OrdersModule {}`,
   SC6001: `// generated/application.ts
 export const unsafe: any = value;`,
   SC6002: `export function decode(input: any) {
@@ -281,6 +310,7 @@ function fix(entry: DiagnosticEntry): string {
   if (entry.code === "SC2012") return "Use typed constructor parameters and compiler-generated scope factories instead of runtime inject() or injection contexts.";
   if (entry.code === "SC6007") return "Keep raw SQL results unknown and validate them with an explicit result decoder.";
   if (entry.code === "SC6008") return "Use parameterized SQL templates for values; raw SQL must be a static literal.";
+  if (entry.code.startsWith("SC81")) return "Correct the `@InfraResource` declaration or the module/command/job resource use. Declare each logical resource once, reference only declared resources, and keep operations within `read | write | publish | consume`.";
   if (entry.registry === "type-safety") return `Replace the unsafe type escape reported by \`${names}\` with an explicit type, \`unknown\` plus narrowing, or a constrained generic.`;
   if (entry.code.startsWith("SC1")) return `Inspect the module graph and change the dependency or scope declaration that triggered \`${names}\`. Keep dependencies one-way and make the smallest shared contract explicit.`;
   if (entry.code.startsWith("SC2")) return `Correct the provider or token declaration associated with \`${names}\`. Prefer a named provider, an explicit module export, and a boundary owned by the consuming layer.`;

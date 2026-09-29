@@ -16,7 +16,7 @@
     {
       "name": "ApplicationGraph",
       "kind": "type",
-      "signature": "export interface ApplicationGraph {\n    moduleHandlerFiles?: Record<string, string[]>;\n    graphql?: GraphqlContractSummary;\n    modules: ModuleNode[];\n    externalTokens: string[];\n    diagnostics?: Diagnostic[];\n    tokenNames?: Record<string, string>;\n    cacheStats?: {\n        reusedModules: string[];\n        reanalyzedModules: string[];\n    };\n}"
+      "signature": "export interface ApplicationGraph {\n    moduleHandlerFiles?: Record<string, string[]>;\n    resources?: InfraResourceNode[];\n    resourceUses?: ResourceUseNode[];\n    graphql?: GraphqlContractSummary;\n    modules: ModuleNode[];\n    externalTokens: string[];\n    diagnostics?: Diagnostic[];\n    tokenNames?: Record<string, string>;\n    cacheStats?: {\n        reusedModules: string[];\n        reanalyzedModules: string[];\n    };\n}"
     },
     {
       "name": "AppliedDiagnosticFix",
@@ -86,7 +86,7 @@
     {
       "name": "CommandNode",
       "kind": "type",
-      "signature": "export interface CommandNode {\n    rpc?: string;\n    className: string;\n    name: string;\n    permission?: string;\n    transaction: \"required\" | \"none\";\n    audit?: string;\n    idempotency: \"required\" | \"none\";\n    standalone?: boolean;\n    aspects?: AspectRefNode[];\n}"
+      "signature": "export interface CommandNode {\n    rpc?: string;\n    className: string;\n    name: string;\n    permission?: string;\n    transaction: \"required\" | \"none\";\n    audit?: string;\n    idempotency: \"required\" | \"none\";\n    standalone?: boolean;\n    uses?: InfraResourceUseRef[];\n    aspects?: AspectRefNode[];\n}"
     },
     {
       "name": "CompileOptions",
@@ -436,7 +436,7 @@
     {
       "name": "JobNode",
       "kind": "type",
-      "signature": "export interface JobNode {\n    className: string;\n    name: string;\n    serviceKey: string;\n    scope: Scope;\n    input?: string;\n    output?: string;\n    schemaKinds?: Partial<Record<\"input\" | \"output\", JobSchemaKind>>;\n    schemaImports?: Record<string, string>;\n    mode?: JobMode;\n    timeoutSec?: number;\n    maxAttempts?: number;\n    idempotency?: JobIdempotency;\n    aspects?: AspectRefNode[];\n}"
+      "signature": "export interface JobNode {\n    className: string;\n    name: string;\n    serviceKey: string;\n    scope: Scope;\n    input?: string;\n    output?: string;\n    schemaKinds?: Partial<Record<\"input\" | \"output\", JobSchemaKind>>;\n    schemaImports?: Record<string, string>;\n    mode?: JobMode;\n    timeoutSec?: number;\n    maxAttempts?: number;\n    idempotency?: JobIdempotency;\n    uses?: InfraResourceUseRef[];\n    aspects?: AspectRefNode[];\n}"
     },
     {
       "name": "loadGeneratedOpenApiDocument",
@@ -531,7 +531,7 @@
     {
       "name": "ModuleNode",
       "kind": "type",
-      "signature": "export interface ModuleNode {\n    name: string;\n    className: string;\n    tags?: string[];\n    file: string;\n    line: number;\n    imports: string[];\n    providers: ProviderNode[];\n    controllers: ControllerNode[];\n    commands: CommandNode[];\n    jobs?: JobNode[];\n    queries: QueryNode[];\n    aspects?: AspectRefNode[];\n    exports: string[];\n    featureSpec?: FeatureSpecNode;\n}"
+      "signature": "export interface ModuleNode {\n    name: string;\n    className: string;\n    tags?: string[];\n    file: string;\n    line: number;\n    imports: string[];\n    providers: ProviderNode[];\n    controllers: ControllerNode[];\n    commands: CommandNode[];\n    jobs?: JobNode[];\n    queries: QueryNode[];\n    resources?: string[];\n    aspects?: AspectRefNode[];\n    exports: string[];\n    featureSpec?: FeatureSpecNode;\n}"
     },
     {
       "name": "OpenApiDiffChange",

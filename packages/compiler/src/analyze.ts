@@ -14,6 +14,10 @@ import type {
   FunctionalInjectNode,
   FeatureSpecNode,
   FeatureTransitionNode,
+  InfraResourceKind,
+  InfraResourceNode,
+  InfraResourceOperation,
+  InfraResourceUseRef,
   JobIdempotency,
   JobMode,
   JobNode,
@@ -21,6 +25,7 @@ import type {
   ModuleNode,
   ProviderNode,
   QueryNode,
+  ResourceUseNode,
   RouteNode,
   Scope,
   TokenKind,
@@ -45,6 +50,17 @@ const JOB_IDEMPOTENCY = ["required", "none"] as const satisfies readonly JobIdem
 const JOB_TIMEOUT_MAX_SEC = 900;
 const JOB_TASK_MAX_ATTEMPTS = 10;
 const JOB_WORKFLOW_MAX_ATTEMPTS = 100;
+
+const INFRA_RESOURCE_KINDS: readonly InfraResourceKind[] = ["database", "bucket", "queue", "config", "secret"];
+const INFRA_RESOURCE_OPERATIONS: readonly InfraResourceOperation[] = ["read", "write", "publish", "consume"];
+
+function isInfraResourceKind(value: string): value is InfraResourceKind {
+  return INFRA_RESOURCE_KINDS.some((kind) => kind === value);
+}
+
+function isInfraResourceOperation(value: string): value is InfraResourceOperation {
+  return INFRA_RESOURCE_OPERATIONS.some((operation) => operation === value);
+}
 
 const RESPONSE_STATUS_SELECTOR = /^[1-5]\d{2}$/;
 const RESPONSE_STATUS_FAMILY_SELECTOR = /^[1-5](?:xx|XX)$/;
@@ -109,6 +125,10 @@ interface AnalysisContext {
   classesByName: Map<string, ClassInfo>;
   variablesByName: Map<string, VariableDeclaration>;
   moduleHandlerFiles: Map<string, string[]>;
+  /** Declared infrastructure resources keyed by class name. */
+  infraResources: Map<string, InfraResourceNode>;
+  /** Logical resource name -> declaring class name, for duplicate detection and lookups. */
+  infraResourceClasses: Map<string, string>;
   diagnostics: Diagnostic[];
 }
 
@@ -207,6 +227,8 @@ export async function analyzeProject(
     classesByName: new Map(),
     variablesByName: new Map(),
     moduleHandlerFiles: new Map(),
+    infraResources: new Map(),
+    infraResourceClasses: new Map(),
     diagnostics: [],
   };
   const nativeTraitFiles = new Map<string, Set<string>>();
@@ -435,15 +457,24 @@ export async function analyzeProject(
           const permission = stringLiteralProp(meta, "permission");
           const rpc = checkedRpc(meta, ctx);
           const audit = stringLiteralProp(meta, "audit");
+          const standaloneName = stringLiteralProp(meta, "name") ?? classInfo.decl.name?.text ?? name;
+          const standaloneUses = parseInfraResourceUseRefs(
+            getProp(meta, "uses"),
+            ctx,
+            `command ${standaloneName}`,
+            sourcePath(ctx.rootDir, classInfo.file),
+            lineOf(classInfo.decl),
+          );
           standaloneCommands.push({
             className: classInfo.decl.name?.text ?? name,
-            name: stringLiteralProp(meta, "name") ?? classInfo.decl.name?.text ?? name,
+            name: standaloneName,
             ...(permission === undefined ? {} : { permission }),
             ...(rpc === undefined ? {} : { rpc }),
             transaction: checkedCommandMode(meta, "transaction", ctx, classInfo.decl.name?.text ?? name) ?? "none",
             ...(audit === undefined ? {} : { audit }),
             idempotency: checkedCommandMode(meta, "idempotency", ctx, classInfo.decl.name?.text ?? name) ?? "none",
             standalone: true,
+            ...(standaloneUses.length > 0 ? { uses: standaloneUses } : {}),
             aspects: parseAspectRefs(
               getProp(meta, "aspects"),
               ctx,
@@ -516,9 +547,43 @@ export async function analyzeProject(
     if (info.stringName) tokenNames[info.name] = info.stringName;
   }
 
+  const resources = [...ctx.infraResources.values()].sort((a, b) => a.name.localeCompare(b.name, "en"));
+  const resourceUses: ResourceUseNode[] = [];
+  for (const module of modules) {
+    const resourceClassOf = (resource: string): string => ctx.infraResourceClasses.get(resource) ?? resource;
+    for (const command of module.commands) {
+      for (const use of command.uses ?? []) {
+        resourceUses.push({
+          module: module.name,
+          command: command.name,
+          resource: use.resource,
+          resourceClass: resourceClassOf(use.resource),
+          operations: [...use.operations],
+        });
+      }
+    }
+    for (const job of module.jobs ?? []) {
+      for (const use of job.uses ?? []) {
+        resourceUses.push({
+          module: module.name,
+          job: job.name,
+          resource: use.resource,
+          resourceClass: resourceClassOf(use.resource),
+          operations: [...use.operations],
+        });
+      }
+    }
+  }
+  resourceUses.sort((left, right) =>
+    `${left.module}:${left.command ?? left.job ?? ""}:${left.resource}`
+      .localeCompare(`${right.module}:${right.command ?? right.job ?? ""}:${right.resource}`, "en"),
+  );
+
   return {
     modules,
     externalTokens,
+    ...(resources.length > 0 ? { resources } : {}),
+    ...(resourceUses.length > 0 ? { resourceUses } : {}),
     diagnostics: ctx.diagnostics.map(withDiagnosticMetadata),
     tokenNames,
     moduleHandlerFiles: Object.fromEntries(ctx.moduleHandlerFiles),
@@ -607,6 +672,7 @@ function indexFile(sf: SourceFile, ctx: AnalysisContext): void {
     if (name && !ctx.classesByName.has(name)) {
       ctx.classesByName.set(name, { name, decl: cls, file: sf.fileName });
     }
+    if (name) indexInfraResource(cls, name, sf, ctx);
   }
   for (const statement of sf.statements.filter(ts.isVariableStatement)) {
     for (const decl of statement.declarationList.declarations) {
@@ -665,6 +731,11 @@ function parseModule(
     ctx,
     `module ${name}`,
   );
+  const moduleResourceNames = new Set<string>();
+  for (const el of arrayProp(options, "resources")) {
+    const resource = resolveInfraResourceRef(el, ctx, `module ${name}`, sourcePath(ctx.rootDir, file), lineOf(el));
+    if (resource) moduleResourceNames.add(resource);
+  }
 
   const imports = arrayProp(options, "imports")
     .map((el) => {
@@ -789,15 +860,25 @@ function parseModule(
         const permission = stringLiteralProp(meta, "permission");
         const rpc = checkedRpc(meta, ctx);
         const audit = stringLiteralProp(meta, "audit");
+        const commandName = stringLiteralProp(meta, "name") ?? cls.name?.text ?? "<anonymous>";
+        const uses = parseInfraResourceUseRefs(
+          getProp(meta, "uses"),
+          ctx,
+          `command ${commandName}`,
+          sourcePath(ctx.rootDir, cls.getSourceFile().fileName),
+          lineOf(cls),
+        );
+        rejectUndeclaredResourceUses(uses, moduleResourceNames, ctx, `command ${commandName}`, sourcePath(ctx.rootDir, cls.getSourceFile().fileName), lineOf(cls));
         commands.push({
           className: cls.name?.text ?? "<anonymous>",
-          name: stringLiteralProp(meta, "name") ?? cls.name?.text ?? "<anonymous>",
+          name: commandName,
           ...(permission === undefined ? {} : { permission }),
           ...(rpc === undefined ? {} : { rpc }),
           transaction: checkedCommandMode(meta, "transaction", ctx, cls.name?.text ?? "<anonymous>") ?? "none",
           ...(audit === undefined ? {} : { audit }),
           idempotency: checkedCommandMode(meta, "idempotency", ctx, cls.name?.text ?? "<anonymous>") ?? "none",
           ...(booleanProp(meta, "standalone") ? { standalone: true } : {}),
+          ...(uses.length > 0 ? { uses } : {}),
           ...(aspects.length > 0 ? { aspects } : {}),
         });
       }
@@ -830,12 +911,21 @@ function parseModule(
           `job ${className}`,
         );
         const contract = parseJobOptions(meta, className, ctx);
+        const jobUses = parseInfraResourceUseRefs(
+          getProp(meta, "uses"),
+          ctx,
+          `job ${stringLiteralProp(meta, "name") ?? className}`,
+          sourcePath(ctx.rootDir, cls.getSourceFile().fileName),
+          lineOf(cls),
+        );
+        rejectUndeclaredResourceUses(jobUses, moduleResourceNames, ctx, `job ${stringLiteralProp(meta, "name") ?? className}`, sourcePath(ctx.rootDir, cls.getSourceFile().fileName), lineOf(cls));
         jobs.push({
           className,
           name: stringLiteralProp(meta, "name") ?? className,
           serviceKey: camelName(provider?.token ?? className),
           scope,
           ...contract,
+          ...(jobUses.length > 0 ? { uses: jobUses } : {}),
           ...(aspects.length > 0 ? { aspects } : {}),
         });
       }
@@ -864,6 +954,7 @@ function parseModule(
     commands,
     jobs,
     queries,
+    ...(moduleResourceNames.size > 0 ? { resources: [...moduleResourceNames].sort() } : {}),
     ...(aspects.length > 0 ? { aspects } : {}),
     exports,
     ...(featureSpec ? { featureSpec } : {}),
@@ -2653,6 +2744,130 @@ function modulePath(rootDir: string, absFile: string): string {
 /** Absolute path -> posix-style source file path relative to rootDir (keeping extension, for diagnostic location). */
 function sourcePath(rootDir: string, absFile: string): string {
   return relative(rootDir, absFile).split(sep).join("/");
+}
+
+function indexInfraResource(cls: ClassDeclaration, className: string, sf: SourceFile, ctx: AnalysisContext): void {
+  const decorator = findDecorator(cls, "InfraResource");
+  if (!decorator) return;
+  const file = sourcePath(ctx.rootDir, sf.fileName);
+  const line = lineOf(cls);
+  const options = decoratorObjectArg(decorator);
+  if (!options) {
+    pushResourceError(ctx, "invalid-resource-kind", `@InfraResource 需要 { name, kind } 对象参数`, file, line,
+      "使用 @InfraResource({ name: \"orders-db\", kind: \"database\" })。");
+    return;
+  }
+  const logicalName = stringLiteralProp(options, "name");
+  const kindValue = stringLiteralProp(options, "kind");
+  if (!logicalName) {
+    pushResourceError(ctx, "invalid-resource-kind", `@InfraResource 缺少 name`, file, line,
+      "为资源提供一个跨环境稳定的逻辑名称。");
+    return;
+  }
+  if (!kindValue || !isInfraResourceKind(kindValue)) {
+    pushResourceError(ctx, "invalid-resource-kind",
+      `@InfraResource '${logicalName}' 的 kind 无效：${kindValue ?? "<missing>"}`,
+      file, line, `kind 必须是 ${INFRA_RESOURCE_KINDS.join(" | ")} 之一。`);
+    return;
+  }
+  const existing = ctx.infraResourceClasses.get(logicalName);
+  if (existing && existing !== className) {
+    pushResourceError(ctx, "duplicate-resource",
+      `资源逻辑名 '${logicalName}' 已被 ${existing} 声明`, file, line,
+      "为每个逻辑资源保留一个声明类，或改用不同的 name。");
+    return;
+  }
+  ctx.infraResourceClasses.set(logicalName, className);
+  ctx.infraResources.set(className, {
+    name: logicalName,
+    kind: kindValue,
+    className,
+    file,
+    line,
+    importPath: modulePath(ctx.rootDir, sf.fileName),
+  });
+}
+
+/** Resolves a resource reference to its logical name, emitting a diagnostic when unknown. */
+function resolveInfraResourceRef(el: Expression, ctx: AnalysisContext, owner: string, file: string, line: number): string | undefined {
+  const unwrapped = unwrapForwardRef(el);
+  const decl = ts.isIdentifier(unwrapped) ? resolveDeclaration(unwrapped, ctx)[0] : undefined;
+  const className = decl && ts.isClassDeclaration(decl) ? decl.name?.text : (ts.isIdentifier(unwrapped) ? unwrapped.text : undefined);
+  if (!className || !ctx.infraResources.has(className)) {
+    pushResourceError(ctx, "unknown-resource",
+      `${owner} 引用的资源 '${nodeText(el)}' 未声明为 @InfraResource`,
+      file, line, "为资源类添加 @InfraResource({ name, kind })，或修正引用目标。");
+    return undefined;
+  }
+  return ctx.infraResources.get(className)!.name;
+}
+
+function parseInfraResourceUseRefs(
+  value: Expression | undefined,
+  ctx: AnalysisContext,
+  owner: string,
+  file: string,
+  line: number,
+): InfraResourceUseRef[] {
+  if (!value) return [];
+  if (!ts.isArrayLiteralExpression(value)) {
+    warn(ctx, "unknown-resource", `${owner} 的 uses 必须是数组`, file, line);
+    return [];
+  }
+  const uses: InfraResourceUseRef[] = [];
+  for (const entry of value.elements) {
+    if (!ts.isObjectLiteralExpression(entry)) {
+      warn(ctx, "unknown-resource", `${owner} 的 uses 项必须是 { resource, operations } 对象`, file, line);
+      continue;
+    }
+    const resourceEl = getProp(entry, "resource");
+    if (!resourceEl) {
+      warn(ctx, "unknown-resource", `${owner} 的 uses 项缺少 resource`, file, line);
+      continue;
+    }
+    const resource = resolveInfraResourceRef(resourceEl, ctx, owner, file, lineOf(resourceEl));
+    if (!resource) continue;
+    const operations: InfraResourceOperation[] = [];
+    for (const operationEl of arrayProp(entry, "operations")) {
+      const operation = ts.isStringLiteral(operationEl) ? operationEl.text : nodeText(operationEl).replace(/['"]/g, "");
+      if (!isInfraResourceOperation(operation)) {
+        pushResourceError(ctx, "invalid-resource-operation",
+          `${owner} 对资源 '${resource}' 声明了无效操作 '${operation}'`,
+          file, lineOf(operationEl), `operations 只能包含 ${INFRA_RESOURCE_OPERATIONS.join(" | ")}。`);
+        continue;
+      }
+      if (!operations.includes(operation)) operations.push(operation);
+    }
+    uses.push({ resource, operations: operations.length > 0 ? operations : ["read"] });
+  }
+  return uses;
+}
+
+function rejectUndeclaredResourceUses(
+  uses: InfraResourceUseRef[],
+  declared: Set<string>,
+  ctx: AnalysisContext,
+  owner: string,
+  file: string,
+  line: number,
+): void {
+  for (const use of uses) {
+    if (declared.has(use.resource)) continue;
+    pushResourceError(ctx, "undeclared-resource-use",
+      `${owner} 使用了模块未声明的资源 '${use.resource}'`,
+      file, line, `在所属 @Module({ resources: [...] }) 中声明该资源，或移除该使用。`);
+  }
+}
+
+function pushResourceError(
+  ctx: AnalysisContext,
+  code: string,
+  message: string,
+  file: string,
+  line: number,
+  suggestion: string,
+): void {
+  ctx.diagnostics.push({ severity: "error", code, message, file, line, suggestion });
 }
 
 function warn(
