@@ -354,7 +354,7 @@ async function saveRbacConfig(
   const next = withNextVersion(rbac);
   const [updated] = await database`
     UPDATE projects
-    SET config = ${JSON.stringify(mergeProjectConfig(currentProjectConfig, { rbac: next }))}::jsonb,
+    SET config = ${mergeProjectConfig(currentProjectConfig, { rbac: next })}::jsonb,
         updated_at = NOW()
     WHERE ref = ${ref} AND deleted_at IS NULL
     RETURNING *
