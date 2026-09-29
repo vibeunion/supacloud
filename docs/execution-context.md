@@ -38,14 +38,16 @@ observer to collect approved metadata into this envelope:
 ```
 
 Allowed event fields are exactly `kind`, `operation`, `stage`, `phase`,
-`requestId` and `durationMs`. The last two are optional in the file, but only
-events with the selected request ID can be correlated. Kinds are `route`,
-`command` and `job`; phases are `started`, `succeeded` and `failed`.
+`requestId`, `durationMs`, `attempt` and `traceId`. The last four are optional in
+the file, but only events with the selected request ID can be correlated. Kinds
+are `route`, `command` and `job`; phases are `started`, `succeeded` and `failed`.
+`attempt` is a 1-based integer (omitted means the first attempt) and `traceId` is
+an opaque correlation ID shared across a business operation and its tasks.
 IDs must be opaque correlation identifiers, never credentials, user names or
 business data. The tool cannot determine whether a syntactically valid ID
 contains a secret. Hosts own log access, retention and metadata naming policy.
 Operation names are limited to 512 characters, stage names to 256, and request
-IDs to 256 ASCII letters, digits, dots, underscores, colons or hyphens.
+IDs/trace IDs to 256 ASCII letters, digits, dots, underscores, colons or hyphens.
 
 Unknown fields reject the entire input rather than silently accepting raw logs.
 Unknown operations/stages, ambiguous owners and events outside the selected
@@ -53,14 +55,40 @@ graph neighborhood are counted but not echoed. Other request IDs are excluded.
 Routes must use declared templates, not concrete URLs containing record IDs.
 Legacy command class names are normalized to their declared operation names.
 
+## Business Execution Timeline
+
+In addition to the flat `events` list, the pack exposes a `timeline` projection
+grouped by `kind` + `operation` and then by `attempt`. Each attempt lists the
+observed stages in input order, whether it `failed`, whether the last declared
+stage `complete`d (succeeded), the declared stages with no observation
+(`missingStages`), observed stages outside the current static plan
+(`unexpectedStages`) and the `traceIds` seen.
+
+The declared stage order comes from the existing static execution plan
+(`authorize` → `idempotency` → `transaction` → aspects → `handler` → `audit`,
+with `rpc:<name>` replacing the persistence stages). This lets a developer see
+where a business operation spent time and how retries progressed without
+inventing a second execution ledger:
+
+- **`complete` is not business success.** It only means the last declared stage
+  reported `succeeded` in that attempt.
+- **`missingStages` is not proof of skipping.** Observers may emit a subset of
+  phases or the process may have stopped; absence is informational.
+- **Attempts are caller-reported.** The compiler does not count or discover
+  retries on its own.
+- The timeline still carries `correlation: "current-graph-only"`,
+  `eventsTrusted: false` and `deploymentVerified: false`. It never replaces the
+  durable command receipt, audit record or task ledger.
+
 ## Limits And Interpretation
 
 - Input: a regular JSON file no larger than 1 MiB and no more than 2,048 events.
   The programmatic API also enforces the UTF-8 size of its canonical JSON input.
-- Output: at most 32 KiB of formatted JSON including the CLI newline.
-- Projection caps: 128 matched events, 16 modules, 64 files, 32 diagnostics and
-  64 execution plans. Failed events take precedence; retained input order is
-  preserved through the `index` field. Truncation counts are explicit.
+- Output: at most 64 KiB of formatted JSON including the CLI newline.
+- Projection caps: 128 matched events, 64 timeline entries, 16 attempts per entry,
+  32 stages per attempt, 16 modules, 64 files, 32 diagnostics and 64 execution
+  plans. Failed events take precedence; retained input order is preserved through
+  the `index` field. Truncation counts are explicit, including `omitted.timeline`.
 - Oversized results fail with `EXECUTION_CONTEXT_TOO_LARGE`; select a smaller
   observation set. Invalid and unreadable inputs use fixed error codes without
   echoing their contents or paths.

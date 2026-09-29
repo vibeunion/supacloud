@@ -13,9 +13,13 @@ export const EXECUTION_CONTEXT_LIMITS: {
   readonly files: number;
   readonly diagnostics: number;
   readonly plans: number;
+  readonly timeline: number;
+  readonly timelineAttempts: number;
+  readonly timelineStages: number;
 } = Object.freeze({
-  inputBytes: 1_048_576, inputEvents: 2048, outputBytes: 32_768,
+  inputBytes: 1_048_576, inputEvents: 2048, outputBytes: 65_536,
   events: 128, modules: 16, files: 64, diagnostics: 32, plans: 64,
+  timeline: 64, timelineAttempts: 16, timelineStages: 32,
 });
 
 interface ExecutionMetadata {
@@ -25,6 +29,38 @@ interface ExecutionMetadata {
   phase: "started" | "succeeded" | "failed";
   requestId?: string;
   durationMs?: number;
+  /** 1-based execution attempt; omitted means the first. Distinguishes retries without inventing a counter. */
+  attempt?: number;
+  /** Opaque correlation ID (for example a W3C trace ID) shared across a business operation and its tasks. */
+  traceId?: string;
+}
+
+export interface ExecutionTimelineStage {
+  stage: string;
+  phase: "started" | "succeeded" | "failed";
+  durationMs?: number;
+  index: number;
+}
+
+export interface ExecutionTimelineAttempt {
+  attempt: number;
+  stages: ExecutionTimelineStage[];
+  failed: boolean;
+  /** The last declared stage (or last observed stage) succeeded. Not a business-success claim. */
+  complete: boolean;
+  /** Declared stages with no observation in this attempt. Absence is not proof a stage was skipped. */
+  missingStages: string[];
+  /** Observed stages not present in the current static plan. */
+  unexpectedStages: string[];
+  traceIds: string[];
+}
+
+export interface ExecutionTimelineEntry {
+  kind: "route" | "command" | "job";
+  operation: string;
+  module: string;
+  declaredStages: string[];
+  attempts: ExecutionTimelineAttempt[];
 }
 
 export class ExecutionContextError extends Error {
@@ -50,7 +86,12 @@ export interface ExecutionContextPack {
     code: string; severity: "error" | "warn"; file?: string; line?: number;
     repair?: { type: string; readiness: "preview" | "input-required" | "manual" };
   }>;
-  omitted: { events: number; modules: number; files: number; diagnostics: number; plans: number; unmatchedEvents: number };
+  omitted: {
+    events: number; modules: number; files: number; diagnostics: number; plans: number; unmatchedEvents: number;
+    timeline: number;
+  };
+  /** Ordered per-operation attempt timeline derived from the retained events and the static plan. */
+  timeline: ExecutionTimelineEntry[];
   limits: typeof EXECUTION_CONTEXT_LIMITS;
 }
 
@@ -79,11 +120,14 @@ function decodeMetadata(input: unknown): ExecutionMetadata[] {
   const events = envelope.events.map((entry: unknown): ExecutionMetadata => {
     const event = record(entry);
     if (Object.keys(event).some((key) =>
-      !["kind", "operation", "stage", "phase", "requestId", "durationMs"].includes(key))
+      !["kind", "operation", "stage", "phase", "requestId", "durationMs", "attempt", "traceId"].includes(key))
       || (event.kind !== "route" && event.kind !== "command" && event.kind !== "job")
       || (event.phase !== "started" && event.phase !== "succeeded" && event.phase !== "failed")
       || !metadataText(event.operation, 512) || !metadataText(event.stage, 256)
       || ("requestId" in event && !requestIdentifier(event.requestId))
+      || ("traceId" in event && !requestIdentifier(event.traceId))
+      || ("attempt" in event && (typeof event.attempt !== "number" || !Number.isInteger(event.attempt)
+        || event.attempt < 1 || event.attempt > 1_000_000))
       || ("durationMs" in event && (typeof event.durationMs !== "number" || !Number.isFinite(event.durationMs)
         || event.durationMs < 0 || event.durationMs > Number.MAX_SAFE_INTEGER))) return invalid();
     return {
@@ -91,6 +135,8 @@ function decodeMetadata(input: unknown): ExecutionMetadata[] {
       operation: event.operation, stage: event.stage, phase: event.phase,
       ...(event.requestId === undefined ? {} : { requestId: event.requestId as string }),
       ...(event.durationMs === undefined ? {} : { durationMs: event.durationMs as number }),
+      ...(event.attempt === undefined ? {} : { attempt: event.attempt as number }),
+      ...(event.traceId === undefined ? {} : { traceId: event.traceId as string }),
     };
   });
   if (Buffer.byteLength(JSON.stringify({ version: 1, events }), "utf8") > EXECUTION_CONTEXT_LIMITS.inputBytes) return invalid();
@@ -143,6 +189,81 @@ export function executionContextFromSnapshot(
   return correlateSnapshot(snapshot, subject, events, requestId);
 }
 
+function buildTimeline(
+  events: Array<ExecutionMetadata & { index: number; module: string }>,
+  byOperation: Map<string, ExecutionPlan[]>,
+): { timeline: ExecutionTimelineEntry[]; omitted: number } {
+  interface AttemptAccumulator {
+    attempt: number;
+    stages: ExecutionTimelineStage[];
+    observed: Set<string>;
+    traceIds: Set<string>;
+  }
+  const groups = new Map<string, { entry: ExecutionTimelineEntry; attempts: Map<number, AttemptAccumulator> }>();
+  for (const event of events) {
+    const key = JSON.stringify([event.kind, event.operation]);
+    let group = groups.get(key);
+    if (!group) {
+      const plan = (byOperation.get(key) ?? [])[0];
+      group = {
+        entry: {
+          kind: event.kind,
+          operation: event.operation,
+          module: event.module,
+          declaredStages: plan ? [...plan.stages] : [],
+          attempts: [],
+        },
+        attempts: new Map(),
+      };
+      groups.set(key, group);
+    }
+    const attemptNumber = event.attempt ?? 1;
+    let attempt = group.attempts.get(attemptNumber);
+    if (!attempt) {
+      attempt = { attempt: attemptNumber, stages: [], observed: new Set(), traceIds: new Set() };
+      group.attempts.set(attemptNumber, attempt);
+    }
+    attempt.stages.push({
+      stage: event.stage,
+      phase: event.phase,
+      ...(event.durationMs === undefined ? {} : { durationMs: event.durationMs }),
+      index: event.index,
+    });
+    attempt.observed.add(event.stage);
+    if (event.traceId) attempt.traceIds.add(event.traceId);
+  }
+
+  const ordered = [...groups.values()].sort((left, right) =>
+    left.entry.module.localeCompare(right.entry.module, "en")
+    || left.entry.kind.localeCompare(right.entry.kind, "en")
+    || left.entry.operation.localeCompare(right.entry.operation, "en"));
+  const omitted = Math.max(0, ordered.length - EXECUTION_CONTEXT_LIMITS.timeline);
+  const timeline = ordered.slice(0, EXECUTION_CONTEXT_LIMITS.timeline).map((group): ExecutionTimelineEntry => {
+    const declared = group.entry.declaredStages;
+    const attempts = [...group.attempts.values()]
+      .sort((left, right) => left.attempt - right.attempt)
+      .slice(0, EXECUTION_CONTEXT_LIMITS.timelineAttempts)
+      .map((attempt): ExecutionTimelineAttempt => {
+        const stages = [...attempt.stages]
+          .sort((left, right) => left.index - right.index)
+          .slice(0, EXECUTION_CONTEXT_LIMITS.timelineStages);
+        const terminal = declared.length > 0 ? declared[declared.length - 1] : stages[stages.length - 1]?.stage;
+        return {
+          attempt: attempt.attempt,
+          stages,
+          failed: stages.some((stage) => stage.phase === "failed"),
+          complete: terminal !== undefined
+            && stages.some((stage) => stage.stage === terminal && stage.phase === "succeeded"),
+          missingStages: declared.filter((stage) => !attempt.observed.has(stage)),
+          unexpectedStages: [...attempt.observed].filter((stage) => !declared.includes(stage)),
+          traceIds: [...attempt.traceIds].sort(),
+        };
+      });
+    return { ...group.entry, attempts };
+  });
+  return { timeline, omitted };
+}
+
 function correlateSnapshot(
   snapshot: ExecutionSnapshot, subject: string, events: ExecutionMetadata[], requestId: string,
 ): ExecutionContextPack {
@@ -186,6 +307,7 @@ function correlateSnapshot(
   const retained = [...matches].sort((left, right) =>
     Number(right.phase === "failed") - Number(left.phase === "failed") || left.index - right.index)
     .slice(0, EXECUTION_CONTEXT_LIMITS.events).sort((left, right) => left.index - right.index);
+  const timelineResult = buildTimeline(retained, byOperation);
   const modules = [...context.modules].sort((left, right) =>
     Number(right.name === context.subject) - Number(left.name === context.subject) || left.name.localeCompare(right.name));
   const files = context.files.flatMap((file) => sourceFile(file) ?? []);
@@ -199,12 +321,14 @@ function correlateSnapshot(
     files: files.slice(0, EXECUTION_CONTEXT_LIMITS.files),
     executionPlans: [...matchedPlans].slice(0, EXECUTION_CONTEXT_LIMITS.plans),
     events: retained, diagnostics: diagnostics.slice(0, EXECUTION_CONTEXT_LIMITS.diagnostics),
+    timeline: timelineResult.timeline,
     omitted: {
       events: matches.length - retained.length,
       modules: Math.max(0, modules.length - EXECUTION_CONTEXT_LIMITS.modules),
       files: context.files.length - Math.min(files.length, EXECUTION_CONTEXT_LIMITS.files),
       diagnostics: Math.max(0, diagnostics.length - EXECUTION_CONTEXT_LIMITS.diagnostics),
       plans: Math.max(0, matchedPlans.size - EXECUTION_CONTEXT_LIMITS.plans), unmatchedEvents,
+      timeline: timelineResult.omitted,
     },
     limits: EXECUTION_CONTEXT_LIMITS,
   };

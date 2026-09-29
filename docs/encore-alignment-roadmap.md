@@ -147,7 +147,14 @@ supacloud-cli app dev --profile integration
 
 **实现边界：** Trace 不替代持久审计；长任务用关联关系连接，不长期保持一条活跃请求；
 日志继续沿用既有存储路线，不搬到业务 PostgreSQL。追踪应关联现有事务命令回执与
-Workflow 恢复基础，而不是另建一套"执行状态真相"。
+Workflow 恢复基础，而不是另建一套“执行状态真相”。
+
+> **第一切片已实现（2026-09-29）**：`execution-context` 新增 `timeline` 投影，按
+> `kind+operation` 与 `attempt` 分组，给出每阶段的顺序/耗时、`failed`/`complete`、
+> `missingStages`/`unexpectedStages` 与 `traceIds`；事件格式新增可选 `attempt` 与
+> `traceId`。它仍标记 `current-graph-only`、`eventsTrusted: false`、
+> `deploymentVerified: false`，不替代持久回执/审计。参见
+> [Execution Context](./execution-context.md#business-execution-timeline)。
 
 **验收标准：** 一个 Command 经 HTTP 进入、投递后台任务、最终完成后，可以从同一业务
 操作入口定位整个过程，并区分每次尝试。
