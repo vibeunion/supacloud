@@ -14,6 +14,25 @@ export { generateFeatureSource, validateFeatureSpec } from "./feature";
 export { applyDiagnosticFix } from "./fixes";
 export { createExecutionContextPack, readExecutionMetadata, EXECUTION_CONTEXT_LIMITS, ExecutionContextError } from "./execution-context";
 export type { ExecutionContextPack, ExecutionTimelineStage, ExecutionTimelineAttempt, ExecutionTimelineEntry } from "./execution-context";
+export {
+  createApplicationDevelopmentContext,
+  formatApplicationDevelopmentContext,
+  APPLICATION_DEVELOPMENT_LIMITS,
+  APPLICATION_DEVELOPMENT_SCHEMA,
+  ApplicationDevelopmentError,
+} from "./application-development";
+export type {
+  ApplicationDevelopmentContext,
+  ApplicationDevelopmentModule,
+  ApplicationDevelopmentRoute,
+  ApplicationDevelopmentCommand,
+  ApplicationDevelopmentJob,
+  ApplicationDevelopmentResource,
+  ApplicationDevelopmentResourceUse,
+  ApplicationDevelopmentResourceUseEntry,
+  ApplicationDevelopmentDiagnostic,
+  DevelopmentSchemaKind,
+} from "./application-development";
 export type { AppliedDiagnosticFix, ApplyDiagnosticFixOptions } from "./fixes";
 export { createDiagnosticRepairPlan } from "./repair-plan";
 export type { DiagnosticRepair } from "./repair-plan";

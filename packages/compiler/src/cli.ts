@@ -5,6 +5,7 @@ import { analyzeProject } from "./analyze";
 import { checkProject, compileProject } from "./compile";
 import { createContextPack, doctorProject, explainGraph, formatGraph } from "./inspect";
 import { createExecutionContextPack, readExecutionMetadata, ExecutionContextError } from "./execution-context";
+import { createApplicationDevelopmentContext, formatApplicationDevelopmentContext } from "./application-development";
 import { createDeliveryExecutionContextPack, DeliveryContextError } from "./delivery-context";
 import { watchProject } from "./watch";
 import type { Diagnostic, ModuleBoundaryPresetName } from "./types";
@@ -57,6 +58,7 @@ Usage:
   supacloud-compiler graph   [rootDir] [options]
   supacloud-compiler explain <name> [rootDir] [options]
   supacloud-compiler context <name> [rootDir] [options]
+  supacloud-compiler dev-context [rootDir] [options]
   supacloud-compiler doctor  [rootDir] [options]
   supacloud-compiler migrate [rootDir] [options]
   supacloud-compiler migration-assess [rootDir] [options]
@@ -75,6 +77,7 @@ Commands:
   graph               Print the discovered application graph
   explain             Explain a module, provider, or external token
   context             Extract an AI-sized module context pack
+  dev-context         Print the read-only application development context for tooling/console/MCP consumers
   doctor              Run project and generated-artifact health checks
   migrate             Preview or apply versioned source migrations
   migration-assess    Produce a read-only migration compatibility report
@@ -139,7 +142,7 @@ async function run(): Promise<void> {
     if (args.includes("--check") && !result.upToDate) process.exitCode = 1;
     return;
   }
-  if (!command || !["compile", "check", "dev", "graph", "explain", "context", "doctor", "migrate", "migration-assess", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
+  if (!command || !["compile", "check", "dev", "graph", "explain", "context", "dev-context", "doctor", "migrate", "migration-assess", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
     console.error(`Error: unknown command "${command}"`);
     printUsage();
     process.exit(1);
@@ -263,7 +266,7 @@ async function run(): Promise<void> {
     } else if (arg === "--dry-run") {
       dryRun = true;
     } else if (arg === "--write") {
-      if (command === "context") throw new Error("context is read-only; --write is not supported");
+      if (command === "context" || command === "dev-context") throw new Error(`${command} is read-only; --write is not supported`);
       if (command === "plan" || command === "migration-assess") throw new Error(`${command} is read-only; --write is not supported`);
       dryRun = false;
     } else if (arg === "--baseline-openapi" || arg === "--current-openapi") {
@@ -567,6 +570,11 @@ async function run(): Promise<void> {
       console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
       process.exit(1);
     }
+  } else if (command === "dev-context") {
+    const graph = await analyzeProject(resolvedRoot);
+    const context = createApplicationDevelopmentContext(graph);
+    if (json) console.log(JSON.stringify(context, null, 2));
+    else console.log(formatApplicationDevelopmentContext(context));
   } else if (command === "context") {
     if (!query) {
       console.error("Error: context requires a module or owned symbol name");

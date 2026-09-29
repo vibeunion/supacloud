@@ -14,6 +14,66 @@
       "signature": "export declare const ANGULAR_ENTERPRISE_RULES: ModuleBoundaryRule[];"
     },
     {
+      "name": "APPLICATION_DEVELOPMENT_LIMITS",
+      "kind": "value",
+      "signature": "export declare const APPLICATION_DEVELOPMENT_LIMITS: {\n    readonly outputBytes: number;\n    readonly modules: number;\n    readonly providers: number;\n    readonly routes: number;\n    readonly commands: number;\n    readonly jobs: number;\n    readonly resources: number;\n    readonly resourceUses: number;\n    readonly plans: number;\n    readonly diagnostics: number;\n};"
+    },
+    {
+      "name": "APPLICATION_DEVELOPMENT_SCHEMA",
+      "kind": "value",
+      "signature": "export declare const APPLICATION_DEVELOPMENT_SCHEMA = \"supacloud.application-development.v1\";"
+    },
+    {
+      "name": "ApplicationDevelopmentCommand",
+      "kind": "type",
+      "signature": "export interface ApplicationDevelopmentCommand {\n    module: string;\n    name: string;\n    permission?: string;\n    transaction: \"required\" | \"none\";\n    idempotency: \"required\" | \"none\";\n    audit?: string;\n    resources: ApplicationDevelopmentResourceUse[];\n}"
+    },
+    {
+      "name": "ApplicationDevelopmentContext",
+      "kind": "type",
+      "signature": "export interface ApplicationDevelopmentContext {\n    schema: typeof APPLICATION_DEVELOPMENT_SCHEMA;\n    source: \"current-graph\";\n    deploymentVerified: false;\n    modules: ApplicationDevelopmentModule[];\n    routes: ApplicationDevelopmentRoute[];\n    commands: ApplicationDevelopmentCommand[];\n    jobs: ApplicationDevelopmentJob[];\n    resources: ApplicationDevelopmentResource[];\n    resourceUses: ApplicationDevelopmentResourceUseEntry[];\n    executionPlans: ExecutionPlan[];\n    diagnostics: ApplicationDevelopmentDiagnostic[];\n    omitted: {\n        modules: number;\n        providers: number;\n        routes: number;\n        commands: number;\n        jobs: number;\n        resources: number;\n        resourceUses: number;\n        plans: number;\n        diagnostics: number;\n    };\n    limits: typeof APPLICATION_DEVELOPMENT_LIMITS;\n}"
+    },
+    {
+      "name": "ApplicationDevelopmentDiagnostic",
+      "kind": "type",
+      "signature": "export interface ApplicationDevelopmentDiagnostic {\n    code: string;\n    severity: \"error\" | \"warn\";\n    file?: string;\n    line?: number;\n    repair?: {\n        type: string;\n        readiness: \"preview\" | \"input-required\" | \"manual\";\n    };\n}"
+    },
+    {
+      "name": "ApplicationDevelopmentError",
+      "kind": "both",
+      "signature": "export declare class ApplicationDevelopmentError extends Error {\n    readonly code: \"APPLICATION_DEVELOPMENT_TOO_LARGE\";\n    constructor(code: \"APPLICATION_DEVELOPMENT_TOO_LARGE\");\n}"
+    },
+    {
+      "name": "ApplicationDevelopmentJob",
+      "kind": "type",
+      "signature": "export interface ApplicationDevelopmentJob {\n    module: string;\n    name: string;\n    mode?: string;\n    resources: ApplicationDevelopmentResourceUse[];\n}"
+    },
+    {
+      "name": "ApplicationDevelopmentModule",
+      "kind": "type",
+      "signature": "export interface ApplicationDevelopmentModule {\n    name: string;\n    className: string;\n    file?: string;\n    tags?: string[];\n    providers: string[];\n    controllers: string[];\n    commands: string[];\n    jobs: string[];\n    queries: string[];\n    resources: string[];\n}"
+    },
+    {
+      "name": "ApplicationDevelopmentResource",
+      "kind": "type",
+      "signature": "export interface ApplicationDevelopmentResource {\n    name: string;\n    kind: string;\n}"
+    },
+    {
+      "name": "ApplicationDevelopmentResourceUse",
+      "kind": "type",
+      "signature": "export interface ApplicationDevelopmentResourceUse {\n    resource: string;\n    operations: string[];\n}"
+    },
+    {
+      "name": "ApplicationDevelopmentResourceUseEntry",
+      "kind": "type",
+      "signature": "export interface ApplicationDevelopmentResourceUseEntry {\n    module: string;\n    owner: string;\n    ownerKind: \"command\" | \"job\";\n    resource: string;\n    operations: string[];\n}"
+    },
+    {
+      "name": "ApplicationDevelopmentRoute",
+      "kind": "type",
+      "signature": "export interface ApplicationDevelopmentRoute {\n    module: string;\n    method: string;\n    path: string;\n    controller: string;\n    handler: string;\n    command?: string;\n    aspects: string[];\n    schemaKinds?: Record<string, DevelopmentSchemaKind>;\n}"
+    },
+    {
       "name": "ApplicationGraph",
       "kind": "type",
       "signature": "export interface ApplicationGraph {\n    moduleHandlerFiles?: Record<string, string[]>;\n    resources?: InfraResourceNode[];\n    resourceUses?: ResourceUseNode[];\n    graphql?: GraphqlContractSummary;\n    modules: ModuleNode[];\n    externalTokens: string[];\n    diagnostics?: Diagnostic[];\n    tokenNames?: Record<string, string>;\n    cacheStats?: {\n        reusedModules: string[];\n        reanalyzedModules: string[];\n    };\n}"
@@ -137,6 +197,11 @@
       "name": "ControllerNode",
       "kind": "type",
       "signature": "export interface ControllerNode {\n    className: string;\n    path: string;\n    scope: Scope;\n    deps: string[];\n    hasOnDestroy?: boolean;\n    optionalDeps?: string[];\n    selfDeps?: string[];\n    skipSelfDeps?: string[];\n    hostDeps?: string[];\n    functionalInjects?: FunctionalInjectNode[];\n    standalone?: boolean;\n    routes: RouteNode[];\n    file: string;\n    importPath: string;\n    schemaImports?: Record<string, string>;\n}"
+    },
+    {
+      "name": "createApplicationDevelopmentContext",
+      "kind": "value",
+      "signature": "export declare function createApplicationDevelopmentContext(graph: ApplicationGraph): ApplicationDevelopmentContext;"
     },
     {
       "name": "createContextPack",
@@ -284,6 +349,11 @@
       "signature": "export interface DependencyGraphIndex {\n    getAffectedModules(changedFiles: string[]): string[];\n}"
     },
     {
+      "name": "DevelopmentSchemaKind",
+      "kind": "type",
+      "signature": "export type DevelopmentSchemaKind = \"opaque\" | \"declared\";"
+    },
+    {
       "name": "Diagnostic",
       "kind": "type",
       "signature": "export interface Diagnostic {\n    severity: \"error\" | \"warn\";\n    code: string;\n    message: string;\n    file?: string;\n    line?: number;\n    suggestion?: string;\n    errorCode?: string;\n    docsUrl?: string;\n    fix?: DiagnosticFix;\n}"
@@ -377,6 +447,11 @@
       "name": "FeatureTransitionNode",
       "kind": "type",
       "signature": "export interface FeatureTransitionNode {\n    name: string;\n    from: string;\n    to: string;\n    permission?: string;\n    command?: string;\n    route?: string;\n    transaction?: \"required\" | \"none\";\n    idempotency?: \"required\" | \"none\";\n    audit?: string;\n}"
+    },
+    {
+      "name": "formatApplicationDevelopmentContext",
+      "kind": "value",
+      "signature": "export declare function formatApplicationDevelopmentContext(context: ApplicationDevelopmentContext): string;"
     },
     {
       "name": "formatDeliveryPlan",
