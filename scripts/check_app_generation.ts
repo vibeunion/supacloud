@@ -121,6 +121,8 @@ const services = module.createServices({}, {});
 const service = Object.values(services).find(value => value instanceof InventoryService);
 assert.ok(service instanceof InventoryService);
 const app = new Elysia().use(createModulePlugin(module, services));
+// Elysia 2 seals registration on its first request; mount every route first.
+app.get("/native-generation-probe", {}, () => ({ native: true }));
 const unavailable = await app.handle(new Request("http://localhost/inventory/example"));
 assert.equal(unavailable.status, 500);
 assert.ok(!(await unavailable.text()).includes("Implement InventoryService"));
@@ -134,7 +136,6 @@ const accepted = await app.handle(new Request("http://localhost/inventory/exampl
 assert.equal(accepted.status, 200);
 assert.deepEqual(await accepted.json(), { id: "example" });
 assert.equal(calls, 1);
-app.get("/native-generation-probe", {}, () => ({ native: true }));
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: request => app.handle(request) });
 try {
     const response = await fetch(new URL("/native-generation-probe", server.url), { signal: AbortSignal.timeout(5000) });
