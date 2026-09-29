@@ -119,10 +119,32 @@ export interface ApplicationDevelopmentContext {
 }
 
 export class ApplicationDevelopmentError extends Error {
-  constructor(readonly code: "APPLICATION_DEVELOPMENT_TOO_LARGE") {
+  constructor(readonly code: "APPLICATION_DEVELOPMENT_TOO_LARGE" | "APPLICATION_DEVELOPMENT_INVALID") {
     super(code);
     this.name = "ApplicationDevelopmentError";
   }
+}
+
+/**
+ * Structural validation for a serialized contract read from an artifact. The
+ * producer is hash-verified upstream; this only rejects a document that is not
+ * the declared development contract.
+ */
+export function parseApplicationDevelopmentContext(input: unknown): ApplicationDevelopmentContext {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new ApplicationDevelopmentError("APPLICATION_DEVELOPMENT_INVALID");
+  }
+  const row = input as Record<string, unknown>;
+  if (row.schema !== APPLICATION_DEVELOPMENT_SCHEMA || row.source !== "current-graph"
+    || row.deploymentVerified !== false
+    || !Array.isArray(row.modules) || !Array.isArray(row.routes) || !Array.isArray(row.commands)
+    || !Array.isArray(row.jobs) || !Array.isArray(row.resources) || !Array.isArray(row.resourceUses)
+    || !Array.isArray(row.executionPlans) || !Array.isArray(row.diagnostics)
+    || !row.omitted || typeof row.omitted !== "object"
+    || !row.limits || typeof row.limits !== "object") {
+    throw new ApplicationDevelopmentError("APPLICATION_DEVELOPMENT_INVALID");
+  }
+  return row as unknown as ApplicationDevelopmentContext;
 }
 
 const schemaKinds = (route: ApplicationGraph["modules"][number]["controllers"][number]["routes"][number]): Record<string, DevelopmentSchemaKind> | undefined => {
@@ -136,12 +158,24 @@ function bound<T>(values: readonly T[], limit: number): { items: T[]; omitted: n
   return { items: values.slice(0, limit), omitted: Math.max(0, values.length - limit) };
 }
 
+export interface ApplicationDevelopmentOptions {
+  /**
+   * Enforce the formatted-output byte budget. CLI/console consumers keep the
+   * default; immutable build artifacts may disable it because the projection
+   * caps already bound the document and a build must not fail on document size.
+   */
+  enforceByteBudget?: boolean;
+}
+
 /**
  * Project the current application graph into the versioned development contract.
  * Ordering is deterministic so two runs over the same source produce the same
  * document.
  */
-export function createApplicationDevelopmentContext(graph: ApplicationGraph): ApplicationDevelopmentContext {
+export function createApplicationDevelopmentContext(
+  graph: ApplicationGraph,
+  options: ApplicationDevelopmentOptions = {},
+): ApplicationDevelopmentContext {
   const modules = [...graph.modules].sort((left, right) => left.name.localeCompare(right.name, "en"));
   const resources = [...(graph.resources ?? [])].sort((left, right) => left.name.localeCompare(right.name, "en"));
   const resourceUses = [...(graph.resourceUses ?? [])];
@@ -273,7 +307,8 @@ export function createApplicationDevelopmentContext(graph: ApplicationGraph): Ap
     },
     limits: APPLICATION_DEVELOPMENT_LIMITS,
   };
-  if (Buffer.byteLength(JSON.stringify(context, null, 2), "utf8") + 1 > APPLICATION_DEVELOPMENT_LIMITS.outputBytes) {
+  if (options.enforceByteBudget !== false
+    && Buffer.byteLength(JSON.stringify(context, null, 2), "utf8") + 1 > APPLICATION_DEVELOPMENT_LIMITS.outputBytes) {
     throw new ApplicationDevelopmentError("APPLICATION_DEVELOPMENT_TOO_LARGE");
   }
   return context;

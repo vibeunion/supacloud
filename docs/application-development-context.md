@@ -76,6 +76,31 @@ document describes the **current source declarations**, not a deployed build,
 runtime state, successful activation, audit receipt or rollback. `schemaKinds`
 says whether a route schema is declared, not that the runtime validated it.
 
+## Delivered Build Snapshot
+
+A delivery build embeds the same contract as
+`objects/<objectId>/bundle/application-development.json`, projected to the build
+**target** (only that target's modules, routes, jobs and resource uses). The
+platform can serve a released application without a source checkout:
+
+```ts
+import { readApplicationDevelopmentContext } from "@supacloud/compiler";
+
+const delivered = await readApplicationDevelopmentContext(
+  "generated/delivery/delivery.manifest.json", "api",
+);
+// delivered.correlation === "verified-build-snapshot"
+// delivered.delivery.artifactVerified === true
+// delivered.context: ApplicationDevelopmentContext
+```
+
+The reader verifies the selected object's target identity and every inventoried
+file hash before parsing. A missing, changed or unexpected artifact fails with
+`DELIVERY_CONTEXT_INTEGRITY_FAILED`; it **never** falls back to the current
+source checkout. `correlation: "verified-build-snapshot"` and
+`deploymentVerified: false` still mean local archive consistency only: this is
+not signed provenance, runtime state or deployment success.
+
 ## Consumers
 
 - **Web Console (application developer view)**: render modules, routes, resources
@@ -92,13 +117,13 @@ only against an explicitly selected local/test environment, never production.
 
 ## Next steps
 
-1. Serve this contract from a delivered build snapshot so the console and MCP can
-   read a released application without a source checkout.
-2. Add the project-scoped Developer MCP tools over that read path.
-3. Add the Web Console application developer view beside the existing runtime
+1. Add the project-scoped Developer MCP tools over the delivered-build read path.
+2. Add the Web Console application developer view beside the existing runtime
    release view, sharing this one document.
 
 ## Verification
 
 `packages/compiler/src/application-development.test.ts` covers the projection,
 redaction, deterministic ordering, truncation and the byte budget.
+`packages/compiler/src/application-development-delivery.test.ts` covers the
+delivered-build artifact and its integrity failure path.

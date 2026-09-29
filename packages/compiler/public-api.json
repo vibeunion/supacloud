@@ -41,7 +41,7 @@
     {
       "name": "ApplicationDevelopmentError",
       "kind": "both",
-      "signature": "export declare class ApplicationDevelopmentError extends Error {\n    readonly code: \"APPLICATION_DEVELOPMENT_TOO_LARGE\";\n    constructor(code: \"APPLICATION_DEVELOPMENT_TOO_LARGE\");\n}"
+      "signature": "export declare class ApplicationDevelopmentError extends Error {\n    readonly code: \"APPLICATION_DEVELOPMENT_TOO_LARGE\" | \"APPLICATION_DEVELOPMENT_INVALID\";\n    constructor(code: \"APPLICATION_DEVELOPMENT_TOO_LARGE\" | \"APPLICATION_DEVELOPMENT_INVALID\");\n}"
     },
     {
       "name": "ApplicationDevelopmentJob",
@@ -52,6 +52,11 @@
       "name": "ApplicationDevelopmentModule",
       "kind": "type",
       "signature": "export interface ApplicationDevelopmentModule {\n    name: string;\n    className: string;\n    file?: string;\n    tags?: string[];\n    providers: string[];\n    controllers: string[];\n    commands: string[];\n    jobs: string[];\n    queries: string[];\n    resources: string[];\n}"
+    },
+    {
+      "name": "ApplicationDevelopmentOptions",
+      "kind": "type",
+      "signature": "export interface ApplicationDevelopmentOptions {\n    enforceByteBudget?: boolean;\n}"
     },
     {
       "name": "ApplicationDevelopmentResource",
@@ -201,7 +206,7 @@
     {
       "name": "createApplicationDevelopmentContext",
       "kind": "value",
-      "signature": "export declare function createApplicationDevelopmentContext(graph: ApplicationGraph): ApplicationDevelopmentContext;"
+      "signature": "export declare function createApplicationDevelopmentContext(graph: ApplicationGraph, options?: ApplicationDevelopmentOptions): ApplicationDevelopmentContext;"
     },
     {
       "name": "createContextPack",
@@ -259,6 +264,11 @@
       "signature": "export declare function defineSupacloudConfig(config?: SupaCloudConfig): SupaCloudConfig;"
     },
     {
+      "name": "DeliveredApplicationDevelopmentContext",
+      "kind": "type",
+      "signature": "export interface DeliveredApplicationDevelopmentContext {\n    correlation: \"verified-build-snapshot\";\n    delivery: {\n        target: string;\n        objectId: string;\n        artifactVerified: true;\n    };\n    context: ApplicationDevelopmentContext;\n}"
+    },
+    {
       "name": "DeliveryBuildManifest",
       "kind": "type",
       "signature": "export type DeliveryBuildManifest = Static<typeof DeliveryBuildManifestSchema>;"
@@ -284,9 +294,19 @@
       "signature": "export declare class DeliveryConfigurationError extends Error {\n    readonly code = \"delivery-config-invalid\";\n    constructor();\n}"
     },
     {
+      "name": "DeliveryContextError",
+      "kind": "both",
+      "signature": "export declare class DeliveryContextError extends Error {\n    readonly code: \"DELIVERY_CONTEXT_INVALID\" | \"DELIVERY_CONTEXT_IDENTITY_MISMATCH\" | \"DELIVERY_CONTEXT_INTEGRITY_FAILED\";\n    constructor(code: \"DELIVERY_CONTEXT_INVALID\" | \"DELIVERY_CONTEXT_IDENTITY_MISMATCH\" | \"DELIVERY_CONTEXT_INTEGRITY_FAILED\");\n}"
+    },
+    {
       "name": "DeliveryDiagnostic",
       "kind": "type",
       "signature": "export type DeliveryDiagnostic = Static<typeof DeliveryDiagnosticSchema>;"
+    },
+    {
+      "name": "DeliveryExecutionContextPack",
+      "kind": "type",
+      "signature": "export interface DeliveryExecutionContextPack extends Omit<ExecutionContextPack, \"correlation\"> {\n    correlation: \"verified-build-snapshot\";\n    delivery: {\n        target: string;\n        objectId: string;\n        artifactVerified: true;\n    };\n}"
     },
     {
       "name": "DeliveryMigrationArchive",
@@ -654,6 +674,11 @@
       "signature": "export interface OpenApiServer {\n    url: string;\n    description?: string;\n}"
     },
     {
+      "name": "parseApplicationDevelopmentContext",
+      "kind": "value",
+      "signature": "export declare function parseApplicationDevelopmentContext(input: unknown): ApplicationDevelopmentContext;"
+    },
+    {
       "name": "parseDatabaseContractsOptions",
       "kind": "value",
       "signature": "export declare function parseDatabaseContractsOptions(value: unknown, directory: string): DatabaseContractsOptions;"
@@ -717,6 +742,11 @@
       "name": "QueryNode",
       "kind": "type",
       "signature": "export interface QueryNode {\n    className: string;\n    name: string;\n}"
+    },
+    {
+      "name": "readApplicationDevelopmentContext",
+      "kind": "value",
+      "signature": "export declare function readApplicationDevelopmentContext(manifestPath: string, target: string): Promise<DeliveredApplicationDevelopmentContext>;"
     },
     {
       "name": "readDeliveryMigrationArchive",

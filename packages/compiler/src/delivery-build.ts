@@ -202,6 +202,7 @@ export async function buildDeliveryProject(
       await writeArtifact(stage, "bundle/package.json", canonical({ type: "module", private: true }));
       await writeArtifact(stage, "bundle/app.manifest.json", rendered.manifestJson);
       await writeArtifact(stage, "bundle/execution-context.json", rendered.executionSnapshot);
+      await writeArtifact(stage, "bundle/application-development.json", rendered.applicationDevelopment);
       for (const [path, bytes] of migrations.files) await writeArtifact(stage, path, bytes);
       await writeArtifact(stage, "bundle/target.json", canonical({
         target, entryKind, deploymentReady: false,
