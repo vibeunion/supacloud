@@ -181,6 +181,14 @@ Workflow 恢复基础，而不是另建一套“执行状态真相”。
 MCP 的权限不能混在一起：现有运维 MCP 的 plan-only、项目范围限制和凭据脱敏继续保持；
 允许调用端点或执行测试的能力必须绑定到明确的本地/测试环境，不自动延伸到生产。
 
+> **决策与第一切片（2026-09-29）**：**不新建控制台**。应用开发视图复用现有
+> `packages/web-console` 的 project 区域（与现有 applications 运行态页并列），
+> Developer MCP 与运维 MCP 分端点/分权限。已落地“一份数据”的编译期契约：
+> `supacloud.application-development.v1`（`createApplicationDevelopmentContext` /
+> `dev-context` CLI），红化输出模块/路由/资源/诊断，供控制台与 MCP 共同消费；
+> 从交付快照服务化、Developer MCP 工具、Web Console 视图为后续切片。参见
+> [Application Development Context](./application-development-context.md)。
+
 **验收标准：** 人和 AI 查看的是同一份应用结构、同一条执行证据，而不是各自维护一套解释。
 
 ### P1-5 完整应用 Preview 与统一发布证据
