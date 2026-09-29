@@ -1,0 +1,42 @@
+name: Context Review Inputs
+on:
+  push:
+    branches: [review/context-1515-1516]
+    paths: [.github/workflows/context-review-bundle.yml]
+permissions:
+  contents: read
+jobs:
+  inputs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: 8b75ce255872fc3cb2eaefeb7c3a6967bbee7e2e
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Prepare locked compiler dependencies
+        run: |
+          bun install --frozen-lockfile --cwd packages/contracts
+          bun run --cwd packages/contracts build
+          bun install --frozen-lockfile --cwd packages/delivery
+          bun install --frozen-lockfile --cwd packages/compiler
+          bun install --frozen-lockfile --cwd packages/app
+      - name: Package only source and dependency inputs, never credentials
+        run: |
+          mkdir -p /tmp/context-review/repo
+          git archive HEAD | tar -x -C /tmp/context-review/repo
+          git diff 3fa97dc15003dc24d43078ad143dfd1840e04952^ 3fa97dc15003dc24d43078ad143dfd1840e04952 > /tmp/context-review/pr1516.patch
+          git diff 8b75ce255872fc3cb2eaefeb7c3a6967bbee7e2e^ 8b75ce255872fc3cb2eaefeb7c3a6967bbee7e2e > /tmp/context-review/pr1515.patch
+          tar -cf - packages/compiler/node_modules packages/contracts/node_modules packages/contracts/dist packages/app/node_modules packages/delivery/node_modules | tar -xf - -C /tmp/context-review/repo
+          cp "$(command -v bun)" /tmp/context-review/bun
+          printf '%s\n' '8b75ce255872fc3cb2eaefeb7c3a6967bbee7e2e' > /tmp/context-review/source-head.txt
+          tar -czf /tmp/context-review-inputs.tar.gz -C /tmp/context-review .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: context-review-inputs
+          path: /tmp/context-review-inputs.tar.gz
+          retention-days: 1
