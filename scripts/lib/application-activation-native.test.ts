@@ -12,6 +12,7 @@ import {
 } from "../../packages/management-api/src/services/application-activation";
 import { ApplicationActiveStorage } from "../../packages/management-api/src/services/application-active-storage";
 import { runtimeInput } from "../../packages/management-api/tests/helpers/application-runtime";
+import { MANAGEMENT_SQL_IDLE_TIMEOUT } from "../../packages/management-api/src/db";
 
 const postgresBin = process.env.SUPACLOUD_STARTER_POSTGRES_BIN;
 let postgres: StarterPostgres | undefined;
@@ -43,6 +44,39 @@ afterAll(async () => {
     if (root) await rm(root, { recursive: true, force: true });
   }
 });
+
+test.skipIf(!postgresBin)("management mutation lease survives a host operation longer than 30 seconds", async () => {
+  if (!postgres) throw new Error("Native fixture missing");
+  const db = await postgres.withConnection(async url =>
+    new SQL({ url, max: 2, idleTimeout: MANAGEMENT_SQL_IDLE_TIMEOUT }));
+  const mutationId = crypto.randomUUID();
+  try {
+    const mutations = createApplicationActivationMutations(db);
+    const begun = await mutations.begin({
+      projectRef: "demo", mutationId, operation: "application.release.activate",
+      resource: { type: "application_release", id: "slow-prepare" },
+      principal: { type: "project", id: "project:demo" }, requestFingerprint: "a".repeat(64),
+    });
+    if (!begun.lease) throw new Error("Mutation lease missing");
+    let effectCompleted = false;
+    await mutations.protect(begun.lease, async () => {
+      await Bun.sleep(35_000);
+      effectCompleted = true;
+    });
+    await mutations.checkpoint(begun.lease, { phase: "transitioning" });
+    await mutations.success(begun.lease, { completed: true });
+    const stored = await mutations.read("demo", mutationId);
+    expect(effectCompleted).toBe(true);
+    expect(stored?.status).toBe("succeeded");
+    expect(stored?.checkpoint.phase).toBe("transitioning");
+  } finally {
+    try {
+      await db`DELETE FROM project_mutations WHERE project_ref = ${"demo"} AND mutation_id = ${mutationId}`;
+    } finally {
+      await db.close({ timeout: 1 });
+    }
+  }
+}, 60_000);
 
 test.skipIf(!postgresBin)("native mutation journal survives restart and fences unresolved application activation", async () => {
   if (!database || !postgres || !root) throw new Error("Native fixture missing");

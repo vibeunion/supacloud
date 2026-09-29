@@ -26,6 +26,10 @@ function parseDatabaseUrl(url: string) {
 
 export const dbConfig = parseDatabaseUrl(config.databaseUrl);
 
+// Mutation leases hold row locks while awaiting host operations. Bun's idle
+// timeout can close those transactions even though their callbacks still run.
+export const MANAGEMENT_SQL_IDLE_TIMEOUT = 0;
+
 export const sql = new SQL({
   hostname: dbConfig.hostname,
   port: dbConfig.port,
@@ -33,7 +37,7 @@ export const sql = new SQL({
   username: dbConfig.username,
   password: dbConfig.password,
   max: config.managementDbPool,
-  idleTimeout: 30,
+  idleTimeout: MANAGEMENT_SQL_IDLE_TIMEOUT,
   connectTimeout: 5000,
 });
 
