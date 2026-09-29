@@ -1,0 +1,126 @@
+name: Context PR Review Validation
+on:
+  push:
+    branches: [review/context-1515-1516]
+    paths: [.github/workflows/context-review-validation.yml]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Install locked test dependencies
+        run: |
+          bun install --frozen-lockfile --cwd packages/contracts
+          bun run --cwd packages/contracts build
+          bun install --frozen-lockfile --cwd packages/delivery
+          bun install --frozen-lockfile --cwd packages/compiler
+          bun install --frozen-lockfile --cwd packages/app
+          mkdir -p /tmp/context-results
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+      - name: Apply pinned timeline repair and prove regression failures
+        run: |
+          cp packages/compiler/src/execution-context.ts /tmp/original-execution-context.ts
+          python3 .review/fix1515.py
+          cp packages/compiler/src/execution-context.ts /tmp/fixed-execution-context.ts
+          cp /tmp/original-execution-context.ts packages/compiler/src/execution-context.ts
+          set +e
+          bun test packages/compiler/src/execution-timeline-regressions.test.ts > /tmp/context-results/1515-before.log 2>&1
+          code=$?
+          set -e
+          cat /tmp/context-results/1515-before.log
+          test "$code" -ne 0
+          grep -q '4 fail' /tmp/context-results/1515-before.log
+          cp /tmp/fixed-execution-context.ts packages/compiler/src/execution-context.ts
+      - name: Verify timeline, CLI, existing compiler behavior and types
+        run: |
+          set -o pipefail
+          bun test packages/compiler/src/execution-context.test.ts packages/compiler/src/execution-timeline-regressions.test.ts packages/compiler/src/execution-context-cli.test.ts packages/compiler/src/analyze.test.ts packages/compiler/src/generate.test.ts packages/compiler/src/contract-manifest.test.ts 2>&1 | tee /tmp/context-results/1515-after.log
+          bun run --cwd packages/compiler typecheck 2>&1 | tee /tmp/context-results/1515-typecheck.log
+          bun run --cwd packages/compiler typecheck:test 2>&1 | tee -a /tmp/context-results/1515-typecheck.log
+          bun scripts/check_public_api.ts --update
+          bun scripts/check_public_api.ts
+          bun scripts/check_diagnostic_docs.ts
+          node scripts/check-readme-docs.mjs
+          git diff --exit-code -- packages/app/public-api.json
+          git diff --check
+      - name: Save tested timeline product changes on isolated branch
+        run: |
+          git add docs/execution-context.md packages/compiler/src/execution-context.ts packages/compiler/src/execution-timeline-regressions.test.ts packages/compiler/src/index.ts packages/compiler/public-api.json
+          git commit -m 'fix(compiler): preserve timeline evidence across projection caps'
+          git push origin HEAD:refs/heads/review/context-1515-1516
+          git rev-parse HEAD > /tmp/context-results/timeline-commit.txt
+          python3 - <<'PY'
+          import json, subprocess
+          def git(*args): return subprocess.check_output(['git', *args], text=True).strip()
+          paths=git('diff','--name-only','8b75ce255872fc3cb2eaefeb7c3a6967bbee7e2e','HEAD','--','docs','packages').splitlines()
+          result={'commit':git('rev-parse','HEAD'),'files':[{'path':p,'mode':'100644','type':'blob','sha':git('rev-parse','HEAD:'+p)} for p in paths]}
+          open('/tmp/context-results/1515.json','w').write(json.dumps(result,indent=2))
+          print(json.dumps(result))
+          PY
+      - name: Add pinned development PR without overwriting timeline exports
+        run: |
+          git diff 3fa97dc15003dc24d43078ad143dfd1840e04952^ 3fa97dc15003dc24d43078ad143dfd1840e04952 -- docs packages/compiler/src/cli.ts 'packages/compiler/src/application-development*' | git apply
+          python3 - <<'PY'
+          import subprocess
+          from pathlib import Path
+          def source(ref): return subprocess.check_output(['git','show',ref+':packages/compiler/src/index.ts'],text=True)
+          old='export type { ExecutionContextPack } from "./execution-context";'
+          new='export type { ExecutionContextPack, ExecutionTimelineStage, ExecutionTimelineAttempt, ExecutionTimelineEntry } from "./execution-context";'
+          p=Path('packages/compiler/src/index.ts')
+          assert p.read_text()==source('3fa97dc15003dc24d43078ad143dfd1840e04952^').replace(old,new)
+          p.write_text(source('3fa97dc15003dc24d43078ad143dfd1840e04952').replace(old,new))
+          PY
+          cp packages/compiler/src/application-development.ts /tmp/original-development.ts
+          python3 .review/fix1516.py
+          cp packages/compiler/src/application-development.ts /tmp/fixed-development.ts
+          cp /tmp/original-development.ts packages/compiler/src/application-development.ts
+          set +e
+          bun test packages/compiler/src/application-development-regressions.test.ts > /tmp/context-results/1516-before.log 2>&1
+          code=$?
+          set -e
+          cat /tmp/context-results/1516-before.log
+          test "$code" -ne 0
+          grep -q '5 fail' /tmp/context-results/1516-before.log
+          cp /tmp/fixed-development.ts packages/compiler/src/application-development.ts
+      - name: Verify combined contexts, CLI, resource regressions and types
+        run: |
+          set -o pipefail
+          bun test packages/compiler/src/application-development.test.ts packages/compiler/src/application-development-regressions.test.ts packages/compiler/src/application-development-cli.test.ts packages/compiler/src/execution-context.test.ts packages/compiler/src/execution-timeline-regressions.test.ts packages/compiler/src/execution-context-cli.test.ts packages/compiler/src/resource-model.test.ts packages/compiler/src/resource-model-regressions.test.ts 2>&1 | tee /tmp/context-results/1516-after.log
+          bun run --cwd packages/compiler typecheck 2>&1 | tee /tmp/context-results/1516-typecheck.log
+          bun run --cwd packages/compiler typecheck:test 2>&1 | tee -a /tmp/context-results/1516-typecheck.log
+          bun scripts/check_public_api.ts --update
+          bun scripts/check_public_api.ts
+          bun scripts/check_diagnostic_docs.ts
+          node scripts/check-readme-docs.mjs
+          git diff --exit-code -- packages/app/public-api.json
+          git diff --check
+      - name: Save tested development changes on isolated branch
+        run: |
+          git add docs/README.md docs/application-development-context.md docs/encore-alignment-roadmap.md packages/compiler/src/application-development* packages/compiler/src/cli.ts packages/compiler/src/index.ts packages/compiler/public-api.json
+          git commit -m 'fix(compiler): align development projection with canonical application model'
+          git push origin HEAD:refs/heads/review/context-1515-1516
+          python3 - <<'PY'
+          import json, subprocess
+          def git(*args): return subprocess.check_output(['git', *args], text=True).strip()
+          base=open('/tmp/context-results/timeline-commit.txt').read().strip()
+          paths=git('diff','--name-only',base,'HEAD','--','docs','packages').splitlines()
+          result={'commit':git('rev-parse','HEAD'),'files':[{'path':p,'mode':'100644','type':'blob','sha':git('rev-parse','HEAD:'+p)} for p in paths]}
+          open('/tmp/context-results/1516.json','w').write(json.dumps(result,indent=2))
+          print(json.dumps(result))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: context-pr-review-evidence
+          path: /tmp/context-results
+          retention-days: 7
