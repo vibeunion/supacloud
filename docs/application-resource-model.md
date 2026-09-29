@@ -61,7 +61,7 @@ export class CreateOrderCommand {}
 
 @Job({
   name: "orders.cleanup",
-  uses: [{ resource: AttachmentsBucket, operations: ["publish"] }],
+  uses: [{ resource: AttachmentsBucket, operations: ["write"] }],
 })
 export class CleanupJob {}
 
@@ -74,9 +74,26 @@ export class CleanupJob {}
 export class OrdersModule {}
 ```
 
-`operations` is one or more of `read | write | publish | consume`; when omitted
-it defaults to `read`. A command or job may only use resources its module
-declared.
+`operations` is a nonempty static array of string literals from
+`read | write | publish | consume`. **Only omitting the property** defaults to
+`read`; `[]`, `null`, explicit `undefined`, scalar values, spreads and dynamic
+expressions are compilation errors, never an implicit read. `resources` and
+`uses` must also be static arrays; empty arrays are allowed for these two fields.
+Syntax-only wrappers such as parentheses and `as const` are accepted. Unsupported
+shorthand, computed or spread properties are errors when explicitly declaring
+resources or uses, not silently omitted relationships.
+
+Resource references resolve by their actual class declarations, including import
+aliases, re-exports and namespace imports. Unrelated classes with the same name
+cannot share or overwrite resource metadata. Repeated uses of the same resource
+are merged; operations use canonical `read`, `write`, `publish`, `consume` order.
+
+A command or job may only use resources its module declared. An automatically
+registered standalone command follows the same rule for the existing `root` or
+`app` module. A synthetic root grants no implicit resource declarations: declare
+the resource in an explicit root/app module, or register the command in a module
+that declares it. The operation vocabulary is descriptive; it does not prove
+resource-kind capabilities or runtime authorization.
 
 ## Graph and manifest
 
@@ -105,7 +122,7 @@ inspection and delivery tooling can answer:
 | SC8102 | `unknown-resource` | A reference is not an `@InfraResource` class |
 | SC8103 | `undeclared-resource-use` | A command/job uses a resource its module did not declare |
 | SC8104 | `invalid-resource-kind` | `kind` is missing or not a supported value |
-| SC8105 | `invalid-resource-operation` | An operation is not `read \| write \| publish \| consume` |
+| SC8105 | `invalid-resource-operation` | Operations are not a nonempty static array of supported string literals |
 
 Run the documented reproduction for each code in [docs/errors](./errors/README.md).
 
@@ -118,8 +135,10 @@ Run the documented reproduction for each code in [docs/errors](./errors/README.m
   references and the allowed operation vocabulary. It does **not** prove that a
   target environment provides the resource, the right permissions or a working
   transaction. Deployment preflight and runtime evidence remain separate.
-- **Explicit references only.** Only explicit `@InfraResource` classes referenced
-  from `resources`/`uses` are analyzed. Dynamic SQL, arbitrary `fetch` and
+- **Explicit declarations and references only.** All explicit `@InfraResource`
+  declarations in the analyzed project are indexed, including unused declarations
+  for duplicate-name diagnostics. `resources`/`uses` resolve actual declarations.
+  Dynamic SQL, arbitrary `fetch` and
   third-party SDKs are not inferred; treat them as explicit external dependencies.
 - **Fail closed before startup.** Missing, unknown or undeclared resources are
   compile-time errors, not first-request failures.
