@@ -25,13 +25,13 @@ jobs:
           bun install --frozen-lockfile --cwd packages/compiler
           bun install --frozen-lockfile --cwd packages/app
           mkdir -p /tmp/context-development-results
-      - name: Apply original development PR preserving every existing export
+      - name: Apply merged development PR preserving every existing export
         run: |
-          git diff 3fa97dc15003dc24d43078ad143dfd1840e04952^ 3fa97dc15003dc24d43078ad143dfd1840e04952 -- docs packages/compiler/src/cli.ts 'packages/compiler/src/application-development*' | git apply
+          git diff 8bf40fc5988aaf075c7c3d8a319798bb11e366fd^ 8bf40fc5988aaf075c7c3d8a319798bb11e366fd -- docs packages/compiler/src/cli.ts 'packages/compiler/src/application-development*' | git apply
           python3 - <<'PY'
           import subprocess
           from pathlib import Path
-          patch=subprocess.check_output(['git','diff','3fa97dc15003dc24d43078ad143dfd1840e04952^','3fa97dc15003dc24d43078ad143dfd1840e04952','--','packages/compiler/src/index.ts'],text=True)
+          patch=subprocess.check_output(['git','diff','8bf40fc5988aaf075c7c3d8a319798bb11e366fd^','8bf40fc5988aaf075c7c3d8a319798bb11e366fd','--','packages/compiler/src/index.ts'],text=True)
           added='\n'.join(line[1:] for line in patch.splitlines() if line.startswith('+') and not line.startswith('+++'))+'\n'
           assert added.startswith('export {\n') and added.count('from "./application-development";')==2
           p=Path('packages/compiler/src/index.ts')
