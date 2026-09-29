@@ -21,17 +21,23 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./execution": {
+      "types": "./dist/execution.d.ts",
+      "import": "./dist/execution.js",
+      "default": "./dist/execution.js"
     }
   },
   "files": [
     "NOTICE",
     "LICENSE-APACHE-2.0.txt",
     "dist",
-    "README.md"
+    "README.md",
+    "EXECUTION.md"
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts --outdir dist --target node --external @supacloud/contracts && bun build src/contract_client.ts src/browser.ts --outdir dist --target browser --external @supacloud/contracts",
+    "build:js": "bun build src/index.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts && bun build src/contract_client.ts src/browser.ts --outdir dist --target browser --external @supacloud/contracts",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
