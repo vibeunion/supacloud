@@ -2896,3 +2896,47 @@ before creating a compatibility session. CI/nightly now expose the same
 explicit version selection for session preparation and verification; the
 default remains v2.197.0. Do not weaken this check or count an older-version
 regression run as v2.197.0 live acceptance.
+
+### Default Management Activation Acceptance (2026-09-29)
+
+Parent: the six-item application workflow follow-up above. Source: the user's
+instruction to continue through completion. This remains a dedicated test-VM
+exercise, not production deployment.
+
+The default activation attempts installed runtime files and systemd units but
+ended as terminal `prepared` failures. A read-only Bun 1.4.2/PostgreSQL probe
+reproduced `ERR_POSTGRES_IDLE_TIMEOUT` after a 35-second wait inside a transaction
+with `idleTimeout: 30`. The management SQL pool now disables client-side idle
+eviction, preserving the row-lock/lease protocol during external host work.
+Project pools retain their existing idle policy.
+
+Verification: 28 focused activation/deployment tests (188 assertions), three
+native PostgreSQL tests (50 assertions, including the 35-second protected
+operation), Management API typecheck, ARM64 compilation and diff checks passed.
+An independent read-only review found no blocking issue.
+
+The compiled binary's local and installed SHA-256 matched:
+`2cd48cbd2c1793cd33b8a2c493721b83eb16892931208074e478b924d95a9ce2`.
+On the dedicated Datas VM, default API activation
+`2bf9ee98-df12-4439-89e9-ee9da09c8e01` reused the already uploaded immutable
+release and stored configuration. Previous attempts were confirmed terminal
+and stopped before creating a new, privately journaled request identity.
+Original GoTrue subjects obtained fresh OAuth tokens; runtime credentials and
+immutable configuration were unchanged.
+
+The default API passed compatibility verification, HTTP/Worker startup,
+readiness, gateway runtime-identity readback and reconcile. The subsequent
+gateway business workflow passed real GoTrue identity, authorization,
+foreign-owner denial, private Storage upload/readback, immutable registration,
+approval replay, external Worker completion, durable results and queue drain.
+Receipts are retained under
+`/var/lib/supacloud-delivery-acceptance/default-management-Kn0bQv/`:
+`activation-after-idle-fix-result.json` and
+`gateway-business-after-idle-fix.json`.
+
+This proves default first activation and its business workflow, not default
+API upgrade/rollback, external SupAuth collaborator/RBAC, live CLI acceptance,
+dashboard expansion, PR preview lifecycle or full-platform restoration. The
+business fixture explicitly reports that its identity scope is GoTrue plus the
+starter SupAuth contract, not the external SupAuth provider. Overall acceptance
+remains PARTIAL until the remaining independent proofs exist.
