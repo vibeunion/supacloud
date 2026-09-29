@@ -1,0 +1,43 @@
+name: App Generation Acceptance
+
+on:
+  pull_request:
+    paths:
+      - "packages/cli/**"
+      - "packages/app/**"
+      - "packages/compiler/**"
+      - "packages/elysia/**"
+      - "packages/contracts/**"
+      - "scripts/check_app_generation.ts"
+      - "scripts/check_app_starter.ts"
+      - ".github/workflows/app-generation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-generation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  generated-consumer:
+    name: Packed CLI and generated resource
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - name: Build, pack, install and exercise the consumer path
+        run: bun run scripts/check_app_generation.ts
+      - name: Generator safety and existing CLI regressions
+        working-directory: packages/cli
+        run: |
+          bun run typecheck
+          bun test src/shared/tools/app-scaffold-writes.test.ts src/shared/tools/app-resource-generation.test.ts src/shared/tools/app-tools.test.ts
+      - name: Keep the exact Elysia beta policy intact
+        run: node scripts/check-elysia-compatibility.mjs

@@ -1,0 +1,144 @@
+/**
+ * Candidate-package acceptance, not a source-import shortcut. The only reused
+ * starter helpers manage subprocess lifetime and frozen consumer installation.
+ * Application/resource generation is performed by the installed, packed CLI.
+ */
+import { strict as assert } from "node:assert";
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
+import { installStarterConsumer, runStarterCommand, starterInstallArgs } from "./check_app_starter";
+
+const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const temporary = await mkdtemp(join(tmpdir(), "supacloud-packed-generation-"));
+const runner = join(temporary, "runner");
+const project = join(temporary, "project");
+const interruption = new AbortController();
+const interrupt = () => interruption.abort(new Error("Packed generation verification interrupted"));
+process.once("SIGINT", interrupt);
+process.once("SIGTERM", interrupt);
+const environment: Record<string, string> = {};
+for (const [key, value] of Object.entries(process.env)) {
+    if (value !== undefined && !/^(SUPACLOUD_|SUPABASE_|APP_ENV$|NODE_ENV$|PORT$|NODE_PATH$)/.test(key)) environment[key] = value;
+}
+// No developer context or credentials should participate in a local generator test.
+environment.HOME = join(temporary, "home");
+environment.USERPROFILE = environment.HOME;
+environment.XDG_CONFIG_HOME = join(environment.HOME, ".config");
+environment.BUN_TMPDIR = join(temporary, "bun-tmp");
+async function run(args: string[], cwd = project, success = true): Promise<string> {
+    return runStarterCommand(args, { cwd, env: environment, signal: interruption.signal, success, timeoutMs: 180_000 });
+}
+
+try {
+    await mkdir(runner, { recursive: true });
+    await mkdir(environment.HOME, { recursive: true });
+    await mkdir(environment.BUN_TMPDIR, { recursive: true });
+    const overrides: Record<string, string> = {};
+    for (const name of ["contracts", "commands", "delivery", "compiler", "db", "app", "elysia", "cli"]) {
+        const directory = join(repo, "packages", name);
+        await run(starterInstallArgs("workspace"), directory);
+        await run(["run", "build"], directory);
+        await run(["pm", "pack", "--ignore-scripts", "--destination", temporary], directory);
+        const filename = (await readdir(temporary)).find(file => file.startsWith(`supacloud-${name}-`) && file.endsWith(".tgz"));
+        assert.ok(filename, `Missing packed ${name}`);
+        overrides[`@supacloud/${name}`] = `file:${join(temporary, filename)}`;
+    }
+    await writeFile(join(runner, "package.json"), JSON.stringify({
+        name: "packed-cli-runner", private: true, type: "module",
+        dependencies: { "@supacloud/cli": overrides["@supacloud/cli"] }, overrides,
+    }, null, 2));
+    await installStarterConsumer(runner, run);
+    const cli = join(runner, "node_modules/@supacloud/cli/dist/index.js");
+    await run([cli, "app", "init", "--root", project, "--name", "generation-acceptance", "--template", "http"], runner);
+    const generatedManifest = JSON.parse(await readFile(join(project, "package.json"), "utf8"));
+    assert.equal(generatedManifest.dependencies.elysia, "2.0.0-beta.19");
+    // Candidate tarballs replace only project-owned packages; third-party versions
+    // and the generated template otherwise remain exactly as the CLI emitted them.
+    for (const group of ["dependencies", "devDependencies"]) {
+        for (const name of Object.keys(generatedManifest[group] ?? {})) {
+            if (overrides[name]) generatedManifest[group][name] = overrides[name];
+        }
+    }
+    generatedManifest.overrides = overrides;
+    await writeFile(join(project, "package.json"), JSON.stringify(generatedManifest, null, 2));
+    await installStarterConsumer(project, run);
+
+    const generation = [cli, "app", "generate", "--kind", "resource", "--name", "inventory", "--register-in", "src/orders/orders.ts", "--format", "json"];
+    const parent = await readFile(join(project, "src/orders/orders.ts"), "utf8");
+    const preview = JSON.parse(await run([...generation, "--dry-run"]));
+    assert.equal(preview.written, false);
+    assert.equal(preview.changes.length, 7);
+    assert.equal(await readFile(join(project, "src/orders/orders.ts"), "utf8"), parent);
+    await assert.rejects(readFile(join(project, "src/features/inventory/inventory.module.ts")), { code: "ENOENT" });
+    const generated = JSON.parse(await run(generation));
+    assert.equal(generated.written, true);
+    for (const change of preview.changes) assert.equal(await readFile(join(project, change.path), "utf8"), change.content);
+    const conflict = JSON.parse(await run(generation, project, false));
+    assert.equal(conflict.ok, false);
+    assert.equal(conflict.code, "SCAFFOLD_EXISTS");
+    // Validate the actual CLI alias/flag parser, not only runAppTool's direct API.
+    const alias = JSON.parse(await run([cli, "generate", "--kind", "module", "--name", "preview-only", "--dry-run", "--format", "json"]));
+    assert.equal(alias.written, false);
+    const compile = JSON.parse(await run([cli, "app", "compile", "--format", "json"]));
+    assert.equal(compile.ok, true);
+    assert.ok(compile.written.length > 0);
+    const check = JSON.parse(await run([cli, "app", "check", "--format", "json"]));
+    assert.equal(check.ok, true);
+    assert.deepEqual(check.written, []);
+    assert.ok(check.modules.includes("inventory"));
+    const context = JSON.parse(await run([cli, "app", "context", "--target", "InventoryService", "--format", "json"]));
+    assert.ok(context.files.some((file: string) => file.endsWith("inventory.service.ts")));
+    await run(["run", "typecheck"]);
+    await run(["test", "src/features/inventory"]);
+    await run(["run", "build"]);
+
+    await writeFile(join(project, "scripts/verify-generated-resource.ts"), `import { strict as assert } from "node:assert";
+import { Elysia } from "elysia";
+import { createModulePlugin } from "@supacloud/elysia";
+import { createCompiledModules } from "../generated/application";
+import { InventoryService } from "../src/features/inventory/inventory.service";
+
+const version = await Bun.file("node_modules/elysia/package.json").json();
+assert.equal(version.version, "2.0.0-beta.19");
+const module = createCompiledModules().find(value => value.name === "inventory");
+assert.ok(module);
+const services = module.createServices({}, {});
+const service = Object.values(services).find(value => value instanceof InventoryService);
+assert.ok(service instanceof InventoryService);
+const app = new Elysia().use(createModulePlugin(module, services));
+const unavailable = await app.handle(new Request("http://localhost/inventory/example"));
+assert.equal(unavailable.status, 500);
+assert.ok(!(await unavailable.text()).includes("Implement InventoryService"));
+let calls = 0;
+// Test double on this test-owned instance only. No generated business file changes.
+service.find = id => { calls++; return { id }; };
+const invalid = await app.handle(new Request("http://localhost/inventory/%20"));
+assert.equal(invalid.status, 422);
+assert.equal(calls, 0);
+const accepted = await app.handle(new Request("http://localhost/inventory/example"));
+assert.equal(accepted.status, 200);
+assert.deepEqual(await accepted.json(), { id: "example" });
+assert.equal(calls, 1);
+app.get("/native-generation-probe", {}, () => ({ native: true }));
+const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: request => app.handle(request) });
+try {
+    const response = await fetch(new URL("/native-generation-probe", server.url), { signal: AbortSignal.timeout(5000) });
+    assert.deepEqual(await response.json(), { native: true });
+} finally { await server.stop(true); }
+console.log("Packed resource: real compiled DI/routes, fail-closed placeholder, input validation, test-double read and Elysia 2 listener passed");
+`);
+    await run(["run", "typecheck"]);
+    console.log(await run(["scripts/verify-generated-resource.ts"]));
+    // Compile/check/graph must agree even with a non-default generated directory.
+    const custom = "candidate-generated";
+    assert.equal(JSON.parse(await run([cli, "app", "compile", "--out_dir", custom, "--format", "json"])).ok, true);
+    const graph = JSON.parse(await run([cli, "app", "graph", "--out_dir", custom, "--format", "json"]));
+    assert.ok(graph.modules.some((module: { name: string }) => module.name === "inventory"));
+    console.log("Packed CLI generation acceptance passed; no deployment or production persistence was exercised.");
+} finally {
+    process.removeListener("SIGINT", interrupt);
+    process.removeListener("SIGTERM", interrupt);
+    await rm(temporary, { recursive: true, force: true });
+}
