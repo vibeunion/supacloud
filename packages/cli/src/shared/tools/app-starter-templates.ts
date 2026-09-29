@@ -93,6 +93,7 @@ function baseFiles(name: string): Record<string, string> {
         compile: "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js compile",
         "check:generated": "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js check",
         typecheck: "tsc --noEmit",
+        inspect: "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js graph --json",
         check: "bun run compile && bun run check:generated && bun run typecheck && bun run test",
         test: "bun run compile && bun --no-env-file scripts/environment.ts test bun test",
         dev: "bun --no-env-file scripts/environment.ts development bun scripts/dev.ts",
@@ -342,5 +343,49 @@ supacloud doctor --root .
 
 /** Golden-path project templates other than the default full `command` starter. */
 export function appTemplateFiles(name: string, template: StarterTemplate): Record<string, string> {
-  return template === "http" ? httpTemplate(name) : edgeTemplate(name);
+  const files = template === "http" ? httpTemplate(name) : edgeTemplate(name);
+  const feature = template === "http" ? "OrdersFeature" : "SyncFeature";
+  const source = template === "http" ? "./orders/orders" : "./sync/sync";
+  return {
+    ...files,
+    "src/app.module.ts": `import { Module } from "@supacloud/app";
+import { ${feature} } from "${source}";
+
+// Compose feature modules here. Do not make unrelated features import each other.
+@Module({
+  name: "application-root",
+  tags: ["type:app"],
+  imports: [${feature}],
+})
+export class AppModule {}
+`,
+    "README.md": files["README.md"] + `
+## Application Composition
+
+\`src/app.module.ts\` is the application composition root. Register additional
+feature modules there, rather than importing them from another feature.
+The compiler discovers this declaration; no runtime container lookup is needed.
+
+With the matching candidate/released CLI installed:
+
+\`\`\`sh
+supacloud-cli app generate --kind resource --name inventory --register-in src/app.module.ts --dry-run --format json
+supacloud-cli app generate --kind resource --name inventory --register-in src/app.module.ts
+bun run check
+bun run inspect
+\`\`\`
+
+The resource is an asynchronous read skeleton, not implemented CRUD. Its Service
+rejects until an authorized data adapter is supplied; implement it and replace the
+placeholder test together. Generation does not grant access or connect a database.
+
+\`bun run inspect\` delegates to the installed compiler and prints the current
+source graph as JSON without starting the app or regenerating artifacts. This is
+not a live mounted-route report. Configuration remains trusted project code.
+After changing source, compile before using artifact-backed CLI graph/explain.
+
+In CI, run \`bun run check:generated\` before commands that regenerate artifacts;
+\`bun run check\` is the convenient bootstrap path for a newly created project.
+`,
+  };
 }

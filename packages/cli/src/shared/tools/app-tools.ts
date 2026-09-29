@@ -23,6 +23,8 @@ import type { ToolSchema } from "../schema";
 import { buildToolDefinitions, type AppManifest } from "./app-tool-export";
 import { initializeAppProject } from "./app-starter";
 import { APPLICATION_TOOL_SCHEMA } from "./application-tools";
+import { resourceScaffold } from "./app-resource";
+import { applyScaffoldWrites, planScaffoldWrites, scaffoldPath, ScaffoldError, type ScaffoldWrite } from "./app-scaffold-writes";
 
 const REMOTE_APP_ACTIONS = {
     upload: "upload_release",
@@ -78,12 +80,16 @@ export interface AppToolArguments {
     configuration_path?: string;
     manifest_path?: string;
     release_id?: string;
-    kind?: "module" | "command" | "query" | "controller" | "job" | "contract";
+    kind?: "module" | "command" | "query" | "controller" | "job" | "contract" | "resource";
     template?: "http" | "command" | "edge";
     name?: string;
     module?: string;
     dir?: string;
     force?: boolean;
+    dry_run?: boolean;
+    register_in?: string;
+    "dry-run"?: boolean;
+    "register-in"?: string;
     root?: string;
     include?: string;
     out_dir?: string;
@@ -140,19 +146,6 @@ function requireIdentifier(value: string | undefined, flag: string): string {
         throw new Error(`Invalid --${flag} value: ${value}`);
     }
     return trimmed;
-}
-
-async function writeScaffold(path: string, content: string, force: boolean): Promise<"created" | "overwritten"> {
-    if (existsSync(path)) {
-        if (!force) {
-            throw new Error(`File already exists: ${path}（使用 --force 覆盖）`);
-        }
-        await writeFile(path, content, "utf8");
-        return "overwritten";
-    }
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, content, "utf8");
-    return "created";
 }
 
 function moduleScaffold(name: string): string {
@@ -233,49 +226,95 @@ export const ${prefix}Response = t.Object({});
 
 async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
     const kind = args.kind;
-    if (!kind) throw new Error("app generate requires --kind (module|command|query|controller|job|contract)");
+    if (!kind || !["module", "command", "query", "controller", "job", "contract", "resource"].includes(kind)) {
+        throw new ScaffoldError("SCAFFOLD_KIND_INVALID", "app generate requires --kind (module|command|query|controller|job|contract|resource)");
+    }
+    for (const flag of ["dry_run", "force"] as const) {
+        if (args[flag] !== undefined && typeof args[flag] !== "boolean") {
+            throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", `--${flag.replaceAll("_", "-")} must be boolean`);
+        }
+    }
     const root = resolve(args.root || process.cwd());
-    const dir = args.dir || "src/features";
-
-    if (kind === "module") {
+    const dir = args.dir ?? "src/features";
+    if (dir !== ".") scaffoldPath(root, dir);
+    if (args.register_in !== undefined && kind !== "resource" && kind !== "module") {
+        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--register-in is only supported for a new module or resource");
+    }
+    if (kind === "resource" && (args.force || args.module !== undefined)) {
+        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "resource creates its own module; use --name and optionally --register-in, never --force or --module");
+    }
+    const writes: ScaffoldWrite[] = [];
+    let modulePath: string | undefined;
+    let moduleSymbol: string | undefined;
+    let contractName: string | undefined;
+    if (kind === "module" || kind === "resource") {
         const name = requireIdentifier(args.name, "name");
-        const path = join(root, dir, name, `${name}.module.ts`);
-        const status = await writeScaffold(path, moduleScaffold(name), args.force === true);
-        return textResult(`✅ ${status}: ${path}`);
+        modulePath = join(dir, name, `${name}.module.ts`).replaceAll("\\", "/");
+        moduleSymbol = `${pascalName(name)}Module`;
+        if (kind === "module") writes.push({ path: modulePath, content: moduleScaffold(name), overwrite: args.force === true });
+        else for (const [file, content] of Object.entries(resourceScaffold(name, pascalName(name)))) {
+            writes.push({ path: join(dir, name, file).replaceAll("\\", "/"), content });
+        }
+    } else {
+        const moduleName = requireIdentifier(args.module, "module");
+        const name = kind === "controller" ? moduleName : requireIdentifier(args.name, "name");
+        const subdir = kind === "command" ? "commands" : kind === "query" ? "queries" : kind === "job" ? "jobs" : kind === "contract" ? "contracts" : "";
+        const path = join(dir, moduleName, subdir, `${name}.${kind}.ts`).replaceAll("\\", "/");
+        if (kind === "controller" && existsSync(scaffoldPath(root, path))) {
+            throw new ScaffoldError("SCAFFOLD_EXISTS", `Controller already exists: ${path}（请手工合并路由到现有 controller）`);
+        }
+        const content = kind === "command" ? commandScaffold(moduleName, name)
+            : kind === "query" ? queryScaffold(moduleName, name)
+            : kind === "job" ? jobScaffold(moduleName, name)
+            : kind === "contract" ? contractScaffold(moduleName, name)
+            : controllerScaffold(moduleName);
+        writes.push({ path, content, overwrite: args.force === true });
+        if (kind === "contract") contractName = name;
     }
-
-    const moduleName = requireIdentifier(args.module, "module");
-    const name = kind === "controller" ? moduleName : requireIdentifier(args.name, "name");
-    const fileName = kind === "controller"
-        ? `${moduleName}.controller.ts`
-        : `${name}.${kind}.ts`;
-    const subdir = kind === "command" ? "commands" : kind === "query" ? "queries" : kind === "job" ? "jobs" : kind === "contract" ? "contracts" : "";
-    const path = join(root, dir, moduleName, subdir, fileName);
-    if (kind === "controller" && existsSync(path)) {
-        throw new Error(`Controller already exists: ${path}（请手工合并路由到现有 controller）`);
+    if (args.register_in !== undefined && modulePath && moduleSymbol) {
+        await planScaffoldWrites(root, writes);
+        // Reuse the compiler's AST edit; never regex-edit a user's module or
+        // execute application code to discover where a new module belongs.
+        const target = scaffoldPath(root, args.register_in);
+        const checked = await planScaffoldWrites(root, [{ path: args.register_in, content: "", overwrite: true }]);
+        const original = checked.writes[0]?.before?.content;
+        if (original === undefined) throw new ScaffoldError("SCAFFOLD_REGISTRATION_INVALID", "--register-in must name an existing module file");
+        if (new RegExp(`\\b${moduleSymbol}\\b`).test(original)) {
+            throw new ScaffoldError("SCAFFOLD_REGISTRATION_CONFLICT", `Registration target already references ${moduleSymbol}; review the import manually`);
+        }
+        let importPath = relative(dirname(target), resolve(root, modulePath)).replaceAll("\\", "/").replace(/\.ts$/, "");
+        if (!importPath.startsWith(".")) importPath = `./${importPath}`;
+        const edit = await applyDiagnosticFix({
+            type: "add_module_import", targetFile: args.register_in, module: requireIdentifier(args.name, "name"), importPath, symbol: moduleSymbol,
+        }, { rootDir: root, dryRun: true });
+        if (await readFile(target, "utf8") !== original) throw new ScaffoldError("SCAFFOLD_CHANGED", "Registration source changed during planning");
+        writes.push({ path: args.register_in, content: edit.content, expected: original });
     }
-    const content = kind === "command"
-        ? commandScaffold(moduleName, name)
-        : kind === "query"
-            ? queryScaffold(moduleName, name)
-            : kind === "job"
-                ? jobScaffold(moduleName, name)
-                : kind === "contract"
-                    ? contractScaffold(moduleName, name)
-                    : controllerScaffold(moduleName);
-    const status = await writeScaffold(path, content, args.force === true);
-    if (kind === "contract") {
-        const prefix = pascalName(name);
-        return textResult([
-            `✅ ${status}: ${path}`,
-            "",
-            "Next, bind the contract to a route so the compiler can check route/schema drift:",
-            `  import { ${prefix}Body, ${prefix}Response } from "./contracts/${name}.contract";`,
+    const plan = await planScaffoldWrites(root, writes);
+    if (!args.dry_run) await applyScaffoldWrites(plan);
+    const changes = plan.writes.map((write) => ({
+        path: write.path.replaceAll("\\", "/"),
+        action: write.before ? "overwritten" : "created",
+        ...(args.dry_run ? { content: write.content } : {}),
+    }));
+    if (args.format === "json") return textResult(JSON.stringify({
+        version: 1, ok: true, kind, root: plan.root, written: !args.dry_run, changes,
+    }, null, 2));
+    const lines = changes.map((change) => `${args.dry_run ? "PREVIEW" : "✅"} ${change.action}: ${join(plan.root, change.path)}`);
+    if (args.dry_run) lines.push("No files written. Omit --dry-run to apply this generation.");
+    if (kind === "resource") lines.push(
+        "Service and controller are registered in the generated module. No root module is guessed.",
+        "Use --register-in <module.ts> to add an explicit parent import. Implement the read port before exposing the resource.",
+        "Run app compile, app check --format json and your tests. No writes, permissions or persistence are inferred.",
+    );
+    if (contractName) {
+        const prefix = pascalName(contractName);
+        lines.push("", "Next, bind the contract to a route so the compiler can check route/schema drift:",
+            `  import { ${prefix}Body, ${prefix}Response } from "./contracts/${contractName}.contract";`,
             `  @Post("/", { body: ${prefix}Body, responses: { 200: ${prefix}Response } })`,
-            "Fill in the schema fields and reuse them in command decoders; never widen them to unknown.",
-        ].join("\n"));
+            "Fill in the schema fields and reuse them in command decoders; never widen them to unknown.");
     }
-    return textResult(`✅ ${status}: ${path}`);
+    return textResult(lines.join("\n"));
 }
 
 function formatDiagnostic(diagnostic: Diagnostic): string {
@@ -556,6 +595,9 @@ async function runCompile(args: AppToolArguments): Promise<ToolResult> {
         writeOnError: false,
     });
     const hasError = result.diagnostics.some((diagnostic) => diagnostic.severity === "error");
+    if (args.format === "json") return textResult(JSON.stringify({
+        version: 1, ok: !hasError, diagnostics: result.diagnostics, written: result.written,
+    }, null, 2), hasError);
     const text = [
         formatDiagnostics(result.diagnostics),
         "",
@@ -581,6 +623,11 @@ async function runCheck(args: AppToolArguments): Promise<ToolResult> {
     const result = await checkProject(config);
     const hasError = result.diagnostics.some((diagnostic) => diagnostic.severity === "error")
         || result.mismatches.length > 0;
+    if (args.format === "json") return textResult(JSON.stringify({
+        version: 1, ok: !hasError, source: "declaration", diagnostics: result.diagnostics,
+        mismatches: result.mismatches, upToDate: result.upToDate, written: [],
+        modules: result.graph.modules.map((module) => module.name),
+    }, null, 2), hasError);
     const summary = `checked ${result.graph.modules.length} module(s), no files written`;
     return textResult([
         formatDiagnostics(result.diagnostics),
@@ -589,8 +636,10 @@ async function runCheck(args: AppToolArguments): Promise<ToolResult> {
     ].join("\n"), hasError);
 }
 
-async function readManifest(root: string): Promise<AppManifest> {
-    const manifestPath = join(root, "generated", "app.manifest.json");
+async function readManifest(root: string, args: AppToolArguments): Promise<AppManifest> {
+    const config = await loadSupacloudConfig(root);
+    const outDir = args.out_dir ? resolve(root, args.out_dir) : resolveSupacloudConfig(config, root).outDir;
+    const manifestPath = join(outDir, "app.manifest.json");
     if (!existsSync(manifestPath)) {
         throw new Error(`Manifest not found: ${manifestPath}（先运行 app compile 生成）`);
     }
@@ -634,7 +683,7 @@ function formatGraphText(manifest: AppManifest): string {
 
 async function runGraph(args: AppToolArguments): Promise<ToolResult> {
     const root = resolve(args.root || process.cwd());
-    const manifest = await readManifest(root);
+    const manifest = await readManifest(root, args);
     if (args.format === "json") return textResult(JSON.stringify(manifest, null, 2));
     return textResult(formatGraphText(manifest));
 }
@@ -698,7 +747,7 @@ async function runExplain(args: AppToolArguments): Promise<ToolResult> {
     const target = args.target?.trim();
     if (!target) throw new Error("app explain requires --target（provider 类名 / token 名 / command 名 / job 名）");
     const root = resolve(args.root || process.cwd());
-    const manifest = await readManifest(root);
+    const manifest = await readManifest(root, args);
 
     for (const module of manifest.modules) {
         const job = module.jobs?.find(
@@ -777,17 +826,16 @@ async function runExplain(args: AppToolArguments): Promise<ToolResult> {
 
 async function runExportTools(args: AppToolArguments): Promise<ToolResult> {
     const root = resolve(args.root || process.cwd());
-    const manifest = await readManifest(root);
+    const manifest = await readManifest(root, { ...args, out_dir: undefined });
     const definitions = buildToolDefinitions(manifest);
 
     const outDir = resolve(args.out_dir || join(root, "generated"));
-    await mkdir(outDir, { recursive: true });
-
     if (args.format === "json") {
         // JSON mode returns the combined contract on stdout without writing artifacts.
         return textResult(JSON.stringify(definitions, null, 2));
     }
 
+    await mkdir(outDir, { recursive: true });
     const openaiPath = join(outDir, "tool-definitions.openai.json");
     const mcpPath = join(outDir, "tool-definitions.mcp.json");
     await writeFile(openaiPath, JSON.stringify(definitions.openai, null, 2), "utf8");
@@ -821,6 +869,18 @@ async function runDelivery(args: AppToolArguments): Promise<ToolResult> {
 }
 
 export async function runAppTool(request: AppToolArguments, options: AppToolOptions = {}): Promise<ToolResult> {
+    if ((request.dry_run !== undefined && request["dry-run"] !== undefined)
+        || (request.register_in !== undefined && request["register-in"] !== undefined)) {
+        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "Do not combine hyphenated and underscored aliases of the same flag");
+    }
+    request = {
+        ...request,
+        ...(request["dry-run"] === undefined ? {} : { dry_run: request["dry-run"] }),
+        ...(request["register-in"] === undefined ? {} : { register_in: request["register-in"] }),
+    };
+    if ((request.dry_run !== undefined || request.register_in !== undefined) && request.action !== "generate") {
+        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--dry-run and --register-in apply only to app generate");
+    }
     if (Object.hasOwn(REMOTE_APP_ACTIONS, request.action)) {
         const delegate = options.getApplications?.();
         if (!delegate) return textResult("App remote actions require a Management API context.", true);
@@ -835,7 +895,17 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
         case "plan":
         case "build": return runDelivery(request);
         case "init": return initProject(request);
-        case "generate": return generateScaffold(request);
+        case "generate": {
+            try { return await generateScaffold(request); }
+            catch (error) {
+                if (request.format !== "json") throw error;
+                return textResult(JSON.stringify({
+                    version: 1, ok: false,
+                    code: error instanceof ScaffoldError ? error.code : "SCAFFOLD_FAILED",
+                    message: error instanceof Error ? error.message : "Scaffold generation failed",
+                }, null, 2), true);
+            }
+        }
         case "compile": return runCompile(request);
         case "check": return runCheck(request);
         case "graph": return runGraph(request);
@@ -857,17 +927,21 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             ...REMOTE_APP_SCHEMA,
             action: withDescription(stringEnum(["init", "generate", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix",
                 "plan", "build", "upload", "configure", "deploy", "status", "rollback", "reconcile", "retire"]), "App action; upload/configure only prepare, rollback activates an explicit old release without schema downgrade"),
-            kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract"]), "[generate] Scaffold kind"),
+            kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource"]), "[generate] Scaffold kind"),
             template: optional(stringEnum(["http", "command", "edge"]), "[init] Golden-path template (default: command)"),
             name: optional(Type.String(), "[init/generate] Project or object name"),
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
             dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
-            force: optional(Type.Boolean(), "[generate] Overwrite existing files"),
+            force: optional(Type.Boolean(), "[generate] Overwrite a single regular file; resource/controller never overwrite"),
+            dry_run: optional(Type.Boolean(), "[generate] Validate and preview the complete change set without writing"),
+            "dry-run": optional(Type.Boolean(), "[generate] CLI alias of dry_run"),
+            register_in: optional(Type.String(), "[generate] Existing parent module file for module/resource; uses the compiler AST editor"),
+            "register-in": optional(Type.String(), "[generate] CLI alias of register_in"),
             root: optional(Type.String(), "[plan/build/compile/check] Project directory containing supacloud.config.ts (default: current directory)"),
             include: optional(Type.String(), "[compile/check] Comma-separated glob patterns for source files"),
             out_dir: optional(Type.String(), "[compile/plan/build/export-tools] Output directory (default: configured outDir)"),
             strict: optional(Type.Boolean(), "[compile/check] Promote warnings to errors"),
-            format: optional(stringEnum(["text", "json"]), "[plan/graph/export-tools] Output format (default: text)"),
+            format: optional(stringEnum(["text", "json"]), "[generate/compile/check/plan/graph/export-tools] Output format (default: text)"),
             target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / job name / module name"),
             fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
             write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
@@ -885,11 +959,15 @@ const APP_ALIAS_ACTIONS = ["generate", "compile", "check", "graph", "explain", "
  */
 export function registerAppAliases(server: ToolServer): void {
     const schema: ToolSchema = {
-        kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract"]), "[generate] Scaffold kind"),
+        kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource"]), "[generate] Scaffold kind"),
         name: optional(Type.String(), "[generate] Object name"),
         module: optional(Type.String(), "[generate] Target feature module"),
         dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
-        force: optional(Type.Boolean(), "[generate] Overwrite existing files"),
+        force: optional(Type.Boolean(), "[generate] Overwrite a single regular file; resource/controller never overwrite"),
+        dry_run: optional(Type.Boolean(), "[generate] Validate and preview the complete change set without writing"),
+        "dry-run": optional(Type.Boolean(), "[generate] CLI alias of dry_run"),
+        register_in: optional(Type.String(), "[generate] Existing parent module file for module/resource; uses the compiler AST editor"),
+        "register-in": optional(Type.String(), "[generate] CLI alias of register_in"),
         root: optional(Type.String(), "Project directory containing supacloud.config.ts (default: current directory)"),
         include: optional(Type.String(), "[compile/check] Comma-separated glob patterns for source files"),
         out_dir: optional(Type.String(), "[compile/export-tools] Output directory (default: <root>/generated)"),
