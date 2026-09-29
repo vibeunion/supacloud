@@ -15,7 +15,8 @@
   "include": [
     "src/index.ts",
     "src/browser.ts",
-    "src/contract_client.ts"
+    "src/contract_client.ts",
+    "src/execution.ts"
   ],
   "exclude": [
     "node_modules",
