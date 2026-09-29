@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { businessManagementSettings, requireBusinessMigrationLedger,
+  businessManagementFailure, managementResponse, persistBusinessEffectReceipt,
   businessManagementVerifierPolicy, businessManagementMigrationEvidence, requireBusinessManagementProject,
   runPlatformBusinessManagement, type BusinessManagementInput } from "../fixtures/platform-business-management";
 import { applicationReleaseId, type ApplicationReleaseRecord } from "../../../delivery/src";
@@ -16,6 +20,58 @@ const input: BusinessManagementInput = {
   inspectionDatabaseUrl: common.DATABASE_URL, verifierExecutable: "/owned/verify", expectedRevision: 1,
 };
 const env = { SUPACLOUD_BUSINESS_MANAGEMENT_TEST: "1", SUPACLOUD_TEST_PROJECT_REF: ref };
+
+test("experimental resume inputs are rejected before creating new request identities", () => {
+  for (const extra of [{ resume: true }, { configurationId: crypto.randomUUID() }]) {
+    expect(() => businessManagementSettings({ ...input, ...extra }, env)).toThrow("resume is unsupported");
+  }
+});
+
+test("structured diagnostics exclude raw errors, bodies and non-allowlisted identity", async () => {
+  let failure: unknown;
+  try { await managementResponse(new Response("PRIVATE PASSWORD postgres://secret", { status: 503 })); }
+  catch (error) { failure = error; }
+  const diagnostic = businessManagementFailure(failure, "configuration", {
+    project_ref: ref, activation_id: crypto.randomUUID(), release_id: "a".repeat(64), secret: "PRIVATE",
+  });
+  expect(diagnostic).toMatchObject({
+    status: "FAIL", phase: "configuration", code: "MANAGEMENT_HTTP_ERROR", http_status: 503,
+    project_ref: ref, release_id: "a".repeat(64),
+  });
+  expect(JSON.stringify(diagnostic)).not.toContain("PRIVATE");
+  expect(JSON.stringify(diagnostic)).not.toContain("secret");
+  expect(businessManagementFailure({
+    code: "PRIVATE", message: "PRIVATE", status: "PRIVATE",
+  }, "PRIVATE", { project_ref: "PRIVATE", token: "PRIVATE" })).toEqual({
+    status: "FAIL", phase: "preflight", code: "ACCEPTANCE_FAILED",
+  });
+  expect(businessManagementFailure(null, "activation")).toMatchObject({ code: "ACCEPTANCE_FAILED" });
+});
+
+test("private request receipt retains exact identities and refuses overwrite before subsequent effects", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "management-effect-receipt-"));
+  try {
+    const path = join(directory, "private-effects.json");
+    const settings = businessManagementSettings(input, env);
+    const ids = { project_ref: ref, application_id: settings.applicationId, environment_id: settings.environmentId,
+      release_id: "a".repeat(64), activation_id: crypto.randomUUID(),
+      configuration_id: settings.configuration.configuration_id };
+    const activation = await persistBusinessEffectReceipt(path, ids, settings.configuration);
+    const saved = await readFile(path, "utf8");
+    expect(JSON.parse(saved)).toMatchObject({
+      ...ids, activation_request: activation, configuration_request: settings.configuration,
+    });
+    expect(activation).toEqual({
+      activation_id: ids.activation_id, configuration_id: ids.configuration_id,
+      release_id: ids.release_id, expected_activation_id: null,
+    });
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+    await expect(persistBusinessEffectReceipt(path, {
+      ...ids, activation_id: crypto.randomUUID(),
+    }, settings.configuration)).rejects.toThrow();
+    expect(await readFile(path, "utf8")).toBe(saved);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
 
 test("management acceptance requires explicit owned-project opt-in and valid existing configuration schema", () => {
   const settings = businessManagementSettings(input, env);

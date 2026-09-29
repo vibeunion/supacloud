@@ -17,6 +17,8 @@ export interface StarterCompatibilityPolicy {
   database: string;
   http_role: string;
   worker_role: string;
+  /** Optional project-scoped NOLOGIN groups from the administrator's provisioning policy. */
+  runtime_groups?: { http: string; worker: string };
   inspection: { url: string } | { socket: string; username: string };
   identity_token: string;
   /** Optional private CA also installed in the application host's trust store. */
@@ -122,7 +124,10 @@ async function runtimeDatabase(
 ) {
   const env = input.environment[target]!;
   const role = target === "api" ? policy.http_role : policy.worker_role;
-  const group = target === "api" ? "starter_review_http" : "starter_review_worker";
+  const groups = policy.runtime_groups ?? { http: "starter_review_http", worker: "starter_review_worker" };
+  requireProbe(groups.http !== groups.worker
+    && [groups.http, groups.worker].every(name => /^[a-z_][a-z0-9_]{0,62}$/.test(name)));
+  const group = target === "api" ? groups.http : groups.worker;
   await readOnly(connection(env), async tx => {
     const [identity] = await tx.unsafe(`SELECT current_database() AS database, current_user AS role,
       session_user AS login, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolreplication
