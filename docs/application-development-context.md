@@ -36,7 +36,7 @@ the stricter artifact-drift and type-safety gate.
 | `source` | Always `current-graph` |
 | `deploymentVerified` | Always `false` |
 | `modules` | name, className, file, tags, provider tokens, controller/command/job/query names, required resources |
-| `routes` | module, method, path, controller, handler, bound command, aspect names, `schemaKinds` |
+| `routes` | module, method, full controller-prefixed path, controller, handler, canonical bound command, aspect names, `schemaKinds` |
 | `commands` | module, name, permission, transaction, idempotency, audit, declared resource uses |
 | `jobs` | module, name, mode, declared resource uses |
 | `resources` | logical name + kind (from the [resource model](./application-resource-model.md)) |
@@ -55,17 +55,27 @@ The projection never includes:
 
 - diagnostic messages, suggestions or repair replacement values;
 - aspect/schema source expressions (aspect **names** and schema **kinds** only);
-- credentials, tokens, request bodies, results or business payloads;
+- credentials, authentication tokens, request bodies, results or business payloads;
 - absolute, parent-traversing or URL-shaped source paths (omitted).
 
 Diagnostic repair entries expose only `{ type, readiness }`, matching the
-execution-context policy.
+execution-context policy. Only positive integer diagnostic line numbers and
+allowlisted schema-kind keys are retained. Declared names (including DI provider
+tokens) and tags are structural metadata, not automatically secret-detectable;
+hosts must not place credentials or business payloads in metadata names.
 
 ## Limits
 
 `APPLICATION_DEVELOPMENT_LIMITS` bounds the document (64 modules, 128 providers,
 256 routes, 128 commands, 128 jobs, 64 resources, 128 resource uses, 128 plans,
-64 diagnostics, 64 KiB output). Truncation is reported in `omitted`; a document
+64 diagnostics, 64 KiB output). The provider budget is document-wide, including
+providers lost with omitted modules in the count. Other collection caps apply to
+their top-level arrays; module name inventories remain subject to the final byte
+budget. Aspect and execution-stage order remains semantic, while inventories,
+resource uses and diagnostics have canonical ordering. Text output reports
+omissions and explicitly marks deployment as unverified.
+
+Truncation is reported in `omitted`; a document
 that still exceeds the byte budget fails with `APPLICATION_DEVELOPMENT_TOO_LARGE`
 rather than silently producing a partial view.
 

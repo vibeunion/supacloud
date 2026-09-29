@@ -43,7 +43,7 @@ function graph(): ApplicationGraph {
       className: "OrdersController", deps: [], scope: "application", file: "src/orders.ts", importPath: "src/orders",
       path: "/orders",
       routes: [{
-        method: "POST", path: "/", handler: "create", command: "orders.create",
+        method: "POST", path: "/", handler: "create", command: "OrdersCreate",
         schemaKinds: { body: "declared", response: "opaque" },
         aspects: [{ name: "AuditAspect", expression: "PRIVATE_ASPECT_EXPRESSION" }],
       }],
@@ -84,7 +84,7 @@ test("projects the current graph into the versioned development contract", () =>
     resources: ["orders-db"],
   }]);
   expect(context.routes).toEqual([{
-    module: "orders", method: "POST", path: "/", controller: "OrdersController", handler: "create",
+    module: "orders", method: "POST", path: "/orders", controller: "OrdersController", handler: "create",
     command: "orders.create", aspects: ["AuditAspect"], schemaKinds: { body: "declared", response: "opaque" },
   }]);
   expect(context.commands).toEqual([{
@@ -147,6 +147,6 @@ test("fails closed when the projected document exceeds the public byte budget", 
 test("formats a human-readable summary", () => {
   const text = formatApplicationDevelopmentContext(createApplicationDevelopmentContext(graph()));
   expect(text).toContain("APPLICATION supacloud.application-development.v1");
-  expect(text).toContain("POST / -> OrdersController.create (orders)");
+  expect(text).toContain("POST /orders -> OrdersController.create (orders)");
   expect(text).toContain("orders-db:database");
 });

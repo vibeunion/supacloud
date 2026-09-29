@@ -1,8 +1,8 @@
-import type { Diagnostic } from "./types";
 import type { ApplicationGraph } from "./types";
 import { createExecutionPlans, type ExecutionPlan } from "./inspect";
 import { createDiagnosticRepairPlan } from "./repair-plan";
 import { executionSourceFile } from "./execution-snapshot";
+import { joinRoutePaths } from "./util";
 
 /**
  * A stable, read-only projection of the current application graph for developer
@@ -128,8 +128,9 @@ export class ApplicationDevelopmentError extends Error {
 const schemaKinds = (route: ApplicationGraph["modules"][number]["controllers"][number]["routes"][number]): Record<string, DevelopmentSchemaKind> | undefined => {
   if (!route.schemaKinds) return undefined;
   const entries = Object.entries(route.schemaKinds)
+    .filter(([key]) => ["body", "params", "query", "headers", "cookie", "response"].includes(key))
     .filter((entry): entry is [string, DevelopmentSchemaKind] => entry[1] === "opaque" || entry[1] === "declared");
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+  return entries.length > 0 ? Object.fromEntries(entries.sort(([left], [right]) => left.localeCompare(right, "en"))) : undefined;
 };
 
 function bound<T>(values: readonly T[], limit: number): { items: T[]; omitted: number } {
@@ -144,39 +145,53 @@ function bound<T>(values: readonly T[], limit: number): { items: T[]; omitted: n
 export function createApplicationDevelopmentContext(graph: ApplicationGraph): ApplicationDevelopmentContext {
   const modules = [...graph.modules].sort((left, right) => left.name.localeCompare(right.name, "en"));
   const resources = [...(graph.resources ?? [])].sort((left, right) => left.name.localeCompare(right.name, "en"));
-  const resourceUses = [...(graph.resourceUses ?? [])];
+  const names = (values: readonly string[]) => [...values].sort((left, right) => left.localeCompare(right, "en"));
+  const operationOrder = ["read", "write", "publish", "consume"];
+  const resourceUses = (graph.resourceUses ?? []).map(use => ({ ...use,
+    operations: [...use.operations].sort((left, right) => operationOrder.indexOf(left) - operationOrder.indexOf(right)),
+  })).sort((left, right) =>
+    left.module.localeCompare(right.module, "en")
+    || Number(left.command === undefined) - Number(right.command === undefined)
+    || (left.command ?? left.job ?? "").localeCompare(right.command ?? right.job ?? "", "en")
+    || left.resource.localeCompare(right.resource, "en")
+    || JSON.stringify(left.operations).localeCompare(JSON.stringify(right.operations), "en"));
 
   let omittedProviders = 0;
+  let remainingProviders = APPLICATION_DEVELOPMENT_LIMITS.providers;
   const developmentModules: ApplicationDevelopmentModule[] = [];
   const routes: ApplicationDevelopmentRoute[] = [];
   const commands: ApplicationDevelopmentCommand[] = [];
   const jobs: ApplicationDevelopmentJob[] = [];
 
-  for (const module of modules) {
-    const providers = bound(module.providers.map((provider) => provider.token), APPLICATION_DEVELOPMENT_LIMITS.providers);
+  for (const [moduleIndex, module] of modules.entries()) {
+    const providers = bound(names(module.providers.map((provider) => provider.token)),
+      moduleIndex < APPLICATION_DEVELOPMENT_LIMITS.modules ? remainingProviders : 0);
+    remainingProviders -= providers.items.length;
     omittedProviders += providers.omitted;
     developmentModules.push({
       name: module.name,
       className: module.className,
       ...(executionSourceFile(module.file) ? { file: executionSourceFile(module.file) } : {}),
-      ...(module.tags && module.tags.length > 0 ? { tags: [...module.tags] } : {}),
+      ...(module.tags && module.tags.length > 0 ? { tags: names(module.tags) } : {}),
       providers: providers.items,
-      controllers: module.controllers.map((controller) => controller.className),
-      commands: module.commands.map((command) => command.name),
-      jobs: (module.jobs ?? []).map((job) => job.name),
-      queries: module.queries.map((query) => query.name),
-      resources: [...(module.resources ?? [])],
+      controllers: names(module.controllers.map((controller) => controller.className)),
+      commands: names(module.commands.map((command) => command.name)),
+      jobs: names((module.jobs ?? []).map((job) => job.name)),
+      queries: names(module.queries.map((query) => query.name)),
+      resources: names(module.resources ?? []),
     });
 
     for (const controller of module.controllers) {
       for (const route of controller.routes) {
+        const candidates = module.commands.filter(command => command.className === route.command || command.name === route.command);
+        const command = candidates.length === 1 ? candidates[0]?.name : undefined;
         routes.push({
           module: module.name,
           method: route.method,
-          path: route.path,
+          path: joinRoutePaths(controller.path, route.path),
           controller: controller.className,
           handler: route.handler,
-          ...(route.command === undefined ? {} : { command: route.command }),
+          ...(command === undefined ? {} : { command }),
           aspects: (route.aspects ?? []).map((aspect) => aspect.name),
           ...(schemaKinds(route) ? { schemaKinds: schemaKinds(route) } : {}),
         });
@@ -210,7 +225,9 @@ export function createApplicationDevelopmentContext(graph: ApplicationGraph): Ap
   routes.sort((left, right) =>
     left.module.localeCompare(right.module, "en")
     || left.method.localeCompare(right.method, "en")
-    || left.path.localeCompare(right.path, "en"));
+    || left.path.localeCompare(right.path, "en")
+    || left.controller.localeCompare(right.controller, "en")
+    || left.handler.localeCompare(right.handler, "en"));
   commands.sort((left, right) =>
     left.module.localeCompare(right.module, "en") || left.name.localeCompare(right.name, "en"));
   jobs.sort((left, right) =>
@@ -228,10 +245,17 @@ export function createApplicationDevelopmentContext(graph: ApplicationGraph): Ap
       code: diagnostic.code,
       severity: diagnostic.severity,
       ...(executionSourceFile(diagnostic.file) ? { file: executionSourceFile(diagnostic.file) } : {}),
-      ...(diagnostic.line === undefined ? {} : { line: diagnostic.line }),
+      ...(Number.isSafeInteger(diagnostic.line) && diagnostic.line! > 0 ? { line: diagnostic.line } : {}),
       ...(repair ? { repair: { type: repair.type, readiness: repair.readiness } } : {}),
     });
   }
+
+  diagnostics.sort((left, right) =>
+    Number(right.severity === "error") - Number(left.severity === "error")
+    || (left.file ?? "").localeCompare(right.file ?? "", "en")
+    || (left.line ?? 0) - (right.line ?? 0)
+    || left.code.localeCompare(right.code, "en")
+    || JSON.stringify(left.repair ?? {}).localeCompare(JSON.stringify(right.repair ?? {}), "en"));
 
   const boundedModules = bound(developmentModules, APPLICATION_DEVELOPMENT_LIMITS.modules);
   const boundedRoutes = bound(routes, APPLICATION_DEVELOPMENT_LIMITS.routes);
@@ -283,6 +307,8 @@ export function createApplicationDevelopmentContext(graph: ApplicationGraph): Ap
 export function formatApplicationDevelopmentContext(context: ApplicationDevelopmentContext): string {
   const lines: string[] = [
     `APPLICATION ${context.schema}`,
+    `  source: ${context.source}; deploymentVerified: ${context.deploymentVerified}`,
+    `  omitted: ${Object.entries(context.omitted).filter(([, count]) => count > 0).map(([key, count]) => `${key}=${count}`).join(", ") || "none"}`,
     `  modules: ${context.modules.map((module) => module.name).join(", ") || "-"}`,
     `  resources: ${context.resources.map((resource) => `${resource.name}:${resource.kind}`).join(", ") || "-"}`,
     `  routes: ${context.routes.length}`,

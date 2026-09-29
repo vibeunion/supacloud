@@ -349,6 +349,11 @@
       "signature": "export interface DependencyGraphIndex {\n    getAffectedModules(changedFiles: string[]): string[];\n}"
     },
     {
+      "name": "DevelopmentSchemaKind",
+      "kind": "type",
+      "signature": "export type DevelopmentSchemaKind = \"opaque\" | \"declared\";"
+    },
+    {
       "name": "Diagnostic",
       "kind": "type",
       "signature": "export interface Diagnostic {\n    severity: \"error\" | \"warn\";\n    code: string;\n    message: string;\n    file?: string;\n    line?: number;\n    suggestion?: string;\n    errorCode?: string;\n    docsUrl?: string;\n    fix?: DiagnosticFix;\n}"
@@ -397,6 +402,21 @@
       "name": "ExecutionPlan",
       "kind": "type",
       "signature": "export interface ExecutionPlan {\n    module: string;\n    kind: \"route\" | \"command\" | \"job\";\n    name: string;\n    command?: string;\n    stages: string[];\n}"
+    },
+    {
+      "name": "ExecutionTimelineAttempt",
+      "kind": "type",
+      "signature": "export interface ExecutionTimelineAttempt {\n    attempt: number;\n    stages: ExecutionTimelineStage[];\n    failed: boolean;\n    complete: boolean;\n    missingStages: string[];\n    unexpectedStages: string[];\n    traceIds: string[];\n    omittedStages: number;\n}"
+    },
+    {
+      "name": "ExecutionTimelineEntry",
+      "kind": "type",
+      "signature": "export interface ExecutionTimelineEntry {\n    kind: \"route\" | \"command\" | \"job\";\n    operation: string;\n    module: string;\n    declaredStages: string[];\n    attempts: ExecutionTimelineAttempt[];\n    omittedAttempts: number;\n}"
+    },
+    {
+      "name": "ExecutionTimelineStage",
+      "kind": "type",
+      "signature": "export interface ExecutionTimelineStage {\n    stage: string;\n    phase: \"started\" | \"succeeded\" | \"failed\";\n    durationMs?: number;\n    index: number;\n}"
     },
     {
       "name": "explainGraph",

@@ -46,13 +46,15 @@ export interface ExecutionTimelineAttempt {
   attempt: number;
   stages: ExecutionTimelineStage[];
   failed: boolean;
-  /** The last declared stage (or last observed stage) succeeded. Not a business-success claim. */
+  /** The last declared stage succeeded in the matched input, before display caps. Not business success. */
   complete: boolean;
   /** Declared stages with no observation in this attempt. Absence is not proof a stage was skipped. */
   missingStages: string[];
   /** Observed stages not present in the current static plan. */
   unexpectedStages: string[];
   traceIds: string[];
+  /** Matched stage observations excluded from this attempt's displayed details. */
+  omittedStages: number;
 }
 
 export interface ExecutionTimelineEntry {
@@ -61,6 +63,8 @@ export interface ExecutionTimelineEntry {
   module: string;
   declaredStages: string[];
   attempts: ExecutionTimelineAttempt[];
+  /** Attempts excluded from this entry by the display cap. */
+  omittedAttempts: number;
 }
 
 export class ExecutionContextError extends Error {
@@ -90,7 +94,7 @@ export interface ExecutionContextPack {
     events: number; modules: number; files: number; diagnostics: number; plans: number; unmatchedEvents: number;
     timeline: number;
   };
-  /** Ordered per-operation attempt timeline derived from the retained events and the static plan. */
+  /** Per-operation timeline summarized from all matched observations, independently of display caps. */
   timeline: ExecutionTimelineEntry[];
   limits: typeof EXECUTION_CONTEXT_LIMITS;
 }
@@ -191,7 +195,7 @@ export function executionContextFromSnapshot(
 
 function buildTimeline(
   events: Array<ExecutionMetadata & { index: number; module: string }>,
-  byOperation: Map<string, ExecutionPlan[]>,
+  matchedPlans: ReadonlySet<ExecutionPlan>,
 ): { timeline: ExecutionTimelineEntry[]; omitted: number } {
   interface AttemptAccumulator {
     attempt: number;
@@ -199,12 +203,15 @@ function buildTimeline(
     observed: Set<string>;
     traceIds: Set<string>;
   }
-  const groups = new Map<string, { entry: ExecutionTimelineEntry; attempts: Map<number, AttemptAccumulator> }>();
+  const operationKey = (kind: string, operation: string, module: string) => JSON.stringify([kind, operation, module]);
+  const byOperation = new Map([...matchedPlans].map(plan => [operationKey(plan.kind, plan.name, plan.module), plan]));
+  interface TimelineGroup { entry: ExecutionTimelineEntry; attempts: Map<number, AttemptAccumulator> }
+  const groups = new Map<string, TimelineGroup>();
   for (const event of events) {
-    const key = JSON.stringify([event.kind, event.operation]);
+    const key = operationKey(event.kind, event.operation, event.module);
     let group = groups.get(key);
     if (!group) {
-      const plan = (byOperation.get(key) ?? [])[0];
+      const plan = byOperation.get(key);
       group = {
         entry: {
           kind: event.kind,
@@ -212,6 +219,7 @@ function buildTimeline(
           module: event.module,
           declaredStages: plan ? [...plan.stages] : [],
           attempts: [],
+          omittedAttempts: 0,
         },
         attempts: new Map(),
       };
@@ -233,33 +241,41 @@ function buildTimeline(
     if (event.traceId) attempt.traceIds.add(event.traceId);
   }
 
-  const ordered = [...groups.values()].sort((left, right) =>
+  const hasFailure = (attempt: AttemptAccumulator) => attempt.stages.some(stage => stage.phase === "failed");
+  const compareGroups = (left: TimelineGroup, right: TimelineGroup) =>
     left.entry.module.localeCompare(right.entry.module, "en")
     || left.entry.kind.localeCompare(right.entry.kind, "en")
-    || left.entry.operation.localeCompare(right.entry.operation, "en"));
+    || left.entry.operation.localeCompare(right.entry.operation, "en");
+  const ordered = [...groups.values()].sort((left, right) =>
+    Number([...right.attempts.values()].some(hasFailure)) - Number([...left.attempts.values()].some(hasFailure))
+    || compareGroups(left, right));
   const omitted = Math.max(0, ordered.length - EXECUTION_CONTEXT_LIMITS.timeline);
-  const timeline = ordered.slice(0, EXECUTION_CONTEXT_LIMITS.timeline).map((group): ExecutionTimelineEntry => {
+  const timeline = ordered.slice(0, EXECUTION_CONTEXT_LIMITS.timeline).sort(compareGroups).map((group): ExecutionTimelineEntry => {
     const declared = group.entry.declaredStages;
     const attempts = [...group.attempts.values()]
-      .sort((left, right) => left.attempt - right.attempt)
+      .sort((left, right) => Number(hasFailure(right)) - Number(hasFailure(left)) || left.attempt - right.attempt)
       .slice(0, EXECUTION_CONTEXT_LIMITS.timelineAttempts)
+      .sort((left, right) => left.attempt - right.attempt)
       .map((attempt): ExecutionTimelineAttempt => {
         const stages = [...attempt.stages]
-          .sort((left, right) => left.index - right.index)
-          .slice(0, EXECUTION_CONTEXT_LIMITS.timelineStages);
-        const terminal = declared.length > 0 ? declared[declared.length - 1] : stages[stages.length - 1]?.stage;
+          .sort((left, right) => Number(right.phase === "failed") - Number(left.phase === "failed") || left.index - right.index)
+          .slice(0, EXECUTION_CONTEXT_LIMITS.timelineStages)
+          .sort((left, right) => left.index - right.index);
+        const terminal = declared[declared.length - 1];
         return {
           attempt: attempt.attempt,
           stages,
-          failed: stages.some((stage) => stage.phase === "failed"),
+          failed: hasFailure(attempt),
           complete: terminal !== undefined
-            && stages.some((stage) => stage.stage === terminal && stage.phase === "succeeded"),
+            && attempt.stages.some((stage) => stage.stage === terminal && stage.phase === "succeeded"),
           missingStages: declared.filter((stage) => !attempt.observed.has(stage)),
-          unexpectedStages: [...attempt.observed].filter((stage) => !declared.includes(stage)),
+          // Unknown stages were counted, not echoed, at the correlation boundary.
+          unexpectedStages: [],
           traceIds: [...attempt.traceIds].sort(),
+          omittedStages: attempt.stages.length - stages.length,
         };
       });
-    return { ...group.entry, attempts };
+    return { ...group.entry, attempts, omittedAttempts: group.attempts.size - attempts.length };
   });
   return { timeline, omitted };
 }
@@ -307,7 +323,7 @@ function correlateSnapshot(
   const retained = [...matches].sort((left, right) =>
     Number(right.phase === "failed") - Number(left.phase === "failed") || left.index - right.index)
     .slice(0, EXECUTION_CONTEXT_LIMITS.events).sort((left, right) => left.index - right.index);
-  const timelineResult = buildTimeline(retained, byOperation);
+  const timelineResult = buildTimeline(matches, matchedPlans);
   const modules = [...context.modules].sort((left, right) =>
     Number(right.name === context.subject) - Number(left.name === context.subject) || left.name.localeCompare(right.name));
   const files = context.files.flatMap((file) => sourceFile(file) ?? []);
