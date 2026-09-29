@@ -1,0 +1,88 @@
+{
+  "en": {
+    "overview": {
+      "title": "Application engineering. Self-hosted operations.",
+      "description": "The development layer defines and compiles business modules. Lite is a single-project Bun and PGlite runtime; the full platform manages multiple projects on Pigsty. These are not three interchangeable editions.",
+      "subtitle": "Build with explicit contracts. Choose hosting for the workload.",
+      "lane": "HOSTING OPTIONS / DIFFERENT OPERATIONAL BOUNDARIES",
+      "cards": [
+        ["Application engineering", "@supacloud/app  +  @supacloud/compiler  +  @supacloud/elysia", "Business modules, static wiring, schemas and generated clients", "Business policy and object-level authorization stay application-owned"],
+        ["SupaCloud Lite", "Bun + PGlite / one project per process", "REST, Auth, Storage, Realtime, Functions", "Local development and small deployments", "No multi-project control plane or Studio"],
+        ["SupaCloud platform", "Pigsty / multiple isolated projects", "Management API, Web Console, Admin CLI", "Gateway, delivery and observability", "Shared infrastructure, operator ownership"]
+      ],
+      "note": "The development layer is not a hosting edition; this overview does not imply deployment parity."
+    },
+    "build-runtime": {
+      "title": "From application declarations to execution",
+      "description": "Application declarations pass through the compiler to generated artifacts. At runtime the Elysia host consumes compiled modules and invokes application-owned services. The host still installs Elysia; business modules need not import native Elysia types.",
+      "subtitle": "Static wiring and HTTP hosting have separate responsibilities.",
+      "compileLane": "COMPILE TIME",
+      "runtimeLane": "RUNTIME",
+      "cards": [
+        ["Application declarations", "@supacloud/app", "Modules, schemas and aspects", "Business-owned boundaries"],
+        ["Static compiler", "@supacloud/compiler", "Analysis and diagnostics", "Explicit dependency wiring"],
+        ["Generated artifacts", "Factories and route contracts", "Typed client and OpenAPI", "Runtime uses compiled modules"],
+        ["Application services", "Business policy", "Authorization and persistence", "Business acceptance tests"],
+        ["Compiled invocation", "Explicit request context", "Generated factories", "Declared governance hooks"],
+        ["HTTP host / adapter", "@supacloud/elysia", "Host still installs Elysia", "Input / output validation"]
+      ],
+      "note": "Compilation is not proof of business correctness or support for arbitrary HTTP frameworks."
+    },
+    "project-storage": {
+      "title": "One storage backend per project",
+      "description": "Storage API authorization precedes routing by trusted projectRef. Unbound projects retain platform storage; projects A and B use independent S3 endpoint, credential, physical bucket and prefix bindings. Failed bindings never fall back to other storage.",
+      "subtitle": "Project isolation, not bucket-level source selection or automatic failover.",
+      "cards": [
+        ["Storage API", "Trusted project identity", "Authorization / RLS", "Logical bucket + object"],
+        ["Project-bound router", "Resolve by projectRef", "One backend per project", "Immutable operation client"],
+        ["Unbound project", "Existing platform driver", "Existing bucket / key layout"],
+        ["Project A / S3 A", "Own endpoint and credentials", "Physical bucket + root prefix"],
+        ["Project B / S3 B", "Own endpoint and credentials", "Physical bucket + root prefix"]
+      ],
+      "note": "A configured backend failure is an error — never a fallback to platform storage."
+    }
+  },
+  "zh-CN": {
+    "overview": {
+      "title": "应用工程底座，自托管运行平台",
+      "description": "开发层负责业务模块的声明与编译。Lite 是基于 Bun 和 PGlite 的单项目运行时；完整平台在 Pigsty 上管理多个项目。它们不是三个可以直接互换的版本。",
+      "subtitle": "以明确契约组织开发，按工作负载选择运行形态。",
+      "lane": "运行形态 / 各自具有不同的运维边界",
+      "cards": [
+        ["应用工程层", "@supacloud/app  +  @supacloud/compiler  +  @supacloud/elysia", "业务模块、静态装配、Schema 与生成的客户端", "业务规则与对象级授权仍由应用负责"],
+        ["SupaCloud Lite", "Bun + PGlite / 每个进程一个项目", "REST、Auth、Storage、Realtime、Functions", "本地开发与小型部署", "不提供多项目控制面或 Studio"],
+        ["SupaCloud 完整平台", "Pigsty / 多个隔离项目", "Management API、Web Console、Admin CLI", "网关、交付与可观测性", "共享基础设施，由平台运维者管理"]
+      ],
+      "note": "开发层不是一种托管版本；本图不表示不同运行形态已具备相同的部署能力。"
+    },
+    "build-runtime": {
+      "title": "从应用声明到业务执行",
+      "description": "应用声明经过编译器生成产物。运行时，Elysia 宿主消费编译后的模块并调用应用拥有的服务。宿主仍需安装 Elysia，业务模块无需导入原生 Elysia 类型。",
+      "subtitle": "静态装配与 HTTP 托管各自承担明确职责。",
+      "compileLane": "编译时",
+      "runtimeLane": "运行时",
+      "cards": [
+        ["应用声明", "@supacloud/app", "模块、Schema 与切面", "业务拥有的模块边界"],
+        ["静态编译器", "@supacloud/compiler", "静态分析与诊断", "显式依赖装配"],
+        ["生成产物", "工厂与路由契约", "类型化客户端与 OpenAPI", "运行时使用编译后的模块"],
+        ["应用服务", "业务规则", "授权与持久化", "业务验收测试"],
+        ["编译后的调用", "显式请求上下文", "生成的工厂", "声明的治理钩子"],
+        ["HTTP 宿主 / 适配器", "@supacloud/elysia", "宿主仍需安装 Elysia", "请求与响应校验"]
+      ],
+      "note": "编译通过不等于业务正确，也不代表已支持任意 HTTP 框架。"
+    },
+    "project-storage": {
+      "title": "每个项目绑定一个存储后端",
+      "description": "Storage API 完成授权后按可信 projectRef 路由。未绑定项目保留平台存储，项目 A 和 B 分别使用具有独立 endpoint、凭据、物理桶和前缀的 S3 绑定。绑定故障不会回退到其他存储。",
+      "subtitle": "实现项目隔离，而非桶级来源选择或自动故障切换。",
+      "cards": [
+        ["Storage API", "可信项目身份", "鉴权 / RLS", "逻辑桶 + 对象"],
+        ["项目级存储路由", "按 projectRef 解析", "每个项目一个后端", "每次操作使用不可变客户端"],
+        ["未绑定项目", "沿用平台存储驱动", "保留原有桶与对象路径布局"],
+        ["项目 A / S3 A", "独立 endpoint 与凭据", "物理桶 + 根前缀"],
+        ["项目 B / S3 B", "独立 endpoint 与凭据", "物理桶 + 根前缀"]
+      ],
+      "note": "已绑定后端发生故障时返回错误，不会回退到平台存储。"
+    }
+  }
+}
