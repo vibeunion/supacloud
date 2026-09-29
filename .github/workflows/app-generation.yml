@@ -8,6 +8,11 @@ on:
       - "packages/compiler/**"
       - "packages/elysia/**"
       - "packages/contracts/**"
+      - "packages/commands/**"
+      - "packages/db/**"
+      - "packages/delivery/**"
+      - "scripts/lib/starter-*.ts"
+      - "scripts/check-elysia-compatibility.mjs"
       - "scripts/check_app_generation.ts"
       - "scripts/check_app_starter.ts"
       - ".github/workflows/app-generation.yml"
@@ -39,6 +44,7 @@ jobs:
         working-directory: packages/cli
         run: |
           bun run typecheck
-          bun test src/shared/tools/app-scaffold-writes.test.ts src/shared/tools/app-resource-generation.test.ts src/shared/tools/app-tools.test.ts
+          bun test src/shared/tools/app-scaffold-writes.test.ts src/shared/tools/app-resource-generation.test.ts src/shared/tools/app-tools.test.ts src/shared/tools/app-starter-composition.test.ts
       - name: Keep the exact Elysia beta policy intact
+        if: ${{ !cancelled() }}
         run: node scripts/check-elysia-compatibility.mjs

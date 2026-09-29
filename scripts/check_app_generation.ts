@@ -65,13 +65,10 @@ try {
     await writeFile(join(project, "package.json"), JSON.stringify(generatedManifest, null, 2));
     await installStarterConsumer(project, run);
 
-    // A composition root may import features; one feature must not import another.
-    // This fixture adds a root, rather than weakening the starter boundary rules.
-    await writeFile(join(project, "src/app.module.ts"), `import { Module } from "@supacloud/app";
-import { OrdersFeature } from "./orders/orders";
-@Module({ name: "application-root", tags: ["type:app"], imports: [OrdersFeature] })
-export class AppModule {}
-`);
+    // Use the composition root shipped by the packed CLI, never a test-only root.
+    const starterRoot = await readFile(join(project, "src/app.module.ts"), "utf8");
+    assert.ok(starterRoot.includes("OrdersFeature"));
+    assert.ok(starterRoot.includes('tags: ["type:app"]'));
     const generation = [cli, "app", "generate", "--kind", "resource", "--name", "inventory", "--register-in", "src/app.module.ts", "--format", "json"];
     const parent = await readFile(join(project, "src/app.module.ts"), "utf8");
     const preview = JSON.parse(await run([...generation, "--dry-run"]));
@@ -98,7 +95,8 @@ export class AppModule {}
     const context = JSON.parse(await run([cli, "app", "context", "--target", "InventoryService", "--format", "json"]));
     assert.ok(context.files.some((file: string) => file.endsWith("inventory.service.ts")));
     await run(["run", "typecheck"]);
-    await run(["test", "src/features/inventory"]);
+    // Include the starter's own tests; an added root must not orphan its feature.
+    await run(["run", "test"]);
     await run(["run", "build"]);
 
     await writeFile(join(project, "scripts/verify-generated-resource.ts"), `import { strict as assert } from "node:assert";
@@ -128,7 +126,7 @@ assert.equal(unavailable.status, 500);
 assert.ok(!(await unavailable.text()).includes("Implement InventoryService"));
 let calls = 0;
 // Test double on this test-owned instance only. No generated business file changes.
-service.find = id => { calls++; return { id }; };
+service.find = async id => { calls++; return { id }; };
 const invalid = await app.handle(new Request("http://localhost/inventory/%20"));
 assert.equal(invalid.status, 422);
 assert.equal(calls, 0);
@@ -136,6 +134,11 @@ const accepted = await app.handle(new Request("http://localhost/inventory/exampl
 assert.equal(accepted.status, 200);
 assert.deepEqual(await accepted.json(), { id: "example" });
 assert.equal(calls, 1);
+service.find = async () => { calls++; throw new Error("private async read failure"); };
+const failed = await app.handle(new Request("http://localhost/inventory/example"));
+assert.equal(failed.status, 500);
+assert.ok(!(await failed.text()).includes("private async read failure"));
+assert.equal(calls, 2);
 const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: request => app.handle(request) });
 try {
     const response = await fetch(new URL("/native-generation-probe", server.url), { signal: AbortSignal.timeout(5000) });
@@ -145,12 +148,72 @@ console.log("Packed resource: real compiled DI/routes, fail-closed placeholder, 
 `);
     await run(["run", "typecheck"]);
     console.log(await run(["scripts/verify-generated-resource.ts"]));
+    // Verify the shipped built application, not just one hand-mounted module.
+    await writeFile(join(project, "scripts/verify-built-application.mjs"), `import { strict as assert } from "node:assert";
+import { createApp } from "../dist/application.js";
+
+const app = createApp({
+    deps: {},
+    requestContext: () => ({}),
+    commandGovernance: { authorize: () => { throw new Error("No command is authorized by this read-only test"); } },
+});
+const server = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: request => app.handle(request) });
+try {
+    const request = path => fetch(new URL(path, server.url), { signal: AbortSignal.timeout(5000) });
+    const health = await request("/orders/health");
+    assert.equal(health.status, 200);
+    assert.deepEqual(await health.json(), { ok: true });
+    const placeholder = await request("/inventory/example");
+    assert.equal(placeholder.status, 500);
+    assert.ok(!(await placeholder.text()).includes("Implement InventoryService"));
+    assert.equal((await request("/inventory/%20")).status, 422);
+} finally { await server.stop(true); }
+console.log("Built consumer factory: original and generated routes served together; async placeholder remained fail-closed");
+`);
+    console.log(await run(["scripts/verify-built-application.mjs"]));
+    const beforeInspect = await readFile(join(project, "generated/application.ts"), "utf8");
+    const inspection = await run(["run", "inspect"]);
+    assert.ok(inspection.includes('"application-root"'));
+    assert.ok(inspection.includes('"inventory"'));
+    assert.equal(await readFile(join(project, "generated/application.ts"), "utf8"), beforeInspect);
+
+    // Artifact drift must fail with machine-readable diagnostics and no repair.
+    const driftPath = join(project, "generated/application.ts");
+    const drifted = beforeInspect + "\n// test-owned artifact drift\n";
+    await writeFile(driftPath, drifted);
+    const drift = JSON.parse(await run([cli, "app", "check", "--format", "json"], project, false));
+    assert.equal(drift.ok, false);
+    assert.deepEqual(drift.written, []);
+    assert.ok(drift.mismatches.length > 0);
+    assert.equal(await readFile(driftPath, "utf8"), drifted);
+    await writeFile(driftPath, beforeInspect);
+
     // Compile/check/graph must agree even with a non-default generated directory.
     const custom = "candidate-generated";
     assert.equal(JSON.parse(await run([cli, "app", "compile", "--out_dir", custom, "--format", "json"])).ok, true);
     const graph = JSON.parse(await run([cli, "app", "graph", "--out_dir", custom, "--format", "json"]));
     assert.ok(graph.modules.some((module: { name: string }) => module.name === "inventory"));
-    console.log("Packed CLI generation acceptance passed; no deployment or production persistence was exercised.");
+    // The other lightweight template shares the root-generation code. Exercise
+    // its real graph too, without scheduling or claiming any background job.
+    const edge = join(temporary, "edge-project");
+    await run([cli, "app", "init", "--root", edge, "--name", "edge-generation-acceptance", "--template", "edge"], runner);
+    const edgeManifestPath = join(edge, "package.json");
+    const edgeManifest = JSON.parse(await readFile(edgeManifestPath, "utf8"));
+    assert.equal(edgeManifest.dependencies.elysia, "2.0.0-beta.19");
+    for (const group of ["dependencies", "devDependencies"]) {
+        for (const name of Object.keys(edgeManifest[group] ?? {})) {
+            if (overrides[name]) edgeManifest[group][name] = overrides[name];
+        }
+    }
+    edgeManifest.overrides = overrides;
+    await writeFile(edgeManifestPath, JSON.stringify(edgeManifest, null, 2));
+    await installStarterConsumer(edge, run);
+    await run(["run", "check"], edge);
+    await run(["run", "build"], edge);
+    const edgeInspection = await run(["run", "inspect"], edge);
+    assert.ok(edgeInspection.includes('"application-root"'));
+    assert.ok(edgeInspection.includes('"sync"'));
+    console.log("Packed HTTP/edge roots, async resource, built application and read-only inspection passed; no deployment or production persistence was exercised.");
 } finally {
     process.removeListener("SIGINT", interrupt);
     process.removeListener("SIGTERM", interrupt);

@@ -17,7 +17,7 @@ import type { ${className}Result } from "./${name}.model";
 
 @Injectable()
 export class ${className}Service {
-    find(_id: string): ${className}Result {
+    async find(_id: string): Promise<${className}Result> {
         // Supply your project's authorized read port before exposing this route.
         // Writes must use a governed Command; this scaffold never fakes persistence.
         throw new Error("Implement ${className}Service.find before exposing this resource");
@@ -33,7 +33,7 @@ export class ${className}Controller {
     constructor(@Inject(${className}Service) readonly service: ${className}Service) {}
 
     @Get("/:id", { params: ${className}Params, responses: { 200: ${className}Response } })
-    find(@Param("id") id: string): ${className}Result {
+    find(@Param("id") id: string): Promise<${className}Result> {
         return this.service.find(id);
     }
 }
@@ -53,18 +53,24 @@ export class ${className}Module {}
         [`${name}.service.test.ts`]: `import { expect, test } from "bun:test";
 import { ${className}Service } from "./${name}.service";
 
-test("${name} does not claim a read adapter has been implemented", () => {
-    expect(() => new ${className}Service().find("example"))
-        .toThrow("Implement ${className}Service.find");
+test("${name} does not claim a read adapter has been implemented", async () => {
+    await expect(new ${className}Service().find("example"))
+        .rejects.toThrow("Implement ${className}Service.find");
 });
 `,
         [`${name}.controller.test.ts`]: `import { expect, test } from "bun:test";
 import { ${className}Controller } from "./${name}.controller";
 
-test("${name} controller delegates to the supplied read port", () => {
+test("${name} controller delegates to the supplied asynchronous read port", async () => {
     // Unit-test double only; the generated runtime service remains fail-closed.
-    const controller = new ${className}Controller({ find: (id) => ({ id }) });
-    expect(controller.find("example")).toEqual({ id: "example" });
+    const controller = new ${className}Controller({ find: async (id) => ({ id }) });
+    expect(await controller.find("example")).toEqual({ id: "example" });
+});
+
+test("${name} controller preserves an asynchronous read failure", async () => {
+    const failure = new Error("read port unavailable");
+    const controller = new ${className}Controller({ find: async () => { throw failure; } });
+    await expect(controller.find("example")).rejects.toBe(failure);
 });
 `,
     };
