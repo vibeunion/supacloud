@@ -4,6 +4,7 @@ import { copyFile, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { initializeAppProject } from "../packages/cli/src/shared/tools/app-starter";
+import { renderStarterRuntimeRolesSchema } from "../packages/cli/src/shared/tools/app-starter-roles";
 import { buildDeliveryProject, compileProject, compileOptionsFromConfig, loadSupacloudConfig } from "../packages/compiler/src";
 import { readDeliveryExecutableArchive } from "../packages/delivery/src";
 
@@ -14,6 +15,11 @@ const output = await mkdtemp(join(tmpdir(), "supacloud-platform-business-"));
 const project = join(output, "project");
 try {
   await initializeAppProject({ root: project, name: "platform-business-acceptance" });
+  const rolePrefix = process.env.SUPACLOUD_BUSINESS_ROLE_PREFIX;
+  if (rolePrefix) {
+    await writeFile(join(project, "migrations/004-review-runtime-roles.sql"),
+      renderStarterRuntimeRolesSchema(`${rolePrefix}_http`, `${rolePrefix}_worker`));
+  }
   const dependencies = new Map<string, string>();
   for (const name of ["app", "elysia", "contracts", "commands", "db", "compiler", "delivery", "js"]) {
     const directory = join(repo, "packages", name === "js" ? "supacloud-js" : name);
@@ -78,6 +84,7 @@ try {
     source: "shipped-review-starter",
     dependencies: "workspace-builds-not-published-packages",
     bun: Bun.version,
+    ...(rolePrefix ? { runtimeGroups: { http: `${rolePrefix}_http`, worker: `${rolePrefix}_worker` } } : {}),
     manifestSha256: createHash("sha256").update(await readFile(manifestPath)).digest("hex"),
     objects: archive.objects.map(({ object }) => ({ name: object.name, objectId: object.objectId })),
     upgraded: upgraded.objects.map(({ object }) => ({ name: object.name, objectId: object.objectId })),

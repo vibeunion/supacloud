@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { SQL } from "bun";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import {
   applicationReleaseId, parseApplicationConfigurationWrite, parseApplicationReadinessReport,
   parseApplicationReleaseRecord, parseApplicationRuntimeIdentity, readDeliveryExecutableArchive,
@@ -24,10 +24,14 @@ export interface BusinessManagementInput {
   applicationId?: string;
   environmentId?: string;
   ca?: string;
+  runtimeGroups?: { http: string; worker: string };
+  privateReceiptPath?: string;
 }
 
 export function businessManagementSettings(input: BusinessManagementInput, env = process.env) {
   assert.equal(env.SUPACLOUD_BUSINESS_MANAGEMENT_TEST, "1", "Explicit management acceptance opt-in required");
+  assert.ok(!("resume" in input) && !("configurationId" in input),
+    "Automatic resume is unsupported; use explicit recovery with retained request identities");
   assert.equal(env.SUPACLOUD_TEST_PROJECT_REF, input.ref, "Owned acceptance project mismatch");
   assert.match(input.ref, /^[a-z0-9]{10,20}$/);
   assert.ok(input.manifestPath && input.verifierExecutable && input.ownerToken && input.managementToken);
@@ -35,6 +39,10 @@ export function businessManagementSettings(input: BusinessManagementInput, env =
   const applicationId = input.applicationId ?? "business-management";
   const environmentId = input.environmentId ?? "acceptance";
   for (const id of [applicationId, environmentId]) assert.match(id, /^[A-Za-z0-9_-]{1,64}$/);
+  if (input.runtimeGroups) {
+    assert.notEqual(input.runtimeGroups.http, input.runtimeGroups.worker);
+    for (const name of Object.values(input.runtimeGroups)) assert.match(name, /^[a-z_][a-z0-9_]{0,62}$/);
+  }
   const inspection = parsePostgresUrl(input.inspectionDatabaseUrl);
   assert.equal(inspection.database, `supa_${input.ref}`, "Inspection must already target the owned tenant");
   for (const target of [input.environment.api, input.environment.jobs]) {
@@ -77,6 +85,7 @@ export function businessManagementVerifierPolicy(
     http_role: parsePostgresUrl(input.environment.api.DATABASE_URL!).username,
     worker_role: parsePostgresUrl(input.environment.jobs.DATABASE_URL!).username,
     inspection: { url: input.inspectionDatabaseUrl }, identity_token: input.ownerToken,
+    ...(input.runtimeGroups ? { runtime_groups: input.runtimeGroups } : {}),
     ...(input.ca ? { ca: input.ca } : {}),
   };
 }
@@ -133,14 +142,81 @@ async function privateInstall(parts: string[], binary: string, policy: StarterCo
     bytes = await source.readFile();
     assert.equal(bytes.subarray(0, 4).toString("hex"), "7f454c46", "Compiled Linux verifier required");
   } finally { await source.close(); }
-  await writeFile(join(directory, "verify"), bytes!, { flag: "wx", mode: 0o755 });
+  const verifierPath = join(directory, "verify");
+  await writeFile(verifierPath, bytes!, { flag: "wx", mode: 0o755 });
   await writeFile(join(directory, "starter-policy.json"), JSON.stringify(policy), { flag: "wx", mode: 0o600 });
+}
+
+export async function managementResponse(response: Response) {
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw Object.assign(new Error("Management request failed"), {
+      code: "MANAGEMENT_HTTP_ERROR", status: response.status,
+    });
+  }
+  return response.json();
+}
+
+const FAILURE_PHASES = new Set([
+  "preflight", "tenant-guard", "command-persistence", "project-migrations", "operator-provisioning",
+  "storage-bucket", "oauth-client", "gotrue-identity", "runtime-roles", "default-activation",
+  "gateway-business-workflow", "project-guard", "upload", "migration-ledger", "private-receipt",
+  "verifier-install", "configuration", "activation", "reconcile", "runtime", "gateway",
+]);
+const FAILURE_CODES = new Set([
+  "ERR_ASSERTION", "MANAGEMENT_HTTP_ERROR", "EEXIST", "ENOENT", "ECONNREFUSED", "ETIMEDOUT",
+  "ABORT_ERR", "23505", "42710", "42P01", "42501", "28P01", "08006", "57014",
+]);
+const RECEIPT_ID_PATTERNS: Record<string, RegExp> = {
+  project_ref: /^[a-z0-9]{10,20}$/,
+  application_id: /^[A-Za-z0-9_-]{1,64}$/,
+  environment_id: /^[A-Za-z0-9_-]{1,64}$/,
+  activation_id: /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i,
+  configuration_id: /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i,
+  release_id: /^[a-f0-9]{64}$/,
+};
+
+export function businessManagementFailure(
+  error: unknown, phase: string, ids: Record<string, unknown> = {},
+) {
+  const details = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const code = [details.errno, details.code].find(value => typeof value === "string" && FAILURE_CODES.has(value));
+  const status = details.status;
+  const identity = Object.fromEntries(Object.entries(RECEIPT_ID_PATTERNS).flatMap(([key, pattern]) =>
+    typeof ids[key] === "string" && pattern.test(ids[key]) ? [[key, ids[key]]] : []));
+  return {
+    status: "FAIL" as const, phase: FAILURE_PHASES.has(phase) ? phase : "preflight", ...identity,
+    code: code ?? (details.name === "TimeoutError" ? "TIMEOUT" : "ACCEPTANCE_FAILED"),
+    ...(typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599
+      ? { http_status: status } : {}),
+  };
+}
+
+/** A create-only private journal binds both requests before any remote mutation. */
+export async function persistBusinessEffectReceipt(
+  path: string,
+  ids: { project_ref: string; application_id: string; environment_id: string; release_id: string;
+    activation_id: string; configuration_id: string },
+  configuration: ReturnType<typeof businessManagementSettings>["configuration"],
+) {
+  assert.ok(isAbsolute(path), "Absolute private receipt path required");
+  assert.equal(configuration.configuration_id, ids.configuration_id);
+  const activation = { activation_id: ids.activation_id, release_id: ids.release_id,
+    configuration_id: ids.configuration_id, expected_activation_id: null };
+  const file = await open(path, "wx", 0o600);
+  try {
+    await file.writeFile(JSON.stringify({ schema: "supacloud.platform-business-effect-receipt.v1",
+      ...ids, configuration_request: configuration, activation_request: activation }));
+    await file.sync();
+  } finally { await file.close(); }
+  return activation;
 }
 
 /** Real loopback Management API only. No adapters, migration writes or supervisor commands. */
 export async function runPlatformBusinessManagement(input: BusinessManagementInput) {
   input = structuredClone(input);
   const settings = businessManagementSettings(input);
+  assert.ok(input.privateReceiptPath && isAbsolute(input.privateReceiptPath), "Absolute private receipt path required");
   assert.equal(process.platform, "linux", "VM-only fixture");
   assert.equal(process.getuid?.(), 0, "Root required for the private verifier installation");
   const { applicationId, environmentId, host, configuration, inspection } = settings;
@@ -162,8 +238,7 @@ export async function runPlatformBusinessManagement(input: BusinessManagementInp
         ...(!multipart && body !== undefined ? { "content-type": "application/json" } : {}) },
       ...(body === undefined ? {} : { body: multipart ? body : JSON.stringify(body) }),
     });
-    assert.ok(response.ok, `Management request failed (${response.status})`);
-    return response.json();
+    return managementResponse(response);
   }
   try {
     const project = await call("GET", projectPath);
@@ -188,6 +263,11 @@ export async function runPlatformBusinessManagement(input: BusinessManagementInp
     ]);
     const digest = stableSha256(archive.manifest);
     releaseId = applicationReleaseId(input.ref, applicationId, digest);
+    phase = "private-receipt";
+    const activationRequest = await persistBusinessEffectReceipt(
+      input.privateReceiptPath, { ...ids, release_id: releaseId }, configuration,
+    );
+    phase = "upload";
     const form = new FormData();
     form.set("manifest", JSON.stringify(archive.manifest));
     form.set("expected_objects", JSON.stringify(Object.fromEntries(
@@ -222,15 +302,15 @@ export async function runPlatformBusinessManagement(input: BusinessManagementInp
     phase = "activation";
     let activationAcknowledged = false;
     try {
-      const activated = await call("POST", `${environmentPath}/activations`, {
-        activation_id: activationId, release_id: releaseId,
-        configuration_id: configuration.configuration_id, expected_activation_id: null,
-      });
+      const activated = await call("POST", `${environmentPath}/activations`, activationRequest);
       assert.equal(activated.activation_id, activationId);
       assert.equal(activated.release_id, releaseId);
       activationAcknowledged = true;
-    } catch {
-      // A lost receipt is not authorization to replay activation effects.
+    } catch (error) {
+      // Leave uncertain activation for explicit recovery with the persisted identity.
+      return { ...businessManagementFailure(error, phase, { ...ids, release_id: releaseId }),
+        status: "PARTIAL" as const, code: "ACTIVATION_OUTCOME_UNKNOWN",
+        activationAttempted: true, activationAcknowledged: false };
     }
     phase = "reconcile";
     const reconciled = await call("POST", `${environmentPath}/activations/${activationId}/reconcile`, {});
@@ -264,8 +344,8 @@ export async function runPlatformBusinessManagement(input: BusinessManagementInp
     return { status: "PASS" as const, ...ids, release_id: releaseId, host, activationAcknowledged,
       defaultComposition: true, reconciled: true, gatewayIdentity: true,
       retention: "Runtime, route, verifier and private policy retained; launcher must not delete their roles/OAuth dependencies." };
-  } catch {
-    throw new Error(JSON.stringify({ status: "FAIL", phase, ...ids, release_id: releaseId,
-      retention: "Retain runtime, route, verifier, policy and dependencies for observation; do not retry blindly." }));
+  } catch (error) {
+    return { ...businessManagementFailure(error, phase, { ...ids, release_id: releaseId }),
+      retention: "Retain runtime, route, verifier, policy and dependencies for observation; do not retry blindly." };
   } finally { await database.close({ timeout: 2 }); }
 }

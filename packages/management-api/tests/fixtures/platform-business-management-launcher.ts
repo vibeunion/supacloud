@@ -10,12 +10,15 @@ import { buildDeliveryMigrationPlan, readDeliveryExecutableArchive, readDelivery
 import { COMMAND_PERSISTENCE_SQL } from "../../../db/src/command-schema";
 import { parsePostgresUrl } from "../../src/utils/postgres-url";
 import {
+  businessManagementFailure, managementResponse,
   requireBusinessManagementProject, runPlatformBusinessManagement, type BusinessManagementInput,
 } from "./platform-business-management";
 import { runPlatformBusinessWorkflow } from "./platform-business-workflow-smoke";
 
 export function defaultManagementLauncherSettings(env = process.env) {
   assert.equal(env.SUPACLOUD_BUSINESS_MANAGEMENT_TEST, "1", "Explicit management acceptance opt-in required");
+  assert.ok(!env.SUPACLOUD_BUSINESS_RESUME_ROOT && env.SUPACLOUD_BUSINESS_RESUME_PROVISIONING !== "1",
+    "Provisioning resume is unsupported; retain private inputs for explicit recovery");
   const ref = env.SUPACLOUD_TEST_PROJECT_REF;
   assert.equal(ref, "ttzatqixbiaxhyratbvh", "Dedicated default-management project required");
   for (const key of ["DATABASE_URL", "MASTER_TOKEN", "SUPACLOUD_BUSINESS_ARCHIVE",
@@ -23,9 +26,12 @@ export function defaultManagementLauncherSettings(env = process.env) {
   for (const key of ["SUPACLOUD_BUSINESS_ARCHIVE", "SUPACLOUD_BUSINESS_VERIFIER", "NODE_EXTRA_CA_CERTS"]) {
     assert.ok(isAbsolute(env[key]!), `Absolute ${key} required`);
   }
+  const rolePrefix = env.SUPACLOUD_BUSINESS_ROLE_PREFIX ?? `starter_${ref}`;
+  assert.match(rolePrefix, /^[a-z_][a-z0-9_]{0,49}$/, "Invalid role prefix");
   return {
     ref, manifestPath: env.SUPACLOUD_BUSINESS_ARCHIVE!, verifier: env.SUPACLOUD_BUSINESS_VERIFIER!,
     caPath: env.NODE_EXTRA_CA_CERTS!, databaseUrl: env.DATABASE_URL!, managementToken: env.MASTER_TOKEN!,
+    rolePrefix,
   };
 }
 
@@ -41,6 +47,16 @@ export function managementSetupMigrationPlan(archive: DeliveryMigrationArchive,
   assert.ok(inventory.every(row => plan.migrations.some(entry =>
     entry.version === row.version && entry.status === "ledger-match")), "Unexpected migration in setup inventory");
   return plan;
+}
+
+export function assertStarterStorageBucket(bucket: {
+  public?: unknown;
+  file_size_limit?: unknown;
+  allowed_mime_types?: unknown;
+}) {
+  assert.equal(bucket.public, false);
+  assert.equal(Number(bucket.file_size_limit), 1048576);
+  assert.deepEqual(bucket.allowed_mime_types, ["text/plain"]);
 }
 
 async function oauthToken(client: SupabaseClient, issuer: string, clientId: string, callback: string) {
@@ -84,14 +100,14 @@ export async function runDefaultManagementLauncher(env = process.env) {
   assert.equal(process.getuid?.(), 0);
   assert.equal(hostname(), "supacloud-delivery-acceptance-0926");
   const { ref } = settings;
+  const runtimeGroups = { http: `${settings.rolePrefix}_http`, worker: `${settings.rolePrefix}_worker` };
   const request = async (suffix: string, body?: unknown) => {
     const response = await fetch(`http://127.0.0.1:9090/v1/projects/${ref}${suffix}`, {
       method: body === undefined ? "GET" : "POST", redirect: "error", signal: AbortSignal.timeout(120000),
       headers: { authorization: `Bearer ${settings.managementToken}`, "content-type": "application/json" },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    assert.ok(response.ok, `Management status ${response.status}`);
-    return response.json();
+    return managementResponse(response);
   };
   assert.ok(requireBusinessManagementProject(await request(""), ref), "Project not ready");
   await readDeliveryExecutableArchive(settings.manifestPath);
@@ -127,8 +143,8 @@ export async function runDefaultManagementLauncher(env = process.env) {
     );
     if (existing.relation) {
       assert.equal(env.SUPACLOUD_BUSINESS_RESUME_SETUP, "1");
-      const [bindings] = await database`SELECT count(*)::int AS count FROM public.starter_application`;
-      assert.equal(bindings.count, 0, "Provisioned tenant must use retained inputs; never replay activation");
+      const bindings = await database`SELECT project_id,tenant_id FROM public.starter_application`;
+      assert.equal(bindings.length, 0, "Provisioned tenant must use retained inputs; never replay activation");
     }
     phase = "command-persistence";
     await database.begin(tx => tx.unsafe(COMMAND_PERSISTENCE_SQL));
@@ -146,6 +162,13 @@ export async function runDefaultManagementLauncher(env = process.env) {
     assert.ok(managementSetupMigrationPlan(migrationArchive, readback.migrations, ref, true)
       .migrations.every(entry => entry.status === "ledger-match"));
     phase = "operator-provisioning";
+    const reserved = await database`SELECT rolname FROM pg_roles
+      WHERE rolname IN (${runtimeGroups.http},${runtimeGroups.worker})`;
+    assert.equal(reserved.length, 0, "Existing runtime groups require explicit recovery");
+    const roleMigration = migrations.find(entry => entry.executor === "operator-provisioning"
+      && entry.name === "review_runtime_roles");
+    assert.ok(roleMigration?.sql.includes(`CREATE ROLE ${runtimeGroups.http} `)
+      && roleMigration.sql.includes(`CREATE ROLE ${runtimeGroups.worker} `), "Build a project-scoped role archive");
     await database.begin(async tx => {
       for (const migration of migrations.filter(entry => entry.executor === "operator-provisioning")) {
         await tx.unsafe(migration.sql);
@@ -156,6 +179,24 @@ export async function runDefaultManagementLauncher(env = process.env) {
     const origin = `https://${ref}.api.localhost`, issuer = `${origin}/auth/v1`;
     const sdkOptions = { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false } };
     const admin = createClient(origin, project.service_role_key, sdkOptions);
+    phase = "storage-bucket";
+    const existingBucket = await admin.storage.getBucket("review-attachments");
+    evidence.storageBucket = existingBucket.error
+      ? { status: existingBucket.error.status }
+      : {
+        public: existingBucket.data?.public,
+        file_size_limit: existingBucket.data?.file_size_limit,
+        allowed_mime_types: existingBucket.data?.allowed_mime_types,
+      };
+    if (existingBucket.error) {
+      assert.match(String(existingBucket.error.message), /not found|does not exist/i);
+      const bucket = await admin.storage.createBucket("review-attachments", {
+        public: false, fileSizeLimit: 1048576, allowedMimeTypes: ["text/plain"],
+      });
+      assert.equal(bucket.error, null);
+    } else {
+      assertStarterStorageBucket(existingBucket.data ?? {});
+    }
     phase = "oauth-client";
     const callback = "https://acceptance.example.com/callback";
     const client = await request("/auth/oauth-clients", {
@@ -166,6 +207,7 @@ export async function runDefaultManagementLauncher(env = process.env) {
     assert.ok(typeof client.client_id === "string");
     const clientId = client.client_id;
     const tokens: string[] = [];
+    const workerId = `management-${crypto.randomUUID()}`;
     evidence.clientId = clientId;
     const subjects: string[] = [];
     evidence.subjects = subjects;
@@ -187,11 +229,12 @@ export async function runDefaultManagementLauncher(env = process.env) {
     const connections: Record<string, string> = {};
     const roles: string[] = [];
     evidence.roles = roles;
-    for (const kind of ["http", "worker"]) {
-      const role = `management_${kind}_${randomBytes(6).toString("hex")}`;
+    for (const kind of ["http", "worker"] as const) {
+      const role = `${settings.rolePrefix}_login_${kind}`;
       const password = randomBytes(32).toString("hex");
+      // CREATE fails on collisions; never adopt or rotate an existing LOGIN.
       await database.unsafe(`CREATE ROLE "${role}" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE
-        NOREPLICATION NOBYPASSRLS PASSWORD '${password}' IN ROLE starter_review_${kind}`);
+        NOREPLICATION NOBYPASSRLS PASSWORD '${password}' IN ROLE ${runtimeGroups[kind]}`);
       roles.push(role);
       await database.unsafe(`GRANT CONNECT ON DATABASE "supa_${ref}" TO "${role}"`);
       const url = new URL(inspection);
@@ -199,7 +242,6 @@ export async function runDefaultManagementLauncher(env = process.env) {
       url.password = password;
       connections[kind] = url.href;
     }
-    const workerId = `management-${crypto.randomUUID()}`;
     const common = {
       NODE_EXTRA_CA_CERTS: settings.caPath, NO_PROXY: "*", APP_TENANT_ID: `business-${ref}`,
       SUPACLOUD_PROJECT_ID: ref, SUPACLOUD_URL: origin, SUPACLOUD_SERVICE_ROLE_KEY: String(project.service_role_key),
@@ -208,6 +250,8 @@ export async function runDefaultManagementLauncher(env = process.env) {
       ref, manifestPath: settings.manifestPath, verifierExecutable: settings.verifier, expectedRevision: 1,
       ownerToken: tokens[0]!, managementToken: settings.managementToken,
       inspectionDatabaseUrl: inspection.href, ca: await readFile(settings.caPath, "utf8"),
+      runtimeGroups,
+      privateReceiptPath: join(root, "private-effects.json"),
       environment: {
         api: { ...common, DATABASE_URL: connections.http!, REVIEW_ATTACHMENTS: "enabled",
           SUPAUTH_ISSUER: issuer, SUPAUTH_AUDIENCE: "authenticated", SUPAUTH_CLIENT_ID: clientId,
@@ -236,13 +280,7 @@ export async function runDefaultManagementLauncher(env = process.env) {
     await writeFile(join(root, "receipt.json"), JSON.stringify(receipt), { mode: 0o600 });
     return receipt;
   } catch (error) {
-    const details = error && typeof error === "object" ? error as Record<string, unknown> : {};
-    const code = typeof details.errno === "string" && /^[0-9A-Z]{5}$/.test(details.errno)
-      ? details.errno
-      : typeof details.code === "string" && /^(?:[0-9A-Z]{5}|ERR_ASSERTION)$/.test(details.code)
-        ? details.code : "ACCEPTANCE_FAILED";
-    const receipt = { status: "FAIL", phase, evidence, root,
-      code,
+    const receipt = { ...businessManagementFailure(error, phase, { project_ref: ref }), root,
       retention: "Retain all dependencies and private inputs; do not replay uncertain effects." };
     await writeFile(join(root, "receipt.json"), JSON.stringify(receipt), { mode: 0o600 });
     return receipt;
