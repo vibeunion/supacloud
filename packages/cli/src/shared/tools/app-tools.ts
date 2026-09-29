@@ -285,7 +285,7 @@ async function generateScaffold(args: AppToolArguments): Promise<ToolResult> {
         let importPath = relative(dirname(target), resolve(root, modulePath)).replaceAll("\\", "/").replace(/\.ts$/, "");
         if (!importPath.startsWith(".")) importPath = `./${importPath}`;
         const edit = await applyDiagnosticFix({
-            type: "add_module_import", targetFile: args.register_in, importPath, symbol: moduleSymbol,
+            type: "add_module_import", targetFile: args.register_in, module: requireIdentifier(args.name, "name"), importPath, symbol: moduleSymbol,
         }, { rootDir: root, dryRun: true });
         if (await readFile(target, "utf8") !== original) throw new ScaffoldError("SCAFFOLD_CHANGED", "Registration source changed during planning");
         writes.push({ path: args.register_in, content: edit.content, expected: original });

@@ -68,8 +68,8 @@ try {
     // A composition root may import features; one feature must not import another.
     // This fixture adds a root, rather than weakening the starter boundary rules.
     await writeFile(join(project, "src/app.module.ts"), `import { Module } from "@supacloud/app";
-import { OrdersModule } from "./orders/orders";
-@Module({ name: "application-root", tags: ["type:app"], imports: [OrdersModule] })
+import { OrdersFeature } from "./orders/orders";
+@Module({ name: "application-root", tags: ["type:app"], imports: [OrdersFeature] })
 export class AppModule {}
 `);
     const generation = [cli, "app", "generate", "--kind", "resource", "--name", "inventory", "--register-in", "src/app.module.ts", "--format", "json"];
