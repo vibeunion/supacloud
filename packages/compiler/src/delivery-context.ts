@@ -3,7 +3,7 @@ import { readDeliverySelection, readVerifiedDeliveryFiles } from "./delivery-art
 import { executionContextFromSnapshot, EXECUTION_CONTEXT_LIMITS, ExecutionContextError, type ExecutionContextPack } from "./execution-context";
 import { parseExecutionSnapshot } from "./execution-snapshot";
 import {
-  APPLICATION_DEVELOPMENT_LIMITS,
+  APPLICATION_DEVELOPMENT_ARCHIVE_MAX_BYTES,
   parseApplicationDevelopmentContext,
   type ApplicationDevelopmentContext,
 } from "./application-development";
@@ -44,9 +44,27 @@ export async function readApplicationDevelopmentContext(
     object = found;
     if (!planned) throw invalid();
     const path = "bundle/application-development.json";
+    const metadata = object.files.find(file => file.path === path);
+    if (!metadata || metadata.bytes > APPLICATION_DEVELOPMENT_ARCHIVE_MAX_BYTES) throw new Error("Invalid development context.");
     const content = (await readVerifiedDeliveryFiles(root, object, planned, new Set([path]))).get(path);
-    if (!content || content.length > APPLICATION_DEVELOPMENT_LIMITS.outputBytes * 8) throw new Error("Invalid development context.");
-    context = parseApplicationDevelopmentContext(JSON.parse(content.toString("utf8")));
+    if (!content || content.length > APPLICATION_DEVELOPMENT_ARCHIVE_MAX_BYTES) throw new Error("Invalid development context.");
+    context = parseApplicationDevelopmentContext(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(content)));
+    // Projection caps allow omissions, but never an entry belonging to another target.
+    const modules = new Set(planned.modules.map(module => module.name));
+    if (context.modules.some(module => !modules.has(module.name))
+      || [...context.commands, ...context.resourceUses, ...context.executionPlans].some(item => !modules.has(item.module))
+      || context.routes.some(route => !planned.routes.some(owned => owned.module === route.module
+        && owned.method === route.method && owned.path === route.path
+        && owned.controller === route.controller && owned.handler === route.handler))
+      || context.jobs.some(job => !planned.jobs.some(owned => owned.module === job.module && owned.name === job.name))
+      || context.resourceUses.some(use => use.ownerKind === "job"
+        && !planned.jobs.some(job => job.module === use.module && job.name === use.owner))
+      || context.executionPlans.some(plan => plan.kind === "job"
+        ? !planned.jobs.some(job => job.module === plan.module && job.name === plan.name)
+        : plan.kind === "route" && !planned.routes.some(route => route.module === plan.module
+          && `${route.method} ${route.path}` === plan.name))) {
+      throw new Error("Development context target mismatch.");
+    }
   } catch (error) {
     if (error instanceof DeliveryContextError) throw error;
     throw new DeliveryContextError("DELIVERY_CONTEXT_INTEGRITY_FAILED");

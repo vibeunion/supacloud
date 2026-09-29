@@ -3,7 +3,7 @@ import type { DeliveryTarget } from "./delivery-schema";
 import { renderApplication, type GenerateOptions } from "./generate";
 import { joinRoutePaths } from "./util";
 import { serializedExecutionSnapshot } from "./execution-snapshot";
-import { createApplicationDevelopmentContext } from "./application-development";
+import { createApplicationDevelopmentContext, parseApplicationDevelopmentContext } from "./application-development";
 
 /** Keep conservative service factories while restricting exposed route/job descriptors. */
 export function renderDeliveryTarget(
@@ -12,7 +12,8 @@ export function renderDeliveryTarget(
   options: GenerateOptions,
 ) {
   const included = new Set(target.modules.map((module) => module.name));
-  const includedUses = (graph.resourceUses ?? []).filter((use) => included.has(use.module));
+  const includedUses = (graph.resourceUses ?? []).filter((use) => included.has(use.module)
+    && (use.job === undefined || target.jobs.some(job => job.module === use.module && job.name === use.job)));
   const declaredResources = new Set(graph.modules.filter((module) => included.has(module.name))
     .flatMap((module) => module.resources ?? []));
   const resourceNames = new Set([...includedUses.map((use) => use.resource), ...declaredResources]);
@@ -34,10 +35,12 @@ export function renderDeliveryTarget(
     resourceUses: includedUses,
     resources: (graph.resources ?? []).filter((resource) => resourceNames.has(resource.name)),
   };
+  // A successful writer must produce a document accepted by the same reader schema.
+  const development = parseApplicationDevelopmentContext(createApplicationDevelopmentContext(projected, { byteBudget: "archive" }));
   // Existing root-provider pruning does not treat Jobs as roots; preserve all providers here.
   return {
     ...renderApplication(projected, { ...options, treeShakeUnusedProviders: false }),
     executionSnapshot: serializedExecutionSnapshot(projected),
-    applicationDevelopment: JSON.stringify(createApplicationDevelopmentContext(projected, { enforceByteBudget: false }), null, 2) + "\n",
+    applicationDevelopment: JSON.stringify(development, null, 2) + "\n",
   };
 }

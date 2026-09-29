@@ -1,6 +1,6 @@
 # Application Development Context
 
-Status: **IMPLEMENTED (compiler projection)**. The contract and CLI are read-only.
+Status: **IMPLEMENTED (compiler projection and delivered-build reader)**. The contract and CLI are read-only.
 The Web Console application view and a project-scoped Developer MCP are the next
 consumers; they are **not** implemented here.
 
@@ -36,7 +36,7 @@ the stricter artifact-drift and type-safety gate.
 | `source` | Always `current-graph` |
 | `deploymentVerified` | Always `false` |
 | `modules` | name, className, file, tags, provider tokens, controller/command/job/query names, required resources |
-| `routes` | module, method, path, controller, handler, bound command, aspect names, `schemaKinds` |
+| `routes` | module, method, full controller-prefixed path, controller, handler, canonical bound command, aspect names, `schemaKinds` |
 | `commands` | module, name, permission, transaction, idempotency, audit, declared resource uses |
 | `jobs` | module, name, mode, declared resource uses |
 | `resources` | logical name + kind (from the [resource model](./application-resource-model.md)) |
@@ -55,17 +55,27 @@ The projection never includes:
 
 - diagnostic messages, suggestions or repair replacement values;
 - aspect/schema source expressions (aspect **names** and schema **kinds** only);
-- credentials, tokens, request bodies, results or business payloads;
+- credentials, authentication tokens, request bodies, results or business payloads;
 - absolute, parent-traversing or URL-shaped source paths (omitted).
 
 Diagnostic repair entries expose only `{ type, readiness }`, matching the
-execution-context policy.
+execution-context policy. Only positive integer diagnostic line numbers and
+allowlisted schema-kind keys are retained. Declared names (including DI provider
+tokens) and tags are structural metadata, not automatically secret-detectable;
+hosts must not place credentials or business payloads in metadata names.
 
 ## Limits
 
 `APPLICATION_DEVELOPMENT_LIMITS` bounds the document (64 modules, 128 providers,
 256 routes, 128 commands, 128 jobs, 64 resources, 128 resource uses, 128 plans,
-64 diagnostics, 64 KiB output). Truncation is reported in `omitted`; a document
+64 diagnostics, 64 KiB output). The provider budget is document-wide, including
+providers lost with omitted modules in the count. Other collection caps apply to
+their top-level arrays; module name inventories remain subject to the final byte
+budget. Aspect and execution-stage order remains semantic, while inventories,
+resource uses and diagnostics have canonical ordering. Text output reports
+omissions and explicitly marks deployment as unverified.
+
+Truncation is reported in `omitted`; a document
 that still exceeds the byte budget fails with `APPLICATION_DEVELOPMENT_TOO_LARGE`
 rather than silently producing a partial view.
 
@@ -80,7 +90,9 @@ says whether a route schema is declared, not that the runtime validated it.
 
 A delivery build embeds the same contract as
 `objects/<objectId>/bundle/application-development.json`, projected to the build
-**target** (only that target's modules, routes, jobs and resource uses). The
+**target** (only that target's modules, routes and jobs; resource uses of excluded
+jobs are removed). Command/service factories remain conservative within included
+modules, and explicitly module-required resources are retained. The
 platform can serve a released application without a source checkout:
 
 ```ts
@@ -94,8 +106,27 @@ const delivered = await readApplicationDevelopmentContext(
 // delivered.context: ApplicationDevelopmentContext
 ```
 
+Both the writer and reader use `APPLICATION_DEVELOPMENT_ARCHIVE_MAX_BYTES`
+(**512 KiB**, formatted UTF-8 JSON including the final newline). The default
+`createApplicationDevelopmentContext(graph)` and CLI budget stays **64 KiB**;
+`{ byteBudget: "archive" }` selects the larger, still bounded budget. The wire
+`limits.outputBytes` continues to describe the interactive budget. There is no
+unbounded `enforceByteBudget: false` escape hatch. The writer validates its own
+serialized contract before publication; an oversized rebuild fails without
+replacing the previous build pointer.
+
 The reader verifies the selected object's target identity and every inventoried
-file hash before parsing. A missing, changed or unexpected artifact fails with
+file hash before parsing, rejects malformed UTF-8, and validates every nested
+record with a closed schema. This includes enums, execution-stage forms, source
+paths, safe integer counters/lines, exact limit values, collection caps and the
+aggregate provider cap. Structural labels are bounded to 512 characters without
+control characters. Extra payload/credential/message/repair-value fields are
+rejected, not returned. The exported parser returns a detached JSON value.
+
+Retained modules, routes, jobs and route/job plans must belong to the selected
+target; projection omissions do not permit cross-target entries. Hash validation
+establishes archive consistency, not trust in its producer or authenticity of
+declared names. A self-consistent rehashed archive still undergoes these checks. A missing, changed or unexpected artifact fails with
 `DELIVERY_CONTEXT_INTEGRITY_FAILED`; it **never** falls back to the current
 source checkout. `correlation: "verified-build-snapshot"` and
 `deploymentVerified: false` still mean local archive consistency only: this is
@@ -117,7 +148,7 @@ only against an explicitly selected local/test environment, never production.
 
 ## Next steps
 
-1. Add the project-scoped Developer MCP tools over the delivered-build read path.
+1. Add project-scoped Developer MCP tools over the delivered-build read path.
 2. Add the Web Console application developer view beside the existing runtime
    release view, sharing this one document.
 
@@ -125,5 +156,9 @@ only against an explicitly selected local/test environment, never production.
 
 `packages/compiler/src/application-development.test.ts` covers the projection,
 redaction, deterministic ordering, truncation and the byte budget.
+
 `packages/compiler/src/application-development-delivery.test.ts` covers the
-delivered-build artifact and its integrity failure path.
+delivered-build artifact, self-consistent malformed archives, UTF-8 rejection,
+target matching, large archive round trips and failed-rebuild pointer preservation.
+`packages/compiler/src/application-development-validation.test.ts` covers nested
+schema/redaction failures, provider limits and excluded-job resource isolation.

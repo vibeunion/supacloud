@@ -61,8 +61,9 @@ In addition to the flat `events` list, the pack exposes a `timeline` projection
 grouped by `kind` + `operation` and then by `attempt`. Each attempt lists the
 observed stages in input order, whether it `failed`, whether the last declared
 stage `complete`d (succeeded), the declared stages with no observation
-(`missingStages`), observed stages outside the current static plan
-(`unexpectedStages`) and the `traceIds` seen.
+(`missingStages`), `traceIds` seen and the number of omitted details (`omittedStages`). Unknown
+stages are excluded before projection and counted in `omitted.unmatchedEvents`,
+never echoed in `unexpectedStages` (which remains empty).
 
 The declared stage order comes from the existing static execution plan
 (`authorize` → `idempotency` → `transaction` → aspects → `handler` → `audit`,
@@ -74,6 +75,13 @@ inventing a second execution ledger:
   reported `succeeded` in that attempt.
 - **`missingStages` is not proof of skipping.** Observers may emit a subset of
   phases or the process may have stopped; absence is informational.
+- **Summaries precede display caps.** Failure, terminal-stage success, missing
+  stages and trace IDs use all matched observations, not only displayed events.
+  Failed operations, attempts and stage observations take display priority; the
+  retained details preserve input order. `omitted.timeline` counts omitted
+  operation groups, each entry reports `omittedAttempts`, and each retained
+  attempt reports `omittedStages`. These counts are independent of the flat
+  `omitted.events` count.
 - **Attempts are caller-reported.** The compiler does not count or discover
   retries on its own.
 - The timeline still carries `correlation: "current-graph-only"`,
@@ -88,7 +96,7 @@ inventing a second execution ledger:
 - Projection caps: 128 matched events, 64 timeline entries, 16 attempts per entry,
   32 stages per attempt, 16 modules, 64 files, 32 diagnostics and 64 execution
   plans. Failed events take precedence; retained input order is preserved through
-  the `index` field. Truncation counts are explicit, including `omitted.timeline`.
+  the `index` field. All three timeline caps report their omissions explicitly.
 - Oversized results fail with `EXECUTION_CONTEXT_TOO_LARGE`; select a smaller
   observation set. Invalid and unreadable inputs use fixed error codes without
   echoing their contents or paths.
