@@ -14,15 +14,20 @@ export { generateFeatureSource, validateFeatureSpec } from "./feature";
 export { applyDiagnosticFix } from "./fixes";
 export { createExecutionContextPack, readExecutionMetadata, EXECUTION_CONTEXT_LIMITS, ExecutionContextError } from "./execution-context";
 export type { ExecutionContextPack, ExecutionTimelineStage, ExecutionTimelineAttempt, ExecutionTimelineEntry } from "./execution-context";
+export { readApplicationDevelopmentContext, DeliveryContextError } from "./delivery-context";
+export type { DeliveredApplicationDevelopmentContext, DeliveryExecutionContextPack } from "./delivery-context";
 export {
   createApplicationDevelopmentContext,
+  parseApplicationDevelopmentContext,
   formatApplicationDevelopmentContext,
   APPLICATION_DEVELOPMENT_LIMITS,
+  APPLICATION_DEVELOPMENT_ARCHIVE_MAX_BYTES,
   APPLICATION_DEVELOPMENT_SCHEMA,
   ApplicationDevelopmentError,
 } from "./application-development";
 export type {
   ApplicationDevelopmentContext,
+  ApplicationDevelopmentOptions,
   ApplicationDevelopmentModule,
   ApplicationDevelopmentRoute,
   ApplicationDevelopmentCommand,

@@ -1,6 +1,6 @@
 # Application Development Context
 
-Status: **IMPLEMENTED (compiler projection)**. The contract and CLI are read-only.
+Status: **IMPLEMENTED (compiler projection and delivered-build reader)**. The contract and CLI are read-only.
 The Web Console application view and a project-scoped Developer MCP are the next
 consumers; they are **not** implemented here.
 
@@ -86,6 +86,52 @@ document describes the **current source declarations**, not a deployed build,
 runtime state, successful activation, audit receipt or rollback. `schemaKinds`
 says whether a route schema is declared, not that the runtime validated it.
 
+## Delivered Build Snapshot
+
+A delivery build embeds the same contract as
+`objects/<objectId>/bundle/application-development.json`, projected to the build
+**target** (only that target's modules, routes and jobs; resource uses of excluded
+jobs are removed). Command/service factories remain conservative within included
+modules, and explicitly module-required resources are retained. The
+platform can serve a released application without a source checkout:
+
+```ts
+import { readApplicationDevelopmentContext } from "@supacloud/compiler";
+
+const delivered = await readApplicationDevelopmentContext(
+  "generated/delivery/delivery.manifest.json", "api",
+);
+// delivered.correlation === "verified-build-snapshot"
+// delivered.delivery.artifactVerified === true
+// delivered.context: ApplicationDevelopmentContext
+```
+
+Both the writer and reader use `APPLICATION_DEVELOPMENT_ARCHIVE_MAX_BYTES`
+(**512 KiB**, formatted UTF-8 JSON including the final newline). The default
+`createApplicationDevelopmentContext(graph)` and CLI budget stays **64 KiB**;
+`{ byteBudget: "archive" }` selects the larger, still bounded budget. The wire
+`limits.outputBytes` continues to describe the interactive budget. There is no
+unbounded `enforceByteBudget: false` escape hatch. The writer validates its own
+serialized contract before publication; an oversized rebuild fails without
+replacing the previous build pointer.
+
+The reader verifies the selected object's target identity and every inventoried
+file hash before parsing, rejects malformed UTF-8, and validates every nested
+record with a closed schema. This includes enums, execution-stage forms, source
+paths, safe integer counters/lines, exact limit values, collection caps and the
+aggregate provider cap. Structural labels are bounded to 512 characters without
+control characters. Extra payload/credential/message/repair-value fields are
+rejected, not returned. The exported parser returns a detached JSON value.
+
+Retained modules, routes, jobs and route/job plans must belong to the selected
+target; projection omissions do not permit cross-target entries. Hash validation
+establishes archive consistency, not trust in its producer or authenticity of
+declared names. A self-consistent rehashed archive still undergoes these checks. A missing, changed or unexpected artifact fails with
+`DELIVERY_CONTEXT_INTEGRITY_FAILED`; it **never** falls back to the current
+source checkout. `correlation: "verified-build-snapshot"` and
+`deploymentVerified: false` still mean local archive consistency only: this is
+not signed provenance, runtime state or deployment success.
+
 ## Consumers
 
 - **Web Console (application developer view)**: render modules, routes, resources
@@ -102,13 +148,17 @@ only against an explicitly selected local/test environment, never production.
 
 ## Next steps
 
-1. Serve this contract from a delivered build snapshot so the console and MCP can
-   read a released application without a source checkout.
-2. Add the project-scoped Developer MCP tools over that read path.
-3. Add the Web Console application developer view beside the existing runtime
+1. Add project-scoped Developer MCP tools over the delivered-build read path.
+2. Add the Web Console application developer view beside the existing runtime
    release view, sharing this one document.
 
 ## Verification
 
 `packages/compiler/src/application-development.test.ts` covers the projection,
 redaction, deterministic ordering, truncation and the byte budget.
+
+`packages/compiler/src/application-development-delivery.test.ts` covers the
+delivered-build artifact, self-consistent malformed archives, UTF-8 rejection,
+target matching, large archive round trips and failed-rebuild pointer preservation.
+`packages/compiler/src/application-development-validation.test.ts` covers nested
+schema/redaction failures, provider limits and excluded-job resource isolation.
