@@ -873,7 +873,11 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
         || (request.register_in !== undefined && request["register-in"] !== undefined)) {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "Do not combine hyphenated and underscored aliases of the same flag");
     }
-    request = { ...request, dry_run: request.dry_run ?? request["dry-run"], register_in: request.register_in ?? request["register-in"] };
+    request = {
+        ...request,
+        ...(request["dry-run"] === undefined ? {} : { dry_run: request["dry-run"] }),
+        ...(request["register-in"] === undefined ? {} : { register_in: request["register-in"] }),
+    };
     if ((request.dry_run !== undefined || request.register_in !== undefined) && request.action !== "generate") {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--dry-run and --register-in apply only to app generate");
     }

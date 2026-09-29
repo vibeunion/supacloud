@@ -140,3 +140,18 @@ test("an explicit project-root feature directory remains supported", async () =>
     expect(data(result).changes[0].path).toBe("inventory/inventory.module.ts");
     expect(await readdir(root)).toEqual([]);
 });
+
+
+test("generation flag normalization does not add fields to remote application requests", async () => {
+    let forwarded: Record<string, unknown> | undefined;
+    const result = await runAppTool({ action: "status", ref: "project-test", id: "app-test" }, {
+        getApplications: () => async (args) => {
+            forwarded = args;
+            return { isError: false, content: [{ type: "text", text: "remote-status" }] };
+        },
+    });
+    expect(result.isError).toBe(false);
+    expect(forwarded).toMatchObject({ action: "get_runtime", ref: "project-test", id: "app-test" });
+    expect(forwarded).not.toHaveProperty("dry_run");
+    expect(forwarded).not.toHaveProperty("register_in");
+});

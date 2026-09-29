@@ -65,12 +65,19 @@ try {
     await writeFile(join(project, "package.json"), JSON.stringify(generatedManifest, null, 2));
     await installStarterConsumer(project, run);
 
-    const generation = [cli, "app", "generate", "--kind", "resource", "--name", "inventory", "--register-in", "src/orders/orders.ts", "--format", "json"];
-    const parent = await readFile(join(project, "src/orders/orders.ts"), "utf8");
+    // A composition root may import features; one feature must not import another.
+    // This fixture adds a root, rather than weakening the starter boundary rules.
+    await writeFile(join(project, "src/app.module.ts"), `import { Module } from "@supacloud/app";
+import { OrdersModule } from "./orders/orders";
+@Module({ name: "application-root", tags: ["type:app"], imports: [OrdersModule] })
+export class AppModule {}
+`);
+    const generation = [cli, "app", "generate", "--kind", "resource", "--name", "inventory", "--register-in", "src/app.module.ts", "--format", "json"];
+    const parent = await readFile(join(project, "src/app.module.ts"), "utf8");
     const preview = JSON.parse(await run([...generation, "--dry-run"]));
     assert.equal(preview.written, false);
     assert.equal(preview.changes.length, 7);
-    assert.equal(await readFile(join(project, "src/orders/orders.ts"), "utf8"), parent);
+    assert.equal(await readFile(join(project, "src/app.module.ts"), "utf8"), parent);
     await assert.rejects(readFile(join(project, "src/features/inventory/inventory.module.ts")), { code: "ENOENT" });
     const generated = JSON.parse(await run(generation));
     assert.equal(generated.written, true);
@@ -99,6 +106,12 @@ import { Elysia } from "elysia";
 import { createModulePlugin } from "@supacloud/elysia";
 import { createCompiledModules } from "../generated/application";
 import { InventoryService } from "../src/features/inventory/inventory.service";
+import type { InventoryResult } from "../src/features/inventory/inventory.model";
+
+const typedResult: InventoryResult = { id: "example" };
+// @ts-expect-error Response fields come from the schema, not an unknown/any cast.
+const invalidResult: InventoryResult = { id: 1 };
+void typedResult; void invalidResult;
 
 const version = await Bun.file("node_modules/elysia/package.json").json();
 assert.equal(version.version, "2.0.0-beta.19");

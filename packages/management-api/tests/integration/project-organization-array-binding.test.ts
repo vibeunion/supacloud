@@ -47,6 +47,37 @@ afterAll(async () => {
 }, 30_000);
 
 describe("project organization TEXT[] binding", () => {
+  test("branding JSONB round trips objects rather than JSON string values", async () => {
+    await withRollback(async transaction => {
+      await transaction`
+        CREATE TEMPORARY TABLE project_organization_branding_binding (
+          id TEXT PRIMARY KEY,
+          branding JSONB NOT NULL
+        ) ON COMMIT DROP
+      `;
+      const branding = { name: "Review", primary_color: "#26734d", logo_url: null };
+      for (const [id, value] of [["empty", {}], ["populated", branding]] as const) {
+        const [created] = await transaction`
+          INSERT INTO project_organization_branding_binding VALUES (${id}, ${value}::jsonb)
+          RETURNING branding, jsonb_typeof(branding) AS kind
+        `;
+        expect(created.kind).toBe("object");
+        expect(created.branding).toEqual(value);
+      }
+      const [updated] = await transaction`
+        UPDATE project_organization_branding_binding SET branding = ${branding}::jsonb WHERE id = ${"empty"}
+        RETURNING branding, jsonb_typeof(branding) AS kind
+      `;
+      expect(updated.kind).toBe("object");
+      expect(updated.branding).toEqual(branding);
+      const [cleared] = await transaction`
+        UPDATE project_organization_branding_binding SET branding = ${{}}::jsonb WHERE id = ${"populated"}
+        RETURNING branding
+      `;
+      expect(cleared.branding).toEqual({});
+    });
+  }, 30_000);
+
   test("round trips empty, non-empty, and escaped domain arrays", async () => {
     await withRollback(async (transaction) => {
       await transaction`

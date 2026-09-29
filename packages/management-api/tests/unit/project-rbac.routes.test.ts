@@ -18,7 +18,7 @@ const managementTransaction = mock(async (strings: TemplateStringsArray, ...valu
     return project ? [project] : [];
   }
   if (query.includes("UPDATE projects") && query.includes("SET config =")) {
-    const nextConfig = JSON.parse(String(values[0])) as Record<string, unknown>;
+    const nextConfig = values[0] as Record<string, unknown>;
     const project = await updateConfig(String(values[1]), nextConfig);
     return project ? [project] : [];
   }

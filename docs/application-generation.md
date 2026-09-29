@@ -60,8 +60,10 @@ supacloud-cli app generate --kind resource --name inventory \
   --register-in src/app.module.ts
 ```
 
-For the existing HTTP starter the parent may be `src/orders/orders.ts`, which
-contains its feature Module. The same flag works with `--kind module`.
+Choose an application composition module, not an unrelated feature module: the
+existing boundary rules may forbid feature-to-feature imports. The packed test
+adds an explicit `type:app` composition fixture without weakening those rules.
+The same registration flag works with `--kind module`.
 
 Registration reuses the compiler's `add_module_import` AST editor in preview mode.
 Ambiguous module declarations, dynamic imports arrays, missing files, conflicting

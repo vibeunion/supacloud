@@ -5,11 +5,12 @@
 export function resourceScaffold(name: string, className: string): Record<string, string> {
     return {
         [`${name}.model.ts`]: `import { t } from "elysia";
+import type { RouteHandlerOutput } from "@supacloud/app";
 
 // HTTP contracts are the single source of field types. Services import types only.
 export const ${className}Params = t.Object({ id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }) });
 export const ${className}Response = t.Object({ id: t.String() });
-export type ${className}Result = typeof ${className}Response.static;
+export type ${className}Result = RouteHandlerOutput<{ responses: { 200: typeof ${className}Response } }>;
 `,
         [`${name}.service.ts`]: `import { Injectable } from "@supacloud/app";
 import type { ${className}Result } from "./${name}.model";

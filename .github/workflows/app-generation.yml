@@ -35,6 +35,7 @@ jobs:
       - name: Build, pack, install and exercise the consumer path
         run: bun run scripts/check_app_generation.ts
       - name: Generator safety and existing CLI regressions
+        if: ${{ !cancelled() }}
         working-directory: packages/cli
         run: |
           bun run typecheck

@@ -224,6 +224,18 @@ describe("project organization GoTrue authority", () => {
     expect(updatedSlugs).toEqual(validSlugs);
   });
 
+  test("binds branding as JSON objects on create and update without double encoding", async () => {
+    const branding = { name: "Review", primary_color: "#26734d", logo_url: null };
+    await projectOrganizationService.create("business-project", { name: "Branding", branding }, "admin");
+    await projectOrganizationService.create("business-project", { name: "Default branding" }, "admin");
+    await projectOrganizationService.update("business-project", "org-one", { branding });
+    await projectOrganizationService.update("business-project", "org-one", { branding: {} });
+    const inserts = controlQueries.filter(({ query }) => query.includes("INSERT INTO project_business_organizations"));
+    const updates = controlQueries.filter(({ query }) => query.includes("UPDATE project_business_organizations"));
+    expect(inserts.map(({ values }) => values[4])).toEqual([branding, {}]);
+    expect(updates.map(({ values }) => values[5])).toEqual([branding, {}]);
+  });
+
   test("accepts organization names at 1 and 120 characters after trimming", async () => {
     await projectOrganizationService.create(
       "business-project",
