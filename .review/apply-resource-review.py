@@ -47,6 +47,13 @@ replace('''  resourceUses.sort((left, right) =>
 start = text.index('function indexInfraResource(')
 end = text.index('\nfunction warn(', start)
 text = text[:start] + Path('.review/resource-block.ts').read_text() + text[end:]
+replace('''  const declaration = identifier ? resolveDeclaration(identifier, ctx).find(ts.isClassDeclaration) : undefined;''', '''  let symbol = identifier ? ctx.checker.getSymbolAtLocation(identifier) : undefined;
+  const visited = new Set<TsSymbol>();
+  while (symbol && (symbol.flags & ts.SymbolFlags.Alias) && !visited.has(symbol)) {
+    visited.add(symbol);
+    symbol = ctx.checker.getAliasedSymbol(symbol);
+  }
+  const declaration = symbol?.declarations?.find(ts.isClassDeclaration);''')
 source.write_text(text)
 
 doc = Path('docs/application-resource-model.md')
