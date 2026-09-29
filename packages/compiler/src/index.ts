@@ -13,7 +13,7 @@ export type { DeliveryOptions, DeliveryPlan, DeliveryPlanResult, DeliveryTarget,
 export { generateFeatureSource, validateFeatureSpec } from "./feature";
 export { applyDiagnosticFix } from "./fixes";
 export { createExecutionContextPack, readExecutionMetadata, EXECUTION_CONTEXT_LIMITS, ExecutionContextError } from "./execution-context";
-export type { ExecutionContextPack } from "./execution-context";
+export type { ExecutionContextPack, ExecutionTimelineStage, ExecutionTimelineAttempt, ExecutionTimelineEntry } from "./execution-context";
 export type { AppliedDiagnosticFix, ApplyDiagnosticFixOptions } from "./fixes";
 export { createDiagnosticRepairPlan } from "./repair-plan";
 export type { DiagnosticRepair } from "./repair-plan";
