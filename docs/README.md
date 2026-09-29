@@ -70,6 +70,7 @@
 - [PowerSync Local-First Integration](./powersync-local-first.md) - Self-hosted sync boundary, replication readiness, RLS upload path, ELN conflicts, and cleanup
 - [Application Architecture Guide](./application-architecture.md) - Scalable monorepo, migration, Function, worker, and contract boundaries for SupaCloud applications
 - [Application Framework](./application-framework.md) - Angular-style modules, compile-time DI, and Elysia runtime (`@supacloud/app` / `compiler` / `elysia`)
+- [Application Resource Model](./application-resource-model.md) - Logical infrastructure resources, resource uses, and SC8101-SC8105 diagnostics
 - [Route Contract Migration](./route-contract-migration.md) - Schema-first routes, generated client decoding, OpenAPI, and Management API registry migration
 - [Database Governance](./database-governance.md) - RLS/RPC as first-class resources with catalog reconcile and SQL lint (`@supacloud/db`)
 - [Application Platform Primitives](./application-platform-primitives.md) - Custom PostgREST schemas, transactional command receipts, and immutable artifact lineage
