@@ -35,7 +35,9 @@ export async function verifyGatewaySupAuthAccess(input: {
         "content-type": "application/json",
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(15_000),
+      // Revocation synchronizes unavailable and final GoTrue projections before
+      // returning. A read-sized deadline can expire after the write committed.
+      signal: AbortSignal.timeout(method === "GET" ? 15_000 : 60_000),
     });
     if (absent && response.status === 404) return null;
     // Do not include response bodies, credentials or user metadata in failures.

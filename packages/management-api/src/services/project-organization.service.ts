@@ -357,7 +357,7 @@ export const projectOrganizationService = {
           INSERT INTO project_business_organizations (
             project_ref, name, slug, description, branding, jit_enabled, jit_domains, created_by
           ) VALUES (
-            ${ref}, ${name}, ${slug}, ${input.description ?? null}, ${JSON.stringify(input.branding || {})}::jsonb,
+            ${ref}, ${name}, ${slug}, ${input.description ?? null}, ${input.branding ?? {}}::jsonb,
             ${input.jit_enabled ?? false}, ${jitDomains}, ${actor}
           ) RETURNING *
         `;
@@ -397,7 +397,7 @@ export const projectOrganizationService = {
           name = COALESCE(${name ?? null}, name),
           slug = COALESCE(${slug}, slug),
           description = CASE WHEN ${input.description !== undefined} THEN ${input.description ?? null} ELSE description END,
-          branding = CASE WHEN ${input.branding !== undefined} THEN ${JSON.stringify(input.branding || {})}::jsonb ELSE branding END,
+          branding = CASE WHEN ${input.branding !== undefined} THEN ${input.branding ?? {}}::jsonb ELSE branding END,
           jit_enabled = CASE WHEN ${input.jit_enabled !== undefined} THEN ${input.jit_enabled ?? false} ELSE jit_enabled END,
           jit_domains = CASE WHEN ${jitDomains !== null} THEN ${jitDomains} ELSE jit_domains END,
           updated_at = NOW()

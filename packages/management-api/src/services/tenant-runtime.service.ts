@@ -1101,7 +1101,7 @@ class TenantRuntimeService {
         };
         await metaSql`
           UPDATE projects
-          SET config=${JSON.stringify(next)}::jsonb, updated_at=NOW()
+          SET config=${next}::jsonb, updated_at=NOW()
           WHERE ref=${ref} AND deleted_at IS NULL
         `;
         logger.info(`Persisted tenant runtime ports for ${ref} (pgrst_port=${pgrstPort}, gotrue_port=${gotruePort})`);

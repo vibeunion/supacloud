@@ -2940,3 +2940,50 @@ dashboard expansion, PR preview lifecycle or full-platform restoration. The
 business fixture explicitly reports that its identity scope is GoTrue plus the
 starter SupAuth contract, not the external SupAuth provider. Overall acceptance
 remains PARTIAL until the remaining independent proofs exist.
+
+### Default Rollback And Live SupAuth Follow-Up (2026-09-29)
+
+The CLI uploaded the v2 archive and the Management API executed its additive
+version-5 migration, with migration-ledger readback verified. The v2 release is
+`3fc16f3e4cbc90a48382ff675cbe752f5f13060277a93dc9bdec17c4050043eb`.
+Its activation `7bb7f37e-6a19-4c83-aa6c-ec97f25a8fb2` and explicit v1 rollback
+`88dcb3a9-88cb-4c84-8b8c-1dc3c54e5ff5` both reached `succeeded / committed` in
+the real mutation journal. Initial CLI responses timed out and correctly
+reported unknown outcome; they were not replayed. Later CLI reconcile of the
+rollback returned a successful replay receipt. The rollback's gateway business
+workflow passed on the expanded schema, with its receipt retained as
+`gateway-business-after-rollback.json` beside the first-activation receipts.
+This is application rollback, not data restoration. A complete live CLI
+plan/build/configure workflow and v2 business run remain distinct checks.
+
+The GoTrue health endpoint on the SupAuth acceptance tenant reported
+`v2.197.0`. Live SupAuth testing found two real JSONB wire-shape defects:
+organization branding and RBAC project config were encoded as JSON strings.
+Writes now bind objects directly; the runtime-port config writer uses the
+same fix. The dedicated acceptance project's double-encoded configuration was
+privately backed up and normalized under a row lock without changing its
+contents. No general production data rewrite was performed.
+
+The installed Management API binary SHA-256 is
+`9029e2cf5af548a10a2ed89d8c996e77f014e1b02d59ca7433f0ed000e241aa6`.
+The live SupAuth Function emulator, built from source
+`0b321cb09846246e51246927d85dffb78547fdb2`, then returned PASS for:
+
+- Active collaborator provisioning, GoTrue SSO PKCE and signature verification.
+- SupAuth admin identity and delegated management reads.
+- Application identity, membership/RBAC grant and permission readback.
+- Role revocation and membership revocation with denied application access.
+- Wrong/missing PKCE verifier rejection, ID token validation and single-use code.
+- Unchanged GoTrue issuer/JWKS authority and complete test-resource cleanup.
+
+The acceptance mutation deadline is now 60 seconds; the previous 15-second
+read-sized budget expired while revocation synchronized GoTrue projections.
+Read requests retain their 15-second deadline. Focused tests passed:
+18 organization tests, 2 native PostgreSQL JSONB/array tests, 33 RBAC/runtime
+tests and 10 SupAuth fixture tests, plus Management API typecheck and ARM64
+compilation.
+
+This closes the v2.197.0 Function-emulator collaborator/RBAC proof. It does not
+claim a deployed Functions/Pages release or a fresh three-version matrix run.
+Dashboard expansion, PR preview lifecycle and independent full-platform
+restoration remain unfinished; overall status remains PARTIAL.
