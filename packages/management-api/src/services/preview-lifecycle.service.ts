@@ -2,8 +2,7 @@ import {
   PREVIEW_ENVIRONMENT_SCHEMA,
   previewsDueForReclamation,
   type PreviewReclaimCandidate,
-} from "./preview-environment.service";
-import {
+} from "./preview-environment.service";import {
   reclaimPreviewEnvironment,
   type PreviewProvisioningPorts,
   type PreviewReclamationResult,
@@ -41,9 +40,30 @@ export async function savePreview(
 }
 
 /**
- * Reclaim exactly the stored previews whose timeout has elapsed. A preview is
- * removed from the store only when every release succeeds, so a failed
- * reclamation keeps its record and residue for the next pass.
+ * Mark a stored preview closed without reclaiming yet. The next reclamation
+ * pass picks it up (zero grace), and the absolute deadline stays a backstop if
+ * the close event is ever missed.
+ */
+export async function markPreviewClosed(
+  store: PreviewStore,
+  projectRef: string,
+  previewRef: string,
+  now: Date,
+): Promise<StoredPreviewEnvironment | null> {
+  if (!Number.isFinite(now.getTime())) throw new Error("Invalid preview timestamp");
+  const stored = await store.list(projectRef);
+  const entry = stored.find((candidate) => candidate.preview.preview_ref === previewRef);
+  if (!entry) return null;
+  const closed: StoredPreviewEnvironment = { ...entry, closed_at: now.toISOString() };
+  await store.save(projectRef, closed);
+  return closed;
+}
+
+/**
+ * Reclaim exactly the stored previews whose change closed or whose deadline
+ * elapsed (first trigger wins). A preview is removed from the store only when
+ * every release succeeds, so a failed reclamation keeps its record and residue
+ * for the next pass.
  */
 export async function reclaimStoredPreviews(
   store: PreviewStore,
@@ -52,8 +72,8 @@ export async function reclaimStoredPreviews(
   now: Date,
 ): Promise<PreviewLifecycleReport> {
   const stored = await store.list(projectRef);
-  const candidates: PreviewReclaimCandidate[] = stored.map(({ preview, created_at }) => ({
-    preview_ref: preview.preview_ref, created_at, lifecycle: preview.lifecycle,
+  const candidates: PreviewReclaimCandidate[] = stored.map(({ preview, created_at, closed_at }) => ({
+    preview_ref: preview.preview_ref, created_at, closed_at, lifecycle: preview.lifecycle,
   }));
   const due = new Set(previewsDueForReclamation(candidates, now).map((candidate) => candidate.preview_ref));
   const report: PreviewLifecycleReport = { checked: stored.length, reclaimed: 0, failed: [] };

@@ -71,8 +71,8 @@ test("reclaims only timeout-due previews", async () => {
   const routes = app({
     ports: ports(),
     initial: [
-      { preview: composePreviewEnvironment({ ...input, previewRef: "expired", lifecycle: { reclaimOn: "timeout", timeoutHours: 24 } }), created_at: "2026-09-20T00:00:00.000Z" },
-      { preview: composePreviewEnvironment({ ...input, previewRef: "fresh", lifecycle: { reclaimOn: "timeout", timeoutHours: 24 } }), created_at: "2026-09-30T00:00:00.000Z" },
+      { preview: composePreviewEnvironment({ ...input, previewRef: "pr-1", lifecycle: { reclaimOn: "timeout", timeoutHours: 24 } }), created_at: "2026-09-20T00:00:00.000Z" },
+      { preview: composePreviewEnvironment({ ...input, previewRef: "pr-2", lifecycle: { reclaimOn: "timeout", timeoutHours: 24 } }), created_at: "2026-09-30T00:00:00.000Z" },
     ],
   });
   const response = await routes.handle(new Request(`${url}/reclaim`, { method: "POST" }));

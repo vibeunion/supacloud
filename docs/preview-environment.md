@@ -32,7 +32,7 @@ connects to a database or embeds a credential.
   "source": { "branch": "feature/orders", "commit": "<40 hex>" },
   "resources": { "orders-db": "project:orders" },
   "data_mode": "schema_only",
-  "lifecycle": { "reclaim_on": "pr_closed", "timeout_hours": 168 }
+  "lifecycle": { "reclaim_on": "pr_closed_or_timeout", "timeout_hours": 168 }
 }
 ```
 
@@ -45,7 +45,7 @@ connects to a database or embeds a credential.
 | `components` | database, application, configuration, resources, queues, storage, secrets — each `planned` / `ready` / `failed` / `unknown` |
 | `queue_names` / `storage_buckets` | Structured preview-scoped queue and bucket names carried from the request |
 | `isolation` | database role, storage permissions, consumer identity, route access control — each `pending` / `verified` / `failed` |
-| `lifecycle` | `reclaim_on` (`pr_closed` / `timeout`), `timeout_hours` (1-720), residue policy |
+| `lifecycle` | `reclaim_on` (`pr_closed` / `timeout` / `pr_closed_or_timeout`), `timeout_hours` (1-720), residue policy |
 | `data_mode` | `schema_only` (default) or `full_clone` |
 | `source` | git branch and commit |
 | `production_blocked` | Always `true` |
@@ -55,6 +55,11 @@ The default data mode is `schema_only`, reusing the existing
 [database branch and migration promotion](./database-environment-promotion.md)
 mechanisms. `full_clone` requires `authorized_full_clone: true` and pre-masked
 data.
+
+`preview_ref` is a change identity (`pr-<n>` or `change-<id>`), never a branch
+name; `configuration_id`, when present, is a content-addressed `cfg_…` revision
+(or a legacy UUIDv4). Both grammars are enforced at composition, so the
+documented and accepted forms cannot drift.
 
 ## Isolation acceptance
 
@@ -105,11 +110,14 @@ The composer refuses, before anything else:
 
 ## Lifecycle and reclamation
 
-Previews are reclaimed on `pr_closed` or after `timeout_hours`. The pure
-`previewsDueForReclamation(previews, now)` selector returns only overdue
-timeout-based previews, so a reclamation worker can act on an explicit list. The
-residue policy is `delete_branch_and_namespace`: both the database branch and the
-queue/storage namespace are removed, so a failed preview does not leave orphans.
+Previews are reclaimed on the first trigger: the change closing or the
+`timeout_hours` deadline elapsing (default `pr_closed_or_timeout`), so a missed
+close webhook is still reclaimed by the timeout backstop. The pure
+`previewsDueForReclamation(previews, now)` selector returns the due previews so a
+reclamation worker can act on an explicit list, and `previewReclamationDue(preview, now)`
+exposes the per-preview decision. The residue policy is `delete_branch_and_namespace`:
+both the database branch and the queue/storage namespace are removed, so a failed
+preview does not leave orphans.
 
 ## Provisioning and reclamation orchestration
 
@@ -125,8 +133,8 @@ storage, secrets). The first failing port stops the run, marks that component
 - `reclaimPreviewEnvironment(ports, preview)` releases namespace components first
   (storage, queues) and the database branch last, continues after a failure, and
   reports exactly which releases failed so residue is never silently abandoned.
-- `reclaimDuePreviews(ports, stored, now)` reclaims only timeout-due previews,
-  leaving `pr_closed` previews to their webhook.
+- `reclaimDuePreviews(ports, stored, now)` reclaims the previews whose change
+  closed or whose deadline elapsed, first trigger winning.
 - `createPreviewDatabasePort(branchService)` adapts the existing database branch
   service to the `database` port; the other ports are supplied by the caller.
 - `createPreviewQueuePort(pgmqService)` creates and drops each preview queue as
@@ -147,9 +155,12 @@ records that the ports succeeded, not that an external system is healthy.
 `PreviewStore` port and drives reclamation from stored records:
 
 - `savePreview(store, projectRef, preview, now)` records the environment with its
-  `created_at`, which the timeout selector needs.
+  `created_at`, which the deadline selector needs.
+- `markPreviewClosed(store, projectRef, previewRef, now)` records `closed_at`
+  without reclaiming, so the next pass reclaims it (zero grace) while the
+  absolute deadline stays a backstop if the close event is missed.
 - `reclaimStoredPreviews(store, ports, projectRef, now)` lists the project's
-  previews, reclaims only the timeout-due ones, and removes a record **only when
+  previews, reclaims the due ones, and removes a record **only when
   every release succeeds**, so a failed reclamation keeps its record and residue
   for the next pass.
 - `closePreview(store, ports, projectRef, previewRef)` reclaims one preview by
@@ -166,7 +177,7 @@ POST   /v1/projects/{project_ref}/previews/reclaim
 ```
 
 `GET` lists tracked previews. `DELETE` reclaims one preview and removes its
-record; `POST /reclaim` reclaims every timeout-due preview and returns
+record; `POST /reclaim` reclaims every due preview and returns
 `{ checked, reclaimed, failed }`. Reclamation requires the cleanup ports; when
 they are not configured the routes answer `501 PREVIEW_RECLAMATION_UNAVAILABLE`
 instead of pretending a preview was reclaimed. This is deliberate: listing is

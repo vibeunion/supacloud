@@ -113,6 +113,8 @@ export interface PreviewReclamationResult {
 export interface StoredPreviewEnvironment {
   preview: PreviewEnvironment;
   created_at: string;
+  /** Set when the change closed; the timeout is only a backstop. */
+  closed_at?: string;
 }
 
 function messageOf(error: unknown): string {
@@ -201,14 +203,14 @@ export async function reclaimPreviewEnvironment(
   return { preview_ref: preview.preview_ref, released, failed };
 }
 
-/** Reclaim only the previews whose timeout has elapsed, leaving `pr_closed` previews to their webhook. */
+/** Reclaim every stored preview whose change closed or whose deadline elapsed. */
 export async function reclaimDuePreviews(
   ports: Pick<PreviewProvisioningPorts, "database" | "queues" | "storage">,
   previews: ReadonlyArray<StoredPreviewEnvironment>,
   now: Date,
 ): Promise<PreviewReclamationResult[]> {
-  const candidates: PreviewReclaimCandidate[] = previews.map(({ preview, created_at }) => ({
-    preview_ref: preview.preview_ref, created_at, lifecycle: preview.lifecycle,
+  const candidates: PreviewReclaimCandidate[] = previews.map(({ preview, created_at, closed_at }) => ({
+    preview_ref: preview.preview_ref, created_at, closed_at, lifecycle: preview.lifecycle,
   }));
   const due = new Set(previewsDueForReclamation(candidates, now).map((candidate) => candidate.preview_ref));
   const results: PreviewReclamationResult[] = [];

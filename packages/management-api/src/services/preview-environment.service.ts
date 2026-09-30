@@ -40,7 +40,7 @@ export interface PreviewEnvironmentIsolationCheck {
 }
 
 export interface PreviewEnvironmentLifecycle {
-  reclaim_on: "pr_closed" | "timeout";
+  reclaim_on: PreviewReclaimTrigger;
   timeout_hours: number;
   residue: "delete_branch_and_namespace";
 }
@@ -82,12 +82,32 @@ export interface PreviewComposeInput {
   dataMode?: "schema_only" | "full_clone";
   /** Required for `full_clone`; absent means unauthorized. */
   authorizedFullClone?: boolean;
-  lifecycle?: { reclaimOn?: "pr_closed" | "timeout"; timeoutHours?: number };
+  lifecycle?: { reclaimOn?: PreviewReclaimTrigger; timeoutHours?: number };
 }
+
+/**
+ * Preview references are stable change identities, never raw branch names: a
+ * pull request (`pr-<n>`) or an external change (`change-<id>`).
+ */
+export const PREVIEW_REF_PATTERN = /^(?:pr-\d{1,10}|change-[A-Za-z0-9_-]{1,32})$/;
+
+/**
+ * Configuration revisions are content-addressed (`cfg_` + base32-lower SHA-256)
+ * or a legacy UUIDv4 revision. Accepting both keeps stored previews readable
+ * while `cfg_` stays the canonical, documented form.
+ */
+export const PREVIEW_CONFIGURATION_ID_PATTERN = /^(?:cfg_[a-z2-7]{26,64}|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/;
+
+/**
+ * How a preview is reclaimed:
+ * - `pr_closed`: when the change closes;
+ * - `timeout`: at the absolute deadline;
+ * - `pr_closed_or_timeout`: whichever comes first (the default backstop).
+ */
+export type PreviewReclaimTrigger = "pr_closed" | "timeout" | "pr_closed_or_timeout";
 
 const PRODUCTION_SHAPE = /^(?:prod|production|live|release)(?:[-_]|$)/i;
 const referenceName = /^[a-z][a-z0-9-]{0,15}:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const IDENTIFIER = /^[A-Za-z0-9_-]{1,64}$/;
 const MAX_TIMEOUT_HOURS = 24 * 30;
 
@@ -122,7 +142,7 @@ function sortedUnique(values: ReadonlyArray<string>, pattern: RegExp): string[] 
  * `pending`, and no credential is embedded.
  */
 export function composePreviewEnvironment(input: PreviewComposeInput): PreviewEnvironment {
-  if (!/^[A-Za-z0-9_-]{1,32}$/.test(input.previewRef)
+  if (!PREVIEW_REF_PATTERN.test(input.previewRef)
     || !/^[A-Za-z0-9_-]{1,20}$/.test(input.projectRef)
     || !IDENTIFIER.test(input.applicationId)
     || !IDENTIFIER.test(input.environmentId)
@@ -131,7 +151,7 @@ export function composePreviewEnvironment(input: PreviewComposeInput): PreviewEn
     || input.source.branch.length === 0 || input.source.branch.length > 255
     || /[\u0000-\u001f\u007f]/.test(input.source.branch) || input.source.branch.includes("..")
     || (input.source.commit !== "" && !/^[a-f0-9]{7,40}$/.test(input.source.commit))
-    || (input.configurationId !== undefined && !uuid.test(input.configurationId))) invalid();
+    || (input.configurationId !== undefined && !PREVIEW_CONFIGURATION_ID_PATTERN.test(input.configurationId))) invalid();
 
   assertProductionSafe(input.environmentId);
   assertProductionSafe(input.source.branch);
@@ -155,8 +175,8 @@ export function composePreviewEnvironment(input: PreviewComposeInput): PreviewEn
 
   const timeoutHours = input.lifecycle?.timeoutHours ?? 168;
   if (!Number.isSafeInteger(timeoutHours) || timeoutHours < 1 || timeoutHours > MAX_TIMEOUT_HOURS) invalid();
-  const reclaimOn = input.lifecycle?.reclaimOn ?? "pr_closed";
-  if (reclaimOn !== "pr_closed" && reclaimOn !== "timeout") invalid();
+  const reclaimOn = input.lifecycle?.reclaimOn ?? "pr_closed_or_timeout";
+  if (reclaimOn !== "pr_closed" && reclaimOn !== "timeout" && reclaimOn !== "pr_closed_or_timeout") invalid();
 
   const queueNames = sortedUnique(input.queueNames ?? [], /^[A-Za-z0-9_-]{1,64}$/);
   const storageBuckets = sortedUnique(input.storageBuckets ?? [], /^[a-z0-9][a-z0-9._-]{0,62}$/);
@@ -200,6 +220,8 @@ export function composePreviewEnvironment(input: PreviewComposeInput): PreviewEn
 export interface PreviewReclaimCandidate {
   preview_ref: string;
   created_at: string;
+  /** Set when the change closed; a `pr_closed` trigger reclaims on sight. */
+  closed_at?: string;
   lifecycle: Pick<PreviewEnvironmentLifecycle, "reclaim_on" | "timeout_hours">;
 }
 
@@ -232,17 +254,26 @@ export function evaluatePreviewIsolation(
   return { isolation, accepted: isolation.every((check) => check.status === "verified") };
 }
 
-/** Pure timeout selection: which timeout-based previews should be reclaimed at `now`. */
+/** Whether one preview is due for reclamation at `now` (first trigger wins). */
+export function previewReclamationDue(preview: PreviewReclaimCandidate, now: Date): boolean {
+  const timestamp = now.getTime();
+  if (!Number.isFinite(timestamp)) invalid();
+  const closedAt = preview.closed_at === undefined ? Number.NaN : Date.parse(preview.closed_at);
+  const closed = preview.closed_at !== undefined && Number.isFinite(closedAt) && timestamp >= closedAt;
+  const created = Date.parse(preview.created_at);
+  const timeoutDue = Number.isFinite(created)
+    && timestamp - created >= preview.lifecycle.timeout_hours * 3_600_000;
+  switch (preview.lifecycle.reclaim_on) {
+    case "pr_closed": return closed;
+    case "timeout": return timeoutDue;
+    case "pr_closed_or_timeout": return closed || timeoutDue;
+  }
+}
+
+/** Pure timeout selection: which previews should be reclaimed at `now`. */
 export function previewsDueForReclamation(
   previews: ReadonlyArray<PreviewReclaimCandidate>,
   now: Date,
 ): PreviewReclaimCandidate[] {
-  const timestamp = now.getTime();
-  if (!Number.isFinite(timestamp)) invalid();
-  return previews.filter((preview) => {
-    if (preview.lifecycle.reclaim_on !== "timeout") return false;
-    const created = Date.parse(preview.created_at);
-    if (!Number.isFinite(created)) return false;
-    return timestamp - created >= preview.lifecycle.timeout_hours * 3_600_000;
-  });
+  return previews.filter((preview) => previewReclamationDue(preview, now));
 }

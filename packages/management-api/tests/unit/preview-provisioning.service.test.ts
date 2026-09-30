@@ -94,13 +94,13 @@ test("reclaims namespace components before the database and reports failures", a
 test("reclaims only timeout-due previews", async () => {
   const now = new Date("2026-09-30T12:00:00.000Z");
   const stored: StoredPreviewEnvironment[] = [
-    { preview: composePreviewEnvironment({ ...input, previewRef: "expired", lifecycle: { reclaimOn: "timeout", timeoutHours: 24 } }), created_at: "2026-09-20T00:00:00.000Z" },
-    { preview: composePreviewEnvironment({ ...input, previewRef: "fresh", lifecycle: { reclaimOn: "timeout", timeoutHours: 24 } }), created_at: "2026-09-30T00:00:00.000Z" },
-    { preview: composePreviewEnvironment({ ...input, previewRef: "by-pr" }), created_at: "2026-09-01T00:00:00.000Z" },
+    { preview: composePreviewEnvironment({ ...input, previewRef: "pr-1", lifecycle: { reclaimOn: "timeout", timeoutHours: 24 } }), created_at: "2026-09-20T00:00:00.000Z" },
+    { preview: composePreviewEnvironment({ ...input, previewRef: "pr-2", lifecycle: { reclaimOn: "timeout", timeoutHours: 24 } }), created_at: "2026-09-30T00:00:00.000Z" },
+    { preview: composePreviewEnvironment({ ...input, previewRef: "pr-3", lifecycle: { reclaimOn: "pr_closed" } }), created_at: "2026-09-30T00:00:00.000Z" },
   ];
   const { calls, ports: fake } = ports();
   const results = await reclaimDuePreviews(fake, stored, now);
-  expect(results.map((result) => result.preview_ref)).toEqual(["expired"]);
+  expect(results.map((result) => result.preview_ref)).toEqual(["pr-1"]);
   expect(calls.filter((call) => call.endsWith(".delete"))).toHaveLength(3);
 });
 test("database port adapts the existing branch service", async () => {

@@ -4,6 +4,7 @@ import type { PreviewProvisioningPorts, StoredPreviewEnvironment } from "../../s
 import {
   closePreview,
   createProjectConfigPreviewStore,
+  markPreviewClosed,
   reclaimStoredPreviews,
   savePreview,
   type PreviewStore,
@@ -58,23 +59,35 @@ test("saves a preview with its creation timestamp", async () => {
 test("reclaims only due previews and removes their records", async () => {
   const now = new Date("2026-09-30T12:00:00.000Z");
   const { store } = memoryStore([
-    { preview: preview({ previewRef: "expired", lifecycle: { reclaimOn: "timeout", timeoutHours: 24 } }), created_at: "2026-09-20T00:00:00.000Z" },
-    { preview: preview({ previewRef: "fresh", lifecycle: { reclaimOn: "timeout", timeoutHours: 24 } }), created_at: "2026-09-30T00:00:00.000Z" },
-    { preview: preview({ previewRef: "by-pr" }), created_at: "2026-09-01T00:00:00.000Z" },
+    { preview: preview({ previewRef: "pr-1", lifecycle: { reclaimOn: "timeout", timeoutHours: 24 } }), created_at: "2026-09-20T00:00:00.000Z" },
+    { preview: preview({ previewRef: "pr-2", lifecycle: { reclaimOn: "timeout", timeoutHours: 24 } }), created_at: "2026-09-30T00:00:00.000Z" },
+    { preview: preview({ previewRef: "pr-3", lifecycle: { reclaimOn: "pr_closed" } }), created_at: "2026-09-01T00:00:00.000Z", closed_at: "2026-09-15T00:00:00.000Z" },
   ]);
   const report = await reclaimStoredPreviews(store, ports(), "demo", now);
-  expect(report).toEqual({ checked: 3, reclaimed: 1, failed: [] });
-  expect((await store.list("demo")).map((entry) => entry.preview.preview_ref)).toEqual(["fresh", "by-pr"]);
+  expect(report).toEqual({ checked: 3, reclaimed: 2, failed: [] });
+  expect((await store.list("demo")).map((entry) => entry.preview.preview_ref)).toEqual(["pr-2"]);
+});
+
+test("marks a preview closed so the next pass reclaims it", async () => {
+  const { store } = memoryStore([
+    { preview: preview({ lifecycle: { reclaimOn: "pr_closed" } }), created_at: "2026-09-01T00:00:00.000Z" },
+  ]);
+  expect(await markPreviewClosed(store, "demo", "missing", new Date("2026-09-30T00:00:00.000Z"))).toBeNull();
+  const closed = await markPreviewClosed(store, "demo", "pr-42", new Date("2026-09-30T00:00:00.000Z"));
+  expect(closed?.closed_at).toBe("2026-09-30T00:00:00.000Z");
+  const report = await reclaimStoredPreviews(store, ports(), "demo", new Date("2026-09-30T00:00:01.000Z"));
+  expect(report.reclaimed).toBe(1);
+  expect(await store.list("demo")).toEqual([]);
 });
 
 test("keeps the record and residue when a release fails", async () => {
   const now = new Date("2026-09-30T12:00:00.000Z");
   const { store } = memoryStore([
-    { preview: preview({ previewRef: "expired", lifecycle: { reclaimOn: "timeout", timeoutHours: 1 } }), created_at: "2026-09-01T00:00:00.000Z" },
+    { preview: preview({ previewRef: "pr-1", lifecycle: { reclaimOn: "timeout", timeoutHours: 1 } }), created_at: "2026-09-01T00:00:00.000Z" },
   ]);
   const report = await reclaimStoredPreviews(store, ports(true), "demo", now);
   expect(report.reclaimed).toBe(0);
-  expect(report.failed[0]?.preview_ref).toBe("expired");
+  expect(report.failed[0]?.preview_ref).toBe("pr-1");
   expect(report.failed[0]?.failed.map((entry) => entry.component)).toEqual(["storage", "queues", "database"]);
   expect(await store.list("demo")).toHaveLength(1);
 });

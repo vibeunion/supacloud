@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { stableStringify } from "../utils/stable-json";
-import { PreviewEnvironmentError } from "./preview-environment.service";
+import { PreviewEnvironmentError, PREVIEW_CONFIGURATION_ID_PATTERN } from "./preview-environment.service";
 import { base32Lower, normalizePreviewSlug } from "./preview-naming";
 
 /**
@@ -105,9 +105,11 @@ export function canonicalizePreviewConfiguration(configuration: PreviewConfigura
   return stableStringify(configuration);
 }
 
-/** Content-addressed configuration revision id. */
+/** Content-addressed configuration revision id (asserted against the shared grammar). */
 export function deriveConfigurationId(canonicalConfiguration: string): string {
-  return `cfg_${base32Lower(createHash("sha256").update(canonicalConfiguration, "utf8").digest())}`;
+  const configurationId = `cfg_${base32Lower(createHash("sha256").update(canonicalConfiguration, "utf8").digest())}`;
+  if (!PREVIEW_CONFIGURATION_ID_PATTERN.test(configurationId)) throw new PreviewEnvironmentError("PREVIEW_ENVIRONMENT_INVALID");
+  return configurationId;
 }
 
 /** Build, validate and content-address an immutable configuration revision. */

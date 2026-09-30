@@ -30,7 +30,7 @@ test("composes a complete planned environment with isolation checks and lifecycl
     "database_role", "storage_permissions", "consumer_identity", "route_access_control",
   ]);
   expect(preview.isolation.every((check) => check.status === "pending")).toBe(true);
-  expect(preview.lifecycle).toEqual({ reclaim_on: "pr_closed", timeout_hours: 168, residue: "delete_branch_and_namespace" });
+  expect(preview.lifecycle).toEqual({ reclaim_on: "pr_closed_or_timeout", timeout_hours: 168, residue: "delete_branch_and_namespace" });
   expect(preview.notes.join(" ")).toContain("does not provision");
 });
 
@@ -64,6 +64,17 @@ test("rejects malformed identifiers and out-of-range lifecycle values", () => {
   expect(() => composePreviewEnvironment({ ...base, lifecycle: { timeoutHours: 24 * 31 } })).toThrow();
 });
 
+test("accepts canonical configuration ids and rejects unknown ones", () => {
+  const cfg = composePreviewEnvironment({ ...base, configurationId: `cfg_${"a".repeat(52)}` });
+  expect(cfg.components.find((component) => component.name === "configuration")?.detail).toBe(`configuration cfg_${"a".repeat(52)}`);
+  expect(() => composePreviewEnvironment({ ...base, configurationId: "cfg-short" })).toThrow();
+});
+
+test("rejects preview refs that are not a change identity", () => {
+  expect(() => composePreviewEnvironment({ ...base, previewRef: "feature/orders" })).toThrow();
+  expect(composePreviewEnvironment({ ...base, previewRef: "change-abc_1" }).preview_ref).toBe("change-abc_1");
+});
+
 test("selects only overdue timeout previews for reclamation", () => {
   const now = new Date("2026-09-30T12:00:00.000Z");
   const previews = [
@@ -72,6 +83,16 @@ test("selects only overdue timeout previews for reclamation", () => {
     { preview_ref: "fresh", created_at: "2026-09-30T00:00:00.000Z", lifecycle: { reclaim_on: "timeout" as const, timeout_hours: 24 } },
   ];
   expect(previewsDueForReclamation(previews, now).map((preview) => preview.preview_ref)).toEqual(["expired"]);
+});
+
+test("reclaims a closed or timed-out preview on the first trigger", () => {
+  const now = new Date("2026-09-30T12:00:00.000Z");
+  const previews = [
+    { preview_ref: "closed", created_at: "2026-09-29T00:00:00.000Z", closed_at: "2026-09-30T00:00:00.000Z", lifecycle: { reclaim_on: "pr_closed_or_timeout" as const, timeout_hours: 168 } },
+    { preview_ref: "closed-pr-only", created_at: "2026-09-29T00:00:00.000Z", closed_at: "2026-09-30T00:00:00.000Z", lifecycle: { reclaim_on: "pr_closed" as const, timeout_hours: 168 } },
+    { preview_ref: "open-and-fresh", created_at: "2026-09-30T00:00:00.000Z", lifecycle: { reclaim_on: "pr_closed_or_timeout" as const, timeout_hours: 168 } },
+  ];
+  expect(previewsDueForReclamation(previews, now).map((preview) => preview.preview_ref)).toEqual(["closed", "closed-pr-only"]);
 });
 test("accepts only when every isolation check has passing evidence", () => {
   const preview = composePreviewEnvironment(base);
