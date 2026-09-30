@@ -60,7 +60,7 @@ export interface ReleaseEvidenceInput {
   target: string;
 }
 
-const rollback = Object.freeze({
+export const releaseRecoveryPaths = Object.freeze({
   application: "Activate the previous immutable release; the current object stays addressable.",
   database: "Apply the reviewed migration repair path; destructive changes still require explicit operator handling.",
   storage: "Restore the referenced object version; release evidence does not attest stored bytes.",
@@ -110,7 +110,7 @@ export function createReleaseEvidence(input: ReleaseEvidenceInput): ReleaseEvide
       compatibility: "not-proven",
       dataRecovery: "separate-required",
     },
-    rollback,
+    rollback: releaseRecoveryPaths,
     notes: [
       "Local artifact integrity only: this is not signed provenance, deployment success, runtime health or an account identity.",
       "Source-control commit, environment binding version and activation identity are not embedded in this document.",

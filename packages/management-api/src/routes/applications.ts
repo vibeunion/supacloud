@@ -9,6 +9,7 @@ import { getVerifiedRequestPrincipal, requireProjectOrAdminAuth } from "../middl
 import { ApplicationReleaseError, ApplicationReleaseStorage } from "../services/application-release-storage";
 import { ApplicationDevelopmentError, extractApplicationDevelopment } from "../services/application-development.service";
 import { ReleaseEvidenceError, createReleaseEvidence } from "../services/application-release-evidence.service";
+import { ReleaseExecutionError, createReleaseExecution } from "../services/application-release-execution.service";
 import { uploadApplicationRelease } from "../services/application-release-upload";
 import { ApplicationActiveStorage } from "../services/application-active-storage";
 import { ApplicationReadiness } from "../services/application-readiness";
@@ -89,6 +90,9 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
         return status(error.statusCode, { code: error.code, error: error.message });
       }
       if (error instanceof ReleaseEvidenceError) {
+        return status(error.statusCode, { code: error.code, error: error.message });
+      }
+      if (error instanceof ReleaseExecutionError) {
         return status(error.statusCode, { code: error.code, error: error.message });
       }
       if (error instanceof Error && "code" in error && error.code === "not-found") {
@@ -191,6 +195,27 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       return {
         project_ref: values.ref, application_id: values.id, release_id: values.releaseId,
         ...createReleaseEvidence({ record, archive, migrations: archives, target: query.target }),
+      };
+    })
+    .post("/:id/releases/:releaseId/execution", {
+      params: t.Object({ ...params.properties, releaseId: t.String({ pattern: "^[a-f0-9]{64}$" }) }),
+      query: t.Object({ target: t.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" }) }),
+      body: t.Object({
+        observations: t.Optional(t.Object({
+          application: t.Optional(t.Object({ status: t.Union([t.Literal("succeeded"), t.Literal("failed"), t.Literal("unknown")]), version: t.Optional(t.String({ maxLength: 128 })), detail: t.Optional(t.String({ maxLength: 512 })), observedAt: t.Optional(t.String({ maxLength: 64 })) }, { additionalProperties: false })),
+          migrations: t.Optional(t.Object({ status: t.Union([t.Literal("succeeded"), t.Literal("failed"), t.Literal("unknown")]), version: t.Optional(t.String({ maxLength: 128 })), detail: t.Optional(t.String({ maxLength: 512 })), observedAt: t.Optional(t.String({ maxLength: 64 })) }, { additionalProperties: false })),
+          configuration: t.Optional(t.Object({ status: t.Union([t.Literal("succeeded"), t.Literal("failed"), t.Literal("unknown")]), version: t.Optional(t.String({ maxLength: 128 })), detail: t.Optional(t.String({ maxLength: 512 })), observedAt: t.Optional(t.String({ maxLength: 64 })) }, { additionalProperties: false })),
+          resources: t.Optional(t.Object({ status: t.Union([t.Literal("succeeded"), t.Literal("failed"), t.Literal("unknown")]), version: t.Optional(t.String({ maxLength: 128 })), detail: t.Optional(t.String({ maxLength: 512 })), observedAt: t.Optional(t.String({ maxLength: 64 })) }, { additionalProperties: false })),
+          secrets: t.Optional(t.Object({ status: t.Union([t.Literal("succeeded"), t.Literal("failed"), t.Literal("unknown")]), version: t.Optional(t.String({ maxLength: 128 })), detail: t.Optional(t.String({ maxLength: 512 })), observedAt: t.Optional(t.String({ maxLength: 64 })) }, { additionalProperties: false })),
+          health: t.Optional(t.Object({ status: t.Union([t.Literal("succeeded"), t.Literal("failed"), t.Literal("unknown")]), version: t.Optional(t.String({ maxLength: 128 })), detail: t.Optional(t.String({ maxLength: 512 })), observedAt: t.Optional(t.String({ maxLength: 64 })) }, { additionalProperties: false })),
+        }, { additionalProperties: false })),
+      }, { additionalProperties: false }),
+      detail: { tags: ["applications"], summary: "Record per-component release execution results without a store" },
+    }, async ({ params: values, query, body }) => {
+      const { record } = await storage.readArchive(values.ref, values.id, values.releaseId);
+      return {
+        project_ref: values.ref, application_id: values.id,
+        ...createReleaseExecution({ record, target: query.target, observations: body.observations }),
       };
     })
     .post("/:id/releases", {

@@ -32,6 +32,7 @@
 - [CI/CD Integration](./ci-cd-integration.md) - CI/CD integration with GitHub webhooks
 - [Frontend Hosting](./frontend-hosting.md) - SupaCloud Pages static site hosting
 - [Release Control Automation & Canary Spec](./release-control-automation-spec.md) - Proposed contracts for headless PKCE canary, batch function releases, and CAS rollback primitives
+- [Release Execution Evidence](./release-execution.md) - Per-component runtime activation, migration and health results bound to an immutable release
 
 ## Authentication
 
