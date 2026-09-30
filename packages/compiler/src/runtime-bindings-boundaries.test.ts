@@ -7,10 +7,11 @@ import {
 import type { ApplicationGraph } from "./types";
 
 function fixture(names: string[], binding: (index: number) => string = () => "local") {
-  // Resolver fixtures contain only the resource metadata consumed by this boundary.
   const graph: ApplicationGraph = {
     modules: [], externalTokens: [],
-    resources: names.map(name => ({ name, kind: "database", className: "Database", file: "resource.ts", line: 1 })),
+    resources: names.map(name => ({
+      name, kind: "database" as const, className: "Database", file: "resource.ts", line: 1, importPath: "./resource",
+    })),
   };
   const document = parseEnvironmentBindings({
     schema: ENVIRONMENT_BINDINGS_SCHEMA,
@@ -59,7 +60,7 @@ test("runtime metadata cannot push a near-limit UTF-8 static projection over bud
   let exercised = false;
   for (let length = 200; length <= 400; length++) {
     const { graph, document } = fixture(Array.from({ length: 64 }, (_, index) => `${String(index).padStart(3, "0")}-${"测".repeat(length)}`));
-    let result;
+    let result: ReturnType<typeof resolveEnvironmentBindings>;
     try { result = resolveEnvironmentBindings(graph, document, "staging"); }
     catch (error) {
       if (error instanceof EnvironmentBindingError && error.code === "ENVIRONMENT_BINDINGS_TOO_LARGE") continue;
