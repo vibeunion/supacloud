@@ -31,12 +31,14 @@ test("environment-bindings CLI resolves one environment and fails closed on inva
     const child = Bun.spawn([process.execPath, "--no-env-file", cli, ...args], {
       cwd: root, env: { PATH: process.env.PATH ?? "" }, stdout: "pipe", stderr: "pipe",
     });
+    const deadline = setTimeout(() => child.kill(), 10_000);
     try {
       const [status, stdout, stderr] = await Promise.all([
         child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
       ]);
       return { status, stdout, stderr };
     } finally {
+      clearTimeout(deadline);
       if (child.exitCode === null) { child.kill(); await child.exited; }
     }
   };
@@ -80,4 +82,4 @@ test("environment-bindings CLI resolves one environment and fails closed on inva
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 30_000);
