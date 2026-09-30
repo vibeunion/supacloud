@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.2.1...delivery-v0.3.0) (2026-09-30)
+
+
+### Features
+
+* **management-api:** Developer MCP reads application development context (P1-4) ([#1519](https://github.com/vibeunion/supacloud/issues/1519)) ([7d7f0e9](https://github.com/vibeunion/supacloud/commit/7d7f0e9d1d3263614fb1104c3168521e21b69832))
+
 ## [0.2.1](https://github.com/vibeunion/supacloud/compare/delivery-v0.2.0...delivery-v0.2.1) (2026-09-28)
 
 

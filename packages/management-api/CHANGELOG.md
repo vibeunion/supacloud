@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.90.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.89.2...management-api-v0.90.0) (2026-09-30)
+
+
+### Features
+
+* **console:** safely inspect delivered application development context ([#1522](https://github.com/vibeunion/supacloud/issues/1522)) ([db25fc2](https://github.com/vibeunion/supacloud/commit/db25fc2844a18aea660e5fdd5249486f40ec1458))
+* **management-api:** Developer MCP reads application development context (P1-4) ([#1519](https://github.com/vibeunion/supacloud/issues/1519)) ([7d7f0e9](https://github.com/vibeunion/supacloud/commit/7d7f0e9d1d3263614fb1104c3168521e21b69832))
+
+
+### Bug Fixes
+
+* **auth:** preserve SupAuth JSONB contract shapes ([#1509](https://github.com/vibeunion/supacloud/issues/1509)) ([bb23592](https://github.com/vibeunion/supacloud/commit/bb235927f38f684503d4e172acee762439794afc))
+* **gateway:** compress migration inventory responses ([#1535](https://github.com/vibeunion/supacloud/issues/1535)) ([431261f](https://github.com/vibeunion/supacloud/commit/431261fc850b993bff26b9d01843a6df524bd44b))
+* **management:** preserve mutation transactions during host operations ([#1508](https://github.com/vibeunion/supacloud/issues/1508)) ([ebf79ac](https://github.com/vibeunion/supacloud/commit/ebf79ac8b159007325c9837fb576d84db3f62fce))
+
 ## [0.89.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.89.1...management-api-v0.89.2) (2026-09-28)
 
 
