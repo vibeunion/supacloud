@@ -1,0 +1,105 @@
+import { expect, test } from "bun:test";
+import { composePreviewEnvironment, type PreviewEnvironment } from "../../src/services/preview-environment.service";
+import type { PreviewProvisioningPorts, StoredPreviewEnvironment } from "../../src/services/preview-provisioning.service";
+import {
+  closePreview,
+  createProjectConfigPreviewStore,
+  reclaimStoredPreviews,
+  savePreview,
+  type PreviewStore,
+} from "../../src/services/preview-lifecycle.service";
+
+const input = {
+  previewRef: "pr-42",
+  projectRef: "demo",
+  applicationId: "reviews",
+  environmentId: "preview",
+  releaseId: "a".repeat(64),
+  source: { branch: "feature/orders", commit: "b".repeat(40) },
+};
+
+function preview(overrides: Partial<typeof input> = {}): PreviewEnvironment {
+  return composePreviewEnvironment({ ...input, ...overrides });
+}
+
+function memoryStore(initial: StoredPreviewEnvironment[] = []) {
+  const data = new Map<string, StoredPreviewEnvironment[]>(initial.length ? [["demo", [...initial]]] : []);
+  return {
+    data,
+    store: {
+      list: async (projectRef) => [...(data.get(projectRef) ?? [])],
+      save: async (projectRef, item) => {
+        data.set(projectRef, [...(data.get(projectRef) ?? []).filter((entry) => entry.preview.preview_ref !== item.preview.preview_ref), item]);
+      },
+      remove: async (projectRef, previewRef) => {
+        data.set(projectRef, (data.get(projectRef) ?? []).filter((entry) => entry.preview.preview_ref !== previewRef));
+      },
+    } satisfies PreviewStore,
+  };
+}
+
+function ports(failDelete = false): Pick<PreviewProvisioningPorts, "database" | "queues" | "storage"> {
+  const run = async () => { if (failDelete) throw new Error("busy"); };
+  return {
+    database: { create: run, delete: run },
+    queues: { create: run, delete: run },
+    storage: { create: run, delete: run },
+  };
+}
+
+test("saves a preview with its creation timestamp", async () => {
+  const now = new Date("2026-09-30T12:00:00.000Z");
+  const { store } = memoryStore();
+  const stored = await savePreview(store, "demo", preview(), now);
+  expect(stored.created_at).toBe("2026-09-30T12:00:00.000Z");
+  expect((await store.list("demo"))[0]?.preview.preview_ref).toBe("pr-42");
+});
+
+test("reclaims only due previews and removes their records", async () => {
+  const now = new Date("2026-09-30T12:00:00.000Z");
+  const { store } = memoryStore([
+    { preview: preview({ previewRef: "expired", lifecycle: { reclaimOn: "timeout", timeoutHours: 24 } }), created_at: "2026-09-20T00:00:00.000Z" },
+    { preview: preview({ previewRef: "fresh", lifecycle: { reclaimOn: "timeout", timeoutHours: 24 } }), created_at: "2026-09-30T00:00:00.000Z" },
+    { preview: preview({ previewRef: "by-pr" }), created_at: "2026-09-01T00:00:00.000Z" },
+  ]);
+  const report = await reclaimStoredPreviews(store, ports(), "demo", now);
+  expect(report).toEqual({ checked: 3, reclaimed: 1, failed: [] });
+  expect((await store.list("demo")).map((entry) => entry.preview.preview_ref)).toEqual(["fresh", "by-pr"]);
+});
+
+test("keeps the record and residue when a release fails", async () => {
+  const now = new Date("2026-09-30T12:00:00.000Z");
+  const { store } = memoryStore([
+    { preview: preview({ previewRef: "expired", lifecycle: { reclaimOn: "timeout", timeoutHours: 1 } }), created_at: "2026-09-01T00:00:00.000Z" },
+  ]);
+  const report = await reclaimStoredPreviews(store, ports(true), "demo", now);
+  expect(report.reclaimed).toBe(0);
+  expect(report.failed[0]?.preview_ref).toBe("expired");
+  expect(report.failed[0]?.failed.map((entry) => entry.component)).toEqual(["storage", "queues", "database"]);
+  expect(await store.list("demo")).toHaveLength(1);
+});
+
+test("closes one preview by reference", async () => {
+  const { store } = memoryStore([{ preview: preview(), created_at: "2026-09-30T00:00:00.000Z" }]);
+  expect(await closePreview(store, ports(), "demo", "missing")).toBeNull();
+  const result = await closePreview(store, ports(), "demo", "pr-42");
+  expect(result?.released).toEqual(["storage", "queues", "database"]);
+  expect(await store.list("demo")).toEqual([]);
+});
+
+test("project-config store filters untrusted entries and upserts by reference", async () => {
+  let config: Record<string, unknown> = { other: true, previews: [{ preview: { preview_ref: "bad" } }, "junk"] };
+  const store = createProjectConfigPreviewStore({
+    readConfig: async () => config,
+    writeConfig: async (_ref, next) => { config = next; },
+  });
+  expect(await store.list("demo")).toEqual([]);
+
+  await savePreview(store, "demo", preview(), new Date("2026-09-30T00:00:00.000Z"));
+  await savePreview(store, "demo", preview({ previewRef: "pr-42" }), new Date("2026-09-30T01:00:00.000Z"));
+  expect((config.previews as unknown[]).length).toBe(1);
+  expect(config.other).toBe(true);
+
+  await store.remove("demo", "pr-42");
+  expect(await store.list("demo")).toEqual([]);
+});

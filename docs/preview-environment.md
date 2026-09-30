@@ -107,6 +107,22 @@ storage, secrets). The first failing port stops the run, marks that component
 A `ready` result is a stateful orchestration outcome, not signed provenance: it
 records that the ports succeeded, not that an external system is healthy.
 
+## Persistence and the reclamation driver
+
+`preview-lifecycle.service.ts` persists provisioned previews through a
+`PreviewStore` port and drives reclamation from stored records:
+
+- `savePreview(store, projectRef, preview, now)` records the environment with its
+  `created_at`, which the timeout selector needs.
+- `reclaimStoredPreviews(store, ports, projectRef, now)` lists the project's
+  previews, reclaims only the timeout-due ones, and removes a record **only when
+  every release succeeds**, so a failed reclamation keeps its record and residue
+  for the next pass.
+- `closePreview(store, ports, projectRef, previewRef)` reclaims one preview by
+  reference (the `pr_closed` path) and removes its record on full success.
+- `createProjectConfigPreviewStore(configPort)` backs the store with the project
+  config under a single `previews` collection, filtering untrusted entries.
+
 ## Boundaries
 
 - **Composition vs provisioning.** A composed plan is not a running environment;
@@ -124,5 +140,5 @@ records that the ports succeeded, not that an external system is healthy.
 2. An isolation verifier that flips the acceptance checks to `verified` from
    observed database role, storage permissions, consumer identity and route
    access control evidence.
-3. Persist each provisioned preview so the timeout selector and the reclamation
-   worker can read the environment, its `created_at` and its component status.
+3. Expose preview lifecycle routes (create/list/close) over the store and the
+   port-driven orchestration.
