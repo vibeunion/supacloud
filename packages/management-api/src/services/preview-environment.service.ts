@@ -52,6 +52,8 @@ export interface PreviewEnvironment {
   application_id: string;
   environment_id: string;
   release_id: string;
+  /** Content-addressed configuration revision bound to this preview, if any. */
+  configuration_id?: string;
   source: { branch: string; commit: string };
   data_mode: "schema_only" | "full_clone";
   branch_ref: string;
@@ -199,6 +201,7 @@ export function composePreviewEnvironment(input: PreviewComposeInput): PreviewEn
     application_id: input.applicationId,
     environment_id: input.environmentId,
     release_id: input.releaseId,
+    ...(input.configurationId ? { configuration_id: input.configurationId } : {}),
     source: { branch: input.source.branch, commit: input.source.commit },
     data_mode: dataMode,
     branch_ref: namespace,

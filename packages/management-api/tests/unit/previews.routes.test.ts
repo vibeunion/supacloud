@@ -37,6 +37,31 @@ test("blocks production and invalid requests without echoing input", async () =>
   expect(JSON.stringify(payload)).not.toContain("short");
 });
 
+test("fails closed when no isolation collector is configured", async () => {
+  const response = await app.handle(post(body, "isolation-collection"));
+  expect(response.status).toBe(501);
+  expect((await response.json()).code).toBe("PREVIEW_ISOLATION_COLLECTOR_UNAVAILABLE");
+});
+
+test("collects isolation evidence from the injected collector", async () => {
+  const collectedApp = createPreviewRoutes({
+    authorize: async () => undefined,
+    now: () => new Date("2026-09-30T12:00:00.000Z"),
+    isolationCollector: {
+      collect: async (check) => check === "database_role"
+        ? null
+        : { ok: true, observed_at: "2026-09-30T11:00:00.000Z" },
+    },
+  });
+  const response = await collectedApp.handle(post(body, "isolation-collection"));
+  expect(response.status).toBe(200);
+  const payload = await response.json();
+  expect(payload.accepted).toBe(false);
+  expect(payload.discarded).toEqual([{ check: "database_role", reason: "no observation" }]);
+  expect(payload.isolation.map((check: { status: string }) => check.status)).toEqual(["pending", "verified", "verified", "verified"]);
+  expect(payload.status.isolated).toBe(false);
+});
+
 test("evaluates isolation evidence and gates acceptance", async () => {
   const pending = await app.handle(post(body, "acceptance"));
   const pendingPayload = await pending.json();

@@ -2,6 +2,7 @@ import { Elysia, status, t } from "elysia";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { PreviewEnvironmentError, composePreviewEnvironment, evaluatePreviewIsolation } from "../services/preview-environment.service";
 import { evaluatePreviewStatus } from "../services/preview-status.service";
+import { collectPreviewIsolation, type PreviewIsolationCollectorPort } from "../services/preview-isolation-collector.service";
 
 const params = t.Object({ ref: t.String({ pattern: "^[A-Za-z0-9_-]{1,20}$" }) });
 const body = t.Object({
@@ -73,8 +74,14 @@ function toComposeInput(ref: string, input: PreviewRequestBody) {
   };
 }
 
-export function createPreviewRoutes(dependencies: { authorize?: typeof requireProjectOrAdminAuth } = {}) {
+export function createPreviewRoutes(dependencies: {
+  authorize?: typeof requireProjectOrAdminAuth;
+  /** Isolation evidence must come from a trusted collector; absent means collection is unavailable. */
+  isolationCollector?: PreviewIsolationCollectorPort;
+  now?: () => Date;
+} = {}) {
   const authorize = dependencies.authorize ?? requireProjectOrAdminAuth;
+  const now = dependencies.now ?? (() => new Date());
   return new Elysia({ prefix: "/v1/projects/:ref/previews", name: "preview-environments" })
     .error(({ error }) => {
       if (error instanceof PreviewEnvironmentError) {
@@ -107,6 +114,29 @@ export function createPreviewRoutes(dependencies: { authorize?: typeof requirePr
         ...(input.accepted ? { accepted: input.accepted } : {}),
       });
       return { preview: evaluated, isolation: evaluation.isolation, accepted: evaluation.accepted, status };
+    })
+    .post("/isolation-collection", {
+      params,
+      body,
+      detail: { tags: ["previews"], summary: "Collect isolation evidence from the trusted collector" },
+    }, async ({ params: values, body: input }) => {
+      if (!dependencies.isolationCollector) {
+        return status(501, {
+          code: "PREVIEW_ISOLATION_COLLECTOR_UNAVAILABLE",
+          error: "Preview isolation collector is not configured",
+        });
+      }
+      const preview = composePreviewEnvironment(toComposeInput(values.ref, input));
+      const collected = await collectPreviewIsolation(preview, dependencies.isolationCollector, now());
+      const evaluated = { ...preview, isolation: collected.isolation };
+      return {
+        preview: evaluated,
+        evidence: collected.evidence,
+        isolation: collected.isolation,
+        accepted: collected.accepted,
+        discarded: collected.discarded,
+        status: evaluatePreviewStatus(evaluated),
+      };
     });
 }
 

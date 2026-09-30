@@ -97,6 +97,26 @@ POST /v1/projects/{project_ref}/previews/acceptance
 }
 ```
 
+## Isolation evidence collection
+
+The acceptance endpoint above consumes caller-supplied evidence. For real
+environments the evidence must come from a trusted collector:
+`preview-isolation-collector.service.ts` defines `PreviewIsolationCollectorPort`
+and `collectPreviewIsolation(preview, collector, now)` aggregates its
+observations fail-closed.
+
+- An observation is discarded — and the check stays `pending` — when it is
+  absent, the collector throws, or it is bound to a different
+  `preview_ref`/`release_id`/`configuration_id`.
+- A timestamped `observed_at` must be valid and not in the future; an
+  `expires_at` in the past discards the observation.
+- Only surviving observations become evidence, so a preview can never be
+  accepted on unverifiable input.
+
+`POST /v1/projects/{project_ref}/previews/isolation-collection` uses the
+injected collector and answers `501 PREVIEW_ISOLATION_COLLECTOR_UNAVAILABLE` when
+none is configured, rather than pretending isolation was verified.
+
 ## Production blocking
 
 The composer refuses, before anything else:
@@ -206,8 +226,9 @@ deliver.
 
 1. Wire the remaining real cleanup ports (queue/storage namespace) and the
    remaining provisioning ports (application activation, configuration, secrets).
-2. An evidence collector that fills the isolation evidence from the running
-   environment so acceptance does not depend on a caller-supplied payload.
+2. Implement a concrete `PreviewIsolationCollectorPort` (platform query and/or
+   authenticated runtime agent) so collection does not depend on a
+   caller-supplied payload.
 3. Persist the acceptance decision with the preview record so an accepted
    preview can be promoted without re-collecting evidence.
 ## Contract primitives
