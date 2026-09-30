@@ -403,6 +403,11 @@ function authorizedToolMap(
     return tools;
 }
 
+// Keep stdout reserved for the final ToolResult, including one parseable JSON document.
+function writeDevProgress(result: { content: Array<{ type: string; text: string }> }): void {
+    for (const item of result.content) process.stderr.write(`${item.text}\n`);
+}
+
 function createCliTools(context: ResolvedContext, confirmProduction?: string): ToolMap {
     let pushMigrations: ((args: Record<string, unknown>) => Promise<any>) | undefined;
     const tools: ToolMap = {
@@ -419,7 +424,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     })));
     Object.assign(tools, captureTools((server) => registerLiteCliTools(server as any)));
     Object.assign(tools, captureTools((server) => registerAiTools(server as any)));
-    Object.assign(tools, captureTools((server) => registerAppTools(server as any)));
+    Object.assign(tools, captureTools((server) => registerAppTools(server as any, { onDevProgress: writeDevProgress })));
     Object.assign(tools, captureTools((server) => registerAppAliases(server as any)));
     Object.assign(tools, captureTools((server) => registerDbGovernanceTools(server as any)));
     const registerContextAwareHelp = () => {
@@ -602,6 +607,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     assign(captureTools((server) => registerApplicationTools(server, http)));
     Object.assign(tools, captureTools((server) => registerAppTools(server as any, {
         getApplications: () => tools.applications?.callback,
+        onDevProgress: writeDevProgress,
         projectRef: context.projectRef || undefined,
     })));
     assign(captureTools((server) => registerDeployTools(server as any, http, {

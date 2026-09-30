@@ -76,11 +76,8 @@ SupaCloud 的目标链路是：
 > `EnvironmentBinding` 的静态切片也已落地：编译器读取项目根目录
 > `supacloud.environments.json`，将每个已声明资源解析到不携带凭据的绑定引用
 > （`local` 或 `scheme:name`），并新增 SC8106-SC8108；CLI 为
-> `supacloud-compiler environment-bindings --environment <name>`。
-> `--profile fast|integration` 会产出本地运行时投影（`supacloud.runtime-bindings.v1`）：
-> 仅分类 `ephemeral`/`external`，**不解析凭据**，并拒绝 `prod`/`production`/`live`/`release` 形状的
-> 环境名（`ENVIRONMENT_BINDINGS_PRODUCTION_FORBIDDEN`）。部署预检仍为后续切片。参见
-> [Environment Bindings](./environment-bindings.md)。
+> `supacloud-compiler environment-bindings --environment <name>`。运行时凭据解析与
+> 部署预检仍为后续切片。参见 [Environment Bindings](./environment-bindings.md)。
 
 编译产物应能回答：
 
@@ -198,8 +195,14 @@ MCP 的权限不能混在一起：现有运维 MCP 的 plan-only、项目范围�
 > `dev-context` CLI），红化输出模块/路由/资源/诊断；并已随交付构建发布
 > `bundle/application-development.json`，由 `readApplicationDevelopmentContext`
 > 按目标/哈希校验读取（`verified-build-snapshot`），无需源码 checkout。
-> Developer MCP 工具与 Web Console 视图为后续切片。参见
-> [Application Development Context](./application-development-context.md)。
+> **Developer MCP 与 Web Console 视图已落地**：独立端点
+> `POST /mcp/developer/projects/{project_ref}` 只读、项目限域，仅暴露
+> `supacloud.get_application_development`；管理 API 新增
+> `GET .../releases/{release_id}/development?target=...`；`packages/web-console`
+> 应用页在已存发布包上逐目标展示模块/路由/命令/任务/资源计数与诊断。三处消费同一份
+> `supacloud.application-development.v1` 契约；运维 MCP 端点不暴露该工具。参见
+> [Application Development Context](./application-development-context.md) 与
+> [Optional AI Operations MCP](./mcp-ai-operations.md)。
 
 **验收标准：** 人和 AI 查看的是同一份应用结构、同一条执行证据，而不是各自维护一套解释。
 

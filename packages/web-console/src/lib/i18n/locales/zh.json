@@ -7,7 +7,12 @@
     "no_active": "没有当前激活记录", "ready": "已就绪", "not_ready": "未就绪",
     "release": "Release ID", "activation": "激活 ID", "configuration": "配置 ID",
     "target": "目标", "kind": "类型", "status": "状态", "releases": "已存发布包",
-    "no_releases": "没有已存发布包", "stored_at": "存储时间", "previous": "上一页", "next": "下一页"
+    "no_releases": "没有已存发布包", "stored_at": "存储时间", "previous": "上一页", "next": "下一页",
+    "development": "应用开发", "inspect": "查看",
+    "development_verified": "构建快照已验证",
+    "development_unavailable": "该发布目标暂无开发数据。",
+    "modules": "模块", "routes": "路由", "commands": "命令", "jobs": "任务",
+    "resources": "资源", "diagnostics": "诊断", "no_diagnostics": "没有开发诊断"
   },
   "GlobalDashboard": {
     "welcome": "欢迎回来，系统管理员",

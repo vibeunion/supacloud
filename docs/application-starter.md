@@ -74,16 +74,42 @@ Remote test-server sync, migration generation and remote reload remain
 | Profile | Intended use | Requirement |
 | --- | --- | --- |
 | `fast` (default) | Write business code, inspect routes and check contracts quickly | Local/ephemeral dependencies; no external database is required |
-| `integration` | Verify production dependency semantics | An explicit `--database-url` or `SUPACLOUD_DEV_DATABASE_URL`; never inferred or defaulted |
+| `integration` | Select a database target for subsequent integration work; this slice only compiles | An explicit `--database-url` or `SUPACLOUD_DEV_DATABASE_URL`; never inferred or defaulted |
 
-The command prints the selected profile, project root, output directory, the
-database mode (with credentials redacted) and the modules written. It also prints
-what the selected profile does **not** verify, so "zero configuration" never means
-hidden configuration. `--once` performs a single validation pass; omit it to watch.
+The command reports the selected profile, project root, output directory,
+database mode and current compilation result. `--once` (or `--watch=false`)
+performs one compile without creating filesystem watchers. Omit these to watch.
+Initial and subsequent watch reports are emitted immediately to **stderr**;
+with `--format json` each progress report is one JSON line. **stdout** remains one
+final JSON document when the command stops. Text output explicitly says when
+watching has stopped instead of asking the user to stop an already closed watcher.
 
-The first slice does **not** connect to, migrate or seed the integration database,
-and does not provision queue or object-storage adapters. Those steps require an
-explicitly selected environment and remain separate follow-ups.
+JSON reports retain `version: 1` and add `state: "once" | "watching" | "stopped"`
+and `artifacts: "current" | "not-current"`. If compilation fails, `ok` is false,
+`modules` and `written` are empty and artifacts are `not-current`; previous
+successful generated files remain untouched, but are not presented as results
+of the failed compile. The final exit status reflects the last completed compile.
+Shutdown waits for an already-running recompile to finish; it does not abort a
+write midway. Cancellation during startup and watcher-setup failures settle
+without leaving a pending `ready` promise or live watcher behind.
+
+Both `--database-url` and the existing `--database_url` are accepted, but not
+together. The explicit flag takes precedence over `SUPACLOUD_DEV_DATABASE_URL`;
+an explicitly empty flag is rejected rather than falling back to the environment.
+Integration accepts only `postgres://` or `postgresql://` URLs with a host, omits
+userinfo, query parameters and fragments from reports, and never echoes an
+invalid URL in an error. `fast` ignores the integration environment variable and
+rejects an explicit database flag rather than claiming to use it. The displayed
+host and database name are metadata, not a guarantee that those names contain no
+user-supplied sensitive information.
+
+The first slice does **not** provision even a local database, connect to, migrate
+or seed an integration database, start the application, or provision queue or
+object-storage adapters. A syntactically valid URL does not prove connectivity,
+permissions, environment identity or non-production status. Those steps require
+an explicitly selected environment and remain separate follow-ups. Embedded tool
+consumers can opt into `AppToolOptions.onDevProgress`; the CLI owns its stderr
+transport, and the shared tool never writes to a transport implicitly.
 
 ## Environment Contract
 

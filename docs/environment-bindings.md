@@ -1,27 +1,16 @@
 # Environment Bindings
 
-Status: **IMPLEMENTED (static resolution slice)**. The compiler reads a
-per-environment binding document, resolves each declared `@InfraResource` to an
-opaque reference and fails closed on missing, unknown or credential-shaped
-bindings. Runtime credential resolution and deployment preflight are **not**
-implemented here; see [Encore Alignment Roadmap](./encore-alignment-roadmap.md).
-
-## Why
-
-The [application resource model](./application-resource-model.md) declares
-*what* infrastructure an application needs (`orders-db`, `attachments`) without
-saying where it comes from. An environment binding answers the next question —
-"which concrete binding does this logical resource use in this environment?" —
-without moving credentials or hosting decisions into the application source or
-build output.
-
-The projection is a read-only view of the declarations plus one binding
-document. It is not a second source of truth and it does not prove that a target
-environment actually provides the resource.
+Status: **IMPLEMENTED (static resolution slice)**. The compiler resolves each
+explicit `@InfraResource` to an opaque reference for one selected environment.
+Missing, unknown and malformed bindings fail closed. Runtime credential
+resolution and deployment preflight are separate work; see the
+[Encore Alignment Roadmap](./encore-alignment-roadmap.md).
 
 ## Document
 
-`supacloud.environments.json` at the project root:
+The [application resource model](./application-resource-model.md) declares what
+an application needs. `supacloud.environments.json` declares where those logical
+resources should be resolved, without embedding connection strings or secrets:
 
 ```json
 {
@@ -43,89 +32,97 @@ environment actually provides the resource.
 }
 ```
 
-- `schema` is exactly `supacloud.environments.v1`.
-- `environments` maps an environment name (`^[a-z][a-z0-9-]{0,31}$`) to its
-  `bindings`.
-- `bindings` maps a logical resource name to an opaque binding reference.
+Environment names match `^[a-z][a-z0-9-]{0,31}$`. Binding values must match the
+entire reference grammar: `local`, or a single `scheme:name` namespace
+(`^[a-z][a-z0-9-]{0,15}:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`). URLs, credentials,
+whitespace and control characters, including a trailing newline, are rejected.
+Secret values must be referenced by name, for example `secret:orders-db`.
+A reference's syntax is not proof of its existence or authorization.
 
-A binding reference is either `local` or a single `scheme:name` namespace
-(`^[a-z][a-z0-9-]{0,15}:[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$`). It never carries a
-connection string, URL, credential or secret value: values containing `://`,
-`@`, `=`, whitespace or control characters are rejected. Secrets must be
-referenced by name (`secret:orders-db`), not inlined.
-
-## Command
+## Command and path ownership
 
 ```sh
 supacloud-compiler environment-bindings [rootDir] --environment <name> [--bindings-file <file>] [--json]
 ```
 
-The command analyzes the current source (read-only), resolves the selected
-environment and prints the projection. `--bindings-file` defaults to
-`./supacloud.environments.json`. The process exits non-zero when any binding
-diagnostic is reported, so CI fails closed.
+`--environment` is required; the CLI never selects the first object key as an
+environment. The command is read-only and rejects `--write`.
 
-Add `--profile fast|integration` to resolve the **local runtime** projection
-(`supacloud.runtime-bindings.v1`):
+When an explicit `rootDir` (or `--root`) is supplied, the default binding document
+and any relative `--bindings-file` are resolved against that directory. With no
+explicit root, they are resolved against the current project directory. Absolute
+binding-file paths are used as given. This prevents a command targeting a nested
+project from silently reading the parent workspace's binding file. When selecting
+a source subdirectory, use `--bindings-file` to explicitly identify a document
+outside that directory.
 
 ```sh
-supacloud-compiler environment-bindings --environment fast --profile fast --json
+supacloud-compiler environment-bindings ./apps/orders --environment integration --json
+supacloud-compiler environment-bindings ./apps/orders --environment integration --bindings-file config/bindings.json
 ```
 
-Runtime resolution only classifies the static projection for a local runner; it
-never resolves a credential (`credentials: "resolved-by-local-runner"`). The
-`fast` profile requires every resource to bind to `local` (mode `ephemeral`);
-`integration` accepts namespaced references (mode `external`). A
-production-shaped environment name (`prod`, `production`, `live`, `release`) is
-refused with `ENVIRONMENT_BINDINGS_PRODUCTION_FORBIDDEN` before anything is read,
-so a local entry can never point at production by accident.
+The CLI returns nonzero for binding diagnostics, analysis errors, invalid files
+or exceeded budgets. Rejected JSON and IO error bodies are never echoed.
 
 ## Projection
 
-`supacloud.environment-bindings.v1`:
-
-| Field | Contents |
-| --- | --- |
-| `environment` | The resolved environment name |
-| `bindings` | resource, declared kind and binding reference, sorted by resource |
-| `omitted` | resources beyond the cap |
-| `limits` | enforced caps |
-| `diagnostics` | `--json` output only; `{ code, severity, environment, resource?, message }` |
+`supacloud.environment-bindings.v1` contains the selected `environment`, sorted
+`bindings` (`resource`, `kind`, `binding`), `omitted.resources`, and `limits`.
+JSON CLI output additionally includes `diagnostics`; programmatic resolution
+returns `{ projection, diagnostics }`. Ordering uses an explicit locale.
+Only own properties are read: prototype properties are not declarations.
 
 ## Diagnostics
 
 | Code | Name | Meaning |
 | --- | --- | --- |
-| SC8106 | `missing-environment-binding` | A declared `@InfraResource` has no binding in the selected environment |
-| SC8107 | `unknown-environment-binding` | The environment binds a name that is not a declared `@InfraResource` |
-| SC8108 | `invalid-environment-binding` | A binding reference is a URL, credential or otherwise malformed |
+| SC8106 | `missing-environment-binding` | A declared resource lacks a binding |
+| SC8107 | `unknown-environment-binding` | A binding names an undeclared resource |
+| SC8108 | `invalid-environment-binding` | A reference is malformed or credential-shaped |
 
-When the selected environment does not exist, the command fails with
-`ENVIRONMENT_BINDINGS_UNKNOWN_ENVIRONMENT`. A structurally invalid document
-fails with `ENVIRONMENT_BINDINGS_INVALID`; exceeding the caps fails with
-`ENVIRONMENT_BINDINGS_TOO_LARGE`.
+Unknown environments produce `ENVIRONMENT_BINDINGS_UNKNOWN_ENVIRONMENT`.
+Malformed documents produce `ENVIRONMENT_BINDINGS_INVALID`; budget violations
+produce `ENVIRONMENT_BINDINGS_TOO_LARGE`.
 
 ## Limits
 
-`ENVIRONMENT_BINDINGS_LIMITS` bounds the document at 32 environments, 128
-bindings per environment and a 64 KiB projection budget. The `resources` cap
-(64) bounds the emitted projection and is reported through `omitted`.
+Documents allow at most 32 environments and 128 bindings per environment. File
+reads are bounded to 4 MiB of actual bytes before strict UTF-8 decoding and JSON
+parsing. Programmatic parsing also bounds and detaches the document; resolution
+revalidates it so subsequent mutations cannot bypass validation.
 
-## Boundaries
+The projection contains at most 64 bindings, with omissions explicitly counted.
+Both formatted JSON (including diagnostics) and human-readable output must fit
+64 KiB of UTF-8, including the final newline. Multibyte resource names and error
+messages count toward the same budget. Oversized output fails before printing;
+it is not silently truncated into a partial successful result.
 
-- **Declaration vs runtime.** A binding reference says where a resource *should*
-  be resolved. It is not a credential, a connection test or a permission check.
-  Runtime resolution, permissions and health remain deployment preflight.
-- **Explicit references only.** Dynamic SQL, arbitrary `fetch` and third-party
-  SDKs are not inferred. Only declared `@InfraResource` names are resolved.
-- **Fail closed.** Missing, unknown or credential-shaped bindings are errors,
-  not first-request failures.
-- **No production side effects.** The resolver only reads a local document; it
-  never connects to or mutates an environment.
+## Local runtime classification
 
-## Next steps
+```sh
+supacloud-compiler environment-bindings ./apps/orders --environment fast --profile fast --json
+```
 
-1. Wire the runtime projection into the local runner so `fast` starts against
-   ephemeral resources and `integration` connects to explicitly selected ones.
-2. Deployment preflight that verifies the bound resource, permissions and health.
-3. Delivery/receipt evidence referencing the resolved binding version.
+`--profile fast|integration` produces `supacloud.runtime-bindings.v1` with
+`credentials: "resolved-by-local-runner"`. `local` is classified as `ephemeral`;
+a valid namespaced reference is `external`. The `fast` profile rejects every
+non-local declaration, including declarations beyond the 64-entry display cap.
+`integration` accepts local and external references but does not connect to them.
+Both output formats enforce a separate 64 KiB budget after classification.
+
+Production-shaped environment names (`prod`, `production`, `live`, `release`,
+optionally followed by `-` or `_`) are rejected before project configuration is
+loaded. Production-shaped reference destinations are also rejected during
+resolution with `ENVIRONMENT_BINDINGS_PRODUCTION_FORBIDDEN`. These syntax checks
+are not proof that an arbitrary reference is non-production: the future runner
+must independently authorize and identify the destination before connecting.
+
+## Boundaries and next steps
+
+Only explicit resources are resolved; dynamic SQL, arbitrary `fetch`, and SDK
+calls are not inferred. Nothing connects to or mutates an environment. A binding
+is a declaration, not a runtime credential, health check, or permission proof.
+
+Connecting these classifications to local runners, deployment preflight, and
+delivery receipts referencing the resolved binding version remain separate
+implementation slices.

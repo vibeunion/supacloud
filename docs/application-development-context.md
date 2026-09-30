@@ -1,8 +1,8 @@
 # Application Development Context
 
-Status: **IMPLEMENTED (compiler projection and delivered-build reader)**. The contract and CLI are read-only.
-The Web Console application view and a project-scoped Developer MCP are the next
-consumers; they are **not** implemented here.
+Status: **IMPLEMENTED (compiler projection, delivered-build reader, Developer MCP and
+Web Console view)**. The contract, CLI, MCP tool and console view are all read-only.
+The console and the Developer MCP read the **same** delivered-build document.
 
 ## Why
 
@@ -146,11 +146,45 @@ A Developer MCP must stay separate from the platform
 project-scoped, redacted policy. Developer tools may call endpoints or run tests
 only against an explicitly selected local/test environment, never production.
 
+### Management API read endpoint
+
+The platform exposes the delivered-build document for one immutable release
+target without a source checkout:
+
+```http
+GET /v1/projects/{project_ref}/applications/{application_id}/releases/{release_id}/development?target={target}
+```
+
+The response carries `project_ref`, `application_id`, `release_id`, `target`,
+`object_id`, `correlation: "verified-build-snapshot"` and the validated
+`context`. The bytes come from the release archive that `ApplicationReleaseStorage`
+already hash-verified, so the endpoint reuses one read path and never re-infers
+structure from current source. It maps `APPLICATION_DEVELOPMENT_MISSING` and
+`APPLICATION_DEVELOPMENT_TARGET_NOT_FOUND` to `404`, and
+`APPLICATION_DEVELOPMENT_INVALID`/`APPLICATION_DEVELOPMENT_TOO_LARGE` to `422`.
+
+### Developer MCP tool
+
+`POST /mcp/developer/projects/{project_ref}` is a separate, project-scoped,
+read-only Developer MCP surface. It exposes only `supacloud.get_capabilities`
+and `supacloud.get_application_development` (inputs `application_id`,
+`release_id`, `target`) and returns the same `verified-build-snapshot` document.
+The operations MCP endpoint does not expose the development tool.
+
+### Web Console view
+
+The application page (`packages/web-console`) adds a development column per
+stored release. Selecting a target loads the endpoint above through
+`parseApplicationDevelopment` and renders module/route/command/job/resource
+counts plus the development diagnostics. The console and the MCP consume the
+same contract, so AI and the UI cannot drift.
+
 ## Next steps
 
-1. Add project-scoped Developer MCP tools over the delivered-build read path.
-2. Add the Web Console application developer view beside the existing runtime
-   release view, sharing this one document.
+1. Connect a selected route to its static execution plan and, when available, a
+   business execution timeline record.
+2. Extend the Developer MCP with explicitly local/test-only invocation tools
+   bound to a named environment.
 
 ## Verification
 
@@ -162,3 +196,12 @@ delivered-build artifact, self-consistent malformed archives, UTF-8 rejection,
 target matching, large archive round trips and failed-rebuild pointer preservation.
 `packages/compiler/src/application-development-validation.test.ts` covers nested
 schema/redaction failures, provider limits and excluded-job resource isolation.
+
+`packages/management-api/src/services/application-development.service.ts` and its
+unit test cover the release-archive extraction and validation, and
+`tests/unit/application-development.routes.test.ts` covers the read endpoint.
+`tests/unit/mcp-developer-surface.test.ts` covers the separate Developer MCP
+surface.
+
+`packages/web-console/src/lib/application-development.ts` and its test cover the
+console parser and loader; the compiled page test exercises the development view.
