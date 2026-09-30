@@ -71,6 +71,81 @@ const COMPONENTS: ReadonlyArray<ReleaseExecutionComponent> = [
 const REQUIRED: ReadonlyArray<ReleaseExecutionComponent> = ["application", "migrations", "health"];
 const STATUSES: ReadonlyArray<ReleaseExecutionStatus> = ["succeeded", "failed", "unknown"];
 
+function isStatus(value: unknown): value is ReleaseExecutionStatus {
+  return typeof value === "string" && (STATUSES as ReadonlyArray<string>).includes(value);
+}
+
+function isText(value: unknown): value is string {
+  return typeof value === "string" && value.length >= 1 && value.length <= 512 && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function isHex64(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
+function isTarget(value: unknown): value is string {
+  return typeof value === "string" && /^[a-z][a-z0-9-]{0,62}$/.test(value);
+}
+
+/**
+ * Rebuild a release-execution document from untrusted storage, accepting only
+ * well-formed fields. Any mismatch throws `RELEASE_EXECUTION_INVALID` so a
+ * corrupted or tampered record is never surfaced as a verified release.
+ */
+export function parseReleaseExecutionDocument(
+  value: unknown,
+  expected: { release_id: string; target: string; manifestSha256?: string },
+): ReleaseExecutionDocument {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) invalid();
+  const row = value as Record<string, unknown>;
+  if (row.schema !== RELEASE_EXECUTION_SCHEMA || row.correlation !== "release-execution-observation") invalid();
+  if (!isTarget(row.target) || row.target !== expected.target) invalid();
+  if (!isHex64(row.release_id) || row.release_id !== expected.release_id) invalid();
+  if (!isHex64(row.manifestSha256)) invalid();
+  if (expected.manifestSha256 !== undefined && row.manifestSha256 !== expected.manifestSha256) invalid();
+  if (typeof row.deploymentVerified !== "boolean") invalid();
+  if (!Array.isArray(row.components) || row.components.length !== COMPONENTS.length) invalid();
+  const rawComponents = row.components as unknown[];
+
+  const components: ReleaseExecutionComponentResult[] = COMPONENTS.map((name, index) => {
+    const raw = rawComponents[index];
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) invalid();
+    const component = raw as Record<string, unknown>;
+    if (component.name !== name || !isStatus(component.status) || component.required !== REQUIRED.includes(name)) invalid();
+    if (component.version !== null && !isText(component.version)) invalid();
+    if (component.detail !== null && !isText(component.detail)) invalid();
+    if (component.observedAt !== null && (typeof component.observedAt !== "string" || !Number.isFinite(Date.parse(component.observedAt)))) invalid();
+    if (component.status === "unknown" && (component.version !== null || component.detail !== null)) invalid();
+    if (component.status !== "unknown" && component.observedAt === null) invalid();
+    return {
+      name, status: component.status, required: component.required,
+      version: component.version as string | null, detail: component.detail as string | null,
+      observedAt: component.observedAt as string | null,
+    };
+  });
+
+  const recovery = row.recovery as Record<string, unknown> | undefined;
+  if (!recovery || recovery.application !== releaseRecoveryPaths.application
+    || recovery.database !== releaseRecoveryPaths.database || recovery.storage !== releaseRecoveryPaths.storage) invalid();
+  if (!Array.isArray(row.notes) || row.notes.length === 0 || row.notes.length > 16 || !row.notes.every(isText)) invalid();
+
+  const verified = components.every((component) => component.status !== "failed")
+    && components.filter((component) => component.required).every((component) => component.status === "succeeded");
+  if (row.deploymentVerified !== verified) invalid();
+
+  return {
+    schema: RELEASE_EXECUTION_SCHEMA,
+    correlation: "release-execution-observation",
+    target: row.target,
+    release_id: row.release_id,
+    manifestSha256: row.manifestSha256,
+    deploymentVerified: verified,
+    components,
+    recovery: releaseRecoveryPaths,
+    notes: row.notes.map((note) => String(note)),
+  };
+}
+
 function invalid(): never {
   throw new ReleaseExecutionError("RELEASE_EXECUTION_INVALID");
 }

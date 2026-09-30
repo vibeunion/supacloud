@@ -10,6 +10,7 @@ import { ApplicationReleaseError, ApplicationReleaseStorage } from "../services/
 import { ApplicationDevelopmentError, extractApplicationDevelopment } from "../services/application-development.service";
 import { ReleaseEvidenceError, createReleaseEvidence } from "../services/application-release-evidence.service";
 import { ReleaseExecutionError, createReleaseExecution } from "../services/application-release-execution.service";
+import type { ReleaseExecutionStore } from "../services/application-release-execution-store";
 import { uploadApplicationRelease } from "../services/application-release-upload";
 import { ApplicationActiveStorage } from "../services/application-active-storage";
 import { ApplicationReadiness } from "../services/application-readiness";
@@ -52,6 +53,7 @@ interface ApplicationRouteDependencies {
   migrations?: Pick<ApplicationMigrations, "inspect">;
   configurations?: Pick<ApplicationConfigurations, "read" | "put">;
   deployment?: Pick<ApplicationDeploymentService, "activateConfigured" | "reconcile" | "retireConfigured">;
+  executions?: ReleaseExecutionStore;
   retirementVerifier?: unknown;
   principal?: typeof getVerifiedRequestPrincipal;
 }
@@ -74,6 +76,7 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
   const readiness = dependencies.readiness ?? new ApplicationReadiness();
   const migrations = dependencies.migrations ?? new ApplicationMigrations({ storage });
   const configurations = dependencies.configurations ?? new ApplicationConfigurations();
+  const executions = dependencies.executions;
   const environmentParams = t.Object({
     ...params.properties, ref: t.String({ pattern: "^[a-z0-9-]{1,20}$" }),
     environmentId: t.String({ pattern: "^[A-Za-z0-9_-]{1,64}$" }),
@@ -213,10 +216,25 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       detail: { tags: ["applications"], summary: "Record per-component release execution results without a store" },
     }, async ({ params: values, query, body }) => {
       const { record } = await storage.readArchive(values.ref, values.id, values.releaseId);
+      const document = createReleaseExecution({ record, target: query.target, observations: body.observations });
+      if (executions) await executions.save(values.ref, values.id, document);
       return {
         project_ref: values.ref, application_id: values.id,
-        ...createReleaseExecution({ record, target: query.target, observations: body.observations }),
+        stored: executions !== undefined,
+        ...document,
       };
+    })
+    .get("/:id/releases/:releaseId/execution", {
+      params: t.Object({ ...params.properties, releaseId: t.String({ pattern: "^[a-f0-9]{64}$" }) }),
+      query: t.Object({ target: t.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" }) }),
+      detail: { tags: ["applications"], summary: "Read a recorded per-component release execution result" },
+    }, async ({ params: values, query }) => {
+      if (!executions) {
+        return status(501, { code: "RELEASE_EXECUTION_STORE_UNAVAILABLE", error: "Release execution store is not configured" });
+      }
+      const document = await executions.read(values.ref, values.id, values.releaseId, query.target);
+      if (!document) return status(404, { code: "RELEASE_EXECUTION_NOT_RECORDED", error: "Release execution is not recorded" });
+      return { project_ref: values.ref, application_id: values.id, ...document };
     })
     .post("/:id/releases", {
       params, parse: "none",

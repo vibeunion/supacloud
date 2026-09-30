@@ -39,6 +39,22 @@ success. It fails closed:
 - an unknown `target` returns `404 RELEASE_EXECUTION_TARGET_NOT_FOUND`;
 - a malformed observation returns `422 RELEASE_EXECUTION_INVALID`.
 
+## Persistence
+
+`application-release-execution-store.ts` defines a `ReleaseExecutionStore` port
+and `createFileReleaseExecutionStore(baseDir)`, which writes each document under
+`<baseDir>/<project>/<application>/<release_id>/<target>.json` atomically
+(temp file + rename + fsync). Reads re-validate the stored document, so a
+corrupted or tampered record is rejected as `RELEASE_EXECUTION_INVALID` instead
+of being shown as a verified release.
+
+- `POST .../execution` persists the result when a store is configured and
+  reports `stored: true`.
+- `GET .../execution?target={target}` reads the recorded result, answers
+  `501 RELEASE_EXECUTION_STORE_UNAVAILABLE` when no store is configured, and
+  `404 RELEASE_EXECUTION_NOT_RECORDED` when nothing was recorded for that
+  release and target.
+
 ## Recovery paths
 
 The document carries separate recovery paths per surface, reusing the same
