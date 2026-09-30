@@ -1,4 +1,5 @@
 import type { VerifiedDeliveryExecutableArchive } from "@supacloud/delivery";
+import { AppError } from "../utils/errors";
 
 /**
  * Read-only projection of a delivered application's development contract. This
@@ -17,9 +18,10 @@ export type ApplicationDevelopmentErrorCode =
   | "APPLICATION_DEVELOPMENT_TOO_LARGE"
   | "APPLICATION_DEVELOPMENT_INVALID";
 
-export class ApplicationDevelopmentError extends Error {
-  constructor(readonly code: ApplicationDevelopmentErrorCode) {
-    super(code);
+export class ApplicationDevelopmentError extends AppError {
+  constructor(readonly developmentCode: ApplicationDevelopmentErrorCode) {
+    super(developmentCode, developmentCode === "APPLICATION_DEVELOPMENT_TARGET_NOT_FOUND"
+      || developmentCode === "APPLICATION_DEVELOPMENT_MISSING" ? 404 : 422, developmentCode);
     this.name = "ApplicationDevelopmentError";
   }
 }

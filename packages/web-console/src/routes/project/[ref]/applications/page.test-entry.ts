@@ -15,6 +15,19 @@ function inventory(ref: string, app: string, id = a, next: string | null = null)
     targets: [{ name: "api", kind: "http", object_id: "c".repeat(64), entrypoint: "bundle/index.js" }],
   }] };
 }
+function development(ref: string, app: string) {
+  return {
+    project_ref: ref, application_id: app, release_id: a, target: "api", object_id: "c".repeat(64),
+    correlation: "verified-build-snapshot",
+    context: {
+      schema: "supacloud.application-development.v1", source: "current-graph", deploymentVerified: false,
+      modules: [], routes: [], commands: [], jobs: [], resourceUses: [], executionPlans: [],
+      resources: [{ name: "reviews-db", kind: "database" }],
+      diagnostics: [{ code: "SC8103", severity: "warn" }],
+      omitted: { modules: 0 }, limits: { outputBytes: 65536 },
+    },
+  };
+}
 function network(handler: (url: string, init: RequestInit) => Promise<Response>) {
   globalThis.fetch = Object.assign(async (url: RequestInfo | URL, init: RequestInit = {}) =>
     handler(String(url), init), originalFetch);
@@ -74,6 +87,19 @@ try {
   await eventually(() => ok(text().includes("Data unavailable")));
   ok(!text().includes(a));
   ok(!text().includes("No stored releases"));
+
+  network(async url => {
+    urls.push(url);
+    if (url.endsWith("/runtime")) return Response.json(runtime("other", "next-app", "prod"));
+    if (url.includes("/development")) return Response.json(development("other", "next-app"));
+    return Response.json(inventory("other", "next-app", a));
+  });
+  button("Refresh").click();
+  await eventually(() => ok(text().includes(a)));
+  button("api").click();
+  await eventually(() => ok(text().includes("Verified build snapshot")));
+  ok(text().includes("SC8103"));
+  ok(urls.some(url => url.includes(`/releases/${a}/development?target=api`)));
 
   const hanging = Promise.withResolvers<Response>();
   const unmountSignals: AbortSignal[] = [];

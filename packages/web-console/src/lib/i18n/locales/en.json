@@ -7,7 +7,12 @@
     "no_active": "No active activation record", "ready": "Ready", "not_ready": "Not ready",
     "release": "Release ID", "activation": "Activation ID", "configuration": "Configuration ID",
     "target": "Target", "kind": "Kind", "status": "Status", "releases": "Stored releases",
-    "no_releases": "No stored releases", "stored_at": "Stored at", "previous": "Previous", "next": "Next"
+    "no_releases": "No stored releases", "stored_at": "Stored at", "previous": "Previous", "next": "Next",
+    "development": "Application development", "inspect": "Inspect",
+    "development_verified": "Verified build snapshot",
+    "development_unavailable": "Development data unavailable for this release target.",
+    "modules": "Modules", "routes": "Routes", "commands": "Commands", "jobs": "Jobs",
+    "resources": "Resources", "diagnostics": "Diagnostics", "no_diagnostics": "No development diagnostics"
   },
   "GlobalDashboard": {
     "welcome": "Welcome back, Admin",
