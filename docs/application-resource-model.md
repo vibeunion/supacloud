@@ -1,8 +1,10 @@
 # Application Resource Model
 
 Status: **IMPLEMENTED (static slice)**. The compiler declares, validates and
-serializes logical infrastructure resources and their uses. Runtime credential
-resolution and per-environment binding are **not** implemented here; see
+serializes logical infrastructure resources and their uses. Per-environment
+binding is now a separate static resolver
+([Environment Bindings](./environment-bindings.md)); runtime credential
+resolution is **not** implemented here; see
 [Encore Alignment Roadmap](./encore-alignment-roadmap.md).
 
 ## Why
@@ -20,7 +22,7 @@ declare it.
 | --- | --- | --- |
 | `InfraResource` | A logical resource declaration: name + kind | Holding credentials or provisioning cloud resources |
 | `ResourceUse` | Which module/command/job uses a resource, and how | Inferring object-level authorization |
-| `EnvironmentBinding` | Where a logical resource is bound per environment | *(future work; not in this slice)* |
+| `EnvironmentBinding` | Where a logical resource is bound per environment (see [Environment Bindings](./environment-bindings.md)) | Holding credentials or proving the binding is reachable |
 
 Naming note: `@supacloud/app` already exports a reactive data-loading primitive
 `resource<T>()` (`packages/app/src/resource.ts`, modeled after Angular
@@ -124,6 +126,10 @@ inspection and delivery tooling can answer:
 | SC8104 | `invalid-resource-kind` | `kind` is missing or not a supported value |
 | SC8105 | `invalid-resource-operation` | Operations are not a nonempty static array of supported string literals |
 
+Per-environment binding adds SC8106-SC8108 (`missing-environment-binding`,
+`unknown-environment-binding`, `invalid-environment-binding`); see
+[Environment Bindings](./environment-bindings.md).
+
 Run the documented reproduction for each code in [docs/errors](./errors/README.md).
 
 ## Boundaries
@@ -152,7 +158,8 @@ and full-application preview.
 
 ## Next steps
 
-1. `EnvironmentBinding` config and a runtime resolver (local/integration/profile).
-2. Deployment preflight that checks the actual binding, permissions and health.
-3. Local `app dev` consuming the graph to connect declared resources.
-4. Delivery/receipt evidence referencing the bound resource version.
+1. Deployment preflight that checks the actual binding, permissions and health.
+2. Local `app dev` consuming the graph and
+   [environment bindings](./environment-bindings.md) to connect declared
+   resources in the `fast`/`integration` profiles.
+3. Delivery/receipt evidence referencing the bound resource version.

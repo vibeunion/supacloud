@@ -38,6 +38,25 @@ export type {
   ApplicationDevelopmentDiagnostic,
   DevelopmentSchemaKind,
 } from "./application-development";
+export {
+  parseEnvironmentBindings,
+  resolveEnvironmentBindings,
+  formatEnvironmentBindings,
+  EnvironmentBindingError,
+  ENVIRONMENT_BINDINGS_SCHEMA,
+  ENVIRONMENT_BINDINGS_PROJECTION_SCHEMA,
+  ENVIRONMENT_BINDING_REFERENCE_PATTERN,
+  ENVIRONMENT_BINDINGS_LIMITS,
+} from "./environment-bindings";
+export type {
+  EnvironmentBindingsDocument,
+  EnvironmentBindingsProjection,
+  EnvironmentBindingsResult,
+  EnvironmentBindingEntry,
+  EnvironmentBindingDiagnostic,
+  EnvironmentBindingDiagnosticCode,
+  EnvironmentBindingErrorCode,
+} from "./environment-bindings";
 export type { AppliedDiagnosticFix, ApplyDiagnosticFixOptions } from "./fixes";
 export { createDiagnosticRepairPlan } from "./repair-plan";
 export type { DiagnosticRepair } from "./repair-plan";

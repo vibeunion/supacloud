@@ -409,6 +409,66 @@
       "signature": "export interface DoctorResult {\n    checks: Array<{\n        name: string;\n        ok: boolean;\n        detail: string;\n    }>;\n    diagnostics: ApplicationGraph[\"diagnostics\"];\n    errors: number;\n}"
     },
     {
+      "name": "ENVIRONMENT_BINDING_REFERENCE_PATTERN",
+      "kind": "value",
+      "signature": "export declare const ENVIRONMENT_BINDING_REFERENCE_PATTERN = \"^(?:local|[a-z][a-z0-9-]{0,15}:[A-Za-z0-9][A-Za-z0-9_.-]{0,63})$\";"
+    },
+    {
+      "name": "ENVIRONMENT_BINDINGS_LIMITS",
+      "kind": "value",
+      "signature": "export declare const ENVIRONMENT_BINDINGS_LIMITS: {\n    readonly environments: number;\n    readonly bindings: number;\n    readonly resources: number;\n    readonly outputBytes: number;\n};"
+    },
+    {
+      "name": "ENVIRONMENT_BINDINGS_PROJECTION_SCHEMA",
+      "kind": "value",
+      "signature": "export declare const ENVIRONMENT_BINDINGS_PROJECTION_SCHEMA = \"supacloud.environment-bindings.v1\";"
+    },
+    {
+      "name": "ENVIRONMENT_BINDINGS_SCHEMA",
+      "kind": "value",
+      "signature": "export declare const ENVIRONMENT_BINDINGS_SCHEMA = \"supacloud.environments.v1\";"
+    },
+    {
+      "name": "EnvironmentBindingDiagnostic",
+      "kind": "type",
+      "signature": "export interface EnvironmentBindingDiagnostic {\n    code: EnvironmentBindingDiagnosticCode;\n    severity: \"error\";\n    environment: string;\n    resource?: string;\n    message: string;\n}"
+    },
+    {
+      "name": "EnvironmentBindingDiagnosticCode",
+      "kind": "type",
+      "signature": "export type EnvironmentBindingDiagnosticCode = \"missing-environment-binding\" | \"unknown-environment-binding\" | \"invalid-environment-binding\";"
+    },
+    {
+      "name": "EnvironmentBindingEntry",
+      "kind": "type",
+      "signature": "export interface EnvironmentBindingEntry {\n    resource: string;\n    kind: InfraResourceKind;\n    binding: string;\n}"
+    },
+    {
+      "name": "EnvironmentBindingError",
+      "kind": "both",
+      "signature": "export declare class EnvironmentBindingError extends Error {\n    readonly code: EnvironmentBindingErrorCode;\n    constructor(code: EnvironmentBindingErrorCode);\n}"
+    },
+    {
+      "name": "EnvironmentBindingErrorCode",
+      "kind": "type",
+      "signature": "export type EnvironmentBindingErrorCode = \"ENVIRONMENT_BINDINGS_INVALID\" | \"ENVIRONMENT_BINDINGS_TOO_LARGE\" | \"ENVIRONMENT_BINDINGS_UNKNOWN_ENVIRONMENT\";"
+    },
+    {
+      "name": "EnvironmentBindingsDocument",
+      "kind": "type",
+      "signature": "export interface EnvironmentBindingsDocument {\n    schema: typeof ENVIRONMENT_BINDINGS_SCHEMA;\n    environments: Record<string, {\n        bindings: Record<string, string>;\n    }>;\n}"
+    },
+    {
+      "name": "EnvironmentBindingsProjection",
+      "kind": "type",
+      "signature": "export interface EnvironmentBindingsProjection {\n    schema: typeof ENVIRONMENT_BINDINGS_PROJECTION_SCHEMA;\n    environment: string;\n    bindings: EnvironmentBindingEntry[];\n    omitted: {\n        resources: number;\n    };\n    limits: typeof ENVIRONMENT_BINDINGS_LIMITS;\n}"
+    },
+    {
+      "name": "EnvironmentBindingsResult",
+      "kind": "type",
+      "signature": "export interface EnvironmentBindingsResult {\n    projection: EnvironmentBindingsProjection;\n    diagnostics: EnvironmentBindingDiagnostic[];\n}"
+    },
+    {
       "name": "EXECUTION_CONTEXT_LIMITS",
       "kind": "value",
       "signature": "export declare const EXECUTION_CONTEXT_LIMITS: {\n    readonly inputBytes: number;\n    readonly inputEvents: number;\n    readonly outputBytes: number;\n    readonly events: number;\n    readonly modules: number;\n    readonly files: number;\n    readonly diagnostics: number;\n    readonly plans: number;\n    readonly timeline: number;\n    readonly timelineAttempts: number;\n    readonly timelineStages: number;\n};"
@@ -482,6 +542,11 @@
       "name": "formatDeliveryPlan",
       "kind": "value",
       "signature": "export declare function formatDeliveryPlan(result: DeliveryPlanResult): string;"
+    },
+    {
+      "name": "formatEnvironmentBindings",
+      "kind": "value",
+      "signature": "export declare function formatEnvironmentBindings(result: EnvironmentBindingsResult): string;"
     },
     {
       "name": "formatGraph",
@@ -729,6 +794,11 @@
       "signature": "export declare function parseDeliveryPlanResult(value: unknown): DeliveryPlanResult;"
     },
     {
+      "name": "parseEnvironmentBindings",
+      "kind": "value",
+      "signature": "export declare function parseEnvironmentBindings(value: unknown): EnvironmentBindingsDocument;"
+    },
+    {
       "name": "parseOpenApiDocument",
       "kind": "value",
       "signature": "export declare function parseOpenApiDocument(value: unknown): OpenApiDocument;"
@@ -807,6 +877,11 @@
       "name": "renderOpenApi",
       "kind": "value",
       "signature": "export declare function renderOpenApi(graph: ApplicationGraph, options?: GenerateOptions): string;"
+    },
+    {
+      "name": "resolveEnvironmentBindings",
+      "kind": "value",
+      "signature": "export declare function resolveEnvironmentBindings(graph: ApplicationGraph, document: EnvironmentBindingsDocument, environment: string): EnvironmentBindingsResult;"
     },
     {
       "name": "resolveModuleBoundaries",
