@@ -1,0 +1,268 @@
+import {
+  composePreviewEnvironment,
+  previewsDueForReclamation,
+  type PreviewComponentName,
+  type PreviewComposeInput,
+  type PreviewEnvironment,
+  type PreviewEnvironmentIsolationCheck,
+  type PreviewIsolationCheckKey,
+  type PreviewReclaimCandidate,
+} from "./preview-environment.service";
+
+/** Minimal branch port surface, satisfied by the existing `branchService`. */
+export interface PreviewBranchPort {
+  createBranch(input: { parentRef: string; branchRef: string; name: string; dataMode?: "schema_only" | "full_clone" }): Promise<void>;
+  deleteBranch(branchRef: string): Promise<void>;
+}
+
+/** Adapt the existing database branch service to the preview database port. */
+export function createPreviewDatabasePort(branches: PreviewBranchPort): Pick<PreviewProvisioningPorts, "database"> {
+  return {
+    database: {
+      // A preview on an existing Supabase-compatible branch reuses it: creation
+      // and deletion are owned by the branch service, so this port must not
+      // create a duplicate or delete a branch the user still has open.
+      create: (preview) => preview.branch_preexisting
+        ? Promise.resolve()
+        : branches.createBranch({
+          parentRef: preview.project_ref,
+          branchRef: preview.branch_ref,
+          name: preview.branch_ref,
+          dataMode: preview.data_mode,
+        }),
+      delete: (preview) => preview.branch_preexisting ? Promise.resolve() : branches.deleteBranch(preview.branch_ref),
+    },
+  };
+}
+
+/** Minimal queue port surface, satisfied by `pgmqService`. */
+export interface PreviewQueuePort {
+  createQueue(projectRef: string, queue: string): Promise<unknown>;
+  dropQueue(projectRef: string, queue: string): Promise<unknown>;
+}
+
+/** Minimal bucket port surface, satisfied by a storage driver. */
+export interface PreviewBucketPort {
+  createBucket(projectRef: string, bucket: string): Promise<unknown>;
+  deleteBucket(projectRef: string, bucket: string): Promise<unknown>;
+}
+
+/** Deterministic, lowercase, bounded preview queue/bucket names. */
+export function previewQueueName(preview: PreviewEnvironment, queue: string): string {
+  return `preview_${preview.preview_ref}__${queue}`.toLowerCase().replace(/[^a-z0-9_]/g, "_").slice(0, 63);
+}
+export function previewBucketName(preview: PreviewEnvironment, bucket: string): string {
+  return `${preview.branch_ref}-${bucket}`.toLowerCase().replace(/[^a-z0-9._-]/g, "-").slice(0, 63);
+}
+
+/** Adapt the project queue service to the preview queue port. */
+export function createPreviewQueuePort(pgmq: PreviewQueuePort): Pick<PreviewProvisioningPorts, "queues"> {
+  return {
+    queues: {
+      create: async (preview) => {
+        for (const queue of preview.queue_names) await pgmq.createQueue(preview.project_ref, previewQueueName(preview, queue));
+      },
+      delete: async (preview) => {
+        for (const queue of preview.queue_names) await pgmq.dropQueue(preview.project_ref, previewQueueName(preview, queue));
+      },
+    },
+  };
+}
+
+/** Adapt a project storage driver to the preview storage port. */
+export function createPreviewStoragePort(storage: PreviewBucketPort): Pick<PreviewProvisioningPorts, "storage"> {
+  return {
+    storage: {
+      create: async (preview) => {
+        for (const bucket of preview.storage_buckets) await storage.createBucket(preview.project_ref, previewBucketName(preview, bucket));
+      },
+      delete: async (preview) => {
+        for (const bucket of preview.storage_buckets) await storage.deleteBucket(preview.project_ref, previewBucketName(preview, bucket));
+      },
+    },
+  };
+}
+
+/**
+ * Ports a preview provisioner must supply. The orchestration below is pure: it
+ * never connects anywhere itself, and every side effect goes through a port so
+ * a caller can wire real infrastructure (or a fake in tests) and so a failure
+ * is attributable to one component.
+ */
+export interface PreviewProvisioningPorts {
+  database: { create(preview: PreviewEnvironment): Promise<void>; delete(preview: PreviewEnvironment): Promise<void> };
+  application: { activate(preview: PreviewEnvironment): Promise<void>; deactivate?(preview: PreviewEnvironment): Promise<void> };
+  configuration: { bind(preview: PreviewEnvironment): Promise<void>; unbind?(preview: PreviewEnvironment): Promise<void> };
+  resources: { bind(preview: PreviewEnvironment): Promise<void>; unbind?(preview: PreviewEnvironment): Promise<void> };
+  queues: { create(preview: PreviewEnvironment): Promise<void>; delete(preview: PreviewEnvironment): Promise<void> };
+  storage: { create(preview: PreviewEnvironment): Promise<void>; delete(preview: PreviewEnvironment): Promise<void> };
+  secrets: { bind(preview: PreviewEnvironment): Promise<void>; revoke?(preview: PreviewEnvironment): Promise<void> };
+  isolation: { verify(check: PreviewIsolationCheckKey, preview: PreviewEnvironment): Promise<boolean> };
+}
+
+/**
+ * Reclamation ports. The namespace cleanup (`database`/`queues`/`storage`) is
+ * always required; the auxiliary release ports are optional, but a provisioned
+ * component without its release port is reported `unreleased` rather than
+ * assumed gone.
+ */
+export type PreviewReclamationPorts =
+  Pick<PreviewProvisioningPorts, "database" | "queues" | "storage">
+  & Partial<Pick<PreviewProvisioningPorts, "application" | "configuration" | "resources" | "secrets">>;
+
+export type PreviewRunStatus = "ready" | "failed";
+
+export interface PreviewProvisionResult {
+  preview: PreviewEnvironment;
+  status: PreviewRunStatus;
+  failed_component?: PreviewComponentName;
+  error?: string;
+}
+
+export interface PreviewReclamationReceipt {
+  preview_ref: string;
+  status: "reclaimed" | "incomplete";
+  released: PreviewComponentName[];
+  /** Provisioned components whose release port is not wired. */
+  unreleased: PreviewComponentName[];
+  failed: Array<{ component: PreviewComponentName; error: string }>;
+}
+
+export interface PreviewReclamationResult {
+  preview_ref: string;
+  released: PreviewComponentName[];
+  failed: Array<{ component: PreviewComponentName; error: string }>;
+  unreleased: PreviewComponentName[];
+  /** Immutable record of the attempt; `reclaimed` requires every release. */
+  receipt: PreviewReclamationReceipt;
+}
+
+export interface StoredPreviewEnvironment {
+  preview: PreviewEnvironment;
+  created_at: string;
+  /** Set when the change closed; the timeout is only a backstop. */
+  closed_at?: string;
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function setComponent(
+  preview: PreviewEnvironment,
+  name: PreviewComponentName,
+  status: "planned" | "ready" | "failed",
+): PreviewEnvironment {
+  return {
+    ...preview,
+    components: preview.components.map((component) => component.name === name ? { ...component, status } : component),
+  };
+}
+
+/**
+ * Provision a complete preview environment in dependency order. It fails closed:
+ * the first failing port stops provisioning and is recorded on that component;
+ * isolation checks only run once every component is ready. The returned preview
+ * is `ready` only when all four isolation checks verify.
+ */
+export async function provisionPreviewEnvironment(
+  ports: PreviewProvisioningPorts,
+  input: PreviewComposeInput,
+): Promise<PreviewProvisionResult> {
+  let preview = composePreviewEnvironment(input);
+  const steps: Array<[PreviewComponentName, (current: PreviewEnvironment) => Promise<void>]> = [
+    ["database", (current) => ports.database.create(current)],
+    ["application", (current) => ports.application.activate(current)],
+    ["configuration", (current) => ports.configuration.bind(current)],
+    ["resources", (current) => ports.resources.bind(current)],
+    ["queues", (current) => ports.queues.create(current)],
+    ["storage", (current) => ports.storage.create(current)],
+    ["secrets", (current) => ports.secrets.bind(current)],
+  ];
+  for (const [name, run] of steps) {
+    try {
+      await run(preview);
+      preview = setComponent(preview, name, "ready");
+    } catch (error) {
+      preview = setComponent(preview, name, "failed");
+      return { preview, status: "failed", failed_component: name, error: messageOf(error) };
+    }
+  }
+
+  const isolation: PreviewEnvironmentIsolationCheck[] = [];
+  for (const check of preview.isolation) {
+    let verified = false;
+    try {
+      verified = await ports.isolation.verify(check.key, preview);
+    } catch {
+      verified = false;
+    }
+    isolation.push({ ...check, status: verified ? "verified" : "failed" });
+  }
+  preview = { ...preview, isolation };
+  return { preview, status: isolation.every((check) => check.status === "verified") ? "ready" : "failed" };
+}
+
+/**
+ * Release every component that could still be live, then mark the attempt with a
+ * receipt. Namespace cleanup always runs (it is how residue is removed); the
+ * auxiliary releases only run for components that were actually provisioned, and
+ * a provisioned component without a release port is recorded `unreleased` so the
+ * caller cannot remove the record and call it reclaimed.
+ */
+export async function reclaimPreviewEnvironment(
+  ports: PreviewReclamationPorts,
+  preview: PreviewEnvironment,
+): Promise<PreviewReclamationResult> {
+  const statusByName = new Map(preview.components.map((component) => [component.name, component.status]));
+  const wasProvisioned = (name: PreviewComponentName) => statusByName.get(name) !== undefined && statusByName.get(name) !== "planned";
+
+  const steps: Array<[PreviewComponentName, (() => Promise<void>) | undefined, boolean]> = [
+    ["application", ports.application?.deactivate ? () => ports.application!.deactivate!(preview) : undefined, false],
+    ["secrets", ports.secrets?.revoke ? () => ports.secrets!.revoke!(preview) : undefined, false],
+    ["configuration", ports.configuration?.unbind ? () => ports.configuration!.unbind!(preview) : undefined, false],
+    ["resources", ports.resources?.unbind ? () => ports.resources!.unbind!(preview) : undefined, false],
+    ["storage", () => ports.storage.delete(preview), true],
+    ["queues", () => ports.queues.delete(preview), true],
+    ["database", () => ports.database.delete(preview), true],
+  ];
+  const released: PreviewComponentName[] = [];
+  const unreleased: PreviewComponentName[] = [];
+  const failed: PreviewReclamationResult["failed"] = [];
+  for (const [name, run, always] of steps) {
+    if (!always && !wasProvisioned(name)) continue;
+    if (!run) { unreleased.push(name); continue; }
+    try {
+      await run();
+      released.push(name);
+    } catch (error) {
+      failed.push({ component: name, error: messageOf(error) });
+    }
+  }
+  const receipt: PreviewReclamationReceipt = {
+    preview_ref: preview.preview_ref,
+    status: failed.length === 0 && unreleased.length === 0 ? "reclaimed" : "incomplete",
+    released,
+    unreleased,
+    failed,
+  };
+  return { preview_ref: preview.preview_ref, released, failed, unreleased, receipt };
+}
+
+/** Reclaim every stored preview whose change closed or whose deadline elapsed. */
+export async function reclaimDuePreviews(
+  ports: PreviewReclamationPorts,
+  previews: ReadonlyArray<StoredPreviewEnvironment>,
+  now: Date,
+): Promise<PreviewReclamationResult[]> {
+  const candidates: PreviewReclaimCandidate[] = previews.map(({ preview, created_at, closed_at }) => ({
+    preview_ref: preview.preview_ref, created_at, closed_at, lifecycle: preview.lifecycle,
+  }));
+  const due = new Set(previewsDueForReclamation(candidates, now).map((candidate) => candidate.preview_ref));
+  const results: PreviewReclamationResult[] = [];
+  for (const stored of previews) {
+    if (!due.has(stored.preview.preview_ref)) continue;
+    results.push(await reclaimPreviewEnvironment(ports, stored.preview));
+  }
+  return results;
+}

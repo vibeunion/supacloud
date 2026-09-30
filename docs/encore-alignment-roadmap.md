@@ -223,6 +223,24 @@ MCP 的权限不能混在一起：现有运维 MCP 的 plan-only、项目范围�
 **避免"换个前缀就算隔离"。** 数据库角色、存储权限、消费者身份和路由访问控制都应进入
 验收。
 
+> **实现进展（Preview 环境组合切片）**：新增只读端点
+> `POST /v1/projects/:ref/previews/plan`，确定性地组合完整环境（database/application/
+> configuration/resources/queues/storage/secrets）、四项**隔离验收检查**、回收策略
+> （`pr_closed`/`timeout`）与残渣清理；默认 `schema_only`（复用现有数据库分支/
+> 迁移晋升），`full_clone` 需显式授权。**生产阻断**：`prod`/`production`/`live`/`release`
+> 形状的环境名、分支名与资源绑定被拒绝；内联凭据被拒绝。参见
+> [Preview Environment Composition](./preview-environment.md)。
+> 供给编排（`provisionPreviewEnvironment`，端口驱动、失败关闭）、四项隔离验证与回收
+> （`reclaimPreviewEnvironment` / `reclaimDuePreviews`，先释放命名空间后删分支）也已落地；
+> 生命周期持久化（`PreviewStore` / `savePreview` / `reclaimStoredPreviews` / `closePreview`，
+> 仅全部释放成功才移除记录）与项目配置存储实现也已落地；隔离证据验收（
+> `evaluatePreviewIsolation` + `POST /previews/acceptance`，无证据即 `pending`、不视为通过）
+> 也已落地。生命周期路由（`GET /previews` 列表、`DELETE /previews/:ref` 关闭、
+> `POST /previews/reclaim` 超时回收；未配置清理端口时返回 `501`）已注册。
+> 具体端口适配器（database → 分支服务，queues → pgmq，storage → 存储驱动）与
+> 结构化的 `queue_names` / `storage_buckets` 命名空间已实现；application/configuration/
+> resources/secrets 端口待选定后端。
+
 发布时把这些信息合成一份可查询结果：源代码提交、构建摘要、契约版本、迁移计划、资源
 绑定版本、健康检查，以及回滚目标。不要承诺"回滚镜像即可回滚一切"：应用回滚、数据库
 迁移恢复、存储变更恢复应分别记录可行路径；破坏性数据库变更仍需专门处理。
