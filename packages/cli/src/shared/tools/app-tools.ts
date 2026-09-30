@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { Type } from "@sinclair/typebox";
@@ -42,6 +42,8 @@ export interface AppToolOptions {
     projectRef?: string;
     /** Abort signal for long-running local actions (`app dev` watch), used for cancellation and tests. */
     signal?: AbortSignal;
+    /** Watch progress only. The caller owns its transport; the final result is returned separately. */
+    onDevProgress?: (result: ToolResult) => void;
 }
 
 const REMOTE_APP_DESCRIPTIONS: Record<string, string> = {
@@ -107,8 +109,9 @@ export interface AppToolArguments {
     once?: boolean;
     /** `app dev`: watch for changes (default true; `--once` disables). */
     watch?: boolean;
-    /** `app dev --profile integration`: explicit non-production database URL. */
+    /** `app dev --profile integration`: explicit database URL; this command never connects. */
     database_url?: string;
+    "database-url"?: string;
 }
 
 async function initProject(args: AppToolArguments): Promise<ToolResult> {
@@ -602,54 +605,64 @@ const DEV_NOT_VERIFIED: Record<DevProfile, string[]> = {
     ],
 };
 
-/** Reports where a database URL points without leaking credentials. */
-function redactDatabaseUrl(value: string | undefined): string | null {
-    if (!value) return null;
+/** Validate the supported URL shape before reporting only its non-credential components. */
+function devDatabase(profile: DevProfile, explicit: string | undefined) {
+    if (profile === "fast") {
+        if (explicit !== undefined) {
+            throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--database-url applies only to app dev --profile integration");
+        }
+        // An ambient integration setting must not make the fast report claim an external binding.
+        return { mode: "local", configured: false, url: null };
+    }
+    const value = (explicit ?? process.env.SUPACLOUD_DEV_DATABASE_URL)?.trim();
+    if (!value) {
+        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID",
+            "app dev --profile integration requires an explicit database URL via --database-url or SUPACLOUD_DEV_DATABASE_URL");
+    }
     try {
         const parsed = new URL(value);
-        return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+        if (!(["postgres:", "postgresql:"].includes(parsed.protocol)) || !parsed.hostname
+            || /[\x00-\x20\x7f]/.test(value)) throw new Error("Invalid database URL");
+        return { mode: "explicit", configured: true, url: `${parsed.protocol}//${parsed.host}${parsed.pathname}` };
     } catch {
-        return "<unparsable-database-url>";
+        // URL parser errors can contain the entire credential-bearing input. Never propagate them.
+        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "Integration database URL must be a valid postgres:// or postgresql:// URL with a host");
     }
 }
 
-async function readManifestModules(outDir: string): Promise<string[]> {
-    const manifestPath = join(outDir, "app.manifest.json");
-    if (!existsSync(manifestPath)) return [];
+function readManifestModules(outDir: string): string[] {
     try {
-        const parsed = JSON.parse(await readFile(manifestPath, "utf8")) as AppManifest;
+        const parsed = JSON.parse(readFileSync(join(outDir, "app.manifest.json"), "utf8")) as AppManifest;
         return Array.isArray(parsed.modules) ? parsed.modules.map((module) => module.name) : [];
     } catch {
         return [];
     }
 }
 
-function waitForShutdown(signal: AbortSignal | undefined): Promise<void> {
-    if (signal?.aborted) return Promise.resolve();
-    return new Promise((resolvePromise) => {
-        const cleanup = () => {
-            signal?.removeEventListener("abort", onAbort);
-            process.removeListener("SIGINT", onSignal);
-            process.removeListener("SIGTERM", onSignal);
-        };
-        const onAbort = () => { cleanup(); resolvePromise(); };
-        const onSignal = () => { cleanup(); resolvePromise(); };
-        signal?.addEventListener("abort", onAbort, { once: true });
-        process.once("SIGINT", onSignal);
-        process.once("SIGTERM", onSignal);
-    });
+function shutdownWaiter(signal: AbortSignal | undefined) {
+    let resolveDone: () => void = () => {};
+    const done = new Promise<void>(resolvePromise => { resolveDone = resolvePromise; });
+    const dispose = () => {
+        signal?.removeEventListener("abort", stop);
+        process.removeListener("SIGINT", stop);
+        process.removeListener("SIGTERM", stop);
+    };
+    const stop = () => { dispose(); resolveDone(); };
+    // Install before initial compilation, not after it, so shutdown during startup is retained.
+    signal?.addEventListener("abort", stop, { once: true });
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+    if (signal?.aborted) stop();
+    return { done, stop, dispose };
 }
 
-/**
- * Unified application-level local development entry. This command compiles,
- * reports diagnostics and watches; it never syncs to a remote test server
- * (`supacloud dev sync`) and never connects to, migrates or seeds a database.
- */
+/** Local compile/watch only: no server startup, resource provisioning or database connection. */
 async function runAppDev(args: AppToolArguments, options: AppToolOptions): Promise<ToolResult> {
-    const profile = (args.profile ?? "fast") as DevProfile;
+    const profile = args.profile ?? "fast";
     if (profile !== "fast" && profile !== "integration") {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "app dev --profile must be fast or integration");
     }
+    const database = devDatabase(profile, args.database_url);
     const root = resolve(args.root || process.cwd());
     const loadedConfig = await loadSupacloudConfig(root);
     const defaults = resolveSupacloudConfig(loadedConfig, root);
@@ -657,15 +670,6 @@ async function runAppDev(args: AppToolArguments, options: AppToolOptions): Promi
     const include = parseInclude(args.include) ?? loadedConfig.include;
     const outDir = args.out_dir ? resolve(root, args.out_dir) : defaults.outDir;
     const watch = args.once !== true && args.watch !== false;
-
-    const explicitDatabase = (args.database_url?.trim() || process.env.SUPACLOUD_DEV_DATABASE_URL?.trim()) || undefined;
-    if (profile === "integration" && explicitDatabase === undefined) {
-        throw new ScaffoldError(
-            "SCAFFOLD_OPTION_INVALID",
-            "app dev --profile integration requires an explicit database URL via --database-url or SUPACLOUD_DEV_DATABASE_URL; it never defaults to a production database",
-        );
-    }
-
     const compileOptions = compileOptionsFromConfig({
         ...loadedConfig,
         ...(configuredRoot === undefined ? {} : { root: configuredRoot }),
@@ -674,55 +678,68 @@ async function runAppDev(args: AppToolArguments, options: AppToolOptions): Promi
         strict: args.strict ?? loadedConfig.strict ?? false,
     }, root);
 
-    let lastEvent: { diagnostics: Diagnostic[]; written: string[] } = { diagnostics: [], written: [] };
-    const watcher = watchProject({
-        ...compileOptions,
-        writeOnError: false,
-        onEvent: (event) => {
-            if (event.type === "compile-start") return;
-            lastEvent = { diagnostics: event.diagnostics, written: event.written };
-        },
-    });
-    try {
-        const initial = await watcher.ready;
-        lastEvent = { diagnostics: initial.diagnostics, written: initial.written };
-        if (watch) await waitForShutdown(options.signal);
-    } finally {
-        await watcher.close();
-    }
-
-    const hasError = lastEvent.diagnostics.some((diagnostic) => diagnostic.severity === "error");
-    const modules = await readManifestModules(outDir);
-    const database = {
-        mode: profile === "fast" ? "local" : "explicit",
-        configured: explicitDatabase !== undefined,
-        url: redactDatabaseUrl(explicitDatabase),
+    type DevCompilation = { diagnostics: Diagnostic[]; written: string[] };
+    const report = (event: DevCompilation, state: "once" | "watching" | "stopped", progress = false): ToolResult => {
+        const hasError = event.diagnostics.some((diagnostic) => diagnostic.severity === "error");
+        // writeOnError preserves previous successful artifacts, not the current graph's modules.
+        const modules = hasError ? [] : readManifestModules(outDir);
+        const artifacts = hasError ? "not-current" : "current";
+        const notVerified = DEV_NOT_VERIFIED[profile];
+        if (args.format === "json") {
+            return textResult(JSON.stringify({
+                version: 1, ok: !hasError, profile, root, outDir, watch, state, artifacts,
+                database, modules, diagnostics: event.diagnostics, written: event.written, notVerified,
+            }, null, progress ? undefined : 2), hasError);
+        }
+        return textResult([
+            `app dev (profile: ${profile}, watch: ${watch ? "on" : "off"}, state: ${state})`,
+            `  root:     ${root}`,
+            `  outDir:   ${outDir}`,
+            `  database: ${profile === "fast" ? "local profile (no database provisioned or connected)" : `explicit ${database.url} (credentials omitted; not connected)`}`,
+            `  modules:  ${hasError ? "(current compile failed; any previous artifacts are retained)" : modules.length > 0 ? modules.join(", ") : "(none)"}`,
+            `  written:  ${event.written.length} file(s)`,
+            "", formatDiagnostics(event.diagnostics), "",
+            state === "watching" ? "Watching for changes. Press Ctrl+C to stop. Remote test-server sync remains `supacloud dev sync`."
+                : state === "stopped" ? "Watch stopped."
+                : "Single validation pass. Omit --once and --watch=false to watch for changes.",
+            `Not verified in this profile: ${notVerified.join("; ")}.`,
+        ].join("\n"), hasError);
     };
-    const notVerified = DEV_NOT_VERIFIED[profile];
 
-    if (args.format === "json") {
-        return textResult(JSON.stringify({
-            version: 1, ok: !hasError, profile, root, outDir, watch,
-            database, modules, diagnostics: lastEvent.diagnostics, written: lastEvent.written, notVerified,
-        }, null, 2), hasError);
+    if (!watch) {
+        // --once must not create filesystem watchers or install process signal handlers.
+        const result = await compileProject({ ...compileOptions, writeOnError: false });
+        return report(result, "once");
     }
 
-    const lines = [
-        `app dev (profile: ${profile}, watch: ${watch ? "on" : "off"})`,
-        `  root:     ${root}`,
-        `  outDir:   ${outDir}`,
-        `  database: ${profile === "fast" ? "local/ephemeral (no external database configured)" : `explicit ${database.url} (credentials omitted)`}`,
-        `  modules:  ${modules.length > 0 ? modules.join(", ") : "(none written)"}`,
-        `  written:  ${lastEvent.written.length} file(s)`,
-        "",
-        formatDiagnostics(lastEvent.diagnostics),
-        "",
-        watch
-            ? "Watching for changes. Press Ctrl+C to stop. Remote test-server sync remains `supacloud dev sync`."
-            : "Single validation pass (--once). Omit --once to watch for changes.",
-        `Not verified in this profile: ${notVerified.join("; ")}.`,
-    ];
-    return textResult(lines.join("\n"), hasError);
+    const shutdown = shutdownWaiter(options.signal);
+    let lastEvent: DevCompilation = { diagnostics: [], written: [] };
+    let progressFailure: { error: unknown } | undefined;
+    const publish = (event: DevCompilation) => {
+        try { options.onDevProgress?.(report(event, "watching", true)); }
+        catch (error) { progressFailure = { error }; shutdown.stop(); }
+    };
+    let watcher: ReturnType<typeof watchProject> | undefined;
+    try {
+        watcher = watchProject({
+            ...compileOptions,
+            writeOnError: false,
+            onEvent: (event) => {
+                if (event.type === "compile-start") return;
+                lastEvent = event;
+                if (!event.initial) publish(event);
+            },
+        });
+        lastEvent = await watcher.ready;
+        // Initial progress means the watcher has actually been installed and can observe edits.
+        publish(lastEvent);
+        await shutdown.done;
+    } finally {
+        shutdown.dispose();
+        await watcher?.close();
+    }
+    if (progressFailure) throw progressFailure.error;
+    return report(lastEvent, "stopped");
 }
 
 async function runCompile(args: AppToolArguments): Promise<ToolResult> {
@@ -1017,16 +1034,21 @@ async function runDelivery(args: AppToolArguments): Promise<ToolResult> {
 
 export async function runAppTool(request: AppToolArguments, options: AppToolOptions = {}): Promise<ToolResult> {
     if ((request.dry_run !== undefined && request["dry-run"] !== undefined)
-        || (request.register_in !== undefined && request["register-in"] !== undefined)) {
+        || (request.register_in !== undefined && request["register-in"] !== undefined)
+        || (request.database_url !== undefined && request["database-url"] !== undefined)) {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "Do not combine hyphenated and underscored aliases of the same flag");
     }
     request = {
         ...request,
         ...(request["dry-run"] === undefined ? {} : { dry_run: request["dry-run"] }),
         ...(request["register-in"] === undefined ? {} : { register_in: request["register-in"] }),
+        ...(request["database-url"] === undefined ? {} : { database_url: request["database-url"] }),
     };
     if ((request.dry_run !== undefined || request.register_in !== undefined) && request.action !== "generate") {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--dry-run and --register-in apply only to app generate");
+    }
+    if (request.database_url !== undefined && request.action !== "dev") {
+        throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--database-url applies only to app dev --profile integration");
     }
     if (Object.hasOwn(REMOTE_APP_ACTIONS, request.action)) {
         const delegate = options.getApplications?.();
@@ -1085,15 +1107,16 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             "dry-run": optional(Type.Boolean(), "[generate] CLI alias of dry_run"),
             register_in: optional(Type.String(), "[generate] Existing parent module file for module/resource; uses the compiler AST editor"),
             "register-in": optional(Type.String(), "[generate] CLI alias of register_in"),
-            root: optional(Type.String(), "[plan/build/compile/check] Project directory containing supacloud.config.ts (default: current directory)"),
-            include: optional(Type.String(), "[compile/check] Comma-separated glob patterns for source files"),
-            out_dir: optional(Type.String(), "[compile/plan/build/export-tools] Output directory (default: configured outDir)"),
-            strict: optional(Type.Boolean(), "[compile/check] Promote warnings to errors"),
-            format: optional(stringEnum(["text", "json"]), "[generate/compile/check/plan/graph/export-tools] Output format (default: text)"),
+            root: optional(Type.String(), "[dev/plan/build/compile/check] Project directory containing supacloud.config.ts (default: current directory)"),
+            include: optional(Type.String(), "[dev/compile/check] Comma-separated glob patterns for source files"),
+            out_dir: optional(Type.String(), "[dev/compile/plan/build/export-tools] Output directory (default: configured outDir)"),
+            strict: optional(Type.Boolean(), "[dev/compile/check] Promote warnings to errors"),
+            format: optional(stringEnum(["text", "json"]), "[dev/generate/compile/check/plan/graph/export-tools] Output format (default: text)"),
             profile: optional(stringEnum(["fast", "integration"]), "[dev] Local development profile (default: fast); integration requires an explicit database URL"),
             once: optional(Type.Boolean(), "[dev] Validate and report once without watching"),
             watch: optional(Type.Boolean(), "[dev] Watch for changes (default: true; --once disables)"),
-            database_url: optional(Type.String(), "[dev] Explicit integration database URL (never production)"),
+            database_url: optional(Type.String(), "[dev] Explicit integration database URL (validated shape only; never connected)"),
+            "database-url": optional(Type.String(), "[dev] CLI alias of database_url"),
             target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / job name / module name"),
             fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
             write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
