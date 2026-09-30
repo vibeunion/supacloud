@@ -85,6 +85,28 @@ timeout-based previews, so a reclamation worker can act on an explicit list. The
 residue policy is `delete_branch_and_namespace`: both the database branch and the
 queue/storage namespace are removed, so a failed preview does not leave orphans.
 
+## Provisioning and reclamation orchestration
+
+`preview-provisioning.service.ts` turns a composed plan into an orchestrated run
+through explicit ports, so every side effect is attributable to one component
+and no credential lives in this module:
+
+- `provisionPreviewEnvironment(ports, input)` provisions components in a fixed
+dependency order (database, application, configuration, resources, queues,
+storage, secrets). The first failing port stops the run, marks that component
+`failed`, and skips isolation. Isolation only runs once every component is
+`ready`; the result is `ready` only when all four isolation checks pass.
+- `reclaimPreviewEnvironment(ports, preview)` releases namespace components first
+  (storage, queues) and the database branch last, continues after a failure, and
+  reports exactly which releases failed so residue is never silently abandoned.
+- `reclaimDuePreviews(ports, stored, now)` reclaims only timeout-due previews,
+  leaving `pr_closed` previews to their webhook.
+- `createPreviewDatabasePort(branchService)` adapts the existing database branch
+  service to the `database` port; the other ports are supplied by the caller.
+
+A `ready` result is a stateful orchestration outcome, not signed provenance: it
+records that the ports succeeded, not that an external system is healthy.
+
 ## Boundaries
 
 - **Composition vs provisioning.** A composed plan is not a running environment;
@@ -97,7 +119,10 @@ queue/storage namespace are removed, so a failed preview does not leave orphans.
 
 ## Next steps
 
-1. A provisioning orchestrator that creates the branch, activates the release,
-   binds resources and records per-component status.
-2. An isolation verifier that flips the acceptance checks to `verified`.
-3. A reclamation worker driven by `previewsDueForReclamation`.
+1. Wire the remaining real ports (application activation, configuration,
+   queue/storage namespace, secrets) and a scheduled reclamation worker.
+2. An isolation verifier that flips the acceptance checks to `verified` from
+   observed database role, storage permissions, consumer identity and route
+   access control evidence.
+3. Persist each provisioned preview so the timeout selector and the reclamation
+   worker can read the environment, its `created_at` and its component status.
