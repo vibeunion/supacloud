@@ -130,9 +130,14 @@ dependency order (database, application, configuration, resources, queues,
 storage, secrets). The first failing port stops the run, marks that component
 `failed`, and skips isolation. Isolation only runs once every component is
 `ready`; the result is `ready` only when all four isolation checks pass.
-- `reclaimPreviewEnvironment(ports, preview)` releases namespace components first
-  (storage, queues) and the database branch last, continues after a failure, and
-  reports exactly which releases failed so residue is never silently abandoned.
+- `reclaimPreviewEnvironment(ports, preview)` releases every component that
+  could still be live, in order: application, secrets, configuration, resources,
+  then storage/queues namespaces, then the database branch. Namespace cleanup
+  always runs; the auxiliary releases only run for components that were actually
+  provisioned, and a provisioned component without a release port is recorded
+  `unreleased` rather than assumed gone. The returned `receipt` is `reclaimed`
+  only when nothing failed and nothing is `unreleased`; otherwise it is
+  `incomplete`, so residue is never silently abandoned.
 - `reclaimDuePreviews(ports, stored, now)` reclaims the previews whose change
   closed or whose deadline elapsed, first trigger winning.
 - `createPreviewDatabasePort(branchService)` adapts the existing database branch
@@ -144,7 +149,9 @@ storage, secrets). The first failing port stops the run, marks that component
   bucket as `<preview-<ref>>-<bucket>` (lowercase, bounded to 63 characters).
 - `application`, `configuration`, `resources` and `secrets` ports remain
   caller-supplied until their backends are chosen; the orchestrator fails closed
-  if one is missing.
+  if one is missing. Their optional release ports (`deactivate`, `unbind`,
+  `revoke`) let a caller prove a provisioned component is gone; without them the
+  reclamation receipt stays `incomplete` for that component.
 
 A `ready` result is a stateful orchestration outcome, not signed provenance: it
 records that the ports succeeded, not that an external system is healthy.
@@ -160,11 +167,12 @@ records that the ports succeeded, not that an external system is healthy.
   without reclaiming, so the next pass reclaims it (zero grace) while the
   absolute deadline stays a backstop if the close event is missed.
 - `reclaimStoredPreviews(store, ports, projectRef, now)` lists the project's
-  previews, reclaims the due ones, and removes a record **only when
-  every release succeeds**, so a failed reclamation keeps its record and residue
-  for the next pass.
+  previews, reclaims the due ones, and removes a record **only when the receipt
+  is `reclaimed`** (no failure, nothing `unreleased`), so a partial reclamation
+  keeps its record and residue for the next pass.
 - `closePreview(store, ports, projectRef, previewRef)` reclaims one preview by
-  reference (the `pr_closed` path) and removes its record on full success.
+  reference (the `pr_closed` path) and removes its record only when the receipt
+  is `reclaimed`; otherwise the record and its residue remain with the receipt.
 - `createProjectConfigPreviewStore(configPort)` backs the store with the project
   config under a single `previews` collection, filtering untrusted entries.
 

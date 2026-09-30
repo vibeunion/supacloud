@@ -23,6 +23,11 @@ function preview(overrides: Partial<typeof input> = {}): PreviewEnvironment {
   return composePreviewEnvironment({ ...input, ...overrides });
 }
 
+function readyPreview(overrides: Partial<typeof input> = {}): PreviewEnvironment {
+  const composed = preview(overrides);
+  return { ...composed, components: composed.components.map((component) => ({ ...component, status: "ready" as const })) };
+}
+
 function memoryStore(initial: StoredPreviewEnvironment[] = []) {
   const data = new Map<string, StoredPreviewEnvironment[]>(initial.length ? [["demo", [...initial]]] : []);
   return {
@@ -78,6 +83,22 @@ test("marks a preview closed so the next pass reclaims it", async () => {
   const report = await reclaimStoredPreviews(store, ports(), "demo", new Date("2026-09-30T00:00:01.000Z"));
   expect(report.reclaimed).toBe(1);
   expect(await store.list("demo")).toEqual([]);
+});
+
+test("keeps the record when a provisioned component has no release port", async () => {
+  const now = new Date("2026-09-30T12:00:00.000Z");
+  const { store } = memoryStore([
+    { preview: readyPreview({ previewRef: "pr-1" }), created_at: "2026-09-01T00:00:00.000Z", closed_at: "2026-09-15T00:00:00.000Z" },
+  ]);
+  const report = await reclaimStoredPreviews(store, ports(), "demo", now);
+  expect(report.reclaimed).toBe(0);
+  expect(report.failed[0]?.preview_ref).toBe("pr-1");
+  expect(await store.list("demo")).toHaveLength(1);
+
+  const closed = await closePreview(store, ports(), "demo", "pr-1");
+  expect(closed?.receipt.status).toBe("incomplete");
+  expect(closed?.unreleased).toEqual(["application", "secrets", "configuration", "resources"]);
+  expect(await store.list("demo")).toHaveLength(1);
 });
 
 test("keeps the record and residue when a release fails", async () => {

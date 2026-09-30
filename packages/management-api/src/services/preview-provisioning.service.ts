@@ -86,14 +86,24 @@ export function createPreviewStoragePort(storage: PreviewBucketPort): Pick<Previ
  */
 export interface PreviewProvisioningPorts {
   database: { create(preview: PreviewEnvironment): Promise<void>; delete(preview: PreviewEnvironment): Promise<void> };
-  application: { activate(preview: PreviewEnvironment): Promise<void> };
-  configuration: { bind(preview: PreviewEnvironment): Promise<void> };
-  resources: { bind(preview: PreviewEnvironment): Promise<void> };
+  application: { activate(preview: PreviewEnvironment): Promise<void>; deactivate?(preview: PreviewEnvironment): Promise<void> };
+  configuration: { bind(preview: PreviewEnvironment): Promise<void>; unbind?(preview: PreviewEnvironment): Promise<void> };
+  resources: { bind(preview: PreviewEnvironment): Promise<void>; unbind?(preview: PreviewEnvironment): Promise<void> };
   queues: { create(preview: PreviewEnvironment): Promise<void>; delete(preview: PreviewEnvironment): Promise<void> };
   storage: { create(preview: PreviewEnvironment): Promise<void>; delete(preview: PreviewEnvironment): Promise<void> };
-  secrets: { bind(preview: PreviewEnvironment): Promise<void> };
+  secrets: { bind(preview: PreviewEnvironment): Promise<void>; revoke?(preview: PreviewEnvironment): Promise<void> };
   isolation: { verify(check: PreviewIsolationCheckKey, preview: PreviewEnvironment): Promise<boolean> };
 }
+
+/**
+ * Reclamation ports. The namespace cleanup (`database`/`queues`/`storage`) is
+ * always required; the auxiliary release ports are optional, but a provisioned
+ * component without its release port is reported `unreleased` rather than
+ * assumed gone.
+ */
+export type PreviewReclamationPorts =
+  Pick<PreviewProvisioningPorts, "database" | "queues" | "storage">
+  & Partial<Pick<PreviewProvisioningPorts, "application" | "configuration" | "resources" | "secrets">>;
 
 export type PreviewRunStatus = "ready" | "failed";
 
@@ -104,10 +114,22 @@ export interface PreviewProvisionResult {
   error?: string;
 }
 
+export interface PreviewReclamationReceipt {
+  preview_ref: string;
+  status: "reclaimed" | "incomplete";
+  released: PreviewComponentName[];
+  /** Provisioned components whose release port is not wired. */
+  unreleased: PreviewComponentName[];
+  failed: Array<{ component: PreviewComponentName; error: string }>;
+}
+
 export interface PreviewReclamationResult {
   preview_ref: string;
   released: PreviewComponentName[];
   failed: Array<{ component: PreviewComponentName; error: string }>;
+  unreleased: PreviewComponentName[];
+  /** Immutable record of the attempt; `reclaimed` requires every release. */
+  receipt: PreviewReclamationReceipt;
 }
 
 export interface StoredPreviewEnvironment {
@@ -177,22 +199,34 @@ export async function provisionPreviewEnvironment(
 }
 
 /**
- * Release the namespace-scoped components and then the database branch. It keeps
- * going after a failure so a partially reclaimed preview does not keep its
- * residue, and reports exactly which releases failed.
+ * Release every component that could still be live, then mark the attempt with a
+ * receipt. Namespace cleanup always runs (it is how residue is removed); the
+ * auxiliary releases only run for components that were actually provisioned, and
+ * a provisioned component without a release port is recorded `unreleased` so the
+ * caller cannot remove the record and call it reclaimed.
  */
 export async function reclaimPreviewEnvironment(
-  ports: Pick<PreviewProvisioningPorts, "database" | "queues" | "storage">,
+  ports: PreviewReclamationPorts,
   preview: PreviewEnvironment,
 ): Promise<PreviewReclamationResult> {
-  const steps: Array<[PreviewComponentName, () => Promise<void>]> = [
-    ["storage", () => ports.storage.delete(preview)],
-    ["queues", () => ports.queues.delete(preview)],
-    ["database", () => ports.database.delete(preview)],
+  const statusByName = new Map(preview.components.map((component) => [component.name, component.status]));
+  const wasProvisioned = (name: PreviewComponentName) => statusByName.get(name) !== undefined && statusByName.get(name) !== "planned";
+
+  const steps: Array<[PreviewComponentName, (() => Promise<void>) | undefined, boolean]> = [
+    ["application", ports.application?.deactivate ? () => ports.application!.deactivate!(preview) : undefined, false],
+    ["secrets", ports.secrets?.revoke ? () => ports.secrets!.revoke!(preview) : undefined, false],
+    ["configuration", ports.configuration?.unbind ? () => ports.configuration!.unbind!(preview) : undefined, false],
+    ["resources", ports.resources?.unbind ? () => ports.resources!.unbind!(preview) : undefined, false],
+    ["storage", () => ports.storage.delete(preview), true],
+    ["queues", () => ports.queues.delete(preview), true],
+    ["database", () => ports.database.delete(preview), true],
   ];
   const released: PreviewComponentName[] = [];
+  const unreleased: PreviewComponentName[] = [];
   const failed: PreviewReclamationResult["failed"] = [];
-  for (const [name, run] of steps) {
+  for (const [name, run, always] of steps) {
+    if (!always && !wasProvisioned(name)) continue;
+    if (!run) { unreleased.push(name); continue; }
     try {
       await run();
       released.push(name);
@@ -200,12 +234,19 @@ export async function reclaimPreviewEnvironment(
       failed.push({ component: name, error: messageOf(error) });
     }
   }
-  return { preview_ref: preview.preview_ref, released, failed };
+  const receipt: PreviewReclamationReceipt = {
+    preview_ref: preview.preview_ref,
+    status: failed.length === 0 && unreleased.length === 0 ? "reclaimed" : "incomplete",
+    released,
+    unreleased,
+    failed,
+  };
+  return { preview_ref: preview.preview_ref, released, failed, unreleased, receipt };
 }
 
 /** Reclaim every stored preview whose change closed or whose deadline elapsed. */
 export async function reclaimDuePreviews(
-  ports: Pick<PreviewProvisioningPorts, "database" | "queues" | "storage">,
+  ports: PreviewReclamationPorts,
   previews: ReadonlyArray<StoredPreviewEnvironment>,
   now: Date,
 ): Promise<PreviewReclamationResult[]> {

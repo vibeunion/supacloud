@@ -7,9 +7,9 @@ import {
   reclaimStoredPreviews,
   type PreviewStore,
 } from "../services/preview-lifecycle.service";
-import type { PreviewProvisioningPorts } from "../services/preview-provisioning.service";
+import type { PreviewReclamationPorts } from "../services/preview-provisioning.service";
 
-type PreviewCleanupPorts = Pick<PreviewProvisioningPorts, "database" | "queues" | "storage">;
+type PreviewCleanupPorts = PreviewReclamationPorts;
 
 const params = t.Object({ ref: t.String({ pattern: "^[A-Za-z0-9_-]{1,20}$" }) });
 const previewParams = t.Object({

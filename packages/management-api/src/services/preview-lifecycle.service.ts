@@ -4,7 +4,7 @@ import {
   type PreviewReclaimCandidate,
 } from "./preview-environment.service";import {
   reclaimPreviewEnvironment,
-  type PreviewProvisioningPorts,
+  type PreviewReclamationPorts,
   type PreviewReclamationResult,
   type StoredPreviewEnvironment,
 } from "./preview-provisioning.service";
@@ -67,7 +67,7 @@ export async function markPreviewClosed(
  */
 export async function reclaimStoredPreviews(
   store: PreviewStore,
-  ports: Pick<PreviewProvisioningPorts, "database" | "queues" | "storage">,
+  ports: PreviewReclamationPorts,
   projectRef: string,
   now: Date,
 ): Promise<PreviewLifecycleReport> {
@@ -80,7 +80,7 @@ export async function reclaimStoredPreviews(
   for (const entry of stored) {
     if (!due.has(entry.preview.preview_ref)) continue;
     const result = await reclaimPreviewEnvironment(ports, entry.preview);
-    if (result.failed.length === 0) {
+    if (result.receipt.status === "reclaimed") {
       await store.remove(projectRef, entry.preview.preview_ref);
       report.reclaimed += 1;
     } else {
@@ -93,7 +93,7 @@ export async function reclaimStoredPreviews(
 /** Reclaim one preview by reference and remove its record only on full success. */
 export async function closePreview(
   store: PreviewStore,
-  ports: Pick<PreviewProvisioningPorts, "database" | "queues" | "storage">,
+  ports: PreviewReclamationPorts,
   projectRef: string,
   previewRef: string,
 ): Promise<PreviewReclamationResult | null> {
@@ -101,7 +101,7 @@ export async function closePreview(
   const entry = stored.find((candidate) => candidate.preview.preview_ref === previewRef);
   if (!entry) return null;
   const result = await reclaimPreviewEnvironment(ports, entry.preview);
-  if (result.failed.length === 0) await store.remove(projectRef, previewRef);
+  if (result.receipt.status === "reclaimed") await store.remove(projectRef, previewRef);
   return result;
 }
 

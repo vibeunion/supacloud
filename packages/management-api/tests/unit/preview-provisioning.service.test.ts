@@ -89,6 +89,35 @@ test("reclaims namespace components before the database and reports failures", a
   expect(calls).toEqual(["storage.delete", "queues.delete", "database.delete"]);
   expect(result.released).toEqual(["storage", "database"]);
   expect(result.failed).toEqual([{ component: "queues", error: "queue busy" }]);
+  expect(result.unreleased).toEqual([]);
+  expect(result.receipt.status).toBe("incomplete");
+});
+
+test("reports an unreleased receipt when a provisioned component has no release port", async () => {
+  const { ports: fake } = ports();
+  const provisioned = (await provisionPreviewEnvironment(fake, input)).preview;
+  const result = await reclaimPreviewEnvironment(fake, provisioned);
+  expect(result.released).toEqual(["storage", "queues", "database"]);
+  expect(result.unreleased).toEqual(["application", "secrets", "configuration", "resources"]);
+  expect(result.receipt.status).toBe("incomplete");
+});
+
+test("marks the receipt reclaimed only when every provisioned component is released", async () => {
+  const { calls, ports: fake } = ports();
+  const provisioned = (await provisionPreviewEnvironment(fake, input)).preview;
+  const released = await reclaimPreviewEnvironment({
+    ...fake,
+    application: { activate: fake.application.activate, deactivate: async () => { calls.push("application.deactivate"); } },
+    configuration: { bind: fake.configuration.bind, unbind: async () => { calls.push("configuration.unbind"); } },
+    resources: { bind: fake.resources.bind, unbind: async () => { calls.push("resources.unbind"); } },
+    secrets: { bind: fake.secrets.bind, revoke: async () => { calls.push("secrets.revoke"); } },
+  }, provisioned);
+  expect(released.unreleased).toEqual([]);
+  expect(released.receipt.status).toBe("reclaimed");
+  expect(calls.slice(-7)).toEqual([
+    "application.deactivate", "secrets.revoke", "configuration.unbind", "resources.unbind",
+    "storage.delete", "queues.delete", "database.delete",
+  ]);
 });
 
 test("reclaims only timeout-due previews", async () => {
