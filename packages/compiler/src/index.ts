@@ -65,6 +65,13 @@ export type {
   RuntimeBindingsProjection,
   RuntimeBindingsResult,
 } from "./environment-bindings";
+export {
+  createReleaseEvidence,
+  formatReleaseEvidence,
+  RELEASE_EVIDENCE_SCHEMA,
+  ReleaseEvidenceError,
+} from "./release-evidence";
+export type { ReleaseEvidence, ReleaseEvidenceErrorCode } from "./release-evidence";
 export type { AppliedDiagnosticFix, ApplyDiagnosticFixOptions } from "./fixes";
 export { createDiagnosticRepairPlan } from "./repair-plan";
 export type { DiagnosticRepair } from "./repair-plan";

@@ -69,6 +69,7 @@ Usage:
   supacloud-compiler context <name> [rootDir] [options]
   supacloud-compiler dev-context [rootDir] [options]
   supacloud-compiler environment-bindings [rootDir] [options]
+  supacloud-compiler release-evidence --delivery-manifest <file> --delivery-target <name> [--json]
   supacloud-compiler doctor  [rootDir] [options]
   supacloud-compiler migrate [rootDir] [options]
   supacloud-compiler migration-assess [rootDir] [options]
@@ -89,6 +90,7 @@ Commands:
   context             Extract an AI-sized module context pack
   dev-context         Print the read-only application development context for tooling/console/MCP consumers
   environment-bindings Resolve static per-environment resource bindings without credentials
+  release-evidence    Summarize one immutable target without loading project configuration
   doctor              Run project and generated-artifact health checks
   migrate             Preview or apply versioned source migrations
   migration-assess    Produce a read-only migration compatibility report
@@ -145,6 +147,11 @@ async function run(): Promise<void> {
   }
 
   const command = args[0];
+  if (command === "release-evidence") {
+    const { runReleaseEvidenceCommand } = await import("./release-evidence-cli");
+    await runReleaseEvidenceCommand(args.slice(1));
+    return;
+  }
   if (command === "database-contracts") {
     const path = args[1];
     if (!path || path.startsWith("-") || args.slice(2).some((arg) => arg !== "--check")) {
