@@ -14,7 +14,10 @@
     "modules": "Modules", "routes": "Routes", "commands": "Commands", "jobs": "Jobs",
     "resources": "Resources", "diagnostics": "Diagnostics", "no_diagnostics": "No development diagnostics",
     "evidence": "Release evidence", "evidence_unavailable": "Release evidence unavailable for this release target.",
-    "evidence_build": "Build", "evidence_contract": "Contract", "evidence_migrations": "Migrations", "evidence_rollback": "Rollback paths"
+    "evidence_build": "Build", "evidence_contract": "Contract", "evidence_migrations": "Migrations", "evidence_rollback": "Rollback paths",
+    "execution": "Release execution", "execution_unavailable": "Release execution is not recorded for this target.",
+    "execution_verified": "Deployment verified", "execution_unverified": "Deployment not verified",
+    "execution_component": "Component", "execution_version": "Version", "execution_observed_at": "Observed at"
   },
   "GlobalDashboard": {
     "welcome": "Welcome back, Admin",

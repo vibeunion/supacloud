@@ -40,6 +40,25 @@ function evidence(ref: string, app: string) {
     notes: ["Local artifact integrity only."],
   };
 }
+function execution(ref: string, app: string) {
+  const at = "2026-09-30T01:00:00.000Z";
+  const component = (name: string, overrides: Record<string, unknown> = {}) => ({
+    name, status: "unknown", required: false, version: null, detail: null, observedAt: null, ...overrides,
+  });
+  return {
+    project_ref: ref, application_id: app, release_id: a,
+    schema: "supacloud.release-execution.v1", correlation: "release-execution-observation",
+    target: "api", manifestSha256: "d".repeat(64), deploymentVerified: true,
+    components: [
+      component("application", { status: "succeeded", required: true, observedAt: at }),
+      component("migrations", { status: "succeeded", required: true, version: "2", observedAt: at }),
+      component("configuration"), component("resources"), component("secrets"),
+      component("health", { status: "succeeded", required: true, observedAt: at }),
+    ],
+    recovery: { application: "previous release", database: "repair path", storage: "object version" },
+    notes: ["Runtime observation only."],
+  };
+}
 function network(handler: (url: string, init: RequestInit) => Promise<Response>) {
   globalThis.fetch = Object.assign(async (url: RequestInfo | URL, init: RequestInit = {}) =>
     handler(String(url), init), originalFetch);
@@ -104,6 +123,7 @@ try {
     urls.push(url);
     if (url.endsWith("/runtime")) return Response.json(runtime("other", "next-app", "prod"));
     if (url.includes("/development")) return Response.json(development("other", "next-app"));
+    if (url.includes("/execution")) return Response.json(execution("other", "next-app"));
     if (url.includes("/evidence")) return Response.json(evidence("other", "next-app"));
     return Response.json(inventory("other", "next-app", a));
   });
@@ -117,6 +137,9 @@ try {
   await eventually(() => ok(text().includes("Rollback paths")));
   ok(text().includes("previous release"));
   ok(urls.some(url => url.includes(`/releases/${a}/evidence?target=api`)));
+  await eventually(() => ok(text().includes("Deployment verified")));
+  ok(text().includes("Migrations"));
+  ok(urls.some(url => url.includes(`/releases/${a}/execution?target=api`)));
 
   const hanging = Promise.withResolvers<Response>();
   const unmountSignals: AbortSignal[] = [];

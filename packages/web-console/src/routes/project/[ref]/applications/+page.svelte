@@ -16,6 +16,9 @@
   import {
     loadReleaseEvidence, type ReleaseEvidenceResponse,
   } from "$lib/release-evidence";
+  import {
+    loadReleaseExecution, type ReleaseExecutionResponse,
+  } from "$lib/release-execution";
 
   let application = $state("");
   let environment = $state("");
@@ -32,6 +35,8 @@
   let evidence = $state<ReleaseEvidenceResponse | null>(null);
   let evidenceState = $state("idle");
   let evidenceSelection = $state<{ releaseId: string; target: string } | null>(null);
+  let execution = $state<ReleaseExecutionResponse | null>(null);
+  let executionState = $state("idle");
   const scope = $derived({
     ref: page.params.ref ?? "",
     application: page.url.searchParams.get("application") ?? "",
@@ -114,6 +119,25 @@
       })
       .catch(() => {
         if (!controller.signal.aborted) evidenceState = "error";
+      });
+    return () => controller.abort();
+  });
+  $effect(() => {
+    const selected = scope;
+    const selection = evidenceSelection;
+    const controller = new AbortController();
+    execution = null;
+    if (!validApplicationScope(selected) || !selection) {
+      executionState = "idle";
+      return () => controller.abort();
+    }
+    executionState = "loading";
+    void loadReleaseExecution(selected, selection.releaseId, selection.target, apiClient, controller.signal)
+      .then(value => {
+        if (!controller.signal.aborted) { execution = value; executionState = "ready"; }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) executionState = "error";
       });
     return () => controller.abort();
   });
@@ -255,6 +279,20 @@
             <div><dt class="text-muted-foreground">{$t("Applications.evidence_migrations")}</dt><dd>{evidence.migrations.status}{evidence.migrations.status === "present" ? ` · ${evidence.migrations.count} (${evidence.migrations.latestVersion})` : ""}</dd></div>
             <div><dt class="text-muted-foreground">{$t("Applications.evidence_rollback")}</dt><dd>{evidence.rollback.application}<br />{evidence.rollback.database}<br />{evidence.rollback.storage}</dd></div>
           </dl>
+          <h3 class="text-sm font-semibold">{$t("Applications.execution")}</h3>
+          {#if executionState === "loading"}<p role="status">{$t("Applications.loading")}</p>
+          {:else if executionState === "error" || !execution}<p class="text-sm text-muted-foreground">{$t("Applications.execution_unavailable")}</p>
+          {:else}
+            <p class="text-sm font-medium">{$t(execution.deploymentVerified ? "Applications.execution_verified" : "Applications.execution_unverified")}</p>
+            <div class="overflow-x-auto">
+              <table class="w-full table-fixed text-left text-sm">
+                <thead><tr class="border-b"><th class="p-2">{$t("Applications.execution_component")}</th><th class="p-2">{$t("Applications.status")}</th><th class="p-2">{$t("Applications.execution_version")}</th><th class="p-2">{$t("Applications.execution_observed_at")}</th></tr></thead>
+                <tbody>{#each execution.components as component (component.name)}
+                  <tr class="border-b"><td class="break-all p-2">{component.name}{component.required ? " *" : ""}</td><td class="break-all p-2">{component.status}</td><td class="break-all p-2 font-mono">{component.version ?? ""}</td><td class="break-all p-2">{component.observedAt ?? ""}</td></tr>
+                {/each}</tbody>
+              </table>
+            </div>
+          {/if}
           <div class="overflow-x-auto">
             <table class="w-full table-fixed text-left text-sm">
               <thead><tr class="border-b"><th class="p-2">{$t("Applications.evidence")}</th><th class="p-2">{$t("Applications.status")}</th></tr></thead>

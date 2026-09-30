@@ -14,7 +14,10 @@
     "modules": "模块", "routes": "路由", "commands": "命令", "jobs": "任务",
     "resources": "资源", "diagnostics": "诊断", "no_diagnostics": "没有开发诊断",
     "evidence": "发布证据", "evidence_unavailable": "该发布目标暂无发布证据。",
-    "evidence_build": "构建", "evidence_contract": "契约", "evidence_migrations": "迁移", "evidence_rollback": "回滚路径"
+    "evidence_build": "构建", "evidence_contract": "契约", "evidence_migrations": "迁移", "evidence_rollback": "回滚路径",
+    "execution": "发布执行结果", "execution_unavailable": "该发布目标暂无执行记录。",
+    "execution_verified": "部署已验证", "execution_unverified": "部署未验证",
+    "execution_component": "组件", "execution_version": "版本", "execution_observed_at": "观测时间"
   },
   "GlobalDashboard": {
     "welcome": "欢迎回来，系统管理员",

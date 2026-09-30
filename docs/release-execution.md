@@ -65,3 +65,10 @@ strings as the artifact evidence:
   changes still requiring explicit operator handling;
 - **storage**: restore the referenced object version, since release evidence
   does not attest stored bytes.
+## Console
+
+The applications page in `packages/web-console` reads `GET .../execution` for the
+same release target as the evidence view and renders a per-component table
+(required components marked with `*`) plus the deployment-verified verdict.
+When the store is unconfigured or nothing was recorded, the console shows
+"release execution is not recorded" instead of an empty success.
