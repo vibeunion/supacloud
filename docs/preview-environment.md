@@ -43,6 +43,7 @@ connects to a database or embeds a credential.
 | Field | Contents |
 | --- | --- |
 | `components` | database, application, configuration, resources, queues, storage, secrets — each `planned` / `ready` / `failed` / `unknown` |
+| `queue_names` / `storage_buckets` | Structured preview-scoped queue and bucket names carried from the request |
 | `isolation` | database role, storage permissions, consumer identity, route access control — each `pending` / `verified` / `failed` |
 | `lifecycle` | `reclaim_on` (`pr_closed` / `timeout`), `timeout_hours` (1-720), residue policy |
 | `data_mode` | `schema_only` (default) or `full_clone` |
@@ -128,6 +129,14 @@ storage, secrets). The first failing port stops the run, marks that component
   leaving `pr_closed` previews to their webhook.
 - `createPreviewDatabasePort(branchService)` adapts the existing database branch
   service to the `database` port; the other ports are supplied by the caller.
+- `createPreviewQueuePort(pgmqService)` creates and drops each preview queue as
+  `preview_<ref>__<name>` (lowercase, `[^a-z0-9_]` collapsed to `_`, bounded to
+  63 characters).
+- `createPreviewStoragePort(storageDriver)` creates and deletes each preview
+  bucket as `<preview-<ref>>-<bucket>` (lowercase, bounded to 63 characters).
+- `application`, `configuration`, `resources` and `secrets` ports remain
+  caller-supplied until their backends are chosen; the orchestrator fails closed
+  if one is missing.
 
 A `ready` result is a stateful orchestration outcome, not signed provenance: it
 records that the ports succeeded, not that an external system is healthy.

@@ -2,6 +2,8 @@ import { expect, test } from "bun:test";
 import { composePreviewEnvironment } from "../../src/services/preview-environment.service";
 import {
   createPreviewDatabasePort,
+  createPreviewQueuePort,
+  createPreviewStoragePort,
   provisionPreviewEnvironment,
   reclaimDuePreviews,
   reclaimPreviewEnvironment,
@@ -111,4 +113,34 @@ test("database port adapts the existing branch service", async () => {
   await database.database.create(preview);
   await database.database.delete(preview);
   expect(seen).toEqual([["create", "preview-pr-42"], ["delete", "preview-pr-42"]]);
+});
+
+test("queue port namespaces and drops each preview queue", async () => {
+  const seen: string[] = [];
+  const queues = createPreviewQueuePort({
+    createQueue: async (ref, queue) => { seen.push(`create:${ref}:${queue}`); },
+    dropQueue: async (ref, queue) => { seen.push(`drop:${ref}:${queue}`); },
+  });
+  const preview = composePreviewEnvironment({ ...input, queueNames: ["orders", "audit"] });
+  await queues.queues.create(preview);
+  await queues.queues.delete(preview);
+  expect(seen).toEqual([
+    "create:demo:preview_pr_42__audit", "create:demo:preview_pr_42__orders",
+    "drop:demo:preview_pr_42__audit", "drop:demo:preview_pr_42__orders",
+  ]);
+});
+
+test("storage port namespaces and deletes each preview bucket", async () => {
+  const seen: string[] = [];
+  const storage = createPreviewStoragePort({
+    createBucket: async (ref, bucket) => { seen.push(`create:${ref}:${bucket}`); },
+    deleteBucket: async (ref, bucket) => { seen.push(`delete:${ref}:${bucket}`); },
+  });
+  const preview = composePreviewEnvironment({ ...input, storageBuckets: ["uploads", "reports"] });
+  await storage.storage.create(preview);
+  await storage.storage.delete(preview);
+  expect(seen).toEqual([
+    "create:demo:preview-pr-42-reports", "create:demo:preview-pr-42-uploads",
+    "delete:demo:preview-pr-42-reports", "delete:demo:preview-pr-42-uploads",
+  ]);
 });

@@ -30,6 +30,54 @@ export function createPreviewDatabasePort(branches: PreviewBranchPort): Pick<Pre
   };
 }
 
+/** Minimal queue port surface, satisfied by `pgmqService`. */
+export interface PreviewQueuePort {
+  createQueue(projectRef: string, queue: string): Promise<unknown>;
+  dropQueue(projectRef: string, queue: string): Promise<unknown>;
+}
+
+/** Minimal bucket port surface, satisfied by a storage driver. */
+export interface PreviewBucketPort {
+  createBucket(projectRef: string, bucket: string): Promise<unknown>;
+  deleteBucket(projectRef: string, bucket: string): Promise<unknown>;
+}
+
+/** Deterministic, lowercase, bounded preview queue/bucket names. */
+export function previewQueueName(preview: PreviewEnvironment, queue: string): string {
+  return `preview_${preview.preview_ref}__${queue}`.toLowerCase().replace(/[^a-z0-9_]/g, "_").slice(0, 63);
+}
+export function previewBucketName(preview: PreviewEnvironment, bucket: string): string {
+  return `${preview.branch_ref}-${bucket}`.toLowerCase().replace(/[^a-z0-9._-]/g, "-").slice(0, 63);
+}
+
+/** Adapt the project queue service to the preview queue port. */
+export function createPreviewQueuePort(pgmq: PreviewQueuePort): Pick<PreviewProvisioningPorts, "queues"> {
+  return {
+    queues: {
+      create: async (preview) => {
+        for (const queue of preview.queue_names) await pgmq.createQueue(preview.project_ref, previewQueueName(preview, queue));
+      },
+      delete: async (preview) => {
+        for (const queue of preview.queue_names) await pgmq.dropQueue(preview.project_ref, previewQueueName(preview, queue));
+      },
+    },
+  };
+}
+
+/** Adapt a project storage driver to the preview storage port. */
+export function createPreviewStoragePort(storage: PreviewBucketPort): Pick<PreviewProvisioningPorts, "storage"> {
+  return {
+    storage: {
+      create: async (preview) => {
+        for (const bucket of preview.storage_buckets) await storage.createBucket(preview.project_ref, previewBucketName(preview, bucket));
+      },
+      delete: async (preview) => {
+        for (const bucket of preview.storage_buckets) await storage.deleteBucket(preview.project_ref, previewBucketName(preview, bucket));
+      },
+    },
+  };
+}
+
 /**
  * Ports a preview provisioner must supply. The orchestration below is pure: it
  * never connects anywhere itself, and every side effect goes through a port so

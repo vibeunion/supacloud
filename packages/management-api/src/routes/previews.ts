@@ -14,6 +14,8 @@ const body = t.Object({
   }, { additionalProperties: false }),
   configuration_id: t.Optional(t.String()),
   resources: t.Optional(t.Record(t.String(), t.String())),
+  queue_names: t.Optional(t.Array(t.String({ maxLength: 64 }), { maxItems: 64 })),
+  storage_buckets: t.Optional(t.Array(t.String({ maxLength: 63 }), { maxItems: 64 })),
   data_mode: t.Optional(t.Union([t.Literal("schema_only"), t.Literal("full_clone")])),
   authorized_full_clone: t.Optional(t.Boolean()),
   lifecycle: t.Optional(t.Object({
@@ -27,6 +29,44 @@ const body = t.Object({
     route_access_control: t.Optional(t.Object({ ok: t.Boolean(), detail: t.Optional(t.String({ maxLength: 512 })) }, { additionalProperties: false })),
   }, { additionalProperties: false })),
 }, { additionalProperties: false });
+
+interface PreviewRequestBody {
+  preview_ref: string;
+  application_id: string;
+  environment_id: string;
+  release_id: string;
+  source: { branch: string; commit: string };
+  configuration_id?: string;
+  resources?: Record<string, string>;
+  queue_names?: string[];
+  storage_buckets?: string[];
+  data_mode?: "schema_only" | "full_clone";
+  authorized_full_clone?: boolean;
+  lifecycle?: { reclaim_on?: "pr_closed" | "timeout"; timeout_hours?: number };
+}
+
+function toComposeInput(ref: string, input: PreviewRequestBody) {
+  return {
+    previewRef: input.preview_ref,
+    projectRef: ref,
+    applicationId: input.application_id,
+    environmentId: input.environment_id,
+    releaseId: input.release_id,
+    source: input.source,
+    ...(input.configuration_id ? { configurationId: input.configuration_id } : {}),
+    ...(input.resources ? { resources: input.resources } : {}),
+    ...(input.queue_names ? { queueNames: input.queue_names } : {}),
+    ...(input.storage_buckets ? { storageBuckets: input.storage_buckets } : {}),
+    ...(input.data_mode ? { dataMode: input.data_mode } : {}),
+    ...(input.authorized_full_clone === undefined ? {} : { authorizedFullClone: input.authorized_full_clone }),
+    ...(input.lifecycle ? {
+      lifecycle: {
+        ...(input.lifecycle.reclaim_on ? { reclaimOn: input.lifecycle.reclaim_on } : {}),
+        ...(input.lifecycle.timeout_hours === undefined ? {} : { timeoutHours: input.lifecycle.timeout_hours }),
+      },
+    } : {}),
+  };
+}
 
 export function createPreviewRoutes(dependencies: { authorize?: typeof requireProjectOrAdminAuth } = {}) {
   const authorize = dependencies.authorize ?? requireProjectOrAdminAuth;
@@ -48,47 +88,13 @@ export function createPreviewRoutes(dependencies: { authorize?: typeof requirePr
       params,
       body,
       detail: { tags: ["previews"], summary: "Compose a complete preview environment plan without provisioning" },
-    }, ({ params: values, body: input }) => composePreviewEnvironment({
-      previewRef: input.preview_ref,
-      projectRef: values.ref,
-      applicationId: input.application_id,
-      environmentId: input.environment_id,
-      releaseId: input.release_id,
-      source: input.source,
-      ...(input.configuration_id ? { configurationId: input.configuration_id } : {}),
-      ...(input.resources ? { resources: input.resources } : {}),
-      ...(input.data_mode ? { dataMode: input.data_mode } : {}),
-      ...(input.authorized_full_clone === undefined ? {} : { authorizedFullClone: input.authorized_full_clone }),
-      ...(input.lifecycle ? {
-        lifecycle: {
-          ...(input.lifecycle.reclaim_on ? { reclaimOn: input.lifecycle.reclaim_on } : {}),
-          ...(input.lifecycle.timeout_hours === undefined ? {} : { timeoutHours: input.lifecycle.timeout_hours }),
-        },
-      } : {}),
-    }))
+    }, ({ params: values, body: input }) => composePreviewEnvironment(toComposeInput(values.ref, input)))
     .post("/acceptance", {
       params,
       body,
       detail: { tags: ["previews"], summary: "Evaluate observed isolation evidence for a composed preview without provisioning" },
     }, ({ params: values, body: input }) => {
-      const preview = composePreviewEnvironment({
-        previewRef: input.preview_ref,
-        projectRef: values.ref,
-        applicationId: input.application_id,
-        environmentId: input.environment_id,
-        releaseId: input.release_id,
-        source: input.source,
-        ...(input.configuration_id ? { configurationId: input.configuration_id } : {}),
-        ...(input.resources ? { resources: input.resources } : {}),
-        ...(input.data_mode ? { dataMode: input.data_mode } : {}),
-        ...(input.authorized_full_clone === undefined ? {} : { authorizedFullClone: input.authorized_full_clone }),
-        ...(input.lifecycle ? {
-          lifecycle: {
-            ...(input.lifecycle.reclaim_on ? { reclaimOn: input.lifecycle.reclaim_on } : {}),
-            ...(input.lifecycle.timeout_hours === undefined ? {} : { timeoutHours: input.lifecycle.timeout_hours }),
-          },
-        } : {}),
-      });
+      const preview = composePreviewEnvironment(toComposeInput(values.ref, input));
       const evaluation = evaluatePreviewIsolation(preview, input.evidence ?? {});
       return { preview, isolation: evaluation.isolation, accepted: evaluation.accepted };
     });

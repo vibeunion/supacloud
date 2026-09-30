@@ -55,6 +55,8 @@ export interface PreviewEnvironment {
   source: { branch: string; commit: string };
   data_mode: "schema_only" | "full_clone";
   branch_ref: string;
+  queue_names: string[];
+  storage_buckets: string[];
   lifecycle: PreviewEnvironmentLifecycle;
   components: PreviewEnvironmentComponent[];
   isolation: PreviewEnvironmentIsolationCheck[];
@@ -73,6 +75,10 @@ export interface PreviewComposeInput {
   configurationId?: string;
   /** Logical resource name -> opaque binding reference. */
   resources?: Readonly<Record<string, string>>;
+  /** Preview queue names (logical); each becomes a preview-namespaced queue. */
+  queueNames?: ReadonlyArray<string>;
+  /** Preview storage bucket names (logical); each becomes a preview-namespaced bucket. */
+  storageBuckets?: ReadonlyArray<string>;
   dataMode?: "schema_only" | "full_clone";
   /** Required for `full_clone`; absent means unauthorized. */
   authorizedFullClone?: boolean;
@@ -100,6 +106,14 @@ function assertProductionSafe(value: string): void {
   if (PRODUCTION_SHAPE.test(value)) {
     throw new PreviewEnvironmentError("PREVIEW_ENVIRONMENT_PRODUCTION_FORBIDDEN");
   }
+}
+
+const MAX_NAMESPACED_ENTRIES = 64;
+function sortedUnique(values: ReadonlyArray<string>, pattern: RegExp): string[] {
+  if (values.length > MAX_NAMESPACED_ENTRIES) invalid();
+  const unique = [...new Set(values)];
+  if (unique.length !== values.length || unique.some((value) => typeof value !== "string" || !pattern.test(value))) invalid();
+  return unique.sort((a, b) => a.localeCompare(b));
 }
 
 /**
@@ -144,14 +158,17 @@ export function composePreviewEnvironment(input: PreviewComposeInput): PreviewEn
   const reclaimOn = input.lifecycle?.reclaimOn ?? "pr_closed";
   if (reclaimOn !== "pr_closed" && reclaimOn !== "timeout") invalid();
 
+  const queueNames = sortedUnique(input.queueNames ?? [], /^[A-Za-z0-9_-]{1,64}$/);
+  const storageBuckets = sortedUnique(input.storageBuckets ?? [], /^[a-z0-9][a-z0-9._-]{0,62}$/);
+
   const namespace = `preview-${input.previewRef}`;
   const components: PreviewEnvironmentComponent[] = [
     { name: "database", status: "planned", detail: `branch '${namespace}' (${dataMode})` },
     { name: "application", status: "planned", detail: `release ${input.releaseId}` },
     { name: "configuration", status: "planned", detail: input.configurationId ? `configuration ${input.configurationId}` : "environment defaults" },
     { name: "resources", status: "planned", detail: resources.length > 0 ? resources.map(([name, binding]) => `${name} -> ${binding}`).join(", ") : "no declared resources" },
-    { name: "queues", status: "planned", detail: `namespace '${namespace}' with preview consumers` },
-    { name: "storage", status: "planned", detail: `namespace '${namespace}' scoped to the preview binding` },
+    { name: "queues", status: "planned", detail: queueNames.length > 0 ? `namespace '${namespace}': ${queueNames.join(", ")}` : `namespace '${namespace}' with preview consumers` },
+    { name: "storage", status: "planned", detail: storageBuckets.length > 0 ? `namespace '${namespace}': ${storageBuckets.join(", ")}` : `namespace '${namespace}' scoped to the preview binding` },
     { name: "secrets", status: "planned", detail: "test credentials by reference only" },
   ];
 
@@ -165,6 +182,8 @@ export function composePreviewEnvironment(input: PreviewComposeInput): PreviewEn
     source: { branch: input.source.branch, commit: input.source.commit },
     data_mode: dataMode,
     branch_ref: namespace,
+    queue_names: queueNames,
+    storage_buckets: storageBuckets,
     lifecycle: { reclaim_on: reclaimOn, timeout_hours: timeoutHours, residue: "delete_branch_and_namespace" },
     components,
     isolation: ISOLATION_REQUIREMENTS.map((check) => ({ ...check, status: "pending" as const })),

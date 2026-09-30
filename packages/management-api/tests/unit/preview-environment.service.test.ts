@@ -89,3 +89,13 @@ test("accepts only when every isolation check has passing evidence", () => {
   });
   expect(all.accepted).toBe(true);
 });
+
+test("carries structured queue and bucket namespaces and rejects invalid names", () => {
+  const preview = composePreviewEnvironment({ ...base, queueNames: ["orders", "audit"], storageBuckets: ["uploads"] });
+  expect(preview.queue_names).toEqual(["audit", "orders"]);
+  expect(preview.storage_buckets).toEqual(["uploads"]);
+  expect(preview.components.find((component) => component.name === "queues")?.detail).toContain("audit, orders");
+  expect(() => composePreviewEnvironment({ ...base, queueNames: ["bad name"] })).toThrow();
+  expect(() => composePreviewEnvironment({ ...base, storageBuckets: ["UPPER"] })).toThrow();
+  expect(() => composePreviewEnvironment({ ...base, queueNames: ["a", "a"] })).toThrow();
+});
