@@ -807,6 +807,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
     scheduledFunctionRoutes,
     projectMutationRoutes,
     branchRoutes,
+    previewRoutes,
     pgMetaRoutes,
     storageS3Routes,
     autoBranchingRoutes,
@@ -939,6 +940,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(scheduledFunctionRoutes)
       .use(projectMutationRoutes)
       .use(branchRoutes)
+      .use(previewRoutes)
       .use(pgMetaRoutes)
       .use(autoBranchingRoutes)
       .use(projectRbacRoutes)

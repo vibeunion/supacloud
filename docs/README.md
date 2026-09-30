@@ -11,6 +11,7 @@
 - [Configuration Example](./supacloud.yml.example) - Configuration file example
 - [SupaCloud vs Supabase](./supacloud-vs-supabase.md) - Product positioning and feature comparison
 - [Database Environment Promotion](./database-environment-promotion.md) - Local, preview, staging, and production migration workflow
+- [Preview Environment Composition](./preview-environment.md) - A complete preview environment definition with isolation acceptance, reclamation policy and production blocking
 
 ## Vibecoding
 
