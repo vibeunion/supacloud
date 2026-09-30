@@ -1371,6 +1371,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         upstreamTlsInsecureSkipVerify?: boolean;
         methods?: string[];
         pathRegexp?: string;
+        encodeMigrationInventory?: boolean;
     }): CaddyRoute {
         const requestHeaders: Record<string, CaddyHeaderValue> = {
             "Host": "{http.request.host}",
@@ -1391,6 +1392,17 @@ export class CaddyGatewayProvider implements GatewayProvider {
         if (corsSubroute) handle.push(corsSubroute);
         if (opts.rewriteUri) handle.push({ handler: "rewrite", uri: opts.rewriteUri });
         else if (opts.stripPrefix) handle.push({ handler: "rewrite", strip_path_prefix: opts.stripPrefix });
+        // 只压缩迁移清单，不改变认证响应、下载和流式接口的传输行为。
+        if (opts.encodeMigrationInventory) handle.push({
+            handler: "subroute",
+            routes: [{
+                match: [{
+                    method: ["GET"],
+                    path_regexp: { pattern: "^/v1/projects/[^/]+/database/migrations/?$" },
+                }],
+                handle: [this.makeEncodeHandler()],
+            }],
+        });
         handle.push(makeReverseProxy(opts.upstream, requestHeaders, opts.readTimeout, opts.preserveUpstreamCors, opts.streaming, opts.upstreamTls, opts.upstreamTlsInsecureSkipVerify));
 
         return {
@@ -1860,7 +1872,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "realtime-api"), hosts, path: "/realtime/v1/api*", upstream: `${hostIp}:${config.port}`, projectRef, readTimeout: 60_000, corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "realtime"), hosts, path: "/realtime/v1/websocket*", upstream: `${hostIp}:${config.port}`, projectRef, readTimeout: 86_400_000, corsOrigins }),
-                this.makeRoute({ id: caddyRouteId(projectRef, "management"), hosts, path: [`/v1/projects/${projectRef}`, `/v1/projects/${projectRef}/*`], upstream: `${hostIp}:${config.port}`, projectRef, corsOrigins }),
+                this.makeRoute({ id: caddyRouteId(projectRef, "management"), hosts, path: [`/v1/projects/${projectRef}`, `/v1/projects/${projectRef}/*`], upstream: `${hostIp}:${config.port}`, projectRef, corsOrigins, encodeMigrationInventory: true }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "acme"), hosts: [...hosts, ...studioHosts], path: "/.well-known/acme-challenge*", upstream: `${hostIp}:${config.port}`, projectRef, corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "studio"), hosts: studioHosts, path: "/*", upstream: `${hostIp}:${config.port}`, projectRef, headers: ["x-supacloud-ui-host:studio"], corsOrigins }),
             ];
@@ -2057,6 +2069,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             projectRef: "_management",
             stripPrefix: "/api",
             corsOrigins,
+            encodeMigrationInventory: true,
         }));
         this.routesById.set("route-system-studio-root", this.makeRoute({
             id: "route-system-studio-root",
@@ -2065,6 +2078,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             upstream: `${hostIp}:${config.port}`,
             projectRef: "_system",
             corsOrigins,
+            encodeMigrationInventory: true,
         }));
         await this.persistAndLoad();
     }
@@ -2100,6 +2114,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             upstream: `127.0.0.1:${port}`,
             projectRef: "_global",
             readTimeout: 60_000,
+            encodeMigrationInventory: true,
         }));
         await this.persistAndLoad();
     }
