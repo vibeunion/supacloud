@@ -105,3 +105,28 @@ test("rejects an invalid target name before reading the archive", async () => {
   expect(response.status).toBe(422);
   expect((await response.json()).code).toBe("APPLICATION_REQUEST_INVALID");
 });
+test("serves release evidence for a release target", async () => {
+  const { app, release } = await fixture();
+  const response = await app.handle(new Request(
+    `http://localhost/v1/projects/example/applications/reviews/releases/${release.release_id}/evidence?target=api`,
+  ));
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.schema).toBe("supacloud.release-evidence.v1");
+  expect(body.release_id).toBe(release.release_id);
+  expect(body.build.entryKind).toBe("bun-http-application");
+  expect(body.contract.status).toBe("present");
+  expect(body.migrations.status).toBe("absent");
+});
+
+test("release evidence fails closed for an unknown or invalid target", async () => {
+  const { app, release } = await fixture();
+  const base = `http://localhost/v1/projects/example/applications/reviews/releases/${release.release_id}/evidence`;
+  const unknown = await app.handle(new Request(`${base}?target=worker`));
+  expect(unknown.status).toBe(404);
+  expect((await unknown.json()).code).toBe("RELEASE_EVIDENCE_TARGET_NOT_FOUND");
+
+  const invalid = await app.handle(new Request(`${base}?target=Bad_Target`));
+  expect(invalid.status).toBe(422);
+  expect((await invalid.json()).code).toBe("APPLICATION_REQUEST_INVALID");
+});

@@ -13,6 +13,9 @@
   import {
     loadApplicationDevelopment, type ApplicationDevelopmentResponse,
   } from "$lib/application-development";
+  import {
+    loadReleaseEvidence, type ReleaseEvidenceResponse,
+  } from "$lib/release-evidence";
 
   let application = $state("");
   let environment = $state("");
@@ -26,6 +29,9 @@
   let development = $state<ApplicationDevelopmentResponse | null>(null);
   let developmentState = $state("idle");
   let developmentSelection = $state<{ releaseId: string; target: string } | null>(null);
+  let evidence = $state<ReleaseEvidenceResponse | null>(null);
+  let evidenceState = $state("idle");
+  let evidenceSelection = $state<{ releaseId: string; target: string } | null>(null);
   const scope = $derived({
     ref: page.params.ref ?? "",
     application: page.url.searchParams.get("application") ?? "",
@@ -40,6 +46,7 @@
     cursor = undefined;
     previousCursors = [];
     developmentSelection = null;
+    evidenceSelection = null;
   });
   $effect(() => {
     const selected = scope;
@@ -91,6 +98,25 @@
       });
     return () => controller.abort();
   });
+  $effect(() => {
+    const selected = scope;
+    const selection = evidenceSelection;
+    const controller = new AbortController();
+    evidence = null;
+    if (!validApplicationScope(selected) || !selection) {
+      evidenceState = "idle";
+      return () => controller.abort();
+    }
+    evidenceState = "loading";
+    void loadReleaseEvidence(selected, selection.releaseId, selection.target, apiClient, controller.signal)
+      .then(value => {
+        if (!controller.signal.aborted) { evidence = value; evidenceState = "ready"; }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) evidenceState = "error";
+      });
+    return () => controller.abort();
+  });
   function select(event: SubmitEvent) {
     event.preventDefault();
     const url = new URL(page.url);
@@ -103,6 +129,9 @@
   }
   function inspect(releaseId: string, target: string) {
     developmentSelection = { releaseId, target };
+  }
+  function inspectEvidence(releaseId: string, target: string) {
+    evidenceSelection = { releaseId, target };
   }
 </script>
 
@@ -160,11 +189,14 @@
         {:else}
           <div class="overflow-x-auto">
             <table class="w-full table-fixed text-left text-sm">
-              <thead><tr class="border-b"><th class="p-2">{$t("Applications.release")}</th><th class="p-2">{$t("Applications.stored_at")}</th><th class="p-2">{$t("Applications.target")}</th><th class="p-2">{$t("Applications.development")}</th></tr></thead>
+              <thead><tr class="border-b"><th class="p-2">{$t("Applications.release")}</th><th class="p-2">{$t("Applications.stored_at")}</th><th class="p-2">{$t("Applications.target")}</th><th class="p-2">{$t("Applications.development")}</th><th class="p-2">{$t("Applications.evidence")}</th></tr></thead>
               <tbody>{#each releases.releases as release (release.release_id)}
                 <tr class="border-b align-top"><td class="break-all p-2 font-mono">{release.release_id}</td><td class="break-all p-2">{release.created_at}</td><td class="break-all p-2">{release.targets.map(target => `${target.name} (${target.kind})`).join(", ")}</td>
                   <td class="p-2"><div class="flex flex-wrap gap-1">{#each release.targets as target (target.name)}
                     <Button variant="outline" disabled={developmentState === "loading"} onclick={() => inspect(release.release_id, target.name)}>{target.name}</Button>
+                  {/each}</div></td>
+                  <td class="p-2"><div class="flex flex-wrap gap-1">{#each release.targets as target (target.name)}
+                    <Button variant="outline" disabled={evidenceState === "loading"} aria-label={`${$t("Applications.evidence")} ${target.name}`} onclick={() => inspectEvidence(release.release_id, target.name)}>{target.name}</Button>
                   {/each}</div></td>
                 </tr>
               {/each}</tbody>
@@ -207,6 +239,30 @@
               </table>
             </div>
           {/if}
+        {/if}
+      </section>
+    {/if}
+    {#if evidenceState !== "idle"}
+      <section class="space-y-3" aria-busy={evidenceState === "loading"}>
+        <h2 class="text-base font-semibold">{$t("Applications.evidence")}</h2>
+        {#if evidenceState === "loading"}<p role="status">{$t("Applications.loading")}</p>
+        {:else if evidenceState === "error"}<p role="alert">{$t("Applications.evidence_unavailable")}</p>
+        {:else if evidence}
+          <p class="text-sm font-medium">{$t("Applications.development_verified")}: <span class="font-mono">{evidence.target}</span> · <span class="break-all font-mono">{evidence.build.objectId.slice(0, 12)}</span></p>
+          <dl class="grid gap-2 text-sm">
+            <div><dt class="text-muted-foreground">{$t("Applications.evidence_build")}</dt><dd class="break-all font-mono">{evidence.build.manifestSha256.slice(0, 12)} · {evidence.build.entryKind} · {evidence.build.files} file(s)</dd></div>
+            <div><dt class="text-muted-foreground">{$t("Applications.evidence_contract")}</dt><dd>{evidence.contract.status}{evidence.contract.status === "present" ? ` · ${evidence.contract.resources} ${$t("Applications.resources")} · ${evidence.contract.diagnostics.errors}/${evidence.contract.diagnostics.warnings}` : ""}</dd></div>
+            <div><dt class="text-muted-foreground">{$t("Applications.evidence_migrations")}</dt><dd>{evidence.migrations.status}{evidence.migrations.status === "present" ? ` · ${evidence.migrations.count} (${evidence.migrations.latestVersion})` : ""}</dd></div>
+            <div><dt class="text-muted-foreground">{$t("Applications.evidence_rollback")}</dt><dd>{evidence.rollback.application}<br />{evidence.rollback.database}<br />{evidence.rollback.storage}</dd></div>
+          </dl>
+          <div class="overflow-x-auto">
+            <table class="w-full table-fixed text-left text-sm">
+              <thead><tr class="border-b"><th class="p-2">{$t("Applications.evidence")}</th><th class="p-2">{$t("Applications.status")}</th></tr></thead>
+              <tbody>{#each evidence.notes as note, index (index)}
+                <tr class="border-b"><td class="p-2 font-mono">note</td><td class="break-all p-2">{note}</td></tr>
+              {/each}</tbody>
+            </table>
+          </div>
         {/if}
       </section>
     {/if}

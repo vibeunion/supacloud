@@ -12,7 +12,9 @@
     "development_verified": "构建快照已验证",
     "development_unavailable": "该发布目标暂无开发数据。",
     "modules": "模块", "routes": "路由", "commands": "命令", "jobs": "任务",
-    "resources": "资源", "diagnostics": "诊断", "no_diagnostics": "没有开发诊断"
+    "resources": "资源", "diagnostics": "诊断", "no_diagnostics": "没有开发诊断",
+    "evidence": "发布证据", "evidence_unavailable": "该发布目标暂无发布证据。",
+    "evidence_build": "构建", "evidence_contract": "契约", "evidence_migrations": "迁移", "evidence_rollback": "回滚路径"
   },
   "GlobalDashboard": {
     "welcome": "欢迎回来，系统管理员",

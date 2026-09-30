@@ -12,7 +12,9 @@
     "development_verified": "Verified build snapshot",
     "development_unavailable": "Development data unavailable for this release target.",
     "modules": "Modules", "routes": "Routes", "commands": "Commands", "jobs": "Jobs",
-    "resources": "Resources", "diagnostics": "Diagnostics", "no_diagnostics": "No development diagnostics"
+    "resources": "Resources", "diagnostics": "Diagnostics", "no_diagnostics": "No development diagnostics",
+    "evidence": "Release evidence", "evidence_unavailable": "Release evidence unavailable for this release target.",
+    "evidence_build": "Build", "evidence_contract": "Contract", "evidence_migrations": "Migrations", "evidence_rollback": "Rollback paths"
   },
   "GlobalDashboard": {
     "welcome": "Welcome back, Admin",

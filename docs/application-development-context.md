@@ -179,12 +179,32 @@ stored release. Selecting a target loads the endpoint above through
 counts plus the development diagnostics. The console and the MCP consume the
 same contract, so AI and the UI cannot drift.
 
+### Release evidence endpoint and console view
+
+The same immutable release supports a read-only evidence summary:
+
+```http
+GET /v1/projects/{project_ref}/applications/{application_id}/releases/{release_id}/evidence?target={target}
+```
+
+`supacloud.release-evidence.v1` reports the verified build (producer, canonical
+manifest SHA-256, object, entry kind, file count/bytes), the development contract
+status and diagnostic counts, the migration inventory, and **separate**
+application/database/storage rollback paths. It is built from the release archive
+that `ApplicationReleaseStorage` already hash-verified; `RELEASE_EVIDENCE_TARGET_NOT_FOUND`
+and `RELEASE_EVIDENCE_INVALID` map to `404`/`422`. The Web Console adds an
+evidence column per release target and renders the same document. Like the
+compiler's `release-evidence` command, this is build evidence, not deployment
+success, runtime health or signed provenance.
+
 ## Next steps
 
 1. Connect a selected route to its static execution plan and, when available, a
    business execution timeline record.
 2. Extend the Developer MCP with explicitly local/test-only invocation tools
    bound to a named environment.
+3. Correlate release evidence with the deployment record (source commit,
+   environment, resolved binding version, activation).
 
 ## Verification
 
@@ -200,6 +220,9 @@ schema/redaction failures, provider limits and excluded-job resource isolation.
 `packages/management-api/src/services/application-development.service.ts` and its
 unit test cover the release-archive extraction and validation, and
 `tests/unit/application-development.routes.test.ts` covers the read endpoint.
+`packages/management-api/src/services/application-release-evidence.service.ts`
+and `tests/unit/application-release-evidence.service.test.ts` cover the evidence
+summary and its endpoint.
 `tests/unit/mcp-developer-surface.test.ts` covers the separate Developer MCP
 surface.
 

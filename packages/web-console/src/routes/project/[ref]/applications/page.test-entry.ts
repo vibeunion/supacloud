@@ -28,6 +28,18 @@ function development(ref: string, app: string) {
     },
   };
 }
+function evidence(ref: string, app: string) {
+  return {
+    project_ref: ref, application_id: app, release_id: a,
+    schema: "supacloud.release-evidence.v1", correlation: "verified-build-snapshot",
+    deploymentVerified: false, target: "api",
+    build: { producer: "@supacloud/compiler/delivery-build-v1", deploymentReady: false, manifestSha256: "d".repeat(64), objectId: "c".repeat(64), entryKind: "bun-http-application", entrypoint: "bundle/index.js", files: 2, bytes: 64 },
+    contract: { status: "present", schema: "supacloud.application-development.v1", resources: 1, diagnostics: { errors: 0, warnings: 1 } },
+    migrations: { status: "absent", count: 0, latestVersion: null, executionPerformed: false, compatibility: "not-proven", dataRecovery: "separate-required" },
+    rollback: { application: "previous release", database: "repair path", storage: "object version" },
+    notes: ["Local artifact integrity only."],
+  };
+}
 function network(handler: (url: string, init: RequestInit) => Promise<Response>) {
   globalThis.fetch = Object.assign(async (url: RequestInfo | URL, init: RequestInit = {}) =>
     handler(String(url), init), originalFetch);
@@ -92,6 +104,7 @@ try {
     urls.push(url);
     if (url.endsWith("/runtime")) return Response.json(runtime("other", "next-app", "prod"));
     if (url.includes("/development")) return Response.json(development("other", "next-app"));
+    if (url.includes("/evidence")) return Response.json(evidence("other", "next-app"));
     return Response.json(inventory("other", "next-app", a));
   });
   button("Refresh").click();
@@ -100,6 +113,10 @@ try {
   await eventually(() => ok(text().includes("Verified build snapshot")));
   ok(text().includes("SC8103"));
   ok(urls.some(url => url.includes(`/releases/${a}/development?target=api`)));
+  button("Release evidence api").click();
+  await eventually(() => ok(text().includes("Rollback paths")));
+  ok(text().includes("previous release"));
+  ok(urls.some(url => url.includes(`/releases/${a}/evidence?target=api`)));
 
   const hanging = Promise.withResolvers<Response>();
   const unmountSignals: AbortSignal[] = [];

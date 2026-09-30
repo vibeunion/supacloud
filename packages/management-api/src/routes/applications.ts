@@ -8,6 +8,7 @@ import { sql } from "../db";
 import { getVerifiedRequestPrincipal, requireProjectOrAdminAuth } from "../middleware/auth";
 import { ApplicationReleaseError, ApplicationReleaseStorage } from "../services/application-release-storage";
 import { ApplicationDevelopmentError, extractApplicationDevelopment } from "../services/application-development.service";
+import { ReleaseEvidenceError, createReleaseEvidence } from "../services/application-release-evidence.service";
 import { uploadApplicationRelease } from "../services/application-release-upload";
 import { ApplicationActiveStorage } from "../services/application-active-storage";
 import { ApplicationReadiness } from "../services/application-readiness";
@@ -85,6 +86,9 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
         return status(error.statusCode, { code: error.code, error: error.message });
       }
       if (error instanceof ApplicationDevelopmentError) {
+        return status(error.statusCode, { code: error.code, error: error.message });
+      }
+      if (error instanceof ReleaseEvidenceError) {
         return status(error.statusCode, { code: error.code, error: error.message });
       }
       if (error instanceof Error && "code" in error && error.code === "not-found") {
@@ -175,6 +179,18 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
         project_ref: values.ref, application_id: values.id, release_id: values.releaseId,
         target: development.delivery.target, object_id: development.delivery.objectId,
         correlation: development.correlation, context: development.context,
+      };
+    })
+    .get("/:id/releases/:releaseId/evidence", {
+      params: t.Object({ ...params.properties, releaseId: t.String({ pattern: "^[a-f0-9]{64}$" }) }),
+      query: t.Object({ target: t.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" }) }),
+      detail: { tags: ["applications"], summary: "Summarize one immutable release target as verified release evidence" },
+    }, async ({ params: values, query }) => {
+      const { record, archive } = await storage.readArchive(values.ref, values.id, values.releaseId);
+      const { archives } = await storage.readMigrations(values.ref, values.id, values.releaseId);
+      return {
+        project_ref: values.ref, application_id: values.id, release_id: values.releaseId,
+        ...createReleaseEvidence({ record, archive, migrations: archives, target: query.target }),
       };
     })
     .post("/:id/releases", {
