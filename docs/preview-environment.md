@@ -191,3 +191,34 @@ deliver.
    environment so acceptance does not depend on a caller-supplied payload.
 3. Persist the acceptance decision with the preview record so an accepted
    preview can be promoted without re-collecting evidence.
+## Contract primitives
+
+Deterministic, infrastructure-free primitives make Preview identity and policy
+auditable before any real port is wired:
+
+- **Naming** (`services/preview-naming.ts`): bounded, canonical slugs; per-kind
+  resource names for namespace/database/queue/bucket/secret/configuration; and a
+  deterministic `activation_id` via UUIDv5
+  (`UUIDv5(UUIDv5(NAMESPACE_URL, "supacloud:project:<project_id>"), "preview:<preview_ref>")`),
+  so retrying a provisioning step converges instead of duplicating resources.
+  `preview_ref` stays `pr-<num>` / `change-<id>`; branch names and short SHAs are
+  never identities.
+- **Configuration** (`services/preview-configuration.service.ts`): an immutable
+  `PreviewConfiguration` built only from the release contract, Preview defaults,
+  and secret references. Every external service is explicitly `sandbox` or
+  `disabled`. Values that look production-shaped (`prod`/`live`/`release`, or any
+  URL) and unknown environment keys are rejected, not sanitized. The revision id
+  is `cfg_` + base32-lower SHA-256 of the canonical JSON.
+- **Secrets** (`services/preview-secrets.service.ts`): only sandbox-backed
+  providers (`stripe`, `paypal`, `sendgrid`, `sentry`, `oauth`, `webhook`) may be
+  enabled; anything else is refused rather than falling back to a production
+  credential.
+- **Authorization** (`services/preview-authorization.service.ts`): a pure role
+  matrix. Members close only their own preview; `full_clone` needs an admin;
+  force-deleting a non-empty bucket needs platform ops; migration promotion
+  always requires approval; and `use_real_credentials` is denied for every role.
+
+These primitives do not claim any resource exists. They are the fail-closed
+contract the provisioning ports must honor once the remaining decisions in
+[Preview environment open questions](./preview-environment-open-questions.md) are
+confirmed.
