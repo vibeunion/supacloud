@@ -1,18 +1,9 @@
 # Preview Environment Composition
 
-Status: **IMPLEMENTED (composition and lifecycle planning slice)**. The platform
-composes a complete preview environment definition, its isolation acceptance
-checks and its reclamation policy, and refuses production-shaped inputs. Actual
-provisioning and teardown remain a later slice; see
-[Encore Alignment Roadmap](./encore-alignment-roadmap.md).
-
-## Why
-
-"Preview" is a complete environment, not a renamed database branch. A pull
-request needs a runnable, verifiable and reclaimable environment whose parts are
-named and whose isolation is explicit. This slice defines that environment
-deterministically from existing identifiers, so provisioning, verification and
-reclamation all share one description.
+Status: **IMPLEMENTED (read-only planning slice)**. This slice composes a bounded
+preview definition. It does not create a branch, activate code, read production
+data, collect isolation evidence, persist lifecycle state or run reclamation.
+See [Encore Alignment Roadmap](./encore-alignment-roadmap.md).
 
 ## Endpoint
 
@@ -20,84 +11,73 @@ reclamation all share one description.
 POST /v1/projects/{project_ref}/previews/plan
 ```
 
-The endpoint is read-only: it composes and validates; it never provisions,
-connects to a database or embeds a credential.
-
 ```json
 {
   "preview_ref": "pr-42",
   "application_id": "reviews",
   "environment_id": "preview",
-  "release_id": "<64 hex>",
-  "source": { "branch": "feature/orders", "commit": "<40 hex>" },
+  "release_id": "<64 lowercase hex>",
+  "source": { "branch": "feature/orders", "commit": "<40 lowercase hex>" },
   "resources": { "orders-db": "project:orders" },
   "data_mode": "schema_only",
   "lifecycle": { "reclaim_on": "pr_closed", "timeout_hours": 168 }
 }
 ```
 
-## Schema
+The route first requires project or administrator authentication. A `full_clone`
+plan additionally requires a verified platform `admin` or `master` principal.
+The legacy `authorized_full_clone` request field is ignored as an authorization
+source: setting it to true cannot grant permission. The internal composer takes
+a trusted policy result, not an unverified HTTP assertion. Even an authorized
+plan is not execution approval or proof that a source dataset is pre-masked;
+those checks must occur independently when provisioning is implemented.
 
-`supacloud.preview-environment.v1`:
+## Contract
 
-| Field | Contents |
-| --- | --- |
-| `components` | database, application, configuration, resources, queues, storage, secrets — each `planned` / `ready` / `failed` / `unknown` |
-| `isolation` | database role, storage permissions, consumer identity, route access control — each `pending` / `verified` / `failed` |
-| `lifecycle` | `reclaim_on` (`pr_closed` / `timeout`), `timeout_hours` (1-720), residue policy |
-| `data_mode` | `schema_only` (default) or `full_clone` |
-| `source` | git branch and commit |
-| `production_blocked` | Always `true` |
-| `notes` | explicit non-guarantees |
+`supacloud.preview-environment.v1` contains database, application, configuration,
+resources, queues, storage and secrets components. All start `planned`. The four
+isolation checks (database role, storage permissions, consumer identity and route
+access control) all start `pending`; none is treated as observed or verified.
 
-The default data mode is `schema_only`, reusing the existing
-[database branch and migration promotion](./database-environment-promotion.md)
-mechanisms. `full_clone` requires `authorized_full_clone: true` and pre-masked
-data.
+`configuration_id` retains the selected UUID revision or null. `resource_bindings`
+retains a detached map of logical resource names to opaque references. A later
+adapter must consume these structured fields, never parse human-readable component
+`detail` strings. Resource references and configuration identity remain unverified.
 
-## Isolation acceptance
+`branch_ref` is a deterministic 20-character identifier: `pv` plus 18 SHA-256 hex
+characters over a domain-separated tuple of the exact project and preview IDs.
+Case and separator differences are not collapsed. The digest fits existing tenant
+reference limits. Neither a digest nor a name prefix proves ownership: a future
+provisioner must reject collisions and verify stored project/preview ownership
+before reusing or deleting anything. This replaces the old project-independent
+`preview-<ref>` naming rule; no infrastructure is migrated by this planning slice.
 
-"Changing the prefix" is not isolation. A preview is only accepted once these
-checks are `verified`:
+## Input boundaries
 
-- **database role**: the preview role must not hold cluster-management privileges;
-- **storage permissions**: access is scoped to the preview binding, not the parent;
-- **consumer identity**: queue consumers run under a preview-scoped identity;
-- **route access control**: preview routes reject production credentials and are
-  not publicly indexed.
+Identifiers and references require full-string matches; trailing control characters
+are rejected. `resources` allows at most 64 names and references. Formatted output,
+including structured references and display details, is limited to 64 KiB UTF-8.
+Invalid data-mode values, non-string references and malformed lifecycle values fail
+with stable errors rather than exposing rejected input.
 
-## Production blocking
+Production-shaped environment names, branch path segments and binding destinations
+are rejected. URL or credential-shaped binding values are rejected. These are
+syntax policies, not proof that arbitrary external resources are non-production.
+`production_blocked: true` describes the applied name policy only; execution must
+resolve and authorize every target independently. Do not encode secrets in names.
 
-The composer refuses, before anything else:
+## Lifecycle planning
 
-- an `environment_id` or git branch shaped like `prod`, `production`, `live` or
-  `release` (`PREVIEW_ENVIRONMENT_PRODUCTION_FORBIDDEN`);
-- a resource binding whose namespace resolves to a production-shaped name;
-- an inline credential or URL as a binding value
-  (`PREVIEW_ENVIRONMENT_INLINE_SECRET_FORBIDDEN`). Bindings are references by
-  name only (`project:orders`, `secret:orders-db`).
+The default is `pr_closed`; `timeout` accepts an integer from 1 to 720 hours.
+`previewsDueForReclamation(previews, now)` is a pure selector. Invalid ages or
+out-of-range deadlines are never selected as permission to delete. No worker is
+installed here, and neither selector output nor the `delete_branch_and_namespace`
+residue policy claims that cleanup has happened.
 
-## Lifecycle and reclamation
+## Next implementation boundaries
 
-Previews are reclaimed on `pr_closed` or after `timeout_hours`. The pure
-`previewsDueForReclamation(previews, now)` selector returns only overdue
-timeout-based previews, so a reclamation worker can act on an explicit list. The
-residue policy is `delete_branch_and_namespace`: both the database branch and the
-queue/storage namespace are removed, so a failed preview does not leave orphans.
-
-## Boundaries
-
-- **Composition vs provisioning.** A composed plan is not a running environment;
-  it does not attest that any component exists or is healthy.
-- **No production side effects.** The composer never connects to production and
-  never embeds production credentials; external services default to test
-  credentials by reference.
-- **Fail closed.** Production-shaped or credential-bearing inputs are rejected,
-  not sanitized.
-
-## Next steps
-
-1. A provisioning orchestrator that creates the branch, activates the release,
-   binds resources and records per-component status.
-2. An isolation verifier that flips the acceptance checks to `verified`.
-3. A reclamation worker driven by `previewsDueForReclamation`.
+Provisioning requires independent credentials, resource ownership, quarantine until
+isolation passes, and a durable record before side effects. Reclamation needs a
+complete cleanup receipt, per-generation concurrency protection and verified
+ownership. Storage and external data recovery remain separate from application
+rollback. These requirements are not satisfied by the plan alone.
