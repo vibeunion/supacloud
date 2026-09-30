@@ -188,11 +188,12 @@ MCP 的权限不能混在一起：现有运维 MCP 的 plan-only、项目范围�
 > `dev-context` CLI），红化输出模块/路由/资源/诊断；并已随交付构建发布
 > `bundle/application-development.json`，由 `readApplicationDevelopmentContext`
 > 按目标/哈希校验读取（`verified-build-snapshot`），无需源码 checkout。
-> **Developer MCP 工具已落地（第三切片）**：独立端点
-> `POST /mcp/developer/projects/{project_ref}`，只读、项目限域，仅暴露
-> `supacloud.get_application_development`，从不可变 release 归档读取并校验同一份
-> `supacloud.application-development.v1` 契约；运维 MCP 端点不暴露该工具。
-> Web Console 视图为后续切片。参见
+> **Developer MCP 与 Web Console 视图已落地**：独立端点
+> `POST /mcp/developer/projects/{project_ref}` 只读、项目限域，仅暴露
+> `supacloud.get_application_development`；管理 API 新增
+> `GET .../releases/{release_id}/development?target=...`；`packages/web-console`
+> 应用页在已存发布包上逐目标展示模块/路由/命令/任务/资源计数与诊断。三处消费同一份
+> `supacloud.application-development.v1` 契约；运维 MCP 端点不暴露该工具。参见
 > [Application Development Context](./application-development-context.md) 与
 > [Optional AI Operations MCP](./mcp-ai-operations.md)。
 

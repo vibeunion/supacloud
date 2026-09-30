@@ -7,6 +7,7 @@ import {
 import { sql } from "../db";
 import { getVerifiedRequestPrincipal, requireProjectOrAdminAuth } from "../middleware/auth";
 import { ApplicationReleaseError, ApplicationReleaseStorage } from "../services/application-release-storage";
+import { ApplicationDevelopmentError, extractApplicationDevelopment } from "../services/application-development.service";
 import { uploadApplicationRelease } from "../services/application-release-upload";
 import { ApplicationActiveStorage } from "../services/application-active-storage";
 import { ApplicationReadiness } from "../services/application-readiness";
@@ -81,6 +82,9 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
   const routes = new Elysia({ prefix: "/v1/projects/:ref/applications", name: "application-releases" })
     .error(({ error }) => {
       if (error instanceof ApplicationReleaseError || error instanceof ApplicationConfigurationError) {
+        return status(error.statusCode, { code: error.code, error: error.message });
+      }
+      if (error instanceof ApplicationDevelopmentError) {
         return status(error.statusCode, { code: error.code, error: error.message });
       }
       if (error instanceof Error && "code" in error && error.code === "not-found") {
@@ -160,6 +164,19 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       project_ref: values.ref, application_id: values.id,
       release: await storage.readRelease(values.ref, values.id, values.releaseId),
     }))
+    .get("/:id/releases/:releaseId/development", {
+      params: t.Object({ ...params.properties, releaseId: t.String({ pattern: "^[a-f0-9]{64}$" }) }),
+      query: t.Object({ target: t.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" }) }),
+      detail: { tags: ["applications"], summary: "Read the validated application development contract from an immutable release target" },
+    }, async ({ params: values, query }) => {
+      const { archive } = await storage.readArchive(values.ref, values.id, values.releaseId);
+      const development = extractApplicationDevelopment(archive, query.target);
+      return {
+        project_ref: values.ref, application_id: values.id, release_id: values.releaseId,
+        target: development.delivery.target, object_id: development.delivery.objectId,
+        correlation: development.correlation, context: development.context,
+      };
+    })
     .post("/:id/releases", {
       params, parse: "none",
       detail: { tags: ["applications"], summary: "Upload an immutable HTTP/Worker release without activating it" },

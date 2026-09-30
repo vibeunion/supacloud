@@ -6,6 +6,7 @@ import {
   parseDevelopmentContext,
   type DevelopmentContext,
 } from "@supacloud/delivery/development";
+import { AppError } from "../utils/errors";
 
 /** Read-only, strictly validated projection of a hash-verified delivery artifact. */
 export const APPLICATION_DEVELOPMENT_ARTIFACT = "bundle/application-development.json";
@@ -18,9 +19,10 @@ export type ApplicationDevelopmentErrorCode =
   | "APPLICATION_DEVELOPMENT_TOO_LARGE"
   | "APPLICATION_DEVELOPMENT_INVALID";
 
-export class ApplicationDevelopmentError extends Error {
-  constructor(readonly code: ApplicationDevelopmentErrorCode) {
-    super(code);
+export class ApplicationDevelopmentError extends AppError {
+  constructor(readonly developmentCode: ApplicationDevelopmentErrorCode) {
+    super(developmentCode, developmentCode === "APPLICATION_DEVELOPMENT_TARGET_NOT_FOUND"
+      || developmentCode === "APPLICATION_DEVELOPMENT_MISSING" ? 404 : 422, developmentCode);
     this.name = "ApplicationDevelopmentError";
   }
 }
