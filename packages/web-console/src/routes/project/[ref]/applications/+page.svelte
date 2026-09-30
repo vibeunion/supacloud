@@ -25,7 +25,7 @@
   let previousCursors = $state<(string | undefined)[]>([]);
   let development = $state<ApplicationDevelopmentResponse | null>(null);
   let developmentState = $state("idle");
-  let developmentSelection = $state<{ releaseId: string; target: string } | null>(null);
+  let developmentSelection = $state<{ releaseId: string; target: string; objectId: string } | null>(null);
   const scope = $derived({
     ref: page.params.ref ?? "",
     application: page.url.searchParams.get("application") ?? "",
@@ -82,7 +82,7 @@
       return () => controller.abort();
     }
     developmentState = "loading";
-    void loadApplicationDevelopment(selected, selection.releaseId, selection.target, apiClient, controller.signal)
+    void loadApplicationDevelopment(selected, selection.releaseId, selection.target, apiClient, controller.signal, selection.objectId)
       .then(value => {
         if (!controller.signal.aborted) { development = value; developmentState = "ready"; }
       })
@@ -101,8 +101,8 @@
   function refresh() {
     untrack(() => { cursor = undefined; previousCursors = []; revision += 1; });
   }
-  function inspect(releaseId: string, target: string) {
-    developmentSelection = { releaseId, target };
+  function inspect(releaseId: string, target: string, objectId: string) {
+    developmentSelection = { releaseId, target, objectId };
   }
 </script>
 
@@ -164,7 +164,7 @@
               <tbody>{#each releases.releases as release (release.release_id)}
                 <tr class="border-b align-top"><td class="break-all p-2 font-mono">{release.release_id}</td><td class="break-all p-2">{release.created_at}</td><td class="break-all p-2">{release.targets.map(target => `${target.name} (${target.kind})`).join(", ")}</td>
                   <td class="p-2"><div class="flex flex-wrap gap-1">{#each release.targets as target (target.name)}
-                    <Button variant="outline" disabled={developmentState === "loading"} onclick={() => inspect(release.release_id, target.name)}>{target.name}</Button>
+                    <Button variant="outline" disabled={developmentState === "loading"} onclick={() => inspect(release.release_id, target.name, target.object_id)}>{target.name}</Button>
                   {/each}</div></td>
                 </tr>
               {/each}</tbody>
@@ -188,6 +188,7 @@
         {:else if developmentState === "error"}<p role="alert">{$t("Applications.development_unavailable")}</p>
         {:else if development}
           <p class="text-sm font-medium">{$t("Applications.development_verified")}: <span class="font-mono">{development.target}</span> · <span class="break-all font-mono">{development.object_id.slice(0, 12)}</span></p>
+          <p class="break-all text-sm">{$t("Applications.release")}: <span class="font-mono">{development.release_id}</span></p>
           <dl class="grid grid-cols-2 gap-2 text-sm sm:grid-cols-5">
             <div><dt class="text-muted-foreground">{$t("Applications.modules")}</dt><dd>{development.context.modules.length}</dd></div>
             <div><dt class="text-muted-foreground">{$t("Applications.routes")}</dt><dd>{development.context.routes.length}</dd></div>
@@ -201,7 +202,7 @@
             <div class="overflow-x-auto">
               <table class="w-full table-fixed text-left text-sm">
                 <thead><tr class="border-b"><th class="p-2">{$t("Applications.status")}</th><th class="p-2">Code</th><th class="p-2">File</th></tr></thead>
-                <tbody>{#each development.context.diagnostics as diagnostic (diagnostic.code + (diagnostic.file ?? ""))}
+                <tbody>{#each development.context.diagnostics as diagnostic, index (index)}
                   <tr class="border-b"><td class="break-all p-2">{diagnostic.severity}</td><td class="break-all p-2 font-mono">{diagnostic.code}</td><td class="break-all p-2">{diagnostic.file ?? ""}{diagnostic.line === undefined ? "" : `:${diagnostic.line}`}</td></tr>
                 {/each}</tbody>
               </table>

@@ -23,8 +23,13 @@ function development(ref: string, app: string) {
       schema: "supacloud.application-development.v1", source: "current-graph", deploymentVerified: false,
       modules: [], routes: [], commands: [], jobs: [], resourceUses: [], executionPlans: [],
       resources: [{ name: "reviews-db", kind: "database" }],
-      diagnostics: [{ code: "SC8103", severity: "warn" }],
-      omitted: { modules: 0 }, limits: { outputBytes: 65536 },
+      diagnostics: [
+        { code: "SC8103", severity: "warn", file: "src/reviews.ts", line: 10 },
+        { code: "SC8103", severity: "warn", file: "src/reviews.ts", line: 20 },
+      ],
+      omitted: { modules: 0, providers: 0, routes: 0, commands: 0, jobs: 0, resources: 0, resourceUses: 0, plans: 0, diagnostics: 0 },
+      limits: { outputBytes: 65536, modules: 64, providers: 128, routes: 256, commands: 128, jobs: 128,
+        resources: 64, resourceUses: 128, plans: 128, diagnostics: 64 },
     },
   };
 }
@@ -98,8 +103,32 @@ try {
   await eventually(() => ok(text().includes(a)));
   button("api").click();
   await eventually(() => ok(text().includes("Verified build snapshot")));
-  ok(text().includes("SC8103"));
+  strictEqual(text().match(/SC8103/g)?.length, 2);
+  ok(text().includes("src/reviews.ts:10") && text().includes("src/reviews.ts:20"));
   ok(urls.some(url => url.includes(`/releases/${a}/development?target=api`)));
+
+  network(async () => Response.json({ ...development("other", "next-app"), object_id: "d".repeat(64) }));
+  button("api").click();
+  await eventually(() => ok(document.querySelector('[role="alert"]')));
+  ok(!text().includes("Verified build snapshot"));
+
+  const pendingDevelopment = Promise.withResolvers<Response>();
+  const developmentSignals: AbortSignal[] = [];
+  network(async (url, init) => {
+    if (url.includes("/development")) { developmentSignals.push(init.signal!); return pendingDevelopment.promise; }
+    if (url.endsWith("/runtime")) return Response.json(runtime("third", "third-app", "prod"));
+    return Response.json(inventory("third", "third-app", b));
+  });
+  button("api").click();
+  await eventually(() => strictEqual(developmentSignals.length, 1));
+  page.params.ref = "third";
+  page.url = new URL("http://localhost/project/third/applications?application=third-app&environment=prod");
+  await eventually(() => ok(text().includes(b)));
+  ok(developmentSignals[0]?.aborted);
+  pendingDevelopment.resolve(Response.json(development("other", "next-app")));
+  await tick();
+  ok(!text().includes("SC8103"));
+  ok(!text().includes("Verified build snapshot"));
 
   const hanging = Promise.withResolvers<Response>();
   const unmountSignals: AbortSignal[] = [];

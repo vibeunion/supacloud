@@ -1,16 +1,17 @@
 import type { VerifiedDeliveryExecutableArchive } from "@supacloud/delivery";
+import {
+  APPLICATION_DEVELOPMENT_ARCHIVE_MAX_BYTES,
+  assertDevelopmentTarget,
+  DevelopmentContractError,
+  parseDevelopmentContext,
+  type DevelopmentContext,
+} from "@supacloud/delivery/development";
 import { AppError } from "../utils/errors";
 
-/**
- * Read-only projection of a delivered application's development contract. This
- * mirrors `supacloud.application-development.v1` produced by `@supacloud/compiler`
- * but does not depend on it: the bytes are already hash-verified by the release
- * archive reader, so this only validates the declared contract shape.
- */
+/** Read-only, strictly validated projection of a hash-verified delivery artifact. */
 export const APPLICATION_DEVELOPMENT_ARTIFACT = "bundle/application-development.json";
 export const APPLICATION_DEVELOPMENT_SCHEMA = "supacloud.application-development.v1";
-/** The compiler caps the document well below this; the hard bound protects the API. */
-export const APPLICATION_DEVELOPMENT_MAX_BYTES = 512 * 1024;
+export const APPLICATION_DEVELOPMENT_MAX_BYTES = APPLICATION_DEVELOPMENT_ARCHIVE_MAX_BYTES;
 
 export type ApplicationDevelopmentErrorCode =
   | "APPLICATION_DEVELOPMENT_TARGET_NOT_FOUND"
@@ -29,38 +30,10 @@ export class ApplicationDevelopmentError extends AppError {
 export interface DeliveredApplicationDevelopment {
   correlation: "verified-build-snapshot";
   delivery: { target: string; objectId: string; artifactVerified: true };
-  /** Validated `supacloud.application-development.v1` document. */
-  context: Record<string, unknown>;
+  context: DevelopmentContext;
 }
 
-const arrays = ["modules", "routes", "commands", "jobs", "resources", "resourceUses", "executionPlans", "diagnostics"] as const;
-
-function parseContext(bytes: Uint8Array): Record<string, unknown> {
-  if (bytes.length === 0 || bytes.length > APPLICATION_DEVELOPMENT_MAX_BYTES) {
-    throw new ApplicationDevelopmentError(bytes.length > APPLICATION_DEVELOPMENT_MAX_BYTES
-      ? "APPLICATION_DEVELOPMENT_TOO_LARGE" : "APPLICATION_DEVELOPMENT_INVALID");
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(Buffer.from(bytes).toString("utf8"));
-  } catch {
-    throw new ApplicationDevelopmentError("APPLICATION_DEVELOPMENT_INVALID");
-  }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new ApplicationDevelopmentError("APPLICATION_DEVELOPMENT_INVALID");
-  }
-  const row = parsed as Record<string, unknown>;
-  if (row.schema !== APPLICATION_DEVELOPMENT_SCHEMA || row.source !== "current-graph"
-    || row.deploymentVerified !== false
-    || arrays.some((key) => !Array.isArray(row[key]))
-    || !row.omitted || typeof row.omitted !== "object" || Array.isArray(row.omitted)
-    || !row.limits || typeof row.limits !== "object" || Array.isArray(row.limits)) {
-    throw new ApplicationDevelopmentError("APPLICATION_DEVELOPMENT_INVALID");
-  }
-  return row;
-}
-
-/** Extract and validate the development contract from an already verified archive. */
+/** Hash verification alone is not schema validation or proof of deployment. */
 export function extractApplicationDevelopment(
   archive: VerifiedDeliveryExecutableArchive,
   target: string,
@@ -69,9 +42,22 @@ export function extractApplicationDevelopment(
   if (!entry) throw new ApplicationDevelopmentError("APPLICATION_DEVELOPMENT_TARGET_NOT_FOUND");
   const bytes = entry.files.get(APPLICATION_DEVELOPMENT_ARTIFACT);
   if (!bytes) throw new ApplicationDevelopmentError("APPLICATION_DEVELOPMENT_MISSING");
-  return {
-    correlation: "verified-build-snapshot",
-    delivery: { target, objectId: entry.object.objectId, artifactVerified: true },
-    context: parseContext(bytes),
-  };
+  if (bytes.byteLength > APPLICATION_DEVELOPMENT_MAX_BYTES) {
+    throw new ApplicationDevelopmentError("APPLICATION_DEVELOPMENT_TOO_LARGE");
+  }
+  try {
+    const context = parseDevelopmentContext(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)));
+    const planned = archive.manifest.plan.targets.find(candidate => candidate.name === target);
+    if (!planned) throw new ApplicationDevelopmentError("APPLICATION_DEVELOPMENT_INVALID");
+    assertDevelopmentTarget(context, planned);
+    return {
+      correlation: "verified-build-snapshot",
+      delivery: { target, objectId: entry.object.objectId, artifactVerified: true },
+      context,
+    };
+  } catch (error) {
+    if (error instanceof ApplicationDevelopmentError) throw error;
+    throw new ApplicationDevelopmentError(error instanceof DevelopmentContractError
+      ? error.code : "APPLICATION_DEVELOPMENT_INVALID");
+  }
 }

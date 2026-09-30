@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { deliveryObjectDigest, type DeliveryBuildManifest, type DeliveryObject } from "@supacloud/delivery/build-schema";
 import { canonical, digest } from "@supacloud/delivery/files";
 import type { DeliveryTarget } from "@supacloud/delivery/schema";
+import { APPLICATION_DEVELOPMENT_LIMITS } from "@supacloud/delivery/development";
 import { createApplicationRoutes } from "../../src/routes/applications";
 import { ApplicationReleaseStorage } from "../../src/services/application-release-storage";
 import { APPLICATION_DEVELOPMENT_ARTIFACT } from "../../src/services/application-development.service";
@@ -16,10 +17,12 @@ afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 const context = {
   schema: "supacloud.application-development.v1", source: "current-graph", deploymentVerified: false,
   modules: [], routes: [], commands: [], jobs: [], resources: [], resourceUses: [],
-  executionPlans: [], diagnostics: [], omitted: {}, limits: { outputBytes: 65536 },
+  executionPlans: [], diagnostics: [],
+  omitted: { modules: 0, providers: 0, routes: 0, commands: 0, jobs: 0, resources: 0, resourceUses: 0, plans: 0, diagnostics: 0 },
+  limits: APPLICATION_DEVELOPMENT_LIMITS,
 };
 
-async function fixture(withDevelopment = true) {
+async function fixture(withDevelopment = true, development: unknown = context) {
   const manifestPath = join(root, "upload/delivery.manifest.json");
   const targets: DeliveryTarget[] = ["api", "jobs"].map(name => ({
     name, kind: name === "jobs" ? "jobs" : "api", isolation: "process",
@@ -35,7 +38,7 @@ async function fixture(withDevelopment = true) {
       ["bundle/index.js", "throw new Error('intake must never execute code');\n"],
       ["bundle/target.json", canonical({ target, entryKind, deploymentReady: false })],
       ...(withDevelopment && target.name === "api"
-        ? [[APPLICATION_DEVELOPMENT_ARTIFACT, canonical(context)] as [string, string]] : []),
+        ? [[APPLICATION_DEVELOPMENT_ARTIFACT, canonical(development)] as [string, string]] : []),
     ]);
     const object: Omit<DeliveryObject, "objectId"> = {
       name: target.name, inputDigest: digest("fixture"), entrypoint: "bundle/index.js",
@@ -79,7 +82,7 @@ test("serves the validated development contract for a release target", async () 
   expect(body.target).toBe("api");
   expect(body.correlation).toBe("verified-build-snapshot");
   expect(body.object_id).toMatch(/^[a-f0-9]{64}$/);
-  expect(body.context.schema).toBe("supacloud.application-development.v1");
+  expect(body.context).toEqual(context);
 });
 
 test("reports a missing artifact and an unknown target distinctly", async () => {
@@ -88,7 +91,6 @@ test("reports a missing artifact and an unknown target distinctly", async () => 
   const missing = await app.handle(new Request(`${base}?target=api`));
   expect(missing.status).toBe(404);
   expect((await missing.json()).code).toBe("APPLICATION_DEVELOPMENT_MISSING");
-
   const { app: withArtifact, release: other } = await fixture();
   const unknown = await withArtifact.handle(new Request(
     `http://localhost/v1/projects/example/applications/reviews/releases/${other.release_id}/development?target=workers`,
@@ -104,4 +106,21 @@ test("rejects an invalid target name before reading the archive", async () => {
   ));
   expect(response.status).toBe(422);
   expect((await response.json()).code).toBe("APPLICATION_REQUEST_INVALID");
+});
+
+test("hash-consistent but malformed or foreign contracts return safe 422 errors", async () => {
+  for (const value of [
+    { ...context, private: "do-not-echo" },
+    { ...context, modules: [null] },
+    { ...context, routes: [{ module: "jobs", method: "GET", path: "/foreign", controller: "Other", handler: "list", aspects: [] }] },
+  ]) {
+    const { app, release } = await fixture(true, value);
+    const response = await app.handle(new Request(
+      `http://localhost/v1/projects/example/applications/reviews/releases/${release.release_id}/development?target=api`,
+    ));
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body.code).toBe("APPLICATION_DEVELOPMENT_INVALID");
+    expect(JSON.stringify(body)).not.toContain("do-not-echo");
+  }
 });
