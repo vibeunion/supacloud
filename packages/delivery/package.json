@@ -35,6 +35,12 @@
       "supacloud-source": "./src/delivery-artifact.ts",
       "bun": "./src/delivery-artifact.ts",
       "import": "./dist/delivery-artifact.js"
+    },
+    "./development": {
+      "types": "./src/application-development.ts",
+      "supacloud-source": "./src/application-development.ts",
+      "bun": "./src/application-development.ts",
+      "import": "./dist/application-development.js"
     }
   },
   "files": [
@@ -45,7 +51,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun build src/index.ts src/delivery-schema.ts src/delivery-build-schema.ts src/delivery-files.ts src/delivery-artifact.ts src/application-activation.ts --outdir dist --target node --splitting",
+    "build": "bun build src/index.ts src/delivery-schema.ts src/delivery-build-schema.ts src/delivery-files.ts src/delivery-artifact.ts src/application-activation.ts src/application-development.ts --outdir dist --target node --splitting",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "prepublishOnly": "bun run build"
