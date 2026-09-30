@@ -17,6 +17,13 @@ export type { ExecutionContextPack, ExecutionTimelineStage, ExecutionTimelineAtt
 export { readApplicationDevelopmentContext, DeliveryContextError } from "./delivery-context";
 export type { DeliveredApplicationDevelopmentContext, DeliveryExecutionContextPack } from "./delivery-context";
 export {
+  createReleaseEvidence,
+  formatReleaseEvidence,
+  ReleaseEvidenceError,
+  RELEASE_EVIDENCE_SCHEMA,
+} from "./release-evidence";
+export type { ReleaseEvidence, ReleaseEvidenceErrorCode } from "./release-evidence";
+export {
   createApplicationDevelopmentContext,
   parseApplicationDevelopmentContext,
   formatApplicationDevelopmentContext,
