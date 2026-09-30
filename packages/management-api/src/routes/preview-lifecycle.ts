@@ -14,7 +14,7 @@ type PreviewCleanupPorts = Pick<PreviewProvisioningPorts, "database" | "queues" 
 const params = t.Object({ ref: t.String({ pattern: "^[A-Za-z0-9_-]{1,20}$" }) });
 const previewParams = t.Object({
   ...params.properties,
-  previewRef: t.String({ pattern: "^[A-Za-z0-9_-]{1,32}$" }),
+  previewRef: t.String({ pattern: "^(?:pr-\\d{1,10}|change-[A-Za-z0-9_-]{1,32})$" }),
 });
 
 /**

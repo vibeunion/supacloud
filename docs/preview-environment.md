@@ -233,3 +233,21 @@ These primitives do not claim any resource exists. They are the fail-closed
 contract the provisioning ports must honor once the remaining decisions in
 [Preview environment open questions](./preview-environment-open-questions.md) are
 confirmed.
+
+## Readiness stages
+
+A preview's readiness is reported as distinct, contiguous stages, never a single
+"ready" flag. `evaluatePreviewStatus(preview, evidence)` returns:
+
+- **planned** — the composed plan; nothing is asserted to exist;
+- **provisioned** — every component is `ready` (no component is `failed`);
+- **isolated** — provisioned *and* all four isolation checks are `verified`;
+- **healthy** — isolated *and* runtime health was observed (`healthy.ok`);
+- **accepted** — healthy *and* a named reviewer recorded an acceptance
+  (`accepted.by` + a parseable `accepted.at`).
+
+Each stage requires the previous one, so a healthy preview is necessarily
+isolated and provisioned. The report also lists `blockers` — the unmet conditions
+that prevent the next stage. `POST /v1/projects/{project_ref}/previews/acceptance`
+returns this `status` alongside the isolation evaluation, so verifying isolation
+never implies health or business acceptance.

@@ -56,7 +56,7 @@ test("answers 501 when reclamation ports are not configured", async () => {
 
 test("closes one preview and reports a missing one", async () => {
   const routes = app({ ports: ports(), initial: [{ preview: composePreviewEnvironment(input), created_at: "2026-09-30T00:00:00.000Z" }] });
-  const missing = await routes.handle(new Request(`${url}/missing`, { method: "DELETE" }));
+  const missing = await routes.handle(new Request(`${url}/pr-999`, { method: "DELETE" }));
   expect(missing.status).toBe(404);
 
   const closed = await routes.handle(new Request(`${url}/pr-1`, { method: "DELETE" }));

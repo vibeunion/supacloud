@@ -39,7 +39,10 @@ test("blocks production and invalid requests without echoing input", async () =>
 
 test("evaluates isolation evidence and gates acceptance", async () => {
   const pending = await app.handle(post(body, "acceptance"));
-  expect((await pending.json()).accepted).toBe(false);
+  const pendingPayload = await pending.json();
+  expect(pendingPayload.accepted).toBe(false);
+  expect(pendingPayload.status.stage).toBe("planned");
+  expect(pendingPayload.status.accepted).toBe(false);
 
   const accepted = await app.handle(post({
     ...body,
@@ -51,4 +54,8 @@ test("evaluates isolation evidence and gates acceptance", async () => {
   const evaluation = await accepted.json();
   expect(evaluation.accepted).toBe(true);
   expect(evaluation.isolation.every((check: { status: string }) => check.status === "verified")).toBe(true);
+  // Isolation is verified, but the composed plan is not provisioned, so the
+  // reported stage must not claim health or acceptance.
+  expect(evaluation.status.isolated).toBe(false);
+  expect(evaluation.status.stage).toBe("planned");
 });

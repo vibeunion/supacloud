@@ -1,10 +1,11 @@
 import { Elysia, status, t } from "elysia";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { PreviewEnvironmentError, composePreviewEnvironment, evaluatePreviewIsolation } from "../services/preview-environment.service";
+import { evaluatePreviewStatus } from "../services/preview-status.service";
 
 const params = t.Object({ ref: t.String({ pattern: "^[A-Za-z0-9_-]{1,20}$" }) });
 const body = t.Object({
-  preview_ref: t.String({ pattern: "^[A-Za-z0-9_-]{1,32}$" }),
+  preview_ref: t.String({ pattern: "^(?:pr-\\d{1,10}|change-[A-Za-z0-9_-]{1,32})$" }),
   application_id: t.String({ pattern: "^[A-Za-z0-9_-]{1,64}$" }),
   environment_id: t.String({ pattern: "^[A-Za-z0-9_-]{1,64}$" }),
   release_id: t.String({ pattern: "^[a-f0-9]{64}$" }),
@@ -19,7 +20,7 @@ const body = t.Object({
   data_mode: t.Optional(t.Union([t.Literal("schema_only"), t.Literal("full_clone")])),
   authorized_full_clone: t.Optional(t.Boolean()),
   lifecycle: t.Optional(t.Object({
-    reclaim_on: t.Optional(t.Union([t.Literal("pr_closed"), t.Literal("timeout")])),
+    reclaim_on: t.Optional(t.Union([t.Literal("pr_closed"), t.Literal("timeout"), t.Literal("pr_closed_or_timeout")])),
     timeout_hours: t.Optional(t.Number()),
   }, { additionalProperties: false })),
   evidence: t.Optional(t.Object({
@@ -28,6 +29,8 @@ const body = t.Object({
     consumer_identity: t.Optional(t.Object({ ok: t.Boolean(), detail: t.Optional(t.String({ maxLength: 512 })) }, { additionalProperties: false })),
     route_access_control: t.Optional(t.Object({ ok: t.Boolean(), detail: t.Optional(t.String({ maxLength: 512 })) }, { additionalProperties: false })),
   }, { additionalProperties: false })),
+  healthy: t.Optional(t.Object({ ok: t.Boolean(), detail: t.Optional(t.String({ maxLength: 512 })) }, { additionalProperties: false })),
+  accepted: t.Optional(t.Object({ by: t.String({ minLength: 1, maxLength: 128 }), at: t.String({ minLength: 1, maxLength: 64 }) }, { additionalProperties: false })),
 }, { additionalProperties: false });
 
 interface PreviewRequestBody {
@@ -42,7 +45,9 @@ interface PreviewRequestBody {
   storage_buckets?: string[];
   data_mode?: "schema_only" | "full_clone";
   authorized_full_clone?: boolean;
-  lifecycle?: { reclaim_on?: "pr_closed" | "timeout"; timeout_hours?: number };
+  lifecycle?: { reclaim_on?: "pr_closed" | "timeout" | "pr_closed_or_timeout"; timeout_hours?: number };
+  healthy?: { ok: boolean; detail?: string };
+  accepted?: { by: string; at: string };
 }
 
 function toComposeInput(ref: string, input: PreviewRequestBody) {
@@ -96,7 +101,12 @@ export function createPreviewRoutes(dependencies: { authorize?: typeof requirePr
     }, ({ params: values, body: input }) => {
       const preview = composePreviewEnvironment(toComposeInput(values.ref, input));
       const evaluation = evaluatePreviewIsolation(preview, input.evidence ?? {});
-      return { preview, isolation: evaluation.isolation, accepted: evaluation.accepted };
+      const evaluated = { ...preview, isolation: evaluation.isolation };
+      const status = evaluatePreviewStatus(evaluated, {
+        ...(input.healthy ? { healthy: input.healthy } : {}),
+        ...(input.accepted ? { accepted: input.accepted } : {}),
+      });
+      return { preview: evaluated, isolation: evaluation.isolation, accepted: evaluation.accepted, status };
     });
 }
 
