@@ -74,6 +74,7 @@
 - [Application Development Context](./application-development-context.md) - A stable, redacted projection of the application graph for the Web Console application view and a future Developer MCP
 - [Application Resource Model](./application-resource-model.md) - Logical infrastructure resources, resource uses, and SC8101-SC8105 diagnostics
 - [Environment Bindings](./environment-bindings.md) - Static per-environment binding of logical resources, and SC8106-SC8108 diagnostics
+- [Release Evidence](./release-evidence.md) - A single read-only summary of one immutable delivery target and its separate rollback paths
 - [Route Contract Migration](./route-contract-migration.md) - Schema-first routes, generated client decoding, OpenAPI, and Management API registry migration
 - [Database Governance](./database-governance.md) - RLS/RPC as first-class resources with catalog reconcile and SQL lint (`@supacloud/db`)
 - [Application Platform Primitives](./application-platform-primitives.md) - Custom PostgREST schemas, transactional command receipts, and immutable artifact lineage

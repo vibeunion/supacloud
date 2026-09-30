@@ -254,6 +254,11 @@
       "signature": "export declare function createIncrementalProgramSession(projectRoot: string): IncrementalProgramSession;"
     },
     {
+      "name": "createReleaseEvidence",
+      "kind": "value",
+      "signature": "export declare function createReleaseEvidence(manifestPath: string, target: string): Promise<ReleaseEvidence>;"
+    },
+    {
       "name": "DatabaseContractsOptions",
       "kind": "type",
       "signature": "export interface DatabaseContractsOptions {\n    rootDir: string;\n    outDir: string;\n    postgrestTypes: string;\n    drizzleSchema: string;\n    role: string;\n    graphql: GraphqlOptions;\n    migrations: readonly string[];\n}"
@@ -564,6 +569,11 @@
       "signature": "export declare function formatOpenApiDiff(result: OpenApiDiffResult): string;"
     },
     {
+      "name": "formatReleaseEvidence",
+      "kind": "value",
+      "signature": "export declare function formatReleaseEvidence(evidence: ReleaseEvidence): string;"
+    },
+    {
       "name": "generateApplication",
       "kind": "value",
       "signature": "export declare function generateApplication(graph: ApplicationGraph, options: GenerateOptions): Promise<string[]>;"
@@ -857,6 +867,26 @@
       "name": "readOpenApiJson",
       "kind": "value",
       "signature": "export declare function readOpenApiJson(path: string): Promise<OpenApiDocument>;"
+    },
+    {
+      "name": "RELEASE_EVIDENCE_SCHEMA",
+      "kind": "value",
+      "signature": "export declare const RELEASE_EVIDENCE_SCHEMA = \"supacloud.release-evidence.v1\";"
+    },
+    {
+      "name": "ReleaseEvidence",
+      "kind": "type",
+      "signature": "export interface ReleaseEvidence {\n    schema: typeof RELEASE_EVIDENCE_SCHEMA;\n    correlation: \"verified-build-snapshot\";\n    deploymentVerified: false;\n    target: string;\n    build: {\n        producer: string;\n        deploymentReady: false;\n        manifestSha256: string;\n        objectId: string;\n        entryKind: DeliveryObject[\"entryKind\"];\n        entrypoint: \"bundle/index.js\";\n        files: number;\n        bytes: number;\n    };\n    contract: {\n        status: \"present\" | \"absent\";\n        schema: string | null;\n        resources: number;\n        diagnostics: {\n            errors: number;\n            warnings: number;\n        };\n    };\n    migrations: {\n        status: \"present\" | \"absent\";\n        count: number;\n        latestVersion: string | null;\n        executionPerformed: false;\n        compatibility: \"not-proven\";\n        dataRecovery: \"separate-required\";\n    };\n    rollback: {\n        application: string;\n        database: string;\n        storage: string;\n    };\n    notes: string[];\n}"
+    },
+    {
+      "name": "ReleaseEvidenceError",
+      "kind": "both",
+      "signature": "export declare class ReleaseEvidenceError extends Error {\n    readonly code: ReleaseEvidenceErrorCode;\n    constructor(code: ReleaseEvidenceErrorCode);\n}"
+    },
+    {
+      "name": "ReleaseEvidenceErrorCode",
+      "kind": "type",
+      "signature": "export type ReleaseEvidenceErrorCode = \"RELEASE_EVIDENCE_INVALID\" | \"RELEASE_EVIDENCE_TARGET_NOT_FOUND\";"
     },
     {
       "name": "renderApplication",

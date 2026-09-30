@@ -13,6 +13,7 @@ import {
   EnvironmentBindingError,
 } from "./environment-bindings";
 import { createDeliveryExecutionContextPack, DeliveryContextError } from "./delivery-context";
+import { createReleaseEvidence, formatReleaseEvidence, ReleaseEvidenceError } from "./release-evidence";
 import { watchProject } from "./watch";
 import type { Diagnostic, ModuleBoundaryPresetName } from "./types";
 import { compileOptionsFromConfig, loadSupacloudConfig, resolveSupacloudConfig } from "./config";
@@ -66,6 +67,7 @@ Usage:
   supacloud-compiler context <name> [rootDir] [options]
   supacloud-compiler dev-context [rootDir] [options]
   supacloud-compiler environment-bindings [rootDir] [options]
+  supacloud-compiler release-evidence --delivery-manifest <file> --delivery-target <name> [--json]
   supacloud-compiler doctor  [rootDir] [options]
   supacloud-compiler migrate [rootDir] [options]
   supacloud-compiler migration-assess [rootDir] [options]
@@ -86,6 +88,7 @@ Commands:
   context             Extract an AI-sized module context pack
   dev-context         Print the read-only application development context for tooling/console/MCP consumers
   environment-bindings Resolve static per-environment resource bindings without credentials
+  release-evidence    Summarize one immutable delivery target as verified release evidence
   doctor              Run project and generated-artifact health checks
   migrate             Preview or apply versioned source migrations
   migration-assess    Produce a read-only migration compatibility report
@@ -152,7 +155,7 @@ async function run(): Promise<void> {
     if (args.includes("--check") && !result.upToDate) process.exitCode = 1;
     return;
   }
-  if (!command || !["compile", "check", "dev", "graph", "explain", "context", "dev-context", "environment-bindings", "doctor", "migrate", "migration-assess", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
+  if (!command || !["compile", "check", "dev", "graph", "explain", "context", "dev-context", "environment-bindings", "release-evidence", "doctor", "migrate", "migration-assess", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
     console.error(`Error: unknown command "${command}"`);
     printUsage();
     process.exit(1);
@@ -265,14 +268,20 @@ async function run(): Promise<void> {
         throw new Error("openapi-export --space must be an integer from 0 to 10");
       }
       openApiExportSpace = space;
-    } else if (arg === "--events" || arg === "--request-id" || arg === "--delivery-manifest" || arg === "--delivery-target") {
+    } else if (arg === "--delivery-manifest" || arg === "--delivery-target") {
+      if (command !== "context" && command !== "release-evidence") {
+        throw new Error(`${arg} is only supported by context or release-evidence`);
+      }
+      const value = args[++i];
+      if (!value || value.startsWith("-")) throw new Error(`${arg} requires a value`);
+      if (arg === "--delivery-manifest") contextManifest = value;
+      else contextTarget = value;
+    } else if (arg === "--events" || arg === "--request-id") {
       if (command !== "context") throw new Error("Execution metadata options are only supported by context");
       const value = args[++i];
       if (!value || value.startsWith("-")) throw new Error("Execution metadata option requires a value");
       if (arg === "--events") executionEventsPath = value;
-      else if (arg === "--request-id") executionRequestId = value;
-      else if (arg === "--delivery-manifest") contextManifest = value;
-      else contextTarget = value;
+      else executionRequestId = value;
     } else if (arg === "--environment" || arg === "--bindings-file") {
       if (command !== "environment-bindings") throw new Error(`${arg} is only supported by environment-bindings`);
       const value = args[++i];
@@ -333,7 +342,7 @@ async function run(): Promise<void> {
     }
   }
 
-  if (contextManifest !== undefined || contextTarget !== undefined) {
+  if (command !== "release-evidence" && (contextManifest !== undefined || contextTarget !== undefined)) {
     if (!contextManifest || !contextTarget || !executionEventsPath || !executionRequestId || !query || !json || !dryRun) {
       throw new Error("Build context requires a manifest, target, subject, events, request ID and --json");
     }
@@ -609,6 +618,23 @@ async function run(): Promise<void> {
       if (result.diagnostics.length > 0) process.exitCode = 1;
     } catch (error) {
       if (error instanceof EnvironmentBindingError || error instanceof SyntaxError
+        || (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT")) {
+        console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+        process.exit(1);
+      }
+      throw error;
+    }
+  } else if (command === "release-evidence") {
+    if (!contextManifest || !contextTarget) {
+      console.error("Error: release-evidence requires --delivery-manifest and --delivery-target");
+      process.exit(1);
+    }
+    try {
+      const evidence = await createReleaseEvidence(resolve(contextManifest), contextTarget);
+      if (json) console.log(JSON.stringify(evidence, null, 2));
+      else console.log(formatReleaseEvidence(evidence));
+    } catch (error) {
+      if (error instanceof ReleaseEvidenceError || error instanceof SyntaxError
         || (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT")) {
         console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
         process.exit(1);
