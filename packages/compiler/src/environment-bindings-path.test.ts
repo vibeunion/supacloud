@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,10 +19,12 @@ test("CLI scopes default and relative binding files to an explicit root", async 
     const child = Bun.spawn([process.execPath, "--no-env-file", cli, "environment-bindings", ...args], {
       cwd, env: { PATH: process.env.PATH ?? "" }, stdout: "pipe", stderr: "pipe",
     });
+    const deadline = setTimeout(() => child.kill(), 10_000);
     try {
       const [status, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
       return { status, stdout, stderr };
     } finally {
+      clearTimeout(deadline);
       if (child.exitCode === null) { child.kill(); await child.exited; }
     }
   };
@@ -50,7 +52,10 @@ test("CLI scopes default and relative binding files to an explicit root", async 
     expect(missing.stdout).toBe("");
     const write = await invoke([root, "--environment", "test", "--write"]);
     expect(write.status).toBe(1);
-    expect(write.stderr).toContain("read-only");
+    // Argument failures are sanitized just like configuration failures.
+    expect(write.stderr).toBe("Error: ENVIRONMENT_BINDINGS_INVALID\n");
+    expect(write.stdout).toBe("");
+    expect(await readFile(join(root, "supacloud.environments.json"), "utf8")).toBe(document("project:selected"));
   } finally { await rm(cwd, { recursive: true, force: true }); }
 }, 30_000);
 

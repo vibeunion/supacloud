@@ -10,6 +10,9 @@ import {
   resolveEnvironmentBindings,
   formatEnvironmentBindings,
   EnvironmentBindingError,
+  resolveRuntimeBindings,
+  formatRuntimeBindings,
+  type RuntimeBindingProfile,
 } from "./environment-bindings";
 import { readEnvironmentBindingsFile } from "./environment-bindings-file";
 import { createDeliveryExecutionContextPack, DeliveryContextError } from "./delivery-context";
@@ -121,6 +124,7 @@ Options:
   --delivery-target <name>    Target in --delivery-manifest (requires execution metadata)
   --environment <name>        environment-bindings: required explicit environment name
   --bindings-file <file>      environment-bindings: file relative to rootDir (default: supacloud.environments.json)
+  --profile <name>            environment-bindings: classify fast | integration bindings without connecting
   --space <n>         openapi-export: JSON indentation (0-10, default: 2)
   --delivery <file>   plan/build-delivery: validated JSON configuration (overrides config.delivery)
   --dry-run           Preview a fix without writing the target file
@@ -180,6 +184,7 @@ async function run(): Promise<void> {
   let contextTarget: string | undefined;
   let bindingEnvironment: string | undefined;
   let bindingsFile: string | undefined;
+  let bindingProfile: RuntimeBindingProfile | undefined;
   let json: boolean = false;
   let dryRun = true;
   let fromVersion: string | undefined;
@@ -286,6 +291,11 @@ async function run(): Promise<void> {
       if (!value || value.startsWith("-")) throw new Error(`${arg} requires a value`);
       if (arg === "--environment") bindingEnvironment = value;
       else bindingsFile = value;
+    } else if (arg === "--profile") {
+      if (command !== "environment-bindings") throw new Error("--profile is only supported by environment-bindings");
+      const value = args[++i];
+      if (value !== "fast" && value !== "integration") throw new Error("--profile requires fast or integration");
+      bindingProfile = value;
     } else if (arg === "--json") {
       json = true;
     } else if (arg === "--dry-run") {
@@ -413,6 +423,17 @@ async function run(): Promise<void> {
     }
     if (result.issues.length > 0) process.exitCode = 1;
     return;
+  }
+
+  if (command === "environment-bindings") {
+    if (!bindingEnvironment) {
+      console.error("Error: environment-bindings requires --environment");
+      process.exitCode = 1;
+      return;
+    }
+    if (bindingProfile && /^(?:prod|production|live|release)(?:[-_]|$)/i.test(bindingEnvironment)) {
+      throw new EnvironmentBindingError("ENVIRONMENT_BINDINGS_PRODUCTION_FORBIDDEN");
+    }
   }
 
   const loadedConfig = await loadSupacloudConfig(process.cwd());
@@ -613,10 +634,18 @@ async function run(): Promise<void> {
     try {
       const document = await readEnvironmentBindingsFile(file);
       const graph = await analyzeProject(resolvedRoot);
-      const result = resolveEnvironmentBindings(graph, document, bindingEnvironment);
-      if (json) console.log(JSON.stringify({ ...result.projection, diagnostics: result.diagnostics }, null, 2));
-      else console.log(formatEnvironmentBindings(result));
-      if (result.diagnostics.length > 0 || graph.diagnostics?.some(item => item.severity === "error")) process.exitCode = 1;
+      if (bindingProfile) {
+        const result = resolveRuntimeBindings(graph, document, bindingEnvironment, bindingProfile);
+        if (json) console.log(JSON.stringify({ ...result.projection, diagnostics: result.diagnostics }, null, 2));
+        else console.log(formatRuntimeBindings(result));
+        if (result.diagnostics.length > 0) process.exitCode = 1;
+      } else {
+        const result = resolveEnvironmentBindings(graph, document, bindingEnvironment);
+        if (json) console.log(JSON.stringify({ ...result.projection, diagnostics: result.diagnostics }, null, 2));
+        else console.log(formatEnvironmentBindings(result));
+        if (result.diagnostics.length > 0) process.exitCode = 1;
+      }
+      if (graph.diagnostics?.some(item => item.severity === "error")) process.exitCode = 1;
     } catch (error) {
       // Configuration can contain accidental credentials: never print parser/IO bodies.
       console.error(`Error: ${error instanceof EnvironmentBindingError ? error.code : "ENVIRONMENT_BINDINGS_INVALID"}`);
@@ -692,6 +721,11 @@ function printDiagnostics(diagnostics: Diagnostic[]): void {
 }
 
 run().catch((err: unknown) => {
+  if (process.argv[2] === "environment-bindings") {
+    console.error(`Error: ${err instanceof EnvironmentBindingError ? err.code : "ENVIRONMENT_BINDINGS_INVALID"}`);
+    process.exitCode = 1;
+    return;
+  }
   if (process.argv[2] === "openapi-diff" || process.argv[2] === "openapi-export" || err instanceof OpenApiDocumentError) {
     const diagnostic = {
       severity: "error" as const,
