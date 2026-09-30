@@ -12,6 +12,22 @@ import {
     reconcileCanonicalGatewayRoutes,
 } from "../../src/services/gateway.service";
 
+const inventoryCompression = {
+    handler: "subroute",
+    routes: [{
+        match: [{
+            method: ["GET"],
+            path_regexp: { pattern: "^/v1/projects/[^/]+/database/migrations/?$" },
+        }],
+        handle: [{
+            handler: "encode",
+            encodings: { zstd: {}, gzip: {} },
+            prefer: ["zstd", "gzip"],
+            minimum_length: 1024,
+        }],
+    }],
+};
+
 function captureFetch(calls: Array<{ url: string; method: string; body: any }>) {
     const originalFetch = globalThis.fetch;
     let loadedConfig: any = null;
@@ -277,6 +293,10 @@ describe("CaddyGatewayProvider", () => {
         const management = routes.find((route: any) => route["@id"] === "route-project-testref123-management");
 
         expect(rest?.match?.[0]?.path).toEqual(["/rest/v1*"]);
+        expect(management?.handle).toContainEqual(inventoryCompression);
+        for (const route of [rest, storage, storageResumable, functions, admin, realtime]) {
+            expect(route?.handle).not.toContainEqual(inventoryCompression);
+        }
         expect(restOpenApi?.match?.[0]?.path).toEqual(["/rest/v1", "/rest/v1/"]);
         expect(restOpenApi?.match?.[0]?.method).toEqual(["GET", "HEAD"]);
         expect(restOpenApi?.handle?.at(-1)?.upstreams?.[0]?.dial).toBe("127.0.0.1:9090");
@@ -614,6 +634,10 @@ describe("CaddyGatewayProvider", () => {
         expect(api?.match?.[0]?.host).toContain(`api.${config.baseDomain}`);
         expect(findCorsSubroute(api)).toBeDefined();
         expect(findCorsSubroute(studio)).toBeDefined();
+        expect(api?.handle).toContainEqual(inventoryCompression);
+        expect(studio?.handle).toContainEqual(inventoryCompression);
+        expect(api?.handle?.at(-2)).toEqual(inventoryCompression);
+        expect(api?.handle?.at(-3)).toEqual({ handler: "rewrite", strip_path_prefix: "/api" });
 
         restore();
     });
@@ -687,6 +711,7 @@ describe("CaddyGatewayProvider", () => {
         });
         expect(studio?.match?.[0]?.host).toEqual(["studio.example.com"]);
         expect(studio?.handle?.at(-1)?.upstreams?.[0]?.dial).toBe("127.0.0.1:9090");
+        expect(studio?.handle).toContainEqual(inventoryCompression);
 
         restore();
     });
