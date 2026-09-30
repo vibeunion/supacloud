@@ -164,7 +164,7 @@ export function resolveEnvironmentBindings(
       });
       continue;
     }
-    // JavaScript's $ also matches before a final newline; require the entire value.
+    // Require a full-string match; references must not contain unconsumed input.
     if (referencePattern.exec(binding)?.[0] !== binding) {
       diagnostics.push({
         code: "invalid-environment-binding", severity: "error", environment, resource: resource.name,
