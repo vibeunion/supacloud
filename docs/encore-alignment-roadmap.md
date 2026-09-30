@@ -195,8 +195,14 @@ MCP 的权限不能混在一起：现有运维 MCP 的 plan-only、项目范围�
 > `dev-context` CLI），红化输出模块/路由/资源/诊断；并已随交付构建发布
 > `bundle/application-development.json`，由 `readApplicationDevelopmentContext`
 > 按目标/哈希校验读取（`verified-build-snapshot`），无需源码 checkout。
-> Developer MCP 工具与 Web Console 视图为后续切片。参见
-> [Application Development Context](./application-development-context.md)。
+> **Developer MCP 与 Web Console 视图已落地**：独立端点
+> `POST /mcp/developer/projects/{project_ref}` 只读、项目限域，仅暴露
+> `supacloud.get_application_development`；管理 API 新增
+> `GET .../releases/{release_id}/development?target=...`；`packages/web-console`
+> 应用页在已存发布包上逐目标展示模块/路由/命令/任务/资源计数与诊断。三处消费同一份
+> `supacloud.application-development.v1` 契约；运维 MCP 端点不暴露该工具。参见
+> [Application Development Context](./application-development-context.md) 与
+> [Optional AI Operations MCP](./mcp-ai-operations.md)。
 
 **验收标准：** 人和 AI 查看的是同一份应用结构、同一条执行证据，而不是各自维护一套解释。
 
@@ -220,13 +226,6 @@ MCP 的权限不能混在一起：现有运维 MCP 的 plan-only、项目范围�
 发布时把这些信息合成一份可查询结果：源代码提交、构建摘要、契约版本、迁移计划、资源
 绑定版本、健康检查，以及回滚目标。不要承诺"回滚镜像即可回滚一切"：应用回滚、数据库
 迁移恢复、存储变更恢复应分别记录可行路径；破坏性数据库变更仍需专门处理。
-
-> **实现进展（静态发布证据切片）**：编译器新增只读的
-> `supacloud-compiler release-evidence --delivery-manifest <file> --delivery-target <name>`，
-> 从已哈希校验的不可变构建中汇总构建摘要、契约状态、迁移清单计数与**分开的**应用/数据库/存储
-> 回滚路径，产出 `supacloud.release-evidence.v1`。源代码提交、环境绑定版本、健康检查与
-> 激活身份仍属部署记录，需另行关联。参见 [Release Evidence](./release-evidence.md)。
-> Preview 环境供给与生命周期仍为后续切片（依赖静态 `EnvironmentBinding`，已落地）。
 
 **验收标准：** 一个 PR 能获得可运行、可验证、可回收的整套环境；一次发布能说明每个组成
 部分究竟成功、失败还是结果待确认。

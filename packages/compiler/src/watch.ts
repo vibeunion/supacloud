@@ -24,6 +24,7 @@ export function watchProject(options: WatchOptions): WatchHandle {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let closed: boolean = false;
   let compiling: boolean = false;
+  let activeCompilation: Promise<void> = Promise.resolve();
   let pending: boolean = false;
   const pendingPaths = new Set<string>();
   let watcher: ReturnType<typeof watch> | undefined;
@@ -39,49 +40,70 @@ export function watchProject(options: WatchOptions): WatchHandle {
     rejectReady = rejectPromise;
   });
 
+  void ready.catch(() => undefined);
+
   const emit = (event: WatchEvent): void => {
     options.onEvent?.(event);
     if (event.initial) initialEvent = event;
   };
 
-  const compile = async (initial: boolean, changedPaths: string[] = []): Promise<void> => {
-    if (closed && !initial) return;
+  const stopWatching = (): void => {
+    closed = true;
+    if (timer) clearTimeout(timer);
+    watcher?.close();
+    schemaWatcher?.close();
+  };
+
+  const compile = (initial: boolean, changedPaths: string[] = []): Promise<void> => {
+    if (closed && !initial) return Promise.resolve();
     if (compiling) {
       pending = true;
-      return;
+      for (const path of changedPaths) pendingPaths.add(path);
+      return activeCompilation;
     }
     compiling = true;
-    const startedAt = performance.now();
-    options.onEvent?.({
-      type: "compile-start",
-      initial,
-      durationMs: 0,
-      diagnostics: [],
-      written: [],
-    });
-    try {
-      const result = await incremental.compile({ ...options, writeOnError: false }, changedPaths);
-      const durationMs = Math.round(performance.now() - startedAt);
-      const hasErrors = result.diagnostics.some((diagnostic) => diagnostic.severity === "error");
-      emit({
-        type: hasErrors ? "compile-error" : "compiled",
-        initial,
-        durationMs,
-        diagnostics: result.diagnostics,
-        written: result.written,
-        stats: result.stats,
-      });
-    } catch (error) {
-      rejectReady(error);
-      throw error;
-    } finally {
-      compiling = false;
-      if (pending && !closed) {
-        pending = false;
-        void compile(false, [...pendingPaths]);
-        pendingPaths.clear();
+    // Assign the promise before invoking callbacks: close() from compile-start must drain this run.
+    activeCompilation = Promise.resolve().then(async () => {
+      const startedAt = performance.now();
+      try {
+        options.onEvent?.({
+          type: "compile-start", initial, durationMs: 0, diagnostics: [], written: [],
+        });
+        const result = await incremental.compile({ ...options, writeOnError: false }, changedPaths);
+        const hasErrors = result.diagnostics.some((diagnostic) => diagnostic.severity === "error");
+        emit({
+          type: hasErrors ? "compile-error" : "compiled", initial,
+          durationMs: Math.round(performance.now() - startedAt),
+          diagnostics: result.diagnostics, written: result.written, stats: result.stats,
+        });
+      } catch (error) {
+        if (initial) throw error;
+        // A filesystem/compiler exception is a failed rebuild, not an unhandled background rejection.
+        // Do not echo arbitrary exception text, which may include source or configuration secrets.
+        emit({
+          type: "compile-error", initial: false,
+          durationMs: Math.round(performance.now() - startedAt),
+          diagnostics: [{ code: "watch-compile", severity: "error",
+            message: "Watch compilation failed; check project files and configuration before retrying." }],
+          written: [],
+        });
+      } finally {
+        compiling = false;
+        if (pending && !closed) {
+          pending = false;
+          const paths = [...pendingPaths];
+          pendingPaths.clear();
+          startRecompile(paths);
+        }
       }
-    }
+    });
+    return activeCompilation;
+  };
+
+  const startRecompile = (paths: string[]): void => {
+    // The only remaining rejection is an observer throwing while receiving the failure event.
+    // Stop safely rather than retaining live watchers with a broken observer.
+    void compile(false, paths).catch(stopWatching);
   };
 
   const schedule = (changedPath?: string): void => {
@@ -90,14 +112,18 @@ export function watchProject(options: WatchOptions): WatchHandle {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       timer = undefined;
-      void compile(false, [...pendingPaths]);
+      const paths = [...pendingPaths];
       pendingPaths.clear();
+      startRecompile(paths);
     }, debounceMs);
   };
 
-  void compile(true)
+  const startup = compile(true)
     .then(() => {
-      if (closed) return;
+      if (closed) {
+        if (initialEvent) resolveReady(initialEvent);
+        return;
+      }
       watcher = watch(rootDir, { recursive: true }, (_eventType, filename) => {
         if (!filename) return schedule();
         const changedPath = resolve(rootDir, filename.toString());
@@ -118,16 +144,18 @@ export function watchProject(options: WatchOptions): WatchHandle {
       }
       if (initialEvent) resolveReady(initialEvent);
     })
-    .catch(() => undefined);
+    .catch((error: unknown) => {
+      stopWatching();
+      rejectReady(error);
+    });
 
   return {
     ready,
     async close(): Promise<void> {
-      closed = true;
-      if (timer) clearTimeout(timer);
-      watcher?.close();
-      schemaWatcher?.close();
-      await ready.catch(() => undefined);
+      stopWatching();
+      // startup settles even when ready rejects, and closed startup never installs new watchers.
+      await startup;
+      await activeCompilation.catch(() => undefined);
     },
   };
 }

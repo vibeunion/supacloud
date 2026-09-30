@@ -7,13 +7,12 @@ import { createContextPack, doctorProject, explainGraph, formatGraph } from "./i
 import { createExecutionContextPack, readExecutionMetadata, ExecutionContextError } from "./execution-context";
 import { createApplicationDevelopmentContext, formatApplicationDevelopmentContext } from "./application-development";
 import {
-  parseEnvironmentBindings,
   resolveEnvironmentBindings,
   formatEnvironmentBindings,
   EnvironmentBindingError,
 } from "./environment-bindings";
+import { readEnvironmentBindingsFile } from "./environment-bindings-file";
 import { createDeliveryExecutionContextPack, DeliveryContextError } from "./delivery-context";
-import { createReleaseEvidence, formatReleaseEvidence, ReleaseEvidenceError } from "./release-evidence";
 import { watchProject } from "./watch";
 import type { Diagnostic, ModuleBoundaryPresetName } from "./types";
 import { compileOptionsFromConfig, loadSupacloudConfig, resolveSupacloudConfig } from "./config";
@@ -88,7 +87,7 @@ Commands:
   context             Extract an AI-sized module context pack
   dev-context         Print the read-only application development context for tooling/console/MCP consumers
   environment-bindings Resolve static per-environment resource bindings without credentials
-  release-evidence    Summarize one immutable delivery target as verified release evidence
+  release-evidence    Summarize one immutable target without loading project configuration
   doctor              Run project and generated-artifact health checks
   migrate             Preview or apply versioned source migrations
   migration-assess    Produce a read-only migration compatibility report
@@ -120,8 +119,8 @@ Options:
   --request-id <id>   Select one opaque request ID from --events; context remains read-only
   --delivery-manifest <file>  Correlate context using an immutable build, not current source
   --delivery-target <name>    Target in --delivery-manifest (requires execution metadata)
-  --environment <name>        environment-bindings: select one environment from the binding document
-  --bindings-file <file>      environment-bindings: binding document (default: ./supacloud.environments.json)
+  --environment <name>        environment-bindings: required explicit environment name
+  --bindings-file <file>      environment-bindings: file relative to rootDir (default: supacloud.environments.json)
   --space <n>         openapi-export: JSON indentation (0-10, default: 2)
   --delivery <file>   plan/build-delivery: validated JSON configuration (overrides config.delivery)
   --dry-run           Preview a fix without writing the target file
@@ -144,6 +143,11 @@ async function run(): Promise<void> {
   }
 
   const command = args[0];
+  if (command === "release-evidence") {
+    const { runReleaseEvidenceCommand } = await import("./release-evidence-cli");
+    await runReleaseEvidenceCommand(args.slice(1));
+    return;
+  }
   if (command === "database-contracts") {
     const path = args[1];
     if (!path || path.startsWith("-") || args.slice(2).some((arg) => arg !== "--check")) {
@@ -155,7 +159,7 @@ async function run(): Promise<void> {
     if (args.includes("--check") && !result.upToDate) process.exitCode = 1;
     return;
   }
-  if (!command || !["compile", "check", "dev", "graph", "explain", "context", "dev-context", "environment-bindings", "release-evidence", "doctor", "migrate", "migration-assess", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
+  if (!command || !["compile", "check", "dev", "graph", "explain", "context", "dev-context", "environment-bindings", "doctor", "migrate", "migration-assess", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
     console.error(`Error: unknown command "${command}"`);
     printUsage();
     process.exit(1);
@@ -268,20 +272,14 @@ async function run(): Promise<void> {
         throw new Error("openapi-export --space must be an integer from 0 to 10");
       }
       openApiExportSpace = space;
-    } else if (arg === "--delivery-manifest" || arg === "--delivery-target") {
-      if (command !== "context" && command !== "release-evidence") {
-        throw new Error(`${arg} is only supported by context or release-evidence`);
-      }
-      const value = args[++i];
-      if (!value || value.startsWith("-")) throw new Error(`${arg} requires a value`);
-      if (arg === "--delivery-manifest") contextManifest = value;
-      else contextTarget = value;
-    } else if (arg === "--events" || arg === "--request-id") {
+    } else if (arg === "--events" || arg === "--request-id" || arg === "--delivery-manifest" || arg === "--delivery-target") {
       if (command !== "context") throw new Error("Execution metadata options are only supported by context");
       const value = args[++i];
       if (!value || value.startsWith("-")) throw new Error("Execution metadata option requires a value");
       if (arg === "--events") executionEventsPath = value;
-      else executionRequestId = value;
+      else if (arg === "--request-id") executionRequestId = value;
+      else if (arg === "--delivery-manifest") contextManifest = value;
+      else contextTarget = value;
     } else if (arg === "--environment" || arg === "--bindings-file") {
       if (command !== "environment-bindings") throw new Error(`${arg} is only supported by environment-bindings`);
       const value = args[++i];
@@ -293,7 +291,7 @@ async function run(): Promise<void> {
     } else if (arg === "--dry-run") {
       dryRun = true;
     } else if (arg === "--write") {
-      if (command === "context" || command === "dev-context") throw new Error(`${command} is read-only; --write is not supported`);
+      if (command === "context" || command === "dev-context" || command === "environment-bindings") throw new Error(`${command} is read-only; --write is not supported`);
       if (command === "plan" || command === "migration-assess") throw new Error(`${command} is read-only; --write is not supported`);
       dryRun = false;
     } else if (arg === "--baseline-openapi" || arg === "--current-openapi") {
@@ -342,7 +340,7 @@ async function run(): Promise<void> {
     }
   }
 
-  if (command !== "release-evidence" && (contextManifest !== undefined || contextTarget !== undefined)) {
+  if (contextManifest !== undefined || contextTarget !== undefined) {
     if (!contextManifest || !contextTarget || !executionEventsPath || !executionRequestId || !query || !json || !dryRun) {
       throw new Error("Build context requires a manifest, target, subject, events, request ID and --json");
     }
@@ -603,43 +601,26 @@ async function run(): Promise<void> {
     if (json) console.log(JSON.stringify(context, null, 2));
     else console.log(formatApplicationDevelopmentContext(context));
   } else if (command === "environment-bindings") {
-    const file = resolve(bindingsFile ?? "supacloud.environments.json");
+    if (!bindingEnvironment) {
+      console.error("Error: environment-bindings requires --environment");
+      process.exitCode = 1;
+      return;
+    }
+    // An explicit source/project root must not pick up another workspace's bindings.
+    // Without an explicit root, retain the documented project-CWD default.
+    const file = resolve(rootDir ? resolve(process.cwd(), rootDir) : process.cwd(),
+      bindingsFile ?? "supacloud.environments.json");
     try {
-      const document = parseEnvironmentBindings(JSON.parse(await readFile(file, "utf8")));
-      const environment = bindingEnvironment ?? Object.keys(document.environments)[0];
-      if (!environment) {
-        console.error("Error: the binding document declares no environments");
-        process.exit(1);
-      }
+      const document = await readEnvironmentBindingsFile(file);
       const graph = await analyzeProject(resolvedRoot);
-      const result = resolveEnvironmentBindings(graph, document, environment);
+      const result = resolveEnvironmentBindings(graph, document, bindingEnvironment);
       if (json) console.log(JSON.stringify({ ...result.projection, diagnostics: result.diagnostics }, null, 2));
       else console.log(formatEnvironmentBindings(result));
-      if (result.diagnostics.length > 0) process.exitCode = 1;
+      if (result.diagnostics.length > 0 || graph.diagnostics?.some(item => item.severity === "error")) process.exitCode = 1;
     } catch (error) {
-      if (error instanceof EnvironmentBindingError || error instanceof SyntaxError
-        || (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT")) {
-        console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
-        process.exit(1);
-      }
-      throw error;
-    }
-  } else if (command === "release-evidence") {
-    if (!contextManifest || !contextTarget) {
-      console.error("Error: release-evidence requires --delivery-manifest and --delivery-target");
-      process.exit(1);
-    }
-    try {
-      const evidence = await createReleaseEvidence(resolve(contextManifest), contextTarget);
-      if (json) console.log(JSON.stringify(evidence, null, 2));
-      else console.log(formatReleaseEvidence(evidence));
-    } catch (error) {
-      if (error instanceof ReleaseEvidenceError || error instanceof SyntaxError
-        || (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT")) {
-        console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
-        process.exit(1);
-      }
-      throw error;
+      // Configuration can contain accidental credentials: never print parser/IO bodies.
+      console.error(`Error: ${error instanceof EnvironmentBindingError ? error.code : "ENVIRONMENT_BINDINGS_INVALID"}`);
+      process.exitCode = 1;
     }
   } else if (command === "context") {
     if (!query) {
