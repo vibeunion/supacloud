@@ -184,6 +184,35 @@ export interface PreviewReclaimCandidate {
   lifecycle: Pick<PreviewEnvironmentLifecycle, "reclaim_on" | "timeout_hours">;
 }
 
+export interface PreviewIsolationEvidence {
+  database_role?: { ok: boolean; detail?: string };
+  storage_permissions?: { ok: boolean; detail?: string };
+  consumer_identity?: { ok: boolean; detail?: string };
+  route_access_control?: { ok: boolean; detail?: string };
+}
+
+export interface PreviewIsolationEvaluation {
+  isolation: PreviewEnvironmentIsolationCheck[];
+  accepted: boolean;
+}
+
+/**
+ * Turn observed isolation evidence into the acceptance decision. Absent evidence
+ * stays `pending` and is never treated as verified, so a preview is accepted
+ * only when every check has explicit passing evidence.
+ */
+export function evaluatePreviewIsolation(
+  preview: PreviewEnvironment,
+  evidence: PreviewIsolationEvidence,
+): PreviewIsolationEvaluation {
+  const isolation = preview.isolation.map((check) => {
+    const observed = evidence[check.key];
+    if (!observed) return { ...check, status: "pending" as const };
+    return { ...check, status: observed.ok ? ("verified" as const) : ("failed" as const) };
+  });
+  return { isolation, accepted: isolation.every((check) => check.status === "verified") };
+}
+
 /** Pure timeout selection: which timeout-based previews should be reclaimed at `now`. */
 export function previewsDueForReclamation(
   previews: ReadonlyArray<PreviewReclaimCandidate>,

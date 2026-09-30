@@ -9,8 +9,8 @@ const body = {
   release_id: "a".repeat(64),
   source: { branch: "feature/orders", commit: "b".repeat(40) },
 };
-function post(value: unknown) {
-  return new Request("http://localhost/v1/projects/demo/previews/plan", {
+function post(value: unknown, path = "plan") {
+  return new Request(`http://localhost/v1/projects/demo/previews/${path}`, {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(value),
   });
 }
@@ -35,4 +35,20 @@ test("blocks production and invalid requests without echoing input", async () =>
   const payload = await invalid.json();
   expect(payload.code).toBe("PREVIEW_ENVIRONMENT_INVALID");
   expect(JSON.stringify(payload)).not.toContain("short");
+});
+
+test("evaluates isolation evidence and gates acceptance", async () => {
+  const pending = await app.handle(post(body, "acceptance"));
+  expect((await pending.json()).accepted).toBe(false);
+
+  const accepted = await app.handle(post({
+    ...body,
+    evidence: {
+      database_role: { ok: true }, storage_permissions: { ok: true },
+      consumer_identity: { ok: true }, route_access_control: { ok: true },
+    },
+  }, "acceptance"));
+  const evaluation = await accepted.json();
+  expect(evaluation.accepted).toBe(true);
+  expect(evaluation.isolation.every((check: { status: string }) => check.status === "verified")).toBe(true);
 });

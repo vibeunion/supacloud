@@ -66,6 +66,31 @@ checks are `verified`:
 - **route access control**: preview routes reject production credentials and are
   not publicly indexed.
 
+`evaluatePreviewIsolation(preview, evidence)` turns observed evidence into the
+acceptance decision. Absent evidence stays `pending` and is never treated as
+verified, so a preview is `accepted` only when every check has explicit passing
+evidence. The read-only endpoint composes the preview and returns the evaluation:
+
+```http
+POST /v1/projects/{project_ref}/previews/acceptance
+```
+
+```json
+{
+  "preview_ref": "pr-42",
+  "application_id": "reviews",
+  "environment_id": "preview",
+  "release_id": "<64 hex>",
+  "source": { "branch": "feature/orders", "commit": "<40 hex>" },
+  "evidence": {
+    "database_role": { "ok": true },
+    "storage_permissions": { "ok": true },
+    "consumer_identity": { "ok": true },
+    "route_access_control": { "ok": true }
+  }
+}
+```
+
 ## Production blocking
 
 The composer refuses, before anything else:
@@ -136,9 +161,9 @@ records that the ports succeeded, not that an external system is healthy.
 ## Next steps
 
 1. Wire the remaining real ports (application activation, configuration,
-   queue/storage namespace, secrets) and a scheduled reclamation worker.
-2. An isolation verifier that flips the acceptance checks to `verified` from
-   observed database role, storage permissions, consumer identity and route
-   access control evidence.
-3. Expose preview lifecycle routes (create/list/close) over the store and the
+   queue/storage namespace, secrets) and an evidence collector that fills the
+   isolation evidence from the running environment.
+2. Expose preview lifecycle routes (create/list/close) over the store and the
    port-driven orchestration.
+3. Persist the acceptance decision with the preview record so an accepted
+   preview can be promoted without re-collecting evidence.

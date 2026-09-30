@@ -1,6 +1,6 @@
 import { Elysia, status, t } from "elysia";
 import { requireProjectOrAdminAuth } from "../middleware/auth";
-import { PreviewEnvironmentError, composePreviewEnvironment } from "../services/preview-environment.service";
+import { PreviewEnvironmentError, composePreviewEnvironment, evaluatePreviewIsolation } from "../services/preview-environment.service";
 
 const params = t.Object({ ref: t.String({ pattern: "^[A-Za-z0-9_-]{1,20}$" }) });
 const body = t.Object({
@@ -19,6 +19,12 @@ const body = t.Object({
   lifecycle: t.Optional(t.Object({
     reclaim_on: t.Optional(t.Union([t.Literal("pr_closed"), t.Literal("timeout")])),
     timeout_hours: t.Optional(t.Number()),
+  }, { additionalProperties: false })),
+  evidence: t.Optional(t.Object({
+    database_role: t.Optional(t.Object({ ok: t.Boolean(), detail: t.Optional(t.String({ maxLength: 512 })) }, { additionalProperties: false })),
+    storage_permissions: t.Optional(t.Object({ ok: t.Boolean(), detail: t.Optional(t.String({ maxLength: 512 })) }, { additionalProperties: false })),
+    consumer_identity: t.Optional(t.Object({ ok: t.Boolean(), detail: t.Optional(t.String({ maxLength: 512 })) }, { additionalProperties: false })),
+    route_access_control: t.Optional(t.Object({ ok: t.Boolean(), detail: t.Optional(t.String({ maxLength: 512 })) }, { additionalProperties: false })),
   }, { additionalProperties: false })),
 }, { additionalProperties: false });
 
@@ -59,7 +65,33 @@ export function createPreviewRoutes(dependencies: { authorize?: typeof requirePr
           ...(input.lifecycle.timeout_hours === undefined ? {} : { timeoutHours: input.lifecycle.timeout_hours }),
         },
       } : {}),
-    }));
+    }))
+    .post("/acceptance", {
+      params,
+      body,
+      detail: { tags: ["previews"], summary: "Evaluate observed isolation evidence for a composed preview without provisioning" },
+    }, ({ params: values, body: input }) => {
+      const preview = composePreviewEnvironment({
+        previewRef: input.preview_ref,
+        projectRef: values.ref,
+        applicationId: input.application_id,
+        environmentId: input.environment_id,
+        releaseId: input.release_id,
+        source: input.source,
+        ...(input.configuration_id ? { configurationId: input.configuration_id } : {}),
+        ...(input.resources ? { resources: input.resources } : {}),
+        ...(input.data_mode ? { dataMode: input.data_mode } : {}),
+        ...(input.authorized_full_clone === undefined ? {} : { authorizedFullClone: input.authorized_full_clone }),
+        ...(input.lifecycle ? {
+          lifecycle: {
+            ...(input.lifecycle.reclaim_on ? { reclaimOn: input.lifecycle.reclaim_on } : {}),
+            ...(input.lifecycle.timeout_hours === undefined ? {} : { timeoutHours: input.lifecycle.timeout_hours }),
+          },
+        } : {}),
+      });
+      const evaluation = evaluatePreviewIsolation(preview, input.evidence ?? {});
+      return { preview, isolation: evaluation.isolation, accepted: evaluation.accepted };
+    });
 }
 
 export const previewRoutes = createPreviewRoutes();

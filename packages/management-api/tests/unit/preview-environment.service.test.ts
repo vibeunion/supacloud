@@ -3,6 +3,7 @@ import {
   PREVIEW_ENVIRONMENT_SCHEMA,
   PreviewEnvironmentError,
   composePreviewEnvironment,
+  evaluatePreviewIsolation,
   previewsDueForReclamation,
 } from "../../src/services/preview-environment.service";
 
@@ -71,4 +72,20 @@ test("selects only overdue timeout previews for reclamation", () => {
     { preview_ref: "fresh", created_at: "2026-09-30T00:00:00.000Z", lifecycle: { reclaim_on: "timeout" as const, timeout_hours: 24 } },
   ];
   expect(previewsDueForReclamation(previews, now).map((preview) => preview.preview_ref)).toEqual(["expired"]);
+});
+test("accepts only when every isolation check has passing evidence", () => {
+  const preview = composePreviewEnvironment(base);
+  const none = evaluatePreviewIsolation(preview, {});
+  expect(none.accepted).toBe(false);
+  expect(none.isolation.every((check) => check.status === "pending")).toBe(true);
+
+  const partial = evaluatePreviewIsolation(preview, { database_role: { ok: true }, storage_permissions: { ok: false } });
+  expect(partial.isolation.map((check) => check.status)).toEqual(["verified", "failed", "pending", "pending"]);
+  expect(partial.accepted).toBe(false);
+
+  const all = evaluatePreviewIsolation(preview, {
+    database_role: { ok: true }, storage_permissions: { ok: true },
+    consumer_identity: { ok: true }, route_access_control: { ok: true },
+  });
+  expect(all.accepted).toBe(true);
 });

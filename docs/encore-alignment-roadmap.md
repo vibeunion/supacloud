@@ -225,7 +225,9 @@ MCP 的权限不能混在一起：现有运维 MCP 的 plan-only、项目范围�
 > 供给编排（`provisionPreviewEnvironment`，端口驱动、失败关闭）、四项隔离验证与回收
 > （`reclaimPreviewEnvironment` / `reclaimDuePreviews`，先释放命名空间后删分支）也已落地；
 > 生命周期持久化（`PreviewStore` / `savePreview` / `reclaimStoredPreviews` / `closePreview`，
-> 仅全部释放成功才移除记录）与项目配置存储实现也已落地。真实端口接线与生命周期路由为后续切片。
+> 仅全部释放成功才移除记录）与项目配置存储实现也已落地；隔离证据验收（
+> `evaluatePreviewIsolation` + `POST /previews/acceptance`，无证据即 `pending`、不视为通过）
+> 也已落地。真实端口接线与生命周期路由为后续切片。
 
 发布时把这些信息合成一份可查询结果：源代码提交、构建摘要、契约版本、迁移计划、资源
 绑定版本、健康检查，以及回滚目标。不要承诺"回滚镜像即可回滚一切"：应用回滚、数据库
