@@ -16,7 +16,7 @@ function reader(files: Record<string, string>) {
 
 const pressure: MemoryPressureSnapshot = {
   cgroup: "/sys/fs/cgroup/system.slice/supacloud-edge-runtime.service",
-  currentBytes: 3.7 * 1024 ** 3,
+  currentBytes: 4 * 1024 ** 3,
   highBytes: 4 * 1024 ** 3,
   highEvents: 34_940_000,
 };
@@ -89,6 +89,63 @@ describe("cgroup memory pressure recovery", () => {
     await monitor.poll();
     expect(events).toEqual([pressure]);
     expect(errors).toEqual([]);
+  });
+
+  test("does not restart at the production idle-cache plateau without fresh high events", async () => {
+    for (const highEvents of [0, 34_940_000]) {
+      const events: MemoryPressureSnapshot[] = [];
+      const monitor = createMemoryPressureMonitor({
+        sample: async () => ({
+          ...pressure, currentBytes: 3_872_747_520, highEvents,
+        }),
+        onPressure: (snapshot) => events.push(snapshot),
+        onError: () => {},
+      });
+      for (let i = 0; i < 10; i++) await monitor.poll();
+      expect(events).toEqual([]);
+    }
+  });
+
+  test("recovers below the limit when fresh throttling persists near memory.high", async () => {
+    let highEvents = 100;
+    const events: MemoryPressureSnapshot[] = [];
+    const monitor = createMemoryPressureMonitor({
+      sample: async () => ({
+        ...pressure, currentBytes: pressure.highBytes * 0.95, highEvents: highEvents++,
+      }),
+      onPressure: (snapshot) => events.push(snapshot),
+      onError: () => {},
+    });
+    await monitor.poll(); // Establish the counter baseline.
+    await monitor.poll();
+    await monitor.poll();
+    expect(events).toEqual([]);
+    await monitor.poll();
+    await monitor.poll();
+    expect(events).toHaveLength(1);
+  });
+
+  test("stalled counters and cgroup changes do not accumulate near-limit pressure", async () => {
+    let sample = { ...pressure, currentBytes: pressure.highBytes * 0.95, highEvents: 100 };
+    const events: MemoryPressureSnapshot[] = [];
+    const monitor = createMemoryPressureMonitor({
+      sample: async () => sample,
+      onPressure: (snapshot) => events.push(snapshot),
+      onError: () => {},
+    });
+    await monitor.poll();
+    for (let i = 0; i < 2; i++) {
+      sample = { ...sample, highEvents: sample.highEvents + 1 };
+      await monitor.poll();
+    }
+    await monitor.poll(); // No new throttling: reset the streak.
+    sample = { ...sample, highEvents: sample.highEvents + 1 };
+    await monitor.poll();
+    sample = { ...sample, cgroup: "/other", highEvents: 1000 };
+    await monitor.poll();
+    sample = { ...sample, highEvents: 1001 };
+    await monitor.poll();
+    expect(events).toEqual([]);
   });
 
   test("transient peaks, historical high counts, and missing samples reset the streak", async () => {

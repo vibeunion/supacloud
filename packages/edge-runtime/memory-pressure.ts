@@ -96,6 +96,7 @@ export function createMemoryPressureMonitor(options: {
   let stopped = false;
   let pressureSamples = 0;
   let pressureCgroup: string | null = null;
+  let previous: MemoryPressureSnapshot | null = null;
   return {
     stop() { stopped = true; },
     async poll(): Promise<void> {
@@ -104,9 +105,16 @@ export function createMemoryPressureMonitor(options: {
       try {
         const snapshot = await options.sample();
         if (stopped) return;
-        // Leave headroom for draining before memory.high starts reclaim throttling.
-        // Historical high events alone must never trigger a restart.
-        if (!snapshot || snapshot.currentBytes < snapshot.highBytes * 0.9) {
+        const newHighEvents = snapshot !== null
+          && previous?.cgroup === snapshot.cgroup
+          && previous.highBytes === snapshot.highBytes
+          && snapshot.highEvents > previous.highEvents;
+        previous = snapshot;
+        // Near-limit occupancy alone is not pressure (for example, idle module caches).
+        // Recover below memory.high only while reclaim throttling is still increasing;
+        // at the limit, retain protection even if the kernel counter has not advanced.
+        if (!snapshot || snapshot.currentBytes < snapshot.highBytes * 0.9
+          || (snapshot.currentBytes < snapshot.highBytes && !newHighEvents)) {
           pressureSamples = 0;
           pressureCgroup = null;
           return;
@@ -117,6 +125,7 @@ export function createMemoryPressureMonitor(options: {
         stopped = true;
         options.onPressure(snapshot);
       } catch (error: unknown) {
+        previous = null;
         pressureSamples = 0;
         pressureCgroup = null;
         options.onError(error);
