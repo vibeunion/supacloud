@@ -11,6 +11,8 @@ existing SupaCloud admin or project-scoped credential.
 
 - Endpoint: `POST /mcp` for platform administrators.
 - Endpoint: `POST /mcp/projects/{project_ref}` for a project-scoped client.
+- Endpoint: `POST /mcp/developer/projects/{project_ref}` for the read-only
+  Developer MCP surface (application development context only).
 - Protocol: `2025-06-18`.
 - Transport: JSON-RPC over `application/json`.
 - State model: stateless. SupaCloud does not return `Mcp-Session-Id`, keep a
@@ -19,6 +21,24 @@ existing SupaCloud admin or project-scoped credential.
 - Response caching: disabled with `Cache-Control: no-store`.
 - Write policy: plan-only. A model cannot execute shell commands, receive
   database credentials, or directly perform a restore through MCP.
+
+## Developer MCP surface
+
+The Developer MCP is a separate, project-scoped, read-only surface. It exposes
+only `supacloud.get_capabilities` and
+`supacloud.get_application_development`, reports
+`write_policy: "read_only"`, and never lists backup or metrics resources. It
+does not replace the plan-only operations surface, and the operations endpoint
+does not expose the development tool. Both surfaces read the same
+`supacloud.application-development.v1` contract that the application developer
+console consumes, so AI and the console cannot drift.
+
+`supacloud.get_application_development` reads one immutable application
+release target and returns the validated development contract (modules,
+routes, resources, resource uses, execution plans, and diagnostics) with
+`correlation: "verified-build-snapshot"`. The bytes come from the release
+archive that `ApplicationReleaseStorage` already hash-verified, so the result
+is build evidence, not a re-inference from current source.
 
 The client should send the `MCP-Protocol-Version` request header after
 initialization. The server returns the same protocol version in responses. A
@@ -57,6 +77,14 @@ plan records the project, target, prerequisites, approval requirement, and
 confirmation string. Execution remains behind the normal backup API workflow,
 maker-checker approval, idempotency, audit, operation receipt, and post-restore
 health verification.
+
+### `supacloud.get_application_development` (Developer MCP only)
+
+Available only on `POST /mcp/developer/projects/{project_ref}`. Reads the
+validated `supacloud.application-development.v1` contract for one immutable
+application release target. Inputs: `application_id`, `release_id`, and
+`target`. The result is read-only build evidence and never executes
+application code.
 
 ## Resources
 
