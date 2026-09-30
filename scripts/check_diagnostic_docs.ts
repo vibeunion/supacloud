@@ -210,6 +210,18 @@ class OrdersDatabase {}
 class CreateOrderCommand {}
 @Module({ name: "orders", resources: [OrdersDatabase], commands: [CreateOrderCommand] })
 class OrdersModule {}`,
+  SC8106: `@InfraResource({ name: "orders-db", kind: "database" })
+class OrdersDatabase {}
+// supacloud.environments.json omits a binding:
+// { "schema": "supacloud.environments.v1", "environments": { "test": { "bindings": {} } } }`,
+  SC8107: `@InfraResource({ name: "orders-db", kind: "database" })
+class OrdersDatabase {}
+// supacloud.environments.json binds an undeclared resource:
+// { "schema": "supacloud.environments.v1", "environments": { "test": { "bindings": { "orders-db": "local", "cache": "local" } } } }`,
+  SC8108: `@InfraResource({ name: "orders-db", kind: "database" })
+class OrdersDatabase {}
+// supacloud.environments.json embeds a credential/URL instead of a binding reference:
+// { "schema": "supacloud.environments.v1", "environments": { "test": { "bindings": { "orders-db": "postgres://user:pass@host/db" } } } }`,
   SC6001: `// generated/application.ts
 export const unsafe: any = value;`,
   SC6002: `export function decode(input: any) {

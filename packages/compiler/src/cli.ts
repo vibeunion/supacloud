@@ -6,6 +6,12 @@ import { checkProject, compileProject } from "./compile";
 import { createContextPack, doctorProject, explainGraph, formatGraph } from "./inspect";
 import { createExecutionContextPack, readExecutionMetadata, ExecutionContextError } from "./execution-context";
 import { createApplicationDevelopmentContext, formatApplicationDevelopmentContext } from "./application-development";
+import {
+  parseEnvironmentBindings,
+  resolveEnvironmentBindings,
+  formatEnvironmentBindings,
+  EnvironmentBindingError,
+} from "./environment-bindings";
 import { createDeliveryExecutionContextPack, DeliveryContextError } from "./delivery-context";
 import { watchProject } from "./watch";
 import type { Diagnostic, ModuleBoundaryPresetName } from "./types";
@@ -59,6 +65,7 @@ Usage:
   supacloud-compiler explain <name> [rootDir] [options]
   supacloud-compiler context <name> [rootDir] [options]
   supacloud-compiler dev-context [rootDir] [options]
+  supacloud-compiler environment-bindings [rootDir] [options]
   supacloud-compiler doctor  [rootDir] [options]
   supacloud-compiler migrate [rootDir] [options]
   supacloud-compiler migration-assess [rootDir] [options]
@@ -78,6 +85,7 @@ Commands:
   explain             Explain a module, provider, or external token
   context             Extract an AI-sized module context pack
   dev-context         Print the read-only application development context for tooling/console/MCP consumers
+  environment-bindings Resolve static per-environment resource bindings without credentials
   doctor              Run project and generated-artifact health checks
   migrate             Preview or apply versioned source migrations
   migration-assess    Produce a read-only migration compatibility report
@@ -109,6 +117,8 @@ Options:
   --request-id <id>   Select one opaque request ID from --events; context remains read-only
   --delivery-manifest <file>  Correlate context using an immutable build, not current source
   --delivery-target <name>    Target in --delivery-manifest (requires execution metadata)
+  --environment <name>        environment-bindings: select one environment from the binding document
+  --bindings-file <file>      environment-bindings: binding document (default: ./supacloud.environments.json)
   --space <n>         openapi-export: JSON indentation (0-10, default: 2)
   --delivery <file>   plan/build-delivery: validated JSON configuration (overrides config.delivery)
   --dry-run           Preview a fix without writing the target file
@@ -142,7 +152,7 @@ async function run(): Promise<void> {
     if (args.includes("--check") && !result.upToDate) process.exitCode = 1;
     return;
   }
-  if (!command || !["compile", "check", "dev", "graph", "explain", "context", "dev-context", "doctor", "migrate", "migration-assess", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
+  if (!command || !["compile", "check", "dev", "graph", "explain", "context", "dev-context", "environment-bindings", "doctor", "migrate", "migration-assess", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
     console.error(`Error: unknown command "${command}"`);
     printUsage();
     process.exit(1);
@@ -161,6 +171,8 @@ async function run(): Promise<void> {
   let executionRequestId: string | undefined;
   let contextManifest: string | undefined;
   let contextTarget: string | undefined;
+  let bindingEnvironment: string | undefined;
+  let bindingsFile: string | undefined;
   let json: boolean = false;
   let dryRun = true;
   let fromVersion: string | undefined;
@@ -261,6 +273,12 @@ async function run(): Promise<void> {
       else if (arg === "--request-id") executionRequestId = value;
       else if (arg === "--delivery-manifest") contextManifest = value;
       else contextTarget = value;
+    } else if (arg === "--environment" || arg === "--bindings-file") {
+      if (command !== "environment-bindings") throw new Error(`${arg} is only supported by environment-bindings`);
+      const value = args[++i];
+      if (!value || value.startsWith("-")) throw new Error(`${arg} requires a value`);
+      if (arg === "--environment") bindingEnvironment = value;
+      else bindingsFile = value;
     } else if (arg === "--json") {
       json = true;
     } else if (arg === "--dry-run") {
@@ -575,6 +593,28 @@ async function run(): Promise<void> {
     const context = createApplicationDevelopmentContext(graph);
     if (json) console.log(JSON.stringify(context, null, 2));
     else console.log(formatApplicationDevelopmentContext(context));
+  } else if (command === "environment-bindings") {
+    const file = resolve(bindingsFile ?? "supacloud.environments.json");
+    try {
+      const document = parseEnvironmentBindings(JSON.parse(await readFile(file, "utf8")));
+      const environment = bindingEnvironment ?? Object.keys(document.environments)[0];
+      if (!environment) {
+        console.error("Error: the binding document declares no environments");
+        process.exit(1);
+      }
+      const graph = await analyzeProject(resolvedRoot);
+      const result = resolveEnvironmentBindings(graph, document, environment);
+      if (json) console.log(JSON.stringify({ ...result.projection, diagnostics: result.diagnostics }, null, 2));
+      else console.log(formatEnvironmentBindings(result));
+      if (result.diagnostics.length > 0) process.exitCode = 1;
+    } catch (error) {
+      if (error instanceof EnvironmentBindingError || error instanceof SyntaxError
+        || (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT")) {
+        console.error(`Error: ${error instanceof Error ? error.message : String(error)}`);
+        process.exit(1);
+      }
+      throw error;
+    }
   } else if (command === "context") {
     if (!query) {
       console.error("Error: context requires a module or owned symbol name");

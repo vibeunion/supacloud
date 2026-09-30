@@ -72,6 +72,13 @@ SupaCloud 的目标链路是：
 > （`packages/app/src/resource.ts`，对标 Angular `resource`）。基础设施资源必须使用
 > 不同命名（例如 `InfraResource` / `defineResource`），避免与本原语混淆。
 
+> **实现进展（静态绑定切片）**：`InfraResource` / `ResourceUse` 已落地（SC8101-SC8105）。
+> `EnvironmentBinding` 的静态切片也已落地：编译器读取项目根目录
+> `supacloud.environments.json`，将每个已声明资源解析到不携带凭据的绑定引用
+> （`local` 或 `scheme:name`），并新增 SC8106-SC8108；CLI 为
+> `supacloud-compiler environment-bindings --environment <name>`。运行时凭据解析与
+> 部署预检仍为后续切片。参见 [Environment Bindings](./environment-bindings.md)。
+
 编译产物应能回答：
 
 - `orders.create` 会写哪个数据库、发布什么事件、访问哪个 Bucket？
@@ -223,7 +230,7 @@ MCP 的权限不能混在一起：现有运维 MCP 的 plan-only、项目范围�
 2. **P0-2 本地入口**依赖 P0-1 的绑定解析，并与现有生成应用 `dev` 脚本、`dev sync` 收敛。
 3. **P0-3 执行时间线**可与 P0-1/P0-2 并行，但必须复用现有回执与追踪管道。
 4. **P1-4 控制台/MCP** 消费 P0-1 的图和 P0-3 的证据。
-5. **P1-5 完整 Preview** 依赖 P0-1 的 `EnvironmentBinding` 和 P0-2 的本地/集成 profile。
+5. **P1-5 完整 Preview** 依赖 P0-1 的 `EnvironmentBinding`（静态绑定切片已落地）和 P0-2 的本地/集成 profile。
 
 每个阶段沿用 `docs/encore-inspired-delivery.md` 的账本模式，记录范围、证据和未决项，
 不以单点通过提升为整体验收。

@@ -111,3 +111,6 @@ bun scripts/check_diagnostic_docs.ts --write
 | [SC8103](SC8103.md) | `undeclared-resource-use` | compiler |
 | [SC8104](SC8104.md) | `invalid-resource-kind` | compiler |
 | [SC8105](SC8105.md) | `invalid-resource-operation` | compiler |
+| [SC8106](SC8106.md) | `missing-environment-binding` | compiler |
+| [SC8107](SC8107.md) | `unknown-environment-binding` | compiler |
+| [SC8108](SC8108.md) | `invalid-environment-binding` | compiler |
