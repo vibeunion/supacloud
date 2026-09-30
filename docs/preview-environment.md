@@ -148,6 +148,22 @@ records that the ports succeeded, not that an external system is healthy.
 - `createProjectConfigPreviewStore(configPort)` backs the store with the project
   config under a single `previews` collection, filtering untrusted entries.
 
+## Lifecycle routes
+
+```http
+GET    /v1/projects/{project_ref}/previews
+DELETE /v1/projects/{project_ref}/previews/{preview_ref}
+POST   /v1/projects/{project_ref}/previews/reclaim
+```
+
+`GET` lists tracked previews. `DELETE` reclaims one preview and removes its
+record; `POST /reclaim` reclaims every timeout-due preview and returns
+`{ checked, reclaimed, failed }`. Reclamation requires the cleanup ports; when
+they are not configured the routes answer `501 PREVIEW_RECLAMATION_UNAVAILABLE`
+instead of pretending a preview was reclaimed. This is deliberate: listing is
+safe without infrastructure, but teardown must not report success it cannot
+deliver.
+
 ## Boundaries
 
 - **Composition vs provisioning.** A composed plan is not a running environment;
@@ -160,10 +176,9 @@ records that the ports succeeded, not that an external system is healthy.
 
 ## Next steps
 
-1. Wire the remaining real ports (application activation, configuration,
-   queue/storage namespace, secrets) and an evidence collector that fills the
-   isolation evidence from the running environment.
-2. Expose preview lifecycle routes (create/list/close) over the store and the
-   port-driven orchestration.
+1. Wire the remaining real cleanup ports (queue/storage namespace) and the
+   remaining provisioning ports (application activation, configuration, secrets).
+2. An evidence collector that fills the isolation evidence from the running
+   environment so acceptance does not depend on a caller-supplied payload.
 3. Persist the acceptance decision with the preview record so an accepted
    preview can be promoted without re-collecting evidence.
