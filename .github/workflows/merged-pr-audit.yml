@@ -1,0 +1,48 @@
+name: Merged PR audit workspace
+on:
+  push:
+    branches: [review/merged-pr-audit-20260930]
+permissions:
+  contents: read
+concurrency:
+  group: merged-pr-audit-workspace
+  cancel-in-progress: true
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Export pinned tracked source and test runtime
+        run: |
+          mkdir -p /tmp/review-source
+          git archive --format=tar.gz HEAD > /tmp/review-source/source.tar.gz
+          cp "$(command -v bun)" /tmp/review-source/bun
+          git rev-parse HEAD > /tmp/review-source/commit.txt
+          sha256sum /tmp/review-source/source.tar.gz /tmp/review-source/bun > /tmp/review-source/sha256.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: merged-pr-audit-source
+          path: /tmp/review-source/
+          retention-days: 1
+      - name: Existing packed consumer acceptance
+        run: |
+          set -o pipefail
+          bun run scripts/check_app_generation.ts 2>&1 | tee /tmp/merged-pr-audit-acceptance.log
+      - name: Export offline dependency workspace
+        if: always()
+        run: |
+          mkdir -p /tmp/review-dependencies
+          find packages -type d \( -name node_modules -o -name dist \) -prune -print0 | tar --null -T - -czf /tmp/review-dependencies/dependencies.tar.gz
+          cp /tmp/merged-pr-audit-acceptance.log /tmp/review-dependencies/acceptance.log
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: merged-pr-audit-dependencies
+          path: /tmp/review-dependencies/
+          retention-days: 1
