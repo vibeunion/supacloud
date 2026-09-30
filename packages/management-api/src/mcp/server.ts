@@ -7,6 +7,8 @@ import {
 import {
   renderRequestMetrics,
 } from "../utils/observability";
+import { ApplicationReleaseStorage } from "../services/application-release-storage";
+import { ApplicationDevelopmentError, extractApplicationDevelopment } from "../services/application-development.service";
 import {
   requireAdminAuth,
   requireProjectOrAdminAuth,
@@ -25,6 +27,18 @@ type JsonRpcRequest = {
 };
 
 type McpScope = { role: "admin" | "project"; ref?: string };
+type McpSurface = "operations" | "developer";
+
+const OPERATIONS_TOOLS = [
+  "supacloud.get_capabilities",
+  "supacloud.get_backup_readiness",
+  "supacloud.get_request_metrics",
+  "supacloud.plan_pitr_restore",
+] as const;
+const DEVELOPER_TOOLS = [
+  "supacloud.get_capabilities",
+  "supacloud.get_application_development",
+] as const;
 
 function rpcResult(id: JsonRpcId | undefined, result: unknown): Record<string, unknown> {
   return { jsonrpc: "2.0", id: id ?? null, result };
@@ -54,27 +68,36 @@ function scopedRef(scope: McpScope, params: Record<string, unknown>): string | n
     : null;
 }
 
-function capabilities(scope: McpScope) {
+function requiredIdentifier(params: Record<string, unknown>, key: string): string {
+  const value = params[key];
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(value)) {
+    throw new Error(`${key} is required`);
+  }
+  return value;
+}
+
+function capabilities(scope: McpScope, surface: McpSurface) {
+  const developer = surface === "developer";
   return {
     schema: "supacloud.mcp-capabilities.v1",
+    surface,
     transport: {
       type: "streamable-http",
       stateless: true,
-      endpoint: scope.ref ? `/mcp/projects/${scope.ref}` : "/mcp",
+      endpoint: developer
+        ? `/mcp/developer/projects/${scope.ref}`
+        : scope.ref ? `/mcp/projects/${scope.ref}` : "/mcp",
       session: "none",
     },
-    scopes: scope.ref ? ["project.read"] : ["platform.read", "project.read"],
-    write_policy: "plan_only",
-    tools: [
-      "supacloud.get_capabilities",
-      "supacloud.get_backup_readiness",
-      "supacloud.get_request_metrics",
-      "supacloud.plan_pitr_restore",
-    ],
+    scopes: developer ? ["project.read"] : scope.ref ? ["project.read"] : ["platform.read", "project.read"],
+    write_policy: developer ? "read_only" : "plan_only",
+    tools: [...(developer ? DEVELOPER_TOOLS : OPERATIONS_TOOLS)],
     resources: [
       "supacloud://capabilities",
-      "supacloud://project/{project_ref}/backups",
-      "supacloud://project/{project_ref}/metrics",
+      ...(developer ? [] : [
+        "supacloud://project/{project_ref}/backups",
+        "supacloud://project/{project_ref}/metrics",
+      ]),
     ],
   };
 }
@@ -83,9 +106,13 @@ async function callTool(
   name: string,
   params: Record<string, unknown>,
   scope: McpScope,
+  surface: McpSurface,
 ): Promise<Record<string, unknown>> {
+  const allowed: readonly string[] = surface === "developer" ? DEVELOPER_TOOLS : OPERATIONS_TOOLS;
+  if (!allowed.includes(name)) throw new Error(`Unknown MCP tool: ${name}`);
+
   if (name === "supacloud.get_capabilities") {
-    return { content: textContent(JSON.stringify(capabilities(scope), null, 2)) };
+    return { content: textContent(JSON.stringify(capabilities(scope, surface), null, 2)) };
   }
 
   if (name === "supacloud.get_request_metrics") {
@@ -135,6 +162,28 @@ async function callTool(
     };
   }
 
+  if (name === "supacloud.get_application_development") {
+    const ref = scopedRef(scope, params);
+    if (!ref) throw new Error("project_ref is required for application development context");
+    const applicationId = requiredIdentifier(params, "application_id");
+    const releaseId = requiredIdentifier(params, "release_id");
+    const target = requiredIdentifier(params, "target");
+    try {
+      const { archive } = await new ApplicationReleaseStorage().readArchive(ref, applicationId, releaseId);
+      const development = extractApplicationDevelopment(archive, target);
+      return {
+        content: textContent(JSON.stringify({
+          schema: "supacloud.application-development-result.v1",
+          read_only: true,
+          ...development,
+        }, null, 2)),
+      };
+    } catch (error) {
+      if (error instanceof ApplicationDevelopmentError) throw new Error(error.code);
+      throw error;
+    }
+  }
+
   throw new Error(`Unknown MCP tool: ${name}`);
 }
 
@@ -148,10 +197,11 @@ function resourceContents(uri: string, value: unknown) {
   };
 }
 
-async function readResource(uri: string, scope: McpScope) {
+async function readResource(uri: string, scope: McpScope, surface: McpSurface) {
   if (uri === "supacloud://capabilities") {
-    return resourceContents(uri, capabilities(scope));
+    return resourceContents(uri, capabilities(scope, surface));
   }
+  if (surface === "developer") throw new Error(`Unknown MCP resource: ${uri}`);
   const backupMatch = uri.match(/^supacloud:\/\/project\/([A-Za-z0-9_-]{1,64})\/backups$/);
   if (backupMatch) {
     const ref = scopedRef(scope, { project_ref: backupMatch[1] });
@@ -172,7 +222,7 @@ async function readResource(uri: string, scope: McpScope) {
   throw new Error(`Unknown MCP resource: ${uri}`);
 }
 
-export async function processMessage(message: JsonRpcRequest, scope: McpScope) {
+export async function processMessage(message: JsonRpcRequest, scope: McpScope, surface: McpSurface = "operations") {
   if (!message || message.jsonrpc !== "2.0" || typeof message.method !== "string") {
     return rpcError(message?.id, -32600, "Invalid Request");
   }
@@ -189,8 +239,8 @@ export async function processMessage(message: JsonRpcRequest, scope: McpScope) {
   if (message.method === "ping") return rpcResult(message.id, {});
   if (message.method === "notifications/initialized") return null;
   if (message.method === "tools/list") {
-    return rpcResult(message.id, {
-      tools: [
+    const allowed: readonly string[] = surface === "developer" ? DEVELOPER_TOOLS : OPERATIONS_TOOLS;
+    const tools = [
         {
           name: "supacloud.get_capabilities",
           description: "Read the stateless SupaCloud AI operations contract.",
@@ -211,6 +261,21 @@ export async function processMessage(message: JsonRpcRequest, scope: McpScope) {
           inputSchema: { type: "object", properties: {}, additionalProperties: false },
         },
         {
+          name: "supacloud.get_application_development",
+          description: "Read the read-only application development contract (modules, routes, resources, diagnostics) from one immutable application release target.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              project_ref: { type: "string" },
+              application_id: { type: "string" },
+              release_id: { type: "string" },
+              target: { type: "string", description: "Delivery target name" },
+            },
+            required: ["application_id", "release_id", "target"],
+            additionalProperties: false,
+          },
+        },
+        {
           name: "supacloud.plan_pitr_restore",
           description: "Create a non-executing, approval-bound PITR restore plan.",
           inputSchema: {
@@ -223,12 +288,12 @@ export async function processMessage(message: JsonRpcRequest, scope: McpScope) {
             additionalProperties: false,
           },
         },
-      ],
-    });
+    ].filter((tool) => allowed.includes(tool.name));
+    return rpcResult(message.id, { tools });
   }
   if (message.method === "resources/list") {
     const resources = [{ uri: "supacloud://capabilities", name: "SupaCloud capabilities", mimeType: "application/json" }];
-    if (scope.ref) {
+    if (scope.ref && surface !== "developer") {
       resources.push(
         { uri: `supacloud://project/${scope.ref}/backups`, name: "Project backups", mimeType: "application/json" },
         { uri: `supacloud://project/${scope.ref}/metrics`, name: "Project metrics", mimeType: "application/json" },
@@ -238,17 +303,17 @@ export async function processMessage(message: JsonRpcRequest, scope: McpScope) {
   }
   if (message.method === "resources/read") {
     if (typeof params.uri !== "string") return rpcError(message.id, -32602, "uri is required");
-    return rpcResult(message.id, await readResource(params.uri, scope));
+    return rpcResult(message.id, await readResource(params.uri, scope, surface));
   }
   if (message.method === "tools/call") {
     if (typeof params.name !== "string") return rpcError(message.id, -32602, "name is required");
-    const result = await callTool(params.name, (params.arguments ?? {}) as Record<string, unknown>, scope);
+    const result = await callTool(params.name, (params.arguments ?? {}) as Record<string, unknown>, scope, surface);
     return rpcResult(message.id, result);
   }
   return rpcError(message.id, -32601, `Method not found: ${message.method}`);
 }
 
-export async function handleMcpRequest(request: Request, scope: McpScope): Promise<Response> {
+export async function handleMcpRequest(request: Request, scope: McpScope, surface: McpSurface = "operations"): Promise<Response> {
   const contentType = request.headers.get("content-type") || "";
   if (!contentType.toLowerCase().includes("application/json")) {
     return Response.json({ error: "MCP Streamable HTTP requires application/json" }, { status: 415 });
@@ -264,7 +329,7 @@ export async function handleMcpRequest(request: Request, scope: McpScope): Promi
     return Response.json(rpcError(null, -32700, "Parse error"), { status: 400 });
   }
   try {
-    const response = await processMessage(message, scope);
+    const response = await processMessage(message, scope, surface);
     if (response === null) {
       return new Response(null, {
         status: 202,
@@ -303,4 +368,9 @@ export const mcpRoutes = new Elysia()
     const authError = await authorizeMcp(request, params.ref);
     if (authError) return status(authError.status, authError.body);
     return handleMcpRequest(request, { role: "project", ref: params.ref });
+  })
+  .post("/mcp/developer/projects/:ref", async ({ request, params }) => {
+    const authError = await authorizeMcp(request, params.ref);
+    if (authError) return status(authError.status, authError.body);
+    return handleMcpRequest(request, { role: "project", ref: params.ref }, "developer");
   });

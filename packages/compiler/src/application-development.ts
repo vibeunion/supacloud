@@ -1,5 +1,8 @@
-import { Type } from "typebox";
-import { Value } from "typebox/value";
+import {
+  APPLICATION_DEVELOPMENT_LIMITS as DEVELOPMENT_LIMITS,
+  DevelopmentContractError,
+  parseDevelopmentContext,
+} from "@supacloud/delivery/development";
 import type { ApplicationGraph } from "./types";
 import { createExecutionPlans, type ExecutionPlan } from "./inspect";
 import { createDiagnosticRepairPlan } from "./repair-plan";
@@ -8,10 +11,8 @@ import { joinRoutePaths } from "./util";
 
 /**
  * A stable, read-only projection of the current application graph for developer
- * tooling (Web Console application view and a future Developer MCP). It is a
- * projection of `ApplicationGraph`, never a second source of truth, and it never
- * exports source expressions, diagnostic messages/suggestions, repair replacement
- * values, credentials or business payloads.
+ * tooling. Never exports expressions, diagnostic messages, repair replacement
+ * values, credentials or business payloads. Readers share the delivery contract.
  */
 export const APPLICATION_DEVELOPMENT_LIMITS: {
   readonly outputBytes: number;
@@ -24,17 +25,11 @@ export const APPLICATION_DEVELOPMENT_LIMITS: {
   readonly resourceUses: number;
   readonly plans: number;
   readonly diagnostics: number;
-} = Object.freeze({
-  outputBytes: 65_536,
-  modules: 64, providers: 128, routes: 256, commands: 128, jobs: 128,
-  resources: 64, resourceUses: 128, plans: 128, diagnostics: 64,
-});
+} = DEVELOPMENT_LIMITS;
 
 /** Shared formatted UTF-8 byte budget for archive writers and readers (including the final newline). */
 export const APPLICATION_DEVELOPMENT_ARCHIVE_MAX_BYTES = 524_288;
-
 export const APPLICATION_DEVELOPMENT_SCHEMA = "supacloud.application-development.v1";
-
 export type DevelopmentSchemaKind = "opaque" | "declared";
 
 export interface ApplicationDevelopmentModule {
@@ -130,95 +125,13 @@ export class ApplicationDevelopmentError extends Error {
   }
 }
 
-const closed = { additionalProperties: false } as const;
-const text = Type.String({ minLength: 1, maxLength: 512, pattern: "^[^\\u0000-\\u001f\\u007f]+$" });
-const texts = Type.Array(text);
-const count = Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER });
-const mode = Type.Union([Type.Literal("required"), Type.Literal("none")]);
-const operations = Type.Array(Type.Union([Type.Literal("read"), Type.Literal("write"), Type.Literal("publish"), Type.Literal("consume")]));
-const resourceUse = Type.Object({ resource: text, operations }, closed);
-const schemaKind = Type.Optional(Type.Union([Type.Literal("opaque"), Type.Literal("declared")]));
-const stage = Type.Union([
-  Type.Union([Type.Literal("commandExecutor"), Type.Literal("jobExecutor"), Type.Literal("authorize"), Type.Literal("idempotency"), Type.Literal("transaction"), Type.Literal("handler"), Type.Literal("audit")]),
-  Type.String({ maxLength: 512, pattern: "^rpc:[^\\u0000-\\u001f\\u007f]+$" }),
-  Type.String({ maxLength: 512,
-    pattern: "^(?:module:[^\\u0000-\\u001f\\u007f]+|route|command|job)\\.aspect\\[(?:0|[1-9][0-9]*)\\]:[^\\u0000-\\u001f\\u007f]+$" }),
-]);
-const ContextSchema = Type.Object({
-  schema: Type.Literal(APPLICATION_DEVELOPMENT_SCHEMA),
-  source: Type.Literal("current-graph"), deploymentVerified: Type.Literal(false),
-  modules: Type.Array(Type.Object({
-    name: text, className: text, file: Type.Optional(text), tags: Type.Optional(texts),
-    providers: texts, controllers: texts, commands: texts, jobs: texts, queries: texts, resources: texts,
-  }, closed), { maxItems: APPLICATION_DEVELOPMENT_LIMITS.modules }),
-  routes: Type.Array(Type.Object({
-    module: text, method: Type.Union([Type.Literal("GET"), Type.Literal("POST"), Type.Literal("PUT"), Type.Literal("PATCH"), Type.Literal("DELETE"), Type.Literal("HEAD"), Type.Literal("OPTIONS")]),
-    path: text, controller: text, handler: text, command: Type.Optional(text), aspects: texts,
-    schemaKinds: Type.Optional(Type.Object({
-      body: schemaKind, params: schemaKind, query: schemaKind, headers: schemaKind, cookie: schemaKind, response: schemaKind,
-    }, closed)),
-  }, closed), { maxItems: APPLICATION_DEVELOPMENT_LIMITS.routes }),
-  commands: Type.Array(Type.Object({
-    module: text, name: text, permission: Type.Optional(text), transaction: mode, idempotency: mode,
-    audit: Type.Optional(text), resources: Type.Array(resourceUse),
-  }, closed), { maxItems: APPLICATION_DEVELOPMENT_LIMITS.commands }),
-  jobs: Type.Array(Type.Object({
-    module: text, name: text, mode: Type.Optional(Type.Union([Type.Literal("task"), Type.Literal("workflow")])), resources: Type.Array(resourceUse),
-  }, closed), { maxItems: APPLICATION_DEVELOPMENT_LIMITS.jobs }),
-  resources: Type.Array(Type.Object({ name: text, kind: Type.Union([Type.Literal("database"), Type.Literal("bucket"), Type.Literal("queue"), Type.Literal("config"), Type.Literal("secret")]) }, closed),
-    { maxItems: APPLICATION_DEVELOPMENT_LIMITS.resources }),
-  resourceUses: Type.Array(Type.Object({
-    module: text, owner: text, ownerKind: Type.Union([Type.Literal("command"), Type.Literal("job")]), resource: text, operations,
-  }, closed), { maxItems: APPLICATION_DEVELOPMENT_LIMITS.resourceUses }),
-  executionPlans: Type.Array(Type.Object({
-    module: text, kind: Type.Union([Type.Literal("route"), Type.Literal("command"), Type.Literal("job")]), name: text, command: Type.Optional(text), stages: Type.Array(stage),
-  }, closed), { maxItems: APPLICATION_DEVELOPMENT_LIMITS.plans }),
-  diagnostics: Type.Array(Type.Object({
-    code: text, severity: Type.Union([Type.Literal("error"), Type.Literal("warn")]), file: Type.Optional(text),
-    line: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
-    repair: Type.Optional(Type.Object({
-      type: Type.Union([Type.Literal("set_command_mode"), Type.Literal("add_module_import"), Type.Literal("add_provider"), Type.Literal("mark_optional_dependency"), Type.Literal("change_provider_scope"), Type.Literal("add_command_permission"), Type.Literal("add_route_parameter_binding"), Type.Literal("remove_route_body_binding")]),
-      readiness: Type.Union([Type.Literal("preview"), Type.Literal("input-required"), Type.Literal("manual")]),
-    }, closed)),
-  }, closed), { maxItems: APPLICATION_DEVELOPMENT_LIMITS.diagnostics }),
-  omitted: Type.Object({ modules: count, providers: count, routes: count, commands: count, jobs: count,
-    resources: count, resourceUses: count, plans: count, diagnostics: count }, closed),
-  limits: Type.Object({
-    outputBytes: Type.Literal(APPLICATION_DEVELOPMENT_LIMITS.outputBytes),
-    modules: Type.Literal(APPLICATION_DEVELOPMENT_LIMITS.modules), providers: Type.Literal(APPLICATION_DEVELOPMENT_LIMITS.providers),
-    routes: Type.Literal(APPLICATION_DEVELOPMENT_LIMITS.routes), commands: Type.Literal(APPLICATION_DEVELOPMENT_LIMITS.commands),
-    jobs: Type.Literal(APPLICATION_DEVELOPMENT_LIMITS.jobs), resources: Type.Literal(APPLICATION_DEVELOPMENT_LIMITS.resources),
-    resourceUses: Type.Literal(APPLICATION_DEVELOPMENT_LIMITS.resourceUses), plans: Type.Literal(APPLICATION_DEVELOPMENT_LIMITS.plans),
-    diagnostics: Type.Literal(APPLICATION_DEVELOPMENT_LIMITS.diagnostics),
-  }, closed),
-}, closed);
-
-/**
- * Hash consistency does not establish a trusted producer. Validate every nested
- * field before returning a detached JSON value; never echo rejected input.
- */
+/** Keep the compiler API and error identity stable while sharing the wire parser. */
 export function parseApplicationDevelopmentContext(input: unknown): ApplicationDevelopmentContext {
-  const invalid = () => new ApplicationDevelopmentError("APPLICATION_DEVELOPMENT_INVALID");
   try {
-    if (!Value.Check(ContextSchema, input)) throw invalid();
-    const json = JSON.stringify(input, null, 2) + "\n";
-    if (Buffer.byteLength(json, "utf8") > APPLICATION_DEVELOPMENT_ARCHIVE_MAX_BYTES) {
-      throw new ApplicationDevelopmentError("APPLICATION_DEVELOPMENT_TOO_LARGE");
-    }
-    // Revalidate the detached representation too: programmatic callers may pass
-    // accessors or objects with custom serialization, unlike JSON file readers.
-    const value: unknown = JSON.parse(json);
-    if (!Value.Check(ContextSchema, value)) throw invalid();
-    const files = [...value.modules.flatMap(module => module.file ?? []),
-      ...value.diagnostics.flatMap(diagnostic => diagnostic.file ?? [])];
-    if (files.some(file => executionSourceFile(file) !== file)
-      || value.modules.reduce((total, module) => total + module.providers.length, 0) > APPLICATION_DEVELOPMENT_LIMITS.providers) {
-      throw invalid();
-    }
-    return value;
+    return parseDevelopmentContext(input);
   } catch (error) {
-    if (error instanceof ApplicationDevelopmentError) throw error;
-    throw invalid();
+    throw new ApplicationDevelopmentError(error instanceof DevelopmentContractError
+      ? error.code : "APPLICATION_DEVELOPMENT_INVALID");
   }
 }
 
@@ -234,11 +147,7 @@ function bound<T>(values: readonly T[], limit: number): { items: T[]; omitted: n
   return { items: values.slice(0, limit), omitted: Math.max(0, values.length - limit) };
 }
 
-/**
- * Project the current application graph into the versioned development contract.
- * Ordering is deterministic so two runs over the same source produce the same
- * document.
- */
+/** Deterministic projection of the current graph into the versioned contract. */
 export interface ApplicationDevelopmentOptions {
   /** Interactive output defaults to 64 KiB; delivery archives allow 512 KiB. Neither mode is unbounded. */
   byteBudget?: "interactive" | "archive";

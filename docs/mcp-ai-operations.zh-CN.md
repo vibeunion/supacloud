@@ -8,6 +8,7 @@ SupaCloud 通过 Streamable HTTP MCP 协议提供可选的、面向客户的 AI 
 
 - 平台管理员端点：`POST /mcp`。
 - 项目级客户端端点：`POST /mcp/projects/{project_ref}`。
+- 只读 Developer MCP 端点：`POST /mcp/developer/projects/{project_ref}`（仅提供应用开发契约）。
 - 协议版本：`2025-06-18`。
 - 传输格式：基于 `application/json` 的 JSON-RPC 2.0。
 - 状态模型：完全无状态。SupaCloud 不返回 `Mcp-Session-Id`，不维护会话映射表，也不保存大模型的对话状态。
@@ -16,6 +17,12 @@ SupaCloud 通过 Streamable HTTP MCP 协议提供可选的、面向客户的 AI 
 - 写入策略：仅生成计划（plan-only）。大模型无法通过 MCP 执行 Shell 命令、获取数据库密码或直接发起数据恢复。
 
 客户端在完成初始化握手后，后续请求应携带 `MCP-Protocol-Version` 头。服务端在响应中返回相同的协议版本。`notifications/initialized` 请求会收到 HTTP 202 与空响应体。
+
+## Developer MCP 接口
+
+Developer MCP 是独立、项目限域、只读的接口，仅暴露 `supacloud.get_capabilities` 与 `supacloud.get_application_development`，返回 `write_policy: "read_only"`，且不列出备份或指标资源。它不替代仅生成计划的运维接口，运维端点也不暴露开发工具。两种接口消费同一份 `supacloud.application-development.v1` 契约，确保 AI 与应用开发者控制台不会出现数据漂移。
+
+`supacloud.get_application_development` 读取一个不可变的应用 release target，返回经过校验的开发契约（模块、路由、资源、资源使用、执行计划与诊断信息），并附带 `correlation: "verified-build-snapshot"`。字节来自 `ApplicationReleaseStorage` 已完成哈希校验的 release 归档，因此结果是构建证据，而非对当前源码的重新推断。
 
 ## 工具列表
 
@@ -41,6 +48,10 @@ SupaCloud 通过 Streamable HTTP MCP 协议提供可选的、面向客户的 AI 
 ### `supacloud.plan_pitr_restore`
 
 为指定的 RFC3339 UTC 时间戳生成非执行状态的 PITR 恢复计划。该计划会记录项目、目标时间、前置条件、审批要求及确认字符串。实际执行仍必须通过既有的备份 API 流程、双人审核（maker-checker）审批、幂等控制、审计日志、操作回执以及恢复后健康验证。
+
+### `supacloud.get_application_development`（仅 Developer MCP）
+
+仅在 `POST /mcp/developer/projects/{project_ref}` 提供。读取一个不可变应用 release target 的、经过校验的 `supacloud.application-development.v1` 契约。入参为 `application_id`、`release_id` 与 `target`。结果是只读构建证据，绝不执行应用代码。
 
 ## 资源列表
 
