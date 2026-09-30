@@ -9,8 +9,11 @@ import { createApplicationDevelopmentContext, formatApplicationDevelopmentContex
 import {
   parseEnvironmentBindings,
   resolveEnvironmentBindings,
+  resolveRuntimeBindings,
   formatEnvironmentBindings,
+  formatRuntimeBindings,
   EnvironmentBindingError,
+  type RuntimeBindingProfile,
 } from "./environment-bindings";
 import { createDeliveryExecutionContextPack, DeliveryContextError } from "./delivery-context";
 import { watchProject } from "./watch";
@@ -119,6 +122,7 @@ Options:
   --delivery-target <name>    Target in --delivery-manifest (requires execution metadata)
   --environment <name>        environment-bindings: select one environment from the binding document
   --bindings-file <file>      environment-bindings: binding document (default: ./supacloud.environments.json)
+  --profile <name>            environment-bindings: resolve local runtime bindings for fast | integration
   --space <n>         openapi-export: JSON indentation (0-10, default: 2)
   --delivery <file>   plan/build-delivery: validated JSON configuration (overrides config.delivery)
   --dry-run           Preview a fix without writing the target file
@@ -173,6 +177,7 @@ async function run(): Promise<void> {
   let contextTarget: string | undefined;
   let bindingEnvironment: string | undefined;
   let bindingsFile: string | undefined;
+  let bindingProfile: RuntimeBindingProfile | undefined;
   let json: boolean = false;
   let dryRun = true;
   let fromVersion: string | undefined;
@@ -279,6 +284,11 @@ async function run(): Promise<void> {
       if (!value || value.startsWith("-")) throw new Error(`${arg} requires a value`);
       if (arg === "--environment") bindingEnvironment = value;
       else bindingsFile = value;
+    } else if (arg === "--profile") {
+      if (command !== "environment-bindings") throw new Error("--profile is only supported by environment-bindings");
+      const value = args[++i];
+      if (value !== "fast" && value !== "integration") throw new Error("--profile requires fast or integration");
+      bindingProfile = value;
     } else if (arg === "--json") {
       json = true;
     } else if (arg === "--dry-run") {
@@ -603,10 +613,17 @@ async function run(): Promise<void> {
         process.exit(1);
       }
       const graph = await analyzeProject(resolvedRoot);
-      const result = resolveEnvironmentBindings(graph, document, environment);
-      if (json) console.log(JSON.stringify({ ...result.projection, diagnostics: result.diagnostics }, null, 2));
-      else console.log(formatEnvironmentBindings(result));
-      if (result.diagnostics.length > 0) process.exitCode = 1;
+      if (bindingProfile) {
+        const runtime = resolveRuntimeBindings(graph, document, environment, bindingProfile);
+        if (json) console.log(JSON.stringify({ ...runtime.projection, diagnostics: runtime.diagnostics }, null, 2));
+        else console.log(formatRuntimeBindings(runtime));
+        if (runtime.diagnostics.length > 0) process.exitCode = 1;
+      } else {
+        const result = resolveEnvironmentBindings(graph, document, environment);
+        if (json) console.log(JSON.stringify({ ...result.projection, diagnostics: result.diagnostics }, null, 2));
+        else console.log(formatEnvironmentBindings(result));
+        if (result.diagnostics.length > 0) process.exitCode = 1;
+      }
     } catch (error) {
       if (error instanceof EnvironmentBindingError || error instanceof SyntaxError
         || (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT")) {

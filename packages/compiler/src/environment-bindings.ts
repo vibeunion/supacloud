@@ -26,7 +26,8 @@ export const ENVIRONMENT_BINDINGS_LIMITS: {
 export type EnvironmentBindingErrorCode =
   | "ENVIRONMENT_BINDINGS_INVALID"
   | "ENVIRONMENT_BINDINGS_TOO_LARGE"
-  | "ENVIRONMENT_BINDINGS_UNKNOWN_ENVIRONMENT";
+  | "ENVIRONMENT_BINDINGS_UNKNOWN_ENVIRONMENT"
+  | "ENVIRONMENT_BINDINGS_PRODUCTION_FORBIDDEN";
 
 export class EnvironmentBindingError extends Error {
   constructor(readonly code: EnvironmentBindingErrorCode) {
@@ -180,6 +181,94 @@ export function resolveEnvironmentBindings(
       environment,
       bindings: projected,
       omitted: { resources: bindings.length - projected.length },
+      limits: ENVIRONMENT_BINDINGS_LIMITS,
+    },
+    diagnostics,
+  };
+}
+
+/**
+ * Local runtime consumption of a binding projection. This is the only place a
+ * binding stops being purely static, and even here no credential is resolved:
+ * the runner owns credentials. Only the explicit `fast` and `integration` local
+ * profiles are allowed, and a production-shaped environment name is refused
+ * outright so a local entry can never point at production by accident.
+ */
+export const RUNTIME_BINDINGS_SCHEMA = "supacloud.runtime-bindings.v1";
+export type RuntimeBindingProfile = "fast" | "integration";
+export type RuntimeBindingMode = "ephemeral" | "external";
+
+const PRODUCTION_ENVIRONMENT = /^(?:prod|production|live|release)(?:[-_]|$)/i;
+
+export interface RuntimeBindingEntry extends EnvironmentBindingEntry {
+  mode: RuntimeBindingMode;
+}
+
+export interface RuntimeBindingsProjection {
+  schema: typeof RUNTIME_BINDINGS_SCHEMA;
+  profile: RuntimeBindingProfile;
+  environment: string;
+  credentials: "resolved-by-local-runner";
+  bindings: RuntimeBindingEntry[];
+  omitted: { resources: number };
+  limits: typeof ENVIRONMENT_BINDINGS_LIMITS;
+}
+
+export interface RuntimeBindingsResult {
+  projection: RuntimeBindingsProjection;
+  diagnostics: EnvironmentBindingDiagnostic[];
+}
+
+export function formatRuntimeBindings(result: RuntimeBindingsResult): string {
+  const { projection, diagnostics } = result;
+  return [
+    `RUNTIME ${projection.profile} / ${projection.environment} (credentials: ${projection.credentials})`,
+    ...projection.bindings.map((entry) => `  ${entry.resource} (${entry.kind}) -> ${entry.binding} [${entry.mode}]`),
+    ...(diagnostics.length === 0
+      ? []
+      : ["", ...diagnostics.map((diagnostic) => `  [${diagnostic.code}] ${diagnostic.message}`)]),
+  ].join("\n");
+}
+
+/**
+ * Classify a static projection for a local profile. `fast` requires every
+ * resource to be `local` (fully ephemeral); `integration` accepts namespaced
+ * references and never embeds credentials.
+ */
+export function resolveRuntimeBindings(
+  graph: ApplicationGraph,
+  document: EnvironmentBindingsDocument,
+  environment: string,
+  profile: RuntimeBindingProfile,
+): RuntimeBindingsResult {
+  if (profile !== "fast" && profile !== "integration") {
+    throw new EnvironmentBindingError("ENVIRONMENT_BINDINGS_INVALID");
+  }
+  if (PRODUCTION_ENVIRONMENT.test(environment)) {
+    throw new EnvironmentBindingError("ENVIRONMENT_BINDINGS_PRODUCTION_FORBIDDEN");
+  }
+  const staticResult = resolveEnvironmentBindings(graph, document, environment);
+  const diagnostics = [...staticResult.diagnostics];
+  const bindings: RuntimeBindingEntry[] = [];
+  for (const entry of staticResult.projection.bindings) {
+    const local = entry.binding === "local";
+    if (profile === "fast" && !local) {
+      diagnostics.push({
+        code: "invalid-environment-binding", severity: "error", environment, resource: entry.resource,
+        message: `Profile 'fast' requires '${entry.resource}' to bind to 'local', received '${entry.binding}'`,
+      });
+      continue;
+    }
+    bindings.push({ ...entry, mode: local ? "ephemeral" : "external" });
+  }
+  return {
+    projection: {
+      schema: RUNTIME_BINDINGS_SCHEMA,
+      profile,
+      environment,
+      credentials: "resolved-by-local-runner",
+      bindings,
+      omitted: staticResult.projection.omitted,
       limits: ENVIRONMENT_BINDINGS_LIMITS,
     },
     diagnostics,

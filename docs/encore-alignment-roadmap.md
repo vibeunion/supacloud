@@ -76,8 +76,11 @@ SupaCloud 的目标链路是：
 > `EnvironmentBinding` 的静态切片也已落地：编译器读取项目根目录
 > `supacloud.environments.json`，将每个已声明资源解析到不携带凭据的绑定引用
 > （`local` 或 `scheme:name`），并新增 SC8106-SC8108；CLI 为
-> `supacloud-compiler environment-bindings --environment <name>`。运行时凭据解析与
-> 部署预检仍为后续切片。参见 [Environment Bindings](./environment-bindings.md)。
+> `supacloud-compiler environment-bindings --environment <name>`。
+> `--profile fast|integration` 会产出本地运行时投影（`supacloud.runtime-bindings.v1`）：
+> 仅分类 `ephemeral`/`external`，**不解析凭据**，并拒绝 `prod`/`production`/`live`/`release` 形状的
+> 环境名（`ENVIRONMENT_BINDINGS_PRODUCTION_FORBIDDEN`）。部署预检仍为后续切片。参见
+> [Environment Bindings](./environment-bindings.md)。
 
 编译产物应能回答：
 

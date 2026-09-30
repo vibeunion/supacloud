@@ -451,7 +451,7 @@
     {
       "name": "EnvironmentBindingErrorCode",
       "kind": "type",
-      "signature": "export type EnvironmentBindingErrorCode = \"ENVIRONMENT_BINDINGS_INVALID\" | \"ENVIRONMENT_BINDINGS_TOO_LARGE\" | \"ENVIRONMENT_BINDINGS_UNKNOWN_ENVIRONMENT\";"
+      "signature": "export type EnvironmentBindingErrorCode = \"ENVIRONMENT_BINDINGS_INVALID\" | \"ENVIRONMENT_BINDINGS_TOO_LARGE\" | \"ENVIRONMENT_BINDINGS_UNKNOWN_ENVIRONMENT\" | \"ENVIRONMENT_BINDINGS_PRODUCTION_FORBIDDEN\";"
     },
     {
       "name": "EnvironmentBindingsDocument",
@@ -562,6 +562,11 @@
       "name": "formatOpenApiDiff",
       "kind": "value",
       "signature": "export declare function formatOpenApiDiff(result: OpenApiDiffResult): string;"
+    },
+    {
+      "name": "formatRuntimeBindings",
+      "kind": "value",
+      "signature": "export declare function formatRuntimeBindings(result: RuntimeBindingsResult): string;"
     },
     {
       "name": "generateApplication",
@@ -889,6 +894,11 @@
       "signature": "export declare function resolveModuleBoundaries(options?: {\n    preset?: ModuleBoundaryPresetName;\n    rules?: ModuleBoundaryRule[];\n}): ModuleBoundaryRule[] | undefined;"
     },
     {
+      "name": "resolveRuntimeBindings",
+      "kind": "value",
+      "signature": "export declare function resolveRuntimeBindings(graph: ApplicationGraph, document: EnvironmentBindingsDocument, environment: string, profile: RuntimeBindingProfile): RuntimeBindingsResult;"
+    },
+    {
       "name": "resolveSupacloudConfig",
       "kind": "value",
       "signature": "export declare function resolveSupacloudConfig(config?: SupaCloudConfig, cwd?: any): {\n    rootDir: string;\n    outDir: string;\n    include: string[];\n    strict: boolean;\n    requireRouteContracts: boolean;\n    generateClient: boolean;\n    generateOpenApi: boolean;\n    openApi?: NonNullable<CompileOptions[\"openApi\"]>;\n    generatePermissions: boolean;\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n    commandCapabilities?: CommandExecutionCapabilities;\n    moduleBoundaries?: NonNullable<CompileOptions[\"moduleBoundaries\"]>;\n    typeSafety?: NonNullable<CompileOptions[\"typeSafety\"]>;\n    allowRouteCommandBindings?: boolean;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    treeShakeUnusedProviders: boolean;\n    graphql?: GraphqlOptions;\n};"
@@ -902,6 +912,36 @@
       "name": "runDatabaseContractsFile",
       "kind": "value",
       "signature": "export declare function runDatabaseContractsFile(path: string, check?: boolean): unknown;"
+    },
+    {
+      "name": "RUNTIME_BINDINGS_SCHEMA",
+      "kind": "value",
+      "signature": "export declare const RUNTIME_BINDINGS_SCHEMA = \"supacloud.runtime-bindings.v1\";"
+    },
+    {
+      "name": "RuntimeBindingEntry",
+      "kind": "type",
+      "signature": "export interface RuntimeBindingEntry extends EnvironmentBindingEntry {\n    mode: RuntimeBindingMode;\n}"
+    },
+    {
+      "name": "RuntimeBindingMode",
+      "kind": "type",
+      "signature": "export type RuntimeBindingMode = \"ephemeral\" | \"external\";"
+    },
+    {
+      "name": "RuntimeBindingProfile",
+      "kind": "type",
+      "signature": "export type RuntimeBindingProfile = \"fast\" | \"integration\";"
+    },
+    {
+      "name": "RuntimeBindingsProjection",
+      "kind": "type",
+      "signature": "export interface RuntimeBindingsProjection {\n    schema: typeof RUNTIME_BINDINGS_SCHEMA;\n    profile: RuntimeBindingProfile;\n    environment: string;\n    credentials: \"resolved-by-local-runner\";\n    bindings: RuntimeBindingEntry[];\n    omitted: {\n        resources: number;\n    };\n    limits: typeof ENVIRONMENT_BINDINGS_LIMITS;\n}"
+    },
+    {
+      "name": "RuntimeBindingsResult",
+      "kind": "type",
+      "signature": "export interface RuntimeBindingsResult {\n    projection: RuntimeBindingsProjection;\n    diagnostics: EnvironmentBindingDiagnostic[];\n}"
     },
     {
       "name": "scanDrizzleSql",

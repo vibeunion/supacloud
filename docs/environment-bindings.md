@@ -65,6 +65,21 @@ environment and prints the projection. `--bindings-file` defaults to
 `./supacloud.environments.json`. The process exits non-zero when any binding
 diagnostic is reported, so CI fails closed.
 
+Add `--profile fast|integration` to resolve the **local runtime** projection
+(`supacloud.runtime-bindings.v1`):
+
+```sh
+supacloud-compiler environment-bindings --environment fast --profile fast --json
+```
+
+Runtime resolution only classifies the static projection for a local runner; it
+never resolves a credential (`credentials: "resolved-by-local-runner"`). The
+`fast` profile requires every resource to bind to `local` (mode `ephemeral`);
+`integration` accepts namespaced references (mode `external`). A
+production-shaped environment name (`prod`, `production`, `live`, `release`) is
+refused with `ENVIRONMENT_BINDINGS_PRODUCTION_FORBIDDEN` before anything is read,
+so a local entry can never point at production by accident.
+
 ## Projection
 
 `supacloud.environment-bindings.v1`:
@@ -110,7 +125,7 @@ bindings per environment and a 64 KiB projection budget. The `resources` cap
 
 ## Next steps
 
-1. A runtime resolver that consumes the projection for `fast` and `integration`
-   local profiles (explicitly non-production).
+1. Wire the runtime projection into the local runner so `fast` starts against
+   ephemeral resources and `integration` connects to explicitly selected ones.
 2. Deployment preflight that verifies the bound resource, permissions and health.
 3. Delivery/receipt evidence referencing the resolved binding version.

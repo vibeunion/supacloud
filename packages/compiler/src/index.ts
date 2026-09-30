@@ -41,12 +41,15 @@ export type {
 export {
   parseEnvironmentBindings,
   resolveEnvironmentBindings,
+  resolveRuntimeBindings,
   formatEnvironmentBindings,
+  formatRuntimeBindings,
   EnvironmentBindingError,
   ENVIRONMENT_BINDINGS_SCHEMA,
   ENVIRONMENT_BINDINGS_PROJECTION_SCHEMA,
   ENVIRONMENT_BINDING_REFERENCE_PATTERN,
   ENVIRONMENT_BINDINGS_LIMITS,
+  RUNTIME_BINDINGS_SCHEMA,
 } from "./environment-bindings";
 export type {
   EnvironmentBindingsDocument,
@@ -56,6 +59,11 @@ export type {
   EnvironmentBindingDiagnostic,
   EnvironmentBindingDiagnosticCode,
   EnvironmentBindingErrorCode,
+  RuntimeBindingProfile,
+  RuntimeBindingMode,
+  RuntimeBindingEntry,
+  RuntimeBindingsProjection,
+  RuntimeBindingsResult,
 } from "./environment-bindings";
 export type { AppliedDiagnosticFix, ApplyDiagnosticFixOptions } from "./fixes";
 export { createDiagnosticRepairPlan } from "./repair-plan";
