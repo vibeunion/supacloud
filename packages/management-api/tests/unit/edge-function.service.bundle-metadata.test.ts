@@ -967,6 +967,40 @@ describe("edgeFunctionService bundle metadata", () => {
     }
   });
 
+  test("stores byte-identical version artifacts as a single hardlinked copy", async () => {
+    const ref = "proj_dedup_artifacts";
+    const slug = "fa-api";
+    const code = "export default { fetch: () => new Response('dedup') };";
+    const expectedSha256 = createHash("sha256").update(code).digest("hex");
+    const deployed = await edgeFunctionService.deployRelease({
+      ref,
+      slug,
+      expectedActiveVersion: "absent",
+      expectedActivationId: "legacy",
+      code,
+      prebundled: true,
+      expectedSha256,
+    });
+
+    const versionDir = join(functionsRoot, ref, ".versions", slug, deployed.version!);
+    const aliasPath = join(versionDir, "index.js");
+    const authorityPath = join(versionDir, `index.${expectedSha256.slice(0, 16)}.js`);
+    const sourcePaths = [
+      join(versionDir, "index.src.ts"),
+      join(versionDir, "src", ".supacloud-entry.js"),
+    ];
+    const aliasStat = await stat(aliasPath);
+    const authorityStat = await stat(authorityPath);
+    const sourceStats = await Promise.all(sourcePaths.map((candidate) => stat(candidate)));
+
+    // The immutable authority and attested source entries hold one on-disk copy...
+    expect(new Set([authorityStat.ino, ...sourceStats.map((entry) => entry.ino)]).size).toBe(1);
+    expect(authorityStat.nlink).toBeGreaterThanOrEqual(3);
+    // ...while the mutable version alias stays an independent byte copy.
+    expect(aliasStat.ino).not.toBe(authorityStat.ino);
+    expect(await readFile(aliasPath)).toEqual(Buffer.from(code));
+  });
+
   test("writes the attested source entry for every immutable deployment path", async () => {
     globalThis.fetch = runtimeSuccessFetch();
     const single = await edgeFunctionService.deployDetailed(

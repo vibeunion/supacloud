@@ -1036,6 +1036,24 @@ type CurrentRollbackSnapshotRequest = {
   currentState: FunctionManifestState;
 };
 
+async function linkIdenticalArtifact(
+  sourcePath: string,
+  targetPath: string,
+  code: string,
+): Promise<void> {
+  // Immutable function versions keep several byte-identical copies of a frozen
+  // artifact (content-addressed authority, bundled source entry, attested source).
+  // Hardlinking the immutable copies stores a single copy on disk while leaving
+  // the mutable `index.js` alias as an independent file. This keeps every path
+  // readers use intact without growing the tenant footprint without bound.
+  try {
+    await fs.rm(targetPath, { force: true });
+    await fs.link(sourcePath, targetPath);
+  } catch {
+    await Bun.write(targetPath, code);
+  }
+}
+
 async function writePreparedBundle(
   stageDir: string,
   finalDir: string,
@@ -1069,11 +1087,17 @@ async function writePreparedReleaseBundle(
   PreparedFunctionVersion,
   "bundleHash" | "artifactSha256" | "bundleSizeBytes" | "contentPath"
 >> {
+  // The mutable `index.js` alias must stay an independent copy; only the
+  // immutable content-addressed authority and attested source entries share one.
   const artifact = await writePreparedBundle(stageDir, finalDir, code, artifactSizeBytes);
   const sourceDir = path.join(stageDir, "src");
   await fs.mkdir(sourceDir, { recursive: true, mode: 0o755 });
   const runtimeEntry = path.join(sourceDir, BUNDLED_SOURCE_RUNTIME_ENTRY);
-  await Bun.write(runtimeEntry, code);
+  await linkIdenticalArtifact(
+    path.join(stageDir, `index.${artifact.bundleHash}.js`),
+    runtimeEntry,
+    code,
+  );
   await fs.chmod(runtimeEntry, 0o444);
   return artifact;
 }
@@ -1119,8 +1143,12 @@ async function preparePrebundledFunctionVersion(
 ): Promise<PreparedFunctionVersion> {
   const normalization = await validatedPrebundledBundle(request);
   await fs.mkdir(stageDir, { recursive: true, mode: 0o755 });
-  await Bun.write(path.join(stageDir, "index.src.ts"), request.code);
   const artifact = await writePreparedReleaseBundle(stageDir, finalDir, request.code);
+  await linkIdenticalArtifact(
+    path.join(stageDir, `index.${artifact.bundleHash}.js`),
+    path.join(stageDir, "index.src.ts"),
+    request.code,
+  );
   return {
     version,
     bundled: true,
