@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.90.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.90.0...management-api-v0.90.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* **management-api:** harden watchdog and deduplicate immutable function artifacts ([#1549](https://github.com/vibeunion/supacloud/issues/1549)) ([f6821a8](https://github.com/vibeunion/supacloud/commit/f6821a81b7ea56f0a3ccdb20104b6114a0eadafd))
+
 ## [0.90.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.89.2...management-api-v0.90.0) (2026-09-30)
 
 
