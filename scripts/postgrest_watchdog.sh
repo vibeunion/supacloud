@@ -3,6 +3,7 @@
 # Detects tenant-local PostgREST HTTP 503s and schema-cache failures such as PGRST002.
 
 set -euo pipefail
+export LC_ALL=C
 
 STATE_ROOT="${SUPACLOUD_WATCHDOG_STATE_DIR:-/var/lib/supacloud/postgrest-watchdog}"
 TENANT_DIR="${SUPACLOUD_TENANT_CONFIG_DIR:-/etc/supabase/tenants}"
@@ -63,21 +64,31 @@ get_state() {
 }
 
 check_tenant() {
-    local conf="$1"
-    local tenant="${conf##*/}"
-    tenant="${tenant%.conf}"
+    local tenant="$1"
+    local conf="$2"
+
+    if [[ -z "$conf" || ! -f "$conf" || -L "$conf" || ! -r "$conf" ]]; then
+        echo "missing-config|Tenant ${tenant} has no resolvable PostgREST configuration"
+        return 0
+    fi
 
     local port
-    port=$(sed -n 's/^server-port = \([0-9][0-9]*\)$/\1/p' "$conf" | head -n 1)
+    if ! port=$(sed -n '/^server-port = [0-9][0-9]*$/ { s/^server-port = //; p; q; }' "$conf"); then
+        echo "missing-config|Tenant ${tenant} PostgREST configuration could not be read"
+        return 0
+    fi
     if [[ -z "$port" ]]; then
         echo "missing-port|Tenant config ${conf} is missing server-port"
         return 0
     fi
 
-    local http_code
-    http_code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:${port}/" || true)
-    if [[ "$http_code" != "200" ]]; then
-        echo "http-${http_code}|Local PostgREST probe on 127.0.0.1:${port} returned HTTP ${http_code}"
+    local http_code curl_status=0
+    # A final 2xx-4xx response proves reachability, not authorization. Do not
+    # ignore transfer failures: curl may emit a status before timing out.
+    # Keep this tenant-local probe independent of proxy and curlrc settings.
+    http_code=$(curl -q --noproxy '*' -sS -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:${port}/") || curl_status=$?
+    if [[ "$curl_status" -ne 0 || ! "$http_code" =~ ^[2-4][0-9]{2}$ ]]; then
+        echo "http-${http_code}|Local PostgREST probe on 127.0.0.1:${port} returned HTTP ${http_code:-no-response} (curl exit ${curl_status})"
         return 0
     fi
 
@@ -93,25 +104,63 @@ check_tenant() {
     echo "ok|healthy"
 }
 
-main() {
-    local any_issue=0
+resolve_tenant_configs() {
+    # Follow launcher selection: an existing generation pointer is authoritative,
+    # even when malformed. Never silently fall back to a stale legacy config.
+    local pointer ref target legacy pointer_bytes generation
     shopt -s nullglob
-    local confs=("$TENANT_DIR"/*.conf)
+    local pointers=("$TENANT_DIR"/*_postgrest.current)
+    local legacies=("$TENANT_DIR"/*.conf)
     shopt -u nullglob
 
-    if [[ "${#confs[@]}" -eq 0 ]]; then
+    for pointer in ${pointers[@]+"${pointers[@]}"}; do
+        ref="${pointer##*/}"
+        ref="${ref%_postgrest.current}"
+        [[ "$ref" =~ ^[a-z0-9-]{1,64}$ ]] || continue
+        target=""
+        generation="$TENANT_DIR/${ref}_postgrest.d"
+        # Bound reads and reject special files before opening them (a FIFO can
+        # otherwise hang every tenant's watchdog). Match the launcher's single
+        # newline-terminated target and reject symlinks in the selected paths.
+        if [[ -f "$pointer" && ! -L "$pointer" && -r "$pointer" ]] \
+            && pointer_bytes=$(wc -c < "$pointer") \
+            && [[ "$pointer_bytes" -le 160 ]] \
+            && IFS= read -r target < "$pointer" \
+            && [[ "$target" =~ ^${ref}_postgrest\.d/[a-f0-9]{64}\.conf$ ]] \
+            && [[ "$pointer_bytes" -eq $((${#target} + 1)) ]] \
+            && [[ -d "$generation" && ! -L "$generation" ]] \
+            && [[ -f "$TENANT_DIR/$target" && ! -L "$TENANT_DIR/$target" && -r "$TENANT_DIR/$target" ]]; then
+            printf '%s\t%s\n' "$ref" "$TENANT_DIR/$target"
+        else
+            printf '%s\t%s\n' "$ref" ""
+        fi
+    done
+
+    for legacy in ${legacies[@]+"${legacies[@]}"}; do
+        ref="${legacy##*/}"
+        ref="${ref%.conf}"
+        [[ "$ref" =~ ^[a-z0-9-]{1,64}$ ]] || continue
+        pointer="$TENANT_DIR/${ref}_postgrest.current"
+        [[ -e "$pointer" || -L "$pointer" ]] && continue
+        printf '%s\t%s\n' "$ref" "$legacy"
+    done
+}
+
+main() {
+    local any_issue=0
+    local configs
+    configs="$(resolve_tenant_configs)"
+
+    if [[ -z "$configs" ]]; then
         logger -t supacloud-postgrest-watchdog "[info] no tenant config files found under ${TENANT_DIR}"
         exit 0
     fi
 
-    for conf in "${confs[@]}"; do
-        [[ "$conf" == *.bak* ]] && continue
+    local tenant conf result issue detail fingerprint previous
+    while IFS=$'\t' read -r tenant conf; do
+        [[ -n "$tenant" ]] || continue
 
-        local tenant="${conf##*/}"
-        tenant="${tenant%.conf}"
-
-        local result issue detail fingerprint previous
-        result=$(check_tenant "$conf")
+        result=$(check_tenant "$tenant" "$conf")
         issue="${result%%|*}"
         detail="${result#*|}"
         previous="$(get_state "$tenant")"
@@ -130,7 +179,7 @@ main() {
             send_alert "critical" "$tenant" "$detail"
             set_state "$tenant" "$fingerprint"
         fi
-    done
+    done <<< "$configs"
 
     if [[ "$any_issue" -ne 0 ]]; then
         exit 1
