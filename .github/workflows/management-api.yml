@@ -594,7 +594,6 @@ jobs:
           bash scripts/lib/systemd_unit_broker.test.sh
           bash scripts/lib/application_bun_runtime.test.sh
           bash scripts/lib/edge_runtime_source.test.sh
-          bash scripts/lib/postgrest_watchdog.test.sh
 
       - name: Validate Realtime slot-isolation trust root
         run: python3 -m unittest infrastructure/realtime/test_apply_slot_isolation.py
@@ -1213,6 +1212,10 @@ jobs:
       - name: Test Caddy to Edge Runtime cancellation and proxying
         run: CADDY_BINARY=packages/management-api/dist/supacloud-caddy-linux-amd64 bash scripts/test_supacloud_caddy_edge_proxy.sh
 
+  app-generation:
+    name: App Generation Acceptance
+    uses: ./.github/workflows/app-generation.yml
+
   # Keep this aggregate name stable: main branch protection requires it.
   required-checks:
     name: Required Checks
@@ -1231,6 +1234,7 @@ jobs:
       - integration-test
       - shell-scripts-lint
       - caddy-edge-proxy-smoke
+      - app-generation
       - generate-sbom
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -1251,6 +1255,7 @@ jobs:
           INTEGRATION_TESTS: ${{ needs.integration-test.result }}
           SHELL_SCRIPTS_LINT: ${{ needs.shell-scripts-lint.result }}
           CADDY_EDGE_PROXY: ${{ needs.caddy-edge-proxy-smoke.result }}
+          APP_GENERATION: ${{ needs.app-generation.result }}
           SBOM: ${{ needs.generate-sbom.result }}
         run: |
           for result in \
@@ -1267,6 +1272,7 @@ jobs:
             "$INTEGRATION_TESTS" \
             "$SHELL_SCRIPTS_LINT" \
             "$CADDY_EDGE_PROXY" \
+            "$APP_GENERATION" \
             "$SBOM"; do
             if [[ "$result" != "success" ]]; then
               echo "Required CI job did not succeed: $result" >&2

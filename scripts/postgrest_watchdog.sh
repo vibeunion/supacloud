@@ -3,6 +3,7 @@
 # Detects tenant-local PostgREST HTTP 503s and schema-cache failures such as PGRST002.
 
 set -euo pipefail
+export LC_ALL=C
 
 STATE_ROOT="${SUPACLOUD_WATCHDOG_STATE_DIR:-/var/lib/supacloud/postgrest-watchdog}"
 TENANT_DIR="${SUPACLOUD_TENANT_CONFIG_DIR:-/etc/supabase/tenants}"
@@ -66,25 +67,28 @@ check_tenant() {
     local tenant="$1"
     local conf="$2"
 
-    if [[ -z "$conf" ]]; then
+    if [[ -z "$conf" || ! -f "$conf" || -L "$conf" || ! -r "$conf" ]]; then
         echo "missing-config|Tenant ${tenant} has no resolvable PostgREST configuration"
         return 0
     fi
 
     local port
-    port=$(sed -n 's/^server-port = \([0-9][0-9]*\)$/\1/p' "$conf" | head -n 1)
+    if ! port=$(sed -n '/^server-port = [0-9][0-9]*$/ { s/^server-port = //; p; q; }' "$conf"); then
+        echo "missing-config|Tenant ${tenant} PostgREST configuration could not be read"
+        return 0
+    fi
     if [[ -z "$port" ]]; then
         echo "missing-port|Tenant config ${conf} is missing server-port"
         return 0
     fi
 
-    local http_code
-    http_code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:${port}/" || true)
-    # A reachable PostgREST answers 401 (or 404) to an unauthenticated root probe;
-    # that is healthy. Only a failed connection or a 5xx — for example the 503
-    # raised when the schema cache cannot load — is an incident.
-    if [[ ! "$http_code" =~ ^[1-4][0-9]{2}$ ]]; then
-        echo "http-${http_code}|Local PostgREST probe on 127.0.0.1:${port} returned HTTP ${http_code:-no-response}"
+    local http_code curl_status=0
+    # A final 2xx-4xx response proves reachability, not authorization. Do not
+    # ignore transfer failures: curl may emit a status before timing out.
+    # Keep this tenant-local probe independent of proxy and curlrc settings.
+    http_code=$(curl -q --noproxy '*' -sS -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:${port}/") || curl_status=$?
+    if [[ "$curl_status" -ne 0 || ! "$http_code" =~ ^[2-4][0-9]{2}$ ]]; then
+        echo "http-${http_code}|Local PostgREST probe on 127.0.0.1:${port} returned HTTP ${http_code:-no-response} (curl exit ${curl_status})"
         return 0
     fi
 
@@ -101,40 +105,43 @@ check_tenant() {
 }
 
 resolve_tenant_configs() {
-    # Mirror the PostgREST launcher: a tenant on the generation layout is
-    # described by <ref>_postgrest.current -> <ref>_postgrest.d/<sha>.conf, and a
-    # legacy tenant by <ref>.conf. Emit "<ref>\t<conf-path>" for each active
-    # tenant so the watchdog probes the configuration the runtime actually loads.
-    local pointer ref target legacy pointer_refs=""
+    # Follow launcher selection: an existing generation pointer is authoritative,
+    # even when malformed. Never silently fall back to a stale legacy config.
+    local pointer ref target legacy pointer_bytes generation
     shopt -s nullglob
     local pointers=("$TENANT_DIR"/*_postgrest.current)
     local legacies=("$TENANT_DIR"/*.conf)
     shopt -u nullglob
 
     for pointer in ${pointers[@]+"${pointers[@]}"}; do
-        [[ "$pointer" == *.bak* ]] && continue
         ref="${pointer##*/}"
         ref="${ref%_postgrest.current}"
-        [[ -n "$ref" ]] || continue
+        [[ "$ref" =~ ^[a-z0-9-]{1,64}$ ]] || continue
         target=""
-        if IFS= read -r target < "$pointer" \
+        generation="$TENANT_DIR/${ref}_postgrest.d"
+        # Bound reads and reject special files before opening them (a FIFO can
+        # otherwise hang every tenant's watchdog). Match the launcher's single
+        # newline-terminated target and reject symlinks in the selected paths.
+        if [[ -f "$pointer" && ! -L "$pointer" && -r "$pointer" ]] \
+            && pointer_bytes=$(wc -c < "$pointer") \
+            && [[ "$pointer_bytes" -le 160 ]] \
+            && IFS= read -r target < "$pointer" \
             && [[ "$target" =~ ^${ref}_postgrest\.d/[a-f0-9]{64}\.conf$ ]] \
-            && [[ -f "$TENANT_DIR/$target" ]]; then
+            && [[ "$pointer_bytes" -eq $((${#target} + 1)) ]] \
+            && [[ -d "$generation" && ! -L "$generation" ]] \
+            && [[ -f "$TENANT_DIR/$target" && ! -L "$TENANT_DIR/$target" && -r "$TENANT_DIR/$target" ]]; then
             printf '%s\t%s\n' "$ref" "$TENANT_DIR/$target"
         else
             printf '%s\t%s\n' "$ref" ""
         fi
-        pointer_refs="${pointer_refs} ${ref}"
     done
 
     for legacy in ${legacies[@]+"${legacies[@]}"}; do
-        [[ "$legacy" == *.bak* ]] && continue
         ref="${legacy##*/}"
         ref="${ref%.conf}"
-        [[ -n "$ref" ]] || continue
-        case "${pointer_refs} " in
-            *" ${ref} "*) continue ;;
-        esac
+        [[ "$ref" =~ ^[a-z0-9-]{1,64}$ ]] || continue
+        pointer="$TENANT_DIR/${ref}_postgrest.current"
+        [[ -e "$pointer" || -L "$pointer" ]] && continue
         printf '%s\t%s\n' "$ref" "$legacy"
     done
 }
