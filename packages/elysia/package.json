@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/elysia",
-  "version": "0.20.2",
+  "version": "0.21.0",
   "description": "Elysia runtime adapter for SupaCloud compiled modules: application/request scopes, route registration and validation",
   "type": "module",
   "main": "./dist/index.js",

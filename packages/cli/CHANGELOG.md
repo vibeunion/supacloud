@@ -14,6 +14,19 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.60.0](https://github.com/vibeunion/supacloud/compare/cli-v0.59.0...cli-v0.60.0) (2026-09-30)
+
+
+### Features
+
+* **cli:** add profile-aware app dev local entry (P0-2) ([#1514](https://github.com/vibeunion/supacloud/issues/1514)) ([4e49247](https://github.com/vibeunion/supacloud/commit/4e4924766129a21befb6b01d8844eee55001c382))
+* **cli:** safe resource generation and packed consumer acceptance ([#1510](https://github.com/vibeunion/supacloud/issues/1510)) ([4b743b2](https://github.com/vibeunion/supacloud/commit/4b743b2e1d3829add5f891d8f211690386595a46))
+
+
+### Bug Fixes
+
+* **dev:** repair watch lifecycle and development reports ([#1524](https://github.com/vibeunion/supacloud/issues/1524)) ([69fd216](https://github.com/vibeunion/supacloud/commit/69fd216cbeb3bc68ca182d488bc86e8061283468))
+
 ## [0.59.0](https://github.com/vibeunion/supacloud/compare/cli-v0.58.5...cli-v0.59.0) (2026-09-28)
 
 

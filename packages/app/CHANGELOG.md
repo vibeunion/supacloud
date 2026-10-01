@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.0](https://github.com/vibeunion/supacloud/compare/app-v0.18.1...app-v0.19.0) (2026-09-30)
+
+
+### Features
+
+* **app:** add portable execution pipeline for Elysia 2 beta ([#1506](https://github.com/vibeunion/supacloud/issues/1506)) ([02486f4](https://github.com/vibeunion/supacloud/commit/02486f43a12d6260cbcabde305857fb92464529a))
+* **compiler:** add validated application resource model ([#1512](https://github.com/vibeunion/supacloud/issues/1512)) ([c7ed93b](https://github.com/vibeunion/supacloud/commit/c7ed93b5cd50107ba0c61ac002e1c254907aa6a5))
+
 ## [0.18.1](https://github.com/vibeunion/supacloud/compare/app-v0.18.0...app-v0.18.1) (2026-09-28)
 
 

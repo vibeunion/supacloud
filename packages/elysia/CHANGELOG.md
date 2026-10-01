@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.21.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.20.2...elysia-v0.21.0) (2026-09-30)
+
+
+### Features
+
+* **app:** add portable execution pipeline for Elysia 2 beta ([#1506](https://github.com/vibeunion/supacloud/issues/1506)) ([02486f4](https://github.com/vibeunion/supacloud/commit/02486f43a12d6260cbcabde305857fb92464529a))
+* **elysia:** add experimental SupaCloud framework profile ([#1513](https://github.com/vibeunion/supacloud/issues/1513)) ([fe0b5a9](https://github.com/vibeunion/supacloud/commit/fe0b5a96a586957d129ce3bc2aade1786452f8bb))
+
 ## [0.20.2](https://github.com/vibeunion/supacloud/compare/elysia-v0.20.1...elysia-v0.20.2) (2026-09-28)
 
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.44.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.43.0...web-console-v0.44.0) (2026-09-30)
+
+
+### Features
+
+* **console:** safely inspect delivered application development context ([#1522](https://github.com/vibeunion/supacloud/issues/1522)) ([db25fc2](https://github.com/vibeunion/supacloud/commit/db25fc2844a18aea660e5fdd5249486f40ec1458))
+
+
+### Miscellaneous Chores
+
+* **deps:** patch high-severity audit advisories in web-console ([#1521](https://github.com/vibeunion/supacloud/issues/1521)) ([1be1ece](https://github.com/vibeunion/supacloud/commit/1be1ece3f4fa150508e4f54c6dc9d84a7868057f))
+
 ## [0.43.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.42.3...web-console-v0.43.0) (2026-09-28)
 
 

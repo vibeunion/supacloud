@@ -43,11 +43,14 @@ test("accepts the exact release migration tuple", async () => {
   });
 });
 
-for (const [name, staleVersion] of Object.entries({
-  "@supacloud/app": "0.15.0",
-  "@supacloud/elysia": "0.17.0",
-})) {
-  test(`rejects the previous ${name} version rather than widening compatibility`, async () => {
+for (const [name, staleVersion] of [
+  ["@supacloud/app", "0.15.0"],
+  ["@supacloud/elysia", "0.17.0"],
+  // The immediately preceding release must not be accepted by the new tuple.
+  ["@supacloud/app", "0.18.1"],
+  ["@supacloud/elysia", "0.20.2"],
+] as const) {
+  test(`rejects ${name}@${staleVersion} rather than widening compatibility`, async () => {
     await withInstalledTuple(async (root) => {
       await writeFile(join(root, "node_modules", name, "package.json"), JSON.stringify({ name, version: staleVersion }));
       expect(await checkMigrationDependencies(root)).toEqual([
