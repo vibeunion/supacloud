@@ -10,8 +10,10 @@ import {
   ENVIRONMENT_BINDINGS_SCHEMA,
   EnvironmentBindingError,
   formatEnvironmentBindings,
+  formatRuntimeBindings,
   parseEnvironmentBindings,
   resolveEnvironmentBindings,
+  resolveRuntimeBindings,
 } from "./environment-bindings";
 import type { ApplicationGraph } from "./types";
 
@@ -98,4 +100,31 @@ test("bounds the environment and binding counts", () => {
     (_, index) => [`resource-${index}`, "local"]));
   expect(() => parseEnvironmentBindings({ schema: ENVIRONMENT_BINDINGS_SCHEMA, environments: { test: { bindings } } }))
     .toThrow(new EnvironmentBindingError("ENVIRONMENT_BINDINGS_TOO_LARGE"));
+});
+test("fast resolves every resource to an ephemeral local binding", async () => {
+  const result = resolveRuntimeBindings(await graph(),
+    document({ fast: { "orders-db": "local", attachments: "local" } }), "fast", "fast");
+  expect(result.diagnostics).toEqual([]);
+  expect(result.projection.credentials).toBe("resolved-by-local-runner");
+  expect(result.projection.bindings.every((entry) => entry.mode === "ephemeral")).toBe(true);
+  expect(formatRuntimeBindings(result)).toContain("[ephemeral]");
+});
+
+test("fast rejects a non-local binding and integration keeps it external", async () => {
+  const graphValue = await graph();
+  const fast = resolveRuntimeBindings(graphValue, document({ fast: complete }), "fast", "fast");
+  expect(fast.diagnostics.map((diagnostic) => diagnostic.code)).toEqual(["invalid-environment-binding", "invalid-environment-binding"]);
+  expect(fast.projection.bindings).toEqual([]);
+
+  const integration = resolveRuntimeBindings(graphValue, document({ integration: complete }), "integration", "integration");
+  expect(integration.diagnostics).toEqual([]);
+  expect(integration.projection.bindings.every((entry) => entry.mode === "external")).toBe(true);
+});
+
+test("refuses a production-shaped environment before reading anything", async () => {
+  const graphValue = await graph();
+  for (const environment of ["production", "prod", "prod-eu", "live"]) {
+    expect(() => resolveRuntimeBindings(graphValue, document({ [environment]: complete }), environment, "fast"))
+      .toThrow(new EnvironmentBindingError("ENVIRONMENT_BINDINGS_PRODUCTION_FORBIDDEN"));
+  }
 });

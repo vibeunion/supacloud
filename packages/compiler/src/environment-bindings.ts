@@ -17,7 +17,8 @@ export const ENVIRONMENT_BINDINGS_LIMITS: {
 export type EnvironmentBindingErrorCode =
   | "ENVIRONMENT_BINDINGS_INVALID"
   | "ENVIRONMENT_BINDINGS_TOO_LARGE"
-  | "ENVIRONMENT_BINDINGS_UNKNOWN_ENVIRONMENT";
+  | "ENVIRONMENT_BINDINGS_UNKNOWN_ENVIRONMENT"
+  | "ENVIRONMENT_BINDINGS_PRODUCTION_FORBIDDEN";
 
 export class EnvironmentBindingError extends Error {
   constructor(readonly code: EnvironmentBindingErrorCode) {
@@ -196,5 +197,101 @@ export function resolveEnvironmentBindings(
     diagnostics,
   };
   assertOutputBudget(result);
+  return result;
+}
+
+/** Classification only. A name check is not proof of environment identity or isolation. */
+export const RUNTIME_BINDINGS_SCHEMA = "supacloud.runtime-bindings.v1";
+export type RuntimeBindingProfile = "fast" | "integration";
+export type RuntimeBindingMode = "ephemeral" | "external";
+const PRODUCTION_ENVIRONMENT = /^(?:prod|production|live|release)(?:[-_]|$)/i;
+
+export interface RuntimeBindingEntry extends EnvironmentBindingEntry {
+  mode: RuntimeBindingMode;
+}
+
+export interface RuntimeBindingsProjection {
+  schema: typeof RUNTIME_BINDINGS_SCHEMA;
+  profile: RuntimeBindingProfile;
+  environment: string;
+  credentials: "resolved-by-local-runner";
+  bindings: RuntimeBindingEntry[];
+  omitted: { resources: number };
+  limits: typeof ENVIRONMENT_BINDINGS_LIMITS;
+}
+
+export interface RuntimeBindingsResult {
+  projection: RuntimeBindingsProjection;
+  diagnostics: EnvironmentBindingDiagnostic[];
+}
+
+function renderRuntime(result: RuntimeBindingsResult): string {
+  const { projection, diagnostics } = result;
+  return [
+    `RUNTIME ${projection.profile} / ${projection.environment} (credentials: ${projection.credentials})`,
+    ...projection.bindings.map(entry => `  ${entry.resource} (${entry.kind}) -> ${entry.binding} [${entry.mode}]`),
+    ...(projection.omitted.resources > 0 ? [`  omitted: ${projection.omitted.resources} binding(s)`] : []),
+    ...(diagnostics.length === 0 ? [] : ["", ...diagnostics.map(diagnostic => `  [${diagnostic.code}] ${diagnostic.message}`)]),
+  ].join("\n");
+}
+
+function assertRuntimeBudget(result: RuntimeBindingsResult): void {
+  const json = JSON.stringify({ ...result.projection, diagnostics: result.diagnostics }, null, 2);
+  if ([json, renderRuntime(result)].some(output => Buffer.byteLength(output, "utf8") + 1 > ENVIRONMENT_BINDINGS_LIMITS.outputBytes)) {
+    throw new EnvironmentBindingError("ENVIRONMENT_BINDINGS_TOO_LARGE");
+  }
+}
+
+export function formatRuntimeBindings(result: RuntimeBindingsResult): string {
+  assertRuntimeBudget(result);
+  return renderRuntime(result);
+}
+
+/** Validate the full declaration set before applying any display limit. */
+export function resolveRuntimeBindings(
+  graph: ApplicationGraph,
+  document: EnvironmentBindingsDocument,
+  environment: string,
+  profile: RuntimeBindingProfile,
+): RuntimeBindingsResult {
+  if (profile !== "fast" && profile !== "integration") {
+    throw new EnvironmentBindingError("ENVIRONMENT_BINDINGS_INVALID");
+  }
+  if (PRODUCTION_ENVIRONMENT.test(environment)) {
+    throw new EnvironmentBindingError("ENVIRONMENT_BINDINGS_PRODUCTION_FORBIDDEN");
+  }
+  const validated = parseEnvironmentBindings(document);
+  const staticResult = resolveEnvironmentBindings(graph, validated, environment);
+  const selected = validated.environments[environment]!;
+  const diagnostics = [...staticResult.diagnostics];
+  const bindings: RuntimeBindingEntry[] = [];
+  // staticResult.projection.bindings is a display slice, never an authorization input.
+  const resources = [...(graph.resources ?? [])].sort((a, b) => a.name.localeCompare(b.name, "en"));
+  for (const resource of resources) {
+    const binding = Object.hasOwn(selected.bindings, resource.name) ? selected.bindings[resource.name] : undefined;
+    if (binding === undefined || referencePattern.exec(binding)?.[0] !== binding) continue;
+    const local = binding === "local";
+    if (!local && PRODUCTION_ENVIRONMENT.test(binding.slice(binding.indexOf(":") + 1))) {
+      throw new EnvironmentBindingError("ENVIRONMENT_BINDINGS_PRODUCTION_FORBIDDEN");
+    }
+    if (profile === "fast" && !local) {
+      diagnostics.push({
+        code: "invalid-environment-binding", severity: "error", environment, resource: resource.name,
+        message: `Profile 'fast' requires '${resource.name}' to bind to 'local'`,
+      });
+      continue;
+    }
+    bindings.push({ resource: resource.name, kind: resource.kind, binding, mode: local ? "ephemeral" : "external" });
+  }
+  const projected = bindings.slice(0, ENVIRONMENT_BINDINGS_LIMITS.resources);
+  const result: RuntimeBindingsResult = {
+    projection: {
+      schema: RUNTIME_BINDINGS_SCHEMA, profile, environment,
+      credentials: "resolved-by-local-runner", bindings: projected,
+      omitted: { resources: bindings.length - projected.length }, limits: ENVIRONMENT_BINDINGS_LIMITS,
+    },
+    diagnostics,
+  };
+  assertRuntimeBudget(result);
   return result;
 }

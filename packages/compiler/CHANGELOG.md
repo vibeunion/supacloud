@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.28.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.27.4...compiler-v0.28.0) (2026-09-30)
+
+
+### Features
+
+* **compiler:** add application development context contract (P1-4) ([#1516](https://github.com/vibeunion/supacloud/issues/1516)) ([8bf40fc](https://github.com/vibeunion/supacloud/commit/8bf40fc5988aaf075c7c3d8a319798bb11e366fd))
+* **compiler:** add business execution timeline to execution context (P0-3) ([#1515](https://github.com/vibeunion/supacloud/issues/1515)) ([0ec5ace](https://github.com/vibeunion/supacloud/commit/0ec5ace9c5be047a8b73b1da6ed58a5a55ab687b))
+* **compiler:** add validated application resource model ([#1512](https://github.com/vibeunion/supacloud/issues/1512)) ([c7ed93b](https://github.com/vibeunion/supacloud/commit/c7ed93b5cd50107ba0c61ac002e1c254907aa6a5))
+* **compiler:** resolve bounded per-environment resource bindings ([#1523](https://github.com/vibeunion/supacloud/issues/1523)) ([3305d61](https://github.com/vibeunion/supacloud/commit/3305d618be63da23945a537715632760c67784df))
+* **compiler:** ship validated development contexts in delivery builds ([#1518](https://github.com/vibeunion/supacloud/issues/1518)) ([70f944b](https://github.com/vibeunion/supacloud/commit/70f944b3b4f48b265158dfdaf9fbe91878445498))
+* **compiler:** validate complete local runtime bindings before bounded projection ([#1526](https://github.com/vibeunion/supacloud/issues/1526)) ([9b085eb](https://github.com/vibeunion/supacloud/commit/9b085ebd67a79023d0d6f1a44508617fa86b1971))
+* **compiler:** verify immutable release evidence without executing project configuration ([#1525](https://github.com/vibeunion/supacloud/issues/1525)) ([ab9ac43](https://github.com/vibeunion/supacloud/commit/ab9ac436a5cffe13ff46e8afe00d152ba17e2a54))
+* **management-api:** Developer MCP reads application development context (P1-4) ([#1519](https://github.com/vibeunion/supacloud/issues/1519)) ([7d7f0e9](https://github.com/vibeunion/supacloud/commit/7d7f0e9d1d3263614fb1104c3168521e21b69832))
+
+
+### Bug Fixes
+
+* **compiler:** harden execution and development context projections ([#1517](https://github.com/vibeunion/supacloud/issues/1517)) ([822e902](https://github.com/vibeunion/supacloud/commit/822e9026bead5cee9006c83a3f5bfa45cf59c3ed))
+* **dev:** repair watch lifecycle and development reports ([#1524](https://github.com/vibeunion/supacloud/issues/1524)) ([69fd216](https://github.com/vibeunion/supacloud/commit/69fd216cbeb3bc68ca182d488bc86e8061283468))
+
 ## [0.27.4](https://github.com/vibeunion/supacloud/compare/compiler-v0.27.3...compiler-v0.27.4) (2026-09-28)
 
 

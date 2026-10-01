@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.2](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.27.1...edge-runtime-v0.27.2) (2026-09-30)
+
+
+### Bug Fixes
+
+* **edge-runtime:** avoid recycling on idle memory plateau ([#1520](https://github.com/vibeunion/supacloud/issues/1520)) ([1241ee8](https://github.com/vibeunion/supacloud/commit/1241ee83ad1b6f411713a3c00923fdcb3c79de58))
+
 ## [0.27.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.27.0...edge-runtime-v0.27.1) (2026-09-28)
 
 

@@ -97,11 +97,32 @@ Both formatted JSON (including diagnostics) and human-readable output must fit
 messages count toward the same budget. Oversized output fails before printing;
 it is not silently truncated into a partial successful result.
 
+## Local runtime classification
+
+```sh
+supacloud-compiler environment-bindings ./apps/orders --environment fast --profile fast --json
+```
+
+`--profile fast|integration` produces `supacloud.runtime-bindings.v1` with
+`credentials: "resolved-by-local-runner"`. `local` is classified as `ephemeral`;
+a valid namespaced reference is `external`. The `fast` profile rejects every
+non-local declaration, including declarations beyond the 64-entry display cap.
+`integration` accepts local and external references but does not connect to them.
+Both output formats enforce a separate 64 KiB budget after classification.
+
+Production-shaped environment names (`prod`, `production`, `live`, `release`,
+optionally followed by `-` or `_`) are rejected before project configuration is
+loaded. Production-shaped reference destinations are also rejected during
+resolution with `ENVIRONMENT_BINDINGS_PRODUCTION_FORBIDDEN`. These syntax checks
+are not proof that an arbitrary reference is non-production: the future runner
+must independently authorize and identify the destination before connecting.
+
 ## Boundaries and next steps
 
 Only explicit resources are resolved; dynamic SQL, arbitrary `fetch`, and SDK
 calls are not inferred. Nothing connects to or mutates an environment. A binding
 is a declaration, not a runtime credential, health check, or permission proof.
 
-Runtime resolvers for local profiles, deployment preflight, and delivery receipts
-referencing the resolved binding version remain separate implementation slices.
+Connecting these classifications to local runners, deployment preflight, and
+delivery receipts referencing the resolved binding version remain separate
+implementation slices.

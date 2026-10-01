@@ -18,6 +18,7 @@ export class AttachmentsBucket {}
 const DOCUMENT = {
   schema: "supacloud.environments.v1",
   environments: {
+    fast: { bindings: { "orders-db": "local", attachments: "local" } },
     production: { bindings: { "orders-db": "project:orders", attachments: "bucket:attachments" } },
     test: { bindings: { "orders-db": "postgres://user:pass@host/orders" } },
   },
@@ -30,12 +31,14 @@ test("environment-bindings CLI resolves one environment and fails closed on inva
     const child = Bun.spawn([process.execPath, "--no-env-file", cli, ...args], {
       cwd: root, env: { PATH: process.env.PATH ?? "" }, stdout: "pipe", stderr: "pipe",
     });
+    const deadline = setTimeout(() => child.kill(), 10_000);
     try {
       const [status, stdout, stderr] = await Promise.all([
         child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
       ]);
       return { status, stdout, stderr };
     } finally {
+      clearTimeout(deadline);
       if (child.exitCode === null) { child.kill(); await child.exited; }
     }
   };
@@ -65,7 +68,18 @@ test("environment-bindings CLI resolves one environment and fails closed on inva
     const unknown = await invoke(["environment-bindings", "--environment", "staging"]);
     expect(unknown.status).toBe(1);
     expect(unknown.stderr).toContain("ENVIRONMENT_BINDINGS_UNKNOWN_ENVIRONMENT");
+
+    const runtime = await invoke(["environment-bindings", "--environment", "fast", "--profile", "fast", "--json"]);
+    expect(runtime.status).toBe(0);
+    const runtimeProjection = JSON.parse(runtime.stdout);
+    expect(runtimeProjection.schema).toBe("supacloud.runtime-bindings.v1");
+    expect(runtimeProjection.credentials).toBe("resolved-by-local-runner");
+    expect(runtimeProjection.bindings.every((entry: { mode: string }) => entry.mode === "ephemeral")).toBe(true);
+
+    const forbidden = await invoke(["environment-bindings", "--environment", "production", "--profile", "fast"]);
+    expect(forbidden.status).toBe(1);
+    expect(forbidden.stderr).toContain("ENVIRONMENT_BINDINGS_PRODUCTION_FORBIDDEN");
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
+}, 30_000);
