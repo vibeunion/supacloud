@@ -63,9 +63,13 @@ get_state() {
 }
 
 check_tenant() {
-    local conf="$1"
-    local tenant="${conf##*/}"
-    tenant="${tenant%.conf}"
+    local tenant="$1"
+    local conf="$2"
+
+    if [[ -z "$conf" ]]; then
+        echo "missing-config|Tenant ${tenant} has no resolvable PostgREST configuration"
+        return 0
+    fi
 
     local port
     port=$(sed -n 's/^server-port = \([0-9][0-9]*\)$/\1/p' "$conf" | head -n 1)
@@ -96,25 +100,60 @@ check_tenant() {
     echo "ok|healthy"
 }
 
-main() {
-    local any_issue=0
+resolve_tenant_configs() {
+    # Mirror the PostgREST launcher: a tenant on the generation layout is
+    # described by <ref>_postgrest.current -> <ref>_postgrest.d/<sha>.conf, and a
+    # legacy tenant by <ref>.conf. Emit "<ref>\t<conf-path>" for each active
+    # tenant so the watchdog probes the configuration the runtime actually loads.
+    local pointer ref target legacy pointer_refs=""
     shopt -s nullglob
-    local confs=("$TENANT_DIR"/*.conf)
+    local pointers=("$TENANT_DIR"/*_postgrest.current)
+    local legacies=("$TENANT_DIR"/*.conf)
     shopt -u nullglob
 
-    if [[ "${#confs[@]}" -eq 0 ]]; then
+    for pointer in ${pointers[@]+"${pointers[@]}"}; do
+        [[ "$pointer" == *.bak* ]] && continue
+        ref="${pointer##*/}"
+        ref="${ref%_postgrest.current}"
+        [[ -n "$ref" ]] || continue
+        target=""
+        if IFS= read -r target < "$pointer" \
+            && [[ "$target" =~ ^${ref}_postgrest\.d/[a-f0-9]{64}\.conf$ ]] \
+            && [[ -f "$TENANT_DIR/$target" ]]; then
+            printf '%s\t%s\n' "$ref" "$TENANT_DIR/$target"
+        else
+            printf '%s\t%s\n' "$ref" ""
+        fi
+        pointer_refs="${pointer_refs} ${ref}"
+    done
+
+    for legacy in ${legacies[@]+"${legacies[@]}"}; do
+        [[ "$legacy" == *.bak* ]] && continue
+        ref="${legacy##*/}"
+        ref="${ref%.conf}"
+        [[ -n "$ref" ]] || continue
+        case "${pointer_refs} " in
+            *" ${ref} "*) continue ;;
+        esac
+        printf '%s\t%s\n' "$ref" "$legacy"
+    done
+}
+
+main() {
+    local any_issue=0
+    local configs
+    configs="$(resolve_tenant_configs)"
+
+    if [[ -z "$configs" ]]; then
         logger -t supacloud-postgrest-watchdog "[info] no tenant config files found under ${TENANT_DIR}"
         exit 0
     fi
 
-    for conf in "${confs[@]}"; do
-        [[ "$conf" == *.bak* ]] && continue
+    local tenant conf result issue detail fingerprint previous
+    while IFS=$'\t' read -r tenant conf; do
+        [[ -n "$tenant" ]] || continue
 
-        local tenant="${conf##*/}"
-        tenant="${tenant%.conf}"
-
-        local result issue detail fingerprint previous
-        result=$(check_tenant "$conf")
+        result=$(check_tenant "$tenant" "$conf")
         issue="${result%%|*}"
         detail="${result#*|}"
         previous="$(get_state "$tenant")"
@@ -133,7 +172,7 @@ main() {
             send_alert "critical" "$tenant" "$detail"
             set_state "$tenant" "$fingerprint"
         fi
-    done
+    done <<< "$configs"
 
     if [[ "$any_issue" -ne 0 ]]; then
         exit 1
