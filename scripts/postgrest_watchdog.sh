@@ -76,8 +76,11 @@ check_tenant() {
 
     local http_code
     http_code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 3 "http://127.0.0.1:${port}/" || true)
-    if [[ "$http_code" != "200" ]]; then
-        echo "http-${http_code}|Local PostgREST probe on 127.0.0.1:${port} returned HTTP ${http_code}"
+    # A reachable PostgREST answers 401 (or 404) to an unauthenticated root probe;
+    # that is healthy. Only a failed connection or a 5xx — for example the 503
+    # raised when the schema cache cannot load — is an incident.
+    if [[ ! "$http_code" =~ ^[1-4][0-9]{2}$ ]]; then
+        echo "http-${http_code}|Local PostgREST probe on 127.0.0.1:${port} returned HTTP ${http_code:-no-response}"
         return 0
     fi
 

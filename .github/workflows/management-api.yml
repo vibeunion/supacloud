@@ -594,6 +594,7 @@ jobs:
           bash scripts/lib/systemd_unit_broker.test.sh
           bash scripts/lib/application_bun_runtime.test.sh
           bash scripts/lib/edge_runtime_source.test.sh
+          bash scripts/lib/postgrest_watchdog.test.sh
 
       - name: Validate Realtime slot-isolation trust root
         run: python3 -m unittest infrastructure/realtime/test_apply_slot_isolation.py
