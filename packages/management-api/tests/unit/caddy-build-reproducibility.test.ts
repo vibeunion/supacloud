@@ -102,12 +102,26 @@ describe("Caddy release build reproducibility", () => {
 
   test("management CI pins Linux runners without changing the Windows lane", () => {
     const parsed = Bun.YAML.parse(workflow) as {
-      jobs: Record<string, { "runs-on": string }>;
+      jobs: Record<string, { "runs-on"?: string; uses?: string }>;
     };
     for (const [id, job] of Object.entries(parsed.jobs)) {
+      // A reusable-workflow call has no runner of its own; the called workflow
+      // pins its own, which is asserted below.
+      if (job.uses) continue;
       expect(job["runs-on"]).toBe(
         id === "supacloud-lite-windows" ? "windows-latest" : "ubuntu-24.04",
       );
+    }
+    const delegated = readFileSync(
+      new URL("../../../../.github/workflows/app-generation.yml", import.meta.url),
+      "utf8",
+    );
+    const delegatedJobs = Bun.YAML.parse(delegated) as {
+      jobs: Record<string, { "runs-on"?: string; uses?: string }>;
+    };
+    for (const job of Object.values(delegatedJobs.jobs)) {
+      if (job.uses) continue;
+      expect(job["runs-on"]).toBe("ubuntu-24.04");
     }
   });
 
