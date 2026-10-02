@@ -31,7 +31,7 @@
     "typecheck": "bun x tsc --noEmit -p tsconfig.json",
     "test": "bun test"
   },
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/vibeunion/supacloud.git",
@@ -44,6 +44,9 @@
     "@sveltejs/kit": {
       "optional": true
     }
+  },
+  "overrides": {
+    "cookie": "0.7.2"
   },
   "devDependencies": {
     "@sveltejs/kit": "^2.70.3",

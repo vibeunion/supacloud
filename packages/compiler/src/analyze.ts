@@ -175,6 +175,10 @@ function hasDestroyHook(cls: ts.ClassDeclaration): boolean {
   return hasMethod(cls, "onDestroy") || hasMethod(cls, "ngOnDestroy");
 }
 
+function hasInitHook(cls: ts.ClassDeclaration): boolean {
+  return hasMethod(cls, "onInit");
+}
+
 function descendantsOfKind<T extends ts.Node>(
   root: ts.Node,
   predicate: (node: ts.Node) => node is T,
@@ -430,6 +434,7 @@ export async function analyzeProject(
           ...(functionalInjects.length > 0 ? { functionalInjects } : {}),
           providedIn: "root",
           ...(hasDestroyHook(classInfo.decl) ? { hasOnDestroy: true } : {}),
+          ...(hasInitHook(classInfo.decl) ? { hasOnInit: true } : {}),
           exported: true,
           file,
           line,
@@ -808,6 +813,7 @@ function parseModule(
       ...(deps.hostDeps.length > 0 ? { hostDeps: deps.hostDeps } : {}),
       ...(deps.functionalInjects.length > 0 ? { functionalInjects: deps.functionalInjects } : {}),
       ...(hasDestroyHook(decl) ? { hasOnDestroy: true } : {}),
+      ...(hasInitHook(decl) ? { hasOnInit: true } : {}),
       exported: exportsSet.has(className),
       file: sourcePath(ctx.rootDir, decl.getSourceFile().fileName),
       line: lineOf(decl),
@@ -1168,6 +1174,7 @@ function parseProvider(
       ...(functionalInjects.length > 0 ? { functionalInjects } : {}),
       ...(injectable?.providedIn ? { providedIn: injectable.providedIn } : {}),
       ...(cls && hasDestroyHook(cls) ? { hasOnDestroy: true } : {}),
+      ...(cls && hasInitHook(cls) ? { hasOnInit: true } : {}),
       exported: exportsSet.has(className),
       file,
       line,
@@ -1237,6 +1244,7 @@ function parseProvider(
       ...(multi === undefined ? {} : { multi }),
       ...(injectable?.providedIn ? { providedIn: injectable.providedIn } : {}),
       ...(cls && hasMethod(cls, "onDestroy") ? { hasOnDestroy: true } : {}),
+      ...(cls && hasInitHook(cls) ? { hasOnInit: true } : {}),
       exported: exportsSet.has(token),
       file,
       line,
@@ -2018,6 +2026,7 @@ function parseController(
     scope: injectable?.scope ?? "request",
     deps,
     ...(hasDestroyHook(decl) ? { hasOnDestroy: true } : {}),
+    ...(hasInitHook(decl) ? { hasOnInit: true } : {}),
     ...(optionalDeps.length > 0 ? { optionalDeps } : {}),
     ...(selfDeps.length > 0 ? { selfDeps } : {}),
     ...(skipSelfDeps.length > 0 ? { skipSelfDeps } : {}),
