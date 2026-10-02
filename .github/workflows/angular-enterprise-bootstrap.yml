@@ -1,0 +1,45 @@
+name: Angular enterprise verification environment
+
+on:
+  push:
+    branches: [feat/angular-enterprise-completion]
+    paths: [.github/workflows/angular-enterprise-bootstrap.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  environment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Record source and prepare package dependencies
+        run: |
+          git rev-parse HEAD
+          bun --version
+          bun run scripts/build-command-dependencies.ts app
+          bun run scripts/build-command-dependencies.ts compiler
+          bun run scripts/build-command-dependencies.ts supacloud-js
+      - name: Export source and verification runtime (no credentials or git directory)
+        if: always()
+        run: |
+          mkdir -p /tmp/angular-enterprise-evidence
+          git archive --format=tar HEAD > /tmp/angular-enterprise-evidence/source.tar
+          find packages -maxdepth 2 -type d \( -name node_modules -o -name dist \) -print0 > /tmp/angular-enterprise-paths
+          tar --null -T /tmp/angular-enterprise-paths -cf /tmp/angular-enterprise-evidence/dependencies.tar
+          cp "$(command -v bun)" /tmp/angular-enterprise-evidence/bun
+          git rev-parse HEAD > /tmp/angular-enterprise-evidence/commit.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: angular-enterprise-verification-environment
+          path: /tmp/angular-enterprise-evidence/
+          retention-days: 1
+          compression-level: 1
