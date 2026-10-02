@@ -283,7 +283,8 @@ describe("Aponia-inspired lifecycle behavior on the existing runtime API", () =>
         process.exitCode = initialExitCode;
         const listener = process.listeners("SIGTERM").find((entry) => !before.has(entry));
         if (!listener) throw new Error("Expected the application signal listener");
-        listener("SIGTERM");        const error: unknown = await app.stop().catch((reason: unknown) => reason);
+        listener("SIGTERM");
+        const error: unknown = await app.stop().catch((reason: unknown) => reason);
         expect(error).toBe(failure);
         expect(process.exitCode).toBe(initialExitCode || 1);
         expect(report).toHaveBeenCalledTimes(1);
@@ -291,7 +292,8 @@ describe("Aponia-inspired lifecycle behavior on the existing runtime API", () =>
         expect(process.listeners("SIGTERM").filter((entry) => !before.has(entry))).toEqual([]);
       } finally {
         await app.stop().catch(() => undefined);
-        process.exitCode = exitCode;
+        // Bun does not clear a previously set exit code when assigned undefined.
+        process.exitCode = exitCode ?? 0;
         report.mockRestore();
       }
     });
