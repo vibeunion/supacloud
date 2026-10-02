@@ -3,21 +3,38 @@
   "version": "0.7.0",
   "description": "SupaCloud command protocol with optional client and browser entrypoints",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/index.cjs",
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./client": {
-      "types": "./dist/client.d.ts",
-      "import": "./dist/client.js"
+      "import": {
+        "types": "./dist/client.d.mts",
+        "default": "./dist/client.mjs"
+      },
+      "require": {
+        "types": "./dist/client.d.cts",
+        "default": "./dist/client.cjs"
+      }
     },
     "./browser": {
-      "types": "./dist/browser.d.ts",
-      "import": "./dist/browser.js"
+      "import": {
+        "types": "./dist/browser.d.mts",
+        "default": "./dist/browser.mjs"
+      },
+      "require": {
+        "types": "./dist/browser.d.cts",
+        "default": "./dist/browser.cjs"
+      }
     }
   },
   "files": [
@@ -27,13 +44,16 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/client.ts src/browser.ts --outdir dist --target browser --splitting",
-    "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
+    "build": "bun run clean && bun run build:js && bun run build:types",
+    "build:js": "bun run build:js:esm && bun run build:js:cjs",
+    "build:types": "tsc -p tsconfig.json --emitDeclarationOnly && node ../../scripts/copy-dual-declarations.mjs dist",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
     "test": "bun test",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bun run build",
+    "build:js:esm": "bun build src/index.ts src/client.ts src/browser.ts --outdir dist --format esm --entry-naming \"[name].mjs\" --chunk-naming \"[name]-[hash].mjs\" --target browser --splitting",
+    "build:js:cjs": "bun build src/index.ts src/client.ts src/browser.ts --outdir dist --format cjs --entry-naming \"[name].cjs\" --chunk-naming \"[name]-[hash].cjs\" --target browser",
+    "clean": "rm -rf dist"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
@@ -44,5 +64,6 @@
     "type": "git",
     "url": "https://github.com/vibeunion/supacloud.git",
     "directory": "packages/contracts"
-  }
+  },
+  "module": "./dist/index.mjs"
 }

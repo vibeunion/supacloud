@@ -3,33 +3,49 @@
   "version": "0.35.0",
   "description": "Platform SDK for SupaCloud, built on top of supabase-js",
   "type": "module",
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "module-sync": "./dist/index.js",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./task-events": {
-      "types": "./dist/task-events.d.ts",
-      "module-sync": "./dist/task-events.js",
-      "import": "./dist/task-events.js",
-      "default": "./dist/task-events.js"
+      "import": {
+        "types": "./dist/task-events.d.mts",
+        "default": "./dist/task-events.mjs"
+      },
+      "require": {
+        "types": "./dist/task-events.d.cts",
+        "default": "./dist/task-events.cjs"
+      }
     },
     "./contracts": {
-      "types": "./dist/contracts.d.ts",
-      "module-sync": "./dist/contracts.js",
-      "import": "./dist/contracts.js",
-      "default": "./dist/contracts.js"
+      "import": {
+        "types": "./dist/contracts.d.mts",
+        "default": "./dist/contracts.mjs"
+      },
+      "require": {
+        "types": "./dist/contracts.d.cts",
+        "default": "./dist/contracts.cjs"
+      }
     },
     "./reactive": {
-      "types": "./dist/reactive.d.ts",
-      "module-sync": "./dist/reactive.js",
-      "import": "./dist/reactive.js",
-      "default": "./dist/reactive.js"
+      "import": {
+        "types": "./dist/reactive.d.mts",
+        "default": "./dist/reactive.mjs"
+      },
+      "require": {
+        "types": "./dist/reactive.d.cts",
+        "default": "./dist/reactive.cjs"
+      }
     }
   },
   "files": [
@@ -43,14 +59,16 @@
   "scripts": {
     "test": "bun test",
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/task-events.ts --outdir dist --target node --external @supabase/supabase-js --external @supacloud/contracts && bun build src/contracts.ts --outdir dist --target browser --external @supacloud/contracts && bun build src/reactive.ts --outdir dist --target browser --external rxjs",
-    "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
+    "build:js": "bun run build:js:esm && bun run build:js:cjs",
+    "build:types": "tsc -p tsconfig.json --emitDeclarationOnly && node ../../scripts/copy-dual-declarations.mjs dist",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build && bun run check:package",
     "typecheck:consumer": "tsc -p tsconfig.consumer.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
-    "check:package": "node ../../.github/scripts/esm-package-policy.mjs --pack ."
+    "check:package": "node ../../.github/scripts/esm-package-policy.mjs --pack .",
+    "build:js:esm": "bun build src/index.ts src/task-events.ts --outdir dist --format esm --entry-naming \"[name].mjs\" --chunk-naming \"[name]-[hash].mjs\" --target node --external @supabase/supabase-js --external @supacloud/contracts && bun build src/contracts.ts --outdir dist --format esm --entry-naming \"[name].mjs\" --chunk-naming \"[name]-[hash].mjs\" --target browser --external @supacloud/contracts && bun build src/reactive.ts --outdir dist --format esm --entry-naming \"[name].mjs\" --chunk-naming \"[name]-[hash].mjs\" --target browser --external rxjs",
+    "build:js:cjs": "bun build src/index.ts src/task-events.ts --outdir dist --format cjs --entry-naming \"[name].cjs\" --chunk-naming \"[name]-[hash].cjs\" --target node --external @supabase/supabase-js --external @supacloud/contracts && bun build src/contracts.ts --outdir dist --format cjs --entry-naming \"[name].cjs\" --chunk-naming \"[name]-[hash].cjs\" --target browser --external @supacloud/contracts && bun build src/reactive.ts --outdir dist --format cjs --entry-naming \"[name].cjs\" --chunk-naming \"[name]-[hash].cjs\" --target browser --external rxjs"
   },
   "keywords": [
     "supacloud",
