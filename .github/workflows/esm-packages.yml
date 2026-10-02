@@ -1,0 +1,64 @@
+name: ESM Package Contracts
+
+on:
+  pull_request:
+    paths:
+      - 'packages/**'
+      - '.github/scripts/esm-package*'
+      - '.github/scripts/prepare-command-package.mjs'
+      - '.github/scripts/package-validation.mjs'
+      - '.github/scripts/npm-registry-visibility.mjs'
+      - '.github/workflows/esm-packages.yml'
+  push:
+    branches: [main, dev]
+    paths:
+      - 'packages/**'
+      - '.github/scripts/esm-package*'
+      - '.github/scripts/prepare-command-package.mjs'
+      - '.github/scripts/package-validation.mjs'
+      - '.github/scripts/npm-registry-visibility.mjs'
+      - '.github/workflows/esm-packages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: esm-packages-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  esm-policy:
+    name: First-party ESM policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+      - run: node --test .github/scripts/esm-package-policy.test.mjs
+      - run: node .github/scripts/esm-package-policy.mjs
+
+  esm-consumers:
+    name: Installed ESM consumers (Node and Bun)
+    needs: esm-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Build candidate packages in dependency order
+        run: |
+          for package in contracts delivery app supacloud-js compiler; do
+            (cd "packages/$package" && bun install --frozen-lockfile && bun run build)
+          done
+      - name: Check the application publish inventory
+        run: bun run --cwd packages/app check:package
+      - name: Install real tarballs and verify public entrypoints
+        run: node .github/scripts/esm-package.acceptance.mjs
