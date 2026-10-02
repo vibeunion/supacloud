@@ -96,9 +96,16 @@ console.log('SDK synchronous require/import compatibility passed: ${order}');
 /** @param {boolean} commonjs */
 export function sdkTypeConsumer(commonjs) {
   const imports = commonjs
-    ? `import sdk = require('@supacloud/js');\nimport events = require('@supacloud/js/task-events');\nimport contracts = require('@supacloud/js/contracts');`
-    : `import * as sdk from '@supacloud/js';\nimport * as events from '@supacloud/js/task-events';\nimport * as contracts from '@supacloud/js/contracts';`;
+    ? `import sdk = require('@supacloud/js');\nimport events = require('@supacloud/js/task-events');\nimport contracts = require('@supacloud/js/contracts');\nimport upstream = require('@supabase/supabase-js');`
+    : `import * as sdk from '@supacloud/js';\nimport * as events from '@supacloud/js/task-events';\nimport * as contracts from '@supacloud/js/contracts';\nimport * as upstream from '@supabase/supabase-js';`;
   return imports + `
+// The normal integration must type-check too, not just reject invalid calls.
+const upstreamClient = upstream.createClient('https://sdk-compat.example.invalid', 'test-anon-key', {
+  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+});
+export const integratedClient = sdk.createSupaCloudClient({
+  supabase: upstreamClient, projectRef: 'abcd1234', managementApiUrl: 'https://management.example.invalid',
+});
 // These fail if export resolution silently degrades to any.
 type IsAny<T> = 0 extends (1 & T) ? true : false;
 export const factoryHasTypes: IsAny<typeof sdk.createSupaCloudClient> = false;
