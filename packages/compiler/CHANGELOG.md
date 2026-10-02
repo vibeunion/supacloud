@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.30.0...compiler-v0.31.0) (2026-10-02)
+
+
+### Features
+
+* **compiler:** add line-ending-normalized GraphQL schema diagnostics ([#1595](https://github.com/vibeunion/supacloud/issues/1595)) ([5aa4ec5](https://github.com/vibeunion/supacloud/commit/5aa4ec50a82fbf1b0a22b051039516ab5e46cf9c))
+
 ## [0.30.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.29.0...compiler-v0.30.0) (2026-10-02)
 
 
