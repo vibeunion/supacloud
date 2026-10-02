@@ -26,7 +26,6 @@ export const HTTP_INTERCEPTORS = new InjectionToken<HttpInterceptorFn[]>(
   "HTTP_INTERCEPTORS",
   { scope: "application", factory: () => [] },
 );
-
 export type HttpClientFeatureKind = "Fetch" | "Interceptors" | "ParentRequests";
 
 export interface HttpClientFeature {
