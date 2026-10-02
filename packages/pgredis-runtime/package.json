@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/pgredis-runtime",
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "version": "0.10.1",
   "private": true,
   "type": "module",
