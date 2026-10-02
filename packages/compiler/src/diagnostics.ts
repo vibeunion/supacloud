@@ -24,8 +24,14 @@ export function createDiagnosticReport(diagnostics: readonly Diagnostic[]): Diag
 export function toEditorDiagnostics(diagnostics: readonly Diagnostic[]) {
   return createDiagnosticReport(diagnostics).entries.map(entry => ({
     range: {
-      start: { line: Math.max(0, (entry.diagnostic.line ?? 1) - 1), character: 0 },
-      end: { line: Math.max(0, (entry.diagnostic.line ?? 1) - 1), character: 0 },
+      start: {
+        line: Math.max(0, (entry.diagnostic.line ?? 1) - 1),
+        character: Math.max(0, entry.diagnostic.column ?? 0),
+      },
+      end: {
+        line: Math.max(0, (entry.diagnostic.endLine ?? entry.diagnostic.line ?? 1) - 1),
+        character: Math.max(0, entry.diagnostic.endColumn ?? entry.diagnostic.column ?? 0),
+      },
     },
     severity: entry.diagnostic.severity === "error" ? 1 as const : 2 as const,
     source: "supacloud",
@@ -34,4 +40,34 @@ export function toEditorDiagnostics(diagnostics: readonly Diagnostic[]) {
     message: entry.diagnostic.message + (entry.guidance ? `\n${entry.guidance}` : ""),
     data: { format: 1 as const, ...entry },
   }));
+}
+
+/** Semantic editor commands are emitted only after a successful read-only preview.
+ * Consumers execute the command through applyDiagnosticFix with expectedSourceHash;
+ * source drift or changed semantic preconditions reject the action.
+ */
+export async function createEditorCodeActions(diagnostics: readonly Diagnostic[], options: { rootDir?: string } = {}) {
+  const { applyDiagnosticFix } = await import("./fixes");
+  const actions: Array<{
+    title: string;
+    kind: "quickfix";
+    command: { title: string; command: "supacloud.applyDiagnosticFix";
+      arguments: [{ fix: NonNullable<Diagnostic["fix"]>; expectedSourceHash: string }] };
+    data: { file: string; preview: string };
+  }> = [];
+  for (const entry of createDiagnosticReport(diagnostics).entries) {
+    if (entry.repair?.readiness !== "preview") continue;
+    try {
+      const preview = await applyDiagnosticFix(entry.repair.fix, { ...options, dryRun: true });
+      if (!preview.changed) continue;
+      const title = `Apply ${entry.repair.type}`;
+      actions.push({ title, kind: "quickfix", command: {
+        title, command: "supacloud.applyDiagnosticFix",
+        arguments: [{ fix: entry.repair.fix, expectedSourceHash: preview.sourceHash }],
+      }, data: { file: preview.file, preview: preview.content } });
+    } catch {
+      // Stale, ambiguous or unsupported suggestions remain diagnostics only.
+    }
+  }
+  return actions;
 }

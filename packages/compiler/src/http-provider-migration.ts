@@ -88,8 +88,11 @@ export function scanHttpProviderImports(source: ts.SourceFile, file: string): Di
     if (ts.isCallExpression(node)) {
       const origin = apiOrigin(node.expression, checker);
       if (origin?.module === "@supacloud/app" && origin.name === "withInterceptors" && providerArgument(node.expression, checker)) {
+        const start = sf.getLineAndCharacterOfPosition(node.getStart(sf));
+        const end = sf.getLineAndCharacterOfPosition(node.end);
         diagnostics.push({ severity: "error", code: "http-provider-import-mismatch", file,
-          line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+          line: start.line + 1, column: start.character,
+          endLine: end.line + 1, endColumn: end.character,
           message: "The root withInterceptors returns an interceptor array, not a provideHttpClient feature.",
           suggestion: "Import withInterceptors from @supacloud/app/http. Preview the http-provider-entrypoint source migration; mixed/namespace uses require manual review.",
           docsUrl: "https://supacloud.dev/errors/http-provider-import-mismatch",

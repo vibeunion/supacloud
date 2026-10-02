@@ -8,6 +8,9 @@ test("all official starters install the same RxJS version and emit the reactive 
     const manifest = JSON.parse(files["package.json"]!) as { dependencies: Record<string, string> };
     expect(manifest.dependencies.rxjs).toBe(appMetadata.dependencies.rxjs);
     expect(files["REACTIVE.md"]).toContain("client.supabase");
+    expect(files["REACTIVE.md"]).toContain("@supacloud/app/angular");
+    expect(files["REACTIVE.md"]).toContain("legacy root signal graph");
+    expect(files["AGENTS.md"]).toContain("@supacloud/app/angular");
     expect(files["REACTIVE.md"]).toContain("onCursor");
     expect(files["AGENTS.md"]).toContain("REACTIVE.md");
     expect(files["tests/reactive.test.ts"]).toContain("takeUntilAborted");

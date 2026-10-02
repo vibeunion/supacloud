@@ -85,6 +85,10 @@ export interface Diagnostic {
   message: string;
   file?: string;
   line?: number;
+  /** Zero-based source columns and optional end position for editor consumers. */
+  column?: number;
+  endLine?: number;
+  endColumn?: number;
   /** Actionable Angular Ivy-style remediation hint. */
   suggestion?: string;
   /** Standardized compiler diagnostic code (e.g. SC1001) modeled after Angular ngtsc error codes. */

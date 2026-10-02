@@ -7,6 +7,7 @@ import type {
   CommandRuntimeInvocation,
   CommandRuntimeMiddleware,
 } from "@supacloud/app";
+import { PendingWorkRegistry, PendingWorkTimeoutError } from "@supacloud/app/runtime";
 import { decodeCommandPreview, type CommandPreview } from "@supacloud/contracts";
 import { commandErrorCode, commandErrorStatus } from "./command-errors";
 import { compileHttpPolicies, type HttpPolicyRegistry } from "./http-policy";
@@ -532,6 +533,7 @@ export type ApplicationHttpContext<Http extends AnyElysia = Elysia> =
 export type HttpRequestContextFactory<Http extends AnyElysia = Elysia, Value = unknown> = (
   request: Request,
   context: ApplicationHttpContext<Http>,
+  signal?: AbortSignal,
 ) => Value | Promise<Value>;
 
 export interface ApplicationOptions<Http extends AnyElysia = Elysia, RequestContext = unknown> {
@@ -558,6 +560,8 @@ export interface ApplicationOptions<Http extends AnyElysia = Elysia, RequestCont
   onExecution?: ExecutionObserver;
   /** Optional read-only OpenAPI and GraphQL documentation endpoints. */
   documentation?: ApplicationDocumentationOptions;
+  /** Bounded lifecycle work accounting; registries remain owned by each host. */
+  pendingWork?: { capacity?: number; shutdownTimeoutMs?: number };
 }
 
 /** Lifecycle controls exposed by createApplication for explicit host startup/shutdown. */
@@ -566,6 +570,8 @@ export interface ApplicationLifecycle {
   readonly destroyed: boolean;
   initialize(): Promise<void>;
   destroy(): Promise<void>;
+  readonly pendingWork: PendingWorkRegistry;
+  waitForIdle(options?: { timeoutMs?: number; includeBackground?: boolean }): Promise<void>;
 }
 
 export interface JobInvocation {
@@ -1036,6 +1042,7 @@ export function createModulePlugin<
   ctxFactory: HttpRequestContextFactory<Http> = defaultRequestContext,
   options: Pick<ApplicationOptions<Http>, "http" | "httpPolicies" | "commandGovernance" | "commandExecutor" | "errorMapper" | "onExecution" | "normalize"> = {},
   imported: Record<string, Record<string, unknown>> = {},
+  pendingWork?: PendingWorkRegistry,
 ) {
   // Compiled descriptors are also loadable from JavaScript and older generators.
   // Reject options we cannot preserve instead of silently dropping native hooks.
@@ -1092,6 +1099,7 @@ export function createModulePlugin<
     }
   }
   const requestContexts = new WeakMap<Request, unknown>();
+  const requestCompletions = new WeakMap<Request, () => void>();
   const governanceExecutor = options.commandGovernance
     ? createCommandExecutor(options.commandGovernance, options.onExecution)
     : undefined;
@@ -1101,7 +1109,12 @@ export function createModulePlugin<
 
   const plugin = mountHttp(options.http, `supacloud:${compiled.name}`, options.normalize ?? true)
     .derive(async (context) => {
-      const requestContext = await ctxFactory(context.request, context as ApplicationHttpContext<Http>);
+      if (pendingWork?.closed) throw new ApplicationError("Application is stopping", { status: 503, code: "APPLICATION_STOPPING" });
+      const complete = pendingWork?.add({ name: "http.request", kind: "request" });
+      if (complete) requestCompletions.set(context.request, complete);
+      const signal = pendingWork
+        ? AbortSignal.any([context.request.signal, pendingWork.signal]) : context.request.signal;
+      const requestContext = await ctxFactory(context.request, context as ApplicationHttpContext<Http>, signal);
       requestContexts.set(context.request, requestContext);
       // Elysia merges decorators across siblings. Resolve the original map
       // locally so colliding service names cannot change module ownership.
@@ -1110,19 +1123,18 @@ export function createModulePlugin<
 
   const createRequestScope = compiled.createRequestScope;
   const requestScopes = new WeakMap<Request, Record<string, unknown>>();
-  if (compiled.destroyRequestScope) {
-    const destroyRequestScope = compiled.destroyRequestScope;
-    plugin.afterResponse(async ({ request }) => {
-      const scope = requestScopes.get(request);
-      if (!scope) return;
-      requestScopes.delete(request);
-      try {
-        await destroyRequestScope(scope);
-      } catch (error) {
-        console.error(`supacloud: request scope cleanup failed for "${compiled.name}"`, error);
-      }
-    });
-  }
+  plugin.afterResponse(async ({ request }) => {
+    const scope = requestScopes.get(request);
+    requestScopes.delete(request);
+    try {
+      if (scope) await compiled.destroyRequestScope?.(scope);
+    } catch (error) {
+      console.error(`supacloud: request scope cleanup failed for "${compiled.name}"`, error);
+    } finally {
+      requestCompletions.get(request)?.();
+      requestCompletions.delete(request);
+    }
+  });
   // Bind before routes and keep the handler local to its module's request context.
   plugin.error(async ({ error, request }) => {
     const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
@@ -1495,15 +1507,16 @@ function isPublicApplicationError(error: unknown): error is PublicApplicationErr
 export function createApplication<const Http extends AnyElysia = Elysia>(
   options: ApplicationOptions<Http>,
 ) {
+  const pendingWork = new PendingWorkRegistry(options.pendingWork ? { capacity: options.pendingWork.capacity } : {});
   const app = new Elysia({ name: options.name ?? "supacloud:app", normalize: options.normalize ?? true })
     .use(contextPlugin(options.http).as("global"));
   if (options.documentation) app.use(createDocumentationPlugin(options.documentation));
   const configuredContextFactory = options.requestContext ?? defaultRequestContext;
   const contextCache = new WeakMap<Request, Promise<unknown>>();
-  const ctxFactory: HttpRequestContextFactory<Http> = (request, context) => {
+  const ctxFactory: HttpRequestContextFactory<Http> = (request, context, signal) => {
     const cached = contextCache.get(request);
     if (cached) return cached;
-    const pending = Promise.resolve(configuredContextFactory(request, context));
+    const pending = Promise.resolve().then(() => configuredContextFactory(request, context, signal));
     contextCache.set(request, pending);
     return pending;
   };
@@ -1516,42 +1529,49 @@ export function createApplication<const Http extends AnyElysia = Elysia>(
     moduleServices.push({ module, services });
     // The root owns shared HTTP hooks; mounting them again on each module
     // duplicates anonymous global hooks in Elysia 2.
-    app.use(createModulePlugin(module, services, ctxFactory, { ...options, http: undefined }, imported));
+    app.use(createModulePlugin(module, services, ctxFactory, { ...options, http: undefined }, imported, pendingWork));
   }
 
   let initialized = false;
   let destroyed = false;
   let initializationPromise: Promise<void> | undefined;
   let destructionPromise: Promise<void> | undefined;
-
   const lifecycle: ApplicationLifecycle = {
     get initialized() { return initialized; },
     get destroyed() { return destroyed; },
+    pendingWork,
+    waitForIdle(options) { return pendingWork.waitForIdle(options); },
     initialize(): Promise<void> {
       if (destroyed) return Promise.reject(new Error("Application has already been destroyed"));
       if (initializationPromise) return initializationPromise;
-      initializationPromise = (async () => {
-        try {
-          for (const { module, services } of moduleServices) {
-            await module.initializeServices?.(services);
-          }
-          initialized = true;
-        } catch (error) {
-          try {
-            await lifecycle.destroy();
-          } catch (cleanupError) {
-            throw new AggregateError([error, cleanupError], "Application initialization failed and cleanup failed");
-          }
-          throw error;
+      const startup = pendingWork.run({ name: "application.startup", kind: "startup" }, () => Promise.resolve().then(async () => {
+        for (const { module, services } of moduleServices) {
+          await module.initializeServices?.(services);
         }
-      })();
-      return initializationPromise;
+        initialized = !destroyed;
+      })).catch(async (error: unknown) => {
+        try { await lifecycle.destroy(); }
+        catch (cleanupError) {
+          throw new AggregateError([error, cleanupError], "Application initialization failed and cleanup failed");
+        }
+        throw error;
+      });
+      initializationPromise = startup;
+      return startup;
     },
     destroy(): Promise<void> {
       if (destructionPromise) return destructionPromise;
       destroyed = true;
-      destructionPromise = (async () => {
+      pendingWork.close();
+      destructionPromise = Promise.resolve().then(async () => {
+        pendingWork.dispose();
         const errors: unknown[] = [];
+        try { await pendingWork.waitForIdle({ timeoutMs: options.pendingWork?.shutdownTimeoutMs ?? 5000 }); }
+        catch (error) {
+          if (error instanceof PendingWorkTimeoutError) destructionPromise = undefined;
+          throw error;
+        }
+        pendingWork.dispose();
         for (const { module, services } of [...moduleServices].reverse()) {
           try {
             await module.destroyServices?.(services);
@@ -1562,7 +1582,7 @@ export function createApplication<const Http extends AnyElysia = Elysia>(
         if (errors.length > 0) {
           throw new AggregateError(errors, "Application destruction failed");
         }
-      })();
+      });
       return destructionPromise;
     },
   };
@@ -1570,6 +1590,8 @@ export function createApplication<const Http extends AnyElysia = Elysia>(
   Object.defineProperties(app, {
     initialized: { enumerable: true, configurable: false, get: () => lifecycle.initialized },
     destroyed: { enumerable: true, configurable: false, get: () => lifecycle.destroyed },
+    pendingWork: { enumerable: true, configurable: false, value: pendingWork },
+    waitForIdle: { enumerable: true, configurable: false, value: lifecycle.waitForIdle },
     initialize: { enumerable: true, configurable: false, value: lifecycle.initialize },
     destroy: { enumerable: true, configurable: false, value: lifecycle.destroy },
   });

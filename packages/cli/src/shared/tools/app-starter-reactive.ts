@@ -5,6 +5,12 @@ RxJS is installed by default. Ordinary queries and business commands still use
 async/await. Use RxJS for ongoing events and timing/composition, not as a new
 transaction, retry or durable-delivery system.
 
+Host defaults:
+- In a native Angular host, use signal/resource APIs from @supacloud/app/angular
+  and Angular's scheduler. Do not mix them with the legacy root signal graph.
+- In framework-neutral code, use async/await for one result and RxJS for event
+  composition. The host owns cancellation through an explicit signal.
+
 - Import native operators from rxjs; do not invent another event/operator library.
 - Import takeUntilAborted / toReadableStream from @supacloud/app/reactive.
 - Every subscription belongs to a request, connection, task or application owner.
@@ -49,7 +55,9 @@ framework/SDK release or the packed candidate packages used by repository CI.
 
 export const STARTER_REACTIVE_AGENTS = `# Application development rules
 
-Read README.md and REACTIVE.md before adding asynchronous features.
+Read README.md and REACTIVE.md before adding asynchronous features. If the
+application is hosted by Angular, read the @supacloud/app/angular guidance
+before choosing a signal API.
 Prefer the generated contracts and existing project-bound @supacloud/js client.
 Use async/await for a single result; RxJS is the default event-composition library.
 Bind subscriptions to an explicit owner and propagate cancellation to native I/O.

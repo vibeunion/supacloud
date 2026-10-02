@@ -31,7 +31,7 @@ const run = (args: string[], cwd = project): Promise<string> => runStarterComman
 try {
   for (const directory of [project, env.HOME, env.BUN_TMPDIR]) await mkdir(directory, { recursive: true });
   const overrides: Record<string, string> = {};
-  for (const directory of ["contracts", "app", "testing", "delivery", "compiler"]) {
+  for (const directory of ["contracts", "app", "testing", "delivery", "compiler", "commands", "db", "elysia"]) {
     const root = join(repo, "packages", directory);
     const metadata = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
     await readFile(join(root, "dist/index.js"));
@@ -48,12 +48,13 @@ try {
     overrides[metadata.name] = `file:${join(temporary, packed)}`;
   }
   const app = JSON.parse(await readFile(join(repo, "packages/app/package.json"), "utf8"));
-  const angularVersion = app.peerDependencies?.["@angular/core"] ?? app.dependencies?.["@angular/core"];
+  const angularVersion = process.env.SUPACLOUD_ANGULAR_TEST_VERSION
+    ?? app.peerDependencies?.["@angular/core"] ?? app.dependencies?.["@angular/core"];
   assert.equal(typeof angularVersion, "string", "A declared Angular compatibility range is required");
   await writeFile(join(project, "package.json"), JSON.stringify({
     name: "angular-consumer", private: true, type: "module",
     dependencies: { ...overrides, "@angular/core": angularVersion, rxjs: app.dependencies.rxjs },
-    devDependencies: { typescript: app.devDependencies.typescript, "@types/node": app.devDependencies["@types/node"] },
+  devDependencies: { typescript: app.devDependencies.typescript, "@types/node": app.devDependencies["@types/node"], "@types/bun": "^1.4.2" },
     overrides,
   }, null, 2));
   await writeFile(join(project, "tsconfig.json"), JSON.stringify({
@@ -93,7 +94,17 @@ console.log("Packed diagnostic report and editor adapter share the compiler payl
       moduleResolution: "Bundler", types: ["node"], strict: true, skipLibCheck: false, noEmit: true },
     include: ["consumer-http.ts", "consumer-diagnostics.ts"],
   }, null, 2));
+  await writeFile(join(project, "tsconfig.host.json"), JSON.stringify({
+    compilerOptions: { target: "ES2022", lib: ["ES2022", "DOM", "DOM.Iterable"], module: "NodeNext",
+      moduleResolution: "NodeNext", types: ["node", "bun"], strict: true, skipLibCheck: true, noEmit: true },
+    include: ["consumer-host.ts"],
+  }, null, 2));
+  await writeFile(join(project, "consumer-host.ts"), hostConsumerSource());
   await installStarterConsumer(project, run);
+  for (const name of ["@angular/core", "rxjs", "typescript", "elysia"]) {
+    const installed = JSON.parse(await readFile(join(project, "node_modules", name, "package.json"), "utf8"));
+    console.log(`Tested packed consumer dependency: ${name}@${installed.version}`);
+  }
   console.log(await run(["node_modules/typescript/bin/tsc", "--project", "tsconfig.json", "--pretty", "false"]));
   console.log(await run(["consumer.ts"]));
   // A separate process prevents production mode leaking into other tests.
@@ -102,6 +113,8 @@ console.log("Packed diagnostic report and editor adapter share the compiler payl
   console.log(await run(["node_modules/typescript/bin/tsc", "--project", "tsconfig.http.json", "--pretty", "false"]));
   console.log(await run(["consumer-http.ts"]));
   console.log(await run(["consumer-diagnostics.ts"]));
+  console.log(await run(["node_modules/typescript/bin/tsc", "--project", "tsconfig.host.json", "--pretty", "false"]));
+  console.log(await run(["consumer-host.ts"]));
 } finally {
   process.removeListener("SIGINT", interrupt);
   process.removeListener("SIGTERM", interrupt);
@@ -195,5 +208,41 @@ try {
   assert.equal(work.closed, true); assert.equal(callbacks.size, 0);
 } finally { backend.dispose(); await child.destroyAsync(); await parent.destroyAsync(); }
 console.log("Packed HTTP identity, actual injector hierarchy, request verification and work ownership passed");
+`;
+}
+
+function hostConsumerSource(): string {
+  return `import { strict as assert } from "node:assert";
+import { createApplication, createWorker, type CompiledModule } from "@supacloud/elysia";
+import { PendingWorkTimeoutError } from "@supacloud/app/runtime";
+function deferred() { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); return { resolve, promise }; }
+const entered = deferred(), release = deferred();
+let signal: AbortSignal | undefined, cleaned = 0;
+const module: CompiledModule = {
+  name: "consumer", createServices: () => ({ controller: { run: async () => {
+    entered.resolve(); await release.promise; return "ok";
+  } } }),
+  destroyServices: async () => { cleaned++; },
+  controllers: [{ path: "/work", serviceKey: "controller", scope: "application",
+    routes: [{ method: "GET", path: "/", handler: "run" }] }],
+};
+const app = createApplication({ modules: [module], pendingWork: { shutdownTimeoutMs: 0 },
+  requestContext: (_request, _context, owned) => { signal = owned; return {}; } });
+const response = app.handle(new Request("http://localhost/work"));
+await entered.promise;
+assert.equal(app.pendingWork.snapshot()[0]?.kind, "request");
+await assert.rejects(app.destroy(), PendingWorkTimeoutError);
+assert.equal(signal?.aborted, true); assert.equal(cleaned, 0);
+release.resolve(); assert.equal((await response).status, 200);
+await app.waitForIdle(); await app.destroy(); assert.equal(cleaned, 1);
+const worker = createWorker<{ id: string; jobName: string; input: unknown }, unknown>({ modules: [{ name: "jobs", createServices: () => ({ job: { run: () => 7 } }),
+  controllers: [], jobs: [{ name: "read", className: "Job", serviceKey: "job", scope: "application" }] }],
+  transport: { claim: async (): Promise<{ id: string; jobName: string; input: unknown } | null> => null,
+    ack: async (_claim: { id: string; jobName: string; input: unknown }, output: unknown) => output,
+    fail: async () => null } });
+await worker.start();
+assert.equal((await worker.processClaim({ id: "1", jobName: "read", input: {} })).receipt, 7);
+await worker.stop(); assert.equal(worker.pendingWork.snapshot().length, 0);
+console.log("Packed application request cancellation/drain and worker receipt boundaries passed");
 `;
 }
