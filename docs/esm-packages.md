@@ -25,6 +25,19 @@ ESM-only is a publication format, not a blanket prohibition on CommonJS:
 - CommonJS wrappers generated inside an ESM bundle are not deleted by textual
   search. This policy does not attempt to rewrite third-party dependency code.
 
+## Public SDK compatibility
+
+The public `@supacloud/js` SDK has a different consumer contract from the
+server framework: its root, `/task-events` and `/contracts` explicitly support
+both `import` and synchronous `require()` on Node 22.12.0+. Their `module-sync`,
+`import` and `default` conditions resolve to the same ESM file, so this adds no
+CJS build, duplicated error classes or asynchronous initialization wrapper.
+
+This is not a promise of compatibility with older Node or CJS-only bundlers.
+The newly explicit `engines.node` floor is a release compatibility change.
+See the [SDK compatibility contract](../packages/supacloud-js/COMPATIBILITY.md)
+for browser/TypeScript boundaries and the conditions for adding real CJS output.
+
 ## Lite launcher migration
 
 The supported command remains `supacloud-lite`; use the installed executable
@@ -72,10 +85,11 @@ contract. Some Node versions can load eligible synchronous ESM graphs through
 `require()`, but consumers must not depend on that behavior. Migrate old direct
 `dist/index.cjs` references and tooling that requires a separate CJS build.
 
-The added CI consumer baseline is Node 24 and Bun 1.4.2, matching the existing
-repository CI. This does not assert support for older runtimes. TypeScript
-consumer verification uses the repository's ESNext/bundler configuration; it
-is not a claim that all older TypeScript or NodeNext configurations are covered.
+The application/compiler baseline remains Node 24 and Bun 1.4.2. SDK loader
+acceptance also covers Node 22.12.0 and Node 26. SDK-specific TypeScript
+NodeNext checks cover both `.cts` and `.mts` consumers with library checking
+enabled; the broader app/compiler check retains its ESNext/bundler configuration
+and existing skipLibCheck setting. Neither claims support for all older compilers.
 
 ## Verification
 
@@ -84,6 +98,7 @@ npm run test:esm
 node .github/scripts/esm-package-policy.mjs
 # After the app/Lite builds; also checked by their publication lifecycles:
 bun run --cwd packages/app check:package
+bun run --cwd packages/supacloud-js check:package
 bun run --cwd packages/supacloud-lite check:package
 # After building contracts, delivery, app, supacloud-js and compiler:
 node .github/scripts/esm-package.acceptance.mjs
@@ -104,7 +119,8 @@ permissions. It builds the five candidate packages, packs real archives,
 normalizes sibling dependencies with the existing release helper, and installs
 all candidate archives outside the checkout. It verifies every public app,
 SDK and compiler entrypoint under Node and Bun, CJS-to-ESM dynamic import,
-shared command-client identity across the app and SDK, TypeScript declarations,
+cold synchronous SDK require/import in both loading orders, shared command-client
+identity across the app and SDK, actual TypeScript declaration compilation,
 and a browser-target bundle. It does not publish packages, change branch
 protection, or enable automatic merging.
 
