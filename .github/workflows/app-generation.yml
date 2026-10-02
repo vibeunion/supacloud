@@ -11,7 +11,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: app-generation-${{ github.ref }}
+  # Reusable workflows inherit the caller's github.workflow. Keep independent
+  # callers/events from cancelling one another's required acceptance jobs.
+  group: app-generation-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
