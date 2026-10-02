@@ -45,3 +45,10 @@ second workflow, DI, persistence or schema system.
 New APIs are available in a release containing this entry or packed candidate
 packages. Repository tests exercise cleanup, overflow and browser isolation;
 production transport and database behavior still require application acceptance.
+
+## Angular integration
+
+For official Angular Signals/Resource and explicit SupaCloud cleanup ownership,
+see [Angular integration](./ANGULAR.md). These are isolated subpaths; the
+framework-neutral `/reactive` API above remains unchanged. SDK observation stays
+on `@supacloud/js/reactive`; there is no second SDK reactive implementation.

@@ -31,6 +31,16 @@
       "types": "./dist/reactive.d.ts",
       "import": "./dist/reactive.js",
       "default": "./dist/reactive.js"
+    },
+    "./rxjs": {
+      "types": "./dist/rxjs.d.ts",
+      "import": "./dist/rxjs.js",
+      "default": "./dist/rxjs.js"
+    },
+    "./angular": {
+      "types": "./dist/angular.d.ts",
+      "import": "./dist/angular.js",
+      "default": "./dist/angular.js"
     }
   },
   "files": [
@@ -39,11 +49,12 @@
     "dist",
     "README.md",
     "EXECUTION.md",
-    "REACTIVE.md"
+    "REACTIVE.md",
+    "ANGULAR.md"
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts && bun build src/contract_client.ts src/browser.ts --outdir dist --target browser --external @supacloud/contracts && bun build src/reactive.ts --outdir dist --target browser --external rxjs",
+    "build:js": "bun build src/index.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts --external '@angular/*' --external rxjs && bun build src/contract_client.ts src/browser.ts --outdir dist --target browser --external @supacloud/contracts && bun build src/reactive.ts --outdir dist --target browser --external rxjs && bun build src/angular.ts src/rxjs.ts --outdir dist --target browser --external '@angular/*' --external rxjs",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
