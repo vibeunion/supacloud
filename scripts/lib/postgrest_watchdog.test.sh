@@ -158,20 +158,36 @@ printf '# no port\n' > "$TMP_DIR/tenants/demo.conf"
 expect_incident 200 "" 'missing-port|'
 
 # Alert webhook delivery must be bounded so a stalled endpoint cannot hold the
-# watchdog open and delay the remaining tenants.
-: > "$TMP_DIR/webhook.log"
-rm -f "$TMP_DIR/state/demo.state"
-status=0
-PATH="$TMP_DIR/bin:/usr/bin:/bin" \
-  CURL_CODE=503 CURL_LOG="$TMP_DIR/webhook.log" PROBE_LOG="$TMP_DIR/probe.log" \
-  ALERT_LOG="$TMP_DIR/alert.log" \
-  SUPACLOUD_ALERT_WEBHOOK_URL='https://hooks.example/alert' \
-  SUPACLOUD_WATCHDOG_STATE_DIR="$TMP_DIR/state" \
-  SUPACLOUD_TENANT_CONFIG_DIR="$TMP_DIR/tenants" \
-  timeout 10 bash "$WATCHDOG" || status=$?
-[[ "$status" == 1 ]] || fail "webhook scenario did not report the incident (exit $status)"
-grep -q 'hooks.example/alert' "$TMP_DIR/webhook.log" || fail 'alert webhook was not delivered'
-grep 'hooks.example/alert' "$TMP_DIR/webhook.log" | grep -q -- '--max-time' || fail 'alert webhook has no total timeout'
-grep 'hooks.example/alert' "$TMP_DIR/webhook.log" | grep -q -- '--connect-timeout' || fail 'alert webhook has no connect timeout'
+# watchdog open and delay the remaining tenants. Assert the actual bounds, the
+# environment override and the invalid-value fallback.
+run_webhook() {
+  local configured="$1" log="$2" status=0
+  : > "$log"
+  rm -f "$TMP_DIR/state/demo.state"
+  PATH="$TMP_DIR/bin:/usr/bin:/bin" \
+    CURL_CODE=503 CURL_LOG="$log" PROBE_LOG="$TMP_DIR/probe.log" \
+    ALERT_LOG="$TMP_DIR/alert.log" \
+    SUPACLOUD_ALERT_WEBHOOK_URL='https://hooks.example/alert' \
+    SUPACLOUD_WATCHDOG_WEBHOOK_TIMEOUT="$configured" \
+    SUPACLOUD_WATCHDOG_STATE_DIR="$TMP_DIR/state" \
+    SUPACLOUD_TENANT_CONFIG_DIR="$TMP_DIR/tenants" \
+    timeout 10 bash "$WATCHDOG" || status=$?
+  [[ "$status" == 1 ]] || fail "webhook scenario did not report the incident (exit $status)"
+  grep -q 'hooks.example/alert' "$log" || fail 'alert webhook was not delivered'
+}
+
+run_webhook "" "$TMP_DIR/webhook.log"
+grep 'hooks.example/alert' "$TMP_DIR/webhook.log" | grep -q -- '--connect-timeout 5' \
+  || fail 'default webhook connect timeout is not 5'
+grep 'hooks.example/alert' "$TMP_DIR/webhook.log" | grep -q -- '--max-time 5' \
+  || fail 'default webhook total timeout is not 5'
+
+run_webhook '9' "$TMP_DIR/webhook-override.log"
+grep 'hooks.example/alert' "$TMP_DIR/webhook-override.log" | grep -q -- '--max-time 9' \
+  || fail 'webhook timeout override was not honored'
+
+run_webhook 'not-a-number' "$TMP_DIR/webhook-invalid.log"
+grep 'hooks.example/alert' "$TMP_DIR/webhook-invalid.log" | grep -q -- '--max-time 5' \
+  || fail 'invalid webhook timeout did not fall back to 5'
 
 echo 'postgrest_watchdog.test.sh: OK (transport, HTTP, journal, state transitions and config boundaries)'
