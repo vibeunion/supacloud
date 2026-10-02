@@ -63,18 +63,95 @@ get_state() {
     fi
 }
 
+path_identity_nofollow() {
+    # GNU and BSD `stat` do not follow a final symlink by default (verified on
+    # both), so this reports the entry's own dev:inode as required.
+    local target="$1"
+    stat -c '%d:%i' -- "$target" 2>/dev/null \
+        || stat -f '%d:%i' -- "$target" 2>/dev/null
+}
+
+path_field() {
+    local target="$1" gnu_format="$2" bsd_format="$3"
+    stat -c "$gnu_format" -- "$target" 2>/dev/null \
+        || stat -f "$bsd_format" -- "$target" 2>/dev/null
+}
+
+descriptor_field() {
+    # Read a field from the open descriptor rather than the path, so a path swap
+    # cannot change the metadata we validate.
+    local fd="$1" gnu_format="$2" bsd_format="$3" fdpath=""
+    if [[ -e "/proc/self/fd/$fd" ]]; then
+        fdpath="/proc/self/fd/$fd"
+    elif [[ -e "/dev/fd/$fd" ]]; then
+        fdpath="/dev/fd/$fd"
+    else
+        return 1
+    fi
+    stat -L -c "$gnu_format" -- "$fdpath" 2>/dev/null \
+        || stat -L -f "$bsd_format" -- "$fdpath" 2>/dev/null
+}
+
+read_trusted_config_port() {
+    # Resolve the port once, from a single opened descriptor, so the probe never
+    # reopens the path. Validate descriptor-based identity, link count, owner and
+    # mode; a path swapped between checks cannot redirect the read. A portable
+    # shell cannot open with O_NOFOLLOW/O_NONBLOCK, so the root-owned, unwritable
+    # configuration directory remains the boundary for the pre-open window.
+    local conf="$1" ref="$2"
+    local fd_id path_id mode owner links tenant_uid content port=""
+
+    [[ -n "$conf" && -f "$conf" && ! -L "$conf" && -r "$conf" ]] || return 0
+    exec 9< "$conf" 2>/dev/null || return 0
+    fd_id="$(descriptor_field 9 '%d:%i' '%d:%i')" || { exec 9<&-; return 0; }
+    path_id="$(path_identity_nofollow "$conf")" || { exec 9<&-; return 0; }
+    if [[ -e /proc/self/fd/9 ]]; then
+        # Linux: /proc/self/fd follows to the real inode including its device.
+        [[ -n "$fd_id" && "$fd_id" == "$path_id" ]] || { exec 9<&-; return 0; }
+    else
+        # macOS /dev/fd reports the devfs device, so compare the inode only.
+        [[ -n "$fd_id" && "${fd_id#*:}" == "${path_id#*:}" ]] || { exec 9<&-; return 0; }
+    fi
+    mode="$(descriptor_field 9 '%a' '%Lp')" || { exec 9<&-; return 0; }
+    owner="$(descriptor_field 9 '%u' '%u')" || { exec 9<&-; return 0; }
+    links="$(descriptor_field 9 '%h' '%l')" || { exec 9<&-; return 0; }
+    if [[ ! -e /proc/self/fd/9 ]]; then
+        # macOS /dev/fd reports the correct owner and link count but a fixed
+        # devfs mode, so take the mode from the path and re-confirm the path
+        # still resolves to the opened inode afterwards (a swap is rejected).
+        mode="$(path_field "$conf" '%a' '%Lp')" || { exec 9<&-; return 0; }
+        [[ "$(path_identity_nofollow "$conf")" == "$path_id" ]] || { exec 9<&-; return 0; }
+    fi
+    content="$(head -c 65536 <&9 || true)"
+    exec 9<&-
+
+    [[ -n "$mode" && -n "$owner" && -n "$links" ]] || return 0
+    if [[ "$links" != "1" ]] || (( (8#$mode & 8#022) != 0 )); then
+        printf '!untrusted'
+        return 0
+    fi
+    # Mirror the launcher: the file is trusted only for root, the current
+    # effective user, or the tenant's own runtime account.
+    tenant_uid="$(id -u "supacloud-$ref" 2>/dev/null || true)"
+    if [[ "$owner" != "0" && "$owner" != "$EUID" && ( -z "$tenant_uid" || "$owner" != "$tenant_uid" ) ]]; then
+        printf '!untrusted'
+        return 0
+    fi
+    port="$(printf '%s\n' "$content" | sed -n '/^server-port = [0-9][0-9]*$/ { s/^server-port = //; p; q; }')"
+    printf '%s' "$port"
+}
+
 check_tenant() {
     local tenant="$1"
     local conf="$2"
+    local port="$3"
 
-    if [[ -z "$conf" || ! -f "$conf" || -L "$conf" || ! -r "$conf" ]]; then
+    if [[ -z "$conf" ]]; then
         echo "missing-config|Tenant ${tenant} has no resolvable PostgREST configuration"
         return 0
     fi
-
-    local port
-    if ! port=$(sed -n '/^server-port = [0-9][0-9]*$/ { s/^server-port = //; p; q; }' "$conf"); then
-        echo "missing-config|Tenant ${tenant} PostgREST configuration could not be read"
+    if [[ "$port" == '!untrusted' ]]; then
+        echo "untrusted-config|Tenant config ${conf} failed the trusted-file checks"
         return 0
     fi
     if [[ -z "$port" ]]; then
@@ -130,9 +207,9 @@ resolve_tenant_configs() {
             && [[ "$pointer_bytes" -eq $((${#target} + 1)) ]] \
             && [[ -d "$generation" && ! -L "$generation" ]] \
             && [[ -f "$TENANT_DIR/$target" && ! -L "$TENANT_DIR/$target" && -r "$TENANT_DIR/$target" ]]; then
-            printf '%s\t%s\n' "$ref" "$TENANT_DIR/$target"
+            printf '%s\t%s\t%s\n' "$ref" "$TENANT_DIR/$target" "$(read_trusted_config_port "$TENANT_DIR/$target" "$ref")"
         else
-            printf '%s\t%s\n' "$ref" ""
+            printf '%s\t%s\t%s\n' "$ref" "" ""
         fi
     done
 
@@ -142,7 +219,7 @@ resolve_tenant_configs() {
         [[ "$ref" =~ ^[a-z0-9-]{1,64}$ ]] || continue
         pointer="$TENANT_DIR/${ref}_postgrest.current"
         [[ -e "$pointer" || -L "$pointer" ]] && continue
-        printf '%s\t%s\n' "$ref" "$legacy"
+        printf '%s\t%s\t%s\n' "$ref" "$legacy" "$(read_trusted_config_port "$legacy" "$ref")"
     done
 }
 
@@ -156,11 +233,11 @@ main() {
         exit 0
     fi
 
-    local tenant conf result issue detail fingerprint previous
-    while IFS=$'\t' read -r tenant conf; do
+    local tenant conf port result issue detail fingerprint previous
+    while IFS=$'\t' read -r tenant conf port; do
         [[ -n "$tenant" ]] || continue
 
-        result=$(check_tenant "$tenant" "$conf")
+        result=$(check_tenant "$tenant" "$conf" "$port")
         issue="${result%%|*}"
         detail="${result#*|}"
         previous="$(get_state "$tenant")"

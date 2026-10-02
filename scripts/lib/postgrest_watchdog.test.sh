@@ -156,4 +156,28 @@ run_watchdog_in "$TMP_DIR/no-tenants" 200 ""
 printf '# no port\n' > "$TMP_DIR/tenants/demo.conf"
 expect_incident 200 "" 'missing-port|'
 
+# Group/world-writable or multiply-linked tenant configs must never be trusted,
+# even with a well-formed server-port.
+for mode in 666 620 642; do
+  untrusted_dir="$TMP_DIR/untrusted-$mode"
+  mkdir -p "$untrusted_dir"
+  printf 'server-port = 3157\n' > "$untrusted_dir/demo.conf"
+  chmod "$mode" "$untrusted_dir/demo.conf"
+  rm -f "$TMP_DIR/state/demo.state"
+  status=0
+  run_watchdog_in "$untrusted_dir" 200 "" || status=$?
+  [[ "$status" == 1 ]] || fail "mode $mode config was not treated as an incident"
+  [[ "$(state_value)" == untrusted-config\|* ]] || fail "mode $mode config: $(state_value)"
+done
+
+link_dir="$TMP_DIR/untrusted-link"
+mkdir -p "$link_dir"
+printf 'server-port = 3157\n' > "$link_dir/demo.conf"
+ln "$link_dir/demo.conf" "$link_dir/demo.conf.hardlink"
+rm -f "$TMP_DIR/state/demo.state"
+status=0
+run_watchdog_in "$link_dir" 200 "" || status=$?
+[[ "$status" == 1 ]] || fail 'hardlinked config was not treated as an incident'
+[[ "$(state_value)" == untrusted-config\|* ]] || fail "hardlinked config: $(state_value)"
+
 echo 'postgrest_watchdog.test.sh: OK (transport, HTTP, journal, state transitions and config boundaries)'
