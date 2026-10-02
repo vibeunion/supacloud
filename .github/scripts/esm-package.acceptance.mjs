@@ -158,7 +158,7 @@ const { createSupaCloudClient } = require('@supacloud/js');
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {
       target: 'ES2022', module: 'ESNext', moduleResolution: 'bundler', strict: true,
-      noEmit: true, skipLibCheck: true, types: [],
+      noEmit: true, skipLibCheck: true, types: ['node'],
     }, files: ['./consumer.ts'],
   }));
   // Pack the resolved Node types directory, rather than persisting a workspace
