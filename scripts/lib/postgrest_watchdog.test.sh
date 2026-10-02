@@ -48,7 +48,8 @@ printf 'server-port = 3157\n' > "$TMP_DIR/tenants/demo.conf"
 cat > "$TMP_DIR/bin/curl" <<'SH'
 #!/usr/bin/env bash
 for arg in "$@"; do last="$arg"; done
-printf '%s\n' "$last" >> "$PROBE_LOG"
+printf '%s\n' "$last" >> "${PROBE_LOG:-/dev/null}"
+printf '%s\n' "$*" >> "${CURL_LOG:-/dev/null}"
 printf '%s' "${CURL_CODE:-}"
 exit "${CURL_EXIT:-0}"
 SH
@@ -192,29 +193,36 @@ run_watchdog_in "$TMP_DIR/no-tenants" 200 ""
 printf '# no port\n' > "$TMP_DIR/tenants/demo.conf"
 expect_incident 200 "" 'missing-port|'
 
-# Group/world-writable or multiply-linked tenant configs must never be trusted,
-# even with a well-formed server-port.
-for mode in 666 620 642; do
-  untrusted_dir="$TMP_DIR/untrusted-$mode"
-  mkdir -p "$untrusted_dir"
-  printf 'server-port = 3157\n' > "$untrusted_dir/demo.conf"
-  chmod "$mode" "$untrusted_dir/demo.conf"
+# Alert webhook delivery must be bounded so a stalled endpoint cannot hold the
+# watchdog open and delay the remaining tenants. Assert the actual bounds, the
+# environment override and the invalid-value fallback.
+run_webhook() {
+  local configured="$1" log="$2" status=0
+  : > "$log"
   rm -f "$TMP_DIR/state/demo.state"
-  status=0
-  run_watchdog_in "$untrusted_dir" 200 "" || status=$?
-  [[ "$status" == 1 ]] || fail "mode $mode config was not treated as an incident"
-  [[ "$(state_value)" == untrusted-config\|* ]] || fail "mode $mode config: $(state_value)"
-done
+  PATH="$TMP_DIR/bin:/usr/bin:/bin" \
+    CURL_CODE=503 CURL_LOG="$log" PROBE_LOG="$TMP_DIR/probe.log" \
+    ALERT_LOG="$TMP_DIR/alert.log" \
+    SUPACLOUD_ALERT_WEBHOOK_URL='https://hooks.example/alert' \
+    SUPACLOUD_WATCHDOG_WEBHOOK_TIMEOUT="$configured" \
+    SUPACLOUD_WATCHDOG_STATE_DIR="$TMP_DIR/state" \
+    SUPACLOUD_TENANT_CONFIG_DIR="$TMP_DIR/tenants" \
+    timeout 10 bash "$WATCHDOG" || status=$?
+  [[ "$status" == 1 ]] || fail "webhook scenario did not report the incident (exit $status)"
+  grep -q 'hooks.example/alert' "$log" || fail 'alert webhook was not delivered'
+}
 
-link_dir="$TMP_DIR/untrusted-link"
-mkdir -p "$link_dir"
-printf 'server-port = 3157\n' > "$link_dir/demo.conf"
-ln "$link_dir/demo.conf" "$link_dir/demo.conf.hardlink"
-rm -f "$TMP_DIR/state/demo.state"
-status=0
-run_watchdog_in "$link_dir" 200 "" || status=$?
-[[ "$status" == 1 ]] || fail 'hardlinked config was not treated as an incident'
-[[ "$(state_value)" == untrusted-config\|* ]] || fail "hardlinked config: $(state_value)"
+run_webhook "" "$TMP_DIR/webhook.log"
+grep 'hooks.example/alert' "$TMP_DIR/webhook.log" | grep -q -- '--connect-timeout 5' \
+  || fail 'default webhook connect timeout is not 5'
+grep 'hooks.example/alert' "$TMP_DIR/webhook.log" | grep -q -- '--max-time 5' \
+  || fail 'default webhook total timeout is not 5'
+
+run_webhook '9' "$TMP_DIR/webhook-override.log"
+grep 'hooks.example/alert' "$TMP_DIR/webhook-override.log" | grep -q -- '--connect-timeout 9' \
+  || fail 'webhook connect-timeout override was not honored'
+grep 'hooks.example/alert' "$TMP_DIR/webhook-override.log" | grep -q -- '--max-time 9' \
+  || fail 'webhook total timeout override was not honored'
 # Force the fallback on every platform. Capture output just like the Bun bridge:
 # a surviving descendant or timer sleeper would keep these pipes open.
 saved_timeout_bin="$WATCHDOG_TIMEOUT_BIN"
@@ -250,5 +258,35 @@ kill_elapsed=$(( $(date +%s) - kill_start ))
 WATCHDOG_TIMEOUT_BIN="$saved_timeout_bin"
 [[ "$status" != 0 ]] || fail 'escalating fallback did not terminate a SIGTERM-ignoring command'
 [[ "$kill_elapsed" -le 8 ]] || fail "escalating fallback exceeded its bound (${kill_elapsed}s)"
+
+run_webhook 'not-a-number' "$TMP_DIR/webhook-invalid.log"
+grep 'hooks.example/alert' "$TMP_DIR/webhook-invalid.log" | grep -q -- '--connect-timeout 5' \
+  || fail 'invalid webhook timeout did not fall back to 5 (connect)'
+grep 'hooks.example/alert' "$TMP_DIR/webhook-invalid.log" | grep -q -- '--max-time 5' \
+  || fail 'invalid webhook timeout did not fall back to 5 (total)'
+# Trusted-file regressions from the config-hardening PR.
+# Group/world-writable or multiply-linked tenant configs must never be trusted,
+# even with a well-formed server-port.
+for mode in 666 620 642; do
+  untrusted_dir="$TMP_DIR/untrusted-$mode"
+  mkdir -p "$untrusted_dir"
+  printf 'server-port = 3157\n' > "$untrusted_dir/demo.conf"
+  chmod "$mode" "$untrusted_dir/demo.conf"
+  rm -f "$TMP_DIR/state/demo.state"
+  status=0
+  run_watchdog_in "$untrusted_dir" 200 "" || status=$?
+  [[ "$status" == 1 ]] || fail "mode $mode config was not treated as an incident"
+  [[ "$(state_value)" == untrusted-config\|* ]] || fail "mode $mode config: $(state_value)"
+done
+
+link_dir="$TMP_DIR/untrusted-link"
+mkdir -p "$link_dir"
+printf 'server-port = 3157\n' > "$link_dir/demo.conf"
+ln "$link_dir/demo.conf" "$link_dir/demo.conf.hardlink"
+rm -f "$TMP_DIR/state/demo.state"
+status=0
+run_watchdog_in "$link_dir" 200 "" || status=$?
+[[ "$status" == 1 ]] || fail 'hardlinked config was not treated as an incident'
+[[ "$(state_value)" == untrusted-config\|* ]] || fail "hardlinked config: $(state_value)"
 
 echo 'postgrest_watchdog.test.sh: OK (transport, HTTP, journal, state transitions and config boundaries)'
