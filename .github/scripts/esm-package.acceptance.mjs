@@ -6,6 +6,7 @@ import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareCommandPackage } from './prepare-command-package.mjs';
 import { checkEsmPack } from './esm-package-policy.mjs';
+import { writeSdkConsumers, checkConsumerTypes } from './esm-package-sdk.mjs';
 // Run after building these packages. Installation is outside the checkout and
 // uses real tarballs, never workspace links or source-resolution conditions.
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -117,6 +118,40 @@ console.log('Installed ESM entrypoints and shared identities passed: ' + specifi
 `);
   for (const runtime of ['node', 'bun']) console.log(`${runtime}: ${run(runtime, ['consumer.mjs'], consumer).trim()}`);
 
+  await writeSdkConsumers(consumer);
+  for (const runtime of ['node', 'bun']) {
+    for (const fixture of ['sdk-require-first.cjs', 'sdk-import-first.mjs']) {
+      console.log(`${runtime}: ${run(runtime, [fixture], consumer).trim()}`);
+    }
+  }
+
+  await writeFile(join(consumer, 'sdk-supabase.cjs'), `
+const assert = require('node:assert/strict');
+const { createClient, FunctionsHttpError } = require('@supabase/supabase-js');
+const { createSupaCloudClient } = require('@supacloud/js');
+(async () => {
+  let calls = 0;
+  const response = new Response(JSON.stringify({ error: 'invalid input' }), {
+    status: 400, headers: { 'content-type': 'application/json' },
+  });
+  const supabase = createClient('https://sdk-compat.example.invalid', 'test-anon-key', {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    global: { fetch: async () => { calls++; return response; } },
+  });
+  const sdk = createSupaCloudClient({ supabase, projectRef: 'abcd1234',
+    managementApiUrl: 'https://management.example.invalid' });
+  assert.notEqual(typeof sdk.then, 'function', 'SDK factory must remain synchronous');
+  await assert.rejects(sdk.tasks.submit('worker', { body: {} }), error => {
+    assert.ok(error instanceof FunctionsHttpError, 'preserve official CJS Supabase error');
+    assert.strictEqual(error.context, response, 'preserve response context across module formats');
+    return true;
+  });
+  assert.equal(calls, 1, 'module interop must not introduce a retry');
+  console.log('CJS Supabase client + single ESM SDK behavior passed');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+`);
+  for (const runtime of ['node', 'bun']) console.log(run(runtime, ['sdk-supabase.cjs'], consumer).trim());
+
   await writeFile(join(consumer, 'consumer.ts'), specifiers.map((specifier, index) =>
     `import * as API${index} from ${JSON.stringify(specifier)};\nexport const exports${index}: string[] = Object.keys(API${index});`
   ).join('\n') + '\nimport { InjectionToken } from "@supacloud/app";\nexport const token = new InjectionToken<string>("esm-consumer");\n');
@@ -126,10 +161,16 @@ console.log('Installed ESM entrypoints and shared identities passed: ' + specifi
       noEmit: true, skipLibCheck: true, types: [],
     }, files: ['./consumer.ts'],
   }));
-        run('bun', ['add', '--no-save', '--exact', resolve(root, 'packages', 'app', 'node_modules', '@types', 'node')], consumer);
+  // Pack the resolved Node types directory, rather than persisting a workspace
+  // link or asking Bun to reinstall the candidate SDK dependency graph.
+  const nodeTypes = pack(resolve(root, 'packages', 'app', 'node_modules', '@types', 'node'), raw);
+  run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--save-dev', nodeTypes.path], consumer);
+  checkConsumerTypes(consumer, resolve(root, 'packages', 'app'), run);
   await writeFile(join(consumer, 'browser.ts'), [
     'export { HttpClient } from "@supacloud/app/browser";',
     'export { createAuthoritativeCommandClient } from "@supacloud/js/contracts";',
+    'export { createSupaCloudClient } from "@supacloud/js";',
+    'export { TaskEventError } from "@supacloud/js/task-events";',
   ].join('\n'));
   run('bun', ['build', 'browser.ts', '--target', 'browser', '--format', 'esm', '--outfile', 'browser.mjs'], consumer);
   console.log('Installed declaration consumer and browser bundle passed.');
