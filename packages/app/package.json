@@ -42,6 +42,16 @@
       "types": "./dist/angular.d.ts",
       "import": "./dist/angular.js",
       "default": "./dist/angular.js"
+    },
+    "./http": {
+      "types": "./dist/http.d.ts",
+      "import": "./dist/http.js",
+      "default": "./dist/http.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "import": "./dist/runtime.js",
+      "default": "./dist/runtime.js"
     }
   },
   "files": [
@@ -55,7 +65,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts --external '@angular/*' --external rxjs && bun build src/index.ts --outfile dist/index.cjs --target node --format cjs --external '@angular/*' --external rxjs && bun build src/contract_client.ts src/browser.ts --outdir dist --target browser --external @supacloud/contracts && bun build src/reactive.ts --outdir dist --target browser --external rxjs && bun build src/angular.ts src/rxjs.ts --outdir dist --target browser --external '@angular/*' --external rxjs",
+    "build:js": "bun build src/index.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts --external '@angular/*' --external rxjs && bun build src/index.ts --outfile dist/index.cjs --target node --format cjs --external '@angular/*' --external rxjs && bun build src/contract_client.ts src/browser.ts --outdir dist --target browser --external @supacloud/contracts && bun build src/reactive.ts --outdir dist --target browser --external rxjs && bun build src/angular.ts src/rxjs.ts --outdir dist --target browser --external '@angular/*' --external rxjs && bun build src/http.ts --outdir dist --target node --external @supacloud/app && bun build src/runtime.ts --outdir dist --target browser",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
@@ -83,6 +93,7 @@
     "typebox": "1.3.34"
   },
   "devDependencies": {
+    "@angular/compiler": "22.1.5",
     "@types/bun": "^1.4.2",
     "@types/node": "^26.5.0",
     "typescript": "^7.0.2"

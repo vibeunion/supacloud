@@ -2,24 +2,30 @@ name: Reactive Integration
 
 on:
   push:
-    branches: ["main", "dev", "feat/default-rxjs-sdk"]
+    branches: ["main", "dev", "feat/default-rxjs-sdk", "feat/angular-enterprise-hardening"]
     paths:
       - "packages/app/**"
+      - "packages/compiler/**"
+      - "packages/testing/**"
       - "packages/supacloud-js/**"
       - "packages/contracts/**"
       - "packages/cli/**"
       - "scripts/check_reactive_consumer.ts"
+      - "scripts/check_angular_consumer.ts"
       - "scripts/check_app_starter.ts"
       - "scripts/check_app_generation.ts"
       - ".github/workflows/reactive.yml"
   pull_request:
-    branches: ["main", "dev"]
+    branches: ["main", "dev", "feat/default-rxjs-sdk"]
     paths:
       - "packages/app/**"
+      - "packages/compiler/**"
+      - "packages/testing/**"
       - "packages/supacloud-js/**"
       - "packages/contracts/**"
       - "packages/cli/**"
       - "scripts/check_reactive_consumer.ts"
+      - "scripts/check_angular_consumer.ts"
       - "scripts/check_app_starter.ts"
       - "scripts/check_app_generation.ts"
       - ".github/workflows/reactive.yml"
@@ -65,6 +71,25 @@ jobs:
           bun test
       - name: Packed reactive consumer with real Supabase and SupaCloud clients
         run: bun run scripts/check_reactive_consumer.ts
+      - name: Compiler and real generated scopes
+        run: |
+          bun run scripts/build-command-dependencies.ts compiler
+          cd packages/compiler
+          bun install --frozen-lockfile
+          bun run build
+          bun run typecheck
+          bun run typecheck:test
+          bun test src/reactive-analysis.test.ts src/http-provider-migration.test.ts src/angular-scopes.test.ts src/static-di-aop.test.ts
+      - name: Testing helpers and request error contracts
+        run: |
+          cd packages/testing
+          bun install --frozen-lockfile
+          bun run build
+          bun run typecheck
+          bun run typecheck:test
+          bun test
+      - name: Packed Angular host identity and scoped interop
+        run: bun run scripts/check_angular_consumer.ts
       - name: All starter defaults
         run: |
           cd packages/cli

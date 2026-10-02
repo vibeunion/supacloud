@@ -5,6 +5,7 @@ const dependencies: Readonly<Record<string, readonly string[]>> = {
   "supacloud-js": ["contracts"],
   "supacloud-lite": ["contracts", "supacloud-js", "commands", "delivery", "compiler", "db", "app", "elysia"],
   app: ["contracts"],
+  compiler: ["contracts", "delivery"],
   db: ["contracts", "commands", "delivery", "compiler"],
   commands: ["contracts"],
   "app-svelte": ["contracts"],
