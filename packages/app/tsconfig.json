@@ -6,7 +6,10 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["bun", "node"],
+    "types": [
+      "bun",
+      "node"
+    ],
     "experimentalDecorators": true,
     "outDir": "dist",
     "rootDir": "src",
@@ -17,7 +20,9 @@
     "src/browser.ts",
     "src/contract_client.ts",
     "src/execution.ts",
-    "src/reactive.ts"
+    "src/reactive.ts",
+    "src/angular.ts",
+    "src/rxjs.ts"
   ],
   "exclude": [
     "node_modules",

@@ -1,5 +1,6 @@
 import { InjectionToken } from "./token";
 import { DestroyRef as AngularDestroyRef, inject as angularInject } from "@angular/core";
+import { createCleanupScope } from "./scope_cleanup";
 
 /**
  * Built-in token resolved from the request-context argument of a compiled
@@ -106,37 +107,5 @@ export function createDestroyRef(): DestroyRef & {
   destroy(): Promise<void>;
   _teardowns: Array<() => void | Promise<void>>;
 } {
-  let isDestroyed = false;
-  const abortController = new AbortController();
-  const callbacks: Array<() => void | Promise<void>> = [];
-
-  return {
-    get destroyed() {
-      return isDestroyed;
-    },
-    get signal() {
-      return abortController.signal;
-    },
-    onDestroy(callback: () => void | Promise<void>): () => void {
-      if (isDestroyed) {
-        throw new Error("Cannot register onDestroy callback on an already destroyed DestroyRef");
-      }
-      callbacks.push(callback);
-      return () => {
-        const idx = callbacks.indexOf(callback);
-        if (idx !== -1) callbacks.splice(idx, 1);
-      };
-    },
-    async destroy(): Promise<void> {
-      if (isDestroyed) return;
-      isDestroyed = true;
-      abortController.abort();
-      const reversed = [...callbacks].reverse();
-      callbacks.length = 0;
-      for (const cb of reversed) {
-        await cb();
-      }
-    },
-    _teardowns: callbacks,
-  };
+  return createCleanupScope();
 }
