@@ -47,8 +47,9 @@ EOF
 
     if [[ -n "$ALERT_WEBHOOK_URL" ]]; then
         # Bound delivery so a stalled endpoint cannot hold the watchdog open and
-        # delay the remaining tenants.
-        curl -fsS \
+        # delay the remaining tenants. Disable curlrc first so ambient retry
+        # settings cannot restart the per-transfer timeout or add extra URLs.
+        curl -q -fsS \
             --connect-timeout "$ALERT_WEBHOOK_TIMEOUT" \
             --max-time "$ALERT_WEBHOOK_TIMEOUT" \
             -X POST \
