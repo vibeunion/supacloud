@@ -59,6 +59,14 @@ network listener. It is included in the normal `bun test` discovery.
   cookies.
 - Errors before context resolution have no request context. Error mappers must
   not assume identity or request-scoped services are available.
+- When `pendingWork.capacity` is exhausted, compiled-route admission returns
+  HTTP 503 with `PENDING_WORK_CAPACITY_EXCEEDED` before the adapter's
+  `requestContext` factory or controller runs. Existing work remains registered
+  and is not cancelled; requests can be admitted again after capacity is freed.
+  A configured `errorMapper` retains precedence. Capacity errors thrown later
+  by application code are not automatically treated as admission failures.
+  The transport-neutral registry exports `PendingWorkCapacityError` from
+  `@supacloud/app/runtime`; it remains a `RangeError` subclass.
 
 ### Not Yet Proven by This Suite
 
