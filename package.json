@@ -1,6 +1,6 @@
 {
   "version": "0.0.2",
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "scripts": {
     "verify:commands": "bun run scripts/verify-command-migration.ts",
     "verify:starter": "bun --no-env-file scripts/check_app_starter.ts",

@@ -3,7 +3,7 @@
   "version": "0.17.2",
   "description": "Bun-native, single-project Supabase-compatible backend powered by PGlite or native PostgreSQL",
   "type": "module",
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "bin": {
     "supacloud-lite": "dist/launcher.cjs"
   },

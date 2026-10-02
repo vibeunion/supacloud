@@ -68,6 +68,24 @@ async function expectAttestedRuntimeEntry(
   expect((await stat(runtimeEntry)).mode & 0o222).toBe(0);
 }
 
+async function expectImmutableSourceDeduplicated(
+  ref: string,
+  slug: string,
+  deployment: { version?: string; bundle_hash?: string },
+) {
+  const versionDir = join(functionsRoot, ref, ".versions", slug, deployment.version!);
+  const authority = join(versionDir, `index.${deployment.bundle_hash!}.js`);
+  const runtimeEntry = join(versionDir, "src", ".supacloud-entry.js");
+  const alias = join(versionDir, "index.js");
+  const authorityStat = await stat(authority);
+  const runtimeStat = await stat(runtimeEntry);
+  const aliasStat = await stat(alias);
+  expect(runtimeStat.ino).toBe(authorityStat.ino);
+  expect(authorityStat.nlink).toBeGreaterThanOrEqual(2);
+  expect(aliasStat.ino).not.toBe(authorityStat.ino);
+  expect(await readFile(runtimeEntry)).toEqual(await readFile(authority));
+}
+
 async function writeConfiguredAliases(ref: string, slug: string, version: string): Promise<void> {
   const projectDir = join(functionsRoot, ref);
   await mkdir(projectDir, { recursive: true });
@@ -999,6 +1017,25 @@ describe("edgeFunctionService bundle metadata", () => {
     // ...while the mutable version alias stays an independent byte copy.
     expect(aliasStat.ino).not.toBe(authorityStat.ino);
     expect(await readFile(aliasPath)).toEqual(Buffer.from(code));
+  });
+
+  test("hardlinks the bundled source entry for single-file and bundle releases", async () => {
+    const singleCode = "export default { fetch: () => new Response('single') };";
+    const single = await edgeFunctionService.deployDetailed("proj_dedup_single", "single", singleCode);
+    const bundle = await edgeFunctionService.deployBundleDetailed("proj_dedup_bundle", "bundle", {
+      "index.ts": "export default { fetch: () => new Response('bundle') };",
+    });
+    expect(single.success).toBe(true);
+    expect(bundle.success).toBe(true);
+    await expectImmutableSourceDeduplicated("proj_dedup_single", "single", single);
+    await expectImmutableSourceDeduplicated("proj_dedup_bundle", "bundle", bundle);
+
+    // The single-file path keeps its original TypeScript source as a distinct copy.
+    const singleDir = join(functionsRoot, "proj_dedup_single", ".versions", "single", single.version!);
+    const authorityStat = await stat(join(singleDir, `index.${single.bundle_hash!}.js`));
+    const sourceStat = await stat(join(singleDir, "index.src.ts"));
+    expect(sourceStat.ino).not.toBe(authorityStat.ino);
+    expect(await readFile(join(singleDir, "index.src.ts"), "utf8")).toBe(singleCode);
   });
 
   test("writes the attested source entry for every immutable deployment path", async () => {
