@@ -6,17 +6,30 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "types": ["bun", "node"],
+    "types": [
+      "bun",
+      "node"
+    ],
     "experimentalDecorators": true,
     "outDir": "dist",
     "rootDir": "src",
-    "declaration": true
+    "declaration": true,
+    "paths": {
+      "@supacloud/app": [
+        "./src/index.ts"
+      ]
+    }
   },
   "include": [
     "src/index.ts",
     "src/browser.ts",
     "src/contract_client.ts",
-    "src/execution.ts"
+    "src/execution.ts",
+    "src/reactive.ts",
+    "src/angular.ts",
+    "src/rxjs.ts",
+    "src/http.ts",
+    "src/runtime.ts"
   ],
   "exclude": [
     "node_modules",

@@ -42,6 +42,15 @@ type ResponseOptions = HttpRequestOptions & { observe: "response" };
 type TextOptions = HttpRequestOptions & { observe?: "body"; responseType: "text" };
 type BlobOptions = HttpRequestOptions & { observe?: "body"; responseType: "blob" };
 
+// Internal transport composition. Not exported from any public package entry.
+// The child borrows its parent; it never owns or destroys the parent client.
+const parentHttpClients = new WeakMap<HttpClientCore, HttpClientCore>();
+type HttpTransportAttempt = { method: string; url: string; body: BodyInit | null; headers: string };
+type HttpReplayGuard = (attempt: HttpTransportAttempt) => void;
+// Carry the original logical request's budgets across parent pipelines without
+// adding a caller-settable option or exposing control state in HttpContext.
+const parentReplayGuards = new WeakMap<HttpRequestOptions, readonly HttpReplayGuard[]>();
+
 export class HttpClientCore {
   private config: HttpClientConfig;
   private interceptors: HttpInterceptorFn[];
@@ -184,12 +193,24 @@ export class HttpClientCore {
       ...(options?.signal === undefined ? {} : { signal: options.signal }),
     };
 
+    const parentClient = parentHttpClients.get(this);
     const fetchFn = this.config.fetch ?? (typeof globalThis.fetch === "function" ? globalThis.fetch.bind(globalThis) : undefined);
-    if (!fetchFn) {
+    if (!fetchFn && !parentClient) {
       throw new Error("No fetch implementation available. Provide withFetch() in provideHttpClient or run in an environment with global fetch.");
     }
 
-    let sent: { method: string; url: string; body: BodyInit | null; headers: string } | undefined;
+    const inheritedGuards = (options && parentReplayGuards.get(options)) ?? [];
+    let sent: HttpTransportAttempt | undefined;
+    const guardTransport: HttpReplayGuard = (attempt) => {
+      const defaultReadReplay = replay === undefined && isReadMethod(method)
+        && sent !== undefined && isReadMethod(sent.method) && isReadMethod(attempt.method);
+      if (sent !== undefined && !defaultReadReplay && (
+        !allowsHttpReplay(method, replay) || !allowsHttpReplay(attempt.method, replay)
+        || attempt.method !== sent.method || attempt.url !== sent.url || attempt.body !== sent.body
+        || attempt.headers !== sent.headers
+      )) throw new HttpReplayError();
+      sent = attempt;
+    };
     const finalHandler = async (req: HttpRequestPayload): Promise<Response> => {
       options?.signal?.throwIfAborted();
       const requestBody = transportBody(req.body);
@@ -203,15 +224,28 @@ export class HttpClientCore {
       const stableHeaders = new Headers(headers);
       stableHeaders.delete("authorization");
       const headerFingerprint = JSON.stringify([...stableHeaders]);
-      const defaultReadReplay = replay === undefined && isReadMethod(method)
-        && sent !== undefined && isReadMethod(sent.method) && isReadMethod(requestMethod);
-      if (sent !== undefined && !defaultReadReplay && (
-        !allowsHttpReplay(method, replay) || !allowsHttpReplay(requestMethod, replay)
-        || requestMethod !== sent.method || req.url !== sent.url || requestBody !== sent.body
-        || headerFingerprint !== sent.headers
-      )) throw new HttpReplayError();
-      sent = { method: requestMethod, url: req.url, body: requestBody, headers: headerFingerprint };
-      return fetchFn(req.url, {
+      if (parentClient) {
+        // Cross the parent's full interceptor/replay boundary, preserving the
+        // caller's policy and signal rather than an interceptor's replacements.
+        // observe:response defers decoding until the outermost client returns.
+        const forwarded: ResponseOptions = {
+          headers,
+          body: requestBody,
+          context: req.context,
+          replay,
+          signal: options?.signal,
+          observe: "response",
+        };
+        parentReplayGuards.set(forwarded, [...inheritedGuards, guardTransport]);
+        return parentClient.request(requestMethod, req.url, forwarded);
+      }
+      // Check the actual send after every ancestor's interceptor transformations.
+      // Otherwise a parent changing GET to POST could evade a child's read retry
+      // budget by entering a fresh parent request for each forwarding attempt.
+      const attempt = { method: requestMethod, url: req.url, body: requestBody, headers: headerFingerprint };
+      for (const guard of inheritedGuards) guard(attempt);
+      guardTransport(attempt);
+      return fetchFn!(req.url, {
         method: requestMethod,
         headers,
         body: requestBody,
@@ -271,6 +305,14 @@ export class HttpClientCore {
       return text;
     }
   }
+}
+
+/** Internal: bind a provider-created client to its nearest configured parent. */
+export function delegateHttpRequestsToParent(client: HttpClientCore, parent: HttpClientCore): void {
+  for (let cursor: HttpClientCore | undefined = parent; cursor; cursor = parentHttpClients.get(cursor)) {
+    if (cursor === client) throw new TypeError("HTTP parent delegation cannot contain a cycle");
+  }
+  parentHttpClients.set(client, parent);
 }
 
 function transportBody(value: unknown): BodyInit | null {

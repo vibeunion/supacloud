@@ -16,10 +16,12 @@ export class HttpContext {
   }
 
   get<T>(token: HttpContextToken<T>): T {
-    if (this.map.has(token as HttpContextToken<unknown>)) {
-      return this.map.get(token as HttpContextToken<unknown>) as T;
+    if (!this.map.has(token)) {
+      // Materialize once per context, including undefined and mutable defaults.
+      // A throwing factory does not leave a partially initialized entry.
+      this.map.set(token, token.defaultValue());
     }
-    return token.defaultValue();
+    return this.map.get(token) as T;
   }
 
   delete(token: HttpContextToken<unknown>): this {

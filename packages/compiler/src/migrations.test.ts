@@ -228,16 +228,16 @@ test("migration order follows checkpoint edges and writes each file's final resu
     }),
   });
   SUPACLOUD_MIGRATIONS.push(
-    step("third", "0.13.0", "0.14.0", "Intermediate", "Final"),
-    step("second", "0.12.0", "0.13.0", "Result", "Intermediate"),
+    step("third", "0.14.0", "0.15.0", "Intermediate", "Final"),
+    step("second", "0.13.0", "0.14.0", "Result", "Intermediate"),
   );
   try {
     const result = await migrateProject({
-      rootDir: f.root, write: true, fromVersion: "0.11.0", toVersion: "0.14.0",
+      rootDir: f.root, write: true, fromVersion: "0.11.0", toVersion: "0.15.0",
     });
     expect(result.issues).toEqual([]);
     expect(result.migrations.map((migration) => migration.id)).toEqual([
-      "route-response-to-responses", "second", "third",
+      "route-response-to-responses", "http-provider-entrypoint", "second", "third",
     ]);
     expect(result.changedFiles).toEqual(["items.ts"]);
     expect(await readFile(join(f.root, "items.ts"), "utf8")).toContain("responses: { 200: Final }");
