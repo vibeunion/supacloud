@@ -2144,6 +2144,87 @@ async function listVersionDirectories(ref: string, slug: string): Promise<string
   }
 }
 
+const DEFAULT_FUNCTION_VERSION_RETENTION = 20;
+const FUNCTION_VERSION_RETENTION_ENV = "SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION";
+
+function functionVersionRetention(): number {
+  const raw = process.env[FUNCTION_VERSION_RETENTION_ENV];
+  if (raw === undefined || raw === "") return DEFAULT_FUNCTION_VERSION_RETENTION;
+  if (!/^[1-9][0-9]*$/.test(raw)) return DEFAULT_FUNCTION_VERSION_RETENTION;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(parsed)) return DEFAULT_FUNCTION_VERSION_RETENTION;
+  return parsed;
+}
+
+// Prepared generations also exist for failed deployments. Only ancestors of the
+// committed authority prove activation; an absent tombstone ends this incarnation
+// because deleting/recreating a function can reuse its immutable version numbers.
+async function activatedFunctionVersions(ref: string, slug: string): Promise<Set<number>> {
+  const state = await readFunctionManifestState(ref, slug);
+  const versions = new Set<number>();
+  if (state.authority?.target_state !== "active") return versions;
+  const directory = assertInside(
+    getFuncDir(ref),
+    path.join(getFuncDir(ref), ".activation-generations", validateSlug(slug)),
+  );
+  let child = state.authority;
+  while (child.previous_activation_id !== null) {
+    const identifier = child.previous_activation_id;
+    const manifest = parseEdgeFunctionActivationManifest(
+      await Bun.file(assertInside(directory, path.join(directory, `${identifier}.json`))).text(),
+    );
+    const parent = manifest.authority;
+    if (parent === null || parent.activation_id !== identifier
+      || parent.activation_generation !== child.activation_generation - 1) {
+      throw new Error("Function retention activation lineage is invalid");
+    }
+    if (parent.target_state === "absent") break;
+    const version = typeof manifest.config.version === "string"
+      ? parseVersionNumber(manifest.config.version)
+      : null;
+    if (version === null) throw new Error("Function retention ancestor has no immutable version");
+    // Previously pruned ancestors can remain in the journal. Never let a record
+    // for different artifact bytes authorize removal of an existing version.
+    const metadata = await readFunctionVersionMetadata(ref, slug, String(version))
+      .catch((error: unknown) => {
+        if (isMissingPathError(error)) return null;
+        throw error;
+      });
+    if (metadata?.artifact_sha256 === parent.artifact_sha256) versions.add(version);
+    child = parent;
+  }
+  return versions;
+}
+
+// Bounds the immutable version history so repeated deploys cannot grow
+// `.versions/<slug>` without limit. Only versions that were actually activated
+// AND are strictly older than the active version are candidates, so staged or
+// pending versions (outside the committed activation lineage) and the
+// active version are never removed. Among the candidates the most recent
+// `keep - 1` are retained. Callers must hold the function deploy lock;
+// rollback to a pruned version is intentionally no longer possible.
+async function pruneFunctionVersionHistory(ref: string, slug: string): Promise<number> {
+  const keep = functionVersionRetention();
+  const activeVersion = await readConfiguredFunctionVersion(ref, slug);
+  const activated = await activatedFunctionVersions(ref, slug);
+  // Fail safe: if no activation history can be proven, prune nothing.
+  if (activated.size === 0) return 0;
+  const candidates = (await listVersionDirectories(ref, slug))
+    .map((version) => Number(version))
+    .filter((version) => version < activeVersion && activated.has(version))
+    .sort((a, b) => a - b);
+  const keepOlder = Math.max(keep - 1, 0);
+  if (candidates.length <= keepOlder) return 0;
+  const obsolete = candidates.slice(0, candidates.length - keepOlder);
+  let removed = 0;
+  for (const version of obsolete) {
+    await preflightFunctionMutation(ref, slug);
+    await fs.rm(getFunctionVersionDir(ref, slug, String(version)), { recursive: true, force: true });
+    removed += 1;
+  }
+  return removed;
+}
+
 async function statIso(filePath: string | null): Promise<string | null> {
   if (!filePath) return null;
   try {
@@ -2639,6 +2720,21 @@ function releaseResult(
   };
 }
 
+async function pruneFunctionVersionHistoryQuietly(ref: string, slug: string): Promise<void> {
+  try {
+    const removed = await pruneFunctionVersionHistory(ref, slug);
+    if (removed > 0) {
+      logger.info(`[EdgeFunction] Pruned ${removed} obsolete version(s) for ${slug}`, { ref, slug, removed });
+    }
+  } catch (error: unknown) {
+    logger.warn("[EdgeFunction] Failed to prune function version history", {
+      ref,
+      slug,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function deployFunctionRelease(
   request: EdgeFunctionReleaseRequest,
   previousActiveVersion: EdgeFunctionActiveVersion,
@@ -2661,6 +2757,7 @@ async function deployFunctionRelease(
   if (!activation.preheat) {
     throw new Error("Active Function deployment did not produce a readiness attestation");
   }
+  await pruneFunctionVersionHistoryQuietly(request.ref, request.slug);
   recordDeployMetrics(
     release.prepared.bundleSizeBytes,
     release.prepared.importCount,
