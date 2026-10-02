@@ -33,6 +33,7 @@ try {
     const metadata = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
     // Build before invoking this script; do not silently substitute workspace source.
     await readFile(join(root, "dist/index.js"));
+    if (directory !== "contracts") await readFile(join(root, "dist/reactive.d.ts"));
     await run(["pm", "pack", "--ignore-scripts", "--destination", temporary], root);
     const prefix = `${String(metadata.name).replace(/^@/, "").replaceAll("/", "-")}-`;
     const packed = (await readdir(temporary)).find(file => file.startsWith(prefix) && file.endsWith(".tgz"));
@@ -55,9 +56,12 @@ try {
     },
     overrides,
   }, null, 2));
+  // This is a NodeNext consumer: Node supplies its Web platform globals. Browser
+  // bundling is checked separately, without silently disabling declaration checks
+  // or patching the peer SDK's WebAuthn declarations to match TypeScript's DOM lib.
   await writeFile(join(project, "tsconfig.json"), JSON.stringify({
     compilerOptions: {
-      target: "ES2022", module: "NodeNext", moduleResolution: "NodeNext",
+      target: "ES2022", lib: ["ES2022"], module: "NodeNext", moduleResolution: "NodeNext",
       types: ["node"], strict: true, skipLibCheck: false, noEmit: true,
     }, include: ["consumer.ts"],
   }, null, 2));
