@@ -79,8 +79,9 @@ test('acceptance invokes the real compiler for bundler and NodeNext consumers', 
   const calls = [];
   checkConsumerTypes('/consumer', '/compiler', (...args) => calls.push(args));
   assert.deepEqual(calls, [
+    ['node', [join('/consumer', 'node_modules', 'typescript', 'bin', 'tsc'), '-p', join('/consumer', 'tsconfig.sdk.json')], '/consumer'],
+    ['bun', ['run', 'tsc', '-p', join('/consumer', 'tsconfig.sdk.json'), '--skipLibCheck'], '/compiler'],
     ['bun', ['run', 'tsc', '-p', join('/consumer', 'tsconfig.json')], '/compiler'],
-    ['bun', ['run', 'tsc', '-p', join('/consumer', 'tsconfig.sdk.json')], '/compiler'],
   ]);
 });
 
@@ -95,6 +96,8 @@ test('type consumers use actual CommonJS/ESM syntax and retain negative/any chec
   for (const mode of [true, false]) {
     assert.match(sdkTypeConsumer(mode), /@ts-expect-error/);
     assert.match(sdkTypeConsumer(mode), /IsAny/);
+    assert.match(sdkTypeConsumer(mode), /sameDatabaseType/);
+    assert.match(sdkTypeConsumer(mode), /missing_table/);
   }
   assert.throws(() => sdkRuntimeConsumer('unsupported'), /Invalid SDK loader order/);
 });

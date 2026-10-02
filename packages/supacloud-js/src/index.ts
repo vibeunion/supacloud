@@ -1,7 +1,5 @@
-import type {
-  RealtimeChannel,
-  SupabaseClient,
-} from "@supabase/supabase-js";
+import type { RealtimeChannel } from "@supabase/supabase-js";
+import type { SupabaseClient } from "./supabase-types.js";
 import { FunctionsHttpError } from "@supabase/supabase-js";
 import { SupaCloudWorkflowsClient } from "./workflows.js";
 import { SupaCloudCommandsClient } from "./commands.js";

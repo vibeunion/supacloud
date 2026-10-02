@@ -106,6 +106,21 @@ const upstreamClient = upstream.createClient('https://sdk-compat.example.invalid
 export const integratedClient = sdk.createSupaCloudClient({
   supabase: upstreamClient, projectRef: 'abcd1234', managementApiUrl: 'https://management.example.invalid',
 });
+// The precise caller client and database schema must survive the adapter.
+export const sameClientType: typeof upstreamClient = integratedClient.supabase;
+export const workflows = new sdk.SupaCloudWorkflowsClient(upstreamClient);
+export const artifacts = new sdk.SupaCloudArtifactsClient(upstreamClient);
+type Database = { public: {
+  Tables: { notes: { Row: { id: number; title: string }; Insert: { id?: number; title: string };
+    Update: { title?: string }; Relationships: [] } };
+  Views: {}; Functions: {}; Enums: {}; CompositeTypes: {};
+} };
+const typedUpstream = upstream.createClient<Database>('https://sdk-compat.example.invalid', 'test-anon-key');
+const typedSdk = sdk.createSupaCloudClient({ supabase: typedUpstream,
+  projectRef: 'abcd1234', managementApiUrl: 'https://management.example.invalid' });
+export const sameDatabaseType: typeof typedUpstream = typedSdk.supabase;
+// @ts-expect-error Database table names must stay checked across the adapter.
+typedSdk.supabase.from('missing_table');
 // These fail if export resolution silently degrades to any.
 type IsAny<T> = 0 extends (1 & T) ? true : false;
 export const factoryHasTypes: IsAny<typeof sdk.createSupaCloudClient> = false;
@@ -148,7 +163,14 @@ export async function writeSdkConsumers(directory) {
  * @param {(command: string, args: string[], cwd: string) => unknown} run
  */
 export function checkConsumerTypes(consumer, compilerDirectory, run) {
-  for (const config of ['tsconfig.json', 'tsconfig.sdk.json']) {
-    run('bun', ['run', 'tsc', '-p', join(consumer, config)], compilerDirectory);
-  }
+  console.log('SDK type matrix: TS 5.8.3 strict libraries; TS 7 consumers with skipLibCheck (upstream WebAuthn conflict).');
+  // TS 5.8 is the first stable NodeNext model covering require(ESM). Check
+  // the entire declaration graph, including upstream libraries, at that floor.
+  run('node', [join(consumer, 'node_modules', 'typescript', 'bin', 'tsc'),
+    '-p', join(consumer, 'tsconfig.sdk.json')], consumer);
+  // Current upstream auth-js WebAuthn declarations conflict with TS 7 lib.dom.
+  // Keep current-compiler consumer/negative/any checks without pretending that
+  // its third-party declaration audit passes. The strict floor above still runs.
+  run('bun', ['run', 'tsc', '-p', join(consumer, 'tsconfig.sdk.json'), '--skipLibCheck'], compilerDirectory);
+  run('bun', ['run', 'tsc', '-p', join(consumer, 'tsconfig.json')], compilerDirectory);
 }

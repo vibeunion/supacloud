@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "./supabase-types.js";
 
 export async function invokeArtifactRpc(
   supabase: SupabaseClient,

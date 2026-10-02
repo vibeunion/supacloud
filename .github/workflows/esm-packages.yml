@@ -87,14 +87,19 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - name: Install real tarballs and verify public entrypoints
-        run: node .github/scripts/esm-package.acceptance.mjs
+        run: |
+          if [ '${{ matrix.node }}' = '22.12.0' ]; then
+            node .github/scripts/esm-package.acceptance.mjs --sdk-only
+          else
+            node .github/scripts/esm-package.acceptance.mjs
+          fi
       - name: Collect reproducible SDK type-failure evidence
         if: failure() && matrix.node == '24.x'
         run: |
           evidence="$RUNNER_TEMP/sdk-compatibility-evidence"
           mkdir -p "$evidence"
           # Only committed public source and named build/dependency directories.
-          # Never archive .git, runner credentials, npm config or environment files.
+          # Never archive .git, runner credentials, npm user config or untracked env files.
           git archive --format=tar HEAD > "$evidence/source.tar"
           tar -cf "$evidence/dependencies.tar" \
             packages/supacloud-js/node_modules packages/supacloud-js/dist \

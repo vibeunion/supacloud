@@ -46,7 +46,8 @@ must switch to `dist/launcher.mjs` or the package executable.
 
 `supacloud-cli lite` now resolves `bin["supacloud-lite"]` from the locally
 installed `@supacloud/lite/package.json`, not a hard-coded extension. Explicit
-`SUPACLOUD_LITE_CLI_BIN` still has priority; no local package falls back to PATH.
+`SUPACLOUD_LITE_CLI_BIN` still has priority. When no local package is installed,
+resolution falls back to PATH.
 A corrupt manifest, escaping bin path or missing local bin is an error, not a
 reason to silently invoke an unrelated global installation. This also permits
 an older installed release to run through its own declared bin; it does not
@@ -87,9 +88,13 @@ contract. Some Node versions can load eligible synchronous ESM graphs through
 
 The application/compiler baseline remains Node 24 and Bun 1.4.2. SDK loader
 acceptance also covers Node 22.12.0 and Node 26. SDK-specific TypeScript
-NodeNext checks cover both `.cts` and `.mts` consumers with library checking
-enabled; the broader app/compiler check retains its ESNext/bundler configuration
-and existing skipLibCheck setting. Neither claims support for all older compilers.
+NodeNext checks cover both `.cts` and `.mts` consumers: TypeScript 5.8.3 checks
+the full declaration graph; TypeScript 7 checks consumers with skipLibCheck=true
+because of a documented upstream auth-js/lib.dom WebAuthn declaration conflict.
+The broader app/compiler check retains its ESNext/bundler configuration and
+skipLibCheck setting. Neither claims support for all compiler configurations.
+The SDK uses a type-only ESM/CommonJS Supabase declaration bridge without
+casting callers or erasing their client/database generic type.
 
 ## Verification
 
@@ -120,9 +125,11 @@ normalizes sibling dependencies with the existing release helper, and installs
 all candidate archives outside the checkout. It verifies every public app,
 SDK and compiler entrypoint under Node and Bun, CJS-to-ESM dynamic import,
 cold synchronous SDK require/import in both loading orders, shared command-client
-identity across the app and SDK, actual TypeScript declaration compilation,
-and a browser-target bundle. It does not publish packages, change branch
-protection, or enable automatic merging.
+identity across the app and SDK, actual TypeScript consumer compilation under
+the documented version/library-check matrix, and a browser-target bundle. The
+minimum-Node job installs only SDK/contracts with the minimum Supabase peer and
+strict engine enforcement, not Angular/app/compiler packages. It does not publish
+packages, change branch protection, or enable automatic merging.
 
 ESM-only does not by itself guarantee that every independently bundled subpath
 shares every runtime object. The acceptance checks assert specific shared

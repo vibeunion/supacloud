@@ -62,13 +62,32 @@ synchronous `require()` and must fail the cold-process acceptance tests.
 Do not work around failures by returning a Promise from `require()` or copying
 contract code into a separate CJS bundle.
 
-ESM and CommonJS callers use the same ESM declarations. TypeScript `NodeNext`
-consumers are checked in both `.mts` and `.cts` files, including
-`import sdk = require('@supacloud/js')`, checked factory arguments and generic
-results. `ESNext`/`bundler` consumers are checked separately. The repository
-compiler version is used; this does not certify every older TypeScript version
-or the older `node16`/`node18` module-resolution models. Separate `.d.cts`
-declarations would describe a different CJS artifact that we do not ship.
+ESM and CommonJS callers use the same ESM declarations. The SDK's type-only
+Supabase bridge accepts the upstream ESM and CommonJS class declaration graphs;
+their protected members are nominally distinct even though their APIs match.
+The adapter retains the caller's exact client/database generic type. Applications
+do not need casts, and the bridge emits no runtime import or duplicate client.
+
+TypeScript `NodeNext` consumers are checked in both `.mts` and `.cts` files,
+including `import sdk = require('@supacloud/js')`, real Supabase client options,
+generic task results and database table-name inference. TypeScript **5.8.3** is
+the verified strict baseline: `skipLibCheck: false` checks the entire declaration
+graph. The repository's **TypeScript 7** also checks these consumers and the
+`ESNext`/`bundler` surface, with `skipLibCheck: true`.
+
+**Known upstream TypeScript 7 limitation:** auth-js's
+`PublicKeyCredentialFuture<T>` WebAuthn declaration conflicts with the newer
+`lib.dom` JSON credential types (TS2430). A TS7 full-library check currently
+fails for that reason even with the module-identity problem fixed. The current
+TS7 consumer check is not represented as a successful upstream declaration
+audit. The strict 5.8.3 check and all positive/negative/any-erasure consumer tests
+still run; no package declarations are replaced by `any`. Consumers requiring
+TS7 with `skipLibCheck: false` must resolve the upstream declaration issue before
+adopting this combination.
+
+This does not certify every TypeScript version or the older `node16`/`node18`
+module-resolution models. Separate `.d.cts` declarations would describe a
+CommonJS artifact that we do not ship.
 
 Framework packages such as `@supacloud/app` and `@supacloud/compiler` retain
 ESM-first contracts and do not acquire the SDK's synchronous-loading promise.
@@ -84,8 +103,12 @@ node .github/scripts/esm-package.acceptance.mjs
 ```
 
 The acceptance workflow installs real candidate tarballs outside the checkout.
-It runs Node 22.12.0, Node 24, Node 26 and Bun consumers, with separate fresh
-processes for require-first and import-first order. It compares every exported
+It runs Node 22.12.0, Node 24, Node 26 and Bun consumers. The minimum-Node job
+installs only the SDK/contracts candidates with the minimum Supabase peer
+(2.115.0), enforces package engines and verifies that server-framework
+packages are absent; the higher-Node jobs also check app/compiler integration.
+The consumer-only TypeScript 5.8.3 dependency does not change SDK dependencies.
+Separate fresh processes cover require-first and import-first order. It compares every exported
 runtime value, checks error `instanceof` identity and verifies the SDK's command
 client against `@supacloud/contracts/client`. An actual CommonJS Supabase client
 with a local fetch stub checks factory synchrony, HTTP error preservation and
