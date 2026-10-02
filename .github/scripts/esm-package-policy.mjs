@@ -8,6 +8,7 @@ import { checkSdkModuleContract } from './esm-package-sdk.mjs';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const commonJsFile = /\.(?:cjs|cts)(?:\.map)?$/i;
 const commonJsBuild = /--format(?:\s*=\s*|\s+)["']?(?:cjs|commonjs)\b/i;
+const dualFormatPackages = new Set(['@supacloud/contracts', '@supacloud/js']);
 
 /** @param {unknown} value @returns {value is Record<string, unknown>} */
 function isRecord(value) {
@@ -15,19 +16,19 @@ function isRecord(value) {
 }
 
 /** @param {unknown} value @param {string} location @param {string[]} errors */
-function checkExports(value, location, errors) {
+function checkExports(value, location, errors, allowDual = false) {
   if (typeof value === 'string') {
-    if (commonJsFile.test(value)) errors.push(`${location}: CommonJS target ${value}`);
+    if (!allowDual && commonJsFile.test(value)) errors.push(`${location}: CommonJS target ${value}`);
     return;
   }
   if (Array.isArray(value)) {
-    value.forEach((entry, index) => checkExports(entry, `${location}[${index}]`, errors));
+    value.forEach((entry, index) => checkExports(entry, `${location}[${index}]`, errors, allowDual));
     return;
   }
   if (!isRecord(value)) return;
   for (const [condition, target] of Object.entries(value)) {
-    if (condition === 'require') errors.push(`${location}.require: use the shared ESM entrypoint instead`);
-    checkExports(target, `${location}.${condition}`, errors);
+    if (condition === 'require' && !allowDual) errors.push(`${location}.require: use the shared ESM entrypoint instead`);
+    checkExports(target, `${location}.${condition}`, errors, allowDual);
   }
 }
 
@@ -41,20 +42,21 @@ export function checkEsmManifest(manifest, { firstParty = false } = {}) {
   if (!isRecord(manifest)) return ['Invalid package manifest'];
   const name = manifest['name'];
   if (!firstParty && (typeof name !== 'string' || (!name.startsWith('@supacloud/') && name !== 'supacloud'))) return [];
+  const allowDual = dualFormatPackages.has(name);
   const errors = checkSdkModuleContract(manifest);
   if (manifest['type'] === 'commonjs') errors.push(`${name ?? 'package'}: CommonJS package scope is not supported`);
   if (manifest['exports'] !== undefined || manifest['main'] !== undefined || manifest['module'] !== undefined || manifest['bin'] !== undefined) {
     if (manifest['type'] !== 'module') errors.push(`${name}: libraries and executables must declare type: module`);
-    checkExports(manifest['exports'], `${name}.exports`, errors);
+    checkExports(manifest['exports'], `${name}.exports`, errors, allowDual);
     for (const field of ['main', 'module', 'types', 'typings', 'browser']) {
-      checkExports(manifest[field], `${name}.${field}`, errors);
+      checkExports(manifest[field], `${name}.${field}`, errors, allowDual);
     }
   }
   const scripts = manifest['scripts'];
   if (isRecord(scripts)) {
     for (const [name, command] of Object.entries(scripts)) {
       if (typeof command === 'string' && commonJsBuild.test(command)) {
-        errors.push(`scripts.${name}: first-party CommonJS builds are not supported`);
+        if (!allowDual) errors.push(`scripts.${name}: first-party CommonJS builds are not supported`);
       }
     }
   }
@@ -86,7 +88,7 @@ export function checkEsmPack(manifest, files) {
   const errors = checkEsmManifest(manifest, { firstParty: true });
   const inventory = new Set(files.map(path => path.replace(/^\.\//, '')));
   for (const path of inventory) {
-    if (commonJsFile.test(path)) {
+    if (commonJsFile.test(path) && !dualFormatPackages.has(manifest.name)) {
       errors.push(`pack: unexpected CommonJS artifact ${path}`);
     }
   }

@@ -4,7 +4,7 @@
  * Preserve the caller's exact client type while accepting either declaration
  * graph. Type-only imports add no CommonJS runtime or duplicated state.
  */
-import type { SupabaseClient as EsmSupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient as EsmSupabaseClient } from "@supabase/supabase-js" with { "resolution-mode": "import" };
 import type { SupabaseClient as CommonJsSupabaseClient } from "@supabase/supabase-js"
   with { "resolution-mode": "require" };
 

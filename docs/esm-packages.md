@@ -1,4 +1,4 @@
-# ESM-only package policy
+# ESM package policy with SDK/Contracts dual distribution
 
 ## Decision and compatibility boundary
 
@@ -12,8 +12,8 @@ public import specifiers.
 `@supacloud/app` no longer builds `dist/index.cjs` or advertises a separate
 `exports.require` branch. Its root, `/browser`, `/contracts` and `/execution`
 entrypoints retain their existing ESM paths and declaration files.
-`@supacloud/js` and `@supacloud/compiler` already use this model and are not
-rebuilt as CommonJS or renamed as part of this change.
+`@supacloud/compiler` retains this model. The public SDK and Contracts are
+the two explicit dual-format exceptions described below.
 
 ESM-only is a publication format, not a blanket prohibition on CommonJS:
 
@@ -27,16 +27,17 @@ ESM-only is a publication format, not a blanket prohibition on CommonJS:
 
 ## Public SDK compatibility
 
-The public `@supacloud/js` SDK has a different consumer contract from the
-server framework: its root, `/task-events`, `/contracts` and `/reactive` explicitly support
-both `import` and synchronous `require()` on Node 22.12.0+. Their `module-sync`,
-`import` and `default` conditions resolve to the same ESM file, so this adds no
-CJS build, duplicated error classes or asynchronous initialization wrapper.
+The public `@supacloud/js` SDK exports its root, `/task-events`, `/contracts`
+and `/reactive` as native MJS and CJS. `@supacloud/contracts` exports its root,
+`/client` and `/browser` in both formats. Each `import` condition selects `.mjs`
+and `.d.mts`; each `require` condition selects `.cjs` and `.d.cts`.
+Only these two packages may publish CommonJS artifacts. Their source remains
+TypeScript and the supported SDK Node floor remains 22.12.0.
 
-This is not a promise of compatibility with older Node or CJS-only bundlers.
-The newly explicit `engines.node` floor is a release compatibility change.
-See the [SDK compatibility contract](../packages/supacloud-js/COMPATIBILITY.md)
-for browser/TypeScript boundaries and the conditions for adding real CJS output.
+The two formats have equivalent APIs and distinct class/function identities.
+Repeated loads within a format and the SDK/shared Contracts facade preserve
+identity; cross-format `instanceof` is not promised. See the
+[SDK compatibility contract](../packages/supacloud-js/COMPATIBILITY.md).
 
 ## Lite launcher migration
 
@@ -59,10 +60,10 @@ supersedes legacy launcher-path examples in the Project CLI README.
 
 ## Consumer migration and release
 
-Removing the published CommonJS implementation is a **breaking compatibility
-change**, not a patch-level cleanup. The conventional breaking-change commit
-and release-please process own the release version; do not silently republish
-an existing version or hand-edit generated release records.
+Removing CommonJS from app/compiler/Lite is a **breaking compatibility change**.
+The SDK and Contracts remain dual-format packages and are not covered by that
+migration. The conventional breaking-change commit and release-please process
+own the release version; do not silently republish an existing version.
 
 Use package-name ESM imports, without changing the established public APIs:
 
@@ -72,7 +73,7 @@ import { HttpClient } from '@supacloud/app/browser';
 import { createAuthoritativeCommandClient } from '@supacloud/js/contracts';
 ```
 
-A CommonJS application can load the ESM implementation asynchronously:
+A CommonJS application using app/compiler can load their ESM implementation asynchronously:
 
 ```js
 async function start() {
@@ -116,7 +117,9 @@ and explicit CommonJS build flags. A Git file-inventory guard rejects owned
 `node_modules` and compatibility data under `fixtures/`. It does not rewrite
 third-party code or ban `createRequire` interoperability inside an ES module.
 The pack guard checks the actual npm file inventory for missing export/type/bin
-targets and stale `.cjs`, `.cts` or associated source-map artifacts. Unknown
+targets and stale `.cjs`, `.cts` or associated source-map artifacts outside
+the SDK/Contracts exception. Those packages must retain matching runtime and
+declaration targets for every public import/require condition. Unknown
 wildcard targets fail explicitly rather than receiving an unearned pass.
 
 `ESM Package Contracts` adds an independent CI workflow with read-only repository
@@ -148,6 +151,5 @@ They do not substitute for the full Lite database/package/standalone checks.
 
 Before release, revert the breaking change. After release, consumers that still
 need the old synchronous CommonJS contract can pin the last compatible version
-while migrating. Restoring a CJS implementation would require an explicit
-policy change, equivalent public declarations, consumer coverage and renewed
-runtime-identity checks; do not disable the guard just to make CI green.
+while migrating. Any additional CJS exception requires an explicit policy change, matching
+declarations and installed-consumer coverage; do not disable the guard to make CI green.

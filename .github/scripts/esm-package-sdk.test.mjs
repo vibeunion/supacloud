@@ -13,22 +13,22 @@ import {
 
 const manifest = () => ({
   name: '@supacloud/js', version: '1.0.0', type: 'module',
-  main: './dist/index.js', module: './dist/index.js', types: './dist/index.d.ts',
+  main: './dist/index.cjs', module: './dist/index.mjs', types: './dist/index.d.mts',
   engines: { node: SDK_NODE_RANGE },
   exports: Object.fromEntries(Object.entries(SDK_ENTRYPOINTS).map(([path, file]) => [path, {
-    types: `./dist/${file}.d.ts`, 'module-sync': `./dist/${file}.js`,
-    import: `./dist/${file}.js`, default: `./dist/${file}.js`,
+    import: { types: `./dist/${file}.d.mts`, default: `./dist/${file}.mjs` },
+    require: { types: `./dist/${file}.d.cts`, default: `./dist/${file}.cjs` },
   }])),
 });
 const inventory = ['package.json', ...Object.values(SDK_ENTRYPOINTS).flatMap(file => [
-  `dist/${file}.js`, `dist/${file}.d.ts`,
+  `dist/${file}.mjs`, `dist/${file}.cjs`, `dist/${file}.d.mts`, `dist/${file}.d.cts`,
 ])];
 
-test('SDK promises modern require/import without granting a CJS build exception', () => {
+test('SDK publishes explicit dual MJS/CJS require/import conditions', () => {
   assert.deepEqual(checkEsmManifest(manifest()), []);
   assert.deepEqual(checkEsmPack(manifest(), inventory), []);
-  assert.match(checkEsmPack(manifest(), [...inventory, 'dist/index.cjs']).join('\n'), /unexpected CommonJS artifact/);
-  assert.match(checkEsmManifest({ ...manifest(), scripts: { build: 'bun build index.ts --format cjs' } }).join('\n'), /CommonJS builds/);
+  assert.deepEqual(checkEsmPack(manifest(), inventory), []);
+  assert.deepEqual(checkEsmManifest({ ...manifest(), scripts: { build: 'bun build index.ts --format cjs' } }), []);
 });
 
 test('the real SDK manifest preserves its reviewed public paths and runtime floor', async () => {
@@ -42,14 +42,14 @@ test('SDK must not promise synchronous loading without its documented Node floor
   }
 });
 
-test('every public SDK subpath requires module-sync with the same ESM implementation', () => {
+test('every public SDK subpath requires matching MJS/CJS conditions', () => {
   for (const path of Object.keys(SDK_ENTRYPOINTS)) {
-    for (const field of ['module-sync', 'import', 'default', 'types']) {
+    for (const field of ['import', 'require']) {
       const candidate = manifest();
-      candidate.exports[path][field] = './dist/other.js';
-      assert.match(checkSdkModuleContract(candidate).join('\n'), /share the reviewed ESM entry/);
+      candidate.exports[path][field] = { types: './dist/other.d.mts', default: './dist/other.mjs' };
+      assert.match(checkSdkModuleContract(candidate).join('\n'), /matching MJS\/CJS/);
       delete candidate.exports[path][field];
-      assert.match(checkSdkModuleContract(candidate).join('\n'), /share the reviewed ESM entry/);
+      assert.match(checkSdkModuleContract(candidate).join('\n'), /matching MJS\/CJS/);
     }
   }
 });
@@ -102,30 +102,54 @@ test('type consumers use actual CommonJS/ESM syntax and retain negative/any chec
   assert.throws(() => sdkRuntimeConsumer('unsupported'), /Invalid SDK loader order/);
 });
 
-// These dependency-free fixtures exercise the acceptance harness and Node's
-// real loader. CI separately runs the same consumers against actual tarballs.
+// Real tarball consumers in esm-package.acceptance.mjs cover native loading,
+// both load orders, declarations and browser bundling.
+test('runtime harness checks format-local identity and API parity', () => {
+  for (const order of ['require-first', 'import-first']) {
+    const source = sdkRuntimeConsumer(order);
+    assert.match(source, /API parity/);
+    assert.match(source, /CJS identity/);
+    assert.match(source, /ESM identity/);
+  }
+});
+
+// Run the harness against deliberately independent builds, then inject real
+// packaging failures to prove that acceptance does not merely inspect metadata.
 async function fixture(work) {
-  const directory = await mkdtemp(join(tmpdir(), 'supacloud-sdk-compat-'));
+  const directory = await mkdtemp(join(tmpdir(), 'supacloud-sdk-dual-'));
   try {
     const sdk = join(directory, 'node_modules', '@supacloud', 'js');
     const contracts = join(directory, 'node_modules', '@supacloud', 'contracts');
-    await mkdir(join(sdk, 'dist'), { recursive: true });
-    await mkdir(contracts, { recursive: true });
+    for (const path of [sdk, contracts]) await mkdir(join(path, 'dist'), { recursive: true });
     await writeFile(join(directory, 'package.json'), '{"type":"module"}');
     await writeFile(join(sdk, 'package.json'), JSON.stringify(manifest()));
-    await writeFile(join(sdk, 'dist', 'index.js'), 'export function createSupaCloudClient() { return {}; }\n');
-    await writeFile(join(sdk, 'dist', 'task-events.js'), 'export class TaskEventError extends Error { constructor(status, code) { super(code); this.status = status; } }\n');
-    await writeFile(join(contracts, 'package.json'), JSON.stringify({ name: '@supacloud/contracts', type: 'module', exports: { './client': { import: './client.js' } } }));
-    await writeFile(join(contracts, 'client.js'), 'export function createAuthoritativeCommandClient() {}\nexport class CommandAuthenticationError extends Error {}\n');
-    await writeFile(join(sdk, 'dist', 'contracts.js'), 'export * from "@supacloud/contracts/client";\n');
-    await writeFile(join(sdk, 'dist', 'reactive.js'), 'export function observeQuery() {}\n');
+    const entries = { '.': 'index', './client': 'client', './browser': 'browser' };
+    await writeFile(join(contracts, 'package.json'), JSON.stringify({
+      type: 'module', exports: Object.fromEntries(Object.entries(entries).map(([path, file]) =>
+        [path, { import: `./dist/${file}.mjs`, require: `./dist/${file}.cjs` }])),
+    }));
+    const implementations = {
+      index: 'function createSupaCloudClient() { return {}; }',
+      'task-events': 'class TaskEventError extends Error { constructor(status, code) { super(code); this.status = status; } }',
+      reactive: 'function observeQuery() {}',
+    };
+    for (const [file, source] of Object.entries(implementations)) {
+      const name = source.match(/(?:function|class) (\w+)/)[1];
+      await writeFile(join(sdk, 'dist', file + '.mjs'), `export ${source}\n`);
+      await writeFile(join(sdk, 'dist', file + '.cjs'), `${source}\nexports.${name} = ${name};\n`);
+    }
+    for (const file of Object.values(entries)) {
+      await writeFile(join(contracts, 'dist', file + '.mjs'), 'export function createAuthoritativeCommandClient() {}\n');
+      await writeFile(join(contracts, 'dist', file + '.cjs'), 'exports.createAuthoritativeCommandClient = function() {};\n');
+    }
+    await writeFile(join(sdk, 'dist', 'contracts.mjs'), 'export * from "@supacloud/contracts/client";\n');
+    await writeFile(join(sdk, 'dist', 'contracts.cjs'), 'module.exports = require("@supacloud/contracts/client");\n');
     await writeSdkConsumers(directory);
     const env = { ...process.env };
     delete env.NODE_OPTIONS;
     delete env.NODE_PATH;
     const run = file => execFileSync(process.execPath, [file], {
-      cwd: directory, env, encoding: 'utf8', timeout: 15_000,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: directory, env, encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'pipe'],
     });
     await work({ directory, sdk, contracts, run });
   } finally {
@@ -134,40 +158,58 @@ async function fixture(work) {
 }
 
 for (const file of ['sdk-require-first.cjs', 'sdk-import-first.mjs']) {
-  test(`native loader shares all SDK identities: ${file}`, () => fixture(async ({ run }) => {
+  test(`native dual builds preserve per-format contracts: ${file}`, () => fixture(async ({ run }) => {
     assert.match(run(file), /SDK synchronous require\/import compatibility passed/);
   }));
 }
 
-for (const transitive of [false, true]) {
-  test(`cold require rejects ${transitive ? 'transitive' : 'direct'} top-level await`, () => fixture(async ({ sdk, run }) => {
-    if (transitive) {
-      await writeFile(join(sdk, 'dist', 'async.js'), 'await Promise.resolve(); export const ready = true;\n');
-      await writeFile(join(sdk, 'dist', 'index.js'), 'export { ready } from "./async.js"; export function createSupaCloudClient() {}\n');
-    } else {
-      await writeFile(join(sdk, 'dist', 'index.js'), 'await Promise.resolve(); export function createSupaCloudClient() {}\n');
-    }
-    assert.throws(() => run('sdk-require-first.cjs'), error => /ERR_REQUIRE_ASYNC_MODULE/.test(String(error.stderr)));
-  }));
-}
-
-test('an async CJS shim cannot fake the synchronous SDK contract', () => fixture(async ({ sdk, run }) => {
-  const candidate = manifest();
-  candidate.exports['.'] = { import: './dist/index.js', require: './dist/shim.cjs' };
-  await writeFile(join(sdk, 'package.json'), JSON.stringify(candidate));
-  await writeFile(join(sdk, 'dist', 'shim.cjs'), 'module.exports = import("./index.js");\n');
+test('an asynchronous CJS shim fails acceptance', () => fixture(async ({ sdk, run }) => {
+  await writeFile(join(sdk, 'dist', 'index.cjs'), 'module.exports = import("./index.mjs");\n');
   assert.throws(() => run('sdk-require-first.cjs'), error => /require must not return a Promise/.test(String(error.stderr)));
 }));
 
-test('independently bundled CJS/ESM functions are detected as an identity split', () => fixture(async ({ sdk, run }) => {
-  const candidate = manifest();
-  candidate.exports['.'] = { import: './dist/index.js', require: './dist/split.cjs' };
-  await writeFile(join(sdk, 'package.json'), JSON.stringify(candidate));
-  await writeFile(join(sdk, 'dist', 'split.cjs'), 'exports.createSupaCloudClient = function createSupaCloudClient() {};\n');
-  assert.throws(() => run('sdk-require-first.cjs'), error => /shared identity/.test(String(error.stderr)));
+test('a missing CJS public export fails API parity', () => fixture(async ({ sdk, run }) => {
+  await writeFile(join(sdk, 'dist', 'reactive.cjs'), 'exports.wrong = function() {};\n');
+  assert.throws(() => run('sdk-import-first.mjs'), error => /API parity/.test(String(error.stderr)));
 }));
 
-test('duplicating the contracts implementation is detected across SDK/shared boundaries', () => fixture(async ({ sdk, run }) => {
-  await writeFile(join(sdk, 'dist', 'contracts.js'), 'export function createAuthoritativeCommandClient() {}\nexport class CommandAuthenticationError extends Error {}\n');
-  assert.throws(() => run('sdk-require-first.cjs'), error => /shared protocol identity/.test(String(error.stderr)));
-}));
+for (const extension of ['mjs', 'cjs']) {
+  test(`duplicated ${extension} contracts fail format-local facade identity`, () => fixture(async ({ sdk, run }) => {
+    await writeFile(join(sdk, 'dist', 'contracts.' + extension), extension === 'mjs'
+      ? 'export function createAuthoritativeCommandClient() {}\n'
+      : 'exports.createAuthoritativeCommandClient = function() {};\n');
+    assert.throws(() => run('sdk-require-first.cjs'), error => /shared protocol identity/.test(String(error.stderr)));
+  }));
+}
+
+test('Contracts uses the same strict dual-format contract', async () => {
+  const path = fileURLToPath(new URL('../../packages/contracts/package.json', import.meta.url));
+  const candidate = JSON.parse(await readFile(path, 'utf8'));
+  assert.deepEqual(checkEsmManifest(candidate), []);
+  for (const entry of Object.values(candidate.exports)) {
+    entry.require.types = './dist/index.d.mts';
+    assert.match(checkEsmManifest(candidate).join('\n'), /matching MJS\/CJS/);
+  }
+});
+
+test('declaration copying rewrites re-exports, imports and nested import types', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'supacloud-dual-types-'));
+  try {
+    await mkdir(join(directory, 'nested'));
+    await writeFile(join(directory, 'nested', 'entry.d.ts'), `export * from '../other.js';
+import type { A } from "../other.js";
+export type B = import('../other.js').A;
+import type { SupabaseClient } from '@supabase/supabase-js' with { "resolution-mode": "import" };
+`);
+    execFileSync(process.execPath, [fileURLToPath(new URL('../../scripts/copy-dual-declarations.mjs', import.meta.url)), directory]);
+    for (const extension of ['m', 'c']) {
+      const content = await readFile(join(directory, 'nested', `entry.d.${extension}ts`), 'utf8');
+      assert.equal(content.match(new RegExp(`other\\.${extension}js`, 'g')).length, 3);
+      assert.match(content, /resolution-mode": "import"/);
+      assert.match(content, /@supabase\/supabase-js/);
+    }
+    await assert.rejects(readFile(join(directory, 'nested', 'entry.d.ts')), { code: 'ENOENT' });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
