@@ -6,7 +6,6 @@ import { tmpdir } from "node:os";
 import { migrateProject, migrateRouteResponse, SUPACLOUD_MIGRATIONS, type SupaCloudMigration } from "./migrations";
 import { migrationDependencies } from "./migration-policy";
 
-
 test("migrates deprecated route response schemas to an explicit 200 response map", () => {
   const source = `
 const Result = {};
@@ -20,7 +19,6 @@ const unrelated = { response: Result };
   expect(result.content).toContain('responses: { 200: Result }');
   expect(result.content).toContain("const unrelated = { response: Result }");
 });
-
 
 test("schema builder calls without a route-options argument remain untouched", () => {
   const source = `
@@ -36,7 +34,6 @@ class ItemsController {}
   expect(result.content).toContain("responses: { 200: Result }");
 });
 
-
 test("migrates route options resolved through a local const and defineRouteContract", () => {
   const result = migrateRouteResponse(`
 const defineRouteContract = <T>(value: T): T => value;
@@ -49,7 +46,6 @@ class ItemsController {}
   expect(result.content).toContain("const routeOptions = defineRouteContract({ responses: { 200: Result } });");
 });
 
-
 test("does not guess when a route already has a response map", () => {
   const result = migrateRouteResponse(
     `@Get("/items", { response: Legacy, responses: { 201: Created } }) class ItemsController {}`,
@@ -58,7 +54,6 @@ test("does not guess when a route already has a response map", () => {
   expect(result.changed).toBe(false);
   expect(result.issues).toMatchObject([{ code: "route-response-conflict", file: "src/items.ts", line: 1 }]);
 });
-
 
 test("project migration is atomic when one file needs manual conflict resolution", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-migration-"));
@@ -70,7 +65,6 @@ test("project migration is atomic when one file needs manual conflict resolution
   await writeFile(goodPath, good, "utf8");
   await writeFile(conflictPath, conflict, "utf8");
 
-
   const result = await migrateProject({ rootDir: root, write: true });
   expect(result.issues).toHaveLength(1);
   expect(result.changedFiles).toEqual([]);
@@ -78,7 +72,6 @@ test("project migration is atomic when one file needs manual conflict resolution
   expect(await readFile(conflictPath, "utf8")).toBe(conflict);
   await rm(root, { recursive: true, force: true });
 });
-
 
 test("unchanged project files do not fall back to context-free per-file migration", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-migration-unchanged-"));
@@ -96,7 +89,6 @@ test("unchanged project files do not fall back to context-free per-file migratio
     await rm(root, { recursive: true, force: true });
   }
 });
-
 
 test("project migration follows route contracts across files and only changes the declaration", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-migration-cross-file-"));
@@ -116,12 +108,10 @@ const Result = {};
 export const ItemsRoute = defineRouteContract({ response: Result });
 `, "utf8");
 
-
     const preview = await migrateProject({ rootDir: root });
     expect(preview.issues).toEqual([]);
     expect(preview.changedFiles).toEqual(["src/contracts.ts"]);
     expect(preview.files).toMatchObject([{ file: "src/contracts.ts", replacements: 1 }]);
-
 
     const applied = await migrateProject({ rootDir: root, write: true });
     expect(applied.issues).toEqual([]);
@@ -132,7 +122,6 @@ export const ItemsRoute = defineRouteContract({ response: Result });
     await rm(root, { recursive: true, force: true });
   }
 });
-
 
 test("project migration uses tsconfig path aliases when resolving shared contracts", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-migration-paths-"));
@@ -151,7 +140,6 @@ class ItemsController {}
 export const ItemsRoute = { response: Result };
 `, "utf8");
 
-
     const result = await migrateProject({ rootDir: root });
     expect(result.issues).toEqual([]);
     expect(result.changedFiles).toEqual(["src/contracts.ts"]);
@@ -159,7 +147,6 @@ export const ItemsRoute = { response: Result };
     await rm(root, { recursive: true, force: true });
   }
 });
-
 
 async function versionedFixture() {
   const root = await mkdtemp(join(tmpdir(), "supacloud-versioned-migration-"));
@@ -172,7 +159,6 @@ async function versionedFixture() {
   await writeFile(join(root, "items.ts"), source);
   return { root, source, fromVersion: "0.11.0", toVersion: "0.12.0" };
 }
-
 
 test("versioned upgrade previews without writing, applies once and is repeatable", async () => {
   const f = await versionedFixture();
@@ -188,7 +174,6 @@ test("versioned upgrade previews without writing, applies once and is repeatable
     expect((await migrateProject({ ...options, fromVersion: f.toVersion })).migrations).toEqual([]);
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
-
 
 test("unknown checkpoints, downgrade and mismatched installed packages block all writes", async () => {
   const f = await versionedFixture();
@@ -211,7 +196,6 @@ test("unknown checkpoints, downgrade and mismatched installed packages block all
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
 
-
 test("a later filesystem failure restores earlier writes and removes temporary files", async () => {
   const f = await versionedFixture();
   await writeFile(join(f.root, "z.ts"), f.source);
@@ -232,7 +216,6 @@ test("a later filesystem failure restores earlier writes and removes temporary f
     await rm(f.root, { recursive: true, force: true });
   }
 });
-
 
 test("migration order follows checkpoint edges and writes each file's final result once", async () => {
   const f = await versionedFixture();
@@ -264,7 +247,6 @@ test("migration order follows checkpoint edges and writes each file's final resu
   }
 });
 
-
 test("rollback reports residual files rather than overwriting concurrent edits", async () => {
   const f = await versionedFixture();
   await writeFile(join(f.root, "z.ts"), f.source);
@@ -285,7 +267,6 @@ test("rollback reports residual files rather than overwriting concurrent edits",
     await rm(f.root, { recursive: true, force: true });
   }
 });
-
 
 test("CLI rejects unsupported checkpoints with nonzero status and visible diagnostics", async () => {
   const f = await versionedFixture();
