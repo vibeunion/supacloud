@@ -1,9 +1,9 @@
 import { mkdir, readFile } from "node:fs/promises";
-import { createHash } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { writeFileIfChanged } from "./generate";
 import type { IntrospectionQuery } from "graphql";
 import { assertGraphqlOptions } from "./graphql-options";
+import { graphqlSchemaHashes } from "./graphql-schema-hashes";
 
 export interface PullGraphqlSchemaOptions {
   /** Explicit project URL. This operation never discovers or changes a deployment. */
@@ -20,6 +20,7 @@ export interface PullGraphqlSchemaOptions {
 export async function pullGraphqlSchema(options: PullGraphqlSchemaOptions): Promise<{
   path: string;
   schemaHash: string;
+  schemaNormalizedHash: string;
   upToDate: boolean;
   written: boolean;
 }> {
@@ -70,9 +71,9 @@ export async function pullGraphqlSchema(options: PullGraphqlSchemaOptions): Prom
     if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) throw error;
   }
   const upToDate = previous === content;
-  const schemaHash = createHash("sha256").update(content).digest("hex");
-  if (options.check) return { path, schemaHash, upToDate, written: false };
+  const hashes = graphqlSchemaHashes(content);
+  if (options.check) return { path, ...hashes, upToDate, written: false };
   await mkdir(dirname(path), { recursive: true });
   await writeFileIfChanged(path, content);
-  return { path, schemaHash, upToDate: true, written: true };
+  return { path, ...hashes, upToDate: true, written: true };
 }

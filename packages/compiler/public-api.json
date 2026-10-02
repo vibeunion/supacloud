@@ -611,7 +611,7 @@
     {
       "name": "GraphqlContractSummary",
       "kind": "type",
-      "signature": "export interface GraphqlContractSummary {\n    schema: string;\n    schemaHash?: string;\n    documents: string[];\n    operations: Array<{\n        name: string;\n        file: string;\n        line: number;\n    }>;\n}"
+      "signature": "export interface GraphqlContractSummary {\n    schema: string;\n    schemaHash?: string;\n    schemaNormalizedHash?: string;\n    documents: string[];\n    operations: Array<{\n        name: string;\n        file: string;\n        line: number;\n    }>;\n}"
     },
     {
       "name": "GraphqlOptions",
@@ -841,7 +841,7 @@
     {
       "name": "pullGraphqlSchema",
       "kind": "value",
-      "signature": "export declare function pullGraphqlSchema(options: PullGraphqlSchemaOptions): Promise<{\n    path: string;\n    schemaHash: string;\n    upToDate: boolean;\n    written: boolean;\n}>;"
+      "signature": "export declare function pullGraphqlSchema(options: PullGraphqlSchemaOptions): Promise<{\n    path: string;\n    schemaHash: string;\n    schemaNormalizedHash: string;\n    upToDate: boolean;\n    written: boolean;\n}>;"
     },
     {
       "name": "PullGraphqlSchemaOptions",
