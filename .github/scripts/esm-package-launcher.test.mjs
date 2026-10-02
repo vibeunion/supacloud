@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -62,7 +62,11 @@ test('ESM launcher preserves argv and resolves cli.js independently of cwd and U
   const args = ['start', '--project-dir', 'space # percent % 测试', '; echo must-not-run', '--json'];
   const result = await run(context, args).closed;
   assert.equal(result.code, 0, result.stderr);
-  assert.deepEqual(JSON.parse(result.stdout), { args, cwd: context.cwd });
+    const observed = JSON.parse(result.stdout);
+  const [actualCwd, expectedCwd] = process.platform === 'darwin'
+    ? await Promise.all([realpath(observed.cwd), realpath(context.cwd)])
+    : [observed.cwd, context.cwd];
+  assert.deepEqual({ ...observed, cwd: actualCwd }, { args, cwd: expectedCwd });
 });
 
 test('ESM launcher preserves unsuccessful CLI exit codes', { timeout: 15000 }, async t => {
