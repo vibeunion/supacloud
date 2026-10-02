@@ -12,7 +12,8 @@ printf 'server-port = 3157\n' > "$TMP_DIR/tenants/demo.conf"
 cat > "$TMP_DIR/bin/curl" <<'SH'
 #!/usr/bin/env bash
 for arg in "$@"; do last="$arg"; done
-printf '%s\n' "$last" >> "$PROBE_LOG"
+printf '%s\n' "$last" >> "${PROBE_LOG:-/dev/null}"
+printf '%s\n' "$*" >> "${CURL_LOG:-/dev/null}"
 printf '%s' "${CURL_CODE:-}"
 exit "${CURL_EXIT:-0}"
 SH
@@ -155,5 +156,22 @@ mkdir -p "$TMP_DIR/no-tenants"
 run_watchdog_in "$TMP_DIR/no-tenants" 200 ""
 printf '# no port\n' > "$TMP_DIR/tenants/demo.conf"
 expect_incident 200 "" 'missing-port|'
+
+# Alert webhook delivery must be bounded so a stalled endpoint cannot hold the
+# watchdog open and delay the remaining tenants.
+: > "$TMP_DIR/webhook.log"
+rm -f "$TMP_DIR/state/demo.state"
+status=0
+PATH="$TMP_DIR/bin:/usr/bin:/bin" \
+  CURL_CODE=503 CURL_LOG="$TMP_DIR/webhook.log" PROBE_LOG="$TMP_DIR/probe.log" \
+  ALERT_LOG="$TMP_DIR/alert.log" \
+  SUPACLOUD_ALERT_WEBHOOK_URL='https://hooks.example/alert' \
+  SUPACLOUD_WATCHDOG_STATE_DIR="$TMP_DIR/state" \
+  SUPACLOUD_TENANT_CONFIG_DIR="$TMP_DIR/tenants" \
+  timeout 10 bash "$WATCHDOG" || status=$?
+[[ "$status" == 1 ]] || fail "webhook scenario did not report the incident (exit $status)"
+grep -q 'hooks.example/alert' "$TMP_DIR/webhook.log" || fail 'alert webhook was not delivered'
+grep 'hooks.example/alert' "$TMP_DIR/webhook.log" | grep -q -- '--max-time' || fail 'alert webhook has no total timeout'
+grep 'hooks.example/alert' "$TMP_DIR/webhook.log" | grep -q -- '--connect-timeout' || fail 'alert webhook has no connect timeout'
 
 echo 'postgrest_watchdog.test.sh: OK (transport, HTTP, journal, state transitions and config boundaries)'

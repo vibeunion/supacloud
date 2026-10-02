@@ -18,6 +18,10 @@ if [[ -f /etc/supabase/management-api.env ]]; then
 fi
 
 ALERT_WEBHOOK_URL="${SUPACLOUD_ALERT_WEBHOOK_URL:-}"
+ALERT_WEBHOOK_TIMEOUT="${SUPACLOUD_WATCHDOG_WEBHOOK_TIMEOUT:-5}"
+if [[ ! "$ALERT_WEBHOOK_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+    ALERT_WEBHOOK_TIMEOUT=5
+fi
 
 json_escape() {
     local value="$1"
@@ -42,7 +46,12 @@ EOF
     logger -t supacloud-postgrest-watchdog "[$severity] ${tenant}: ${message}"
 
     if [[ -n "$ALERT_WEBHOOK_URL" ]]; then
-        curl -fsS -X POST \
+        # Bound delivery so a stalled endpoint cannot hold the watchdog open and
+        # delay the remaining tenants.
+        curl -fsS \
+            --connect-timeout "$ALERT_WEBHOOK_TIMEOUT" \
+            --max-time "$ALERT_WEBHOOK_TIMEOUT" \
+            -X POST \
             -H 'Content-Type: application/json' \
             -d "$payload" \
             "$ALERT_WEBHOOK_URL" >/dev/null || logger -t supacloud-postgrest-watchdog "[warn] webhook delivery failed for ${tenant}"
