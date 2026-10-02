@@ -2156,39 +2156,42 @@ function functionVersionRetention(): number {
   return parsed;
 }
 
-// Collects the versions that were actually activated at some point, from the
-// append-only activation-generation records. A version that only exists because
-// it was staged for a future project release has no generation record, so it is
-// never eligible for pruning.
+// Prepared generations also exist for failed deployments. Only ancestors of the
+// committed authority prove activation; an absent tombstone ends this incarnation
+// because deleting/recreating a function can reuse its immutable version numbers.
 async function activatedFunctionVersions(ref: string, slug: string): Promise<Set<number>> {
+  const state = await readFunctionManifestState(ref, slug);
+  const versions = new Set<number>();
+  if (state.authority?.target_state !== "active") return versions;
   const directory = assertInside(
     getFuncDir(ref),
     path.join(getFuncDir(ref), ".activation-generations", validateSlug(slug)),
   );
-  const entries = await fs.readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
-    if (isMissingPathError(error)) return [];
-    throw error;
-  });
-  const versions = new Set<number>();
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".json")) continue;
-    try {
-      const manifest = parseEdgeFunctionActivationManifest(
-        await Bun.file(assertInside(directory, path.join(directory, entry.name))).text(),
-      );
-      // Require a valid activation authority whose identifier matches the file
-      // name, so only genuine activation records can mark a version removable.
-      if (manifest.authority === null
-        || entry.name !== `${manifest.authority.activation_id}.json`) {
-        continue;
-      }
-      const candidate = typeof manifest.config.version === "string"
-        ? parseVersionNumber(manifest.config.version)
-        : null;
-      if (candidate !== null) versions.add(candidate);
-    } catch {
-      // Malformed records are ignored; unproven versions stay protected below.
+  let child = state.authority;
+  while (child.previous_activation_id !== null) {
+    const identifier = child.previous_activation_id;
+    const manifest = parseEdgeFunctionActivationManifest(
+      await Bun.file(assertInside(directory, path.join(directory, `${identifier}.json`))).text(),
+    );
+    const parent = manifest.authority;
+    if (parent === null || parent.activation_id !== identifier
+      || parent.activation_generation !== child.activation_generation - 1) {
+      throw new Error("Function retention activation lineage is invalid");
     }
+    if (parent.target_state === "absent") break;
+    const version = typeof manifest.config.version === "string"
+      ? parseVersionNumber(manifest.config.version)
+      : null;
+    if (version === null) throw new Error("Function retention ancestor has no immutable version");
+    // Previously pruned ancestors can remain in the journal. Never let a record
+    // for different artifact bytes authorize removal of an existing version.
+    const metadata = await readFunctionVersionMetadata(ref, slug, String(version))
+      .catch((error: unknown) => {
+        if (isMissingPathError(error)) return null;
+        throw error;
+      });
+    if (metadata?.artifact_sha256 === parent.artifact_sha256) versions.add(version);
+    child = parent;
   }
   return versions;
 }
@@ -2196,7 +2199,7 @@ async function activatedFunctionVersions(ref: string, slug: string): Promise<Set
 // Bounds the immutable version history so repeated deploys cannot grow
 // `.versions/<slug>` without limit. Only versions that were actually activated
 // AND are strictly older than the active version are candidates, so staged or
-// pending versions (always newer, and without a generation record) and the
+// pending versions (outside the committed activation lineage) and the
 // active version are never removed. Among the candidates the most recent
 // `keep - 1` are retained. Callers must hold the function deploy lock;
 // rollback to a pruned version is intentionally no longer possible.

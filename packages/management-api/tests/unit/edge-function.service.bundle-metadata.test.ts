@@ -1097,6 +1097,59 @@ describe("edgeFunctionService bundle metadata", () => {
     }
   });
 
+  test.each(["same", "different"])("retention protects recreated staged versions with %s content", async (content) => {
+    const ref = `proj_retention_recreated_${content}`;
+    const slug = "recreated";
+    const previous = process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION;
+    process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION = "1";
+    const original = "export default { fetch: () => new Response('original') };";
+    try {
+      expect((await deployConditionalRelease({ ref, slug, code: original })).success).toBe(true);
+      const current = await edgeFunctionService.getConfig(ref, slug);
+      await edgeFunctionService.remove(ref, slug, current.activation_id);
+      const staged = await edgeFunctionService.stageVersion({
+        ref, slug, code: content === "same" ? original
+          : "export default { fetch: () => new Response('staged') };",
+      });
+      expect(staged.version).toBe("1");
+      expect((await deployConditionalRelease({
+        ref, slug, code: "export default { fetch: () => new Response('active') };",
+      })).success).toBe(true);
+      expect(existsSync(join(functionsRoot, ref, ".versions", slug, "1"))).toBe(true);
+      expect(existsSync(join(functionsRoot, ref, ".versions", slug, "2"))).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION;
+      else process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION = previous;
+    }
+  });
+
+  test("retention does not treat a failed preheat generation as activated", async () => {
+    const ref = "proj_retention_failed_preheat";
+    const slug = "failed-candidate";
+    const previous = process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION;
+    process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION = "1";
+    try {
+      expect((await deployConditionalRelease({ ref, slug,
+        code: "export default { fetch: () => new Response('original') };",
+      })).success).toBe(true);
+      globalThis.fetch = runtimeSuccessFetch(async () => Response.json({}, { status: 503 }));
+      expect((await deployConditionalRelease({ ref, slug,
+        code: "export default { fetch: () => new Response('failed') };",
+      })).success).toBe(false);
+      globalThis.fetch = runtimeSuccessFetch();
+      expect((await deployConditionalRelease({ ref, slug,
+        code: "export default { fetch: () => new Response('active') };",
+      })).success).toBe(true);
+      const root = join(functionsRoot, ref, ".versions", slug);
+      expect(existsSync(join(root, "1"))).toBe(false);
+      expect(existsSync(join(root, "2"))).toBe(true);
+      expect(existsSync(join(root, "3"))).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION;
+      else process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION = previous;
+    }
+  });
+
   test("malformed activation records cannot mark a staged version removable", async () => {
     const ref = "proj_version_retention_malformed";
     const slug = "malformed";
