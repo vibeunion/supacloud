@@ -7,32 +7,16 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
-    },
-    "./task-events": {
-      "types": "./dist/task-events.d.ts",
-      "import": "./dist/task-events.js",
-      "default": "./dist/task-events.js"
-    },
-    "./contracts": {
-      "types": "./dist/contracts.d.ts",
-      "import": "./dist/contracts.js",
-      "default": "./dist/contracts.js"
-    }
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js", "default": "./dist/index.js" },
+    "./task-events": { "types": "./dist/task-events.d.ts", "import": "./dist/task-events.js", "default": "./dist/task-events.js" },
+    "./contracts": { "types": "./dist/contracts.d.ts", "import": "./dist/contracts.js", "default": "./dist/contracts.js" },
+    "./reactive": { "types": "./dist/reactive.d.ts", "import": "./dist/reactive.js", "default": "./dist/reactive.js" }
   },
-  "files": [
-    "NOTICE",
-    "LICENSE-APACHE-2.0.txt",
-    "dist",
-    "README.md"
-  ],
+  "files": ["NOTICE", "LICENSE-APACHE-2.0.txt", "dist", "README.md", "REACTIVE.md"],
   "scripts": {
     "test": "bun test",
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/task-events.ts --outdir dist --target node --external @supabase/supabase-js --external @supacloud/contracts && bun build src/contracts.ts --outdir dist --target browser --external @supacloud/contracts",
+    "build:js": "bun build src/index.ts src/task-events.ts --outdir dist --target node --external @supabase/supabase-js --external @supacloud/contracts && bun build src/contracts.ts --outdir dist --target browser --external @supacloud/contracts && bun build src/reactive.ts --outdir dist --target browser --external rxjs",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
@@ -40,28 +24,10 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit"
   },
-  "keywords": [
-    "supacloud",
-    "supabase",
-    "sdk",
-    "background-tasks",
-    "realtime"
-  ],
+  "keywords": ["supacloud", "supabase", "sdk", "background-tasks", "realtime"],
   "license": "AGPL-3.0-only",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/vibeunion/supacloud.git",
-    "directory": "packages/supacloud-js"
-  },
-  "peerDependencies": {
-    "@supabase/supabase-js": "^2.115.0"
-  },
-  "dependencies": {
-    "@supacloud/contracts": "file:../contracts"
-  },
-  "devDependencies": {
-    "@types/bun": "^1.4.2",
-    "@supabase/supabase-js": "^2.115.0",
-    "typescript": "^7.0.2"
-  }
+  "repository": { "type": "git", "url": "https://github.com/vibeunion/supacloud.git", "directory": "packages/supacloud-js" },
+  "peerDependencies": { "@supabase/supabase-js": "^2.115.0" },
+  "dependencies": { "@supacloud/contracts": "file:../contracts", "rxjs": "7.8.2" },
+  "devDependencies": { "@types/bun": "^1.4.2", "@supabase/supabase-js": "^2.115.0", "typescript": "^7.0.2" }
 }
