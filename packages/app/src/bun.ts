@@ -1,4 +1,5 @@
 import type { EnvironmentProviders, Provider } from "./provider";
+import { withCleanup } from "./lifecycle-cleanup";
 import {
   createEnvironmentInjector,
   runInInjectionContext,
@@ -38,25 +39,17 @@ export async function bootstrapBun(options: BunBootstrapOptions): Promise<BunApp
     signalHandlers.length = 0;
   };
 
-  const stop = async (): Promise<void> => {
+  const stop = (): Promise<void> => {
     if (stopPromise) return stopPromise;
-    stopPromise = (async () => {
+    // Publish the promise before calling host code, which may request stop again.
+    stopPromise = Promise.resolve().then(() => {
       detachSignalHandlers();
-      const errors: unknown[] = [];
-      try {
-        if (server) await server.stop(true);
-      } catch (error) {
-        errors.push(error);
-      } finally {
-        try {
-          await injector.destroyAsync();
-        } catch (error) {
-          errors.push(error);
-        }
-      }
-      if (errors.length === 1) throw errors[0];
-      if (errors.length > 1) throw new AggregateError(errors, "Bun application shutdown failed");
-    })();
+      return withCleanup(
+        () => server?.stop(true),
+        () => injector.destroyAsync(),
+        "Bun application shutdown failed",
+      );
+    });
     return stopPromise;
   };
 
@@ -66,7 +59,16 @@ export async function bootstrapBun(options: BunBootstrapOptions): Promise<BunApp
 
     if (options.installSignalHandlers ?? true) {
       for (const signal of ["SIGINT", "SIGTERM"] as const) {
-        const handler = () => void stop();
+        const handler = () => {
+          void stop().catch(() => {
+            // A signal has no caller to observe a rejection. Keep the failure
+            // status, but do not print arbitrary resource errors or credentials.
+            if (process.exitCode === undefined || Number(process.exitCode) === 0) {
+              process.exitCode = 1;
+            }
+            console.error("Bun application shutdown failed; await app.stop() for the error.");
+          });
+        };
         signalHandlers.push([signal, handler]);
         process.once(signal, handler);
       }
@@ -78,8 +80,11 @@ export async function bootstrapBun(options: BunBootstrapOptions): Promise<BunApp
       stop,
     };
   } catch (error) {
-    await stop().catch(() => undefined);
-    throw error;
+    return withCleanup(
+      () => { throw error; },
+      stop,
+      "Bun application startup and cleanup failed",
+    );
   }
 }
 
@@ -94,12 +99,14 @@ export async function runInScope<T>(
     name,
   });
 
-  try {
-    await injector.initialize();
-    return await runInInjectionContext(injector, () => work(injector));
-  } finally {
-    await injector.destroyAsync();
-  }
+  return withCleanup(
+    async () => {
+      await injector.initialize();
+      return runInInjectionContext(injector, () => work(injector));
+    },
+    () => injector.destroyAsync(),
+    "Scoped work and cleanup failed",
+  );
 }
 
 export function runInRequestContext<T>(
