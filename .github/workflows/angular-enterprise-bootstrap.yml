@@ -17,21 +17,25 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.2'
-      - name: Record source and prepare package dependencies
+      - name: Record source and install exact lockfile dependencies
         run: |
           git rev-parse HEAD
           bun --version
-          bun run scripts/build-command-dependencies.ts app
-          bun run scripts/build-command-dependencies.ts compiler
-          bun run scripts/build-command-dependencies.ts supacloud-js
-      - name: Export source and verification runtime (no credentials or git directory)
+          status=0
+          for package in contracts commands delivery compiler db app supacloud-js testing elysia cli; do
+            (cd "packages/$package" && bun install --frozen-lockfile --ignore-scripts) || status=1
+          done
+          exit "$status"
+      - name: Export source and verification runtime (no credentials or git configuration)
         if: always()
         run: |
           mkdir -p /tmp/angular-enterprise-evidence
           git archive --format=tar HEAD > /tmp/angular-enterprise-evidence/source.tar
+          git bundle create /tmp/angular-enterprise-evidence/repository.bundle --all
           find packages -maxdepth 2 -type d \( -name node_modules -o -name dist \) -print0 > /tmp/angular-enterprise-paths
           tar --null -T /tmp/angular-enterprise-paths -cf /tmp/angular-enterprise-evidence/dependencies.tar
           cp "$(command -v bun)" /tmp/angular-enterprise-evidence/bun
