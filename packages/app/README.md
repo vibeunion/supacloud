@@ -504,7 +504,12 @@ backpressure, cancellation and error isolation are part of the application
 contract. The package publishes ESM entrypoints for Bun/Node consumers;
 platform SDK calls remain ordinary Promise-based JavaScript.
 
-### Framework-neutral signals and layered configuration
+### Legacy framework-neutral signals and layered configuration
+
+New applications use async/await for one result and RxJS for event composition.
+In an Angular host, use native APIs from `@supacloud/app/angular` with the
+Angular host scheduler. Never combine the two signal dependency graphs.
+The root APIs below are retained for compatibility with existing applications.
 
 `signal`, `computed`, `linkedSignal` and `effect` remain callable and
 framework-neutral. Signals expose an optional invalidation subscription for

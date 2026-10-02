@@ -18,9 +18,12 @@ export function scanReactiveSource(input: ts.SourceFile, file: string): Diagnost
       if (reactive && origin && signalBridges.has(origin.module)
         && ["toSignal", "toScopedSignal", "rxResource"].includes(origin.name) && !reported.has(node.pos)) {
         reported.add(node.pos);
+        const start = source.getLineAndCharacterOfPosition(node.getStart(source));
+        const end = source.getLineAndCharacterOfPosition(node.end);
         diagnostics.push({
           severity: "error", code: "reactive-subscription-in-computation", file,
-          line: source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1,
+          line: start.line + 1, column: start.character,
+          endLine: end.line + 1, endColumn: end.character,
           message: `${origin.name} creates a subscription inside a reactive computation.`,
           suggestion: "Create the subscription once in its explicit owner scope, then derive state with computed. Hoisting requires ownership review; no automatic edit is safe.",
           docsUrl: "https://supacloud.dev/errors/reactive-subscription-in-computation",

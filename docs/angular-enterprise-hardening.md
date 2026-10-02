@@ -44,8 +44,9 @@ executors and SDKs, not to these HTTP features.
 Compile/check already return the same `Diagnostic[]` used by Context Pack. The
 new `@supacloud/compiler/diagnostics` entry adds `createDiagnosticReport()` and
 `toEditorDiagnostics()` over that exact payload and existing semantic repair plan.
-Editor positions are line-only, zero-based LSP-shaped data; they are not claimed
-as exact character spans. This is an adapter, not a new language-server process.
+Editor positions are zero-based LSP-shaped ranges with source columns when the
+compiler has a precise span; this remains an adapter, not a new language-server
+process.
 
 The checks identify known imported APIs and lexical bindings, not arbitrary
 function names. New errors are `reactive-subscription-in-computation` and
@@ -134,3 +135,75 @@ Revert this change to roll back implementation; use version control to revert
 applied source migrations. Re-run validation after retargeting or rebasing the
 stacked PR. Local syntax/helper tests are not a substitute for Bun, the repository
 compiler/Angular versions, packed consumers, or production concurrency tests.
+
+## Default host integration
+
+New application guidance and module Context Packs choose async/await for a single
+business result, RxJS for event composition, and `@supacloud/app/angular` inside
+an Angular host. Root signals remain legacy compatibility APIs; no scheduler or
+existing signal graph is silently migrated. SupaCloud JS still uses the existing
+`createSupaCloudClient`, `client.supabase`, command/task Promise APIs and separate
+`@supacloud/js/reactive` adapters.
+
+`createApplication()` owns a bounded `pendingWork` registry. It tracks module
+startup and compiled requests from context construction through request-scope
+cleanup. `app.waitForIdle({ timeoutMs })` observes that registry. `destroy()`
+stops admission, requests cancellation, and drains admitted work before releasing
+services. `pendingWork.shutdownTimeoutMs` defaults to 5000. A drain timeout
+rejects with `PendingWorkTimeoutError`, retains unfinished snapshots and service
+ownership, and allows `destroy()` again after the work settles.
+
+Request context factories receive an optional third `AbortSignal`, combining
+request disconnect and application shutdown. Existing two-argument factories
+remain valid; use the third argument when passing cancellation into custom I/O:
+
+```ts
+const app = createApplication({
+  modules,
+  requestContext: (request, context, signal) => ({ request, signal }),
+  pendingWork: { shutdownTimeoutMs: 5000 },
+});
+```
+
+Workers own their own `pendingWork` registry. Startup, polling/manual claims,
+job execution, scope disposal and receipt confirmation are counted. `stop()`
+closes admission and cancels cooperative job I/O; its `shutdownTimeoutMs` bounds
+the work drain. A timeout leaves the worker stopping and services retained until
+a subsequent successful stop. Receipt confirmation retains its own signal so
+handler cancellation does not prevent acknowledging an already committed result.
+There is no new automatic retry, rollback, durable queue or global Promise tracker.
+Custom contexts must forward the supplied signal themselves. Unmanaged native
+routes and arbitrary background promises are not automatically registered.
+Request accounting ends at the adapter's after-response cleanup boundary, not an
+assertion of remote delivery or durable consumption. Service destructors remain
+host-defined and are awaited; the timeout bounds admitted-work drainage.
+
+## Validated editor actions and tested consumers
+
+`supacloud-compiler diagnostics [rootDir] --json` emits a shared report, editor
+ranges and validated semantic actions without writing source. Angular misuse,
+runtime-DI and HTTP-provider diagnostics carry exact UTF-16 source spans; older
+line-only diagnostics retain a zero-column fallback. `createEditorCodeActions()`
+previews only repairs classified as ready. Missing policy input, stale or
+ambiguous source, and manual-only suggestions produce no automatic action.
+
+The `supacloud.applyDiagnosticFix` command arguments contain a semantic `fix` and
+`expectedSourceHash`. Save that argument object as JSON and use the existing
+`supacloud-compiler fix action.json --root src --write` executor, or call
+`applyDiagnosticFix(fix, { expectedSourceHash, rootDir, dryRun: false })` directly.
+A changed source hash or semantic precondition rejects application. No editor
+extension or language server is installed by this command.
+
+The reactive CI runs packed consumers using the declared Angular dependency
+range and the explicit minimum `22.1.5`; each run logs actual installed Angular,
+RxJS, TypeScript and Elysia versions. The Angular consumer now installs candidate
+Elysia/DB/command packages and executes request cancellation, drain timeout,
+repeated shutdown and worker receipts outside the workspace. The separate SDK
+consumer continues checking real SDK calls, generic inference and browser
+isolation. These are tested dependency combinations, not a claim of compatibility
+with every version in the declared range or production deployment acceptance.
+
+Type checking is explicit about upstream limits: Angular/HTTP/diagnostic consumer
+projects keep `skipLibCheck: false`; the packed Elysia host uses `skipLibCheck:
+true` because Elysia's published declarations are outside SupaCloud's control.
+This does not claim every upstream declaration combination is clean.

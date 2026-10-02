@@ -13,13 +13,18 @@ const runtimeApis = new Set([
 export function scanRuntimeDi(source: ts.SourceFile, file: string): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
   const namespaces = new Set<string>();
-  const report = (node: ts.Node) => diagnostics.push({
+  const report = (node: ts.Node) => {
+    const start = source.getLineAndCharacterOfPosition(node.getStart());
+    const end = source.getLineAndCharacterOfPosition(node.end);
+    diagnostics.push({
     severity: "error", code: "runtime-injection-disallowed", errorCode: "SC2012",
     docsUrl: "https://supacloud.dev/errors/SC2012", file,
-    line: source.getLineAndCharacterOfPosition(node.getStart()).line + 1,
+    line: start.line + 1, column: start.character,
+    endLine: end.line + 1, endColumn: end.character,
     message: "Compiled applications cannot import runtime DI. Use explicit constructors and generated scope factories.",
     suggestion: "Use constructor dependencies and generated request/job factories. Keep Angular runtime services outside the compiled application source root.",
-  });
+    });
+  };
   for (const statement of source.statements) {
     if (!(ts.isImportDeclaration(statement) || ts.isExportDeclaration(statement))
       || !statement.moduleSpecifier || !ts.isStringLiteral(statement.moduleSpecifier)

@@ -21,6 +21,12 @@ export interface ContextPack {
   executionPlans: ExecutionPlan[];
   routeContracts: ReturnType<typeof inspectRouteContracts>;
   diagnostics: Diagnostic[];
+  conventions: {
+    singleResult: "async-await";
+    eventComposition: "rxjs";
+    angularHost: "@supacloud/app/angular";
+    cancellation: "explicit-owner-signal";
+  };
   relatedModules: {
     importedBy: string[];
     imports: string[];
@@ -151,6 +157,12 @@ export function createContextPack(graph: ApplicationGraph, subject: string): Con
     ...(graphql ? { graphql } : {}),
     diagnostics: (graph.diagnostics ?? []).filter((diagnostic) =>
       diagnostic.file === undefined || files.includes(diagnostic.file)),
+    conventions: {
+      singleResult: "async-await",
+      eventComposition: "rxjs",
+      angularHost: "@supacloud/app/angular",
+      cancellation: "explicit-owner-signal",
+    },
     relatedModules: {
       imports: subjectModule.imports.filter((name) => selected.has(name)),
       importedBy: graph.modules
