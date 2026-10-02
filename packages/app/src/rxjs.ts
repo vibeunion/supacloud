@@ -1,13 +1,17 @@
+import { assertNotInReactiveContext } from "@angular/core";
 import type { DestroyRef as AngularDestroyRef, Signal } from "@angular/core";
 import {
   takeUntilDestroyed as angularTakeUntilDestroyed,
   toSignal as angularToSignal,
 } from "@angular/core/rxjs-interop";
 import { defer, EMPTY, type MonoTypeOperatorFunction, type Observable } from "rxjs";
-import type { DestroyRef } from "./context";
 
 /** An explicitly owned SupaCloud scope; never resolves a global injector. */
-export type ReactiveScope = DestroyRef & { readonly destroyed?: boolean };
+export interface ReactiveScope {
+  readonly signal?: AbortSignal;
+  readonly destroyed?: boolean;
+  onDestroy(callback: () => void | Promise<void>): () => void;
+}
 
 /**
  * Reuses Angular's operator with a SupaCloud lifetime. Abort stops consumption
@@ -47,6 +51,10 @@ export function toScopedSignal<T>(
   source: Observable<T>,
   options: { destroyRef: ReactiveScope; initialValue: T },
 ): Signal<T> {
+  // This bridge creates a subscription. Keep the guard explicit even in
+  // production builds; a computed/effect must not recreate owned subscriptions.
+  // Do not require an injection context: ownership is passed explicitly.
+  assertNotInReactiveContext(toScopedSignal, "Create the scoped signal once outside computed/effect, then derive from it.");
   return angularToSignal<T, T>(source.pipe(takeUntilDestroyed(options.destroyRef)), {
     initialValue: options.initialValue,
     // The operator above owns cleanup; do not register a second Angular owner.

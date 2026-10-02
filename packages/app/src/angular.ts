@@ -6,7 +6,7 @@
 export {
   computed, signal, linkedSignal, untracked, effect, isSignal,
   DestroyRef, Injector, InjectionToken, createEnvironmentInjector,
-  runInInjectionContext, resource,
+  runInInjectionContext, resource, assertInInjectionContext, assertNotInReactiveContext,
 } from "@angular/core";
 export type {
   Signal, WritableSignal, CreateSignalOptions, CreateComputedOptions,

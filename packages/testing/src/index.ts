@@ -17,3 +17,5 @@ export type {
   MockModuleNode,
   MockRouteNode,
 } from "./mock-graph";
+export { createHttpTestBackend } from "./http-backend";
+export type { HttpTestBackend, CapturedHttpRequest, HttpRequestMatcher } from "./http-backend";

@@ -14,6 +14,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
+    },
+    "./diagnostics": {
+      "types": "./dist/diagnostics.d.ts",
+      "import": "./dist/diagnostics.js",
+      "default": "./dist/diagnostics.js"
     }
   },
   "files": [
@@ -25,7 +30,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/cli.ts src/delivery-bundle-worker.ts --outdir dist --target node --conditions=supacloud-source --external @typescript/typescript6 --external graphql --external '@graphql-codegen/*'",
+    "build:js": "bun build src/index.ts src/diagnostics.ts src/cli.ts src/delivery-bundle-worker.ts --outdir dist --target node --conditions=supacloud-source --external @typescript/typescript6 --external graphql --external '@graphql-codegen/*'",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build && bun run test:package",
