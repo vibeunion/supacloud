@@ -1038,6 +1038,128 @@ describe("edgeFunctionService bundle metadata", () => {
     expect(await readFile(join(singleDir, "index.src.ts"), "utf8")).toBe(singleCode);
   });
 
+  test("prunes obsolete immutable versions beyond the retention limit", async () => {
+    const ref = "proj_version_retention";
+    const slug = "retained";
+    const previous = process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION;
+    process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION = "2";
+    try {
+      for (let index = 1; index <= 4; index += 1) {
+        await deployConditionalRelease({
+          ref,
+          slug,
+          code: `export default { fetch: () => new Response('v${index}') };`,
+        });
+      }
+
+      const versions = await edgeFunctionService.listVersions(ref, slug);
+      expect(versions.map((record) => record.version)).toEqual(["4", "3"]);
+      const versionRoot = join(functionsRoot, ref, ".versions", slug);
+      expect(existsSync(join(versionRoot, "1"))).toBe(false);
+      expect(existsSync(join(versionRoot, "2"))).toBe(false);
+      expect(existsSync(join(versionRoot, "3"))).toBe(true);
+      expect(existsSync(join(versionRoot, "4"))).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION;
+      else process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION = previous;
+    }
+  });
+
+  test("retention never removes a staged version that was never activated", async () => {
+    const ref = "proj_version_retention_staged";
+    const slug = "staged";
+    const previous = process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION;
+    process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION = "1";
+    try {
+      await deployConditionalRelease({
+        ref,
+        slug,
+        code: "export default { fetch: () => new Response('v1') };",
+      });
+      await edgeFunctionService.stageVersion({
+        ref,
+        slug,
+        code: "export default { fetch: () => new Response('staged') };",
+      });
+      await deployConditionalRelease({
+        ref,
+        slug,
+        code: "export default { fetch: () => new Response('v3') };",
+      });
+
+      const versionRoot = join(functionsRoot, ref, ".versions", slug);
+      expect(existsSync(join(versionRoot, "1"))).toBe(false); // activated, beyond keep
+      expect(existsSync(join(versionRoot, "2"))).toBe(true); // staged only -> protected
+      expect(existsSync(join(versionRoot, "3"))).toBe(true); // active
+    } finally {
+      if (previous === undefined) delete process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION;
+      else process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION = previous;
+    }
+  });
+
+  test("malformed activation records cannot mark a staged version removable", async () => {
+    const ref = "proj_version_retention_malformed";
+    const slug = "malformed";
+    const previous = process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION;
+    process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION = "1";
+    try {
+      await deployConditionalRelease({
+        ref,
+        slug,
+        code: "export default { fetch: () => new Response('v1') };",
+      });
+      await edgeFunctionService.stageVersion({
+        ref,
+        slug,
+        code: "export default { fetch: () => new Response('staged') };",
+      });
+      // Junk records claiming the staged version was activated must be ignored.
+      const generationDir = join(functionsRoot, ref, ".activation-generations", slug);
+      await mkdir(generationDir, { recursive: true });
+      const authority = (
+        activationId: string,
+        targetState: "active" | "absent",
+        artifactSha256: string | null,
+      ) => ({
+        schema: "supacloud.edge-function-activation.v1",
+        activation_id: activationId,
+        activation_generation: 1,
+        previous_activation_id: null,
+        target_state: targetState,
+        artifact_sha256: artifactSha256,
+      });
+      // 1. malformed JSON behind a valid-looking record name.
+      await Bun.write(join(generationDir, `${crypto.randomUUID()}.json`), "{ not json");
+      // 2. a valid authority whose identifier does not match the file name.
+      await Bun.write(
+        join(generationDir, `${crypto.randomUUID()}.json`),
+        JSON.stringify({
+          version: "2",
+          _supacloud_activation: authority(crypto.randomUUID(), "active", "a".repeat(64)),
+        }),
+      );
+      // 3. a valid, matching, absent-target manifest with no version component.
+      const absentId = crypto.randomUUID();
+      await Bun.write(
+        join(generationDir, `${absentId}.json`),
+        JSON.stringify({ _supacloud_activation: authority(absentId, "absent", null) }),
+      );
+      await deployConditionalRelease({
+        ref,
+        slug,
+        code: "export default { fetch: () => new Response('v3') };",
+      });
+
+      const versionRoot = join(functionsRoot, ref, ".versions", slug);
+      expect(existsSync(join(versionRoot, "1"))).toBe(false); // genuinely activated, pruned
+      expect(existsSync(join(versionRoot, "2"))).toBe(true); // staged, protected
+      expect(existsSync(join(versionRoot, "3"))).toBe(true); // active
+    } finally {
+      if (previous === undefined) delete process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION;
+      else process.env.SUPACLOUD_EDGE_FUNCTION_VERSION_RETENTION = previous;
+    }
+  });
+
   test("writes the attested source entry for every immutable deployment path", async () => {
     globalThis.fetch = runtimeSuccessFetch();
     const single = await edgeFunctionService.deployDetailed(
