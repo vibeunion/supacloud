@@ -16,7 +16,7 @@ describe("application event stream", () => {
       seen.push(value);
       if (value === 2) throw new Error("consumer failed");
       await Promise.resolve();
-    }, { onError: error => failures.push(error) });
+    }, { onError: error => { failures.push(error); } });
 
     await stream.publish(1);
     await stream.publish(2);
@@ -40,7 +40,7 @@ describe("application event stream", () => {
     const subscription = stream.subscribe(async value => {
       started = true;
       if (value === 1) await first;
-    }, { onError: error => errors.push(error) });
+    }, { onError: error => { errors.push(error); } });
     await stream.publish(1);
     expect(started).toBe(true);
     await stream.publish(2);
