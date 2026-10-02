@@ -3,6 +3,8 @@ import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { checkSdkModuleContract } from './esm-package-sdk.mjs';
+
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const commonJsFile = /\.(?:cjs|cts)(?:\.map)?$/i;
 const commonJsBuild = /--format(?:\s*=\s*|\s+)["']?(?:cjs|commonjs)\b/i;
@@ -39,7 +41,7 @@ export function checkEsmManifest(manifest, { firstParty = false } = {}) {
   if (!isRecord(manifest)) return ['Invalid package manifest'];
   const name = manifest['name'];
   if (!firstParty && (typeof name !== 'string' || (!name.startsWith('@supacloud/') && name !== 'supacloud'))) return [];
-  const errors = [];
+  const errors = checkSdkModuleContract(manifest);
   if (manifest['type'] === 'commonjs') errors.push(`${name ?? 'package'}: CommonJS package scope is not supported`);
   if (manifest['exports'] !== undefined || manifest['main'] !== undefined || manifest['module'] !== undefined || manifest['bin'] !== undefined) {
     if (manifest['type'] !== 'module') errors.push(`${name}: libraries and executables must declare type: module`);

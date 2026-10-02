@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "./supabase-types.js";
 import { captureArtifactId, decodeArtifactRead, SupaCloudArtifactReadError } from "./artifact-read.js";
 import { captureArtifactRegister, decodeArtifactRegister, SupaCloudArtifactRegisterError } from "./artifact-register.js";
 import { invokeArtifactRpc } from "./artifact-rpc.js";

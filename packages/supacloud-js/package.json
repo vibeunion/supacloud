@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/js",
-  "version": "0.34.1",
+  "version": "0.35.0",
   "description": "Platform SDK for SupaCloud, built on top of supabase-js",
   "type": "module",
   "main": "./dist/index.js",
@@ -9,21 +9,25 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "module-sync": "./dist/index.js",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
     "./task-events": {
       "types": "./dist/task-events.d.ts",
+      "module-sync": "./dist/task-events.js",
       "import": "./dist/task-events.js",
       "default": "./dist/task-events.js"
     },
     "./contracts": {
       "types": "./dist/contracts.d.ts",
+      "module-sync": "./dist/contracts.js",
       "import": "./dist/contracts.js",
       "default": "./dist/contracts.js"
     },
     "./reactive": {
       "types": "./dist/reactive.d.ts",
+      "module-sync": "./dist/reactive.js",
       "import": "./dist/reactive.js",
       "default": "./dist/reactive.js"
     }
@@ -33,6 +37,7 @@
     "LICENSE-APACHE-2.0.txt",
     "dist",
     "README.md",
+    "COMPATIBILITY.md",
     "REACTIVE.md"
   ],
   "scripts": {
@@ -41,10 +46,11 @@
     "build:js": "bun build src/index.ts src/task-events.ts --outdir dist --target node --external @supabase/supabase-js --external @supacloud/contracts && bun build src/contracts.ts --outdir dist --target browser --external @supacloud/contracts && bun build src/reactive.ts --outdir dist --target browser --external rxjs",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
-    "prepublishOnly": "bun run build",
+    "prepublishOnly": "bun run build && bun run check:package",
     "typecheck:consumer": "tsc -p tsconfig.consumer.json --noEmit",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "typecheck:test": "tsc -p tsconfig.test.json --noEmit"
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
+    "check:package": "node ../../.github/scripts/esm-package-policy.mjs --pack ."
   },
   "keywords": [
     "supacloud",
@@ -70,5 +76,8 @@
     "@types/bun": "^1.4.2",
     "@supabase/supabase-js": "^2.115.0",
     "typescript": "^7.0.2"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

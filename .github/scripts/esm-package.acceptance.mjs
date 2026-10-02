@@ -6,10 +6,16 @@ import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareCommandPackage } from './prepare-command-package.mjs';
 import { checkEsmPack } from './esm-package-policy.mjs';
+import { writeSdkConsumers, checkConsumerTypes } from './esm-package-sdk.mjs';
 // Run after building these packages. Installation is outside the checkout and
 // uses real tarballs, never workspace links or source-resolution conditions.
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const directories = ['contracts', 'delivery', 'app', 'supacloud-js', 'compiler'];
+const args = process.argv.slice(2);
+assert.ok(args.length === 0 || (args.length === 1 && args[0] === '--sdk-only'),
+  'Usage: esm-package.acceptance.mjs [--sdk-only]');
+const sdkOnly = args[0] === '--sdk-only';
+const directories = sdkOnly ? ['contracts', 'supacloud-js']
+  : ['contracts', 'delivery', 'app', 'supacloud-js', 'compiler'];
 const publicConsumers = new Set(['@supacloud/app', '@supacloud/js', '@supacloud/compiler']);
 const scratch = await mkdtemp(join(tmpdir(), 'supacloud-esm-consumer-'));
 const env = { ...process.env };
@@ -78,7 +84,14 @@ try {
   await writeFile(join(consumer, 'package.json'), JSON.stringify({
     name: 'supacloud-esm-installed-consumer', version: '0.0.0', private: true, type: 'module',
   }));
-  run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', ...tarballs], consumer);
+  run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund',
+    ...(sdkOnly ? ['--engine-strict', '@supabase/supabase-js@2.115.0'] : []), ...tarballs], consumer);
+  if (sdkOnly) {
+    for (const name of ['@angular/core', '@supacloud/app', '@supacloud/compiler', '@supacloud/delivery']) {
+      await assert.rejects(lstat(join(consumer, 'node_modules', name)), { code: 'ENOENT' },
+        `${name}: SDK consumers must not acquire server-only dependencies`);
+    }
+  }
   for (const [name, expected] of siblings) {
     const path = join(consumer, 'node_modules', name);
     assert.equal((await lstat(path)).isSymbolicLink(), false, `${name}: installation must not be a workspace link`);
@@ -100,6 +113,7 @@ for (const specifier of specifiers) {
   assert.ok(path.startsWith(installedRoot), specifier + ': must resolve inside the isolated installation');
   await import(specifier); // Type-only subpaths may legitimately export an empty namespace.
 }
+if (!${sdkOnly}) {
 const app = await import('@supacloud/app');
 const bridge = createRequire(import.meta.url)('./bridge.cjs');
 const fromCommonJs = await bridge();
@@ -113,23 +127,65 @@ const sdkContracts = await import('@supacloud/js/contracts');
 assert.equal(typeof shared.createAuthoritativeCommandClient, 'function');
 assert.strictEqual(appContracts.createAuthoritativeCommandClient, shared.createAuthoritativeCommandClient);
 assert.strictEqual(sdkContracts.createAuthoritativeCommandClient, shared.createAuthoritativeCommandClient);
+}
 console.log('Installed ESM entrypoints and shared identities passed: ' + specifiers.length);
 `);
   for (const runtime of ['node', 'bun']) console.log(`${runtime}: ${run(runtime, ['consumer.mjs'], consumer).trim()}`);
 
+  await writeSdkConsumers(consumer);
+  for (const runtime of ['node', 'bun']) {
+    for (const fixture of ['sdk-require-first.cjs', 'sdk-import-first.mjs']) {
+      console.log(`${runtime}: ${run(runtime, [fixture], consumer).trim()}`);
+    }
+  }
+
+  await writeFile(join(consumer, 'sdk-supabase.cjs'), `
+const assert = require('node:assert/strict');
+const { createClient, FunctionsHttpError } = require('@supabase/supabase-js');
+const { createSupaCloudClient } = require('@supacloud/js');
+(async () => {
+  let calls = 0;
+  const response = new Response(JSON.stringify({ error: 'invalid input' }), {
+    status: 400, headers: { 'content-type': 'application/json' },
+  });
+  const supabase = createClient('https://sdk-compat.example.invalid', 'test-anon-key', {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    global: { fetch: async () => { calls++; return response; } },
+  });
+  const sdk = createSupaCloudClient({ supabase, projectRef: 'abcd1234',
+    managementApiUrl: 'https://management.example.invalid' });
+  assert.notEqual(typeof sdk.then, 'function', 'SDK factory must remain synchronous');
+  await assert.rejects(sdk.tasks.submit('worker', { body: {} }), error => {
+    assert.ok(error instanceof FunctionsHttpError, 'preserve official CJS Supabase error');
+    assert.strictEqual(error.context, response, 'preserve response context across module formats');
+    return true;
+  });
+  assert.equal(calls, 1, 'module interop must not introduce a retry');
+  console.log('CJS Supabase client + single ESM SDK behavior passed');
+})().catch(error => { console.error(error); process.exitCode = 1; });
+`);
+  for (const runtime of ['node', 'bun']) console.log(run(runtime, ['sdk-supabase.cjs'], consumer).trim());
+
   await writeFile(join(consumer, 'consumer.ts'), specifiers.map((specifier, index) =>
     `import * as API${index} from ${JSON.stringify(specifier)};\nexport const exports${index}: string[] = Object.keys(API${index});`
-  ).join('\n') + '\nimport { InjectionToken } from "@supacloud/app";\nexport const token = new InjectionToken<string>("esm-consumer");\n');
+  ).join('\n') + (sdkOnly ? '' : '\nimport { InjectionToken } from "@supacloud/app";\nexport const token = new InjectionToken<string>("esm-consumer");\n'));
   await writeFile(join(consumer, 'tsconfig.json'), JSON.stringify({
     compilerOptions: {
       target: 'ES2022', module: 'ESNext', moduleResolution: 'bundler', strict: true,
-      noEmit: true, skipLibCheck: true, types: [],
+      noEmit: true, skipLibCheck: true, types: ['node'],
     }, files: ['./consumer.ts'],
   }));
-        run('bun', ['add', '--no-save', '--exact', resolve(root, 'packages', 'app', 'node_modules', '@types', 'node')], consumer);
+  // Pack the resolved Node types directory, rather than persisting a workspace
+  // link or asking Bun to reinstall the candidate SDK dependency graph.
+  const nodeTypes = pack(resolve(root, 'packages', 'app', 'node_modules', '@types', 'node'), raw);
+  run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--save-dev', nodeTypes.path, 'typescript@5.8.3'], consumer);
+  checkConsumerTypes(consumer, resolve(root, 'packages', 'app'), run);
   await writeFile(join(consumer, 'browser.ts'), [
-    'export { HttpClient } from "@supacloud/app/browser";',
+    ...(sdkOnly ? [] : ['export { HttpClient } from "@supacloud/app/browser";']),
     'export { createAuthoritativeCommandClient } from "@supacloud/js/contracts";',
+    'export { createSupaCloudClient } from "@supacloud/js";',
+    'export { TaskEventError } from "@supacloud/js/task-events";',
+    'export { observeQuery, observeTask } from "@supacloud/js/reactive";',
   ].join('\n'));
   run('bun', ['build', 'browser.ts', '--target', 'browser', '--format', 'esm', '--outfile', 'browser.mjs'], consumer);
   console.log('Installed declaration consumer and browser bundle passed.');

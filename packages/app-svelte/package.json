@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/app-svelte",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Svelte lifecycle binding for SupaCloud command scopes",
   "type": "module",
   "main": "./dist/index.js",

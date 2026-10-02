@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.29.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.28.0...compiler-v0.29.0) (2026-10-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* @supacloud/app no longer publishes dist/index.cjs or a separate synchronous CommonJS entrypoint. CommonJS consumers should use dynamic import() or migrate to ESM. Release-please should handle the corresponding breaking version change.
+
+### Features
+
+* **app:** add governed reactive event streams and lifecycle signals ([38a26e2](https://github.com/vibeunion/supacloud/commit/38a26e2d3b83226a7488df2ef4f1f5714573aeb2))
+* default RxJS support with compatible SupaCloud JS calls ([#1556](https://github.com/vibeunion/supacloud/issues/1556)) ([b3015cb](https://github.com/vibeunion/supacloud/commit/b3015cb161c0d87e6611f6c4fc60c120a8c9fffe))
+
 ## [0.28.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.27.4...compiler-v0.28.0) (2026-09-30)
 
 
