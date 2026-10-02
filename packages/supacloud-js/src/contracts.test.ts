@@ -104,7 +104,7 @@ test("an invalidated scope prevents a late confirmation from updating a reused v
 
 test("the public contracts entrypoint bundles for the browser without the platform SDK", async () => {
   const consumer = fileURLToPath(new URL("../test/consumer-contracts.ts", import.meta.url));
-  const facade = realpathSync(fileURLToPath(new URL("../dist/contracts.js", import.meta.url)));
+  const facade = realpathSync(fileURLToPath(new URL("../dist/contracts.mjs", import.meta.url)));
   const sharedDist = dirname(realpathSync(fileURLToPath(import.meta.resolve("@supacloud/contracts/client"))));
   const build = await Bun.build({
     entrypoints: [consumer],

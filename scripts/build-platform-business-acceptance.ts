@@ -23,7 +23,7 @@ try {
   const dependencies = new Map<string, string>();
   for (const name of ["app", "elysia", "contracts", "commands", "db", "compiler", "delivery", "js"]) {
     const directory = join(repo, "packages", name === "js" ? "supacloud-js" : name);
-    assert.ok(await Bun.file(join(directory, "dist/index.js")).exists(), `${name} must be built first`);
+    assert.ok(await Bun.file(join(directory, "dist/" + (name === "contracts" || name === "js" ? "index.mjs" : "index.js"))).exists(), `${name} must be built first`);
     dependencies.set(`@supacloud/${name}`, directory);
   }
   for (const name of ["elysia", "jose", "typebox", "bun-types", "@types/bun", "typescript"]) {

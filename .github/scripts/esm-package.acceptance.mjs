@@ -161,7 +161,7 @@ const { createSupaCloudClient } = require('@supacloud/js');
     return true;
   });
   assert.equal(calls, 1, 'module interop must not introduce a retry');
-  console.log('CJS Supabase client + single ESM SDK behavior passed');
+  console.log('CJS Supabase client + CJS SDK behavior passed');
 })().catch(error => { console.error(error); process.exitCode = 1; });
 `);
   for (const runtime of ['node', 'bun']) console.log(run(runtime, ['sdk-supabase.cjs'], consumer).trim());
@@ -177,9 +177,10 @@ const { createSupaCloudClient } = require('@supacloud/js');
   }));
   // Pack the resolved Node types directory, rather than persisting a workspace
   // link or asking Bun to reinstall the candidate SDK dependency graph.
-  const nodeTypes = pack(resolve(root, 'packages', 'app', 'node_modules', '@types', 'node'), raw);
+  const compilerPackage = sdkOnly ? 'supacloud-js' : 'app';
+  const nodeTypes = pack(resolve(root, 'packages', compilerPackage, 'node_modules', '@types', 'node'), raw);
   run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--save-dev', nodeTypes.path, 'typescript@5.8.3'], consumer);
-  checkConsumerTypes(consumer, resolve(root, 'packages', 'app'), run);
+  checkConsumerTypes(consumer, resolve(root, 'packages', compilerPackage), run);
   await writeFile(join(consumer, 'browser.ts'), [
     ...(sdkOnly ? [] : ['export { HttpClient } from "@supacloud/app/browser";']),
     'export { createAuthoritativeCommandClient } from "@supacloud/js/contracts";',
