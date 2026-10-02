@@ -1,5 +1,30 @@
 import { describe, expect, it } from "bun:test";
 import { signal, computed, effect, untracked, linkedSignal } from "./signal";
+import { createDestroyRef } from "./context";
+
+describe("framework-neutral signal boundaries", () => {
+  it("supports explicit invalidation subscriptions without requiring RxJS", () => {
+    const value = signal(1);
+    const notifications: number[] = [];
+    const unsubscribe = value.subscribe?.(() => notifications.push(value()));
+    value.set(2);
+    unsubscribe?.();
+    value.set(3);
+    expect(notifications).toEqual([2]);
+    expect(computed(() => value() * 2)()).toBe(6);
+  });
+
+  it("ties an effect lifetime to DestroyRef cancellation", async () => {
+    const ref = createDestroyRef();
+    const value = signal(0);
+    const seen: number[] = [];
+    effect(() => { seen.push(value()); }, { destroyRef: ref });
+    value.set(1);
+    await ref.destroy();
+    value.set(2);
+    expect(seen).toEqual([0, 1]);
+  });
+});
 
 describe("Angular 19-style linkedSignal API", () => {
   it("creates shorthand linkedSignal derived from a computation and resets on source change", () => {

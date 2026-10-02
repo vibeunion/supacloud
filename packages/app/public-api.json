@@ -29,6 +29,16 @@
       "signature": "export declare const APP_LIFECYCLE: any;"
     },
     {
+      "name": "ApplicationEventStream",
+      "kind": "type",
+      "signature": "export interface ApplicationEventStream<T> {\n    readonly observable: Observable<T>;\n    publish(value: T): Promise<void>;\n    subscribe(handler: (value: T) => void | Promise<void>, options?: EventSubscriptionOptions<T>): EventSubscription;\n    close(): Promise<void>;\n}"
+    },
+    {
+      "name": "ApplicationEventStreamOptions",
+      "kind": "type",
+      "signature": "export interface ApplicationEventStreamOptions {\n    maxQueue?: number;\n    overflow?: EventOverflowStrategy;\n}"
+    },
+    {
       "name": "Aspect",
       "kind": "type",
       "signature": "export type Aspect<TResult = unknown> = (context: AspectContext, next: AspectNext<TResult>) => TResult | Promise<TResult>;"
@@ -249,6 +259,11 @@
       "signature": "export declare function Cookie(name?: string): ParameterDecorator;"
     },
     {
+      "name": "createApplicationEventStream",
+      "kind": "value",
+      "signature": "export declare function createApplicationEventStream<T>(options?: ApplicationEventStreamOptions): ApplicationEventStream<T>;"
+    },
+    {
       "name": "createBearerAuthInterceptor",
       "kind": "value",
       "signature": "export declare function createBearerAuthInterceptor(tokenOrGetter: string | (() => string | Promise<string>)): HttpInterceptorFn;"
@@ -386,7 +401,12 @@
     {
       "name": "effect",
       "kind": "value",
-      "signature": "export declare function effect(effectFn: () => void | (() => void)): () => void;"
+      "signature": "export declare function effect(effectFn: () => void | (() => void), options?: EffectOptions): () => void;"
+    },
+    {
+      "name": "EffectOptions",
+      "kind": "type",
+      "signature": "export interface EffectOptions {\n    destroyRef?: {\n        onDestroy(callback: () => void | Promise<void>): () => void;\n    };\n}"
     },
     {
       "name": "ENVIRONMENT_INITIALIZER",
@@ -407,6 +427,31 @@
       "name": "EnvironmentProviders",
       "kind": "type",
       "signature": "export interface EnvironmentProviders {\n    readonly providers: Array<Provider | EnvironmentProviders>;\n}"
+    },
+    {
+      "name": "EventOverflowStrategy",
+      "kind": "type",
+      "signature": "export type EventOverflowStrategy = \"error\" | \"drop-oldest\" | \"drop-newest\";"
+    },
+    {
+      "name": "EventStreamClosedError",
+      "kind": "both",
+      "signature": "export declare class EventStreamClosedError extends Error {\n    readonly code: \"EVENT_STREAM_CLOSED\";\n    constructor();\n}"
+    },
+    {
+      "name": "EventStreamOverflowError",
+      "kind": "both",
+      "signature": "export declare class EventStreamOverflowError extends Error {\n    readonly maxQueue: number;\n    readonly code: \"EVENT_STREAM_OVERFLOW\";\n    constructor(maxQueue: number);\n}"
+    },
+    {
+      "name": "EventSubscription",
+      "kind": "type",
+      "signature": "export interface EventSubscription {\n    readonly closed: boolean;\n    readonly completion: Promise<void>;\n    unsubscribe(): void;\n}"
+    },
+    {
+      "name": "EventSubscriptionOptions",
+      "kind": "type",
+      "signature": "export interface EventSubscriptionOptions<T> {\n    signal?: AbortSignal;\n    maxQueue?: number;\n    overflow?: EventOverflowStrategy;\n    onError?: (error: unknown, event?: T) => void | Promise<void>;\n}"
     },
     {
       "name": "executeResolvers",
@@ -1094,6 +1139,11 @@
       "signature": "export declare function provideAppInitializer(initializerFn: () => void | Promise<void>): EnvironmentProviders;"
     },
     {
+      "name": "provideConfig",
+      "kind": "value",
+      "signature": "export declare function provideConfig<T>(token: Token<T>, value: NoInfer<T>): EnvironmentProviders;"
+    },
+    {
       "name": "provideEnvironmentInitializer",
       "kind": "value",
       "signature": "export declare function provideEnvironmentInitializer(initializerFn: () => void | Promise<void>): EnvironmentProviders;"
@@ -1386,7 +1436,7 @@
     {
       "name": "Signal",
       "kind": "type",
-      "signature": "export interface Signal<T> {\n    (): T;\n}"
+      "signature": "export interface Signal<T> {\n    (): T;\n    subscribe?(listener: () => void): () => void;\n}"
     },
     {
       "name": "SKIP_SELF_PARAMS_METADATA",

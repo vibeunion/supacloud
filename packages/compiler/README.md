@@ -747,4 +747,4 @@ metadata, not an authorization boundary.
 
 ## License
 
-AGPL-3.0-only. See the repository root `LICENSE` and `NOTICE` files.
+Apache-2.0. See the repository root `LICENSE` and `NOTICE` files.
