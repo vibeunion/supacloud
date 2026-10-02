@@ -31,7 +31,6 @@ try {
   for (const directory of ["contracts", "app", "supacloud-js"]) {
     const root = join(repo, "packages", directory);
     const metadata = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-    // Build before invoking this script; do not silently substitute workspace source.
     await readFile(join(root, "dist/index.js"));
     if (directory !== "contracts") await readFile(join(root, "dist/reactive.d.ts"));
     await run(["pm", "pack", "--ignore-scripts", "--destination", temporary], root);
@@ -56,15 +55,30 @@ try {
     },
     overrides,
   }, null, 2));
-  // This is a NodeNext consumer: Node supplies its Web platform globals. Browser
-  // bundling is checked separately, without silently disabling declaration checks
-  // or patching the peer SDK's WebAuthn declarations to match TypeScript's DOM lib.
-  await writeFile(join(project, "tsconfig.json"), JSON.stringify({
-    compilerOptions: {
-      target: "ES2022", lib: ["ES2022"], module: "NodeNext", moduleResolution: "NodeNext",
-      types: ["node"], strict: true, skipLibCheck: false, noEmit: true,
-    }, include: ["consumer.ts"],
-  }, null, 2));
+  // The native SDK requires DOM declarations even for a NodeNext consumer.
+  // Keep full declaration checking. A native-only baseline distinguishes the
+  // peer's known WebAuthn defect from errors introduced by our packed adapters.
+  const compilerOptions = {
+    target: "ES2022", lib: ["ES2022", "DOM", "DOM.Iterable"],
+    module: "NodeNext", moduleResolution: "NodeNext", types: ["node"],
+    strict: true, skipLibCheck: false, noEmit: true,
+  };
+  for (const [name, file] of [
+    ["tsconfig.json", "consumer.ts"],
+    ["tsconfig.native.json", "native.ts"],
+    ["tsconfig.framework.json", "framework.ts"],
+  ]) {
+    await writeFile(join(project, name!), JSON.stringify({ compilerOptions, include: [file] }, null, 2));
+  }
+  await writeFile(join(project, "native.ts"), 'import { createClient } from "@supabase/supabase-js";\nvoid createClient;\n');
+  await writeFile(join(project, "framework.ts"), `import { of } from "rxjs";
+import { takeUntilAborted, toReadableStream } from "@supacloud/app/reactive";
+const stream: ReadableStream<number> = toReadableStream(of(1).pipe(takeUntilAborted(new AbortController().signal)));
+// @ts-expect-error Framework stream element inference remains precise.
+const wrong: ReadableStream<string> = stream;
+void wrong;
+`);
+  await writeFile(join(project, "strict-declarations.mjs"), declarationCheckSource());
   await writeFile(join(project, "consumer.ts"), consumerSource());
   await writeFile(join(project, "browser.ts"), `export { observeQuery, observeTask } from "@supacloud/js/reactive";
 export { takeUntilAborted, toReadableStream } from "@supacloud/app/reactive";
@@ -80,13 +94,49 @@ assert.ok(!inputs.some(path => path.endsWith("@supacloud/js/dist/index.js")));
 console.log("Packed reactive browser entries retain dependency isolation");
 `);
   await installStarterConsumer(project, run);
-  console.log(await run(["node_modules/typescript/bin/tsc", "--project", "tsconfig.json"]));
   console.log(await run(["consumer.ts"]));
   console.log(await run(["bundle.mjs"]));
+  console.log(await run(["strict-declarations.mjs"]));
 } finally {
   process.removeListener("SIGINT", interrupt);
   process.removeListener("SIGTERM", interrupt);
   await rm(temporary, { recursive: true, force: true });
+}
+
+function declarationCheckSource(): string {
+  return String.raw`import { strict as assert } from "node:assert";
+async function compile(project) {
+  const child = Bun.spawn([process.execPath, "node_modules/typescript/bin/tsc", "--project", project, "--pretty", "false"], {
+    stdout: "pipe", stderr: "pipe",
+  });
+  const [code, stdout, stderr] = await Promise.all([
+    child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+  ]);
+  assert.ok(code === 0 || code === 1, "TypeScript did not complete normally: " + stdout + stderr);
+  return { code, diagnostics: (stdout + stderr).trim() };
+}
+const framework = await compile("tsconfig.framework.json");
+assert.equal(framework.code, 0, framework.diagnostics);
+console.log("Packed framework reactive declarations pass strict full-library checking");
+const native = await compile("tsconfig.native.json");
+const consumer = await compile("tsconfig.json");
+if (native.code === 0) {
+  assert.equal(consumer.code, 0, consumer.diagnostics);
+  console.log("Packed SDK consumer declarations pass strict full-library checking");
+} else {
+  // Only this independently reproduced peer diagnostic is recognized. Do not
+  // accept arbitrary native failures, additional errors, or patched declarations.
+  const headers = native.diagnostics.match(/^.+\(\d+,\d+\): error TS\d+:.*$/gm) ?? [];
+  assert.equal(headers.length, 1, native.diagnostics);
+  assert.match(headers[0], /^node_modules\/@supabase\/auth-js\/dist\/module\/lib\/webauthn\.dom\.d\.ts\(\d+,\d+\): error TS2430: Interface 'PublicKeyCredentialFuture<T>' incorrectly extends interface 'PublicKeyCredential'\.$/);
+  assert.match(native.diagnostics, /toJSON/);
+  assert.match(native.diagnostics, /ArrayBuffer/);
+  assert.equal(consumer.code, native.code, consumer.diagnostics);
+  assert.equal(consumer.diagnostics, native.diagnostics, "Packed adapters introduced additional/different diagnostics:\n" + consumer.diagnostics);
+  console.log("::warning::Native Supabase SDK independently reproduces its WebAuthn/DOM TS2430 defect. Full SDK strict declaration acceptance remains blocked upstream; packed adapters add no diagnostics. No skipLibCheck or declaration patch was used.");
+  console.log(native.diagnostics);
+}
+`;
 }
 
 function consumerSource(): string {
@@ -188,6 +238,6 @@ const reader = toReadableStream(of(1, 2), { capacity: 2 }).getReader();
 assert.deepEqual(await reader.read(), { value: 1, done: false });
 assert.deepEqual(await reader.read(), { value: 2, done: false });
 assert.equal((await reader.read()).done, true);
-console.log("Packed SDK: native queries, strict type inference, one task submission with repeated observation, decoder/project rejection and cleanup passed");
+console.log("Packed SDK: native queries, one task submission with repeated observation, decoder/project rejection and cleanup passed");
 `;
 }

@@ -40,3 +40,15 @@ snapshots, cancellation, synchronous teardown races, errors, bounded overflow
 and browser dependency isolation. Generated starter tests cover owner cleanup.
 Use matching released packages or the packed candidate gate; adding source code
 is not a claim of npm publication, production transport acceptance or deployment.
+
+The packed-consumer gate runs real SDK implementations with synthetic HTTP
+responses, not a live production database. It checks framework declarations with
+`strict: true` and `skipLibCheck: false`, and compares the full SDK consumer with
+an independently compiled native Supabase-only baseline using the same DOM libs.
+A known upstream `PublicKeyCredentialFuture<T>` WebAuthn/DOM TS2430 conflict is
+reported explicitly only when that exact diagnostic is independently reproduced
+and the adapter consumer has identical diagnostics; all additional errors fail.
+This is a no-new-diagnostics regression gate, NOT full SDK strict declaration
+acceptance. No peer declarations are patched and library checking is not disabled.
+When the native baseline compiles cleanly, the full consumer must also compile
+cleanly. Selected-row and decoded-task negative type assertions remain enforced.
