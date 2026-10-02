@@ -1,3 +1,4 @@
+import { STARTER_REACTIVE_GUIDE, STARTER_REACTIVE_TEST, STARTER_REACTIVE_AGENTS } from "./app-starter-reactive";
 import { STARTER_ENVIRONMENT, STARTER_ENVIRONMENT_TEST } from "./app-starter-environment";
 import compilerMetadata from "../../../../compiler/package.json" with { type: "json" };
 import appMetadata from "../../../../app/package.json" with { type: "json" };
@@ -107,6 +108,7 @@ function baseFiles(name: string): Record<string, string> {
         "@supacloud/app": `^${appMetadata.version}`,
         "@supacloud/elysia": `^${elysiaMetadata.version}`,
         elysia: "2.0.0-beta.19",
+                rxjs: appMetadata.dependencies.rxjs,
       },
       devDependencies: {
         "@supacloud/compiler": `^${compilerMetadata.version}`,
@@ -143,7 +145,10 @@ export default defineSupacloudConfig({
 `,
     "src/application.ts": APPLICATION_SOURCE(name),
     "generated/application.ts": GENERATED_BOOTSTRAP,
-    "scripts/environment.ts": STARTER_ENVIRONMENT,
+    "REACTIVE.md": STARTER_REACTIVE_GUIDE,
+        "AGENTS.md": STARTER_REACTIVE_AGENTS,
+        "tests/reactive.test.ts": STARTER_REACTIVE_TEST,
+        "scripts/environment.ts": STARTER_ENVIRONMENT,
     "tests/environment.test.ts": STARTER_ENVIRONMENT_TEST,
     "scripts/dev.ts": DEV_SCRIPT,
     "scripts/serve.ts": SERVE_SCRIPT,

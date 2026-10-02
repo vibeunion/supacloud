@@ -157,3 +157,11 @@ Feature: Verifiable enterprise application development
 - [Compiler](../packages/compiler/README.md)
 - [Runtime And Static AOP](../packages/elysia/README.md)
 - [Enterprise Operational Readiness](enterprise-architecture-readiness.md)
+
+## Default reactive development
+
+RxJS is the supported default for event composition; single-result commands keep
+async/await. Starters include the dependency, REACTIVE.md, AI guidance and cleanup
+tests. Preserve the project-bound `@supacloud/js` client and its Promise APIs. See
+[Reactive development](reactive-development.md) and
+[Framework transport integration](../packages/app/REACTIVE.md).

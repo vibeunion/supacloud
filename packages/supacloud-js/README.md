@@ -694,3 +694,9 @@ files in the SDK checkout are neither read nor overwritten.
 Dependency declaration failures remain failures. This check does not replace
 Supabase declarations with stubs, patch ambient browser types or certify live
 authentication behavior.
+
+## Default reactive support
+
+RxJS is provided by default. See [Reactive development](REACTIVE.md) for the
+`/reactive` entry, SDK compatibility, cancellation and durable-output boundaries.
+Ordinary Promise APIs and non-reactive entrypoints are unchanged.
