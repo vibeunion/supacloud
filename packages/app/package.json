@@ -44,7 +44,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts && bun build src/index.ts --outfile dist/index.cjs --target node --format cjs && bun build src/contract_client.ts src/browser.ts --outdir dist --target browser --external @supacloud/contracts",
+    "build:js": "bun build src/index.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts && bun build src/index.ts --outfile dist/index.cjs --target node --format cjs && bun build src/contract_client.ts src/browser.ts --outdir dist --target browser --external @supacloud/contracts && bun build src/reactive.ts --outdir dist --target browser --external rxjs",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
@@ -68,7 +68,7 @@
   "dependencies": {
     "@angular/core": "^22.1.5",
     "@supacloud/contracts": "file:../contracts",
-    "rxjs": "^7.8.2",
+    "rxjs": "7.8.2",
     "typebox": "1.3.34"
   },
   "devDependencies": {
