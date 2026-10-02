@@ -146,30 +146,22 @@ test-gotrue.sh
 
 # AI assistant directories
 .claude/
-.agents/
 .npm-cache/
 .roo/
 .DS_Store
 output/playwright/
 
-progress.md
 
 servers.local.md
-.mailbox/
 
-.agents/state/
-AGENTS.md
 deploy_all.sh
 .roomodes
 .gitignore
 tasks.md
-.agents/automations/
 .cursorrules
 CLAUDE.md
 HERMES.md
 OPENCODE.md
 .goosehints
 .zed/CONVENTIONS.md
-.agents/goal-forge/runs/
 CODEBUDDY.md
-.agents/docs/
