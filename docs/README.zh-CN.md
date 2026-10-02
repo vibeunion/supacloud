@@ -17,6 +17,8 @@
 - [多租户架构设计](./architecture-multi-tenant.md) - 共享底座多租户隔离架构
 - [多租户管理契约](./multi-tenant-management.md) - Management API 规范、鉴权边界与运维加固
 - [企业级架构就绪度](./enterprise-architecture-readiness.zh-CN.md) - 基础设施边界、SLO 模型、灾备验收与发布治理 ([English](./enterprise-architecture-readiness.md))
+- [Encore 对齐路线](./encore-alignment-roadmap.md) - 下一阶段应用模型、本地运行入口、执行时间线与开发控制台路线 (PROPOSAL)
+- [应用生命周期与三层诊断演进路线](./application-lifecycle-and-diagnostics.md) - 应用级生命周期、三层诊断视图、业务使用路径与架构底座决策 (PROPOSAL)
 
 ## 部署与托管
 
