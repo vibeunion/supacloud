@@ -1,10 +1,8 @@
 #!/usr/bin/env node
-'use strict'
+import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 
-const { spawn } = require('node:child_process')
-const { join } = require('node:path')
-
-const cliPath = join(__dirname, 'cli.js')
+const cliPath = fileURLToPath(new URL('./cli.js', import.meta.url))
 const bunProcess = spawn('bun', [cliPath, ...process.argv.slice(2)], { shell: false, stdio: 'inherit' })
 let requestedShutdownSignal = null
 
@@ -19,7 +17,13 @@ const forwardSigterm = () => forwardShutdownSignal('SIGTERM')
 process.once('SIGINT', forwardSigint)
 process.once('SIGTERM', forwardSigterm)
 
+function cleanup() {
+  process.off('SIGINT', forwardSigint)
+  process.off('SIGTERM', forwardSigterm)
+}
+
 bunProcess.once('error', (error) => {
+  cleanup()
   if (error.code === 'ENOENT') {
     console.error('Bun executable not found on PATH. Install Bun 1.4.2 or newer, then retry.')
   } else {
@@ -29,7 +33,6 @@ bunProcess.once('error', (error) => {
 })
 
 bunProcess.once('exit', (exitCode, signal) => {
-  process.off('SIGINT', forwardSigint)
-  process.off('SIGTERM', forwardSigterm)
+  cleanup()
   process.exitCode = exitCode ?? (requestedShutdownSignal === signal ? 0 : 1)
 })

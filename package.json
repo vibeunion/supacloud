@@ -1,7 +1,10 @@
 {
   "version": "0.0.2",
+  "type": "module",
   "license": "Apache-2.0",
   "scripts": {
+    "check:esm": "node .github/scripts/esm-package-policy.mjs",
+    "test:esm": "node --experimental-strip-types --test .github/scripts/esm-package-policy.test.mjs .github/scripts/esm-package-launcher.test.mjs .github/scripts/esm-package-cli-resolution.test.mjs",
     "verify:commands": "bun run scripts/verify-command-migration.ts",
     "verify:starter": "bun --no-env-file scripts/check_app_starter.ts",
     "check:boundaries": "bun run scripts/check_workspace_boundaries.ts",

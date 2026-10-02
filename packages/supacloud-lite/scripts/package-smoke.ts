@@ -9,11 +9,11 @@ const consumerDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-consumer-'))
 const noBunPath = await mkdtemp(join(tmpdir(), 'supacloud-lite-no-bun-'))
 
 try {
-  if (packageJson.bin['supacloud-lite'] !== 'dist/launcher.cjs') {
+  if (packageJson.bin['supacloud-lite'] !== 'dist/launcher.mjs') {
     throw new Error('package bin must point to the Node launcher')
   }
   await access(join(packageDir, 'dist', 'cli.js'))
-  await access(join(packageDir, 'dist', 'launcher.cjs'))
+  await access(join(packageDir, 'dist', 'launcher.mjs'))
 
   const packOutput = await runCommand(npmPackCommand(packDir), packageDir)
   const jsonStart = packOutput.lastIndexOf('[\n  {')
@@ -30,9 +30,15 @@ try {
   await runCommand(npmCommand(['install', '--ignore-scripts', '--no-audit', '--no-fund', '--save-dev', 'typescript@5.9.3']), consumerDir)
   const installedPackage = join(consumerDir, 'node_modules', '@supacloud', 'lite', 'dist')
   const installedCli = join(installedPackage, 'cli.js')
-  const installedLauncher = join(installedPackage, 'launcher.cjs')
+  const installedLauncher = join(installedPackage, 'launcher.mjs')
   await access(installedCli)
   await access(installedLauncher)
+  const node = Bun.which('node')
+  if (!node) throw new Error('Package smoke requires Node to verify the installed ESM launcher')
+  for (const runtime of [node, process.execPath]) {
+    const runtimeVersion = (await runCommand([runtime, installedLauncher, 'version'], consumerDir)).trim()
+    if (runtimeVersion !== packageJson.version) throw new Error(`unexpected launcher version: ${runtimeVersion}`)
+  }
   const version = (await runCommand(npxCommand(['--no-install', 'supacloud-lite', 'version']), consumerDir)).trim()
   if (version !== packageJson.version) throw new Error(`unexpected CLI version: ${version}`)
   const noBunEnvironment: NodeJS.ProcessEnv = {
@@ -40,7 +46,7 @@ try {
     PATH: noBunPath,
   }
   if (process.platform === 'win32') noBunEnvironment['Path'] = noBunPath
-  const missingBunOutput = await runCommandExpectingFailure([process.execPath, installedLauncher, 'version'], consumerDir, noBunEnvironment)
+  const missingBunOutput = await runCommandExpectingFailure([node, installedLauncher, 'version'], consumerDir, noBunEnvironment)
   if (!missingBunOutput.includes('Bun executable not found on PATH')) {
     throw new Error(`launcher did not explain a missing Bun executable:\n${missingBunOutput}`)
   }

@@ -8,6 +8,16 @@ SupaCloud compiler (`@supacloud/compiler`) reads that metadata from source,
 validates the dependency graph and generates plain static factories — there is
 no runtime reflection and no `reflect-metadata` dependency.
 
+## Module format
+
+This package is **ESM-only**: `.js` files use `"type": "module"`. Existing
+package-name imports and the `/browser`, `/contracts` and `/execution` subpaths
+are unchanged; there is no separate `dist/index.cjs` or `exports.require` build.
+CommonJS callers should migrate to asynchronous `import('@supacloud/app')`.
+Removing the old CJS implementation is a breaking compatibility change, not a
+promise that synchronous `require()` works on every runtime. See the
+[ESM package policy and migration guide](../../docs/esm-packages.md).
+
 ## Zero-configuration start
 
 For a complete runnable project, use `supacloud-cli app init --root ./orders --name orders`,
@@ -486,8 +496,8 @@ await events.close();
 
 Use `observable` only for read-only RxJS composition. Use `subscribe` when
 backpressure, cancellation and error isolation are part of the application
-contract. The package exports the same API from its ESM and Node-compatible
-entrypoints; platform SDK calls remain ordinary Promise-based JavaScript.
+contract. The package publishes ESM entrypoints for Bun/Node consumers;
+platform SDK calls remain ordinary Promise-based JavaScript.
 
 ### Framework-neutral signals and layered configuration
 

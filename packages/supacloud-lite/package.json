@@ -5,7 +5,7 @@
   "type": "module",
   "license": "Apache-2.0",
   "bin": {
-    "supacloud-lite": "dist/launcher.cjs"
+    "supacloud-lite": "dist/launcher.mjs"
   },
   "exports": {
     ".": {
@@ -49,7 +49,8 @@
     "test:package": "bun run scripts/package-smoke.ts",
     "test:standalone": "bun run scripts/standalone-smoke.ts",
     "test:standalone:native": "bun run scripts/standalone-native-smoke.ts",
-    "prepack": "bun run build",
+    "check:package": "node ../../.github/scripts/esm-package-policy.mjs --pack .",
+    "prepack": "bun run build && bun run check:package",
     "typecheck": "bun x tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

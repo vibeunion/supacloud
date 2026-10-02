@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
+import { resolveLiteCommand } from "./lite-cli-command";
+export { resolveLiteCommand } from "./lite-cli-command";
 import { Type } from "@sinclair/typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
@@ -127,17 +129,6 @@ export function buildLiteArgs(request: LiteCliArgs): string[] {
     booleanFlag(args, "--memory", request.memory);
     booleanFlag(args, "--json", request.json);
     return args;
-}
-
-export function resolveLiteCommand(workdir: string, environment: NodeJS.ProcessEnv = process.env): string[] {
-    const explicitBinary = environment.SUPACLOUD_LITE_CLI_BIN?.trim();
-    if (explicitBinary) {
-        if (explicitBinary.includes("\0")) throw new Error("Invalid SUPACLOUD_LITE_CLI_BIN");
-        return [explicitBinary];
-    }
-    const localPackageEntry = join(resolve(workdir), "node_modules", "@supacloud", "lite", "dist", "launcher.cjs");
-    if (existsSync(localPackageEntry)) return [process.execPath, localPackageEntry];
-    return ["supacloud-lite"];
 }
 
 function spawnLiteCommand(
