@@ -32,6 +32,7 @@ export {
   isValueProvider,
   makeEnvironmentProviders,
   provideAppInitializer,
+  provideConfig,
   provideEnvironmentInitializer,
   provideLifecycle,
   provideToken,
@@ -225,7 +226,7 @@ export {
   signal,
   untracked,
 } from "./signal";
-export type { LinkedSignalOptions, Signal, WritableSignal } from "./signal";
+export type { EffectOptions, LinkedSignalOptions, Signal, WritableSignal } from "./signal";
 export { resource } from "./resource";
 export type {
   ResourceLoaderParams,
@@ -233,6 +234,18 @@ export type {
   ResourceRef,
   ResourceStatus,
 } from "./resource";
+export {
+  createApplicationEventStream,
+  EventStreamClosedError,
+  EventStreamOverflowError,
+} from "./event_stream";
+export type {
+  ApplicationEventStream,
+  ApplicationEventStreamOptions,
+  EventOverflowStrategy,
+  EventSubscription,
+  EventSubscriptionOptions,
+} from "./event_stream";
 export {
   RedirectCommand,
   executeRoutePipeline,
