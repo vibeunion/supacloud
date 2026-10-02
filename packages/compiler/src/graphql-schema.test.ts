@@ -144,8 +144,14 @@ test.each([".graphql", ".json"])("line-ending diagnostics preserve raw integrity
   expect(lf.contract).toMatchObject({
     schemaHash: exported.schemaHash, schemaNormalizedHash: exported.schemaNormalizedHash,
   });
-  for (const ending of ["\r\n", "\r"]) {
-    const changed = original.replace(/\n/g, ending);
+  const variants = [
+    original.replace(/\n/g, "\r\n"),
+    original.replace(/\n/g, "\r"),
+    original.split("\n").map((line, index, lines) =>
+      line + (index === lines.length - 1 ? "" : ["\n", "\r\n", "\r"][index % 3]),
+    ).join(""),
+  ];
+  for (const changed of variants) {
     await writeFile(path, changed);
     const result = await compile();
     expect(result.diagnostics).toEqual([]);
@@ -162,17 +168,20 @@ test.each([".graphql", ".json"])("line-ending diagnostics preserve raw integrity
   expect((await compile()).contract?.schemaNormalizedHash).not.toBe(exported.schemaNormalizedHash);
 });
 
-test("escaped carriage returns in descriptions and defaults remain significant", async () => {
-  const path = await output();
+test.each([".graphql", ".json"])("escaped carriage returns in descriptions and defaults remain significant for %s", async (extension) => {
+  const path = (await output()).replace(".graphql", extension);
   const query = join(path, "..", "query.graphql");
   await writeFile(query, "query Health { health }\n");
+  const snapshot = (sdl: string) => extension === ".json"
+    ? JSON.stringify(introspectionFromSchema(buildSchema(sdl)), null, 2)
+    : sdl;
   const compile = () => renderGraphql({
     rootDir: join(path, ".."), outDir: join(path, "..", "generated"),
     graphql: { schema: path, documents: [query] },
   });
-  await writeFile(path, '"line\\r\\nbreak"\ntype Query { health(value: String = "a\\r\\nb"): String! }\n');
+  await writeFile(path, snapshot('"line\\r\\nbreak"\ntype Query { health(value: String = "a\\r\\nb"): String! }\n'));
   const crlf = await compile();
-  await writeFile(path, '"line\\nbreak"\ntype Query { health(value: String = "a\\nb"): String! }\n');
+  await writeFile(path, snapshot('"line\\nbreak"\ntype Query { health(value: String = "a\\nb"): String! }\n'));
   const lf = await compile();
   expect(crlf.diagnostics).toEqual([]);
   expect(lf.diagnostics).toEqual([]);
