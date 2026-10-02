@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/vibeunion/supacloud/compare/app-v0.20.0...app-v0.21.0) (2026-10-02)
+
+
+### Features
+
+* complete Angular framework defaults integration ([#1587](https://github.com/vibeunion/supacloud/issues/1587)) ([0dec8ea](https://github.com/vibeunion/supacloud/commit/0dec8ea48f288da27824579038136dd33f8ccb20))
+
 ## [0.20.0](https://github.com/vibeunion/supacloud/compare/app-v0.19.0...app-v0.20.0) (2026-10-02)
 
 

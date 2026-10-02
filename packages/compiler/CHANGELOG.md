@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.29.0...compiler-v0.30.0) (2026-10-02)
+
+
+### Features
+
+* complete Angular framework defaults integration ([#1587](https://github.com/vibeunion/supacloud/issues/1587)) ([0dec8ea](https://github.com/vibeunion/supacloud/commit/0dec8ea48f288da27824579038136dd33f8ccb20))
+
 ## [0.29.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.28.0...compiler-v0.29.0) (2026-10-02)
 
 

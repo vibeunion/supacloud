@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.7.0...contracts-v0.8.0) (2026-10-02)
+
+
+### Features
+
+* **js:** publish SDK and Contracts as dual MJS and CJS ([#1585](https://github.com/vibeunion/supacloud/issues/1585)) ([6183f3e](https://github.com/vibeunion/supacloud/commit/6183f3e7e985f1fb06a6b31aaf2bab125bb1b34d))
+
 ## [0.7.0](https://github.com/vibeunion/supacloud/compare/contracts-v0.6.0...contracts-v0.7.0) (2026-10-02)
 
 
