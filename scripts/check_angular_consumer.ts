@@ -34,7 +34,7 @@ try {
   for (const directory of ["contracts", "app", "testing", "delivery", "compiler"]) {
     const root = join(repo, "packages", directory);
     const metadata = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-    await readFile(join(root, "dist/index.js"));
+    await readFile(join(root, "dist/" + (directory === "contracts" || directory === "supacloud-js" ? "index.mjs" : "index.js")));
     if (directory === "app") for (const entry of ["angular", "rxjs", "http", "runtime"]) {
       assert.equal(metadata.exports[`./${entry}`]?.import, `./dist/${entry}.js`);
       assert.equal(metadata.exports[`./${entry}`]?.types, `./dist/${entry}.d.ts`);

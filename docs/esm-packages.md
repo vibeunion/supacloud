@@ -60,10 +60,10 @@ supersedes legacy launcher-path examples in the Project CLI README.
 
 ## Consumer migration and release
 
-Removing the published CommonJS implementation is a **breaking compatibility
-change**, not a patch-level cleanup. The conventional breaking-change commit
-and release-please process own the release version; do not silently republish
-an existing version or hand-edit generated release records.
+Removing CommonJS from app/compiler/Lite is a **breaking compatibility change**.
+The SDK and Contracts remain dual-format packages and are not covered by that
+migration. The conventional breaking-change commit and release-please process
+own the release version; do not silently republish an existing version.
 
 Use package-name ESM imports, without changing the established public APIs:
 
@@ -73,7 +73,7 @@ import { HttpClient } from '@supacloud/app/browser';
 import { createAuthoritativeCommandClient } from '@supacloud/js/contracts';
 ```
 
-A CommonJS application can load the ESM implementation asynchronously:
+A CommonJS application using app/compiler can load their ESM implementation asynchronously:
 
 ```js
 async function start() {
