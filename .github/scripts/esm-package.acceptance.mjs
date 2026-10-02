@@ -127,6 +127,7 @@ console.log('Installed ESM entrypoints and shared identities passed: ' + specifi
       noEmit: true, skipLibCheck: true, types: [],
     }, files: ['./consumer.ts'],
   }));
+  run('bun', ['add', '--no-save', '--exact', '/node'], consumer);
   run('bun', ['run', 'tsc', '-p', join(consumer, 'tsconfig.json')], resolve(root, 'packages', 'app'));
   await writeFile(join(consumer, 'browser.ts'), [
     'export { HttpClient } from "@supacloud/app/browser";',
