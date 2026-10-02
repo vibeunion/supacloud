@@ -3,7 +3,7 @@
 ## Supported loading contract
 
 `@supacloud/js` is a public SDK, not the server framework. Its root,
-`@supacloud/js/task-events` and `@supacloud/js/contracts` support ESM `import`,
+`@supacloud/js/task-events`, `@supacloud/js/contracts` and `@supacloud/js/reactive` support ESM `import`,
 dynamic `import()` and **synchronous `require()` on Node 22.12.0 or newer**.
 Bun 1.4.2 is included in the installed-consumer checks. Use a maintained runtime
 with current security patches; 22.12.0 is a module-loader capability floor,

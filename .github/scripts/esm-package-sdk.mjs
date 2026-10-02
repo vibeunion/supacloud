@@ -96,8 +96,8 @@ console.log('SDK synchronous require/import compatibility passed: ${order}');
 /** @param {boolean} commonjs */
 export function sdkTypeConsumer(commonjs) {
   const imports = commonjs
-    ? `import sdk = require('@supacloud/js');\nimport events = require('@supacloud/js/task-events');\nimport contracts = require('@supacloud/js/contracts');\nimport upstream = require('@supabase/supabase-js');`
-    : `import * as sdk from '@supacloud/js';\nimport * as events from '@supacloud/js/task-events';\nimport * as contracts from '@supacloud/js/contracts';\nimport * as upstream from '@supabase/supabase-js';`;
+    ? `import sdk = require('@supacloud/js');\nimport events = require('@supacloud/js/task-events');\nimport contracts = require('@supacloud/js/contracts');\nimport upstream = require('@supabase/supabase-js');\nimport reactive = require('@supacloud/js/reactive');`
+    : `import * as sdk from '@supacloud/js';\nimport * as events from '@supacloud/js/task-events';\nimport * as contracts from '@supacloud/js/contracts';\nimport * as upstream from '@supabase/supabase-js';\nimport * as reactive from '@supacloud/js/reactive';`;
   return imports + `
 // The normal integration must type-check too, not just reject invalid calls.
 const upstreamClient = upstream.createClient('https://sdk-compat.example.invalid', 'test-anon-key', {
@@ -121,8 +121,17 @@ const typedSdk = sdk.createSupaCloudClient({ supabase: typedUpstream,
 export const sameDatabaseType: typeof typedUpstream = typedSdk.supabase;
 // @ts-expect-error Database table names must stay checked across the adapter.
 typedSdk.supabase.from('missing_table');
+export const query = reactive.observeQuery(signal => typedSdk.supabase.from('notes').select('id').abortSignal(signal));
+query.subscribe(response => {
+  const id: number | undefined = response.data?.[0]?.id;
+  // @ts-expect-error Selecting id does not expose title.
+  response.data?.[0]?.title;
+});
+// @ts-expect-error Query observation requires a lazy query factory.
+reactive.observeQuery(Promise.resolve({ error: null }));
 // These fail if export resolution silently degrades to any.
 type IsAny<T> = 0 extends (1 & T) ? true : false;
+export const reactiveHasTypes: IsAny<typeof reactive.observeQuery> = false;
 export const factoryHasTypes: IsAny<typeof sdk.createSupaCloudClient> = false;
 export const contractHasTypes: IsAny<typeof contracts.createAuthoritativeCommandClient> = false;
 export const scopeHasTypes: IsAny<typeof contracts.createCommandScope> = false;

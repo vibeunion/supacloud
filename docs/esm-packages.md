@@ -28,7 +28,7 @@ ESM-only is a publication format, not a blanket prohibition on CommonJS:
 ## Public SDK compatibility
 
 The public `@supacloud/js` SDK has a different consumer contract from the
-server framework: its root, `/task-events` and `/contracts` explicitly support
+server framework: its root, `/task-events`, `/contracts` and `/reactive` explicitly support
 both `import` and synchronous `require()` on Node 22.12.0+. Their `module-sync`,
 `import` and `default` conditions resolve to the same ESM file, so this adds no
 CJS build, duplicated error classes or asynchronous initialization wrapper.

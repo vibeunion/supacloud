@@ -185,6 +185,7 @@ const { createSupaCloudClient } = require('@supacloud/js');
     'export { createAuthoritativeCommandClient } from "@supacloud/js/contracts";',
     'export { createSupaCloudClient } from "@supacloud/js";',
     'export { TaskEventError } from "@supacloud/js/task-events";',
+    'export { observeQuery, observeTask } from "@supacloud/js/reactive";',
   ].join('\n'));
   run('bun', ['build', 'browser.ts', '--target', 'browser', '--format', 'esm', '--outfile', 'browser.mjs'], consumer);
   console.log('Installed declaration consumer and browser bundle passed.');
