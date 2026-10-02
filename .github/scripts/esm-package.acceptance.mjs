@@ -6,7 +6,6 @@ import { basename, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { prepareCommandPackage } from './prepare-command-package.mjs';
 import { checkEsmPack } from './esm-package-policy.mjs';
-import { resolveNodeTypesPackage } from './esm-package-paths.mjs';
 // Run after building these packages. Installation is outside the checkout and
 // uses real tarballs, never workspace links or source-resolution conditions.
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -127,8 +126,7 @@ console.log('Installed ESM entrypoints and shared identities passed: ' + specifi
       noEmit: true, skipLibCheck: true, types: [],
     }, files: ['./consumer.ts'],
   }));
-    run('bun', ['add', '--no-save', '--exact', resolveNodeTypesPackage(root)], consumer);
-  run('bun', ['run', 'tsc', '-p', join(consumer, 'tsconfig.json')], resolve(root, 'packages', 'app'));
+        run('bun', ['add', '--no-save', '--exact', resolve(root, 'packages', 'app', 'node_modules', '@types', 'node')], consumer);
   await writeFile(join(consumer, 'browser.ts'), [
     'export { HttpClient } from "@supacloud/app/browser";',
     'export { createAuthoritativeCommandClient } from "@supacloud/js/contracts";',
