@@ -283,8 +283,7 @@ describe("Aponia-inspired lifecycle behavior on the existing runtime API", () =>
         process.exitCode = initialExitCode;
         const listener = process.listeners("SIGTERM").find((entry) => !before.has(entry));
         if (!listener) throw new Error("Expected the application signal listener");
-        l
-istener("SIGTERM");        const error: unknown = await app.stop().catch((reason: unknown) => reason);
+        listener("SIGTERM");        const error: unknown = await app.stop().catch((reason: unknown) => reason);
         expect(error).toBe(failure);
         expect(process.exitCode).toBe(initialExitCode || 1);
         expect(report).toHaveBeenCalledTimes(1);
