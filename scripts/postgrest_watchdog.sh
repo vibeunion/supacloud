@@ -103,50 +103,62 @@ descriptor_field() {
 }
 
 read_trusted_config_port() {
-    # Resolve the port once, from a single opened descriptor, so the probe never
-    # reopens the path. Validate descriptor-based identity, link count, owner and
-    # mode; a path swapped between checks cannot redirect the read. A portable
-    # shell cannot open with O_NOFOLLOW/O_NONBLOCK, so the root-owned, unwritable
-    # configuration directory remains the boundary for the pre-open window.
+    # Resolve the port once from the opened descriptor. Validate one metadata
+    # snapshot, reject partial/binary reads, then ensure that snapshot is stable.
     local conf="$1" ref="$2"
-    local fd_id path_id mode owner links tenant_uid content port=""
+    local fd_id path_id mode owner links bytes tenant_uid content before after port=""
+    local metadata_gnu='%a %u %h %s %y %z'
+    local metadata_bsd='%Lp %u %l %z %m %c'
 
     [[ -n "$conf" && -f "$conf" && ! -L "$conf" && -r "$conf" ]] || return 0
     exec 9< "$conf" 2>/dev/null || return 0
     fd_id="$(descriptor_field 9 '%d:%i' '%d:%i')" || { exec 9<&-; return 0; }
     path_id="$(path_identity_nofollow "$conf")" || { exec 9<&-; return 0; }
     if [[ -e /proc/self/fd/9 ]]; then
-        # Linux: /proc/self/fd follows to the real inode including its device.
-        [[ -n "$fd_id" && "$fd_id" == "$path_id" ]] || { exec 9<&-; return 0; }
+        [[ -f /proc/self/fd/9 && -n "$fd_id" && "$fd_id" == "$path_id" ]] || { exec 9<&-; return 0; }
+        before="$(descriptor_field 9 "$metadata_gnu" "$metadata_bsd")" || { exec 9<&-; return 0; }
     else
-        # macOS /dev/fd reports the devfs device, so compare the inode only.
+        # macOS /dev/fd exposes devfs metadata. Keep the descriptor for content,
+        # compare inode identity, and recheck path metadata after the read.
         [[ -n "$fd_id" && "${fd_id#*:}" == "${path_id#*:}" ]] || { exec 9<&-; return 0; }
+        before="$(path_field "$conf" "$metadata_gnu" "$metadata_bsd")" || { exec 9<&-; return 0; }
     fi
-    mode="$(descriptor_field 9 '%a' '%Lp')" || { exec 9<&-; return 0; }
-    owner="$(descriptor_field 9 '%u' '%u')" || { exec 9<&-; return 0; }
-    links="$(descriptor_field 9 '%h' '%l')" || { exec 9<&-; return 0; }
-    if [[ ! -e /proc/self/fd/9 ]]; then
-        # macOS /dev/fd reports the correct owner and link count but a fixed
-        # devfs mode, so take the mode from the path and re-confirm the path
-        # still resolves to the opened inode afterwards (a swap is rejected).
-        mode="$(path_field "$conf" '%a' '%Lp')" || { exec 9<&-; return 0; }
-        [[ "$(path_identity_nofollow "$conf")" == "$path_id" ]] || { exec 9<&-; return 0; }
-    fi
-    content="$(head -c 65536 <&9 || true)"
-    exec 9<&-
-
-    [[ -n "$mode" && -n "$owner" && -n "$links" ]] || return 0
-    if [[ "$links" != "1" ]] || (( (8#$mode & 8#022) != 0 )); then
+    read -r mode owner links bytes _ <<< "$before"
+    if [[ ! "$mode" =~ ^[0-7]{1,4}$ || ! "$owner" =~ ^[0-9]+$ || "$links" != 1 ]]; then
+        exec 9<&-
         printf '!untrusted'
         return 0
     fi
-    # Mirror the launcher: the file is trusted only for root, the current
-    # effective user, or the tenant's own runtime account.
+    if (( (8#$mode & 8#022) != 0 )); then
+        exec 9<&-
+        printf '!untrusted'
+        return 0
+    fi
     tenant_uid="$(id -u "supacloud-$ref" 2>/dev/null || true)"
-    if [[ "$owner" != "0" && "$owner" != "$EUID" && ( -z "$tenant_uid" || "$owner" != "$tenant_uid" ) ]]; then
+    if [[ "$owner" != 0 && "$owner" != "$EUID" && ( -z "$tenant_uid" || "$owner" != "$tenant_uid" ) ]]; then
+        exec 9<&-
         printf '!untrusted'
         return 0
     fi
+    # Do not silently validate a prefix of an oversized configuration.
+    if [[ ! "$bytes" =~ ^[0-9]{1,5}$ ]] || (( 10#$bytes > 65536 )); then
+        exec 9<&-
+        return 0
+    fi
+    # Bash command substitution discards NUL bytes. Preserve their presence as
+    # a rejected binary control byte instead; pipefail also preserves read errors.
+    if ! content="$(head -c 65537 <&9 | LC_ALL=C tr '\000' '\001')"; then
+        exec 9<&-
+        return 0
+    fi
+    if [[ -e /proc/self/fd/9 ]]; then
+        after="$(descriptor_field 9 "$metadata_gnu" "$metadata_bsd")" || { exec 9<&-; return 0; }
+    else
+        [[ "$(path_identity_nofollow "$conf")" == "$path_id" ]] || { exec 9<&-; return 0; }
+        after="$(path_field "$conf" "$metadata_gnu" "$metadata_bsd")" || { exec 9<&-; return 0; }
+    fi
+    exec 9<&-
+    [[ "$before" == "$after" && "$content" != *$'\001'* ]] || return 0
     port="$(printf '%s\n' "$content" | sed -n '/^server-port = [0-9][0-9]*$/ { s/^server-port = //; p; q; }')"
     printf '%s' "$port"
 }
