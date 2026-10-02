@@ -88,3 +88,28 @@ jobs:
           node-version: ${{ matrix.node }}
       - name: Install real tarballs and verify public entrypoints
         run: node .github/scripts/esm-package.acceptance.mjs
+      - name: Collect reproducible SDK type-failure evidence
+        if: failure() && matrix.node == '24.x'
+        run: |
+          evidence="$RUNNER_TEMP/sdk-compatibility-evidence"
+          mkdir -p "$evidence"
+          # Only committed public source and named build/dependency directories.
+          # Never archive .git, runner credentials, npm config or environment files.
+          git archive --format=tar HEAD > "$evidence/source.tar"
+          tar -cf "$evidence/dependencies.tar" \
+            packages/supacloud-js/node_modules packages/supacloud-js/dist \
+            packages/contracts/node_modules packages/contracts/dist \
+            packages/app/node_modules packages/app/dist \
+            packages/delivery/node_modules packages/delivery/dist \
+            packages/compiler/node_modules packages/compiler/dist
+          cp "$(command -v bun)" "$evidence/bun"
+          git rev-parse HEAD > "$evidence/commit.txt"
+          node --version > "$evidence/node-version.txt"
+      - name: Upload SDK type-failure evidence
+        if: failure() && matrix.node == '24.x'
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdk-compatibility-evidence
+          path: ${{ runner.temp }}/sdk-compatibility-evidence/
+          retention-days: 1
+          compression-level: 1
