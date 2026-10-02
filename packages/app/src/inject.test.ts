@@ -54,7 +54,7 @@ describe("Angular 14+ EnvironmentInjector and createEnvironmentInjector", () => 
     expect(env.get(FLAG)).toBe("ready");
   });
 
-  it("executes DestroyRef teardowns and OnDestroy hooks on destroy()", () => {
+  it("starts cancellation on destroy() and completes OnDestroy through destroyAsync()", async () => {
     let destroyRefTeardownRan = false;
     let onDestroyHookRan = false;
 
@@ -72,22 +72,62 @@ describe("Angular 14+ EnvironmentInjector and createEnvironmentInjector", () => 
           destroyRefTeardownRan = true;
         });
       }),
-    ]);
+    ], undefined, { initialize: false });
+    await env.initialize();
 
-    // Instantiate service inside env
-    const service = env.get(CleanableService);
-    expect(service).toBeDefined();
-    expect(destroyRefTeardownRan).toBe(false);
-    expect(onDestroyHookRan).toBe(false);
+    try {
+      const service = env.get(CleanableService);
+      const signal = env.get(DESTROY_REF).signal;
+      expect(service).toBeDefined();
+      expect(destroyRefTeardownRan).toBe(false);
+      expect(onDestroyHookRan).toBe(false);
 
-    env.destroy();
-    expect(env.destroyed).toBe(true);
-    expect(destroyRefTeardownRan).toBe(true);
+      env.destroy();
+      expect(env.destroyed).toBe(true);
+      expect(signal?.aborted).toBe(true);
+      expect(destroyRefTeardownRan).toBe(true);
+
+      // Operations are forbidden immediately, even while cleanup is in flight.
+      expect(() => env.get(CleanableService)).toThrow("already been destroyed");
+      expect(() => env.runInContext(() => 42)).toThrow("already been destroyed");
+    } finally {
+      await env.destroyAsync();
+    }
     expect(onDestroyHookRan).toBe(true);
+  });
 
-    // Operations after destroy throw
-    expect(() => env.get(CleanableService)).toThrow("already been destroyed");
-    expect(() => env.runInContext(() => 42)).toThrow("already been destroyed");
+  it("awaits pending DestroyRef cleanup before releasing OnDestroy resources", async () => {
+    const events: string[] = [];
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => { release = resolve; });
+    class CleanableService implements OnDestroy {
+      onDestroy() { events.push("service"); }
+    }
+    const env = createEnvironmentInjector([
+      CleanableService,
+      provideEnvironmentInitializer(() => {
+        inject(DESTROY_REF).onDestroy(async () => {
+          events.push("ref:start");
+          await pending;
+          events.push("ref:end");
+        });
+      }),
+    ], undefined, { initialize: false });
+    await env.initialize();
+    env.get(CleanableService);
+    const signal = env.get(DESTROY_REF).signal;
+    try {
+      env.destroy();
+      expect(signal?.aborted).toBe(true);
+      // This fails with the previous concurrent cleanup implementation.
+      expect(events).toEqual(["ref:start"]);
+      await Promise.resolve();
+      expect(events).toEqual(["ref:start"]);
+    } finally {
+      release();
+      await env.destroyAsync();
+    }
+    expect(events).toEqual(["ref:start", "ref:end", "service"]);
   });
 
   it("delegates to parent injector when token is not found in child", () => {
