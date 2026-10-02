@@ -1,0 +1,79 @@
+name: Reactive Integration
+
+on:
+  push:
+    branches: ["main", "dev", "feat/default-rxjs-sdk"]
+    paths:
+      - "packages/app/**"
+      - "packages/supacloud-js/**"
+      - "packages/contracts/**"
+      - "packages/cli/**"
+      - "scripts/check_reactive_consumer.ts"
+      - "scripts/check_app_starter.ts"
+      - "scripts/check_app_generation.ts"
+      - ".github/workflows/reactive.yml"
+  pull_request:
+    branches: ["main", "dev"]
+    paths:
+      - "packages/app/**"
+      - "packages/supacloud-js/**"
+      - "packages/contracts/**"
+      - "packages/cli/**"
+      - "scripts/check_reactive_consumer.ts"
+      - "scripts/check_app_starter.ts"
+      - "scripts/check_app_generation.ts"
+      - ".github/workflows/reactive.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reactive-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Reactive packages and SDK consumer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.2"
+      - name: App build, types and tests
+        run: |
+          bun run scripts/build-command-dependencies.ts app
+          cd packages/app
+          bun install --frozen-lockfile
+          bun run build
+          bun run typecheck
+          bun run typecheck:test
+          bun test
+      - name: SDK build, consumer types and tests
+        run: |
+          bun run scripts/build-command-dependencies.ts supacloud-js
+          cd packages/supacloud-js
+          bun install --frozen-lockfile
+          bun run build
+          bun run typecheck
+          bun run typecheck:test
+          bun run typecheck:consumer
+          bun test
+      - name: Packed reactive consumer with real Supabase and SupaCloud clients
+        run: bun run scripts/check_reactive_consumer.ts
+      - name: All starter defaults
+        run: |
+          cd packages/cli
+          bun install --frozen-lockfile --ignore-scripts
+          bun test src/shared/tools/app-starter-reactive.test.ts
+      - name: No verification edits to tracked source or lockfiles
+        run: git diff --exit-code
+
+  # PRs already run this reusable acceptance in Management API CI.
+  generated-consumer:
+    if: github.event_name != 'pull_request'
+    uses: ./.github/workflows/app-generation.yml
