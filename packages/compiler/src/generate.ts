@@ -151,6 +151,10 @@ export interface CompiledModule {
     deps: Record<string, unknown>,
     imported: Record<string, Record<string, unknown>>,
   ): Record<string, unknown>;
+  /** Initializes application-scoped instances owned by this module. */
+  initializeServices?(services: Record<string, unknown>): Promise<void>;
+  /** Destroys application-scoped instances owned by this module. */
+  destroyServices?(services: Record<string, unknown>): Promise<void>;
   createRequestScope?(
     services: Record<string, unknown>,
     ctx: unknown,
@@ -236,7 +240,54 @@ function destroyScopeInstances(
   });
   scopeDestructions.set(scope, destruction);
   return destruction;
-}`;
+}
+
+type CompiledServiceLifecycleEntry = { key: string; index?: number };
+
+async function initializeServiceInstances(
+  services: Record<string, unknown>,
+  plan: readonly CompiledServiceLifecycleEntry[],
+): Promise<void> {
+  const seen = new Set<unknown>();
+  for (const entry of plan) {
+    const value = services[entry.key];
+    const instance = entry.index === undefined
+      ? value
+      : Array.isArray(value) ? value[entry.index] : undefined;
+    if (seen.has(instance)) continue;
+    seen.add(instance);
+    if (!isRecord(instance) || !isFunction(instance.onInit)) continue;
+    await instance.onInit();
+  }
+}
+
+async function destroyServiceInstances(
+  services: Record<string, unknown>,
+  plan: readonly CompiledServiceLifecycleEntry[],
+): Promise<void> {
+  const errors: unknown[] = [];
+  const seen = new Set<unknown>();
+  for (const entry of [...plan].reverse()) {
+    const value = services[entry.key];
+    const instance = entry.index === undefined
+      ? value
+      : Array.isArray(value) ? value[entry.index] : undefined;
+    if (seen.has(instance)) continue;
+    seen.add(instance);
+    if (!isRecord(instance)) continue;
+    const hook = isFunction(instance.onDestroy)
+      ? instance.onDestroy
+      : isFunction(instance.ngOnDestroy) ? instance.ngOnDestroy : undefined;
+    if (!hook) continue;
+    try {
+      await hook.call(instance);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length > 0) throw new AggregateError(errors, "Application service destruction failed");
+}
+`;
 
 export interface GenerateOptions {
   rootDir: string;
@@ -607,6 +658,12 @@ class ModuleGenerator {
 
   renderFactories(): string[] {
     const sections: string[] = [this.renderServicesFactory()];
+    if (this.hasApplicationLifecycle("init")) {
+      sections.push(this.renderApplicationLifecycle("init"));
+    }
+    if (this.hasApplicationLifecycle("destroy")) {
+      sections.push(this.renderApplicationLifecycle("destroy"));
+    }
     if (this.hasFactoryContent("request")) {
       sections.push(this.renderScopeFactory("request"));
       sections.push(this.renderScopeDestroyer("request"));
@@ -624,6 +681,12 @@ class ModuleGenerator {
       `  name: ${JSON.stringify(this.module.name)} as const,`,
       `  createServices: create${this.pascal}Services,`,
     ];
+    if (this.hasApplicationLifecycle("init")) {
+      lines.push(`  initializeServices: initialize${this.pascal}Services,`);
+    }
+    if (this.hasApplicationLifecycle("destroy")) {
+      lines.push(`  destroyServices: destroy${this.pascal}Services,`);
+    }
     if (this.hasFactoryContent("request")) {
       lines.push(`  createRequestScope: create${this.pascal}RequestScope,`);
       lines.push(`  destroyRequestScope: destroy${this.pascal}RequestScope,`);
@@ -648,6 +711,38 @@ class ModuleGenerator {
       this.module.providers.some((p) => factoryOfScope(p.scope) === kind) ||
       this.module.controllers.some((c) => factoryOfScope(c.scope) === kind)
     );
+  }
+
+  private hasApplicationLifecycle(kind: "init" | "destroy"): boolean {
+    return this.applicationLifecyclePlan(kind).length > 0;
+  }
+
+  private applicationLifecyclePlan(kind: "init" | "destroy"): Array<{ key: string; index?: number }> {
+    const result: Array<{ key: string; index?: number }> = [];
+    const multiIndices = new Map<string, number>();
+    for (const provider of orderProviders(this.module.providers.filter((p) => factoryOfScope(p.scope) === "services"))) {
+      const index = provider.multi ? (multiIndices.get(provider.token) ?? 0) : undefined;
+      if (index !== undefined) multiIndices.set(provider.token, index + 1);
+      const owned = provider.kind !== "existing";
+      const selected = kind === "init" ? provider.hasOnInit : provider.hasOnDestroy;
+      if (owned && selected) result.push({ key: camelName(provider.token), ...(index === undefined ? {} : { index }) });
+    }
+    for (const controller of this.module.controllers) {
+      if (factoryOfScope(controller.scope) !== "services") continue;
+      const selected = kind === "init" ? controller.hasOnInit : controller.hasOnDestroy;
+      if (selected) result.push({ key: camelName(controller.className) });
+    }
+    return result;
+  }
+
+  private renderApplicationLifecycle(kind: "init" | "destroy"): string {
+    const suffix = kind === "init" ? "initialize" : "destroy";
+    const helper = kind === "init" ? "initializeServiceInstances" : "destroyServiceInstances";
+    return [
+      `async function ${suffix}${this.pascal}Services(services: Record<string, unknown>): Promise<void> {`,
+      `  await ${helper}(services, ${JSON.stringify(this.applicationLifecyclePlan(kind))});`,
+      `}`,
+    ].join("\n");
   }
 
   private renderControllers(): string {

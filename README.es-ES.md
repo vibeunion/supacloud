@@ -681,11 +681,7 @@ Configuraciones de instalación clave:
 
 ## Licencia
 
-SupaCloud se distribuye bajo GNU Affero General Public License, solo
-version 3 (`AGPL-3.0-only`). Consulte [LICENSE](LICENSE) y [NOTICE](NOTICE).
-
-Si modifica el programa y permite la interaccion remota por red, la seccion
-13 exige ofrecer a esos usuarios el codigo fuente correspondiente de la
-version modificada. Se permiten el uso comercial y el alojamiento que cumpla
-la licencia. Los componentes de terceros conservan sus propias licencias.
-Las copias publicadas anteriormente conservan sus permisos originales.
+El código propio de SupaCloud se distribuye bajo la licencia Apache, versión
+2.0 (`Apache-2.0`). Consulte [LICENSE](LICENSE) y [NOTICE](NOTICE). Los
+componentes de terceros conservan sus propias licencias y las versiones
+publicadas anteriormente conservan sus permisos originales.

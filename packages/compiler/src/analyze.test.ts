@@ -449,6 +449,7 @@ describe("analyzeProject：command 与 externalTokens", () => {
 
         @Injectable({ providedIn: 'root' })
         export class LifecycleService implements OnDestroy {
+          onInit(): void {}
           onDestroy(): void {}
         }
 
@@ -470,6 +471,7 @@ describe("analyzeProject：command 与 externalTokens", () => {
     expect(rootMod).toBeDefined();
 
     const prov = rootMod?.providers.find((p) => p.token === "LifecycleService");
+    expect(prov?.hasOnInit).toBe(true);
     expect(prov?.hasOnDestroy).toBe(true);
 
     const ctrl = rootMod?.controllers.find((c) => c.className === "ItemsController");
