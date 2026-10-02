@@ -210,7 +210,7 @@ for scenario in direct descendants ignores-term; do
 done
 fallback_start=$(date +%s)
 fallback_output="$(timeout 10 bash -c 'sleep 30 & printf done')"
-[[ "$fallback_output" == done ]] || fail 'fallback lost successful command output'
+[[ "$fallback_output" == "done" ]] || fail 'fallback lost successful command output'
 [[ $(( $(date +%s) - fallback_start )) -le 6 ]] || fail 'fallback retained a descendant or timer after successful completion'
 status=0
 fallback_output="$(timeout 10 bash -c 'exit 7')" || status=$?
