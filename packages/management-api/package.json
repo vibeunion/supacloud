@@ -44,7 +44,7 @@
     "@supacloud/delivery": "file:../delivery",
     "acorn": "^8.18.0",
     "aws4fetch": "^1.0.20",
-    "elysia": "2.0.0-beta.19",
+    "elysia": "2.0.0-exp.64",
     "exact-mirror": "1.2.6",
     "jose": "^6.2.12",
     "nanoid": "^6.0.1",
