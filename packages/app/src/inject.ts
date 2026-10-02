@@ -10,7 +10,8 @@ import {
 } from "@angular/core";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { EnvironmentProviders, Provider, ProviderDep, ProviderDependency, Token, Type } from "./provider";
-import { flattenProviders, isClassProvider, isFactoryProvider } from "./provider";
+import { flattenProviders, isClassProvider, isFactoryProvi313
+        der } from "./provider";
 import {
   APP_INITIALIZER,
   APP_LIFECYCLE,
@@ -315,11 +316,14 @@ export function createEnvironmentInjector(
       }
       if (initialized) return Promise.resolve();
       if (initializationPromise) return initializationPromise;
-
       initializationPromise = (async () => {
+        if (destroyed || runtime.destroyed) return;
         await runInitializers(adapter, ENVIRONMENT_INITIALIZER);
+        if (destroyed || runtime.destroyed) return;
         await runInitializers(adapter, APP_INITIALIZER);
+        if (destroyed || runtime.destroyed) return;
         await runLifecycleInitializers(adapter);
+        if (destroyed || runtime.destroyed) return;
         initialized = true;
       })();
       return initializationPromise;
