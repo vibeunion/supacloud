@@ -118,6 +118,7 @@ async function fixture(work) {
     await writeFile(join(contracts, 'package.json'), JSON.stringify({ name: '@supacloud/contracts', type: 'module', exports: { './client': { import: './client.js' } } }));
     await writeFile(join(contracts, 'client.js'), 'export function createAuthoritativeCommandClient() {}\nexport class CommandAuthenticationError extends Error {}\n');
     await writeFile(join(sdk, 'dist', 'contracts.js'), 'export * from "@supacloud/contracts/client";\n');
+    await writeFile(join(sdk, 'dist', 'reactive.js'), 'export function observeQuery() {}\n');
     await writeSdkConsumers(directory);
     const env = { ...process.env };
     delete env.NODE_OPTIONS;

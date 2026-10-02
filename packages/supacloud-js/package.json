@@ -27,6 +27,7 @@
     },
     "./reactive": {
       "types": "./dist/reactive.d.ts",
+      "module-sync": "./dist/reactive.js",
       "import": "./dist/reactive.js",
       "default": "./dist/reactive.js"
     }

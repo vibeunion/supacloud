@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 export const SDK_NODE_RANGE = '>=22.12.0';
 export const SDK_ENTRYPOINTS = Object.freeze({
-  '.': 'index', './task-events': 'task-events', './contracts': 'contracts',
+  '.': 'index', './task-events': 'task-events', './contracts': 'contracts', './reactive': 'reactive',
 });
 export const SDK_SPECIFIERS = Object.freeze(Object.keys(SDK_ENTRYPOINTS).map(
   path => '@supacloud/js' + (path === '.' ? '' : path.slice(1)),
