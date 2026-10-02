@@ -265,6 +265,8 @@ grep 'hooks.example/alert' "$TMP_DIR/webhook-invalid.log" | grep -q -- '--connec
 grep 'hooks.example/alert' "$TMP_DIR/webhook-invalid.log" | grep -q -- '--max-time 5' \
   || fail 'invalid webhook timeout did not fall back to 5 (total)'
 # Trusted-file regressions from the config-hardening PR.
+# Group/world-writable or multiply-linked tenant configs must never be trusted,
+# even with a well-formed server-port.
 for mode in 666 620 642; do
   untrusted_dir="$TMP_DIR/untrusted-$mode"
   mkdir -p "$untrusted_dir"
