@@ -1,6 +1,6 @@
 {
   "name": "web-console",
-  "license": "AGPL-3.0-only",
+  "license": "Apache-2.0",
   "private": true,
   "version": "0.44.0",
   "type": "module",

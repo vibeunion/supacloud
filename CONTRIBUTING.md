@@ -1,7 +1,7 @@
 # Contributions
 
 New contributions to SupaCloud project-owned code are submitted under
-AGPL-3.0-only, as described in LICENSE and NOTICE. Submit only work you have
+Apache-2.0, as described in LICENSE and NOTICE. Submit only work you have
 the right to contribute under those terms, and identify third-party code
 and preserve its original license and attribution.
 
