@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.3.0...delivery-v0.4.0) (2026-10-02)
+
+
+### Features
+
+* **app:** add governed reactive event streams and lifecycle signals ([38a26e2](https://github.com/vibeunion/supacloud/commit/38a26e2d3b83226a7488df2ef4f1f5714573aeb2))
+
 ## [0.3.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.2.1...delivery-v0.3.0) (2026-09-30)
 
 

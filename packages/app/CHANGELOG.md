@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.20.0](https://github.com/vibeunion/supacloud/compare/app-v0.19.0...app-v0.20.0) (2026-10-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* @supacloud/app no longer publishes dist/index.cjs or a separate synchronous CommonJS entrypoint. CommonJS consumers should use dynamic import() or migrate to ESM. Release-please should handle the corresponding breaking version change.
+* @supacloud/app no longer publishes dist/index.cjs or a separate synchronous CommonJS entrypoint. CommonJS consumers should use dynamic import() or migrate to ESM. Release-please should handle the corresponding breaking version change.
+
+### Features
+
+* **app:** add governed reactive event streams and lifecycle signals ([38a26e2](https://github.com/vibeunion/supacloud/commit/38a26e2d3b83226a7488df2ef4f1f5714573aeb2))
+* default RxJS support with compatible SupaCloud JS calls ([#1556](https://github.com/vibeunion/supacloud/issues/1556)) ([b3015cb](https://github.com/vibeunion/supacloud/commit/b3015cb161c0d87e6611f6c4fc60c120a8c9fffe))
+
+
+### Bug Fixes
+
+* **app:** harden lifecycle ordering and preserve cleanup failures ([#1555](https://github.com/vibeunion/supacloud/issues/1555)) ([8c96e0d](https://github.com/vibeunion/supacloud/commit/8c96e0d516bd655178ee26f05777787f4e511dab))
+
+
+### Elegance & Refactoring
+
+* use ESM-only owned packages and Lite launcher ([#1582](https://github.com/vibeunion/supacloud/issues/1582)) ([ed5ac78](https://github.com/vibeunion/supacloud/commit/ed5ac78ee3ab22567268fa276e5b016ad1e8b575))
+
 ## [0.19.0](https://github.com/vibeunion/supacloud/compare/app-v0.18.1...app-v0.19.0) (2026-09-30)
 
 
