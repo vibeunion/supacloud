@@ -187,6 +187,8 @@ export interface ProviderNode {
   providedIn?: "root";
   /** Class implements OnDestroy interface or onDestroy method. */
   hasOnDestroy?: boolean;
+  /** Class exposes an application startup hook. */
+  hasOnInit?: boolean;
   exported: boolean;
   file: string;
   line: number;
@@ -271,6 +273,8 @@ export interface ControllerNode {
   deps: string[];
   /** Class implements OnDestroy interface or onDestroy method. */
   hasOnDestroy?: boolean;
+  /** Class exposes an application startup hook. */
+  hasOnInit?: boolean;
   /** Parameter tokens marked @Optional(). */
   optionalDeps?: string[];
   selfDeps?: string[];
