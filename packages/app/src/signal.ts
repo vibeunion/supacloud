@@ -5,6 +5,8 @@
 
 export interface Signal<T> {
   (): T;
+  /** Subscribe to invalidation without coupling the state API to RxJS. */
+  subscribe?(listener: () => void): () => void;
 }
 
 export interface WritableSignal<T> extends Signal<T> {
@@ -14,6 +16,11 @@ export interface WritableSignal<T> extends Signal<T> {
 }
 
 type Consumer = () => void;
+
+export interface EffectOptions {
+  /** Tie the effect lifetime to a framework-neutral DestroyRef-like owner. */
+  destroyRef?: { onDestroy(callback: () => void | Promise<void>): () => void };
+}
 
 let activeConsumer: Consumer | null = null;
 let isTrackingEnabled = true;
@@ -41,11 +48,20 @@ export function signal<T>(initialValue: T): WritableSignal<T> {
     }
   };
 
+  read.subscribe = (listener: Consumer) => {
+    subscribers.add(listener);
+    return () => subscribers.delete(listener);
+  };
+
   read.update = (updateFn: (current: T) => T) => {
     read.set(updateFn(value));
   };
 
-  read.asReadonly = () => (() => read()) as Signal<T>;
+  read.asReadonly = () => {
+    const readonly = (() => read()) as Signal<T>;
+    readonly.subscribe = read.subscribe;
+    return readonly;
+  };
 
   return read;
 }
@@ -68,7 +84,7 @@ export function computed<T>(computation: () => T): Signal<T> {
     }
   };
 
-  return (() => {
+  const read = (() => {
     if (isTrackingEnabled && activeConsumer) {
       subscribers.add(activeConsumer);
     }
@@ -84,13 +100,18 @@ export function computed<T>(computation: () => T): Signal<T> {
     }
     return cachedValue;
   }) as Signal<T>;
+  read.subscribe = (listener: Consumer) => {
+    subscribers.add(listener);
+    return () => subscribers.delete(listener);
+  };
+  return read;
 }
 
 /**
  * Creates a reactive effect that runs computation immediately and re-runs whenever any read signal changes.
  * Returns a teardown function.
  */
-export function effect(effectFn: () => void | (() => void)): () => void {
+export function effect(effectFn: () => void | (() => void), options: EffectOptions = {}): () => void {
   let cleanup: void | (() => void);
   let isDestroyed = false;
 
@@ -108,14 +129,15 @@ export function effect(effectFn: () => void | (() => void)): () => void {
     }
   };
 
-  run();
-
-  return () => {
+  const stop = () => {
     isDestroyed = true;
     if (typeof cleanup === "function") {
       cleanup();
     }
   };
+  run();
+  options.destroyRef?.onDestroy(stop);
+  return stop;
 }
 
 /**
@@ -235,7 +257,15 @@ export function linkedSignal<S, D>(
     read.set(updateFn(read()));
   };
 
-  read.asReadonly = () => (() => read()) as Signal<D>;
+  read.subscribe = (listener: Consumer) => {
+    subscribers.add(listener);
+    return () => subscribers.delete(listener);
+  };
+  read.asReadonly = () => {
+    const readonly = (() => read()) as Signal<D>;
+    readonly.subscribe = read.subscribe;
+    return readonly;
+  };
 
   return read;
 }
