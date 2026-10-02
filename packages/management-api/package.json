@@ -51,7 +51,7 @@
     "typebox": "1.3.34"
   },
   "devDependencies": {
-    "@supabase/supabase-js": "^2.116.0",
+    "@supabase/supabase-js": "^2.117.2",
     "@types/bun": "^1.4.2",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
