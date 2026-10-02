@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "./supabase-types.js";
 import { invokeWorkflowMutation, invokeWorkflowRead } from "./workflow-rpc.js";
 import { captureWorkflowClaimRequest, decodeWorkflowClaim, SupaCloudWorkflowClaimError } from "./workflow-claim.js";
 import { captureWorkflowRunId, decodeWorkflowRun, SupaCloudWorkflowReadError } from "./workflow-run.js";

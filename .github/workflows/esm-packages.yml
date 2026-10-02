@@ -39,7 +39,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24.x'
-      - run: node --test .github/scripts/esm-package-policy.test.mjs
+      - run: node --test .github/scripts/esm-package-policy.test.mjs .github/scripts/esm-package-sdk.test.mjs
       - run: node .github/scripts/esm-package-policy.mjs
 
   esm-launcher:
@@ -58,10 +58,14 @@ jobs:
       - run: node --experimental-strip-types --test .github/scripts/esm-package-launcher.test.mjs .github/scripts/esm-package-cli-resolution.test.mjs
 
   esm-consumers:
-    name: Installed ESM consumers (Node and Bun)
+    name: Installed consumers (Node ${{ matrix.node }} and Bun)
     needs: esm-policy
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22.12.0', '24.x', '26.x']
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -75,7 +79,42 @@ jobs:
           for package in contracts delivery app supacloud-js compiler; do
             (cd "packages/$package" && bun install --frozen-lockfile && bun run build)
           done
-      - name: Check the application publish inventory
-        run: bun run --cwd packages/app check:package
+      - name: Check application and SDK publish inventories
+        run: |
+          bun run --cwd packages/app check:package
+          bun run --cwd packages/supacloud-js check:package
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
       - name: Install real tarballs and verify public entrypoints
-        run: node .github/scripts/esm-package.acceptance.mjs
+        run: |
+          if [ '${{ matrix.node }}' = '22.12.0' ]; then
+            node .github/scripts/esm-package.acceptance.mjs --sdk-only
+          else
+            node .github/scripts/esm-package.acceptance.mjs
+          fi
+      - name: Collect reproducible SDK type-failure evidence
+        if: failure() && matrix.node == '24.x'
+        run: |
+          evidence="$RUNNER_TEMP/sdk-compatibility-evidence"
+          mkdir -p "$evidence"
+          # Only committed public source and named build/dependency directories.
+          # Never archive .git, runner credentials, npm user config or untracked env files.
+          git archive --format=tar HEAD > "$evidence/source.tar"
+          tar -cf "$evidence/dependencies.tar" \
+            packages/supacloud-js/node_modules packages/supacloud-js/dist \
+            packages/contracts/node_modules packages/contracts/dist \
+            packages/app/node_modules packages/app/dist \
+            packages/delivery/node_modules packages/delivery/dist \
+            packages/compiler/node_modules packages/compiler/dist
+          cp "$(command -v bun)" "$evidence/bun"
+          git rev-parse HEAD > "$evidence/commit.txt"
+          node --version > "$evidence/node-version.txt"
+      - name: Upload SDK type-failure evidence
+        if: failure() && matrix.node == '24.x'
+        uses: actions/upload-artifact@v7
+        with:
+          name: sdk-compatibility-evidence
+          path: ${{ runner.temp }}/sdk-compatibility-evidence/
+          retention-days: 1
+          compression-level: 1

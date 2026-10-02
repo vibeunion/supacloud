@@ -1,4 +1,4 @@
-import type { SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "./supabase-types.js";
 
 type WorkflowMutationName =
   | "supacloud_workflow_start" | "supacloud_workflow_claim" | "supacloud_workflow_cancel"
