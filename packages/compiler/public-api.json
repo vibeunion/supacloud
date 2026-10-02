@@ -206,7 +206,7 @@
     {
       "name": "ControllerNode",
       "kind": "type",
-      "signature": "export interface ControllerNode {\n    className: string;\n    path: string;\n    scope: Scope;\n    deps: string[];\n    hasOnDestroy?: boolean;\n    optionalDeps?: string[];\n    selfDeps?: string[];\n    skipSelfDeps?: string[];\n    hostDeps?: string[];\n    functionalInjects?: FunctionalInjectNode[];\n    standalone?: boolean;\n    routes: RouteNode[];\n    file: string;\n    importPath: string;\n    schemaImports?: Record<string, string>;\n}"
+      "signature": "export interface ControllerNode {\n    className: string;\n    path: string;\n    scope: Scope;\n    deps: string[];\n    hasOnDestroy?: boolean;\n    hasOnInit?: boolean;\n    optionalDeps?: string[];\n    selfDeps?: string[];\n    skipSelfDeps?: string[];\n    hostDeps?: string[];\n    functionalInjects?: FunctionalInjectNode[];\n    standalone?: boolean;\n    routes: RouteNode[];\n    file: string;\n    importPath: string;\n    schemaImports?: Record<string, string>;\n}"
     },
     {
       "name": "createApplicationDevelopmentContext",
@@ -836,7 +836,7 @@
     {
       "name": "ProviderNode",
       "kind": "type",
-      "signature": "export interface ProviderNode {\n    token: string;\n    tokenKind: TokenKind;\n    kind: ProviderKind;\n    useClass?: string;\n    useValueExpr?: string;\n    useFactoryName?: string;\n    useExisting?: string;\n    scope: Scope;\n    deps: string[];\n    optionalDeps?: string[];\n    selfDeps?: string[];\n    skipSelfDeps?: string[];\n    hostDeps?: string[];\n    functionalInjects?: FunctionalInjectNode[];\n    multi?: boolean;\n    providedIn?: \"root\";\n    hasOnDestroy?: boolean;\n    exported: boolean;\n    file: string;\n    line: number;\n    importPath?: string;\n    importModule?: string;\n}"
+      "signature": "export interface ProviderNode {\n    token: string;\n    tokenKind: TokenKind;\n    kind: ProviderKind;\n    useClass?: string;\n    useValueExpr?: string;\n    useFactoryName?: string;\n    useExisting?: string;\n    scope: Scope;\n    deps: string[];\n    optionalDeps?: string[];\n    selfDeps?: string[];\n    skipSelfDeps?: string[];\n    hostDeps?: string[];\n    functionalInjects?: FunctionalInjectNode[];\n    multi?: boolean;\n    providedIn?: \"root\";\n    hasOnDestroy?: boolean;\n    hasOnInit?: boolean;\n    exported: boolean;\n    file: string;\n    line: number;\n    importPath?: string;\n    importModule?: string;\n}"
     },
     {
       "name": "pullGraphqlSchema",
