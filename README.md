@@ -148,4 +148,4 @@ The [complete documentation index](docs/README.md) retains additional APIs, migr
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting changes. Keep examples, translations and generated diagrams synchronized; see [visual maintenance](docs/readme-visuals.md).
 
-SupaCloud is licensed under the GNU Affero General Public License version 3 only (`AGPL-3.0-only`). See [LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party components retain their own licenses; previously released copies retain their original grants. This documentation refresh does not change licensing.
+SupaCloud project-owned code is licensed under the Apache License, Version 2.0 (`Apache-2.0`). See [LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party components retain their own licenses; previously released copies retain their original grants.

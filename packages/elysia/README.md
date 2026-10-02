@@ -562,9 +562,32 @@ with those statuses. The default content type is
 is for bounded JSON payloads, not files or streams. Existing native `Response`
 passthrough is unchanged.
 
-### `createApplication(options: ApplicationOptions): Elysia`
+### `createApplication(options: ApplicationOptions): Elysia & ApplicationLifecycle`
 
-Creates the root Elysia application from compiled modules.
+Creates the root Elysia application from compiled modules. The returned app
+also exposes explicit `initialize()` and `destroy()` controls for
+application-scoped resources. Initialization runs compiled modules in their
+topological order; destruction runs in reverse order and is idempotent. A
+startup failure triggers best-effort cleanup of all modules that were created,
+and shutdown continues across modules before reporting an `AggregateError`.
+
+The controls are intentionally explicit so hosts can await startup before
+accepting traffic and await shutdown from their process signal handler:
+
+```ts
+const app = createApplication({ modules: createCompiledModules() });
+await app.initialize();
+const server = app.listen(3000);
+process.once("SIGTERM", async () => {
+  server.stop();
+  await app.destroy();
+});
+```
+
+The compiler emits `initializeServices` and `destroyServices` for
+application-scoped providers and controllers that declare `onInit()` or
+`onDestroy()`/`ngOnDestroy()`. Borrowed `useExisting` providers are never
+destroyed by the owning module.
 
 ### `createModulePlugin(compiled, services, ctxFactory?, options?, imported?): Elysia`
 
