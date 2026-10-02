@@ -7,7 +7,7 @@ import type {
   CommandRuntimeInvocation,
   CommandRuntimeMiddleware,
 } from "@supacloud/app";
-import { PendingWorkRegistry, PendingWorkTimeoutError } from "@supacloud/app/runtime";
+import { PendingWorkRegistry, PendingWorkTimeoutError, PendingWorkCapacityError } from "@supacloud/app/runtime";
 import { decodeCommandPreview, type CommandPreview } from "@supacloud/contracts";
 import { commandErrorCode, commandErrorStatus } from "./command-errors";
 import { compileHttpPolicies, type HttpPolicyRegistry } from "./http-policy";
@@ -1110,7 +1110,13 @@ export function createModulePlugin<
   const plugin = mountHttp(options.http, `supacloud:${compiled.name}`, options.normalize ?? true)
     .derive(async (context) => {
       if (pendingWork?.closed) throw new ApplicationError("Application is stopping", { status: 503, code: "APPLICATION_STOPPING" });
-      const complete = pendingWork?.add({ name: "http.request", kind: "request" });
+      let complete: (() => void) | undefined;
+      try {
+        complete = pendingWork?.add({ name: "http.request", kind: "request" });
+      } catch (error) {
+        if (!(error instanceof PendingWorkCapacityError)) throw error;
+        throw new ApplicationError("Application work capacity exceeded", { status: 503, code: error.code });
+      }
       if (complete) requestCompletions.set(context.request, complete);
       const signal = pendingWork
         ? AbortSignal.any([context.request.signal, pendingWork.signal]) : context.request.signal;
