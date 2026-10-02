@@ -20,7 +20,7 @@
   "dependencies": {
     "@sinclair/typebox": "^0.34.52",
     "@supabase/supabase-js": "^2.116.0",
-    "elysia": "2.0.0-beta.19",
+    "elysia": "2.0.0-exp.64",
     "es-module-lexer": "3.0.2",
     "exact-mirror": "1.2.6",
     "jose": "^6.2.12",
