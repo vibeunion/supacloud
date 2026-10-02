@@ -20,7 +20,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "require": "./dist/index.cjs",
       "default": "./dist/index.js"
     },
     "./execution": {
@@ -38,7 +37,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts && bun build src/index.ts --outfile dist/index.cjs --target node --format cjs && bun build src/contract_client.ts src/browser.ts --outdir dist --target browser --external @supacloud/contracts",
+    "build:js": "bun build src/index.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts && bun build src/contract_client.ts src/browser.ts --outdir dist --target browser --external @supacloud/contracts",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
@@ -48,10 +47,10 @@
   },
   "keywords": [
     "supacloud",
-    "di",
+    "elysia",
     "dependency-injection",
     "module",
-    "elysia"
+    "commands"
   ],
   "license": "Apache-2.0",
   "repository": {
