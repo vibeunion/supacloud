@@ -5,32 +5,38 @@ set -euo pipefail
 # `timeout` is GNU coreutils; a stock macOS only has it via gtimeout, if at all.
 # Resolve an absolute path before the tests narrow PATH, then expose a portable
 # wrapper so the regression runs unchanged on Linux and macOS. When neither tool
-# exists, run the command in the background and escalate SIGTERM->SIGKILL from a
-# killing sleeper so direct execution stays bounded (a blocking regression must
-# not hang the suite).
+# exists, terminate the command's process group so descendants cannot retain
+# captured output pipes and hang the suite after their parent has exited.
 WATCHDOG_TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
-timeout() {
+timeout() (
     local seconds="$1"
     shift
     if [[ -n "$WATCHDOG_TIMEOUT_BIN" ]]; then
         "$WATCHDOG_TIMEOUT_BIN" "$seconds" "$@"
         return
     fi
+    # Isolate job-control changes to this subshell. Each background job gets its
+    # own process group, so descendants holding captured pipes are also stopped.
+    set -m
     local pid watcher status=0
     "$@" &
     pid=$!
     (
+        # Keep the sleeper in the watcher's group for cancellation on completion.
+        set +m
         sleep "$seconds"
-        kill -TERM "$pid" 2>/dev/null
+        kill -TERM -- "-$pid" 2>/dev/null || true
         sleep 2
-        kill -KILL "$pid" 2>/dev/null
+        kill -KILL -- "-$pid" 2>/dev/null || true
     ) &
     watcher=$!
-    wait "$pid" || status=$?
-    kill "$watcher" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || status=$?
+    kill -TERM -- "-$watcher" 2>/dev/null || true
     wait "$watcher" 2>/dev/null || true
+    # The parent may terminate before a descendant that ignores SIGTERM.
+    kill -KILL -- "-$pid" 2>/dev/null || true
     return "$status"
-}
+)
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 WATCHDOG="${SUPACLOUD_WATCHDOG_TEST_SCRIPT:-$ROOT_DIR/scripts/postgrest_watchdog.sh}"
@@ -186,17 +192,30 @@ run_watchdog_in "$TMP_DIR/no-tenants" 200 ""
 printf '# no port\n' > "$TMP_DIR/tenants/demo.conf"
 expect_incident 200 "" 'missing-port|'
 
-# The portability fallback must bound a hanging command even without
-# timeout/gtimeout. Force the fallback branch on every platform.
+# Force the fallback on every platform. Capture output just like the Bun bridge:
+# a surviving descendant or timer sleeper would keep these pipes open.
 saved_timeout_bin="$WATCHDOG_TIMEOUT_BIN"
 WATCHDOG_TIMEOUT_BIN=""
+for scenario in direct descendants ignores-term; do
+  fallback_start=$(date +%s)
+  status=0
+  case "$scenario" in
+    direct) fallback_output="$(timeout 1 sleep 30)" || status=$? ;;
+    descendants) fallback_output="$(timeout 1 bash -c 'sleep 30 & wait')" || status=$? ;;
+    ignores-term) fallback_output="$(timeout 1 bash -c 'trap "" TERM; sleep 30 & wait')" || status=$? ;;
+  esac
+  fallback_elapsed=$(( $(date +%s) - fallback_start ))
+  [[ "$status" != 0 ]] || fail "bounded fallback did not terminate $scenario"
+  [[ "$fallback_elapsed" -le 6 ]] || fail "bounded fallback exceeded its bound for $scenario (${fallback_elapsed}s)"
+done
 fallback_start=$(date +%s)
+fallback_output="$(timeout 10 bash -c 'sleep 30 & printf done')"
+[[ "$fallback_output" == done ]] || fail 'fallback lost successful command output'
+[[ $(( $(date +%s) - fallback_start )) -le 6 ]] || fail 'fallback retained a descendant or timer after successful completion'
 status=0
-timeout 1 sleep 30 || status=$?
-fallback_elapsed=$(( $(date +%s) - fallback_start ))
+fallback_output="$(timeout 10 bash -c 'exit 7')" || status=$?
+[[ "$status" == 7 ]] || fail "fallback changed command exit status to $status"
 WATCHDOG_TIMEOUT_BIN="$saved_timeout_bin"
-[[ "$status" != 0 ]] || fail 'bounded fallback did not terminate a hanging command'
-[[ "$fallback_elapsed" -le 6 ]] || fail "bounded fallback exceeded its bound (${fallback_elapsed}s)"
 
 # Escalation must SIGKILL a command that ignores SIGTERM. A pure-bash busy loop
 # traps TERM and has no child, so termination proves the SIGKILL path.
