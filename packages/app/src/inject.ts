@@ -29,6 +29,7 @@ import {
 } from "./decorators";
 import { resolveForwardRef } from "./forward_ref";
 import { InjectionToken } from "./token";
+import { runCleanup, type Cleanup } from "./lifecycle-cleanup";
 
 export type InjectFlags = InjectOptions;
 
@@ -314,11 +315,14 @@ export function createEnvironmentInjector(
       }
       if (initialized) return Promise.resolve();
       if (initializationPromise) return initializationPromise;
-
       initializationPromise = (async () => {
+        if (destroyed || runtime.destroyed) return;
         await runInitializers(adapter, ENVIRONMENT_INITIALIZER);
+        if (destroyed || runtime.destroyed) return;
         await runInitializers(adapter, APP_INITIALIZER);
+        if (destroyed || runtime.destroyed) return;
         await runLifecycleInitializers(adapter);
+        if (destroyed || runtime.destroyed) return;
         initialized = true;
       })();
       return initializationPromise;
@@ -340,37 +344,32 @@ export function createEnvironmentInjector(
 
   function startDestroy(): Promise<void> {
     if (destructionPromise) return destructionPromise;
+    // Reserve completion before any user hook runs, including Angular hooks.
+    // Re-entrant fire-and-forget destroy calls must join, not release twice.
+    let resolve!: () => void;
+    let reject!: (error: unknown) => void;
+    destructionPromise = new Promise<void>((done, failed) => {
+      resolve = done;
+      reject = failed;
+    });
     destroyed = true;
 
-    const operations: Array<Promise<void>> = [];
-    try {
-      runtime.destroy();
-    } catch (error) {
-      operations.push(Promise.reject(error));
-    }
-
-    operations.push(destroyRef.destroy());
+    const operations: Cleanup[] = [
+      () => runtime.destroy(),
+      () => destroyRef.destroy(),
+    ];
     for (const instance of [...trackedInstances].reverse()) {
       if (!instance || typeof instance !== "object") continue;
-      const candidate = instance as {
-        onDestroy?: () => void | Promise<void>;
-      };
-      // Angular owns ngOnDestroy; only invoke the Node-specific async hook here.
-      const hook = candidate.onDestroy;
-      if (!hook) continue;
-      try {
-        operations.push(Promise.resolve(hook.call(instance)));
-      } catch (error) {
-        operations.push(Promise.reject(error));
-      }
+      operations.push(() => {
+        const candidate = instance as { onDestroy?: () => void | Promise<void> };
+        // Angular owns ngOnDestroy. Await each SupaCloud onDestroy before
+        // releasing the next instance in reverse construction order.
+        const hook = candidate.onDestroy;
+        if (hook) return hook.call(instance);
+      });
     }
 
-    destructionPromise = Promise.allSettled(operations).then((results) => {
-      const errors = results
-        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
-        .map((result) => result.reason);
-      if (errors.length > 0) throw new AggregateError(errors, "EnvironmentInjector destruction failed");
-    });
+    void runCleanup(operations, "EnvironmentInjector destruction failed").then(resolve, reject);
     return destructionPromise;
   }
 }
@@ -391,7 +390,10 @@ async function runInitializers(
 async function runLifecycleInitializers(injector: EnvironmentInjector): Promise<void> {
   const lifecycles = injector.get(APP_LIFECYCLE, { optional: true, self: true });
   if (!Array.isArray(lifecycles)) return;
+  const seen = new Set<unknown>();
   for (const lifecycle of lifecycles) {
+    if (seen.has(lifecycle)) continue;
+    seen.add(lifecycle);
     if (isLifecycleHooks(lifecycle) && lifecycle.onInit) {
       await injector.runInContext(() => lifecycle.onInit?.());
     }
