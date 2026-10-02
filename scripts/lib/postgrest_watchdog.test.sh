@@ -2,6 +2,36 @@
 # Exercise real watchdog control flow with deterministic local service probes.
 set -euo pipefail
 
+# `timeout` is GNU coreutils; a stock macOS only has it via gtimeout, if at all.
+# Resolve an absolute path before the tests narrow PATH, then expose a portable
+# wrapper so the regression runs unchanged on Linux and macOS. When neither tool
+# exists, run the command in the background and escalate SIGTERM->SIGKILL from a
+# killing sleeper so direct execution stays bounded (a blocking regression must
+# not hang the suite).
+WATCHDOG_TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+timeout() {
+    local seconds="$1"
+    shift
+    if [[ -n "$WATCHDOG_TIMEOUT_BIN" ]]; then
+        "$WATCHDOG_TIMEOUT_BIN" "$seconds" "$@"
+        return
+    fi
+    local pid watcher status=0
+    "$@" &
+    pid=$!
+    (
+        sleep "$seconds"
+        kill -TERM "$pid" 2>/dev/null
+        sleep 2
+        kill -KILL "$pid" 2>/dev/null
+    ) &
+    watcher=$!
+    wait "$pid" || status=$?
+    kill "$watcher" 2>/dev/null || true
+    wait "$watcher" 2>/dev/null || true
+    return "$status"
+}
+
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 WATCHDOG="${SUPACLOUD_WATCHDOG_TEST_SCRIPT:-$ROOT_DIR/scripts/postgrest_watchdog.sh}"
 TMP_DIR=$(mktemp -d)
@@ -155,5 +185,28 @@ mkdir -p "$TMP_DIR/no-tenants"
 run_watchdog_in "$TMP_DIR/no-tenants" 200 ""
 printf '# no port\n' > "$TMP_DIR/tenants/demo.conf"
 expect_incident 200 "" 'missing-port|'
+
+# The portability fallback must bound a hanging command even without
+# timeout/gtimeout. Force the fallback branch on every platform.
+saved_timeout_bin="$WATCHDOG_TIMEOUT_BIN"
+WATCHDOG_TIMEOUT_BIN=""
+fallback_start=$(date +%s)
+status=0
+timeout 1 sleep 30 || status=$?
+fallback_elapsed=$(( $(date +%s) - fallback_start ))
+WATCHDOG_TIMEOUT_BIN="$saved_timeout_bin"
+[[ "$status" != 0 ]] || fail 'bounded fallback did not terminate a hanging command'
+[[ "$fallback_elapsed" -le 6 ]] || fail "bounded fallback exceeded its bound (${fallback_elapsed}s)"
+
+# Escalation must SIGKILL a command that ignores SIGTERM. A pure-bash busy loop
+# traps TERM and has no child, so termination proves the SIGKILL path.
+WATCHDOG_TIMEOUT_BIN=""
+kill_start=$(date +%s)
+status=0
+timeout 1 bash -c 'trap "" TERM; while :; do :; done' || status=$?
+kill_elapsed=$(( $(date +%s) - kill_start ))
+WATCHDOG_TIMEOUT_BIN="$saved_timeout_bin"
+[[ "$status" != 0 ]] || fail 'escalating fallback did not terminate a SIGTERM-ignoring command'
+[[ "$kill_elapsed" -le 8 ]] || fail "escalating fallback exceeded its bound (${kill_elapsed}s)"
 
 echo 'postgrest_watchdog.test.sh: OK (transport, HTTP, journal, state transitions and config boundaries)'

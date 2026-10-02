@@ -2,11 +2,12 @@ import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-// The tenant watchdog is a Linux/systemd script. This bridge places its shell
-// regression under Management API CI's required Unit Tests job.
-const linuxTest = process.platform === "linux" ? test : test.skip;
+// The watchdog runs under Linux/systemd in production, but its shell regression
+// drives the script through local fakes and is portable, so it runs wherever
+// bash is available to keep a behavioural signal on developer machines too.
+const portableTest = process.platform === "win32" ? test.skip : test;
 
-linuxTest("tenant PostgREST watchdog preserves transport and configuration boundaries", () => {
+portableTest("tenant PostgREST watchdog preserves transport and configuration boundaries", () => {
   const script = fileURLToPath(new URL(
     "../../../../scripts/lib/postgrest_watchdog.test.sh", import.meta.url,
   ));
