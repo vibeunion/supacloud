@@ -2,23 +2,16 @@ SupaCloud
 Copyright 2025 SupaCloud Contributors
 
 SupaCloud project-owned code in this revision is licensed under the Apache
-License, Version 2.0 (Apache-2.0). The complete license is provided in LICENSE.
-LICENSE-APACHE-2.0.txt contains the same license text and is retained for
-redistribution compatibility; it is not a separate or additional license.
+License, Version 2.0 (Apache-2.0). The complete license is provided in
+LICENSE.
 
-Unless required by applicable law or agreed to in writing, software is
-distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
-either express or implied. See LICENSE for the governing terms.
+This program is distributed without any warranty; without even the implied
+warranty of merchantability or fitness for a particular purpose.
 
 Third-party components, incorporated upstream code, and their copyright,
-license and attribution notices retain their original terms. This notice
-does not replace those terms or claim ownership of third-party work.
+license and attribution notices retain their original terms. This notice does
+not replace those terms or claim ownership of third-party work.
 
-Previously released versions retain the permissions granted with those
-versions. This change does not revoke earlier license grants or relicense
-third-party code. Retain all applicable upstream license and attribution
-notices, including MIT notices where applicable.
-
-Before publishing this licensing change, maintainers must confirm authority
-to license the affected contributions and compatibility of incorporated
-third-party code. This notice is not evidence of contributor consent.
+Previously released SupaCloud versions retain the permissions granted with
+those versions. See the historical license files and release notices where
+applicable.

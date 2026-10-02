@@ -175,6 +175,10 @@ export interface CompiledModule {
     deps: Record<string, unknown>,
     imported: Record<string, Record<string, unknown>>,
   ): Record<string, unknown>;
+  /** Initializes application-scoped instances owned by this module. */
+  initializeServices?(services: Record<string, unknown>): Promise<void>;
+  /** Destroys application-scoped instances owned by this module. */
+  destroyServices?(services: Record<string, unknown>): Promise<void>;
   createRequestScope?(
     services: Record<string, unknown>,
     ctx: unknown,
@@ -554,6 +558,14 @@ export interface ApplicationOptions<Http extends AnyElysia = Elysia, RequestCont
   onExecution?: ExecutionObserver;
   /** Optional read-only OpenAPI and GraphQL documentation endpoints. */
   documentation?: ApplicationDocumentationOptions;
+}
+
+/** Lifecycle controls exposed by createApplication for explicit host startup/shutdown. */
+export interface ApplicationLifecycle {
+  readonly initialized: boolean;
+  readonly destroyed: boolean;
+  initialize(): Promise<void>;
+  destroy(): Promise<void>;
 }
 
 export interface JobInvocation {
@@ -1496,16 +1508,72 @@ export function createApplication<const Http extends AnyElysia = Elysia>(
     return pending;
   };
   const imported: Record<string, Record<string, unknown>> = {};
+  const moduleServices: Array<{ module: CompiledModule; services: Record<string, unknown> }> = [];
 
   for (const module of options.modules ?? []) {
     const services = module.createServices(options.deps ?? {}, imported);
     imported[module.name] = services;
+    moduleServices.push({ module, services });
     // The root owns shared HTTP hooks; mounting them again on each module
     // duplicates anonymous global hooks in Elysia 2.
     app.use(createModulePlugin(module, services, ctxFactory, { ...options, http: undefined }, imported));
   }
 
-  return app;
+  let initialized = false;
+  let destroyed = false;
+  let initializationPromise: Promise<void> | undefined;
+  let destructionPromise: Promise<void> | undefined;
+
+  const lifecycle: ApplicationLifecycle = {
+    get initialized() { return initialized; },
+    get destroyed() { return destroyed; },
+    initialize(): Promise<void> {
+      if (destroyed) return Promise.reject(new Error("Application has already been destroyed"));
+      if (initializationPromise) return initializationPromise;
+      initializationPromise = (async () => {
+        try {
+          for (const { module, services } of moduleServices) {
+            await module.initializeServices?.(services);
+          }
+          initialized = true;
+        } catch (error) {
+          try {
+            await lifecycle.destroy();
+          } catch (cleanupError) {
+            throw new AggregateError([error, cleanupError], "Application initialization failed and cleanup failed");
+          }
+          throw error;
+        }
+      })();
+      return initializationPromise;
+    },
+    destroy(): Promise<void> {
+      if (destructionPromise) return destructionPromise;
+      destroyed = true;
+      destructionPromise = (async () => {
+        const errors: unknown[] = [];
+        for (const { module, services } of [...moduleServices].reverse()) {
+          try {
+            await module.destroyServices?.(services);
+          } catch (error) {
+            errors.push(error);
+          }
+        }
+        if (errors.length > 0) {
+          throw new AggregateError(errors, "Application destruction failed");
+        }
+      })();
+      return destructionPromise;
+    },
+  };
+
+  Object.defineProperties(app, {
+    initialized: { enumerable: true, configurable: false, get: () => lifecycle.initialized },
+    destroyed: { enumerable: true, configurable: false, get: () => lifecycle.destroyed },
+    initialize: { enumerable: true, configurable: false, value: lifecycle.initialize },
+    destroy: { enumerable: true, configurable: false, value: lifecycle.destroy },
+  });
+  return app as typeof app & ApplicationLifecycle;
 }
 
 /** Semantic alias of createApplication for readable tests. */

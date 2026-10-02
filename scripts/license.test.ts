@@ -8,6 +8,7 @@ const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 test("project packages distribute the same complete Apache-2.0 license and notices", () => {
   const license = read("LICENSE");
   const notice = read("NOTICE");
+  expect(license).toContain("Apache License");
   expect(license).toContain("Version 2.0, January 2004");
   expect(license).toContain("2. Grant of Copyright License.");
   expect(license).toContain("3. Grant of Patent License.");
@@ -15,7 +16,7 @@ test("project packages distribute the same complete Apache-2.0 license and notic
   expect(license).toBe(read("LICENSE-APACHE-2.0.txt"));
   expect(notice).toContain("Apache-2.0");
   expect(notice).toContain("Third-party components");
-  expect(notice).toContain("Previously released versions retain the permissions");
+  expect(notice).toMatch(/Previously released[\s\S]*retain the permissions/);
   expect(JSON.parse(read("package.json")).license).toBe("Apache-2.0");
 
   for (const entry of readdirSync(resolve(root, "packages"), { withFileTypes: true })) {

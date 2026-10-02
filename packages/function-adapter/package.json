@@ -45,6 +45,9 @@
       "optional": true
     }
   },
+  "overrides": {
+    "cookie": "0.7.2"
+  },
   "devDependencies": {
     "@sveltejs/kit": "^2.70.3",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",

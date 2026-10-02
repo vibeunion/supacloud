@@ -1049,9 +1049,17 @@ async function linkIdenticalArtifact(
   try {
     await fs.rm(targetPath, { force: true });
     await fs.link(sourcePath, targetPath);
-  } catch {
-    await Bun.write(targetPath, code);
+    return;
+  } catch (error: unknown) {
+    // Preserve deployment correctness on filesystems without hardlinks, but
+    // surface the degraded storage guarantee instead of failing silently.
+    logger.warn("[EdgeFunction] Immutable artifact dedup unavailable; storing a separate copy", {
+      target: path.basename(targetPath),
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
+  await Bun.write(targetPath, code);
+  await fs.chmod(targetPath, 0o444);
 }
 
 async function writePreparedBundle(

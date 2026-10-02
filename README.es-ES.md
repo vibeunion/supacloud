@@ -681,8 +681,7 @@ Configuraciones de instalación clave:
 
 ## Licencia
 
-El código propio de SupaCloud se distribuye bajo Apache License, Version 2.0
-(`Apache-2.0`). Consulte [LICENSE](LICENSE) y [NOTICE](NOTICE).
-
-Los componentes de terceros conservan sus propias licencias.
-Las copias publicadas anteriormente conservan sus permisos originales.
+El código propio de SupaCloud se distribuye bajo la licencia Apache, versión
+2.0 (`Apache-2.0`). Consulte [LICENSE](LICENSE) y [NOTICE](NOTICE). Los
+componentes de terceros conservan sus propias licencias y las versiones
+publicadas anteriormente conservan sus permisos originales.

@@ -148,4 +148,4 @@ curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh |
 
 提交修改前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。示例、多语言版本与生成的配图应同步更新，详见[配图维护说明](docs/readme-visuals.md)。
 
-SupaCloud 项目自有代码统一采用 Apache License 2.0（`Apache-2.0`）。详见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。第三方组件保留各自许可证，既有发布版本保留原有授权。
+SupaCloud 自有代码采用 Apache License 2.0（`Apache-2.0`）。详见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。第三方组件保留各自许可证，既有发布版本保留原有授权。

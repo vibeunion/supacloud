@@ -20,6 +20,7 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
       "default": "./dist/index.js"
     },
     "./execution": {
@@ -37,7 +38,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts && bun build src/contract_client.ts src/browser.ts --outdir dist --target browser --external @supacloud/contracts",
+    "build:js": "bun build src/index.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts && bun build src/index.ts --outfile dist/index.cjs --target node --format cjs && bun build src/contract_client.ts src/browser.ts --outdir dist --target browser --external @supacloud/contracts",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build",
@@ -59,8 +60,9 @@
     "directory": "packages/app"
   },
   "dependencies": {
-    "@supacloud/contracts": "file:../contracts",
     "@angular/core": "^22.1.5",
+    "@supacloud/contracts": "file:../contracts",
+    "rxjs": "^7.8.2",
     "typebox": "1.3.34"
   },
   "devDependencies": {

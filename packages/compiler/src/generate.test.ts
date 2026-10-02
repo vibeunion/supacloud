@@ -228,6 +228,72 @@ for (const module of createUnscopedModules()) {
     expect(caseIndex).toBeLessThan(healthIndex);
   });
 
+  test("application scope emits explicit lifecycle controls for owned instances", () => {
+    const graph: ApplicationGraph = {
+      externalTokens: [],
+      modules: [{
+        name: "lifecycle", className: "LifecycleModule", file: "source.ts", line: 1,
+        imports: [], exports: [], commands: [], queries: [],
+        providers: [{
+          token: "LifecycleService", tokenKind: "class", kind: "class", useClass: "LifecycleService",
+          importPath: "source", scope: "application", deps: [], hasOnInit: true, hasOnDestroy: true,
+          exported: false, file: "source.ts", line: 1,
+        }],
+        controllers: [],
+      }],
+    };
+    const rendered = renderApplication(graph, { rootDir, outDir: join(rootDir, "lifecycle-generated") });
+    expect(rendered.applicationCode).toContain("initializeLifecycleServices");
+    expect(rendered.applicationCode).toContain("destroyLifecycleServices");
+    expect(rendered.applicationCode).toContain("initializeServices: initializeLifecycleServices");
+    expect(rendered.applicationCode).toContain("destroyServices: destroyLifecycleServices");
+    expect(rendered.applicationCode).toContain('[{"key":"lifecycleService"}]');
+  });
+
+  test("generated lifecycle controls await hooks and preserve ownership", async () => {
+    const root = await mkdtemp(join(tmpdir(), "supacloud-compiler-lifecycle-"));
+    try {
+      const graph: ApplicationGraph = {
+        externalTokens: [],
+        modules: [{
+          name: "lifecycle", className: "LifecycleModule", file: "source.ts", line: 1,
+          imports: [], exports: [], commands: [], queries: [],
+          providers: [{
+            token: "LifecycleService", tokenKind: "class", kind: "class", useClass: "LifecycleService",
+            importPath: "source", scope: "application", deps: [], hasOnInit: true, hasOnDestroy: true,
+            exported: false, file: "source.ts", line: 1,
+          }],
+          controllers: [],
+        }],
+      };
+      const rendered = renderApplication(graph, { rootDir: root, outDir: join(root, "generated") });
+      await writeFixtureProject(root, {
+        "source.ts": `
+export class LifecycleService {
+  onInit() { (globalThis as { events?: string[] }).events?.push("init"); }
+  onDestroy() { (globalThis as { events?: string[] }).events?.push("destroy"); }
+}
+`,
+        "generated/application.ts": rendered.applicationCode,
+      });
+      const generated = await import(pathToFileURL(join(root, "generated/application.ts")).href);
+      const [module] = generated.createCompiledModules() as Array<{
+        createServices: (deps: Record<string, unknown>, imported: Record<string, Record<string, unknown>>) => Record<string, unknown>;
+        initializeServices?: (services: Record<string, unknown>) => Promise<void>;
+        destroyServices?: (services: Record<string, unknown>) => Promise<void>;
+      }>;
+      if (!module?.initializeServices || !module.destroyServices) throw new Error("Generated lifecycle controls are missing");
+      (globalThis as { events?: string[] }).events = [];
+      const services = module.createServices({}, {});
+      await module.initializeServices(services);
+      await module.destroyServices(services);
+      expect((globalThis as { events?: string[] }).events).toEqual(["init", "destroy"]);
+      delete (globalThis as { events?: string[] }).events;
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("application 工厂：value/factory/class/existing 实例化与依赖解析", () => {
     expect(applicationCode).toContain('const auditConfig = { level: "info" };');
     expect(applicationCode).toContain("const logger = createLogger(auditConfig);");
