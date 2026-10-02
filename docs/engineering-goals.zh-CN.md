@@ -6,7 +6,7 @@ FA 消费者验证后的 API、迁移补丁与验收入口见
 [English](engineering-goals.md) | [简体中文](engineering-goals.zh-CN.md)
 
 状态：架构契约与实施优先级，不代表能力全部完成。
-更新：2026-09-08
+更新：2026-10-02
 
 ## 目标
 
@@ -132,3 +132,17 @@ Feature: 可验证的企业应用开发
 - [编译器](../packages/compiler/README.md)
 - [运行时与静态 AOP](../packages/elysia/README.md)
 - [企业运维就绪标准](enterprise-architecture-readiness.zh-CN.md)
+
+## 异步模型、流边界与治理职责
+
+[ADR-2026-10-02-ASYNC](adr/2026-10-02-async-stream-governance.md) 取代所有模板
+默认推荐 RxJS 的选型原则。新异步业务契约使用 Promise；持续事件和字节传输优先使用
+AsyncIterable 与 Web Streams。RxJS 继续用于内部复杂事件组合和显式响应式／Angular
+集成入口，不作为通用业务模型。
+
+保留项目绑定的 `@supacloud/js` 客户端、原生 Promise／PromiseLike 调用和持久化任务输出
+确认语义。治理约束受控能力，不是任意代码沙盒；取消不等于回滚。
+
+规范状态为已批准；模板调整、架构检查和可选的安装图拆分仍按台账分阶段实施，不能根据
+本次文档修改宣称完成。现有依赖、公开响应式入口与模板实际行为保持不变，直到相应代码
+变更和兼容性验收通过。现有适配器见[响应式集成](reactive-development.md)。

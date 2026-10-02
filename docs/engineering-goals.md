@@ -3,7 +3,7 @@
 [English](engineering-goals.md) | [简体中文](engineering-goals.zh-CN.md)
 
 Status: architecture contract and implementation priorities, not a completion claim.
-Updated: 2026-09-08
+Updated: 2026-10-02
 
 ## Outcome
 
@@ -158,10 +158,20 @@ Feature: Verifiable enterprise application development
 - [Runtime And Static AOP](../packages/elysia/README.md)
 - [Enterprise Operational Readiness](enterprise-architecture-readiness.md)
 
-## Default reactive development
+## Async model, streams and governance
 
-RxJS is the supported default for event composition; single-result commands keep
-async/await. Starters include the dependency, REACTIVE.md, AI guidance and cleanup
-tests. Preserve the project-bound `@supacloud/js` client and its Promise APIs. See
-[Reactive development](reactive-development.md) and
-[Framework transport integration](../packages/app/REACTIVE.md).
+[ADR-2026-10-02-ASYNC](adr/2026-10-02-async-stream-governance.md) supersedes the
+previous all-starter RxJS recommendation. New asynchronous business contracts use
+Promise results; event consumption and byte transport prefer AsyncIterable and
+Web Streams. RxJS remains supported for complex internal event composition and
+explicit reactive/Angular integration entries, not as the universal business model.
+
+Preserve the project-bound `@supacloud/js` client, native Promise/PromiseLike
+calls and durable task-output acknowledgement semantics. Governance applies to
+controlled capabilities, not arbitrary code; cancellation is not rollback.
+
+The ADR is approved, but template changes, architecture gates and optional
+installation-graph separation are tracked as phased work, not completed by this
+documentation change. Existing dependencies, public reactive entries and current
+starter behavior remain until their implementation and compatibility checks pass.
+See [Reactive integration](reactive-development.md) for the current adapters.

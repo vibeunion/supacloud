@@ -1,9 +1,19 @@
-# Default reactive development
+# Reactive integration and asynchronous defaults
 
-SupaCloud provides RxJS by default for event composition. Ordinary business
-commands stay on async/await; no second DI, workflow or authorization layer is
-introduced. Default command/HTTP/edge starters install the same pinned RxJS
-version, emit REACTIVE.md and AGENTS.md, and include cancellation tests.
+The approved [async/stream/governance ADR](adr/2026-10-02-async-stream-governance.md)
+supersedes the blanket recommendation to use RxJS in every starter. Ordinary
+asynchronous business calls use Promise results; continuous event consumption
+and byte transport prefer AsyncIterable and Web Streams. RxJS remains an official
+option for complex event composition and explicit reactive/Angular integration.
+
+## Implementation transition
+
+At baseline `6183f3e7e985f1fb06a6b31aaf2bab125bb1b34d`, command/HTTP/edge starters
+still install RxJS and emit REACTIVE.md, AGENTS.md and reactive cleanup tests.
+The app and SDK still declare RxJS directly. This documentation change does not
+remove those dependencies, alter generated files or retire existing adapters.
+Template convergence and installation-graph separation have separate acceptance
+criteria in the ADR. Not importing RxJS is not proof it is absent from installation.
 
 ## Official entries
 
@@ -13,7 +23,7 @@ version, emit REACTIVE.md and AGENTS.md, and include cancellation tests.
   `@supacloud/js/reactive` provides `observeQuery` and `observeTask` without
   replacing the existing `createSupaCloudClient` instance or Promise APIs.
 
-Use native operators from `rxjs`. Keep normal browser/contracts entries isolated
+When choosing this integration, use native operators from `rxjs`. Keep normal browser/contracts entries isolated
 from reactive imports. All subscriptions have explicit owners; pass cancellation
 to native I/O and keep buffers and payload sizes bounded. Do not globally replay
 project/user data or automatically resubscribe business writes.
