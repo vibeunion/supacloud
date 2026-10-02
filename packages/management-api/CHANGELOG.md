@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.91.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.90.1...management-api-v0.91.0) (2026-10-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* @supacloud/app no longer publishes dist/index.cjs or a separate synchronous CommonJS entrypoint. CommonJS consumers should use dynamic import() or migrate to ESM. Release-please should handle the corresponding breaking version change.
+* @supacloud/app no longer publishes dist/index.cjs or a separate synchronous CommonJS entrypoint. CommonJS consumers should use dynamic import() or migrate to ESM. Release-please should handle the corresponding breaking version change.
+
+### Features
+
+* **app:** add governed reactive event streams and lifecycle signals ([38a26e2](https://github.com/vibeunion/supacloud/commit/38a26e2d3b83226a7488df2ef4f1f5714573aeb2))
+* default RxJS support with compatible SupaCloud JS calls ([#1556](https://github.com/vibeunion/supacloud/issues/1556)) ([b3015cb](https://github.com/vibeunion/supacloud/commit/b3015cb161c0d87e6611f6c4fc60c120a8c9fffe))
+
+
+### Bug Fixes
+
+* bound edge-function immutable version history ([#1563](https://github.com/vibeunion/supacloud/issues/1563)) ([793723c](https://github.com/vibeunion/supacloud/commit/793723cc55a5184e3b25ab401502e8a49f044eac))
+* preserve reviewed watchdog webhook deadlines and failure isolation ([#1567](https://github.com/vibeunion/supacloud/issues/1567)) ([001180c](https://github.com/vibeunion/supacloud/commit/001180cd2e010a2e481f378dac2dbf135b517e3c))
+* report edge-function artifacts that fall back to separate copies ([#1564](https://github.com/vibeunion/supacloud/issues/1564)) ([d6859e3](https://github.com/vibeunion/supacloud/commit/d6859e316aea1e682262ab99bb3958f15838dcc5))
+
+
+### Elegance & Refactoring
+
+* use ESM-only owned packages and Lite launcher ([#1582](https://github.com/vibeunion/supacloud/issues/1582)) ([ed5ac78](https://github.com/vibeunion/supacloud/commit/ed5ac78ee3ab22567268fa276e5b016ad1e8b575))
+
 ## [0.90.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.90.0...management-api-v0.90.1) (2026-10-01)
 
 
