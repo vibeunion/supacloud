@@ -461,3 +461,39 @@ Scenario: Cancellation during backoff
 These tests include a local HTTP server counting actual requests and a browser
 bundle dependency-graph check. They are not authenticated customer acceptance,
 proof of lower production incident rates, or a completed module migration.
+
+### Event streams and cancellation
+
+`createApplicationEventStream` is the framework-neutral RxJS boundary for
+application events and streaming work. HTTP handlers, command executors and
+transaction callbacks keep their Promise-based contracts; only event consumers
+opt into Observable composition. Governed subscriptions serialize async
+handlers, honor an `AbortSignal`, isolate handler failures through `onError`,
+and apply a bounded queue (`error` by default, or explicit
+`drop-oldest`/`drop-newest`).
+
+```ts
+import { createApplicationEventStream } from "@supacloud/app";
+
+const events = createApplicationEventStream<{ type: "case.updated"; id: string }>();
+const subscription = events.subscribe(async event => {
+  await notifySearchIndex(event.id);
+}, { signal: request.signal });
+
+await events.publish({ type: "case.updated", id: caseId });
+await events.close();
+```
+
+Use `observable` only for read-only RxJS composition. Use `subscribe` when
+backpressure, cancellation and error isolation are part of the application
+contract. The package exports the same API from its ESM and Node-compatible
+entrypoints; platform SDK calls remain ordinary Promise-based JavaScript.
+
+### Framework-neutral signals and layered configuration
+
+`signal`, `computed`, `linkedSignal` and `effect` remain callable and
+framework-neutral. Signals expose an optional invalidation subscription for
+small local integrations; `effect` can be bound to a `DestroyRef` so request,
+job or application teardown stops it deterministically. `InjectionToken` and
+`provideConfig` keep configuration typed and layerable: a child injector can
+override a token without mutating its parent.

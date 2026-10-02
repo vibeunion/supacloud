@@ -168,3 +168,11 @@ export function provideToken<T>(token: Token<T>, value: NoInfer<T>): Environment
     },
   ]);
 }
+
+/**
+ * Registers a typed configuration value at the current injector layer.
+ * Child injectors can override the same token without mutating the parent.
+ */
+export function provideConfig<T>(token: Token<T>, value: NoInfer<T>): EnvironmentProviders {
+  return provideToken(token, value);
+}
