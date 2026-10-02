@@ -771,7 +771,7 @@ supacloud-cli lite start --project_dir . --port 54321
 The adapter resolves the executable in this order:
 
 1. `SUPACLOUD_LITE_CLI_BIN`
-2. ``supacloud-lite` package executable (or its declared `dist/launcher.mjs`)`
+2. `bin["supacloud-lite"]` from the locally installed `@supacloud/lite/package.json` (currently `dist/launcher.mjs`)
 3. `supacloud-lite` on `PATH`
 
 Install `@supacloud/lite` or provide an explicit binary before using the

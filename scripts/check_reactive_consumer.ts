@@ -31,8 +31,11 @@ try {
   for (const directory of ["contracts", "app", "supacloud-js"]) {
     const root = join(repo, "packages", directory);
     const metadata = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-    await readFile(join(root, "dist/index.mjs"));
-    if (directory !== "contracts") await readFile(join(root, "dist/reactive.d.mts"));
+    await readFile(join(root, metadata.module ?? metadata.main));
+    if (directory !== "contracts") {
+      const reactive = metadata.exports["./reactive"];
+      await readFile(join(root, reactive.import?.types ?? reactive.types));
+    }
     await run(["pm", "pack", "--ignore-scripts", "--destination", temporary], root);
     const prefix = `${String(metadata.name).replace(/^@/, "").replaceAll("/", "-")}-`;
     const packed = (await readdir(temporary)).find(file => file.startsWith(prefix) && file.endsWith(".tgz"));
