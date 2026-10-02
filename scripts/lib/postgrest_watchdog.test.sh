@@ -2,6 +2,42 @@
 # Exercise real watchdog control flow with deterministic local service probes.
 set -euo pipefail
 
+# `timeout` is GNU coreutils; a stock macOS only has it via gtimeout, if at all.
+# Resolve an absolute path before the tests narrow PATH, then expose a portable
+# wrapper so the regression runs unchanged on Linux and macOS. When neither tool
+# exists, terminate the command's process group so descendants cannot retain
+# captured output pipes and hang the suite after their parent has exited.
+WATCHDOG_TIMEOUT_BIN="$(command -v timeout || command -v gtimeout || true)"
+timeout() (
+    local seconds="$1"
+    shift
+    if [[ -n "$WATCHDOG_TIMEOUT_BIN" ]]; then
+        "$WATCHDOG_TIMEOUT_BIN" "$seconds" "$@"
+        return
+    fi
+    # Isolate job-control changes to this subshell. Each background job gets its
+    # own process group, so descendants holding captured pipes are also stopped.
+    set -m
+    local pid watcher status=0
+    "$@" &
+    pid=$!
+    (
+        # Keep the sleeper in the watcher's group for cancellation on completion.
+        set +m
+        sleep "$seconds"
+        kill -TERM -- "-$pid" 2>/dev/null || true
+        sleep 2
+        kill -KILL -- "-$pid" 2>/dev/null || true
+    ) &
+    watcher=$!
+    wait "$pid" 2>/dev/null || status=$?
+    kill -TERM -- "-$watcher" 2>/dev/null || true
+    wait "$watcher" 2>/dev/null || true
+    # The parent may terminate before a descendant that ignores SIGTERM.
+    kill -KILL -- "-$pid" 2>/dev/null || true
+    return "$status"
+)
+
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 WATCHDOG="${SUPACLOUD_WATCHDOG_TEST_SCRIPT:-$ROOT_DIR/scripts/postgrest_watchdog.sh}"
 TMP_DIR=$(mktemp -d)
@@ -183,11 +219,72 @@ grep 'hooks.example/alert' "$TMP_DIR/webhook.log" | grep -q -- '--max-time 5' \
   || fail 'default webhook total timeout is not 5'
 
 run_webhook '9' "$TMP_DIR/webhook-override.log"
+grep 'hooks.example/alert' "$TMP_DIR/webhook-override.log" | grep -q -- '--connect-timeout 9' \
+  || fail 'webhook connect-timeout override was not honored'
 grep 'hooks.example/alert' "$TMP_DIR/webhook-override.log" | grep -q -- '--max-time 9' \
-  || fail 'webhook timeout override was not honored'
+  || fail 'webhook total timeout override was not honored'
+# Force the fallback on every platform. Capture output just like the Bun bridge:
+# a surviving descendant or timer sleeper would keep these pipes open.
+saved_timeout_bin="$WATCHDOG_TIMEOUT_BIN"
+WATCHDOG_TIMEOUT_BIN=""
+for scenario in direct descendants ignores-term; do
+  fallback_start=$(date +%s)
+  status=0
+  case "$scenario" in
+    direct) fallback_output="$(timeout 1 sleep 30)" || status=$? ;;
+    descendants) fallback_output="$(timeout 1 bash -c 'sleep 30 & wait')" || status=$? ;;
+    ignores-term) fallback_output="$(timeout 1 bash -c 'trap "" TERM; sleep 30 & wait')" || status=$? ;;
+  esac
+  fallback_elapsed=$(( $(date +%s) - fallback_start ))
+  [[ "$status" != 0 ]] || fail "bounded fallback did not terminate $scenario"
+  [[ "$fallback_elapsed" -le 6 ]] || fail "bounded fallback exceeded its bound for $scenario (${fallback_elapsed}s)"
+done
+fallback_start=$(date +%s)
+fallback_output="$(timeout 10 bash -c 'sleep 30 & printf done')"
+[[ "$fallback_output" == "done" ]] || fail 'fallback lost successful command output'
+[[ $(( $(date +%s) - fallback_start )) -le 6 ]] || fail 'fallback retained a descendant or timer after successful completion'
+status=0
+fallback_output="$(timeout 10 bash -c 'exit 7')" || status=$?
+[[ "$status" == 7 ]] || fail "fallback changed command exit status to $status"
+WATCHDOG_TIMEOUT_BIN="$saved_timeout_bin"
+
+# Escalation must SIGKILL a command that ignores SIGTERM. A pure-bash busy loop
+# traps TERM and has no child, so termination proves the SIGKILL path.
+WATCHDOG_TIMEOUT_BIN=""
+kill_start=$(date +%s)
+status=0
+timeout 1 bash -c 'trap "" TERM; while :; do :; done' || status=$?
+kill_elapsed=$(( $(date +%s) - kill_start ))
+WATCHDOG_TIMEOUT_BIN="$saved_timeout_bin"
+[[ "$status" != 0 ]] || fail 'escalating fallback did not terminate a SIGTERM-ignoring command'
+[[ "$kill_elapsed" -le 8 ]] || fail "escalating fallback exceeded its bound (${kill_elapsed}s)"
 
 run_webhook 'not-a-number' "$TMP_DIR/webhook-invalid.log"
+grep 'hooks.example/alert' "$TMP_DIR/webhook-invalid.log" | grep -q -- '--connect-timeout 5' \
+  || fail 'invalid webhook timeout did not fall back to 5 (connect)'
 grep 'hooks.example/alert' "$TMP_DIR/webhook-invalid.log" | grep -q -- '--max-time 5' \
-  || fail 'invalid webhook timeout did not fall back to 5'
+  || fail 'invalid webhook timeout did not fall back to 5 (total)'
+# Trusted-file regressions from the config-hardening PR.
+for mode in 666 620 642; do
+  untrusted_dir="$TMP_DIR/untrusted-$mode"
+  mkdir -p "$untrusted_dir"
+  printf 'server-port = 3157\n' > "$untrusted_dir/demo.conf"
+  chmod "$mode" "$untrusted_dir/demo.conf"
+  rm -f "$TMP_DIR/state/demo.state"
+  status=0
+  run_watchdog_in "$untrusted_dir" 200 "" || status=$?
+  [[ "$status" == 1 ]] || fail "mode $mode config was not treated as an incident"
+  [[ "$(state_value)" == untrusted-config\|* ]] || fail "mode $mode config: $(state_value)"
+done
+
+link_dir="$TMP_DIR/untrusted-link"
+mkdir -p "$link_dir"
+printf 'server-port = 3157\n' > "$link_dir/demo.conf"
+ln "$link_dir/demo.conf" "$link_dir/demo.conf.hardlink"
+rm -f "$TMP_DIR/state/demo.state"
+status=0
+run_watchdog_in "$link_dir" 200 "" || status=$?
+[[ "$status" == 1 ]] || fail 'hardlinked config was not treated as an incident'
+[[ "$(state_value)" == untrusted-config\|* ]] || fail "hardlinked config: $(state_value)"
 
 echo 'postgrest_watchdog.test.sh: OK (transport, HTTP, journal, state transitions and config boundaries)'
