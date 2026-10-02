@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { createHash } from "node:crypto";
 import { buildSchema, introspectionFromSchema } from "graphql";
 import { pullGraphqlSchema } from "./graphql-schema";
+import { renderGraphql } from "./graphql";
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -122,4 +123,58 @@ test.each([".graphql", ".json"])("manual snapshot edits are detected and an expl
   expect(await pullGraphqlSchema({ ...options, check: true })).toMatchObject({
     upToDate: true, written: false,
   });
+});
+
+test.each([".graphql", ".json"])("line-ending diagnostics preserve raw integrity and strict checks for %s", async (extension) => {
+  const path = (await output()).replace(".graphql", extension);
+  const query = join(path, "..", "query.graphql");
+  await writeFile(query, "query Health { health }\n");
+  const options = {
+    url: "https://project.example.test", output: path, publishableKey: "synthetic-public",
+    fetch: async () => Response.json({ data: schemaData }),
+  };
+  const exported = await pullGraphqlSchema(options);
+  const original = await readFile(path, "utf8");
+  const compile = () => renderGraphql({
+    rootDir: join(path, ".."), outDir: join(path, "..", "generated"),
+    graphql: { schema: path, documents: [query] },
+  });
+  const lf = await compile();
+  expect(lf.diagnostics).toEqual([]);
+  expect(lf.contract).toMatchObject({
+    schemaHash: exported.schemaHash, schemaNormalizedHash: exported.schemaNormalizedHash,
+  });
+  for (const ending of ["\r\n", "\r"]) {
+    const changed = original.replace(/\n/g, ending);
+    await writeFile(path, changed);
+    const result = await compile();
+    expect(result.diagnostics).toEqual([]);
+    expect(result.contract?.schemaHash).toBe(createHash("sha256").update(changed).digest("hex"));
+    expect(result.contract?.schemaHash).not.toBe(exported.schemaHash);
+    expect(result.contract?.schemaNormalizedHash).toBe(exported.schemaNormalizedHash);
+    expect(JSON.parse(result.files["graphql.manifest.json"]!).schemaNormalizedHash).toBe(exported.schemaNormalizedHash);
+    expect(await pullGraphqlSchema({ ...options, check: true })).toMatchObject({ upToDate: false, written: false });
+    expect(await readFile(path, "utf8")).toBe(changed);
+  }
+  await pullGraphqlSchema(options);
+  expect(await readFile(path, "utf8")).toBe(original);
+  await writeFile(path, original.replace("health", "renamedHealth"));
+  expect((await compile()).contract?.schemaNormalizedHash).not.toBe(exported.schemaNormalizedHash);
+});
+
+test("escaped carriage returns in descriptions and defaults remain significant", async () => {
+  const path = await output();
+  const query = join(path, "..", "query.graphql");
+  await writeFile(query, "query Health { health }\n");
+  const compile = () => renderGraphql({
+    rootDir: join(path, ".."), outDir: join(path, "..", "generated"),
+    graphql: { schema: path, documents: [query] },
+  });
+  await writeFile(path, '"line\\r\\nbreak"\ntype Query { health(value: String = "a\\r\\nb"): String! }\n');
+  const crlf = await compile();
+  await writeFile(path, '"line\\nbreak"\ntype Query { health(value: String = "a\\nb"): String! }\n');
+  const lf = await compile();
+  expect(crlf.diagnostics).toEqual([]);
+  expect(lf.diagnostics).toEqual([]);
+  expect(crlf.contract?.schemaNormalizedHash).not.toBe(lf.contract?.schemaNormalizedHash);
 });

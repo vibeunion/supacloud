@@ -518,6 +518,8 @@ export interface OpenApiOptions {
 export interface GraphqlContractSummary {
   schema: string;
   schemaHash?: string;
+  /** SHA-256 with physical CRLF/CR normalized to LF; not an integrity or semantic digest. */
+  schemaNormalizedHash?: string;
   documents: string[];
   operations: Array<{ name: string; file: string; line: number }>;
 }
