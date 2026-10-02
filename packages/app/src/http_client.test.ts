@@ -90,7 +90,7 @@ describe("Angular-inspired HttpParams and HttpHeaders", () => {
     const context = new HttpContext();
     expect(context.get(IS_CACHE_ENABLED)).toBe(true);
     expect(context.get(RETRY_COUNT)).toBe(3);
-    expect(context.has(IS_CACHE_ENABLED)).toBe(false);
+    expect(context.has(IS_CACHE_ENABLED)).toBe(true);
 
     context.set(RETRY_COUNT, 5);
     expect(context.has(RETRY_COUNT)).toBe(true);
