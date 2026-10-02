@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.45.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.44.0...web-console-v0.45.0) (2026-10-02)
+
+
+### Features
+
+* **app:** add governed reactive event streams and lifecycle signals ([38a26e2](https://github.com/vibeunion/supacloud/commit/38a26e2d3b83226a7488df2ef4f1f5714573aeb2))
+
 ## [0.44.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.43.0...web-console-v0.44.0) (2026-09-30)
 
 

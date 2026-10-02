@@ -1,3 +1,4 @@
+import { STARTER_REACTIVE_GUIDE, STARTER_REACTIVE_TEST, STARTER_REACTIVE_AGENTS } from "./app-starter-reactive";
 import { lstat, mkdir, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { STARTER_ENVIRONMENT, STARTER_ENVIRONMENT_TEST } from "./app-starter-environment";
@@ -46,6 +47,7 @@ export function appStarterFiles(name: string): Record<string, string> {
                 "@supacloud/js": `^${sdkMetadata.version}`,
                 "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
                 elysia: "2.0.0-beta.19",
+                rxjs: appMetadata.dependencies.rxjs,
             },
             devDependencies: {
                 "@supacloud/compiler": `^${compilerMetadata.version}`,
@@ -138,6 +140,9 @@ test("generated query client preserves its read contract without a live database
   expect(await queries.ReviewList({ first: 10 })).toEqual(data);
 });
 `,
+        "REACTIVE.md": STARTER_REACTIVE_GUIDE,
+        "AGENTS.md": STARTER_REACTIVE_AGENTS,
+        "tests/reactive.test.ts": STARTER_REACTIVE_TEST,
         "scripts/environment.ts": STARTER_ENVIRONMENT,
         "tests/environment.test.ts": STARTER_ENVIRONMENT_TEST,
         "scripts/dev.ts": `import { watchProject, compileOptionsFromConfig, loadSupacloudConfig } from "@supacloud/compiler";

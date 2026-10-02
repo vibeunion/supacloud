@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/js",
-  "version": "0.34.1",
+  "version": "0.35.0",
   "description": "Platform SDK for SupaCloud, built on top of supabase-js",
   "type": "module",
   "main": "./dist/index.js",
@@ -24,6 +24,11 @@
       "module-sync": "./dist/contracts.js",
       "import": "./dist/contracts.js",
       "default": "./dist/contracts.js"
+    },
+    "./reactive": {
+      "types": "./dist/reactive.d.ts",
+      "import": "./dist/reactive.js",
+      "default": "./dist/reactive.js"
     }
   },
   "files": [
@@ -31,12 +36,13 @@
     "LICENSE-APACHE-2.0.txt",
     "dist",
     "README.md",
-    "COMPATIBILITY.md"
+    "COMPATIBILITY.md",
+    "REACTIVE.md"
   ],
   "scripts": {
     "test": "bun test",
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/task-events.ts --outdir dist --target node --external @supabase/supabase-js --external @supacloud/contracts && bun build src/contracts.ts --outdir dist --target browser --external @supacloud/contracts",
+    "build:js": "bun build src/index.ts src/task-events.ts --outdir dist --target node --external @supabase/supabase-js --external @supacloud/contracts && bun build src/contracts.ts --outdir dist --target browser --external @supacloud/contracts && bun build src/reactive.ts --outdir dist --target browser --external rxjs",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "prepublishOnly": "bun run build && bun run check:package",
@@ -62,7 +68,8 @@
     "@supabase/supabase-js": "^2.115.0"
   },
   "dependencies": {
-    "@supacloud/contracts": "file:../contracts"
+    "@supacloud/contracts": "file:../contracts",
+    "rxjs": "7.8.2"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",

@@ -2,6 +2,7 @@ import { rename, readFile, writeFile, rm } from "node:fs/promises";
 import { relative, resolve } from "node:path";
 import * as ts from "@typescript/typescript6";
 import { checkMigrationDependencies } from "./migration-policy";
+import { migrateHttpProviderImports } from "./http-provider-migration";
 
 export interface SourceMigrationIssue {
   code: string;
@@ -382,6 +383,13 @@ export const SUPACLOUD_MIGRATIONS: SupaCloudMigration[] = [
     to: "0.12.0",
     description: "Replace deprecated route response schemas with explicit HTTP status maps.",
     apply: migrateRouteResponse,
+  },
+  {
+    id: "http-provider-entrypoint",
+    from: "0.12.0",
+    to: "0.13.0",
+    description: "Move provider-only withInterceptors imports to the shared HTTP feature entry; reject ambiguous uses.",
+    apply: migrateHttpProviderImports,
   },
 ];
 

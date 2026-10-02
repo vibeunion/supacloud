@@ -472,6 +472,11 @@ These tests include a local HTTP server counting actual requests and a browser
 bundle dependency-graph check. They are not authenticated customer acceptance,
 proof of lower production incident rates, or a completed module migration.
 
+## Default reactive support
+
+RxJS is provided by default. See [Reactive development](REACTIVE.md) for the
+`/reactive` entry, SDK compatibility, cancellation and durable-output boundaries.
+Ordinary Promise APIs and non-reactive entrypoints are unchanged.
 ### Event streams and cancellation
 
 `createApplicationEventStream` is the framework-neutral RxJS boundary for
