@@ -47,6 +47,8 @@ for (const [name, staleVersion] of [
   ["@supacloud/app", "0.15.0"],
   ["@supacloud/elysia", "0.17.0"],
   // The immediately preceding release must not be accepted by the new tuple.
+  ["@supacloud/app", "0.20.0"],
+  ["@supacloud/elysia", "0.22.0"],
   ["@supacloud/app", "0.19.0"],
   ["@supacloud/elysia", "0.21.0"],
   ["@supacloud/app", "0.18.1"],

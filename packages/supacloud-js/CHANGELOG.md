@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.36.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.35.0...supacloud-js-v0.36.0) (2026-10-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **js:** @supacloud/js explicitly declares Node >=22.12.0. Synchronous require compatibility uses Node's ESM loader and does not promise older Node, classic CJS-only tooling or React Native/Hermes compatibility. Existing ESM specifiers and synchronous factory/Promise-based network APIs are unchanged.
+
+### Features
+
+* **js:** publish SDK and Contracts as dual MJS and CJS ([#1585](https://github.com/vibeunion/supacloud/issues/1585)) ([6183f3e](https://github.com/vibeunion/supacloud/commit/6183f3e7e985f1fb06a6b31aaf2bab125bb1b34d))
+* **js:** support modern CommonJS callers with a single ESM SDK ([#1584](https://github.com/vibeunion/supacloud/issues/1584)) ([cfb6f20](https://github.com/vibeunion/supacloud/commit/cfb6f20d77a1befa6e62ea90a591d373c1677307))
+
 ## [0.35.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.34.1...supacloud-js-v0.35.0) (2026-10-02)
 
 
