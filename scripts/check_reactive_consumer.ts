@@ -31,8 +31,8 @@ try {
   for (const directory of ["contracts", "app", "supacloud-js"]) {
     const root = join(repo, "packages", directory);
     const metadata = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
-    await readFile(join(root, "dist/index.js"));
-    if (directory !== "contracts") await readFile(join(root, "dist/reactive.d.ts"));
+    await readFile(join(root, "dist/index.mjs"));
+    if (directory !== "contracts") await readFile(join(root, "dist/reactive.d.mts"));
     await run(["pm", "pack", "--ignore-scripts", "--destination", temporary], root);
     const prefix = `${String(metadata.name).replace(/^@/, "").replaceAll("/", "-")}-`;
     const packed = (await readdir(temporary)).find(file => file.startsWith(prefix) && file.endsWith(".tgz"));
@@ -90,7 +90,7 @@ assert.ok(result.metafile);
 const inputs = Object.keys(result.metafile.inputs);
 assert.ok(inputs.some(path => path.includes("rxjs")));
 assert.ok(!inputs.some(path => /angular|node:async_hooks|\\/compiler\\//.test(path)));
-assert.ok(!inputs.some(path => path.endsWith("@supacloud/js/dist/index.js")));
+assert.ok(!inputs.some(path => path.endsWith("@supacloud/js/dist/index.mjs")));
 console.log("Packed reactive browser entries retain dependency isolation");
 `);
   await installStarterConsumer(project, run);
