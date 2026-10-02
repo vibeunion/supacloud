@@ -10,8 +10,7 @@ import {
 } from "@angular/core";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { EnvironmentProviders, Provider, ProviderDep, ProviderDependency, Token, Type } from "./provider";
-import { flattenProviders, isClassProvider, isFactoryProvi313
-        der } from "./provider";
+import { flattenProviders, isClassProvider, isFactoryProvider } from "./provider";
 import {
   APP_INITIALIZER,
   APP_LIFECYCLE,
