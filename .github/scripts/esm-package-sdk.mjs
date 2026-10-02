@@ -5,6 +5,7 @@ export const SDK_NODE_RANGE = '>=22.12.0';
 export const SDK_ENTRYPOINTS = Object.freeze({
   '.': 'index', './task-events': 'task-events', './contracts': 'contracts', './reactive': 'reactive',
 });
+export const CONTRACTS_ENTRYPOINTS = Object.freeze({ '.': 'index', './client': 'client', './browser': 'browser' });
 export const SDK_SPECIFIERS = Object.freeze(Object.keys(SDK_ENTRYPOINTS).map(
   path => '@supacloud/js' + (path === '.' ? '' : path.slice(1)),
 ));
@@ -15,37 +16,38 @@ function isRecord(value) {
 }
 
 /**
- * A public SDK promises two loading APIs, not two independent implementations.
- * Actual synchronous loadability (including dependencies) is checked in fresh
- * installed-consumer processes. Metadata alone cannot prove absence of TLA.
+ * Public client packages publish native MJS/CJS with matching declarations.
+ * Installed-consumer processes verify their actual dependency graphs.
  * @param {Record<string, unknown>} manifest
  * @returns {string[]}
  */
 export function checkSdkModuleContract(manifest) {
-  if (manifest.name !== '@supacloud/js') return [];
+  const name = manifest.name;
+  const entries = name === '@supacloud/js' ? SDK_ENTRYPOINTS
+    : name === '@supacloud/contracts' ? CONTRACTS_ENTRYPOINTS : undefined;
+  if (!entries) return [];
   const errors = [];
-  if (!isRecord(manifest.engines) || manifest.engines.node !== SDK_NODE_RANGE) {
-    errors.push(`@supacloud/js: documented Node engine must be ${SDK_NODE_RANGE}`);
+  if (name === '@supacloud/js' && (!isRecord(manifest.engines) || manifest.engines.node !== SDK_NODE_RANGE)) {
+    errors.push(`${name}: documented Node engine must be ${SDK_NODE_RANGE}`);
   }
   const exports = manifest.exports;
-  if (!isRecord(exports)) return [...errors, '@supacloud/js: explicit SDK exports are required'];
-  if (Object.keys(exports).sort().join(',') !== Object.keys(SDK_ENTRYPOINTS).sort().join(',')) {
-    errors.push('@supacloud/js: public subpaths must match the SDK consumer acceptance inventory');
+  if (!isRecord(exports)) return [...errors, `${name}: explicit exports are required`];
+  if (Object.keys(exports).sort().join(',') !== Object.keys(entries).sort().join(',')) {
+    errors.push(`${name}: public subpaths must match the consumer acceptance inventory`);
   }
-  for (const [path, file] of Object.entries(SDK_ENTRYPOINTS)) {
-    const entry = exports[path];
+  for (const [path, file] of Object.entries(entries)) {
     const expected = {
-      types: `./dist/${file}.d.ts`, 'module-sync': `./dist/${file}.js`,
-      import: `./dist/${file}.js`, default: `./dist/${file}.js`,
+      import: { types: `./dist/${file}.d.mts`, default: `./dist/${file}.mjs` },
+      require: { types: `./dist/${file}.d.cts`, default: `./dist/${file}.cjs` },
     };
-    // Exact conditions/order prevent an earlier node/default condition from
-    // silently diverting one loader to a different implementation.
-    if (!isRecord(entry) || JSON.stringify(entry) !== JSON.stringify(expected)) {
-      errors.push(`@supacloud/js${path}: types, module-sync, import and default must share the reviewed ESM entry in that order`);
+    // Exact order prevents a default condition from shadowing either loader.
+    if (!isRecord(exports[path]) || JSON.stringify(exports[path]) !== JSON.stringify(expected)) {
+      errors.push(`${name}${path}: import/require must point to matching MJS/CJS runtime and declarations`);
     }
   }
-  for (const [field, target] of Object.entries({ main: './dist/index.js', module: './dist/index.js', types: './dist/index.d.ts' })) {
-    if (manifest[field] !== target) errors.push(`@supacloud/js.${field}: expected ${target}`);
+  const fallbacks = { main: './dist/index.cjs', module: './dist/index.mjs', types: './dist/index.d.mts' };
+  for (const [field, target] of Object.entries(fallbacks)) {
+    if (manifest[field] !== target) errors.push(`${name}.${field}: expected ${target}`);
   }
   return errors;
 }
@@ -56,7 +58,7 @@ export function sdkRuntimeConsumer(order) {
   const header = order === 'require-first' ? `
 'use strict';
 const assert = require('node:assert/strict');
-const specs = ${JSON.stringify(SDK_SPECIFIERS)};
+const specs = ${JSON.stringify([...SDK_SPECIFIERS, '@supacloud/contracts', '@supacloud/contracts/client', '@supacloud/contracts/browser'])};
 // Deliberately before any dynamic import: this proves cold synchronous loading.
 const required = specs.map(spec => require(spec));
 (async () => {
@@ -65,7 +67,7 @@ const imported = await Promise.all(specs.map(spec => import(spec)));
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const specs = ${JSON.stringify(SDK_SPECIFIERS)};
+const specs = ${JSON.stringify([...SDK_SPECIFIERS, '@supacloud/contracts', '@supacloud/contracts/client', '@supacloud/contracts/browser'])};
 const imported = await Promise.all(specs.map(spec => import(spec)));
 const required = specs.map(spec => require(spec));
 `;
@@ -76,16 +78,20 @@ for (const [index, spec] of specs.entries()) {
   assert.ok(Object.keys(esm).length > 0, spec + ': runtime exports must exist');
   assert.deepEqual(Object.keys(cjs).filter(key => key !== '__esModule').sort(),
     Object.keys(esm).filter(key => key !== '__esModule').sort(), spec + ': API parity');
-  for (const key of Object.keys(esm)) assert.strictEqual(cjs[key], esm[key], spec + '.' + key + ': shared identity');
+  assert.strictEqual(require(spec), cjs, spec + ': CJS identity');
+  assert.strictEqual(await import(spec), esm, spec + ': ESM identity');
+  assert.ok(require.resolve(spec).endsWith('.cjs'), spec + ': native CJS resolution');
+  for (const key of Object.keys(esm)) assert.equal(typeof cjs[key], typeof esm[key], spec + ': export kind');
 }
-assert.equal(typeof required[0].createSupaCloudClient, 'function');
-const cjsError = new required[1].TaskEventError(400, 'COMPATIBILITY_TEST');
-assert.ok(cjsError instanceof imported[1].TaskEventError);
-const esmError = new imported[1].TaskEventError(400, 'COMPATIBILITY_TEST');
-assert.ok(esmError instanceof required[1].TaskEventError);
-const shared = await import('@supacloud/contracts/client');
-for (const key of Object.keys(imported[2])) {
-  assert.strictEqual(required[2][key], shared[key], 'contracts: shared protocol identity ' + key);
+for (const modules of [required, imported]) {
+  assert.equal(typeof modules[0].createSupaCloudClient, 'function');
+  const error = new modules[1].TaskEventError(400, 'COMPATIBILITY_TEST');
+  assert.ok(error instanceof modules[1].TaskEventError);
+  assert.equal(error.status, 400);
+  assert.equal(error.message, 'COMPATIBILITY_TEST');
+  for (const key of Object.keys(modules[2])) {
+    assert.strictEqual(modules[2][key], modules[5][key], 'contracts: shared protocol identity ' + key);
+  }
 }
 console.log('SDK synchronous require/import compatibility passed: ${order}');
 ` + (order === 'require-first' ? `
@@ -98,7 +104,10 @@ export function sdkTypeConsumer(commonjs) {
   const imports = commonjs
     ? `import sdk = require('@supacloud/js');\nimport events = require('@supacloud/js/task-events');\nimport contracts = require('@supacloud/js/contracts');\nimport upstream = require('@supabase/supabase-js');\nimport reactive = require('@supacloud/js/reactive');`
     : `import * as sdk from '@supacloud/js';\nimport * as events from '@supacloud/js/task-events';\nimport * as contracts from '@supacloud/js/contracts';\nimport * as upstream from '@supabase/supabase-js';\nimport * as reactive from '@supacloud/js/reactive';`;
-  return imports + `
+  const oppositeImport = `
+import type { SupabaseClient as OppositeClient } from '@supabase/supabase-js' with { "resolution-mode": "${commonjs ? 'import' : 'require'}" };
+`;
+  return imports + oppositeImport + `
 // The normal integration must type-check too, not just reject invalid calls.
 const upstreamClient = upstream.createClient('https://sdk-compat.example.invalid', 'test-anon-key', {
   auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -110,6 +119,10 @@ export const integratedClient = sdk.createSupaCloudClient({
 export const sameClientType: typeof upstreamClient = integratedClient.supabase;
 export const workflows = new sdk.SupaCloudWorkflowsClient(upstreamClient);
 export const artifacts = new sdk.SupaCloudArtifactsClient(upstreamClient);
+declare const oppositeClient: OppositeClient;
+export const oppositeSdk = sdk.createSupaCloudClient({ supabase: oppositeClient, projectRef: 'abcd1234', managementApiUrl: 'https://management.example.invalid' });
+export const preservedOpposite: OppositeClient = oppositeSdk.supabase;
+
 type Database = { public: {
   Tables: { notes: { Row: { id: number; title: string }; Insert: { id?: number; title: string };
     Update: { title?: string }; Relationships: [] } };
