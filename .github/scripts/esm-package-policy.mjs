@@ -7,11 +7,6 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const commonJsFile = /\.(?:cjs|cts)(?:\.map)?$/i;
 const commonJsBuild = /--format(?:\s*=\s*|\s+)["']?(?:cjs|commonjs)\b/i;
 
-// This process launcher is not a second implementation of a library entrypoint.
-const allowedBins = new Map([
-  ['@supacloud/lite', new Set(['dist/launcher.cjs'])],
-]);
-
 /** @param {unknown} value @returns {value is Record<string, unknown>} */
 function isRecord(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -35,17 +30,19 @@ function checkExports(value, location, errors) {
 }
 
 /**
- * Inspect first-party library metadata only, never dependency code or fixtures.
+ * Inspect owned library and executable metadata, never dependency code.
  * @param {unknown} manifest
+ * @param {{firstParty?: boolean}} [options]
  * @returns {string[]}
  */
-export function checkEsmManifest(manifest) {
+export function checkEsmManifest(manifest, { firstParty = false } = {}) {
   if (!isRecord(manifest)) return ['Invalid package manifest'];
   const name = manifest['name'];
-  if (typeof name !== 'string' || !name.startsWith('@supacloud/') || manifest['private'] === true) return [];
+  if (!firstParty && (typeof name !== 'string' || (!name.startsWith('@supacloud/') && name !== 'supacloud'))) return [];
   const errors = [];
-  if (manifest['exports'] !== undefined || manifest['main'] !== undefined || manifest['module'] !== undefined) {
-    if (manifest['type'] !== 'module') errors.push(`${name}: exported libraries must declare type: module`);
+  if (manifest['type'] === 'commonjs') errors.push(`${name ?? 'package'}: CommonJS package scope is not supported`);
+  if (manifest['exports'] !== undefined || manifest['main'] !== undefined || manifest['module'] !== undefined || manifest['bin'] !== undefined) {
+    if (manifest['type'] !== 'module') errors.push(`${name}: libraries and executables must declare type: module`);
     checkExports(manifest['exports'], `${name}.exports`, errors);
     for (const field of ['main', 'module', 'types', 'typings', 'browser']) {
       checkExports(manifest[field], `${name}.${field}`, errors);
@@ -62,8 +59,8 @@ export function checkEsmManifest(manifest) {
   const bin = manifest['bin'];
   const paths = typeof bin === 'string' ? [bin] : isRecord(bin) ? Object.values(bin) : [];
   for (const path of paths) {
-    if (typeof path === 'string' && commonJsFile.test(path) && !allowedBins.get(name)?.has(path.replace(/^\.\//, ''))) {
-      errors.push(`${name}.bin: unapproved CommonJS launcher ${path}`);
+    if (typeof path === 'string' && commonJsFile.test(path)) {
+      errors.push(`${name}.bin: CommonJS launcher is not supported: ${path}`);
     }
   }
   return errors;
@@ -84,13 +81,10 @@ function targets(value) {
  * @returns {string[]}
  */
 export function checkEsmPack(manifest, files) {
-  const errors = checkEsmManifest(manifest);
-  const name = manifest['name'];
-  const allowed = typeof name === 'string' ? allowedBins.get(name) : undefined;
-  const declaredBins = new Set(targets(manifest['bin']).map(path => path.replace(/^\.\//, '')));
+  const errors = checkEsmManifest(manifest, { firstParty: true });
   const inventory = new Set(files.map(path => path.replace(/^\.\//, '')));
   for (const path of inventory) {
-    if (commonJsFile.test(path) && (!allowed?.has(path) || !declaredBins.has(path))) {
+    if (commonJsFile.test(path)) {
       errors.push(`pack: unexpected CommonJS artifact ${path}`);
     }
   }
@@ -107,6 +101,15 @@ export function checkEsmPack(manifest, files) {
   return errors;
 }
 
+/** Compatibility fixtures remain data, not production entrypoints.
+ * @param {readonly string[]} paths
+ */
+export function checkEsmSourcePaths(paths) {
+  return paths.filter(path => commonJsFile.test(path)
+    && !path.split('/').some(segment => segment === 'node_modules' || segment === 'fixtures'))
+    .map(path => `source: first-party CommonJS file is not supported: ${path}`);
+}
+
 /** @param {string} [directory] */
 export async function checkRepository(directory = root) {
   const errors = [];
@@ -120,8 +123,15 @@ export async function checkRepository(directory = root) {
       if (isRecord(error) && error['code'] === 'ENOENT') continue;
       throw error;
     }
-    errors.push(...checkEsmManifest(JSON.parse(content)).map(error => `${entry.name}/package.json: ${error}`));
+    errors.push(...checkEsmManifest(JSON.parse(content), { firstParty: true }).map(error => `${entry.name}/package.json: ${error}`));
   }
+  const rootManifest = JSON.parse(await readFile(resolve(directory, 'package.json'), 'utf8'));
+  errors.push(...checkEsmManifest(rootManifest, { firstParty: true }));
+  if (rootManifest.type !== 'module') errors.push('package.json: the repository root must declare type: module');
+  const paths = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], {
+    cwd: directory, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024,
+  }).split('\0').filter(Boolean);
+  errors.push(...checkEsmSourcePaths(paths));
   if (errors.length) throw new Error(errors.join('\n'));
 }
 

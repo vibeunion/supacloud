@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { checkEsmManifest, checkEsmPack, checkRepository, checkPackedDirectory } from './esm-package-policy.mjs';
+import { checkEsmManifest, checkEsmPack, checkRepository, checkPackedDirectory, checkEsmSourcePaths } from './esm-package-policy.mjs';
 
 const manifest = () => ({
   name: '@supacloud/example', version: '1.0.0', type: 'module', main: './dist/index.js', types: './dist/index.d.ts',
@@ -56,19 +57,27 @@ test('missing public JS, types and bin targets fail the pack check', () => {
   assert.match(checkEsmPack({ ...manifest(), bin: { example: './dist/cli.js' } }, files).join('\n'), /published target is missing/);
 });
 
-test('Lite launcher is an exact bin-only exception, not permission for dual libraries', () => {
-  const lite = { ...manifest(), name: '@supacloud/lite', bin: { 'supacloud-lite': 'dist/launcher.cjs' } };
-  assert.deepEqual(checkEsmPack(lite, [...files, 'dist/launcher.cjs']), []);
-  assert.match(checkEsmPack({ ...lite, bin: undefined }, [...files, 'dist/launcher.cjs']).join('\n'), /unexpected CommonJS artifact/);
-  assert.match(checkEsmPack(lite, [...files, 'dist/other.cjs']).join('\n'), /unexpected CommonJS artifact/);
-  assert.match(checkEsmManifest({ ...manifest(), bin: { other: 'dist/launcher.cjs' } }).join('\n'), /unapproved CommonJS launcher/);
-  assert.match(checkEsmManifest({ ...lite, exports: { '.': './dist/launcher.cjs' } }).join('\n'), /CommonJS target/);
+test('Lite launcher must be ESM, with no CommonJS bin or pack exception', () => {
+  const lite = { ...manifest(), name: '@supacloud/lite', bin: { 'supacloud-lite': 'dist/launcher.mjs' } };
+  assert.deepEqual(checkEsmPack(lite, [...files, 'dist/launcher.mjs']), []);
+  const legacy = { ...lite, bin: { 'supacloud-lite': 'dist/launcher.cjs' } };
+  assert.match(checkEsmManifest(legacy).join('\n'), /CommonJS launcher/);
+  assert.match(checkEsmPack(legacy, [...files, 'dist/launcher.cjs']).join('\n'), /unexpected CommonJS artifact/);
 });
 
-test('private packages, dependency manifests and fixture filenames are not an ESM policy sweep', () => {
-  assert.deepEqual(checkEsmManifest({ ...manifest(), private: true, type: 'commonjs' }), []);
+test('owned private and unscoped executables cannot bypass the policy', () => {
+  for (const name of ['@supacloud/internal', 'supacloud']) {
+    assert.match(checkEsmManifest({ name, private: true, bin: 'cli.cjs' }).join('\n'), /CommonJS launcher/);
+    assert.match(checkEsmManifest({ name, bin: 'cli.js' }).join('\n'), /type: module/);
+  }
+  assert.match(checkEsmManifest({ name: 'internal-tool', private: true, bin: 'cli.cjs' }, { firstParty: true }).join('\n'), /CommonJS launcher/);
   assert.deepEqual(checkEsmManifest({ name: 'third-party', main: 'index.cjs' }), []);
   assert.deepEqual(checkEsmManifest({ ...manifest(), scripts: { test: 'bun test compatibility.cjs.test.ts' } }), []);
+});
+
+test('source guard rejects CJS/CTS files but preserves dependency and compatibility fixtures', () => {
+  assert.equal(checkEsmSourcePaths(['scripts/tool.cjs', 'packages/app/src/index.cts']).length, 2);
+  assert.deepEqual(checkEsmSourcePaths(['packages/lite/src/launcher.mjs', 'packages/app/test/fixtures/legacy.cjs', 'node_modules/legacy/index.cjs']), []);
 });
 
 test('wildcard exports fail explicitly instead of silently skipping artifact validation', () => {
@@ -78,13 +87,20 @@ test('wildcard exports fail explicitly instead of silently skipping artifact val
 test('repository scan validates real top-level packages but not node_modules or CJS fixtures', async () => {
   const root = await mkdtemp(join(tmpdir(), 'supacloud-esm-policy-'));
   try {
+    execFileSync('git', ['init', '--quiet', root]);
+    await writeFile(join(root, 'package.json'), '{"type":"module"}');
     await mkdir(join(root, 'packages', 'example', 'node_modules', 'legacy'), { recursive: true });
     await mkdir(join(root, 'packages', 'no-manifest'));
     const path = join(root, 'packages', 'example', 'package.json');
     await writeFile(path, JSON.stringify(manifest()));
     await writeFile(join(root, 'packages', 'example', 'node_modules', 'legacy', 'package.json'), '{"type":"commonjs"}');
-    await writeFile(join(root, 'packages', 'example', 'fixture.cjs'), 'module.exports = 1;');
+    await mkdir(join(root, 'packages', 'example', 'test', 'fixtures'), { recursive: true });
+    await writeFile(join(root, 'packages', 'example', 'test', 'fixtures', 'legacy.cjs'), 'module.exports = 1;');
     await checkRepository(root);
+    const legacy = join(root, 'packages', 'example', 'index.cjs');
+    await writeFile(legacy, 'module.exports = 1;');
+    await assert.rejects(checkRepository(root), /first-party CommonJS file/);
+    await rm(legacy);
     await writeFile(path, JSON.stringify({ ...manifest(), type: 'commonjs' }));
     await assert.rejects(checkRepository(root), /example\/package.json/);
     await writeFile(path, '{');

@@ -80,7 +80,7 @@ describe("Bun runtime version assets", () => {
     expect(notices).toContain(`LICENSES/BUN-${BUN_VERSION}-RUNTIME-NOTICES.txt`);
     expect(notices).not.toContain("1.3.14");
 
-    const launcher = readRepoFile("packages/supacloud-lite/src/launcher.cjs");
+    const launcher = readRepoFile("packages/supacloud-lite/src/launcher.mjs");
     expect(launcher).toContain(`Install Bun ${BUN_VERSION} or newer`);
   });
 });

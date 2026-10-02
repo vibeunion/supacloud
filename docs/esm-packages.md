@@ -2,7 +2,9 @@
 
 ## Decision and compatibility boundary
 
-SupaCloud-owned library packages publish ESM implementations. Package-scoped
+SupaCloud-owned libraries and executable entrypoints use ESM. The repository
+root declares `"type": "module"`; private and unscoped owned packages are
+covered by the same metadata guard. Package-scoped
 `.js` with `"type": "module"` remains the default; an explicit `.mjs` entry is
 also valid. This migration does not rename existing ESM files or change the
 public import specifiers.
@@ -15,13 +17,31 @@ rebuilt as CommonJS or renamed as part of this change.
 
 ESM-only is a publication format, not a blanket prohibition on CommonJS:
 
-- `@supacloud/lite` keeps its exact `dist/launcher.cjs` **bin** exception. Its
-  Node-to-Bun startup, signal forwarding, exit handling and CLI discovery paths
-  are unchanged. The exception cannot be used as a library export.
+- `@supacloud/lite` now publishes `dist/launcher.mjs` as its Node-to-Bun **bin**.
+  There is no CommonJS launcher exception and no shipped `.cjs` fallback.
+  Startup errors, argv, signal forwarding and child exit codes are preserved.
 - Edge Runtime's guarded loading of third-party CommonJS dependencies, their
   security checks and CommonJS compatibility fixtures remain unchanged.
 - CommonJS wrappers generated inside an ESM bundle are not deleted by textual
   search. This policy does not attempt to rewrite third-party dependency code.
+
+## Lite launcher migration
+
+The supported command remains `supacloud-lite`; use the installed executable
+rather than hard-coding a `dist` path. Custom scripts using `dist/launcher.cjs`
+must switch to `dist/launcher.mjs` or the package executable.
+
+`supacloud-cli lite` now resolves `bin["supacloud-lite"]` from the locally
+installed `@supacloud/lite/package.json`, not a hard-coded extension. Explicit
+`SUPACLOUD_LITE_CLI_BIN` still has priority; no local package falls back to PATH.
+A corrupt manifest, escaping bin path or missing local bin is an error, not a
+reason to silently invoke an unrelated global installation. This also permits
+an older installed release to run through its own declared bin; it does not
+publish or generate a new CommonJS implementation.
+
+Upgrade the Project CLI together with Lite. Older CLI versions hard-code the
+old launcher path; use `supacloud-lite` directly while upgrading. This section
+supersedes legacy launcher-path examples in the Project CLI README.
 
 ## Consumer migration and release
 
@@ -60,17 +80,21 @@ is not a claim that all older TypeScript or NodeNext configurations are covered.
 ## Verification
 
 ```sh
-node --test .github/scripts/esm-package-policy.test.mjs
+npm run test:esm
 node .github/scripts/esm-package-policy.mjs
-# After the app build; also executed by its prepublishOnly lifecycle:
+# After the app/Lite builds; also checked by their publication lifecycles:
 bun run --cwd packages/app check:package
+bun run --cwd packages/supacloud-lite check:package
 # After building contracts, delivery, app, supacloud-js and compiler:
 node .github/scripts/esm-package.acceptance.mjs
 ```
 
-The metadata guard checks top-level, public `@supacloud/*` library manifests,
-including nested export conditions and explicit CommonJS build flags. It does
-not traverse `node_modules`, arbitrary fixture files or private package code.
+The metadata guard checks the root and all top-level package manifests,
+including private/unscoped packages, nested export conditions, executable bins
+and explicit CommonJS build flags. A Git file-inventory guard rejects owned
+`.cjs`/`.cts` sources (tracked and non-ignored untracked files), excluding
+`node_modules` and compatibility data under `fixtures/`. It does not rewrite
+third-party code or ban `createRequire` interoperability inside an ES module.
 The pack guard checks the actual npm file inventory for missing export/type/bin
 targets and stale `.cjs`, `.cts` or associated source-map artifacts. Unknown
 wildcard targets fail explicitly rather than receiving an unearned pass.
@@ -87,6 +111,15 @@ protection, or enable automatic merging.
 ESM-only does not by itself guarantee that every independently bundled subpath
 shares every runtime object. The acceptance checks assert specific shared
 identities rather than making that broader claim.
+
+The launcher tests execute the actual `.mjs` source in a separate Node process,
+with Node standing in for the Bun binary. They check argv, URL-sensitive paths,
+missing-runtime diagnostics, successful/unsuccessful exits and POSIX signal
+forwarding. Linux/macOS/Windows jobs run the portable cases; POSIX signal cases
+are explicitly skipped on Windows, where POSIX graceful signals do not apply.
+These isolated tests replace the old CommonJS `vm` test; the existing Lite
+package smoke additionally exercises the installed launcher with Node and Bun.
+They do not substitute for the full Lite database/package/standalone checks.
 
 ## Rollback
 
