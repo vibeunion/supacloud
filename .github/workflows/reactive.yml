@@ -2,11 +2,12 @@ name: Reactive Integration
 
 on:
   push:
-    branches: ["main", "dev", "feat/default-rxjs-sdk", "feat/angular-enterprise-hardening"]
+    branches: ["main", "dev", "feat/default-rxjs-sdk", "feat/angular-enterprise-hardening", "feat/angular-defaults-completion"]
     paths:
       - "packages/app/**"
       - "packages/compiler/**"
       - "packages/testing/**"
+      - "packages/elysia/**"
       - "packages/supacloud-js/**"
       - "packages/contracts/**"
       - "packages/cli/**"
@@ -21,6 +22,7 @@ on:
       - "packages/app/**"
       - "packages/compiler/**"
       - "packages/testing/**"
+      - "packages/elysia/**"
       - "packages/supacloud-js/**"
       - "packages/contracts/**"
       - "packages/cli/**"
@@ -79,7 +81,7 @@ jobs:
           bun run build
           bun run typecheck
           bun run typecheck:test
-          bun test src/reactive-analysis.test.ts src/http-provider-migration.test.ts src/angular-scopes.test.ts src/static-di-aop.test.ts
+          bun test src/editor-actions.test.ts src/inspect.test.ts src/reactive-analysis.test.ts src/http-provider-migration.test.ts src/angular-scopes.test.ts src/static-di-aop.test.ts
       - name: Testing helpers and request error contracts
         run: |
           cd packages/testing
@@ -88,8 +90,20 @@ jobs:
           bun run typecheck
           bun run typecheck:test
           bun test
+      - name: Host build and lifecycle verification
+        run: |
+          bun run scripts/build-command-dependencies.ts elysia
+          cd packages/elysia
+          bun install --force --frozen-lockfile --ignore-scripts
+          bun run build
+          bun run typecheck:test
+          bun test src/pending-work-host.test.ts src/application-lifecycle.test.ts src/worker.test.ts src/http-context.test.ts
       - name: Packed Angular host identity and scoped interop
         run: bun run scripts/check_angular_consumer.ts
+      - name: Packed minimum Angular version
+        run: bun run scripts/check_angular_consumer.ts
+        env:
+          SUPACLOUD_ANGULAR_TEST_VERSION: "22.1.5"
       - name: All starter defaults
         run: |
           cd packages/cli

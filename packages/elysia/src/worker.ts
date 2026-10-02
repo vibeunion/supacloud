@@ -1,3 +1,4 @@
+import { PendingWorkRegistry } from "@supacloud/app/runtime";
 import {
   executeJob,
   type CompiledJob,
@@ -145,6 +146,8 @@ export interface WorkerOptions<TClaim = WorkerClaim, TReceipt = unknown> {
   workerId?: string;
   concurrency?: number;
   pollIntervalMs?: number;
+  /** Maximum drain observation; timeout keeps services owned until a later stop succeeds. */
+  shutdownTimeoutMs?: number;
   executor?: JobExecutor;
   onExecution?: ExecutionObserver;
   onError?: (error: unknown) => void | Promise<void>;
@@ -291,6 +294,9 @@ export class SupaCloudWorker<TClaim = WorkerClaim, TReceipt = unknown> {
   private readonly workerId: string;
   private readonly concurrency: number;
   private readonly pollIntervalMs: number;
+  private readonly shutdownTimeoutMs: number;
+  private work = new PendingWorkRegistry();
+  get pendingWork(): PendingWorkRegistry { return this.work; }
   private readonly executor: JobExecutor | undefined;
   private readonly observer: ExecutionObserver | undefined;
   private readonly onError: ((error: unknown) => void | Promise<void>) | undefined;
@@ -324,6 +330,7 @@ export class SupaCloudWorker<TClaim = WorkerClaim, TReceipt = unknown> {
     }));
     this.concurrency = this.capturePositiveInteger(options.concurrency, 1, 1000, "concurrency");
     this.pollIntervalMs = this.captureNonNegativeInteger(options.pollIntervalMs, 1000, 300_000, "pollIntervalMs");
+    this.shutdownTimeoutMs = this.captureNonNegativeInteger(options.shutdownTimeoutMs, 5000, 2_147_483_647, "shutdownTimeoutMs");
     this.executor = options.executor;
     this.observer = options.onExecution;
     this.onError = options.onError;
@@ -396,11 +403,12 @@ export class SupaCloudWorker<TClaim = WorkerClaim, TReceipt = unknown> {
   async start(): Promise<void> {
     if (this.stateValue === "running") return;
     if (this.stateValue === "starting" && this.startPromise) return this.startPromise;
-    if (this.stateValue === "stopping" && this.stopPromise) await this.stopPromise;
+    if (this.stateValue === "stopping") await this.stop();
 
     this.stopRequested = false;
+    if (this.work.closed) this.work = new PendingWorkRegistry();
     this.stateValue = "starting";
-    const startPromise = Promise.resolve().then(() => this.initialize()).then(async () => {
+    const startPromise = this.work.run({ name: "worker.startup", kind: "startup" }, () => Promise.resolve().then(() => this.initialize())).then(async () => {
       if (this.stopRequested || this.stateValue !== "starting") {
         await this.releaseServices();
         return;
@@ -422,9 +430,12 @@ export class SupaCloudWorker<TClaim = WorkerClaim, TReceipt = unknown> {
     if (this.stopPromise) return this.stopPromise;
     this.stopRequested = true;
     this.stateValue = "stopping";
-    this.claimController?.abort(new DOMException("Worker stopped", "AbortError"));
+    this.work.close();
     const startPromise = this.startPromise;
-    this.stopPromise = (async () => {
+    this.stopPromise = Promise.resolve().then(async () => {
+      this.claimController?.abort(new DOMException("Worker stopped", "AbortError"));
+      this.work.dispose();
+      await this.work.waitForIdle({ timeoutMs: this.shutdownTimeoutMs });
       await startPromise?.catch(() => undefined);
       await this.loopPromise?.catch((error: unknown) => this.reportError(error));
       await Promise.allSettled([...this.inFlight]);
@@ -434,7 +445,7 @@ export class SupaCloudWorker<TClaim = WorkerClaim, TReceipt = unknown> {
       this.loopPromise = undefined;
       this.startPromise = undefined;
       this.stopPromise = undefined;
-    })();
+    }).catch(error => { this.stopPromise = undefined; throw error; });
     return this.stopPromise;
   }
 
@@ -446,21 +457,26 @@ export class SupaCloudWorker<TClaim = WorkerClaim, TReceipt = unknown> {
     const controller = this.claimController;
     if (!controller) throw new WorkerRegistrationError("WORKER_NOT_STARTED", "Worker claim lifecycle is unavailable");
     controller.signal.throwIfAborted();
-    const claim = await this.transport.claim(controller.signal);
-    if (claim === null) return null;
-    return this.processClaim(claim);
+    return this.work.run({ name: "worker.claim", kind: "job" }, async signal => {
+      const claim = await this.transport.claim(controller.signal);
+      return claim === null ? null : this.executeClaim(claim, signal);
+    });
   }
 
   /** Process a host-provided claim without performing another claim operation. */
   async processClaim(rawClaim: TClaim): Promise<WorkerRunResult<TReceipt>> {
+    return this.work.run({ name: "worker.job", kind: "job" }, signal => this.executeClaim(rawClaim, signal));
+  }
+
+  private async executeClaim(rawClaim: TClaim, signal: AbortSignal): Promise<WorkerRunResult<TReceipt>> {
     const claim = safeClaim(this.mapClaim(rawClaim));
     const entry = this.registry.get(claim.jobName);
-    const controller = new AbortController();
     const context: WorkerReceiptContext = Object.freeze({
       jobId: claim.id,
       jobName: claim.jobName,
       attempt: claim.attempt ?? 1,
-      signal: controller.signal,
+      // Confirmation remains usable even when shutdown cancels the handler.
+      signal: new AbortController().signal,
     });
     if (!entry) {
       const receipt = await this.failClaim(rawClaim, claim, new WorkerRegistrationError(
@@ -474,7 +490,7 @@ export class SupaCloudWorker<TClaim = WorkerClaim, TReceipt = unknown> {
       if (this.stateValue !== "running" && this.stateValue !== "stopping") {
         throw new WorkerRegistrationError("WORKER_NOT_STARTED", "Worker is not active");
       }
-      const requestContext = claim.requestContext ?? await this.requestContextFactory(claim, controller.signal);
+      const requestContext = claim.requestContext ?? await this.requestContextFactory(claim, signal);
       const moduleServices = this.moduleServices.get(entry.module.name);
       if (!moduleServices) throw new WorkerRegistrationError("WORKER_NOT_STARTED", "Worker services are unavailable");
       output = await executeJob(
@@ -548,20 +564,24 @@ export class SupaCloudWorker<TClaim = WorkerClaim, TReceipt = unknown> {
         await Promise.race(this.inFlight).catch((error: unknown) => this.reportError(error));
         continue;
       }
+      const complete = this.work.add({ name: "worker.claim", kind: "job" });
       let claim: TClaim | null;
       try {
         claim = await this.transport.claim(signal);
       } catch (error) {
+        complete();
         if (signal.aborted) break;
         await this.reportError(error);
         await delay(this.pollIntervalMs, signal).catch(() => undefined);
         continue;
       }
       if (claim === null) {
+        complete();
         await delay(this.pollIntervalMs, signal).catch(() => undefined);
         continue;
       }
-      const execution = this.processClaim(claim).catch((error: unknown) => this.reportError(error));
+      const execution = this.executeClaim(claim, this.work.signal)
+        .catch((error: unknown) => this.reportError(error)).finally(complete);
       this.inFlight.add(execution);
       void execution.finally(() => this.inFlight.delete(execution));
     }

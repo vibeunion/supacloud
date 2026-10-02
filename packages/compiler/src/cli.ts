@@ -20,6 +20,7 @@ import { watchProject } from "./watch";
 import type { Diagnostic, ModuleBoundaryPresetName } from "./types";
 import { compileOptionsFromConfig, loadSupacloudConfig, resolveSupacloudConfig } from "./config";
 import { applyDiagnosticFix } from "./fixes";
+import { createDiagnosticReport, toEditorDiagnostics, createEditorCodeActions } from "./diagnostics";
 import { GraphqlConfigurationError } from "./graphql-options";
 import { planDeliveryProject, formatDeliveryPlan } from "./delivery-plan";
 import { DeliveryConfigurationError } from "./delivery-schema";
@@ -63,6 +64,7 @@ function printUsage(): void {
 Usage:
   supacloud-compiler compile [rootDir] [options]
   supacloud-compiler check   [rootDir] [options]
+  supacloud-compiler diagnostics [rootDir] [--json]
   supacloud-compiler dev     [rootDir] [options]
   supacloud-compiler graph   [rootDir] [options]
   supacloud-compiler explain <name> [rootDir] [options]
@@ -84,6 +86,7 @@ Usage:
 Commands:
   compile             Compile application modules and generate artifacts
   check               Check artifact drift and run governance gates
+  diagnostics         Read-only editor diagnostics and validated semantic code actions
   dev                 Watch source files and recompile on changes
   graph               Print the discovered application graph
   explain             Explain a module, provider, or external token
@@ -163,7 +166,7 @@ async function run(): Promise<void> {
     if (args.includes("--check") && !result.upToDate) process.exitCode = 1;
     return;
   }
-  if (!command || !["compile", "check", "dev", "graph", "explain", "context", "dev-context", "environment-bindings", "doctor", "migrate", "migration-assess", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
+  if (!command || !["compile", "check", "diagnostics", "dev", "graph", "explain", "context", "dev-context", "environment-bindings", "doctor", "migrate", "migration-assess", "fix", "graphql-schema", "plan", "build-delivery", "openapi-export", "openapi-diff"].includes(command)) {
     console.error(`Error: unknown command "${command}"`);
     printUsage();
     process.exit(1);
@@ -301,7 +304,7 @@ async function run(): Promise<void> {
     } else if (arg === "--dry-run") {
       dryRun = true;
     } else if (arg === "--write") {
-      if (command === "context" || command === "dev-context" || command === "environment-bindings") throw new Error(`${command} is read-only; --write is not supported`);
+      if (command === "context" || command === "dev-context" || command === "diagnostics" || command === "environment-bindings") throw new Error(`${command} is read-only; --write is not supported`);
       if (command === "plan" || command === "migration-assess") throw new Error(`${command} is read-only; --write is not supported`);
       dryRun = false;
     } else if (arg === "--baseline-openapi" || arg === "--current-openapi") {
@@ -512,9 +515,23 @@ async function run(): Promise<void> {
     if (result.status === "breaking" || result.status === "unsupported") process.exitCode = 1;
   } else if (command === "fix") {
     if (!query) throw new Error("fix requires a JSON file containing one DiagnosticFix");
-    const fix = JSON.parse(await readFile(resolve(process.cwd(), query), "utf8"));
-    const result = await applyDiagnosticFix(fix, { rootDir: resolvedRoot, dryRun });
+    const input = JSON.parse(await readFile(resolve(process.cwd(), query), "utf8"));
+    const envelope = input && typeof input === "object" && "fix" in input;
+    if (envelope && (typeof input.expectedSourceHash !== "string" || !/^[a-f0-9]{64}$/.test(input.expectedSourceHash))) {
+      throw new Error("Editor fix requires the source hash from its validated preview");
+    }
+    const result = await applyDiagnosticFix(envelope ? input.fix : input, {
+      rootDir: resolvedRoot, dryRun,
+      ...(envelope ? { expectedSourceHash: input.expectedSourceHash } : {}),
+    });
     console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+  } else if (command === "diagnostics") {
+    const result = await checkProject(compileDefaults);
+    console.log(JSON.stringify({
+      report: createDiagnosticReport(result.diagnostics),
+      diagnostics: toEditorDiagnostics(result.diagnostics),
+      actions: await createEditorCodeActions(result.diagnostics, { rootDir: resolvedRoot }),
+    }, null, 2));
   } else if (command === "compile") {
     const result = await compileProject(compileDefaults);
 

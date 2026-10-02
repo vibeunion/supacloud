@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { lstat, readFile, realpath, rename, unlink, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import * as ts from "@typescript/typescript6";
@@ -9,12 +9,15 @@ export interface ApplyDiagnosticFixOptions {
   /** Preview by default; set false to write. */
   dryRun?: boolean;
   permission?: string;
+  /** Reject an editor action when its previewed source has changed. */
+  expectedSourceHash?: string;
 }
 
 export interface AppliedDiagnosticFix {
   file: string;
   changed: boolean;
   content: string;
+  sourceHash: string;
 }
 
 export async function applyDiagnosticFix(
@@ -32,6 +35,10 @@ export async function applyDiagnosticFix(
     throw new Error("Fix target must be a regular file inside rootDir");
   }
   const original = await readFile(file, "utf8");
+  const sourceHash = createHash("sha256").update(original).digest("hex");
+  if (options.expectedSourceHash !== undefined && options.expectedSourceHash !== sourceHash) {
+    throw new Error("Fix source changed since preview; analyze the project again");
+  }
   let source = parse(file, original);
   let content: string;
 
@@ -119,7 +126,7 @@ export async function applyDiagnosticFix(
       throw new Error(`Diagnostic fix '${fix.type}' requires a manual semantic decision; no files changed`);
   }
   parse(file, content);
-  const result = { file, changed: content !== original, content };
+  const result = { file, changed: content !== original, content, sourceHash };
   if (options.dryRun === false && result.changed) {
     const temporary = `${file}.supacloud-fix-${randomUUID()}`;
     try {

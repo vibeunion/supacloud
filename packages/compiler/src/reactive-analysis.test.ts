@@ -41,6 +41,18 @@ test("CLI/AI/editor adapters preserve guidance without inventing an automatic fi
   assert.equal(report.entries[0]?.repair, undefined);
   assert.equal(editor[0]?.range.start.line, 0);
 });
+
+test("editor diagnostics preserve the compiler source span", () => {
+  const diagnostics = scan(prefix + `computed(() => toSignal(stream));`);
+  const diagnostic = diagnostics[0];
+  assert.ok(diagnostic);
+  assert.equal(typeof diagnostic.column, "number");
+  assert.equal(diagnostic.endLine, diagnostic.line);
+  assert.ok((diagnostic.endColumn ?? 0) > (diagnostic.column ?? 0));
+  const editor = toEditorDiagnostics(diagnostics)[0];
+  assert.deepEqual(editor?.range.start, { line: (diagnostic.line ?? 1) - 1, character: diagnostic.column });
+  assert.deepEqual(editor?.range.end, { line: (diagnostic.endLine ?? 1) - 1, character: diagnostic.endColumn });
+});
 test("existing semantic fix payloads remain identical across consumers", () => {
   const diagnostics = [{ severity: "error" as const, code: "example", file: "a.ts", line: 3, message: "fix",
     fix: { type: "set_command_mode" as const, targetFile: "a.ts", command: "orders.save", property: "transaction" as const, expectedExpression: "false" },

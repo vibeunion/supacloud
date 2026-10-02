@@ -91,7 +91,7 @@
     {
       "name": "AppliedDiagnosticFix",
       "kind": "type",
-      "signature": "export interface AppliedDiagnosticFix {\n    file: string;\n    changed: boolean;\n    content: string;\n}"
+      "signature": "export interface AppliedDiagnosticFix {\n    file: string;\n    changed: boolean;\n    content: string;\n    sourceHash: string;\n}"
     },
     {
       "name": "applyDiagnosticFix",
@@ -101,7 +101,7 @@
     {
       "name": "ApplyDiagnosticFixOptions",
       "kind": "type",
-      "signature": "export interface ApplyDiagnosticFixOptions {\n    rootDir?: string;\n    dryRun?: boolean;\n    permission?: string;\n}"
+      "signature": "export interface ApplyDiagnosticFixOptions {\n    rootDir?: string;\n    dryRun?: boolean;\n    permission?: string;\n    expectedSourceHash?: string;\n}"
     },
     {
       "name": "AspectRefNode",
@@ -196,7 +196,7 @@
     {
       "name": "ContextPack",
       "kind": "type",
-      "signature": "export interface ContextPack {\n    version: 1;\n    subject: string;\n    modules: ModuleNode[];\n    files: string[];\n    externalTokens: string[];\n    executionPlans: ExecutionPlan[];\n    routeContracts: ReturnType<typeof inspectRouteContracts>;\n    diagnostics: Diagnostic[];\n    relatedModules: {\n        importedBy: string[];\n        imports: string[];\n    };\n    graphql?: ApplicationGraph[\"graphql\"];\n}"
+      "signature": "export interface ContextPack {\n    version: 1;\n    subject: string;\n    modules: ModuleNode[];\n    files: string[];\n    externalTokens: string[];\n    executionPlans: ExecutionPlan[];\n    routeContracts: ReturnType<typeof inspectRouteContracts>;\n    diagnostics: Diagnostic[];\n    conventions: {\n        singleResult: \"async-await\";\n        eventComposition: \"rxjs\";\n        angularHost: \"@supacloud/app/angular\";\n        cancellation: \"explicit-owner-signal\";\n    };\n    relatedModules: {\n        importedBy: string[];\n        imports: string[];\n    };\n    graphql?: ApplicationGraph[\"graphql\"];\n}"
     },
     {
       "name": "ContractManifest",
@@ -386,7 +386,7 @@
     {
       "name": "Diagnostic",
       "kind": "type",
-      "signature": "export interface Diagnostic {\n    severity: \"error\" | \"warn\";\n    code: string;\n    message: string;\n    file?: string;\n    line?: number;\n    suggestion?: string;\n    errorCode?: string;\n    docsUrl?: string;\n    fix?: DiagnosticFix;\n}"
+      "signature": "export interface Diagnostic {\n    severity: \"error\" | \"warn\";\n    code: string;\n    message: string;\n    file?: string;\n    line?: number;\n    column?: number;\n    endLine?: number;\n    endColumn?: number;\n    suggestion?: string;\n    errorCode?: string;\n    docsUrl?: string;\n    fix?: DiagnosticFix;\n}"
     },
     {
       "name": "DiagnosticFix",
