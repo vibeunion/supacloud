@@ -2,7 +2,8 @@
 
 [English](vibecoding-golden-paths.md) | [简体中文](vibecoding-golden-paths.zh-CN.md)
 
-Status: target engineering experience, not a completion claim.
+Status: supported defaults with explicit compatibility recipes; live acceptance
+and publication remain separate from source implementation.
 Implemented changes and their verification boundaries are recorded in the
 [local acceptance report](vibecoding-acceptance.md).
 
@@ -10,17 +11,18 @@ Implemented changes and their verification boundaries are recorded in the
 
 SupaCloud borrows Angular's *engineering experience* — one entry point, strong
 conventions, generators, early compiler feedback and actionable diagnostics —
-without copying NgModule, its decorator system or its package sprawl. The runtime
-and platform capabilities stay SupaCloud-native.
+without introducing NgModule or another general application framework. Existing
+metadata helpers retain their Angular-backed integration; compiled factories and
+platform capabilities stay SupaCloud-native.
 
-> Angular is the reference for developer experience, not for technical
-> implementation. The goal is to make Vibecoding a constrained, diagnosable and
+> Angular is a developer-experience reference and an existing metadata dependency,
+> not a requirement to adopt its frontend framework. The goal is a constrained, diagnosable and
 > deliverable pipeline.
 
 ## Quick start
 
 ```bash
-supacloud app init --name orders-api --template http   # or command / edge
+supacloud-cli app init --root ./orders-api --name orders-api   # minimal; explicit recipes
 cd orders-api && bun install && bun run check
 
 supacloud context --format json > context.json   # AI reads the compiled project graph
@@ -34,8 +36,10 @@ Developers and AI use one CLI surface and do not need to remember the underlying
 packages:
 
 ```bash
-supacloud app init            # scaffold a project
-supacloud dev                 # local run loop
+supacloud-cli app init        # minimal project; src/features/<feature>
+supacloud-cli app dev         # run the project's existing local dev script
+supacloud-cli app watch       # compiler-only watch
+supacloud-cli app verify-plan --target health  # focused tests, never a full-suite fallback
 supacloud generate ...        # generators
 supacloud check               # compiler governance checks
 supacloud context --format json
@@ -47,8 +51,8 @@ supacloud deploy              # delivery
 The `app` namespace remains as the low-level form (`supacloud app <verb>`); the
 top-level verbs are aliases with the same implementation and execution policy.
 
-> In a generated project, the local development loop is `bun run dev` (watch,
-> compile, restart). `supacloud dev ...` is the separate remote project
+> `app dev` delegates to `bun run dev` (watch, compile, restart).
+> `supacloud-cli dev ...` is the separate remote project
 > sync/watch/migrate module; they are different commands.
 
 ## Conventional project structure
@@ -58,17 +62,19 @@ business modules, generated files and protected files without scanning:
 
 ```text
 src/
-  app/        # application entry and wiring (protected: generated imports)
-  modules/    # business modules (feature slices)
+  application.ts # host factory
+  app.module.ts  # application composition
+  features/   # business slices with colocated tests
   shared/     # tokens, cross-module contracts and utilities
 generated/    # compiler output (do not hand-edit; checked for drift)
 supacloud.config.ts
 ```
 
-Current starters use `src/application.ts` and `src/review/`, `src/orders/` or
-`src/sync/`, depending on the template. Generators default to `src/features/`;
-pass `--dir` to select another module directory. The layout above is a target,
-not an enforced migration or a description of the current generated tree.
+The minimal starter and generators use `src/features/`. Explicit reference
+recipes retain `src/review/`, `src/orders/` and `src/sync/` for compatibility.
+Do not move existing application files only to adopt this default.
+Ordinary reads use the existing RLS-protected PostgREST client; GraphQL remains
+an opt-in contract pipeline and part of the explicit command reference.
 
 `generated/**` is produced by the compiler and is intentionally committed so
 `supacloud check` can detect drift. Never edit `generated/**` directly.
@@ -107,6 +113,10 @@ structured context instead of scanning the repository, and never receive
 credentials or live user data.
 
 ## Three golden paths
+
+The minimal default precedes these opt-in recipes; it does not install all three.
+New business metadata uses `@supacloud/app/core`, while the frontend continues to
+use `@supacloud/js` with its existing Supabase session and selected UI framework.
 
 Support a small number of stable paths first, each with a template, generator,
 example, tests and a deployment flow:
