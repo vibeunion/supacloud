@@ -165,3 +165,6 @@ OPENCODE.md
 .goosehints
 .zed/CONVENTIONS.md
 CODEBUDDY.md
+
+# Repository-only Nx graph, cache and audit evidence
+.nx/

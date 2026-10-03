@@ -1,0 +1,65 @@
+import { ACCEPTANCE_PROJECT, buildPrerequisites, readWorkspace } from './model.mjs';
+
+/** Nx owns execution/deduplication. No generated application imports this plugin. */
+export function projectTargets(workspace, project) {
+  const install = {
+    executor: 'nx:run-commands', cache: false,
+    options: { command: 'bun install --force --ignore-scripts --frozen-lockfile', cwd: project.root },
+    dependsOn: buildPrerequisites(workspace, project.name).map((name) => ({
+      projects: [name], target: 'repo-build', params: 'ignore',
+    })),
+  };
+  const targets = { 'repo-install': install };
+  for (const script of ['build', 'test', 'typecheck', 'typecheck:test', 'check']) {
+    if (typeof project.scripts[script] !== 'string') continue;
+    targets[`repo-${script.replaceAll(':', '-')}`] = {
+      executor: 'nx:run-commands', cache: false,
+      options: { command: `bun run ${script}`, cwd: project.root },
+      dependsOn: [{ target: 'repo-install', params: 'ignore' }],
+      inputs: ['default', '^default'],
+      ...(script === 'build' ? { outputs: ['{projectRoot}/dist'] } : {}),
+      metadata: { description: `Opt-in Bun ${script}; result caching is disabled until package-specific acceptance.` },
+    };
+  }
+  return targets;
+}
+
+export const createNodesV2 = [
+  'packages/*/project.json',
+  async (files, _options, context) => {
+    const workspace = readWorkspace(context.workspaceRoot);
+    const byRoot = new Map(Object.values(workspace.projects).map((project) => [project.root, project]));
+    const results = files.map((file) => {
+      const root = file.slice(0, -'/project.json'.length);
+      const project = byRoot.get(root);
+      if (!project) throw new Error(`Unowned project configuration: ${file}`);
+      return [file, { projects: { [root]: { name: project.name, targets: projectTargets(workspace, project) } } }];
+    });
+    if (results.length) {
+      results[0][1].projects['scripts/workspace'] = {
+        name: ACCEPTANCE_PROJECT,
+        tags: ['scope:tooling', 'type:acceptance'],
+        implicitDependencies: Object.keys(workspace.projects).sort(),
+        targets: {
+          'app-generation': {
+            executor: 'nx:run-commands', cache: false,
+            options: { command: 'bun run scripts/check_app_generation.ts', cwd: '.' },
+            metadata: { description: 'Existing packed CLI/generated-consumer acceptance; no cached result.' },
+          },
+        },
+      };
+    }
+    return results;
+  },
+];
+
+export async function createDependencies(_options, context) {
+  const workspace = readWorkspace(context.workspaceRoot);
+  const unique = new Map();
+  for (const edge of workspace.edges) {
+    // Include manifest inputs even when Nx's package-manager workspace is not enabled.
+    const dependency = { source: edge.source, target: edge.target, sourceFile: edge.sourceFile, type: 'static' };
+    unique.set(`${edge.source}\0${edge.target}`, dependency);
+  }
+  return [...unique.values()];
+}

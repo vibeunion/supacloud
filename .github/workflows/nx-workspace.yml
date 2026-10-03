@@ -1,0 +1,92 @@
+name: Nx Workspace Tooling
+
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - package.json
+      - bun.lock
+      - nx.json
+      - 'scripts/workspace/**'
+      - 'scripts/check_workspace_boundaries*'
+      - 'packages/**/package.json'
+      - 'packages/**/project.json'
+      - 'packages/**/bun.lock'
+      - '.github/workflows/nx-workspace.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nx-workspace-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workspace:
+    name: Nx Workspace Acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+      NX_TUI: 'false'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Install pinned repository tooling (bootstrap lock in draft)
+        run: bun install --ignore-scripts
+      - name: Install existing Compiler parser
+        run: bun install --ignore-scripts --frozen-lockfile --cwd packages/compiler
+      - name: Workspace and source-boundary regression tests
+        run: bun run test:workspace
+      - name: Validate repository metadata and Nx discovery
+        run: |
+          mkdir -p .nx/evidence
+          node scripts/workspace/cli.mjs check > .nx/evidence/workspace.json
+          node node_modules/nx/bin/nx.js graph --file=.nx/evidence/nx-graph.json
+      - name: Exercise real Nx task ordering and failure propagation
+        run: bun run test:nx-acceptance
+      - name: Build the app/contracts pilot using the actual repository task graph
+        run: bun run workspace:build --project app
+      - name: Source-boundary rollout inventory
+        id: source_inventory
+        continue-on-error: true
+        run: bun run check:source-boundaries > .nx/evidence/source-boundaries.json
+      - name: Record affected shadow plan without selecting or skipping CI jobs
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "$BASE_SHA" ]; then
+            node scripts/workspace/cli.mjs affected --base "$BASE_SHA" > .nx/evidence/affected.json
+          else
+            node scripts/workspace/cli.mjs affected > .nx/evidence/affected.json
+          fi
+      - name: Record bootstrap verification inputs
+        if: always()
+        run: |
+          mkdir -p .nx/evidence
+          git archive HEAD > .nx/evidence/source.tar
+          if [ -f bun.lock ]; then cp bun.lock .nx/evidence/bun.lock; fi
+          if [ -d node_modules ]; then tar -chf .nx/evidence/tooling.tar node_modules; fi
+          if [ -d packages/compiler/node_modules/@typescript/typescript6 ]; then
+            tar -chf .nx/evidence/parser.tar packages/compiler/node_modules/@typescript/typescript6
+          fi
+          cp "$(command -v bun)" .nx/evidence/bun
+          node --version > .nx/evidence/node-version.txt
+          git rev-parse HEAD > .nx/evidence/commit.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: nx-workspace-evidence
+          path: .nx/evidence/
+          include-hidden-files: true
+          retention-days: 3
