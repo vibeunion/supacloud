@@ -8,7 +8,7 @@ export function productionSources(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = resolve(directory, entry.name);
     if (entry.isDirectory()) return excluded.has(entry.name) ? [] : productionSources(path);
-    if (!entry.isFile() || !/\.(?:[cm]?[jt]s|[jt]sx)$/.test(entry.name) || /\.(?:test|spec|d)\.[cm]?[jt]sx?$/.test(entry.name)) return [];
+    if (!entry.isFile() || !/\.(?:[cm]?[jt]s|[jt]sx)$/.test(entry.name) || /\.(?:test|spec|test-fixtures|d)\.[cm]?[jt]sx?$/.test(entry.name)) return [];
     return [path];
   }).sort();
 }
@@ -40,6 +40,7 @@ function enabledExport(value) {
   return Object.values(value).some(enabledExport);
 }
 
+/** Declared-public-entrypoint policy, not a complete Node resolution emulator. */
 export function publicSubpath(exports, subpath) {
   if (subpath !== '.' && subpath.slice(2).split('/').some((part) => !part || part === '.' || part === '..' || part.includes('\\'))) return false;
   if (exports === undefined) return subpath === '.';
@@ -67,12 +68,17 @@ export function checkSourceBoundaries(workspace, ts, rules) {
     let compilerOptions = { moduleResolution: ts.ModuleResolutionKind.Bundler, allowJs: true };
     if (existsSync(configPath)) {
       const config = ts.readConfigFile(configPath, ts.sys.readFile);
-      if (config.error) throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, '\n'));
-      const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, resolve(workspace.root, project.root));
-      // File-list/typecheck diagnostics belong to existing type gates, not this import scanner.
-      const errors = parsed.errors.filter((error) => error.code !== 18003 && error.code !== 18002);
-      if (errors.length) throw new Error(errors.map((error) => ts.flattenDiagnosticMessageText(error.messageText, '\n')).join('\n'));
-      compilerOptions = parsed.options;
+      if (config.error) {
+        diagnostics.push({ code: 'WS_TSCONFIG', file: `${project.root}/tsconfig.json`, line: 1, column: 1,
+          message: ts.flattenDiagnosticMessageText(config.error.messageText, '\n') });
+      } else {
+        const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, resolve(workspace.root, project.root));
+        // Missing generated extends still permit named/relative checks, but never a clean result.
+        const errors = parsed.errors.filter((error) => error.code !== 18003 && error.code !== 18002);
+        for (const error of errors) diagnostics.push({ code: 'WS_TSCONFIG', file: `${project.root}/tsconfig.json`,
+          line: 1, column: 1, message: ts.flattenDiagnosticMessageText(error.messageText, '\n') });
+        compilerOptions = parsed.options;
+      }
     }
     for (const absolute of productionSources(resolve(workspace.root, project.root, 'src'))) {
       filesScanned++;
@@ -104,7 +110,7 @@ export function checkSourceBoundaries(workspace, ts, rules) {
           report('WS_PRIVATE_IMPORT', `Cross-project path/alias bypasses ${target.packageName} public exports. Import a declared package entrypoint.`);
         } else {
           const subpath = specifier === target.packageName ? '.' : `.${specifier.slice(target.packageName.length)}`;
-          if (!publicSubpath(target.manifest.exports, subpath)) report('WS_PRIVATE_IMPORT', `${specifier} is not an exported package entrypoint.`);
+          if (!publicSubpath(target.manifest.exports, subpath)) report('WS_PRIVATE_IMPORT', `${specifier} is not a declared public package entrypoint.`);
           const declared = ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']
             .some((field) => Object.hasOwn(project.manifest[field] ?? {}, target.packageName));
           if (!declared) report('WS_UNDECLARED_IMPORT', `${target.packageName} must be declared in package.json; an override alone is not a declaration.`);

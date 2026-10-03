@@ -16,8 +16,12 @@ CI permissions, real-consumer acceptance, and failure/rollback behavior.
 
 ## Commands
 
-Install repository development tooling with `bun install` (root only). Package
+Install repository development tooling with `bun install --ignore-scripts --frozen-lockfile` (root only). Package
 installation remains independent; no package-manager workspaces are introduced.
+The root pins Nx 23.2.1, verified with the repository's Bun 1.4.2 lockfile v2.
+`tsconfig.base.json` only supplies an empty path map for local Nx plugin discovery;
+no application configuration extends it. The launcher resolves Nx's public `bin`
+metadata instead of depending on an internal directory layout.
 
 ```sh
 bun run check:workspace
@@ -74,7 +78,12 @@ application-semantic edge. Do not use it to prune CI.
 The AST source checker reuses `WORKSPACE_BOUNDARY_RULES` from the existing checker.
 It covers static JS/TS imports, exports, import types, literal dynamic imports,
 `require`, deep package imports and resolvable TypeScript path aliases under package
-`src`. Tests, fixtures, generated directories and non-JS/TS templates are excluded.
+`src`. Test files (including `*.test-fixtures.*`), fixture/generated directories
+and non-JS/TS templates are excluded. Subpath governance requires an explicit public
+`exports` entry; this is deliberately stricter than Node's legacy deep-import
+resolution for packages without `exports`, not a complete Node resolution emulator.
+Missing generated tsconfig parents produce `WS_TSCONFIG` diagnostics without
+preventing other packages from being scanned.
 Computed imports are reported as unverified. A zero-diagnostic report is not proof
 of runtime isolation. The command fails on violations; the new CI inventory is
 advisory until existing findings are reviewed. Regression tests remain mandatory.
@@ -91,10 +100,22 @@ installed Nx and Bun; it verifies diamond ordering, shared-task deduplication,
 uncached rebuilds after deleting outputs, and dependency failure propagation.
 Neither fixtures nor source checks replace actual generated-consumer acceptance.
 
-The first draft also exports temporary bootstrap inputs to allow verification in
-an offline editing environment. Remove these large snapshots and commit the actual
-root tooling lock before marking the PR ready. Do not claim full CI, native package,
-cache or performance validation without the corresponding evidence.
+The Nx workflow verifies all focused regressions, the actual repository project
+graph, real task execution on a diamond fixture, and the app/contracts build pilot.
+It preserves only graph, affected, source-inventory and tool-version evidence;
+source snapshots, node_modules and executable archives are not uploaded.
+
+Source inventory is still advisory. In the reviewed checkout it reports existing
+cross-package/private-entrypoint imports and a missing generated SvelteKit tsconfig;
+these are not silently suppressed or represented as a clean architecture audit.
+Computed imports remain explicitly unverified. Remediating those findings or
+promoting the inventory to a mandatory gate requires a separate review.
+
+The legacy dependency-build helper remains available; this pilot does not yet
+replace every package's preparation steps. Affected pruning, generator sync writes,
+cache enabling, distributed execution and runtime changes are outside this slice.
+Do not claim full CI, native-package, cache or performance validation without the
+corresponding evidence.
 
 Rollback: revert the repository tooling commit. No production API, runtime package
 manifest, deployed resource, schema migration or generated application is changed.

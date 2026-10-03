@@ -13,6 +13,8 @@ on:
       - 'packages/**/package.json'
       - 'packages/**/project.json'
       - 'packages/**/bun.lock'
+      - 'packages/*/src/**'
+      - 'packages/**/tsconfig*.json'
       - '.github/workflows/nx-workspace.yml'
   workflow_dispatch:
 
@@ -43,8 +45,8 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.2'
-      - name: Install pinned repository tooling (bootstrap lock in draft)
-        run: bun install --ignore-scripts
+      - name: Install pinned repository tooling
+        run: bun install --ignore-scripts --frozen-lockfile
       - name: Install existing Compiler parser
         run: bun install --ignore-scripts --frozen-lockfile --cwd packages/compiler
       - name: Workspace and source-boundary regression tests
@@ -73,23 +75,20 @@ jobs:
           else
             node scripts/workspace/cli.mjs affected > .nx/evidence/affected.json
           fi
-      - name: Record bootstrap verification inputs
+      - name: Record verification versions
         if: always()
         run: |
           mkdir -p .nx/evidence
-          git archive HEAD > .nx/evidence/source.tar
-          if [ -f bun.lock ]; then cp bun.lock .nx/evidence/bun.lock; fi
-          if [ -d node_modules ]; then tar -chf .nx/evidence/tooling.tar node_modules; fi
-          if [ -d packages/compiler/node_modules/@typescript/typescript6 ]; then
-            tar -chf .nx/evidence/parser.tar packages/compiler/node_modules/@typescript/typescript6 packages/compiler/node_modules/@typescript/old
-          fi
-          cp "$(command -v bun)" .nx/evidence/bun
           node --version > .nx/evidence/node-version.txt
+          bun --version > .nx/evidence/bun-version.txt
           git rev-parse HEAD > .nx/evidence/commit.txt
+          if [ -f node_modules/nx/package.json ]; then
+            node -p "require('./node_modules/nx/package.json').version" > .nx/evidence/nx-version.txt
+          fi
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: nx-workspace-evidence
           path: .nx/evidence/
           include-hidden-files: true
-          retention-days: 3
+          retention-days: 7
