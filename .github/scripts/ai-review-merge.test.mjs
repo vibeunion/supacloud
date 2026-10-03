@@ -154,7 +154,7 @@ describe('trusted review workflow', () => {
       const installLines = contents.split(/\r?\n/).filter((candidate) => candidate.includes('bun install'));
       const lockfileGenerationLines = installLines.filter((line) => line.includes('--lockfile-only'));
       for (const line of installLines.filter((candidate) => !candidate.includes('--lockfile-only'))) {
-        assert.match(line, /bun install --frozen-lockfile/);
+        assert.match(line, /\bbun install\b[^;&|)\r\n]*\s--frozen-lockfile(?=[\s;)&|]|$)/);
       }
       if (contents === releaseWorkflow) {
         assert.deepEqual(lockfileGenerationLines, Array.from({ length: 10 }, () =>

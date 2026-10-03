@@ -1,47 +1,35 @@
 {
-  "$schema": "https://raw.githubusercontent.com/nrwl/nx/master/packages/nx/schemas/nx-schema.json",
+  "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "defaultBase": "main",
+  "plugins": ["./scripts/workspace/nx-plugin.mjs"],
   "namedInputs": {
-    "default": ["{projectRoot}/**/*", "sharedGlobals"],
-    "production": [
-      "default",
-      "!{projectRoot}/**/?(*.)+(spec|test).[jt]s?(x)?(.snap)",
-      "!{projectRoot}/tsconfig.test.json",
-      "!{projectRoot}/**/__tests__/**"
+    "default": [
+      "{projectRoot}/**/*",
+      "!{projectRoot}/dist/**/*",
+      "!{projectRoot}/node_modules/**/*",
+      "sharedGlobals"
     ],
-    "sharedGlobals": []
+    "production": ["default"],
+    "sharedGlobals": [
+      "{workspaceRoot}/package.json",
+      "{workspaceRoot}/bun.lock",
+      "{workspaceRoot}/nx.json",
+      "{workspaceRoot}/tsconfig*.json",
+      "{workspaceRoot}/scripts/**/*",
+      "{workspaceRoot}/.github/scripts/**/*",
+      "{workspaceRoot}/.github/workflows/**/*",
+      { "runtime": "node --version" },
+      { "runtime": "bun --version" }
+    ]
   },
   "targetDefaults": {
-    "build": {
-      "dependsOn": ["^build"],
-      "inputs": ["production", "^production"],
-      "cache": true
-    },
-    "build:js": {
-      "inputs": ["production", "^production"],
-      "cache": true
-    },
-    "build:types": {
-      "inputs": ["production", "^production"],
-      "cache": true
-    },
-    "test": {
-      "inputs": ["default", "^production"],
-      "cache": true
-    },
-    "typecheck": {
-      "inputs": ["default", "^production"],
-      "cache": true
-    },
-    "typecheck:test": {
-      "inputs": ["default", "^production"],
-      "cache": true
-    },
-    "clean": {
-      "cache": false
-    },
-    "check": {
-      "inputs": ["default", "^production"],
-      "cache": true
-    }
+    "build": { "cache": false },
+    "build:js": { "cache": false },
+    "build:types": { "cache": false },
+    "test": { "cache": false },
+    "typecheck": { "cache": false },
+    "typecheck:test": { "cache": false },
+    "clean": { "cache": false },
+    "check": { "cache": false }
   }
 }

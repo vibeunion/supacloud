@@ -22,6 +22,11 @@ on:
       - "packages/testing/**"
       - "docker/**"
       - "scripts/**"
+      - "package.json"
+      - "bun.lock"
+      - "nx.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/nx-workspace.yml"
       - "infrastructure/realtime/**"
       - "infrastructure/systemd/supacloud-realtime.service"
       - "install.sh"
@@ -178,7 +183,8 @@ jobs:
           - name: SupaCloud JS SDK
             working-directory: packages/supacloud-js
             script: |
-              bun run ../../scripts/build-command-dependencies.ts supacloud-js
+              bun install --ignore-scripts --frozen-lockfile --cwd ../..
+              node ../../scripts/workspace/cli.mjs prepare --project supacloud-js
               bun install --frozen-lockfile
               bun x --no-install tsc -p tsconfig.commands.json
               bun run typecheck
@@ -1219,6 +1225,10 @@ jobs:
     name: App Generation Acceptance
     uses: ./.github/workflows/app-generation.yml
 
+  nx-workspace:
+    name: Nx Workspace Tooling
+    uses: ./.github/workflows/nx-workspace.yml
+
   # Keep this aggregate name stable: main branch protection requires it.
   required-checks:
     name: Required Checks
@@ -1238,6 +1248,7 @@ jobs:
       - shell-scripts-lint
       - caddy-edge-proxy-smoke
       - app-generation
+      - nx-workspace
       - generate-sbom
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -1259,6 +1270,7 @@ jobs:
           SHELL_SCRIPTS_LINT: ${{ needs.shell-scripts-lint.result }}
           CADDY_EDGE_PROXY: ${{ needs.caddy-edge-proxy-smoke.result }}
           APP_GENERATION: ${{ needs.app-generation.result }}
+          NX_WORKSPACE: ${{ needs.nx-workspace.result }}
           SBOM: ${{ needs.generate-sbom.result }}
         run: |
           for result in \
@@ -1276,6 +1288,7 @@ jobs:
             "$SHELL_SCRIPTS_LINT" \
             "$CADDY_EDGE_PROXY" \
             "$APP_GENERATION" \
+            "$NX_WORKSPACE" \
             "$SBOM"; do
             if [[ "$result" != "success" ]]; then
               echo "Required CI job did not succeed: $result" >&2

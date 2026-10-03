@@ -122,3 +122,23 @@ for (const [variable, id] of mappings) {
     });
   }
 }
+
+test('Nx and source regression validation are mandatory without duplicating PR workflows', () => {
+  assert.match(job('nx-workspace'), /uses: \.\/\.github\/workflows\/nx-workspace\.yml/);
+  assert.ok(needs.includes('nx-workspace'));
+  const nx = readFileSync(new URL('../workflows/nx-workspace.yml', import.meta.url), 'utf8');
+  assert.match(nx, /^  workflow_call:$/m);
+  assert.doesNotMatch(nx, /^  pull_request:|continue-on-error/m);
+  assert.match(nx, /bun run check:source-regressions/);
+  assert.match(nx, /bun run test:nx-acceptance/);
+  assert.doesNotMatch(nx, /source\.tar|tooling\.tar|parser\.tar/);
+});
+
+test('SDK preparation uses Nx while preserving existing consumer acceptance', () => {
+  const checks = job('package-checks');
+  const sdk = checks.slice(checks.indexOf('- name: SupaCloud JS SDK'), checks.indexOf('- name: Edge Runtime'));
+  assert.match(sdk, /node \.\.\/\.\.\/scripts\/workspace\/cli\.mjs prepare --project supacloud-js/);
+  assert.match(sdk, /bun install --ignore-scripts --frozen-lockfile --cwd \.\.\/\.\./);
+  assert.doesNotMatch(sdk, /build-command-dependencies/);
+  for (const command of ['bun run typecheck', 'bun run build', 'bun run typecheck:consumer', 'bun test']) assert.ok(sdk.includes(command));
+});

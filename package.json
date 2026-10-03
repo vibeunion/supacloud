@@ -2,6 +2,7 @@
   "version": "0.0.2",
   "type": "module",
   "license": "Apache-2.0",
+  "private": true,
   "scripts": {
     "check:esm": "node .github/scripts/esm-package-policy.mjs",
     "test:esm": "node --experimental-strip-types --test .github/scripts/esm-package-policy.test.mjs .github/scripts/esm-package-launcher.test.mjs .github/scripts/esm-package-cli-resolution.test.mjs .github/scripts/esm-package-sdk.test.mjs",
@@ -14,10 +15,23 @@
     "typecheck:tools": "bun run --cwd packages/compiler tsc -p ../../tsconfig.tools.json --noEmit",
     "check:public-api": "bun scripts/check_public_api.ts",
     "update:public-api": "bun scripts/check_public_api.ts --update",
-    "check:diagnostic-docs": "bun scripts/check_diagnostic_docs.ts"
+    "check:diagnostic-docs": "bun scripts/check_diagnostic_docs.ts",
+    "nx": "node scripts/workspace/nx.mjs",
+    "check:workspace": "node scripts/workspace/cli.mjs check",
+    "workspace:graph": "node scripts/workspace/cli.mjs graph",
+    "workspace:affected": "node scripts/workspace/cli.mjs affected",
+    "workspace:build": "node scripts/workspace/cli.mjs build",
+    "workspace:prepare": "node scripts/workspace/cli.mjs prepare",
+    "test:workspace": "node --test scripts/workspace/workspace.test.mjs scripts/workspace/source.test.mjs scripts/workspace/nx.test.mjs scripts/workspace/source-hardening.test.mjs scripts/workspace/source-baseline.test.mjs",
+    "check:source-boundaries": "bun scripts/workspace/source-check.mjs",
+    "check:source-regressions": "bun scripts/workspace/source-check.mjs --baseline",
+    "test:nx-acceptance": "node scripts/workspace/nx.acceptance.mjs"
   },
   "dependencies": {
     "@types/ws": "^8.18.1",
     "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "nx": "23.2.1"
   }
 }
