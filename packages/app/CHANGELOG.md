@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/vibeunion/supacloud/compare/app-v0.21.1...app-v0.22.0) (2026-10-03)
+
+
+### Features
+
+* converge SDK-aware vibecoding defaults and local development ([#1607](https://github.com/vibeunion/supacloud/issues/1607)) ([cd66672](https://github.com/vibeunion/supacloud/commit/cd6667252a6a8fe0cc0539bc8610ebb8a818af51))
+
 ## [0.21.1](https://github.com/vibeunion/supacloud/compare/app-v0.21.0...app-v0.21.1) (2026-10-02)
 
 

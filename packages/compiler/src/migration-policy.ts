@@ -26,7 +26,7 @@ function compilerVersion(): string {
 // module from locations where that file does not exist at load time.
 export function migrationDependencies(): Readonly<Record<string, string>> {
   return {
-    "@supacloud/app": "0.21.1",
+    "@supacloud/app": "0.22.0",
     "@supacloud/compiler": compilerVersion(),
     "@supacloud/elysia": "0.23.1",
     elysia: "2.0.0-beta.19",
