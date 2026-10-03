@@ -1,0 +1,37 @@
+name: Nx Verification Snapshot
+on:
+  push:
+    branches: [work/nx-completion-verification-20261003]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: 244d92c43d5e021b3c49f1abc9568a4ea7f14150
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Prepare pinned local verification inputs
+        run: |
+          bun install --frozen-lockfile --ignore-scripts
+          bun install --frozen-lockfile --ignore-scripts --cwd packages/compiler
+          bun run workspace:build --project app
+          mkdir -p /tmp/nx-verification
+          git archive HEAD > /tmp/nx-verification/source.tar
+          git rev-parse HEAD > /tmp/nx-verification/commit.txt
+          tar -chf /tmp/nx-verification/dependencies.tar node_modules packages/compiler/node_modules packages/contracts/node_modules packages/app/node_modules packages/contracts/dist packages/app/dist
+          tar -C "$HOME/.bun/install" -cf /tmp/nx-verification/bun-cache.tar cache
+          cp "$(command -v node)" /tmp/nx-verification/node
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nx-completion-verification-inputs
+          path: /tmp/nx-verification/
+          retention-days: 1
