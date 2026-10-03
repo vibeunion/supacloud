@@ -65,6 +65,11 @@ export async function runLocalDevelopment(options: LocalDevOptions) {
     || process.env.SUPACLOUD_ENV === "production") {
     throw new Error("Local development refuses production or staging environment selectors");
   }
+  const remoteKeys = ["SUPACLOUD_API_URL", "SUPACLOUD_API_TOKEN", "SUPACLOUD_PROJECT_REF"];
+  if (remoteKeys.some(key => process.env[key] !== undefined)
+    && (process.env.SUPACLOUD_ENV !== "test" || remoteKeys.some(key => !process.env[key]?.trim()))) {
+    throw new Error("Inherited remote context must be complete and explicitly tagged with SUPACLOUD_ENV=test");
+  }
   const script = profile === "integration" ? "dev:integration" : "dev";
   const manifest: unknown = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
   const scripts = manifest && typeof manifest === "object" && "scripts" in manifest

@@ -122,6 +122,32 @@ test("missing integration script and unsafe database targets fail before any app
     .toBe("postgresql://local:synthetic@127.0.0.1:5432/dev");
 });
 
+test("dev never relabels untagged or partial remote credentials as test credentials", async () => {
+  const root = await fixture('throw new Error("must not run")');
+  const keys = ["APP_ENV", "SUPACLOUD_ENV", "SUPACLOUD_API_URL", "SUPACLOUD_API_TOKEN", "SUPACLOUD_PROJECT_REF"];
+  const saved = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  try {
+    for (const key of keys) delete process.env[key];
+    process.env.SUPACLOUD_API_URL = "https://fixture.invalid";
+    process.env.SUPACLOUD_API_TOKEN = "fixture-secret";
+    process.env.SUPACLOUD_PROJECT_REF = "fixture";
+    await expect(runLocalDevelopment({ root })).rejects.toThrow("complete and explicitly tagged");
+    process.env.SUPACLOUD_ENV = "test";
+    delete process.env.SUPACLOUD_PROJECT_REF;
+    await expect(runLocalDevelopment({ root })).rejects.toThrow("complete and explicitly tagged");
+    process.env.SUPACLOUD_PROJECT_REF = "fixture";
+    const abort = new AbortController();
+    abort.abort();
+    expect(await runLocalDevelopment({ root, signal: abort.signal })).toMatchObject({ state: "stopped" });
+  } finally {
+    for (const key of keys) {
+      const value = saved[key];
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+});
+
 test("output observer failures stop the child and retain the failure", async () => {
   const root = await fixture('console.log("ready"); setInterval(() => {}, 100)');
   const failure = new Error("observer failed");
