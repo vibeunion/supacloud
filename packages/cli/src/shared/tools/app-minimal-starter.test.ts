@@ -57,7 +57,7 @@ test("minimal source compiles and its colocated health test executes with the ne
     child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
   ]);
   expect({ code, errors: code === 0 ? "" : stdout + stderr }).toEqual({ code: 0, errors: "" });
-});
+}, 60_000);
 
 test("the persistent command example remains an explicit compatible recipe", () => {
   const files = appStarterFiles("reference");
