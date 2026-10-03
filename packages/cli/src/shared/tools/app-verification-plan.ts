@@ -3,7 +3,7 @@ import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { ApplicationGraph } from "@supacloud/compiler";
 
 function inside(root: string, file: string): boolean {
-  const path = relative(root, file);
+  const path = relative(root, file).replaceAll("\\", "/");
   return path !== ".." && !path.startsWith("../") && !isAbsolute(path);
 }
 

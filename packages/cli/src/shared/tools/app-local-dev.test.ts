@@ -8,7 +8,7 @@ const roots: string[] = [];
 async function fixture(source: string, scripts: Record<string, string> = { dev: "bun --no-env-file server.ts" }) {
   const root = await mkdtemp(join(tmpdir(), "app-local-dev-"));
   roots.push(root);
-  await writeFile(join(root, "package.json"), JSON.stringify({ scripts }));
+  await writeFile(join(root, "package.json"), JSON.stringify({ type: "module", scripts }));
   await writeFile(join(root, "server.ts"), source);
   return root;
 }
@@ -32,6 +32,40 @@ test("local dev bundles for Node and does not require Bun until integration runs
   ]);
   expect({ code, errors: code ? stdout + stderr : "" }).toEqual({ code: 0, errors: "" });
 });
+
+test("Node integration reaches the Bun database preflight and fails closed without leaking credentials", async () => {
+  const root = await fixture('console.log("MUST_NOT_START")', {
+    "dev:integration": "bun --no-env-file server.ts",
+  });
+  const build = await Bun.build({
+    entrypoints: [join(import.meta.dir, "app-local-dev.ts")], target: "node", outdir: root,
+  });
+  expect(build.success).toBe(true);
+  const listener = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("") });
+  const port = listener.port;
+  await listener.stop(true);
+  const child = Bun.spawn(["node", "--input-type=module", "-e", `
+    import { runLocalDevelopment } from ${JSON.stringify(join(root, "app-local-dev.js"))};
+    try {
+      await runLocalDevelopment({ root: ${JSON.stringify(root)}, profile: "integration",
+        databaseUrl: process.env.SUPACLOUD_DEV_DATABASE_URL, onOutput: text => console.log(text) });
+      process.exitCode = 1;
+    } catch (error) {
+      if (!error.message.startsWith("Integration database verification failed;")) throw error;
+      console.log("PREFLIGHT_REJECTED");
+    }`], {
+    env: { ...process.env, APP_ENV: "development", SUPACLOUD_ENV: "test",
+      SUPACLOUD_DEV_DATABASE_URL: `postgresql://fixture:private-fixture-secret@127.0.0.1:${port}/fixture` },
+    stdout: "pipe", stderr: "pipe",
+  });
+  const timeout = setTimeout(() => child.kill("SIGKILL"), 15_000);
+  try {
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+    ]);
+    expect({ code, stdout, stderr }).toEqual({ code: 0, stdout: "PREFLIGHT_REJECTED\n", stderr: "" });
+  } finally { clearTimeout(timeout); }
+}, 20_000);
 
 test("dev launches the actual project script, serves HTTP and shuts down on cancellation", async () => {
   const root = await fixture(`

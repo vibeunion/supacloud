@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, mkdir, writeFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import type { ApplicationGraph } from "@supacloud/compiler";
 import { createVerificationPlan } from "./app-verification-plan";
 
@@ -67,4 +67,14 @@ test("symlinked source directories cannot enumerate another project", async () =
   const plan = await createVerificationPlan(root, graph, "health");
   expect(plan.ready).toBe(false);
   expect(plan.tests).toEqual([]);
+});
+
+test("parent-directory sources cannot enumerate a sibling project using native path separators", async () => {
+  const { root, graph } = await fixture();
+  const outside = await fixture();
+  graph.modules[0]!.file = relative(root, join(outside.root, "src/health/health.ts"));
+  const plan = await createVerificationPlan(root, graph, "health");
+  expect(plan.ready).toBe(false);
+  expect(plan.tests).toEqual([]);
+  expect(plan.manual).toContain("A source directory is outside the project; select its owning project explicitly");
 });

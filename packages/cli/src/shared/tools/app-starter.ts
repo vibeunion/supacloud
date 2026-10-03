@@ -191,6 +191,7 @@ await watcher.ready;
         "scripts/integration.ts": `if (process.env.APP_ENV !== "development") throw new Error("Integration is development-only");
 process.env.SUPACLOUD_DEV_PROFILE = "integration";
 await import("./dev");
+export {};
 `,
         "scripts/serve-integration.ts": `import { createCompiledModules } from "../generated/application";
 import { createDeliveryApplication } from "../src/delivery-host";

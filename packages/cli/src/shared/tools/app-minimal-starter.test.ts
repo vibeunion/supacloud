@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdtemp, readFile, writeFile, symlink, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile, symlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { compileProject } from "@supacloud/compiler";
@@ -66,4 +66,24 @@ test("the persistent command example remains an explicit compatible recipe", () 
   expect(files["scripts/serve-integration.ts"]).toContain("createDeliveryApplication");
   expect(files["scripts/serve-integration.ts"]).not.toContain("createMemorySandbox");
   expect(files["scripts/dev.ts"]).toContain("scripts/serve-integration.ts");
+});
+
+test("generated integration entry typechecks as a module with top-level await", async () => {
+  const root = await mkdtemp(join(tmpdir(), "integration-entry-"));
+  roots.push(root);
+  const dependencies = resolve(import.meta.dir, "../../../node_modules");
+  await symlink(dependencies, join(root, "node_modules"), "dir");
+  await mkdir(join(root, "scripts"));
+  await writeFile(join(root, "scripts/integration.ts"), appStarterFiles("reference")["scripts/integration.ts"]!);
+  // Isolate the entry's module contract from the watcher's separately tested implementation.
+  await writeFile(join(root, "scripts/dev.ts"), "export {};\n");
+  const child = Bun.spawn([process.execPath, join(dependencies, "typescript/bin/tsc"),
+    "--noEmit", "--target", "ES2022", "--module", "ESNext", "--moduleResolution", "bundler",
+    "--types", "bun", "--skipLibCheck", "scripts/integration.ts"], {
+    cwd: root, stdout: "pipe", stderr: "pipe",
+  });
+  const [code, stdout, stderr] = await Promise.all([
+    child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+  ]);
+  expect({ code, errors: code ? stdout + stderr : "" }).toEqual({ code: 0, errors: "" });
 });

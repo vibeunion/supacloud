@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
@@ -23,19 +23,28 @@ export function localDatabaseUrl(value: string | undefined): string {
   }
 }
 
-async function probeDatabase(url: string): Promise<void> {
-  if (!process.versions.bun) throw new Error("Integration preflight requires the Bun CLI runtime");
-  const { SQL } = Bun;
-  let database: import("bun").SQL | undefined;
+async function probeDatabase(url: string, signal?: AbortSignal): Promise<void> {
+  // The installed CLI runs in Node; use the same Bun runtime as the dev script.
+  // Keep credentials in the child environment, never argv or diagnostic output.
+  const source = `const database = new Bun.SQL(process.env.SUPACLOUD_DEV_DATABASE_URL, {
+    max: 1, connectionTimeout: 5,
+  });
   try {
-    database = new SQL(url, { max: 1, connectionTimeout: 5 });
-    const query = database`SELECT current_database() AS name,
+    const rows = await database\`SELECT current_database() AS name,
       r.rolsuper AS superuser, r.rolbypassrls AS bypass_rls
-      FROM pg_roles r WHERE r.rolname = current_user`;
-    const timeout = setTimeout(() => query.cancel(), 5000);
-    let rows: unknown;
-    try { rows = await query; }
-    finally { clearTimeout(timeout); }
+      FROM pg_roles r WHERE r.rolname = current_user\`;
+    console.log(JSON.stringify(rows));
+  } finally {
+    await database.close({ timeout: 1 });
+  }`;
+  try {
+    const stdout = await new Promise<string>((resolveOutput, reject) => {
+      execFile(process.versions.bun ? process.execPath : "bun", ["--no-env-file", "-e", source], {
+        env: { ...process.env, SUPACLOUD_DEV_DATABASE_URL: url },
+        timeout: 12_000, killSignal: "SIGKILL", maxBuffer: 4096, encoding: "utf8", signal,
+      }, (error, output) => error ? reject(error) : resolveOutput(output));
+    });
+    const rows: unknown = JSON.parse(stdout);
     const expected = decodeURIComponent(new URL(url).pathname.slice(1));
     if (!Array.isArray(rows) || rows.length !== 1) throw new Error();
     const row: unknown = rows[0];
@@ -44,10 +53,6 @@ async function probeDatabase(url: string): Promise<void> {
       || !("bypass_rls" in row) || row.bypass_rls !== false) throw new Error();
   } catch {
     throw new Error("Integration database verification failed; check connectivity, database identity and non-privileged application role");
-  } finally {
-    await database?.close({ timeout: 1 }).catch(() => {
-      throw new Error("Integration database cleanup failed");
-    });
   }
 }
 
@@ -75,7 +80,7 @@ export async function runLocalDevelopment(options: LocalDevOptions) {
     throw new Error("A database URL requires the integration profile");
   }
   if (options.signal?.aborted) return { profile, script, exitCode: 0, state: "stopped" as const };
-  if (databaseUrl) await probeDatabase(databaseUrl);
+  if (databaseUrl) await probeDatabase(databaseUrl, options.signal);
   if (options.signal?.aborted) return { profile, script, exitCode: 0, state: "stopped" as const };
   const env: NodeJS.ProcessEnv = {
     ...process.env, APP_ENV: "development", SUPACLOUD_ENV: "test", SUPACLOUD_DEV_PROFILE: profile,
