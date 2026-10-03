@@ -4,7 +4,7 @@
   "packages/edge-runtime": "0.28.0",
   "packages/pgredis-runtime": "0.11.0",
   "packages/supacloud-js": "0.36.1",
-  "packages/cli": "0.64.0",
+  "packages/cli": "0.64.1",
   "packages/admin": "0.24.0",
   "packages/supacloud": "0.14.3",
   "packages/function-adapter": "0.4.0",
@@ -14,7 +14,7 @@
   "packages/app-svelte": "0.4.0",
   "packages/app": "0.22.0",
   "packages/delivery": "0.4.0",
-  "packages/compiler": "0.31.1",
+  "packages/compiler": "0.31.2",
   "packages/elysia": "0.23.1",
   "packages/db": "0.13.0",
   "packages/testing": "0.6.0"
