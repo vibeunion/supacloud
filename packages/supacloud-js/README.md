@@ -2,6 +2,13 @@
 
 `@supacloud/js` is the platform SDK for SupaCloud.
 
+It serves frontend applications as well as trusted servers. Reuse one existing
+Supabase client and its user session; do not create a second authentication
+store. Frontend frameworks own UI state, routing and forms, while generated
+application clients own business-specific contracts. See
+[Frontend SDK Integration](../../docs/frontend-sdk-integration.md) for the
+shared-session recipe and the browser/server capability boundary.
+
 It does **not** replace [`@supabase/supabase-js`](https://www.npmjs.com/package/@supabase/supabase-js). Instead, it wraps a normal Supabase client and adds SupaCloud-specific capabilities such as:
 
 - background task submission

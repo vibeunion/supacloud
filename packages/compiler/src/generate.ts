@@ -1539,7 +1539,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "",
     "export interface ApiClientConfig {",
     "  baseUrl?: string;",
-    "  fetch?: typeof fetch;",
+    "  fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;",
     "  headers?: Record<string, string> | (() => Record<string, string> | Promise<Record<string, string>>);",
     "  interceptors?: HttpInterceptorFn[];",
     "  /** Normalize response objects like Elysia's default schema validator. */",

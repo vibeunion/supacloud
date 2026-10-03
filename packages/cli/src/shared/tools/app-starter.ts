@@ -439,6 +439,28 @@ compiler-checked command/route/governance bindings, an explicit AOP function,
 HTTP schemas, permission denial, transaction rollback, idempotency and audit.
 It is not a complete Maker-Checker workflow or a production authorization policy.
 
+## Frontend SDK Boundary
+
+Use @supacloud/js as the platform SDK around your existing user-scoped
+@supabase/supabase-js client. Pass that same client to existing UI providers;
+supacloud.supabase exposes it unchanged. Keep UI routing, forms and query
+caches in your frontend framework or svadmin, not in a new DI container.
+
+For generated/client.ts, supply createAuthenticatedFetch from
+@supacloud/js/contracts as its fetch option. Resolve the current user token
+from the same Supabase session for each request; do not capture a token at
+startup or introduce a second session store. Use a fixed trusted HTTPS API
+origin. The authenticated transport rejects missing credentials and redirects
+and does not replay a write after 401. Its underlying fetch must also be
+single-attempt.
+
+Reuse the same session resolver for generated/graphql.ts when adopting queries.
+The local memory demo is not this authenticated production integration.
+Never use supacloud.commands or supacloud.workflows from a browser action:
+those RPCs require service-role credentials. Browser business commands use
+application endpoints, optionally composed through @supacloud/js/contracts.
+Management API tokens and service-role keys remain on trusted servers.
+
 ## Typed Queries
 
 This starter uses Database First as its only GraphQL server-schema model.
