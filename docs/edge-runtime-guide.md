@@ -76,6 +76,14 @@ closed with `Attested Function imports require Linux descriptor binding`
 before the module loader evaluates user code. Production hosts that serve
 canonical activations must therefore run Linux.
 
+## Application Lifecycle Proposal
+
+Request drain and Worker retirement do not by themselves guarantee that an
+application's `destroy()` hook is awaited. The proposed opt-in module contract,
+tenant-isolation requirements and acceptance plan are documented in
+[Explicit Edge Function Application Lifecycle](./edge-function-lifecycle-proposal.md).
+That document is a proposal, not a supported runtime API.
+
 ## Dependency Management
 
 **Edge Runtime dependencies** (Elysia etc.) are declared in `packages/edge-runtime/package.json`.
