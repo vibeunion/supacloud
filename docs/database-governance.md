@@ -12,6 +12,11 @@ SQL 源文件（实现）
 
 ## 目录约定
 
+数据库 starter 默认使用 Drizzle 维护结构，并通过 `supacloud-db check`
+检查源码边界与 RPC 契约新鲜度。完整 SQL 导出只用于审计，不作为日常类型或测试输入。
+存量项目先运行只读评估；参见 [Database Source Contracts](./database-source-contracts.md)。
+离线检查不替代下文的 Catalog、权限与行为验证。
+
 ```
 features/case/db/
   manifest.ts              # defineDatabaseModule

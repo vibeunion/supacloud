@@ -23,6 +23,7 @@ import { optional, parseToolArguments, stringEnum, withDescription } from "../sc
 import type { ToolSchema } from "../schema";
 import { buildToolDefinitions, type AppManifest } from "./app-tool-export";
 import { initializeAppProject } from "./app-starter";
+import { checkAppDatabaseSources } from "./app-database-check";
 import { APPLICATION_TOOL_SCHEMA } from "./application-tools";
 import { resourceScaffold } from "./app-resource";
 import { applyScaffoldWrites, planScaffoldWrites, scaffoldPath, ScaffoldError, type ScaffoldWrite } from "./app-scaffold-writes";
@@ -122,6 +123,7 @@ async function initProject(args: AppToolArguments): Promise<ToolResult> {
         `Initialized ${name} in ${root} (${files.length} files, template: ${template}).`,
         `cd '${root.replaceAll("'", "'\\''")}'`,
         "bun install",
+        ...(template === "command" ? ["bun run db:generate"] : []),
         "bun run check",
         "bun run dev",
         "Local demo only. Production requires persistent governance and identity adapters; see README.md.",
@@ -537,6 +539,11 @@ async function findUnwiredContracts(rootDir: string): Promise<UnwiredContract[]>
 async function runDoctor(args: AppToolArguments): Promise<ToolResult> {
     const { root, outDir, result } = await projectCompileConfig(args);
     const doctor = doctorProject(root, outDir, result.graph, result.upToDate, result.diagnostics);
+    const database = checkAppDatabaseSources(root);
+    if (database) {
+        doctor.checks.push(database);
+        if (!database.ok) doctor.errors += 1;
+    }
     const fixPlan = doctorFixPlan(doctor);
     const autoFixable = fixPlan.filter((repair) => repair.readiness === "preview").length;
     const inputRequired = fixPlan.filter((repair) => repair.readiness === "input-required").length;
@@ -773,6 +780,7 @@ async function runCompile(args: AppToolArguments): Promise<ToolResult> {
 
 async function runCheck(args: AppToolArguments): Promise<ToolResult> {
     const root = resolve(args.root || process.cwd());
+    const database = checkAppDatabaseSources(root);
     const loadedConfig = await loadSupacloudConfig(root);
     const defaults = resolveSupacloudConfig(loadedConfig, root);
     const configuredRoot = sourceRoot(args, root, loadedConfig.root);
@@ -786,16 +794,18 @@ async function runCheck(args: AppToolArguments): Promise<ToolResult> {
     }, root);
     const result = await checkProject(config);
     const hasError = result.diagnostics.some((diagnostic) => diagnostic.severity === "error")
-        || result.mismatches.length > 0;
+        || result.mismatches.length > 0 || database?.ok === false;
     if (args.format === "json") return textResult(JSON.stringify({
         version: 1, ok: !hasError, source: "declaration", diagnostics: result.diagnostics,
         mismatches: result.mismatches, upToDate: result.upToDate, written: [],
         modules: result.graph.modules.map((module) => module.name),
+        ...(database ? { database } : {}),
     }, null, 2), hasError);
     const summary = `checked ${result.graph.modules.length} module(s), no files written`;
     return textResult([
         formatDiagnostics(result.diagnostics),
         ...result.mismatches.map((path) => `generated artifact mismatch: ${path}`),
+        ...(database ? [`${database.ok ? "OK" : "FAIL"} ${database.name}: ${database.detail}`] : []),
         "", summary,
     ].join("\n"), hasError);
 }
@@ -1017,6 +1027,12 @@ async function runExportTools(args: AppToolArguments): Promise<ToolResult> {
 
 async function runDelivery(args: AppToolArguments): Promise<ToolResult> {
     const root = resolve(args.root || process.cwd());
+    if (args.action === "build") {
+        const database = checkAppDatabaseSources(root);
+        if (database && !database.ok) {
+            return textResult(JSON.stringify({ ok: false, database, written: [] }, null, 2), true);
+        }
+    }
     const loaded = await loadSupacloudConfig(root);
     const options = compileOptionsFromConfig({
         ...loaded,
