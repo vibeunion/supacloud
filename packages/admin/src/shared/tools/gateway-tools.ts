@@ -1,7 +1,7 @@
 import type { HttpTransport as AdminHttpTransport } from "../transports/http";
 import {
     registerGatewayTools as registerCliGatewayTools,
-} from "../../../../cli/src/shared/tools/gateway-tools";
+} from "@supacloud/cli/gateway-tools";
 
 export function registerGatewayTools(
     server: Parameters<typeof registerCliGatewayTools>[0],

@@ -1,7 +1,9 @@
 {
   "$schema": "./node_modules/nx/schemas/nx-schema.json",
   "defaultBase": "main",
-  "plugins": ["./scripts/workspace/nx-plugin.mjs"],
+  "plugins": [
+    "./scripts/workspace/nx-plugin.mjs"
+  ],
   "namedInputs": {
     "default": [
       "{projectRoot}/**/*",
@@ -9,7 +11,9 @@
       "!{projectRoot}/node_modules/**/*",
       "sharedGlobals"
     ],
-    "production": ["default"],
+    "production": [
+      "default"
+    ],
     "sharedGlobals": [
       "{workspaceRoot}/package.json",
       "{workspaceRoot}/bun.lock",
@@ -18,18 +22,40 @@
       "{workspaceRoot}/scripts/**/*",
       "{workspaceRoot}/.github/scripts/**/*",
       "{workspaceRoot}/.github/workflows/**/*",
-      { "runtime": "node --version" },
-      { "runtime": "bun --version" }
+      {
+        "runtime": "node --version"
+      },
+      {
+        "runtime": "bun --version"
+      },
+      "{workspaceRoot}/bunfig.toml",
+      "{workspaceRoot}/release-please-config.json"
     ]
   },
   "targetDefaults": {
-    "build": { "cache": false },
-    "build:js": { "cache": false },
-    "build:types": { "cache": false },
-    "test": { "cache": false },
-    "typecheck": { "cache": false },
-    "typecheck:test": { "cache": false },
-    "clean": { "cache": false },
-    "check": { "cache": false }
+    "build": {
+      "cache": false
+    },
+    "build:js": {
+      "cache": false
+    },
+    "build:types": {
+      "cache": false
+    },
+    "test": {
+      "cache": false
+    },
+    "typecheck": {
+      "cache": false
+    },
+    "typecheck:test": {
+      "cache": false
+    },
+    "clean": {
+      "cache": false
+    },
+    "check": {
+      "cache": false
+    }
   }
 }

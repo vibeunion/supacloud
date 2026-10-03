@@ -37,6 +37,12 @@ jobs:
         run: bun install --ignore-scripts --frozen-lockfile
       - name: Install existing Compiler parser
         run: bun install --ignore-scripts --frozen-lockfile --cwd packages/compiler
+      - name: Check managed metadata and pinned asset synchronization
+        run: bun run check:workspace-sync
+      - name: Generate the real SvelteKit resolution config
+        run: |
+          bun install --ignore-scripts --frozen-lockfile --cwd packages/web-console
+          (cd packages/web-console && bun x --no-install svelte-kit sync)
       - name: Workspace and source-boundary regression tests
         run: bun run test:workspace
       - name: Reject new source-boundary and coverage findings
@@ -53,6 +59,15 @@ jobs:
         run: bun run test:nx-acceptance
       - name: Build the app/contracts pilot using the actual repository task graph
         run: bun run workspace:build --project app
+      - name: Verify selective local caching against real outputs
+        run: bun run test:nx-cache --repository
+      - name: Verify extracted public APIs and security helpers
+        run: |
+          bun run workspace:prepare --project cli
+          (cd packages/cli && bun install --frozen-lockfile && bun run build)
+          bun run test:nx-public-api
+          bun install --ignore-scripts --frozen-lockfile --cwd packages/management-api
+          bun test packages/management-api/tests/unit/release-manifest.test.ts packages/management-api/tests/unit/upgrade-lock.test.ts
       - name: Record affected shadow plan without selecting or skipping CI jobs
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

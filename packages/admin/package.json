@@ -34,7 +34,8 @@
   "dependencies": {
     "@sinclair/typebox": "^0.34.52",
     "@supacloud/cli": "file:../cli",
-    "ssh2": "^1.17.0"
+    "ssh2": "^1.17.0",
+    "@supacloud/delivery": "file:../delivery"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",

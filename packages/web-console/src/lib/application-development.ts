@@ -3,7 +3,7 @@ import {
   APPLICATION_DEVELOPMENT_LIMITS,
   parseDevelopmentContext,
   type DevelopmentContext,
-} from "../../../delivery/src/application-development";
+} from "@supacloud/delivery/development";
 import { requestValidatedJson } from "./validated-json";
 import { validApplicationScope, type ApplicationScope } from "./application-dashboard";
 

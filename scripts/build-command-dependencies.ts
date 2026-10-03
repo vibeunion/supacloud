@@ -1,28 +1,17 @@
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
-const dependencies: Readonly<Record<string, readonly string[]>> = {
-  "supacloud-js": ["contracts"],
-  "supacloud-lite": ["contracts", "supacloud-js", "commands", "delivery", "compiler", "db", "app", "elysia"],
-  app: ["contracts"],
-  compiler: ["contracts", "delivery"],
-  db: ["contracts", "commands", "delivery", "compiler"],
-  commands: ["contracts"],
-  "app-svelte": ["contracts"],
-  elysia: ["contracts", "commands", "delivery", "compiler", "db", "app"],
-};
 const consumer = process.argv[2];
-if (consumer === undefined || !Object.hasOwn(dependencies, consumer)) {
-  throw new Error("Expected a command consumer package name");
-}
-const order = dependencies[consumer];
-if (order === undefined) throw new Error("Missing dependency order");
+if (!consumer || process.argv.length !== 3) throw new Error("Expected one workspace consumer package name");
 const root = fileURLToPath(new URL("../", import.meta.url));
-for (const name of order) {
-  for (const args of [["install", "--force", "--ignore-scripts", "--frozen-lockfile"], ["run", "build"]]) {
-    const result = Bun.spawnSync([process.execPath, ...args], {
-      cwd: resolve(root, "packages", name), stdout: "inherit", stderr: "inherit",
-    });
-    if (result.exitCode !== 0) throw new Error(`Dependency build failed: ${name}`);
-  }
+function run(command: string, args: string[]): void {
+  const result = Bun.spawnSync([command, ...args], { cwd: root, stdout: "inherit", stderr: "inherit" });
+  if (result.exitCode !== 0) throw new Error(`Workspace dependency preparation failed (${result.exitCode})`);
 }
+// This repository-only helper has always installed dependencies. It does not ship in applications.
+if (!(await Bun.file(resolve(root, "node_modules/nx/package.json")).exists())) {
+  run(process.execPath, ["install", "--ignore-scripts", "--frozen-lockfile"]);
+}
+const node = Bun.which("node");
+if (!node) throw new Error("Node.js is required by repository Nx tooling");
+run(node, [resolve(root, "scripts/workspace/cli.mjs"), "prepare", "--project", consumer]);

@@ -23,6 +23,7 @@ const topology = { shared: [], left: ['shared'], right: ['shared'], app: ['left'
 const transitive = (name) => [...new Set(topology[name].flatMap((dependency) => [dependency, ...transitive(dependency)]))];
 try {
   cpSync(resolve(repository, 'scripts/workspace'), resolve(root, 'scripts/workspace'), { recursive: true });
+  put('scripts/workspace/policy.json', { schemaVersion: 1 });
   symlinkSync(resolve(repository, 'node_modules'), resolve(root, 'node_modules'), 'junction');
   put('package.json', { name: 'nx-fixture', private: true, type: 'module' });
   put('tsconfig.base.json', { compilerOptions: { paths: {} }, files: [] });

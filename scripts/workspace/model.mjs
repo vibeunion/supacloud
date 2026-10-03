@@ -16,6 +16,7 @@ export function readWorkspace(root) {
   for (const entry of readdirSync(resolve(root, 'packages'), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
     if (entry.isSymbolicLink()) throw new Error(`Symlinked workspace package requires explicit ownership: ${entry.name}`);
     if (!entry.isDirectory()) continue;
+    if (!/^[a-zA-Z0-9._-]+$/.test(entry.name)) throw new Error(`Unsafe package directory: ${entry.name}`);
     const projectRoot = `packages/${entry.name}`;
     const manifestPath = resolve(root, projectRoot, 'package.json');
     if (!existsSync(manifestPath)) continue;
@@ -65,7 +66,24 @@ export function readWorkspace(root) {
       }
     }
   }
-  const workspace = { root, projects, edges };
+  const policyPath = resolve(root, 'scripts/workspace/policy.json');
+  const policy = existsSync(policyPath) ? readJson(policyPath) : { schemaVersion: 1 };
+  const record = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!record(policy)) throw new Error('Invalid workspace policy.');
+  for (const key of ['verificationPrerequisites', 'fileInputs']) if (key in policy && !record(policy[key])) throw new Error(`Invalid workspace policy: ${key}`);
+  if (policy.schemaVersion !== 1 || Object.keys(policy).some((key) => !['schemaVersion', 'verificationPrerequisites', 'fileInputs', 'cacheBuilds'].includes(key))) throw new Error('Invalid workspace policy.');
+  for (const [name, prerequisites] of Object.entries(policy.verificationPrerequisites ?? {})) {
+    if (!projects[name] || !Array.isArray(prerequisites) || new Set(prerequisites).size !== prerequisites.length) throw new Error(`Invalid verification prerequisites: ${name}`);
+    for (const target of prerequisites) {
+      if (!projects[target] || name === target) throw new Error(`Invalid verification prerequisite: ${name} -> ${target}`);
+      edges.push({ source: name, target, kind: 'verification', local: false, sourceFile: 'scripts/workspace/policy.json' });
+    }
+  }
+  for (const [name, inputs] of Object.entries(policy.fileInputs ?? {})) {
+    if (!projects[name] || !Array.isArray(inputs) || inputs.some((file) => typeof file !== 'string' || !/^packages\/[a-zA-Z0-9._/-]+$/.test(file) || file.split('/').some((part) => !part || part === '.' || part === '..'))) throw new Error(`Invalid generated inputs: ${name}`);
+  }
+  if ('cacheBuilds' in policy && (!Array.isArray(policy.cacheBuilds) || new Set(policy.cacheBuilds).size !== policy.cacheBuilds.length || policy.cacheBuilds.some((name) => typeof name !== 'string' || typeof projects[name]?.scripts.build !== 'string'))) throw new Error('Invalid cached build policy.');
+  const workspace = { root, projects, edges, policy };
   assertAcyclic(workspace);
   return workspace;
 }
@@ -85,8 +103,8 @@ export function assertAcyclic({ projects, edges }) {
 }
 
 /** Source-only local packages still need installation of their own prerequisites. */
-export function preparationTargets(workspace, name) {
-  return [...new Set(workspace.edges.filter((edge) => edge.source === name && edge.local).map((edge) => edge.target))]
+export function preparationTargets(workspace, name, verification = false) {
+  return [...new Set(workspace.edges.filter((edge) => edge.source === name && (edge.local || verification && edge.kind === 'verification')).map((edge) => edge.target))]
     .sort().map((name) => ({ projects: [name],
       target: typeof workspace.projects[name].scripts.build === 'string' ? 'repo-build' : 'repo-install', params: 'ignore' }));
 }
@@ -110,7 +128,9 @@ export function graphReport(workspace) {
   return {
     schemaVersion: 1,
     projects: Object.values(workspace.projects).map(({ manifest, ...project }) => ({
-      ...project, buildPrerequisites: buildPrerequisites(workspace, project.name), preparationTargets: preparationTargets(workspace, project.name),
+      ...project, buildPrerequisites: buildPrerequisites(workspace, project.name), preparationTargets: preparationTargets(workspace, project.name, true),
+      fileInputs: workspace.policy?.fileInputs?.[project.name] ?? [],
+      cacheBuild: workspace.policy?.cacheBuilds?.includes(project.name) ?? false,
     })),
     edges: workspace.edges,
     acceptance: { name: ACCEPTANCE_PROJECT, dependsOn: Object.keys(workspace.projects).sort(), cache: false },
@@ -127,6 +147,9 @@ export function affectedReport(workspace, files, fallbackReason) {
     if (!owner || file.includes('/../') || file.startsWith('../')) {
       fullReasons.push(`Shared, deleted-project, or unowned input: ${file}`);
     } else {
+      for (const [consumer, inputs] of Object.entries(workspace.policy?.fileInputs ?? {})) {
+        if (inputs.includes(file)) reasons.set(consumer, [...(reasons.get(consumer) ?? []), `Generated input: ${file}`]);
+      }
       const current = reasons.get(owner.name) ?? [];
       current.push(`Changed input: ${file}`);
       reasons.set(owner.name, current);

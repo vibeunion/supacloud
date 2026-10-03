@@ -12,12 +12,13 @@
     "LICENSE-APACHE-2.0.txt",
     "dist",
     "README.md",
-    "skills"
+    "skills",
+    "src"
   ],
   "scripts": {
     "dev": "bun run --watch src/index.ts",
-    "build": "bun build src/index.ts --outdir dist --target node --conditions=supacloud-source",
-    "pretypecheck": "bun install --cwd ../delivery --frozen-lockfile && bun install --cwd ../compiler --frozen-lockfile && bun run --cwd ../compiler build && bun install --frozen-lockfile",
+    "build": "bun build src/index.ts src/shared/schema.ts src/shared/tools/gateway-tools.ts src/shared/tools/frontend-release-control.ts src/shared/tools/project-endpoint-read.ts src/shared/tools/project-read-projection.ts --outdir dist --target node --conditions=supacloud-source --entry-naming \"[name].js\" --splitting",
+    "pretypecheck": "bun run ../../scripts/build-command-dependencies.ts cli && bun install --frozen-lockfile",
     "prepublishOnly": "bun run build",
     "typecheck": "tsc --noEmit"
   },
@@ -47,5 +48,39 @@
   "devDependencies": {
     "@types/bun": "^1.4.2",
     "typescript": "^7.0.2"
+  },
+  "exports": {
+    ".": "./dist/index.js",
+    "./schema": {
+      "types": "./src/shared/schema.ts",
+      "supacloud-source": "./src/shared/schema.ts",
+      "bun": "./src/shared/schema.ts",
+      "import": "./dist/schema.js"
+    },
+    "./gateway-tools": {
+      "types": "./src/shared/tools/gateway-tools.ts",
+      "supacloud-source": "./src/shared/tools/gateway-tools.ts",
+      "bun": "./src/shared/tools/gateway-tools.ts",
+      "import": "./dist/gateway-tools.js"
+    },
+    "./frontend-release-control": {
+      "types": "./src/shared/tools/frontend-release-control.ts",
+      "supacloud-source": "./src/shared/tools/frontend-release-control.ts",
+      "bun": "./src/shared/tools/frontend-release-control.ts",
+      "import": "./dist/frontend-release-control.js"
+    },
+    "./project-endpoint-read": {
+      "types": "./src/shared/tools/project-endpoint-read.ts",
+      "supacloud-source": "./src/shared/tools/project-endpoint-read.ts",
+      "bun": "./src/shared/tools/project-endpoint-read.ts",
+      "import": "./dist/project-endpoint-read.js"
+    },
+    "./project-read-projection": {
+      "types": "./src/shared/tools/project-read-projection.ts",
+      "supacloud-source": "./src/shared/tools/project-read-projection.ts",
+      "bun": "./src/shared/tools/project-read-projection.ts",
+      "import": "./dist/project-read-projection.js"
+    },
+    "./package.json": "./package.json"
   }
 }

@@ -57,7 +57,8 @@
     "marked": "^18.0.13",
     "marked-highlight": "^2.2.4",
     "monaco-editor": "^0.57.0",
-    "svelte-i18n": "^4.0.1"
+    "svelte-i18n": "^4.0.1",
+    "@supacloud/delivery": "file:../delivery"
   },
   "overrides": {
     "cookie": "0.7.2",

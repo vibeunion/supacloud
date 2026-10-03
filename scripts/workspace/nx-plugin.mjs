@@ -9,18 +9,22 @@ export function projectTargets(workspace, project) {
   };
   const targets = {
     'repo-install': install,
-    'repo-prepare': { executor: 'nx:noop', cache: false, dependsOn: preparationTargets(workspace, project.name),
+    'repo-prepare': { executor: 'nx:noop', cache: false, dependsOn: preparationTargets(workspace, project.name, true),
       metadata: { description: 'Build/install only local prerequisites; do not install or build this consumer.' } },
   };
+  const cacheBuild = workspace.policy?.cacheBuilds?.includes(project.name) ?? false;
+  const fileInputs = (workspace.policy?.fileInputs?.[project.name] ?? []).map((file) => `{workspaceRoot}/${file}`);
   for (const script of ['build', 'test', 'typecheck', 'typecheck:test', 'check']) {
     if (typeof project.scripts[script] !== 'string') continue;
     targets[`repo-${script.replaceAll(':', '-')}`] = {
-      executor: 'nx:run-commands', cache: false,
-      options: { command: `bun run ${script}`, cwd: project.root },
+      executor: 'nx:run-commands', cache: script === 'build' && cacheBuild,
+      options: script === 'build' && cacheBuild
+        ? { command: `node scripts/workspace/build.mjs ${project.root}`, cwd: '.' }
+        : { command: `bun run ${script}`, cwd: project.root },
       dependsOn: [{ target: 'repo-install', params: 'ignore' }],
-      inputs: ['default', '^default'],
+      inputs: ['default', '^default', ...fileInputs, ...(script === 'build' && cacheBuild ? [{ runtime: `node scripts/workspace/build.mjs --hash ${project.root}` }] : [])],
       ...(script === 'build' ? { outputs: ['{projectRoot}/dist'] } : {}),
-      metadata: { description: `Opt-in Bun ${script}; result caching is disabled until package-specific acceptance.` },
+      metadata: { description: `Bun ${script}; only explicitly certified pure builds may replay local results.` },
     };
   }
   return targets;

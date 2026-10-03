@@ -38,7 +38,8 @@
     "packages/supacloud-js": {
       "release-type": "node",
       "component": "supacloud-js",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [{"type": "json", "path": "/packages/cli/src/shared/tools/starter-metadata.json", "jsonpath": "$.sdkMetadata.version"}]
     },
     "packages/cli": {
       "release-type": "node",
@@ -65,13 +66,15 @@
       "release-type": "node",
       "component": "contracts",
       "initial-version": "0.1.0",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [{"type": "json", "path": "/packages/cli/src/shared/tools/starter-metadata.json", "jsonpath": "$.contractsMetadata.version"}]
     },
     "packages/commands": {
       "release-type": "node",
       "component": "commands",
       "initial-version": "0.1.0",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [{"type": "json", "path": "/packages/cli/src/shared/tools/starter-metadata.json", "jsonpath": "$.commandsMetadata.version"}]
     },
     "packages/app-svelte": {
       "release-type": "node",
@@ -83,7 +86,8 @@
       "release-type": "node",
       "component": "app",
       "initial-version": "0.1.0",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [{"type": "json", "path": "/packages/cli/src/shared/tools/starter-metadata.json", "jsonpath": "$.appMetadata.version"}]
     },
     "packages/delivery": {
       "release-type": "node",
@@ -95,19 +99,22 @@
       "release-type": "node",
       "component": "compiler",
       "initial-version": "0.1.0",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [{"type": "json", "path": "/packages/cli/src/shared/tools/starter-metadata.json", "jsonpath": "$.compilerMetadata.version"}]
     },
     "packages/elysia": {
       "release-type": "node",
       "component": "elysia",
       "initial-version": "0.1.0",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [{"type": "json", "path": "/packages/cli/src/shared/tools/starter-metadata.json", "jsonpath": "$.elysiaMetadata.version"}]
     },
     "packages/db": {
       "release-type": "node",
       "component": "db",
       "initial-version": "0.1.0",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [{"type": "json", "path": "/packages/cli/src/shared/tools/starter-metadata.json", "jsonpath": "$.dbMetadata.version"}]
     },
     "packages/testing": {
       "release-type": "node",

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "verificationPrerequisites": {
+    "@supacloud/compiler": ["@supacloud/contracts"],
+    "@supacloud/db": ["@supacloud/commands", "@supacloud/compiler"],
+    "@supacloud/cli": ["@supacloud/compiler"],
+    "@supacloud/lite": ["@supacloud/js", "@supacloud/commands", "@supacloud/delivery"]
+  },
+  "fileInputs": {
+    "@supacloud/cli": [
+      "packages/compiler/package.json",
+      "packages/app/package.json",
+      "packages/elysia/package.json",
+      "packages/commands/package.json",
+      "packages/contracts/package.json",
+      "packages/db/package.json",
+      "packages/supacloud-js/package.json"
+    ],
+    "@supacloud/delivery": ["packages/management-api/src/assets/sigstore-public-good-trusted-root.jsonl"]
+  },
+  "cacheBuilds": ["@supacloud/contracts"]
+}

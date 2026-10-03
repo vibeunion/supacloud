@@ -1,1 +1,1 @@
-export * from "../../../cli/src/shared/schema";
+export * from "@supacloud/cli/schema";

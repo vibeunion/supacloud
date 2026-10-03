@@ -6,21 +6,64 @@ on:
 permissions:
   contents: read
 jobs:
-  source:
+  verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 25
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+      NX_TUI: 'false'
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: Capture tracked source only
-        run: |
-          mkdir -p "$RUNNER_TEMP/nx-rollout-source"
-          git archive HEAD > "$RUNNER_TEMP/nx-rollout-source/source.tar"
-          git rev-parse HEAD > "$RUNNER_TEMP/nx-rollout-source/commit.txt"
-          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/nx-rollout-source/tree.txt"
-      - uses: actions/upload-artifact@v7
+      - uses: actions/setup-node@v7
         with:
-          name: nx-rollout-source
-          path: ${{ runner.temp }}/nx-rollout-source/
+          node-version: '24.x'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Apply staged import refactor for verification only
+        run: git apply --index .github/nx-rollout.patch
+      - name: Install root tooling and generate changed package locks
+        run: |
+          bun install --ignore-scripts --frozen-lockfile
+          for package in compiler delivery cli management-api; do
+            bun install --ignore-scripts --frozen-lockfile --cwd "packages/$package"
+          done
+          for package in admin web-console; do
+            bun install --ignore-scripts --cwd "packages/$package"
+          done
+          (cd packages/web-console && bun x --no-install svelte-kit sync)
+      - name: Unit regressions and source contracts
+        run: |
+          mkdir -p .nx/evidence
+          bun run check:workspace-sync
+          bun run test:workspace
+          bun run check:source-regressions > .nx/evidence/source-boundaries.json
+      - name: Real execution and caching
+        run: |
+          bun run test:nx-acceptance
+          bun run test:nx-cache --repository
+      - name: Public packages and security regressions
+        run: |
+          bun run workspace:prepare --project cli
+          (cd packages/cli && bun install --force --ignore-scripts --frozen-lockfile && bun run build && bun run typecheck)
+          bun run test:nx-public-api
+          bun test packages/management-api/tests/unit/release-manifest.test.ts packages/management-api/tests/unit/upgrade-lock.test.ts
+          (cd packages/admin && bun install --force --ignore-scripts --frozen-lockfile && bun run typecheck && bun run build && bun test)
+      - name: Capture exact generated locks and verification inputs
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/nx-rollout-verification"
+          git diff --binary HEAD > "$RUNNER_TEMP/nx-rollout-verification/changes.patch"
+          tar -cf "$RUNNER_TEMP/nx-rollout-verification/locks.tar" packages/admin/bun.lock packages/web-console/bun.lock
+          if [ -d .nx/evidence ]; then cp -r .nx/evidence "$RUNNER_TEMP/nx-rollout-verification/"; fi
+          git rev-parse HEAD > "$RUNNER_TEMP/nx-rollout-verification/commit.txt"
+          git ls-files -z | xargs -0 sha256sum > "$RUNNER_TEMP/nx-rollout-verification/source-hashes.txt"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: nx-rollout-verification
+          path: ${{ runner.temp }}/nx-rollout-verification/
           retention-days: 1
