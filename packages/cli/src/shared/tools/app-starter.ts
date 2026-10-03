@@ -1,3 +1,4 @@
+import starterMetadata from "./starter-metadata.json" with { type: "json" };
 import { STARTER_REACTIVE_GUIDE, STARTER_REACTIVE_TEST, STARTER_REACTIVE_AGENTS } from "./app-starter-reactive";
 import { lstat, mkdir, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
@@ -9,14 +10,9 @@ import { STARTER_ATTACHMENT_WORKER, STARTER_ATTACHMENT_DELIVERY_WORKER } from ".
 import { STARTER_UPLOAD_FEATURE, STARTER_UPLOAD_SCHEMA, STARTER_UPLOAD_ADAPTER } from "./app-starter-upload";
 import { STARTER_RUNTIME_ROLES_SCHEMA } from "./app-starter-roles";
 import { STARTER_REVIEW_DELIVERY_HOST, STARTER_REVIEW_POSTGRES, STARTER_REVIEW_POSTGRES_TEST, STARTER_REVIEW_SCHEMA } from "./app-starter-postgres";
-import compilerMetadata from "../../../../compiler/package.json" with { type: "json" };
-import appMetadata from "../../../../app/package.json" with { type: "json" };
-import elysiaMetadata from "../../../../elysia/package.json" with { type: "json" };
-import commandsMetadata from "../../../../commands/package.json" with { type: "json" };
-import contractsMetadata from "../../../../contracts/package.json" with { type: "json" };
-import dbMetadata from "../../../../db/package.json" with { type: "json" };
-import sdkMetadata from "../../../../supacloud-js/package.json" with { type: "json" };
 import { starterDatabaseFiles, STARTER_DATABASE_GUIDE } from "./app-starter-database";
+
+const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata, commands: commandsMetadata, contracts: contractsMetadata, db: dbMetadata, sdk: sdkMetadata } = starterMetadata.packages;
 
 const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
