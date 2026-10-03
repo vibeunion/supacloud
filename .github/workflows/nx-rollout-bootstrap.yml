@@ -1,0 +1,26 @@
+name: Nx Rollout Bootstrap
+on:
+  push:
+    branches: [feat/nx-rollout-completion]
+    paths: [.github/workflows/nx-rollout-bootstrap.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Capture tracked source only
+        run: |
+          mkdir -p "$RUNNER_TEMP/nx-rollout-source"
+          git archive HEAD > "$RUNNER_TEMP/nx-rollout-source/source.tar"
+          git rev-parse HEAD > "$RUNNER_TEMP/nx-rollout-source/commit.txt"
+          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/nx-rollout-source/tree.txt"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nx-rollout-source
+          path: ${{ runner.temp }}/nx-rollout-source/
+          retention-days: 1
