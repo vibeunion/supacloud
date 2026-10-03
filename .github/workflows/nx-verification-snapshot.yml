@@ -7,28 +7,19 @@ permissions:
 jobs:
   snapshot:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: 244d92c43d5e021b3c49f1abc9568a4ea7f14150
+          ref: 7b1496828a9ade663f2a3d4572252af966296763
           persist-credentials: false
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: '1.4.2'
-      - name: Generate and verify consumer lock changes
+      - name: Record exact merged baseline
         run: |
-          node --input-type=module -e 'import {readFileSync,writeFileSync} from "node:fs"; for (const p of ["admin","web-console"]) { const path=`packages/${p}/package.json`; const value=JSON.parse(readFileSync(path,"utf8")); value.dependencies["@supacloud/delivery"]="file:../delivery"; writeFileSync(path,JSON.stringify(value,null,2)+"\n"); }'
           mkdir -p /tmp/nx-verification
-          for package in admin web-console; do
-            bun install --lockfile-only --ignore-scripts --cwd "packages/$package"
-            bun install --frozen-lockfile --ignore-scripts --cwd "packages/$package"
-            cp "packages/$package/bun.lock" "/tmp/nx-verification/$package.bun.lock"
-          done
-          git diff -- packages/admin/bun.lock packages/web-console/bun.lock > /tmp/nx-verification/locks.patch
+          git archive HEAD > /tmp/nx-verification/source.tar
           git rev-parse HEAD > /tmp/nx-verification/commit.txt
       - uses: actions/upload-artifact@v7
         with:
-          name: nx-explicit-consumer-locks
+          name: nx-merged-main-source
           path: /tmp/nx-verification/
           retention-days: 1
