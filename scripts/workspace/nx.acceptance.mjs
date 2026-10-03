@@ -5,8 +5,10 @@ import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { nxExecutable } from './nx.mjs';
+
 const repository = fileURLToPath(new URL('../../', import.meta.url));
-const nx = resolve(repository, 'node_modules/nx/bin/nx.js');
+const nx = nxExecutable(repository);
 if (!existsSync(nx)) throw new Error('Install the pinned repository Nx before running the real-task acceptance.');
 const root = mkdtempSync(resolve(tmpdir(), 'supacloud-nx-acceptance-'));
 const env = { ...process.env, NX_DAEMON: 'false', NX_NO_CLOUD: 'true', NX_TUI: 'false', NX_INTERACTIVE: 'false' };
@@ -18,16 +20,19 @@ const run = (command, args, cwd = root, expectedSuccess = true) => {
   return result;
 };
 const topology = { shared: [], left: ['shared'], right: ['shared'], app: ['left', 'right'], unrelated: [] };
+const transitive = (name) => [...new Set(topology[name].flatMap((dependency) => [dependency, ...transitive(dependency)]))];
 try {
   cpSync(resolve(repository, 'scripts/workspace'), resolve(root, 'scripts/workspace'), { recursive: true });
   symlinkSync(resolve(repository, 'node_modules'), resolve(root, 'node_modules'), 'junction');
   put('package.json', { name: 'nx-fixture', private: true, type: 'module' });
+  put('tsconfig.base.json', { compilerOptions: { paths: {} }, files: [] });
   put('nx.json', { plugins: ['./scripts/workspace/nx-plugin.mjs'], namedInputs: { default: ['{projectRoot}/**/*'] } });
   put('.gitignore', 'node_modules/\n.nx/\n**/dist/\n');
   for (const [name, prerequisites] of Object.entries(topology)) {
     put(`packages/${name}/package.json`, {
       name: `@fixture/${name}`, version: '1.0.0', type: 'module', scripts: { build: 'node build.mjs' },
       dependencies: Object.fromEntries(prerequisites.map((dependency) => [`@fixture/${dependency}`, `file:../${dependency}`])),
+      overrides: Object.fromEntries(transitive(name).map((dependency) => [`@fixture/${dependency}`, `file:../${dependency}`])),
     });
     put(`packages/${name}/project.json`, { name: `@fixture/${name}`, tags: ['scope:fixture', 'type:library'] });
     put(`packages/${name}/build.mjs`, `import {appendFileSync, existsSync, mkdirSync, writeFileSync} from 'node:fs';\nfor (const dependency of ${JSON.stringify(prerequisites)}) { if (!existsSync('../' + dependency + '/dist/ready')) throw new Error('Missing prerequisite: ' + dependency); }\nmkdirSync('dist', {recursive:true}); writeFileSync('dist/ready','built'); appendFileSync('../../trace.jsonl',JSON.stringify(${JSON.stringify(name)})+'\\n');\n`);

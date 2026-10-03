@@ -7,6 +7,7 @@ on:
       - package.json
       - bun.lock
       - nx.json
+      - tsconfig.base.json
       - 'scripts/workspace/**'
       - 'scripts/check_workspace_boundaries*'
       - 'packages/**/package.json'
@@ -48,19 +49,21 @@ jobs:
         run: bun install --ignore-scripts --frozen-lockfile --cwd packages/compiler
       - name: Workspace and source-boundary regression tests
         run: bun run test:workspace
+      - name: Source-boundary rollout inventory
+        id: source_inventory
+        continue-on-error: true
+        run: |
+          mkdir -p .nx/evidence
+          bun run check:source-boundaries > .nx/evidence/source-boundaries.json
       - name: Validate repository metadata and Nx discovery
         run: |
           mkdir -p .nx/evidence
           node scripts/workspace/cli.mjs check > .nx/evidence/workspace.json
-          node node_modules/nx/bin/nx.js graph --file=.nx/evidence/nx-graph.json
+          node scripts/workspace/nx.mjs graph --file=.nx/evidence/nx-graph.json
       - name: Exercise real Nx task ordering and failure propagation
         run: bun run test:nx-acceptance
       - name: Build the app/contracts pilot using the actual repository task graph
         run: bun run workspace:build --project app
-      - name: Source-boundary rollout inventory
-        id: source_inventory
-        continue-on-error: true
-        run: bun run check:source-boundaries > .nx/evidence/source-boundaries.json
       - name: Record affected shadow plan without selecting or skipping CI jobs
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -78,7 +81,7 @@ jobs:
           if [ -f bun.lock ]; then cp bun.lock .nx/evidence/bun.lock; fi
           if [ -d node_modules ]; then tar -chf .nx/evidence/tooling.tar node_modules; fi
           if [ -d packages/compiler/node_modules/@typescript/typescript6 ]; then
-            tar -chf .nx/evidence/parser.tar packages/compiler/node_modules/@typescript/typescript6
+            tar -chf .nx/evidence/parser.tar packages/compiler/node_modules/@typescript/typescript6 packages/compiler/node_modules/@typescript/old
           fi
           cp "$(command -v bun)" .nx/evidence/bun
           node --version > .nx/evidence/node-version.txt

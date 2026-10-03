@@ -1,8 +1,9 @@
-import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { affectedReport, graphReport, readWorkspace, resolveProject } from './model.mjs';
+
+import { runNx } from './nx.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const git = (cwd, args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 16 * 1024 * 1024 });
@@ -47,13 +48,7 @@ export function main(args = process.argv.slice(2), cwd = root) {
   if (command === 'build') {
     const project = resolveProject(workspace, options['--project']);
     if (typeof project.scripts.build !== 'string') throw new Error(`No build script: ${project.name}`);
-    const executable = resolve(cwd, 'node_modules/nx/bin/nx.js');
-    if (!existsSync(executable)) throw new Error('Repository Nx is not installed. Run bun install at the repository root.');
-    const child = spawnSync(process.execPath, [executable, 'run', `${project.name}:repo-build`, '--outputStyle=static'], {
-      cwd, stdio: 'inherit', env: { ...process.env, NX_DAEMON: 'false', NX_NO_CLOUD: 'true' },
-    });
-    if (child.error) throw child.error;
-    if (child.status !== 0) throw new Error(`Nx build failed: ${child.signal ?? child.status}`);
+    runNx(['run', `${project.name}:repo-build`, '--outputStyle=static'], cwd);
     return;
   }
   let report = graphReport(workspace);

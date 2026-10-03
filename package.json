@@ -16,12 +16,12 @@
     "check:public-api": "bun scripts/check_public_api.ts",
     "update:public-api": "bun scripts/check_public_api.ts --update",
     "check:diagnostic-docs": "bun scripts/check_diagnostic_docs.ts",
-    "nx": "node node_modules/nx/bin/nx.js",
+    "nx": "node scripts/workspace/nx.mjs",
     "check:workspace": "node scripts/workspace/cli.mjs check",
     "workspace:graph": "node scripts/workspace/cli.mjs graph",
     "workspace:affected": "node scripts/workspace/cli.mjs affected",
     "workspace:build": "node scripts/workspace/cli.mjs build",
-    "test:workspace": "node --test scripts/workspace/workspace.test.mjs scripts/workspace/source.test.mjs",
+    "test:workspace": "node --test scripts/workspace/workspace.test.mjs scripts/workspace/source.test.mjs scripts/workspace/nx.test.mjs",
     "check:source-boundaries": "bun scripts/workspace/source-check.mjs",
     "test:nx-acceptance": "node scripts/workspace/nx.acceptance.mjs"
   },
@@ -30,6 +30,6 @@
     "ws": "^8.21.3"
   },
   "devDependencies": {
-    "nx": "22.7.12"
+    "nx": "23.2.1"
   }
 }
