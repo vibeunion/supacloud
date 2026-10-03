@@ -1,6 +1,5 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 
 export interface AppDatabaseCheck {
@@ -9,16 +8,26 @@ export interface AppDatabaseCheck {
   detail: string;
 }
 
+const CHECK_ENTRY = `
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+const root = process.argv[1];
+const cli = createRequire(join(root, "package.json")).resolve("@supacloud/db/source-contracts-cli");
+process.argv = [process.execPath, cli, "check", "--root", root];
+await import(pathToFileURL(cli).href);
+`;
+
 /** Use the project's installed tool, not arbitrary package scripts or remote database access. */
 export function checkAppDatabaseSources(projectRoot: string): AppDatabaseCheck | undefined {
   const root = resolve(projectRoot);
   if (!existsSync(join(root, "database.sources.json"))) return;
   const name = "database-source-contracts";
   try {
-    const require = createRequire(join(root, "package.json"));
-    const cli = require.resolve("@supacloud/db/source-contracts-cli");
-    const result = spawnSync(process.execPath, [
-      ...(process.versions.bun ? ["--no-env-file"] : []), cli, "check", "--root", root,
+    // Resolve on the host runtime: a compiled CLI has its own embedded module filesystem.
+    const result = spawnSync(process.versions.bun ? "bun" : process.execPath, [
+      ...(process.versions.bun ? ["--no-env-file"] : ["--input-type=module"]),
+      "--eval", CHECK_ENTRY, "--", root,
     ], { cwd: root, encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024 });
     if (result.error) throw result.error;
     const report: unknown = JSON.parse(result.stdout);
@@ -36,6 +45,6 @@ export function checkAppDatabaseSources(projectRoot: string): AppDatabaseCheck |
     return { name, ok: result.status === 0 && report.ok && !messages.length,
       detail: messages.join("\n") || (result.status === 0 && report.ok ? "Offline database contracts and boundaries are current" : "Database source check failed") };
   } catch {
-    return { name, ok: false, detail: "Cannot run the project database checker. Install @supacloud/db with source-contracts support and run `supacloud-db check --root .` for diagnostics." };
+    return { name, ok: false, detail: "Cannot run the project database checker. Install the project runtime and @supacloud/db with source-contracts support, then run `supacloud-db check --root .` for diagnostics." };
   }
 }

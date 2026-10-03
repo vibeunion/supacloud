@@ -50,3 +50,19 @@ test("only check is executed with an explicit project root and no generation", a
 console.log(JSON.stringify({scope:"local-source-contracts",ok:true,findings:[]}));`);
   expect(checkAppDatabaseSources(root)?.ok).toBe(true);
 });
+
+test("compiled CLI runs the installed checker instead of invoking itself again", async () => {
+  const root = await project();
+  await writeFile(join(root, "database.sources.json"), "{}");
+  await tool(root, 'console.log(JSON.stringify({scope:"local-source-contracts",ok:true,findings:[]}));');
+  const entry = join(root, "entry.ts");
+  await writeFile(entry, `import { checkAppDatabaseSources } from ${JSON.stringify(join(import.meta.dir, "app-database-check.ts"))};
+if (process.argv[2] === "--no-env-file") throw Error("Recursive CLI invocation");
+console.log(JSON.stringify(checkAppDatabaseSources(process.argv[2]!)));`);
+  const binary = join(root, process.platform === "win32" ? "check.exe" : "check");
+  const built = await Bun.build({ entrypoints: [entry], compile: { outfile: binary } });
+  expect(built.success).toBe(true);
+  const result = Bun.spawnSync([binary, root], { stdout: "pipe", stderr: "pipe" });
+  expect(result.exitCode, result.stderr.toString()).toBe(0);
+  expect(JSON.parse(result.stdout.toString()), result.stderr.toString()).toMatchObject({ ok: true });
+}, 30_000);

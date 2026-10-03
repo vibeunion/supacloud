@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { databaseSources } from "./source-contracts";
 
@@ -15,7 +15,8 @@ export async function databaseSourcesMain(args: string[]): Promise<number> {
   return action === "assess" || report.ok ? 0 : 1;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && existsSync(process.argv[1])
+  && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
   try { process.exitCode = await databaseSourcesMain(process.argv.slice(2)); }
   catch (error) {
     console.error(error instanceof Error ? error.message : "Database source check failed");

@@ -31,6 +31,14 @@ test("built package CLI generates/checks a real starter; doctor uses the same re
   const run = (args: string[]) => Bun.spawnSync([
     process.execPath, "--no-env-file", join(packed, "source-contracts-cli.js"), ...args, "--root", project,
   ], { cwd: project, stdout: "pipe", stderr: "pipe" });
+  await mkdir(join(project, "node_modules/.bin"), { recursive: true });
+  const bin = join(project, "node_modules/.bin/supacloud-db");
+  await symlink(join(packed, "source-contracts-cli.js"), bin);
+  const installedCheck = Bun.spawnSync(["node", bin, "check", "--root", project], {
+    cwd: project, stdout: "pipe", stderr: "pipe",
+  });
+  expect(installedCheck.exitCode, installedCheck.stderr.toString()).toBe(1);
+  expect(installedCheck.stdout.toString()).toContain('"scope": "local-source-contracts"');
   expect(run(["check"]).exitCode).toBe(1);
   const generated = run(["generate"]);
   expect({ status: generated.exitCode, error: generated.stderr.toString() }).toEqual({ status: 0, error: "" });

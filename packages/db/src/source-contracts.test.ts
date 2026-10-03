@@ -98,6 +98,18 @@ test("audit exceptions are explicit scripts and cannot be imported into ordinary
   expect(() => parseDatabaseSourcesConfig({ ...config, auditConsumers: ["tests/ordinary.ts"] })).toThrow("scripts/");
 });
 
+test("schema entrypoints and their relative imports cannot consume audit dumps", async () => {
+  const root = await project();
+  await file(root, "db/tables.ts", 'export const table = readFile("output/database-audit/schema.sql");');
+  const result = await databaseSources(root, "generate");
+  expect(result.findings.some(item => item.file === "db/tables.ts" && item.code === "audit-input")).toBe(true);
+  expect(result.written).toEqual([]);
+  await file(root, "db/tables.ts", "export const table = 'typed structure';");
+  await file(root, "db/schema.ts", 'export const schema = readFile("bootstrap/schema.sql");');
+  expect((await databaseSources(root, "generate")).findings.some(item =>
+    item.file === "db/schema.ts" && item.code === "audit-input")).toBe(true);
+});
+
 test("assessment before adoption is read-only and provides migration steps instead of rewriting dumps", async () => {
   const root = await project();
   await rm(join(root, "database.sources.json"));

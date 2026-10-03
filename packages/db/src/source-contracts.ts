@@ -169,7 +169,9 @@ function staticPaths(source: ts.SourceFile): Array<{ value: string; line: number
   return references;
 }
 
-async function boundaryFindings(root: string, config?: DatabaseSourcesConfig): Promise<SourceFinding[]> {
+async function boundaryFindings(
+  root: string, config?: DatabaseSourcesConfig, schemaInputs: readonly string[] = [],
+): Promise<SourceFinding[]> {
   const all = await filesUnder(root, "", config ? [config.audit, config.contracts, config.migrations] : ["output"]);
   const dumps = new Set<string>();
   for (const file of all.filter(file => file.endsWith(".sql"))) {
@@ -184,7 +186,7 @@ async function boundaryFindings(root: string, config?: DatabaseSourcesConfig): P
     if (source.includes("-- PostgreSQL database dump") || /(?:^|\/)bootstrap\/schema\.sql$/.test(file)) dumps.add(file);
   }
   const consumers = all.filter(file => /\.[cm]?[jt]sx?$/.test(file)
-    && (config ? config.consumers.some(directory => within(file, directory))
+    && (config ? schemaInputs.includes(file) || config.consumers.some(directory => within(file, directory))
       : !within(file, "output") && !within(file, "generated")));
   const findings: SourceFinding[] = [];
   for (const file of consumers) {
@@ -225,8 +227,8 @@ export async function databaseSources(
     const configPath = await safePath(root, CONFIG);
     const config = await exists(configPath)
       ? parseDatabaseSourcesConfig(JSON.parse(await readFile(configPath, "utf8"))) : undefined;
-    report.findings.push(...await boundaryFindings(root, config));
     if (!config) {
+      report.findings.push(...await boundaryFindings(root));
       report.findings.push({ file: CONFIG, code: "adoption-required", message: "No database source configuration; review the adoption steps before generating contracts." });
       return report;
     }
@@ -270,6 +272,7 @@ export async function databaseSources(
       };
       await visitImports(file);
     }
+    report.findings.push(...await boundaryFindings(root, config, [...inputs.keys()]));
     const migrations: Input[] = [];
     const migrationSql: string[] = [];
     for (const file of (await filesUnder(root, config.migrations)).filter(file => file.endsWith(".sql")).sort()) {
