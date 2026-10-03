@@ -47,7 +47,8 @@ for (const [template, feature, source] of [
 
 test("resource generation is async-ready without adding another validator or persistence library", () => {
     const files = resourceScaffold("inventory", "Inventory");
-    expect(files["inventory.service.ts"]).toContain("async find(_id: string): Promise<InventoryResult>");
+    expect(files["inventory.service.ts"]).toContain("async find(id: string): Promise<InventoryResult>");
+    expect(files["inventory.service.ts"]).toContain("return this.reader.readAuthorized(id)");
     expect(files["inventory.controller.ts"]).toContain('find(@Param("id") id: string): Promise<InventoryResult>');
     expect(files["inventory.service.ts"]).not.toContain('from "elysia"');
     expect(files["inventory.model.ts"]).toContain("RouteHandlerOutput");

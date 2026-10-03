@@ -3,9 +3,12 @@ import { STARTER_ENVIRONMENT, STARTER_ENVIRONMENT_TEST } from "./app-starter-env
 import compilerMetadata from "../../../../compiler/package.json" with { type: "json" };
 import appMetadata from "../../../../app/package.json" with { type: "json" };
 import elysiaMetadata from "../../../../elysia/package.json" with { type: "json" };
-import sdkMetadata from "../../../../supacloud-js/package.json" with { type: "json" };
 
 export type StarterTemplate = "minimal" | "http" | "command" | "edge";
+export interface StarterSdkDependencies {
+  "@supacloud/js": string;
+  "@supabase/supabase-js": string;
+}
 
 const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
@@ -86,7 +89,8 @@ export function createCompiledModules(): never {
 }
 `;
 
-function baseFiles(name: string, minimal = false): Record<string, string> {
+function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Record<string, string> {
+  const minimal = sdkDependencies !== undefined;
   return {
     "package.json": json({
       name, version: "0.0.0", private: true, type: "module",
@@ -109,10 +113,7 @@ function baseFiles(name: string, minimal = false): Record<string, string> {
         "@supacloud/app": `^${appMetadata.version}`,
         "@supacloud/elysia": `^${elysiaMetadata.version}`,
         elysia: "2.0.0-beta.19",
-        ...(minimal ? {
-          "@supacloud/js": `^${sdkMetadata.version}`,
-          "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
-        } : { rxjs: appMetadata.dependencies.rxjs }),
+        ...(sdkDependencies ?? { rxjs: appMetadata.dependencies.rxjs }),
       },
       devDependencies: {
         "@supacloud/compiler": `^${compilerMetadata.version}`,
@@ -352,9 +353,9 @@ supacloud doctor --root .
   };
 }
 
-function minimalTemplate(name: string): Record<string, string> {
+function minimalTemplate(name: string, sdkDependencies: StarterSdkDependencies): Record<string, string> {
   return {
-    ...baseFiles(name, true),
+    ...baseFiles(name, sdkDependencies),
     "src/features/health/health.ts": `import { Controller, Get, Module } from "@supacloud/app/core";
 import { t } from "elysia";
 
@@ -451,8 +452,11 @@ regeneration, then validate types, database permissions and authenticated behavi
 }
 
 /** Explicit recipes retain their existing layouts; new projects default to minimal. */
-export function appTemplateFiles(name: string, template: StarterTemplate): Record<string, string> {
-  if (template === "minimal") return minimalTemplate(name);
+export function appTemplateFiles(name: string, template: StarterTemplate, sdkDependencies?: StarterSdkDependencies): Record<string, string> {
+  if (template === "minimal") {
+    if (!sdkDependencies) throw new Error("Minimal template requires the initializer's SDK dependency versions");
+    return minimalTemplate(name, sdkDependencies);
+  }
   if (template !== "http" && template !== "edge") throw new Error("Use appStarterFiles for the command recipe");
   const files = template === "http" ? httpTemplate(name) : edgeTemplate(name);
   const feature = template === "http" ? "OrdersFeature" : "SyncFeature";

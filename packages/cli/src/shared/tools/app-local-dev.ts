@@ -25,7 +25,7 @@ export function localDatabaseUrl(value: string | undefined): string {
 
 async function probeDatabase(url: string): Promise<void> {
   if (!process.versions.bun) throw new Error("Integration preflight requires the Bun CLI runtime");
-  const { SQL } = await import("bun");
+  const { SQL } = Bun;
   let database: import("bun").SQL | undefined;
   try {
     database = new SQL(url, { max: 1, connectionTimeout: 5 });

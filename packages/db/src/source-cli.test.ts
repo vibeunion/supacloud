@@ -14,7 +14,7 @@ test("built package CLI generates/checks a real starter; doctor uses the same re
   const root = await realpath(await mkdtemp(join(tmpdir(), "db-source-cli-")));
   roots.push(root);
   const project = join(root, "project"), packed = join(root, "package");
-  await initializeAppProject({ root: project, name: "example" });
+  await initializeAppProject({ root: project, name: "example", template: "command" });
   await mkdir(packed);
   const built = await Bun.build({
     entrypoints: [resolve(import.meta.dir, "source-contracts-cli.ts")],

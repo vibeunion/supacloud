@@ -800,7 +800,10 @@ export async function initializeAppProject(options: { root?: string; name?: stri
         throw new Error("app init requires an empty directory (an existing .git directory is allowed)");
     }
     const template = options.template ?? "minimal";
-    const files = template === "command" ? appStarterFiles(name) : appTemplateFiles(name, template);
+    const files = template === "command" ? appStarterFiles(name) : appTemplateFiles(name, template, {
+        "@supacloud/js": `^${sdkMetadata.version}`,
+        "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
+    });
     for (const [relativePath, content] of Object.entries(files)) {
         const path = join(root, relativePath);
         await mkdir(dirname(path), { recursive: true });

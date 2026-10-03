@@ -14,7 +14,7 @@ afterEach(async () => {
 test("database starter ships a working offline default without connecting or rewriting migration history", async () => {
   const root = await mkdtemp(join(tmpdir(), "db-starter-"));
   roots.push(root);
-  await initializeAppProject({ root, name: "example" });
+  await initializeAppProject({ root, name: "example", template: "command" });
   const migration = await readFile(join(root, "migrations/001-review.sql"), "utf8");
   expect((await databaseSources(root)).ok).toBe(false);
   const generated = await databaseSources(root, "generate");
@@ -44,7 +44,7 @@ test("default checks run before regeneration and Drizzle candidate paths never r
 test("generated Drizzle declarations and configuration typecheck; inferred row types reject invalid states", async () => {
   const root = await mkdtemp(join(tmpdir(), "db-starter-types-"));
   roots.push(root);
-  await initializeAppProject({ root, name: "example" });
+  await initializeAppProject({ root, name: "example", template: "command" });
   await symlink(resolve(import.meta.dir, "../node_modules"), join(root, "node_modules"), "dir");
   const path = join(root, "fixture.ts");
   const source = `import type { ReviewRow, NewReview } from "./db/schema";
@@ -66,7 +66,7 @@ const insert: NewReview = row;`;
 test("Drizzle generates real SQL drafts without changing deployment migrations", async () => {
   const root = await mkdtemp(join(tmpdir(), "db-starter-diff-"));
   roots.push(root);
-  await initializeAppProject({ root, name: "example" });
+  await initializeAppProject({ root, name: "example", template: "command" });
   await symlink(resolve(import.meta.dir, "../node_modules"), join(root, "node_modules"), "dir");
   const migrationNames = await readdir(join(root, "migrations"));
   const before = await Promise.all(migrationNames.map(name => readFile(join(root, "migrations", name), "utf8")));
