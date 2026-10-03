@@ -1,8 +1,8 @@
+import starterMetadata from "./starter-metadata.json" with { type: "json" };
 import { STARTER_REACTIVE_GUIDE, STARTER_REACTIVE_TEST, STARTER_REACTIVE_AGENTS } from "./app-starter-reactive";
 import { STARTER_ENVIRONMENT, STARTER_ENVIRONMENT_TEST } from "./app-starter-environment";
-import compilerMetadata from "../../../../compiler/package.json" with { type: "json" };
-import appMetadata from "../../../../app/package.json" with { type: "json" };
-import elysiaMetadata from "../../../../elysia/package.json" with { type: "json" };
+
+const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata } = starterMetadata.packages;
 
 export type StarterTemplate = "minimal" | "http" | "command" | "edge";
 export interface StarterSdkDependencies {

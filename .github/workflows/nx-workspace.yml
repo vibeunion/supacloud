@@ -39,6 +39,8 @@ jobs:
         run: bun install --ignore-scripts --frozen-lockfile --cwd packages/compiler
       - name: Workspace and source-boundary regression tests
         run: bun run test:workspace
+      - name: Check generated starter metadata and release synchronization
+        run: bun run check:workspace-sync
       - name: Reject new source-boundary and coverage findings
         id: source_inventory
         run: |
@@ -53,6 +55,8 @@ jobs:
         run: bun run test:nx-acceptance
       - name: Build the app/contracts pilot using the actual repository task graph
         run: bun run workspace:build --project app
+      - name: Verify actual contracts cache restoration and invalidation
+        run: bun run test:nx-cache > .nx/evidence/cache-acceptance.json
       - name: Record affected shadow plan without selecting or skipping CI jobs
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
