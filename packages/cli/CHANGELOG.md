@@ -14,6 +14,14 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.64.0](https://github.com/vibeunion/supacloud/compare/cli-v0.63.0...cli-v0.64.0) (2026-10-03)
+
+
+### Features
+
+* converge SDK-aware vibecoding defaults and local development ([#1607](https://github.com/vibeunion/supacloud/issues/1607)) ([cd66672](https://github.com/vibeunion/supacloud/commit/cd6667252a6a8fe0cc0539bc8610ebb8a818af51))
+* **tooling:** synchronize starter metadata and validate local build caching ([#1608](https://github.com/vibeunion/supacloud/issues/1608)) ([31137b1](https://github.com/vibeunion/supacloud/commit/31137b135b31251d9837518c9fb31a330c8f4c58))
+
 ## [0.63.0](https://github.com/vibeunion/supacloud/compare/cli-v0.62.1...cli-v0.63.0) (2026-10-03)
 
 

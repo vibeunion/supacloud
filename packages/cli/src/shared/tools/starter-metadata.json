@@ -6,7 +6,7 @@
       "version": "0.31.1"
     },
     "app": {
-      "version": "0.21.1",
+      "version": "0.22.0",
       "dependencies": {
         "rxjs": "7.8.2"
       }
@@ -21,7 +21,7 @@
       "version": "0.8.0"
     },
     "db": {
-      "version": "0.12.0",
+      "version": "0.13.0",
       "peerDependencies": {
         "drizzle-orm": "1.0.0-rc.4"
       },
