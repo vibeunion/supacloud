@@ -218,6 +218,7 @@ jobs:
             working-directory: packages/cli
             script: |
               bun install --frozen-lockfile
+              (cd ../app && bun install --frozen-lockfile)
               (cd ../delivery && bun run build)
               bun run typecheck
               bun test src

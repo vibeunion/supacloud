@@ -36,6 +36,11 @@ jobs:
         run: |
           bun run typecheck
           bun test src/shared/tools/app-scaffold-writes.test.ts src/shared/tools/app-resource-generation.test.ts src/shared/tools/app-tools.test.ts src/shared/tools/app-starter-composition.test.ts
+          bun test src/shared/tools/app-minimal-starter.test.ts
+          bun test src/shared/tools/app-local-dev.test.ts
+          bun test src/shared/tools/app-verification-plan.test.ts
+      - name: Recorded vibecoding metrics contract
+        run: bun test scripts/vibecoding-eval.test.ts
       - name: Keep the exact Elysia beta policy intact
         if: ${{ !cancelled() }}
         run: node scripts/check-elysia-compatibility.mjs

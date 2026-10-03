@@ -21,6 +21,7 @@
     }
   },
   "include": [
+    "src/core.ts",
     "src/index.ts",
     "src/browser.ts",
     "src/contract_client.ts",

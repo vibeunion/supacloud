@@ -1,8 +1,9 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerAppAliases, registerAppTools, runAppTool, type ToolResult } from "./app-tools";
+import { compileProject } from "@supacloud/compiler";
 
 const roots: string[] = [];
 async function fixture() {
@@ -23,7 +24,7 @@ test("resource preview contains all six wired files and creates nothing", async 
     expect(plan.changes.find((file: { path: string }) => file.path.endsWith(".module.ts")).content)
         .toContain("controllers: [InventoryController]");
     expect(plan.changes.find((file: { path: string }) => file.path.endsWith(".service.ts")).content)
-        .toContain("Implement InventoryService.find");
+        .toContain("Bind InventoryReader");
     expect(await readdir(root)).toEqual([]);
 });
 
@@ -38,6 +39,56 @@ test("resource apply writes the previewed sources without adding dependencies", 
     }
     expect(await readdir(root)).toEqual(["src"]);
     expect(applied.changes.every((change: object) => !("content" in change))).toBe(true);
+});
+
+test("the generated request-scoped read slice compiles and tests denial, success and missing adapters", async () => {
+    const root = await fixture();
+    await runAppTool({ action: "generate", kind: "resource", name: "inventory", root, format: "json" });
+    await writeFile(join(root, "tsconfig.json"), JSON.stringify({
+        compilerOptions: {
+            experimentalDecorators: true, module: "ESNext", moduleResolution: "bundler", target: "ES2022",
+            paths: { "@supacloud/app": [join(import.meta.dir, "../../../../app/src/core.ts")] },
+        },
+    }));
+    await symlink(join(import.meta.dir, "../../../node_modules"), join(root, "node_modules"), "dir");
+    const result = await compileProject({ rootDir: join(root, "src"), outDir: join(root, "generated"), strict: true });
+    expect(result.diagnostics.filter(item => item.severity === "error")).toEqual([]);
+    await writeFile(join(root, "src/features/inventory/compiled.test.ts"), `import { expect, test } from "bun:test";
+import { createCompiledModules } from "../../../generated/application";
+import { InventoryService } from "./inventory.service";
+import type { InventoryReadPort } from "./inventory.model";
+
+test("compiled request scopes resolve the reader and isolate service instances", async () => {
+    const module = createCompiledModules().find(item => item.name === "inventory")!;
+    const reader: InventoryReadPort = { readAuthorized: async id => ({ id }) };
+    const services = module.createServices({ inventoryReader: reader }, {});
+    const first = await module.createRequestScope!(services, {});
+    const second = await module.createRequestScope!(services, {});
+    const service = first.inventoryService;
+    expect(service).toBeInstanceOf(InventoryService);
+    if (!(service instanceof InventoryService)) throw new Error("Missing compiled service");
+    expect(service).not.toBe(second.inventoryService);
+    expect(await service.find("example")).toEqual({ id: "example" });
+    const unbound = await module.createRequestScope!(module.createServices({}, {}), {});
+    const missing = unbound.inventoryService;
+    if (!(missing instanceof InventoryService)) throw new Error("Missing unbound service");
+    await expect(missing.find("example")).rejects.toThrow("Bind InventoryReader");
+});
+`);
+    const child = Bun.spawn([process.execPath, "--no-env-file", "test", "src/features/inventory/inventory.service.test.ts"], {
+        cwd: root, stdout: "pipe", stderr: "pipe",
+    });
+    const [code, stdout, stderr] = await Promise.all([
+        child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+    ]);
+    expect({ code, errors: code ? stdout + stderr : "" }).toEqual({ code: 0, errors: "" });
+    const compiled = Bun.spawn([process.execPath, "--no-env-file", "test", "src/features/inventory/compiled.test.ts"], {
+        cwd: root, stdout: "pipe", stderr: "pipe",
+    });
+    const [compiledCode, compiledOut, compiledErr] = await Promise.all([
+        compiled.exited, new Response(compiled.stdout).text(), new Response(compiled.stderr).text(),
+    ]);
+    expect({ code: compiledCode, errors: compiledCode ? compiledOut + compiledErr : "" }).toEqual({ code: 0, errors: "" });
 });
 
 test("a resource conflict reports a structured error and leaves no partial files", async () => {

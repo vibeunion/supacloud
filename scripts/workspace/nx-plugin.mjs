@@ -1,3 +1,4 @@
+import { buildCachePolicy } from './cache-policy.mjs';
 import { ACCEPTANCE_PROJECT, preparationTargets, readWorkspace } from './model.mjs';
 
 /** Nx owns execution/deduplication. No generated application imports this plugin. */
@@ -21,6 +22,7 @@ export function projectTargets(workspace, project) {
       inputs: ['default', '^default'],
       ...(script === 'build' ? { outputs: ['{projectRoot}/dist'] } : {}),
       metadata: { description: `Opt-in Bun ${script}; result caching is disabled until package-specific acceptance.` },
+      ...(script === 'build' ? buildCachePolicy(project) : {}),
     };
   }
   return targets;
