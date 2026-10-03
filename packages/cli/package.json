@@ -35,7 +35,7 @@
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.52",
-    "@supacloud/compiler": "^0.31.0",
+    "@supacloud/compiler": "^0.31.1",
     "@supacloud/delivery": "file:../delivery",
     "@supacloud/db": "^0.2.0",
     "fflate": "^0.8.3",
