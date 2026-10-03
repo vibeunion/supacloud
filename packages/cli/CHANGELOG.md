@@ -14,6 +14,20 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.63.0](https://github.com/vibeunion/supacloud/compare/cli-v0.62.1...cli-v0.63.0) (2026-10-03)
+
+
+### Features
+
+* **db:** default database starters to Drizzle and source-contract gates ([#1599](https://github.com/vibeunion/supacloud/issues/1599)) ([133eb9b](https://github.com/vibeunion/supacloud/commit/133eb9b0d3a6be3690c290041db3906635a376e7))
+
+
+### Bug Fixes
+
+* **cli:** extend edge function deploy timeout ([#1602](https://github.com/vibeunion/supacloud/issues/1602)) ([6d94d74](https://github.com/vibeunion/supacloud/commit/6d94d745034a03a6fa1d52da1325a09b4d943446))
+* **cli:** sync published compiler dependency ([#1598](https://github.com/vibeunion/supacloud/issues/1598)) ([0921645](https://github.com/vibeunion/supacloud/commit/092164593cf8e793c3c277f10e82cb106f43c370))
+* **compiler:** compose generated clients with frontend SDK auth ([#1603](https://github.com/vibeunion/supacloud/issues/1603)) ([7b14968](https://github.com/vibeunion/supacloud/commit/7b1496828a9ade663f2a3d4572252af966296763))
+
 ## [0.62.1](https://github.com/vibeunion/supacloud/compare/cli-v0.62.0...cli-v0.62.1) (2026-10-02)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/vibeunion/supacloud/compare/db-v0.11.0...db-v0.12.0) (2026-10-03)
+
+
+### Features
+
+* **db:** default database starters to Drizzle and source-contract gates ([#1599](https://github.com/vibeunion/supacloud/issues/1599)) ([133eb9b](https://github.com/vibeunion/supacloud/commit/133eb9b0d3a6be3690c290041db3906635a376e7))
+
 ## [0.11.0](https://github.com/vibeunion/supacloud/compare/db-v0.10.0...db-v0.11.0) (2026-10-02)
 
 

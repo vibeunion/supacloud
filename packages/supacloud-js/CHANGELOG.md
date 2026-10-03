@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.36.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.36.0...supacloud-js-v0.36.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* **compiler:** compose generated clients with frontend SDK auth ([#1603](https://github.com/vibeunion/supacloud/issues/1603)) ([7b14968](https://github.com/vibeunion/supacloud/commit/7b1496828a9ade663f2a3d4572252af966296763))
+
 ## [0.36.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.35.0...supacloud-js-v0.36.0) (2026-10-02)
 
 
