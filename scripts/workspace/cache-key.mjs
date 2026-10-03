@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 export function cacheContext(root, project, env = process.env, versions = {}) {
   if (project !== 'packages/contracts') throw new Error('No reviewed cache policy for this project.');
   const directories = new Set([resolve(root), resolve(root, 'packages'), resolve(root, project), env.HOME ?? homedir()]);
+  if (env.XDG_CONFIG_HOME) directories.add(resolve(env.XDG_CONFIG_HOME));
   // Bun may read user configuration outside the repository; fail rather than omit unreadable inputs.
   for (let parent = dirname(resolve(root)); ; parent = dirname(parent)) {
     directories.add(parent);

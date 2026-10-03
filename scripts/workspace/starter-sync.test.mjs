@@ -92,3 +92,12 @@ test('generation relationships affect the CLI but never install producers as run
   rmSync(resolve(root, 'packages/app'), { recursive: true });
   assert.throws(() => readWorkspace(root), /Missing starter metadata producer/);
 });
+
+test('metadata rejects credential-bearing sources and invalid prerelease identifiers', (t) => {
+  const { root, put } = fixture(t);
+  put('packages/app/package.json', { name: '@supacloud/app', version: '1.0.0', dependencies: { rxjs: 'https://example.invalid/private.tgz' } });
+  assert.throws(() => starterMetadata(root), /Missing publishable/);
+  put('packages/app/package.json', { name: '@supacloud/app', version: '1.0.0-01', dependencies: { rxjs: '7.8.2' } });
+  assert.throws(() => starterMetadata(root), /identity\/version/);
+  assert.equal(existsSync(resolve(root, STARTER_FILE)), false);
+});

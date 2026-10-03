@@ -18,12 +18,13 @@ test('only the reviewed contracts script contract enables caching', () => {
 test('environment, hidden config and runtime versions change cache identity without exposing values', (t) => {
   const root = mkdtempSync(resolve(tmpdir(), 'cache-context-')); t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(resolve(root, 'packages/contracts'), { recursive: true }); mkdirSync(resolve(root, 'home'));
-  const env = { HOME: resolve(root, 'home') };
+  mkdirSync(resolve(root, 'xdg'));
+  const env = { HOME: resolve(root, 'home'), XDG_CONFIG_HOME: resolve(root, 'xdg') };
   const key = cacheContext(root, 'packages/contracts', env, { bun: '1.4.2' });
   assert.equal(key, cacheContext(root, 'packages/contracts', env, { bun: '1.4.2' }));
   assert.notEqual(key, cacheContext(root, 'packages/contracts', { ...env, SECRET: 'not-for-logs' }, { bun: '1.4.2' }));
   assert.notEqual(key, cacheContext(root, 'packages/contracts', env, { bun: 'next' }));
-  for (const file of ['.env.local', 'packages/contracts/.env', 'home/.bunfig.toml']) {
+  for (const file of ['.env.local', 'packages/contracts/.env', 'home/.bunfig.toml', 'xdg/.bunfig.toml']) {
     writeFileSync(resolve(root, file), 'secret=not-for-logs');
     const changed = cacheContext(root, 'packages/contracts', env, { bun: '1.4.2' });
     assert.notEqual(key, changed); assert.match(changed, /^[a-f0-9]{64}$/);

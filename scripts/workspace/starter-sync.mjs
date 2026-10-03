@@ -14,7 +14,7 @@ const generator = 'supacloud/starter-metadata-v1';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const json = (value) => `${JSON.stringify(value, null, 2)}\n`;
-const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
+const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const read = (file) => JSON.parse(readFileSync(file, 'utf8'));
 
 function regularFile(path) {
@@ -33,7 +33,7 @@ function safePath(cwd, file) {
 }
 function dependency(manifest, section, name) {
   const value = manifest[section]?.[name];
-  if (typeof value !== 'string' || !value || /^(?:file:|link:|workspace:)/.test(value)) throw new Error(`Missing publishable ${section}.${name} in ${manifest.name}`);
+  if (typeof value !== 'string' || !semver.test(value.replace(/^[~^]/, ''))) throw new Error(`Missing publishable ${section}.${name} in ${manifest.name}`);
   return value;
 }
 

@@ -42,8 +42,9 @@ source-debt baseline or silently fixes user code.
 Manifests plus existing project metadata are authoritative. Registry-version edges
 inform affected analysis; only file/link dependencies introduce local preparation
 tasks. Overrides describe resolution, not a production dependency declaration.
-Starter producers additionally point to their CLI consumer through `generation`
-edges: a producer change affects CLI validation without adding a runtime dependency.
+The CLI additionally depends on its starter metadata producers through `generation`
+edges (source CLI, target producer). A producer change affects CLI validation without
+adding a runtime dependency.
 Missing producers fail discovery. These edges do not install or build the producers.
 
 Nx owns execution ordering and shared-task deduplication:
@@ -66,7 +67,9 @@ preparation chains remain unchanged. No automatic fallback hides an Nx failure.
 
 CLI starter source imports the local `starter-metadata.json`, not sibling package
 manifests. Only the version and dependency fields actually embedded in the starters
-are copied; no credentials or runtime configuration are part of this metadata.
+are copied. Embedded constraints must be exact, caret or tilde semver versions; URL,
+file/link/workspace and arbitrary tagged sources are rejected rather than copied.
+No credentials or runtime configuration are part of this metadata.
 
 `workspace:sync` previews the complete before/after objects and a `planHash`, without
 writing. After reviewing that preview, apply the exact token:
