@@ -48,7 +48,7 @@ jobs:
         run: |
           bun run test:nx-acceptance
           bun run test:nx-cache --repository
-      - name: Build public packages and verify actual npm consumers
+      - name: Verify public packages and platform-specific private-import refusals
         if: ${{ !cancelled() }}
         run: |
           bun run workspace:prepare --project cli

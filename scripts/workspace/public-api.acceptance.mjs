@@ -30,6 +30,7 @@ try {
   run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--package-lock=false', '--registry=https://registry.npmjs.org', ...tarballs, '@types/bun@1.4.2', '@typescript/typescript6@6.0.2']);
   const checks = `import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {existsSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {schemaEnumValues,stringEnum} from '@supacloud/cli/schema';
 import {registerGatewayTools} from '@supacloud/cli/gateway-tools';
@@ -47,7 +48,8 @@ assert.equal(createHash('sha256').update(SIGSTORE_PUBLIC_GOOD_TRUSTED_ROOT_JSONL
 const require=createRequire(import.meta.url);
 assert.ok(require.resolve('@supacloud/cli').endsWith('/dist/index.js'));
 assert.ok(require.resolve('@supacloud/cli/package.json').endsWith('/package.json'));
-assert.throws(()=>require.resolve('@supacloud/cli/src/shared/schema.ts'),{code:'ERR_PACKAGE_PATH_NOT_EXPORTED'});
+assert.ok(existsSync(new URL('./node_modules/@supacloud/cli/src/shared/schema.ts', import.meta.url)));
+assert.throws(()=>require.resolve('@supacloud/cli/src/shared/schema.ts'),{code:process.versions.bun ? 'MODULE_NOT_FOUND' : 'ERR_PACKAGE_PATH_NOT_EXPORTED'});
 `;
   writeFileSync(resolve(consumer, 'check.mjs'), checks);
   run('node', ['check.mjs']); run('bun', ['--no-env-file', 'check.mjs']);
