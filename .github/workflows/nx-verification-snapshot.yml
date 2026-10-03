@@ -19,19 +19,17 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.2'
-      - name: Prepare pinned local verification inputs
+      - name: Prepare pinned consumer inputs
         run: |
-          bun install --frozen-lockfile --ignore-scripts
-          bun install --frozen-lockfile --ignore-scripts --cwd packages/compiler
-          bun run workspace:build --project app
+          for package in delivery cli admin web-console; do
+            bun install --frozen-lockfile --ignore-scripts --cwd "packages/$package"
+          done
           mkdir -p /tmp/nx-verification
-          git archive HEAD > /tmp/nx-verification/source.tar
           git rev-parse HEAD > /tmp/nx-verification/commit.txt
-          tar -chf /tmp/nx-verification/dependencies.tar node_modules packages/compiler/node_modules packages/contracts/node_modules packages/app/node_modules packages/contracts/dist packages/app/dist
-          tar -C "$HOME/.bun/install" -cf /tmp/nx-verification/bun-cache.tar cache
-          cp "$(command -v node)" /tmp/nx-verification/node
+          tar -chf /tmp/nx-verification/consumer-dependencies.tar packages/cli/node_modules packages/admin/node_modules packages/web-console/node_modules packages/delivery/node_modules
+          tar -C "$HOME/.bun/install" -cf /tmp/nx-verification/consumer-bun-cache.tar cache
       - uses: actions/upload-artifact@v7
         with:
-          name: nx-completion-verification-inputs
+          name: nx-shared-consumer-inputs
           path: /tmp/nx-verification/
           retention-days: 1
