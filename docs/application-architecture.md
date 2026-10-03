@@ -157,7 +157,11 @@ Pass identifiers, immutable input versions, and object paths to asynchronous wor
 
 ## SupaCloud Application Capabilities
 
-Use the standard `@supabase/supabase-js` client for normal application runtime traffic:
+`@supacloud/js` is a frontend-facing platform SDK as well as a trusted-server SDK.
+It wraps an existing `@supabase/supabase-js` client; it does not replace its session
+store or transport. Create one user-scoped Supabase client and pass that instance
+to SupaCloud and existing frontend providers. Ordinary operations remain available
+through the same client (also exposed as `supacloud.supabase`):
 
 - Auth sessions and user-scoped authorization.
 - PostgREST database access subject to RLS.
@@ -165,14 +169,26 @@ Use the standard `@supabase/supabase-js` client for normal application runtime t
 - Realtime subscriptions.
 - Standard `supabase.functions.invoke()` calls.
 
-Use `@supacloud/js` from trusted server-side code for platform-specific capabilities:
+Choose SDK capabilities by their server-enforced trust boundary, not merely by
+whether a method is exported:
 
-- Background task submission, status, cancellation, retry, wait, subscription, and DLQ inspection.
-- Supabase Queues/PGMQ send, receive, acknowledgement, archive, and diagnostics helpers.
-- Service-role-only Durable Workflow execution: claim, advance, retry, fail, complete, and cancel.
-- Service-role-only transactional command receipts for idempotent, atomic domain transition plus enqueue.
-- Immutable Storage artifact registration and acyclic artifact lineage.
-- Project OAuth/OIDC migration helpers and trusted SupAuth provisioning, reconciliation, and verification helpers.
+| Caller | SDK use |
+| --- | --- |
+| Browser with a user session | Background task submission and authorized task status/actions; browser business-command composition through `@supacloud/js/contracts` |
+| Trusted application server or worker | Service-role Workflow/Command RPCs and privileged artifact or queue operations |
+| Trusted operator | Project administration, queue administration and OAuth/OIDC management |
+
+Each endpoint must independently authorize the caller. A browser facade is not a
+permission grant. Never put Management API tokens or service-role credentials in
+the frontend to make an operation work. The SDK does not implement SupAuth
+provisioning, reconciliation or rollback.
+
+Generated application clients own business-specific routes, queries and public
+types, not another session system. Reuse the same current-session resolver with
+the SDK's authenticated transport. UI routing, forms and caches stay with the
+selected frontend framework or svadmin; no frontend DI container is required.
+See [Frontend SDK Integration](./frontend-sdk-integration.md) for the composition
+recipe, browser/server boundaries and focused acceptance scenarios.
 
 The related platform contracts are documented in [Background Functions](./background-functions.md), [Durable Workflows](./durable-workflows.md), and [Application Platform Primitives](./application-platform-primitives.md).
 
