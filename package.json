@@ -22,12 +22,15 @@
     "workspace:affected": "node scripts/workspace/cli.mjs affected",
     "workspace:build": "node scripts/workspace/cli.mjs build",
     "workspace:prepare": "node scripts/workspace/cli.mjs prepare",
-    "test:workspace": "node --test scripts/workspace/workspace.test.mjs scripts/workspace/source.test.mjs scripts/workspace/nx.test.mjs scripts/workspace/source-hardening.test.mjs scripts/workspace/source-baseline.test.mjs scripts/workspace/starter-sync.test.mjs scripts/workspace/cache-policy.test.mjs",
+    "test:workspace": "node --test scripts/workspace/workspace.test.mjs scripts/workspace/source.test.mjs scripts/workspace/nx.test.mjs scripts/workspace/source-hardening.test.mjs scripts/workspace/source-baseline.test.mjs scripts/workspace/completion.test.mjs scripts/workspace/starter-sync.test.mjs scripts/workspace/cache-policy.test.mjs",
     "check:source-boundaries": "bun scripts/workspace/source-check.mjs",
     "check:source-regressions": "bun scripts/workspace/source-check.mjs --baseline",
     "test:nx-acceptance": "node scripts/workspace/nx.acceptance.mjs",
-    "workspace:sync": "node scripts/workspace/starter-sync.mjs",
+    "workspace:starter-sync": "node scripts/workspace/starter-sync.mjs",
     "check:workspace-sync": "node scripts/workspace/starter-sync.mjs --check",
+    "workspace:sync": "bun scripts/workspace/sync-public-api.mjs",
+    "workspace:verify-prepare": "node scripts/workspace/prepare.mjs",
+    "workspace:context": "bun scripts/workspace/context.mjs",
     "test:nx-cache": "node scripts/workspace/cache.acceptance.mjs"
   },
   "dependencies": {
