@@ -1,5 +1,6 @@
 /**
  * @supacloud/devtools-contract
+ * @deprecated New consumers should import @vibeunion/devtools-protocol directly.
  *
  * Re-export shim over `@vibeunion/devtools-protocol`, the single source of
  * truth for JSON-safe DevTools contracts shared by frontend, svadmin, and
