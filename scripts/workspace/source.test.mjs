@@ -91,7 +91,7 @@ test('computed imports are explicitly reported as unverified, not silently prove
 
 test('production scan excludes tests, generated sources and fixtures', (t) => {
   const { root, put, check } = fixture(t, 'export const x = 1;');
-  for (const file of ['src/private.test.ts', 'src/private.test-fixtures.ts', 'src/types.d.ts', 'src/fixtures/private.ts', 'src/generated/private.ts']) put(`packages/client/${file}`, "import '@test/server/private';");
+  for (const file of ['src/private.test.ts', 'src/private.test-fixtures.ts', 'src/fixtures/private.ts', 'src/generated/private.ts']) put(`packages/client/${file}`, "import '@test/server/private';");
   assert.equal(productionSources(resolve(root, 'packages/client/src')).length, 2);
   assert.equal(check().diagnostics.length, 0);
 });

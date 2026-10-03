@@ -10,10 +10,11 @@ export const slash = (path) => path.replaceAll('\\', '/');
 /** Repository facts, not a scheduler. Installation/workspace membership is unchanged. */
 export function readWorkspace(root) {
   root = resolve(root);
-  const projects = {};
+  const projects = Object.create(null);
   const byPackage = new Map();
   const byRoot = new Map();
   for (const entry of readdirSync(resolve(root, 'packages'), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (entry.isSymbolicLink()) throw new Error(`Symlinked workspace package requires explicit ownership: ${entry.name}`);
     if (!entry.isDirectory()) continue;
     const projectRoot = `packages/${entry.name}`;
     const manifestPath = resolve(root, projectRoot, 'package.json');
@@ -37,6 +38,7 @@ export function readWorkspace(root) {
     byPackage.set(manifest.name, project);
     byRoot.set(projectRoot, project);
   }
+  if (!Object.keys(projects).length) throw new Error('No workspace packages found.');
   const edges = [];
   for (const project of Object.values(projects)) {
     // Overrides affect local resolution/build inputs; they are not runtime declarations.
@@ -82,9 +84,15 @@ export function assertAcyclic({ projects, edges }) {
   for (const name of Object.keys(projects)) visit(name, []);
 }
 
+/** Source-only local packages still need installation of their own prerequisites. */
+export function preparationTargets(workspace, name) {
+  return [...new Set(workspace.edges.filter((edge) => edge.source === name && edge.local).map((edge) => edge.target))]
+    .sort().map((name) => ({ projects: [name],
+      target: typeof workspace.projects[name].scripts.build === 'string' ? 'repo-build' : 'repo-install', params: 'ignore' }));
+}
+
 export function buildPrerequisites(workspace, name) {
-  return [...new Set(workspace.edges.filter((edge) => edge.source === name && edge.local)
-    .map((edge) => edge.target).filter((target) => typeof workspace.projects[target].scripts.build === 'string'))].sort();
+  return preparationTargets(workspace, name).filter((entry) => entry.target === 'repo-build').map((entry) => entry.projects[0]);
 }
 
 export function resolveProject(workspace, value) {
@@ -102,7 +110,7 @@ export function graphReport(workspace) {
   return {
     schemaVersion: 1,
     projects: Object.values(workspace.projects).map(({ manifest, ...project }) => ({
-      ...project, buildPrerequisites: buildPrerequisites(workspace, project.name),
+      ...project, buildPrerequisites: buildPrerequisites(workspace, project.name), preparationTargets: preparationTargets(workspace, project.name),
     })),
     edges: workspace.edges,
     acceptance: { name: ACCEPTANCE_PROJECT, dependsOn: Object.keys(workspace.projects).sort(), cache: false },

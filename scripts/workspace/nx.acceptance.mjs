@@ -19,7 +19,7 @@ const run = (command, args, cwd = root, expectedSuccess = true) => {
   if ((result.status === 0) !== expectedSuccess) throw new Error(`Unexpected exit ${result.status}: ${command} ${args.join(' ')}\n${result.stdout}\n${result.stderr}`);
   return result;
 };
-const topology = { shared: [], left: ['shared'], right: ['shared'], app: ['left', 'right'], unrelated: [] };
+const topology = { shared: [], left: ['shared'], right: ['shared'], app: ['left', 'right', 'sourceonly'], sourceonly: ['shared'], unrelated: [] };
 const transitive = (name) => [...new Set(topology[name].flatMap((dependency) => [dependency, ...transitive(dependency)]))];
 try {
   cpSync(resolve(repository, 'scripts/workspace'), resolve(root, 'scripts/workspace'), { recursive: true });
@@ -30,12 +30,12 @@ try {
   put('.gitignore', 'node_modules/\n.nx/\n**/dist/\n');
   for (const [name, prerequisites] of Object.entries(topology)) {
     put(`packages/${name}/package.json`, {
-      name: `@fixture/${name}`, version: '1.0.0', type: 'module', scripts: { build: 'node build.mjs' },
+      name: `@fixture/${name}`, version: '1.0.0', type: 'module', scripts: name === 'sourceonly' ? {} : { build: 'node build.mjs' },
       dependencies: Object.fromEntries(prerequisites.map((dependency) => [`@fixture/${dependency}`, `file:../${dependency}`])),
       overrides: Object.fromEntries(transitive(name).map((dependency) => [`@fixture/${dependency}`, `file:../${dependency}`])),
     });
     put(`packages/${name}/project.json`, { name: `@fixture/${name}`, tags: ['scope:fixture', 'type:library'] });
-    put(`packages/${name}/build.mjs`, `import {appendFileSync, existsSync, mkdirSync, writeFileSync} from 'node:fs';\nfor (const dependency of ${JSON.stringify(prerequisites)}) { if (!existsSync('../' + dependency + '/dist/ready')) throw new Error('Missing prerequisite: ' + dependency); }\nmkdirSync('dist', {recursive:true}); writeFileSync('dist/ready','built'); appendFileSync('../../trace.jsonl',JSON.stringify(${JSON.stringify(name)})+'\\n');\n`);
+    put(`packages/${name}/build.mjs`, `import {appendFileSync, existsSync, mkdirSync, writeFileSync} from 'node:fs';\nfor (const dependency of ${JSON.stringify(prerequisites)}) { if (!existsSync('../' + dependency + (dependency === 'sourceonly' ? '/node_modules/@fixture/shared/dist/ready' : '/dist/ready'))) throw new Error('Missing prerequisite: ' + dependency); }\nmkdirSync('dist', {recursive:true}); writeFileSync('dist/ready','built'); appendFileSync('../../trace.jsonl',JSON.stringify(${JSON.stringify(name)})+'\\n');\n`);
   }
   // Local-only fixtures have no registry dependencies; still generate and freeze real Bun locks.
   for (const name of Object.keys(topology)) run('bun', ['install', '--lockfile-only', '--ignore-scripts'], resolve(root, 'packages', name));
@@ -44,6 +44,14 @@ try {
   for (const name of Object.keys(topology)) assert.ok(projects.includes(`@fixture/${name}`));
   assert.ok(projects.includes('supacloud-workspace-acceptance'));
   const readTrace = () => existsSync(resolve(root, 'trace.jsonl')) ? readFileSync(resolve(root, 'trace.jsonl'), 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [];
+  // Prerequisite preparation must not install/build the selected consumer.
+  rmSync(resolve(root, 'packages/app/node_modules'), { recursive: true, force: true });
+  rmSync(resolve(root, 'packages/sourceonly/node_modules'), { recursive: true, force: true });
+  run(process.execPath, [nx, 'run', '@fixture/app:repo-prepare', '--outputStyle=static']);
+  assert.deepEqual(readTrace().sort(), ['left', 'right', 'shared']);
+  assert.ok(!existsSync(resolve(root, 'packages/app/node_modules')));
+  assert.ok(!existsSync(resolve(root, 'packages/app/dist')));
+  assert.ok(existsSync(resolve(root, 'packages/sourceonly/node_modules/@fixture/shared/dist/ready')));
   const args = [nx, 'run', '@fixture/app:repo-build', '--parallel=3', '--nxBail', '--outputStyle=static'];
   for (let iteration = 0; iteration < 2; iteration++) {
     rmSync(resolve(root, 'trace.jsonl'), { force: true });
@@ -62,7 +70,7 @@ try {
   run(process.execPath, args, root, false);
   assert.ok(!readTrace().includes('app'));
   assert.ok(!existsSync(resolve(root, 'packages/app/dist/ready')));
-  console.log('PASS: real Nx discovery, diamond ordering, shared-task deduplication, uncached rebuild and failure propagation.');
+  console.log('PASS: real Nx discovery, diamond ordering, shared-task deduplication, prepare-only execution, source-only prerequisites, uncached rebuild and failure propagation.');
 } finally {
   rmSync(root, { recursive: true, force: true });
 }

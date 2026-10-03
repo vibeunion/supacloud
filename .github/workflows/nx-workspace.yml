@@ -1,21 +1,9 @@
 name: Nx Workspace Tooling
 
+# Reused by Management API CI and included in its Required Checks aggregate.
+# Do not add PR path filters or a second pull_request run here.
 on:
-  pull_request:
-    branches: [main, dev]
-    paths:
-      - package.json
-      - bun.lock
-      - nx.json
-      - tsconfig.base.json
-      - 'scripts/workspace/**'
-      - 'scripts/check_workspace_boundaries*'
-      - 'packages/**/package.json'
-      - 'packages/**/project.json'
-      - 'packages/**/bun.lock'
-      - 'packages/*/src/**'
-      - 'packages/**/tsconfig*.json'
-      - '.github/workflows/nx-workspace.yml'
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -51,12 +39,11 @@ jobs:
         run: bun install --ignore-scripts --frozen-lockfile --cwd packages/compiler
       - name: Workspace and source-boundary regression tests
         run: bun run test:workspace
-      - name: Source-boundary rollout inventory
+      - name: Reject new source-boundary and coverage findings
         id: source_inventory
-        continue-on-error: true
         run: |
           mkdir -p .nx/evidence
-          bun run check:source-boundaries > .nx/evidence/source-boundaries.json
+          bun run check:source-regressions > .nx/evidence/source-boundaries.json
       - name: Validate repository metadata and Nx discovery
         run: |
           mkdir -p .nx/evidence

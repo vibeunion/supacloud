@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
@@ -148,4 +148,29 @@ test('Git inputs include rename source/destination, dirty deletions, spaces and 
   const report = changedInputs(root, base);
   for (const file of ['packages/app/old name.ts', 'packages/web/new name.ts', 'packages/compiler/project.json', 'packages/contracts/untracked.ts']) assert.ok(report.files.includes(file));
   assert.match(changedInputs(root, base, base).fallbackReason, /checked-out/);
+});
+
+test('prepare delegates to Nx without installing or rebuilding the consumer', (t) => {
+  const { root } = fixture(t, deps);
+  const workspace = readWorkspace(root);
+  const target = projectTargets(workspace, workspace.projects['@test/web'])['repo-prepare'];
+  assert.equal(target.executor, 'nx:noop'); assert.equal(target.cache, false);
+  assert.deepEqual(target.dependsOn, [{ projects: ['@test/app'], target: 'repo-build', params: 'ignore' }]);
+  assert.deepEqual(parseArgs(['prepare', '--project', 'web']).options, { '--project': 'web' });
+});
+
+test('source-only local packages retain installation and transitive build prerequisites', (t) => {
+  const { root } = fixture(t, { ...deps, app: { ...deps.app, scripts: {} } });
+  const workspace = readWorkspace(root);
+  assert.deepEqual(projectTargets(workspace, workspace.projects['@test/web'])['repo-install'].dependsOn,
+    [{ projects: ['@test/app'], target: 'repo-install', params: 'ignore' }]);
+  assert.deepEqual(projectTargets(workspace, workspace.projects['@test/app'])['repo-install'].dependsOn,
+    [{ projects: ['@test/contracts'], target: 'repo-build', params: 'ignore' }]);
+});
+
+
+test('symlinked package directories cannot disappear from workspace discovery', (t) => {
+  const { root } = fixture(t);
+  symlinkSync(resolve(root, 'packages/app'), resolve(root, 'packages/linked'), 'junction');
+  assert.throws(() => readWorkspace(root), /Symlinked workspace package/);
 });

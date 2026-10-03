@@ -35,9 +35,9 @@ export function parseArgs(args) {
     }
     options[flag] = rest[index + 1];
   }
-  const allowed = { check: [], graph: [], affected: ['--base', '--head'], build: ['--project'] };
+  const allowed = { check: [], graph: [], affected: ['--base', '--head'], build: ['--project'], prepare: ['--project'] };
   if (!Object.hasOwn(allowed, command) || Object.keys(options).some((key) => !allowed[command].includes(key))) {
-    throw new Error('Usage: workspace <check|graph|affected [--base REF] [--head REF]|build --project NAME>');
+    throw new Error('Usage: workspace <check|graph|affected [--base REF] [--head REF]|(build|prepare) --project NAME>');
   }
   return { command, options };
 }
@@ -45,10 +45,10 @@ export function parseArgs(args) {
 export function main(args = process.argv.slice(2), cwd = root) {
   const { command, options } = parseArgs(args);
   const workspace = readWorkspace(cwd);
-  if (command === 'build') {
+  if (command === 'build' || command === 'prepare') {
     const project = resolveProject(workspace, options['--project']);
-    if (typeof project.scripts.build !== 'string') throw new Error(`No build script: ${project.name}`);
-    runNx(['run', `${project.name}:repo-build`, '--outputStyle=static'], cwd);
+    if (command === 'build' && typeof project.scripts.build !== 'string') throw new Error(`No build script: ${project.name}`);
+    runNx(['run', `${project.name}:repo-${command}`, '--outputStyle=static'], cwd);
     return;
   }
   let report = graphReport(workspace);

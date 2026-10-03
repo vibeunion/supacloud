@@ -1,15 +1,17 @@
-import { ACCEPTANCE_PROJECT, buildPrerequisites, readWorkspace } from './model.mjs';
+import { ACCEPTANCE_PROJECT, preparationTargets, readWorkspace } from './model.mjs';
 
 /** Nx owns execution/deduplication. No generated application imports this plugin. */
 export function projectTargets(workspace, project) {
   const install = {
     executor: 'nx:run-commands', cache: false,
     options: { command: 'bun install --force --ignore-scripts --frozen-lockfile', cwd: project.root },
-    dependsOn: buildPrerequisites(workspace, project.name).map((name) => ({
-      projects: [name], target: 'repo-build', params: 'ignore',
-    })),
+    dependsOn: preparationTargets(workspace, project.name),
   };
-  const targets = { 'repo-install': install };
+  const targets = {
+    'repo-install': install,
+    'repo-prepare': { executor: 'nx:noop', cache: false, dependsOn: preparationTargets(workspace, project.name),
+      metadata: { description: 'Build/install only local prerequisites; do not install or build this consumer.' } },
+  };
   for (const script of ['build', 'test', 'typecheck', 'typecheck:test', 'check']) {
     if (typeof project.scripts[script] !== 'string') continue;
     targets[`repo-${script.replaceAll(':', '-')}`] = {

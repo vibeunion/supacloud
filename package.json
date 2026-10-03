@@ -21,8 +21,10 @@
     "workspace:graph": "node scripts/workspace/cli.mjs graph",
     "workspace:affected": "node scripts/workspace/cli.mjs affected",
     "workspace:build": "node scripts/workspace/cli.mjs build",
-    "test:workspace": "node --test scripts/workspace/workspace.test.mjs scripts/workspace/source.test.mjs scripts/workspace/nx.test.mjs",
+    "workspace:prepare": "node scripts/workspace/cli.mjs prepare",
+    "test:workspace": "node --test scripts/workspace/workspace.test.mjs scripts/workspace/source.test.mjs scripts/workspace/nx.test.mjs scripts/workspace/source-hardening.test.mjs scripts/workspace/source-baseline.test.mjs",
     "check:source-boundaries": "bun scripts/workspace/source-check.mjs",
+    "check:source-regressions": "bun scripts/workspace/source-check.mjs --baseline",
     "test:nx-acceptance": "node scripts/workspace/nx.acceptance.mjs"
   },
   "dependencies": {
