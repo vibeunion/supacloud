@@ -120,7 +120,7 @@ Scenario: Do not replay an uncertain write
 ```
 
 Focused verification (requires installed compiler/SDK dependencies and built
-shared contracts, as in the existing package setup):
+shared contracts and SDK public entrypoints, as in the existing package setup):
 
 ```sh
 bun test scripts/frontend-sdk.test.ts
