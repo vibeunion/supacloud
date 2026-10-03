@@ -63,9 +63,13 @@ export async function createDependencies(_options, context) {
   const workspace = readWorkspace(context.workspaceRoot);
   const unique = new Map();
   for (const edge of workspace.edges) {
-    // Include manifest inputs even when Nx's package-manager workspace is not enabled.
-    const dependency = { source: edge.source, target: edge.target, sourceFile: edge.sourceFile, type: 'static' };
-    unique.set(`${edge.source}\0${edge.target}`, dependency);
+    // Verification policy is owned by tooling, not the source package's file map.
+    // Nx implicit edges express that relationship without forging source ownership.
+    const dependency = edge.kind === 'verification'
+      ? { source: edge.source, target: edge.target, type: 'implicit' }
+      : { source: edge.source, target: edge.target, sourceFile: edge.sourceFile, type: 'static' };
+    const key = `${edge.source}\0${edge.target}`;
+    if (unique.get(key)?.type !== 'static') unique.set(key, dependency);
   }
   return [...unique.values()];
 }

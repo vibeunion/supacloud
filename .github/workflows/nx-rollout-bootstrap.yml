@@ -24,7 +24,9 @@ jobs:
         with:
           bun-version: '1.4.2'
       - name: Apply staged import refactor for verification only
-        run: git apply --index .github/nx-rollout.patch
+        run: |
+          git apply --index .github/nx-rollout.patch
+          git restore --source=HEAD --staged --worktree packages/admin/src/shared/tools/ssh-tools.test.ts
       - name: Install root tooling and generate changed package locks
         run: |
           bun install --ignore-scripts --frozen-lockfile
@@ -41,11 +43,13 @@ jobs:
           bun run check:workspace-sync
           bun run test:workspace
           bun run check:source-regressions > .nx/evidence/source-boundaries.json
+          node scripts/workspace/nx.mjs graph --file=.nx/evidence/nx-graph.json
       - name: Real execution and caching
         run: |
           bun run test:nx-acceptance
           bun run test:nx-cache --repository
       - name: Public packages and security regressions
+        if: ${{ !cancelled() }}
         run: |
           bun run workspace:prepare --project cli
           (cd packages/cli && bun install --force --ignore-scripts --frozen-lockfile && bun run build && bun run typecheck)

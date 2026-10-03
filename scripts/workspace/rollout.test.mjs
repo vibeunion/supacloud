@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 import { affectedReport, preparationTargets, readWorkspace } from './model.mjs';
-import { projectTargets } from './nx-plugin.mjs';
+import { createDependencies, projectTargets } from './nx-plugin.mjs';
 import { buildEnvironment } from './build.mjs';
 import { METADATA_PACKAGES, METADATA_PATH, TRUST_ROOT_OUTPUT, TRUST_ROOT_SOURCE } from './sync.mjs';
 const repository = fileURLToPath(new URL('../../', import.meta.url));
@@ -80,4 +80,21 @@ test('no publishable package depends on Nx and no unresolved static debt is budg
   }
   const baseline = JSON.parse(readFileSync(resolve(repository, 'scripts/workspace/source-baseline.json'), 'utf8'));
   assert.ok(baseline.entries.every((entry) => entry.code === 'WS_DYNAMIC_IMPORT'));
+});
+
+
+test('Nx verification edges are implicit and never attribute tooling files to source projects', async (t) => {
+  const workspace = fixture(t, { schemaVersion: 1, verificationPrerequisites: { runtime: ['compiler'] } });
+  const edges = await createDependencies(undefined, { workspaceRoot: workspace.root });
+  assert.deepEqual(edges, [{ source: 'runtime', target: 'compiler', type: 'implicit' }]);
+});
+
+test('Nx declared source dependencies take precedence over duplicate verification relationships', async (t) => {
+  const workspace = fixture(t, { schemaVersion: 1, verificationPrerequisites: { runtime: ['compiler'] } });
+  const path = resolve(workspace.root, 'packages/runtime/package.json');
+  const manifest = JSON.parse(readFileSync(path, 'utf8'));
+  manifest.dependencies = { compiler: 'file:../compiler' };
+  writeFileSync(path, JSON.stringify(manifest));
+  const edges = await createDependencies(undefined, { workspaceRoot: workspace.root });
+  assert.deepEqual(edges, [{ source: 'runtime', target: 'compiler', type: 'static', sourceFile: 'packages/runtime/package.json' }]);
 });
