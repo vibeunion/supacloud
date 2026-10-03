@@ -1,5 +1,7 @@
 import { buildCachePolicy } from './cache-policy.mjs';
 import { ACCEPTANCE_PROJECT, preparationTargets, readWorkspace } from './model.mjs';
+import { cacheEligible } from './cache.mjs';
+import { verificationTargets } from './verification.mjs';
 
 /** Nx owns execution/deduplication. No generated application imports this plugin. */
 export function projectTargets(workspace, project) {
@@ -10,15 +12,24 @@ export function projectTargets(workspace, project) {
   };
   const targets = {
     'repo-install': install,
+    'repo-verify-prepare': { executor: 'nx:noop', cache: false, dependsOn: verificationTargets(workspace, project) },
     'repo-prepare': { executor: 'nx:noop', cache: false, dependsOn: preparationTargets(workspace, project.name),
       metadata: { description: 'Build/install only local prerequisites; do not install or build this consumer.' } },
   };
+  if (cacheEligible(project)) {
+    targets['repo-cache-guard'] = {
+      executor: 'nx:run-commands', cache: false,
+      options: { command: 'node scripts/workspace/cache.mjs', cwd: '.' },
+      dependsOn: [{ target: 'repo-install', params: 'ignore' }],
+      metadata: { description: 'Uncached cache-input/output preflight; hashing errors alone are not an execution gate.' },
+    };
+  }
   for (const script of ['build', 'test', 'typecheck', 'typecheck:test', 'check']) {
     if (typeof project.scripts[script] !== 'string') continue;
     targets[`repo-${script.replaceAll(':', '-')}`] = {
       executor: 'nx:run-commands', cache: false,
       options: { command: `bun run ${script}`, cwd: project.root },
-      dependsOn: [{ target: 'repo-install', params: 'ignore' }],
+      dependsOn: [{ target: script === 'build' && cacheEligible(project) ? 'repo-cache-guard' : 'repo-install', params: 'ignore' }],
       inputs: ['default', '^default'],
       ...(script === 'build' ? { outputs: ['{projectRoot}/dist'] } : {}),
       metadata: { description: `Opt-in Bun ${script}; result caching is disabled until package-specific acceptance.` },

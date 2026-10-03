@@ -53,8 +53,10 @@ try {
     invalidated.push(file); put(file, original);
   }
   put('packages/contracts/.env.local', 'SUPACLOUD_CACHE_ACCEPTANCE=changed\n');
-  assert.equal(hit(run(built)), false); rmSync(resolve(root, 'packages/contracts/.env.local'));
-  invalidated.push('ignored environment configuration');
+  const dotenvRejected = run(built, environment, false);
+  assert.match(dotenvRejected, /forbid dotenv inputs/i);
+  rmSync(resolve(root, 'packages/contracts/.env.local'));
+  invalidated.push('ignored environment configuration (rejected)');
   assert.equal(hit(run(built, { ...environment, SUPACLOUD_CACHE_ACCEPTANCE: 'different' })), false);
   invalidated.push('effective environment');
   const config = readFileSync(resolve(root, 'packages/contracts/tsconfig.json'), 'utf8');
