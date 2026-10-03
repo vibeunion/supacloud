@@ -962,3 +962,5 @@ supacloud-cli gateway rebuild --ref abc123 --clean
 ```
 
 For server installation, SSH diagnostics, and tenant administration, use `@supacloud/admin`.
+
+<!-- Keep Reactive Integration coverage active for CLI package changes. -->
