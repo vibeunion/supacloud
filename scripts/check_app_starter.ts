@@ -156,6 +156,7 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
   throw new Error("Packed development-loop exports are missing");
 }`]);
   console.log("Starter: installed packed app/compiler/runtime and public third-party packages");
+  console.log(await run(["run", "db:generate"]));
   console.log(await run(["run", "check"]));
   console.log(await run(["run", "build"]));
 
