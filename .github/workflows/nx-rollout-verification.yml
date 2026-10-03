@@ -1,6 +1,6 @@
 name: Nx Rollout Verification Inputs
 
-# Temporary branch-only lock generation. No repository write credentials.
+# Temporary branch-only verification input capture. Remove before final review.
 on:
   push:
     branches: ['feat/nx-workspace-foundation']
@@ -12,49 +12,25 @@ permissions:
 jobs:
   verification-inputs:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 10
     env:
       BUN_INSTALL_CACHE_DIR: /tmp/supacloud-nx-rollout-cache
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: '24.x'
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.2'
-      - name: Generate candidate locks for reviewed manifest additions
+      - name: Install locked compatibility test dependencies
         run: |
-          node --input-type=module <<'JS'
-          import {readFileSync,writeFileSync} from 'node:fs';
-          for (const [name,field] of [['admin','dependencies'],['web-console','devDependencies']]) {
-            const file=`packages/${name}/package.json`;
-            const data=JSON.parse(readFileSync(file,'utf8'));
-            data[field]['@supacloud/delivery']='file:../delivery';
-            writeFileSync(file,JSON.stringify(data,null,2)+'\n');
-          }
-          JS
-          for package in admin web-console; do
-            bun install --lockfile-only --ignore-scripts --cwd "packages/$package"
-          done
-      - name: Install locked verification dependencies
-        run: |
-          bun install --frozen-lockfile --ignore-scripts
-          for package in contracts delivery commands compiler db app app-svelte supacloud-js elysia cli admin web-console; do
-            bun install --frozen-lockfile --ignore-scripts --cwd "packages/$package"
-          done
-      - name: Export isolated verification inputs
+          bun install --frozen-lockfile --ignore-scripts --cwd packages/delivery
+          bun install --frozen-lockfile --ignore-scripts --cwd packages/management-api
+      - name: Export isolated dependency cache
         run: |
           mkdir -p "$RUNNER_TEMP/nx-rollout-inputs"
-          git archive HEAD > "$RUNNER_TEMP/nx-rollout-inputs/source.tar"
           git rev-parse HEAD > "$RUNNER_TEMP/nx-rollout-inputs/commit.txt"
-          git rev-parse HEAD^{tree} > "$RUNNER_TEMP/nx-rollout-inputs/tree.txt"
           tar -cf "$RUNNER_TEMP/nx-rollout-inputs/cache.tar" -C "$BUN_INSTALL_CACHE_DIR" .
-          tar -cf "$RUNNER_TEMP/nx-rollout-inputs/locks.tar" packages/admin/package.json packages/admin/bun.lock packages/web-console/package.json packages/web-console/bun.lock
-          git diff -- packages/admin/bun.lock packages/web-console/bun.lock > "$RUNNER_TEMP/nx-rollout-inputs/lock-diff.txt"
-          node --version > "$RUNNER_TEMP/nx-rollout-inputs/node-version.txt"
           bun --version > "$RUNNER_TEMP/nx-rollout-inputs/bun-version.txt"
       - uses: actions/upload-artifact@v7
         with:
