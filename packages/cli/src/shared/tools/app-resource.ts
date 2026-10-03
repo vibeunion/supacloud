@@ -5,22 +5,30 @@
 export function resourceScaffold(name: string, className: string): Record<string, string> {
     return {
         [`${name}.model.ts`]: `import { t } from "elysia";
-import type { RouteHandlerOutput } from "@supacloud/app";
+import { InjectionToken, type RouteHandlerOutput } from "@supacloud/app";
 
 // HTTP contracts are the single source of field types. Services import types only.
 export const ${className}Params = t.Object({ id: t.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9_-]+$" }) });
 export const ${className}Response = t.Object({ id: t.String() });
 export type ${className}Result = RouteHandlerOutput<{ responses: { 200: typeof ${className}Response } }>;
-`,
-        [`${name}.service.ts`]: `import { Injectable } from "@supacloud/app";
-import type { ${className}Result } from "./${name}.model";
 
-@Injectable()
+// Bind a request-scoped adapter using the verified user and RLS. It must reject
+// denied/not-found reads; never bind a browser-supplied identity or service-role fallback.
+export interface ${className}ReadPort {
+    readAuthorized(id: string): Promise<${className}Result>;
+}
+export const ${className}Reader = new InjectionToken<${className}ReadPort>("${name}.reader", { scope: "request" });
+`,
+        [`${name}.service.ts`]: `import { Inject, Injectable, Optional } from "@supacloud/app";
+import { ${className}Reader, type ${className}ReadPort, type ${className}Result } from "./${name}.model";
+
+@Injectable({ scope: "request" })
 export class ${className}Service {
-    async find(_id: string): Promise<${className}Result> {
-        // Supply your project's authorized read port before exposing this route.
-        // Writes must use a governed Command; this scaffold never fakes persistence.
-        throw new Error("Implement ${className}Service.find before exposing this resource");
+    constructor(@Inject(${className}Reader) @Optional() readonly reader?: ${className}ReadPort) {}
+
+    async find(id: string): Promise<${className}Result> {
+        if (!this.reader) throw new Error("Bind ${className}Reader before exposing this resource");
+        return this.reader.readAuthorized(id);
     }
 }
 `,
@@ -30,7 +38,7 @@ import { ${className}Service } from "./${name}.service";
 
 @Controller("/${name}")
 export class ${className}Controller {
-    constructor(@Inject(${className}Service) readonly service: ${className}Service) {}
+    constructor(@Inject(${className}Service) readonly service: Pick<${className}Service, "find">) {}
 
     @Get("/:id", { params: ${className}Params, responses: { 200: ${className}Response } })
     find(@Param("id") id: string): Promise<${className}Result> {
@@ -55,7 +63,18 @@ import { ${className}Service } from "./${name}.service";
 
 test("${name} does not claim a read adapter has been implemented", async () => {
     await expect(new ${className}Service().find("example"))
-        .rejects.toThrow("Implement ${className}Service.find");
+        .rejects.toThrow("Bind ${className}Reader");
+});
+
+test("${name} returns only the supplied authorized read result", async () => {
+    const service = new ${className}Service({ readAuthorized: async id => ({ id }) });
+    expect(await service.find("example")).toEqual({ id: "example" });
+});
+
+test("${name} preserves permission denial without a privileged fallback", async () => {
+    const denied = new Error("denied");
+    const service = new ${className}Service({ readAuthorized: async () => { throw denied; } });
+    await expect(service.find("example")).rejects.toBe(denied);
 });
 `,
         [`${name}.controller.test.ts`]: `import { expect, test } from "bun:test";
