@@ -16,12 +16,14 @@ import commandsMetadata from "../../../../commands/package.json" with { type: "j
 import contractsMetadata from "../../../../contracts/package.json" with { type: "json" };
 import dbMetadata from "../../../../db/package.json" with { type: "json" };
 import sdkMetadata from "../../../../supacloud-js/package.json" with { type: "json" };
+import { starterDatabaseFiles, STARTER_DATABASE_GUIDE } from "./app-starter-database";
 
 const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
 /** Embedded source strings are included in both the npm CLI and standalone binary. */
 export function appStarterFiles(name: string): Record<string, string> {
     return {
+        ...starterDatabaseFiles(),
         "package.json": json({
             name, version: "0.0.0", private: true, type: "module",
             engines: { bun: ">=1.4.2" },
@@ -29,10 +31,15 @@ export function appStarterFiles(name: string): Record<string, string> {
                 compile: "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js compile",
                 "check:generated": "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js check",
                 typecheck: "tsc --noEmit",
-                check: "bun run compile && bun run check:generated && bun run typecheck && bun run test",
+                "db:generate": "supacloud-db generate",
+                "db:check": "supacloud-db check",
+                "db:assess": "supacloud-db assess",
+                "db:diff": "drizzle-kit generate --config drizzle.config.ts",
+                "db:pull": "drizzle-kit pull --config drizzle.pull.config.ts",
+                check: "bun run db:check && bun run compile && bun run check:generated && bun run typecheck && bun run test",
                 test: "bun run compile && bun --no-env-file scripts/environment.ts test bun test",
                 dev: "bun --no-env-file scripts/environment.ts development bun scripts/dev.ts",
-                build: "bun run compile && bun run typecheck && bun build src/application.ts --target bun --minify --outdir dist",
+                build: "bun run db:check && bun run compile && bun run typecheck && bun build src/application.ts --target bun --minify --outdir dist",
                 "env:development": "bun --no-env-file scripts/environment.ts development",
                 "env:test": "bun --no-env-file scripts/environment.ts test",
                 "env:staging": "bun --no-env-file scripts/environment.ts staging",
@@ -44,6 +51,7 @@ export function appStarterFiles(name: string): Record<string, string> {
                 "@supacloud/commands": `^${commandsMetadata.version}`,
                 "@supacloud/contracts": `^${contractsMetadata.version}`,
                 "@supacloud/db": `^${dbMetadata.version}`,
+                "drizzle-orm": dbMetadata.peerDependencies["drizzle-orm"],
                 "@supacloud/js": `^${sdkMetadata.version}`,
                 "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
                 elysia: "2.0.0-beta.19",
@@ -51,6 +59,7 @@ export function appStarterFiles(name: string): Record<string, string> {
             },
             devDependencies: {
                 "@supacloud/compiler": `^${compilerMetadata.version}`,
+                "drizzle-kit": dbMetadata.devDependencies["drizzle-kit"],
                 "@types/bun": "^1.4.2",
                 typescript: "^7.0.2",
             },
@@ -61,11 +70,11 @@ export function appStarterFiles(name: string): Record<string, string> {
                 strict: true, experimentalDecorators: true, skipLibCheck: true,
                 noEmit: true, types: ["bun"],
             },
-            include: ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "generated/**/*.ts", "supacloud.config.ts"],
+            include: ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "generated/**/*.ts", "db/schema.ts", "db/contracts/**/*.ts", "supacloud.config.ts", "drizzle*.config.ts"],
         }),
         "bunfig.toml": "env = false\n",
         ".gitignore": [
-            "node_modules/", "dist/", ".env", ".env.*", "!.env.*.example", "!.env.test", "",
+            "node_modules/", "dist/", "output/database-audit/", "db/migration-candidates/", ".env", ".env.*", "!.env.*.example", "!.env.test", "",
         ].join("\n"),
         ".env.development.example": "APP_ENV=development\nPORT=3000\n",
         ".env.test": "APP_ENV=test\n",
@@ -141,7 +150,7 @@ test("generated query client preserves its read contract without a live database
 });
 `,
         "REACTIVE.md": STARTER_REACTIVE_GUIDE,
-        "AGENTS.md": STARTER_REACTIVE_AGENTS,
+        "AGENTS.md": STARTER_REACTIVE_AGENTS + STARTER_DATABASE_GUIDE,
         "tests/reactive.test.ts": STARTER_REACTIVE_TEST,
         "scripts/environment.ts": STARTER_ENVIRONMENT,
         "tests/environment.test.ts": STARTER_ENVIRONMENT_TEST,
@@ -243,6 +252,7 @@ import { ApplicationError, assertFeatureTransition } from "@supacloud/elysia";
 import { t } from "elysia";
 import { VerifyReviewAttachment } from "./attachment";
 import { ReviewUploads, ReviewUploadsController, type ReviewUploadPort } from "./uploads";
+import type { ReviewRow } from "../../db/schema";
 
 export const reviewSpec = defineFeatureSpec({
   name: "review",
@@ -257,7 +267,7 @@ export const reviewSpec = defineFeatureSpec({
   },
 });
 
-interface Review { state: string; version: number }
+type Review = Pick<ReviewRow, "state" | "version">;
 // Production implementations must bind both operations to the current transaction.
 export interface ReviewStore extends Partial<ReviewUploadPort> {
   get(table: string, key: string): unknown;
@@ -280,7 +290,7 @@ export const requireRequest: Aspect = (context, next) => {
 
 function readReview(value: unknown): Review {
   if (typeof value !== "object" || value === null ||
-      !("state" in value) || typeof value.state !== "string" ||
+      !("state" in value) || (value.state !== "draft" && value.state !== "approved") ||
       !("version" in value) || typeof value.version !== "number") {
     throw new ApplicationError("Review not found", { status: 404, code: "REVIEW_NOT_FOUND" });
   }
@@ -407,6 +417,7 @@ test("the production composition root rejects missing governance adapters", () =
 
 \`\`\`sh
 bun install
+bun run db:generate
 bun run check
 bun run dev
 \`\`\`
@@ -695,6 +706,8 @@ request IDs. Fixes default to preview; use --write only after reviewing the sele
 policy. Invalid transaction/idempotency modes fail compilation instead of
 silently disabling governance. onExecution receives metadata-only trace events;
 durable audit still belongs to the command governance adapter.
+
+${STARTER_DATABASE_GUIDE}
 
 ## CI
 

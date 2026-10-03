@@ -20,6 +20,7 @@ After the CLI release containing this command is published:
 supacloud app init --root ./orders --name orders
 cd orders
 bun install
+bun run db:generate
 bun run check
 bun run dev
 ```
@@ -39,6 +40,8 @@ does not bypass overwrite protection.
 
 The template contains:
 
+- Drizzle table declarations and inferred row types, separate migration/introspection
+  candidate outputs, and an offline database-source contract gate in default check/build;
 - three separated framework packages, TypeScript configuration and strict compiler capabilities;
 - a typed review feature with a state specification, route schemas and static AOP;
 - Database First GraphQL query contracts as the recommended read path, a synthetic offline schema fixture, generated typed
@@ -54,6 +57,15 @@ CLI build time, so release version changes do not leave stale template literals.
 New compiler and runtime fixes must be published with the CLI feature. Before
 publication, `bun run scripts/check_app_starter.ts` tests locally packed artifacts
 together; this is not evidence that those versions already exist on npm.
+
+The default command template includes database tooling. HTTP/Edge templates do not
+install Drizzle or require `db:generate`. For the command template, `db:generate`
+is an explicit first-use setup step after installation; commit `db/contracts/`.
+Later default checks refuse stale contracts instead of silently regenerating them.
+`supacloud app check`, `doctor` and `build` also invoke the project's installed database
+checker when `database.sources.json` is present. See
+[Database Source Contracts](./database-source-contracts.md) for existing-project
+assessment, source boundaries, precision and migration adoption.
 
 Database First is the only GraphQL server-schema model. The fixture is not an
 application-owned server SDL: change Drizzle/SQL declarations, migrate, then

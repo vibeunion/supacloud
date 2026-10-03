@@ -22,6 +22,14 @@ export class PendingWorkTimeoutError extends Error {
   }
 }
 
+export class PendingWorkCapacityError extends RangeError {
+  readonly code = "PENDING_WORK_CAPACITY_EXCEEDED";
+  constructor() {
+    super("Work registry capacity exceeded");
+    this.name = "PendingWorkCapacityError";
+  }
+}
+
 /** The caller owns the registry. Unfinished work remains visible after cancellation. */
 export class PendingWorkRegistry {
   private readonly entries = new Map<number, WorkDescription & { started: number }>();
@@ -57,7 +65,7 @@ export class PendingWorkRegistry {
       || !["startup", "request", "job", "shutdown", "background"].includes(description.kind)) {
       throw new TypeError("Use a bounded operation name and a supported work kind; never include request data");
     }
-    if (this.entries.size >= this.capacity) throw new RangeError("Work registry capacity exceeded");
+    if (this.entries.size >= this.capacity) throw new PendingWorkCapacityError();
     const id = ++this.sequence;
     this.entries.set(id, { name: description.name, kind: description.kind, started: performance.now() });
     return () => {

@@ -143,6 +143,15 @@ export again and compile. Offline compilation cannot attest a snapshot's origin;
 The starter's synthetic SDL is solely an offline test fixture, not a deployed
 schema. Replace it with a database export before integration.
 
+Schema export results and compiled GraphQL manifests retain `schemaHash` as the
+SHA-256 of the original UTF-8 text. The additional `schemaNormalizedHash` hashes
+the same text with physical CRLF/CR line endings converted to LF, helping identify
+checkout line-ending drift. It does not normalize escaped `\r` sequences, field
+order, descriptions or other content, and is not a semantic-equivalence or
+integrity check. `graphql-schema --check` remains byte-strict and read-only;
+an explicit export restores the generated file. Re-export and regenerate the
+manifest rather than bypassing drift checks based on the normalized hash.
+
 New `supacloud app init` projects preconfigure GraphQL query contracts and include
 an offline example. Existing REST, Command-only and background-task projects
 remain unchanged: general App/CLI configuration and `compileProject(options)`

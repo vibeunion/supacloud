@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { relative, sep } from "node:path";
 import {
@@ -25,6 +24,7 @@ import { GRAPHQL_CLIENT_SOURCE } from "./graphql-client";
 import { graphqlInputPaths } from "./graphql-inputs";
 import { assertGraphqlOptions } from "./graphql-options";
 import { renderGraphqlValidators } from "./graphql-runtime";
+import { graphqlSchemaHashes } from "./graphql-schema-hashes";
 
 export interface GraphqlArtifacts {
   diagnostics: Diagnostic[];
@@ -72,7 +72,7 @@ export async function renderGraphql(options: CompileOptions): Promise<GraphqlArt
   let schemaContent: string;
   try {
     schemaContent = await readFile(schemaPath, "utf8");
-    contract.schemaHash = createHash("sha256").update(schemaContent).digest("hex");
+    Object.assign(contract, graphqlSchemaHashes(schemaContent));
     if (schemaPath.endsWith(".json")) {
       const json = JSON.parse(schemaContent) as { data?: IntrospectionQuery; __schema?: unknown };
       schema = buildClientSchema((json.data ?? json) as IntrospectionQuery);

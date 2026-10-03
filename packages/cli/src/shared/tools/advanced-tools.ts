@@ -44,6 +44,7 @@ import {
 const execFileAsync = promisify(execFile);
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
 const FORBIDDEN_BUNDLE_SEGMENTS = new Set(["node_modules", ".git"]);
+const EDGE_FUNCTION_DEPLOY_TIMEOUT_MS = 5 * 60_000;
 const FUNCTION_FRAMEWORKS = ["fetch", "elysia", "hono", "sveltekit-function"] as const;
 type FunctionFramework = typeof FUNCTION_FRAMEWORKS[number];
 
@@ -1096,7 +1097,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                         expected_active_version: expectedActiveVersion,
                         expected_activation_id: expectedActivationId,
                         ...functionConfig(),
-                    });
+                    }, { timeoutMs: EDGE_FUNCTION_DEPLOY_TIMEOUT_MS });
                     return functionMutationResponse({
                         operation: "edge_functions.deploy",
                         projectRef: ref,
@@ -1115,7 +1116,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                         expected_active_version: expectedActiveVersion,
                         expected_activation_id: expectedActivationId,
                         ...functionConfig(),
-                    });
+                    }, { timeoutMs: EDGE_FUNCTION_DEPLOY_TIMEOUT_MS });
                     return functionMutationResponse({
                         operation: "edge_functions.deploy_bundle",
                         projectRef: ref,
