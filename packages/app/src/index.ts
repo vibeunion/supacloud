@@ -1,3 +1,5 @@
+// Compatibility aggregate. New business modules use @supacloud/app/core;
+// frontend applications use their framework and @supacloud/js.
 export { SCOPES, DEFAULT_SCOPE, SCOPE_LIFETIME_RANK, isScopeViolation } from "./scope";
 export type { Scope } from "./scope";
 export type {

@@ -90,7 +90,7 @@ describe("app dev", () => {
     });
 
     test("watch mode keeps running until the caller aborts", async () => {
-        const result = await app({ action: "dev", root, format: "json" });
+        const result = await app({ action: "watch", root, format: "json" });
         expect(result.isError).toBe(false);
         const report = JSON.parse(result.content[0]!.text);
         expect(report.watch).toBe(true);

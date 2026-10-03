@@ -16,12 +16,21 @@ bun run dev
 ```
 
 The initializer needs no platform credentials and never overwrites existing
-projects. It includes typed state declarations, static AOP, strict compilation,
-an Elysia service, memory governance tests and explicit development/test/staging/
-production environment wrappers. The compiler is a development dependency.
+projects. The default minimal template includes a health feature with a colocated
+test, strict compilation, an Elysia service, SDK dependencies and explicit
+development/test/staging/production environment wrappers. Select
+`--template command` for the persistent governed-command reference, or `http` /
+`edge` for their existing recipes. The compiler is a development dependency.
 The demo binds to loopback and cannot run in staging/production. Production
 identity, persistence and durable governance must be supplied by the application.
 See [Application Starter](../../docs/application-starter.md) for the full contract.
+
+`app dev` runs the project's `dev` script; `app watch` only compiles and watches.
+`app dev --profile integration` requires a loopback database and a
+`dev:integration` script, verifies database identity and the application role, and
+never automatically migrates or seeds. The command recipe includes a durable host.
+`app verify-plan --target <module>` lists focused single-file tests without
+executing them; missing ownership or tests never falls back to the whole suite.
 
 `app compile` and `app check` resolve `supacloud.config.ts` from `--root` (the
 project directory). `app check` runs the complete compiler and artifact-drift

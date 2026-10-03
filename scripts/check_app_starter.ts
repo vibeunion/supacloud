@@ -114,7 +114,7 @@ async function run(args: string[], cwd = project, success = true): Promise<strin
 const tarballs = new Map<string, string>();
 try {
   interruption.signal.throwIfAborted();
-  await initializeAppProject({ root: project, name: "starter-smoke" });
+  await initializeAppProject({ root: project, name: "starter-smoke", template: "command" });
   const manifestPath = join(project, "package.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   // Test the release artifacts together before they exist on the public registry.
@@ -374,7 +374,7 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
 
   // Prove the non-default golden-path templates with the same packed artifacts
   // in one packing pass, so every supported path stays smoke-covered.
-  for (const template of ["http", "edge"] as const) {
+  for (const template of ["minimal", "http", "edge"] as const) {
     const templateProject = join(root, `${template}-project`);
     await initializeAppProject({ root: templateProject, name: `${template}-smoke`, template });
     const templateManifestPath = join(templateProject, "package.json");
@@ -395,8 +395,8 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
     assert.ok(!templateBundle.includes("@typescript/typescript6"), "Template bundle must not contain the compiler");
     assert.ok(!templateBundle.includes("Local demo:"), "Template bundle must not contain the memory demo server");
 
-    const target = template === "http" ? "orders" : "sync";
-    const feature = template === "http" ? "orders.ts" : "sync.ts";
+    const target = template === "minimal" ? "health" : template === "http" ? "orders" : "sync";
+    const feature = `${target}.ts`;
     const templateContext = JSON.parse(await run([
       "node_modules/@supacloud/compiler/dist/cli.js", "context", target, "--json",
     ], templateProject));
@@ -405,7 +405,7 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
     if (template === "http") {
       await copyFile(join(repo, "scripts/fixtures/starter-http-delivery.fixture"), join(templateProject, "scripts/verify-http-delivery.ts"));
       console.log(await run(["scripts/verify-http-delivery.ts"], templateProject));
-    } else {
+    } else if (template === "edge") {
       await copyFile(join(repo, "scripts/fixtures/starter-worker-delivery.fixture"), join(templateProject, "scripts/verify-worker-delivery.ts"));
       console.log(await run(["scripts/verify-worker-delivery.ts"], templateProject));
     }

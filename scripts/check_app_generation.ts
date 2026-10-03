@@ -103,8 +103,7 @@ try {
 import { Elysia } from "elysia";
 import { createModulePlugin } from "@supacloud/elysia";
 import { createCompiledModules } from "../generated/application";
-import { InventoryService } from "../src/features/inventory/inventory.service";
-import type { InventoryResult } from "../src/features/inventory/inventory.model";
+import type { InventoryReadPort, InventoryResult } from "../src/features/inventory/inventory.model";
 
 const typedResult: InventoryResult = { id: "example" };
 // @ts-expect-error Response fields come from the schema, not an unknown/any cast.
@@ -115,18 +114,16 @@ const version = await Bun.file("node_modules/elysia/package.json").json();
 assert.equal(version.version, "2.0.0-beta.19");
 const module = createCompiledModules().find(value => value.name === "inventory");
 assert.ok(module);
-const services = module.createServices({}, {});
-const service = Object.values(services).find(value => value instanceof InventoryService);
-assert.ok(service instanceof InventoryService);
+const unavailableApp = new Elysia().use(createModulePlugin(module, module.createServices({}, {})));
+const unavailable = await unavailableApp.handle(new Request("http://localhost/inventory/example"));
+assert.equal(unavailable.status, 500);
+assert.ok(!(await unavailable.text()).includes("Bind InventoryReader"));
+let calls = 0;
+const reader: InventoryReadPort = { readAuthorized: async id => { calls++; return { id }; } };
+const services = module.createServices({ inventoryReader: reader }, {});
 const app = new Elysia().use(createModulePlugin(module, services));
 // Elysia 2 seals registration on its first request; mount every route first.
 app.get("/native-generation-probe", {}, () => ({ native: true }));
-const unavailable = await app.handle(new Request("http://localhost/inventory/example"));
-assert.equal(unavailable.status, 500);
-assert.ok(!(await unavailable.text()).includes("Implement InventoryService"));
-let calls = 0;
-// Test double on this test-owned instance only. No generated business file changes.
-service.find = async id => { calls++; return { id }; };
 const invalid = await app.handle(new Request("http://localhost/inventory/%20"));
 assert.equal(invalid.status, 422);
 assert.equal(calls, 0);
@@ -134,7 +131,7 @@ const accepted = await app.handle(new Request("http://localhost/inventory/exampl
 assert.equal(accepted.status, 200);
 assert.deepEqual(await accepted.json(), { id: "example" });
 assert.equal(calls, 1);
-service.find = async () => { calls++; throw new Error("private async read failure"); };
+reader.readAuthorized = async () => { calls++; throw new Error("private async read failure"); };
 const failed = await app.handle(new Request("http://localhost/inventory/example"));
 assert.equal(failed.status, 500);
 assert.ok(!(await failed.text()).includes("private async read failure"));
@@ -165,7 +162,7 @@ try {
     assert.deepEqual(await health.json(), { ok: true });
     const placeholder = await request("/inventory/example");
     assert.equal(placeholder.status, 500);
-    assert.ok(!(await placeholder.text()).includes("Implement InventoryService"));
+    assert.ok(!(await placeholder.text()).includes("Bind InventoryReader"));
     assert.equal((await request("/inventory/%20")).status, 422);
 } finally { await server.stop(true); }
 console.log("Built consumer factory: original and generated routes served together; async placeholder remained fail-closed");
