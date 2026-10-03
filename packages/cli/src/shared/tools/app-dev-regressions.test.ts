@@ -35,12 +35,12 @@ afterEach(async () => {
     for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
-function spawn(root: string, args: string[], overrides: Record<string, string> = {}) {
+function spawn(root: string, args: string[], overrides: Record<string, string> = {}, action: "dev" | "watch" = "dev") {
     const env: Record<string, string> = {};
     for (const [key, value] of Object.entries(process.env)) {
         if (value !== undefined && !/^(SUPACLOUD_|SUPABASE_)/.test(key)) env[key] = value;
     }
-    return Bun.spawn([process.execPath, "--no-env-file", CLI_ENTRY, "app", "dev", "--root", root, ...args], {
+    return Bun.spawn([process.execPath, "--no-env-file", CLI_ENTRY, "app", action, "--root", root, ...args], {
         cwd: root, env: { ...env, HOME: root, ...overrides }, stdout: "pipe", stderr: "pipe",
     });
 }
@@ -154,7 +154,7 @@ describe("app dev actual CLI regressions", () => {
         const abort = new AbortController();
         const before = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
         const progress: string[] = [];
-        const result = await runAppTool({ action: "dev", root }, {
+        const result = await runAppTool({ action: "watch", root }, {
             signal: abort.signal,
             onDevProgress(report) { progress.push(report.content[0]!.text); abort.abort(); },
         });
@@ -169,7 +169,7 @@ describe("app dev actual CLI regressions", () => {
         const root = await fixture();
         const failure = new Error("progress transport unavailable");
         const before = [process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")];
-        await expect(runAppTool({ action: "dev", root }, {
+        await expect(runAppTool({ action: "watch", root }, {
             onDevProgress() { throw failure; },
         })).rejects.toBe(failure);
         expect([process.listenerCount("SIGINT"), process.listenerCount("SIGTERM")]).toEqual(before);
@@ -177,7 +177,7 @@ describe("app dev actual CLI regressions", () => {
 
     test("watch reports initial, error and repaired builds before shutdown; stdout stays one JSON document", async () => {
         const root = await fixture();
-        const child = spawn(root, ["--format", "json"]);
+        const child = spawn(root, ["--format", "json"], {}, "watch");
         let stdout = "";
         let stderr = "";
         const output = collect(child.stdout, text => { stdout += text; });

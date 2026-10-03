@@ -26,6 +26,8 @@ import { initializeAppProject } from "./app-starter";
 import { checkAppDatabaseSources } from "./app-database-check";
 import { APPLICATION_TOOL_SCHEMA } from "./application-tools";
 import { resourceScaffold } from "./app-resource";
+import { runLocalDevelopment } from "./app-local-dev";
+import { createVerificationPlan } from "./app-verification-plan";
 import { applyScaffoldWrites, planScaffoldWrites, scaffoldPath, ScaffoldError, type ScaffoldWrite } from "./app-scaffold-writes";
 
 const REMOTE_APP_ACTIONS = {
@@ -75,7 +77,7 @@ type ToolServer = {
 };
 
 export interface AppToolArguments {
-    action: "init" | "generate" | "dev" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "doctor" | "fix"
+    action: "init" | "generate" | "dev" | "watch" | "verify-plan" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "doctor" | "fix"
         | "plan" | "build" | keyof typeof REMOTE_APP_ACTIONS;
     ref?: string;
     id?: string;
@@ -87,7 +89,7 @@ export interface AppToolArguments {
     manifest_path?: string;
     release_id?: string;
     kind?: "module" | "command" | "query" | "controller" | "job" | "contract" | "resource";
-    template?: "http" | "command" | "edge";
+    template?: "minimal" | "http" | "command" | "edge";
     name?: string;
     module?: string;
     dir?: string;
@@ -110,14 +112,14 @@ export interface AppToolArguments {
     once?: boolean;
     /** `app dev`: watch for changes (default true; `--once` disables). */
     watch?: boolean;
-    /** `app dev --profile integration`: explicit database URL; this command never connects. */
+    /** Integration dev verifies an explicit loopback database before running dev:integration. */
     database_url?: string;
     "database-url"?: string;
 }
 
 async function initProject(args: AppToolArguments): Promise<ToolResult> {
     if (args.force) throw new Error("app init never overwrites files; choose an empty directory");
-    const template = args.template ?? "command";
+    const template = args.template ?? "minimal";
     const { root, name, files } = await initializeAppProject({ root: args.root, name: args.name, template });
     return textResult([
         `Initialized ${name} in ${root} (${files.length} files, template: ${template}).`,
@@ -367,6 +369,7 @@ function sourceRoot(args: AppToolArguments, root: string, configured: string | u
 /** Resolves project root/config and runs a no-write check to obtain the current graph. */
 async function projectCompileConfig(args: AppToolArguments): Promise<{
     root: string;
+    sourceDir: string;
     configFile: string | null;
     outDir: string;
     result: Awaited<ReturnType<typeof checkProject>>;
@@ -380,14 +383,15 @@ async function projectCompileConfig(args: AppToolArguments): Promise<{
     const configuredRoot = sourceRoot(args, root, loadedConfig.root);
     const include = parseInclude(args.include) ?? loadedConfig.include;
     const outDir = args.out_dir ? resolve(root, args.out_dir) : defaults.outDir;
-    const result = await checkProject(compileOptionsFromConfig({
+    const compileOptions = compileOptionsFromConfig({
         ...loadedConfig,
         ...(configuredRoot === undefined ? {} : { root: configuredRoot }),
         outDir,
         ...(include === undefined ? {} : { include }),
         strict: args.strict ?? loadedConfig.strict ?? false,
-    }, root));
-    return { root, configFile, outDir, result };
+    }, root);
+    const result = await checkProject(compileOptions);
+    return { root, sourceDir: compileOptions.rootDir, configFile, outDir, result };
 }
 
 interface ProjectContextPack {
@@ -663,8 +667,20 @@ function shutdownWaiter(signal: AbortSignal | undefined) {
     return { done, stop, dispose };
 }
 
-/** Local compile/watch only: no server startup, resource provisioning or database connection. */
+/** Launch the project dev loop, or preserve explicit compile-only inspection. */
 async function runAppDev(args: AppToolArguments, options: AppToolOptions): Promise<ToolResult> {
+    if (args.action === "dev" && args.once !== true && args.watch !== false) {
+        const result = await runLocalDevelopment({
+            root: args.root || process.cwd(),
+            profile: args.profile,
+            databaseUrl: args.database_url,
+            signal: options.signal,
+            onOutput: (text) => options.onDevProgress?.(textResult(
+                args.format === "json" ? JSON.stringify({ version: 1, source: "application", output: text }) : text,
+            )),
+        });
+        return textResult(JSON.stringify({ version: 1, ok: result.exitCode === 0, ...result }), result.exitCode !== 0);
+    }
     const profile = args.profile ?? "fast";
     if (profile !== "fast" && profile !== "integration") {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "app dev --profile must be fast or integration");
@@ -699,7 +715,7 @@ async function runAppDev(args: AppToolArguments, options: AppToolOptions): Promi
             }, null, progress ? undefined : 2), hasError);
         }
         return textResult([
-            `app dev (profile: ${profile}, watch: ${watch ? "on" : "off"}, state: ${state})`,
+            `app watch (compile-only, profile: ${profile}, watch: ${watch ? "on" : "off"}, state: ${state})`,
             `  root:     ${root}`,
             `  outDir:   ${outDir}`,
             `  database: ${profile === "fast" ? "local profile (no database provisioned or connected)" : `explicit ${database.url} (credentials omitted; not connected)`}`,
@@ -1063,7 +1079,7 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
     if ((request.dry_run !== undefined || request.register_in !== undefined) && request.action !== "generate") {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--dry-run and --register-in apply only to app generate");
     }
-    if (request.database_url !== undefined && request.action !== "dev") {
+    if (request.database_url !== undefined && request.action !== "dev" && request.action !== "watch") {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--database-url applies only to app dev --profile integration");
     }
     if (Object.hasOwn(REMOTE_APP_ACTIONS, request.action)) {
@@ -1077,7 +1093,15 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
         return delegate(args);
     }
     switch (request.action) {
-        case "dev": return runAppDev(request, options);
+        case "verify-plan": {
+            if (!request.target?.trim()) throw new Error("verify-plan requires --target; it never defaults to a full test suite");
+            const { root, sourceDir, result } = await projectCompileConfig(request);
+            const plan = await createVerificationPlan(root, result.graph, request.target.trim(), sourceDir);
+            const ready = plan.ready && !result.diagnostics.some(item => item.severity === "error");
+            return textResult(JSON.stringify({ ...plan, ready, diagnostics: result.diagnostics }, null, 2), !ready);
+        }
+        case "dev":
+        case "watch": return runAppDev(request, options);
         case "plan":
         case "build": return runDelivery(request);
         case "init": return initProject(request);
@@ -1111,10 +1135,10 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
         "Application authoring and delivery. Plan is read-only; build, upload and configure never deploy. Deploy/rollback explicitly activate a release; rollback never downgrades schema.",
         {
             ...REMOTE_APP_SCHEMA,
-            action: withDescription(stringEnum(["init", "generate", "dev", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix",
+            action: withDescription(stringEnum(["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix",
                 "plan", "build", "upload", "configure", "deploy", "status", "rollback", "reconcile", "retire"]), "App action; upload/configure only prepare, rollback activates an explicit old release without schema downgrade"),
             kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource"]), "[generate] Scaffold kind"),
-            template: optional(stringEnum(["http", "command", "edge"]), "[init] Golden-path template (default: command)"),
+            template: optional(stringEnum(["minimal", "http", "command", "edge"]), "[init] Minimal application by default; explicit http/command/edge recipes"),
             name: optional(Type.String(), "[init/generate] Project or object name"),
             module: optional(Type.String(), "[generate] Target feature module (required for command/query/controller)"),
             dir: optional(Type.String(), "[generate] Feature root directory (default: src/features)"),
@@ -1128,12 +1152,12 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             out_dir: optional(Type.String(), "[dev/compile/plan/build/export-tools] Output directory (default: configured outDir)"),
             strict: optional(Type.Boolean(), "[dev/compile/check] Promote warnings to errors"),
             format: optional(stringEnum(["text", "json"]), "[dev/generate/compile/check/plan/graph/export-tools] Output format (default: text)"),
-            profile: optional(stringEnum(["fast", "integration"]), "[dev] Local development profile (default: fast); integration requires an explicit database URL"),
+            profile: optional(stringEnum(["fast", "integration"]), "[dev] Run dev or dev:integration; integration verifies an explicit loopback database"),
             once: optional(Type.Boolean(), "[dev] Validate and report once without watching"),
             watch: optional(Type.Boolean(), "[dev] Watch for changes (default: true; --once disables)"),
-            database_url: optional(Type.String(), "[dev] Explicit integration database URL (validated shape only; never connected)"),
+            database_url: optional(Type.String(), "[dev] Explicit loopback integration URL; watch/once only inspect its shape"),
             "database-url": optional(Type.String(), "[dev] CLI alias of database_url"),
-            target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / job name / module name"),
+            target: optional(Type.String(), "[explain/context/verify-plan] Provider class name / token name / command name / job name / module name"),
             fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
             write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
         },

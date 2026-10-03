@@ -12,7 +12,7 @@ test('current generated starter runs through Lite bundling, routes, contracts an
   const project = join(root, 'project')
   let running: Awaited<ReturnType<typeof startProjectServer>> | undefined
   try {
-    await initializeAppProject({ root: project, name: 'lite-compatibility' })
+    await initializeAppProject({ root: project, name: 'lite-compatibility', template: 'command' })
     await symlink(join(import.meta.dir, '../node_modules'), join(project, 'node_modules'),
       process.platform === 'win32' ? 'junction' : 'dir')
     const result = await compileProject({

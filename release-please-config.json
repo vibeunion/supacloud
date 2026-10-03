@@ -38,7 +38,14 @@
     "packages/supacloud-js": {
       "release-type": "node",
       "component": "supacloud-js",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "/packages/cli/src/shared/tools/starter-metadata.json",
+          "jsonpath": "$.packages.sdk.version"
+        }
+      ]
     },
     "packages/cli": {
       "release-type": "node",
@@ -65,13 +72,27 @@
       "release-type": "node",
       "component": "contracts",
       "initial-version": "0.1.0",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "/packages/cli/src/shared/tools/starter-metadata.json",
+          "jsonpath": "$.packages.contracts.version"
+        }
+      ]
     },
     "packages/commands": {
       "release-type": "node",
       "component": "commands",
       "initial-version": "0.1.0",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "/packages/cli/src/shared/tools/starter-metadata.json",
+          "jsonpath": "$.packages.commands.version"
+        }
+      ]
     },
     "packages/app-svelte": {
       "release-type": "node",
@@ -83,7 +104,14 @@
       "release-type": "node",
       "component": "app",
       "initial-version": "0.1.0",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "/packages/cli/src/shared/tools/starter-metadata.json",
+          "jsonpath": "$.packages.app.version"
+        }
+      ]
     },
     "packages/delivery": {
       "release-type": "node",
@@ -95,19 +123,40 @@
       "release-type": "node",
       "component": "compiler",
       "initial-version": "0.1.0",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "/packages/cli/src/shared/tools/starter-metadata.json",
+          "jsonpath": "$.packages.compiler.version"
+        }
+      ]
     },
     "packages/elysia": {
       "release-type": "node",
       "component": "elysia",
       "initial-version": "0.1.0",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "/packages/cli/src/shared/tools/starter-metadata.json",
+          "jsonpath": "$.packages.elysia.version"
+        }
+      ]
     },
     "packages/db": {
       "release-type": "node",
       "component": "db",
       "initial-version": "0.1.0",
-      "changelog-path": "CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "/packages/cli/src/shared/tools/starter-metadata.json",
+          "jsonpath": "$.packages.db.version"
+        }
+      ]
     },
     "packages/testing": {
       "release-type": "node",

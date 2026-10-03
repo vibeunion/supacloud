@@ -64,8 +64,9 @@ Scenario: The starter does not invent a deployed schema
 
 Make database-backed read queries easy to write, validate and call without
 introducing a second application runtime. The platform extension remains opt-in.
-New `supacloud app init` projects preconfigure query contracts as the recommended
-read path. General App/compiler configuration and the low-level `compileProject`
+The explicit `supacloud-cli app init --template command` reference preconfigures
+query contracts. The default minimal starter uses ordinary PostgREST reads and
+does not require GraphQL. General App/compiler configuration and the low-level `compileProject`
 API enable contracts only when `graphql` is configured. Existing REST,
 Command-only and background-task projects do not need a schema or dummy query.
 Once adopted, invalid queries and missing schemas are always errors, including
@@ -87,7 +88,7 @@ require review for side effects.
 
 ## Usage
 
-`supacloud app init` includes the configuration, example snapshot, query and
+`supacloud-cli app init --template command` includes the configuration, example snapshot, query and
 offline client test. For an existing project:
 
 ```ts
@@ -203,7 +204,7 @@ and deletions invalidate the incremental contract snapshot. A schema outside
 
 ## Security and Deployment
 
-The starter's default is a development contract, not a deployment operation.
+The command reference's query example is a development contract, not a deployment operation.
 Enabling `pg_graphql`, reviewing role grants, enforcing RLS, applying migrations,
 and testing authenticated access remain explicit deployment gates. Keep production
 introspection off when not needed. Use a representative role snapshot and refresh
@@ -223,7 +224,7 @@ see [GraphQL Acceptance Pilot](graphql-pilot.md).
 
 ```gherkin
 Scenario: Preconfigure typed queries for new applications
-  Given a new App starter with a local schema and named query
+  Given an explicit command reference with a local schema and named query
   When the application is compiled
   Then operation-specific input and result types and a callable client are generated
   And no GraphQL runtime dependency is required by the generated browser code

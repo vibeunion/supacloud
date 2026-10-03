@@ -1,3 +1,4 @@
+import { STARTER_FILE, STARTER_PACKAGES } from './starter-sync.mjs';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { posix, relative, resolve } from 'node:path';
 
@@ -63,6 +64,14 @@ export function readWorkspace(root) {
           throw new Error(`Self dependency ${name} at ${project.root}`);
         }
       }
+    }
+  }
+  const cli = byPackage.get('@supacloud/cli');
+  if (cli && existsSync(resolve(root, STARTER_FILE))) {
+    for (const [, packageName] of Object.values(STARTER_PACKAGES)) {
+      const producer = byPackage.get(packageName);
+      if (!producer) throw new Error(`Missing starter metadata producer: ${packageName}`);
+      edges.push({ source: cli.name, target: producer.name, kind: 'generation', local: false, sourceFile: STARTER_FILE });
     }
   }
   const workspace = { root, projects, edges };
@@ -150,7 +159,7 @@ export function affectedReport(workspace, files, fallbackReason) {
   if (reasons.size) reasons.set(ACCEPTANCE_PROJECT, ['Conservative packed/generated-consumer acceptance dependency']);
   return {
     schemaVersion: 1, mode: 'shadow', safeToSkip: false,
-    completeness: 'manifest-and-local-resolution-only',
+    completeness: 'manifest-local-resolution-and-starter-generation',
     full: fullReasons.length > 0, fallbackReasons: fullReasons, changedFiles,
     projects: [...reasons].sort(([a], [b]) => a.localeCompare(b)).map(([name, why]) => ({ name, reasons: why })),
   };
