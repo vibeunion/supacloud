@@ -142,6 +142,7 @@ jobs:
         run: |
           bun run scripts/build-command-dependencies.ts app
           (cd packages/app && bun install --frozen-lockfile)
+          (cd packages/supacloud-js && bun install --frozen-lockfile && bun run build)
           (cd packages/cli && bun install --frozen-lockfile --ignore-scripts)
           (cd packages/db && bun install --frozen-lockfile --ignore-scripts)
           (cd packages/management-api && bun install --frozen-lockfile)
@@ -268,7 +269,7 @@ jobs:
               (cd ../management-api && bun run typecheck:application-releases)
               (cd ../cli && bun install --frozen-lockfile)
               (cd ../delivery && bun install --frozen-lockfile && bun run typecheck && bun run build)
-              (cd ../supacloud-js && bun install --frozen-lockfile)
+              (cd ../supacloud-js && bun install --frozen-lockfile && bun run build)
               bun test ../../scripts/frontend-sdk.test.ts
               bun test --timeout 60000 ../../scripts/lib/application-release-storage.test.ts
               bun ../../.github/scripts/delivery-package.acceptance.mjs

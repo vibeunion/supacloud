@@ -9,8 +9,8 @@ import {
   CommandAuthenticationError,
   createAuthenticatedFetch,
   type SingleAttemptFetch,
-} from "../packages/supacloud-js/src/contracts";
-import { createSupaCloudClient } from "../packages/supacloud-js/src/index";
+} from "../packages/supacloud-js/dist/contracts.mjs";
+import { createSupaCloudClient } from "../packages/supacloud-js/dist/index.mjs";
 import { renderClient } from "../packages/compiler/src/generate";
 import type { ApplicationGraph } from "../packages/compiler/src/types";
 import { writeFixtureProject } from "../packages/compiler/src/fixtures/helpers";
@@ -48,7 +48,7 @@ beforeAll(async () => {
     "client.ts": renderClient(graph),
     "consumer.ts": [
       'import { createApiClient } from "./client";',
-      `import { createAuthenticatedFetch } from ${JSON.stringify(join(repo, "packages/supacloud-js/src/contracts"))};`,
+      `import { createAuthenticatedFetch } from ${JSON.stringify(join(repo, "packages/supacloud-js/dist/contracts.mjs"))};`,
       'const getAccessToken = async (): Promise<string | null> => "synthetic-token";',
       "const transport = createAuthenticatedFetch({ getAccessToken });",
       'createApiClient({ baseUrl: "https://app.example.test", fetch: transport });',
@@ -76,6 +76,17 @@ test("generated client accepts the SDK authenticated transport under Bun types w
   expect(diagnostics).toEqual([]);
 });
 
+test("frontend SDK acceptance typechecks with the repository tools configuration", () => {
+  const config = ts.readConfigFile(join(repo, "tsconfig.tools.json"), ts.sys.readFile);
+  expect(config.error).toBeUndefined();
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, repo);
+  expect(parsed.errors).toEqual([]);
+  const program = ts.createProgram([import.meta.path], parsed.options);
+  const diagnostics = ts.getPreEmitDiagnostics(program)
+    .map(diagnostic => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"));
+  expect(diagnostics).toEqual([]);
+});
+
 test("the SDK and generated business client share one changing session resolver", async () => {
   let token: string | null = "session-one";
   let resolutions = 0;
@@ -92,7 +103,7 @@ test("the SDK and generated business client share one changing session resolver"
   expect(platform.supabase).toBe(supabase);
 
   const requests: Request[] = [];
-  const fetchMock = spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+  const fetchMock = spyOn(globalThis, "fetch").mockImplementation(Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
     const request = new Request(input, init);
     requests.push(request);
     if (request.url.startsWith("https://management.example.test/")) {
@@ -103,7 +114,7 @@ test("the SDK and generated business client share one changing session resolver"
       });
     }
     return Response.json({ approved: true });
-  });
+  }, { preconnect: globalThis.fetch.preconnect }));
   try {
     const api = generated.createApiClient({
       baseUrl: "https://app.example.test",
