@@ -48,12 +48,15 @@ jobs:
         run: |
           bun run test:nx-acceptance
           bun run test:nx-cache --repository
-      - name: Public packages and security regressions
+      - name: Build public packages and verify actual npm consumers
         if: ${{ !cancelled() }}
         run: |
           bun run workspace:prepare --project cli
           (cd packages/cli && bun install --force --ignore-scripts --frozen-lockfile && bun run build && bun run typecheck)
           bun run test:nx-public-api
+      - name: Preserve platform security and admin compatibility behavior
+        if: ${{ !cancelled() }}
+        run: |
           bun test packages/management-api/tests/unit/release-manifest.test.ts packages/management-api/tests/unit/upgrade-lock.test.ts
           (cd packages/admin && bun install --force --ignore-scripts --frozen-lockfile && bun run typecheck && bun run build && bun test)
       - name: Capture exact generated locks and verification inputs

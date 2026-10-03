@@ -70,10 +70,11 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun build src/index.ts src/delivery-schema.ts src/delivery-build-schema.ts src/delivery-files.ts src/delivery-artifact.ts src/application-activation.ts src/application-development.ts src/platform-release-manifest.ts src/platform-upgrade-lock.ts src/platform-sigstore-trusted-root.ts --outdir dist --target node --splitting",
+    "build": "bun run clean && bun build src/index.ts src/delivery-schema.ts src/delivery-build-schema.ts src/delivery-files.ts src/delivery-artifact.ts src/application-activation.ts src/application-development.ts src/platform-release-manifest.ts src/platform-upgrade-lock.ts src/platform-sigstore-trusted-root.ts --outdir dist --entry-naming \"[name].js\" --target node --splitting",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "prepublishOnly": "bun run build"
+    "prepublishOnly": "bun run build",
+    "clean": "rm -rf dist"
   },
   "dependencies": {
     "typebox": "1.3.34"
