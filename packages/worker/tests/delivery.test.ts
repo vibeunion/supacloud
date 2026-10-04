@@ -6,8 +6,8 @@ import {
   parseWorkerDelivery, renderWorkerService, startQueueWorkerFromEnvironment,
 } from "../src/delivery.js";
 import { evaluateWorkerPerformance } from "../src/performance.js";
-import manifest from "../examples/worker-delivery.json";
-import sampleEvidence from "../examples/performance-evidence.json";
+import manifest from "../examples/worker-delivery.json" with { type: "json" };
+import sampleEvidence from "../examples/performance-evidence.json" with { type: "json" };
 
 function measurements() {
   return {

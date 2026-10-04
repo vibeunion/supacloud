@@ -160,6 +160,7 @@ export async function startQueueWorkerFromEnvironment<T>(
     maxPgConnections: environmentInteger(env, "SUPACLOUD_WORKER_PG_CONNECTIONS", 1, 16),
     visibilityTimeoutSeconds: environmentInteger(env, "SUPACLOUD_WORKER_VISIBILITY_SECONDS", 15, 3600),
     retryLimit: environmentInteger(env, "SUPACLOUD_WORKER_RETRY_LIMIT", 0, 10),
+    environment: env,
   }, handler);
   await worker.start();
   return worker;
