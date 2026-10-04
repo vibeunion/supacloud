@@ -9,6 +9,7 @@
 - [Deploy Guide](./deploy-guide.md) - Complete deployment guide
 - [Deploy API](./deploy-api.md) - Deployment API reference
 - [Configuration Example](./supacloud.yml.example) - Configuration file example
+- [Self-Hosted Stable Baseline](./self-hosted-stable-baseline.md) - Primary product boundary, supported profile, acceptance gates, and evidence states
 - [SupaCloud vs Supabase](./supacloud-vs-supabase.md) - Product positioning and feature comparison
 - [Database Environment Promotion](./database-environment-promotion.md) - Local, preview, staging, and production migration workflow
 
@@ -85,4 +86,5 @@
 
 ## Product Positioning
 
+- [Self-Hosted Stable Baseline](./self-hosted-stable-baseline.md) - The primary self-hosted multi-project product and its release acceptance contract ([中文](./self-hosted-stable-baseline.zh-CN.md))
 - [SupaCloud vs Supabase](./supacloud-vs-supabase.md) - When to choose SupaCloud, Supabase Cloud, or official self-hosted Supabase

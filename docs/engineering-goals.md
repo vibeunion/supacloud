@@ -3,17 +3,31 @@
 [English](engineering-goals.md) | [简体中文](engineering-goals.zh-CN.md)
 
 Status: architecture contract and implementation priorities, not a completion claim.
-Updated: 2026-10-02
+Updated: 2026-10-04
 
 ## Outcome
 
-Help developers and AI build business features with less repeated infrastructure
-code, earlier feedback and explicit ownership. Optimize for verifiable business
-changes, not the number of decorators, packages or generated files.
+Help teams run and maintain multiple isolated projects on their own
+infrastructure with reliable installation, delivery, upgrades, and recovery.
+Then help developers and AI build business features with less repeated
+infrastructure code, earlier feedback, and explicit ownership. Optimize for
+verifiable platform and business changes, not the number of decorators,
+packages, or generated files.
 
-The four goals are reliable foundations, convenient vibe coding, earlier error
+The primary goal is a dependable self-hosted platform. The supporting goals are
+reliable application foundations, convenient vibe coding, earlier error
 detection through types and compilation, and maintainability through module
 boundaries and static AOP.
+
+## Product priority
+
+1. Full Platform: project isolation, delivery, operations, upgrades, and
+   recovery on the supported self-hosted profile.
+2. Admin, Web Console, and project CLI: the standard interfaces for operating
+   that platform without repository access.
+3. Application framework, compiler, SDK, and AI tooling: optional development
+   acceleration that must not become a platform prerequisite.
+4. Lite: a separate bounded single-project and local-first runtime.
 
 ## Ownership
 
@@ -89,14 +103,18 @@ durable receipt instead of blindly retrying.
 
 ## Implementation Order
 
-1. Adopt this ownership contract in root documentation and the generated starter.
-2. Complete a supported SupAuth host-adapter recipe with verified identity,
-   project-local access resolution and authenticated multi-application tests.
-3. For one real business command, verify durable authorization, concurrency,
-   idempotency, transaction and audit behavior together.
-4. Add compiler checks only for statically provable mistakes, with actionable
+1. Complete the [Self-Hosted Stable Baseline](self-hosted-stable-baseline.md):
+   one supported profile, clean installation, two-project operation, a
+   stateful upgrade, and an independent recovery drill.
+2. Adopt this ownership contract in root documentation and the generated
+   starter, while keeping platform use independent from the framework.
+3. Complete a supported SupAuth host-adapter recipe with verified identity,
+   project-local access resolution, and authenticated multi-application tests.
+4. For one real business command, verify durable authorization, concurrency,
+   idempotency, transaction, and audit behavior together.
+5. Add compiler checks only for statically provable mistakes, with actionable
    diagnostics and negative fixtures; keep runtime checks for external facts.
-5. Exercise AI-assisted feature creation/repair and multi-module AOP behavior.
+6. Exercise AI-assisted feature creation/repair and multi-module AOP behavior.
    Extend shared capabilities only when this exposes meaningful repeated work.
 
 ## Local Implementation

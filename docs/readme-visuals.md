@@ -8,7 +8,7 @@
 
 | Pair | Meaning | Do not imply |
 | --- | --- | --- |
-| `overview.{en,zh-CN}.svg` | Application engineering vs Lite/full-platform hosting | Three interchangeable editions or verified deployment parity |
+| `overview.{en,zh-CN}.svg` | The full platform as the primary product, with optional application engineering and bounded Lite hosting | Three interchangeable editions or verified deployment parity |
 | `build-runtime.{en,zh-CN}.svg` | Compile-time artifacts vs runtime adapter and application service responsibilities | Elysia-free hosts, arbitrary framework support or business correctness from compilation |
 | `project-storage.{en,zh-CN}.svg` | Project-scoped routing and one backend per project | Bucket-level backend selection, replication or automatic failover |
 
