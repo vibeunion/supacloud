@@ -24,6 +24,8 @@ Go Accounting normalizer and opt-in real database/container acceptance.
   commit the business intent and return an operation receipt.
 - `@supacloud/js`: existing remote task/queue/workflow protocol clients.
 - `@supacloud/worker`: start a project-scoped, dedicated Node/Bun worker process.
+  Delivery also supports opt-in native Go and scriptc Worker executables under
+  the same supervisor and resource contract.
 - pgflow: queue or native Flow execution, retry scheduling and worker lifecycle.
 - Domain commands: side-effect idempotency, artifact storage, business state.
 

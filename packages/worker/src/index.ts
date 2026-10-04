@@ -12,6 +12,7 @@ export {
   type TaskContext,
   type TaskHandler,
 } from "./queue-handler.js";
+export * from "./scriptc.js";
 
 export interface ProcessWorkerOptions {
   readonly projectRef: string;

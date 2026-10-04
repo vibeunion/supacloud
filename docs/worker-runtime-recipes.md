@@ -1,7 +1,7 @@
 # Worker Runtime Recipes
 
 These optional recipes extend the existing pgflow worker. Bun/TypeScript stays
-the default; Go is opt-in. They are not a production deployment or an iBOSS
+the default; Go and scriptc are opt-in native Worker runtimes. They are not a production deployment or an iBOSS
 implementation, and add no second scheduler or task ledger.
 
 ## Transactional Admission
@@ -111,9 +111,17 @@ database/identity settings are deliberately empty until provisioned.
 
 ## Optional Go Adapter
 
-`packages/worker/examples/go-accounting` is a standard-library-only service
+`packages/worker/examples/go-accounting` is a standard-library-first service
 normalizing bounded Accounting batches. It does not implement RADIUS, subscriber
 authentication, direct BNG collection, financial deduplication or billing.
+
+The community `supabase-go` module can be used by a Go Worker, but it is not the
+official Supabase Go SDK. The upstream repository's September 2026 notice says
+the codebase is not actively maintained and will be superseded by an official
+SDK. Keep it optional until the official client is available and has passed the
+same workload, timeout and failure tests. This recipe therefore places the
+dependency behind the `supabase_sdk` build tag and uses it only for an
+explicit, read-only readiness probe.
 
 ```sh
 cd packages/worker/examples/go-accounting
@@ -143,9 +151,67 @@ HTTPS outside loopback. Use TLS/mTLS and network policy for remote deployment;
 the default Go listener is intentionally private. Record calls under the
 `external` timing stage.
 
+### Optional Supabase Go SDK probe
+
+Build the SDK-enabled variant only when the customer has approved the
+community-module supply-chain and compatibility review:
+
+```sh
+cd packages/worker/examples/go-accounting
+go test -tags supabase_sdk .
+go build -tags supabase_sdk -trimpath -o accounting-worker .
+```
+
+Set `SCW_SUPABASE_URL`, `SCW_SUPABASE_KEY`,
+`SCW_SUPABASE_PROBE_TABLE` and optionally `SCW_SUPABASE_TIMEOUT_MS` (50-5000,
+default 750). The table must be a single validated identifier. The SDK probe
+runs only when `/ready` is requested; it is never on the Accounting request
+path and does not claim, settle or retry queue messages.
+
+`SCW_SUPABASE_KEY` is deliberately separate from the platform's
+`SUPABASE_SERVICE_ROLE_KEY`. Use a project-scoped, least-privilege key with RLS
+or a dedicated read-only probe relation. Do not put a service-role key in the
+Go Worker's environment merely to enable this probe. A failed probe returns
+unready without exposing upstream error text. The SDK's PostgREST path supports
+request contexts, so the probe has a hard deadline; critical writes should
+still use the existing transactional PostgreSQL/RPC boundary until the
+official Go SDK and its context/transport behavior are reviewed.
+
 Only this side-effect-free computation may be explicitly retried with the same
 operation ID. Do not copy that behavior to payments, resource reservations or
 device changes; retain their durable operation and unknown-result semantics.
+
+## Optional scriptc Worker Runtime
+
+`scriptc` is a build-time option for Workers that need a native executable
+artifact. It is selected in delivery metadata with `runtime: "scriptc"` and
+uses the same systemd resource limits, project identity, restart policy,
+readiness boundary and artifact rollback as a Go executable. It does not add a
+second queue, scheduler or task ledger.
+
+The runtime manifest must point both `runtimePath` and `entrypoint` at the
+content-addressed executable:
+
+```json
+{
+  "runtime": "scriptc",
+  "runtimePath": "/opt/scw/project-a/releases/candidate-001/report-worker",
+  "entrypoint": "/opt/scw/project-a/releases/candidate-001/report-worker"
+}
+```
+
+The optional `@supacloud/worker` helper discovers `scriptc` through
+`SUPACLOUD_SCRIPTC_PATH` or `PATH` and invokes the pinned command shape:
+
+```sh
+scriptc build worker.ts -o report-worker
+```
+
+Use `dynamic: true` only after reviewing the resulting dependency and API
+coverage. `scriptc` remains experimental and supports a subset of
+JavaScript/TypeScript and Node APIs; build success is not behavioral
+equivalence. Keep Bun/Go as the rollback candidates until differential,
+cancellation, timeout, memory and long-duration acceptance pass.
 
 ## Local Acceptance
 

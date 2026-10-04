@@ -90,7 +90,8 @@ export class ApplicationReleaseStorage {
       manifest_sha256: manifestSha256, created_at: new Date().toISOString(),
       targets: archive.objects.map(({ object }) => ({
         name: object.name, object_id: object.objectId,
-        kind: object.entryKind === "bun-worker-application" ? "worker" : "http",
+        kind: ["bun-worker-application", "go-worker-application", "scriptc-worker-application"]
+          .includes(object.entryKind) ? "worker" : "http",
         entrypoint: object.entrypoint,
       })),
     };
@@ -200,7 +201,8 @@ export class ApplicationReleaseStorage {
     if (stableSha256(archive.manifest) !== record.manifest_sha256
       || stableStringify(record.targets) !== stableStringify(archive.objects.map(({ object }) => ({
         name: object.name, object_id: object.objectId,
-        kind: object.entryKind === "bun-worker-application" ? "worker" : "http",
+        kind: ["bun-worker-application", "go-worker-application", "scriptc-worker-application"]
+          .includes(object.entryKind) ? "worker" : "http",
         entrypoint: object.entrypoint,
       })))) invalid();
     return { record, archive };
