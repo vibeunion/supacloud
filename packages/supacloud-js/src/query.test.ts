@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 import { MutationObserver, QueryClient, QueryObserver, hashKey } from "@tanstack/query-core";
-import * as ts from "@typescript/typescript6";
+import * as ts from "../../compiler/node_modules/@typescript/typescript6";
 import { createCommandScope } from "@supacloud/contracts/client";
 import { createSupaCloudApiFetch } from "./api-fetch";
 import { createSupaCloudQueryAdapter } from "./query";

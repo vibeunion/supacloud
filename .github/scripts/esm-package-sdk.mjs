@@ -4,6 +4,7 @@ import { join } from 'node:path';
 export const SDK_NODE_RANGE = '>=22.12.0';
 export const SDK_ENTRYPOINTS = Object.freeze({
   '.': 'index', './task-events': 'task-events', './contracts': 'contracts', './reactive': 'reactive',
+  './query': 'query',
 });
 export const CONTRACTS_ENTRYPOINTS = Object.freeze({ '.': 'index', './client': 'client', './browser': 'browser' });
 export const SDK_SPECIFIERS = Object.freeze(Object.keys(SDK_ENTRYPOINTS).map(
@@ -55,10 +56,12 @@ export function checkSdkModuleContract(manifest) {
 /** @param {'require-first' | 'import-first'} order */
 export function sdkRuntimeConsumer(order) {
   if (order !== 'require-first' && order !== 'import-first') throw new Error('Invalid SDK loader order');
+  const specs = [...SDK_SPECIFIERS, '@supacloud/contracts', '@supacloud/contracts/client', '@supacloud/contracts/browser'];
+  const at = (specifier) => specs.indexOf(specifier);
   const header = order === 'require-first' ? `
 'use strict';
 const assert = require('node:assert/strict');
-const specs = ${JSON.stringify([...SDK_SPECIFIERS, '@supacloud/contracts', '@supacloud/contracts/client', '@supacloud/contracts/browser'])};
+const specs = ${JSON.stringify(specs)};
 // Deliberately before any dynamic import: this proves cold synchronous loading.
 const required = specs.map(spec => require(spec));
 (async () => {
@@ -67,7 +70,7 @@ const imported = await Promise.all(specs.map(spec => import(spec)));
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const specs = ${JSON.stringify([...SDK_SPECIFIERS, '@supacloud/contracts', '@supacloud/contracts/client', '@supacloud/contracts/browser'])};
+const specs = ${JSON.stringify(specs)};
 const imported = await Promise.all(specs.map(spec => import(spec)));
 const required = specs.map(spec => require(spec));
 `;
@@ -84,13 +87,13 @@ for (const [index, spec] of specs.entries()) {
   for (const key of Object.keys(esm)) assert.equal(typeof cjs[key], typeof esm[key], spec + ': export kind');
 }
 for (const modules of [required, imported]) {
-  assert.equal(typeof modules[0].createSupaCloudClient, 'function');
-  const error = new modules[1].TaskEventError(400, 'COMPATIBILITY_TEST');
-  assert.ok(error instanceof modules[1].TaskEventError);
+  assert.equal(typeof modules[${at('@supacloud/js')}].createSupaCloudClient, 'function');
+  const error = new modules[${at('@supacloud/js/task-events')}].TaskEventError(400, 'COMPATIBILITY_TEST');
+  assert.ok(error instanceof modules[${at('@supacloud/js/task-events')}].TaskEventError);
   assert.equal(error.status, 400);
   assert.equal(error.message, 'COMPATIBILITY_TEST');
-  for (const key of Object.keys(modules[2])) {
-    assert.strictEqual(modules[2][key], modules[5][key], 'contracts: shared protocol identity ' + key);
+  for (const key of Object.keys(modules[${at('@supacloud/js/contracts')}])) {
+    assert.strictEqual(modules[${at('@supacloud/js/contracts')}][key], modules[${at('@supacloud/contracts/client')}][key], 'contracts: shared protocol identity ' + key);
   }
 }
 console.log('SDK synchronous require/import compatibility passed: ${order}');

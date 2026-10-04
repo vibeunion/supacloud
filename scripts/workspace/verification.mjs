@@ -6,6 +6,7 @@ const additional = {
   '@supacloud/compiler': ['contracts'],
   '@supacloud/db': ['commands', 'compiler'],
   '@supacloud/lite': ['supacloud-js'],
+  '@supacloud/js': ['compiler'],
 };
 export function verificationTargets(workspace, project) {
   const result = [{ target: 'repo-prepare', params: 'ignore' }];
