@@ -78,7 +78,12 @@ Rollback is recorded as separate paths, not a single switch:
 ## Next steps
 
 1. Have the Management API persist and expose deployment evidence after each
-   single-node activation or reconcile operation.
+   single-node activation or reconcile operation. The current observer can be
+   refreshed through `POST
+   /v1/projects/:ref/applications/:id/environments/:environmentId/deployment-evidence/refresh`;
+   it records runtime, migration and readiness observations while leaving
+   backup, recovery, authenticated smoke and rollback proof as `unknown` until
+   independent checks produce evidence.
 2. Connect Preview lifecycle and recovery drills to the database provider,
    backup, migration, health and rollback fields.
 3. Surface build and deployment evidence together in the Web Console release

@@ -18,6 +18,7 @@ import { stableStringify } from "../utils/stable-json";
 import type { ApplicationDeploymentService } from "../services/application-deployment";
 import { ConflictError } from "../utils/errors";
 import { ApplicationDeploymentEvidenceStorage } from "../services/application-deployment-evidence";
+import { ApplicationDeploymentEvidenceObserver } from "../services/application-deployment-evidence-observer";
 
 function activationFailure(error: unknown, identity: {
   project_ref: string; application_id: string; environment_id: string; activation_id: string;
@@ -52,6 +53,7 @@ interface ApplicationRouteDependencies {
   migrations?: Pick<ApplicationMigrations, "inspect">;
   configurations?: Pick<ApplicationConfigurations, "read" | "put">;
   evidence?: Pick<ApplicationDeploymentEvidenceStorage, "read" | "write">;
+  evidenceObserver?: Pick<ApplicationDeploymentEvidenceObserver, "observe">;
   deployment?: Pick<ApplicationDeploymentService, "activateConfigured" | "reconcile" | "retireConfigured">;
   retirementVerifier?: unknown;
   principal?: typeof getVerifiedRequestPrincipal;
@@ -76,6 +78,17 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
   const migrations = dependencies.migrations ?? new ApplicationMigrations({ storage });
   const configurations = dependencies.configurations ?? new ApplicationConfigurations();
   const evidence = dependencies.evidence ?? new ApplicationDeploymentEvidenceStorage();
+  const evidenceObserver = dependencies.evidenceObserver;
+  const persistObservedEvidence = async (values: { ref: string; id: string; environmentId: string }) => {
+    if (!evidenceObserver) return;
+    try {
+      const observed = await evidenceObserver.observe(scope(values));
+      if (observed) await evidence.write(observed);
+    } catch {
+      // Evidence is a readback artifact. A failed observer must not replay or
+      // invalidate an already committed activation; the next refresh exposes it.
+    }
+  };
   const environmentParams = t.Object({
     ...params.properties, ref: t.String({ pattern: "^[a-z0-9-]{1,20}$" }),
     environmentId: t.String({ pattern: "^[A-Za-z0-9_-]{1,64}$" }),
@@ -173,6 +186,28 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
         evidence: await evidence.write(parsed),
       };
     })
+    .post("/:id/environments/:environmentId/deployment-evidence/refresh", {
+      params: environmentParams,
+      detail: { tags: ["applications"], summary: "Observe and persist current single-node deployment evidence" },
+    }, async ({ params: values }) => {
+      if (!evidenceObserver) {
+        return status(503, {
+          code: "APPLICATION_DEPLOYMENT_EVIDENCE_OBSERVER_UNAVAILABLE",
+          error: "Deployment evidence observer is unavailable",
+        });
+      }
+      const observed = await evidenceObserver.observe(scope(values));
+      if (!observed) {
+        return status(409, {
+          code: "APPLICATION_DEPLOYMENT_EVIDENCE_RUNTIME_NOT_ACTIVE",
+          error: "No active application runtime is available for evidence observation",
+        });
+      }
+      return {
+        project_ref: values.ref, application_id: values.id, environment_id: values.environmentId,
+        evidence: await evidence.write(observed),
+      };
+    })
     .get("/:id/releases", {
       params,
       query: t.Object({
@@ -238,11 +273,13 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
       try {
         const release = await storage.readRelease(values.ref, values.id, body.release_id);
-        return await deployment.activateConfigured({
+        const result = await deployment.activateConfigured({
           runtime: { release, environmentId: values.environmentId, activationId: body.activation_id },
           configurationId: body.configuration_id, expectedActivationId: body.expected_activation_id,
           principal: actor,
         });
+        await persistObservedEvidence(values);
+        return result;
       } catch (error) {
         return activationFailure(error, {
           project_ref: values.ref, application_id: values.id, environment_id: values.environmentId,
@@ -258,9 +295,11 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
         detail: { tags: ["applications"], summary: "Confirm an already committed activation without replaying runtime effects" },
       }, async ({ params: values, request }) => {
         const actor = await principal(request);
-        if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
-        try {
-          return await deployment.reconcile({ ...scope(values), activationId: values.activationId, principal: actor });
+      if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
+      try {
+          const result = await deployment.reconcile({ ...scope(values), activationId: values.activationId, principal: actor });
+          await persistObservedEvidence(values);
+          return result;
         } catch (error) {
           return activationFailure(error, {
             project_ref: values.ref, application_id: values.id, environment_id: values.environmentId,

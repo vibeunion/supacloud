@@ -41,3 +41,34 @@ groups:
         annotations:
           summary: Dispatched background task p95 age exceeds five minutes
           runbook: docs/request-task-tracing.md#queue-delay
+      - alert: SupaCloudBackupFreshness
+        expr: |
+          (supacloud_backup_inventory_available == 0)
+          or (supacloud_backup_latest_success_age_seconds > 3600)
+        for: 15m
+        labels:
+          severity: critical
+          service: backup
+        annotations:
+          summary: Backup inventory is unavailable or the latest backup is older than one hour
+          runbook: docs/request-task-tracing.md#backup-freshness
+      - alert: SupaCloudRestoreDrillFailure
+        expr: |
+          (supacloud_restore_drill_last_status{status!="succeeded"} == 1)
+          or (supacloud_restore_drill_last_status == 0 and time() - supacloud_restore_drill_last_completed_timestamp_seconds > 604800)
+        for: 15m
+        labels:
+          severity: critical
+          service: recovery
+        annotations:
+          summary: The latest restore drill failed or no successful drill ran in seven days
+          runbook: docs/request-task-tracing.md#restore-failure
+      - alert: SupaCloudLogIngestionDelay
+        expr: supacloud_log_ingestion_delay_seconds > 300
+        for: 10m
+        labels:
+          severity: warning
+          service: observability
+        annotations:
+          summary: Log ingestion delay exceeds five minutes
+          runbook: docs/request-task-tracing.md#log-ingestion-delay

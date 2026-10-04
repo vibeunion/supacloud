@@ -1,4 +1,5 @@
 import { requestValidatedJson } from "./validated-json";
+import { parseDeploymentEvidence, type DeploymentEvidence } from "../../../delivery/src/deployment-evidence";
 
 export interface ApplicationScope { ref: string; application: string; environment: string }
 export const readinessCodes = [
@@ -25,6 +26,10 @@ export interface Release {
 }
 export interface ReleasePage {
   project_ref: string; application_id: string; releases: Release[]; next_cursor: string | null;
+}
+export interface DeploymentEvidenceResponse {
+  project_ref: string; application_id: string; environment_id: string;
+  evidence: DeploymentEvidence | null;
 }
 const id = /^[A-Za-z0-9_-]{1,64}$/;
 const hash = /^[a-f0-9]{64}$/;
@@ -117,4 +122,20 @@ export function loadApplicationReleases(scope: ApplicationScope, request: Reques
   return requestValidatedJson(`${base(scope)}/releases?limit=50${cursor ? `&cursor=${cursor}` : ""}`,
     request, value => parseApplicationReleases(value, scope, cursor),
     { signal, cache: "no-store" }, { maxBytes: 1024 * 1024 });
+}
+export function loadApplicationDeploymentEvidence(
+  scope: ApplicationScope, request: Request, signal: AbortSignal,
+) {
+  return requestValidatedJson(
+    `${base(scope)}/environments/${encodeURIComponent(scope.environment)}/deployment-evidence`,
+    request,
+    value => {
+      const row = record(value);
+      identity(row, scope, true);
+      requireValue(row.evidence === null || parseDeploymentEvidence(row.evidence));
+      return row as unknown as DeploymentEvidenceResponse;
+    },
+    { signal, cache: "no-store" },
+    { maxBytes: 256 * 1024 },
+  );
 }
