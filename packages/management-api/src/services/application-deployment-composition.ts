@@ -15,6 +15,7 @@ import { ApplicationSystemdRuntime } from "./application-runtime";
 import { ApplicationRuntimeAllocations } from "./application-runtime-allocation";
 import { ApplicationRuntimeFiles } from "./application-runtime-files";
 import { createApplicationCompatibilityVerifier } from "./application-compatibility";
+import { createApplicationWorkerRetirementChecks } from "./application-worker-retirement";
 
 type CompatibilityInput = Parameters<
   NonNullable<ApplicationDeploymentDependencies["verifyCompatibility"]>
@@ -117,6 +118,7 @@ export function createDefaultApplicationRouteComposition(
     migrations,
     readiness,
     allocations,
+    ...createApplicationWorkerRetirementChecks(),
     files,
     runtime,
     gateway: gatewayService,

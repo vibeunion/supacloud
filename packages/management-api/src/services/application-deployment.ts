@@ -1,4 +1,5 @@
 import { parseApplicationReadinessReport } from "@supacloud/delivery";
+import type { WorkerExecutionGroup } from "@supacloud/delivery";
 import {
   ApplicationActivationService, type ActivateApplicationInput, type ApplicationActivationMutations,
   type ApplicationActiveRecord, type ReconcileApplicationActivationInput,
@@ -28,7 +29,11 @@ export interface ApplicationDeploymentDependencies {
   }): Promise<void>;
   /** Observe paused admission, zero held operations and an empty old queue before retiring a route. */
   verifyWorkerRetirement?(input: {
-    runtime: ApplicationRuntimeInput; previous: ApplicationActiveRecord;
+    runtime: ApplicationRuntimeInput; previous: ApplicationActiveRecord; groups: readonly WorkerExecutionGroup[];
+  }): Promise<void>;
+  /** Verify an allocation's worker queues before releasing its reservation. */
+  verifyWorkerAllocationRetirement?(input: {
+    runtime: ApplicationRuntimeInput; groups: readonly WorkerExecutionGroup[];
   }): Promise<void>;
   mutations?: ApplicationActivationMutations;
   storage?: ApplicationReleaseStorage;
@@ -63,6 +68,7 @@ export class ApplicationDeploymentService {
   private readonly allocations: Pick<ApplicationRuntimeAllocations, "allocate">
     & Partial<Pick<ApplicationRuntimeAllocations, "read" | "retire">>;
   private readonly retirementVerifier?: ApplicationDeploymentDependencies["retirementVerifier"];
+  private readonly verifyWorkerAllocationRetirement?: ApplicationDeploymentDependencies["verifyWorkerAllocationRetirement"];
   private readonly active: Partial<Pick<ApplicationActiveStorage, "readForApplication">>;
   private readonly storage: ApplicationReleaseStorage;
 
@@ -71,6 +77,7 @@ export class ApplicationDeploymentService {
     this.configurations = dependencies.configurations ?? new ApplicationConfigurations();
     this.allocations = dependencies.allocations ?? new ApplicationRuntimeAllocations();
     this.retirementVerifier = dependencies.retirementVerifier;
+    this.verifyWorkerAllocationRetirement = dependencies.verifyWorkerAllocationRetirement;
     const storage = dependencies.storage ?? new ApplicationReleaseStorage();
     this.storage = storage;
     const files = dependencies.files ?? new ApplicationRuntimeFiles(storage);
@@ -101,15 +108,18 @@ export class ApplicationDeploymentService {
           if (Object.values(input.ports).some(port => previousPorts.has(port))) {
             throw new Error("APPLICATION_DEPLOYMENT_PORT_CONFLICT");
           }
-          const removed = previous.runtime.release.targets.some(target => target.execution
+          const removedGroups = previous.runtime.release.targets.flatMap(target => target.execution
             && !input.release.targets.some(next => next.execution
               && next.execution.queue === target.execution!.queue
               && next.execution.taskKey === target.execution!.taskKey
               && next.execution.definitionVersion === target.execution!.definitionVersion
-              && next.execution.name === target.execution!.name));
-          if (removed) {
+              && next.execution.name === target.execution!.name)
+            ? [target.execution] : []);
+          if (removedGroups.length) {
             if (!dependencies.verifyWorkerRetirement) throw new Error("WORKER_RETIREMENT_VERIFIER_REQUIRED");
-            await dependencies.verifyWorkerRetirement({ runtime: structuredClone(input), previous: structuredClone(previous) });
+            await dependencies.verifyWorkerRetirement({
+              runtime: structuredClone(input), previous: structuredClone(previous), groups: removedGroups,
+            });
           }
         }
         const report = await migrations.inspect(input.release.project_ref, input.release.application_id, input.release.release_id);
@@ -179,6 +189,17 @@ export class ApplicationDeploymentService {
     const configuration = await this.configurations.resolve({
       projectRef, applicationId: release.application_id, environmentId: input.environmentId,
     }, allocation.configurationId, release);
+    const retiredGroups = release.targets.flatMap(target => target.execution
+      && !active?.runtime.release.targets.some(next => next.execution
+        && next.execution.queue === target.execution!.queue
+        && next.execution.taskKey === target.execution!.taskKey
+        && next.execution.definitionVersion === target.execution!.definitionVersion
+        && next.execution.name === target.execution!.name)
+      ? [target.execution] : []);
+    if (retiredGroups.length) {
+      if (!this.verifyWorkerAllocationRetirement) throw new Error("WORKER_RETIREMENT_VERIFIER_REQUIRED");
+      await this.verifyWorkerAllocationRetirement({ runtime: structuredClone(allocation.runtime), groups: retiredGroups });
+    }
     const retired = await this.allocations.retire(projectRef, input.activationId, allocationValue =>
       this.retirementVerifier!({ allocation: allocationValue, active, configuration }));
     if (!retired.retiredAt) throw new Error("APPLICATION_PORT_RETIREMENT_UNCONFIRMED");
