@@ -52,6 +52,10 @@ export async function loadMigrations(profile: "dedicated" | "shared" = "dedicate
     version: "supacloud_002",
     sql: await readFile(new URL("../sql/002-admission.sql", import.meta.url), "utf8"),
   });
+  migrations.push({
+    version: "supacloud_003",
+    sql: await readFile(new URL("../sql/003-bounded-admission.sql", import.meta.url), "utf8"),
+  });
   return migrations;
 }
 

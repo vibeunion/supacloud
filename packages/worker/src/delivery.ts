@@ -37,6 +37,7 @@ export interface WorkerDelivery {
   memoryMaxMiB: number;
   tasksMax: number;
   stopTimeoutSeconds: number;
+  artifactDirectory?: string;
 }
 
 const keys: readonly (keyof WorkerDelivery)[] = [
@@ -44,6 +45,7 @@ const keys: readonly (keyof WorkerDelivery)[] = [
   "entrypoint", "environmentFile", "concurrency", "maxPgConnections",
   "visibilityTimeoutSeconds", "retryLimit", "cpuQuotaPercent", "memoryMaxMiB",
   "tasksMax", "stopTimeoutSeconds",
+  "artifactDirectory",
 ];
 
 function absolutePath(value: unknown): string {
@@ -78,6 +80,13 @@ export function parseWorkerDelivery(value: unknown): Readonly<WorkerDelivery> {
   };
   if (result.user === "root" || !result.entrypoint.startsWith(`${result.releaseDirectory}/`))
     throw new Error("WORKER_DELIVERY_INVALID");
+  if (input.artifactDirectory !== undefined) {
+    const directory = absolutePath(input.artifactDirectory);
+    if (directory !== `/var/lib/scw/${result.projectRef}` &&
+      !directory.startsWith(`/var/lib/scw/${result.projectRef}/`))
+      throw new Error("WORKER_DELIVERY_INVALID");
+    result.artifactDirectory = directory;
+  }
   return Object.freeze(result);
 }
 
@@ -92,6 +101,7 @@ export function renderWorkerService(value: unknown): string {
     `SUPACLOUD_WORKER_PG_CONNECTIONS=${plan.maxPgConnections}`,
     `SUPACLOUD_WORKER_VISIBILITY_SECONDS=${plan.visibilityTimeoutSeconds}`,
     `SUPACLOUD_WORKER_RETRY_LIMIT=${plan.retryLimit}`,
+    ...(plan.artifactDirectory ? [`SCW_ARTIFACT_DIRECTORY=${plan.artifactDirectory}`] : []),
   ].join(" ");
   return `[Unit]
 Description=SupaCloud queue worker ${plan.projectRef}/${plan.queueName}
@@ -120,7 +130,7 @@ TasksMax=${plan.tasksMax}
 OOMPolicy=stop
 NoNewPrivileges=yes
 ProtectSystem=strict
-ProtectHome=yes
+${plan.artifactDirectory ? `ReadWritePaths=${plan.artifactDirectory}\n` : ""}ProtectHome=yes
 PrivateTmp=yes
 UMask=0077
 StandardOutput=journal

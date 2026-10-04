@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "rootDir": ".", "noEmit": true },
+  "include": [
+    "src/**/*.ts",
+    "examples/reporting/**/*.ts",
+    "tests/runtime.test.ts",
+    "tests/fixtures/runtime-acceptance.ts",
+    "tests/fixtures/reporting-worker.ts"
+  ]
+}
