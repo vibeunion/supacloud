@@ -72,8 +72,9 @@ jobs:
           bun run --cwd packages/delivery build
       - name: Validate SLO alert rules
         run: |
-          docker run --rm -v "$PWD:/workspace:ro" prom/prometheus:v3.5.0 \
-            promtool test rules /workspace/infrastructure/monitoring/supacloud-slo.rules.test.yml
+          docker run --rm --entrypoint promtool \
+            -v "$PWD:/workspace:ro" prom/prometheus:v3.5.0 \
+            test rules /workspace/infrastructure/monitoring/supacloud-slo.rules.test.yml
       - name: Verify clean diff
         run: git diff --check
 

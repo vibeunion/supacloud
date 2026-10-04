@@ -99,6 +99,24 @@ tests:
       - {eval_time: 15m, alertname: SupaCloudManagementLatency, exp_alerts: []}
       - {eval_time: 15m, alertname: SupaCloudBackgroundFailures, exp_alerts: []}
       - {eval_time: 15m, alertname: SupaCloudBackgroundQueueDelay, exp_alerts: []}
-      - {eval_time: 15m, alertname: SupaCloudBackupFreshness}
-      - {eval_time: 15m, alertname: SupaCloudRestoreDrillFailure}
-      - {eval_time: 15m, alertname: SupaCloudLogIngestionDelay}
+      - eval_time: 15m
+        alertname: SupaCloudBackupFreshness
+        exp_alerts:
+          - exp_labels: {severity: critical, service: backup}
+            exp_annotations:
+              summary: Backup inventory is unavailable or the latest backup is older than one hour
+              runbook: docs/request-task-tracing.md#backup-freshness
+      - eval_time: 15m
+        alertname: SupaCloudRestoreDrillFailure
+        exp_alerts:
+          - exp_labels: {severity: critical, service: recovery, status: failed}
+            exp_annotations:
+              summary: The latest restore drill failed or no successful drill ran in seven days
+              runbook: docs/request-task-tracing.md#restore-failure
+      - eval_time: 15m
+        alertname: SupaCloudLogIngestionDelay
+        exp_alerts:
+          - exp_labels: {severity: warning, service: observability}
+            exp_annotations:
+              summary: Log ingestion delay exceeds five minutes
+              runbook: docs/request-task-tracing.md#log-ingestion-delay
