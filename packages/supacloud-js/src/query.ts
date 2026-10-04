@@ -225,7 +225,6 @@ export function createSupaCloudQueryAdapter({
     procedure: TProcedure,
     options?: SupaCloudMutationOptions<NoInfer<TProcedure>, TError, TContext>,
   ): SupaCloudMutationOptionsResult<TProcedure, TError, TContext> {
-    const metadata = metadataOf(procedure, "mutation");
     return {
       ...options,
       mutationKey: procedureKey(procedure, "mutation") as MutationKey,
@@ -233,11 +232,6 @@ export function createSupaCloudQueryAdapter({
       retry: false as const,
       mutationFn: async (variables: SupaCloudMutationVariables<TProcedure>) => {
         const execution = variables.execution ?? {};
-        const key = execution.idempotencyKey;
-        if ((metadata.idempotency === "required" && key === undefined)
-          || (key !== undefined && (typeof key !== "string" || !/^[A-Za-z0-9._:-]{1,512}$/.test(key)))) {
-          throw new TypeError("This mutation requires a valid idempotencyKey");
-        }
         return callProcedure(procedure, variables.input, execution);
       },
     };

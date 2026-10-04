@@ -60,6 +60,25 @@ peer range compatible with a newer SDK.
 
 ## Quick Start
 
+Use [`createSupaCloudProcedureClient`](./PROCEDURES.md) to initialize a generated
+application client with the existing Supabase session:
+
+```ts
+import { createSupaCloudProcedureClient } from "@supacloud/js";
+import { createApiClient } from "./generated/client";
+
+const api = createSupaCloudProcedureClient({
+  supabase,
+  functionName: "app-api",
+  generated: createApiClient,
+});
+
+const detail = await api.cases.detail.query({ params: { id: "case-1" } });
+```
+
+The facade preserves route overloads and adds `SupaCloudProcedureError`, original
+Functions errors, and HTTP metadata. It does not replace Supabase JS or retry writes.
+
 For compiler-generated application procedures, the optional
 [`@supacloud/js/query`](./QUERY.md) entrypoint provides typed TanStack Query options,
 identity-scoped cache keys, cancellation and per-invocation mutation idempotency.

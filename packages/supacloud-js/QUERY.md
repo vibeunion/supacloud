@@ -23,13 +23,15 @@ until regenerated. Existing route calls, response validation, interceptors,
 `.query()` and `.mutate()` argument conventions are unchanged.
 
 ```ts
-import { createSupaCloudApiFetch } from "@supacloud/js";
+import { createSupaCloudProcedureClient } from "@supacloud/js";
 import { createSupaCloudQueryAdapter } from "@supacloud/js/query";
 import { createApiClient } from "./generated/client";
 
 // Reuse the application's existing user-scoped Supabase client.
-const api = createApiClient({
-  fetch: createSupaCloudApiFetch({ supabase, functionName: "app-api" }),
+const api = createSupaCloudProcedureClient({
+  supabase,
+  functionName: "app-api",
+  generated: createApiClient,
 });
 const queries = createSupaCloudQueryAdapter({
   keyPrefix: [projectUrl, "app-api", tenantId, actorId],
@@ -39,6 +41,8 @@ const queries = createSupaCloudQueryAdapter({
 The Supabase client still owns session storage, refresh, auth headers, Database,
 Storage, Realtime and Functions. No second token store or fetch/auth protocol is
 introduced. This adapter works with other generated-client transports as well.
+See [Procedure Facade](./PROCEDURES.md) for incremental migration and unified
+errors. `createApiClient({ fetch: createSupaCloudApiFetch(...) })` remains supported.
 
 ## Query Options
 
@@ -68,7 +72,8 @@ are adapter-owned.
 Query cancellation forwards TanStack's signal into the generated client.
 No-content query results are normalized from `undefined` to `null`, because
 TanStack cannot cache `undefined`; direct procedure and mutation results remain
-unchanged. HTTP/validation errors retain the generated client's error metadata.
+unchanged. With the facade, HTTP/validation failures use `SupaCloudProcedureError`;
+direct generated clients retain their original error classes.
 Schema-declared non-2xx responses retain the generated client's typed-data
 semantics; this adapter does not reclassify them as exceptions.
 
@@ -141,6 +146,11 @@ Each invocation supplies `{ input, execution }`. A required command idempotency
 key is required both by TypeScript and at runtime. It belongs to the logical
 operation, not to the component or mutation-options factory. Reuse it only when
 reconciling/retrying the same operation, never for a different write.
+The facade validates execution keys; direct generated procedures retain their
+legacy header checks. With the facade, invalid mutation
+execution settings reject with `SupaCloudProcedureError` and
+`SUPACLOUD_EXECUTION_ERROR` before dispatch; direct generated clients retain their
+original validation errors.
 
 Mutations set `retry: false`, including when QueryClient defaults enable retry.
 An unknown outcome is not permission to retry; first resolve the server outcome.
