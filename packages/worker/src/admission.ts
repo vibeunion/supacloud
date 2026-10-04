@@ -53,10 +53,7 @@ export async function requireDrainedWorkerGroup(transaction: WorkerTransaction, 
     FROM supacloud_worker.admission_limits l
     WHERE l.group_name=$2 AND EXISTS(SELECT FROM supacloud_worker.installation WHERE singleton AND project_ref=$1)
     FOR UPDATE OF l`, [projectRef, group, queue]);
-  const zero = (value: unknown) => value === 0 || value === "0" || value === 0n;
   if (!Array.isArray(result) || result.length !== 1 || !result[0] || typeof result[0] !== "object"
-    || result[0].accepting !== false || !zero(result[0].outstanding)
-    || !zero(result[0].held) || !zero(result[0].queued)) {
-    throw new Error("WORKER_GROUP_NOT_DRAINED");
-  }
+    || result[0].accepting !== false || result[0].outstanding !== 0
+    || result[0].held !== 0 || ![0, "0", 0n].includes(result[0].queued)) throw new Error("WORKER_GROUP_NOT_DRAINED");
 }

@@ -39,14 +39,6 @@ type response struct {
 	Records       []record `json:"records"`
 }
 
-type supabaseProbe interface {
-	Check(context.Context) error
-}
-
-var supabaseProbeFactory = func() (supabaseProbe, error) {
-	return nil, nil
-}
-
 var identity = regexp.MustCompile(`^[A-Za-z0-9_.:@/-]{1,128}$`)
 var project = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,99}$`)
 
@@ -81,7 +73,6 @@ type service struct {
 	project string
 	token   string
 	slots   chan struct{}
-	probe   supabaseProbe
 	ready   atomic.Bool
 	calls   atomic.Uint64
 	failed  atomic.Uint64
@@ -91,11 +82,7 @@ func newService(projectRef, token string, concurrency int) (*service, error) {
 	if !project.MatchString(projectRef) || len(token) < 32 || concurrency < 1 || concurrency > 32 {
 		return nil, errors.New("SERVICE_CONFIG_INVALID")
 	}
-	probe, err := supabaseProbeFactory()
-	if err != nil {
-		return nil, err
-	}
-	s := &service{project: projectRef, token: token, slots: make(chan struct{}, concurrency), probe: probe}
+	s := &service{project: projectRef, token: token, slots: make(chan struct{}, concurrency)}
 	s.ready.Store(true)
 	return s, nil
 }
@@ -106,14 +93,10 @@ func (s *service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodGet && r.URL.Path == "/ready" {
-		ready := s.ready.Load()
-		if ready && s.probe != nil {
-			ready = s.probe.Check(r.Context()) == nil
-		}
-		if !ready {
+		if !s.ready.Load() {
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
-		json.NewEncoder(w).Encode(map[string]bool{"ready": ready})
+		json.NewEncoder(w).Encode(map[string]bool{"ready": s.ready.Load()})
 		return
 	}
 	if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+s.token)) != 1 {

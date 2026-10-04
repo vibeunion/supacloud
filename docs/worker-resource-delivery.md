@@ -2,9 +2,9 @@
 
 Status: optional, private worker integration. This delivers configuration and
 measurement evaluation, not a managed service or a customer capacity guarantee.
-No mandatory Go or scriptc runtime, second scheduler, task ledger or automatic
-deployment is added. Optional recipes, admission and local runtime acceptance
-are described in [Worker Runtime Recipes](worker-runtime-recipes.md).
+No mandatory Go runtime, second scheduler, task ledger or automatic deployment
+is added. Optional recipes, admission and local runtime acceptance are described
+in [Worker Runtime Recipes](worker-runtime-recipes.md).
 
 ## Scope And Acceptance
 
@@ -59,10 +59,7 @@ Mismatches fail before claiming a process or connecting to the engine.
 
 ## Render And Deploy
 
-Use `packages/worker/examples/worker-delivery.json` as a non-secret Bun
-manifest. Native Go or scriptc Workers use the same fields with
-`runtime: "go"` or `runtime: "scriptc"` and point `runtimePath` and
-`entrypoint` to the same immutable executable.
+Use `packages/worker/examples/worker-delivery.json` as a non-secret manifest.
 All values are explicit example settings, not customer sizing recommendations.
 One manifest/service binds one project and queue. The entrypoint must reside
 inside the declared release directory. Use an immutable release directory,
@@ -92,9 +89,8 @@ grants using [the installation procedure](pgflow-installation.md). Startup
 never installs them.
 
 Generated `ExecStart` sets the non-secret project/queue/pool configuration
-after loading the environment file. Bun runs with `--no-env-file`; native
-Go/scriptc executables run directly. A release-local `.env` cannot silently
-override these settings.
+after loading the environment file. Bun runs with `--no-env-file`, so a
+release-local `.env` cannot silently override these settings.
 
 On a Linux systemd host, after identifying the approved environment and
 reading `hostname` and `hostname -I`:

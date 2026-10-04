@@ -66,27 +66,19 @@ ALTER FUNCTION pgflow.ensure_flow_compiled(text,jsonb) OWNER TO ${owner};
 REVOKE ALL ON FUNCTION pgflow.ensure_flow_compiled(text,jsonb) FROM PUBLIC;
 GRANT USAGE ON SCHEMA pgflow,pgmq,supacloud_worker TO ${worker};
 GRANT SELECT ON supacloud_worker.installation TO ${worker};
--- Worker execution groups use server-owned admission functions and read only
--- their configured quota row; the token table remains private to SECURITY
--- DEFINER functions.
-DO $admission_grants$
-BEGIN
-  -- Keep the roles action repeatable for databases still on supacloud_001;
-  -- engine installation applies these grants once supacloud_002 exists.
-  IF to_regclass('supacloud_worker.admission_limits') IS NOT NULL THEN
-    EXECUTE 'GRANT SELECT ON supacloud_worker.admission_limits TO ${worker}';
-  END IF;
-  IF to_regprocedure('supacloud_worker.admit_operation(text,text,text,text)') IS NOT NULL THEN
-    EXECUTE 'GRANT EXECUTE ON FUNCTION supacloud_worker.admit_operation(text,text,text,text),'
-      || ' supacloud_worker.release_operation(text,text,text) TO ${worker}';
-  END IF;
-END $admission_grants$;
 GRANT SELECT ON pgflow.runs TO ${worker};
 GRANT SELECT,INSERT,UPDATE ON pgflow.workers TO ${worker};
 GRANT EXECUTE ON FUNCTION pgflow.ensure_flow_compiled(text,jsonb),
   pgflow.start_tasks(text,bigint[],uuid), pgflow.complete_task(uuid,text,integer,jsonb),
   pgflow.fail_task(uuid,text,integer,text), pgflow.track_worker_function(text,text),
   pgflow.mark_worker_stopped(uuid) TO ${worker};
+-- Optional bounded-admission producers use the invoker function through this
+-- trusted, project-scoped owner role. Runtime workers receive no grant.
+GRANT SELECT ON supacloud_worker.bounded_project_limits,
+  supacloud_worker.queue_bindings TO ${owner};
+GRANT UPDATE (used,window_start) ON supacloud_worker.bounded_project_limits,
+  supacloud_worker.queue_bindings TO ${owner};
+GRANT EXECUTE ON FUNCTION supacloud_worker.enqueue_bounded(text,text,text,text,jsonb) TO ${owner};
 GRANT USAGE ON SCHEMA pgflow TO ${recovery};
 GRANT EXECUTE ON FUNCTION pgflow.requeue_stalled_tasks() TO ${recovery};
 CREATE OR REPLACE FUNCTION supacloud_worker.recover(expected_project text) RETURNS integer

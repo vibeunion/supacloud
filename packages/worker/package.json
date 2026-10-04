@@ -19,6 +19,10 @@
       "types": "./dist/admission.d.ts",
       "import": "./dist/admission.js"
     },
+    "./bounded-admission": {
+      "types": "./dist/bounded-admission.d.ts",
+      "import": "./dist/bounded-admission.js"
+    },
     "./telemetry": {
       "types": "./dist/telemetry.d.ts",
       "import": "./dist/telemetry.js"
@@ -43,6 +47,8 @@
     "delivery:render": "bun scripts/delivery.ts",
     "performance:check": "bun scripts/performance.ts",
     "test:delivery": "bun test tests/delivery.test.ts",
+    "test:runtime": "bun test tests/runtime.test.ts",
+    "check:runtime": "tsc -p tsconfig.runtime.json",
     "build": "tsc -p tsconfig.json",
     "test": "bun test tests/worker.test.ts"
   },
