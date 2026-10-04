@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.94.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.93.1...management-api-v0.94.0) (2026-10-04)
+
+
+### Features
+
+* establish single-node delivery baseline ([#1632](https://github.com/vibeunion/supacloud/issues/1632)) ([926de6c](https://github.com/vibeunion/supacloud/commit/926de6c6c72940f7c03e046908ef446c54d37621))
+
 ## [0.93.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.93.0...management-api-v0.93.1) (2026-10-04)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.32.0...compiler-v0.33.0) (2026-10-04)
+
+
+### Features
+
+* add Supabase-compatible procedure client transport ([#1634](https://github.com/vibeunion/supacloud/issues/1634)) ([661351a](https://github.com/vibeunion/supacloud/commit/661351ae507877a463a5aab1bd49a27c9bd77cfa))
+
 ## [0.32.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.31.2...compiler-v0.32.0) (2026-10-04)
 
 

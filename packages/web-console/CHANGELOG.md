@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.46.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.45.1...web-console-v0.46.0) (2026-10-04)
+
+
+### Features
+
+* establish single-node delivery baseline ([#1632](https://github.com/vibeunion/supacloud/issues/1632)) ([926de6c](https://github.com/vibeunion/supacloud/commit/926de6c6c72940f7c03e046908ef446c54d37621))
+
 ## [0.45.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.45.0...web-console-v0.45.1) (2026-10-02)
 
 
