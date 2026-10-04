@@ -66,6 +66,21 @@ ALTER FUNCTION pgflow.ensure_flow_compiled(text,jsonb) OWNER TO ${owner};
 REVOKE ALL ON FUNCTION pgflow.ensure_flow_compiled(text,jsonb) FROM PUBLIC;
 GRANT USAGE ON SCHEMA pgflow,pgmq,supacloud_worker TO ${worker};
 GRANT SELECT ON supacloud_worker.installation TO ${worker};
+-- Worker execution groups use server-owned admission functions and read only
+-- their configured quota row; the token table remains private to SECURITY
+-- DEFINER functions.
+DO $admission_grants$
+BEGIN
+  -- Keep the roles action repeatable for databases still on supacloud_001;
+  -- engine installation applies these grants once supacloud_002 exists.
+  IF to_regclass('supacloud_worker.admission_limits') IS NOT NULL THEN
+    EXECUTE 'GRANT SELECT ON supacloud_worker.admission_limits TO ${worker}';
+  END IF;
+  IF to_regprocedure('supacloud_worker.admit_operation(text,text,text,text)') IS NOT NULL THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION supacloud_worker.admit_operation(text,text,text,text),'
+      || ' supacloud_worker.release_operation(text,text,text) TO ${worker}';
+  END IF;
+END $admission_grants$;
 GRANT SELECT ON pgflow.runs TO ${worker};
 GRANT SELECT,INSERT,UPDATE ON pgflow.workers TO ${worker};
 GRANT EXECUTE ON FUNCTION pgflow.ensure_flow_compiled(text,jsonb),

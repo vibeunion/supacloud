@@ -45,6 +45,9 @@ export function parseApplicationReleaseRecord(candidate: unknown): ApplicationRe
     throw new Error("Invalid application release record.");
   }
   validateWorkerExecution(candidate.targets.flatMap(target => target.execution ? [target.execution] : []));
+  if (candidate.targets.reduce((count, target) => count + (target.execution?.replicas ?? 1), 0) > 32) {
+    throw new Error("Invalid application replica count.");
+  }
   if (candidate.targets.some(target => target.execution
     && (target.kind !== "worker" || target.execution.target !== target.name))) {
     throw new Error("Invalid application execution binding.");

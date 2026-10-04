@@ -28,6 +28,7 @@ import { ApplicationRuntimeFiles } from "../packages/management-api/src/services
 import { canonical, digest } from "../packages/delivery/src/delivery-files";
 import { deliveryObjectDigest, type DeliveryBuildManifest } from "../packages/delivery/src/delivery-build-schema";
 import { ApplicationDeploymentService, type ApplicationDeploymentDependencies } from "../packages/management-api/src/services/application-deployment";
+import { createApplicationWorkerRetirementChecks } from "../packages/management-api/src/services/application-worker-retirement";
 import type { ApplicationActiveRecord } from "../packages/management-api/src/services/application-activation";
 import type { ApplicationRuntimeAllocation } from "../packages/management-api/src/services/application-runtime-allocation";
 import { ApplicationMigrations } from "../packages/management-api/src/services/application-migrations";
@@ -369,6 +370,8 @@ describe("worker execution groups", () => {
     for (const mode of ["missing", "not-drained", "drained"] as const) {
       const f = deploymentFixture(true);
       if (mode !== "missing") f.dependencies.verifyWorkerRetirement = async value => {
+        expect(value.groups).toHaveLength(1);
+        expect(value.groups[0]!.queue).toBe("scw_reports_v1");
         expect(value.previous.runtime.release.targets[1]!.execution!.queue).toBe("scw_reports_v1");
         expect(value.runtime.release.targets[1]!.execution!.queue).toBe("scw_reports_v2");
         if (mode === "not-drained") throw new Error("WORKER_GROUP_NOT_DRAINED");
@@ -383,6 +386,45 @@ describe("worker execution groups", () => {
         expect(f.calls).toEqual([]);
       }
     }
+  });
+
+  test("allocation retirement proves only worker routes absent from the active release", async () => {
+    const f = deploymentFixture();
+    const drained: string[] = [];
+    f.dependencies.active!.readForApplication = async () => null;
+    f.dependencies.configurations = { resolve: async () => ({
+      bunVersion: "1.4.2", environment: { api: {}, jobs: {} }, hosts: { api: ["reports.example.test"] },
+    }) };
+    f.dependencies.retirementVerifier = async () => {};
+    f.dependencies.verifyWorkerAllocationRetirement = async ({ groups }) => {
+      drained.push(...groups.map(group => group.queue));
+    };
+    f.dependencies.allocations!.retire = async () => ({
+      ...f.allocation, retiredAt: new Date().toISOString(),
+    });
+    await new ApplicationDeploymentService(f.dependencies).retireConfigured({
+      projectRef: "demo", applicationId: "reviews", environmentId: "test",
+      activationId: f.request.runtime.activationId, principal: f.request.principal,
+    });
+    expect(drained).toEqual(["scw_reports_v1"]);
+  });
+
+  test("default retirement evidence is read-only and requires admission to be paused first", async () => {
+    const queries: string[] = [];
+    const checks = createApplicationWorkerRetirementChecks(async (_project, verify) => {
+      await verify({ query: async (text) => {
+        queries.push(text);
+        return [{ accepting: false, outstanding: "0", held: "0", queued: "0" }];
+      } });
+    });
+    await checks.verifyWorkerAllocationRetirement({ runtime: input(), groups: [group] });
+    expect(queries).toHaveLength(1);
+    expect(queries[0]).not.toContain("UPDATE supacloud_worker.admission_limits");
+    const paused = createApplicationWorkerRetirementChecks(async (_project, verify) => {
+      await verify({ query: async () => [{ accepting: true, outstanding: 0, held: 0, queued: 0 }] });
+    });
+    await expect(paused.verifyWorkerAllocationRetirement({ runtime: input(), groups: [group] }))
+      .rejects.toThrow("WORKER_GROUP_NOT_DRAINED");
   });
 
   test.skipIf(process.env.WORKER_GROUP_DATABASE_ACCEPTANCE !== "1")(

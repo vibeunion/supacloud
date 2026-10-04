@@ -70,6 +70,9 @@ export function deliveryObjectDigest(object: Pick<DeliveryObject, "inputDigest" 
 export function parseDeliveryBuildManifest(value: unknown): DeliveryBuildManifest {
   if (!Value.Check(DeliveryBuildManifestSchema, value)) throw new Error("Invalid delivery build manifest.");
   validateWorkerExecution(value.plan.targets.flatMap(target => target.execution ? [target.execution] : []));
+  if (value.plan.targets.reduce((count, target) => count + (target.execution?.replicas ?? 1), 0) > 32) {
+    throw new Error("Invalid delivery replica count.");
+  }
   for (const target of value.plan.targets) {
     if (target.execution && (target.kind !== "jobs" || target.isolation !== "process"
       || target.execution.target !== target.name || target.jobs.length !== 1
