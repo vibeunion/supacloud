@@ -53,6 +53,9 @@ does not prove a report, payment or device operation succeeded.
 The helper requires all queue limits from the environment and forwards them
 to the existing pgflow adapter. It neither implements polling nor installs
 another signal handler. pgflow owns cooperative shutdown and queue retries.
+An explicit environment object does not replace upstream's process environment:
+its project, endpoint and credential must match the actual process identity.
+Mismatches fail before claiming a process or connecting to the engine.
 
 ## Render And Deploy
 
