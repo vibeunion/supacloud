@@ -9,6 +9,16 @@ export class AdmissionError extends Error {
   constructor(readonly code: string) { super(code); }
 }
 
+/** Explicit public domain rejection; never wrap a driver message in this type. */
+export class TaskSubmissionError extends Error {
+  constructor(readonly code: string) {
+    super(code);
+    if (!/^[A-Z][A-Z0-9_]{0,99}$/.test(code))
+      throw new Error("WORKER_SUBMISSION_CODE_INVALID");
+    this.name = "TaskSubmissionError";
+  }
+}
+
 const admissionCodes = new Set([
   "WORKER_ADMISSION_INVALID",
   "WORKER_ADMISSION_NOT_CONFIGURED",
@@ -21,10 +31,6 @@ const admissionCodes = new Set([
   "WORKER_QUEUE_NOT_FOUND",
 ]);
 
-class PrepareFailure {
-  constructor(readonly cause: unknown) {}
-}
-
 function toAdmissionError(error: unknown): AdmissionError {
   if (error instanceof AdmissionError) return error;
   if (error instanceof Error && admissionCodes.has(error.message))
@@ -32,7 +38,7 @@ function toAdmissionError(error: unknown): AdmissionError {
   return new AdmissionError("WORKER_ADMISSION_FAILED");
 }
 
-/** The callback must authorize and persist intent using ONLY this short transaction. */
+/** Use only this transaction; throw TaskSubmissionError for a public domain rejection. */
 export async function submitBoundedTask<T>(
   sql: SQL,
   binding: { projectRef: string; queueName: string; taskKey: string },
@@ -42,21 +48,11 @@ export async function submitBoundedTask<T>(
     return await sql.begin("isolation level read committed", async tx => {
       await tx`SET LOCAL lock_timeout = '2s'`;
       await tx`SET LOCAL statement_timeout = '5s'`;
-      let decision: AdmissionDecision<T>;
-      try {
-        decision = await prepare(tx);
-      } catch (error) {
-        throw new PrepareFailure(error);
-      }
+      const decision = await prepare(tx);
       if (decision.replay) return { value: decision.value, messageId: null, replay: true };
-      let input: string;
-      try {
-        input = JSON.stringify(decision.input);
-        if (input === undefined || Buffer.byteLength(input) > 65536)
-          throw new AdmissionError("WORKER_PAYLOAD_TOO_LARGE");
-      } catch (error) {
-        throw toAdmissionError(error);
-      }
+      const input = JSON.stringify(decision.input);
+      if (input === undefined || Buffer.byteLength(input) > 65536)
+        throw new AdmissionError("WORKER_PAYLOAD_TOO_LARGE");
       const [row] = await tx<{ id: string }[]>`
         SELECT supacloud_worker.enqueue_bounded(${binding.projectRef},${binding.queueName},
           ${binding.taskKey},${decision.idempotencyKey},${input}::text::jsonb) AS id`;
@@ -64,7 +60,7 @@ export async function submitBoundedTask<T>(
       return { value: decision.value, messageId: row.id, replay: false };
     });
   } catch (error) {
-    if (error instanceof PrepareFailure) throw error.cause;
+    if (error instanceof TaskSubmissionError) throw error;
     // Do not echo SQL, connection strings or driver diagnostics through the business API.
     throw toAdmissionError(error);
   }

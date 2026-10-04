@@ -55,11 +55,20 @@ async function sampleApi(url: string, seconds: number) {
 
 export async function runtimeAcceptance() {
   const artifactsDirectory = await mkdtemp(join(tmpdir(), "scw-runtime-"));
-  const packageDirectory = resolve(import.meta.dir, "../..");
+  const runtimeDirectory = await mkdtemp(join(tmpdir(), "scw-runtime-bundle-"));
   const names: string[] = [];
   let report: unknown;
   let accepted = false;
   try {
+    // Local file dependencies can contain host-absolute symlinks. Deliver a
+    // self-contained Bun entrypoint instead of mounting host node_modules.
+    const bundle = await Bun.build({
+      entrypoints: [resolve(import.meta.dir, "reporting-worker.ts")],
+      target: "bun",
+      outdir: runtimeDirectory,
+      naming: "reporting-worker.js",
+    });
+    if (!bundle.success) throw new Error("ACCEPTANCE_WORKER_BUILD_FAILED");
     await withPgflowDatabase(async (sql, url, _install, psql) => {
       await sql.unsafe(await Bun.file(new URL("../../examples/reporting/schema.sql", import.meta.url)).text());
       await sql`SELECT pgmq.create('scw_reports')`;
@@ -79,6 +88,8 @@ export async function runtimeAcceptance() {
       await sql`INSERT INTO report_demo.rows
         SELECT ${source}::uuid,n,'label-'||n,9007199254740993::bigint FROM generate_series(1,10000) n`;
       await sql`UPDATE report_demo.sources SET frozen=true WHERE id=${source}`;
+      await expect(submitReport(sql, "fixture", "intruder", crypto.randomUUID(), source, "v1"))
+        .rejects.toThrow("REPORT_FORBIDDEN");
       await expect(Promise.resolve(sql`UPDATE report_demo.rows SET label='bad' WHERE source_id=${source} AND row_id=1`))
         .rejects.toThrow("REPORT_SOURCE_IMMUTABLE");
       const submitted = await Promise.allSettled(Array.from({ length: 12 }, () =>
@@ -87,6 +98,10 @@ export async function runtimeAcceptance() {
       expect(admitted).toHaveLength(2);
       expect((await sql`SELECT count(*)::int n FROM report_demo.requests`)[0].n).toBe(2);
       expect((await submitReport(sql, "fixture", "operator", admitted[0]!.value, source, "v1")).replay).toBe(true);
+      const alternateSource = crypto.randomUUID();
+      await sql`INSERT INTO report_demo.sources VALUES (${alternateSource},'v1','operator',true)`;
+      await expect(submitReport(sql, "fixture", "operator", admitted[0]!.value, alternateSource, "v1"))
+        .rejects.toThrow("REPORT_OPERATION_CONFLICT");
       const other = () => submitBoundedTask(sql, {
         projectRef: "fixture", queueName: "scw_other", taskKey: "other",
       }, async () => ({ replay: false, value: null, idempotencyKey: crypto.randomUUID(), input: {} }));
@@ -109,11 +124,33 @@ export async function runtimeAcceptance() {
       await sql`SELECT pgmq.purge_queue('scw_reports')`;
       await sql`DELETE FROM report_demo.requests`;
       await sql`UPDATE supacloud_worker.bounded_project_limits SET max_per_second=1000,used=0,window_start='-infinity'`;
-      await sql`UPDATE supacloud_worker.queue_bindings SET max_per_second=1000,used=0,window_start='-infinity'`;
+      await sql`UPDATE supacloud_worker.queue_bindings
+        SET max_pending=500,max_per_second=1000,used=0,window_start='-infinity'`;
 
       // The real worker uses a scoped runtime login, never the fixture installer.
       await psql(renderRoles("fixture"));
-      const { worker } = roleNames("fixture");
+      const { owner, worker } = roleNames("fixture");
+      // Queue-only recipes provision their queue grants separately from Flow
+      // publication. Exercise the invoker under the actual NOLOGIN owner.
+      await sql.unsafe(`GRANT SELECT ON pgmq.q_scw_reports,pgmq.q_scw_other TO ${owner};
+        GRANT INSERT ON pgmq.q_scw_reports TO ${owner};
+        GRANT USAGE,SELECT ON SEQUENCE pgmq.q_scw_reports_msg_id_seq TO ${owner};`);
+      await sql.begin(async tx => {
+        await tx.unsafe(`SET LOCAL ROLE ${owner}`);
+        const [row] = await tx`SELECT supacloud_worker.enqueue_bounded(
+          'fixture','scw_reports','report.generate','owner-check','{}') AS id`;
+        expect(row.id).toMatch(/^[1-9][0-9]*$/);
+      });
+      await expect(sql.begin(async tx => {
+        await tx.unsafe(`SET LOCAL ROLE ${owner}`);
+        await tx`UPDATE supacloud_worker.bounded_project_limits SET max_pending=999`;
+      })).rejects.toThrow("permission denied");
+      await expect(sql.begin(async tx => {
+        await tx.unsafe(`SET LOCAL ROLE ${owner}`);
+        await tx`SELECT supacloud_worker.enqueue_bounded(
+          'fixture','scw_foreign','other','foreign-check','{}')`;
+      })).rejects.toThrow("WORKER_QUEUE_OWNERSHIP");
+      await sql`SELECT pgmq.purge_queue('scw_reports')`;
       await sql.unsafe(`ALTER ROLE ${worker} LOGIN PASSWORD 'fixture-runtime-only';
         GRANT CONNECT ON DATABASE postgres TO ${worker};
         GRANT USAGE ON SCHEMA report_demo TO ${worker};
@@ -130,6 +167,8 @@ export async function runtimeAcceptance() {
       try {
         await expect(Promise.resolve(limited`UPDATE report_demo.sources SET owner_id='intruder'`)).rejects.toThrow();
         await expect(Promise.resolve(limited`UPDATE supacloud_worker.bounded_project_limits SET max_pending=999`)).rejects.toThrow();
+        await expect(Promise.resolve(limited`SELECT supacloud_worker.enqueue_bounded(
+          'fixture','scw_reports','report.generate','runtime-check','{}')`)).rejects.toThrow("permission denied");
       } finally { await limited.close(); }
       runtimeUrl.hostname = "host.docker.internal";
       runtimeUrl.searchParams.set("application_name", "scw_delivery_acceptance");
@@ -139,7 +178,7 @@ export async function runtimeAcceptance() {
         await command(["docker", "run", "-d", "--name", name, "--cpus=0.5", "--memory=256m",
           "--memory-swap=256m", "--pids-limit=64", "--user", `${process.getuid!()}:${process.getgid!()}`,
           "--read-only", "--tmpfs", "/tmp:rw,nosuid,size=32m",
-          "--mount", `type=bind,src=${packageDirectory},dst=/app,readonly`,
+          "--mount", `type=bind,src=${runtimeDirectory},dst=/app,readonly`,
           "--mount", `type=bind,src=${artifactsDirectory},dst=/artifacts`,
           "-w", "/app",
           "-e", `EDGE_WORKER_DB_URL=${runtimeUrl}`,
@@ -149,7 +188,7 @@ export async function runtimeAcceptance() {
           "-e", "SUPACLOUD_WORKER_CONCURRENCY=2", "-e", "SUPACLOUD_WORKER_PG_CONNECTIONS=3",
           "-e", "SUPACLOUD_WORKER_VISIBILITY_SECONDS=15", "-e", "SUPACLOUD_WORKER_RETRY_LIMIT=2",
           "-e", `SCW_TEST_HOLD_AFTER=${hold}`, "-e", "EDGE_WORKER_LOG_LEVEL=error",
-          "oven/bun:1.4.2", "bun", "--no-env-file", "tests/fixtures/reporting-worker.ts"]);
+          "oven/bun:1.4.2", "bun", "--no-env-file", "reporting-worker.js"]);
         return name;
       };
       const health = (name: string, path: string) => command(["docker", "exec", name, "bun", "-e",
@@ -305,6 +344,7 @@ export async function runtimeAcceptance() {
   } finally {
     for (const name of names) await command(["docker", "rm", "--force", name]).catch(() => {});
     await rm(artifactsDirectory, { recursive: true, force: true });
+    await rm(runtimeDirectory, { recursive: true, force: true });
     if (process.env.SCW_ACCEPTANCE_OUTPUT && report) {
       const path = accepted ? process.env.SCW_ACCEPTANCE_OUTPUT
         : `${process.env.SCW_ACCEPTANCE_OUTPUT}.failed-${Date.now()}.json`;

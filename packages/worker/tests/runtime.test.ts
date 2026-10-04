@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createWorkerTelemetry, serveWorkerHealth } from "../src/telemetry.js";
 import { normalizeAccounting, type AccountingRequest } from "../src/native.js";
-import { submitBoundedTask } from "../src/bounded-admission.js";
+import { submitBoundedTask, TaskSubmissionError } from "../src/bounded-admission.js";
 import { LocalArtifacts } from "../examples/reporting/report.js";
 import { runtimeAcceptance, nativeProtocolAcceptance } from "./fixtures/runtime-acceptance.js";
 
@@ -74,8 +74,8 @@ test("local artifact publication is immutable and content checked", async () => 
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test("bounded admission preserves prepare errors while redacting enqueue failures", async () => {
-  const businessError = new Error("REPORT_FORBIDDEN");
+test("bounded admission preserves explicit domain rejections and redacts driver errors", async () => {
+  const businessError = new TaskSubmissionError("REPORT_FORBIDDEN");
   type FakeTransaction = (
     strings: TemplateStringsArray,
     ...values: unknown[]
@@ -95,15 +95,22 @@ test("bounded admission preserves prepare errors while redacting enqueue failure
     throw businessError;
   })).rejects.toBe(businessError);
 
-  let queryCount = 0;
+  await expect(submitBoundedTask(sql, {
+    projectRef: "fixture", queueName: "scw_reports", taskKey: "report.generate",
+  }, async () => {
+    throw new Error("postgres://private:secret@database/project");
+  })).rejects.toMatchObject({ message: "WORKER_ADMISSION_FAILED", code: "WORKER_ADMISSION_FAILED" });
+  expect(() => new TaskSubmissionError("postgres://private:secret@database/project"))
+    .toThrow("WORKER_SUBMISSION_CODE_INVALID");
+
+  let enqueueError = "WORKER_QUEUE_FULL";
   const failingSql = {
     async begin(
       _options: string,
       callback: (transaction: FakeTransaction) => Promise<unknown>,
     ) {
-      const transaction: FakeTransaction = async () => {
-        queryCount++;
-        if (queryCount === 3) throw new Error("WORKER_QUEUE_FULL");
+      const transaction: FakeTransaction = async strings => {
+        if (strings.join("").includes("enqueue_bounded")) throw new Error(enqueueError);
         return [];
       };
       return callback(transaction);
@@ -114,6 +121,18 @@ test("bounded admission preserves prepare errors while redacting enqueue failure
   }, async () => ({
     replay: false, value: "operation", idempotencyKey: "operation", input: {},
   }))).rejects.toMatchObject({ code: "WORKER_QUEUE_FULL" });
+
+  enqueueError = "private database detail";
+  await expect(submitBoundedTask(failingSql, {
+    projectRef: "fixture", queueName: "scw_reports", taskKey: "report.generate",
+  }, async () => ({
+    replay: false, value: "operation", idempotencyKey: "operation", input: {},
+  }))).rejects.toMatchObject({ message: "WORKER_ADMISSION_FAILED", code: "WORKER_ADMISSION_FAILED" });
+
+  await expect(submitBoundedTask(failingSql, {
+    projectRef: "fixture", queueName: "scw_reports", taskKey: "report.generate",
+  }, async () => ({ replay: true, value: "existing" })))
+    .resolves.toEqual({ value: "existing", messageId: null, replay: true });
 });
 
 describe("optional native computation client", () => {

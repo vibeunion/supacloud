@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdir, open, link, unlink, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { TaskHandler } from "../../src/queue-handler.js";
-import { submitBoundedTask } from "../../src/bounded-admission.js";
+import { submitBoundedTask, TaskSubmissionError } from "../../src/bounded-admission.js";
 import type { createWorkerTelemetry } from "../../src/telemetry.js";
 
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
@@ -46,14 +46,14 @@ export async function submitReport(sql: SQL, projectRef: string, actorId: string
     const [source] = await tx<{ id: string }[]>`
       SELECT id FROM report_demo.sources WHERE id=${sourceId} AND revision=${revision}
         AND owner_id=${actorId} AND frozen`;
-    if (!source) throw new Error("REPORT_FORBIDDEN");
+    if (!source) throw new TaskSubmissionError("REPORT_FORBIDDEN");
     const inserted = await tx`
       INSERT INTO report_demo.requests(operation_id,source_id,revision,actor_id)
       VALUES (${operationId},${sourceId},${revision},${actorId}) ON CONFLICT DO NOTHING RETURNING operation_id`;
     const [request] = await tx<{ source_id: string; revision: string; actor_id: string }[]>`
       SELECT source_id,revision,actor_id FROM report_demo.requests WHERE operation_id=${operationId} FOR UPDATE`;
     if (!request || request.source_id !== sourceId || request.revision !== revision || request.actor_id !== actorId)
-      throw new Error("REPORT_OPERATION_CONFLICT");
+      throw new TaskSubmissionError("REPORT_OPERATION_CONFLICT");
     return inserted.length === 0
       ? { replay: true, value: operationId }
       : { replay: false, value: operationId, idempotencyKey: operationId, input: { operationId } };
