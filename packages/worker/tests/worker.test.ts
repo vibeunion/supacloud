@@ -11,6 +11,7 @@ import { loadMigrations, renderInstall } from "../scripts/migrations.js";
 import { until, withPgflowDatabase } from "./fixtures/database.js";
 import { sharedDatabaseAcceptance } from "./fixtures/shared-database.js";
 import { renderSchedule, roleNames } from "../scripts/scheduler.js";
+import { renderRoles } from "../scripts/roles.js";
 
 const binding = {
   projectRef: "project-a",
@@ -63,6 +64,14 @@ function context(signal = new AbortController().signal): Context {
 }
 
 describe("pgflow process adapter", () => {
+  test("worker role receives only the admission capabilities required by execution groups", () => {
+    const worker = roleNames("project-a").worker;
+    const script = renderRoles("project-a");
+    expect(script).toContain("to_regclass('supacloud_worker.admission_limits')");
+    expect(script).toContain("to_regprocedure('supacloud_worker.admit_operation(text,text,text,text)')");
+    expect(script).toContain(`TO ${worker}`);
+    expect(script).not.toContain(`GRANT SELECT ON supacloud_worker.admission_tokens TO ${worker}`);
+  });
   test("central scheduler validates target and scopes peer socket configuration", () => {
     const sql = renderSchedule("project-a", "tenant_a", "/var/run/postgresql");
     expect(sql).toContain("SET LOCAL ROLE " + roleNames("project-a").recovery);
