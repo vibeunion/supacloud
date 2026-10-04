@@ -60,6 +60,8 @@ jobs:
           bun test packages/delivery/src/deployment-evidence.test.ts
           bun test packages/management-api/tests/unit/application-runtime.routes.test.ts
           bun test packages/management-api/tests/unit/mcp-developer-surface.test.ts
+          bun test packages/management-api/tests/unit/branches.routes.test.ts
+          bun test packages/management-api/tests/unit/auto-branching.service.test.ts
           bun test packages/cli/src/shared/tools/application-tools.test.ts
       - name: Typecheck changed platform packages
         run: |
