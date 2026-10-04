@@ -4,6 +4,7 @@ import {
   applicationReleaseId, parseApplicationReleaseRecord, readDeliveryExecutableArchive,
   parseApplicationReadinessReport,
   parseApplicationConfigurationWrite, parseApplicationConfigurationView,
+  parseDeploymentEvidence,
   type ApplicationReleaseRecord,
 } from "@supacloud/delivery";
 import {
@@ -25,7 +26,8 @@ type ToolServer = {
 };
 export const APPLICATION_TOOL_SCHEMA: ToolSchema = {
   action: withDescription(stringEnum([
-    "list_releases", "get_release", "upload_release", "get_runtime", "get_configuration", "put_configuration",
+    "list_releases", "get_release", "upload_release", "get_runtime", "get_deployment_evidence",
+    "get_configuration", "put_configuration",
     "activate_release", "reconcile_activation", "retire_activation",
   ]), "Action"),
   ref: withDescription(Type.String(), "Project ref"),
@@ -189,6 +191,31 @@ export function registerApplicationTools(server: ToolServer, http: HttpTransport
             ...("configuration_id" in data ? { configuration_id: data.configuration_id } : {}),
           });
         } catch { return releaseControlFailure(operation, "INVALID_RESPONSE", result.status); }
+      }
+      if (action === "get_deployment_evidence") {
+        const environmentId = text(args, "environment_id");
+        if (!Value.Check(ApplicationIdSchema, environmentId)) throw new Error("Invalid environment ID");
+        const result = await http.get(
+          `/v1/projects/${project}/applications/${encodeURIComponent(id)}/environments/${encodeURIComponent(environmentId)}/deployment-evidence`,
+          { maxJsonBytes: 262_144, responseTimeoutMs: 30_000 },
+        );
+        if (!result.ok) return releaseControlFailure(operation, "HTTP_ERROR", result.status);
+        try {
+          const data = result.data;
+          if (!data || typeof data !== "object"
+            || !("project_ref" in data) || data.project_ref !== ref
+            || !("application_id" in data) || data.application_id !== id
+            || !("environment_id" in data) || data.environment_id !== environmentId
+            || !("evidence" in data)) throw new Error();
+          const evidence = data.evidence === null ? null : parseDeploymentEvidence(data.evidence);
+          if (evidence && (evidence.scope.project_ref !== ref
+            || evidence.scope.application_id !== id || evidence.scope.environment_id !== environmentId)) throw new Error();
+          return releaseControlSuccess(operation, {
+            project_ref: ref, application_id: id, environment_id: environmentId, evidence,
+          });
+        } catch {
+          return releaseControlFailure(operation, "INVALID_RESPONSE", result.status);
+        }
       }
       if (action === "list_releases") {
         const limit = args.limit ?? 50;
