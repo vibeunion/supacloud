@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.5.0...delivery-v0.6.0) (2026-10-04)
+
+
+### Features
+
+* **worker:** add bounded runtime recipes and native adapter ([#1618](https://github.com/vibeunion/supacloud/issues/1618)) ([335354c](https://github.com/vibeunion/supacloud/commit/335354c988e63f7c58ff79d7210a9af20814e911))
+
+
+### Bug Fixes
+
+* **worker:** enforce safe retirement and admission grants ([6ac69dc](https://github.com/vibeunion/supacloud/commit/6ac69dcb3381c47a5f91737b958f3a730f4304f9))
+
 ## [0.5.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.4.0...delivery-v0.5.0) (2026-10-04)
 
 
