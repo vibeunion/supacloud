@@ -10,6 +10,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./delivery": {
+      "types": "./dist/delivery.d.ts",
+      "import": "./dist/delivery.js"
     }
   },
   "files": [
@@ -17,11 +21,16 @@
     "LICENSE-APACHE-2.0.txt",
     "dist",
     "scripts",
+    "src",
+    "examples",
     "sql",
     "README.md"
   ],
   "scripts": {
     "db:install": "bun scripts/install.ts",
+    "delivery:render": "bun scripts/delivery.ts",
+    "performance:check": "bun scripts/performance.ts",
+    "test:delivery": "bun test tests/delivery.test.ts",
     "build": "tsc -p tsconfig.json",
     "test": "bun test tests/worker.test.ts"
   },
