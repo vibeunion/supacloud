@@ -2,7 +2,8 @@
 
 [English](self-hosted-stable-baseline.md) | [简体中文](self-hosted-stable-baseline.zh-CN.md)
 
-> Status: product boundary and acceptance contract  
+> Status: product boundary and acceptance contract
+>
 > Updated: 2026-10-04
 
 This document makes the primary SupaCloud product explicit:
@@ -59,6 +60,24 @@ The primary acceptance run must record the selected Edge Runtime mode. The
 coordinated Management/Web Console/Edge Runtime upgrade path requires
 `EDGE_RUNTIME_MODE=external`; embedded mode is not silently treated as
 equivalent upgrade evidence. Caddy and GoTrue remain separate upgrade surfaces.
+
+## Support matrix
+
+| Area | Status | Boundary and evidence |
+| --- | --- | --- |
+| Native single-host Full Platform | Stable baseline target | Ubuntu 24.04 LTS, `amd64`, systemd, Pigsty `v4.5.0` / PostgreSQL 18, SupaCloud-managed Caddy, and published verified artifacts; Gates 2-4 are still required before claiming production acceptance |
+| Lite | Separate bounded product | Single-project local-first runtime with its own compatibility and recovery evidence; not evidence for Full Platform readiness |
+| Compose and other installer paths | Deployment-specific / separate acceptance | Follow their documented boundaries; do not treat them as equivalent proof of the native baseline |
+| `arm64` and other operating systems | Deployment-specific / separate acceptance | Require explicit installation, upgrade, and recovery evidence for the selected combination |
+| External S3 project storage | Deployment-specific / separate acceptance | Requires an explicit project binding and provider-specific reachability, durability, and recovery evidence |
+| Embedded Edge Runtime in a coordinated upgrade | Experimental / separate acceptance | The primary coordinated upgrade evidence uses persisted `EDGE_RUNTIME_MODE=external` |
+| Control-plane outage survival | Experimental target | Not a current guarantee; requires a failure drill that measures which project traffic survives |
+| HA, multi-node scheduling, and multi-region operation | Out of scope for the single-host baseline | Require independent failover, capacity, upgrade, and recovery evidence |
+| Application framework, compiler, SDK, and AI tooling | Optional development layer | Useful for application delivery and contracts, but not required to operate a platform project |
+
+“Stable baseline target” describes the intended release profile, not completed
+production proof. A release is only accepted after the relevant gates produce
+dated evidence.
 
 ## Platform boundaries
 

@@ -50,6 +50,7 @@ for product boundaries.
 <!-- section:start -->
 ## Quick start
 
+<a id="server-installation"></a>
 ### Install the full platform
 
 Review the [supported baseline, host prerequisites, trust boundary and upgrade procedure](docs/self-hosted-stable-baseline.md) before executing a root installer on a server:

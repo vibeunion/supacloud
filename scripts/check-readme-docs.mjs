@@ -6,6 +6,7 @@ import { generate, root } from './readme-diagrams.mjs';
 export const documents = [
   'README.md', 'README.zh-CN.md',
   'docs/platform-operations.md', 'docs/platform-operations.zh-CN.md',
+  'docs/self-hosted-stable-baseline.md', 'docs/self-hosted-stable-baseline.zh-CN.md',
   'docs/readme-visuals.md', 'docs/translation-policy.md',
 ];
 export const codeBlocks = text => [...text.matchAll(/^```([^\n]*)\n([\s\S]*?)^```\s*$/gm)].map(m => [m[1], m[2]]);

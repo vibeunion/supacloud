@@ -44,6 +44,7 @@
 <!-- section:start -->
 ## 快速开始
 
+<a id="安装部署"></a>
 ### 安装完整平台
 
 在服务器上执行 root 安装脚本前，先阅读[支持基线、主机前提、信任边界与升级流程](docs/self-hosted-stable-baseline.zh-CN.md)：
