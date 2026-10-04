@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import type { SQL } from "bun";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createWorkerTelemetry, serveWorkerHealth } from "../src/telemetry.js";
 import { normalizeAccounting, type AccountingRequest } from "../src/native.js";
+import { submitBoundedTask } from "../src/bounded-admission.js";
 import { LocalArtifacts } from "../examples/reporting/report.js";
 import { runtimeAcceptance, nativeProtocolAcceptance } from "./fixtures/runtime-acceptance.js";
 
@@ -70,6 +72,48 @@ test("local artifact publication is immutable and content checked", async () => 
     await expect(artifacts.read(first)).rejects.toThrow("ARTIFACT_CORRUPT");
     await expect(artifacts.read("../secret")).rejects.toThrow("ARTIFACT_INVALID");
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("bounded admission preserves prepare errors while redacting enqueue failures", async () => {
+  const businessError = new Error("REPORT_FORBIDDEN");
+  type FakeTransaction = (
+    strings: TemplateStringsArray,
+    ...values: unknown[]
+  ) => Promise<unknown[]>;
+  const sql = {
+    async begin(
+      _options: string,
+      callback: (transaction: FakeTransaction) => Promise<unknown>,
+    ) {
+      const transaction = async () => [];
+      return callback(transaction);
+    },
+  } as unknown as SQL;
+  await expect(submitBoundedTask(sql, {
+    projectRef: "fixture", queueName: "scw_reports", taskKey: "report.generate",
+  }, async () => {
+    throw businessError;
+  })).rejects.toBe(businessError);
+
+  let queryCount = 0;
+  const failingSql = {
+    async begin(
+      _options: string,
+      callback: (transaction: FakeTransaction) => Promise<unknown>,
+    ) {
+      const transaction: FakeTransaction = async () => {
+        queryCount++;
+        if (queryCount === 3) throw new Error("WORKER_QUEUE_FULL");
+        return [];
+      };
+      return callback(transaction);
+    },
+  } as unknown as SQL;
+  await expect(submitBoundedTask(failingSql, {
+    projectRef: "fixture", queueName: "scw_reports", taskKey: "report.generate",
+  }, async () => ({
+    replay: false, value: "operation", idempotencyKey: "operation", input: {},
+  }))).rejects.toMatchObject({ code: "WORKER_QUEUE_FULL" });
 });
 
 describe("optional native computation client", () => {

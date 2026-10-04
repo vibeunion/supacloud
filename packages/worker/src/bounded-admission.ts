@@ -9,6 +9,29 @@ export class AdmissionError extends Error {
   constructor(readonly code: string) { super(code); }
 }
 
+const admissionCodes = new Set([
+  "WORKER_ADMISSION_INVALID",
+  "WORKER_ADMISSION_NOT_CONFIGURED",
+  "WORKER_PAYLOAD_TOO_LARGE",
+  "WORKER_QUEUE_FULL",
+  "WORKER_PROJECT_FULL",
+  "WORKER_RATE_LIMITED",
+  "WORKER_QUEUE_OWNERSHIP",
+  "WORKER_PROJECT_MISMATCH",
+  "WORKER_QUEUE_NOT_FOUND",
+]);
+
+class PrepareFailure {
+  constructor(readonly cause: unknown) {}
+}
+
+function toAdmissionError(error: unknown): AdmissionError {
+  if (error instanceof AdmissionError) return error;
+  if (error instanceof Error && admissionCodes.has(error.message))
+    return new AdmissionError(error.message);
+  return new AdmissionError("WORKER_ADMISSION_FAILED");
+}
+
 /** The callback must authorize and persist intent using ONLY this short transaction. */
 export async function submitBoundedTask<T>(
   sql: SQL,
@@ -19,11 +42,21 @@ export async function submitBoundedTask<T>(
     return await sql.begin("isolation level read committed", async tx => {
       await tx`SET LOCAL lock_timeout = '2s'`;
       await tx`SET LOCAL statement_timeout = '5s'`;
-      const decision = await prepare(tx);
+      let decision: AdmissionDecision<T>;
+      try {
+        decision = await prepare(tx);
+      } catch (error) {
+        throw new PrepareFailure(error);
+      }
       if (decision.replay) return { value: decision.value, messageId: null, replay: true };
-      const input = JSON.stringify(decision.input);
-      if (input === undefined || Buffer.byteLength(input) > 65536)
-        throw new AdmissionError("WORKER_PAYLOAD_TOO_LARGE");
+      let input: string;
+      try {
+        input = JSON.stringify(decision.input);
+        if (input === undefined || Buffer.byteLength(input) > 65536)
+          throw new AdmissionError("WORKER_PAYLOAD_TOO_LARGE");
+      } catch (error) {
+        throw toAdmissionError(error);
+      }
       const [row] = await tx<{ id: string }[]>`
         SELECT supacloud_worker.enqueue_bounded(${binding.projectRef},${binding.queueName},
           ${binding.taskKey},${decision.idempotencyKey},${input}::text::jsonb) AS id`;
@@ -31,13 +64,8 @@ export async function submitBoundedTask<T>(
       return { value: decision.value, messageId: row.id, replay: false };
     });
   } catch (error) {
-    if (error instanceof AdmissionError) throw error;
-    if (error instanceof Error && [
-      "WORKER_ADMISSION_INVALID", "WORKER_ADMISSION_NOT_CONFIGURED", "WORKER_PAYLOAD_TOO_LARGE",
-      "WORKER_QUEUE_FULL", "WORKER_PROJECT_FULL", "WORKER_RATE_LIMITED",
-      "WORKER_QUEUE_OWNERSHIP", "WORKER_PROJECT_MISMATCH", "WORKER_QUEUE_NOT_FOUND",
-    ].includes(error.message)) throw new AdmissionError(error.message);
+    if (error instanceof PrepareFailure) throw error.cause;
     // Do not echo SQL, connection strings or driver diagnostics through the business API.
-    throw new AdmissionError("WORKER_ADMISSION_FAILED");
+    throw toAdmissionError(error);
   }
 }
