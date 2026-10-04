@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.93.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.93.0...management-api-v0.93.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **worker:** restore admission compatibility after runtime merge ([#1625](https://github.com/vibeunion/supacloud/issues/1625)) ([8e75778](https://github.com/vibeunion/supacloud/commit/8e75778e543279ceefa21d97a35105274d72e700))
+
 ## [0.93.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.92.0...management-api-v0.93.0) (2026-10-04)
 
 
