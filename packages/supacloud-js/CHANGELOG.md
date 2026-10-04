@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.37.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.36.1...supacloud-js-v0.37.0) (2026-10-04)
+
+
+### Features
+
+* add Supabase-compatible procedure client transport ([#1634](https://github.com/vibeunion/supacloud/issues/1634)) ([661351a](https://github.com/vibeunion/supacloud/commit/661351ae507877a463a5aab1bd49a27c9bd77cfa))
+
 ## [0.36.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.36.0...supacloud-js-v0.36.1) (2026-10-03)
 
 
