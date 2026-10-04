@@ -103,6 +103,48 @@ test("Supabase API fetch preserves the Functions HTTP response on errors", async
   await expect(result.json()).resolves.toEqual({ code: "FORBIDDEN" });
 });
 
+test("Supabase API fetch preserves binary and multipart request bodies", async () => {
+  const calls: Array<{ options: InvokeOptions | undefined }> = [];
+  const supabase = {
+    functions: {
+      invoke: async (_name: string, options?: InvokeOptions) => {
+        calls.push({ options });
+        return { data: { ok: true }, error: null };
+      },
+    },
+  } as unknown as SupabaseClient;
+  const fetcher = createSupaCloudApiFetch({ supabase, functionName: "app-api" });
+
+  await fetcher("/upload", {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: new Uint8Array([1, 2, 3]),
+  });
+  const form = new FormData();
+  form.set("reason", "approved");
+  await fetcher("/cases", { method: "POST", body: form });
+
+  const binary = calls[0]?.options?.body;
+  expect(binary).toBeInstanceOf(Blob);
+  await expect((binary as Blob).arrayBuffer()).resolves.toEqual(new Uint8Array([1, 2, 3]).buffer);
+  const multipart = calls[1]?.options;
+  expect(multipart?.body).toBeInstanceOf(FormData);
+  expect((multipart?.body as FormData).get("reason")).toBe("approved");
+  expect(multipart?.headers?.["content-type"]).toBeUndefined();
+});
+
+test("Supabase API fetch propagates transport errors without fabricating HTTP 500", async () => {
+  const transportError = new Error("network unavailable");
+  const supabase = {
+    functions: {
+      invoke: async () => ({ data: null, error: transportError }),
+    },
+  } as unknown as SupabaseClient;
+  const fetcher = createSupaCloudApiFetch({ supabase, functionName: "app-api" });
+
+  await expect(fetcher("/cases", { method: "GET" })).rejects.toBe(transportError);
+});
+
 test("Supabase API fetch preserves successful status and response headers", async () => {
   const supabase = {
     functions: {

@@ -34,9 +34,17 @@ function errorMessage(error: unknown): string {
 }
 
 async function readRequestBody(request: Request): Promise<unknown> {
+  if (request.body === null) return undefined;
+  const contentType = request.headers.get("content-type")?.toLowerCase() ?? "";
+  if (contentType.includes("multipart/form-data")) return request.formData();
+  if (!contentType.startsWith("text/")
+    && !contentType.includes("application/json")
+    && !contentType.includes("+json")
+    && !contentType.includes("application/x-www-form-urlencoded")) {
+    return request.blob();
+  }
   const text = await request.text();
   if (text.length === 0) return undefined;
-  const contentType = request.headers.get("content-type") ?? "";
   if (contentType.includes("application/json") || contentType.includes("+json")) {
     try {
       return JSON.parse(text) as unknown;
@@ -106,6 +114,11 @@ export function createSupaCloudApiFetch<TClient extends SupabaseClient = Supabas
     });
 
     const body = method === "GET" ? undefined : await readRequestBody(request);
+    if ((request.headers.get("content-type") ?? "").toLowerCase().includes("multipart/form-data")) {
+      for (const key of Object.keys(headers)) {
+        if (key.toLowerCase() === "content-type") delete headers[key];
+      }
+    }
     const invocation = await invoke(`${functionName}${url.pathname}${url.search}`, {
       ...(body === undefined ? {} : { body }),
       ...(Object.keys(headers).length === 0 ? {} : { headers }),
@@ -114,7 +127,8 @@ export function createSupaCloudApiFetch<TClient extends SupabaseClient = Supabas
     });
     if (invocation.error !== null && invocation.error !== undefined) {
       if (invocation.response instanceof Response) return invocation.response;
-      return Response.json({ message: errorMessage(invocation.error) }, { status: 500 });
+      if (invocation.error instanceof Error) throw invocation.error;
+      throw new Error(errorMessage(invocation.error));
     }
     return responseFromData(invocation.data, invocation.response instanceof Response ? invocation.response : undefined);
   };
