@@ -47,6 +47,12 @@
       "supacloud-source": "./src/application-development.ts",
       "bun": "./src/application-development.ts",
       "import": "./dist/application-development.js"
+    },
+    "./deployment-evidence": {
+      "types": "./src/deployment-evidence.ts",
+      "supacloud-source": "./src/deployment-evidence.ts",
+      "bun": "./src/deployment-evidence.ts",
+      "import": "./src/deployment-evidence.ts"
     }
   },
   "files": [

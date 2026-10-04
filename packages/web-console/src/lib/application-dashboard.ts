@@ -1,5 +1,5 @@
 import { requestValidatedJson } from "./validated-json";
-import { parseDeploymentEvidence, type DeploymentEvidence } from "../../../delivery/src/deployment-evidence";
+import { parseDeploymentEvidence, type DeploymentEvidence } from "@supacloud/delivery/deployment-evidence";
 
 export interface ApplicationScope { ref: string; application: string; environment: string }
 export const readinessCodes = [
