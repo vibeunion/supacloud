@@ -23,6 +23,13 @@ type InvokeResult = {
   response?: unknown;
 };
 
+const invocationErrors = new WeakMap<Response, unknown>();
+
+/** Returns the original Supabase Functions error associated with a response. */
+export function getSupaCloudApiFetchError(response: Response): unknown | undefined {
+  return invocationErrors.get(response);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -119,6 +126,7 @@ export function createSupaCloudApiFetch<TClient extends SupabaseClient = Supabas
         if (key.toLowerCase() === "content-type") delete headers[key];
       }
     }
+    request.signal.throwIfAborted();
     const invocation = await invoke(`${functionName}${url.pathname}${url.search}`, {
       ...(body === undefined ? {} : { body }),
       ...(Object.keys(headers).length === 0 ? {} : { headers }),
@@ -126,7 +134,10 @@ export function createSupaCloudApiFetch<TClient extends SupabaseClient = Supabas
       signal: request.signal,
     });
     if (invocation.error !== null && invocation.error !== undefined) {
-      if (invocation.response instanceof Response) return invocation.response;
+      if (invocation.response instanceof Response) {
+        invocationErrors.set(invocation.response, invocation.error);
+        return invocation.response;
+      }
       if (invocation.error instanceof Error) throw invocation.error;
       throw new Error(errorMessage(invocation.error));
     }
