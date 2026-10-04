@@ -137,7 +137,7 @@ test('Nx and source regression validation are mandatory without duplicating PR w
 test('SDK preparation uses Nx while preserving existing consumer acceptance', () => {
   const checks = job('package-checks');
   const sdk = checks.slice(checks.indexOf('- name: SupaCloud JS SDK'), checks.indexOf('- name: Edge Runtime'));
-  assert.match(sdk, /node \.\.\/\.\.\/scripts\/workspace\/cli\.mjs prepare --project supacloud-js/);
+  assert.match(sdk, /node \.\.\/\.\.\/scripts\/workspace\/prepare\.mjs supacloud-js/);
   assert.match(sdk, /bun install --ignore-scripts --frozen-lockfile --cwd \.\.\/\.\./);
   assert.doesNotMatch(sdk, /build-command-dependencies/);
   for (const command of ['bun run typecheck', 'bun run build', 'bun run typecheck:consumer', 'bun test']) assert.ok(sdk.includes(command));

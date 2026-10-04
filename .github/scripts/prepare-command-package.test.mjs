@@ -317,7 +317,7 @@ test('clean CI builds local dependencies before checking command consumers', () 
     const block = workflow.split(`working-directory: packages/${name}\n`)[1]?.split('\n          - name:')[0];
     assert.ok(block);
     if (name === 'supacloud-js') {
-      assert.match(block, /bun install --ignore-scripts --frozen-lockfile --cwd \.\.\/\.\.\n\s+node \.\.\/\.\.\/scripts\/workspace\/cli\.mjs prepare --project supacloud-js\n\s+bun install --frozen-lockfile/);
+      assert.match(block, /bun install --ignore-scripts --frozen-lockfile --cwd \.\.\/\.\.\n\s+node \.\.\/\.\.\/scripts\/workspace\/prepare\.mjs supacloud-js\n\s+bun install --frozen-lockfile/);
       assert.match(block, /tsc -p tsconfig\.commands\.json[\s\S]*bun run typecheck\n[\s\S]*bun run typecheck:test[\s\S]*bun run build[\s\S]*bun run typecheck:consumer[\s\S]*bun test[\s\S]*audit_dependencies\.ts/);
     } else {
       assert.match(block, new RegExp(`build-command-dependencies\\.ts ${name}[\\s\\S]*bun install --frozen-lockfile`));
