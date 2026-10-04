@@ -1,16 +1,16 @@
 {
   "en": {
     "overview": {
-      "title": "Application engineering. Self-hosted operations.",
-      "description": "The development layer defines and compiles business modules. Lite is a single-project Bun and PGlite runtime; the full platform manages multiple projects on Pigsty. These are not three interchangeable editions.",
-      "subtitle": "Build with explicit contracts. Choose hosting for the workload.",
-      "lane": "HOSTING OPTIONS / DIFFERENT OPERATIONAL BOUNDARIES",
+      "title": "Self-hosted multi-project platform",
+      "description": "The full platform is the primary product for operating isolated projects on your infrastructure. Application engineering is optional; Lite is a bounded single-project runtime. These are not interchangeable editions.",
+      "subtitle": "Operate projects first. Add application tooling when useful.",
+      "lane": "PRODUCT LAYERS / DIFFERENT OPERATIONAL BOUNDARIES",
       "cards": [
-        ["Application engineering", "@supacloud/app  +  @supacloud/compiler  +  @supacloud/elysia", "Business modules, static wiring, schemas and generated clients", "Business policy and object-level authorization stay application-owned"],
-        ["SupaCloud Lite", "Bun + PGlite / one project per process", "REST, Auth, Storage, Realtime, Functions", "Local development and small deployments", "No multi-project control plane or Studio"],
-        ["SupaCloud platform", "Pigsty / multiple isolated projects", "Management API, Web Console, Admin CLI", "Gateway, delivery and observability", "Shared infrastructure, operator ownership"]
+        ["SupaCloud platform", "Pigsty / multiple isolated projects", "Management API, Web Console, Admin CLI", "Gateway, delivery, observability and recovery", "Primary self-hosted product"],
+        ["Application engineering", "@supacloud/app  +  @supacloud/compiler  +  @supacloud/elysia", "Business modules, static wiring, schemas and generated clients", "Optional development layer", "Not required for platform use"],
+        ["SupaCloud Lite", "Bun + PGlite / one project per process", "REST, Auth, Storage, Realtime, Functions", "Local development and small deployments", "No multi-project control plane or Studio"]
       ],
-      "note": "The development layer is not a hosting edition; this overview does not imply deployment parity."
+      "note": "The application layer is optional; Lite is single-project; neither implies full-platform production acceptance."
     },
     "build-runtime": {
       "title": "From application declarations to execution",
@@ -44,16 +44,16 @@
   },
   "zh-CN": {
     "overview": {
-      "title": "应用工程底座，自托管运行平台",
-      "description": "开发层负责业务模块的声明与编译。Lite 是基于 Bun 和 PGlite 的单项目运行时；完整平台在 Pigsty 上管理多个项目。它们不是三个可以直接互换的版本。",
-      "subtitle": "以明确契约组织开发，按工作负载选择运行形态。",
-      "lane": "运行形态 / 各自具有不同的运维边界",
+      "title": "自托管多项目应用平台",
+      "description": "完整平台是在自有基础设施上运行隔离项目的主产品。应用工程可选，Lite 是有边界的单项目运行时。它们不是可以互换的版本。",
+      "subtitle": "先可靠地运行项目，再按需增加开发工具。",
+      "lane": "产品层级 / 各自具有不同的运维边界",
       "cards": [
-        ["应用工程层", "@supacloud/app  +  @supacloud/compiler  +  @supacloud/elysia", "业务模块、静态装配、Schema 与生成的客户端", "业务规则与对象级授权仍由应用负责"],
-        ["SupaCloud Lite", "Bun + PGlite / 每个进程一个项目", "REST、Auth、Storage、Realtime、Functions", "本地开发与小型部署", "不提供多项目控制面或 Studio"],
-        ["SupaCloud 完整平台", "Pigsty / 多个隔离项目", "Management API、Web Console、Admin CLI", "网关、交付与可观测性", "共享基础设施，由平台运维者管理"]
+        ["SupaCloud 完整平台", "Pigsty / 多个隔离项目", "Management API、Web Console、Admin CLI", "网关、交付、可观测性和恢复", "自托管主产品"],
+        ["应用工程层", "@supacloud/app  +  @supacloud/compiler  +  @supacloud/elysia", "业务模块、静态装配、Schema 与生成的客户端", "可选开发层", "平台使用不要求采用"],
+        ["SupaCloud Lite", "Bun + PGlite / 每个进程一个项目", "REST、Auth、Storage、Realtime、Functions", "本地开发与小型部署", "不提供多项目控制面或 Studio"]
       ],
-      "note": "开发层不是一种托管版本；本图不表示不同运行形态已具备相同的部署能力。"
+      "note": "应用工程层可选；Lite 只支持单项目；二者都不等于完整平台生产验收。"
     },
     "build-runtime": {
       "title": "从应用声明到业务执行",
