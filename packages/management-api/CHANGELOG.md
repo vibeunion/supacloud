@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.92.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.91.0...management-api-v0.92.0) (2026-10-04)
+
+
+### Features
+
+* **worker:** bounded execution groups and admission controls ([#1616](https://github.com/vibeunion/supacloud/issues/1616)) ([8d870ea](https://github.com/vibeunion/supacloud/commit/8d870eabfce9bedce75d42151f5085bcef19b4c1))
+
 ## [0.91.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.90.1...management-api-v0.91.0) (2026-10-02)
 
 

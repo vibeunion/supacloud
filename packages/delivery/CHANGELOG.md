@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.4.0...delivery-v0.5.0) (2026-10-04)
+
+
+### Features
+
+* **worker:** bounded execution groups and admission controls ([#1616](https://github.com/vibeunion/supacloud/issues/1616)) ([8d870ea](https://github.com/vibeunion/supacloud/commit/8d870eabfce9bedce75d42151f5085bcef19b4c1))
+
 ## [0.4.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.3.0...delivery-v0.4.0) (2026-10-02)
 
 
