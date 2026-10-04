@@ -82,11 +82,19 @@ validate_unit_content() {
             Unit:After|Unit:Description|Unit:Documentation|Unit:StartLimitBurst|\
             Unit:StartLimitIntervalSec|Unit:Wants|\
             Service:CPUWeight|Service:Environment|Service:EnvironmentFile|Service:ExecReload|Service:ExecStart|\
+            Service:CPUQuota|Service:CPUAccounting|Service:MemoryAccounting|Service:MemorySwapMax|Service:KillMode|\
             Service:Group|Service:LimitNOFILE|Service:MemoryMax|Service:NoNewPrivileges|Service:ProtectHome|\
             Service:ProtectSystem|Service:ReadOnlyPaths|Service:Restart|Service:RestartSec|\
             Service:SyslogIdentifier|Service:TimeoutStopSec|Service:Type|Service:User|Service:WorkingDirectory|\
             Install:WantedBy) ;;
             *) return 1 ;;
+        esac
+        case "$key" in
+            CPUQuota)
+                [[ "$value" =~ ^[1-9][0-9]{0,3}%$ ]] && (( ${value%\%} <= 6400 )) || return 1 ;;
+            CPUAccounting|MemoryAccounting) [[ "$value" == true ]] || return 1 ;;
+            MemorySwapMax) [[ "$value" == 0 ]] || return 1 ;;
+            KillMode) [[ "$value" == control-group ]] || return 1 ;;
         esac
         if [[ "$key" == ExecStart || "$key" == ExecReload ]]; then
             [[ ! "$value" =~ ^[-+!:@\|] ]] || return 1

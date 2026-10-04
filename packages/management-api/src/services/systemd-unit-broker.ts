@@ -14,6 +14,7 @@ const SERVICE_DIRECTIVES = new Set([
   "MemoryMax", "NoNewPrivileges", "PrivateTmp", "ProtectHome", "ProtectSystem",
   "ReadOnlyPaths", "RestrictRealtime", "RestrictSUIDSGID", "Restart", "RestartSec", "SyslogIdentifier",
   "TimeoutStopSec", "Type", "User", "WorkingDirectory",
+  "CPUQuota", "CPUAccounting", "MemoryAccounting", "MemorySwapMax", "KillMode",
 ]);
 const INSTALL_DIRECTIVES = new Set(["WantedBy"]);
 
@@ -113,6 +114,12 @@ function validateDirective(unitName: string, state: UnitPolicyState, line: strin
   }
   const key = match[1]!;
   const value = match[2]!;
+  if ((key === "CPUQuota" && (!/^[1-9][0-9]{0,3}%$/.test(value) || Number(value.slice(0, -1)) > 6400))
+    || ((key === "CPUAccounting" || key === "MemoryAccounting") && value !== "true")
+    || (key === "MemorySwapMax" && value !== "0")
+    || (key === "KillMode" && value !== "control-group")) {
+    throw new Error(`Systemd unit ${unitName} has invalid resource controls`);
+  }
   if ((key === "ExecStart" || key === "ExecReload") && /^[-+!:@|]/.test(value)) {
     throw new Error(`Systemd unit ${unitName} uses a privileged execution prefix`);
   }

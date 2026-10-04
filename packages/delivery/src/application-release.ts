@@ -1,6 +1,7 @@
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { canonical, digest } from "./delivery-files";
+import { WorkerExecutionGroupSchema, validateWorkerExecution } from "./worker-execution";
 
 export const ApplicationIdSchema = Type.String({ pattern: "^[A-Za-z0-9_-]{1,64}$" });
 export const ApplicationReleaseIdSchema = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -16,6 +17,7 @@ export const ApplicationReleaseRecordSchema = Type.Object({
     object_id: ApplicationReleaseIdSchema,
     kind: Type.Union([Type.Literal("http"), Type.Literal("worker")]),
     entrypoint: Type.Literal("bundle/index.js"),
+    execution: Type.Optional(WorkerExecutionGroupSchema),
   }, { additionalProperties: false }), { minItems: 1, maxItems: 32 }),
 }, { additionalProperties: false });
 
@@ -41,6 +43,11 @@ export function parseApplicationReleaseRecord(candidate: unknown): ApplicationRe
     || new Date(candidate.created_at).toISOString() !== candidate.created_at
     || new Set(candidate.targets.map(target => target.name)).size !== candidate.targets.length) {
     throw new Error("Invalid application release record.");
+  }
+  validateWorkerExecution(candidate.targets.flatMap(target => target.execution ? [target.execution] : []));
+  if (candidate.targets.some(target => target.execution
+    && (target.kind !== "worker" || target.execution.target !== target.name))) {
+    throw new Error("Invalid application execution binding.");
   }
   return candidate;
 }

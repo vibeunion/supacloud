@@ -7,6 +7,13 @@ import {
   type QueueBinding,
   type TaskHandler,
 } from "./queue-handler.js";
+export { workerExecutionFromEnvironment, executionQueueOptions, workerEnvelope } from "./execution-group.js";
+export { createExecutionGroupWorker } from "./group-worker.js";
+export type { ExecutionGroupDomain, WorkerHealth } from "./group-worker.js";
+export { admitWorkerOperation, releaseWorkerOperation, requireDrainedWorkerGroup } from "./admission.js";
+export type { WorkerAdmission, WorkerTransaction } from "./admission.js";
+export { measureWorkerApiLoad, acceptWorkerMixedLoad } from "./acceptance.js";
+export type { WorkerLoadSpec, WorkerLoadMeasurement, WorkerAcceptancePorts } from "./acceptance.js";
 export {
   WorkerTaskError,
   type TaskContext,
@@ -23,6 +30,8 @@ export interface ProcessWorkerOptions {
 export interface QueueWorkerOptions extends ProcessWorkerOptions, QueueBinding {
   visibilityTimeoutSeconds?: number;
   retryLimit?: number;
+  /** Lifecycle supervision only. The upstream engine remains the sole scheduler. */
+  supervise?: (run: (signal: AbortSignal) => Promise<void>, signal: AbortSignal, enqueuedAt: number | null) => Promise<void>;
 }
 let processClaimed = false;
 function integer(
@@ -116,10 +125,15 @@ export function createPgflowQueueWorker<T>(
     },
   };
   const execute = createQueueHandler(options, handler);
+  const supervised: typeof execute = options.supervise
+    ? (payload, context) => options.supervise!(
+      async signal => { await execute(payload, { ...context, shutdownSignal: signal }); }, context.shutdownSignal,
+      Number.isFinite(Date.parse(context.rawMessage.enqueued_at)) ? Date.parse(context.rawMessage.enqueued_at) : null)
+    : execute;
   return createLifecycle(async () => {
     preflight(projectRef);
     const { EdgeWorker } = await import("@pgflow/edge-worker");
-    return EdgeWorker.startQueueWorker(execute, queueConfig);
+    return EdgeWorker.startQueueWorker(supervised, queueConfig);
   });
 }
 

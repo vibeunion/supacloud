@@ -8,6 +8,7 @@ export interface TaskContext {
   readonly idempotencyKey: string;
   readonly messageId: string;
   readonly attempt: number;
+  readonly definitionVersion?: string;
   readonly signal: AbortSignal;
 }
 export interface TaskHandler<T> {
@@ -20,6 +21,7 @@ export interface QueueBinding {
   readonly projectRef: string;
   readonly queueName: string;
   readonly taskKey: string;
+  readonly definitionVersion?: string;
 }
 type Failure =
   | "WORKER_TASK_INVALID"
@@ -54,14 +56,16 @@ export function createQueueHandler<T>(
   binding: QueueBinding,
   handlers: TaskHandler<T>,
 ): UpstreamHandler {
-  const { projectRef, queueName, taskKey } = binding;
+  const { projectRef, queueName, taskKey, definitionVersion } = binding;
   const { decode, authorize, execute } = handlers;
   return async (payload, upstream) => {
     if (upstream.shutdownSignal.aborted)
       throw new WorkerTaskError("WORKER_SHUTTING_DOWN");
     if (
       !object(payload) ||
-      payload.schemaVersion !== 1 ||
+      (definitionVersion !== undefined && Buffer.byteLength(JSON.stringify(payload)) > 65536) ||
+      payload.schemaVersion !== (definitionVersion === undefined ? 1 : 2) ||
+      (definitionVersion !== undefined && payload.definitionVersion !== definitionVersion) ||
       payload.projectRef !== projectRef ||
       payload.taskKey !== taskKey ||
       typeof payload.idempotencyKey !== "string" ||
@@ -74,7 +78,7 @@ export function createQueueHandler<T>(
             "projectRef",
             "taskKey",
             "idempotencyKey",
-            "input",
+            "input", ...(definitionVersion === undefined ? [] : ["definitionVersion"]),
           ].includes(key),
       )
     ) {
@@ -91,6 +95,7 @@ export function createQueueHandler<T>(
       idempotencyKey: payload.idempotencyKey,
       messageId,
       attempt,
+      ...(definitionVersion === undefined ? {} : { definitionVersion }),
       signal: upstream.shutdownSignal,
     });
     let input: T;

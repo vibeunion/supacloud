@@ -5,6 +5,12 @@ and `@pgflow/dsl` 0.16.0 packages. Not yet a published or deployed platform
 service. This package does not reimplement polling, retry, concurrency, queue
 acknowledgement or DAG execution.
 
+Managed execution groups add versioned routing, bounded resources, atomic
+admission and a report-export integration sample. See
+[`worker-execution-groups.md`](../../docs/worker-execution-groups.md) for the
+systemd backend, operator budgets, migration/grants, limits and local acceptance.
+The package remains private; this is not a production capacity claim.
+
 ## Ownership
 
 - Application HTTP/RPC: authenticate, authorize the entity, validate revision,

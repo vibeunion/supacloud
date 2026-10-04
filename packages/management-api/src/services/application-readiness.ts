@@ -54,7 +54,7 @@ const operations: ApplicationReadinessOperations = {
     const child = Bun.spawn({
       cmd: ["journalctl", "--no-pager", "--output=json",
         "--output-fields=MESSAGE,_PID,_SYSTEMD_INVOCATION_ID", "--lines=16",
-        "--grep=delivery-worker-started", `_SYSTEMD_UNIT=${unit}`, `_SYSTEMD_INVOCATION_ID=${invocationId}`],
+        "--grep=delivery-worker-(started|health)", `_SYSTEMD_UNIT=${unit}`, `_SYSTEMD_INVOCATION_ID=${invocationId}`],
       stdout: "pipe", stderr: "ignore",
     });
     const timeout = setTimeout(() => child.kill("SIGKILL"), 3000);
@@ -90,7 +90,8 @@ function matches(value: unknown, expected: ApplicationRuntimeIdentity): boolean 
   catch { return false; }
 }
 
-function workerReady(output: string, state: ApplicationProcessObservation, expected: ApplicationRuntimeIdentity): boolean {
+function workerReady(output: string, state: ApplicationProcessObservation, expected: ApplicationRuntimeIdentity, grouped = false): boolean {
+  let latest: { at: number; ready: boolean } | undefined;
   for (const line of output.split("\n")) {
     if (!line) continue;
     try {
@@ -99,12 +100,18 @@ function workerReady(output: string, state: ApplicationProcessObservation, expec
         || !("_SYSTEMD_INVOCATION_ID" in entry) || entry._SYSTEMD_INVOCATION_ID !== state.invocationId
         || !("MESSAGE" in entry) || typeof entry.MESSAGE !== "string") continue;
       const message: unknown = JSON.parse(entry.MESSAGE);
-      if (message && typeof message === "object" && "event" in message
-        && message.event === "delivery-worker-started" && "identity" in message
-        && matches(message.identity, expected)) return true;
+      if (message && typeof message === "object" && "event" in message && "identity" in message
+        && matches(message.identity, expected)) {
+        if (!grouped && message.event === "delivery-worker-started") return true;
+        if (grouped && message.event === "delivery-worker-health" && "observedAt" in message
+          && typeof message.observedAt === "string" && "ready" in message) {
+          const at = Date.parse(message.observedAt);
+          if (Number.isFinite(at) && (!latest || at >= latest.at)) latest = { at, ready: message.ready === true };
+        }
+      }
     } catch { /* Unrelated or malformed application log lines are not readiness. */ }
   }
-  return false;
+  return !!latest && latest.ready && Date.now() - latest.at >= -1000 && Date.now() - latest.at <= 15000;
 }
 
 function inventory(plan: ApplicationRuntimePlan, states: ApplicationProcessObservation[]) {
@@ -151,6 +158,10 @@ export class ApplicationReadiness {
         result.code = "PROCESS_NOT_RUNNING";
         return;
       }
+      if (target.execution && state.resourcesVerified !== true) {
+        result.code = "WORKER_NOT_READY";
+        return;
+      }
       const expected = expectedIdentity(plan, target, state.mainPid);
       try {
         if (target.kind === "http") {
@@ -163,7 +174,7 @@ export class ApplicationReadiness {
             result.code = "IDENTITY_MISMATCH";
             return;
           }
-        } else if (!workerReady(await this.probes.journal(target.unit, state.invocationId, signal), state, expected)) {
+        } else if (!workerReady(await this.probes.journal(target.unit, state.invocationId, signal), state, expected, !!target.execution)) {
           result.code = "WORKER_NOT_READY";
           return;
         }
@@ -179,7 +190,8 @@ export class ApplicationReadiness {
         const previous = before.get(result.target)!;
         const current = after.get(result.target)!;
         if (!current.processRunning || current.mainPid !== previous.mainPid
-          || current.invocationId !== previous.invocationId) {
+          || current.invocationId !== previous.invocationId
+          || (plan.targets.find(target => target.name === result.target)?.execution && current.resourcesVerified !== true)) {
           result.ready = false;
           result.code = "PROCESS_CHANGED";
         }
