@@ -2,15 +2,19 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [Español](README.es-ES.md)
 
-**An application engineering foundation and self-hosted platform for AI-assisted development.**
+**A self-hosted multi-project application platform for AI-assisted development.**
 
-Build applications with explicit modules, static contracts and generated clients. Run single-project workloads with Lite, or operate multiple isolated Supabase-style projects on your own infrastructure.
+Operate multiple isolated Supabase-style projects on your own infrastructure
+through one control plane, console, operator CLI, delivery path, observability
+surface, upgrade procedure, and recovery process. The optional application
+engineering layer adds explicit modules, static contracts, generated clients,
+compiler diagnostics, and AI-assisted development workflows.
 
 [Get started](#quick-start) · [Architecture](#architecture) · [Documentation](#documentation) · [Compatibility](#compatibility-and-evidence)
 
 The English README is canonical. See the [translation policy](docs/translation-policy.md) for synchronization status.
 
-![Application engineering is a development layer; Lite and the full platform are hosting choices with different operational boundaries.](docs/assets/readme/overview.en.svg)
+![The full platform is the primary self-hosted product; application engineering is optional and Lite has a separate single-project boundary.](docs/assets/readme/overview.en.svg)
 
 <!-- section:goals -->
 ## Engineering goals
@@ -27,18 +31,34 @@ The framework owns application structure and execution contracts; the platform o
 <!-- section:choose -->
 ## Choose your entry point
 
-The **application engineering layer** helps build a service. **Lite and the full platform** are hosting choices, not two more framework editions.
+The **full platform** is the primary product. The application engineering
+layer is optional, and Lite is a separate single-project runtime with its own
+operational boundary.
 
 | Your task | Entry point | Boundary |
 | --- | --- | --- |
-| Build a typed, modular business application | [Application starter](docs/application-starter.md) | The demo does not supply production identity, persistence or deployment. |
-| Run a local-first or small single-project backend without Docker | [SupaCloud Lite](packages/supacloud-lite/README.md) | Bun + PGlite; one project per process; no multi-project control plane or Supabase Studio. |
 | Operate multiple projects on your own servers | [Full platform operations](docs/platform-operations.md) | Pigsty infrastructure, Management API, Web Console, project lifecycle and operator responsibilities. |
+| Build a typed, modular business application | [Application starter](docs/application-starter.md) | Optional development layer; the demo does not supply production identity, persistence or deployment. |
+| Run a local-first or small single-project backend without Docker | [SupaCloud Lite](packages/supacloud-lite/README.md) | Bun + PGlite; one project per process; no multi-project control plane or Supabase Studio. |
 
-The full platform is a self-hosted control plane for Supabase-style projects, not a replica of Supabase Cloud. Read the [detailed comparison](docs/supacloud-vs-supabase.md) for product boundaries.
+Read the [self-hosted stable baseline](docs/self-hosted-stable-baseline.md)
+before treating the full platform as a production dependency. The full platform
+is a self-hosted control plane for Supabase-style projects, not a replica of
+Supabase Cloud. Read the [detailed comparison](docs/supacloud-vs-supabase.md)
+for product boundaries.
 
 <!-- section:start -->
 ## Quick start
+
+### Install the full platform
+
+Review the [supported baseline, host prerequisites, trust boundary and upgrade procedure](docs/self-hosted-stable-baseline.md) before executing a root installer on a server:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh | sudo bash
+```
+
+The bootstrap comes directly from the official repository. An explicitly configured proxy is only a fallback for subsequent Release/API downloads. Network release artifacts require checksum and provenance verification.
 
 ### Build an application
 
@@ -72,17 +92,6 @@ bunx supacloud-lite keys
 ```
 
 Use the anonymous key with `@supabase/supabase-js`; never place the service-role key in browser code. Default state lives under `.supacloud-lite/`. Auth runs inside Bun, not in a GoTrue sidecar. Persistent deployments use the documented `upgrade` and snapshot workflow. Read the [Lite guide](packages/supacloud-lite/README.md) for configuration, compatibility and recovery limits.
-
-<a id="server-installation"></a>
-### Install the full platform
-
-Review the [host prerequisites, trust boundary and upgrade procedure](docs/platform-operations.md) before executing a root installer on a server:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh | sudo bash
-```
-
-The bootstrap comes directly from the official repository. An explicitly configured proxy is only a fallback for subsequent Release/API downloads. Network release artifacts require checksum and provenance verification.
 
 <a id="human-entrypoints"></a>
 ### Use the right CLI
@@ -132,13 +141,13 @@ Binding is an administrator operation. Existing platform objects require the doc
 
 | Area | Guides |
 | --- | --- |
-| Getting started | [Application starter](docs/application-starter.md) · [Lite](packages/supacloud-lite/README.md) · [Installation and upgrades](docs/platform-operations.md) |
+| Getting started | [Stable baseline](docs/self-hosted-stable-baseline.md) · [Installation and upgrades](docs/platform-operations.md) · [Application starter](docs/application-starter.md) · [Lite](packages/supacloud-lite/README.md) |
 | Application engineering | [Golden paths](docs/vibecoding-golden-paths.md) · [Framework](docs/application-framework.md) · [Engineering goals](docs/engineering-goals.md) |
 | Platform and storage | [Multi-tenant architecture](docs/architecture-multi-tenant.md) · [Project-scoped S3](docs/project-scoped-s3.md) · [Gateway](docs/gateway-customization.md) |
 | Delivery and execution | [CLI](docs/cli-guide.md) · [Frontend hosting](docs/frontend-hosting.md) · [Background functions](docs/background-functions.md) · [Edge runtime](docs/edge-runtime-guide.md) |
 | Identity and access | [Authorization boundary](docs/authorization-boundary.md) · [Project OAuth/OIDC](docs/oauth-oidc-provider.md) |
 | Operations | [Backups and PITR](docs/pigsty-backup-operations.md) · [Observability](docs/observability.en.md) · [Plan-only AI Operations MCP](docs/mcp-ai-operations.md) |
-| Acceptance and maintenance | [Framework acceptance](docs/framework-acceptance.md) · [Enterprise readiness](docs/enterprise-architecture-readiness.md) · [README visual sources](docs/readme-visuals.md) |
+| Acceptance and maintenance | [Stable baseline](docs/self-hosted-stable-baseline.md) · [Framework acceptance](docs/framework-acceptance.md) · [Enterprise readiness](docs/enterprise-architecture-readiness.md) · [README visual sources](docs/readme-visuals.md) |
 
 The [complete documentation index](docs/README.md) retains additional APIs, migration guides and troubleshooting references.
 

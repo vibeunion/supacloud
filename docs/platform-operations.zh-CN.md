@@ -2,7 +2,18 @@
 
 [English](platform-operations.md) | [简体中文](platform-operations.zh-CN.md) · [项目概览](../README.zh-CN.md)
 
-本文整理原根目录 README 中的完整平台入口。Lite 的单进程状态、升级与快照请参阅 [Lite 指南](../packages/supacloud-lite/README.md)。
+本文介绍主产品 Full Platform 的运维入口。先阅读[自托管稳定基线](self-hosted-stable-baseline.zh-CN.md)，
+了解首要支持组合、验收门和证据状态。Lite 的单进程状态、升级与快照请参阅
+[Lite 指南](../packages/supacloud-lite/README.md)。
+
+## 首要支持组合
+
+第一个稳定平台基线是使用 systemd 的 Linux 原生路径，采用 Pigsty `v4.5.0`、
+PostgreSQL 18、SupaCloud 管理的 Caddy 和已发布且经过验证的制品。首要验收目标是
+Ubuntu 24.04 LTS 与 `amd64`；其他安装路径和 `arm64` 必须单独提供证据。
+
+该单机组合不声明高可用。Compose、Lite 和其他操作系统仍可按边界使用，但不能作为
+首要平台发布的等价验收证据。
 
 ## 安装前准备
 
@@ -112,6 +123,10 @@ npx @supacloud/admin ssh upgrade \
 嵌入式 Edge Runtime 由 `supacloud.service` 管理，独立模式使用 `supacloud-edge-runtime.service`，不要同时运行两种模式。公共 `/functions/v1/*` 与 `/realtime/v1/websocket` 请求先进入 Management API，不直接进入 Worker 或 Realtime 内部服务。详见[后台函数](background-functions.md)。
 
 Caddy 路由以经过校验的 JSON 经 Admin API 发布，不通过手工修改生产 Caddyfile 维护。详见[网关归属与恢复](gateway-customization.md)。[pgredis-runtime](pgredis-runtime.md) 是私有数据面：浏览器不访问内部端口，Worker 不接收 PostgreSQL 凭据。PGMQ 仍是平台队列。
+
+当前数据面边界还不是“控制面故障后继续服务”的保证：公开 Functions 和 Realtime
+请求会进入 Management API，Storage 也通过 Management API 路由提供。后续控制面故障
+演练必须证明哪些已经运行的项目流量可以继续，哪些流量应当停止。
 
 ## 存储、恢复与可观测性
 

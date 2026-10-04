@@ -2,15 +2,17 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md) | [Español](README.es-ES.md)
 
-**面向 AI 辅助开发的应用工程底座与自托管运行平台。**
+**面向 AI 辅助开发的自托管多项目应用平台。**
 
-以明确的模块、静态契约和生成的客户端组织应用开发。使用 Lite 运行单项目工作负载，或在自有基础设施上管理多个隔离的 Supabase 风格项目。
+通过统一控制面、控制台、运维 CLI、交付流程、可观测性、升级流程和恢复流程，
+在自有基础设施上运行多个相互隔离的 Supabase 风格项目。可选的应用工程层提供
+明确模块、静态契约、生成客户端、编译器诊断和 AI 辅助开发流程。
 
 [快速开始](#快速开始) · [架构设计](#架构设计) · [文档导航](#文档导航) · [兼容性](#兼容性与验证依据)
 
 英文 README 为权威源；同步状态见[翻译策略](docs/translation-policy.md)。
 
-![应用工程属于开发层；Lite 与完整平台是具有不同运维边界的运行形态。](docs/assets/readme/overview.zh-CN.svg)
+![完整平台是主产品；应用工程可选，Lite 具有独立的单项目边界。](docs/assets/readme/overview.zh-CN.svg)
 
 <!-- section:goals -->
 ## 工程目标
@@ -27,18 +29,30 @@
 <!-- section:choose -->
 ## 选择入口
 
-**应用工程层**帮助开发服务；**Lite 与完整平台**是运行形态，不是另外两个框架版本。
+**完整平台**是主产品。应用工程层是可选能力，Lite 是具有独立运维边界的单项目运行时。
 
 | 你的任务 | 从这里开始 | 边界 |
 | --- | --- | --- |
-| 开发类型明确、模块化的业务应用 | [应用模板](docs/application-starter.md) | 演示不提供生产身份、持久化或自动部署。 |
-| 无 Docker 运行本地优先或小型单项目后端 | [SupaCloud Lite](packages/supacloud-lite/README.md) | Bun + PGlite；每个进程一个项目；不提供多项目控制面或 Supabase Studio。 |
 | 在自有服务器上管理多个项目 | [完整平台运维](docs/platform-operations.zh-CN.md) | 包括 Pigsty 基础设施、Management API、Web Console、项目生命周期与运维职责。 |
+| 开发类型明确、模块化的业务应用 | [应用模板](docs/application-starter.md) | 可选开发层；演示不提供生产身份、持久化或自动部署。 |
+| 无 Docker 运行本地优先或小型单项目后端 | [SupaCloud Lite](packages/supacloud-lite/README.md) | Bun + PGlite；每个进程一个项目；不提供多项目控制面或 Supabase Studio。 |
 
-完整平台是面向 Supabase 风格项目的自托管控制平面，不是 Supabase Cloud 的镜像复刻。产品边界见[详细对比](docs/supacloud-vs-supabase.md)。
+在把完整平台作为生产依赖前，先阅读[自托管稳定基线](docs/self-hosted-stable-baseline.zh-CN.md)。
+完整平台是面向 Supabase 风格项目的自托管控制平面，不是 Supabase Cloud 的镜像复刻。
+产品边界见[详细对比](docs/supacloud-vs-supabase.md)。
 
 <!-- section:start -->
 ## 快速开始
+
+### 安装完整平台
+
+在服务器上执行 root 安装脚本前，先阅读[支持基线、主机前提、信任边界与升级流程](docs/self-hosted-stable-baseline.zh-CN.md)：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh | sudo bash
+```
+
+引导脚本直接来自官方仓库。显式配置的代理只用于后续 Release/API 下载的回退。网络 Release 产物必须完成校验和与来源证明验证。
 
 ### 开发应用
 
@@ -72,17 +86,6 @@ bunx supacloud-lite keys
 ```
 
 将匿名 key 用于 `@supabase/supabase-js`，不要把 service-role key 放入浏览器代码。默认状态保存在 `.supacloud-lite/`。Auth 内置于 Bun 进程，不会启动 GoTrue sidecar。持久化部署应使用文档规定的 `upgrade` 和快照流程。配置、兼容性与恢复边界见 [Lite 指南](packages/supacloud-lite/README.md)。
-
-<a id="安装部署"></a>
-### 安装完整平台
-
-在服务器上执行 root 安装脚本前，先阅读[主机前提、信任边界与升级流程](docs/platform-operations.zh-CN.md)：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh | sudo bash
-```
-
-引导脚本直接来自官方仓库。显式配置的代理只用于后续 Release/API 下载的回退。网络 Release 产物必须完成校验和与来源证明验证。
 
 <a id="人类入口"></a>
 ### 使用正确的 CLI
@@ -132,13 +135,13 @@ curl -fsSL https://raw.githubusercontent.com/vibeunion/supacloud/main/setup.sh |
 
 | 主题 | 文档 |
 | --- | --- |
-| 快速入门 | [应用模板](docs/application-starter.md) · [Lite](packages/supacloud-lite/README.md) · [安装与升级](docs/platform-operations.zh-CN.md) |
+| 快速入门 | [稳定基线](docs/self-hosted-stable-baseline.zh-CN.md) · [安装与升级](docs/platform-operations.zh-CN.md) · [应用模板](docs/application-starter.md) · [Lite](packages/supacloud-lite/README.md) |
 | 应用工程 | [推荐开发路径](docs/vibecoding-golden-paths.zh-CN.md) · [应用框架](docs/application-framework.md) · [工程目标](docs/engineering-goals.zh-CN.md) |
 | 平台与存储 | [多租户架构](docs/architecture-multi-tenant.md) · [项目级 S3](docs/project-scoped-s3.md) · [网关](docs/gateway-customization.md) |
 | 交付与执行 | [CLI](docs/cli-guide.md) · [前端托管](docs/frontend-hosting.md) · [后台函数](docs/background-functions.md) · [Edge Runtime](docs/edge-runtime-guide.md) |
 | 身份与授权 | [授权边界](docs/authorization-boundary.md) · [项目 OAuth/OIDC](docs/oauth-oidc-provider.md) |
 | 平台运维 | [备份与 PITR](docs/pigsty-backup-operations.zh-CN.md) · [可观测性](docs/observability.md) · [仅计划的 AI 运维 MCP](docs/mcp-ai-operations.zh-CN.md) |
-| 验收与维护 | [框架验收](docs/framework-acceptance.md) · [企业架构就绪度](docs/enterprise-architecture-readiness.zh-CN.md) · [README 配图源文件](docs/readme-visuals.md) |
+| 验收与维护 | [稳定基线](docs/self-hosted-stable-baseline.zh-CN.md) · [框架验收](docs/framework-acceptance.md) · [企业架构就绪度](docs/enterprise-architecture-readiness.zh-CN.md) · [README 配图源文件](docs/readme-visuals.md) |
 
 [完整文档索引](docs/README.zh-CN.md)继续提供更多 API、迁移指南与故障排查入口。
 

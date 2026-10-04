@@ -3,7 +3,7 @@
 [English](enterprise-architecture-readiness.md) | [简体中文](enterprise-architecture-readiness.zh-CN.md)
 
 > Status: baseline contract
-> Updated: 2026-09-07
+> Updated: 2026-10-04
 
 This document defines the boundary between Pigsty-managed node capabilities and
 SupaCloud-managed platform capabilities. A feature is not considered complete
@@ -137,13 +137,17 @@ Feature: Enterprise recovery readiness
 
 ## Implementation Order
 
-1. Freeze the current working tree into an independently testable branch.
-2. Add the release/readiness contract and machine-readable evidence schema.
-3. Add unified trace and SLO measurement across gateway, API, workers, queues,
+1. Complete the [Self-Hosted Stable Baseline](self-hosted-stable-baseline.md):
+   product boundary, one supported profile, clean installation, and two-project
+   operation.
+2. Run one stateful platform upgrade with explicit component boundaries and
+   durable read-back.
+3. Run one independent full-project recovery from an approved off-host
+   snapshot, recording measured RPO/RTO.
+4. Add unified trace and SLO measurement across gateway, API, workers, queues,
    database, and recovery operations.
-4. Add off-host backup verification and scheduled restore drills.
 5. Add tenant quotas, capacity reports, and noisy-neighbor tests.
 6. Add security rotation, container scanning, SBOM retention, and access review.
-7. Add cross-component upgrade orchestration and verified rollback.
+7. Add broader cross-component upgrade orchestration and verified rollback.
 8. Add multi-node and multi-region procedures only after the single-region
    recovery contract is green.
