@@ -74,6 +74,60 @@ test("generated client requires inherited path parameters and a decoder for type
   }
 });
 
+test("generated client exposes query and mutation procedures with explicit idempotency", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-client-procedures-"));
+  try {
+    const procedureGraph: ApplicationGraph = {
+      externalTokens: [],
+      modules: [{
+        name: "items", className: "ItemsModule", file: "items.ts", line: 1,
+        imports: [], providers: [], queries: [], exports: [],
+        commands: [{
+          className: "AcceptItemCommand",
+          name: "item.accept",
+          permission: "item.accept",
+          transaction: "required",
+          idempotency: "required",
+        }],
+        controllers: [{
+          className: "ItemsController", path: "/items", scope: "application",
+          deps: [], file: "items.ts", importPath: "./items",
+          routes: [
+            { method: "GET", path: "/:id", handler: "detail" },
+            { method: "POST", path: "/:id/accept", handler: "accept", command: "AcceptItemCommand" },
+          ],
+        }],
+      }],
+    };
+    await writeFixtureProject(root, {
+      "client.ts": renderClient(procedureGraph),
+      "consumer.ts": [
+        'import { createApiClient, API_PROCEDURES } from "./client";',
+        "const client = createApiClient();",
+        'const detail: Promise<unknown> = client.items.detail.query({ params: { id: "item-1" } });',
+        'const accepted: Promise<unknown> = client.items.accept.mutate({ params: { id: "item-1" } }, { idempotencyKey: "item-1-v1" });',
+        "// @ts-expect-error Mutations with required idempotency cannot omit the execution key.",
+        'client.items.accept.mutate({ params: { id: "item-1" } });',
+        "// @ts-expect-error Query procedures do not expose mutate.",
+        'client.items.detail.mutate({ params: { id: "item-1" } });',
+        'const procedureKind: "query" = API_PROCEDURES[0]?.kind === "query" ? "query" : "query";',
+        "void detail; void accepted; void procedureKind;",
+      ].join("\n"),
+    });
+    const program = ts.createProgram([join(root, "consumer.ts")], {
+      strict: true, noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
+      noEmit: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
+      moduleResolution: ts.ModuleResolutionKind.Bundler, types: [], skipLibCheck: true,
+      ignoreDeprecations: "6.0", baseUrl: root,
+      paths: { typebox: [typeboxPath] },
+    });
+    expect(ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n")))
+      .toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("generated client requires request sections covered by route schemas", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-client-request-types-"));
   try {

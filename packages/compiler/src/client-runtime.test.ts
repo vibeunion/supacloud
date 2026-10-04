@@ -47,6 +47,64 @@ const graph: ApplicationGraph = {
   }],
 };
 
+test("generated procedure facade separates queries and mutations and forwards stable idempotency keys", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-client-procedure-runtime-"));
+  try {
+    const procedureGraph: ApplicationGraph = {
+      externalTokens: [],
+      modules: [{
+        name: "items", className: "ItemsModule", file: "items.ts", line: 1,
+        imports: [], providers: [], queries: [], exports: [],
+        commands: [{
+          className: "AcceptItemCommand",
+          name: "item.accept",
+          permission: "item.accept",
+          transaction: "required",
+          idempotency: "required",
+        }],
+        controllers: [{
+          className: "ItemsController", path: "/items", scope: "application",
+          deps: [], file: "items.ts", importPath: "src/items.controller",
+          routes: [
+            { method: "GET", path: "/detail", handler: "detail" },
+            { method: "POST", path: "/accept", handler: "accept", command: "AcceptItemCommand" },
+          ],
+        }],
+      }],
+    };
+    await writeFixtureProject(root, {
+      "generated/client.ts": renderClient(procedureGraph, { rootDir: root, outDir: join(root, "generated") }),
+    });
+    const generated = await import(pathToFileURL(join(root, "generated/client.ts")).href);
+    const requests: Array<{ url: string; headers: Headers }> = [];
+    const client = generated.createApiClient({
+      baseUrl: "https://example.test",
+      fetch: async (url: string, init: RequestInit) => {
+        requests.push({ url, headers: new Headers(init.headers) });
+        return Response.json({ ok: true });
+      },
+    });
+
+    await expect(client.items.detail.query()).resolves.toEqual({ ok: true });
+    await expect(client.items.accept.mutate({}, { idempotencyKey: "item-1-v1" })).resolves.toEqual({ ok: true });
+    await expect(client.items.accept.mutate()).rejects.toThrow("requires an idempotencyKey");
+    expect(requests).toHaveLength(2);
+    expect(requests[1]?.headers.get("idempotency-key")).toBe("item-1-v1");
+    expect(generated.API_PROCEDURES).toEqual([
+      {
+        method: "GET", path: "/items/detail", controller: "ItemsController", handler: "detail",
+        kind: "query", idempotency: "none",
+      },
+      {
+        method: "POST", path: "/items/accept", controller: "ItemsController", handler: "accept",
+        kind: "mutation", command: "item.accept", permission: "item.accept", idempotency: "required",
+      },
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("generated client decodes declared non-2xx/default responses and no-content statuses", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-client-runtime-"));
   try {

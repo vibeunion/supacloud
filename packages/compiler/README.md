@@ -495,6 +495,11 @@ route 会自动按 HTTP status 执行内置 response decoder，并返回 schema 
 OpenAPI。`buildRouteUrl` 和 `createApiClient` 可直接复用，也支持动态 headers
 和请求拦截器。
 
+每个生成 route 还会按 HTTP 方法暴露 `.query()` 或 `.mutate()` procedure
+facade，并在 `API_PROCEDURES` 中输出 Command/幂等元数据。声明
+`idempotency: "required"` 的 mutation 必须显式传入稳定的 `idempotencyKey`；
+客户端不会静默生成新 key。
+
 ### Migration from manual decoders
 
 旧版本要求调用方为每个有响应 schema 的 route 传入 decoder。升级后删除该
