@@ -87,7 +87,9 @@ describe("pgflow process adapter", () => {
   );
   test("installer is version locked, target bound and checksum protected", async () => {
     const migrations = await loadMigrations();
-    expect(migrations).toHaveLength(25);
+    expect(migrations).toHaveLength(26);
+    expect(migrations.at(-2)?.version).toBe("supacloud_002");
+    expect(migrations.at(-1)?.version).toBe("supacloud_003");
     const script = renderInstall(migrations, "fixture", "postgres");
     expect(script).toContain("pg_advisory_xact_lock");
     expect(script).toContain("PGFLOW_MIGRATION_CHECKSUM_MISMATCH");
@@ -103,6 +105,18 @@ describe("pgflow process adapter", () => {
       renderInstall([migrations[0]!, migrations[0]!], "fixture", "postgres"),
     ).toThrow();
   });
+  test("admission compatibility keeps 002 API and routes bounded queues through 003", async () => {
+    const migrations = await loadMigrations();
+    const legacy = migrations.find((migration) => migration.version === "supacloud_002");
+    const bounded = migrations.find((migration) => migration.version === "supacloud_003");
+    expect(legacy?.sql).toContain("CREATE TABLE supacloud_worker.admission_tokens");
+    expect(legacy?.sql).toContain("admit_operation");
+    expect(legacy?.sql).toContain("release_operation");
+    expect(bounded?.sql).toContain("CREATE TABLE supacloud_worker.queue_bindings");
+    expect(bounded?.sql).toContain("WORKER_QUEUE_OWNERSHIP");
+    expect(bounded?.sql).not.toContain("DROP TABLE");
+    expect(bounded?.sql).not.toContain("admission_installation");
+  });
 
   test.skipIf(process.env.PGFLOW_DATABASE_ACCEPTANCE !== "1")(
     "real database installation, task API and kill/restart recovery",
@@ -111,7 +125,7 @@ describe("pgflow process adapter", () => {
         await Promise.all([install(), install()]);
         const [receipt] =
           await db`SELECT count(*)::int AS count FROM supacloud_worker.migrations`;
-        expect(receipt.count).toBe(25);
+        expect(receipt.count).toBe(26);
         await expect(install("wrong-project")).rejects.toThrow(
           "PGFLOW_INSTALLATION_BINDING_MISMATCH",
         );

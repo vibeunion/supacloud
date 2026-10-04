@@ -7,6 +7,7 @@ import {
   type QueueBinding,
   type TaskHandler,
 } from "./queue-handler.js";
+export * from "./scriptc.js";
 export { workerExecutionFromEnvironment, executionQueueOptions, workerEnvelope } from "./execution-group.js";
 export { createExecutionGroupWorker } from "./group-worker.js";
 export type { ExecutionGroupDomain, WorkerHealth } from "./group-worker.js";
@@ -19,7 +20,6 @@ export {
   type TaskContext,
   type TaskHandler,
 } from "./queue-handler.js";
-export * from "./scriptc.js";
 
 export interface ProcessWorkerOptions {
   readonly projectRef: string;

@@ -68,11 +68,9 @@ GRANT USAGE ON SCHEMA pgflow,pgmq,supacloud_worker TO ${worker};
 GRANT SELECT ON supacloud_worker.installation TO ${worker};
 -- Worker execution groups use server-owned admission functions and read only
 -- their configured quota row; the token table remains private to SECURITY
--- DEFINER functions.
+-- DEFINER functions. Keep the grant repeatable before supacloud_002 exists.
 DO $admission_grants$
 BEGIN
-  -- Keep the roles action repeatable for databases still on supacloud_001;
-  -- engine installation applies these grants once supacloud_002 exists.
   IF to_regclass('supacloud_worker.admission_limits') IS NOT NULL THEN
     EXECUTE 'GRANT SELECT ON supacloud_worker.admission_limits TO ${worker}';
   END IF;
@@ -87,6 +85,20 @@ GRANT EXECUTE ON FUNCTION pgflow.ensure_flow_compiled(text,jsonb),
   pgflow.start_tasks(text,bigint[],uuid), pgflow.complete_task(uuid,text,integer,jsonb),
   pgflow.fail_task(uuid,text,integer,text), pgflow.track_worker_function(text,text),
   pgflow.mark_worker_stopped(uuid) TO ${worker};
+-- Optional bounded-admission producers use the invoker function through this
+-- trusted, project-scoped owner role. Runtime workers receive no grant. The
+-- bounded recipe is optional for shared installations, so keep these grants
+-- repeatable before supacloud_003 has been installed.
+DO $bounded_grants$
+BEGIN
+  IF to_regclass('supacloud_worker.bounded_project_limits') IS NOT NULL THEN
+    EXECUTE 'GRANT SELECT ON supacloud_worker.bounded_project_limits, supacloud_worker.queue_bindings TO ${owner}';
+    EXECUTE 'GRANT UPDATE (used,window_start) ON supacloud_worker.bounded_project_limits, supacloud_worker.queue_bindings TO ${owner}';
+  END IF;
+  IF to_regprocedure('supacloud_worker.enqueue_bounded(text,text,text,text,jsonb)') IS NOT NULL THEN
+    EXECUTE 'GRANT EXECUTE ON FUNCTION supacloud_worker.enqueue_bounded(text,text,text,text,jsonb) TO ${owner}';
+  END IF;
+END $bounded_grants$;
 GRANT USAGE ON SCHEMA pgflow TO ${recovery};
 GRANT EXECUTE ON FUNCTION pgflow.requeue_stalled_tasks() TO ${recovery};
 CREATE OR REPLACE FUNCTION supacloud_worker.recover(expected_project text) RETURNS integer
