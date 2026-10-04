@@ -64,7 +64,10 @@ function config(options: ProcessWorkerOptions) {
     pollIntervalMs: 200,
   });
 }
-function preflight(\n  projectRef: string,\n  environment: Readonly<Record<string, string | undefined>> = process.env,\n): void {
+function preflight(
+  projectRef: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): void {
   if (
     typeof process === "undefined" ||
     "Deno" in globalThis ||
