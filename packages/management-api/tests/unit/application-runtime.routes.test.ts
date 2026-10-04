@@ -6,6 +6,7 @@ import { createApplicationRoutes } from "../../src/routes/applications";
 import { ApplicationActiveStorage } from "../../src/services/application-active-storage";
 import { ApplicationReadiness } from "../../src/services/application-readiness";
 import { ApplicationDeploymentEvidenceStorage } from "../../src/services/application-deployment-evidence";
+import { ApplicationDeploymentEvidenceObserver } from "../../src/services/application-deployment-evidence-observer";
 import { runtimeInput } from "../helpers/application-runtime";
 
 let root: string;
@@ -117,4 +118,53 @@ test("deployment evidence is persisted, read back and scope-bound", async () => 
     { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(value) },
   ));
   expect(mismatch.status).toBe(409);
+});
+
+test("deployment evidence refresh persists conservative runtime observations", async () => {
+  const evidence = new ApplicationDeploymentEvidenceStorage(join(root, "observed-evidence"));
+  const observer = new ApplicationDeploymentEvidenceObserver({
+    active: {
+      readForApplication: async () => ({
+        schema: "supacloud.application-active.v1",
+        runtime: {
+          release: {
+            schema: "supacloud.application-release.v1",
+            project_ref: "demo", application_id: "reviews",
+            release_id: "b".repeat(64), manifest_sha256: "a".repeat(64),
+            created_at: "2026-10-04T00:00:00.000Z",
+            targets: [{ name: "api", object_id: "c".repeat(64), kind: "http", entrypoint: "bundle/index.js" }],
+          },
+          activationId: "01234567-89ab-4def-8123-456789abcdef",
+          environmentId: "test", bunVersion: "1.4.0", ports: { api: 19001 },
+        },
+        configurationDigest: "d".repeat(64),
+        configurationId: "01234567-89ab-4def-8123-456789abcdef",
+        hosts: { api: ["reviews.example.com"] },
+      }),
+    },
+    releases: { readRelease: async (_project, _application, releaseId) => ({
+      schema: "supacloud.application-release.v1",
+      project_ref: "demo", application_id: "reviews", release_id: releaseId,
+      manifest_sha256: "a".repeat(64), created_at: "2026-10-04T00:00:00.000Z",
+      targets: [{ name: "api", object_id: "c".repeat(64), kind: "http", entrypoint: "bundle/index.js" }],
+    }) },
+    migrations: { inspect: async () => ({
+      project_migrations_applied: true, ledger_compatible: true, ledger_digest: "e".repeat(64),
+    }) } as never,
+    readiness: { inspect: async () => ({
+      ready: true, project_ref: "demo", application_id: "reviews", environment_id: "test",
+      release_id: "b".repeat(64), activation_id: "01234567-89ab-4def-8123-456789abcdef",
+      targets: [{ target: "api", kind: "http", unit: "supacloud-app-demo-reviews-api", pid: 1, invocation_id: "x", ready: true, code: "READY" }],
+    }) } as never,
+    now: () => new Date("2026-10-04T00:00:00.000Z"),
+  });
+  const app = createApplicationRoutes({
+    evidence, evidenceObserver: observer, projectExists: async () => true, authorize: async () => undefined,
+  });
+  const endpoint = "http://localhost/v1/projects/demo/applications/reviews/environments/test/deployment-evidence/refresh";
+  const response = await app.handle(new Request(endpoint, { method: "POST" }));
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    evidence: { status: "unknown", health: { authenticated_smoke: "unknown" } },
+  });
 });

@@ -24,6 +24,16 @@ tests:
         values: 0+100x20
       - series: supacloud_background_queue_wait_seconds_bucket{le="+Inf"}
         values: 0+100x20
+      - series: supacloud_backup_inventory_available
+        values: 1x20
+      - series: supacloud_backup_latest_success_age_seconds
+        values: 60x20
+      - series: supacloud_restore_drill_last_status{status="succeeded"}
+        values: 1x20
+      - series: supacloud_restore_drill_last_completed_timestamp_seconds
+        values: 1000000x20
+      - series: supacloud_log_ingestion_delay_seconds
+        values: 30x20
     alert_rule_test:
       - eval_time: 15m
         alertname: SupaCloudManagementErrorBudget
@@ -53,6 +63,9 @@ tests:
             exp_annotations:
               summary: Dispatched background task p95 age exceeds five minutes
               runbook: docs/request-task-tracing.md#queue-delay
+      - {eval_time: 15m, alertname: SupaCloudBackupFreshness, exp_alerts: []}
+      - {eval_time: 15m, alertname: SupaCloudRestoreDrillFailure, exp_alerts: []}
+      - {eval_time: 15m, alertname: SupaCloudLogIngestionDelay, exp_alerts: []}
   - interval: 1m
     input_series:
       - series: supacloud_management_http_requests_total
@@ -71,8 +84,21 @@ tests:
         values: 0+100x20
       - series: supacloud_background_queue_wait_seconds_bucket{le="+Inf"}
         values: 0+100x20
+      - series: supacloud_backup_inventory_available
+        values: 1x20
+      - series: supacloud_backup_latest_success_age_seconds
+        values: 4000x20
+      - series: supacloud_restore_drill_last_status{status="failed"}
+        values: 1x20
+      - series: supacloud_restore_drill_last_completed_timestamp_seconds
+        values: 0x20
+      - series: supacloud_log_ingestion_delay_seconds
+        values: 400x20
     alert_rule_test:
       - {eval_time: 15m, alertname: SupaCloudManagementErrorBudget, exp_alerts: []}
       - {eval_time: 15m, alertname: SupaCloudManagementLatency, exp_alerts: []}
       - {eval_time: 15m, alertname: SupaCloudBackgroundFailures, exp_alerts: []}
       - {eval_time: 15m, alertname: SupaCloudBackgroundQueueDelay, exp_alerts: []}
+      - {eval_time: 15m, alertname: SupaCloudBackupFreshness}
+      - {eval_time: 15m, alertname: SupaCloudRestoreDrillFailure}
+      - {eval_time: 15m, alertname: SupaCloudLogIngestionDelay}

@@ -33,6 +33,28 @@ function development(ref: string, app: string) {
     },
   };
 }
+function evidence(ref: string, app: string, env: string) {
+  return {
+    project_ref: ref, application_id: app, environment_id: env,
+    evidence: {
+      schema: "supacloud.deployment-evidence.v1", status: "unknown",
+      recorded_at: "2026-10-04T00:00:00.000Z",
+      scope: { project_ref: ref, application_id: app, environment_id: env },
+      source: { commit_sha: null, manifest_sha256: "d".repeat(64), contract_schema: null, environment_binding_version: null },
+      database: {
+        provider: "postgresql", version: "unknown", topology: "single-node",
+        migration: { status: "confirmed", inventory_sha256: "e".repeat(64), compatibility: "verified" },
+        backup: { status: "unknown", latest_success_at: null, freshness_seconds: null },
+        recovery: { status: "unknown", drill_id: null, rpo_seconds: null, rto_seconds: null },
+      },
+      components: [{ name: "edge-runtime", version: null, status: "confirmed", health_check: null, checked_at: "2026-10-04T00:00:00.000Z" }],
+      activation: { release_id: a, configuration_id: "01234567-89ab-4def-8123-456789abcdef", activation_id: "01234567-89ab-4def-8123-456789abcdef" },
+      health: { status: "confirmed", checked_at: "2026-10-04T00:00:00.000Z", authenticated_smoke: "unknown" },
+      rollback: { release_id: null, configuration_id: null, status: "unknown", result: null },
+      notes: ["fixture"],
+    },
+  };
+}
 function network(handler: (url: string, init: RequestInit) => Promise<Response>) {
   globalThis.fetch = Object.assign(async (url: RequestInfo | URL, init: RequestInit = {}) =>
     handler(String(url), init), originalFetch);
@@ -62,11 +84,12 @@ try {
     urls.push(url);
     if (url.includes("/demo/")) { signals.push(init.signal!); return late.promise; }
     if (url.endsWith("/runtime")) return Response.json({ error: "private-error" }, { status: 503 });
+    if (url.endsWith("/deployment-evidence")) return Response.json(evidence("other", "next-app", "prod"));
     return Response.json(inventory("other", "next-app", url.includes("cursor=") ? b : a,
       url.includes("cursor=") ? null : a));
   });
   component = mount(Dashboard, { target });
-  await eventually(() => strictEqual(signals.length, 2));
+  await eventually(() => strictEqual(signals.length, 3));
   page.params.ref = "other";
   page.url = new URL("http://localhost/project/other/applications?application=next-app&environment=prod");
   await eventually(() => ok(text().includes(a)));
@@ -86,6 +109,7 @@ try {
 
   network(async url => url.endsWith("/runtime")
     ? Response.json(runtime("other", "next-app", "prod"))
+    : url.endsWith("/deployment-evidence") ? Response.json(evidence("other", "next-app", "prod"))
     : new Response("{"));
   button("Refresh").click();
   await eventually(() => ok(text().includes("No active activation record")));
@@ -97,6 +121,7 @@ try {
     urls.push(url);
     if (url.endsWith("/runtime")) return Response.json(runtime("other", "next-app", "prod"));
     if (url.includes("/development")) return Response.json(development("other", "next-app"));
+    if (url.endsWith("/deployment-evidence")) return Response.json(evidence("other", "next-app", "prod"));
     return Response.json(inventory("other", "next-app", a));
   });
   button("Refresh").click();
@@ -117,6 +142,7 @@ try {
   network(async (url, init) => {
     if (url.includes("/development")) { developmentSignals.push(init.signal!); return pendingDevelopment.promise; }
     if (url.endsWith("/runtime")) return Response.json(runtime("third", "third-app", "prod"));
+    if (url.endsWith("/deployment-evidence")) return Response.json(evidence("third", "third-app", "prod"));
     return Response.json(inventory("third", "third-app", b));
   });
   button("api").click();
@@ -134,7 +160,7 @@ try {
   const unmountSignals: AbortSignal[] = [];
   network(async (_url, init) => { unmountSignals.push(init.signal!); return hanging.promise; });
   button("Refresh").click();
-  await eventually(() => strictEqual(unmountSignals.length, 2));
+  await eventually(() => strictEqual(unmountSignals.length, 3));
   await unmount(component);
   component = undefined;
   ok(unmountSignals.every(signal => signal.aborted));
