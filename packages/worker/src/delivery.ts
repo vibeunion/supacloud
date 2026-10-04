@@ -25,6 +25,7 @@ export interface WorkerDelivery {
   queueName: string;
   taskKey: string;
   user: string;
+  runtime: "bun" | "go" | "scriptc";
   runtimePath: string;
   releaseDirectory: string;
   entrypoint: string;
@@ -41,7 +42,7 @@ export interface WorkerDelivery {
 }
 
 const keys: readonly (keyof WorkerDelivery)[] = [
-  "projectRef", "queueName", "taskKey", "user", "runtimePath", "releaseDirectory",
+  "projectRef", "queueName", "taskKey", "user", "runtime", "runtimePath", "releaseDirectory",
   "entrypoint", "environmentFile", "concurrency", "maxPgConnections",
   "visibilityTimeoutSeconds", "retryLimit", "cpuQuotaPercent", "memoryMaxMiB",
   "tasksMax", "stopTimeoutSeconds",
@@ -65,6 +66,9 @@ export function parseWorkerDelivery(value: unknown): Readonly<WorkerDelivery> {
     queueName: text(input.queueName, /^scw_[a-z0-9_]{1,40}$/),
     taskKey: text(input.taskKey, /^[a-z][a-z0-9_.-]{0,99}$/),
     user: text(input.user, /^[a-z_][a-z0-9_-]{0,30}$/),
+    runtime: input.runtime === undefined
+      ? "bun"
+      : text(input.runtime, /^(?:bun|go|scriptc)$/) as WorkerDelivery["runtime"],
     runtimePath: absolutePath(input.runtimePath),
     releaseDirectory: absolutePath(input.releaseDirectory),
     entrypoint: absolutePath(input.entrypoint),
@@ -80,6 +84,8 @@ export function parseWorkerDelivery(value: unknown): Readonly<WorkerDelivery> {
   };
   if (result.user === "root" || !result.entrypoint.startsWith(`${result.releaseDirectory}/`))
     throw new Error("WORKER_DELIVERY_INVALID");
+  if (result.runtime !== "bun" && result.entrypoint !== result.runtimePath)
+    throw new Error("WORKER_DELIVERY_INVALID");
   if (input.artifactDirectory !== undefined) {
     const directory = absolutePath(input.artifactDirectory);
     if (directory !== `/var/lib/scw/${result.projectRef}` &&
@@ -92,6 +98,10 @@ export function parseWorkerDelivery(value: unknown): Readonly<WorkerDelivery> {
 
 export function renderWorkerService(value: unknown): string {
   const plan = parseWorkerDelivery(value);
+  const runtime = plan.runtime;
+  const command = runtime === "bun"
+    ? `${plan.runtimePath} --no-env-file ${plan.entrypoint}`
+    : plan.runtimePath;
   // ExecStart assignments override the secret file; Bun must not load a release .env.
   const environment = [
     `SUPACLOUD_PROJECT_REF=${plan.projectRef}`,
@@ -115,7 +125,7 @@ Type=exec
 User=${plan.user}
 WorkingDirectory=${plan.releaseDirectory}
 EnvironmentFile=${plan.environmentFile}
-ExecStart=/usr/bin/env ${environment} ${plan.runtimePath} --no-env-file ${plan.entrypoint}
+ExecStart=/usr/bin/env ${environment} ${command}
 Restart=on-failure
 RestartSec=5
 KillSignal=SIGTERM

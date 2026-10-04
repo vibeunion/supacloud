@@ -8,8 +8,11 @@ import { renderQueueGrants, roleNames } from "../../src/services/pgflow-roles";
 import { createHash } from "node:crypto";
 
 test("bundled migrations preserve canonical versions and checksums", async () => {
-  expect(PGFLOW_MIGRATIONS.length).toBe(24);
-  expect(new Set(PGFLOW_MIGRATIONS.map(row => row.version)).size).toBe(24);
+  expect(PGFLOW_MIGRATIONS.length).toBe(26);
+  expect(new Set(PGFLOW_MIGRATIONS.map(row => row.version)).size).toBe(26);
+  expect(PGFLOW_MIGRATIONS.at(-3)?.version).toBe("supacloud_001");
+  expect(PGFLOW_MIGRATIONS.at(-2)?.version).toBe("supacloud_002");
+  expect(PGFLOW_MIGRATIONS.at(-1)?.version).toBe("supacloud_003");
   for (const migration of PGFLOW_MIGRATIONS) {
     expect(migration.sha256).toBe(createHash("sha256").update(migration.sql).digest("hex"));
   }
