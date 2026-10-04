@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { createApplicationRoutes } from "../../src/routes/applications";
 import { ApplicationActiveStorage } from "../../src/services/application-active-storage";
 import { ApplicationReadiness } from "../../src/services/application-readiness";
+import { ApplicationDeploymentEvidenceStorage } from "../../src/services/application-deployment-evidence";
+import { ApplicationDeploymentEvidenceObserver } from "../../src/services/application-deployment-evidence-observer";
 import { runtimeInput } from "../helpers/application-runtime";
 
 let root: string;
@@ -68,4 +70,101 @@ test("an activation changed during observation is not reported as the current ru
   const response = await app.handle(new Request(url, { headers }));
   expect(response.status).toBe(409);
   expect(await response.json()).toMatchObject({ code: "APPLICATION_RUNTIME_CHANGED" });
+});
+
+test("deployment evidence is persisted, read back and scope-bound", async () => {
+  const evidence = new ApplicationDeploymentEvidenceStorage(join(root, "evidence"));
+  const value = {
+    schema: "supacloud.deployment-evidence.v1" as const,
+    status: "unknown" as const,
+    recorded_at: "2026-10-04T00:00:00.000Z",
+    scope: { project_ref: "demo", application_id: "reviews", environment_id: "test" },
+    source: {
+      commit_sha: "abcdef1234567", manifest_sha256: "a".repeat(64),
+      contract_schema: null, environment_binding_version: null,
+    },
+    database: {
+      provider: "postgresql", version: "18.0", topology: "single-node" as const,
+      migration: { status: "confirmed" as const, inventory_sha256: "a".repeat(64), compatibility: "verified" as const },
+      backup: { status: "unknown" as const, latest_success_at: null, freshness_seconds: null },
+      recovery: { status: "unknown" as const, drill_id: null, rpo_seconds: null, rto_seconds: null },
+    },
+    components: [{
+      name: "management-api" as const, version: "0.90.1", status: "confirmed" as const,
+      health_check: "/health", checked_at: "2026-10-04T00:00:00.000Z",
+    }],
+    activation: {
+      release_id: "b".repeat(64), configuration_id: "01234567-89ab-4def-8123-456789abcdef",
+      activation_id: "01234567-89ab-4def-8123-456789abcdef",
+    },
+    health: { status: "confirmed" as const, checked_at: "2026-10-04T00:00:00.000Z", authenticated_smoke: "confirmed" as const },
+    rollback: { release_id: null, configuration_id: null, status: "unknown" as const, result: null },
+    notes: [],
+  };
+  const app = createApplicationRoutes({
+    evidence, projectExists: async () => true, authorize: async () => undefined,
+  });
+  const endpoint = "http://localhost/v1/projects/demo/applications/reviews/environments/test/deployment-evidence";
+  const write = await app.handle(new Request(endpoint, {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(value),
+  }));
+  expect(write.status).toBe(200);
+  expect(await write.json()).toMatchObject({ evidence: { status: "unknown" } });
+  const read = await app.handle(new Request(endpoint));
+  expect(read.status).toBe(200);
+  expect(await read.json()).toMatchObject({ evidence: value });
+  const mismatch = await app.handle(new Request(
+    "http://localhost/v1/projects/demo/applications/other/environments/test/deployment-evidence",
+    { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(value) },
+  ));
+  expect(mismatch.status).toBe(409);
+});
+
+test("deployment evidence refresh persists conservative runtime observations", async () => {
+  const evidence = new ApplicationDeploymentEvidenceStorage(join(root, "observed-evidence"));
+  const observer = new ApplicationDeploymentEvidenceObserver({
+    active: {
+      readForApplication: async () => ({
+        schema: "supacloud.application-active.v1",
+        runtime: {
+          release: {
+            schema: "supacloud.application-release.v1",
+            project_ref: "demo", application_id: "reviews",
+            release_id: "b".repeat(64), manifest_sha256: "a".repeat(64),
+            created_at: "2026-10-04T00:00:00.000Z",
+            targets: [{ name: "api", object_id: "c".repeat(64), kind: "http", entrypoint: "bundle/index.js" }],
+          },
+          activationId: "01234567-89ab-4def-8123-456789abcdef",
+          environmentId: "test", bunVersion: "1.4.0", ports: { api: 19001 },
+        },
+        configurationDigest: "d".repeat(64),
+        configurationId: "01234567-89ab-4def-8123-456789abcdef",
+        hosts: { api: ["reviews.example.com"] },
+      }),
+    },
+    releases: { readRelease: async (_project, _application, releaseId) => ({
+      schema: "supacloud.application-release.v1",
+      project_ref: "demo", application_id: "reviews", release_id: releaseId,
+      manifest_sha256: "a".repeat(64), created_at: "2026-10-04T00:00:00.000Z",
+      targets: [{ name: "api", object_id: "c".repeat(64), kind: "http", entrypoint: "bundle/index.js" }],
+    }) },
+    migrations: { inspect: async () => ({
+      project_migrations_applied: true, ledger_compatible: true, ledger_digest: "e".repeat(64),
+    }) } as never,
+    readiness: { inspect: async () => ({
+      ready: true, project_ref: "demo", application_id: "reviews", environment_id: "test",
+      release_id: "b".repeat(64), activation_id: "01234567-89ab-4def-8123-456789abcdef",
+      targets: [{ target: "api", kind: "http", unit: "supacloud-app-demo-reviews-api", pid: 1, invocation_id: "x", ready: true, code: "READY" }],
+    }) } as never,
+    now: () => new Date("2026-10-04T00:00:00.000Z"),
+  });
+  const app = createApplicationRoutes({
+    evidence, evidenceObserver: observer, projectExists: async () => true, authorize: async () => undefined,
+  });
+  const endpoint = "http://localhost/v1/projects/demo/applications/reviews/environments/test/deployment-evidence/refresh";
+  const response = await app.handle(new Request(endpoint, { method: "POST" }));
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({
+    evidence: { status: "unknown", health: { authenticated_smoke: "unknown" } },
+  });
 });

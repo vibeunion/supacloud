@@ -47,6 +47,12 @@
       "supacloud-source": "./src/application-development.ts",
       "bun": "./src/application-development.ts",
       "import": "./dist/application-development.js"
+    },
+    "./deployment-evidence": {
+      "types": "./src/deployment-evidence.ts",
+      "supacloud-source": "./src/deployment-evidence.ts",
+      "bun": "./src/deployment-evidence.ts",
+      "import": "./src/deployment-evidence.ts"
     }
   },
   "files": [
@@ -57,7 +63,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun build src/index.ts src/worker-execution.ts src/delivery-schema.ts src/delivery-build-schema.ts src/delivery-files.ts src/delivery-artifact.ts src/application-activation.ts src/application-development.ts --outdir dist --target node --splitting",
+    "build": "bun build src/index.ts src/worker-execution.ts src/delivery-schema.ts src/delivery-build-schema.ts src/delivery-files.ts src/delivery-artifact.ts src/application-activation.ts src/application-development.ts src/deployment-evidence.ts --outdir dist --target node --splitting --entry-naming [name].[ext]",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "prepublishOnly": "bun run build"
