@@ -2,8 +2,16 @@
 
 Status: **IMPLEMENTED (compiler read-only slice)**. The compiler summarizes one
 immutable delivery target into a single queryable document. Preview environment
-provisioning, runtime health and activation identity are **not** part of this
-slice; see [Encore Alignment Roadmap](./encore-alignment-roadmap.md).
+provisioning, runtime health and activation identity are **not** part of the
+compiler slice; see [Encore Alignment Roadmap](./encore-alignment-roadmap.md).
+
+The platform-side companion contract is
+`supacloud.deployment-evidence.v1`, exported by `@supacloud/delivery`. It
+records deployment status, source/build identity, environment binding version,
+database provider capabilities, component health, activation identity,
+authenticated smoke results, and rollback readiness. It is intentionally a
+read model: Management API and the single-node acceptance workflows remain
+responsible for collecting the observations.
 
 ## Why
 
@@ -69,9 +77,9 @@ Rollback is recorded as separate paths, not a single switch:
 
 ## Next steps
 
-1. Correlate release evidence with the deployment record (source commit,
-   environment, resolved binding version, activation).
-2. Add runtime health and activation identity once the preview environment slice
-   defines them.
-3. Surface the document in the Web Console release view beside the application
-   development context.
+1. Have the Management API persist and expose deployment evidence after each
+   single-node activation or reconcile operation.
+2. Connect Preview lifecycle and recovery drills to the database provider,
+   backup, migration, health and rollback fields.
+3. Surface build and deployment evidence together in the Web Console release
+   view beside the application development context.
