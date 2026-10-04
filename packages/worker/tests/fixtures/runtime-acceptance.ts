@@ -25,6 +25,8 @@ async function command(args: string[]): Promise<string> {
 async function sampleApi(url: string, seconds: number) {
   const startedAtMs = Date.now();
   const latenciesMs: number[] = [];
+  const databaseMs: (number | null)[] = [];
+  const arrivalDelayMs: number[] = [];
   let errors = 0;
   const pending: Promise<void>[] = [];
   // Fixed offered arrivals, not a closed loop that slows its input when requests stall.
@@ -32,19 +34,24 @@ async function sampleApi(url: string, seconds: number) {
     await Bun.sleep(Math.max(0, startedAtMs + index * 20 - Date.now()));
     pending.push((async () => {
       const start = performance.now();
+      arrivalDelayMs.push(Math.max(0, Date.now() - (startedAtMs + index * 20)));
+      let databaseDuration: number | null = null;
       try {
         const result = await fetch(url, {
           headers: { authorization: "Bearer fixture-api-only" }, signal: AbortSignal.timeout(2000),
         });
+        const measured = result.headers.get("x-fixture-database-ms");
+        if (measured !== null && Number.isFinite(Number(measured))) databaseDuration = Number(measured);
         if (!result.ok) errors++;
         await result.arrayBuffer();
       } catch { errors++; }
       latenciesMs.push(Math.max(0.001, performance.now() - start));
+      databaseMs.push(databaseDuration);
     })());
   }
   await Promise.all(pending);
   await Bun.sleep(Math.max(0, startedAtMs + seconds * 1000 - Date.now()));
-  return { startedAtMs, seconds: (Date.now() - startedAtMs) / 1000, latenciesMs, errors };
+  return { startedAtMs, seconds: (Date.now() - startedAtMs) / 1000, latenciesMs, databaseMs, arrivalDelayMs, errors };
 }
 
 export async function runtimeAcceptance() {
@@ -168,8 +175,9 @@ export async function runtimeAcceptance() {
       const apiSql = new SQL(url, { max: 2, connectionTimeout: 2 });
       const api = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request) {
         if (request.headers.get("authorization") !== "Bearer fixture-api-only") return new Response(null, { status: 401 });
+        const start = performance.now();
         const rows = await apiSql`SELECT id,revision FROM report_demo.sources WHERE id=${source}`;
-        return Response.json(rows);
+        return Response.json(rows, { headers: { "x-fixture-database-ms": String(performance.now() - start) } });
       } });
       let timer: ReturnType<typeof setInterval> | undefined;
       let peakAge = 0;
@@ -177,9 +185,9 @@ export async function runtimeAcceptance() {
       let observation: Promise<void> | undefined;
       try {
         const apiUrl = `http://127.0.0.1:${api.port}/source`;
-        const baseline = await sampleApi(apiUrl, 2);
+        const baseline = await sampleApi(apiUrl, 10);
         const batchStart = Date.now();
-        const operations = Array.from({ length: 100 }, () => crypto.randomUUID());
+        const operations = Array.from({ length: 300 }, () => crypto.randomUUID());
         await Promise.all(operations.map(id => submitReport(sql, "fixture", "operator", id, source, "v1")));
         const observe = () => {
           if (observation) return;
@@ -192,7 +200,7 @@ export async function runtimeAcceptance() {
           })().finally(() => { observation = undefined; });
         };
         timer = setInterval(observe, 100);
-        const mixed = await sampleApi(apiUrl, 3);
+        const mixed = await sampleApi(apiUrl, 10);
         await until(async () => {
           const [row] = await sql`SELECT count(*)::int n FROM report_demo.receipts WHERE operation_id<>${crashedOperation}`;
           return row.n === operations.length;
@@ -206,10 +214,10 @@ export async function runtimeAcceptance() {
           evidence: {
             candidate: process.env.SCW_ACCEPTANCE_CANDIDATE ?? "local-working-tree",
             hardware: "local OrbStack; worker 0.5 CPU / 256 MiB; API pool 2, worker pools 3+2",
-            workload: "100 CSV exports x 10000 immutable rows; 50 offered API requests/s",
+            workload: "300 CSV exports x 10000 immutable rows; 50 offered API requests/s",
             rawArtifact: process.env.SCW_ACCEPTANCE_OUTPUT ? basename(process.env.SCW_ACCEPTANCE_OUTPUT) : "test-output-only",
           },
-          limits: { minWindowSeconds: 2, minRequests: 90, minRps: 40, maxP95Ms: 250, maxP99Ms: 500,
+          limits: { minWindowSeconds: 10, minRequests: 450, minRps: 40, maxP95Ms: 250, maxP99Ms: 500,
             maxP99Ratio: 10, maxErrorRate: 0, maxBatchSeconds: 120, maxOldestQueueAgeSeconds: 120 },
           baseline, mixed,
           batch: { startedAtMs: batchStart, expected: operations.length, completed: operations.length,
