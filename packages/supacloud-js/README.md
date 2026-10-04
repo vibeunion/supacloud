@@ -60,6 +60,12 @@ peer range compatible with a newer SDK.
 
 ## Quick Start
 
+For compiler-generated application procedures, the optional
+[`@supacloud/js/query`](./QUERY.md) entrypoint provides typed TanStack Query options,
+identity-scoped cache keys, cancellation and per-invocation mutation idempotency.
+Use the existing Svelte/React Query binding and Supabase session; no additional
+framework-specific SupaCloud query package is required.
+
 ```ts
 import { createClient } from "@supabase/supabase-js";
 import { createSupaCloudClient, createSupaCloudTaskFetch } from "@supacloud/js";

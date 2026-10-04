@@ -186,7 +186,7 @@ jobs:
             working-directory: packages/supacloud-js
             script: |
               bun install --ignore-scripts --frozen-lockfile --cwd ../..
-              node ../../scripts/workspace/cli.mjs prepare --project supacloud-js
+              node ../../scripts/workspace/prepare.mjs supacloud-js
               bun install --frozen-lockfile
               bun x --no-install tsc -p tsconfig.commands.json
               bun run typecheck
