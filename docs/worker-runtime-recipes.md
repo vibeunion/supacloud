@@ -172,3 +172,31 @@ The JSON retains raw samples, windows, workload, budgets and outcomes. These
 short local regression limits are not customer SLAs. Customer acceptance still
 requires approved hardware, scale, arrival patterns, failure scenarios and
 longer observation. Local cgroup readback does not attest production systemd.
+
+### Recorded Local Run: 2026-10-04
+
+Source candidate: `ef62d5b208f9e69c88302c35e3f9f97a4a67a18b`.
+Raw evidence: [local acceptance JSON](worker-local-acceptance-2026-10-04.json).
+
+| Observation | Result |
+| --- | --- |
+| Worker resource caps | 0.5 CPU, 256 MiB, no swap, 64 processes/threads |
+| Concurrent CSV work | 100 exports x 10,000 immutable rows |
+| Batch completion | 100/100, 12.196 seconds |
+| API offered load during batch | 50 requests/second, 150 observed requests |
+| API errors during batch | 0 |
+| Baseline / mixed API P99 | 2.829 ms / 0.845 ms |
+| Peak observed worker database connections | 4, budget 5 |
+| Peak cgroup memory | 45,035,520 bytes |
+| Runtime test / delivery test | 6 passed / 12 passed |
+
+The runtime test also passed forced-kill redelivery with one completion receipt,
+checkpoint resume, unauthorized download denial, empty exports, terminal failure
+receipts and the built Go protocol/shutdown checks. Go's separate focused tests,
+the package build and the scoped recipe typecheck passed. Temporary containers
+were removed.
+
+This is a short local regression, not a saturation test or a customer SLA.
+Sequential sampling/cache warming can explain the lower mixed P99; it is not
+evidence that batch work improves API latency. Customer equipment, real traffic
+and long-duration fault/recovery acceptance remain separate release gates.
