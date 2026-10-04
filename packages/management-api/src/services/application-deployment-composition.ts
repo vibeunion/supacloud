@@ -6,6 +6,7 @@ import {
   type ApplicationDeploymentDependencies,
 } from "./application-deployment";
 import { createApplicationRoutes } from "../routes/applications";
+import { ApplicationDeploymentEvidenceStorage } from "./application-deployment-evidence";
 import { ApplicationActiveStorage } from "./application-active-storage";
 import { ApplicationConfigurations } from "./application-configuration";
 import { ApplicationMigrations } from "./application-migrations";
@@ -106,6 +107,7 @@ export function createDefaultApplicationRouteComposition(
   const allocations = new ApplicationRuntimeAllocations();
   const runtime = new ApplicationSystemdRuntime();
   const files = new ApplicationRuntimeFiles(storage);
+  const evidence = new ApplicationDeploymentEvidenceStorage();
 
   const dependencies: ApplicationDeploymentDependencies = {
     verifyCompatibility: verifyCompatibility === undefined ? verifier : async input => {
@@ -136,6 +138,7 @@ export function createDefaultApplicationRouteComposition(
     active,
     migrations,
     readiness,
+    evidence,
     deployment,
     retirementVerifier: dependencies.retirementVerifier,
   });

@@ -289,3 +289,31 @@ test("runtime reads preserve a non-ready report and reject a contradictory or fo
   expect(JSON.parse((await tool({ ...envelope, readiness: null })(args)).content[0]!.text))
     .toMatchObject({ ok: true, readiness: null });
 });
+
+test("deployment evidence reads are scope-bound and preserve incomplete status", async () => {
+  const evidence = {
+    schema: "supacloud.deployment-evidence.v1",
+    status: "unknown",
+    recorded_at: "2026-10-04T00:00:00.000Z",
+    scope: { project_ref: "project", application_id: "reviews", environment_id: "test" },
+    source: { commit_sha: null, manifest_sha256: "a".repeat(64), contract_schema: null, environment_binding_version: null },
+    database: {
+      provider: "postgresql", version: "18.0", topology: "single-node",
+      migration: { status: "confirmed", inventory_sha256: "a".repeat(64), compatibility: "verified" },
+      backup: { status: "unknown", latest_success_at: null, freshness_seconds: null },
+      recovery: { status: "unknown", drill_id: null, rpo_seconds: null, rto_seconds: null },
+    },
+    components: [{ name: "management-api", version: "0.90.1", status: "confirmed", health_check: "/health", checked_at: "2026-10-04T00:00:00.000Z" }],
+    activation: { release_id: "b".repeat(64), configuration_id: "01234567-89ab-4def-8123-456789abcdef", activation_id: "01234567-89ab-4def-8123-456789abcdef" },
+    health: { status: "confirmed", checked_at: "2026-10-04T00:00:00.000Z", authenticated_smoke: "confirmed" },
+    rollback: { release_id: null, configuration_id: null, status: "unknown", result: null },
+    notes: [],
+  };
+  const args = { action: "get_deployment_evidence", ref: "project", id: "reviews", environment_id: "test" };
+  expect(JSON.parse((await tool({ project_ref: "project", application_id: "reviews", environment_id: "test", evidence })(
+    args,
+  )).content[0]!.text)).toMatchObject({ ok: true, evidence: { status: "unknown" } });
+  expect(JSON.parse((await tool({ project_ref: "project", application_id: "reviews", environment_id: "other", evidence })(
+    args,
+  )).content[0]!.text)).toMatchObject({ ok: false, error: { code: "INVALID_RESPONSE" } });
+});
