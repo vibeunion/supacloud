@@ -175,19 +175,20 @@ longer observation. Local cgroup readback does not attest production systemd.
 
 ### Recorded Local Run: 2026-10-04
 
-Source candidate: `ef62d5b208f9e69c88302c35e3f9f97a4a67a18b`.
+Source candidate: `233860f0` (includes the concurrent branch updates).
 Raw evidence: [local acceptance JSON](worker-local-acceptance-2026-10-04.json).
 
 | Observation | Result |
 | --- | --- |
 | Worker resource caps | 0.5 CPU, 256 MiB, no swap, 64 processes/threads |
-| Concurrent CSV work | 100 exports x 10,000 immutable rows |
-| Batch completion | 100/100, 12.196 seconds |
-| API offered load during batch | 50 requests/second, 150 observed requests |
+| Concurrent CSV work | 300 exports x 10,000 immutable rows |
+| Batch completion | 300/300, 41.540 seconds |
+| Baseline / mixed observation windows | 10 seconds each, 500 requests each |
+| API offered load during batch | 50 requests/second |
 | API errors during batch | 0 |
-| Baseline / mixed API P99 | 2.829 ms / 0.845 ms |
+| Baseline / mixed API P99 | 2.370 ms / 0.851 ms |
 | Peak observed worker database connections | 4, budget 5 |
-| Peak cgroup memory | 45,035,520 bytes |
+| Peak cgroup memory | 112,562,176 bytes |
 | Runtime test / delivery test | 6 passed / 12 passed |
 
 The runtime test also passed forced-kill redelivery with one completion receipt,
@@ -200,3 +201,11 @@ This is a short local regression, not a saturation test or a customer SLA.
 Sequential sampling/cache warming can explain the lower mixed P99; it is not
 evidence that batch work improves API latency. Customer equipment, real traffic
 and long-duration fault/recovery acceptance remain separate release gates.
+
+An earlier 2/3-second run on candidate `b062ccdd` failed the unchanged relative
+P99 gate: baseline 2.392 ms, mixed 99.390 ms. Its
+[failed raw sample](worker-local-acceptance-2026-10-04-short-window-failed.json)
+is retained. The cause of that outlier has not been established. The subsequent
+run increased sample windows and workload, retained the same latency/error
+thresholds, and added database timing plus offered-arrival delay samples.
+That pass does not erase the earlier failure or establish long-term stability.
