@@ -12,6 +12,7 @@ test("developer surface exposes only read-only development tools", async () => {
   const names = reply?.result?.tools?.map((tool) => tool.name) ?? [];
   expect(names).toContain("supacloud.get_capabilities");
   expect(names).toContain("supacloud.get_application_development");
+  expect(names).toContain("supacloud.get_deployment_evidence");
   expect(names).not.toContain("supacloud.get_backup_readiness");
   expect(names).not.toContain("supacloud.plan_pitr_restore");
   expect(names).not.toContain("supacloud.get_request_metrics");

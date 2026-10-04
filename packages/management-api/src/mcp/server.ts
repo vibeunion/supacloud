@@ -8,6 +8,7 @@ import {
   renderRequestMetrics,
 } from "../utils/observability";
 import { ApplicationReleaseStorage } from "../services/application-release-storage";
+import { ApplicationDeploymentEvidenceStorage } from "../services/application-deployment-evidence";
 import { ApplicationDevelopmentError, extractApplicationDevelopment } from "../services/application-development.service";
 import {
   requireAdminAuth,
@@ -38,6 +39,7 @@ const OPERATIONS_TOOLS = [
 const DEVELOPER_TOOLS = [
   "supacloud.get_capabilities",
   "supacloud.get_application_development",
+  "supacloud.get_deployment_evidence",
 ] as const;
 
 function rpcResult(id: JsonRpcId | undefined, result: unknown): Record<string, unknown> {
@@ -184,6 +186,24 @@ async function callTool(
     }
   }
 
+  if (name === "supacloud.get_deployment_evidence") {
+    const ref = scopedRef(scope, params);
+    if (!ref) throw new Error("project_ref is required for deployment evidence");
+    const applicationId = requiredIdentifier(params, "application_id");
+    const environmentId = requiredIdentifier(params, "environment_id");
+    const evidence = await new ApplicationDeploymentEvidenceStorage().read(ref, applicationId, environmentId);
+    return {
+      content: textContent(JSON.stringify({
+        schema: "supacloud.deployment-evidence-result.v1",
+        read_only: true,
+        project_ref: ref,
+        application_id: applicationId,
+        environment_id: environmentId,
+        evidence,
+      }, null, 2)),
+    };
+  }
+
   throw new Error(`Unknown MCP tool: ${name}`);
 }
 
@@ -272,6 +292,20 @@ export async function processMessage(message: JsonRpcRequest, scope: McpScope, s
               target: { type: "string", description: "Delivery target name" },
             },
             required: ["application_id", "release_id", "target"],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: "supacloud.get_deployment_evidence",
+          description: "Read the project-scoped single-node deployment evidence without executing an operation.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              project_ref: { type: "string" },
+              application_id: { type: "string" },
+              environment_id: { type: "string" },
+            },
+            required: ["application_id", "environment_id"],
             additionalProperties: false,
           },
         },
