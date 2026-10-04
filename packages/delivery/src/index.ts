@@ -26,6 +26,14 @@ export type {
   ApplicationConfiguration, ApplicationConfigurationWrite, ApplicationConfigurationView, ApplicationConfigurationScope,
 } from "./application-configuration";
 export {
+  DEPLOYMENT_EVIDENCE_SCHEMA, DatabaseProviderSchema, DeploymentComponentEvidenceSchema,
+  DeploymentEvidenceSchema, deriveDeploymentEvidenceStatus, formatDeploymentEvidence,
+  parseDeploymentEvidence,
+} from "./deployment-evidence";
+export type {
+  DatabaseProviderEvidence, DeploymentComponentEvidence, DeploymentEvidence, DeploymentEvidenceStatus,
+} from "./deployment-evidence";
+export {
   APPLICATION_RUNTIME_PROBE_PATH, ApplicationRuntimeIdentitySchema, parseApplicationRuntimeIdentity,
   ApplicationReadinessReportSchema, parseApplicationReadinessReport,
 } from "./application-runtime-identity";
