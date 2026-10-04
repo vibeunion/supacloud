@@ -36,7 +36,7 @@ function scopePath(): string {
 const health = await readJson("/health");
 const runtime = await readJson(`${scopePath()}/runtime`);
 let evidenceResponse = await readJson(`${scopePath()}/deployment-evidence`);
-if (refresh && evidenceResponse.status === 200) {
+if (refresh) {
   evidenceResponse = await readJson(`${scopePath()}/deployment-evidence/refresh`, "POST");
 }
 const backups = await readJson(`/v1/projects/${encodeURIComponent(projectRef)}/database/backups`);
