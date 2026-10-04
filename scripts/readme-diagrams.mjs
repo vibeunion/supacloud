@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 export const root = fileURLToPath(new URL('../', import.meta.url));
 export const assetDir = 'docs/assets/readme';
-export const locales = ['en', 'zh-CN'];
+export const locales = ['en', 'zh-CN', 'es-ES'];
 export const names = ['overview', 'build-runtime', 'project-storage'];
 export const escapeXml = (text) => String(text).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
 
@@ -15,7 +15,7 @@ export function validateLabels(labels) {
     if (typeof value !== 'string' || !value.trim()) throw new Error('Expected non-empty text');
     return 'text';
   };
-  if (JSON.stringify(Object.keys(labels).sort()) !== JSON.stringify([...locales].sort())) throw new Error('Expected en and zh-CN');
+  if (JSON.stringify(Object.keys(labels).sort()) !== JSON.stringify([...locales].sort())) throw new Error('Expected en, zh-CN and es-ES');
   for (const locale of locales) {
     if (JSON.stringify(Object.keys(labels[locale]).sort()) !== JSON.stringify([...names].sort())) throw new Error('Unexpected diagram names');
   }

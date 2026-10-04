@@ -8,10 +8,10 @@
 
 ## README refresh status
 
-The English and Simplified Chinese homepages and platform operations guides are synchronized in this refresh. Spanish retains its previous structure; synchronization is explicitly pending in [issue #1504](https://github.com/vibeunion/supacloud/issues/1504). Do not treat the Spanish page as synchronized with the new architecture and compatibility sections until that task is reviewed.
+The English, Simplified Chinese and Spanish homepages are synchronized in this refresh. Spanish is translated from the canonical English structure; commands, paths, API names and configuration keys remain unchanged. Spanish figures are maintained as `es-ES` outputs from the shared renderer and label table.
 
 ## Technical figures
 
-English and Simplified Chinese figures share the renderer in `scripts/readme-diagrams.mjs` and the label table in `docs/assets/readme/labels.json`. Keep node order, edges, technical names, captions and alternative text consistent. Edit sources and regenerate both languages; do not hand-edit a single generated SVG.
+English, Simplified Chinese and Spanish figures share the renderer in `scripts/readme-diagrams.mjs` and the label table in `docs/assets/readme/labels.json`. Keep node order, edges, technical names, captions and alternative text consistent. Edit sources and regenerate all languages; do not hand-edit a single generated SVG. The Spanish labels are maintained directly in the label table and the figures identify themselves with `xml:lang="es-ES"`.
 
 Run the [README checks](readme-visuals.md) after changes. Structural parity checks do not replace human translation or architecture review. Adding a new figure locale requires updating the renderer's locale contract, tests and README references together.
