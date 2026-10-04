@@ -56,10 +56,18 @@ describe("worker resource delivery", () => {
       { environmentFile: "/etc/$SECRET" }, { runtimePath: "/bin/bun --eval" },
       { runtimePath: "/bin/bun\n" }, { user: "worker\n" },
       { projectRef: "project-a\nRestart=no" }, { connectionString: "secret" },
+      { artifactDirectory: "/etc" }, { artifactDirectory: "/var/lib/scw/other" },
     ]) expect(() => parseWorkerDelivery({ ...manifest, ...patch })).toThrow("WORKER_DELIVERY_INVALID");
     expect(() => parseWorkerDelivery({})).toThrow();
     expect(() => parseWorkerDelivery(null)).toThrow();
     expect(() => parseWorkerDelivery([])).toThrow();
+  });
+
+  test("a local artifact recipe grants write access only to its project directory", () => {
+    const unit = renderWorkerService({ ...manifest, artifactDirectory: "/var/lib/scw/project-a/artifacts" });
+    expect(unit).toContain("ReadWritePaths=/var/lib/scw/project-a/artifacts");
+    expect(unit).toContain("SCW_ARTIFACT_DIRECTORY=/var/lib/scw/project-a/artifacts");
+    expect(unit).toContain("ProtectSystem=strict");
   });
 
   test("missing or malformed runtime limits fail before connecting", async () => {

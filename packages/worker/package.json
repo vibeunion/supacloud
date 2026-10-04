@@ -14,6 +14,18 @@
     "./delivery": {
       "types": "./dist/delivery.d.ts",
       "import": "./dist/delivery.js"
+    },
+    "./admission": {
+      "types": "./dist/admission.d.ts",
+      "import": "./dist/admission.js"
+    },
+    "./telemetry": {
+      "types": "./dist/telemetry.d.ts",
+      "import": "./dist/telemetry.js"
+    },
+    "./native": {
+      "types": "./dist/native.d.ts",
+      "import": "./dist/native.js"
     }
   },
   "files": [
@@ -31,6 +43,9 @@
     "delivery:render": "bun scripts/delivery.ts",
     "performance:check": "bun scripts/performance.ts",
     "test:delivery": "bun test tests/delivery.test.ts",
+    "test:runtime": "bun test tests/runtime.test.ts",
+    "admission:render": "bun scripts/admission.ts",
+    "check:runtime": "tsc -p tsconfig.runtime.json",
     "build": "tsc -p tsconfig.json",
     "test": "bun test tests/worker.test.ts"
   },

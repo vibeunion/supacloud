@@ -32,6 +32,7 @@ export async function withPgflowDatabase(
     sql: SQL,
     url: string,
     install: (project?: string) => Promise<string>,
+    psql: (script: string) => Promise<string>,
   ) => Promise<void>,
 ): Promise<void> {
   const name = `supacloud-pgflow-${crypto.randomUUID()}`;
@@ -134,7 +135,8 @@ export async function withPgflowDatabase(
         renderInstall(migrations, project, "postgres"),
       );
     await install();
-    await run(sql, url, install);
+    await run(sql, url, install, script =>
+      docker(["exec", "-i", name, "psql", "-X", "-v", "ON_ERROR_STOP=1", "-U", "postgres", "-d", "postgres"], script));
   } catch (error) {
     console.error(await docker(["logs", "--tail", "35", name]));
     throw error;

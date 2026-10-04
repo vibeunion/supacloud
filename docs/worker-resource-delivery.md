@@ -2,7 +2,9 @@
 
 Status: optional, private worker integration. This delivers configuration and
 measurement evaluation, not a managed service or a customer capacity guarantee.
-No Go runtime, second scheduler, task ledger or automatic deployment is added.
+No mandatory Go runtime, second scheduler, task ledger or automatic deployment
+is added. Optional recipes, admission and local runtime acceptance are described
+in [Worker Runtime Recipes](worker-runtime-recipes.md).
 
 ## Scope And Acceptance
 
@@ -124,8 +126,8 @@ external side effect. Restart rate limiting can require operator intervention.
 - A separate process does not isolate database I/O, disk contention or an
   overloaded remote service. Apply workload-specific query timeouts, short
   transactions and storage limits where those resources are owned.
-- Queue admission control/backpressure is NOT implemented by these limits.
-  Enforce enqueue quotas in the authorized producer before high-volume rollout.
+- Process limits are not queue admission control. Route trusted producers through
+  the optional transactional admission helper before high-volume rollout.
 - The filesystem is read-only except private temporary storage. Handlers should
   use object storage; persistent local filesystem workloads need a separately
   reviewed profile.
@@ -155,8 +157,9 @@ unconstrained closed-loop benchmark can conceal saturation.
 The evaluator consumes measurements; it is NOT a load generator, profiler or
 telemetry collector. It checks baseline and mixed throughput, P95/P99,
 error rate, tail-latency regression, sample/window minimums, batch completion
-and peak oldest queued-message age. Stage-level tracing, queue admission
-controls and crash-recovery evidence remain separate work.
+and peak oldest queued-message age. The companion recipe adds stage histograms,
+admission controls and opt-in recovery/load acceptance without running anything
+against customer systems implicitly.
 
 Input shape is shown in
 `packages/worker/examples/performance-evidence.json`. That deliberately
@@ -194,5 +197,6 @@ git diff --check
 
 This single focused file covers unsafe configurations, runtime limit forwarding,
 CLI errors, percentile calculation and fail-closed measurement gates. It does
-not start a Linux service or run customer load. Live capacity and recovery gates
-must stay explicitly unaccepted until measured on the approved environment.
+not start a Linux service or run customer load. The separate opt-in runtime
+test exercises disposable local infrastructure. Customer capacity/recovery
+gates remain unaccepted until measured on the approved environment.

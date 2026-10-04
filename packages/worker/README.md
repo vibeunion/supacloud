@@ -14,6 +14,9 @@ or start it. `bun run performance:check` evaluates supplied baseline/mixed-load
 measurements, not synthetic capacity claims. See
 [`worker-resource-delivery.md`](../../docs/worker-resource-delivery.md) for
 manifests, deployment/readback, rollback and the unaccepted live gates.
+The companion [runtime recipes](../../docs/worker-runtime-recipes.md) include
+transactional admission, health/metrics, checkpointed CSV export, an optional
+Go Accounting normalizer and opt-in real database/container acceptance.
 
 ## Ownership
 
