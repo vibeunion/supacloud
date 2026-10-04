@@ -10,7 +10,7 @@ const read = file => readFileSync(resolve(root,file),'utf8');
 const labels = JSON.parse(read(`${assetDir}/labels.json`));
 const clone = () => structuredClone(labels);
 
-test('all six checked-in SVGs match deterministic generation', () => generate(true));
+test('all nine checked-in SVGs match deterministic generation', () => generate(true));
 test('translated figures keep identical geometry and accessible text', () => {
   const geometry = svg => svg.replace(/(<(?:title|desc|text)\b[^>]*>)[\s\S]*?(<\/(?:title|desc|text)>)/g,'$1$2').replace(/xml:lang="[^"]+"/g,'xml:lang="locale"');
   for (const name of names) {
@@ -52,6 +52,7 @@ test('check mode rejects stale assets without rewriting them', () => {
 });
 test('homepage and operations commands remain identical across languages', () => {
   checkParity(read('README.md'),read('README.zh-CN.md'),'README');
+  checkParity(read('README.md'),read('README.es-ES.md'),'README Spanish');
   checkParity(read('docs/platform-operations.md'),read('docs/platform-operations.zh-CN.md'),'operations');
   assert.deepEqual(sectionIds(read('README.md')),['goals','choose','start','architecture','compatibility','docs','license']);
   assert.equal(codeBlocks(read('README.md')).length,4);
@@ -59,7 +60,7 @@ test('homepage and operations commands remain identical across languages', () =>
   assert.throws(() => checkParity('<!-- section:a -->','<!-- section:b -->','README'),/order/);
 });
 test('homepages use three localized figures with meaningful alternatives', () => {
-  for (const [file,locale] of [['README.md','en'],['README.zh-CN.md','zh-CN']]) {
+  for (const [file,locale] of [['README.md','en'],['README.zh-CN.md','zh-CN'],['README.es-ES.md','es-ES']]) {
     const text = read(file), images = links(text).filter(l => l.image);
     assert.deepEqual(images.map(l => l.target),names.map(n => `${assetDir}/${n}.${locale}.svg`));
     assert.ok(images.every(l => l.label.length > 20));
@@ -85,8 +86,8 @@ test('local link checks reject missing paths, fragments, escapes and empty alter
     assert.equal(validateLinks('[x](%ZZ.md)','README.md',repo).length,1);
   } finally { rmSync(repo,{recursive:true,force:true}); }
 });
-test('Spanish synchronization is explicitly tracked instead of claimed complete', () => {
+test('Spanish synchronization is complete and explicitly identified', () => {
   const text = read('docs/translation-policy.md');
-  assert.match(text,/synchronization is explicitly pending/);
-  assert.match(text,/https:\/\/github.com\/vibeunion\/supacloud\/issues\/1504/);
+  assert.match(text,/English, Simplified Chinese and Spanish homepages are synchronized/);
+  assert.doesNotMatch(text,/issue #1504/);
 });

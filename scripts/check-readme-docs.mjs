@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { generate, root } from './readme-diagrams.mjs';
 
 export const documents = [
-  'README.md', 'README.zh-CN.md',
+  'README.md', 'README.zh-CN.md', 'README.es-ES.md',
   'docs/platform-operations.md', 'docs/platform-operations.zh-CN.md',
   'docs/self-hosted-stable-baseline.md', 'docs/self-hosted-stable-baseline.zh-CN.md',
   'docs/readme-visuals.md', 'docs/translation-policy.md',
@@ -51,6 +51,7 @@ export function checkDocumentation(repo = root) {
   const read = path => readFileSync(resolve(repo,path),'utf8');
   generate(true,repo);
   checkParity(read('README.md'),read('README.zh-CN.md'),'README');
+  checkParity(read('README.md'),read('README.es-ES.md'),'README Spanish');
   checkParity(read('docs/platform-operations.md'),read('docs/platform-operations.zh-CN.md'),'operations');
   const errors = documents.flatMap(path => validateLinks(read(path),path,repo));
   if (errors.length) throw new Error(errors.join('\n'));

@@ -84,5 +84,48 @@
       ],
       "note": "已绑定后端发生故障时返回错误，不会回退到平台存储。"
     }
+  },
+  "es-ES": {
+    "overview": {
+      "title": "Ingeniería de aplicaciones. Operaciones autoalojadas.",
+      "description": "La capa de desarrollo define y compila módulos de negocio. Lite es un runtime Bun y PGlite de un solo proyecto; la plataforma completa administra varios proyectos en Pigsty. No son tres ediciones intercambiables.",
+      "subtitle": "Desarrolla con contratos explícitos. Elige el alojamiento según la carga.",
+      "lane": "OPCIONES DE ALOJAMIENTO / LÍMITES OPERATIVOS DIFERENTES",
+      "cards": [
+        ["Ingeniería de aplicaciones", "@supacloud/app  +  @supacloud/compiler  +  @supacloud/elysia", "Módulos de negocio, cableado estático, esquemas y clientes generados", "Las políticas de negocio y la autorización a nivel de objeto siguen siendo responsabilidad de la aplicación"],
+        ["SupaCloud Lite", "Bun + PGlite / un proyecto por proceso", "REST, Auth, Storage, Realtime, Functions", "Desarrollo local y despliegues pequeños", "Sin plano de control multi-proyecto ni Studio"],
+        ["Plataforma SupaCloud", "Pigsty / varios proyectos aislados", "Management API, Web Console, Admin CLI", "Gateway, entrega y observabilidad", "Infraestructura compartida, responsabilidad del operador"]
+      ],
+      "note": "La capa de desarrollo no es una edición de alojamiento; este resumen no implica paridad de despliegue."
+    },
+    "build-runtime": {
+      "title": "De las declaraciones de la aplicación a la ejecución",
+      "description": "Las declaraciones de la aplicación pasan por el compilador y producen artefactos generados. En ejecución, el host Elysia consume los módulos compilados e invoca servicios propiedad de la aplicación. El host sigue instalando Elysia; los módulos de negocio no necesitan importar tipos nativos de Elysia.",
+      "subtitle": "El cableado estático y el alojamiento HTTP tienen responsabilidades separadas.",
+      "compileLane": "TIEMPO DE COMPILACIÓN",
+      "runtimeLane": "EJECUCIÓN",
+      "cards": [
+        ["Declaraciones de la aplicación", "@supacloud/app", "Módulos, esquemas y aspectos", "Límites propiedad del negocio"],
+        ["Compilador estático", "@supacloud/compiler", "Análisis y diagnósticos", "Cableado explícito de dependencias"],
+        ["Artefactos generados", "Fábricas y contratos de rutas", "Cliente tipado y OpenAPI", "El runtime usa módulos compilados"],
+        ["Servicios de la aplicación", "Política de negocio", "Autorización y persistencia", "Pruebas de aceptación del negocio"],
+        ["Invocación compilada", "Contexto de solicitud explícito", "Fábricas generadas", "Hooks de gobernanza declarados"],
+        ["Host HTTP / adaptador", "@supacloud/elysia", "El host sigue instalando Elysia", "Validación de entrada y salida"]
+      ],
+      "note": "Compilar no demuestra la corrección del negocio ni la compatibilidad con frameworks HTTP arbitrarios."
+    },
+    "project-storage": {
+      "title": "Un backend de almacenamiento por proyecto",
+      "description": "La autorización de Storage API precede al enrutamiento mediante un projectRef confiable. Los proyectos sin binding conservan el almacenamiento de la plataforma; los proyectos A y B usan bindings S3 independientes con endpoint, credenciales, bucket físico y prefijo propios. Los bindings fallidos nunca recurren a otro almacenamiento.",
+      "subtitle": "Aislamiento por proyecto, no selección de origen a nivel de bucket ni failover automático.",
+      "cards": [
+        ["Storage API", "Identidad de proyecto confiable", "Autorización / RLS", "Bucket lógico + objeto"],
+        ["Router vinculado al proyecto", "Resolver por projectRef", "Un backend por proyecto", "Cliente de operación inmutable"],
+        ["Proyecto sin binding", "Driver existente de la plataforma", "Diseño existente de bucket / claves"],
+        ["Proyecto A / S3 A", "Endpoint y credenciales propios", "Bucket físico + prefijo raíz"],
+        ["Proyecto B / S3 B", "Endpoint y credenciales propios", "Bucket físico + prefijo raíz"]
+      ],
+      "note": "Un fallo del backend configurado es un error: nunca se recurre al almacenamiento de la plataforma."
+    }
   }
 }
