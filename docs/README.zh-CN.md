@@ -9,6 +9,7 @@
 - [部署指南](./deploy-guide.md) - 完整部署使用指南
 - [部署 API](./deploy-api.md) - 自动化部署 API 参考
 - [配置文件示例](./supacloud.yml.example) - 部署与运行配置文件示例
+- [自托管稳定基线](./self-hosted-stable-baseline.zh-CN.md) - 主产品边界、首要支持组合、验收门与证据状态
 - [SupaCloud 与 Supabase 对比](./supacloud-vs-supabase.md) - 产品定位与核心特性差异对比
 - [数据库环境晋级](./database-environment-promotion.md) - 本地、预览、Staging 与生产环境迁移流
 
@@ -71,4 +72,5 @@
 
 ## 产品定位
 
+- [自托管稳定基线](./self-hosted-stable-baseline.zh-CN.md) - 自托管多项目主产品及其发布验收契约 ([English](./self-hosted-stable-baseline.md))
 - [SupaCloud 与 Supabase 对比](./supacloud-vs-supabase.md) - 何时选择 SupaCloud、Supabase Cloud 或官方自建 Supabase

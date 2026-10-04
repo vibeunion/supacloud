@@ -2,7 +2,22 @@
 
 [English](platform-operations.md) | [简体中文](platform-operations.zh-CN.md) · [Project overview](../README.md)
 
-This guide collects the full-platform entry points previously embedded in the root README. For Lite's single-process state, upgrades and snapshots, use the [Lite guide](../packages/supacloud-lite/README.md).
+This guide covers the primary Full Platform product. Read the
+[Self-Hosted Stable Baseline](self-hosted-stable-baseline.md) first for the
+supported profile, acceptance gates, and evidence states. For Lite's
+single-process state, upgrades and snapshots, use the
+[Lite guide](../packages/supacloud-lite/README.md).
+
+## Primary supported profile
+
+The first stable platform baseline is Linux with systemd, using the native
+Pigsty `v4.5.0` / PostgreSQL 18 path, SupaCloud-managed Caddy, and published
+verified artifacts. The primary acceptance target is Ubuntu 24.04 LTS on
+`amd64`; other installer paths and `arm64` require separate evidence.
+
+This single-host profile does not claim high availability. Compose, Lite, and
+other operating systems remain bounded compatibility paths, not equivalent
+proof of the primary platform release.
 
 ## Before installation
 
@@ -112,6 +127,12 @@ Frontend releases use immutable archive hashes and activation compare-and-swap v
 Embedded Edge Runtime is managed by `supacloud.service`; external mode uses `supacloud-edge-runtime.service`. Do not run both at once. Public `/functions/v1/*` and `/realtime/v1/websocket` traffic enters Management API, not worker/Realtime internals directly. See [background functions](background-functions.md).
 
 Caddy routing is published as validated JSON through its Admin API, not by hand-editing a production Caddyfile. See [gateway ownership and recovery](gateway-customization.md). [pgredis-runtime](pgredis-runtime.md) is a private data plane: browsers do not call its internal port and workers do not receive PostgreSQL credentials. PGMQ remains the platform queue.
+
+The current data-plane boundary is not yet an outage-survival guarantee:
+public Functions and Realtime requests enter Management API, and Storage is
+served through Management API routes. A future control-plane failure drill
+must prove which already-running project traffic survives and which traffic is
+expected to stop.
 
 ## Storage, recovery and observability
 

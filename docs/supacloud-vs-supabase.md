@@ -1,8 +1,8 @@
 # SupaCloud vs Supabase
 
-This document compares **SupaCloud**, **Supabase Cloud**, and **Supabase Self-Hosted** from an operator and product-integration perspective. SupaCloud's product target is project-level functional and protocol compatibility with Supabase Cloud.
+This document compares **SupaCloud**, **Supabase Cloud**, and **Supabase Self-Hosted** from an operator and product-integration perspective. SupaCloud's primary product is a self-hosted multi-project application platform. Project-level functional and protocol compatibility with Supabase Cloud is a compatibility target, not the product definition.
 
-It is intentionally focused on what each option **ships as a built-in capability**, not what can theoretically be assembled with extra tooling.
+It is intentionally focused on what each option **ships as a built-in capability**, not what can theoretically be assembled with extra tooling. A capability listed as built-in still requires the release and acceptance evidence described in [Self-Hosted Stable Baseline](self-hosted-stable-baseline.md).
 
 ## Executive summary
 
