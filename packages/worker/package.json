@@ -35,6 +35,7 @@
     "test": "bun test tests/worker.test.ts"
   },
   "dependencies": {
+    "@supacloud/delivery": "file:../delivery",
     "libpg-query": "17.7.4",
     "@pgflow/core": "0.16.0",
     "@pgflow/edge-worker": "0.16.0",

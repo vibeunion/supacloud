@@ -92,6 +92,8 @@ export class ApplicationReleaseStorage {
         name: object.name, object_id: object.objectId,
         kind: object.entryKind === "bun-worker-application" ? "worker" : "http",
         entrypoint: object.entrypoint,
+        ...(archive.manifest.plan.targets.find(target => target.name === object.name)?.execution
+          ? { execution: archive.manifest.plan.targets.find(target => target.name === object.name)!.execution } : {}),
       })),
     };
     const staging = await mkdtemp(join(directory, ".incoming-"));
@@ -202,6 +204,8 @@ export class ApplicationReleaseStorage {
         name: object.name, object_id: object.objectId,
         kind: object.entryKind === "bun-worker-application" ? "worker" : "http",
         entrypoint: object.entrypoint,
+        ...(archive.manifest.plan.targets.find(target => target.name === object.name)?.execution
+          ? { execution: archive.manifest.plan.targets.find(target => target.name === object.name)!.execution } : {}),
       })))) invalid();
     return { record, archive };
   }

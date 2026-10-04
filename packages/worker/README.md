@@ -15,6 +15,14 @@ measurements, not synthetic capacity claims. See
 [`worker-resource-delivery.md`](../../docs/worker-resource-delivery.md) for
 manifests, deployment/readback, rollback and the unaccepted live gates.
 
+## Managed Execution Groups
+
+Managed execution groups add versioned routing, bounded resources, atomic
+admission and a report-export integration sample. See
+[`worker-execution-groups.md`](../../docs/worker-execution-groups.md) for the
+systemd backend, operator budgets, migration/grants, limits and local acceptance.
+The package remains private; this is not a production capacity claim.
+
 ## Ownership
 
 - Application HTTP/RPC: authenticate, authorize the entity, validate revision,

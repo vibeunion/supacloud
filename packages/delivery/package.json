@@ -6,6 +6,12 @@
   "main": "./dist/index.js",
   "types": "./src/index.ts",
   "exports": {
+    "./worker-execution": {
+      "types": "./src/worker-execution.ts",
+      "supacloud-source": "./src/worker-execution.ts",
+      "bun": "./src/worker-execution.ts",
+      "import": "./dist/worker-execution.js"
+    },
     ".": {
       "types": "./src/index.ts",
       "supacloud-source": "./src/index.ts",
@@ -51,7 +57,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun build src/index.ts src/delivery-schema.ts src/delivery-build-schema.ts src/delivery-files.ts src/delivery-artifact.ts src/application-activation.ts src/application-development.ts --outdir dist --target node --splitting",
+    "build": "bun build src/index.ts src/worker-execution.ts src/delivery-schema.ts src/delivery-build-schema.ts src/delivery-files.ts src/delivery-artifact.ts src/application-activation.ts src/application-development.ts --outdir dist --target node --splitting",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "prepublishOnly": "bun run build"
