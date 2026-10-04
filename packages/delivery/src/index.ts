@@ -1,6 +1,11 @@
 import { readDeliveryManifest, readVerifiedDeliveryFiles } from "./delivery-artifact";
 import type { DeliveryBuildManifest, DeliveryObject } from "./delivery-build-schema";
 export {
+  WorkerExecutionGroupSchema, WorkerExecutionSchema, parseWorkerExecutionGroup,
+  validateWorkerExecution, workerResourceUsage, assertWorkerBudget, resolveWorkerRoute,
+} from "./worker-execution";
+export type { WorkerExecutionGroup, WorkerExecution, WorkerResourceUsage } from "./worker-execution";
+export {
   ApplicationActivationIdSchema, ApplicationActivationWriteSchema, ApplicationActivationResultSchema,
   ApplicationActivationRetirementResultSchema,
 } from "./application-activation";

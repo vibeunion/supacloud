@@ -1,42 +1,59 @@
-import type { SQL, TransactionSQL } from "bun";
-
-export type AdmissionDecision<T> =
-  | { replay: true; value: T }
-  | { replay: false; value: T; idempotencyKey: string; input: unknown };
-
-export class AdmissionError extends Error {
-  readonly retryAfterSeconds = 1;
-  constructor(readonly code: string) { super(code); }
+export interface WorkerTransaction {
+  query(text: string, parameters?: readonly (string | number | boolean | null)[]): Promise<unknown>;
+}
+export interface WorkerAdmission {
+  projectRef: string;
+  group: string;
+  operationId: string;
 }
 
-/** The callback must authorize and persist intent using ONLY this short transaction. */
-export async function submitBoundedTask<T>(
-  sql: SQL,
-  binding: { projectRef: string; queueName: string; taskKey: string },
-  prepare: (transaction: TransactionSQL) => Promise<AdmissionDecision<T>>,
-): Promise<{ value: T; messageId: string | null; replay: boolean }> {
-  try {
-    return await sql.begin("isolation level read committed", async tx => {
-      await tx`SET LOCAL lock_timeout = '2s'`;
-      await tx`SET LOCAL statement_timeout = '5s'`;
-      const decision = await prepare(tx);
-      if (decision.replay) return { value: decision.value, messageId: null, replay: true };
-      const input = JSON.stringify(decision.input);
-      if (input === undefined || Buffer.byteLength(input) > 65536)
-        throw new AdmissionError("WORKER_PAYLOAD_TOO_LARGE");
-      const [row] = await tx<{ id: string }[]>`
-        SELECT supacloud_worker.enqueue_bounded(${binding.projectRef},${binding.queueName},
-          ${binding.taskKey},${decision.idempotencyKey},${input}::text::jsonb) AS id`;
-      if (!row || !/^[1-9][0-9]*$/.test(row.id)) throw new AdmissionError("WORKER_ADMISSION_FAILED");
-      return { value: decision.value, messageId: row.id, replay: false };
-    });
-  } catch (error) {
-    if (error instanceof AdmissionError) throw error;
-    if (error instanceof Error && [
-      "WORKER_ADMISSION_INVALID", "WORKER_ADMISSION_NOT_CONFIGURED", "WORKER_PAYLOAD_TOO_LARGE",
-      "WORKER_QUEUE_FULL", "WORKER_PROJECT_FULL", "WORKER_RATE_LIMITED",
-    ].includes(error.message)) throw new AdmissionError(error.message);
-    // Do not echo SQL, connection strings or driver diagnostics through the business API.
-    throw new AdmissionError("WORKER_ADMISSION_FAILED");
+function parameters(binding: WorkerAdmission) {
+  if (!/^[a-z0-9][a-z0-9-]{0,99}$/.test(binding.projectRef)
+    || !/^[a-z][a-z0-9-]{0,47}$/.test(binding.group)
+    || !/^[A-Za-z0-9_.:@/-]{1,200}$/.test(binding.operationId)) {
+    throw new Error("WORKER_ADMISSION_INVALID");
   }
+  return [binding.projectRef, binding.group, binding.operationId];
+}
+
+/** Call inside the same transaction as domain intent and durable queue/outbox submission. */
+export async function admitWorkerOperation(
+  transaction: WorkerTransaction, binding: WorkerAdmission, fingerprint: string,
+): Promise<{ admitted: boolean }> {
+  if (!/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error("WORKER_ADMISSION_INVALID");
+  const rows = await transaction.query(
+    "SELECT supacloud_worker.admit_operation($1,$2,$3,$4) AS admitted", [...parameters(binding), fingerprint],
+  );
+  if (!Array.isArray(rows) || rows.length !== 1 || !rows[0] || typeof rows[0] !== "object"
+    || !("admitted" in rows[0]) || typeof rows[0].admitted !== "boolean") {
+    throw new Error("WORKER_ADMISSION_RESULT_INVALID");
+  }
+  return { admitted: rows[0].admitted };
+}
+
+/** Unknown, pending and cancellation-requested outcomes must retain their token. */
+export async function releaseWorkerOperation(
+  transaction: WorkerTransaction, binding: WorkerAdmission,
+  terminal: (transaction: WorkerTransaction) => Promise<"succeeded" | "failed" | "cancelled" | "unknown" | "pending">,
+): Promise<void> {
+  const args = parameters(binding);
+  const state = await terminal(transaction);
+  if (!["succeeded", "failed", "cancelled"].includes(state)) throw new Error("WORKER_OPERATION_NOT_TERMINAL");
+  await transaction.query("SELECT supacloud_worker.release_operation($1,$2,$3)", args);
+}
+
+/** Operator/compatibility check. Pause admission first; never delete or move an old queue here. */
+export async function requireDrainedWorkerGroup(transaction: WorkerTransaction, projectRef: string, group: string, queue: string) {
+  parameters({ projectRef, group, operationId: "drain" });
+  if (!/^scw_[a-z0-9_]{1,40}$/.test(queue)) throw new Error("WORKER_ADMISSION_INVALID");
+  const result = await transaction.query(`SELECT l.accepting,l.outstanding,
+    (SELECT count(*)::integer FROM supacloud_worker.admission_tokens t
+      WHERE t.group_name=l.group_name AND NOT t.released) AS held,
+    (SELECT queue_length FROM pgmq.metrics($3)) AS queued
+    FROM supacloud_worker.admission_limits l
+    WHERE l.group_name=$2 AND EXISTS(SELECT FROM supacloud_worker.installation WHERE singleton AND project_ref=$1)
+    FOR UPDATE OF l`, [projectRef, group, queue]);
+  if (!Array.isArray(result) || result.length !== 1 || !result[0] || typeof result[0] !== "object"
+    || result[0].accepting !== false || result[0].outstanding !== 0
+    || result[0].held !== 0 || ![0, "0", 0n].includes(result[0].queued)) throw new Error("WORKER_GROUP_NOT_DRAINED");
 }

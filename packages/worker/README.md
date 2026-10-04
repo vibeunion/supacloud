@@ -18,6 +18,14 @@ The companion [runtime recipes](../../docs/worker-runtime-recipes.md) include
 transactional admission, health/metrics, checkpointed CSV export, an optional
 Go Accounting normalizer and opt-in real database/container acceptance.
 
+## Managed Execution Groups
+
+Managed execution groups add versioned routing, bounded resources, atomic
+admission and a report-export integration sample. See
+[`worker-execution-groups.md`](../../docs/worker-execution-groups.md) for the
+systemd backend, operator budgets, migration/grants, limits and local acceptance.
+The package remains private; this is not a production capacity claim.
+
 ## Ownership
 
 - Application HTTP/RPC: authenticate, authorize the entity, validate revision,

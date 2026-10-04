@@ -2,6 +2,7 @@ import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { DeliveryDiagnosticSchema, DeliveryFilePathSchema, DeliveryPlanSchema } from "./delivery-schema";
 import { canonical, digest as hash } from "./delivery-files";
+import { validateWorkerExecution } from "./worker-execution";
 
 const closed = { additionalProperties: false } as const;
 const digest = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -68,6 +69,15 @@ export function deliveryObjectDigest(object: Pick<DeliveryObject, "inputDigest" 
 
 export function parseDeliveryBuildManifest(value: unknown): DeliveryBuildManifest {
   if (!Value.Check(DeliveryBuildManifestSchema, value)) throw new Error("Invalid delivery build manifest.");
+  validateWorkerExecution(value.plan.targets.flatMap(target => target.execution ? [target.execution] : []));
+  for (const target of value.plan.targets) {
+    if (target.execution && (target.kind !== "jobs" || target.isolation !== "process"
+      || target.execution.target !== target.name || target.jobs.length !== 1
+      || target.jobs[0]?.name !== target.execution.taskKey
+      || value.objects.find(object => object.name === target.name)?.entryKind !== "bun-worker-application")) {
+      throw new Error("Invalid delivery execution binding.");
+    }
+  }
   if (new Set(value.objects.map((item) => item.name)).size !== value.objects.length) {
     throw new Error("Duplicate delivery object owner.");
   }

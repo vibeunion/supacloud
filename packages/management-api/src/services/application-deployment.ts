@@ -26,6 +26,10 @@ export interface ApplicationDeploymentDependencies {
     environment: ApplicationTargetEnvironment;
     migrations: Awaited<ReturnType<ApplicationMigrations["inspect"]>>;
   }): Promise<void>;
+  /** Observe paused admission, zero held operations and an empty old queue before retiring a route. */
+  verifyWorkerRetirement?(input: {
+    runtime: ApplicationRuntimeInput; previous: ApplicationActiveRecord;
+  }): Promise<void>;
   mutations?: ApplicationActivationMutations;
   storage?: ApplicationReleaseStorage;
   files?: Pick<ApplicationRuntimeFiles, "prepare">;
@@ -84,11 +88,28 @@ export class ApplicationDeploymentService {
       checkCompatibility: async (input, previous, environment) => {
         const release = await storage.readRelease(input.release.project_ref, input.release.application_id, input.release.release_id);
         if (stableStringify(release) !== stableStringify(input.release)) throw new Error("APPLICATION_RUNTIME_RELEASE_MISMATCH");
+        if (release.targets.some(target => target.execution)) {
+          if (!this.allocations.read) throw new Error("WORKER_ALLOCATION_REQUIRED");
+          const allocation = await this.allocations.read(release.project_ref, input.activationId);
+          if (!allocation || allocation.retiredAt || stableStringify(allocation.runtime) !== stableStringify(input)) {
+            throw new Error("WORKER_ALLOCATION_REQUIRED");
+          }
+        }
         if (previous) {
           traffic(previous);
           const previousPorts = new Set(Object.values(previous.runtime.ports));
           if (Object.values(input.ports).some(port => previousPorts.has(port))) {
             throw new Error("APPLICATION_DEPLOYMENT_PORT_CONFLICT");
+          }
+          const removed = previous.runtime.release.targets.some(target => target.execution
+            && !input.release.targets.some(next => next.execution
+              && next.execution.queue === target.execution!.queue
+              && next.execution.taskKey === target.execution!.taskKey
+              && next.execution.definitionVersion === target.execution!.definitionVersion
+              && next.execution.name === target.execution!.name));
+          if (removed) {
+            if (!dependencies.verifyWorkerRetirement) throw new Error("WORKER_RETIREMENT_VERIFIER_REQUIRED");
+            await dependencies.verifyWorkerRetirement({ runtime: structuredClone(input), previous: structuredClone(previous) });
           }
         }
         const report = await migrations.inspect(input.release.project_ref, input.release.application_id, input.release.release_id);

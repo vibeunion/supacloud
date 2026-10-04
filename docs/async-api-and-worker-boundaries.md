@@ -11,6 +11,11 @@ The implementation in `packages/worker` is an optional pgflow process adapter.
 Existing queue, task, command, workflow and approval APIs retain their owners.
 No existing run is migrated or consumed by a new engine implicitly.
 
+Execution-group policies now extend delivery targets and their existing
+process adapter. They do not change task authority or introduce another
+scheduler. See [worker execution groups](worker-execution-groups.md) for
+resource enforcement, admission and rollout constraints.
+
 ## Workspace Inventory And Direction
 
 | Capability | Existing owner | Public surface | Direction |

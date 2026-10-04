@@ -6,6 +6,7 @@ export function renderDeliveryWorkerEntry(generatedDirectory: string, hostPath: 
   const specifier = relativeImportPath(generatedDirectory, hostPath);
   return `
 import deliveryProcess from "node:process";
+import { isDeepStrictEqual as deliveryPolicyEqual } from "node:util";
 import { createDeliveryWorker } from ${JSON.stringify(specifier)};
 ${renderDeliveryRuntimeIdentity()}
 
@@ -13,6 +14,8 @@ interface DeliveryWorkerHost {
   start(): void | Promise<void>;
   close(): void | Promise<void>;
   failure?: Promise<never>;
+  execution?: unknown;
+  health?(): Promise<{ ready: boolean; active: number; completed: number; failed: number; timedOut: number }>;
 }
 
 {
@@ -24,6 +27,7 @@ interface DeliveryWorkerHost {
   let closing: Promise<void> | undefined;
   let deadline: ReturnType<typeof setTimeout> | undefined;
   let keepAlive: ReturnType<typeof setInterval> | undefined;
+  let healthPending = false;
   const finish = (failed: boolean) => {
     clearTimeout(deadline);
     clearInterval(keepAlive);
@@ -84,6 +88,13 @@ interface DeliveryWorkerHost {
     const candidate = await createHost(createCompiledModules(), { signal: lifecycle.signal });
     if (!candidate || typeof candidate.close !== "function") throw new Error("Invalid delivery worker host.");
     host = candidate;
+    const execution = deliveryProcess.env.SUPACLOUD_WORKER_EXECUTION;
+    if (execution) {
+      const expected: unknown = JSON.parse(Buffer.from(execution, "base64").toString("utf8"));
+      if (!deliveryPolicyEqual(host.execution, expected) || typeof host.health !== "function" || !host.failure) {
+        throw new Error("Delivery worker execution policy was not adopted.");
+      }
+    }
     if (typeof host.start !== "function") throw new Error("Invalid delivery worker host.");
     if (host.failure !== undefined) {
       if (!host.failure || typeof host.failure.then !== "function") throw new Error("Invalid worker failure signal.");
@@ -95,7 +106,18 @@ interface DeliveryWorkerHost {
       await finishShutdown();
     } else {
       running = true;
-      keepAlive = setInterval(() => {}, 1000);
+      const health = async () => {
+        if (!execution || !host?.health || healthPending || lifecycle.signal.aborted) return;
+        healthPending = true;
+        try {
+          const status = await host.health();
+          console.log(JSON.stringify({ event: "delivery-worker-health", identity, observedAt: new Date().toISOString(), ...status }));
+        } catch {
+          console.log(JSON.stringify({ event: "delivery-worker-health", identity, observedAt: new Date().toISOString(), ready: false }));
+        } finally { healthPending = false; }
+      };
+      keepAlive = setInterval(() => { void health(); }, execution ? 5000 : 1000);
+      await health();
       console.log(JSON.stringify({ event: "delivery-worker-started", ...(identity ? { identity } : {}) }));
     }
   } catch {

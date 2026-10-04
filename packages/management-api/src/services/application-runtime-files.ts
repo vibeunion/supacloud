@@ -19,11 +19,11 @@ async function durableFile(path: string, content: string | Uint8Array, mode: num
 }
 
 function environments(plan: ApplicationRuntimePlan, input: ApplicationTargetEnvironment): Map<string, string> {
-  if (Object.keys(input).sort().join("\0") !== plan.targets.map(target => target.name).sort().join("\0")) {
+  if (Object.keys(input).sort().join("\0") !== [...new Set(plan.targets.map(target => target.sourceTarget ?? target.name))].sort().join("\0")) {
     throw new Error("APPLICATION_RUNTIME_ENVIRONMENT_MISMATCH");
   }
   return new Map(plan.targets.map(target => {
-    const values = input[target.name]!;
+    const values = input[target.sourceTarget ?? target.name]!;
     const lines = Object.entries(values).sort(([a], [b]) => a.localeCompare(b)).map(([name, value]) => {
       if (typeof value !== "string" || APPLICATION_RESERVED_ENVIRONMENT_NAMES.has(name)) {
         throw new Error("APPLICATION_RUNTIME_ENVIRONMENT_INVALID");

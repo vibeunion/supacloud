@@ -190,6 +190,21 @@ export function createDeliveryPlan(
     }
   }
 
+  for (const group of options.execution?.groups ?? []) {
+    const target = targets.get(group.target);
+    if (!target || target.kind !== "jobs" || target.isolation !== "process"
+      || target.jobs.length !== 1 || target.jobs[0]?.name !== group.taskKey
+      || !options.build?.workerApplications?.some(item => item.target === group.target)) {
+      fail("delivery-execution-binding-invalid", `Execution group "${group.name}" requires one matching compiled Job and a Worker host.`,
+        "Bind one versioned queue/task to one process-isolated jobs target with build.workerApplications.");
+    } else {
+      target.execution = group;
+    }
+  }
+  if ([...targets.values()].reduce((count, target) => count + (target.execution?.replicas ?? 1), 0) > 32) {
+    fail("delivery-execution-replica-limit", "A release supports at most 32 runtime targets including replicas.",
+      "Reduce the replica count or split independent applications.");
+  }
   const canonicalDiagnostics = [...new Map(diagnostics.map((item) => [JSON.stringify(item), item])).values()]
     .sort((a, b) => compare(JSON.stringify(a), JSON.stringify(b)));
   if (canonicalDiagnostics.some((item) => item.severity === "error")) {
