@@ -5,6 +5,16 @@ and `@pgflow/dsl` 0.16.0 packages. Not yet a published or deployed platform
 service. This package does not reimplement polling, retry, concurrency, queue
 acknowledgement or DAG execution.
 
+## Resource Delivery
+
+Use the optional `@supacloud/worker/delivery` entry point to bootstrap a queue
+worker from explicit environment limits. `bun run delivery:render` renders a
+dedicated Linux systemd unit with CPU/memory/process limits; it does not install
+or start it. `bun run performance:check` evaluates supplied baseline/mixed-load
+measurements, not synthetic capacity claims. See
+[`worker-resource-delivery.md`](../../docs/worker-resource-delivery.md) for
+manifests, deployment/readback, rollback and the unaccepted live gates.
+
 ## Ownership
 
 - Application HTTP/RPC: authenticate, authorize the entity, validate revision,

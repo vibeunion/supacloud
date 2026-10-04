@@ -1,0 +1,18 @@
+{
+  "projectRef": "project-a",
+  "queueName": "scw_reports",
+  "taskKey": "report.generate",
+  "user": "scw-project-a",
+  "runtimePath": "/usr/local/bin/bun",
+  "releaseDirectory": "/opt/scw/project-a/releases/candidate-001",
+  "entrypoint": "/opt/scw/project-a/releases/candidate-001/worker.ts",
+  "environmentFile": "/etc/scw/project-a.env",
+  "concurrency": 4,
+  "maxPgConnections": 4,
+  "visibilityTimeoutSeconds": 300,
+  "retryLimit": 5,
+  "cpuQuotaPercent": 100,
+  "memoryMaxMiB": 512,
+  "tasksMax": 64,
+  "stopTimeoutSeconds": 30
+}
