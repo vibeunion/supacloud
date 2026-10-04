@@ -20,6 +20,7 @@ on:
       - "packages/elysia/**"
       - "packages/db/**"
       - "packages/testing/**"
+      - "packages/worker/**"
       - "docker/**"
       - "scripts/**"
       - "package.json"
@@ -232,6 +233,14 @@ jobs:
               bun run typecheck
               bun test
               bun run build
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Worker Delivery
+            working-directory: packages/worker
+            script: |
+              bun install --frozen-lockfile
+              bun run build
+              bun test
+              bun run test:delivery
               bun run ../../scripts/audit_dependencies.ts
           - name: Admin CLI
             working-directory: packages/admin

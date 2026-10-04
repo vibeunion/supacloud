@@ -19,6 +19,8 @@ export interface ProcessWorkerOptions {
   connectionString: string;
   concurrency?: number;
   maxPgConnections?: number;
+  /** Environment source used for startup validation; defaults to process.env. */
+  environment?: Readonly<Record<string, string | undefined>>;
 }
 export interface QueueWorkerOptions extends ProcessWorkerOptions, QueueBinding {
   visibilityTimeoutSeconds?: number;
@@ -62,7 +64,10 @@ function config(options: ProcessWorkerOptions) {
     pollIntervalMs: 200,
   });
 }
-function preflight(projectRef: string): void {
+function preflight(
+  projectRef: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): void {
   if (
     typeof process === "undefined" ||
     "Deno" in globalThis ||
@@ -117,7 +122,7 @@ export function createPgflowQueueWorker<T>(
   };
   const execute = createQueueHandler(options, handler);
   return createLifecycle(async () => {
-    preflight(projectRef);
+    preflight(projectRef, options.environment);
     const { EdgeWorker } = await import("@pgflow/edge-worker");
     return EdgeWorker.startQueueWorker(execute, queueConfig);
   });

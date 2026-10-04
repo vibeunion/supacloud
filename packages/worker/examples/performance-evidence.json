@@ -1,0 +1,38 @@
+{
+  "evidence": {
+    "candidate": "SYNTHETIC-EXAMPLE-NOT-CUSTOMER-ACCEPTANCE",
+    "hardware": "fixture-only",
+    "workload": "example-report-batch",
+    "rawArtifact": "fixture-only"
+  },
+  "limits": {
+    "minWindowSeconds": 10,
+    "minRequests": 100,
+    "minRps": 10,
+    "maxP95Ms": 150,
+    "maxP99Ms": 200,
+    "maxP99Ratio": 2,
+    "maxErrorRate": 0,
+    "maxBatchSeconds": 60,
+    "maxOldestQueueAgeSeconds": 30
+  },
+  "baseline": {
+    "startedAtMs": 1000000,
+    "seconds": 10,
+    "latenciesMs": [50, 50, 50],
+    "errors": 0
+  },
+  "mixed": {
+    "startedAtMs": 1020000,
+    "seconds": 10,
+    "latenciesMs": [80, 80, 80],
+    "errors": 0
+  },
+  "batch": {
+    "startedAtMs": 1020000,
+    "expected": 20,
+    "completed": 20,
+    "seconds": 30,
+    "peakOldestQueueAgeSeconds": 10
+  }
+}
