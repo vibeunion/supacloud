@@ -19,6 +19,7 @@ export {
   type TaskContext,
   type TaskHandler,
 } from "./queue-handler.js";
+export * from "./scriptc.js";
 
 export interface ProcessWorkerOptions {
   readonly projectRef: string;
@@ -86,8 +87,11 @@ function preflight(
   }
   if (
     process.env.SUPACLOUD_PROJECT_REF !== projectRef ||
-    !process.env.SUPABASE_URL ||
-    !process.env.SUPABASE_SERVICE_ROLE_KEY
+    environment.SUPACLOUD_PROJECT_REF !== projectRef ||
+    !environment.SUPABASE_URL ||
+    !environment.SUPABASE_SERVICE_ROLE_KEY ||
+    environment.SUPABASE_URL !== process.env.SUPABASE_URL ||
+    environment.SUPABASE_SERVICE_ROLE_KEY !== process.env.SUPABASE_SERVICE_ROLE_KEY
   ) {
     throw new Error("WORKER_PROJECT_ENV_REQUIRED");
   }
@@ -155,7 +159,7 @@ export function createPgflowWorker<TFlow extends AnyFlow>(
   if (!/^scw_[a-z0-9_]{1,40}$/.test(flow.slug))
     throw new Error("WORKER_FLOW_INVALID");
   return createLifecycle(async () => {
-    preflight(projectRef);
+    preflight(projectRef, options.environment);
     const { EdgeWorker } = await import("@pgflow/edge-worker");
     return EdgeWorker.startFlowWorker(flow, flowConfig);
   });

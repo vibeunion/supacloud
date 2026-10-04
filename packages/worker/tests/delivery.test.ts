@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   parseWorkerDelivery, renderWorkerService, startQueueWorkerFromEnvironment,
 } from "../src/delivery.js";
+import { resolveScriptcPath } from "../src/scriptc.js";
 import { evaluateWorkerPerformance } from "../src/performance.js";
 import manifest from "../examples/worker-delivery.json" with { type: "json" };
 import sampleEvidence from "../examples/performance-evidence.json" with { type: "json" };
@@ -56,10 +57,46 @@ describe("worker resource delivery", () => {
       { environmentFile: "/etc/$SECRET" }, { runtimePath: "/bin/bun --eval" },
       { runtimePath: "/bin/bun\n" }, { user: "worker\n" },
       { projectRef: "project-a\nRestart=no" }, { connectionString: "secret" },
+      { artifactDirectory: "/etc" }, { artifactDirectory: "/var/lib/scw/other" },
     ]) expect(() => parseWorkerDelivery({ ...manifest, ...patch })).toThrow("WORKER_DELIVERY_INVALID");
     expect(() => parseWorkerDelivery({})).toThrow();
     expect(() => parseWorkerDelivery(null)).toThrow();
     expect(() => parseWorkerDelivery([])).toThrow();
+  });
+
+  test("a local artifact recipe grants write access only to its project directory", () => {
+    const unit = renderWorkerService({ ...manifest, artifactDirectory: "/var/lib/scw/project-a/artifacts" });
+    expect(unit).toContain("ReadWritePaths=/var/lib/scw/project-a/artifacts");
+    expect(unit).toContain("SCW_ARTIFACT_DIRECTORY=/var/lib/scw/project-a/artifacts");
+    expect(unit).toContain("ProtectSystem=strict");
+  });
+
+  test("renders scriptc as a native executable under the same resource policy", () => {
+    const scriptcManifest = {
+      ...manifest,
+      runtime: "scriptc" as const,
+      runtimePath: "/opt/scw/project-a/releases/candidate-001/worker",
+      entrypoint: "/opt/scw/project-a/releases/candidate-001/worker",
+    };
+    const unit = renderWorkerService(scriptcManifest);
+    expect(unit).toContain(
+      "ExecStart=/usr/bin/env SUPACLOUD_PROJECT_REF=project-a SUPACLOUD_WORKER_QUEUE=scw_reports "
+      + "SUPACLOUD_WORKER_TASK=report.generate SUPACLOUD_WORKER_CONCURRENCY=4 "
+      + "SUPACLOUD_WORKER_PG_CONNECTIONS=4 SUPACLOUD_WORKER_VISIBILITY_SECONDS=300 "
+      + "SUPACLOUD_WORKER_RETRY_LIMIT=5 /opt/scw/project-a/releases/candidate-001/worker",
+    );
+    expect(unit).not.toContain("--no-env-file");
+    expect(() => parseWorkerDelivery({
+      ...scriptcManifest,
+      entrypoint: "/opt/scw/project-a/releases/candidate-001/other",
+    })).toThrow("WORKER_DELIVERY_INVALID");
+  });
+
+  test("scriptc path is optional and never becomes a package dependency", () => {
+    expect(resolveScriptcPath({ SUPACLOUD_SCRIPTC_PATH: "/opt/tool/scriptc" }))
+      .toBe("/opt/tool/scriptc");
+    expect(() => resolveScriptcPath({ SUPACLOUD_SCRIPTC_PATH: "" }))
+      .toThrow("WORKER_SCRIPTC_INVALID");
   });
 
   test("missing or malformed runtime limits fail before connecting", async () => {

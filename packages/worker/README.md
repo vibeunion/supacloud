@@ -14,6 +14,10 @@ or start it. `bun run performance:check` evaluates supplied baseline/mixed-load
 measurements, not synthetic capacity claims. See
 [`worker-resource-delivery.md`](../../docs/worker-resource-delivery.md) for
 manifests, deployment/readback, rollback and the unaccepted live gates.
+The companion [runtime recipes](../../docs/worker-runtime-recipes.md) include
+health/metrics, optional native Go and scriptc runtimes, and delivery
+verification. Managed admission and report export are documented in
+[`worker-execution-groups.md`](../../docs/worker-execution-groups.md).
 
 ## Managed Execution Groups
 
@@ -29,6 +33,8 @@ The package remains private; this is not a production capacity claim.
   commit the business intent and return an operation receipt.
 - `@supacloud/js`: existing remote task/queue/workflow protocol clients.
 - `@supacloud/worker`: start a project-scoped, dedicated Node/Bun worker process.
+  Delivery also supports opt-in native Go and scriptc Worker executables under
+  the same supervisor and resource contract.
 - pgflow: queue or native Flow execution, retry scheduling and worker lifecycle.
 - Domain commands: side-effect idempotency, artifact storage, business state.
 

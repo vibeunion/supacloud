@@ -1,0 +1,27 @@
+[Unit]
+Description=SupaCloud optional accounting normalizer
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=scw-native
+EnvironmentFile=/etc/scw/native.env
+ExecStart=/opt/scw/native/current/accounting-worker
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+KillMode=control-group
+CPUQuota=100%
+MemoryMax=128M
+MemorySwapMax=0
+TasksMax=64
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

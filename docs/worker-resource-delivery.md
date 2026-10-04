@@ -2,7 +2,9 @@
 
 Status: optional, private worker integration. This delivers configuration and
 measurement evaluation, not a managed service or a customer capacity guarantee.
-No Go runtime, second scheduler, task ledger or automatic deployment is added.
+No mandatory Go or scriptc runtime, second scheduler, task ledger or automatic
+deployment is added. Optional recipes, admission and local runtime acceptance
+are described in [Worker Runtime Recipes](worker-runtime-recipes.md).
 
 ## Scope And Acceptance
 
@@ -51,10 +53,16 @@ does not prove a report, payment or device operation succeeded.
 The helper requires all queue limits from the environment and forwards them
 to the existing pgflow adapter. It neither implements polling nor installs
 another signal handler. pgflow owns cooperative shutdown and queue retries.
+An explicit environment object does not replace upstream's process environment:
+its project, endpoint and credential must match the actual process identity.
+Mismatches fail before claiming a process or connecting to the engine.
 
 ## Render And Deploy
 
-Use `packages/worker/examples/worker-delivery.json` as a non-secret manifest.
+Use `packages/worker/examples/worker-delivery.json` as a non-secret Bun
+manifest. Native Go or scriptc Workers use the same fields with
+`runtime: "go"` or `runtime: "scriptc"` and point `runtimePath` and
+`entrypoint` to the same immutable executable.
 All values are explicit example settings, not customer sizing recommendations.
 One manifest/service binds one project and queue. The entrypoint must reside
 inside the declared release directory. Use an immutable release directory,
@@ -84,8 +92,9 @@ grants using [the installation procedure](pgflow-installation.md). Startup
 never installs them.
 
 Generated `ExecStart` sets the non-secret project/queue/pool configuration
-after loading the environment file. Bun runs with `--no-env-file`, so a
-release-local `.env` cannot silently override these settings.
+after loading the environment file. Bun runs with `--no-env-file`; native
+Go/scriptc executables run directly. A release-local `.env` cannot silently
+override these settings.
 
 On a Linux systemd host, after identifying the approved environment and
 reading `hostname` and `hostname -I`:
@@ -124,8 +133,8 @@ external side effect. Restart rate limiting can require operator intervention.
 - A separate process does not isolate database I/O, disk contention or an
   overloaded remote service. Apply workload-specific query timeouts, short
   transactions and storage limits where those resources are owned.
-- Queue admission control/backpressure is NOT implemented by these limits.
-  Enforce enqueue quotas in the authorized producer before high-volume rollout.
+- Process limits are not queue admission control. Route trusted producers through
+  the optional transactional admission helper before high-volume rollout.
 - The filesystem is read-only except private temporary storage. Handlers should
   use object storage; persistent local filesystem workloads need a separately
   reviewed profile.
@@ -155,8 +164,9 @@ unconstrained closed-loop benchmark can conceal saturation.
 The evaluator consumes measurements; it is NOT a load generator, profiler or
 telemetry collector. It checks baseline and mixed throughput, P95/P99,
 error rate, tail-latency regression, sample/window minimums, batch completion
-and peak oldest queued-message age. Stage-level tracing, queue admission
-controls and crash-recovery evidence remain separate work.
+and peak oldest queued-message age. The companion recipe adds stage histograms,
+admission controls and opt-in recovery/load acceptance without running anything
+against customer systems implicitly.
 
 Input shape is shown in
 `packages/worker/examples/performance-evidence.json`. That deliberately
@@ -194,5 +204,6 @@ git diff --check
 
 This single focused file covers unsafe configurations, runtime limit forwarding,
 CLI errors, percentile calculation and fail-closed measurement gates. It does
-not start a Linux service or run customer load. Live capacity and recovery gates
-must stay explicitly unaccepted until measured on the approved environment.
+not start a Linux service or run customer load. The separate opt-in runtime
+test exercises disposable local infrastructure. Customer capacity/recovery
+gates remain unaccepted until measured on the approved environment.
