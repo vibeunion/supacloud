@@ -128,8 +128,8 @@ test('cache refuses dangling output links and symlinked nested output paths', (t
 test('all legacy consumer preparation closures preserve their previous artifact prerequisites', () => {
   const w=readWorkspace(resolve(import.meta.dirname,'../..'));
   const original={
-    'supacloud-js':['compiler','contracts','delivery'], 'supacloud-lite':['contracts','supacloud-js','commands','delivery','compiler','db','app','elysia'],
-    app:['contracts'],compiler:['contracts','delivery'],db:['contracts','commands','delivery','compiler'],
+    'supacloud-js':['compiler','contracts','delivery','query'], 'supacloud-lite':['contracts','supacloud-js','commands','delivery','compiler','db','app','elysia','query'],
+    app:['contracts'],compiler:['contracts','delivery','query'],db:['contracts','commands','delivery','compiler'],
     commands:['contracts'],'app-svelte':['contracts'],elysia:['contracts','commands','delivery','compiler','db','app'],
   };
   const find=alias=>Object.values(w.projects).find(p=>p.root===`packages/${alias}`);
