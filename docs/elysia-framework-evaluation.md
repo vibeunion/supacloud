@@ -103,3 +103,36 @@ The prototype is successful when a new application can:
 It is not yet a complete AdonisJS replacement. Database adapters, auth,
 background jobs, documentation and deployment remain SupaCloud integrations,
 not responsibilities of the bootstrap helper.
+
+## Elysia 2 AOT evaluation & SupaCloud compiler alignment
+
+Elysia 2 introduces build-time Ahead-Of-Time (AOT) compilation by shifting route
+handler and schema compilation from server startup to build time via
+plugins (e.g. `elysia/plugin/aot` across Bun, Vite, webpack, unplugin).
+
+### Relationship with SupaCloud Compiler
+
+SupaCloud Compiler and Elysia AOT operate at distinct abstraction layers:
+- **SupaCloud Compiler (Macro / Domain layer)**: responsible for module graph
+  resolution, permission guard injection, schema contract validation, and
+  producing pure declarative router code.
+- **Elysia AOT (Micro / Transport layer)**: responsible for dry-running the
+  generated router skeleton, inlining TypeBox validations, pre-generating HTTP
+  handler execution code, and producing a static route manifest bundle.
+
+They are strictly complementary. SupaCloud does not duplicate HTTP route JIT/AOT
+optimizations, and Elysia AOT does not handle multi-tenant domain boundaries.
+
+### Critical constraint: Build-time side-effect isolation
+
+Because Elysia AOT executes a dry-run import of the application instance at build
+time to extract routes:
+1. **Zero top-level I/O**: Bootstrapping routes must never trigger top-level
+   database connections, remote config pulls, message broker binds, or read
+   production-only secrets during module evaluation.
+2. **Factory-based instantiation**: Router definition (`createRouter()`) must be
+   separated from runtime initialization (`app.listen()`).
+3. **Static route determination**: All routes and plugins exposed to AOT must be
+   statically deterministic at build time; dynamic runtime-only routes must
+   remain explicitly isolated.
+
