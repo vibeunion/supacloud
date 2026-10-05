@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { isDeepStrictEqual } from "node:util";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { projectRefPathSegment } from "../project-ref";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";

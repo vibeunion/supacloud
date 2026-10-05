@@ -12,7 +12,7 @@ import {
 import { homedir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { optional, stringEnum } from "../schema";
 import type { ToolSchema } from "../schema";
 

@@ -1,7 +1,7 @@
 /**
  * Advanced — Split into 3 compound tools: edge_functions, secrets, platform
  */
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
 import { createFullPhysicalBackup, listPhysicalBackups } from "./backup-release-control";

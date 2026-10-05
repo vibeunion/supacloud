@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, test } from 'bun:test';
-import { Value } from '@sinclair/typebox/value';
-import { Type } from '@sinclair/typebox';
+import { Value } from 'typebox/value';
+import { Type } from 'typebox';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';

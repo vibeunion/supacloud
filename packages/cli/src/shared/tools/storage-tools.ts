@@ -1,6 +1,6 @@
 import { existsSync, openAsBlob, readFileSync, statSync } from "node:fs";
 import { basename, resolve } from "node:path";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";

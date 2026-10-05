@@ -1,5 +1,5 @@
 import { setup, transition } from 'xstate';
-import { Value } from '@sinclair/typebox/value';
+import { Value } from 'typebox/value';
 import {
   ApprovalContractError, decodeApprovalDefinition, immutableData,
   EvaluationSchema, ObservationSchema, InputSchema,

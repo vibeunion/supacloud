@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { readdir } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { compileProject } from "@supacloud/compiler";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
