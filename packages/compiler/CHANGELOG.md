@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.33.0...compiler-v0.34.0) (2026-10-04)
+
+
+### Features
+
+* **supacloud-js:** add framework-neutral TanStack Query adapter ([#1637](https://github.com/vibeunion/supacloud/issues/1637)) ([071b28c](https://github.com/vibeunion/supacloud/commit/071b28c5ce992834f46a0608d68475eb295c5c3e))
+
 ## [0.33.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.32.0...compiler-v0.33.0) (2026-10-04)
 
 

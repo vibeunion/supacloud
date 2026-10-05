@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/vibeunion/supacloud/compare/app-svelte-v0.4.0...app-svelte-v0.5.0) (2026-10-04)
+
+
+### Features
+
+* **supacloud-js:** add framework-neutral TanStack Query adapter ([#1637](https://github.com/vibeunion/supacloud/issues/1637)) ([071b28c](https://github.com/vibeunion/supacloud/commit/071b28c5ce992834f46a0608d68475eb295c5c3e))
+
 ## [0.4.0](https://github.com/vibeunion/supacloud/compare/app-svelte-v0.3.2...app-svelte-v0.4.0) (2026-10-02)
 
 
