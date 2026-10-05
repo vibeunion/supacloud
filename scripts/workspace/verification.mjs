@@ -3,7 +3,7 @@ import { preparationTargets, resolveProject } from './model.mjs';
 // Verification-only consumers not expressed by production package dependencies.
 // Do not turn these into runtime dependencies or add them to repo-build.
 const additional = {
-  '@supacloud/compiler': ['contracts'],
+  '@supacloud/compiler': ['contracts', 'query'],
   '@supacloud/db': ['commands', 'compiler'],
   '@supacloud/lite': ['supacloud-js'],
   '@supacloud/js': ['compiler'],

@@ -1,18 +1,22 @@
 export {
   createQueryAdapter,
   createQueryKey,
-} from "./adapter";
+  createProcedureClient,
+} from "./adapter.js";
 export type {
+  QueryAdapter,
+  ProcedureSource,
+  ProceduresOf,
   ProcedureQueryLike,
   ProcedureMutateLike,
   QueryProcedureAdapter,
   MutateProcedureAdapter,
-} from "./adapter";
-export { invalidateByTags } from "./invalidation";
+} from "./adapter.js";
+export { invalidateByTags } from "./invalidation.js";
 export type {
   QueryKey,
   QueryOptionsResult,
   MutationOptionsResult,
   QueryClientLike,
   QueryAdapterOptions,
-} from "./types";
+} from "./types.js";

@@ -14,17 +14,20 @@
   },
   "files": [
     "NOTICE",
-    "LICENSE",
+    "LICENSE-APACHE-2.0.txt",
     "dist",
     "README.md"
   ],
   "scripts": {
-    "build": "bun build src/index.ts --outdir dist --target browser && bunx tsc -p tsconfig.json --emitDeclarationOnly",
+    "build": "bun run build:js && bun run build:types",
+    "build:js": "bun build src/index.ts --outdir dist --target browser --external @tanstack/query-core",
+    "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "prepublishOnly": "bun run build"
   },
   "peerDependencies": {
-    "@tanstack/query-core": ">=5.0.0"
+    "@tanstack/query-core": "^5.104.1"
   },
   "peerDependenciesMeta": {
     "@tanstack/query-core": {
@@ -32,8 +35,15 @@
     }
   },
   "devDependencies": {
+    "@tanstack/query-core": "5.104.1",
     "@types/bun": "^1.4.2",
     "typescript": "^7.0.2"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "engines": { "node": ">=22.12.0" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vibeunion/supacloud.git",
+    "directory": "packages/query"
+  }
 }

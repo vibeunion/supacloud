@@ -7,6 +7,7 @@ on:
       - "packages/management-api/**"
       - "packages/web-console/**"
       - "packages/supacloud-js/**"
+      - "packages/query/**"
       - "packages/edge-runtime/**"
       - "packages/pgredis-runtime/**"
       - "packages/supacloud-lite/**"
@@ -194,6 +195,14 @@ jobs:
               bun run build
               bun run typecheck:consumer
               bun test
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Query Adapter
+            working-directory: packages/query
+            script: |
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun test test/query-adapter.test.ts
+              bun run build
               bun run ../../scripts/audit_dependencies.ts
           - name: Edge Runtime
             working-directory: packages/edge-runtime

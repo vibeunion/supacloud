@@ -1,28 +1,48 @@
 # @supacloud/query
 
-TanStack Query adapter for SupaCloud procedure clients, providing deterministic query keys, `queryOptions`, `mutationOptions`, and explicit tag-based cache invalidation.
-
-## Usage
+Typed, grouped TanStack Query options for compiler-generated SupaCloud clients.
+Requires a regenerated client exposing `procedureClient`. Existing REST methods,
+`API_PROCEDURES`, and `client.procedures` metadata remain unchanged.
 
 ```ts
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { createApiClient } from "./generated/client";
 import { createQueryAdapter } from "@supacloud/query";
+import { createSupaCloudProcedureClient } from "@supacloud/js";
+import { createApiClient } from "./generated/client";
 
-const client = createApiClient({ baseUrl: "/api" });
-const api = createQueryAdapter(client);
-
-// 1. Query options with deterministic sorted queryKey
-const { data, isLoading } = useQuery(
-  api.items.get.queryOptions({ tenantId: "t1", id: 1 })
+const client = createSupaCloudProcedureClient({
+  supabase,
+  functionName: "application",
+  generated: createApiClient,
+});
+const api = createQueryAdapter(client, {
+  keyPrefix: [projectRef, tenantId, userId],
+  queryClient,
+});
+const detail = api.items.detail.queryOptions(
+  { params: { id: "item-1" } },
+  { tags: ["items"] },
 );
-
-// 2. Mutation options with explicit tag invalidation
-const queryClient = useQueryClient();
-const acceptCase = useMutation(
-  api.cases.accept.mutationOptions({
-    queryClient,
-    invalidateTags: ["cases"],
-  })
-);
+const mutation = api.items.accept.mutationOptions({
+  invalidateTags: ["items"],
+});
+await mutation.mutationFn({
+  input: { params: { id: "item-1" } },
+  execution: { idempotencyKey: "attempt-1" },
+});
 ```
+
+Inputs retain explicit `params`, `query`, `body`, `headers`, and `cookie`
+sections. Required parameters and idempotency keys are checked by TypeScript.
+No flat-input guessing, Supabase private-field inspection, or automatic mutation
+retry is performed. Supabase auth/refresh and Functions transport remain owned by
+`createSupaCloudProcedureClient`.
+
+Recreate the adapter when project, tenant, or actor changes. Query keys snapshot
+JSON inputs; mutation keys never contain execution keys. Cancellation is propagated
+without claiming that a cancelled write rolled back. Tags are explicit and adapter
+invalidation is limited to its identity prefix. A custom success callback does not
+disable configured invalidation.
+
+The SDK also accepts `apiClient` in `createSupaCloudClient`, or
+`sdk.withClient(client)`. Both preserve inferred procedure types and expose
+`queryAdapter({ keyPrefix, queryClient })`.

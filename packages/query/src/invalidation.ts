@@ -1,4 +1,4 @@
-import type { QueryClientLike } from "./types";
+import type { QueryClientLike, QueryKey } from "./types.js";
 
 /**
  * Invalidate cached queries matching explicit tags.
@@ -8,10 +8,12 @@ import type { QueryClientLike } from "./types";
 export async function invalidateByTags(
   queryClient: QueryClientLike,
   tags: string | readonly string[],
+  keyPrefix?: QueryKey,
 ): Promise<void> {
   const targetTags = Array.isArray(tags) ? tags : [tags];
   if (targetTags.length === 0) return;
   await queryClient.invalidateQueries({
+    ...(keyPrefix ? { queryKey: keyPrefix } : {}),
     predicate: (query) => {
       const queryTags = query.meta?.tags as readonly string[] | undefined;
       if (!Array.isArray(queryTags)) return false;

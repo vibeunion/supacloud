@@ -1,85 +1,79 @@
-import { describe, expect, test } from "bun:test";
-import { createQueryAdapter, createQueryKey, invalidateByTags } from "../src";
+import { expect, test } from "bun:test";
+import { QueryClient } from "@tanstack/query-core";
+import { createQueryAdapter, createQueryKey } from "../src/index.js";
 
-describe("@supacloud/query", () => {
-  test("createQueryKey creates deterministic sorted keys", () => {
-    const key1 = createQueryKey("items.get", { id: 1, filter: "active" });
-    const key2 = createQueryKey("items.get", { filter: "active", id: 1 });
-    expect(key1).toEqual(key2);
-    expect(key1).toEqual(["items.get", { filter: "active", id: 1 }]);
-
-    const keyWithPrefix = createQueryKey("items.get", { id: 1 }, ["my-app"]);
-    expect(keyWithPrefix).toEqual(["my-app", "items.get", { id: 1 }]);
+function fixture() {
+  const calls: unknown[] = [];
+  const query = Object.assign(async (input: { params: { id: string } }, execution?: { signal?: AbortSignal }) => {
+    calls.push({ input, execution });
+    return { id: input.params.id };
+  }, {
+    __supacloudInput: undefined as { params: { id: string } } | undefined,
+    __supacloudProcedure: { key: "Items.get", kind: "query" as const, method: "GET", path: "/items/:id", idempotency: "none" as const },
   });
-
-  test("createQueryAdapter produces queryOptions and mutationOptions", async () => {
-    let queriedInput: unknown;
-    let mutatedInput: unknown;
-    let mutatedOptions: unknown;
-
-    const mockClient = {
-      procedures: {
-        items: {
-          get: {
-            operationId: "items.get",
-            kind: "query" as const,
-            tags: ["items"],
-            query: async (input: unknown) => {
-              queriedInput = input;
-              return { id: 1, name: "item1" };
-            },
-          },
-          create: {
-            operationId: "items.create",
-            kind: "command" as const,
-            tags: ["items"],
-            mutate: async (input: unknown, options: unknown) => {
-              mutatedInput = input;
-              mutatedOptions = options;
-              return { id: 2, name: "created" };
-            },
-          },
-        },
-      },
-    };
-
-    const adapter = createQueryAdapter(mockClient);
-
-    // Test queryOptions
-    const qOptions = adapter.items.get.queryOptions({ id: 1 });
-    expect(qOptions.queryKey).toEqual(["items.get", { id: 1 }]);
-    expect(qOptions.meta?.tags).toEqual(["items"]);
-
-    const queryResult = await qOptions.queryFn({});
-    expect(queryResult).toEqual({ id: 1, name: "item1" });
-    expect(queriedInput).toEqual({ id: 1 });
-
-    // Test mutationOptions
-    const mOptions = adapter.items.create.mutationOptions();
-    expect(mOptions.mutationKey).toEqual(["items.create"]);
-    expect(mOptions.meta?.tags).toEqual(["items"]);
-
-    const mutateResult = await mOptions.mutationFn({ input: { name: "new" }, options: { idempotencyKey: "k1" } });
-    expect(mutateResult).toEqual({ id: 2, name: "created" });
-    expect(mutatedInput).toEqual({ name: "new" });
-    expect(mutatedOptions).toEqual({ idempotencyKey: "k1" });
+  const mutate = Object.assign(async (input: { body: { id: string } }, execution: { idempotencyKey: string }) => {
+    calls.push({ input, execution });
+    return { id: input.body.id };
+  }, {
+    __supacloudInput: undefined as { body: { id: string } } | undefined,
+    __supacloudProcedure: { key: "Items.save", kind: "mutation" as const, method: "POST", path: "/items", idempotency: "required" as const },
   });
+  return { calls, client: { procedureClient: { items: { get: { query }, save: { mutate } } } } };
+}
 
-  test("explicit tag-based invalidation invalidates matching query tags", async () => {
-    const invalidatedPredicates: Array<(query: any) => boolean> = [];
-    const mockQueryClient = {
-      invalidateQueries: async ({ predicate }: any) => {
-        invalidatedPredicates.push(predicate);
-      },
-    };
+test("query options retain immutable inputs and tenant-scoped keys", async () => {
+  const { calls, client } = fixture();
+  const adapter = createQueryAdapter(client, { keyPrefix: ["project", "tenant", "actor"] });
+  const input = { params: { id: "before" } };
+  const options = adapter.items.get.queryOptions(input, { tags: ["items"] });
+  input.params.id = "after";
+  expect(await options.queryFn({})).toEqual({ id: "before" });
+  expect(calls).toHaveLength(1);
+  expect(options.meta.tags).toEqual(["items"]);
+  expect(createQueryKey("get", { b: 2, a: 1 }, ["tenant"]))
+    .toEqual(createQueryKey("get", { a: 1, b: 2 }, ["tenant"]));
+  expect(() => createQueryAdapter(client, { keyPrefix: [""] })).toThrow("identity");
+});
 
-    await invalidateByTags(mockQueryClient, ["items", "orders"]);
-    expect(invalidatedPredicates.length).toBe(1);
+test("writes require an explicit key and never inherit retries", async () => {
+  const { calls, client } = fixture();
+  const adapter = createQueryAdapter(client, { keyPrefix: ["tenant"] });
+  const options = adapter.items.save.mutationOptions();
+  expect(options.retry).toBe(false);
+  // @ts-expect-error A required execution key cannot be omitted.
+  await expect(options.mutationFn({ input: { body: { id: "1" } } })).rejects.toThrow("idempotencyKey");
+  expect(calls).toHaveLength(0);
+  expect(await options.mutationFn({ input: { body: { id: "1" } }, execution: { idempotencyKey: "attempt-1" } }))
+    .toEqual({ id: "1" });
+});
 
-    const predicate = invalidatedPredicates[0]!;
-    expect(predicate({ queryKey: ["a"], meta: { tags: ["items"] } })).toBe(true);
-    expect(predicate({ queryKey: ["b"], meta: { tags: ["users"] } })).toBe(false);
-    expect(predicate({ queryKey: ["c"], meta: { tags: ["orders", "reports"] } })).toBe(true);
-    expect(predicate({ queryKey: ["d"], meta: {} })).toBe(false);
+test("tag invalidation is scoped and still runs with a custom onSuccess", async () => {
+  const { client } = fixture();
+  const cache = new QueryClient();
+  const a = createQueryAdapter(client, { keyPrefix: ["a"], queryClient: cache });
+  const b = createQueryAdapter(client, { keyPrefix: ["b"], queryClient: cache });
+  const input = { params: { id: "1" } };
+  await cache.fetchQuery(a.items.get.queryOptions(input, { tags: ["items"] }));
+  await cache.fetchQuery(b.items.get.queryOptions(input, { tags: ["items"] }));
+  let notified = false;
+  const mutation = a.items.save.mutationOptions({
+    invalidateTags: ["items"], onSuccess: () => { notified = true; },
   });
+  const variables = { input: { body: { id: "1" } }, execution: { idempotencyKey: "attempt-1" } };
+  const result = await mutation.mutationFn(variables);
+  await mutation.onSuccess(result, variables, undefined);
+  expect(notified).toBe(true);
+  expect(cache.getQueryState(a.items.get.queryKey(input))?.isInvalidated).toBe(true);
+  expect(cache.getQueryState(b.items.get.queryKey(input))?.isInvalidated).toBe(false);
+  cache.clear();
+});
+
+test("abort prevents dispatch", async () => {
+  const { calls, client } = fixture();
+  const adapter = createQueryAdapter(client, { keyPrefix: ["tenant"] });
+  const controller = new AbortController();
+  controller.abort();
+  await expect(adapter.items.get.queryOptions({ params: { id: "1" } })
+    .queryFn({ signal: controller.signal })).rejects.toThrow();
+  expect(calls).toHaveLength(0);
 });
