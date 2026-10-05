@@ -408,3 +408,51 @@ test("does not treat domain payloads with code and response fields as HTTP statu
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({ code: 404, response: "not-found" });
 });
+
+test("end-to-end schema contract derives handler context and client types with zero codegen", async () => {
+  const inputSchema = t.Object({
+    title: t.String({ minLength: 2 }),
+    tags: t.Array(t.String()),
+  });
+  const outputSchema = t.Object({
+    id: t.String(),
+    title: t.String(),
+    tagCount: t.Integer(),
+  });
+
+  const contract = defineJsonContract(
+    { body: inputSchema, response: outputSchema },
+    (input) => ({ method: "POST", url: "/posts", body: input }),
+  );
+
+  // Inferred client contract types (matches Static<typeof Schema> directly)
+  type InferredInput = Parameters<typeof contract.input>[0];
+  type InferredResult = ReturnType<typeof contract.result>;
+
+  const payload: InferredInput = { title: "Elysia 2", tags: ["framework", "aot"] };
+  expect(contract.input(payload)).toEqual(payload);
+
+  // Server-side route handler with automatic type inference
+  const postRoute = defineElysiaRoute(
+    "POST",
+    "/posts",
+    { body: inputSchema, responses: { 200: outputSchema } },
+    ({ body }) => ({
+      id: "p-1",
+      title: body.title,
+      tagCount: body.tags.length,
+    }),
+  );
+
+  const app = registerElysiaRoute(new Elysia(), postRoute);
+  const response = await app.handle(new Request("http://localhost/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  }));
+
+  expect(response.status).toBe(200);
+  const json: InferredResult = await response.json();
+  expect(contract.result(json)).toEqual({ id: "p-1", title: "Elysia 2", tagCount: 2 });
+});
+

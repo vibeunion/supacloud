@@ -136,3 +136,59 @@ time to extract routes:
    statically deterministic at build time; dynamic runtime-only routes must
    remain explicitly isolated.
 
+## End-to-End Type Safety, Eden Treaty, and svadmin / SDK Integration
+
+A core design feature of Elysia is unifying runtime validation and static TypeScript
+types through TypeBox (`t.Object`, etc.). Combined with Eden Treaty (`treaty<AppRouter>`),
+frontend clients can derive fully typed API clients directly from server router
+definitions with zero codegen.
+
+In SupaCloud, this end-to-end type derivation is fully supported, structured across
+three architectural boundaries to respect browser bundle limits, distributed idempotency,
+and platform release decoupling.
+
+### 1. Handler-Level Context & Type Inference
+
+In Elysia route handlers, TypeBox schemas act as the single source of truth:
+- `defineRouteContract` and `defineElysiaRoute` contextually bind `body`, `params`,
+  `query`, `headers`, and `cookie` schemas to the handler function argument.
+- Handlers automatically receive exact static TypeScript types (`ctx.body`, `ctx.query`,
+  `ctx.params`) without requiring manually written DTO interfaces or runtime type assertion.
+- Status code response maps (`responses: { 200: Schema, 409: ErrorSchema }`) enforce
+  exact return types and guard against undeclared HTTP response payloads.
+
+### 2. Boundary 1: svadmin / Web Console Integration (Eden Treaty Pattern)
+
+For administrative consoles such as `svadmin` (`packages/web-console`):
+- **Zero-codegen type derivation**: When consuming Elysia-native routes, svadmin can
+  utilize `@elysiajs/eden` (`treaty<AppRouter>`) or `@svadmin/elysia` adapters to
+  obtain path autocomplete, typed request payloads, and typed response status mapping.
+- **Strict bundle boundary**: svadmin and browser bundles must only consume pure route
+  declarations (`import type { AppRouter } from ...`) or contract definitions. Server
+  runtime dependencies (Node/Bun runtime, database connections, cryptographic modules,
+  and deployment secrets) must never be imported into browser code.
+
+### 3. Boundary 2: Platform SDKs (@supacloud/js) & Business Command Contracts
+
+For platform-level SDKs and authoritative operations (`@Command`):
+- **Beyond plain REST**: Business commands enforce distributed idempotency
+  (`idempotency-key` headers), JWT authentication through SupaCloud Edge Runtime, and
+  authoritative two-phase confirmation (Submit + Read-only Lookup) rather than blind HTTP retries.
+- **Contract Facade with Zero Codegen**: Through `defineJsonContract` in `@supacloud/elysia`
+  and `@supacloud/contracts` (`createAuthoritativeCommandClient`), the SDK derives typed
+  decoders and static payload types directly from TypeBox schemas:
+  - Input types: `Parameters<typeof contract.input>[0]` (equivalent to `Static<typeof BodySchema>`)
+  - Output types: `ReturnType<typeof contract.result>` (equivalent to `Static<typeof ResponseSchema>`)
+  - Client callers enjoy full compile-time static type safety without running code generators,
+    while isolating browser code from internal server execution details and avoiding tight
+    version coupling between the platform SDK and server releases.
+
+### 4. Boundary 3: Multi-Language SDKs
+
+For non-TypeScript ecosystems (such as Go, Python, or Flutter):
+- Direct TypeScript type derivation across language boundaries is technically impossible.
+- TypeBox route schemas automatically populate OpenAPI specifications via Elysia's
+  documentation integration (`createDocumentationPlugin`), serving as the standardized
+  metadata source for OpenAPI-based code generators.
+
+
