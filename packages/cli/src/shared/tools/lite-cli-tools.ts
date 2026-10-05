@@ -3,7 +3,7 @@ import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { resolveLiteCommand } from "./lite-cli-command";
 export { resolveLiteCommand } from "./lite-cli-command";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { decodedSchema, parseToolArguments, schemaEnumValues, stringEnum } from "./schema";
 
 describe("TypeBox CLI schema boundary", () => {
@@ -14,7 +14,7 @@ describe("TypeBox CLI schema boundary", () => {
             limit: 5,
         });
         expect(() => parseToolArguments(schema, { action: "list", unexpected: true }))
-            .toThrow("Unexpected property");
+            .toThrow("must not have additional properties");
     });
 
     test("decodes transformed fields after validating encoded input", () => {

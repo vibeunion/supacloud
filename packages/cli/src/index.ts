@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { stringEnum } from "./shared/schema";
 import { cliToolResultIsError, runCli } from "./shared/cli";
 import {
