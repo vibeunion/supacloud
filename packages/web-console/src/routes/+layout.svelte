@@ -16,7 +16,7 @@
   import { onMount, tick, type Snippet } from "svelte";
   import { goto } from "$app/navigation";
   import { resolve } from "$app/paths";
-  import { page } from "$app/stores";
+  import { page } from "$app/state";
   import { isLoading, t, waitLocale, locale } from 'svelte-i18n';
   import Sidebar from "$lib/components/Sidebar.svelte";
   import PlatformSidebar from "$lib/components/PlatformSidebar.svelte";
@@ -102,14 +102,14 @@
 
   // Route Detection
   const isAuthRoute = (path: string) => path === "/login" || path === "/register";
-  let isAuthPage = $derived(isAuthRoute($page.url.pathname as string));
+  let isAuthPage = $derived(isAuthRoute(page.url.pathname as string));
   let isStandaloneLayout = $derived(
-    ($page.url.pathname as string) === "/" || isAuthRoute($page.url.pathname as string)
+    (page.url.pathname as string) === "/" || isAuthRoute(page.url.pathname as string)
   );
   let isRawPage = $derived(isStandaloneLayout);
-  let isPlatformRoute = $derived($page.url.pathname.startsWith("/platform"));
+  let isPlatformRoute = $derived(page.url.pathname.startsWith("/platform"));
 
-  let refFromUrl = $derived(typeof $page.params.ref === "string" ? $page.params.ref : null);
+  let refFromUrl = $derived(typeof page.params.ref === "string" ? page.params.ref : null);
 
   let currentProject = $derived.by(() => {
     if (refFromUrl) return projects.find((project) => project.ref === refFromUrl) ?? null;

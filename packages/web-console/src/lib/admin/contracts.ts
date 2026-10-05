@@ -1,7 +1,7 @@
 import { Type, type Static, type TSchema } from 'typebox';
 import type { ResourceContract } from '@svadmin/core/resource-contract';
 import type { TableColumnMetadata } from './resources';
-import { defineSvadminResource, type SvadminResourceContract } from './svadmin-contract';
+import { defineSvadminResource, defineDynamicSvadminResource, type SvadminResourceContract } from './svadmin-contract';
 
 /**
  * SVAdmin 0.54+ requires a runtime contract for every resource consumed by
@@ -82,7 +82,7 @@ export function tableRowsContract(
       if (column.column_name === 'id') continue;
       properties[column.column_name] = Type.Optional(databaseValueSchema());
     }
-    return defineSvadminResource(resourceName, { record: Type.Object(properties) });
+    return defineDynamicSvadminResource(resourceName, { record: Type.Object(properties) });
   });
 }
 

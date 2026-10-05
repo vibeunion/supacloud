@@ -1,5 +1,6 @@
 import { Type, type Static, type TSchema } from "typebox";
 import { Value } from "typebox/value";
+import { defineResource, parseContractCreateInput, parseContractRecord } from "@svadmin/core/resource-contract";
 import { apiClient, ensureMutationSucceeded } from "./api";
 import {
   authUserRoutePrefix, createAuthUserPath, inviteAuthUserPath,
@@ -17,6 +18,13 @@ const inviteFormSchema = Type.Object({
 }, { additionalProperties: false });
 export type CreateAuthUserInput = Static<typeof createFormSchema>;
 export type InviteAuthUserInput = Static<typeof inviteFormSchema>;
+const userRecordSchema = Type.Object({ ...authUserResultSchema.properties }, { additionalProperties: false });
+const createUserContract = defineResource(`${authUserRoutePrefix}${createAuthUserPath}`, {
+  record: userRecordSchema, create: createFormSchema,
+});
+const inviteUserContract = defineResource(`${authUserRoutePrefix}${inviteAuthUserPath}`, {
+  record: userRecordSchema, create: inviteFormSchema,
+});
 
 export function createAuthUserClient(
   projectRef: string,
@@ -39,16 +47,26 @@ export function createAuthUserClient(
     let result: AuthUserResult | undefined;
     await ensureMutationSucceeded(response, fallback, value => {
       if (!Value.Check(authUserResultSchema, value)) throw new Error("Invalid auth user response");
-      result = value;
+      result = parseContractRecord(createUserContract, {
+        id: value.id,
+        ...(value.email === undefined ? {} : { email: value.email }),
+        ...(value.phone === undefined ? {} : { phone: value.phone }),
+      });
     }, { signal });
     if (!result) throw new Error(fallback);
     return result;
   }
 
   return {
-    create: (input: CreateAuthUserInput, signal?: AbortSignal) =>
-      send(createAuthUserPath, createFormSchema, input, "新建用户失败", signal),
-    invite: (input: InviteAuthUserInput, signal?: AbortSignal) =>
-      send(inviteAuthUserPath, inviteFormSchema, input, "邀请用户失败", signal),
+    create: async (input: CreateAuthUserInput, signal?: AbortSignal) => {
+      signal?.throwIfAborted();
+      return send(createAuthUserPath, createFormSchema,
+        parseContractCreateInput(createUserContract, input), "新建用户失败", signal);
+    },
+    invite: async (input: InviteAuthUserInput, signal?: AbortSignal) => {
+      signal?.throwIfAborted();
+      return send(inviteAuthUserPath, inviteFormSchema,
+        parseContractCreateInput(inviteUserContract, input), "邀请用户失败", signal);
+    },
   };
 }

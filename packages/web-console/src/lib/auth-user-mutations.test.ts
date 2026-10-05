@@ -49,11 +49,33 @@ test("unknown fields and invalid inputs are rejected before transport", async ()
     return Response.json({ id: "user-1" });
   });
   const privileged = { email: "user@example.test", app_metadata: { role: "admin" } };
-  await expect(client.invite(privileged)).rejects.toThrow("Invalid auth user input");
+  await expect(client.invite(privileged)).rejects.toThrow();
   // @ts-expect-error Exercise untyped external callers.
   await expect(client.create({ email: "user@example.test" })).rejects.toThrow();
   expect(sends).toBe(0);
   expect(() => createAuthUserClient("../other")).toThrow("Invalid project reference");
+});
+
+test("SVAdmin mutation contracts reject accessor and serialization-hook inputs without executing them", async () => {
+  let reads = 0;
+  let sends = 0;
+  const client = createAuthUserClient("tenant-a", async () => {
+    sends++;
+    return Response.json({ id: "user-1" });
+  });
+  await expect(client.invite({ get email() { reads++; return "user@example.test"; } })).rejects.toThrow();
+  const input = { email: "user@example.test", toJSON() { reads++; return { email: "other@example.test" }; } };
+  await expect(client.invite(input)).rejects.toThrow();
+  expect(reads).toBe(0);
+  expect(sends).toBe(0);
+});
+
+test("mutation receipts expose only the schema-bound public fields", async () => {
+  const client = createAuthUserClient("tenant-a", async () =>
+    Response.json({ id: "user-1", email: "user@example.test", app_metadata: { role: "admin" } }));
+  expect(await client.invite({ email: "user@example.test" })).toEqual({
+    id: "user-1", email: "user@example.test",
+  });
 });
 
 test.each([

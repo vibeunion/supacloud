@@ -20,6 +20,24 @@ test("new packages are discovered and missing checks cannot pass silently", asyn
   }
 });
 
+test("SvelteKit projects remain covered after moving config into Vite", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-inventory-sveltekit-"));
+  try {
+    const directory = join(root, "packages", "web-console");
+    await mkdir(directory, { recursive: true });
+    await writeFile(join(directory, "package.json"), JSON.stringify({
+      name: "web-console",
+      devDependencies: { "@sveltejs/kit": "^3.0.0" },
+    }));
+    await writeFile(join(directory, "vite.config.ts"), "export default {};");
+    expect(discoverTypeSafetyProjects(root)[0]?.svelte).toBe(true);
+    await writeFile(join(directory, "package.json"), JSON.stringify({ name: "plain-vite" }));
+    expect(discoverTypeSafetyProjects(root)[0]?.svelte).toBe(false);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("strict flags and source coverage are both checked with inherited JSONC configurations", async () => {
   const directory = await mkdtemp(join(tmpdir(), "supacloud-inventory-config-"));
   try {

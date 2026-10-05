@@ -77,6 +77,7 @@
   }));
 
   function inviteUser() {
+    if (inviteMutation.isPending || mutationScope.controller.signal.aborted) return;
     if (!inviteEmail.trim()) {
       toast.error("请输入邮箱地址");
       return;
@@ -85,6 +86,7 @@
   }
 
   function createUser() {
+    if (createUserMutation.isPending || mutationScope.controller.signal.aborted) return;
     if (!newUserEmail.trim() || !newUserPassword) {
       toast.error("邮箱和密码均为必填项");
       return;

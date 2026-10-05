@@ -165,7 +165,7 @@
       <h1 class="text-2xl font-bold">Vector Buckets</h1>
       <p class="mt-1 text-sm text-muted-foreground">Supabase Storage Vectors 兼容的向量桶、索引与相似度查询。</p>
     </div>
-    <a href={resolve(`/project/${projectRef}/storage`)} class="rounded-lg border px-3 py-2 text-sm hover:bg-muted">返回文件存储</a>
+    <a href={resolve("/project/[ref]/storage", { ref: projectRef })} class="rounded-lg border px-3 py-2 text-sm hover:bg-muted">返回文件存储</a>
   </header>
 
   <div class="grid gap-6 xl:grid-cols-[280px_minmax(0,1fr)]">
