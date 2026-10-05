@@ -93,6 +93,38 @@ delivery and cleanup when upgrading. CRUD/auth providers need not change.
 
 ## Next integration steps
 
+### Studio Auth form coverage
+
+The project Auth page's create-user and invite-user forms now consume a
+browser-only copy of the Management API's pure auth mutation schemas.
+`node scripts/generate-auth-user-contract.mjs` regenerates that file;
+`--check` checks it without writing. The focused web-console test also compares
+the source and generated contract, so schema drift fails CI.
+
+The route handlers use the same input schemas and validate successful GoTrue
+responses. The form client derives its input types from an explicit writable
+subset (not the user record), rejects extra fields before sending, and validates
+the result before triggering success feedback. The existing Studio cookie
+transport is retained; mutations have no automatic retry. A captured project
+scope prevents late results from refreshing a different project's table.
+Cancellation does not prove rollback of a dispatched write.
+
+Acceptance scenarios:
+
+- Given a create or invite form, when it submits valid input, then its fixed
+  tenant route receives one request and the result has a validated string ID.
+- Given missing or incorrectly typed fields, when the consumer is compiled or
+  untyped input is submitted, then it fails before the transport is called.
+- Given a malformed successful response or an API failure, when the response
+  arrives, then the form client rejects it and does not retry the write.
+- Given a pending mutation, when the project changes or the page is destroyed,
+  then the old scope is cancelled and its callbacks cannot refresh the new view.
+
+This is coverage of two specific routes, not all Management API business routes
+or all Studio forms. Dynamic table writes remain disabled. Other forms, generic
+SVAdmin mutation contracts, and automatic full-route client generation remain
+separate work. No upstream SVAdmin change or SDK release is required here.
+
 1. Export browser-safe public operation contracts and generated clients without
    server implementation imports. Do not derive writable fields from table shape.
 2. Bind those artifacts to existing svadmin resource/command contracts. Their
