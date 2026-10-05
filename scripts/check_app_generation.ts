@@ -53,7 +53,7 @@ try {
     const cli = join(runner, "node_modules/@supacloud/cli/dist/index.js");
     await run([cli, "app", "init", "--root", project, "--name", "generation-acceptance", "--template", "http"], runner);
     const generatedManifest = JSON.parse(await readFile(join(project, "package.json"), "utf8"));
-    assert.equal(generatedManifest.dependencies.elysia, "2.0.0-beta.19");
+    assert.equal(generatedManifest.dependencies.elysia, "2.0.0-beta.21");
     // Candidate tarballs replace only project-owned packages; third-party versions
     // and the generated template otherwise remain exactly as the CLI emitted them.
     for (const group of ["dependencies", "devDependencies"]) {
@@ -112,7 +112,7 @@ const invalidResult: InventoryResult = { id: 1 };
 void typedResult; void invalidResult;
 
 const version = await Bun.file("node_modules/elysia/package.json").json();
-assert.equal(version.version, "2.0.0-beta.19");
+assert.equal(version.version, "2.0.0-beta.21");
 const module = createCompiledModules().find(value => value.name === "inventory");
 assert.ok(module);
 const services = module.createServices({}, {});
@@ -199,7 +199,7 @@ console.log("Built consumer factory: original and generated routes served togeth
     await run([cli, "app", "init", "--root", edge, "--name", "edge-generation-acceptance", "--template", "edge"], runner);
     const edgeManifestPath = join(edge, "package.json");
     const edgeManifest = JSON.parse(await readFile(edgeManifestPath, "utf8"));
-    assert.equal(edgeManifest.dependencies.elysia, "2.0.0-beta.19");
+    assert.equal(edgeManifest.dependencies.elysia, "2.0.0-beta.21");
     for (const group of ["dependencies", "devDependencies"]) {
         for (const name of Object.keys(edgeManifest[group] ?? {})) {
             if (overrides[name]) edgeManifest[group][name] = overrides[name];

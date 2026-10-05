@@ -107,7 +107,7 @@ function baseFiles(name: string): Record<string, string> {
       dependencies: {
         "@supacloud/app": `^${appMetadata.version}`,
         "@supacloud/elysia": `^${elysiaMetadata.version}`,
-        elysia: "2.0.0-beta.19",
+        elysia: "2.0.0-beta.21",
                 rxjs: appMetadata.dependencies.rxjs,
       },
       devDependencies: {

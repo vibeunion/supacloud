@@ -35,11 +35,11 @@ existing compiled-module boundary.
 
 These checks are compatibility signals, not a claim that an Elysia 1 package
 cannot run on a beta release. A package is not an approved dependency until it
-passes the repository's Elysia `2.0.0-beta.19` test and type gates.
+passes the repository's Elysia `2.0.0-beta.21` test and type gates.
 
 ### Local probe on 2026-09-29
 
-The isolated probe used Bun `1.4.2` and Elysia `2.0.0-beta.19`:
+The isolated probe used Bun `1.4.2` and Elysia `2.0.0-beta.21`:
 
 - Native Elysia: bootstrap and `GET /probe` passed.
 - Nestelia `1.11.2`: after installing its runtime validation dependencies,
@@ -49,7 +49,7 @@ The isolated probe used Bun `1.4.2` and Elysia `2.0.0-beta.19`:
   tested tuple.
 - AponiaJS `0.6.0-alpha.37`: bootstrap failed because the platform imported
   `ElysiaCustomStatusResponse`, which is not exported by Elysia
-  `2.0.0-beta.19`. This is a confirmed incompatibility for the tested tuple.
+  `2.0.0-beta.21`. This is a confirmed incompatibility for the tested tuple.
 
 The repository prototype test for `createSupaCloudFramework` passed. The full
 package typecheck was not used as acceptance evidence because this checkout's

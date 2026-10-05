@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { checkElysiaCompatibility, parseLockfile } from './check-elysia-compatibility.mjs';
 
-const version = '2.0.0-beta.19';
+const version = '2.0.0-beta.21';
 const templates = [
   'packages/cli/src/shared/tools/advanced-tools.ts',
   'packages/cli/src/shared/tools/app-starter.ts',
@@ -64,18 +64,18 @@ test('parses emitted trailing commas without rewriting strings or evaluating cod
 });
 test('rejects a widened beta peer', (t) => {
   const f = fixture(t);
-  f.edit('packages/elysia/package.json', (p) => { p.peerDependencies.elysia = '>=2.0.0-beta.19 <3'; });
+  f.edit('packages/elysia/package.json', (p) => { p.peerDependencies.elysia = '>=2.0.0-beta.21 <3'; });
   assert.match(checkElysiaCompatibility(f.root).join('\n'), /peerDependencies\.elysia must equal/);
 });
 test('rejects stale adapter workspace lock metadata', (t) => {
   const f = fixture(t);
-  f.edit('packages/elysia/bun.lock', (p) => { p.workspaces[''].peerDependencies.elysia = '>=2.0.0-beta.19 <3'; });
+  f.edit('packages/elysia/bun.lock', (p) => { p.workspaces[''].peerDependencies.elysia = '>=2.0.0-beta.21 <3'; });
   assert.match(checkElysiaCompatibility(f.root).join('\n'), /stale workspace peerDependencies\.elysia/);
 });
 test('rejects stale copied adapter metadata in a consumer lockfile', (t) => {
   const f = fixture(t);
   f.edit('packages/supacloud-lite/bun.lock', (p) => {
-    p.packages['@supacloud/elysia'][1].peerDependencies.elysia = '>=2.0.0-beta.19 <3';
+    p.packages['@supacloud/elysia'][1].peerDependencies.elysia = '>=2.0.0-beta.21 <3';
   });
   assert.match(checkElysiaCompatibility(f.root).join('\n'), /stale local @supacloud\/elysia peer metadata/);
 });
@@ -113,7 +113,7 @@ test('rejects a legacy-only schema matrix and mismatched active schema declarati
 });
 test('rejects an unpinned compatibility target', (t) => {
   const f = fixture(t);
-  f.edit('packages/elysia/compatibility.json', (p) => { p.packages.elysia = '^2.0.0-beta.19'; });
+  f.edit('packages/elysia/compatibility.json', (p) => { p.packages.elysia = '^2.0.0-beta.21'; });
   assert.match(checkElysiaCompatibility(f.root).join('\n'), /exact Elysia 2\.0 beta version/);
 });
 test('does not rewrite historical third-party adapter dependencies', (t) => {
