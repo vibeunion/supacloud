@@ -28,8 +28,11 @@ const records = pgSchema("app").table("settings", {
   version: integer().notNull().default(0),
 });
 const rowSchema = createSelectSchema(records);
-const inputSchema = Type.Pick(rowSchema, ["id", "enabled"], { additionalProperties: false });
-const resultSchema = Type.Pick(rowSchema, ["id", "enabled", "version"], { additionalProperties: false });
+// Drizzle's legacy decorator returns plain JSON Schema without TypeBox 1.x
+// markers, so re-wrap the derived property map before projecting subsets.
+const rowProjection = Type.Object(rowSchema.properties);
+const inputSchema = Type.Pick(rowProjection, ["id", "enabled"], { additionalProperties: false });
+const resultSchema = Type.Pick(rowProjection, ["id", "enabled", "version"], { additionalProperties: false });
 const actor = { tenantId: "tenant-a", actorId: "operator-a" };
 const container = `supacloud-drizzle-${crypto.randomUUID()}`;
 let pool: BunSQL;
