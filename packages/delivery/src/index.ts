@@ -4,7 +4,8 @@ export {
   WorkerExecutionGroupSchema, WorkerExecutionSchema, parseWorkerExecutionGroup,
   validateWorkerExecution, workerResourceUsage, assertWorkerBudget, resolveWorkerRoute,
 } from "./worker-execution";
-export type { WorkerExecutionGroup, WorkerExecution, WorkerResourceUsage } from "./worker-execution";
+export { ComputeResourcesSchema } from "./worker-execution";
+export type { WorkerExecutionGroup, WorkerExecution, WorkerResourceUsage, ComputeResources } from "./worker-execution";
 export {
   ApplicationActivationIdSchema, ApplicationActivationWriteSchema, ApplicationActivationResultSchema,
   ApplicationActivationRetirementResultSchema,

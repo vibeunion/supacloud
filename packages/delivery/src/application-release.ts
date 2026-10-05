@@ -1,7 +1,7 @@
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { canonical, digest } from "./delivery-files";
-import { WorkerExecutionGroupSchema, validateWorkerExecution } from "./worker-execution";
+import { WorkerExecutionGroupSchema, ComputeResourcesSchema, validateWorkerExecution } from "./worker-execution";
 
 export const ApplicationIdSchema = Type.String({ pattern: "^[A-Za-z0-9_-]{1,64}$" });
 export const ApplicationReleaseIdSchema = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -18,6 +18,7 @@ export const ApplicationReleaseRecordSchema = Type.Object({
     kind: Type.Union([Type.Literal("http"), Type.Literal("worker")]),
     entrypoint: Type.Literal("bundle/index.js"),
     execution: Type.Optional(WorkerExecutionGroupSchema),
+    compute: Type.Optional(ComputeResourcesSchema),
   }, { additionalProperties: false }), { minItems: 1, maxItems: 32 }),
 }, { additionalProperties: false });
 
@@ -49,7 +50,7 @@ export function parseApplicationReleaseRecord(candidate: unknown): ApplicationRe
     throw new Error("Invalid application replica count.");
   }
   if (candidate.targets.some(target => target.execution
-    && (target.kind !== "worker" || target.execution.target !== target.name))) {
+    && (target.compute || target.kind !== "worker" || target.execution.target !== target.name))) {
     throw new Error("Invalid application execution binding.");
   }
   return candidate;

@@ -78,9 +78,10 @@ export function createDeliveryPlan(
     if (existing) return existing;
     const declaration = declarations.get(name);
     const kind = declaration?.kind ?? fallback;
-    const isolation = declaration?.isolation ?? (kind === "jobs" ? "process" : "shared");
+    const isolation = declaration?.isolation ?? (kind === "jobs" || declaration?.compute ? "process" : "shared");
     const target: DeliveryTarget = {
       name, kind, isolation, roots: [], modules: [], routes: [], jobs: [], externalTokens: [],
+      ...(declaration?.compute ? { compute: declaration.compute } : {}),
       requirements: {
         processIsolation: isolation === "process",
         durableQueue: kind === "jobs",
@@ -192,7 +193,7 @@ export function createDeliveryPlan(
 
   for (const group of options.execution?.groups ?? []) {
     const target = targets.get(group.target);
-    if (!target || target.kind !== "jobs" || target.isolation !== "process"
+    if (!target || target.compute || target.kind !== "jobs" || target.isolation !== "process"
       || target.jobs.length !== 1 || target.jobs[0]?.name !== group.taskKey
       || !options.build?.workerApplications?.some(item => item.target === group.target)) {
       fail("delivery-execution-binding-invalid", `Execution group "${group.name}" requires one matching compiled Job and a Worker host.`,

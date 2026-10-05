@@ -41,6 +41,7 @@ import { isS3DataPlaneRequest } from "./utils/storage-s3-paths";
 import { studioAuthRoutes } from "./routes/studio-auth";
 import { caddyAskRoutes } from "./routes/caddy-ask";
 import { mcpRoutes } from "./mcp/server";
+import { appMcpRoutes, isAppMcpRequest } from "./mcp/app-server";
 import { parseErrorResponse, validationErrorResponse } from "./utils/http-validation";
 import {
   collectManagementDocumentedRouteContracts,
@@ -765,6 +766,8 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
   const {
     projectRoutes,
     projectDashboardRoutes: registeredProjectDashboardRoutes,
+    projectAdvisorsRoutes,
+    projectNotebookRoutes,
     projectSecretsRoutes,
     projectControlSecretsRoutes,
     projectFunctionsRoutes,
@@ -843,7 +846,7 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
           return rateLimit.body;
         }
 
-        if (!isS3DataPlaneRequest(request) && !isInvitationAcceptanceRequest(request)) {
+        if (!isS3DataPlaneRequest(request) && !isInvitationAcceptanceRequest(request) && !isAppMcpRequest(request)) {
           const result = await checkAuth(request);
           if (result) {
             set.status = result.status;
@@ -931,6 +934,9 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(chatRoutes)
       .use(platformSettingsRoutes)
       .use(projectLogsRoutes)
+      .use(projectAdvisorsRoutes)
+      .use(projectNotebookRoutes)
+      .use(appMcpRoutes)
       .use(systemRoutes)
       .use(diagnosticsRoutes)
       .use(pgredisRoutes)

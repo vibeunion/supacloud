@@ -32,6 +32,26 @@ Migration files are the durable source of truth. `supabase_migrations.schema_mig
 
 7. After explicit environment approval, apply and read back migration history.
 
+## Declarative authoring option
+
+Preserve the repository's existing schema authority. In a project already using
+declarative SQL, edit those files and run:
+
+```bash
+supacloud-cli supabase db_schema_declarative_sync --name <intent> --strict_coverage
+```
+
+The adapter defaults to no-apply. Review the generated migration, then use the
+same local verification and controlled remote push steps above. Do not introduce
+a second declarative source over Drizzle-generated schemas. Verify the installed
+official CLI supports this experimental command before changing project config.
+
+`supabase config_pull` previews official Supabase settings. Applying that local
+file requires `--dry_run=false --yes`; a configured context must match the
+requested project ref. Keep secrets and environment-specific changes out of
+commits. The adapter filters inherited credentials but does not sandbox upstream
+saved logins or dotenv files.
+
 ## Previously changed remote database
 
 Do not fabricate old migration files and immediately push them. Reconcile deliberately:
@@ -75,6 +95,15 @@ Do not fabricate old migration files and immediately push them. Reconcile delibe
 9. Review every file listed under `Would mark as applied`. Obtain explicit approval, then rerun without `--dry_run`. This action records the selected local migration files through the SupaCloud migration-mode API; it does not execute their DDL.
 10. Never insert/update/delete `supabase_migrations.schema_migrations` via `database query`. If the controlled baseline action cannot represent the verified state, stop and request operator assistance.
 11. Run `supabase push --dry_run`; it should report no unintended pending historical migration. Read back migration history and affected objects.
+
+## Lite drift
+
+For Lite, `lite db_pull` writes drafts outside migrations and does not silently
+change the ledger. The explicit `--baseline` action records already-present
+reviewed DDL without replaying it. Stop on pending history, unsupported catalog
+drift or shadow replay mismatch. Retain `.sql.pending` files after an uncertain
+baseline and verify the ledger before publishing or retrying; never guess commit
+state or restart into captured DDL that has not been baselined.
 
 ## Functions, triggers, RLS, and grants
 

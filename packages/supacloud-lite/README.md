@@ -162,7 +162,7 @@ supacloud-lite keys [--service-role]
 supacloud-lite gen types [-o database.types.ts]
 supacloud-lite db reset
 supacloud-lite db diff [-f migration_name]
-supacloud-lite db pull [migration_name]
+supacloud-lite db pull [migration_name] [--baseline]
 supacloud-lite db check [--module-file supabase/db/modules.ts]
 supacloud-lite snapshot create [-o backup.tar.gz]
 supacloud-lite snapshot restore <backup.tar.gz> [--force]
@@ -173,6 +173,10 @@ supacloud-lite version
 ```
 
 首次初始化或 state 目录不存在/为空时，先运行 `supacloud-lite migrate`。`db reset` 只接受已经初始化且保留有效 `secrets.json` 标记的 state；它不会为 reset 创建或覆盖项目 secrets。
+
+`db diff` / `db pull` 只读检查现有数据库，不会初始化 live backend 或自动应用待执行迁移；已应用历史必须与本地迁移精确一致。生成的 DDL 先在不含 seed 的临时影子数据库中重放并核对受支持的 Catalog。检测到不能完整重建的 view/function/trigger/policy、权限、RLS 或非追加 enum 变更时拒绝生成，改用官方 Supabase pg-delta；这不是完整 PostgreSQL Catalog 覆盖。
+
+`db pull` 默认写入 `.supacloud-lite/schema-drafts`，不修改迁移账本。仅对已审核且已存在于数据库的变更使用 `--baseline`：它记录账本而不执行 DDL，提交确认后才发布到迁移目录，禁止覆盖已有文件。若失败后留下 `.sql.pending`，停止启动/迁移，保留文件并检查对应账本版本与 SQL；只有确认匹配提交后才能发布该文件。不要猜测提交结果或直接重放捕获的 DDL。库调用方在 `baseline: false` 时也应把 `migrationsDir` 指向草稿目录。恢复步骤及文件/数据库非原子边界见仓库 `docs/select-agent-backend.md`。
 
 `db check` 是只读治理命令：加载 `@supacloud/db` 的 `defineDatabaseModule` 清单（默认 `supabase/db/modules.ts`），对声明的 SQL 源做静态 lint，并把声明的表/RLS 策略/RPC/授权与 Lite 数据库的真实 Catalog 对账（pg_policy、pg_proc、grants）。存在 error 级问题（声明缺失、RLS 未启用、security definer 未固定 search_path、PUBLIC 授权）时以非零退出码结束，可接入 CI；不会修改数据库。
 
@@ -562,7 +566,7 @@ supacloud-lite keys [--service-role]
 supacloud-lite gen types [-o database.types.ts]
 supacloud-lite db reset
 supacloud-lite db diff [-f migration_name]
-supacloud-lite db pull [migration_name]
+supacloud-lite db pull [migration_name] [--baseline]
 supacloud-lite db check [--module-file supabase/db/modules.ts]
 supacloud-lite snapshot create [-o backup.tar.gz]
 supacloud-lite snapshot restore <backup.tar.gz> [--force]
@@ -712,6 +716,24 @@ Snapshots in S3 mode only contain the Storage metadata and secrets in the databa
 In-memory databases have no persistable data, so `snapshot` and `upgrade` reject `--memory`.
 
 ### Application Compatibility
+
+`db diff` / `db pull` inspect existing live state without backend bootstrap or
+pending migration application. Applied history must match local migrations
+exactly. Generated DDL is replayed in a disposable, seed-free shadow and checked
+against the supported catalog. Detected unsupported view/function/trigger/policy,
+ACL, RLS or non-append enum changes fail closed with pg-delta guidance; this is
+not complete PostgreSQL catalog coverage.
+
+CLI `db pull` writes to `.supacloud-lite/schema-drafts` by default and never
+implicitly updates the ledger. Use `--baseline` only for reviewed DDL already
+present in live state: it records history without executing DDL and publishes
+the migration after confirmed commit, without overwriting existing files. On an
+uncertain outcome, stop startup/migration, retain `.sql.pending`, and compare the
+ledger version and exact SQL before publishing or retrying. Never guess commit
+state or replay captured DDL against the already-changed database. Library
+callers should also use a draft `migrationsDir` when `baseline` is false. See
+repository document `docs/select-agent-backend.md` for recovery and the
+non-atomic filesystem/database boundary.
 
 Lite accepts flat SQL and timestamp folders containing `migration.sql`, validates
 duplicate versions and applied SQL drift before pending migrations, and reuses
