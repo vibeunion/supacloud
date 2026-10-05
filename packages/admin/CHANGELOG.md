@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.1](https://github.com/vibeunion/supacloud/compare/admin-v0.24.0...admin-v0.24.1) (2026-10-05)
+
+
+### Miscellaneous Chores
+
+* **deps:** complete @sinclair/typebox to typebox 1.3.34 migration ([#1655](https://github.com/vibeunion/supacloud/issues/1655)) ([87d1133](https://github.com/vibeunion/supacloud/commit/87d1133c0fa0eadf145afc6c3747f693e3e36200))
+
 ## [0.24.0](https://github.com/vibeunion/supacloud/compare/admin-v0.23.1...admin-v0.24.0) (2026-10-02)
 
 

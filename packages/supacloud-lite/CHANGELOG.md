@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.20.0...supacloud-lite-v0.21.0) (2026-10-05)
+
+
+### Features
+
+* **elysia:** Elysia 2 AOT evaluation and end-to-end typing architecture ([#1654](https://github.com/vibeunion/supacloud/issues/1654)) ([39ee49f](https://github.com/vibeunion/supacloud/commit/39ee49f760e85e789c43c1d18cf5729db592f6bc))
+
 ## [0.20.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.19.0...supacloud-lite-v0.20.0) (2026-10-05)
 
 

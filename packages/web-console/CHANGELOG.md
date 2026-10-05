@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.48.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.47.0...web-console-v0.48.0) (2026-10-05)
+
+
+### Features
+
+* **web-console:** preserve typed svadmin resource reads ([#1656](https://github.com/vibeunion/supacloud/issues/1656)) ([2d83827](https://github.com/vibeunion/supacloud/commit/2d8382736a4d877d52e0d03705819bc952bf3a0c))
+
+
+### Miscellaneous Chores
+
+* **deps:** complete @sinclair/typebox to typebox 1.3.34 migration ([#1655](https://github.com/vibeunion/supacloud/issues/1655)) ([87d1133](https://github.com/vibeunion/supacloud/commit/87d1133c0fa0eadf145afc6c3747f693e3e36200))
+
 ## [0.47.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.46.0...web-console-v0.47.0) (2026-10-05)
 
 
