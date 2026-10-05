@@ -15,7 +15,7 @@ import { dataProvider } from './provider';
  * response type independently of the schema that validates the actual records.
  */
 export async function getResourceList<S extends ContractSchemas>(
-  resource: ResourceDefinition & { contract: ResourceContract<S> },
+  resource: Omit<ResourceDefinition, 'contract'> & { contract: ResourceContract<S> },
   params: Omit<GetListParams, 'resource' | 'filters' | 'sorters'> & {
     filters?: ContractFilter<NoInfer<ContractRecord<S>>>[];
     sorters?: ContractSort<NoInfer<ContractRecord<S>>>[];

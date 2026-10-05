@@ -111,9 +111,9 @@
       "code": "WS_TSCONFIG",
       "file": "packages/web-console/tsconfig.json",
       "specifier": null,
-      "fingerprint": "6cfb54ebce2f646f1dda27f215353b774073a616dec8497d82d8b99b76aea54f",
+      "fingerprint": "5b8e85a50e2c273830242242262953e4a327845e53d0c51279255d5ca20f1dc9",
       "count": 1,
-      "reason": "Existing SvelteKit generated parent is absent in the clean tooling-only checkout. Full web-console typecheck remains required; do not widen this allowance."
+      "reason": "SvelteKit 3 generated $app/tsconfig parent replaces .svelte-kit/tsconfig.json and is absent in the clean tooling-only checkout. Full web-console typecheck remains required; do not widen this allowance."
     },
     {
       "code": "WS_PRIVATE_IMPORT",

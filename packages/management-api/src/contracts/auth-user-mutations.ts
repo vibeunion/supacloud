@@ -1,0 +1,32 @@
+import { Type, type Static } from "typebox";
+
+export const authUserRoutePrefix = "/v1/projects/:ref/auth";
+export const createAuthUserPath = "/users";
+export const inviteAuthUserPath = "/users/invite";
+
+export const createAuthUserSchema = Type.Object({
+  email: Type.Optional(Type.String()),
+  phone: Type.Optional(Type.String()),
+  password: Type.Optional(Type.String()),
+  email_confirm: Type.Optional(Type.Boolean()),
+  phone_confirm: Type.Optional(Type.Boolean()),
+  user_metadata: Type.Optional(Type.Unknown()),
+  app_metadata: Type.Optional(Type.Unknown()),
+  ban_duration: Type.Optional(Type.String()),
+}, { additionalProperties: true });
+
+export const inviteAuthUserSchema = Type.Object({
+  email: Type.String(),
+  user_metadata: Type.Optional(Type.Unknown()),
+  app_metadata: Type.Optional(Type.Unknown()),
+  redirectTo: Type.Optional(Type.String()),
+}, { additionalProperties: true });
+
+// GoTrue may add fields, but a successful mutation must identify a user.
+export const authUserResultSchema = Type.Object({
+  id: Type.String({ minLength: 1 }),
+  email: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+  phone: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+}, { additionalProperties: true });
+
+export type AuthUserResult = Static<typeof authUserResultSchema>;

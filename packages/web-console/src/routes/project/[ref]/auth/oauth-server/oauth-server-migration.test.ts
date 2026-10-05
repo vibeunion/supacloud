@@ -140,9 +140,9 @@ test("compiled OAuth page isolates reads, mutations, partial outcomes and one-ti
     expect(code, `${stdout}\n${stderr}`).toBe(0);
     return;
   }
-  const configFile = localFile("../../../../../../svelte.config.js");
-  const config: unknown = (await import(pathToFileURL(configFile).href)).default;
-  const alias = record(record(record(config).kit).alias).$supacloud;
+  const configFile = localFile("../../../../../../vite.config.ts");
+  const config: unknown = await import(pathToFileURL(configFile).href);
+  const alias = record(record(config).webConsoleAliases).$supacloud;
   if (typeof alias !== "string") throw new Error("Missing production SDK source alias");
   const sdkDirectory = resolve(dirname(configFile), alias);
   const dom = new JSDOM("<!doctype html><html><body></body></html>", { pretendToBeVisual: true, url: "http://localhost/" });
