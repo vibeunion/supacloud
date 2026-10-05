@@ -7,8 +7,10 @@ import type {
   QueryKey,
   QueryObserverOptions,
 } from "@tanstack/query-core";
+import { validateSupaCloudProcedureExecution } from "./procedure-runtime.js";
+import type { SupaCloudProcedureExecution } from "./procedure-runtime.js";
 
-type Procedure<Kind extends "query" | "mutation"> = {
+type Procedure<Kind extends "query" | "mutation"> = ((...args: never) => Promise<unknown>) & {
   readonly __supacloudProcedure: {
     readonly key: string;
     readonly method: string;
@@ -41,8 +43,7 @@ type TaggedQueryKey<TProcedure, TError = DefaultError> = DataTag<
   TError
 >;
 
-export interface SupaCloudProcedureExecutionOptions {
-  idempotencyKey?: string;
+export interface SupaCloudProcedureExecutionOptions extends SupaCloudProcedureExecution {
   /** Pass an existing CommandAttempt signal to bind a mutation to component lifetime. */
   signal?: AbortSignal;
 }
@@ -115,8 +116,12 @@ function metadataOf<TProcedure extends AnyProcedure>(
   procedure: TProcedure,
   kind: "query" | "mutation",
 ): TProcedure["__supacloudProcedure"] {
+  if (typeof procedure !== "function") {
+    throw new TypeError(`Expected a generated ${kind} procedure; regenerate the application client`);
+  }
   const metadata = procedure.__supacloudProcedure;
-  if (!metadata || metadata.kind !== kind || typeof metadata.method !== "string"
+  if (!metadata || metadata.kind !== kind || typeof metadata.key !== "string"
+    || typeof metadata.method !== "string"
     || typeof metadata.path !== "string" || !["none", "required"].includes(metadata.idempotency)) {
     throw new TypeError(`Expected a generated ${kind} procedure; regenerate the application client`);
   }
@@ -154,11 +159,15 @@ function callProcedure<TProcedure extends AnyProcedure>(
   input: unknown,
   execution: SupaCloudProcedureExecutionOptions,
 ): Promise<SupaCloudProcedureResult<TProcedure>> {
+  validateSupaCloudProcedureExecution(procedure.__supacloudProcedure, execution);
+  const capturedExecution = Object.freeze({ ...execution });
+  // Public inputs are inferred from this procedure; this boundary bridges its
+  // generated tuple overloads to the adapter's two-argument invocation.
   const call = procedure as unknown as (
     input?: unknown,
     execution?: SupaCloudProcedureExecutionOptions,
   ) => Promise<SupaCloudProcedureResult<TProcedure>>;
-  const signal = execution.signal;
+  const signal = capturedExecution.signal;
   return new Promise((resolve, reject) => {
     const onAbort = () => reject(signal?.reason ?? new DOMException("Procedure cancelled", "AbortError"));
     if (signal?.aborted) { onAbort(); return; }
@@ -166,7 +175,7 @@ function callProcedure<TProcedure extends AnyProcedure>(
     // Consume late failures even when the transport ignores cancellation.
     Promise.resolve().then(() => {
       signal?.throwIfAborted();
-      return call(input, execution);
+      return call(input, capturedExecution);
     }).then(resolve, reject).finally(() => signal?.removeEventListener("abort", onAbort));
   });
 }
@@ -188,7 +197,9 @@ export function createSupaCloudQueryAdapter({
     return Object.freeze([...prefix, kind, metadata.method, metadata.path]);
   }
 
-  function queryKey<TProcedure extends Procedure<"query">>(procedure: TProcedure): QueryKey;
+  function queryKey<TProcedure extends Procedure<"query">>(
+    procedure: TProcedure,
+  ): QueryKey;
   function queryKey<TProcedure extends Procedure<"query">>(
     procedure: TProcedure, input: NoInfer<ProcedureInput<TProcedure>>,
   ): TaggedQueryKey<TProcedure>;
@@ -231,7 +242,7 @@ export function createSupaCloudQueryAdapter({
       // A failed or uncertain write must never be replayed by Query defaults.
       retry: false as const,
       mutationFn: async (variables: SupaCloudMutationVariables<TProcedure>) => {
-        const execution = variables.execution ?? {};
+        const execution = variables.execution === undefined ? {} : variables.execution;
         return callProcedure(procedure, variables.input, execution);
       },
     };
@@ -240,7 +251,9 @@ export function createSupaCloudQueryAdapter({
   return {
     queryKey,
     queryOptions,
-    mutationKey: (procedure: Procedure<"mutation">) => procedureKey(procedure, "mutation"),
+    mutationKey: <TProcedure extends Procedure<"mutation">>(
+      procedure: TProcedure,
+    ) => procedureKey(procedure, "mutation"),
     mutationOptions,
   };
 }

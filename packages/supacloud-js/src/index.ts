@@ -37,8 +37,13 @@ export {
 export {
   createSupaCloudProcedureClient,
   SupaCloudProcedureError,
+  isSupaCloudProcedureError,
+  isSupaCloudProcedureErrorCode,
+  isSupaCloudProcedureHttpError,
+  isSupaCloudProcedureTransportError,
   type SupaCloudGeneratedClientConfig,
   type SupaCloudGeneratedClientFactory,
+  type SupaCloudGeneratedClientOptions,
   type SupaCloudProcedureClient,
   type SupaCloudProcedureClientOptions,
   type SupaCloudProcedureErrorCode,

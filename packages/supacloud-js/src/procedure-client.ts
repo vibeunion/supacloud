@@ -1,3 +1,4 @@
+import { FunctionsFetchError, FunctionsHttpError, FunctionsRelayError } from "@supabase/supabase-js";
 import type { SupabaseClient } from "./supabase-types.js";
 import {
   createSupaCloudApiFetch,
@@ -6,23 +7,47 @@ import {
 import type { FetchTransport } from "./bounded-rpc-fetch.js";
 import {
   SupaCloudProcedureError,
+  isSupaCloudProcedureError,
+  isSupaCloudProcedureErrorCode,
   procedureErrorIdentifier as safeIdentifier,
   type SupaCloudProcedureErrorCode,
 } from "./procedure-error.js";
+import {
+  validateSupaCloudProcedureExecution,
+  type SupaCloudProcedureExecution,
+  type SupaCloudProcedureMetadata,
+} from "./procedure-runtime.js";
 
 export {
   SupaCloudProcedureError,
+  isSupaCloudProcedureError,
+  isSupaCloudProcedureErrorCode,
+  isSupaCloudProcedureHttpError,
+  isSupaCloudProcedureTransportError,
   type SupaCloudProcedureErrorCode,
   type SupaCloudProcedureErrorOptions,
 } from "./procedure-error.js";
 
 export interface SupaCloudGeneratedClientConfig {
   fetch: FetchTransport;
+  errorMapper?: (error: unknown) => unknown | Promise<unknown>;
+  procedureExecutionValidator?: (
+    metadata: SupaCloudProcedureMetadata,
+    execution?: SupaCloudProcedureExecution,
+  ) => void;
 }
 
 export type SupaCloudGeneratedClientFactory<TClient extends object = object> = (
   config: SupaCloudGeneratedClientConfig,
 ) => TClient;
+
+export type SupaCloudGeneratedClientOptions<
+  TFactory extends SupaCloudGeneratedClientFactory,
+> = Omit<NonNullable<Parameters<TFactory>[0]>, keyof SupaCloudGeneratedClientConfig> & {
+  fetch?: never;
+  errorMapper?: never;
+  procedureExecutionValidator?: never;
+};
 
 export interface SupaCloudProcedureClientOptions<
   TClient extends SupabaseClient,
@@ -34,6 +59,8 @@ export interface SupaCloudProcedureClientOptions<
   functionName: string;
   /** The generated createApiClient factory for the application contract. */
   generated: TFactory;
+  /** Additional generated-client settings; transport and facade policies are owned by this wrapper. */
+  generatedConfig?: SupaCloudGeneratedClientOptions<NoInfer<TFactory>>;
 }
 
 export type SupaCloudProcedureClient<TFactory extends SupaCloudGeneratedClientFactory> =
@@ -51,9 +78,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function asGeneratedError(value: unknown): GeneratedError | undefined {
-  if (!isRecord(value)) return undefined;
+  if (!isRecord(value) || !(value instanceof Error)) return undefined;
   if (value.name !== "ApiClientError"
-    || typeof value.code !== "string" || typeof value.status !== "number") return undefined;
+    || typeof value.code !== "string" || typeof value.status !== "number"
+    || !Number.isInteger(value.status) || value.status < 0 || value.status > 599
+    || typeof value.method !== "string" || typeof value.path !== "string"
+    || !("response" in value) || (value.response !== undefined && !(value.response instanceof Response))) return undefined;
   return { code: value.code, status: value.status, requestId: value.requestId, response: value.response };
 }
 
@@ -107,12 +137,17 @@ function errorName(error: unknown): string | undefined {
 }
 
 async function normalizeProcedureError(error: unknown, transport = false): Promise<unknown> {
-  if (error instanceof SupaCloudProcedureError) return error;
+  if (isSupaCloudProcedureError(error)) return error;
+  const generated = asGeneratedError(error);
+  const knownTransportFailure = error instanceof FunctionsFetchError
+    || error instanceof FunctionsRelayError
+    || error instanceof FunctionsHttpError;
+  if (generated === undefined && !knownTransportFailure && !transport) return error;
   if (errorName(error) === "AbortError") return error;
   if (errorName(error) === "FunctionsFetchError" && isRecord(error)
     && errorName(error.context) === "AbortError") return error.context;
 
-  const generated = asGeneratedError(error);
+  const responseDecodeFailure = transport && error instanceof SyntaxError;
   const response = generated?.response instanceof Response
     ? generated.response
     : isRecord(error) && error.context instanceof Response ? error.context : undefined;
@@ -125,71 +160,23 @@ async function normalizeProcedureError(error: unknown, transport = false): Promi
     name === "FunctionsFetchError" ? "SUPACLOUD_TRANSPORT_ERROR"
     : name === "FunctionsRelayError" ? "SUPACLOUD_FUNCTIONS_ERROR"
     : name === "FunctionsHttpError" ? "API_HTTP_ERROR"
-    : error instanceof SyntaxError ? "API_RESPONSE_INVALID"
+    : responseDecodeFailure ? "API_RESPONSE_INVALID"
     : transport ? "SUPACLOUD_TRANSPORT_ERROR" : "SUPACLOUD_CLIENT_ERROR";
-  const code = name === "FunctionsRelayError" ? fallback : generated?.code ?? fallback;
+  const code = name !== "FunctionsRelayError" && generated?.code && isSupaCloudProcedureErrorCode(generated.code)
+    ? generated.code : fallback;
+  const upstreamCode = safeIdentifier(responseBody?.code)
+    ?? (generated && !isSupaCloudProcedureErrorCode(generated.code) ? safeIdentifier(generated.code) : undefined);
   return new SupaCloudProcedureError(message, {
     code,
     status: generated?.status ?? response?.status ?? null,
     requestId: safeIdentifier(generated?.requestId)
       ?? safeIdentifier(response?.headers.get("x-request-id"))
       ?? safeIdentifier(responseBody?.requestId) ?? null,
+    upstreamCode: upstreamCode ?? null,
     details: responseBody,
     response,
     cause,
   });
-}
-
-function validateProcedureExecution(procedure: object, args: unknown[]): void {
-  const metadata: unknown = Reflect.get(procedure, "__supacloudProcedure");
-  if (!isRecord(metadata)) return;
-  const [first, second] = args;
-  const execution = second ?? (isRecord(first)
-    && (Object.hasOwn(first, "idempotencyKey") || Object.hasOwn(first, "signal")) ? first : undefined);
-  const key = isRecord(execution) ? execution.idempotencyKey : undefined;
-  if ((metadata.idempotency === "required" && key === undefined)
-    || (key !== undefined && (typeof key !== "string" || !/^[A-Za-z0-9._:-]{1,512}$/.test(key)))) {
-    throw new SupaCloudProcedureError("This procedure requires a valid idempotencyKey", {
-      code: "SUPACLOUD_EXECUTION_ERROR",
-    });
-  }
-}
-
-function wrapGeneratedClient<TClient extends object>(client: TClient): TClient {
-  const cache = new WeakMap<object, object>();
-
-  const wrap = (value: object, level: "client" | "controller" | "call"): object => {
-    const cached = cache.get(value);
-    if (cached !== undefined) return cached;
-    const proxy = new Proxy(value, {
-      async apply(current, thisArg, args: unknown[]) {
-        try {
-          validateProcedureExecution(current, args);
-          return await Reflect.apply(current as (...input: unknown[]) => unknown, thisArg, args);
-        } catch (failure) {
-          throw await normalizeProcedureError(failure);
-        }
-      },
-      get(current, key, receiver) {
-        const member: unknown = Reflect.get(current, key, receiver);
-        if (!Object.hasOwn(current, key)) return member;
-        if (typeof member === "function" && (level === "controller"
-          || (level === "client" && key === "request")
-          || (level === "call" && (key === "query" || key === "mutate")))) {
-          return wrap(member, "call");
-        }
-        if (level === "client" && isRecord(member)
-          && Object.getPrototypeOf(member) === Object.prototype) {
-          return wrap(member, "controller");
-        }
-        return member;
-      },
-    });
-    cache.set(value, proxy);
-    return proxy;
-  };
-
-  return wrap(client, "client") as TClient;
 }
 
 /**
@@ -201,7 +188,10 @@ export function createSupaCloudProcedureClient<
   TClient extends SupabaseClient = SupabaseClient,
 >(
   options: SupaCloudProcedureClientOptions<TClient, TFactory>,
-): SupaCloudProcedureClient<TFactory> {
+): SupaCloudProcedureClient<TFactory>;
+export function createSupaCloudProcedureClient(
+  options: SupaCloudProcedureClientOptions<SupabaseClient, SupaCloudGeneratedClientFactory>,
+): object {
   const transport = createSupaCloudApiFetch({
     supabase: options.supabase,
     functionName: options.functionName,
@@ -217,5 +207,16 @@ export function createSupaCloudProcedureClient<
       throw await normalizeProcedureError(error, true);
     }
   };
-  return wrapGeneratedClient(options.generated({ fetch })) as SupaCloudProcedureClient<TFactory>;
+  const generatedConfig = {
+    ...(options.generatedConfig ?? {}),
+    fetch,
+    errorMapper: normalizeProcedureError,
+    procedureExecutionValidator: validateSupaCloudProcedureExecution,
+  };
+  const client = options.generated(generatedConfig);
+  const capabilities: unknown = Reflect.get(client, "__supacloudClient");
+  if (!isRecord(capabilities) || capabilities.hooksVersion !== 1) {
+    throw new TypeError("Regenerate the application client to enable procedure error and execution hooks");
+  }
+  return client;
 }
