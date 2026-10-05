@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.95.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.94.0...management-api-v0.95.0) (2026-10-05)
+
+
+### Features
+
+* add agent backend authoring, runtime and observability workflows ([#1648](https://github.com/vibeunion/supacloud/issues/1648)) ([59a66d1](https://github.com/vibeunion/supacloud/commit/59a66d184a47d19c7f8895f24a6ba2c7e74e93d0))
+
+
+### Bug Fixes
+
+* **upgrade:** scale edge workers with cpu capacity ([#1644](https://github.com/vibeunion/supacloud/issues/1644)) ([8d97de6](https://github.com/vibeunion/supacloud/commit/8d97de61999a1cf54e844b32851838013c29e66a))
+
 ## [0.94.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.93.1...management-api-v0.94.0) (2026-10-04)
 
 

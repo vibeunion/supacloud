@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.47.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.46.0...web-console-v0.47.0) (2026-10-05)
+
+
+### Features
+
+* add agent backend authoring, runtime and observability workflows ([#1648](https://github.com/vibeunion/supacloud/issues/1648)) ([59a66d1](https://github.com/vibeunion/supacloud/commit/59a66d184a47d19c7f8895f24a6ba2c7e74e93d0))
+
 ## [0.46.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.45.1...web-console-v0.46.0) (2026-10-04)
 
 
