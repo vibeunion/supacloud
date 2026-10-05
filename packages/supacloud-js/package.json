@@ -67,8 +67,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
     "check:package": "node ../../.github/scripts/esm-package-policy.mjs --pack .",
-    "build:js:esm": "bun build src/index.ts src/task-events.ts --outdir dist --format esm --entry-naming \"[name].mjs\" --chunk-naming \"[name]-[hash].mjs\" --target node --external @supabase/supabase-js --external @supacloud/contracts && bun build src/contracts.ts --outdir dist --format esm --entry-naming \"[name].mjs\" --chunk-naming \"[name]-[hash].mjs\" --target browser --external @supacloud/contracts && bun build src/reactive.ts --outdir dist --format esm --entry-naming \"[name].mjs\" --chunk-naming \"[name]-[hash].mjs\" --target browser --external rxjs",
-    "build:js:cjs": "bun build src/index.ts src/task-events.ts --outdir dist --format cjs --entry-naming \"[name].cjs\" --chunk-naming \"[name]-[hash].cjs\" --target node --external @supabase/supabase-js --external @supacloud/contracts && bun build src/contracts.ts --outdir dist --format cjs --entry-naming \"[name].cjs\" --chunk-naming \"[name]-[hash].cjs\" --target browser --external @supacloud/contracts && bun build src/reactive.ts --outdir dist --format cjs --entry-naming \"[name].cjs\" --chunk-naming \"[name]-[hash].cjs\" --target browser --external rxjs"
+    "build:js:esm": "bun build src/index.ts src/task-events.ts --outdir dist --format esm --entry-naming \"[name].mjs\" --chunk-naming \"[name]-[hash].mjs\" --target node --external @supabase/supabase-js --external @supacloud/contracts --external @supacloud/query && bun build src/contracts.ts --outdir dist --format esm --entry-naming \"[name].mjs\" --chunk-naming \"[name]-[hash].mjs\" --target browser --external @supacloud/contracts && bun build src/reactive.ts --outdir dist --format esm --entry-naming \"[name].mjs\" --chunk-naming \"[name]-[hash].mjs\" --target browser --external rxjs",
+    "build:js:cjs": "bun build src/index.ts src/task-events.ts --outdir dist --format cjs --entry-naming \"[name].cjs\" --chunk-naming \"[name]-[hash].cjs\" --target node --external @supabase/supabase-js --external @supacloud/contracts --external @supacloud/query && bun build src/contracts.ts --outdir dist --format cjs --entry-naming \"[name].cjs\" --chunk-naming \"[name]-[hash].cjs\" --target browser --external @supacloud/contracts && bun build src/reactive.ts --outdir dist --format cjs --entry-naming \"[name].cjs\" --chunk-naming \"[name]-[hash].cjs\" --target browser --external rxjs"
   },
   "keywords": [
     "supacloud",
@@ -86,8 +86,17 @@
   "peerDependencies": {
     "@supabase/supabase-js": "^2.115.0"
   },
+  "peerDependenciesMeta": {
+    "@supabase/supabase-js": {
+      "optional": false
+    },
+    "@tanstack/query-core": {
+      "optional": true
+    }
+  },
   "dependencies": {
     "@supacloud/contracts": "file:../contracts",
+    "@supacloud/query": "file:../query",
     "rxjs": "7.8.2"
   },
   "devDependencies": {

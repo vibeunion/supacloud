@@ -779,6 +779,21 @@
       "signature": "export interface OpenApiServer {\n    url: string;\n    description?: string;\n}"
     },
     {
+      "name": "OperationIR",
+      "kind": "type",
+      "signature": "export interface OperationIR {\n    operationId: string;\n    kind: OperationKind;\n    controller: string;\n    controllerKey: string;\n    handler: string;\n    method: string;\n    path: string;\n    commandName?: string;\n    permission?: string;\n    idempotency?: \"required\" | \"none\";\n    audit?: string;\n    cacheTags: string[];\n    paramMappings?: OperationParamMapping[];\n}"
+    },
+    {
+      "name": "OperationKind",
+      "kind": "type",
+      "signature": "export type OperationKind = \"query\" | \"command\";"
+    },
+    {
+      "name": "OperationParamMapping",
+      "kind": "type",
+      "signature": "export interface OperationParamMapping {\n    name: string;\n    target: \"param\" | \"query\" | \"body\" | \"header\" | \"cookie\";\n}"
+    },
+    {
       "name": "parseApplicationDevelopmentContext",
       "kind": "value",
       "signature": "export declare function parseApplicationDevelopmentContext(input: unknown): ApplicationDevelopmentContext;"

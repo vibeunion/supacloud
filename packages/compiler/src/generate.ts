@@ -1292,13 +1292,30 @@ function orderProviders(providers: ProviderNode[]): ProviderNode[] {
 export function renderClient(graph: ApplicationGraph, options?: GenerateOptions): string {
   const rootDir = options?.rootDir ?? process.cwd();
   const outDir = options?.outDir ?? process.cwd();
-  const imports = new ImportManager(new Set(["ApiClientError", "ApiClientErrorCode", "ApiClientErrorDetails"]));
+  const imports = new ImportManager(new Set([
+    "ApiClientError",
+    "ApiClientErrorCode",
+    "ApiClientErrorDetails",
+    "OperationIR",
+    "OperationKind",
+    "OperationParamMapping",
+    "ProcedureQueryOptions",
+    "ProcedureMutateOptions",
+    "ProcedureQueryMethod",
+    "ProcedureMutateMethod",
+    "createProcedureClient",
+    "ProcedureClient",
+    "API_OPERATIONS",
+    "ApiOperation",
+  ]));
   const controllerEntries: string[] = [];
+  const procedureControllerEntries: string[] = [];
   const routeTypes: string[] = [];
   const schemaEntries: string[] = [];
   const schemaLocals = new Map<string, string>();
   const usedTypeNames = new Set<string>();
   const allRoutes: Array<Record<string, unknown>> = [];
+  const allOperations: OperationIR[] = [];
   let usesStatic = false;
   let usesValue = false;
 
@@ -1334,6 +1351,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     for (const controller of module.controllers) {
       const controllerKey = camelName(controller.className.replace(/Controller$/, ""));
       const routeMethods: string[] = [];
+      const procedureMethods: string[] = [];
 
       for (const route of controller.routes) {
         const fullPath = joinRoutePaths(controller.path, route.path);
@@ -1446,12 +1464,74 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           ? `{ ${responseSchemaEntries.map(([status, local]) => `${JSON.stringify(status)}: ${local}`).join(", ")} }`
           : "undefined";
         const responseKindArgument = responseKind === undefined ? "undefined" : JSON.stringify(responseKind);
+
+        const boundCommand = route.command
+          ? module.commands?.find((c) => c.className === route.command || c.name === route.command)
+          : undefined;
+        const isCommand = Boolean(boundCommand) || ["POST", "PUT", "PATCH", "DELETE"].includes(route.method);
+        const kind: "query" | "command" = isCommand ? "command" : "query";
+        const commandName = boundCommand?.name ?? route.command;
+        const routeData = route.data as Record<string, unknown> | undefined;
+        const routeTags = (Array.isArray(routeData?.tags) ? routeData.tags : Array.isArray(routeData?.cacheTags) ? routeData.cacheTags : []) as string[];
+        const cacheTags = [...new Set([controllerKey, ...routeTags])];
+        const operationId = `${controllerKey}.${route.handler}`;
+
+        const paramMappings: Array<{ name: string; target: "param" | "query" | "body" | "header" | "cookie" }> = [];
+        for (const p of paramNames) {
+          paramMappings.push({ name: p, target: "param" });
+        }
+        if (route.queryBindings) {
+          for (const q of route.queryBindings) {
+            paramMappings.push({ name: q, target: "query" });
+          }
+        }
+        if (route.paramBindings) {
+          for (const p of route.paramBindings) {
+            if (!paramMappings.some((m) => m.name === p)) paramMappings.push({ name: p, target: "param" });
+          }
+        }
+
+        allOperations.push({
+          operationId,
+          kind,
+          controller: controller.className,
+          controllerKey,
+          handler: route.handler,
+          method: route.method,
+          path: fullPath,
+          ...(commandName ? { commandName } : {}),
+          ...(boundCommand?.permission ? { permission: boundCommand.permission } : {}),
+          ...(boundCommand ? { idempotency: boundCommand.idempotency } : {}),
+          ...(boundCommand?.audit ? { audit: boundCommand.audit } : {}),
+          cacheTags,
+          ...(paramMappings.length > 0 ? { paramMappings } : {}),
+        });
+
+        const flatInputParts = [
+          ...(paramsSchema || paramNames.length > 0 ? [paramsType] : []),
+          ...(querySchema ? [queryType] : []),
+          ...(bodySchema ? [bodyType] : []),
+        ];
+        const flatInputType = flatInputParts.length > 0 ? flatInputParts.join(" & ") : "Record<string, unknown>";
+        const procedureInputTypeName = uniqueTypeName(`${baseTypeName}Input`);
+        routeTypes.push(`export type ${procedureInputTypeName} = (${flatInputType}) | ${requestTypeName};`);
+
+        const procedureCall = kind === "query"
+          ? `makeProcedureQuery<${procedureInputTypeName}, ${responseType === "never" ? "never" : responseTypeName}>(${JSON.stringify(operationId)}, ${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}, ${JSON.stringify(cacheTags)}, ${JSON.stringify(paramNames)}, ${Boolean(bodySchema)}, ${responseSchemaArgument}, ${responseKindArgument}, ${route.parse === "none"})`
+          : `makeProcedureMutate<${procedureInputTypeName}, ${responseType === "never" ? "never" : responseTypeName}>(${JSON.stringify(operationId)}, ${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}, ${JSON.stringify(cacheTags)}, ${JSON.stringify(paramNames)}, ${Boolean(bodySchema)}, ${JSON.stringify(boundCommand?.idempotency ?? "none")}, ${JSON.stringify(commandName ?? operationId)}, ${responseSchemaArgument}, ${responseKindArgument}, ${route.parse === "none"})`;
+
+        procedureMethods.push(`
+    ${route.handler}: ${procedureCall},`);
+
         routeMethods.push(`
-    ${route.handler}: makeRoute<${requestTypeName}, ${responseType === "never" ? "never" : responseTypeName}>(${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}, ${responseSchemaArgument}, ${responseKindArgument}, ${route.parse === "none"}),`);
+    ${route.handler}: makeRoute<${requestTypeName}, ${responseType === "never" ? "never" : responseTypeName}>(${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}, ${responseSchemaArgument}, ${responseKindArgument}, ${route.parse === "none"}, ${procedureCall}),`);
       }
 
       controllerEntries.push(`
   ${controllerKey}: {${routeMethods.join("")}
+  },`);
+      procedureControllerEntries.push(`
+  ${controllerKey}: {${procedureMethods.join("")}
   },`);
     }
   }
@@ -1476,11 +1556,12 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "  body?: Body;",
     "  headers?: Headers;",
     "  cookie?: Cookie;",
+    "  signal?: AbortSignal;",
     "}",
     "",
     "export type ResponseDecoder<T> = (value: unknown) => T;",
     "",
-    "export type ApiClientErrorCode = \"API_HTTP_ERROR\" | \"API_RESPONSE_INVALID\" | \"API_RESPONSE_UNDECLARED\";",
+    "export type ApiClientErrorCode = \"API_HTTP_ERROR\" | \"API_RESPONSE_INVALID\" | \"API_RESPONSE_UNDECLARED\" | \"API_MISSING_IDEMPOTENCY_KEY\";",
     "",
     "export interface ApiClientErrorDetails {",
     "  code: ApiClientErrorCode;",
@@ -1514,6 +1595,66 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "  }",
     "}",
     "",
+    "export type OperationKind = \"query\" | \"command\";",
+    "",
+    "export interface OperationParamMapping {",
+    "  name: string;",
+    "  target: \"param\" | \"query\" | \"body\" | \"header\" | \"cookie\";",
+    "}",
+    "",
+    "export interface OperationIR {",
+    "  operationId: string;",
+    "  kind: OperationKind;",
+    "  controller: string;",
+    "  controllerKey: string;",
+    "  handler: string;",
+    "  method: string;",
+    "  path: string;",
+    "  commandName?: string;",
+    "  permission?: string;",
+    "  idempotency?: \"required\" | \"none\";",
+    "  audit?: string;",
+    "  cacheTags: string[];",
+    "  paramMappings?: OperationParamMapping[];",
+    "}",
+    "",
+    "export interface ProcedureQueryOptions {",
+    "  headers?: Record<string, string>;",
+    "  cookie?: Record<string, string | number | boolean>;",
+    "  signal?: AbortSignal;",
+    "}",
+    "",
+    "export interface ProcedureMutateOptions {",
+    "  /**",
+    "   * Explicit idempotency key for this mutation attempt.",
+    "   * Required when the command declares idempotency: \"required\".",
+    "   * The caller MUST supply or reuse this key across retries.",
+    "   * The client will NEVER generate a random UUID silently.",
+    "   */",
+    "  idempotencyKey?: string;",
+    "  headers?: Record<string, string>;",
+    "  cookie?: Record<string, string | number | boolean>;",
+    "  signal?: AbortSignal;",
+    "}",
+    "",
+    "export interface ProcedureQueryMethod<Input = unknown, Result = unknown> {",
+    "  (input?: Input, options?: ProcedureQueryOptions): Promise<Result>;",
+    "  query(input?: Input, options?: ProcedureQueryOptions): Promise<Result>;",
+    "  readonly operationId: string;",
+    "  readonly kind: \"query\";",
+    "  readonly tags: readonly string[];",
+    "}",
+    "",
+    "export interface ProcedureMutateMethod<Input = unknown, Result = unknown> {",
+    "  (input?: Input, options?: ProcedureMutateOptions): Promise<Result>;",
+    "  mutate(input?: Input, options?: ProcedureMutateOptions): Promise<Result>;",
+    "  readonly operationId: string;",
+    "  readonly kind: \"command\";",
+    "  readonly tags: readonly string[];",
+    "  readonly commandName?: string;",
+    "  readonly idempotency?: \"required\" | \"none\";",
+    "}",
+    "",
     "export type RouteMethod<",
     "  Options extends ClientRequestOptions = ClientRequestOptions,",
     "  Result = never,",
@@ -1521,7 +1662,14 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "  [Result] extends [never]",
     "    ? { <T>(options: Options, decode: ResponseDecoder<T>): Promise<T> }",
     "    : { (options: Options): Promise<Result>; <T>(options: Options, decode: ResponseDecoder<T>): Promise<T> }",
-    ") & ((...args: {} extends Options ? [options?: Options] : [options: Options]) => Promise<[Result] extends [never] ? unknown : Result>);",
+    ") & ((...args: {} extends Options ? [options?: Options] : [options: Options]) => Promise<[Result] extends [never] ? unknown : Result>)",
+    "& {",
+    "  readonly operationId?: string;",
+    "  readonly kind?: OperationKind;",
+    "  readonly tags?: readonly string[];",
+    "  readonly query?: (input?: any, options?: ProcedureQueryOptions) => Promise<Result>;",
+    "  readonly mutate?: (input?: any, options?: ProcedureMutateOptions) => Promise<Result>;",
+    "};",
     "",
     ...routeTypes,
     ...(routeTypes.length > 0 ? [""] : []),
@@ -1540,6 +1688,12 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "export interface ApiClientConfig {",
     "  baseUrl?: string;",
     "  fetch?: typeof fetch;",
+    "  /**",
+    "   * Optional Supabase client instance from @supabase/supabase-js.",
+    "   * When provided, default baseUrl and authentication headers (apikey, Authorization bearer token)",
+    "   * are automatically derived from the Supabase client without mutating it.",
+    "   */",
+    "  supabase?: any;",
     "  headers?: Record<string, string> | (() => Record<string, string> | Promise<Record<string, string>>);",
     "  interceptors?: HttpInterceptorFn[];",
     "  /** Normalize response objects like Elysia's default schema validator. */",
@@ -1547,6 +1701,10 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "}",
     "",
     "export const API_ROUTES = " + JSON.stringify(allRoutes, null, 2) + " as const;",
+    "",
+    "export const API_OPERATIONS = " + JSON.stringify(allOperations, null, 2) + " as const;",
+    "",
+    "export type ApiOperation = typeof API_OPERATIONS[number];",
     "",
     "export type AppRoutePath = typeof API_ROUTES[number]['path'];",
     "",
@@ -1758,8 +1916,9 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
       "",
     ] : []),
     "export function createApiClient(config: ApiClientConfig = {}) {",
-    "  const fetcher = config.fetch ?? globalThis.fetch.bind(globalThis);",
-    '  const baseUrl = (config.baseUrl ?? "").replace(/\\/+$/, "");',
+    "  const fetcher = config.fetch ?? (config.supabase && typeof config.supabase.fetch === \"function\" ? config.supabase.fetch : globalThis.fetch.bind(globalThis));",
+    "  const derivedBaseUrl = config.baseUrl ?? (config.supabase ? (config.supabase.functionsUrl || config.supabase.supabaseUrl || \"\") : \"\");",
+    '  const baseUrl = (derivedBaseUrl || "").replace(/\\/+$/, "");',
     "  function rawBody(value: unknown): BodyInit {",
     "    if (typeof value === \"string\" || value instanceof Blob || value instanceof FormData || value instanceof URLSearchParams || value instanceof ArrayBuffer || ArrayBuffer.isView(value) || value instanceof ReadableStream) return value as BodyInit;",
     "    throw new TypeError(\"Raw routes require a BodyInit value; JSON encoding is not implicit\");",
@@ -1799,8 +1958,25 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "  ): Promise<T | unknown> {",
     "    const url = `${baseUrl}${buildRouteUrl(path, options.params, options.query)}`;",
     '    const customHeaders = typeof config.headers === "function" ? await config.headers() : config.headers;',
+    "    let supabaseHeaders: Record<string, string> = {};",
+    "    if (config.supabase) {",
+    "      if (typeof config.supabase.supabaseKey === \"string\" && config.supabase.supabaseKey) {",
+    "        supabaseHeaders[\"apikey\"] = config.supabase.supabaseKey;",
+    "        supabaseHeaders[\"authorization\"] = `Bearer ${config.supabase.supabaseKey}`;",
+    "      }",
+    "      if (config.supabase.auth && typeof config.supabase.auth.getSession === \"function\") {",
+    "        try {",
+    "          const sessionResult = await config.supabase.auth.getSession();",
+    "          const token = sessionResult?.data?.session?.access_token;",
+    "          if (token) {",
+    "            supabaseHeaders[\"authorization\"] = `Bearer ${token}`;",
+    "          }",
+    "        } catch {}",
+    "      }",
+    "    }",
     "    const headers: Record<string, string> = {",
     '      ...(raw ? {} : { "content-type": "application/json" }),',
+    "      ...supabaseHeaders,",
     "      ...customHeaders,",
     "      ...options.headers,",
     "    };",
@@ -1821,6 +1997,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "        headers: reqPayload.headers,",
     "        ...(reqPayload.body === undefined ? {} : { body: raw ? rawBody(reqPayload.body) : JSON.stringify(reqPayload.body) }),",
     "        ...(raw && reqPayload.body instanceof ReadableStream ? { duplex: \"half\" } : {}),",
+    "        ...(options.signal ? { signal: options.signal } : {}),",
     "      });",
     "    };",
     "    const response = await executeChain(0, { method, url, headers, body: options.body });",
@@ -1863,7 +2040,136 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "    return decode ? decode(checked) : checked;",
     "  }",
     "",
-    `  function makeRoute<Options extends ClientRequestOptions, Result = never>(method: string, path: string, responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>, responseKind?: string, raw = false): RouteMethod<Options, Result> {`,
+    "  function partitionInput(",
+    "    input: unknown,",
+    "    paramNames: readonly string[],",
+    "    hasBody: boolean,",
+    "    method: string,",
+    "  ): { params?: Record<string, string | number>; query?: Record<string, unknown>; body?: unknown } {",
+    "    if (input === undefined || input === null) return {};",
+    "    if (typeof input !== \"object\" || Array.isArray(input)) {",
+    "      return hasBody ? { body: input } : {};",
+    "    }",
+    "    const obj = input as Record<string, unknown>;",
+    "    if (\"params\" in obj || \"query\" in obj || \"body\" in obj || \"headers\" in obj) {",
+    "      return {",
+    "        params: obj.params as Record<string, string | number> | undefined,",
+    "        query: obj.query as Record<string, unknown> | undefined,",
+    "        body: obj.body,",
+    "      };",
+    "    }",
+    "    const params: Record<string, string | number> = {};",
+    "    const remaining: Record<string, unknown> = {};",
+    "    for (const [key, value] of Object.entries(obj)) {",
+    "      if (paramNames.includes(key)) {",
+    "        if (typeof value === \"string\" || typeof value === \"number\") {",
+    "          params[key] = value;",
+    "        }",
+    "      } else {",
+    "        remaining[key] = value;",
+    "      }",
+    "    }",
+    "    const isRead = method === \"GET\" || method === \"HEAD\";",
+    "    if (isRead) {",
+    "      return {",
+    "        ...(Object.keys(params).length > 0 ? { params } : {}),",
+    "        ...(Object.keys(remaining).length > 0 ? { query: remaining } : {}),",
+    "      };",
+    "    }",
+    "    return {",
+    "      ...(Object.keys(params).length > 0 ? { params } : {}),",
+    "      body: remaining,",
+    "    };",
+    "  }",
+    "",
+    "  function makeProcedureQuery<Input = unknown, Result = unknown>(",
+    "    operationId: string,",
+    "    method: string,",
+    "    path: string,",
+    "    tags: readonly string[],",
+    "    paramNames: readonly string[],",
+    "    hasBody: boolean,",
+    `    responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>,`,
+    "    responseKind?: string,",
+    "    raw = false,",
+    "  ): ProcedureQueryMethod<Input, Result> {",
+    "    function query(input?: Input, options?: ProcedureQueryOptions): Promise<Result> {",
+    "      const partitioned = partitionInput(input, paramNames, hasBody, method);",
+    "      const requestOptions: ClientRequestOptions = {",
+    "        ...partitioned,",
+    "        headers: options?.headers,",
+    "        cookie: options?.cookie,",
+    "        signal: options?.signal,",
+    "      };",
+    "      return request(method, path, requestOptions, undefined, responseSchemas, responseKind, raw) as Promise<Result>;",
+    "    }",
+    "    const fn = function (input?: Input, options?: ProcedureQueryOptions) {",
+    "      return query(input, options);",
+    "    };",
+    "    fn.query = query;",
+    "    fn.operationId = operationId;",
+    "    fn.kind = \"query\" as const;",
+    "    fn.tags = tags;",
+    "    return fn as unknown as ProcedureQueryMethod<Input, Result>;",
+    "  }",
+    "",
+    "  function makeProcedureMutate<Input = unknown, Result = unknown>(",
+    "    operationId: string,",
+    "    method: string,",
+    "    path: string,",
+    "    tags: readonly string[],",
+    "    paramNames: readonly string[],",
+    "    hasBody: boolean,",
+    "    idempotency: \"required\" | \"none\",",
+    "    commandName: string,",
+    `    responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>,`,
+    "    responseKind?: string,",
+    "    raw = false,",
+    "  ): ProcedureMutateMethod<Input, Result> {",
+    "    function mutate(input?: Input, options?: ProcedureMutateOptions): Promise<Result> {",
+    "      if (idempotency === \"required\") {",
+    "        const key = options?.idempotencyKey?.trim();",
+    "        if (!key) {",
+    "          throw new ApiClientError(",
+    "            `Command \"${commandName}\" requires an explicit idempotencyKey for mutate(). Caller must supply or reuse an idempotency key across retries to prevent duplicate execution.`,",
+    "            {",
+    "              code: \"API_MISSING_IDEMPOTENCY_KEY\",",
+    "              method,",
+    "              path,",
+    "              status: 400,",
+    "            },",
+    "          );",
+    "        }",
+    "      }",
+    "      const partitioned = partitionInput(input, paramNames, hasBody, method);",
+    "      const headers: Record<string, string> = {",
+    "        ...(options?.headers ?? {}),",
+    "      };",
+    "      if (options?.idempotencyKey) {",
+    "        headers[\"idempotency-key\"] = options.idempotencyKey;",
+    "        headers[\"x-idempotency-key\"] = options.idempotencyKey;",
+    "      }",
+    "      const requestOptions: ClientRequestOptions = {",
+    "        ...partitioned,",
+    "        headers,",
+    "        cookie: options?.cookie,",
+    "        signal: options?.signal,",
+    "      };",
+    "      return request(method, path, requestOptions, undefined, responseSchemas, responseKind, raw) as Promise<Result>;",
+    "    }",
+    "    const fn = function (input?: Input, options?: ProcedureMutateOptions) {",
+    "      return mutate(input, options);",
+    "    };",
+    "    fn.mutate = mutate;",
+    "    fn.operationId = operationId;",
+    "    fn.kind = \"command\" as const;",
+    "    fn.tags = tags;",
+    "    fn.commandName = commandName;",
+    "    fn.idempotency = idempotency;",
+    "    return fn as unknown as ProcedureMutateMethod<Input, Result>;",
+    "  }",
+    "",
+    `  function makeRoute<Options extends ClientRequestOptions, Result = never>(method: string, path: string, responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>, responseKind?: string, raw = false, procedure?: unknown): RouteMethod<Options, Result> {`,
     "    function route<T>(options: Options, decode: ResponseDecoder<T>): Promise<T>;",
     "    function route(options: Options): Promise<Result>;",
     "    function route(options?: Options): Promise<unknown>;",
@@ -1871,18 +2177,39 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "      const requestOptions = options ?? {};",
     "      return request(method, path, requestOptions, decode, responseSchemas, responseKind, raw);",
     "    }",
+    "    if (procedure && (typeof procedure === \"object\" || typeof procedure === \"function\")) {",
+    "      Object.assign(route, procedure);",
+    "    }",
     "    return route as RouteMethod<Options, Result>;",
     "  }",
+    `  const procedures = {${procedureControllerEntries.join("")}`,
+    "  };",
     "",
     "  return {",
     "    request,",
     "    buildRouteUrl,",
     "    routes: API_ROUTES,",
+    "    operations: API_OPERATIONS,",
+    "    procedures,",
     ...controllerEntries,
     "  };",
     "}",
     "",
     "export type ApiClient = ReturnType<typeof createApiClient>;",
+    "",
+    "export type ApiProcedureClient = ApiClient[\"procedures\"];",
+    "",
+    "export function createProcedureClient(client: ApiClient): ApiProcedureClient {",
+    "  return client.procedures;",
+    "}",
+    "",
+    "/**",
+    " * Convenience helper to create an ApiClient pre-bound to a Supabase client.",
+    " * Automatically resolves baseUrl, apikey, and session bearer tokens.",
+    " */",
+    "export function createApiClientFromSupabase(supabase: any, config: Omit<ApiClientConfig, \"supabase\"> = {}): ApiClient {",
+    "  return createApiClient({ ...config, supabase });",
+    "}",
     "",
   ].join("\n");
 }

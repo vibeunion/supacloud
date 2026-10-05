@@ -195,6 +195,9 @@ export type {
   OpenApiOptions,
   OpenApiSecurityScheme,
   OpenApiServer,
+  OperationIR,
+  OperationKind,
+  OperationParamMapping,
 } from "./types";
 export { inspectRouteContracts, validateRouteContracts } from "./route-contracts";
 export { pullGraphqlSchema } from "./graphql-schema";
