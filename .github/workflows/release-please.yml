@@ -494,6 +494,16 @@ jobs:
           bun run build
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
+      - name: Publish Query adapter to NPM
+        if: ${{ !cancelled() && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true) }}
+        working-directory: packages/query
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
       - name: Publish supacloud-js to NPM
         if: ${{ always() && (needs.release-please.outputs.supacloud_js_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/supacloud-js
