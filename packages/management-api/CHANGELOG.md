@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.97.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.96.0...management-api-v0.97.0) (2026-10-05)
+
+
+### Features
+
+* **web-console:** upgrade svadmin and type auth mutations ([#1662](https://github.com/vibeunion/supacloud/issues/1662)) ([b7bc46c](https://github.com/vibeunion/supacloud/commit/b7bc46cb3aeb57decd9265699cc66a6dd8c0d4ea))
+
 ## [0.96.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.95.0...management-api-v0.96.0) (2026-10-05)
 
 

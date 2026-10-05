@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.37.0...compiler-v0.38.0) (2026-10-05)
+
+
+### Features
+
+* **compiler,query,supacloud-js:** procedure façade, supabase-js compatibility, and @supacloud/query adapter ([#1653](https://github.com/vibeunion/supacloud/issues/1653)) ([8ed8d1a](https://github.com/vibeunion/supacloud/commit/8ed8d1ad594ab981e6d03333ad35248608467992))
+
 ## [0.37.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.36.0...compiler-v0.37.0) (2026-10-05)
 
 
