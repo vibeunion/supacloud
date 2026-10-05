@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.29.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.28.0...edge-runtime-v0.29.0) (2026-10-05)
+
+
+### Features
+
+* **elysia:** Elysia 2 AOT evaluation and end-to-end typing architecture ([#1654](https://github.com/vibeunion/supacloud/issues/1654)) ([39ee49f](https://github.com/vibeunion/supacloud/commit/39ee49f760e85e789c43c1d18cf5729db592f6bc))
+
+
+### Miscellaneous Chores
+
+* **deps:** complete @sinclair/typebox to typebox 1.3.34 migration ([#1655](https://github.com/vibeunion/supacloud/issues/1655)) ([87d1133](https://github.com/vibeunion/supacloud/commit/87d1133c0fa0eadf145afc6c3747f693e3e36200))
+
 ## [0.28.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.27.2...edge-runtime-v0.28.0) (2026-10-02)
 
 

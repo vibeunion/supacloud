@@ -14,6 +14,18 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.67.0](https://github.com/vibeunion/supacloud/compare/cli-v0.66.1...cli-v0.67.0) (2026-10-05)
+
+
+### Features
+
+* **elysia:** Elysia 2 AOT evaluation and end-to-end typing architecture ([#1654](https://github.com/vibeunion/supacloud/issues/1654)) ([39ee49f](https://github.com/vibeunion/supacloud/commit/39ee49f760e85e789c43c1d18cf5729db592f6bc))
+
+
+### Miscellaneous Chores
+
+* **deps:** complete @sinclair/typebox to typebox 1.3.34 migration ([#1655](https://github.com/vibeunion/supacloud/issues/1655)) ([87d1133](https://github.com/vibeunion/supacloud/commit/87d1133c0fa0eadf145afc6c3747f693e3e36200))
+
 ## [0.66.1](https://github.com/vibeunion/supacloud/compare/cli-v0.66.0...cli-v0.66.1) (2026-10-05)
 
 
