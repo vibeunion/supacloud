@@ -35,6 +35,12 @@
       "initial-version": "0.1.0",
       "changelog-path": "CHANGELOG.md"
     },
+    "packages/query": {
+      "release-type": "node",
+      "component": "query",
+      "initial-version": "0.1.0",
+      "changelog-path": "CHANGELOG.md"
+    },
     "packages/supacloud-js": {
       "release-type": "node",
       "component": "supacloud-js",

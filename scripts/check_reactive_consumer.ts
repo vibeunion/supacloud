@@ -28,11 +28,11 @@ const run = (args: string[], cwd = project): Promise<string> => runStarterComman
 try {
   for (const directory of [project, env.HOME, env.BUN_TMPDIR]) await mkdir(directory, { recursive: true });
   const overrides: Record<string, string> = {};
-  for (const directory of ["contracts", "app", "supacloud-js"]) {
+  for (const directory of ["contracts", "query", "app", "supacloud-js"]) {
     const root = join(repo, "packages", directory);
     const metadata = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
     await readFile(join(root, metadata.module ?? metadata.main));
-    if (directory !== "contracts") {
+    if (directory === "app" || directory === "supacloud-js") {
       const reactive = metadata.exports["./reactive"];
       await readFile(join(root, reactive.import?.types ?? reactive.types));
     }
