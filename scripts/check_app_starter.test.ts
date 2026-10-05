@@ -13,12 +13,13 @@ const env = Object.fromEntries(["PATH", "HOME", "TMPDIR"].flatMap(name =>
   process.env[name] === undefined ? [] : [[name, process.env[name]!]]));
 
 describe("starter dependency installation", () => {
-  test("uses cached metadata for workspace and consumer installs", () => {
+  test("refreshes consumer metadata while preserving frozen workspace and offline installs", () => {
     expect(starterInstallArgs("workspace")).toEqual([
       "install", "--no-progress", "--prefer-offline", "--frozen-lockfile",
     ]);
     expect(starterInstallArgs("consumer")).toEqual([
-      "install", "--no-progress", "--prefer-offline", "--ignore-scripts",
+      "install", "--no-progress", "--no-cache", "--ignore-scripts",
+      "--registry=https://registry.npmjs.org",
     ]);
     expect(starterInstallArgs("locked-consumer")).toEqual([
       "install", "--no-progress", "--offline", "--frozen-lockfile", "--ignore-scripts",
@@ -36,7 +37,7 @@ describe("starter dependency installation", () => {
     expect(manifest.devDependencies.jose).toBe("^6.2.11");
   });
 
-  test("performs the cache-preferred install and offline frozen verification", async () => {
+  test("performs a fresh resolution followed by offline frozen verification", async () => {
     const calls: string[][] = [];
     await installStarterConsumer("/tmp/starter-consumer", async (args, cwd) => {
       calls.push([cwd, ...args]);

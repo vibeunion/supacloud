@@ -3,7 +3,7 @@
 SupaCloud keeps one application generator, compiler and runtime model. AponiaJS's
 complete resource generation, preflighted changes and packed-consumer testing
 informed this workflow. No AponiaJS code or runtime is imported. Elysia stays at
-**2.0.0-beta.19**; the existing DI, governance and Devtools contracts remain in use.
+**2.0.0-beta.21**; the existing DI, governance and Devtools contracts remain in use.
 
 ## Create an application and add a feature
 
