@@ -4,8 +4,8 @@ import { and, eq, sql } from "drizzle-orm";
 import { drizzle, type BunSQLDatabase } from "drizzle-orm/bun-sql/postgres";
 import { boolean, integer, pgSchema, text } from "drizzle-orm/pg-core";
 import { createSelectSchema } from "drizzle-orm/typebox-legacy";
-import { Type, type Static } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
+import { Type, type Static } from "typebox";
+import { Value } from "typebox/value";
 import * as ts from "@typescript/typescript6";
 import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -28,8 +28,13 @@ const records = pgSchema("app").table("settings", {
   version: integer().notNull().default(0),
 });
 const rowSchema = createSelectSchema(records);
-const inputSchema = Type.Pick(rowSchema, ["id", "enabled"], { additionalProperties: false });
-const resultSchema = Type.Pick(rowSchema, ["id", "enabled", "version"], { additionalProperties: false });
+// `drizzle-orm/typebox-legacy` is the only Drizzle schema helper that keeps
+// the 0.34 type identity drizzle-orm@1.0.0-rc.4 is built against; its 1.x
+// `typebox` helper still subclasses the removed `Type.Base`. Wrap the derived,
+// marker-less JSON Schema property map with TypeBox 1.x before projecting.
+const rowProjection = Type.Object(rowSchema.properties);
+const inputSchema = Type.Pick(rowProjection, ["id", "enabled"], { additionalProperties: false });
+const resultSchema = Type.Pick(rowProjection, ["id", "enabled", "version"], { additionalProperties: false });
 const actor = { tenantId: "tenant-a", actorId: "operator-a" };
 const container = `supacloud-drizzle-${crypto.randomUUID()}`;
 let pool: BunSQL;

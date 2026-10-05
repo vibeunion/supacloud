@@ -1,5 +1,5 @@
-import type { TSchema } from "@sinclair/typebox";
-import { Value } from "@sinclair/typebox/value";
+import type { TSchema } from "typebox";
+import { Value } from "typebox/value";
 import {
     parseToolArguments,
     schemaDescription,

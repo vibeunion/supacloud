@@ -1,8 +1,8 @@
 <script lang="ts">
   import type { DataProvider, ResourceDefinition, RouterProvider } from '@svadmin/core';
-  import { defineResource } from '@svadmin/core/resource-contract';
-  import { Type } from '@sinclair/typebox';
+  import { Type } from 'typebox';
   import { AdminApp, AutoTable } from '@svadmin/ui';
+  import { defineSvadminResource } from '$lib/admin/svadmin-contract';
 
   const dataProvider = {
     getList: async () => ({
@@ -16,7 +16,7 @@
     getApiUrl: () => 'https://example.test',
   } as DataProvider;
 
-  const usersContract = defineResource('users', {
+  const usersContract = defineSvadminResource('users', {
     record: Type.Object({
       id: Type.String(),
       name: Type.String(),
