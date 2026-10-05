@@ -71,6 +71,7 @@ const api = createSupaCloudProcedureClient({
   supabase,
   functionName: "app-api",
   generated: createApiClient,
+  generatedConfig: { normalize: false },
 });
 
 const detail = await api.cases.detail.query({ params: { id: "case-1" } });
