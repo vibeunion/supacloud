@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.36.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.35.0...compiler-v0.36.0) (2026-10-05)
+
+
+### Features
+
+* add agent backend authoring, runtime and observability workflows ([#1648](https://github.com/vibeunion/supacloud/issues/1648)) ([59a66d1](https://github.com/vibeunion/supacloud/commit/59a66d184a47d19c7f8895f24a6ba2c7e74e93d0))
+
+
+### Bug Fixes
+
+* **supacloud-js:** harden procedure execution contracts ([#1643](https://github.com/vibeunion/supacloud/issues/1643)) ([cb20731](https://github.com/vibeunion/supacloud/commit/cb20731961525ee02e8d46467bf45e9b3dbd9147))
+
 ## [0.35.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.34.0...compiler-v0.35.0) (2026-10-05)
 
 

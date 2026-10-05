@@ -3,7 +3,7 @@
   "generatedBy": "supacloud/starter-metadata-v1",
   "packages": {
     "compiler": {
-      "version": "0.35.0"
+      "version": "0.36.0"
     },
     "app": {
       "version": "0.22.0",
@@ -30,7 +30,7 @@
       }
     },
     "sdk": {
-      "version": "0.39.0",
+      "version": "0.39.1",
       "peerDependencies": {
         "@supabase/supabase-js": "^2.115.0"
       }

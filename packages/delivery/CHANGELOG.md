@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.7.0...delivery-v0.8.0) (2026-10-05)
+
+
+### Features
+
+* add agent backend authoring, runtime and observability workflows ([#1648](https://github.com/vibeunion/supacloud/issues/1648)) ([59a66d1](https://github.com/vibeunion/supacloud/commit/59a66d184a47d19c7f8895f24a6ba2c7e74e93d0))
+
 ## [0.7.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.6.0...delivery-v0.7.0) (2026-10-04)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.39.0...supacloud-js-v0.39.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* **supacloud-js:** harden procedure execution contracts ([#1643](https://github.com/vibeunion/supacloud/issues/1643)) ([cb20731](https://github.com/vibeunion/supacloud/commit/cb20731961525ee02e8d46467bf45e9b3dbd9147))
+
 ## [0.39.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.38.0...supacloud-js-v0.39.0) (2026-10-05)
 
 
