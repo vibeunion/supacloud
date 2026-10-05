@@ -12,7 +12,7 @@ interface ModulePolicy {
 
 const ACTION_POLICY: Record<string, ModulePolicy> = {
     deploy: { write: ["deploy"] },
-    applications: { read: ["list_releases", "get_release", "get_runtime", "get_configuration"],
+    applications: { read: ["list_releases", "get_release", "get_runtime", "get_deployment_evidence", "get_configuration"],
         write: ["upload_release", "put_configuration", "activate_release", "reconcile_activation", "retire_activation"] },
     project: {
         read: ["get", "endpoints", "health", "logs", "api_keys", "settings", "tasks", "task_detail", "task_stats", "dlq", "background_settings"],
@@ -25,7 +25,13 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         write: ["query", "execute", "apply_migration", "push_migrations", "baseline_migrations", "create_table_rls", "enable_extension", "disable_extension"],
     },
     supabase: {
-        local: ["version", "migration_new", "db_diff", "db_reset", "db_pull", "db_dump", "migration_list", "gen_types"],
+        read: ["config_pull"],
+        local: [
+            "version", "init", "migration_new", "db_diff", "db_reset", "db_pull",
+            "db_schema_declarative_sync", "db_schema_declarative_generate",
+            "db_dump", "stack_start", "stack_prepare",
+            "stack_status", "stack_stop", "stack_destroy", "migration_list", "gen_types",
+        ],
         write: ["push"],
     },
     lite: {
@@ -76,7 +82,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     },
     ai: { local: ["show_skill", "install_skill"] },
     app: {
-        local: ["init", "generate", "dev", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix", "plan", "build"],
+        local: ["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix", "plan", "build"],
         read: ["status"],
         write: ["upload", "configure", "deploy", "rollback", "reconcile", "retire"],
     },

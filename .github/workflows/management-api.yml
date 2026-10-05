@@ -20,8 +20,14 @@ on:
       - "packages/elysia/**"
       - "packages/db/**"
       - "packages/testing/**"
+      - "packages/worker/**"
       - "docker/**"
       - "scripts/**"
+      - "package.json"
+      - "bun.lock"
+      - "nx.json"
+      - "tsconfig.base.json"
+      - ".github/workflows/nx-workspace.yml"
       - "infrastructure/realtime/**"
       - "infrastructure/systemd/supacloud-realtime.service"
       - "install.sh"
@@ -142,9 +148,11 @@ jobs:
         run: |
           bun run scripts/build-command-dependencies.ts app
           (cd packages/app && bun install --frozen-lockfile)
+          (cd packages/supacloud-js && bun install --frozen-lockfile && bun run build)
           (cd packages/cli && bun install --frozen-lockfile --ignore-scripts)
           (cd packages/db && bun install --frozen-lockfile --ignore-scripts)
           (cd packages/management-api && bun install --frozen-lockfile)
+          (cd packages/worker && bun install --frozen-lockfile)
           (cd packages/supacloud-lite && bun install --frozen-lockfile)
           (cd packages/compiler && bun run build)
 
@@ -177,7 +185,8 @@ jobs:
           - name: SupaCloud JS SDK
             working-directory: packages/supacloud-js
             script: |
-              bun run ../../scripts/build-command-dependencies.ts supacloud-js
+              bun install --ignore-scripts --frozen-lockfile --cwd ../..
+              node ../../scripts/workspace/prepare.mjs supacloud-js
               bun install --frozen-lockfile
               bun x --no-install tsc -p tsconfig.commands.json
               bun run typecheck
@@ -211,6 +220,7 @@ jobs:
             working-directory: packages/cli
             script: |
               bun install --frozen-lockfile
+              (cd ../app && bun install --frozen-lockfile)
               (cd ../delivery && bun run build)
               bun run typecheck
               bun test src
@@ -224,6 +234,14 @@ jobs:
               bun run typecheck
               bun test
               bun run build
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Worker Delivery
+            working-directory: packages/worker
+            script: |
+              bun install --frozen-lockfile
+              bun run build
+              bun test
+              bun run test:delivery
               bun run ../../scripts/audit_dependencies.ts
           - name: Admin CLI
             working-directory: packages/admin
@@ -268,6 +286,8 @@ jobs:
               (cd ../management-api && bun run typecheck:application-releases)
               (cd ../cli && bun install --frozen-lockfile)
               (cd ../delivery && bun install --frozen-lockfile && bun run typecheck && bun run build)
+              (cd ../supacloud-js && bun install --frozen-lockfile && bun run build)
+              bun test ../../scripts/frontend-sdk.test.ts
               bun test --timeout 60000 ../../scripts/lib/application-release-storage.test.ts
               bun ../../.github/scripts/delivery-package.acceptance.mjs
               bun run ../../scripts/audit_dependencies.ts
@@ -1216,6 +1236,10 @@ jobs:
     name: App Generation Acceptance
     uses: ./.github/workflows/app-generation.yml
 
+  nx-workspace:
+    name: Nx Workspace Tooling
+    uses: ./.github/workflows/nx-workspace.yml
+
   # Keep this aggregate name stable: main branch protection requires it.
   required-checks:
     name: Required Checks
@@ -1235,6 +1259,7 @@ jobs:
       - shell-scripts-lint
       - caddy-edge-proxy-smoke
       - app-generation
+      - nx-workspace
       - generate-sbom
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -1256,6 +1281,7 @@ jobs:
           SHELL_SCRIPTS_LINT: ${{ needs.shell-scripts-lint.result }}
           CADDY_EDGE_PROXY: ${{ needs.caddy-edge-proxy-smoke.result }}
           APP_GENERATION: ${{ needs.app-generation.result }}
+          NX_WORKSPACE: ${{ needs.nx-workspace.result }}
           SBOM: ${{ needs.generate-sbom.result }}
         run: |
           for result in \
@@ -1273,6 +1299,7 @@ jobs:
             "$SHELL_SCRIPTS_LINT" \
             "$CADDY_EDGE_PROXY" \
             "$APP_GENERATION" \
+            "$NX_WORKSPACE" \
             "$SBOM"; do
             if [[ "$result" != "success" ]]; then
               echo "Required CI job did not succeed: $result" >&2

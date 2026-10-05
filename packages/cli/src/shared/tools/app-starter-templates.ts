@@ -1,10 +1,14 @@
+import starterMetadata from "./starter-metadata.json" with { type: "json" };
 import { STARTER_REACTIVE_GUIDE, STARTER_REACTIVE_TEST, STARTER_REACTIVE_AGENTS } from "./app-starter-reactive";
 import { STARTER_ENVIRONMENT, STARTER_ENVIRONMENT_TEST } from "./app-starter-environment";
-import compilerMetadata from "../../../../compiler/package.json" with { type: "json" };
-import appMetadata from "../../../../app/package.json" with { type: "json" };
-import elysiaMetadata from "../../../../elysia/package.json" with { type: "json" };
 
-export type StarterTemplate = "http" | "command" | "edge";
+const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata } = starterMetadata.packages;
+
+export type StarterTemplate = "minimal" | "http" | "command" | "edge";
+export interface StarterSdkDependencies {
+  "@supacloud/js": string;
+  "@supabase/supabase-js": string;
+}
 
 const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
@@ -85,7 +89,8 @@ export function createCompiledModules(): never {
 }
 `;
 
-function baseFiles(name: string): Record<string, string> {
+function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Record<string, string> {
+  const minimal = sdkDependencies !== undefined;
   return {
     "package.json": json({
       name, version: "0.0.0", private: true, type: "module",
@@ -108,7 +113,7 @@ function baseFiles(name: string): Record<string, string> {
         "@supacloud/app": `^${appMetadata.version}`,
         "@supacloud/elysia": `^${elysiaMetadata.version}`,
         elysia: "2.0.0-beta.21",
-                rxjs: appMetadata.dependencies.rxjs,
+        ...(sdkDependencies ?? { rxjs: appMetadata.dependencies.rxjs }),
       },
       devDependencies: {
         "@supacloud/compiler": `^${compilerMetadata.version}`,
@@ -145,10 +150,12 @@ export default defineSupacloudConfig({
 `,
     "src/application.ts": APPLICATION_SOURCE(name),
     "generated/application.ts": GENERATED_BOOTSTRAP,
-    "REACTIVE.md": STARTER_REACTIVE_GUIDE,
-        "AGENTS.md": STARTER_REACTIVE_AGENTS,
-        "tests/reactive.test.ts": STARTER_REACTIVE_TEST,
-        "scripts/environment.ts": STARTER_ENVIRONMENT,
+    ...(minimal ? {} : {
+      "REACTIVE.md": STARTER_REACTIVE_GUIDE,
+      "AGENTS.md": STARTER_REACTIVE_AGENTS,
+      "tests/reactive.test.ts": STARTER_REACTIVE_TEST,
+    }),
+    "scripts/environment.ts": STARTER_ENVIRONMENT,
     "tests/environment.test.ts": STARTER_ENVIRONMENT_TEST,
     "scripts/dev.ts": DEV_SCRIPT,
     "scripts/serve.ts": SERVE_SCRIPT,
@@ -346,8 +353,111 @@ supacloud doctor --root .
   };
 }
 
-/** Golden-path project templates other than the default full `command` starter. */
-export function appTemplateFiles(name: string, template: StarterTemplate): Record<string, string> {
+function minimalTemplate(name: string, sdkDependencies: StarterSdkDependencies): Record<string, string> {
+  return {
+    ...baseFiles(name, sdkDependencies),
+    "src/features/health/health.ts": `import { Controller, Get, Module } from "@supacloud/app/core";
+import { t } from "elysia";
+
+export const HealthResult = t.Object({ ok: t.Boolean() });
+
+@Controller("/health")
+export class HealthController {
+  @Get("/", { responses: { 200: HealthResult } })
+  health(): { ok: boolean } { return { ok: true }; }
+}
+
+@Module({ name: "health", tags: ["type:feature"], controllers: [HealthController] })
+export class HealthModule {}
+`,
+    "src/features/health/health.test.ts": `import { expect, test } from "bun:test";
+import { HealthController } from "./health";
+
+test("health is a public, side-effect-free operation", () => {
+  expect(new HealthController().health()).toEqual({ ok: true });
+});
+`,
+    "src/app.module.ts": `import { Module } from "@supacloud/app/core";
+import { HealthModule } from "./features/health/health";
+
+@Module({ name: "application-root", tags: ["type:app"], imports: [HealthModule] })
+export class AppModule {}
+`,
+    "scripts/sandbox.ts": `import { createMemorySandbox } from "@supacloud/elysia";
+import { createCompiledModules } from "../generated/application";
+
+export function createDemo() {
+  if (process.env.APP_ENV !== "development" && process.env.APP_ENV !== "test") {
+    throw new Error("Local adapters are restricted to development and test");
+  }
+  return createMemorySandbox({ modules: createCompiledModules() });
+}
+`,
+    "AGENTS.md": `# Application changes
+
+- Business code and its tests belong in src/features/<feature>.
+- Use @supacloud/app/core for metadata; keep UI in the selected frontend framework.
+- Reuse @supacloud/js and the existing Supabase session for platform access.
+- Ordinary reads use the RLS-protected Supabase client. GraphQL is opt-in.
+- Cross-table business writes require trusted authorization, transactions,
+  idempotency and audit. Never put service-role or Management tokens in a browser.
+- Do not edit generated/. Do not rewrite historical migrations.
+- Run the directly related single test file and git diff --check for daily changes.
+- Use app verify-plan --target <module> to inspect the focused verification plan.
+- Do not introduce another workflow engine, DI container or session store.
+`,
+    "README.md": `# ${name}
+
+## Local development
+
+\`\`\`sh
+bun install
+bun run compile
+bun test src/features/health/health.test.ts
+bun run dev
+\`\`\`
+
+The local server binds to 127.0.0.1:3000 and exposes GET /health.
+The dev script compiles, watches and restarts after successful compilation.
+Memory adapters are local-only; this is not production identity or persistence.
+
+## Add a feature
+
+Keep code, contracts and tests in src/features/<feature>; register modules in
+src/app.module.ts. Use @supacloud/app/core, not a frontend compatibility API.
+Use app generate --kind resource for an authorized read-port skeleton.
+It fails closed until the application supplies its data adapter.
+
+## Frontend and database
+
+@supacloud/js wraps your existing @supabase/supabase-js client. Reuse its session,
+Storage and RLS-protected PostgREST reads. Generated business clients can use
+createAuthenticatedFetch from @supacloud/js/contracts with that same session.
+Use fixed trusted HTTPS endpoints and never retry an uncertain write.
+
+GraphQL is optional; this starter has no synthetic GraphQL schema.
+For a complete persistent command/attachment example, create a separate reference
+project with app init --template command. The http and edge recipes also remain
+explicit options; do not install every recipe into this application.
+
+## Integration and delivery
+
+createApp requires application-owned trusted identity and durable adapters.
+Database migrations and seed data require an explicitly selected development
+database and a reviewed application script; the CLI never infers a production target.
+Commit generated/ after compilation. At release, check generated drift before
+regeneration, then validate types, database permissions and authenticated behavior.
+`,
+  };
+}
+
+/** Explicit recipes retain their existing layouts; new projects default to minimal. */
+export function appTemplateFiles(name: string, template: StarterTemplate, sdkDependencies?: StarterSdkDependencies): Record<string, string> {
+  if (template === "minimal") {
+    if (!sdkDependencies) throw new Error("Minimal template requires the initializer's SDK dependency versions");
+    return minimalTemplate(name, sdkDependencies);
+  }
+  if (template !== "http" && template !== "edge") throw new Error("Use appStarterFiles for the command recipe");
   const files = template === "http" ? httpTemplate(name) : edgeTemplate(name);
   const feature = template === "http" ? "OrdersFeature" : "SyncFeature";
   const source = template === "http" ? "./orders/orders" : "./sync/sync";

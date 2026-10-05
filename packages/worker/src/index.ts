@@ -7,6 +7,14 @@ import {
   type QueueBinding,
   type TaskHandler,
 } from "./queue-handler.js";
+export * from "./scriptc.js";
+export { workerExecutionFromEnvironment, executionQueueOptions, workerEnvelope } from "./execution-group.js";
+export { createExecutionGroupWorker } from "./group-worker.js";
+export type { ExecutionGroupDomain, WorkerHealth } from "./group-worker.js";
+export { admitWorkerOperation, releaseWorkerOperation, requireDrainedWorkerGroup } from "./admission.js";
+export type { WorkerAdmission, WorkerTransaction } from "./admission.js";
+export { measureWorkerApiLoad, acceptWorkerMixedLoad } from "./acceptance.js";
+export type { WorkerLoadSpec, WorkerLoadMeasurement, WorkerAcceptancePorts } from "./acceptance.js";
 export {
   WorkerTaskError,
   type TaskContext,
@@ -19,10 +27,14 @@ export interface ProcessWorkerOptions {
   connectionString: string;
   concurrency?: number;
   maxPgConnections?: number;
+  /** Environment source used for startup validation; defaults to process.env. */
+  environment?: Readonly<Record<string, string | undefined>>;
 }
 export interface QueueWorkerOptions extends ProcessWorkerOptions, QueueBinding {
   visibilityTimeoutSeconds?: number;
   retryLimit?: number;
+  /** Lifecycle supervision only. The upstream engine remains the sole scheduler. */
+  supervise?: (run: (signal: AbortSignal) => Promise<void>, signal: AbortSignal, enqueuedAt: number | null) => Promise<void>;
 }
 let processClaimed = false;
 function integer(
@@ -62,7 +74,10 @@ function config(options: ProcessWorkerOptions) {
     pollIntervalMs: 200,
   });
 }
-function preflight(projectRef: string): void {
+function preflight(
+  projectRef: string,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+): void {
   if (
     typeof process === "undefined" ||
     "Deno" in globalThis ||
@@ -72,8 +87,11 @@ function preflight(projectRef: string): void {
   }
   if (
     process.env.SUPACLOUD_PROJECT_REF !== projectRef ||
-    !process.env.SUPABASE_URL ||
-    !process.env.SUPABASE_SERVICE_ROLE_KEY
+    environment.SUPACLOUD_PROJECT_REF !== projectRef ||
+    !environment.SUPABASE_URL ||
+    !environment.SUPABASE_SERVICE_ROLE_KEY ||
+    environment.SUPABASE_URL !== process.env.SUPABASE_URL ||
+    environment.SUPABASE_SERVICE_ROLE_KEY !== process.env.SUPABASE_SERVICE_ROLE_KEY
   ) {
     throw new Error("WORKER_PROJECT_ENV_REQUIRED");
   }
@@ -116,10 +134,15 @@ export function createPgflowQueueWorker<T>(
     },
   };
   const execute = createQueueHandler(options, handler);
+  const supervised: typeof execute = options.supervise
+    ? (payload, context) => options.supervise!(
+      async signal => { await execute(payload, { ...context, shutdownSignal: signal }); }, context.shutdownSignal,
+      Number.isFinite(Date.parse(context.rawMessage.enqueued_at)) ? Date.parse(context.rawMessage.enqueued_at) : null)
+    : execute;
   return createLifecycle(async () => {
-    preflight(projectRef);
+    preflight(projectRef, options.environment);
     const { EdgeWorker } = await import("@pgflow/edge-worker");
-    return EdgeWorker.startQueueWorker(execute, queueConfig);
+    return EdgeWorker.startQueueWorker(supervised, queueConfig);
   });
 }
 
@@ -136,7 +159,7 @@ export function createPgflowWorker<TFlow extends AnyFlow>(
   if (!/^scw_[a-z0-9_]{1,40}$/.test(flow.slug))
     throw new Error("WORKER_FLOW_INVALID");
   return createLifecycle(async () => {
-    preflight(projectRef);
+    preflight(projectRef, options.environment);
     const { EdgeWorker } = await import("@pgflow/edge-worker");
     return EdgeWorker.startFlowWorker(flow, flowConfig);
   });

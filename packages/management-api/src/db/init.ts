@@ -140,6 +140,20 @@ export async function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_projects_ref ON projects(ref);
     CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
 
+    CREATE TABLE IF NOT EXISTS project_notebooks (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      project_ref VARCHAR(20) NOT NULL REFERENCES projects(ref) ON DELETE CASCADE,
+      owner_principal TEXT NOT NULL,
+      name VARCHAR(160) NOT NULL,
+      content TEXT NOT NULL DEFAULT '',
+      revision BIGINT NOT NULL DEFAULT 1,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE (project_ref, owner_principal, name)
+    );
+    CREATE INDEX IF NOT EXISTS idx_project_notebooks_project
+      ON project_notebooks(project_ref, owner_principal, updated_at DESC);
+
     CREATE TABLE IF NOT EXISTS branch_replacement_journal (
       parent_ref TEXT PRIMARY KEY,
       branch_ref TEXT NOT NULL,

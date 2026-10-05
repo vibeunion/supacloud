@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/cli",
-  "version": "0.61.0",
+  "version": "0.66.1",
   "description": "Project-scoped CLI for SupaCloud users",
   "type": "module",
   "main": "./dist/index.js",
@@ -35,7 +35,7 @@
   },
   "dependencies": {
     "@sinclair/typebox": "^0.34.52",
-    "@supacloud/compiler": "^0.28.0",
+    "@supacloud/compiler": "^0.36.0",
     "@supacloud/delivery": "file:../delivery",
     "@supacloud/db": "^0.2.0",
     "fflate": "^0.8.3",
@@ -45,7 +45,9 @@
     "@supacloud/delivery": "file:../delivery"
   },
   "devDependencies": {
+    "@supacloud/elysia": "^0.23.1",
     "@types/bun": "^1.4.2",
+    "elysia": "2.0.0-beta.21",
     "typescript": "^7.0.2"
   }
 }

@@ -14,22 +14,33 @@ Business persistence and authorization remain application-owned.
 
 ## Start
 
+The default is now `minimal`: a feature-local health endpoint, its test, compiler,
+Elysia host and frontend SDK dependencies. It does not generate approval,
+attachments, Worker or GraphQL examples. Use `--template command` for the complete
+durable reference described below, or explicitly select `http` / `edge`.
+Existing applications and explicit recipe layouts are not reorganized.
+
 After the CLI release containing this command is published:
 
 ```sh
-supacloud app init --root ./orders --name orders
+supacloud-cli app init --root ./orders --name orders
 cd orders
 bun install
 bun run check
 bun run dev
 ```
 
+Release the matching `@supacloud/app` with its `/core` export before publishing
+the CLI that emits these imports. Source tests and candidate-package overrides
+do not prove that the public registry already contains this entry point.
+
 The published CLI also exposes the same local loop through an application-level
 entry, without reaching for a remote test server:
 
 ```sh
 supacloud-cli app dev --profile fast          # local/ephemeral, safe defaults
-supacloud-cli app dev --profile integration   # requires an explicit database URL
+# In the explicit command recipe, after database setup:
+supacloud-cli app dev --profile integration   # requires an explicit loopback database URL
 ```
 
 The project CLI binary also supports `supacloud-cli app init`. Initialization is
@@ -37,8 +48,10 @@ local, needs no account or API token, never installs dependencies automatically,
 and refuses non-empty or symlink targets. A `.git` directory is allowed. `--force`
 does not bypass overwrite protection.
 
-The template contains:
+The explicit `--template command` reference contains:
 
+- Drizzle table declarations and inferred row types, separate migration/introspection
+  candidate outputs, and an offline database-source contract gate in default check/build;
 - three separated framework packages, TypeScript configuration and strict compiler capabilities;
 - a typed review feature with a state specification, route schemas and static AOP;
 - Database First GraphQL query contracts as the recommended read path, a synthetic offline schema fixture, generated typed
@@ -55,6 +68,15 @@ New compiler and runtime fixes must be published with the CLI feature. Before
 publication, `bun run scripts/check_app_starter.ts` tests locally packed artifacts
 together; this is not evidence that those versions already exist on npm.
 
+The default command template includes database tooling. HTTP/Edge templates do not
+install Drizzle or require `db:generate`. For the command template, `db:generate`
+is an explicit first-use setup step after installation; commit `db/contracts/`.
+Later default checks refuse stale contracts instead of silently regenerating them.
+`supacloud app check`, `doctor` and `build` also invoke the project's installed database
+checker when `database.sources.json` is present. See
+[Database Source Contracts](./database-source-contracts.md) for existing-project
+assessment, source boundaries, precision and migration adoption.
+
 Database First is the only GraphQL server-schema model. The fixture is not an
 application-owned server SDL: change Drizzle/SQL declarations, migrate, then
 replace it with an intended-role database export before integration. Do not
@@ -65,18 +87,19 @@ checks. Offline compilation does not attest database provenance or freshness.
 
 ## Local Development Entry
 
-`bun run dev` (the generated starter's watch/recompile/restart loop) and
-`supacloud-cli app dev` share one application graph and one compiler. `app dev`
-compiles, reports diagnostics and watches; it never syncs files to a remote host.
+`supacloud-cli app dev` runs the project's `dev` script, so it and `bun run dev`
+share the same watch/recompile/restart loop. It does not add a second watcher.
+`supacloud-cli app watch` is the compile-only inspection command.
+For compatibility, `app dev --once` / `--watch=false` remain compile-only.
 Remote test-server sync, migration generation and remote reload remain
 `supacloud dev sync`, `supacloud dev migrate` and `supacloud dev watch`.
 
 | Profile | Intended use | Requirement |
 | --- | --- | --- |
-| `fast` (default) | Write business code, inspect routes and check contracts quickly | Local/ephemeral dependencies; no external database is required |
-| `integration` | Select a database target for subsequent integration work; this slice only compiles | An explicit `--database-url` or `SUPACLOUD_DEV_DATABASE_URL`; never inferred or defaulted |
+| `fast` (default) | Run the project's actual development server | A `dev` script; no external database is required |
+| `integration` | Verify a local database, then run the project's durable host | Explicit loopback PostgreSQL URL and `dev:integration` script |
 
-The command reports the selected profile, project root, output directory,
+The compile-only watch command reports the selected profile, project root, output directory,
 database mode and current compilation result. `--once` (or `--watch=false`)
 performs one compile without creating filesystem watchers. Omit these to watch.
 Initial and subsequent watch reports are emitted immediately to **stderr**;
@@ -103,11 +126,24 @@ rejects an explicit database flag rather than claiming to use it. The displayed
 host and database name are metadata, not a guarantee that those names contain no
 user-supplied sensitive information.
 
-The first slice does **not** provision even a local database, connect to, migrate
-or seed an integration database, start the application, or provision queue or
-object-storage adapters. A syntactically valid URL does not prove connectivity,
-permissions, environment identity or non-production status. Those steps require
-an explicitly selected environment and remain separate follow-ups. Embedded tool
+Actual `app dev --profile integration` verifies connectivity, the requested
+database name and a non-superuser/non-BYPASSRLS application role before starting.
+It accepts only an explicit loopback URL without query/fragment; errors omit
+credentials. Loopback may still be a tunnel and is not proof of environment
+ownership. Never point it at a forwarded production database.
+
+The command reference ships `dev:integration`, which reuses the same compiler
+watcher and existing PostgreSQL/SupAuth delivery host. It does not fall back to a
+memory identity. Apply the reviewed migrations and synthetic development seed
+with a separately privileged, explicitly selected setup process first; keep the
+runtime role unprivileged. Required project/tenant and SupAuth settings remain
+explicit. The minimal template has no database-backed business feature, so it
+does not invent an integration host or silently choose one.
+
+No dev command automatically migrates, seeds, provisions queues/storage or
+accesses a remote server. Production/staging selectors are rejected by the
+launcher. Child exit codes propagate, and cancellation terminates the local
+process group with bounded escalation. Embedded tool
 consumers can opt into `AppToolOptions.onDevProgress`; the CLI owns its stderr
 transport, and the shared tool never writes to a transport implicitly.
 
@@ -172,6 +208,12 @@ matrix but cannot replace any of those guarantees. Client state-machine engines
 remain projections; see [Business State Machines](./business-state-machines.md).
 
 ## Acceptance Scenarios
+
+For the minimal path, run its colocated health test. For other business changes,
+`supacloud-cli app verify-plan --target <module>` reports individual nearby test
+commands and manual gaps without running them or scanning the repository.
+The scenarios below concern the explicit command reference, not features
+implicitly installed into the minimal application.
 
 ```gherkin
 Scenario: Bootstrap without credentials

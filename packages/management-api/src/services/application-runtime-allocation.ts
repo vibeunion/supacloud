@@ -1,7 +1,10 @@
 import type { SQL } from "bun";
 import { createServer } from "node:net";
 import { Value } from "typebox/value";
-import { ApplicationConfigurationIdSchema, parseApplicationReleaseRecord } from "@supacloud/delivery";
+import {
+  ApplicationConfigurationIdSchema, parseApplicationReleaseRecord, workerResourceUsage, assertWorkerBudget,
+  type WorkerResourceUsage,
+} from "@supacloud/delivery";
 import { config } from "../config";
 import { sql } from "../db";
 import { stableSha256, stableStringify } from "../utils/stable-json";
@@ -25,6 +28,7 @@ interface AllocationOptions {
   range?: ApplicationPortRange;
   isAvailable?: (port: number) => Promise<boolean>;
   reservedPorts?: (transaction: SQL) => Promise<readonly number[]>;
+  workerBudget?: unknown;
 }
 interface AllocationRow {
   project_ref: string;
@@ -36,6 +40,16 @@ interface AllocationRow {
   created_at: Date | string;
   retired_at: Date | string | null;
   retirement_fingerprint: string | null;
+}
+
+export function applicationResourceUsage(release: ApplicationRuntimeInput["release"]): WorkerResourceUsage {
+  const usage = workerResourceUsage(release.targets.flatMap(target => target.execution ? [target.execution] : []));
+  for (const target of release.targets) {
+    if (!target.compute) continue;
+    usage.cpu = Math.round((usage.cpu + target.compute.cpuLimit) * 10) / 10;
+    usage.memoryMiB += target.compute.memoryLimitMiB;
+  }
+  return usage;
 }
 export class ApplicationRuntimeAllocationError extends Error {
   constructor(readonly code: string) { super(code); }
@@ -164,6 +178,40 @@ export class ApplicationRuntimeAllocations {
         return allocation(existing);
       }
       const range = this.options.range ? validRange(this.options.range) : configuredApplicationPortRange();
+      const groups = input.runtime.release.targets.flatMap(target => target.execution ? [target.execution] : []);
+      if (groups.length || input.runtime.release.targets.some(target => target.compute)) {
+        // The existing host-wide allocation lock serializes both ports and compute reservations.
+        const active: { runtime: ApplicationRuntimeInput }[] = await transaction`
+          SELECT runtime FROM application_runtime_allocations WHERE retired_at IS NULL`;
+        const requested = applicationResourceUsage(input.runtime.release);
+        const total = active.reduce<WorkerResourceUsage>((sum, row) => {
+          const release = parseApplicationReleaseRecord(row.runtime.release);
+          if (release.project_ref === input.runtime.release.project_ref) {
+            for (const target of release.targets) {
+              const previous = target.execution;
+              if (!previous || !groups.some(group => group.queue === previous.queue)) continue;
+              const next = groups.find(group => group.queue === previous.queue)!;
+              if (release.application_id !== input.runtime.release.application_id
+                || row.runtime.environmentId !== input.runtime.environmentId
+                || previous.taskKey !== next.taskKey || previous.definitionVersion !== next.definitionVersion
+                || previous.name !== next.name) throw new ApplicationRuntimeAllocationError("WORKER_QUEUE_OWNER_CONFLICT");
+            }
+          }
+          const usage = applicationResourceUsage(release);
+          return {
+            cpu: Math.round((sum.cpu + usage.cpu) * 10) / 10,
+            memoryMiB: sum.memoryMiB + usage.memoryMiB,
+            connections: sum.connections + usage.connections,
+            concurrency: sum.concurrency + usage.concurrency,
+          };
+        }, requested);
+        let budget: unknown = this.options.workerBudget;
+        if (budget === undefined) {
+          try { budget = JSON.parse(process.env.SUPACLOUD_APPLICATION_WORKER_BUDGET_JSON ?? "null"); }
+          catch { throw new ApplicationRuntimeAllocationError("WORKER_BUDGET_REQUIRED"); }
+        }
+        assertWorkerBudget(total, budget);
+      }
       const claimed: { port: number }[] = await transaction`SELECT port FROM application_runtime_ports`;
       const unavailable = new Set<number>([
         ...claimed.map(row => Number(row.port)),

@@ -49,6 +49,7 @@ export interface LiteCliArgs {
     force?: boolean;
     memory?: boolean;
     json?: boolean;
+    baseline?: boolean;
 }
 
 export interface LiteCliExecutionResult {
@@ -128,6 +129,8 @@ export function buildLiteArgs(request: LiteCliArgs): string[] {
     booleanFlag(args, "--force", request.force);
     booleanFlag(args, "--memory", request.memory);
     booleanFlag(args, "--json", request.json);
+    if (request.baseline && request.action !== "db_pull") throw new Error("baseline requires db_pull");
+    booleanFlag(args, "--baseline", request.baseline);
     return args;
 }
 
@@ -249,8 +252,10 @@ export function registerLiteCliTools(server: ToolServer, options: LiteCliToolOpt
             force: optional(Type.Boolean(), "[snapshot_restore] Replace non-empty restore targets"),
             memory: optional(Type.Boolean(), "[*] Use an in-memory PGlite database"),
             json: optional(Type.Boolean(), "[doctor] Emit machine-readable output"),
+            baseline: optional(Type.Boolean(), "[db_pull] Record already-present schema in local migration history after review"),
         },
         async (request: LiteCliArgs) => {
+            buildLiteArgs(request);
             const execution = await execute(request);
             return {
                 isError: execution.exitCode !== 0,

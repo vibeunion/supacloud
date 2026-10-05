@@ -354,6 +354,12 @@ describe("CaddyGatewayProvider", () => {
         expect(functionsProxy?.headers?.response).toBeUndefined();
         expect(realtime?.match?.[0]?.path).toEqual(["/realtime/v1/websocket*"]);
         expect(management?.match?.[0]?.path).toEqual(["/v1/projects/testref123", "/v1/projects/testref123/*"]);
+        const appMcp = routes.find((route: { "@id"?: string }) => route["@id"] === "route-project-testref123-app-mcp");
+        expect(appMcp?.match?.[0]?.path).toEqual([
+            "/mcp/app/projects/testref123",
+            "/.well-known/oauth-protected-resource/mcp/app/projects/testref123",
+        ]);
+        expect(appMcp?.handle?.at(-1)?.headers?.request?.set?.["X-Project-Ref"]).toEqual(["testref123"]);
         expect(management?.handle?.some((handler: any) => handler.handler === "rewrite")).toBe(false);
         expect(management?.handle?.at(-1)?.headers?.request?.set?.["X-Project-Ref"]).toEqual(["testref123"]);
 

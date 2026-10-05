@@ -10,6 +10,26 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./delivery": {
+      "types": "./dist/delivery.d.ts",
+      "import": "./dist/delivery.js"
+    },
+    "./admission": {
+      "types": "./dist/admission.d.ts",
+      "import": "./dist/admission.js"
+    },
+    "./bounded-admission": {
+      "types": "./dist/bounded-admission.d.ts",
+      "import": "./dist/bounded-admission.js"
+    },
+    "./telemetry": {
+      "types": "./dist/telemetry.d.ts",
+      "import": "./dist/telemetry.js"
+    },
+    "./native": {
+      "types": "./dist/native.d.ts",
+      "import": "./dist/native.js"
     }
   },
   "files": [
@@ -17,15 +37,23 @@
     "LICENSE-APACHE-2.0.txt",
     "dist",
     "scripts",
+    "src",
+    "examples",
     "sql",
     "README.md"
   ],
   "scripts": {
     "db:install": "bun scripts/install.ts",
+    "delivery:render": "bun scripts/delivery.ts",
+    "performance:check": "bun scripts/performance.ts",
+    "test:delivery": "bun test tests/delivery.test.ts",
+    "test:runtime": "bun test tests/runtime.test.ts",
+    "check:runtime": "tsc -p tsconfig.runtime.json",
     "build": "tsc -p tsconfig.json",
     "test": "bun test tests/worker.test.ts"
   },
   "dependencies": {
+    "@supacloud/delivery": "file:../delivery",
     "libpg-query": "17.7.4",
     "@pgflow/core": "0.16.0",
     "@pgflow/edge-worker": "0.16.0",

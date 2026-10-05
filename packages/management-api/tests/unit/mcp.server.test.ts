@@ -38,6 +38,9 @@ describe("stateless MCP Streamable HTTP endpoint", () => {
       "supacloud.get_capabilities",
       "supacloud.get_backup_readiness",
       "supacloud.get_request_metrics",
+      "supacloud.get_project_logs",
+      "supacloud.query_project_logs_sql",
+      "supacloud.get_connection_locks",
       "supacloud.plan_pitr_restore",
     ]);
 

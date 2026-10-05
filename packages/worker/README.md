@@ -5,12 +5,36 @@ and `@pgflow/dsl` 0.16.0 packages. Not yet a published or deployed platform
 service. This package does not reimplement polling, retry, concurrency, queue
 acknowledgement or DAG execution.
 
+## Resource Delivery
+
+Use the optional `@supacloud/worker/delivery` entry point to bootstrap a queue
+worker from explicit environment limits. `bun run delivery:render` renders a
+dedicated Linux systemd unit with CPU/memory/process limits; it does not install
+or start it. `bun run performance:check` evaluates supplied baseline/mixed-load
+measurements, not synthetic capacity claims. See
+[`worker-resource-delivery.md`](../../docs/worker-resource-delivery.md) for
+manifests, deployment/readback, rollback and the unaccepted live gates.
+The companion [runtime recipes](../../docs/worker-runtime-recipes.md) include
+health/metrics, optional native Go and scriptc runtimes, and delivery
+verification. Managed admission and report export are documented in
+[`worker-execution-groups.md`](../../docs/worker-execution-groups.md).
+
+## Managed Execution Groups
+
+Managed execution groups add versioned routing, bounded resources, atomic
+admission and a report-export integration sample. See
+[`worker-execution-groups.md`](../../docs/worker-execution-groups.md) for the
+systemd backend, operator budgets, migration/grants, limits and local acceptance.
+The package remains private; this is not a production capacity claim.
+
 ## Ownership
 
 - Application HTTP/RPC: authenticate, authorize the entity, validate revision,
   commit the business intent and return an operation receipt.
 - `@supacloud/js`: existing remote task/queue/workflow protocol clients.
 - `@supacloud/worker`: start a project-scoped, dedicated Node/Bun worker process.
+  Delivery also supports opt-in native Go and scriptc Worker executables under
+  the same supervisor and resource contract.
 - pgflow: queue or native Flow execution, retry scheduling and worker lifecycle.
 - Domain commands: side-effect idempotency, artifact storage, business state.
 

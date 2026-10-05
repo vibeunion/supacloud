@@ -143,6 +143,15 @@ export again and compile. Offline compilation cannot attest a snapshot's origin;
 The starter's synthetic SDL is solely an offline test fixture, not a deployed
 schema. Replace it with a database export before integration.
 
+Schema export results and compiled GraphQL manifests retain `schemaHash` as the
+SHA-256 of the original UTF-8 text. The additional `schemaNormalizedHash` hashes
+the same text with physical CRLF/CR line endings converted to LF, helping identify
+checkout line-ending drift. It does not normalize escaped `\r` sequences, field
+order, descriptions or other content, and is not a semantic-equivalence or
+integrity check. `graphql-schema --check` remains byte-strict and read-only;
+an explicit export restores the generated file. Re-export and regenerate the
+manifest rather than bypassing drift checks based on the normalized hash.
+
 New `supacloud app init` projects preconfigure GraphQL query contracts and include
 an offline example. Existing REST, Command-only and background-task projects
 remain unchanged: general App/CLI configuration and `compileProject(options)`
@@ -485,6 +494,11 @@ route 会自动按 HTTP status 执行内置 response decoder，并返回 schema 
 `unknown`。`headers`、`cookie` 和多状态 `responses` 会同步进入客户端和
 OpenAPI。`buildRouteUrl` 和 `createApiClient` 可直接复用，也支持动态 headers
 和请求拦截器。
+
+每个生成 route 还会按 HTTP 方法暴露 `.query()` 或 `.mutate()` procedure
+facade，并在 `API_PROCEDURES` 中输出 Command/幂等元数据。声明
+`idempotency: "required"` 的 mutation 必须显式传入稳定的 `idempotencyKey`；
+客户端不会静默生成新 key。
 
 ### Migration from manual decoders
 

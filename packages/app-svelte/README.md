@@ -2,6 +2,12 @@
 
 Svelte 5 lifecycle binding for `@supacloud/contracts`. No Angular dependency.
 
+For generated procedure queries and mutations, use the framework-neutral
+[`@supacloud/js/query`](../supacloud-js/QUERY.md) options with `@tanstack/svelte-query`.
+This package continues to own component/target/navigation lifetime only. Pass
+an attempt's signal through the mutation's `execution.signal`; do not create a
+second cache, session store or Svelte-specific procedure engine.
+
 ```svelte
 <script lang="ts">
   import { createSvelteCommandScope } from "@supacloud/app-svelte";

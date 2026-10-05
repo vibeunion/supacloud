@@ -105,6 +105,35 @@ test("build reuses compiler manifest output without delegating deployment", asyn
     } finally { await rm(root, { recursive: true, force: true }); }
 }, 30_000);
 
+test("build blocks configured database projects before writing when their checker is unavailable", async () => {
+    const root = await fixture();
+    try {
+        await writeFile(join(root, "database.sources.json"), '{"version":1}');
+        const before = await snapshot(root);
+        const result = await runAppTool({ action: "build", root });
+        const body = JSON.parse(result.content[0]!.text);
+        expect(result.isError).toBe(true);
+        expect(body.ok).toBe(false);
+        expect(body.database.name).toBe("database-source-contracts");
+        expect(body.written).toEqual([]);
+        expect(await snapshot(root)).toEqual(before);
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("check and doctor surface database gate failures without regenerating contracts", async () => {
+    const root = await fixture();
+    try {
+        await writeFile(join(root, "database.sources.json"), '{"version":1}');
+        const before = await snapshot(root);
+        for (const action of ["check", "doctor"] as const) {
+            const result = await runAppTool({ action, root, format: "json" });
+            expect(result.isError).toBe(true);
+            expect(result.content[0]!.text).toContain("database-source-contracts");
+        }
+        expect(await snapshot(root)).toEqual(before);
+    } finally { await rm(root, { recursive: true, force: true }); }
+}, 30_000);
+
 test("remote app actions delegate once and return the identical receipt without fabrication", async () => {
     const aliases = {
         upload: "upload_release", configure: "put_configuration", deploy: "activate_release",

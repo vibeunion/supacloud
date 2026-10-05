@@ -2,6 +2,13 @@
 
 `@supacloud/js` is the platform SDK for SupaCloud.
 
+It serves frontend applications as well as trusted servers. Reuse one existing
+Supabase client and its user session; do not create a second authentication
+store. Frontend frameworks own UI state, routing and forms, while generated
+application clients own business-specific contracts. See
+[Frontend SDK Integration](../../docs/frontend-sdk-integration.md) for the
+shared-session recipe and the browser/server capability boundary.
+
 It does **not** replace [`@supabase/supabase-js`](https://www.npmjs.com/package/@supabase/supabase-js). Instead, it wraps a normal Supabase client and adds SupaCloud-specific capabilities such as:
 
 - background task submission
@@ -52,6 +59,32 @@ generation steps. This entrypoint is additive; it does not make an older svadmin
 peer range compatible with a newer SDK.
 
 ## Quick Start
+
+Use [`createSupaCloudProcedureClient`](./PROCEDURES.md) to initialize a generated
+application client with the existing Supabase session:
+
+```ts
+import { createSupaCloudProcedureClient } from "@supacloud/js";
+import { createApiClient } from "./generated/client";
+
+const api = createSupaCloudProcedureClient({
+  supabase,
+  functionName: "app-api",
+  generated: createApiClient,
+  generatedConfig: { normalize: false },
+});
+
+const detail = await api.cases.detail.query({ params: { id: "case-1" } });
+```
+
+The facade preserves route overloads and adds `SupaCloudProcedureError`, original
+Functions errors, and HTTP metadata. It does not replace Supabase JS or retry writes.
+
+For compiler-generated application procedures, the optional
+[`@supacloud/js/query`](./QUERY.md) entrypoint provides typed TanStack Query options,
+identity-scoped cache keys, cancellation and per-invocation mutation idempotency.
+Use the existing Svelte/React Query binding and Supabase session; no additional
+framework-specific SupaCloud query package is required.
 
 ```ts
 import { createClient } from "@supabase/supabase-js";

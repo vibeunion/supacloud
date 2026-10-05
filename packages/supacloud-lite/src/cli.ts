@@ -34,6 +34,7 @@ interface CliOptions extends ProjectRuntimeOptions {
   positionals: string[]
   output?: string
   diffFile?: string
+  baseline?: boolean
   /** db check: database module manifest path (default supabase/db/modules.ts). */
   moduleFile?: string
   serviceRole: boolean
@@ -90,6 +91,7 @@ function parseArgs(argv: string[]): CliOptions {
     else if (argument === '--memory') options.memory = true
     else if (argument === '--output' || argument === '-o') options.output = resolve(next())
     else if (argument === '--file' || argument === '-f') options.diffFile = next()
+    else if (argument === '--baseline') options.baseline = true
     else if (argument === '--module-file') options.moduleFile = resolve(next())
     else if (argument === '--service-role') options.serviceRole = true
     else if (argument === '--force') options.force = true
@@ -329,10 +331,11 @@ async function runDbCommand(options: CliOptions): Promise<void> {
     }
     const source = `${ddl.join('\n\n')}\n`
     if (options.diffFile) {
+      if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,100}$/.test(options.diffFile)) throw new Error('Invalid migration name')
       const stamp = timestamp()
       const output = join(paths.projectDir, 'supabase', 'migrations', `${stamp}_${options.diffFile}.sql`)
       await mkdir(join(paths.projectDir, 'supabase', 'migrations'), { recursive: true })
-      await writeFile(output, source)
+      await writeFile(output, source, { flag: 'wx' })
       await writeStandardOutput(`Wrote ${output}\n`)
     } else await writeStandardOutput(source)
     return
@@ -353,11 +356,16 @@ async function runDbCommand(options: CliOptions): Promise<void> {
       migrations: project.migrations,
       makeShadowEngine: paths.databaseEngine === 'native' ? () => createTemporaryNativeEngine(options.postgresDir) : undefined,
       runtimeMode: config.lite.runtimeMode,
-      migrationsDir: join(paths.projectDir, 'supabase', 'migrations'),
+      migrationsDir: options.baseline
+        ? join(paths.projectDir, 'supabase', 'migrations')
+        : join(paths.projectDir, '.supacloud-lite', 'schema-drafts'),
+      baseline: options.baseline,
       name: options.positionals[1] ?? 'remote_schema',
     })
     if (!result.path) await writeStandardError('No schema changes to pull.\n')
-    else await writeStandardOutput(`Wrote ${result.path} and recorded version ${result.version} as applied.\n`)
+    else await writeStandardOutput(options.baseline
+      ? `Wrote ${result.path} and recorded the existing schema as applied; no DDL was executed.\n`
+      : `Wrote review draft ${result.path}. Live database and migration history were not changed. Use db pull --baseline after review.\n`)
     return
   }
 
@@ -523,7 +531,7 @@ Commands:
   gen types             emit Supabase-shaped TypeScript database types
   db reset              reset initialized database/storage and re-run migrations
   db diff               print schema changes outside migrations
-  db pull [name]        write live schema changes as an applied migration
+  db pull [name]        write live schema changes to schema-drafts for review
   db check              reconcile database module manifests (@supacloud/db) against the live catalog
   snapshot create       create a compressed database/storage/secrets snapshot
   snapshot restore <f>  restore a snapshot into an empty target
@@ -560,6 +568,7 @@ Options:
       --identity-module   trusted external identity bridge module
   -o, --output <p>        output file for gen types
   -f, --file <name>       migration suffix for db diff
+  --baseline             db pull: write and record already-present schema as a migration
       --module-file <p>   database module manifest for db check (default supabase/db/modules.ts)
       --force             replace non-empty restore targets and retain rollback copies
 `)

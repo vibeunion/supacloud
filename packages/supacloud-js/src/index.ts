@@ -30,26 +30,27 @@ export * from "./workflows.js";
 export { createSupaCloudWorkflowFetch, type SupaCloudWorkflowFetchOptions } from "./workflow-fetch.js";
 export { createSupaCloudCommandFetch, type SupaCloudCommandFetchOptions } from "./command-fetch.js";
 export { createSupaCloudArtifactFetch, type SupaCloudArtifactFetchOptions } from "./artifact-fetch.js";
+export {
+  createSupaCloudApiFetch,
+  type SupaCloudApiFetchOptions,
+} from "./api-fetch.js";
+export {
+  createSupaCloudProcedureClient,
+  SupaCloudProcedureError,
+  isSupaCloudProcedureError,
+  isSupaCloudProcedureErrorCode,
+  isSupaCloudProcedureHttpError,
+  isSupaCloudProcedureTransportError,
+  type SupaCloudGeneratedClientConfig,
+  type SupaCloudGeneratedClientFactory,
+  type SupaCloudGeneratedClientOptions,
+  type SupaCloudProcedureClient,
+  type SupaCloudProcedureClientOptions,
+  type SupaCloudProcedureErrorCode,
+  type SupaCloudProcedureErrorOptions,
+} from "./procedure-client.js";
 export * from "./commands.js";
 export * from "./artifacts.js";
-export {
-  createQueryAdapter,
-  createQueryKey,
-  invalidateByTags,
-  type ProcedureQueryLike,
-  type ProcedureMutateLike,
-  type QueryProcedureAdapter,
-  type MutateProcedureAdapter,
-  type QueryKey,
-  type QueryOptionsResult,
-  type MutationOptionsResult,
-  type QueryClientLike,
-  type QueryAdapterOptions,
-} from "@supacloud/query";
-import {
-  createQueryAdapter,
-  type QueryAdapterOptions,
-} from "@supacloud/query";
 
 export type SupaCloudTaskStatus =
   | "pending"
@@ -291,20 +292,12 @@ export type SupaCloudTaskReceipt<TResult = unknown> = {
   ) => SupaCloudTaskSubscription;
 };
 
-export type SupaCloudClientOptions<
-  TClient extends SupabaseClient = SupabaseClient,
-  TApiClient = unknown,
-> = {
+export type SupaCloudClientOptions<TClient extends SupabaseClient = SupabaseClient> = {
   supabase: TClient;
   managementApiUrl: string;
   projectRef: string;
   getAccessToken?: () => Promise<string | null> | string | null;
   pollingIntervalMs?: number;
-  /**
-   * Optional generated API client or procedure client.
-   * When provided, `supacloud.procedures` will provide typed RPC / procedure calls.
-   */
-  apiClient?: TApiClient;
 };
 
 export class SupaCloudTaskSubmitError extends Error {
@@ -1916,24 +1909,16 @@ class SupaCloudQueuesClient<TClient extends SupabaseClient = SupabaseClient> ext
   }
 }
 
-export function createProcedureClient<T extends { procedures: any } | Record<string, any>>(client: T): T extends { procedures: infer P } ? P : T {
-  return (client as any).procedures ?? client;
-}
-
-export function createSupaCloudClient<
-  TClient extends SupabaseClient = SupabaseClient,
-  TApiClient = unknown,
->(
-  options: SupaCloudClientOptions<TClient, TApiClient>,
+export function createSupaCloudClient<TClient extends SupabaseClient = SupabaseClient>(
+  options: SupaCloudClientOptions<TClient>,
 ) {
-  const normalized: Required<SupaCloudClientOptions<TClient, TApiClient>> = {
+  const normalized: Required<SupaCloudClientOptions<TClient>> = {
     ...options,
     managementApiUrl: normalizeBaseUrl(options.managementApiUrl),
     pollingIntervalMs: options.pollingIntervalMs ?? 3000,
     getAccessToken:
       options.getAccessToken ??
       (() => defaultAccessTokenResolver(options.supabase)),
-    apiClient: (options.apiClient ?? undefined) as TApiClient,
   };
 
   const tasks = new SupaCloudTasksClient(normalized);
@@ -1944,11 +1929,7 @@ export function createSupaCloudClient<
   const commands = new SupaCloudCommandsClient(options.supabase);
   const artifacts = new SupaCloudArtifactsClient(options.supabase);
 
-  const procedures = options.apiClient
-    ? ((options.apiClient as any).procedures ?? options.apiClient)
-    : undefined;
-
-  const instance = {
+  return {
     supabase: options.supabase,
     projectRef: normalized.projectRef,
     managementApiUrl: normalized.managementApiUrl,
@@ -1968,32 +1949,5 @@ export function createSupaCloudClient<
         submitOptions?: SupaCloudTaskSubmitOptions,
       ) => tasks.submit(functionName, submitOptions),
     },
-    procedures,
-    /**
-     * Attach a typed API client or procedure client to this SupaCloud instance.
-     */
-    withClient<TClientImpl extends object>(apiClient: TClientImpl) {
-      const boundProcedures = (apiClient as any).procedures ?? apiClient;
-      return {
-        ...instance,
-        procedures: boundProcedures as TClientImpl extends { procedures: infer P } ? P : TClientImpl,
-        queryAdapter(adapterOptions?: QueryAdapterOptions) {
-          return createQueryAdapter(boundProcedures, adapterOptions);
-        },
-      };
-    },
-    /**
-     * Creates a TanStack Query adapter if a procedure client is attached.
-     */
-    queryAdapter(adapterOptions?: QueryAdapterOptions) {
-      if (!procedures) {
-        throw new Error(
-          "No procedure client attached. Provide `apiClient` in createSupaCloudClient options or call `supacloud.withClient(apiClient)`."
-        );
-      }
-      return createQueryAdapter(procedures, adapterOptions);
-    },
   };
-
-  return instance;
 }

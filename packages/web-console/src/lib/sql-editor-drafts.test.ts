@@ -16,6 +16,18 @@ test("rejects malformed or ambiguous drafts atomically", () => {
   expect(parseSqlEditorDrafts([valid])).toEqual([valid]);
 });
 
+test("persists notebook revisions without trusting malformed bindings or losing SQL", () => {
+  const draft = {
+    id: "one", name: "Query", sql: "select 1", notebookTitle: "Analysis",
+    notebook: { id: "ab000000-0000-4000-8000-000000000000", name: "Analysis", revision: 3 },
+  };
+  expect(parseSqlEditorDrafts(JSON.parse(serializeSqlEditorDrafts([draft])))).toEqual([draft]);
+  for (const notebook of [{ ...draft.notebook, revision: 0 }, { ...draft.notebook, id: "../bad" }, null]) {
+    expect(parseSqlEditorDrafts([{ ...draft, notebook }])).toEqual([{
+      id: draft.id, name: draft.name, sql: draft.sql, notebookTitle: draft.notebookTitle,
+    }]);
+  }
+});
 test("quotes role identifiers without changing the submitted SQL", () => {
   expect(wrapSqlWithRole("select 1;", "postgres")).toBe("select 1;");
   expect(wrapSqlWithRole("select 1;", "authenticated")).toBe('SET ROLE "authenticated";\nselect 1;\nRESET ROLE;');

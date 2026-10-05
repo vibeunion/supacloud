@@ -3,10 +3,27 @@
 Angular-style application metadata for SupaCloud applications: modules, DI
 tokens, providers, scopes, controllers and commands.
 
-This package is **metadata only**. Decorators attach metadata to classes; the
+New business modules use **`@supacloud/app/core`** for metadata and contracts.
+The package root remains a compatibility aggregate; it also exports runtime and
+frontend helpers, so it is not a metadata-only import. Decorators attach metadata to classes; the
 SupaCloud compiler (`@supacloud/compiler`) reads that metadata from source,
 validates the dependency graph and generates plain static factories — there is
 no runtime reflection and no `reflect-metadata` dependency.
+
+## Default and compatibility surfaces
+
+`/core` exposes modules, providers, controllers, commands, jobs and route contracts.
+It does not export UI routing, Forms, Signals, HTTP clients or runtime bootstrap.
+Its metadata/DI still uses the existing Angular integration; this is not a new
+DI engine or a claim of zero Angular dependencies.
+
+Existing root, `/browser`, `/http`, `/reactive`, `/rxjs` and `/angular` consumers
+continue to work. They are explicit integrations, not prerequisites for a new
+SupaCloud business module. Do not expand the root with new frontend capabilities.
+Frontend applications use their chosen framework and `@supacloud/js`; application
+contracts belong to generated clients, not a second HTTP/session implementation.
+Remove compatibility exports only after a separately reviewed consumer migration
+and a breaking release. No existing exports are removed here.
 
 ## Module format
 
@@ -22,13 +39,13 @@ promise that synchronous `require()` works on every runtime. See the
 
 For a complete runnable project, use `supacloud-cli app init --root ./orders --name orders`,
 then `bun install`, `bun run check` and `bun run dev` inside `orders`.
-The template includes compiler, Elysia, environment isolation and governance tests
+The minimal template includes compiler, Elysia, environment isolation and a health test
 without combining the three packages into a runtime dependency.
 
 The smallest application can contain only a controller:
 
 ```ts
-import { Controller, Get } from "@supacloud/app";
+import { Controller, Get } from "@supacloud/app/core";
 
 @Controller("/health")
 export class HealthController {

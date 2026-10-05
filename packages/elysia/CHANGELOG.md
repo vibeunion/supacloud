@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.23.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.23.0...elysia-v0.23.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **elysia:** return 503 when pending work admission is full ([#1594](https://github.com/vibeunion/supacloud/issues/1594)) ([a1e5d2e](https://github.com/vibeunion/supacloud/commit/a1e5d2e9e023a45f852ae7b278509913f0c50e1e))
+
+## [0.23.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.22.0...elysia-v0.23.0) (2026-10-02)
+
+
+### Features
+
+* complete Angular framework defaults integration ([#1587](https://github.com/vibeunion/supacloud/issues/1587)) ([0dec8ea](https://github.com/vibeunion/supacloud/commit/0dec8ea48f288da27824579038136dd33f8ccb20))
+
 ## [0.22.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.21.0...elysia-v0.22.0) (2026-10-02)
 
 

@@ -6,9 +6,33 @@ import {
     redactOfficialSupabaseOutput,
     registerSupabaseCliTools,
     resolveOfficialSupabaseCommand,
+    type SupabaseCliArgs,
 } from "./supabase-cli-tools";
 
 describe("official Supabase CLI adapter", () => {
+    test("initializes through upstream defaults without overwriting existing configuration", () => {
+        expect(buildOfficialSupabaseArgs({ action: "init", workdir: "/workspace/project" }))
+            .toEqual(["init", "--workdir", "/workspace/project"]);
+        expect(() => buildOfficialSupabaseArgs({ action: "init", workdir: ".", force: true })).toThrow("never overwrites");
+    });
+
+    test("native alpha and config project boundaries hold even for injected executors", async () => {
+        let invoke: (args: SupabaseCliArgs) => Promise<unknown> = async () => { throw new Error("not registered"); };
+        let calls = 0;
+        const environment: NodeJS.ProcessEnv = {};
+        registerSupabaseCliTools({ tool(_name, _description, _schema, callback) { invoke = callback; } }, {
+            environment, projectRef: "alpha",
+            executeOfficialCli: async () => { calls++; return { exitCode: 0, stdout: "", stderr: "" }; },
+        });
+        await expect(invoke({ action: "stack_start", runtime: "native" })).rejects.toThrow("disabled");
+        await expect(invoke({ action: "config_pull", ref: "other" })).rejects.toThrow("outside");
+        await expect(invoke({ action: "stack_destroy" })).rejects.toThrow("confirm_destroy");
+        expect(calls).toBe(0);
+        environment.SUPACLOUD_ENABLE_NATIVE_STACK = "1";
+        await invoke({ action: "stack_start", runtime: "native" });
+        await invoke({ action: "config_pull" });
+        expect(calls).toBe(2);
+    });
     test("maps local migration authoring to an argv allowlist", () => {
         expect(buildOfficialSupabaseArgs({
             action: "migration_new",
@@ -81,6 +105,80 @@ describe("official Supabase CLI adapter", () => {
         ]);
     });
 
+    test("supports explicit remote config pull without forwarding credentials", () => {
+        expect(buildOfficialSupabaseArgs({
+            action: "config_pull",
+            ref: "demo-project",
+            workdir: "/workspace/project",
+        })).toEqual([
+            "config", "pull", "--project-ref", "demo-project", "--dry-run",
+            "--workdir", "/workspace/project",
+        ]);
+    });
+
+    test("uses the pg-delta declarative schema commands and keeps sync non-mutating by default", () => {
+        expect(buildOfficialSupabaseArgs({
+            action: "db_schema_declarative_sync",
+            name: "add_accounts",
+            workdir: "/workspace/project",
+        })).toEqual([
+            "db", "schema", "declarative", "sync", "--name", "add_accounts",
+            "--no-apply", "--experimental", "--workdir", "/workspace/project",
+        ]);
+        expect(buildOfficialSupabaseArgs({
+            action: "db_schema_declarative_generate",
+            db_url: "postgresql://postgres:secret@db.example.com/postgres",
+            overwrite: true,
+            workdir: "/workspace/project",
+        })).toEqual([
+            "db", "schema", "declarative", "generate", "--db-url",
+            "postgresql://postgres:secret@db.example.com/postgres",
+            "--experimental", "--overwrite", "--workdir", "/workspace/project",
+        ]);
+    });
+
+    test("supports alpha native stack commands without changing the default runtime", () => {
+        expect(buildOfficialSupabaseArgs({
+            action: "stack_start",
+            runtime: "native",
+            eager: true,
+            preparation: "on-demand",
+            workdir: "/workspace/project",
+        })).toEqual([
+            "stack", "start", "--runtime", "native", "--eager", "--preparation", "on-demand",
+            "--workdir", "/workspace/project",
+        ]);
+        expect(buildOfficialSupabaseArgs({
+            action: "stack_status",
+            workdir: "/workspace/project",
+        })).toEqual([
+            "stack", "status", "--output-format", "json", "--workdir", "/workspace/project",
+        ]);
+    });
+
+    test("rejects unsafe config pull project refs", () => {
+        expect(() => buildOfficialSupabaseArgs({
+            action: "config_pull",
+            ref: "demo; rm -rf /",
+            workdir: "/workspace/project",
+        })).toThrow("Invalid project ref");
+    });
+
+    test("requires explicit config writes and stack destruction; never selects auto runtime", () => {
+        const base = { workdir: "/workspace/project" };
+        expect(buildOfficialSupabaseArgs({ ...base, action: "stack_start" })).toContain("docker");
+        expect(buildOfficialSupabaseArgs({ ...base, action: "stack_prepare" })).toContain("docker");
+        expect(() => buildOfficialSupabaseArgs({ ...base, action: "stack_destroy", confirm_destroy: true })).toThrow("yes=true");
+        expect(buildOfficialSupabaseArgs({ ...base, action: "stack_destroy", confirm_destroy: true, yes: true })).toContain("--yes");
+        expect(() => buildOfficialSupabaseArgs({ ...base, action: "config_pull", ref: "demo", dry_run: false })).toThrow("yes=true");
+        expect(buildOfficialSupabaseArgs({
+            ...base, action: "config_pull", ref: "demo", dry_run: false, force: true, yes: true,
+        })).toEqual(["config", "pull", "--project-ref", "demo", "--force", "--yes", "--workdir", base.workdir]);
+        expect(buildOfficialSupabaseArgs({
+            ...base, action: "db_schema_declarative_generate", experimental: false,
+        })).not.toContain("--experimental");
+    });
+
     test("rejects invalid names, schemas, database URLs, and remote reset attempts", () => {
         expect(() => buildOfficialSupabaseArgs({
             action: "migration_new",
@@ -142,6 +240,12 @@ describe("official Supabase CLI adapter", () => {
         expect(environment.PGPASSFILE).toBeUndefined();
         expect(environment.AUTHORIZATION).toBeUndefined();
         expect(environment.CUSTOM_SECRET).toBeUndefined();
+        expect(createOfficialSupabaseEnvironment({
+            SUPABASE_ACCESS_TOKEN: "upstream", SUPACLOUD_FORWARD_SUPABASE_ACCESS_TOKEN: "1",
+            SUPACLOUD_API_TOKEN: "management", SUPABASE_YES: "true",
+        })).toEqual({
+            SUPABASE_ACCESS_TOKEN: "upstream", SUPABASE_TELEMETRY_DISABLED: "true", NO_COLOR: "1",
+        });
     });
 
     test("redacts explicit and discovered connection credentials from output", () => {
@@ -157,6 +261,11 @@ describe("official Supabase CLI adapter", () => {
         expect(redacted).not.toContain("other-secret");
         expect(redacted).not.toContain("service-secret");
         expect(redacted).toContain("[REDACTED]");
+        const stackOutput = JSON.stringify({ credentials: { anonKey: "anon", secretKey: "secret" }, database: { password: "db-pass" }, port: 5432 });
+        const sanitized = redactOfficialSupabaseOutput(stackOutput);
+        expect(sanitized).not.toContain("db-pass");
+        expect(sanitized).not.toContain("anonKey");
+        expect(sanitized).toContain("5432");
     });
 
     test("uses an explicit executable or pinned package runner without shell parsing", () => {

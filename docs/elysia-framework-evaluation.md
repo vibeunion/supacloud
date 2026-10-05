@@ -39,7 +39,7 @@ passes the repository's Elysia `2.0.0-beta.21` test and type gates.
 
 ### Local probe on 2026-09-29
 
-The isolated probe used Bun `1.4.2` and Elysia `2.0.0-beta.21`:
+The isolated probe used Bun `1.4.2` and Elysia `2.0.0-beta.19`:
 
 - Native Elysia: bootstrap and `GET /probe` passed.
 - Nestelia `1.11.2`: after installing its runtime validation dependencies,
@@ -49,7 +49,7 @@ The isolated probe used Bun `1.4.2` and Elysia `2.0.0-beta.21`:
   tested tuple.
 - AponiaJS `0.6.0-alpha.37`: bootstrap failed because the platform imported
   `ElysiaCustomStatusResponse`, which is not exported by Elysia
-  `2.0.0-beta.21`. This is a confirmed incompatibility for the tested tuple.
+  `2.0.0-beta.19`. This is a confirmed incompatibility for the tested tuple.
 
 The repository prototype test for `createSupaCloudFramework` passed. The full
 package typecheck was not used as acceptance evidence because this checkout's
@@ -108,7 +108,13 @@ not responsibilities of the bootstrap helper.
 
 Elysia 2 introduces build-time Ahead-Of-Time (AOT) compilation by shifting route
 handler and schema compilation from server startup to build time via
-plugins (e.g. `elysia/plugin/aot` across Bun, Vite, webpack, unplugin).
+bundler-specific plugins such as `elysia/plugin/aot/bun` and
+`elysia/plugin/aot/vite`.
+
+This change upgrades the dependency baseline and documents the evaluation
+boundary; it does not enable AOT in SupaCloud builds or establish cold-start
+or memory improvements. Those require a separate side-effect-isolated build
+experiment and runtime comparison.
 
 ### Relationship with SupaCloud Compiler
 
@@ -143,7 +149,7 @@ types through TypeBox (`t.Object`, etc.). Combined with Eden Treaty (`treaty<App
 frontend clients can derive fully typed API clients directly from server router
 definitions with zero codegen.
 
-In SupaCloud, this end-to-end type derivation is fully supported, structured across
+In SupaCloud, the intended integration is structured across
 three architectural boundaries to respect browser bundle limits, distributed idempotency,
 and platform release decoupling.
 
@@ -177,7 +183,8 @@ For platform-level SDKs and authoritative operations (`@Command`):
 - **Contract Facade with Zero Codegen**: Through `defineJsonContract` in `@supacloud/elysia`
   and `@supacloud/contracts` (`createAuthoritativeCommandClient`), the SDK derives typed
   decoders and static payload types directly from TypeBox schemas:
-  - Input types: `Parameters<typeof contract.input>[0]` (equivalent to `Static<typeof BodySchema>`)
+  - Input types: `Parameters<typeof contract.request>[0]` (equivalent to `Static<typeof BodySchema>`).
+    The runtime decoder `contract.input` deliberately accepts `unknown`.
   - Output types: `ReturnType<typeof contract.result>` (equivalent to `Static<typeof ResponseSchema>`)
   - Client callers enjoy full compile-time static type safety without running code generators,
     while isolating browser code from internal server execution details and avoiding tight
@@ -190,5 +197,3 @@ For non-TypeScript ecosystems (such as Go, Python, or Flutter):
 - TypeBox route schemas automatically populate OpenAPI specifications via Elysia's
   documentation integration (`createDocumentationPlugin`), serving as the standardized
   metadata source for OpenAPI-based code generators.
-
-

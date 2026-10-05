@@ -132,6 +132,7 @@ async function fixture(work) {
       index: 'function createSupaCloudClient() { return {}; }',
       'task-events': 'class TaskEventError extends Error { constructor(status, code) { super(code); this.status = status; } }',
       reactive: 'function observeQuery() {}',
+      query: 'function createSupaCloudQueryAdapter() {}',
     };
     for (const [file, source] of Object.entries(implementations)) {
       const name = source.match(/(?:function|class) (\w+)/)[1];

@@ -36,6 +36,25 @@ test("readiness binds every target to release, environment and stable process id
   expect(report.targets.map(target => target.code)).toEqual(["READY", "READY"]);
 });
 
+test("Compute readiness requires resource enforcement throughout the probes", async () => {
+  const f = fixture();
+  for (const target of f.input.release.targets) target.compute = { cpuLimit: 0.5, memoryLimitMiB: 256 };
+  const missing = await new ApplicationReadiness(f.probes).inspect(f.input);
+  expect(missing.ready).toBe(false);
+  expect(missing.targets.map(target => target.code)).toEqual(["HTTP_NOT_READY", "WORKER_NOT_READY"]);
+
+  for (const state of f.states) state.resourcesVerified = true;
+  expect((await new ApplicationReadiness(f.probes).inspect(f.input)).ready).toBe(true);
+  let observations = 0;
+  f.probes.observe = async () => {
+    if (observations++ > 0) f.states[0]!.resourcesVerified = false;
+    return structuredClone(f.states);
+  };
+  const changed = await new ApplicationReadiness(f.probes).inspect(f.input);
+  expect(changed.ready).toBe(false);
+  expect(changed.targets[0]!.code).toBe("PROCESS_CHANGED");
+});
+
 test("a responding old release and an old worker invocation cannot pass readiness", async () => {
   const f = fixture();
   f.identities[0]!.release_id = "0".repeat(64);

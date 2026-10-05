@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.39.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.39.0...supacloud-js-v0.39.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* **supacloud-js:** harden procedure execution contracts ([#1643](https://github.com/vibeunion/supacloud/issues/1643)) ([cb20731](https://github.com/vibeunion/supacloud/commit/cb20731961525ee02e8d46467bf45e9b3dbd9147))
+
+## [0.39.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.38.0...supacloud-js-v0.39.0) (2026-10-05)
+
+
+### Features
+
+* **supacloud-js:** add typed procedure facade and unified errors ([#1639](https://github.com/vibeunion/supacloud/issues/1639)) ([fef05e9](https://github.com/vibeunion/supacloud/commit/fef05e98ee1044e1f449bad52d18104d28e17cb4))
+
+## [0.38.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.37.0...supacloud-js-v0.38.0) (2026-10-04)
+
+
+### Features
+
+* **supacloud-js:** add framework-neutral TanStack Query adapter ([#1637](https://github.com/vibeunion/supacloud/issues/1637)) ([071b28c](https://github.com/vibeunion/supacloud/commit/071b28c5ce992834f46a0608d68475eb295c5c3e))
+
+## [0.37.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.36.1...supacloud-js-v0.37.0) (2026-10-04)
+
+
+### Features
+
+* add Supabase-compatible procedure client transport ([#1634](https://github.com/vibeunion/supacloud/issues/1634)) ([661351a](https://github.com/vibeunion/supacloud/commit/661351ae507877a463a5aab1bd49a27c9bd77cfa))
+
+## [0.36.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.36.0...supacloud-js-v0.36.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* **compiler:** compose generated clients with frontend SDK auth ([#1603](https://github.com/vibeunion/supacloud/issues/1603)) ([7b14968](https://github.com/vibeunion/supacloud/commit/7b1496828a9ade663f2a3d4572252af966296763))
+
+## [0.36.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.35.0...supacloud-js-v0.36.0) (2026-10-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* **js:** @supacloud/js explicitly declares Node >=22.12.0. Synchronous require compatibility uses Node's ESM loader and does not promise older Node, classic CJS-only tooling or React Native/Hermes compatibility. Existing ESM specifiers and synchronous factory/Promise-based network APIs are unchanged.
+
+### Features
+
+* **js:** publish SDK and Contracts as dual MJS and CJS ([#1585](https://github.com/vibeunion/supacloud/issues/1585)) ([6183f3e](https://github.com/vibeunion/supacloud/commit/6183f3e7e985f1fb06a6b31aaf2bab125bb1b34d))
+* **js:** support modern CommonJS callers with a single ESM SDK ([#1584](https://github.com/vibeunion/supacloud/issues/1584)) ([cfb6f20](https://github.com/vibeunion/supacloud/commit/cfb6f20d77a1befa6e62ea90a591d373c1677307))
+
 ## [0.35.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.34.1...supacloud-js-v0.35.0) (2026-10-02)
 
 

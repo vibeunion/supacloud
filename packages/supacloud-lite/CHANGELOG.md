@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.20.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.19.0...supacloud-lite-v0.20.0) (2026-10-05)
+
+
+### Features
+
+* add agent backend authoring, runtime and observability workflows ([#1648](https://github.com/vibeunion/supacloud/issues/1648)) ([59a66d1](https://github.com/vibeunion/supacloud/commit/59a66d184a47d19c7f8895f24a6ba2c7e74e93d0))
+
+## [0.19.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.18.0...supacloud-lite-v0.19.0) (2026-10-03)
+
+
+### Features
+
+* converge SDK-aware vibecoding defaults and local development ([#1607](https://github.com/vibeunion/supacloud/issues/1607)) ([cd66672](https://github.com/vibeunion/supacloud/commit/cd6667252a6a8fe0cc0539bc8610ebb8a818af51))
+
 ## [0.18.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.17.2...supacloud-lite-v0.18.0) (2026-10-02)
 
 

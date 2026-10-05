@@ -74,6 +74,24 @@ describe("delivery input and output boundaries", () => {
 });
 
 describe("deterministic workload placement", () => {
+  test("compute limits are preserved in the delivery plan and change its digest", () => {
+    const options: DeliveryOptions = { version: 1, runtime, targets: [{
+      name: "api", kind: "api", modules: ["orders"], compute: { cpuLimit: 0.5, memoryLimitMiB: 256 },
+    }] };
+    const plan = successful(createDeliveryPlan(graph(http("orders")), options));
+    expect(plan.targets[0]?.compute).toEqual({ cpuLimit: 0.5, memoryLimitMiB: 256 });
+    expect(plan.targets[0]?.isolation).toBe("process");
+    expect(plan.targets[0]?.requirements.processIsolation).toBe(true);
+    expect(() => parseDeliveryOptions({
+      ...options, targets: options.targets!.map(target => ({ ...target, isolation: "shared" })),
+    })).toThrow();
+    options.targets![0]!.compute!.memoryLimitMiB = 512;
+    expect(successful(createDeliveryPlan(graph(http("orders")), options)).topologyDigest).not.toBe(plan.topologyDigest);
+    expect(() => parseDeliveryOptions({ version: 1, targets: [{
+      name: "api", kind: "api", modules: ["orders"], compute: { cpuLimit: 0, memoryLimitMiB: 256 },
+    }] })).toThrow();
+  });
+
   test("defaults to one API, keeps paths, and never claims deployment readiness", () => {
     const plan = successful(createDeliveryPlan(graph(http("orders"), http("users"))));
     const target = requireValue(plan.targets[0]);

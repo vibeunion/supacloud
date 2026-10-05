@@ -8,7 +8,7 @@
   import { apiClient } from "$lib/api";
   import {
     ApplicationRuntimeChanged, validApplicationScope, loadApplicationRuntime, loadApplicationReleases,
-    type RuntimeResponse, type ReleasePage,
+    loadApplicationDeploymentEvidence, type RuntimeResponse, type ReleasePage, type DeploymentEvidenceResponse,
   } from "$lib/application-dashboard";
   import {
     loadApplicationDevelopment, type ApplicationDevelopmentResponse,
@@ -19,6 +19,8 @@
   let runtime = $state<RuntimeResponse | null>(null);
   let releases = $state<ReleasePage | null>(null);
   let runtimeState = $state("idle");
+  let evidence = $state<DeploymentEvidenceResponse | null>(null);
+  let evidenceState = $state("idle");
   let releaseState = $state("idle");
   let revision = $state(0);
   let cursor = $state<string | undefined>();
@@ -40,6 +42,21 @@
     cursor = undefined;
     previousCursors = [];
     developmentSelection = null;
+  });
+  $effect(() => {
+    const selected = scope;
+    void revision;
+    const controller = new AbortController();
+    evidence = null;
+    evidenceState = validApplicationScope(selected) ? "loading" : "idle";
+    if (validApplicationScope(selected)) {
+      void loadApplicationDeploymentEvidence(selected, apiClient, controller.signal).then(value => {
+        if (!controller.signal.aborted) { evidence = value; evidenceState = "ready"; }
+      }).catch(() => {
+        if (!controller.signal.aborted) evidenceState = "error";
+      });
+    }
+    return () => controller.abort();
   });
   $effect(() => {
     const selected = scope;
@@ -149,6 +166,23 @@
             </table>
           </div>
         {/if}
+      {/if}
+    </section>
+    <section class="space-y-3" aria-busy={evidenceState === "loading"}>
+      <h2 class="text-base font-semibold">Deployment evidence</h2>
+      {#if evidenceState === "loading"}<p role="status">{$t("Applications.loading")}</p>
+      {:else if evidenceState === "error"}<p role="alert">{$t("Applications.unavailable")}</p>
+      {:else if evidence?.evidence === null}<p>{$t("Applications.no_evidence")}</p>
+      {:else if evidence?.evidence}
+        <p class="text-sm font-medium">Status: <span class="font-mono">{evidence.evidence.status}</span></p>
+        <dl class="grid gap-2 text-sm sm:grid-cols-3">
+          <div><dt class="text-muted-foreground">Migration</dt><dd class="font-mono">{evidence.evidence.database.migration.status}</dd></div>
+          <div><dt class="text-muted-foreground">Backup</dt><dd class="font-mono">{evidence.evidence.database.backup.status}</dd></div>
+          <div><dt class="text-muted-foreground">Recovery</dt><dd class="font-mono">{evidence.evidence.database.recovery.status}</dd></div>
+          <div><dt class="text-muted-foreground">Authenticated smoke</dt><dd class="font-mono">{evidence.evidence.health.authenticated_smoke}</dd></div>
+          <div><dt class="text-muted-foreground">Rollback</dt><dd class="font-mono">{evidence.evidence.rollback.status}</dd></div>
+          <div><dt class="text-muted-foreground">Recorded</dt><dd>{evidence.evidence.recorded_at}</dd></div>
+        </dl>
       {/if}
     </section>
     <section class="space-y-3" aria-busy={releaseState === "loading"}>

@@ -1,5 +1,73 @@
 # Changelog
 
+## [0.36.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.35.0...compiler-v0.36.0) (2026-10-05)
+
+
+### Features
+
+* add agent backend authoring, runtime and observability workflows ([#1648](https://github.com/vibeunion/supacloud/issues/1648)) ([59a66d1](https://github.com/vibeunion/supacloud/commit/59a66d184a47d19c7f8895f24a6ba2c7e74e93d0))
+
+
+### Bug Fixes
+
+* **supacloud-js:** harden procedure execution contracts ([#1643](https://github.com/vibeunion/supacloud/issues/1643)) ([cb20731](https://github.com/vibeunion/supacloud/commit/cb20731961525ee02e8d46467bf45e9b3dbd9147))
+
+## [0.35.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.34.0...compiler-v0.35.0) (2026-10-05)
+
+
+### Features
+
+* **supacloud-js:** add typed procedure facade and unified errors ([#1639](https://github.com/vibeunion/supacloud/issues/1639)) ([fef05e9](https://github.com/vibeunion/supacloud/commit/fef05e98ee1044e1f449bad52d18104d28e17cb4))
+
+## [0.34.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.33.0...compiler-v0.34.0) (2026-10-04)
+
+
+### Features
+
+* **supacloud-js:** add framework-neutral TanStack Query adapter ([#1637](https://github.com/vibeunion/supacloud/issues/1637)) ([071b28c](https://github.com/vibeunion/supacloud/commit/071b28c5ce992834f46a0608d68475eb295c5c3e))
+
+## [0.33.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.32.0...compiler-v0.33.0) (2026-10-04)
+
+
+### Features
+
+* add Supabase-compatible procedure client transport ([#1634](https://github.com/vibeunion/supacloud/issues/1634)) ([661351a](https://github.com/vibeunion/supacloud/commit/661351ae507877a463a5aab1bd49a27c9bd77cfa))
+
+## [0.32.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.31.2...compiler-v0.32.0) (2026-10-04)
+
+
+### Features
+
+* **worker:** bounded execution groups and admission controls ([#1616](https://github.com/vibeunion/supacloud/issues/1616)) ([8d870ea](https://github.com/vibeunion/supacloud/commit/8d870eabfce9bedce75d42151f5085bcef19b4c1))
+
+## [0.31.2](https://github.com/vibeunion/supacloud/compare/compiler-v0.31.1...compiler-v0.31.2) (2026-10-03)
+
+
+### Miscellaneous Chores
+
+* release main ([#1609](https://github.com/vibeunion/supacloud/issues/1609)) ([b52c79c](https://github.com/vibeunion/supacloud/commit/b52c79ceda912786f1299ae2d618172f9252607a))
+
+## [0.31.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.31.0...compiler-v0.31.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* **compiler:** compose generated clients with frontend SDK auth ([#1603](https://github.com/vibeunion/supacloud/issues/1603)) ([7b14968](https://github.com/vibeunion/supacloud/commit/7b1496828a9ade663f2a3d4572252af966296763))
+
+## [0.31.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.30.0...compiler-v0.31.0) (2026-10-02)
+
+
+### Features
+
+* **compiler:** add line-ending-normalized GraphQL schema diagnostics ([#1595](https://github.com/vibeunion/supacloud/issues/1595)) ([5aa4ec5](https://github.com/vibeunion/supacloud/commit/5aa4ec50a82fbf1b0a22b051039516ab5e46cf9c))
+
+## [0.30.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.29.0...compiler-v0.30.0) (2026-10-02)
+
+
+### Features
+
+* complete Angular framework defaults integration ([#1587](https://github.com/vibeunion/supacloud/issues/1587)) ([0dec8ea](https://github.com/vibeunion/supacloud/commit/0dec8ea48f288da27824579038136dd33f8ccb20))
+
 ## [0.29.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.28.0...compiler-v0.29.0) (2026-10-02)
 
 

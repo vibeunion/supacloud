@@ -1,3 +1,4 @@
+import starterMetadata from "./starter-metadata.json" with { type: "json" };
 import { STARTER_REACTIVE_GUIDE, STARTER_REACTIVE_TEST, STARTER_REACTIVE_AGENTS } from "./app-starter-reactive";
 import { lstat, mkdir, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
@@ -9,19 +10,16 @@ import { STARTER_ATTACHMENT_WORKER, STARTER_ATTACHMENT_DELIVERY_WORKER } from ".
 import { STARTER_UPLOAD_FEATURE, STARTER_UPLOAD_SCHEMA, STARTER_UPLOAD_ADAPTER } from "./app-starter-upload";
 import { STARTER_RUNTIME_ROLES_SCHEMA } from "./app-starter-roles";
 import { STARTER_REVIEW_DELIVERY_HOST, STARTER_REVIEW_POSTGRES, STARTER_REVIEW_POSTGRES_TEST, STARTER_REVIEW_SCHEMA } from "./app-starter-postgres";
-import compilerMetadata from "../../../../compiler/package.json" with { type: "json" };
-import appMetadata from "../../../../app/package.json" with { type: "json" };
-import elysiaMetadata from "../../../../elysia/package.json" with { type: "json" };
-import commandsMetadata from "../../../../commands/package.json" with { type: "json" };
-import contractsMetadata from "../../../../contracts/package.json" with { type: "json" };
-import dbMetadata from "../../../../db/package.json" with { type: "json" };
-import sdkMetadata from "../../../../supacloud-js/package.json" with { type: "json" };
+import { starterDatabaseFiles, STARTER_DATABASE_GUIDE } from "./app-starter-database";
+
+const { compiler: compilerMetadata, app: appMetadata, elysia: elysiaMetadata, commands: commandsMetadata, contracts: contractsMetadata, db: dbMetadata, sdk: sdkMetadata } = starterMetadata.packages;
 
 const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
 /** Embedded source strings are included in both the npm CLI and standalone binary. */
 export function appStarterFiles(name: string): Record<string, string> {
     return {
+        ...starterDatabaseFiles(),
         "package.json": json({
             name, version: "0.0.0", private: true, type: "module",
             engines: { bun: ">=1.4.2" },
@@ -29,10 +27,16 @@ export function appStarterFiles(name: string): Record<string, string> {
                 compile: "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js compile",
                 "check:generated": "bun --no-env-file node_modules/@supacloud/compiler/dist/cli.js check",
                 typecheck: "tsc --noEmit",
-                check: "bun run compile && bun run check:generated && bun run typecheck && bun run test",
+                "db:generate": "supacloud-db generate",
+                "db:check": "supacloud-db check",
+                "db:assess": "supacloud-db assess",
+                "db:diff": "drizzle-kit generate --config drizzle.config.ts",
+                "db:pull": "drizzle-kit pull --config drizzle.pull.config.ts",
+                check: "bun run db:check && bun run compile && bun run check:generated && bun run typecheck && bun run test",
                 test: "bun run compile && bun --no-env-file scripts/environment.ts test bun test",
                 dev: "bun --no-env-file scripts/environment.ts development bun scripts/dev.ts",
-                build: "bun run compile && bun run typecheck && bun build src/application.ts --target bun --minify --outdir dist",
+                "dev:integration": "bun --no-env-file scripts/environment.ts development bun scripts/integration.ts",
+                build: "bun run db:check && bun run compile && bun run typecheck && bun build src/application.ts --target bun --minify --outdir dist",
                 "env:development": "bun --no-env-file scripts/environment.ts development",
                 "env:test": "bun --no-env-file scripts/environment.ts test",
                 "env:staging": "bun --no-env-file scripts/environment.ts staging",
@@ -44,6 +48,7 @@ export function appStarterFiles(name: string): Record<string, string> {
                 "@supacloud/commands": `^${commandsMetadata.version}`,
                 "@supacloud/contracts": `^${contractsMetadata.version}`,
                 "@supacloud/db": `^${dbMetadata.version}`,
+                "drizzle-orm": dbMetadata.peerDependencies["drizzle-orm"],
                 "@supacloud/js": `^${sdkMetadata.version}`,
                 "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
                 elysia: "2.0.0-beta.21",
@@ -51,6 +56,7 @@ export function appStarterFiles(name: string): Record<string, string> {
             },
             devDependencies: {
                 "@supacloud/compiler": `^${compilerMetadata.version}`,
+                "drizzle-kit": dbMetadata.devDependencies["drizzle-kit"],
                 "@types/bun": "^1.4.2",
                 typescript: "^7.0.2",
             },
@@ -61,11 +67,11 @@ export function appStarterFiles(name: string): Record<string, string> {
                 strict: true, experimentalDecorators: true, skipLibCheck: true,
                 noEmit: true, types: ["bun"],
             },
-            include: ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "generated/**/*.ts", "supacloud.config.ts"],
+            include: ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "generated/**/*.ts", "db/schema.ts", "db/contracts/**/*.ts", "supacloud.config.ts", "drizzle*.config.ts"],
         }),
         "bunfig.toml": "env = false\n",
         ".gitignore": [
-            "node_modules/", "dist/", ".env", ".env.*", "!.env.*.example", "!.env.test", "",
+            "node_modules/", "dist/", "output/database-audit/", "db/migration-candidates/", ".env", ".env.*", "!.env.*.example", "!.env.test", "",
         ].join("\n"),
         ".env.development.example": "APP_ENV=development\nPORT=3000\n",
         ".env.test": "APP_ENV=test\n",
@@ -141,7 +147,7 @@ test("generated query client preserves its read contract without a live database
 });
 `,
         "REACTIVE.md": STARTER_REACTIVE_GUIDE,
-        "AGENTS.md": STARTER_REACTIVE_AGENTS,
+        "AGENTS.md": STARTER_REACTIVE_AGENTS + STARTER_DATABASE_GUIDE,
         "tests/reactive.test.ts": STARTER_REACTIVE_TEST,
         "scripts/environment.ts": STARTER_ENVIRONMENT,
         "tests/environment.test.ts": STARTER_ENVIRONMENT_TEST,
@@ -160,7 +166,8 @@ const watcher = watchProject({
     restarts = restarts.then(async () => {
       if (server) { server.kill(); await server.exited; }
       if (closing) return;
-      server = Bun.spawn([process.execPath, "--no-env-file", "scripts/serve.ts"], {
+      const entry = process.env.SUPACLOUD_DEV_PROFILE === "integration" ? "scripts/serve-integration.ts" : "scripts/serve.ts";
+      server = Bun.spawn([process.execPath, "--no-env-file", entry], {
         stdin: "inherit", stdout: "inherit", stderr: "inherit", env: process.env,
       });
     }).catch((error) => { console.error(error); process.exitCode = 1; });
@@ -176,6 +183,48 @@ const close = async () => {
 process.once("SIGINT", close);
 process.once("SIGTERM", close);
 await watcher.ready;
+`,
+        "scripts/integration.ts": `if (process.env.APP_ENV !== "development") throw new Error("Integration is development-only");
+process.env.SUPACLOUD_DEV_PROFILE = "integration";
+await import("./dev");
+export {};
+`,
+        "scripts/serve-integration.ts": `import { createCompiledModules } from "../generated/application";
+import { createDeliveryApplication } from "../src/delivery-host";
+
+if (process.env.APP_ENV !== "development") throw new Error("Integration is development-only");
+const databaseUrl = process.env.SUPACLOUD_DEV_DATABASE_URL;
+try {
+  if (!databaseUrl) throw new Error();
+  const url = new URL(databaseUrl);
+  if (!["postgres:", "postgresql:"].includes(url.protocol)
+    || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
+    || url.pathname.length <= 1 || url.search || url.hash) throw new Error();
+} catch {
+  throw new Error("Integration requires an explicit loopback PostgreSQL database");
+}
+if (process.env.DATABASE_SOCKET_PATH
+  || (process.env.DATABASE_URL && process.env.DATABASE_URL !== databaseUrl)) {
+  throw new Error("Conflicting integration database settings");
+}
+process.env.DATABASE_URL = databaseUrl;
+const port = Number(process.env.PORT ?? "3000");
+if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("Invalid PORT");
+const abort = new AbortController();
+const stopStartup = () => abort.abort();
+process.once("SIGINT", stopStartup);
+process.once("SIGTERM", stopStartup);
+const application = await createDeliveryApplication(createCompiledModules(), { signal: abort.signal });
+if (abort.signal.aborted) { await application.close(); throw new Error("Integration startup cancelled"); }
+const server = Bun.serve({ hostname: "127.0.0.1", port, fetch: application.fetch });
+const close = async () => {
+  abort.abort();
+  server.stop(true);
+  await application.close();
+};
+process.once("SIGINT", close);
+process.once("SIGTERM", close);
+console.log("Local integration: " + server.url);
 `,
         "scripts/serve.ts": `import { createDemo } from "./sandbox";
 
@@ -243,6 +292,7 @@ import { ApplicationError, assertFeatureTransition } from "@supacloud/elysia";
 import { t } from "elysia";
 import { VerifyReviewAttachment } from "./attachment";
 import { ReviewUploads, ReviewUploadsController, type ReviewUploadPort } from "./uploads";
+import type { ReviewRow } from "../../db/schema";
 
 export const reviewSpec = defineFeatureSpec({
   name: "review",
@@ -257,7 +307,7 @@ export const reviewSpec = defineFeatureSpec({
   },
 });
 
-interface Review { state: string; version: number }
+type Review = Pick<ReviewRow, "state" | "version">;
 // Production implementations must bind both operations to the current transaction.
 export interface ReviewStore extends Partial<ReviewUploadPort> {
   get(table: string, key: string): unknown;
@@ -280,7 +330,7 @@ export const requireRequest: Aspect = (context, next) => {
 
 function readReview(value: unknown): Review {
   if (typeof value !== "object" || value === null ||
-      !("state" in value) || typeof value.state !== "string" ||
+      !("state" in value) || (value.state !== "draft" && value.state !== "approved") ||
       !("version" in value) || typeof value.version !== "number") {
     throw new ApplicationError("Review not found", { status: 404, code: "REVIEW_NOT_FOUND" });
   }
@@ -407,6 +457,7 @@ test("the production composition root rejects missing governance adapters", () =
 
 \`\`\`sh
 bun install
+bun run db:generate
 bun run check
 bun run dev
 \`\`\`
@@ -427,6 +478,28 @@ The included feature demonstrates a declared draft-to-approved transition,
 compiler-checked command/route/governance bindings, an explicit AOP function,
 HTTP schemas, permission denial, transaction rollback, idempotency and audit.
 It is not a complete Maker-Checker workflow or a production authorization policy.
+
+## Frontend SDK Boundary
+
+Use @supacloud/js as the platform SDK around your existing user-scoped
+@supabase/supabase-js client. Pass that same client to existing UI providers;
+supacloud.supabase exposes it unchanged. Keep UI routing, forms and query
+caches in your frontend framework or svadmin, not in a new DI container.
+
+For generated/client.ts, supply createAuthenticatedFetch from
+@supacloud/js/contracts as its fetch option. Resolve the current user token
+from the same Supabase session for each request; do not capture a token at
+startup or introduce a second session store. Use a fixed trusted HTTPS API
+origin. The authenticated transport rejects missing credentials and redirects
+and does not replay a write after 401. Its underlying fetch must also be
+single-attempt.
+
+Reuse the same session resolver for generated/graphql.ts when adopting queries.
+The local memory demo is not this authenticated production integration.
+Never use supacloud.commands or supacloud.workflows from a browser action:
+those RPCs require service-role credentials. Browser business commands use
+application endpoints, optionally composed through @supacloud/js/contracts.
+Management API tokens and service-role keys remain on trusted servers.
 
 ## Typed Queries
 
@@ -696,6 +769,8 @@ policy. Invalid transaction/idempotency modes fail compilation instead of
 silently disabling governance. onExecution receives metadata-only trace events;
 durable audit still belongs to the command governance adapter.
 
+${STARTER_DATABASE_GUIDE}
+
 ## CI
 
 After the first compilation, commit generated/. In CI run
@@ -721,8 +796,11 @@ export async function initializeAppProject(options: { root?: string; name?: stri
     if ((await readdir(root)).some((entry) => entry !== ".git")) {
         throw new Error("app init requires an empty directory (an existing .git directory is allowed)");
     }
-    const template = options.template ?? "command";
-    const files = template === "command" ? appStarterFiles(name) : appTemplateFiles(name, template);
+    const template = options.template ?? "minimal";
+    const files = template === "command" ? appStarterFiles(name) : appTemplateFiles(name, template, {
+        "@supacloud/js": `^${sdkMetadata.version}`,
+        "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
+    });
     for (const [relativePath, content] of Object.entries(files)) {
         const path = join(root, relativePath);
         await mkdir(dirname(path), { recursive: true });

@@ -1,0 +1,199 @@
+{
+  "schemaVersion": 1,
+  "basedOn": "9548b9442e5e2914e8c5f4830652c3f3100ca2f7",
+  "description": "Reviewed legacy debt only. New syntax, occurrences, paths, rule violations and unverified imports fail. No automatic refresh.",
+  "entries": [
+    {
+      "code": "WS_PRIVATE_IMPORT",
+      "file": "packages/admin/src/shared/releases/local-upgrade-bundle.ts",
+      "specifier": "../../../../management-api/src/release-manifest",
+      "fingerprint": "4f229757c5f38a1d4b7c2e2686dfe625609a99676cf9cfa9d5762f5561c0c15f",
+      "count": 1,
+      "reason": "Existing bundled admin compatibility/release helper. Extract a supported shared entrypoint and test the packed CLI before removal."
+    },
+    {
+      "code": "WS_UNDECLARED_IMPORT",
+      "file": "packages/admin/src/shared/releases/local-upgrade-bundle.ts",
+      "specifier": "../../../../management-api/src/release-manifest",
+      "fingerprint": "4f229757c5f38a1d4b7c2e2686dfe625609a99676cf9cfa9d5762f5561c0c15f",
+      "count": 1,
+      "reason": "Existing bundled admin compatibility/release helper. Extract a supported shared entrypoint and test the packed CLI before removal."
+    },
+    {
+      "code": "WS_PRIVATE_IMPORT",
+      "file": "packages/admin/src/shared/releases/local-upgrade-bundle.ts",
+      "specifier": "../../../../management-api/src/sigstore-trusted-root",
+      "fingerprint": "07755d5ca8e527efef0a0cad09289c0d7319017901b3f81ec2d736246379ad8c",
+      "count": 1,
+      "reason": "Existing bundled admin compatibility/release helper. Extract a supported shared entrypoint and test the packed CLI before removal."
+    },
+    {
+      "code": "WS_UNDECLARED_IMPORT",
+      "file": "packages/admin/src/shared/releases/local-upgrade-bundle.ts",
+      "specifier": "../../../../management-api/src/sigstore-trusted-root",
+      "fingerprint": "07755d5ca8e527efef0a0cad09289c0d7319017901b3f81ec2d736246379ad8c",
+      "count": 1,
+      "reason": "Existing bundled admin compatibility/release helper. Extract a supported shared entrypoint and test the packed CLI before removal."
+    },
+    {
+      "code": "WS_PRIVATE_IMPORT",
+      "file": "packages/admin/src/shared/releases/local-upgrade-transfer.ts",
+      "specifier": "../../../../management-api/src/upgrade-lock",
+      "fingerprint": "888cbc33c6b7fafb6cf7a86b6c571a96335b171c2312205520626c4f97dd4f94",
+      "count": 1,
+      "reason": "Existing bundled admin compatibility/release helper. Extract a supported shared entrypoint and test the packed CLI before removal."
+    },
+    {
+      "code": "WS_UNDECLARED_IMPORT",
+      "file": "packages/admin/src/shared/releases/local-upgrade-transfer.ts",
+      "specifier": "../../../../management-api/src/upgrade-lock",
+      "fingerprint": "888cbc33c6b7fafb6cf7a86b6c571a96335b171c2312205520626c4f97dd4f94",
+      "count": 1,
+      "reason": "Existing bundled admin compatibility/release helper. Extract a supported shared entrypoint and test the packed CLI before removal."
+    },
+    {
+      "code": "WS_PRIVATE_IMPORT",
+      "file": "packages/admin/src/shared/schema.ts",
+      "specifier": "../../../cli/src/shared/schema",
+      "fingerprint": "7a785c041e6fb6ec7da664036563818ae70b449c2bf9bc3b760579e045aa1481",
+      "count": 1,
+      "reason": "Existing bundled admin compatibility/release helper. Extract a supported shared entrypoint and test the packed CLI before removal."
+    },
+    {
+      "code": "WS_PRIVATE_IMPORT",
+      "file": "packages/admin/src/shared/tools/frontend-release-control.ts",
+      "specifier": "@supacloud/cli/frontend-release-control",
+      "fingerprint": "e8530a8922140f0925c9ef6c3cf43c59ef39c58c4dba230b7eced8bf288002a3",
+      "count": 1,
+      "reason": "Existing bundled admin compatibility/release helper. Extract a supported shared entrypoint and test the packed CLI before removal."
+    },
+    {
+      "code": "WS_PRIVATE_IMPORT",
+      "file": "packages/admin/src/shared/tools/gateway-tools.ts",
+      "specifier": "../../../../cli/src/shared/tools/gateway-tools",
+      "fingerprint": "d399dc5a5f7a0d0de99a5f8ba4391d473689649e2cee21624f473526fe676f13",
+      "count": 1,
+      "reason": "Existing bundled admin compatibility/release helper. Extract a supported shared entrypoint and test the packed CLI before removal."
+    },
+    {
+      "code": "WS_PRIVATE_IMPORT",
+      "file": "packages/admin/src/shared/tools/project-endpoint-read.ts",
+      "specifier": "@supacloud/cli/project-endpoint-read",
+      "fingerprint": "ea8cd695269ff29b6f8acc43bceca62c67128f839588e1656731872a1f3e2f31",
+      "count": 1,
+      "reason": "Existing bundled admin compatibility/release helper. Extract a supported shared entrypoint and test the packed CLI before removal."
+    },
+    {
+      "code": "WS_PRIVATE_IMPORT",
+      "file": "packages/admin/src/shared/tools/project-read-projection.ts",
+      "specifier": "@supacloud/cli/project-read-projection",
+      "fingerprint": "5c2125c9e03f5b16572865c79c15c4e53835d988396ecec80d66ccf8fcec910b",
+      "count": 1,
+      "reason": "Existing bundled admin compatibility/release helper. Extract a supported shared entrypoint and test the packed CLI before removal."
+    },
+    {
+      "code": "WS_PRIVATE_IMPORT",
+      "file": "packages/admin/src/shared/tools/ssh-tools.ts",
+      "specifier": "../../../../management-api/src/sigstore-trusted-root",
+      "fingerprint": "8dbf87f1e00a25fe4e9200732c17cc1289fbd7ffd8e3963058cc0b6acf65cfc7",
+      "count": 1,
+      "reason": "Existing bundled admin compatibility/release helper. Extract a supported shared entrypoint and test the packed CLI before removal."
+    },
+    {
+      "code": "WS_UNDECLARED_IMPORT",
+      "file": "packages/admin/src/shared/tools/ssh-tools.ts",
+      "specifier": "../../../../management-api/src/sigstore-trusted-root",
+      "fingerprint": "8dbf87f1e00a25fe4e9200732c17cc1289fbd7ffd8e3963058cc0b6acf65cfc7",
+      "count": 1,
+      "reason": "Existing bundled admin compatibility/release helper. Extract a supported shared entrypoint and test the packed CLI before removal."
+    },
+    {
+      "code": "WS_TSCONFIG",
+      "file": "packages/web-console/tsconfig.json",
+      "specifier": null,
+      "fingerprint": "6cfb54ebce2f646f1dda27f215353b774073a616dec8497d82d8b99b76aea54f",
+      "count": 1,
+      "reason": "Existing SvelteKit generated parent is absent in the clean tooling-only checkout. Full web-console typecheck remains required; do not widen this allowance."
+    },
+    {
+      "code": "WS_PRIVATE_IMPORT",
+      "file": "packages/web-console/src/lib/application-development.ts",
+      "specifier": "../../../delivery/src/application-development",
+      "fingerprint": "30f444d54c24fbc6067a6d732645d1978cbdb08c154275dee58f118cab03e4ac",
+      "count": 1,
+      "reason": "Existing console delivery type bridge. Adopt a supported contract entrypoint and verify browser isolation before removal."
+    },
+    {
+      "code": "WS_UNDECLARED_IMPORT",
+      "file": "packages/web-console/src/lib/application-development.ts",
+      "specifier": "../../../delivery/src/application-development",
+      "fingerprint": "30f444d54c24fbc6067a6d732645d1978cbdb08c154275dee58f118cab03e4ac",
+      "count": 1,
+      "reason": "Existing console delivery type bridge. Adopt a supported contract entrypoint and verify browser isolation before removal."
+    },
+    {
+      "code": "WS_DYNAMIC_IMPORT",
+      "file": "packages/cli/src/shared/tools/db-governance-tools.ts",
+      "specifier": null,
+      "fingerprint": "b87052ec7485022541e2bec1cf4dab581351d0367c01ad3965eb2dcd4cb57684",
+      "count": 1,
+      "reason": "Existing runtime-selected loader. Static ownership is unverified; affected must remain conservative until explicit impact metadata is reviewed."
+    },
+    {
+      "code": "WS_DYNAMIC_IMPORT",
+      "file": "packages/compiler/src/config.ts",
+      "specifier": null,
+      "fingerprint": "3a0c1ee440c2b9288c061f7cb8b97c3ea8d3935df943ce440ad7f54f101738a3",
+      "count": 1,
+      "reason": "Existing runtime-selected loader. Static ownership is unverified; affected must remain conservative until explicit impact metadata is reviewed."
+    },
+    {
+      "code": "WS_DYNAMIC_IMPORT",
+      "file": "packages/compiler/src/openapi-tools.ts",
+      "specifier": null,
+      "fingerprint": "1be187be3ad6c5658948b8dc223f5a5d0f45a1f310ef8bfcdd7c7c0d37b6b65b",
+      "count": 1,
+      "reason": "Existing runtime-selected loader. Static ownership is unverified; affected must remain conservative until explicit impact metadata is reviewed."
+    },
+    {
+      "code": "WS_DYNAMIC_IMPORT",
+      "file": "packages/supacloud/src/index.ts",
+      "specifier": null,
+      "fingerprint": "30d8f38f9c86dd32ef5a3bee9d57811ec258d1cea1780a3b6359f915f2a83d1a",
+      "count": 1,
+      "reason": "Existing runtime-selected loader. Static ownership is unverified; affected must remain conservative until explicit impact metadata is reviewed."
+    },
+    {
+      "code": "WS_DYNAMIC_IMPORT",
+      "file": "packages/supacloud/src/index.ts",
+      "specifier": null,
+      "fingerprint": "cf773404d8145b797a12c538c4c16cfb5a1192f18518db28a05459e2c3bdf21f",
+      "count": 1,
+      "reason": "Existing runtime-selected loader. Static ownership is unverified; affected must remain conservative until explicit impact metadata is reviewed."
+    },
+    {
+      "code": "WS_DYNAMIC_IMPORT",
+      "file": "packages/supacloud-lite/src/project-runtime.ts",
+      "specifier": null,
+      "fingerprint": "4a9b378c5dd64b6bb443d6e9987b87982b376d6f6765a69b52980d412e54e693",
+      "count": 1,
+      "reason": "Existing runtime-selected loader. Static ownership is unverified; affected must remain conservative until explicit impact metadata is reviewed."
+    },
+    {
+      "code": "WS_DYNAMIC_IMPORT",
+      "file": "packages/supacloud-lite/src/runtime/node/db-check.ts",
+      "specifier": null,
+      "fingerprint": "0e0efc0a79ad2f28e031ffdeb179571a8c2fa6b4dd9abf8f714b3552c0578fc6",
+      "count": 1,
+      "reason": "Existing runtime-selected loader. Static ownership is unverified; affected must remain conservative until explicit impact metadata is reviewed."
+    },
+    {
+      "code": "WS_DYNAMIC_IMPORT",
+      "file": "packages/supacloud-lite/src/runtime/node/load-functions.ts",
+      "specifier": null,
+      "fingerprint": "402f60f7a45b046b0edbbbb7f7e970f2788af4337cd9364d26268eded99265d5",
+      "count": 1,
+      "reason": "Existing runtime-selected loader. Static ownership is unverified; affected must remain conservative until explicit impact metadata is reviewed."
+    }
+  ]
+}

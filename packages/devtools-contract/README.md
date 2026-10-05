@@ -2,6 +2,11 @@
 
 Compatibility shim re-exporting `@vibeunion/devtools-protocol`.
 
+Maintenance-only: new consumers must import `@vibeunion/devtools-protocol`
+directly (and `@vibeunion/devtools-supacloud` for platform mappings). Do not add
+new APIs here. Existing imports continue to work; removal requires an inventory
+of external consumers and a separately announced breaking release.
+
 The JSON-safe DevTools contract (trace/correlation metadata, diagnostics,
 events, snapshots, cache vocabulary, and recursive credential/signed-URL
 redaction) is owned by `@vibeunion/devtools-protocol` so frontend, svadmin,

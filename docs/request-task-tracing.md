@@ -86,3 +86,36 @@ retrying a job with external side effects.
 
 Owner: platform on-call. Check worker liveness, tenant concurrency limits and
 retry storms. Increase capacity only after confirming shared-resource headroom.
+
+## Backup freshness
+
+Owner: platform on-call. Confirm `supacloud_backup_inventory_available` and the
+latest pgBackRest inventory first. A missing inventory is not equivalent to an
+empty backup set. If freshness exceeds one hour, stop treating the project as
+recoverable, inspect the backup job, repository access and WAL retention, and
+record the last confirmed backup timestamp in the incident. Do not report PITR
+readiness from configuration alone.
+
+## Restore failure
+
+Owner: platform on-call with the recovery owner. Read the signed restore-drill
+receipt and preserve any `running` or `outcome_unknown` receipt. Do not reuse a
+drill ID or automatically retry a non-idempotent restore. A successful command
+without verified database, object, secret, permission and application canaries
+is not a successful recovery drill.
+
+## Log ingestion delay
+
+Owner: platform on-call. Compare the collector's last successful read with
+journald and project function log files. Check collector liveness, VictoriaLogs
+write errors, disk pressure and retention. Request and task tracing remains
+authoritative only for the time range that was actually ingested; do not fill
+gaps with inferred spans.
+
+## Deployment unknown outcome
+
+Owner: platform on-call. Read the mutation receipt, active runtime, route and
+deployment evidence before taking another action. `unknown` and `incomplete`
+are operational states, not success. Reconcile an interrupted activation through
+the explicit reconcile endpoint, and never replay a non-idempotent activation
+just because the original response was lost.

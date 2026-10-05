@@ -1,12 +1,17 @@
 {
   "name": "@supacloud/app",
-  "version": "0.20.0",
+  "version": "0.22.0",
   "description": "Angular-style application metadata for SupaCloud: modules, DI tokens, providers, scopes, controllers and commands",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js",
+      "default": "./dist/core.js"
+    },
     "./contracts": {
       "types": "./dist/contract_client.d.ts",
       "import": "./dist/contract_client.js",
@@ -64,7 +69,7 @@
   ],
   "scripts": {
     "build": "bun run clean && bun run build:js && bun run build:types",
-    "build:js": "bun build src/index.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts --external '@angular/*' --external rxjs --format esm && bun build src/contract_client.ts src/browser.ts --outdir dist --target browser --external @supacloud/contracts --format esm && bun build src/reactive.ts --outdir dist --target browser --external rxjs --format esm && bun build src/angular.ts src/rxjs.ts --outdir dist --target browser --external '@angular/*' --external rxjs --format esm && bun build src/http.ts --outdir dist --target node --external @supacloud/app --format esm && bun build src/runtime.ts --outdir dist --target browser --format esm",
+    "build:js": "bun build src/index.ts src/core.ts src/execution.ts --outdir dist --target node --external @supacloud/contracts --external '@angular/*' --external rxjs --format esm && bun build src/contract_client.ts src/browser.ts --outdir dist --target browser --external @supacloud/contracts --format esm && bun build src/reactive.ts --outdir dist --target browser --external rxjs --format esm && bun build src/angular.ts src/rxjs.ts --outdir dist --target browser --external '@angular/*' --external rxjs --format esm && bun build src/http.ts --outdir dist --target node --external @supacloud/app --format esm && bun build src/runtime.ts --outdir dist --target browser --format esm",
     "build:types": "tsc -p tsconfig.json --emitDeclarationOnly",
     "clean": "rm -rf dist",
     "check:package": "node ../../.github/scripts/esm-package-policy.mjs --pack .",

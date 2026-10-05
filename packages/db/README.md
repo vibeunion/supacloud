@@ -250,3 +250,12 @@ bun run typecheck
 bun run typecheck:test
 bun run build       # bun build --target node + tsc 声明文件
 ```
+
+## Database Source Defaults
+
+`supacloud-db assess|generate|check --root <project>` provides offline source-boundary
+assessment, RPC contracts and freshness checks. Use `database.sources.json` to
+separate Drizzle declarations, maintained function SQL, append-only migrations,
+derived contracts and audit output. `check` and `assess` never write or connect;
+`generate` only writes derived contracts and refuses changes to recorded migration
+history. See the repository's `docs/database-source-contracts.md` for adoption.

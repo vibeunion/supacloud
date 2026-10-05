@@ -1,5 +1,6 @@
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
+import { WorkerExecutionSchema, WorkerExecutionGroupSchema, ComputeResourcesSchema, validateWorkerExecution } from "./worker-execution";
 
 const objectOptions = { additionalProperties: false } as const;
 const reference = Type.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z][A-Za-z0-9_.:/-]*$" });
@@ -13,12 +14,14 @@ export const DeliveryFilePathSchema = Type.String({
 
 export const DeliveryOptionsSchema = Type.Object({
   version: Type.Literal(1),
+  execution: Type.Optional(WorkerExecutionSchema),
   targets: Type.Optional(Type.Array(Type.Object({
     name: Type.String({ pattern: "^[a-z][a-z0-9-]{0,62}$" }),
     kind,
     modules: Type.Array(reference, { minItems: 1, uniqueItems: true }),
     isolation: Type.Optional(isolation),
     capabilities: Type.Optional(references),
+    compute: Type.Optional(ComputeResourcesSchema),
   }, objectOptions))),
   // These are declarations, never evidence that a remote host enforces isolation.
   runtime: Type.Optional(Type.Object({
@@ -87,6 +90,8 @@ export const DeliveryTargetSchema = Type.Object({
   name: Type.String(),
   kind,
   isolation,
+  execution: Type.Optional(WorkerExecutionGroupSchema),
+  compute: Type.Optional(ComputeResourcesSchema),
   roots: Type.Array(Type.String()),
   modules: Type.Array(Type.Object({
     name: Type.String(),
@@ -146,7 +151,12 @@ export class DeliveryConfigurationError extends Error {
 export function parseDeliveryOptions(value: unknown): DeliveryOptions {
   if (value === undefined) return { version: 1 };
   if (!Value.Check(DeliveryOptionsSchema, value)) throw new DeliveryConfigurationError();
+  if (value.targets?.some(target => target.compute && target.isolation === "shared")) {
+    throw new DeliveryConfigurationError();
+  }
   const migrations = value.build?.migrations ?? [];
+  try { validateWorkerExecution(value.execution?.groups ?? []); }
+  catch { throw new DeliveryConfigurationError(); }
   if (new Set(migrations.map(item => item.version)).size !== migrations.length
     || new Set(migrations.map(item => item.source)).size !== migrations.length
     || migrations.some(item => BigInt(item.version) > 9_223_372_036_854_775_807n

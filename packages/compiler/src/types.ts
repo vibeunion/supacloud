@@ -518,6 +518,8 @@ export interface OpenApiOptions {
 export interface GraphqlContractSummary {
   schema: string;
   schemaHash?: string;
+  /** SHA-256 with physical CRLF/CR normalized to LF; not an integrity or semantic digest. */
+  schemaNormalizedHash?: string;
   documents: string[];
   operations: Array<{ name: string; file: string; line: number }>;
 }
@@ -669,27 +671,4 @@ export interface DependencyGraphCache {
 
 export interface DependencyGraphIndex {
   getAffectedModules(changedFiles: string[]): string[];
-}
-
-export type OperationKind = "query" | "command";
-
-export interface OperationParamMapping {
-  name: string;
-  target: "param" | "query" | "body" | "header" | "cookie";
-}
-
-export interface OperationIR {
-  operationId: string;
-  kind: OperationKind;
-  controller: string;
-  controllerKey: string;
-  handler: string;
-  method: string;
-  path: string;
-  commandName?: string;
-  permission?: string;
-  idempotency?: "required" | "none";
-  audit?: string;
-  cacheTags: string[];
-  paramMappings?: OperationParamMapping[];
 }

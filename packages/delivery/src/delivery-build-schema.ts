@@ -2,6 +2,7 @@ import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
 import { DeliveryDiagnosticSchema, DeliveryFilePathSchema, DeliveryPlanSchema } from "./delivery-schema";
 import { canonical, digest as hash } from "./delivery-files";
+import { validateWorkerExecution } from "./worker-execution";
 
 const closed = { additionalProperties: false } as const;
 const digest = Type.String({ pattern: "^[a-f0-9]{64}$" });
@@ -11,7 +12,9 @@ export const DeliveryObjectSchema = Type.Object({
   inputDigest: digest,
   entrypoint: Type.Literal("bundle/index.js"),
   entryKind: Type.Union([
-    Type.Literal("compiled-module-factory"), Type.Literal("bun-http-application"), Type.Literal("bun-worker-application"),
+    Type.Literal("compiled-module-factory"), Type.Literal("bun-http-application"),
+    Type.Literal("bun-worker-application"), Type.Literal("go-worker-application"),
+    Type.Literal("scriptc-worker-application"),
   ]),
   runtimeImports: Type.Array(Type.String()),
   files: Type.Array(Type.Object({
@@ -66,6 +69,21 @@ export function deliveryObjectDigest(object: Pick<DeliveryObject, "inputDigest" 
 
 export function parseDeliveryBuildManifest(value: unknown): DeliveryBuildManifest {
   if (!Value.Check(DeliveryBuildManifestSchema, value)) throw new Error("Invalid delivery build manifest.");
+  validateWorkerExecution(value.plan.targets.flatMap(target => target.execution ? [target.execution] : []));
+  if (value.plan.targets.reduce((count, target) => count + (target.execution?.replicas ?? 1), 0) > 32) {
+    throw new Error("Invalid delivery replica count.");
+  }
+  for (const target of value.plan.targets) {
+    if (target.compute && (target.isolation !== "process" || !target.requirements.processIsolation)) {
+      throw new Error("Compute requires process isolation.");
+    }
+    if (target.execution && (target.compute || target.kind !== "jobs" || target.isolation !== "process"
+      || target.execution.target !== target.name || target.jobs.length !== 1
+      || target.jobs[0]?.name !== target.execution.taskKey
+      || value.objects.find(object => object.name === target.name)?.entryKind !== "bun-worker-application")) {
+      throw new Error("Invalid delivery execution binding.");
+    }
+  }
   if (new Set(value.objects.map((item) => item.name)).size !== value.objects.length) {
     throw new Error("Duplicate delivery object owner.");
   }
@@ -74,7 +92,8 @@ export function parseDeliveryBuildManifest(value: unknown): DeliveryBuildManifes
   }
   for (const object of value.objects) {
     const target = value.plan.targets.find(target => target.name === object.name);
-    if ((object.entryKind === "bun-worker-application" && target?.kind !== "jobs")
+    if ((["bun-worker-application", "go-worker-application", "scriptc-worker-application"]
+      .includes(object.entryKind) && target?.kind !== "jobs")
       || (object.entryKind === "bun-http-application" && target?.kind === "jobs")) {
       throw new Error("Delivery executable kind does not match its target.");
     }

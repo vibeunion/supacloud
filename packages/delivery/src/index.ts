@@ -1,6 +1,12 @@
 import { readDeliveryManifest, readVerifiedDeliveryFiles } from "./delivery-artifact";
 import type { DeliveryBuildManifest, DeliveryObject } from "./delivery-build-schema";
 export {
+  WorkerExecutionGroupSchema, WorkerExecutionSchema, parseWorkerExecutionGroup,
+  validateWorkerExecution, workerResourceUsage, assertWorkerBudget, resolveWorkerRoute,
+} from "./worker-execution";
+export { ComputeResourcesSchema } from "./worker-execution";
+export type { WorkerExecutionGroup, WorkerExecution, WorkerResourceUsage, ComputeResources } from "./worker-execution";
+export {
   ApplicationActivationIdSchema, ApplicationActivationWriteSchema, ApplicationActivationResultSchema,
   ApplicationActivationRetirementResultSchema,
 } from "./application-activation";
@@ -20,6 +26,14 @@ export {
 export type {
   ApplicationConfiguration, ApplicationConfigurationWrite, ApplicationConfigurationView, ApplicationConfigurationScope,
 } from "./application-configuration";
+export {
+  DEPLOYMENT_EVIDENCE_SCHEMA, DatabaseProviderSchema, DeploymentComponentEvidenceSchema,
+  DeploymentEvidenceSchema, deriveDeploymentEvidenceStatus, formatDeploymentEvidence,
+  parseDeploymentEvidence,
+} from "./deployment-evidence";
+export type {
+  DatabaseProviderEvidence, DeploymentComponentEvidence, DeploymentEvidence, DeploymentEvidenceStatus,
+} from "./deployment-evidence";
 export {
   APPLICATION_RUNTIME_PROBE_PATH, ApplicationRuntimeIdentitySchema, parseApplicationRuntimeIdentity,
   ApplicationReadinessReportSchema, parseApplicationReadinessReport,

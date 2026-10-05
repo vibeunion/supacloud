@@ -90,8 +90,13 @@ export class ApplicationReleaseStorage {
       manifest_sha256: manifestSha256, created_at: new Date().toISOString(),
       targets: archive.objects.map(({ object }) => ({
         name: object.name, object_id: object.objectId,
-        kind: object.entryKind === "bun-worker-application" ? "worker" : "http",
+        kind: ["bun-worker-application", "go-worker-application", "scriptc-worker-application"]
+          .includes(object.entryKind) ? "worker" : "http",
         entrypoint: object.entrypoint,
+        ...(archive.manifest.plan.targets.find(target => target.name === object.name)?.execution
+          ? { execution: archive.manifest.plan.targets.find(target => target.name === object.name)!.execution } : {}),
+        ...(archive.manifest.plan.targets.find(target => target.name === object.name)?.compute
+          ? { compute: archive.manifest.plan.targets.find(target => target.name === object.name)!.compute } : {}),
       })),
     };
     const staging = await mkdtemp(join(directory, ".incoming-"));
@@ -200,8 +205,13 @@ export class ApplicationReleaseStorage {
     if (stableSha256(archive.manifest) !== record.manifest_sha256
       || stableStringify(record.targets) !== stableStringify(archive.objects.map(({ object }) => ({
         name: object.name, object_id: object.objectId,
-        kind: object.entryKind === "bun-worker-application" ? "worker" : "http",
+        kind: ["bun-worker-application", "go-worker-application", "scriptc-worker-application"]
+          .includes(object.entryKind) ? "worker" : "http",
         entrypoint: object.entrypoint,
+        ...(archive.manifest.plan.targets.find(target => target.name === object.name)?.execution
+          ? { execution: archive.manifest.plan.targets.find(target => target.name === object.name)!.execution } : {}),
+        ...(archive.manifest.plan.targets.find(target => target.name === object.name)?.compute
+          ? { compute: archive.manifest.plan.targets.find(target => target.name === object.name)!.compute } : {}),
       })))) invalid();
     return { record, archive };
   }

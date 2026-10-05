@@ -11,6 +11,7 @@ import { loadMigrations, renderInstall } from "../scripts/migrations.js";
 import { until, withPgflowDatabase } from "./fixtures/database.js";
 import { sharedDatabaseAcceptance } from "./fixtures/shared-database.js";
 import { renderSchedule, roleNames } from "../scripts/scheduler.js";
+import { renderRoles } from "../scripts/roles.js";
 
 const binding = {
   projectRef: "project-a",
@@ -63,6 +64,14 @@ function context(signal = new AbortController().signal): Context {
 }
 
 describe("pgflow process adapter", () => {
+  test("worker role receives only the admission capabilities required by execution groups", () => {
+    const worker = roleNames("project-a").worker;
+    const script = renderRoles("project-a");
+    expect(script).toContain("to_regclass('supacloud_worker.admission_limits')");
+    expect(script).toContain("to_regprocedure('supacloud_worker.admit_operation(text,text,text,text)')");
+    expect(script).toContain(`TO ${worker}`);
+    expect(script).not.toContain(`GRANT SELECT ON supacloud_worker.admission_tokens TO ${worker}`);
+  });
   test("central scheduler validates target and scopes peer socket configuration", () => {
     const sql = renderSchedule("project-a", "tenant_a", "/var/run/postgresql");
     expect(sql).toContain("SET LOCAL ROLE " + roleNames("project-a").recovery);
@@ -78,7 +87,9 @@ describe("pgflow process adapter", () => {
   );
   test("installer is version locked, target bound and checksum protected", async () => {
     const migrations = await loadMigrations();
-    expect(migrations).toHaveLength(24);
+    expect(migrations).toHaveLength(26);
+    expect(migrations.at(-2)?.version).toBe("supacloud_002");
+    expect(migrations.at(-1)?.version).toBe("supacloud_003");
     const script = renderInstall(migrations, "fixture", "postgres");
     expect(script).toContain("pg_advisory_xact_lock");
     expect(script).toContain("PGFLOW_MIGRATION_CHECKSUM_MISMATCH");
@@ -94,6 +105,18 @@ describe("pgflow process adapter", () => {
       renderInstall([migrations[0]!, migrations[0]!], "fixture", "postgres"),
     ).toThrow();
   });
+  test("admission compatibility keeps 002 API and routes bounded queues through 003", async () => {
+    const migrations = await loadMigrations();
+    const legacy = migrations.find((migration) => migration.version === "supacloud_002");
+    const bounded = migrations.find((migration) => migration.version === "supacloud_003");
+    expect(legacy?.sql).toContain("CREATE TABLE supacloud_worker.admission_tokens");
+    expect(legacy?.sql).toContain("admit_operation");
+    expect(legacy?.sql).toContain("release_operation");
+    expect(bounded?.sql).toContain("CREATE TABLE supacloud_worker.queue_bindings");
+    expect(bounded?.sql).toContain("WORKER_QUEUE_OWNERSHIP");
+    expect(bounded?.sql).not.toContain("DROP TABLE");
+    expect(bounded?.sql).not.toContain("admission_installation");
+  });
 
   test.skipIf(process.env.PGFLOW_DATABASE_ACCEPTANCE !== "1")(
     "real database installation, task API and kill/restart recovery",
@@ -102,7 +125,7 @@ describe("pgflow process adapter", () => {
         await Promise.all([install(), install()]);
         const [receipt] =
           await db`SELECT count(*)::int AS count FROM supacloud_worker.migrations`;
-        expect(receipt.count).toBe(24);
+        expect(receipt.count).toBe(26);
         await expect(install("wrong-project")).rejects.toThrow(
           "PGFLOW_INSTALLATION_BINDING_MISMATCH",
         );

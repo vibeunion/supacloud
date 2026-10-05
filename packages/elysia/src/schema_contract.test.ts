@@ -426,9 +426,12 @@ test("end-to-end schema contract derives handler context and client types with z
   );
 
   // Inferred client contract types (matches Static<typeof Schema> directly)
-  type InferredInput = Parameters<typeof contract.input>[0];
+  type InferredInput = Parameters<typeof contract.request>[0];
   type InferredResult = ReturnType<typeof contract.result>;
 
+  // @ts-expect-error The request contract rejects non-string titles.
+  const invalidPayload: InferredInput = { title: 123, tags: [] };
+  void invalidPayload;
   const payload: InferredInput = { title: "Elysia 2", tags: ["framework", "aot"] };
   expect(contract.input(payload)).toEqual(payload);
 
@@ -452,7 +455,7 @@ test("end-to-end schema contract derives handler context and client types with z
   }));
 
   expect(response.status).toBe(200);
-  const json: InferredResult = await response.json();
-  expect(contract.result(json)).toEqual({ id: "p-1", title: "Elysia 2", tagCount: 2 });
+  const json: unknown = await response.json();
+  const result: InferredResult = contract.result(json);
+  expect(result).toEqual({ id: "p-1", title: "Elysia 2", tagCount: 2 });
 });
-

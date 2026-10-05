@@ -8,11 +8,15 @@ import {
   renderRequestMetrics,
 } from "../utils/observability";
 import { ApplicationReleaseStorage } from "../services/application-release-storage";
+import { ApplicationDeploymentEvidenceStorage } from "../services/application-deployment-evidence";
 import { ApplicationDevelopmentError, extractApplicationDevelopment } from "../services/application-development.service";
 import {
   requireAdminAuth,
   requireProjectOrAdminAuth,
 } from "../middleware/auth";
+import { victoriaLogsService } from "../services/victorialogs.service";
+import { queryProjectLogsSql, redactProjectLogs } from "../services/log-sql.service";
+import { readConnectionLocks } from "../services/connection-locks";
 
 const MCP_PROTOCOL_VERSION = "2025-06-18";
 const SERVER_NAME = "supacloud-management";
@@ -33,11 +37,15 @@ const OPERATIONS_TOOLS = [
   "supacloud.get_capabilities",
   "supacloud.get_backup_readiness",
   "supacloud.get_request_metrics",
+  "supacloud.get_project_logs",
+  "supacloud.query_project_logs_sql",
+  "supacloud.get_connection_locks",
   "supacloud.plan_pitr_restore",
 ] as const;
 const DEVELOPER_TOOLS = [
   "supacloud.get_capabilities",
   "supacloud.get_application_development",
+  "supacloud.get_deployment_evidence",
 ] as const;
 
 function rpcResult(id: JsonRpcId | undefined, result: unknown): Record<string, unknown> {
@@ -62,10 +70,14 @@ function textContent(text: string): { type: "text"; text: string }[] {
 }
 
 function scopedRef(scope: McpScope, params: Record<string, unknown>): string | null {
-  if (scope.ref) return scope.ref;
-  return typeof params.project_ref === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(params.project_ref)
+  const requested = typeof params.project_ref === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(params.project_ref)
     ? params.project_ref
     : null;
+  if (scope.ref && requested && requested !== scope.ref) {
+    throw new Error("project_ref is outside the authorized scope");
+  }
+  if (scope.ref) return scope.ref;
+  return requested;
 }
 
 function requiredIdentifier(params: Record<string, unknown>, key: string): string {
@@ -116,7 +128,61 @@ async function callTool(
   }
 
   if (name === "supacloud.get_request_metrics") {
+    if (scope.ref) {
+      return { content: textContent(JSON.stringify({
+        project_ref: scope.ref, available: false, reason: "platform_metrics_are_not_project_scoped",
+      })) };
+    }
     return { content: textContent(renderRequestMetrics()) };
+  }
+
+  if (name === "supacloud.get_project_logs") {
+    const ref = scopedRef(scope, params);
+    if (!ref) throw new Error("project_ref is required for project logs");
+    const limit = params.limit === undefined ? 100 : Number(params.limit);
+    const offset = params.offset === undefined ? 0 : Number(params.offset);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 500) throw new Error("limit must be between 1 and 500");
+    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1_000_000) throw new Error("offset must be between 0 and 1000000");
+    const logs = await victoriaLogsService.queryProjectLogs(ref, {
+      limit,
+      offset,
+      service: typeof params.service === "string" ? params.service : undefined,
+      search: typeof params.search === "string" ? params.search : undefined,
+      start: typeof params.start === "string" ? params.start : undefined,
+      end: typeof params.end === "string" ? params.end : undefined,
+    });
+    const output = JSON.stringify({
+        schema: "supacloud.project-logs.v1",
+        project_ref: ref,
+        read_only: true,
+        logs: redactProjectLogs(logs),
+      });
+    if (Buffer.byteLength(output) > 2 * 1024 * 1024) throw new Error("Log result exceeds size limit; reduce limit");
+    return { content: textContent(output) };
+  }
+
+  if (name === "supacloud.query_project_logs_sql") {
+    const ref = scopedRef(scope, params);
+    if (!ref) throw new Error("project_ref is required for project log SQL");
+    if (typeof params.sql !== "string" || !params.sql.trim()) throw new Error("sql is required");
+    const result = await queryProjectLogsSql(ref, params.sql);
+    return { content: textContent(JSON.stringify({
+      schema: "supacloud.project-logs-sql.v1",
+      ...result,
+      query_scope: "project_logs",
+    }, null, 2)) };
+  }
+
+  if (name === "supacloud.get_connection_locks") {
+    const ref = scopedRef(scope, params);
+    if (!ref) throw new Error("project_ref is required for connection locks");
+    const result = await readConnectionLocks(ref);
+    return {
+      content: textContent(JSON.stringify({
+        schema: "supacloud.connection-locks.v1",
+        ...result,
+      }, null, 2)),
+    };
   }
 
   if (name === "supacloud.get_backup_readiness") {
@@ -184,6 +250,24 @@ async function callTool(
     }
   }
 
+  if (name === "supacloud.get_deployment_evidence") {
+    const ref = scopedRef(scope, params);
+    if (!ref) throw new Error("project_ref is required for deployment evidence");
+    const applicationId = requiredIdentifier(params, "application_id");
+    const environmentId = requiredIdentifier(params, "environment_id");
+    const evidence = await new ApplicationDeploymentEvidenceStorage().read(ref, applicationId, environmentId);
+    return {
+      content: textContent(JSON.stringify({
+        schema: "supacloud.deployment-evidence-result.v1",
+        read_only: true,
+        project_ref: ref,
+        application_id: applicationId,
+        environment_id: environmentId,
+        evidence,
+      }, null, 2)),
+    };
+  }
+
   throw new Error(`Unknown MCP tool: ${name}`);
 }
 
@@ -217,7 +301,9 @@ async function readResource(uri: string, scope: McpScope, surface: McpSurface) {
   if (uri.match(/^supacloud:\/\/project\/[A-Za-z0-9_-]{1,64}\/metrics$/)) {
     const ref = uri.split("/")[3];
     if (scope.ref && scope.ref !== ref) throw new Error("Project resource is outside the authorized scope");
-    return resourceContents(uri, { project_ref: ref, metrics: renderRequestMetrics() });
+    return resourceContents(uri, {
+      project_ref: ref, available: false, reason: "platform_metrics_are_not_project_scoped",
+    });
   }
   throw new Error(`Unknown MCP resource: ${uri}`);
 }
@@ -261,6 +347,45 @@ export async function processMessage(message: JsonRpcRequest, scope: McpScope, s
           inputSchema: { type: "object", properties: {}, additionalProperties: false },
         },
         {
+          name: "supacloud.get_project_logs",
+          description: "Read bounded project logs from the persistent log store.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              project_ref: { type: "string" },
+              limit: { type: "integer", minimum: 1, maximum: 500 },
+              offset: { type: "integer", minimum: 0 },
+              service: { type: "string" },
+              search: { type: "string" },
+              start: { type: "string" },
+              end: { type: "string" },
+            },
+            additionalProperties: false,
+            },
+          },
+          {
+            name: "supacloud.query_project_logs_sql",
+            description: "Run one bounded read-only SELECT over the scoped project_logs virtual table.",
+            inputSchema: {
+              type: "object",
+              required: ["sql"],
+              properties: {
+                project_ref: { type: "string" },
+                sql: { type: "string", maxLength: 16384 },
+              },
+              additionalProperties: false,
+            },
+          },
+        {
+          name: "supacloud.get_connection_locks",
+          description: "Read active connections, wait events, blockers, and waiting lock types without mutating the project.",
+          inputSchema: {
+            type: "object",
+            properties: { project_ref: { type: "string" } },
+            additionalProperties: false,
+          },
+        },
+        {
           name: "supacloud.get_application_development",
           description: "Read the read-only application development contract (modules, routes, resources, diagnostics) from one immutable application release target.",
           inputSchema: {
@@ -272,6 +397,20 @@ export async function processMessage(message: JsonRpcRequest, scope: McpScope, s
               target: { type: "string", description: "Delivery target name" },
             },
             required: ["application_id", "release_id", "target"],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: "supacloud.get_deployment_evidence",
+          description: "Read the project-scoped single-node deployment evidence without executing an operation.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              project_ref: { type: "string" },
+              application_id: { type: "string" },
+              environment_id: { type: "string" },
+            },
+            required: ["application_id", "environment_id"],
             additionalProperties: false,
           },
         },

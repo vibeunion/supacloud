@@ -1,0 +1,180 @@
+name: Single-node Platform Acceptance
+
+on:
+  pull_request:
+    branches: ["main", "dev"]
+    paths:
+      - "packages/delivery/**"
+      - "packages/management-api/**"
+      - "packages/cli/**"
+      - "packages/web-console/**"
+      - "infrastructure/monitoring/**"
+      - "infrastructure/restore-drill/**"
+      - "scripts/ci-single-node-acceptance.ts"
+      - "scripts/test-project-restore-drill.ts"
+      - ".github/workflows/single-node-platform.yml"
+  push:
+    branches: ["main", "dev"]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Acceptance target
+        required: true
+        default: contracts
+        type: choice
+        options: [contracts, test, production]
+      run_restore_drill:
+        description: Run the isolated synthetic restore drill
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: single-node-platform-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUN_VERSION: "1.4.2"
+
+jobs:
+  contracts:
+    name: Single-node contracts and build gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install focused package dependencies
+        run: |
+          bun install --frozen-lockfile --cwd packages/delivery
+          bun install --frozen-lockfile --cwd packages/management-api
+          bun install --frozen-lockfile --cwd packages/cli
+          bun install --frozen-lockfile --cwd packages/web-console
+      - name: Validate deployment evidence and platform routes
+        run: |
+          bun test packages/delivery/src/deployment-evidence.test.ts
+          bun test packages/management-api/tests/unit/application-runtime.routes.test.ts
+          bun test packages/management-api/tests/unit/mcp-developer-surface.test.ts
+          bun test packages/management-api/tests/unit/branches.routes.test.ts
+          bun test packages/management-api/tests/unit/auto-branching.service.test.ts
+          bun test packages/cli/src/shared/tools/application-tools.test.ts
+      - name: Typecheck changed platform packages
+        run: |
+          bun run --cwd packages/delivery typecheck
+          bun run --cwd packages/management-api typecheck
+          bun run --cwd packages/cli typecheck
+          bun run --cwd packages/web-console check
+      - name: Build immutable delivery contract
+        run: |
+          bun run --cwd packages/delivery build
+      - name: Validate SLO alert rules
+        run: |
+          docker run --rm --entrypoint promtool \
+            -v "$PWD:/workspace:ro" prom/prometheus:v3.5.0 \
+            test rules /workspace/infrastructure/monitoring/supacloud-slo.rules.test.yml
+      - name: Verify clean diff
+        run: git diff --check
+
+  restore-drill:
+    name: Isolated backup and restore drill
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_restore_drill }}
+    needs: contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install restore-drill dependencies
+        working-directory: packages/edge-runtime
+        run: bun install --frozen-lockfile --production
+      - name: Build pinned restore-drill image
+        run: docker build --file infrastructure/restore-drill/Dockerfile --tag supacloud-restore-drill:ci .
+      - name: Run logical-full and pgBackRest isolated drills
+        run: |
+          bun scripts/test-project-restore-drill.ts \
+            supacloud-restore-drill:ci \
+            "$(command -v bun)" \
+            default
+
+  test-environment:
+    name: Test environment acceptance
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'test' }}
+    needs: [contracts]
+    environment: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Verify selected test host identity
+        env:
+          SUPACLOUD_TEST_SSH_HOST: ${{ secrets.SUPACLOUD_TEST_SSH_HOST }}
+          SUPACLOUD_TEST_SSH_USER: ${{ secrets.SUPACLOUD_TEST_SSH_USER }}
+          SUPACLOUD_TEST_SSH_PORT: ${{ secrets.SUPACLOUD_TEST_SSH_PORT }}
+          SUPACLOUD_TEST_SSH_PRIVATE_KEY: ${{ secrets.SUPACLOUD_TEST_SSH_PRIVATE_KEY }}
+        run: |
+          test -n "$SUPACLOUD_TEST_SSH_HOST"
+          test -n "$SUPACLOUD_TEST_SSH_PRIVATE_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SUPACLOUD_TEST_SSH_PRIVATE_KEY" > "$HOME/.ssh/supacloud-test"
+          chmod 600 "$HOME/.ssh/supacloud-test"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -i "$HOME/.ssh/supacloud-test" \
+            -p "${SUPACLOUD_TEST_SSH_PORT:-22}" \
+            "${SUPACLOUD_TEST_SSH_USER:-root}@${SUPACLOUD_TEST_SSH_HOST}" \
+            'hostname && hostname -I'
+      - name: Run test single-node acceptance
+        env:
+          SUPACLOUD_ACCEPTANCE_API_URL: ${{ secrets.SUPACLOUD_TEST_API_URL }}
+          SUPACLOUD_ACCEPTANCE_TOKEN: ${{ secrets.SUPACLOUD_TEST_API_TOKEN }}
+          SUPACLOUD_ACCEPTANCE_PROJECT_REF: ${{ secrets.SUPACLOUD_TEST_PROJECT_REF }}
+          SUPACLOUD_ACCEPTANCE_APPLICATION_ID: ${{ secrets.SUPACLOUD_TEST_APPLICATION_ID }}
+          SUPACLOUD_ACCEPTANCE_ENVIRONMENT_ID: ${{ secrets.SUPACLOUD_TEST_ENVIRONMENT_ID }}
+        run: bun scripts/ci-single-node-acceptance.ts --refresh-evidence
+
+  production-acceptance:
+    name: Production read-only acceptance
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.target == 'production' }}
+    needs: [contracts]
+    environment: production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Verify selected production host identity
+        env:
+          SUPACLOUD_PRODUCTION_SSH_HOST: ${{ secrets.SUPACLOUD_PRODUCTION_SSH_HOST }}
+          SUPACLOUD_PRODUCTION_SSH_USER: ${{ secrets.SUPACLOUD_PRODUCTION_SSH_USER }}
+          SUPACLOUD_PRODUCTION_SSH_PORT: ${{ secrets.SUPACLOUD_PRODUCTION_SSH_PORT }}
+          SUPACLOUD_PRODUCTION_SSH_PRIVATE_KEY: ${{ secrets.SUPACLOUD_PRODUCTION_SSH_PRIVATE_KEY }}
+        run: |
+          test -n "$SUPACLOUD_PRODUCTION_SSH_HOST"
+          test -n "$SUPACLOUD_PRODUCTION_SSH_PRIVATE_KEY"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SUPACLOUD_PRODUCTION_SSH_PRIVATE_KEY" > "$HOME/.ssh/supacloud-production"
+          chmod 600 "$HOME/.ssh/supacloud-production"
+          ssh -o BatchMode=yes -o StrictHostKeyChecking=no \
+            -i "$HOME/.ssh/supacloud-production" \
+            -p "${SUPACLOUD_PRODUCTION_SSH_PORT:-2201}" \
+            "${SUPACLOUD_PRODUCTION_SSH_USER:-ubuntu}@${SUPACLOUD_PRODUCTION_SSH_HOST}" \
+            'hostname && hostname -I'
+      - name: Run production read-only acceptance
+        env:
+          SUPACLOUD_ACCEPTANCE_API_URL: ${{ secrets.SUPACLOUD_PRODUCTION_API_URL }}
+          SUPACLOUD_ACCEPTANCE_TOKEN: ${{ secrets.SUPACLOUD_PRODUCTION_API_TOKEN }}
+          SUPACLOUD_ACCEPTANCE_PROJECT_REF: ${{ secrets.SUPACLOUD_PRODUCTION_PROJECT_REF }}
+          SUPACLOUD_ACCEPTANCE_APPLICATION_ID: ${{ secrets.SUPACLOUD_PRODUCTION_APPLICATION_ID }}
+          SUPACLOUD_ACCEPTANCE_ENVIRONMENT_ID: ${{ secrets.SUPACLOUD_PRODUCTION_ENVIRONMENT_ID }}
+        run: bun scripts/ci-single-node-acceptance.ts

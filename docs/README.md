@@ -9,6 +9,7 @@
 - [Deploy Guide](./deploy-guide.md) - Complete deployment guide
 - [Deploy API](./deploy-api.md) - Deployment API reference
 - [Configuration Example](./supacloud.yml.example) - Configuration file example
+- [Self-Hosted Stable Baseline](./self-hosted-stable-baseline.md) - Primary product boundary, supported profile, acceptance gates, and evidence states
 - [SupaCloud vs Supabase](./supacloud-vs-supabase.md) - Product positioning and feature comparison
 - [Database Environment Promotion](./database-environment-promotion.md) - Local, preview, staging, and production migration workflow
 
@@ -66,6 +67,9 @@
 - [Background Functions With supabase-js](./background-functions-supabase-js-tutorial.md) - Tenant SDK tutorial for invoke, polling, cancel, DLQ, lifecycle webhooks, and queues
 - [Background Functions API Reference](./background-functions-api-reference.md) - Headers, task states, control-plane endpoints, and runtime semantics
 - [@supacloud/js](./supacloud-js.md) - Official platform SDK layered on top of `supabase-js`, including tasks, lifecycle webhooks, queues, and OAuth helpers
+- [Frontend SDK Integration](./frontend-sdk-integration.md) - One session shared by the platform SDK and generated business clients, without a frontend DI framework
+- [Execution Engine Policy](./execution-engine-policy.md) - One execution owner per operation; default Workflows and explicit pgflow/approval integrations
+- [Vibecoding Evaluation](./vibecoding-evaluation.md) - Reproducible agent tasks and recorded context, repair, time and scope metrics
 - [Queues PGMQ Migration Guide](./queues-pgmq-migration.md) - Migration notes for Supabase Queues compatibility and SupaCloud queue extensions
 - [Durable Workflows](./durable-workflows.md) - Service-role-only PostgreSQL/PGMQ workflow execution and DBOS design rationale
 - [Application Business State Machines](./business-state-machines.md) - Maker-Checker transition RPC, audit, versioning, and XState projection pattern
@@ -82,4 +86,5 @@
 
 ## Product Positioning
 
+- [Self-Hosted Stable Baseline](./self-hosted-stable-baseline.md) - The primary self-hosted multi-project product and its release acceptance contract ([中文](./self-hosted-stable-baseline.zh-CN.md))
 - [SupaCloud vs Supabase](./supacloud-vs-supabase.md) - When to choose SupaCloud, Supabase Cloud, or official self-hosted Supabase

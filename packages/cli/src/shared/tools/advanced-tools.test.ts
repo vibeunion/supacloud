@@ -1533,14 +1533,20 @@ describe("edge_functions CLI tool", () => {
 
     test("routes every release-control Function mutation through the bounded response transport", async () => {
         const releaseMutationPaths: string[] = [];
+        const releaseMutationTimeouts: Array<number | undefined> = [];
         let ordinaryPostCount = 0;
         const { callback } = captureEdgeFunctionsTool({
             post: async () => {
                 ordinaryPostCount += 1;
                 throw new Error("release mutation used the ordinary POST reader");
             },
-            postReleaseMutation: async (path: string, body: Record<string, unknown>) => {
+            postReleaseMutation: async (
+                path: string,
+                body: Record<string, unknown>,
+                options?: { timeoutMs?: number },
+            ) => {
                 releaseMutationPaths.push(path);
+                releaseMutationTimeouts.push(options?.timeoutMs);
                 const slug = path.split("/functions/")[1].split("/")[0];
                 const previousActiveVersion = String(body.expected_active_version);
                 const expectedActivationId = String(body.expected_activation_id);
@@ -1603,6 +1609,7 @@ describe("edge_functions CLI tool", () => {
             "/v1/projects/proj/functions/bundle/bundle",
             "/v1/projects/proj/functions/restore/versions/1/activate",
         ]);
+        expect(releaseMutationTimeouts).toEqual([300_000, 300_000, undefined]);
     });
 
     test.each([

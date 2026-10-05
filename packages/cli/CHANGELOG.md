@@ -14,6 +14,111 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.66.1](https://github.com/vibeunion/supacloud/compare/cli-v0.66.0...cli-v0.66.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#1650](https://github.com/vibeunion/supacloud/issues/1650)) ([c0b739e](https://github.com/vibeunion/supacloud/commit/c0b739e1b863c6a1a61b7bfa91efc16278225a2b))
+
+## [0.66.0](https://github.com/vibeunion/supacloud/compare/cli-v0.65.2...cli-v0.66.0) (2026-10-05)
+
+
+### Features
+
+* add agent backend authoring, runtime and observability workflows ([#1648](https://github.com/vibeunion/supacloud/issues/1648)) ([59a66d1](https://github.com/vibeunion/supacloud/commit/59a66d184a47d19c7f8895f24a6ba2c7e74e93d0))
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#1646](https://github.com/vibeunion/supacloud/issues/1646)) ([78354f6](https://github.com/vibeunion/supacloud/commit/78354f6f074d7b3b67eb45885abf7915cdaeb4df))
+
+## [0.65.2](https://github.com/vibeunion/supacloud/compare/cli-v0.65.1...cli-v0.65.2) (2026-10-05)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#1640](https://github.com/vibeunion/supacloud/issues/1640)) ([8c78e53](https://github.com/vibeunion/supacloud/commit/8c78e537cfa1038fc4f030e747c07b573c702aad))
+
+## [0.65.1](https://github.com/vibeunion/supacloud/compare/cli-v0.65.0...cli-v0.65.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#1636](https://github.com/vibeunion/supacloud/issues/1636)) ([4b9ae47](https://github.com/vibeunion/supacloud/commit/4b9ae4722c356485dd6476a43d387c97ec6847b2))
+
+## [0.65.0](https://github.com/vibeunion/supacloud/compare/cli-v0.64.4...cli-v0.65.0) (2026-10-04)
+
+
+### Features
+
+* establish single-node delivery baseline ([#1632](https://github.com/vibeunion/supacloud/issues/1632)) ([926de6c](https://github.com/vibeunion/supacloud/commit/926de6c6c72940f7c03e046908ef446c54d37621))
+
+## [0.64.4](https://github.com/vibeunion/supacloud/compare/cli-v0.64.3...cli-v0.64.4) (2026-10-04)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#1621](https://github.com/vibeunion/supacloud/issues/1621)) ([978f503](https://github.com/vibeunion/supacloud/commit/978f503c40dd799babc7547f4e24c6bda4e0840e))
+
+## [0.64.3](https://github.com/vibeunion/supacloud/compare/cli-v0.64.2...cli-v0.64.3) (2026-10-04)
+
+
+### Bug Fixes
+
+* **supacloud:** sync published CLI dependencies ([#1614](https://github.com/vibeunion/supacloud/issues/1614)) ([dc06ea2](https://github.com/vibeunion/supacloud/commit/dc06ea215534fb1d5a2f342c8716075235be28c0))
+
+## [0.64.2](https://github.com/vibeunion/supacloud/compare/cli-v0.64.1...cli-v0.64.2) (2026-10-03)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#1612](https://github.com/vibeunion/supacloud/issues/1612)) ([eef9668](https://github.com/vibeunion/supacloud/commit/eef9668abb0f9e40224f71868ca5234c9efa11df))
+
+## [0.64.1](https://github.com/vibeunion/supacloud/compare/cli-v0.64.0...cli-v0.64.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#1605](https://github.com/vibeunion/supacloud/issues/1605)) ([25f303d](https://github.com/vibeunion/supacloud/commit/25f303ded9aa1883dfe3823e252f1778581ed0af))
+
+## [0.64.0](https://github.com/vibeunion/supacloud/compare/cli-v0.63.0...cli-v0.64.0) (2026-10-03)
+
+
+### Features
+
+* converge SDK-aware vibecoding defaults and local development ([#1607](https://github.com/vibeunion/supacloud/issues/1607)) ([cd66672](https://github.com/vibeunion/supacloud/commit/cd6667252a6a8fe0cc0539bc8610ebb8a818af51))
+* **tooling:** synchronize starter metadata and validate local build caching ([#1608](https://github.com/vibeunion/supacloud/issues/1608)) ([31137b1](https://github.com/vibeunion/supacloud/commit/31137b135b31251d9837518c9fb31a330c8f4c58))
+
+## [0.63.0](https://github.com/vibeunion/supacloud/compare/cli-v0.62.1...cli-v0.63.0) (2026-10-03)
+
+
+### Features
+
+* **db:** default database starters to Drizzle and source-contract gates ([#1599](https://github.com/vibeunion/supacloud/issues/1599)) ([133eb9b](https://github.com/vibeunion/supacloud/commit/133eb9b0d3a6be3690c290041db3906635a376e7))
+
+
+### Bug Fixes
+
+* **cli:** extend edge function deploy timeout ([#1602](https://github.com/vibeunion/supacloud/issues/1602)) ([6d94d74](https://github.com/vibeunion/supacloud/commit/6d94d745034a03a6fa1d52da1325a09b4d943446))
+* **cli:** sync published compiler dependency ([#1598](https://github.com/vibeunion/supacloud/issues/1598)) ([0921645](https://github.com/vibeunion/supacloud/commit/092164593cf8e793c3c277f10e82cb106f43c370))
+* **compiler:** compose generated clients with frontend SDK auth ([#1603](https://github.com/vibeunion/supacloud/issues/1603)) ([7b14968](https://github.com/vibeunion/supacloud/commit/7b1496828a9ade663f2a3d4572252af966296763))
+
+## [0.62.1](https://github.com/vibeunion/supacloud/compare/cli-v0.62.0...cli-v0.62.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#1590](https://github.com/vibeunion/supacloud/issues/1590)) ([a6f492a](https://github.com/vibeunion/supacloud/commit/a6f492adeb61916d461baf56f0c432087c830d67))
+
+## [0.62.0](https://github.com/vibeunion/supacloud/compare/cli-v0.61.0...cli-v0.62.0) (2026-10-02)
+
+
+### Features
+
+* complete Angular framework defaults integration ([#1587](https://github.com/vibeunion/supacloud/issues/1587)) ([0dec8ea](https://github.com/vibeunion/supacloud/commit/0dec8ea48f288da27824579038136dd33f8ccb20))
+* **js:** publish SDK and Contracts as dual MJS and CJS ([#1585](https://github.com/vibeunion/supacloud/issues/1585)) ([6183f3e](https://github.com/vibeunion/supacloud/commit/6183f3e7e985f1fb06a6b31aaf2bab125bb1b34d))
+
 ## [0.61.0](https://github.com/vibeunion/supacloud/compare/cli-v0.60.1...cli-v0.61.0) (2026-10-02)
 
 

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createApplication, createWorker, type CompiledModule } from "./index";
-import { PendingWorkTimeoutError } from "@supacloud/app/runtime";
+import { PendingWorkRegistry, PendingWorkTimeoutError, PendingWorkCapacityError } from "@supacloud/app/runtime";
 
 function deferred() {
   let resolve!: () => void;
@@ -13,6 +13,121 @@ function moduleFor(run: () => Promise<unknown>, cleanup: () => Promise<void> = a
     controllers: [{ path: "/work", serviceKey: "controller", scope: "application",
       routes: [{ method: "GET", path: "/", handler: "run" }] }] };
 }
+
+test("registry capacity has a typed error without changing validation or losing admitted work", async () => {
+  const registry = new PendingWorkRegistry({ capacity: 1 });
+  const work = { name: "test.work", kind: "job" } as const;
+  const complete = registry.add(work);
+  try {
+    expect(() => registry.add(work)).toThrow(PendingWorkCapacityError);
+    expect(() => registry.add(work)).toThrow(RangeError);
+    expect(new PendingWorkCapacityError().code).toBe("PENDING_WORK_CAPACITY_EXCEEDED");
+    let started = false;
+    await expect(registry.run(work, () => { started = true; })).rejects.toBeInstanceOf(PendingWorkCapacityError);
+    expect(started).toBe(false);
+    expect(registry.snapshot()).toHaveLength(1);
+    expect(registry.closed).toBe(false);
+    expect(registry.signal.aborted).toBe(false);
+    expect(() => new PendingWorkRegistry({ capacity: 0 })).toThrow(RangeError);
+    expect(() => registry.add({ ...work, name: "" })).toThrow(TypeError);
+  } finally {
+    complete();
+  }
+  expect(await registry.run(work, () => 42)).toBe(42);
+  expect(registry.snapshot()).toEqual([]);
+});
+
+test("overloaded requests return 503 before context or handler execution and recover after drain", async () => {
+  const entered = deferred(), release = deferred();
+  let contexts = 0, handlers = 0;
+  const signals: AbortSignal[] = [];
+  const app = createApplication({
+    pendingWork: { capacity: 1 },
+    requestContext: (_request, _context, signal) => {
+      contexts++;
+      if (signal) signals.push(signal);
+      return {};
+    },
+    modules: [moduleFor(async () => {
+      handlers++;
+      entered.resolve();
+      await release.promise;
+      return "done";
+    })],
+  });
+  const first = app.handle(new Request("http://localhost/work"));
+  try {
+    await entered.promise;
+    const admitted = app.pendingWork.snapshot().map(({ id, name, kind }) => ({ id, name, kind }));
+    const rejected = await app.handle(new Request("http://localhost/work"));
+    expect(rejected.status).toBe(503);
+    expect(await rejected.json()).toEqual({
+      ok: false,
+      code: "PENDING_WORK_CAPACITY_EXCEEDED",
+      message: "Application work capacity exceeded",
+    });
+    expect(contexts).toBe(1);
+    expect(handlers).toBe(1);
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.aborted).toBe(false);
+    expect(app.pendingWork.snapshot().map(({ id, name, kind }) => ({ id, name, kind }))).toEqual(admitted);
+    await expect(app.waitForIdle({ timeoutMs: 0 })).rejects.toBeInstanceOf(PendingWorkTimeoutError);
+    release.resolve();
+    expect((await first).status).toBe(200);
+    await app.waitForIdle();
+    expect((await app.handle(new Request("http://localhost/work"))).status).toBe(200);
+    expect(contexts).toBe(2);
+    expect(handlers).toBe(2);
+    expect(app.pendingWork.snapshot()).toEqual([]);
+  } finally {
+    release.resolve();
+    await first;
+    await app.destroy();
+  }
+});
+
+test("capacity errors after admission remain internal errors, not retryable admission failures", async () => {
+  for (const failContext of [true, false]) {
+    const app = createApplication({
+      modules: [moduleFor(async () => { throw new PendingWorkCapacityError(); })],
+      requestContext: () => { if (failContext) throw new PendingWorkCapacityError(); return {}; },
+    });
+    try {
+      const response = await app.handle(new Request("http://localhost/work"));
+      expect(response.status).toBe(500);
+      expect(await response.json()).toEqual({ ok: false, code: "INTERNAL_ERROR", message: "Internal Server Error" });
+      expect(app.pendingWork.snapshot()).toEqual([]);
+    } finally {
+      await app.destroy();
+    }
+  }
+});
+
+test("custom error mappers retain precedence for admission capacity errors", async () => {
+  let mapped = false;
+  const app = createApplication({
+    pendingWork: { capacity: 1 },
+    modules: [moduleFor(async () => { throw new Error("Unexpected handler execution"); })],
+    requestContext: () => { throw new Error("Unexpected context execution"); },
+    errorMapper: (error, context) => {
+      mapped = true;
+      expect(error).toMatchObject({ code: "PENDING_WORK_CAPACITY_EXCEEDED", status: 503 });
+      expect(context.requestContext).toBeUndefined();
+      return Response.json({ code: "CUSTOM_OVERLOAD" }, { status: 503 });
+    },
+  });
+  const complete = app.pendingWork.add({ name: "test.busy", kind: "job" });
+  try {
+    const response = await app.handle(new Request("http://localhost/work"));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ code: "CUSTOM_OVERLOAD" });
+    expect(mapped).toBe(true);
+    expect(app.pendingWork.snapshot()).toHaveLength(1);
+  } finally {
+    complete();
+    await app.destroy();
+  }
+});
 
 test("request context, handler and scope cleanup remain registered until completed", async () => {
   const entered = deferred(), release = deferred(), cleaning = deferred(), cleaned = deferred();
