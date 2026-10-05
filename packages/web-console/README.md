@@ -73,6 +73,20 @@ dynamic multi-tenant resources, so the migration splits them:
   `PATCH /v1/projects/:ref` form, because its `config` payload is intentionally
   open-ended and cannot be described by a closed contract.
 
+The table-list and auth-user contract factories preserve their schema types.
+`getTenantResources(ref, labels)` returns a typed tuple, so
+`getResourceList(tables)` and `getResourceList(users)` infer different record
+types without a caller-supplied response generic. This reader uses the same
+resource projection as AutoTable and validates records through SVAdmin before
+returning them. The heterogeneous navigation registry remains type-erased;
+typed consumers should retain the factory result.
+
+This is a checked console read boundary, not generated Management API route
+typing. Dynamic database columns, unchecked resources, and dedicated mutation
+forms are not covered by these static record types. No server runtime is
+imported into the browser. The focused `src/lib/admin/resources.test.ts` suite
+compiles positive and negative type assertions and exercises response validation.
+
 Migration acceptance:
 
 ```gherkin

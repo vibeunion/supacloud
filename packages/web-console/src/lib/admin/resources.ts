@@ -295,7 +295,7 @@ function getPlatformResources(labels: ProjectResourceLabels): ResourceDefinition
   ];
 }
 
-export const getTenantResources = (ref: string, labels: TenantResourceLabels): ResourceDefinition[] => [
+export const getTenantResources = (ref: string, labels: TenantResourceLabels) => [
   {
     name: `v1/projects/${ref}/database/tables`,
     label: labels.tables,
@@ -346,7 +346,7 @@ export const getTenantResources = (ref: string, labels: TenantResourceLabels): R
       { key: 'last_sign_in_at', label: 'Last Login', type: 'date', showInForm: false }
     ]
   }
-];
+] satisfies [ResourceDefinition, ResourceDefinition];
 
 export function buildResourceRegistry(projectRefs: string[], labels: ResourceLabels): ResourceDefinition[] {
   const uniqueRefs = [...new Set(projectRefs.filter(Boolean))];
