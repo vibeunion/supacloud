@@ -7,7 +7,7 @@ import { resolveLiteCommand } from '../../packages/cli/src/shared/tools/lite-cli
 
 async function fixture(t, entry = 'dist/launcher.mjs') {
   const workdir = await mkdtemp(join(tmpdir(), 'supacloud-lite-bin-'));
-  t.after(() => rm(workdir, { recursive: true, force: true }));
+  t.after(() => rm(workdir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }));
   const root = join(workdir, 'node_modules', '@supacloud', 'lite');
   await mkdir(join(root, 'dist'), { recursive: true });
   const manifest = { name: '@supacloud/lite', type: 'module', bin: { 'supacloud-lite': entry } };

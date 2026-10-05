@@ -1,5 +1,11 @@
-import type { TSchema } from 'typebox';
-import { defineResource, type ResourceContract } from '@svadmin/core/resource-contract';
+import type { Static, TObject } from 'typebox';
+import { defineResource, type ContractSchemas, type ResourceContract } from '@svadmin/core/resource-contract';
+
+type LegacyObject = ContractSchemas['record'];
+interface LegacyRecord<S extends TObject> extends LegacyObject {
+  static: Static<S>;
+}
+export type SvadminResourceContract<S extends TObject> = ResourceContract<{ record: LegacyRecord<S> }>;
 
 /**
  * @svadmin/core@0.58 pins `@sinclair/typebox@0.34`, whose schema nodes carry
@@ -46,13 +52,13 @@ function tagLegacyKind(node: unknown): void {
  * property map is built from live metadata) and whose record schema is bridged
  * to the legacy type identity SVAdmin still requires at runtime.
  */
-export function defineSvadminResource(
+export function defineSvadminResource<S extends TObject>(
   name: string,
-  schemas: { record: TSchema },
-): ResourceContract {
+  schemas: { record: S },
+): SvadminResourceContract<S> {
   tagLegacyKind(schemas.record);
   return (defineResource as unknown as (
     name: string,
-    schemas: { record: TSchema },
-  ) => ResourceContract)(name, schemas);
+    schemas: { record: S },
+  ) => SvadminResourceContract<S>)(name, schemas);
 }

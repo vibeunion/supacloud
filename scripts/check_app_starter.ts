@@ -13,9 +13,11 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export function starterInstallArgs(profile: "workspace" | "consumer" | "locked-consumer"): string[] {
   return [
     "install", "--no-progress",
-    profile === "locked-consumer" ? "--offline" : "--prefer-offline",
+    // A new consumer has no lockfile; restored CI metadata may predate its pins.
+    profile === "locked-consumer" ? "--offline" : profile === "consumer" ? "--no-cache" : "--prefer-offline",
     ...(profile === "consumer" ? [] : ["--frozen-lockfile"]),
     ...(profile === "workspace" ? [] : ["--ignore-scripts"]),
+    ...(profile === "consumer" ? ["--registry=https://registry.npmjs.org"] : []),
   ];
 }
 

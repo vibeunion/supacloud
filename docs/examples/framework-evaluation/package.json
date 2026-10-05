@@ -8,7 +8,7 @@
   "dependencies": {
     "@aponiajs/common": "0.6.0-alpha.37",
     "@aponiajs/platform-elysia": "0.6.0-alpha.37",
-    "elysia": "2.0.0-beta.19",
+    "elysia": "2.0.0-beta.21",
     "class-validator": "0.14.3",
     "class-transformer": "0.5.1",
     "rxjs": "7.8.2",
@@ -16,6 +16,6 @@
     "reflect-metadata": "0.2.2"
   },
   "overrides": {
-    "elysia": "2.0.0-beta.19"
+    "elysia": "2.0.0-beta.21"
   }
 }
