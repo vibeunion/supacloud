@@ -18,7 +18,7 @@ async function fixture(t, program, { noBun = false } = {}) {
       if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
     }
     await Promise.allSettled(children.map(execution => execution.closed));
-    await rm(root, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
   });
   const dist = join(root, 'space # percent % Unicode 测试', 'dist');
   const bin = join(root, 'bin');
