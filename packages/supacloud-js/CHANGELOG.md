@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.38.0...supacloud-js-v0.39.0) (2026-10-05)
+
+
+### Features
+
+* **supacloud-js:** add typed procedure facade and unified errors ([#1639](https://github.com/vibeunion/supacloud/issues/1639)) ([fef05e9](https://github.com/vibeunion/supacloud/commit/fef05e98ee1044e1f449bad52d18104d28e17cb4))
+
 ## [0.38.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.37.0...supacloud-js-v0.38.0) (2026-10-04)
 
 
