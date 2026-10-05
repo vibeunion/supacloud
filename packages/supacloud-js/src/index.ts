@@ -30,7 +30,20 @@ export * from "./workflows.js";
 export { createSupaCloudWorkflowFetch, type SupaCloudWorkflowFetchOptions } from "./workflow-fetch.js";
 export { createSupaCloudCommandFetch, type SupaCloudCommandFetchOptions } from "./command-fetch.js";
 export { createSupaCloudArtifactFetch, type SupaCloudArtifactFetchOptions } from "./artifact-fetch.js";
-export { createSupaCloudApiFetch, type SupaCloudApiFetchOptions } from "./api-fetch.js";
+export {
+  createSupaCloudApiFetch,
+  type SupaCloudApiFetchOptions,
+} from "./api-fetch.js";
+export {
+  createSupaCloudProcedureClient,
+  SupaCloudProcedureError,
+  type SupaCloudGeneratedClientConfig,
+  type SupaCloudGeneratedClientFactory,
+  type SupaCloudProcedureClient,
+  type SupaCloudProcedureClientOptions,
+  type SupaCloudProcedureErrorCode,
+  type SupaCloudProcedureErrorOptions,
+} from "./procedure-client.js";
 export * from "./commands.js";
 export * from "./artifacts.js";
 
