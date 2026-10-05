@@ -28,8 +28,10 @@ const records = pgSchema("app").table("settings", {
   version: integer().notNull().default(0),
 });
 const rowSchema = createSelectSchema(records);
-// Drizzle's legacy decorator returns plain JSON Schema without TypeBox 1.x
-// markers, so re-wrap the derived property map before projecting subsets.
+// `drizzle-orm/typebox-legacy` is the only Drizzle schema helper that keeps
+// the 0.34 type identity drizzle-orm@1.0.0-rc.4 is built against; its 1.x
+// `typebox` helper still subclasses the removed `Type.Base`. Wrap the derived,
+// marker-less JSON Schema property map with TypeBox 1.x before projecting.
 const rowProjection = Type.Object(rowSchema.properties);
 const inputSchema = Type.Pick(rowProjection, ["id", "enabled"], { additionalProperties: false });
 const resultSchema = Type.Pick(rowProjection, ["id", "enabled", "version"], { additionalProperties: false });
