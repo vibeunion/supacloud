@@ -1,0 +1,6 @@
+{
+  "name": "@supacloud/query",
+  "tags": ["scope:core", "type:client"],
+  "projectType": "library",
+  "sourceRoot": "packages/query/src"
+}

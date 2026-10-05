@@ -1297,6 +1297,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "ApiClientErrorMapper", "ProcedureExecutionValidator",
   ]));
   const controllerEntries: string[] = [];
+  const procedureEntries: string[] = [];
   const routeTypes: string[] = [];
   const schemaEntries: string[] = [];
   const schemaLocals = new Map<string, string>();
@@ -1341,6 +1342,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     for (const controller of module.controllers) {
       const controllerKey = camelName(controller.className.replace(/Controller$/, ""));
       const routeMethods: string[] = [];
+      const procedureMethods: string[] = [];
 
       for (const route of controller.routes) {
         const fullPath = joinRoutePaths(controller.path, route.path);
@@ -1477,11 +1479,14 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
         });
         routeMethods.push(`
     ${route.handler}: makeRoute<${requestTypeName}, ${responseType === "never" ? "never" : responseTypeName}, ${JSON.stringify(procedureKind)}, ${JSON.stringify(idempotencyMode)}>(${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}, ${responseSchemaArgument}, ${responseKindArgument}, ${route.parse === "none"}, ${JSON.stringify(procedureKind)}, ${JSON.stringify(idempotencyMode)}, ${JSON.stringify(procedureMetadata)}),`);
+        const member = procedureKind === "query" ? "query" : "mutate";
+        procedureMethods.push(`    ${route.handler}: { ${member}: controllers.${controllerKey}.${route.handler}.${member} },`);
       }
 
       controllerEntries.push(`
   ${controllerKey}: {${routeMethods.join("")}
   },`);
+      procedureEntries.push(`    ${controllerKey}: {\n${procedureMethods.join("\n")}\n    },`);
     }
   }
 
@@ -2069,17 +2074,27 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "    return route as RouteMethod<Options, Result> & ProcedureMember<Options, Result, Kind, Idempotency>;",
     "  }",
     "",
+    "  const controllers = {",
+    ...controllerEntries,
+    "  };",
     "  return {",
     "    __supacloudClient: Object.freeze({ hooksVersion: 1 as const }),",
     "    request,",
     "    buildRouteUrl,",
     "    routes: API_ROUTES,",
     "    procedures: API_PROCEDURES,",
-    ...controllerEntries,
+    "    procedureClient: {",
+    ...procedureEntries,
+    "    },",
+    "    ...controllers,",
     "  };",
     "}",
     "",
     "export type ApiClient = ReturnType<typeof createApiClient>;",
+    "",
+    "export function createProcedureClient(client: ApiClient): ApiClient[\"procedureClient\"] {",
+    "  return client.procedureClient;",
+    "}",
     "",
   ].join("\n");
 }

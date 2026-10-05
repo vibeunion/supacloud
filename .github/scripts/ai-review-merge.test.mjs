@@ -168,7 +168,7 @@ describe('trusted review workflow', () => {
     assert.match(releaseWorkflow, /npm --version/);
     assert.equal(
       releaseWorkflow.match(/node (?:"\$GITHUB_WORKSPACE\/|\.\.\/\.\.\/)\.github\/scripts\/publish-npm-package\.mjs"?/g)?.length,
-      15,
+      16,
       'all npm packages must use the retry-safe publisher',
     );
     assert.doesNotMatch(releaseWorkflow, /^\s+npm publish/m);

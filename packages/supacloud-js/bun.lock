@@ -6,6 +6,7 @@
       "name": "@supacloud/js",
       "dependencies": {
         "@supacloud/contracts": "file:../contracts",
+        "@supacloud/query": "file:../query",
         "rxjs": "7.8.2",
       },
       "devDependencies": {
@@ -52,6 +53,8 @@
     "@supabase/supabase-js": ["@supabase/supabase-js@2.117.2", "https://registry.npmmirror.com/@supabase/supabase-js/-/supabase-js-2.117.2.tgz", { "dependencies": { "@supabase/auth-js": "2.117.2", "@supabase/functions-js": "2.117.2", "@supabase/postgrest-js": "2.117.2", "@supabase/realtime-js": "2.117.2", "@supabase/storage-js": "2.117.2" }, "peerDependencies": { "@opentelemetry/api": ">=1.0.0" }, "optionalPeers": ["@opentelemetry/api"] }, "sha512-eSG2VKnHR+Clp1PmidZ1/weJ8PJwoybjva3L2GgKqFG4YDS1Iqmc61psKGZP5xw6OMT2O7ZorPR42PY6q1BOXg=="],
 
     "@supacloud/contracts": ["@supacloud/contracts@file:../contracts", { "devDependencies": { "@types/bun": "1.4.2", "typescript": "7.0.2" } }],
+
+    "@supacloud/query": ["@supacloud/query@file:../query", { "dependencies": { "@tanstack/query-core": "^5.104.1" }, "devDependencies": { "@types/bun": "^1.4.2", "typescript": "^7.0.2" } }],
 
     "@sveltejs/acorn-typescript": ["@sveltejs/acorn-typescript@1.0.13", "https://registry.npmmirror.com/@sveltejs/acorn-typescript/-/acorn-typescript-1.0.13.tgz", { "peerDependencies": { "acorn": "^8.9.0" } }, "sha512-wgKggnhZVL9Bfx1OaKKTrYY9BFRk6C8UAkQNUcIv1+llzYrIqy+RZm5HPKzn0NpEBvTVhTqB4kQyllZywsRBRQ=="],
 
