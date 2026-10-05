@@ -4,9 +4,38 @@ import {
 } from "../../src/services/application-runtime";
 import { assertManagedSystemdUnitContent } from "../../src/services/systemd-unit-broker";
 import { runtimeInput } from "../helpers/application-runtime";
+import { applicationResourceUsage } from "../../src/services/application-runtime-allocation";
+import { ApplicationReadiness } from "../../src/services/application-readiness";
 
 const running = "LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=123\nInvocationID=" + "a".repeat(32) + "\nResult=success\n";
 const stopped = "LoadState=loaded\nActiveState=inactive\nSubState=dead\nMainPID=0\nInvocationID=\nResult=success\n";
+
+test("ordinary HTTP and worker compute is bounded, budgeted and requires cgroup evidence", async () => {
+  const input = runtimeInput();
+  for (const target of input.release.targets) target.compute = { cpuLimit: 0.5, memoryLimitMiB: 256 };
+  expect(applicationResourceUsage(input.release)).toEqual({ cpu: 1, memoryMiB: 512, connections: 0, concurrency: 0 });
+  const plan = applicationRuntimePlan(input);
+  for (const target of plan.targets) {
+    expect(target.unitContent).toContain("CPUQuota=50%");
+    expect(target.unitContent).toContain("MemoryMax=268435456");
+    expect(target.unitContent).not.toContain("RuntimeMaxSec");
+    expect(() => assertManagedSystemdUnitContent(target.unit, target.unitContent)).not.toThrow();
+  }
+  const runtime = new ApplicationSystemdRuntime({
+    install: async () => {},
+    command: async args => ({ exitCode: 0, stdout: `${running}CPUQuotaPerSecUSec=500ms\nMemoryMax=268435456\nMemorySwapMax=0\nCPUAccounting=yes\nMemoryAccounting=yes\nKillMode=control-group\nControlGroup=/system.slice/${args[1]}\n` }),
+    resources: async () => false,
+  });
+  expect((await runtime.inspect(input)).every(state => state.resourcesVerified === false)).toBe(true);
+  let probes = 0;
+  const readiness = new ApplicationReadiness({
+    observe: value => runtime.inspect(value),
+    http: async () => { probes++; return null; },
+    journal: async () => { probes++; return ""; },
+  });
+  expect((await readiness.inspect(input)).ready).toBe(false);
+  expect(probes).toBe(0);
+});
 
 test("HTTP and worker plans share immutable release identity and pass the managed broker", () => {
   const input = runtimeInput();

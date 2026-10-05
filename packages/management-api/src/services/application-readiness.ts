@@ -158,8 +158,8 @@ export class ApplicationReadiness {
         result.code = "PROCESS_NOT_RUNNING";
         return;
       }
-      if (target.execution && state.resourcesVerified !== true) {
-        result.code = "WORKER_NOT_READY";
+      if (target.resources && state.resourcesVerified !== true) {
+        result.code = target.kind === "http" ? "HTTP_NOT_READY" : "WORKER_NOT_READY";
         return;
       }
       const expected = expectedIdentity(plan, target, state.mainPid);
@@ -191,7 +191,8 @@ export class ApplicationReadiness {
         const current = after.get(result.target)!;
         if (!current.processRunning || current.mainPid !== previous.mainPid
           || current.invocationId !== previous.invocationId
-          || (plan.targets.find(target => target.name === result.target)?.execution && current.resourcesVerified !== true)) {
+          || (plan.targets.find(target => target.name === result.target)?.resources
+            && previous.resourcesVerified === true && current.resourcesVerified !== true)) {
           result.ready = false;
           result.code = "PROCESS_CHANGED";
         }

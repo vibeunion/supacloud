@@ -771,6 +771,7 @@ supacloud-cli lite migrate --project_dir .
 supacloud-cli lite status --project_dir .
 supacloud-cli lite db_diff --project_dir . --file add_accounts
 supacloud-cli lite db_pull --project_dir . --file remote_schema
+supacloud-cli lite db_pull --project_dir . --file reviewed_schema --baseline
 supacloud-cli lite gen_types --project_dir . --output src/database.types.ts
 supacloud-cli lite snapshot_create --project_dir . --output backups/lite.tar.gz
 supacloud-cli lite doctor --project_dir . --json
@@ -788,6 +789,13 @@ adapter. Lite actions are local-only, so Management API context and project
 refs are not required. The `supabase` module remains the official CLI adapter;
 use it for upstream Supabase CLI actions and Management-backed remote pushes.
 
+Lite `db_pull` writes a non-executable draft directory by default and never marks
+the live delta applied implicitly. `--baseline` is only for a reviewed change
+already present in that database. Diff/pull require matching applied migration
+history, inspect live state without applying migrations, and verify supported
+DDL in a disposable shadow. Unsupported drift fails closed. Preserve any
+`.sql.pending` baseline file and inspect the ledger before recovery.
+
 ## Official Supabase CLI adapter
 
 The `supabase` command group is a thin, allowlisted adapter around the official
@@ -796,6 +804,7 @@ SupaCloud credentials:
 
 ```bash
 supacloud-cli supabase version
+supacloud-cli supabase init --workdir .
 supacloud-cli supabase migration_new --name add_accounts
 supacloud-cli supabase db_diff --schema public --name add_accounts
 supacloud-cli supabase db_reset --no_seed
@@ -822,7 +831,42 @@ supacloud-cli supabase push --ref abc123 --dir supabase/migrations
 `push` uses only `SUPACLOUD_API_TOKEN` for the SupaCloud Management API. That
 token, upstream access tokens, database passwords, and secret/key environment
 variables are removed from the official CLI child process, and command output
-is redacted.
+is redacted. Upstream access-token forwarding is separately opt-in through
+`SUPACLOUD_FORWARD_SUPABASE_ACCESS_TOKEN=1`. The child can still read the official
+CLI's saved login or project dotenv files; this is not a credential sandbox.
+
+### Declarative schemas, configuration and local stacks
+
+These commands require a compatible official CLI. Pin and check its version;
+the adapter does not install a new CLI or replace an existing schema authority.
+`init` preserves existing configuration and inherits the installed CLI's defaults.
+
+```bash
+supacloud-cli supabase db_schema_declarative_generate --db_url "$SUPACLOUD_DB_URL"
+supacloud-cli supabase db_schema_declarative_sync --name add_accounts --strict_coverage
+supacloud-cli supabase db_diff --diff_engine pg-delta --name add_accounts
+supacloud-cli supabase config_pull --ref upstream-project
+supacloud-cli supabase config_pull --ref upstream-project --dry_run=false --yes
+supacloud-cli supabase stack_start --workdir .
+supacloud-cli supabase stack_status --workdir .
+SUPACLOUD_ENABLE_NATIVE_STACK=1 supacloud-cli supabase stack_prepare --workdir . --runtime native
+SUPACLOUD_ENABLE_NATIVE_STACK=1 supacloud-cli supabase stack_start --workdir . --runtime native --preparation on-demand
+supacloud-cli supabase stack_stop --workdir .
+supacloud-cli supabase stack_destroy --workdir . --confirm_destroy --yes
+```
+
+Declarative sync generates without applying unless `--apply` is explicit.
+Generate uses the supplied DSN or the upstream linked project; overwriting schema
+files requires `--overwrite`. Declarative commands default to experimental mode,
+which can be omitted with `--experimental=false`.
+
+Config pull reads the official Supabase control plane, defaults to dry-run, and
+requires the configured context's project ref when present. It is not a
+SupaCloud settings migration. Native stack mode is alpha, off by default and
+requires the environment opt-in above; start/prepare otherwise use Docker
+explicitly. Destruction needs both confirmations. Upstream owns per-directory
+state and ports. Full boundaries and acceptance gates are documented in
+`docs/select-agent-backend.md` in the source repository.
 
 `push` requires a resolved project ref; pass `--ref` explicitly or set
 `SUPACLOUD_PROJECT_REF`. Relative migration directories are resolved against

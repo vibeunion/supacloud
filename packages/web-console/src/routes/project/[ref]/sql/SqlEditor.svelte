@@ -7,12 +7,15 @@
   } from "$lib/database-sql-response";
   import { isSqlTabNameAvailable, nextSqlTabName } from "$lib/sql-tab-names";
   import { parseSqlEditorDrafts, serializeSqlEditorDrafts, sqlRowsToCsv, wrapSqlWithRole } from "$lib/sql-editor-drafts";
+  import { requestValidatedJson } from "$lib/validated-json";
+  import { decodeNotebook, decodeNotebookPage, notebookResponseStatus, type NotebookSummary } from "$lib/sql-notebooks";
   import { toast } from "svelte-sonner";
 
   import { onMount } from "svelte";
   import { t } from "svelte-i18n";
-  import { Loader2, Play, Database, History, Shield, ChevronDown, Microscope, ChevronRight, Plus, X, CheckCircle2, Download } from "lucide-svelte";
+  import { Loader2, Play, Database, History, Shield, ChevronDown, Microscope, ChevronRight, Plus, X, CheckCircle2, Download, Save, FolderOpen, Trash2, Upload, RefreshCw } from "lucide-svelte";
   import { createMutation } from "@tanstack/svelte-query";
+  import SqlExplorer from "./SqlExplorer.svelte";
 
   interface QueryTab {
     id: string;
@@ -25,6 +28,7 @@
     statementCount: number | null;
     rowCount: number | null;
     durationMs: number | null;
+    notebookTitle: string;
   }
 
   interface SqlMutationVariables {
@@ -38,6 +42,7 @@
   }
 
   let tabs = $state<QueryTab[]>([]);
+  let showExplorer = $state(false);
   let activeTabId = $state("");
   let isSaving = $state(false);
   let saveFailed = $state(false);
@@ -46,6 +51,18 @@
   let elapsedTimer: ReturnType<typeof setInterval> | undefined;
   let elapsedMs = $state(0);
   let activeQuery = $state<Pick<SqlMutationVariables, "tabId" | "queryId" | "startedAt" | "projectRef"> | null>(null);
+  type NotebookBinding = { id: string; name: string; revision: number };
+  let notebooks = $state<NotebookSummary[]>([]);
+  let notebookBindings = $state<Record<string, NotebookBinding>>({});
+  let selectedNotebookId = $state("");
+  let notebooksLoading = $state(false);
+  let notebookOperation = $state(0);
+  let notebookBusy = $state(false);
+  let notebookDelete = $state<NotebookBinding | null>(null);
+  let nextNotebookOffset = $state<number | null>(null);
+  let notebookError = $state<string | null>(null);
+  let importInput: HTMLInputElement;
+  const notebookController = new AbortController();
 
   // Explain mode state
   let explainMode = $state(false);
@@ -83,6 +100,7 @@
       statementCount: null,
       rowCount: null,
       durationMs: null,
+      notebookTitle: "",
     };
   }
 
@@ -115,6 +133,7 @@
     const idx = tabs.findIndex(tb => tb.id === id);
     if (idx < 0) return;
     tabs = tabs.filter(tb => tb.id !== id);
+    notebookBindings = Object.fromEntries(Object.entries(notebookBindings).filter(([tabId]) => tabId !== id));
     if (activeTabId === id) {
       activeTabId = tabs[Math.max(0, idx - 1)]?.id ?? "";
     }
@@ -126,7 +145,9 @@
       const saved = localStorage.getItem(storageKey);
       if (saved) {
         const parsed: unknown = JSON.parse(saved);
-        tabs = parseSqlEditorDrafts(parsed).map((draft) => ({ ...createTab(), ...draft }));
+        const drafts = parseSqlEditorDrafts(parsed);
+        notebookBindings = Object.fromEntries(drafts.flatMap(draft => draft.notebook ? [[draft.id, draft.notebook]] : []));
+        tabs = drafts.map(({ notebook: _notebook, ...draft }) => ({ ...createTab(), ...draft }));
         activeTabId = tabs[0]?.id ?? "";
       } else {
         throw new Error("empty");
@@ -142,6 +163,7 @@
       tabs = [initial];
       activeTabId = initial.id;
     }
+    void loadNotebookList(false);
 
     function handleClickOutside(e: MouseEvent) {
       const target = e.target;
@@ -153,14 +175,19 @@
     document.addEventListener("click", handleClickOutside);
     return () => {
       disposed = true;
+      notebookController.abort();
       document.removeEventListener("click", handleClickOutside);
       clearTimeout(saveTimeout);
       clearInterval(elapsedTimer);
       if (tabs.length) {
-        try { localStorage.setItem(storageKey, serializeSqlEditorDrafts(tabs)); } catch { /* Storage is optional. */ }
+        try { localStorage.setItem(storageKey, draftSnapshot()); } catch { /* Storage is optional. */ }
       }
     };
   });
+
+  function draftSnapshot(): string {
+    return serializeSqlEditorDrafts(tabs.map(tab => ({ ...tab, notebook: notebookBindings[tab.id] })));
+  }
 
   function saveTabs(key: string, snapshot: string) {
     isSaving = true;
@@ -179,7 +206,7 @@
   }
 
   $effect(() => {
-    if (tabs.length > 0) saveTabs(storageKey, serializeSqlEditorDrafts(tabs));
+    if (tabs.length > 0) saveTabs(storageKey, draftSnapshot());
   });
 
   function formatDuration(durationMs: number): string {
@@ -216,6 +243,163 @@
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+  }
+
+  function notebookRequest<T>(url: string, decode: (value: unknown) => T, options: RequestInit = {}): Promise<T> {
+    return requestValidatedJson(url, apiClient, (value, status) => {
+      notebookResponseStatus(value, status);
+      return decode(value);
+    }, { ...options, signal: notebookController.signal }, { statuses: [200, 201, 409], maxBytes: 6_100_000 });
+  }
+
+  async function loadNotebookList(showToast = false, offset = 0): Promise<void> {
+    const operation = ++notebookOperation;
+    const requestProjectRef = projectRef;
+    notebooksLoading = true;
+    notebookError = null;
+    try {
+      const next = await notebookRequest(`/v1/projects/${encodeURIComponent(requestProjectRef)}/notebooks?offset=${offset}`,
+        value => decodeNotebookPage(value, requestProjectRef));
+      if (disposed || operation !== notebookOperation || requestProjectRef !== projectRef) return;
+      notebooks = offset ? [...new Map([...notebooks, ...next.items].map(item => [item.id, item])).values()] : next.items;
+      nextNotebookOffset = next.next_offset;
+      if (showToast) toast.success(`已读取 ${notebooks.length} 个笔记本`);
+    } catch (cause) {
+      if (!disposed && operation === notebookOperation && requestProjectRef === projectRef) {
+        notebookError = cause instanceof Error ? cause.message : "笔记本读取失败";
+      }
+    } finally {
+      if (!disposed && operation === notebookOperation && requestProjectRef === projectRef) notebooksLoading = false;
+    }
+  }
+
+  async function saveNotebook(asNew = false): Promise<void> {
+    const tab = activeTab;
+    if (!tab || notebookBusy) return;
+    const targetTabId = tab.id;
+    const requestProjectRef = projectRef;
+    const binding = asNew ? undefined : notebookBindings[targetTabId];
+    const name = tab.notebookTitle.trim() || binding?.name || tab.name;
+    if (!name) return;
+    if (new TextEncoder().encode(tab.sql).byteLength > 1_000_000) {
+      toast.error("笔记本不能超过 1 MB");
+      return;
+    }
+    notebookBusy = true;
+    try {
+      const payload = await notebookRequest(
+        binding
+          ? `/v1/projects/${encodeURIComponent(requestProjectRef)}/notebooks/${encodeURIComponent(binding.id)}`
+          : `/v1/projects/${encodeURIComponent(requestProjectRef)}/notebooks`,
+        value => decodeNotebook(value, requestProjectRef, binding?.id), {
+          method: binding ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(binding
+            ? { name, content: tab.sql, expected_revision: binding.revision }
+            : { name, content: tab.sql }),
+        },
+      );
+      const nextBinding = { id: payload.id, name: payload.name, revision: payload.revision };
+      if (disposed || requestProjectRef !== projectRef) return;
+      if (tabs.some(item => item.id === targetTabId)) {
+        notebookBindings = { ...notebookBindings, [targetTabId]: nextBinding };
+        tabs = tabs.map(item => item.id === targetTabId ? { ...item, notebookTitle: nextBinding.name } : item);
+      }
+      await loadNotebookList(false);
+      if (!disposed) toast.success("笔记本已保存");
+    } catch (cause) {
+      if (!disposed) toast.error(cause instanceof Error ? cause.message : "笔记本保存失败");
+    } finally { if (!disposed) notebookBusy = false; }
+  }
+
+  async function loadNotebook(): Promise<void> {
+    if (notebookBusy) return;
+    const summary = notebooks.find((item) => item.id === selectedNotebookId);
+    if (!summary) {
+      toast.error("请选择要加载的笔记本");
+      return;
+    }
+    const requestProjectRef = projectRef;
+    const sourceTab = activeTabId;
+    notebookBusy = true;
+    try {
+      const payload = await notebookRequest(
+        `/v1/projects/${encodeURIComponent(requestProjectRef)}/notebooks/${encodeURIComponent(summary.id)}`,
+        value => decodeNotebook(value, requestProjectRef, summary.id));
+      if (disposed || requestProjectRef !== projectRef) return;
+      const tab = createTab(payload.name, payload.content);
+      tab.notebookTitle = payload.name;
+      tabs = [...tabs, tab];
+      if (activeTabId === sourceTab) activeTabId = tab.id;
+      notebookBindings = {
+        ...notebookBindings,
+        [tab.id]: { id: summary.id, name: payload.name, revision: payload.revision },
+      };
+      toast.success("笔记本已加载");
+    } catch (cause) {
+      if (!disposed) toast.error(cause instanceof Error ? cause.message : "笔记本加载失败");
+    } finally { if (!disposed) notebookBusy = false; }
+  }
+
+  async function downloadNotebook(): Promise<void> {
+    const tab = activeTab;
+    if (!tab) return;
+    try {
+      const blob = new Blob([tab.sql], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${tab.notebookTitle || tab.name || "notebook"}.sql`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (cause) {
+      toast.error(cause instanceof Error ? cause.message : "笔记本下载失败");
+    }
+  }
+
+  async function deleteNotebook(): Promise<void> {
+    const binding = notebookDelete;
+    if (!binding || notebookBusy) return;
+    const ref = projectRef;
+    notebookBusy = true;
+    try {
+      await notebookRequest(`/v1/projects/${encodeURIComponent(ref)}/notebooks/${encodeURIComponent(binding.id)}`, value => {
+        if (!value || typeof value !== "object" || !("deleted" in value) || value.deleted !== true) throw new Error("笔记本删除失败");
+      }, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expected_revision: binding.revision }),
+      });
+      if (disposed || ref !== projectRef) return;
+      notebookBindings = Object.fromEntries(Object.entries(notebookBindings).filter(([, item]) => item.id !== binding.id));
+      notebookDelete = null;
+      selectedNotebookId = "";
+      await loadNotebookList(false);
+      if (!disposed) toast.success("笔记本已删除");
+    } catch (cause) {
+      if (!disposed) toast.error(cause instanceof Error ? cause.message : "笔记本删除失败");
+    } finally { if (!disposed) notebookBusy = false; }
+  }
+
+  async function importNotebook(event: Event): Promise<void> {
+    const input = event.currentTarget;
+    if (!(input instanceof HTMLInputElement)) return;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    if (file.size > 1_000_000 || !file.name.toLowerCase().endsWith(".sql")) {
+      toast.error("请选择 1 MB 以内的 SQL 文件");
+      return;
+    }
+    const ref = projectRef;
+    try {
+      const text = new TextDecoder("utf-8", { fatal: true }).decode(await file.arrayBuffer());
+      if (disposed || ref !== projectRef) return;
+      const tab = createTab(file.name.replace(/\.sql$/i, ""), text);
+      tab.notebookTitle = tab.name;
+      tabs = [...tabs, tab];
+      activeTabId = tab.id;
+    } catch { if (!disposed) toast.error("SQL 文件编码无效"); }
   }
 
   const runQueryMutation = createMutation(() => ({
@@ -354,7 +538,7 @@
 <div class="h-[calc(100vh-12rem)] flex flex-col space-y-3">
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div class="flex flex-wrap items-center gap-3">
-      <h1 class="text-2xl font-bold">{$t("SqlEditor.title")}</h1>
+      <h1 class="text-xl font-semibold">SQL Explorer</h1>
       <span class="px-2 py-0.5 bg-brand/10 text-brand text-[10px] font-mono rounded-full uppercase tracking-wider">{$t("SqlEditor.multi_tab_version")}</span>
     </div>
     <div class="flex flex-wrap items-center gap-3">
@@ -371,6 +555,49 @@
       >
         <Microscope size={13} />
         {$t("SqlEditor.explain_mode")}
+      </button>
+      {#if activeTab}
+        <input
+          bind:value={activeTab.notebookTitle}
+          maxlength="160"
+          placeholder={activeTab.name}
+          aria-label="笔记本名称"
+          class="w-32 px-2 py-1.5 text-xs border rounded-md bg-background"
+        />
+      {/if}
+      <button onclick={() => saveNotebook()} disabled={notebookBusy || !activeTab} class="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs border rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50" title="保存当前 SQL 笔记本">
+        <Save size={13} />
+        保存
+      </button>
+      <select
+        bind:value={selectedNotebookId}
+        aria-label="选择 SQL 笔记本"
+        disabled={notebooksLoading || notebooks.length === 0}
+        class="max-w-44 px-2 py-1.5 text-xs border rounded-md bg-background disabled:opacity-50"
+      >
+        <option value="">选择笔记本</option>
+        {#each notebooks as notebook (notebook.id)}
+          <option value={notebook.id}>{notebook.name}</option>
+        {/each}
+      </select>
+      <button onclick={loadNotebook} disabled={notebookBusy || notebooksLoading || !selectedNotebookId} class="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs border rounded-md text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50" title="加载 SQL 笔记本">
+        <FolderOpen size={13} />
+        加载
+      </button>
+      <button onclick={() => loadNotebookList()} disabled={notebooksLoading} class="p-1.5 text-muted-foreground hover:text-foreground disabled:opacity-50" title="刷新笔记本" aria-label="刷新笔记本">
+        <RefreshCw size={13} class={notebooksLoading ? "animate-spin" : ""} />
+      </button>
+      {#if nextNotebookOffset !== null}
+        <button onclick={() => loadNotebookList(false, nextNotebookOffset ?? 0)} disabled={notebooksLoading} class="text-xs px-2 py-1">更多</button>
+      {/if}
+      <button onclick={() => saveNotebook(true)} disabled={notebookBusy || !activeTab} class="text-xs px-2 py-1.5 disabled:opacity-50">另存</button>
+      <button onclick={() => notebookDelete = activeTab ? notebookBindings[activeTab.id] ?? null : null} disabled={notebookBusy || !activeTab || !notebookBindings[activeTab.id]} class="p-1.5 text-muted-foreground hover:text-destructive disabled:opacity-50" title="删除当前 SQL 笔记本" aria-label="删除当前 SQL 笔记本">
+        <Trash2 size={13} />
+      </button>
+      <input type="file" accept=".sql" bind:this={importInput} onchange={importNotebook} class="hidden" aria-label="导入 SQL 文件" />
+      <button onclick={() => importInput.click()} class="p-1.5 text-muted-foreground hover:text-foreground" title="导入 SQL 文件" aria-label="导入 SQL 文件"><Upload size={13} /></button>
+      <button onclick={downloadNotebook} disabled={!activeTab} class="p-1.5 text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50" title="下载当前 SQL 笔记本" aria-label="下载当前 SQL 笔记本">
+        <Download size={13} />
       </button>
       {#if runQueryMutation.isPending}
         <button
@@ -398,9 +625,22 @@
       {/if}
     </div>
   </div>
+  {#if notebookError}
+    <div role="status" class="text-xs text-destructive">{notebookError}</div>
+  {/if}
+  {#if notebookDelete}
+    <div role="alertdialog" aria-label="确认删除笔记本" class="flex flex-wrap gap-3 items-center border-y py-3 text-sm">
+      <span class="break-all">删除“{notebookDelete.name}”？</span>
+      <button onclick={deleteNotebook} disabled={notebookBusy} class="text-destructive px-3 py-1">确认删除</button>
+      <button onclick={() => notebookDelete = null} disabled={notebookBusy} class="px-3 py-1">取消</button>
+    </div>
+  {/if}
 
   <!-- Tab Bar -->
   <div class="flex items-center gap-0.5 border-b border-border/50 overflow-x-auto">
+    <button onclick={() => showExplorer = !showExplorer} aria-pressed={showExplorer} title="数据库目录" aria-label="数据库目录" class="p-2 shrink-0 hover:bg-muted">
+      <Database size={14} />
+    </button>
     {#each tabs as tab (tab.id)}
       <div class="flex items-center group relative">
         <button
@@ -497,7 +737,15 @@
     </div>
 
     <!-- SQL Textarea -->
-    <div class="flex-1 relative">
+    <div class="flex-1 flex min-h-0">
+      {#if showExplorer}
+        <SqlExplorer {projectRef} openTable={(sql, name) => {
+          const tab = createTab(name, sql);
+          tabs = [...tabs, tab];
+          activeTabId = tab.id;
+        }} />
+      {/if}
+      <div class="flex-1 relative min-w-0">
       {#if activeTab}
         <textarea
           bind:value={activeTab.sql}
@@ -507,6 +755,7 @@
           onkeydown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); runQuery(); } }}
         ></textarea>
       {/if}
+      </div>
     </div>
 
     <!-- Results/Error Section -->

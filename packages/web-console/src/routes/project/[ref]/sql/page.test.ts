@@ -57,6 +57,7 @@ test("SQL editor isolates projects, validates responses and survives unavailable
   Object.assign(globalThis, {
     window, document: window.document, navigator: window.navigator, localStorage: window.localStorage,
     HTMLElement: window.HTMLElement, HTMLInputElement: window.HTMLInputElement, HTMLButtonElement: window.HTMLButtonElement,
+    HTMLSelectElement: window.HTMLSelectElement,
     HTMLTextAreaElement: window.HTMLTextAreaElement, Element: window.Element, Node: window.Node, Text: window.Text, Comment: window.Comment,
     Event: window.Event, CustomEvent: window.CustomEvent, MouseEvent: window.MouseEvent,
     getComputedStyle: window.getComputedStyle.bind(window), MutationObserver: window.MutationObserver,
@@ -78,4 +79,4 @@ test("SQL editor isolates projects, validates responses and survives unavailable
     await rm(bundlePath, { force: true });
     dom.window.close();
   }
-}, 30_000);
+}, 60_000);

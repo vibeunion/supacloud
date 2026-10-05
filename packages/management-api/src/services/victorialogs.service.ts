@@ -34,6 +34,26 @@ type VictoriaLogsServiceOptions = {
 const PROJECT_REF_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 const SERVICE_PATTERN = /^[A-Za-z0-9_.@-]{1,128}$/;
 
+async function boundedLogBody(response: Response): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  try {
+    while (true) {
+      const next = await reader.read();
+      if (next.done) break;
+      bytes += next.value.byteLength;
+      if (bytes > 16 * 1024 * 1024) {
+        await reader.cancel();
+        throw new Error("VictoriaLogs response exceeds size limit");
+      }
+      chunks.push(next.value);
+    }
+    return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
+  } finally { reader.releaseLock(); }
+}
+
 function logsQlLiteral(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
@@ -82,14 +102,16 @@ function parseJsonLines(payload: string): Record<string, unknown>[] {
   const records: Record<string, unknown>[] = [];
   for (const line of payload.split("\n")) {
     if (!line.trim()) continue;
+    let parsed: unknown;
     try {
-      const parsed = JSON.parse(line) as unknown;
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        records.push(parsed as Record<string, unknown>);
-      }
+      parsed = JSON.parse(line);
     } catch {
-      // VictoriaLogs may terminate a response while a client closes it. Ignore only malformed lines.
+      throw new Error("VictoriaLogs returned incomplete or invalid records");
     }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new Error("VictoriaLogs returned incomplete or invalid records");
+    }
+    records.push(parsed as Record<string, unknown>);
   }
   return records;
 }
@@ -136,10 +158,12 @@ export class VictoriaLogsService {
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) {
+      await response.body?.cancel();
       throw new Error(`VictoriaLogs query failed (${response.status})`);
     }
 
-    return parseJsonLines(await response.text()).slice(0, limit).map((record, index) => {
+    return parseJsonLines(await boundedLogBody(response)).slice(0, limit).map((record, index) => {
+      if (record.project_ref !== ref) throw new Error("VictoriaLogs project scope mismatch");
       const message = String(record._msg ?? record.message ?? record.MESSAGE ?? "");
       const rawTimestamp = String(record._time ?? record.timestamp ?? new Date().toISOString());
       const timestamp = Number.isFinite(Date.parse(rawTimestamp)) ? new Date(rawTimestamp).toISOString() : new Date().toISOString();

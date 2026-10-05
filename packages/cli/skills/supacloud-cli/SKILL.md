@@ -71,6 +71,14 @@ Use `db_diff` as an authoring aid, not as permission to bypass review:
 supacloud-cli supabase db_diff --schema public --name reconcile_public_schema
 ```
 
+For existing declarative SQL projects, `supabase db_schema_declarative_sync`
+generates without applying by default. Preserve the repository's schema authority
+and review the migration before any apply. `config_pull` previews official
+Supabase configuration, not SupaCloud Management settings. Native local stacks
+remain alpha and require `SUPACLOUD_ENABLE_NATIVE_STACK=1`; do not silently switch
+an existing Docker workflow. Lite drift pull writes drafts by default; only use
+`--baseline` for reviewed DDL already present in the live local state.
+
 For a database that was previously changed directly, stop further direct writes and follow the reconciliation workflow in [references/database-workflow.md](references/database-workflow.md). Do not push guessed historical migrations against a live database. After schema equivalence is proven, preview and record the baseline through:
 
 ```bash

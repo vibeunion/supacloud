@@ -383,6 +383,7 @@ const CADDY_PROJECT_ROUTE_KINDS = [
     "realtime-api",
     "realtime",
     "management",
+    "app-mcp",
     "acme",
     "studio",
 ];
@@ -1873,6 +1874,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 this.makeRoute({ id: caddyRouteId(projectRef, "realtime-api"), hosts, path: "/realtime/v1/api*", upstream: `${hostIp}:${config.port}`, projectRef, readTimeout: 60_000, corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "realtime"), hosts, path: "/realtime/v1/websocket*", upstream: `${hostIp}:${config.port}`, projectRef, readTimeout: 86_400_000, corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "management"), hosts, path: [`/v1/projects/${projectRef}`, `/v1/projects/${projectRef}/*`], upstream: `${hostIp}:${config.port}`, projectRef, corsOrigins, encodeMigrationInventory: true }),
+                this.makeRoute({
+                    id: caddyRouteId(projectRef, "app-mcp"), hosts,
+                    path: [`/mcp/app/projects/${projectRef}`, `/.well-known/oauth-protected-resource/mcp/app/projects/${projectRef}`],
+                    upstream: `${hostIp}:${config.port}`, projectRef, corsOrigins,
+                }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "acme"), hosts: [...hosts, ...studioHosts], path: "/.well-known/acme-challenge*", upstream: `${hostIp}:${config.port}`, projectRef, corsOrigins }),
                 this.makeRoute({ id: caddyRouteId(projectRef, "studio"), hosts: studioHosts, path: "/*", upstream: `${hostIp}:${config.port}`, projectRef, headers: ["x-supacloud-ui-host:studio"], corsOrigins, encodeMigrationInventory: true }),
             ];
@@ -1941,7 +1947,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
 
     private async addProjectDomainsUnlocked(projectRef: string, apiDomains: string[], studioDomains: string[]): Promise<boolean> {
         await this.hydrateFromDiskIfUninitialized();
-        const existingKinds = ["opaque-rest", "opaque-graphql", "opaque-auth", "auth-admin-user-delete", "auth-admin", "rest", "graphql", "auth", "gotrue-well-known", "functions", "storage", "realtime-api", "realtime", "management", "acme"];
+        const existingKinds = ["opaque-rest", "opaque-graphql", "opaque-auth", "auth-admin-user-delete", "auth-admin", "rest", "graphql", "auth", "gotrue-well-known", "functions", "storage", "realtime-api", "realtime", "management", "app-mcp", "acme"];
         for (const kind of existingKinds) {
             const route = this.routesById.get(caddyRouteId(projectRef, kind));
             const matches = Array.isArray(route?.match) ? route.match as Record<string, unknown>[] : [];

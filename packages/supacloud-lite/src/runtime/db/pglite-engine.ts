@@ -33,7 +33,7 @@ end $$;
  * extensions Supabase enables by default.
  * @throws if the PGlite WASM bundle isn't available in this build (use the native engine instead).
  */
-export async function createPgliteEngine(dataDir?: string): Promise<DbEngine> {
+export async function createPgliteEngine(dataDir?: string, options: { inspectOnly?: boolean } = {}): Promise<DbEngine> {
   const releaseLock = await acquireDataDirLock(dataDir, 'PGlite')
   let PGlite, extensions
   const standaloneAssets = getStandaloneAssets()
@@ -93,7 +93,7 @@ export async function createPgliteEngine(dataDir?: string): Promise<DbEngine> {
     // PGlite inherits the host timezone at initdb, and its current session does
     // not apply ALTER DATABASE settings.
     try {
-      await pg.exec(INITIALIZE_TIMEZONE_SQL)
+      if (!options.inspectOnly) await pg.exec(INITIALIZE_TIMEZONE_SQL)
     } catch (error) {
       const [cleanup] = await Promise.allSettled([pg.close()])
       if (cleanup.status === 'rejected') {

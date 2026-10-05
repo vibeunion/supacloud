@@ -1,6 +1,6 @@
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
-import { WorkerExecutionSchema, WorkerExecutionGroupSchema, validateWorkerExecution } from "./worker-execution";
+import { WorkerExecutionSchema, WorkerExecutionGroupSchema, ComputeResourcesSchema, validateWorkerExecution } from "./worker-execution";
 
 const objectOptions = { additionalProperties: false } as const;
 const reference = Type.String({ minLength: 1, maxLength: 128, pattern: "^[A-Za-z][A-Za-z0-9_.:/-]*$" });
@@ -21,6 +21,7 @@ export const DeliveryOptionsSchema = Type.Object({
     modules: Type.Array(reference, { minItems: 1, uniqueItems: true }),
     isolation: Type.Optional(isolation),
     capabilities: Type.Optional(references),
+    compute: Type.Optional(ComputeResourcesSchema),
   }, objectOptions))),
   // These are declarations, never evidence that a remote host enforces isolation.
   runtime: Type.Optional(Type.Object({
@@ -90,6 +91,7 @@ export const DeliveryTargetSchema = Type.Object({
   kind,
   isolation,
   execution: Type.Optional(WorkerExecutionGroupSchema),
+  compute: Type.Optional(ComputeResourcesSchema),
   roots: Type.Array(Type.String()),
   modules: Type.Array(Type.Object({
     name: Type.String(),
@@ -149,6 +151,9 @@ export class DeliveryConfigurationError extends Error {
 export function parseDeliveryOptions(value: unknown): DeliveryOptions {
   if (value === undefined) return { version: 1 };
   if (!Value.Check(DeliveryOptionsSchema, value)) throw new DeliveryConfigurationError();
+  if (value.targets?.some(target => target.compute && target.isolation === "shared")) {
+    throw new DeliveryConfigurationError();
+  }
   const migrations = value.build?.migrations ?? [];
   try { validateWorkerExecution(value.execution?.groups ?? []); }
   catch { throw new DeliveryConfigurationError(); }

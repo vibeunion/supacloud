@@ -74,7 +74,10 @@ export function parseDeliveryBuildManifest(value: unknown): DeliveryBuildManifes
     throw new Error("Invalid delivery replica count.");
   }
   for (const target of value.plan.targets) {
-    if (target.execution && (target.kind !== "jobs" || target.isolation !== "process"
+    if (target.compute && (target.isolation !== "process" || !target.requirements.processIsolation)) {
+      throw new Error("Compute requires process isolation.");
+    }
+    if (target.execution && (target.compute || target.kind !== "jobs" || target.isolation !== "process"
       || target.execution.target !== target.name || target.jobs.length !== 1
       || target.jobs[0]?.name !== target.execution.taskKey
       || value.objects.find(object => object.name === target.name)?.entryKind !== "bun-worker-application")) {

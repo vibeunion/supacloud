@@ -2,6 +2,8 @@ import { createDefaultApplicationRouteComposition } from "../services/applicatio
 
 export { projectRoutes } from "./projects";
 export { projectDashboardRoutes } from "./project-dashboard";
+export { projectAdvisorsRoutes } from "./project-advisors";
+export { projectNotebookRoutes } from "./project-notebooks";
 export { projectSecretsRoutes } from "./project-secrets";
 export { projectControlSecretsRoutes } from "./project-control-secrets";
 export { projectFunctionsRoutes } from "./project-functions";

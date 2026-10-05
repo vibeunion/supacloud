@@ -16,11 +16,20 @@ type ToolServer = {
 
 export type SupabaseCliAction =
     | "version"
+    | "init"
     | "migration_new"
     | "db_diff"
     | "db_reset"
     | "db_pull"
+    | "db_schema_declarative_sync"
+    | "db_schema_declarative_generate"
     | "db_dump"
+    | "config_pull"
+    | "stack_start"
+    | "stack_prepare"
+    | "stack_status"
+    | "stack_stop"
+    | "stack_destroy"
     | "migration_list"
     | "gen_types"
     | "push";
@@ -36,6 +45,16 @@ export interface SupabaseCliArgs {
     dir?: string;
     dry_run?: boolean;
     declarative?: boolean;
+    apply?: boolean;
+    experimental?: boolean;
+    strict_coverage?: boolean;
+    overwrite?: boolean;
+    runtime?: "docker" | "podman" | "native";
+    eager?: boolean;
+    preparation?: "background" | "on-demand";
+    force?: boolean;
+    yes?: boolean;
+    confirm_destroy?: boolean;
     no_seed?: boolean;
     diff_engine?: "migra" | "pg-delta" | "pgadmin" | "pg-schema";
     dump_mode?: "schema" | "data" | "roles";
@@ -64,6 +83,7 @@ const SENSITIVE_ENV_KEY = /(?:^|_)(?:PASSWORD|PASS|SECRET|TOKEN|KEY|CREDENTIALS?
 const VALID_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const VALID_MIGRATION_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]{0,100}$/;
 const VALID_SCHEMA = /^[A-Za-z_][A-Za-z0-9_$]*$/;
+const VALID_PROJECT_REF = /^[A-Za-z0-9_-]{1,64}$/;
 
 function isSensitiveEnvironmentKey(key: string): boolean {
     return key.toUpperCase().startsWith("PG") || SENSITIVE_ENV_KEY.test(key);
@@ -148,6 +168,61 @@ function databasePullArguments(request: SupabaseCliArgs): string[] {
     ];
 }
 
+function declarativeSyncArguments(request: SupabaseCliArgs): string[] {
+    return [
+        "db", "schema", "declarative", "sync",
+        ...(request.name ? ["--name", requireMigrationName(request.name)] : []),
+        ...(request.file ? ["--file", requireMigrationName(request.file)] : []),
+        ...(request.apply === true ? ["--apply"] : ["--no-apply"]),
+        ...(request.experimental === false ? [] : ["--experimental"]),
+        ...(request.strict_coverage ? ["--strict-coverage"] : []),
+        ...schemaArguments(request.schema),
+    ];
+}
+
+function declarativeGenerateArguments(request: SupabaseCliArgs): string[] {
+    const target = request.db_url ? ["--db-url", requirePostgresUrl(request.db_url)] : ["--linked"];
+    return [
+        "db", "schema", "declarative", "generate",
+        ...target,
+        ...(request.experimental === false ? [] : ["--experimental"]),
+        ...(request.overwrite ? ["--overwrite"] : []),
+        ...schemaArguments(request.schema),
+    ];
+}
+
+function stackRuntimeArguments(request: SupabaseCliArgs): string[] {
+    if (request.runtime && !["docker", "podman", "native"].includes(request.runtime)) {
+        throw new Error("Invalid local stack runtime");
+    }
+    return request.runtime ? ["--runtime", request.runtime] : [];
+}
+
+function stackArguments(request: SupabaseCliArgs): string[] {
+    switch (request.action) {
+        case "stack_start":
+            return [
+                "stack", "start",
+                ...stackRuntimeArguments({ ...request, runtime: request.runtime ?? "docker" }),
+                ...(request.eager ? ["--eager"] : []),
+                ...(request.preparation ? ["--preparation", request.preparation] : []),
+            ];
+        case "stack_prepare":
+            return ["stack", "prepare", ...stackRuntimeArguments({ ...request, runtime: request.runtime ?? "docker" })];
+        case "stack_status":
+            return ["stack", "status", "--output-format", "json"];
+        case "stack_stop":
+            return ["stack", "stop"];
+        case "stack_destroy":
+            if (request.confirm_destroy !== true || request.yes !== true) {
+                throw new Error("stack_destroy requires confirm_destroy=true and yes=true");
+            }
+            return ["stack", "destroy", "--yes"];
+        default:
+            throw new Error(`Unsupported local stack action: ${request.action}`);
+    }
+}
+
 function databaseDumpArguments(request: SupabaseCliArgs, workdir: string): string[] {
     return [
         "db", "dump", "--db-url", requirePostgresUrl(request.db_url),
@@ -155,6 +230,20 @@ function databaseDumpArguments(request: SupabaseCliArgs, workdir: string): strin
         ...(request.dump_mode === "data" ? ["--data-only"] : []),
         ...(request.dump_mode === "roles" ? ["--role-only"] : []),
         ...schemaArguments(request.schema),
+    ];
+}
+
+function configPullArguments(request: SupabaseCliArgs): string[] {
+    if (!request.ref || !VALID_PROJECT_REF.test(request.ref)) throw new Error("Invalid project ref");
+    if (request.dry_run === false && request.yes !== true) {
+        throw new Error("config_pull apply requires yes=true");
+    }
+    return [
+        "config", "pull",
+        ...(request.ref ? ["--project-ref", request.ref] : []),
+        ...(request.dry_run === true || request.dry_run === undefined ? ["--dry-run"] : []),
+        ...(request.force ? ["--force"] : []),
+        ...(request.dry_run === false ? ["--yes"] : []),
     ];
 }
 
@@ -170,11 +259,23 @@ function generateTypesArguments(request: SupabaseCliArgs, workdir: string): stri
 
 function actionArguments(request: SupabaseCliArgs, workdir: string): string[] {
     switch (request.action) {
+        case "init":
+            if (request.force) throw new Error("init never overwrites an existing project configuration");
+            return ["init"];
         case "migration_new": return ["migration", "new", requireMigrationName(request.name)];
         case "db_diff": return databaseDiffArguments(request);
         case "db_reset": return ["db", "reset", "--local", ...(request.no_seed ? ["--no-seed"] : []), "--yes"];
         case "db_pull": return databasePullArguments(request);
+        case "db_schema_declarative_sync": return declarativeSyncArguments(request);
+        case "db_schema_declarative_generate": return declarativeGenerateArguments(request);
         case "db_dump": return databaseDumpArguments(request, workdir);
+        case "config_pull": return configPullArguments(request);
+        case "stack_start":
+        case "stack_prepare":
+        case "stack_status":
+        case "stack_stop":
+        case "stack_destroy":
+            return stackArguments(request);
         case "migration_list": return ["migration", "list", ...databaseTargetArguments(request.db_url)];
         case "gen_types": return generateTypesArguments(request, workdir);
         case "push": throw new Error("Remote push must use the SupaCloud Management API");
@@ -193,6 +294,11 @@ export function createOfficialSupabaseEnvironment(environment: NodeJS.ProcessEnv
     const safeEnvironment: Record<string, string> = {};
     for (const [key, environmentValue] of Object.entries(environment)) {
         if (environmentValue === undefined) continue;
+        if (key === "SUPABASE_YES" || key === "SUPABASE_EXPERIMENTAL") continue;
+        if (key === "SUPABASE_ACCESS_TOKEN" && environment.SUPACLOUD_FORWARD_SUPABASE_ACCESS_TOKEN === "1") {
+            safeEnvironment[key] = environmentValue;
+            continue;
+        }
         if (isSensitiveEnvironmentKey(key)) continue;
         safeEnvironment[key] = environmentValue;
     }
@@ -202,7 +308,20 @@ export function createOfficialSupabaseEnvironment(environment: NodeJS.ProcessEnv
 }
 
 export function redactOfficialSupabaseOutput(commandOutput: string, secrets: string[] = []): string {
-    let redacted = commandOutput;
+    const redactJson = (value: unknown): unknown => {
+        if (Array.isArray(value)) return value.map(redactJson);
+        if (value !== null && typeof value === "object") {
+            return Object.fromEntries(Object.entries(value).map(([key, item]) => [
+                key, /password|secret|token|key|credential|authorization|dsn|connection.?string/i.test(key)
+                    ? "[REDACTED]" : redactJson(item),
+            ]));
+        }
+        return value;
+    };
+    let redacted = commandOutput.split("\n").map(line => {
+        try { return JSON.stringify(redactJson(JSON.parse(line))); } catch { return line; }
+    }).join("\n");
+    try { redacted = JSON.stringify(redactJson(JSON.parse(commandOutput)), null, 2); } catch { /* CLI progress is not JSON. */ }
     const explicitSecrets = [...new Set(secrets.filter((secret) => secret.length >= 4))]
         .sort((left, right) => right.length - left.length);
     for (const secret of explicitSecrets) {
@@ -212,7 +331,16 @@ export function redactOfficialSupabaseOutput(commandOutput: string, secrets: str
         /^(\s*(?:export\s+)?[A-Z0-9_]*(?:PASSWORD|PASS|SECRET|TOKEN|KEY|CREDENTIAL|DB_URI|DATABASE_URL|DB_URL|DSN)[A-Z0-9_]*\s*=\s*).*$/gim,
         "$1[REDACTED]",
     );
+    redacted = redacted.replace(
+        /("[^"]*(?:password|secret|token|key|credential|authorization|dsn|connection.?string)[^"]*"\s*:\s*")((?:\\.|[^"\\])*)(")/gi,
+        "$1[REDACTED]$3",
+    );
+    redacted = redacted.replace(
+        /(\b(?:password|pass|secret|token|key|credential|authorization|access_token|anon_key|service_role_key|db_password|connection_string)\b\s*:\s*)([^,\s}]+)/gi,
+        "$1[REDACTED]",
+    );
     redacted = redacted.replace(/\bpostgres(?:ql)?:\/\/[^\s"'`]+/gi, "postgresql://[REDACTED]");
+    redacted = redacted.replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g, "[REDACTED]");
     return redacted;
 }
 
@@ -397,8 +525,20 @@ function generatedTypesResult(outputPath: string, execution: OfficialCliExecutio
 }
 
 async function executeOfficialAction(request: SupabaseCliArgs, runtime: SupabaseCliRuntime) {
+    if (request.action.startsWith("stack_") && request.runtime === "native"
+        && runtime.environment.SUPACLOUD_ENABLE_NATIVE_STACK !== "1") {
+        throw new Error("Native local stack is alpha and disabled by default; set SUPACLOUD_ENABLE_NATIVE_STACK=1 to enable it");
+    }
     const workdir = resolveExistingWorkdir(request.workdir, runtime.fallbackWorkdir);
-    const normalizedRequest = { ...request, workdir };
+    if (request.action === "config_pull" && request.ref && runtime.projectRef && request.ref !== runtime.projectRef) {
+        throw new Error("config_pull cannot target a project outside the authorized context");
+    }
+    const normalizedRequest = {
+        ...request, workdir,
+        ...(request.action === "config_pull" ? { ref: request.ref ?? runtime.projectRef } : {}),
+    };
+    // Validate even with an injected executor so alternate transports keep the same boundary.
+    buildOfficialSupabaseArgs(normalizedRequest);
     const outputPath = actionOutputPath(normalizedRequest, workdir);
     if (outputPath) mkdirSync(dirname(outputPath), { recursive: true });
     const secrets = sensitiveValues(runtime.environment, request.db_url);
@@ -441,18 +581,30 @@ export function registerSupabaseCliTools(
         "Controlled adapter for the official open-source Supabase CLI. Remote push stays on the SupaCloud Management API and requires explicit Management credentials.",
         {
             action: withDescription(stringEnum([
-                "version", "migration_new", "db_diff", "db_reset", "db_pull",
-                "db_dump", "migration_list", "gen_types", "push",
+                "version", "init", "migration_new", "db_diff", "db_reset", "db_pull",
+                "db_schema_declarative_sync", "db_schema_declarative_generate",
+                "db_dump", "config_pull", "stack_start", "stack_prepare", "stack_status",
+                "stack_stop", "stack_destroy", "migration_list", "gen_types", "push",
             ]), "Action to perform"),
             workdir: optional(Type.String(), "[*] Supabase project directory (default: current directory)"),
-            ref: optional(Type.String(), "[push] Optional project ref override"),
+            ref: optional(Type.String(), "[config_pull/push] Optional project ref override"),
             name: optional(Type.String(), "[migration_new/db_diff/db_pull] Migration name"),
             schema: optional(Type.String(), "[db_diff/db_pull/db_dump/gen_types] Comma-separated schemas"),
             db_url: optional(Type.String(), "[db_pull/db_dump/migration_list/gen_types] Explicit percent-encoded Postgres DSN"),
             file: optional(Type.String(), "[db_dump/gen_types] Output file"),
             dir: optional(Type.String(), "[push] Migration directory (default: supabase/migrations)"),
-            dry_run: optional(Type.Boolean(), "[push] Preview pending migrations without applying"),
+            dry_run: optional(Type.Boolean(), "[push/config_pull] Preview changes; config_pull defaults to true"),
             declarative: optional(Type.Boolean(), "[db_pull] Pull declarative schemas with pg-delta"),
+            apply: optional(Type.Boolean(), "[db_schema_declarative_sync] Apply the generated migration locally"),
+            experimental: optional(Type.Boolean(), "[db_schema_declarative_*] Enable the experimental pg-delta workflow"),
+            strict_coverage: optional(Type.Boolean(), "[db_schema_declarative_sync] Fail on unmanaged schema objects"),
+            overwrite: optional(Type.Boolean(), "[db_schema_declarative_generate] Replace existing schema files"),
+            runtime: optional(stringEnum(["docker", "podman", "native"]), "[stack_*] Local stack runtime"),
+            eager: optional(Type.Boolean(), "[stack_start] Start all services before returning"),
+            preparation: optional(stringEnum(["background", "on-demand"]), "[stack_start] Download service archives in the background or on demand"),
+            force: optional(Type.Boolean(), "[config_pull] Permit overwriting dirty tracked config"),
+            yes: optional(Type.Boolean(), "[config_pull/stack_destroy] Confirm a write or destructive action"),
+            confirm_destroy: optional(Type.Boolean(), "[stack_destroy] Explicitly confirm permanent local stack destruction"),
             no_seed: optional(Type.Boolean(), "[db_reset] Skip seed scripts"),
             diff_engine: optional(stringEnum(["migra", "pg-delta", "pgadmin", "pg-schema"]), "[db_diff/db_pull] Official CLI diff engine"),
             dump_mode: optional(stringEnum(["schema", "data", "roles"]), "[db_dump] Dump schema (default), data, or roles"),
