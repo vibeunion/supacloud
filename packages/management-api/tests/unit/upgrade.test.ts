@@ -2153,19 +2153,28 @@ describe("upgrade edge-runtime capacity defaults", () => {
     }
   });
 
-  test("sizes systemd limits to sixty percent of a two-core node", () => {
+  test("sizes systemd limits and worker capacity for a two-core node", () => {
     const config = resolveEdgeRuntimeCapacityConfig({
       env: {},
       cpuCount: 2,
       totalMemoryMb: 2048,
     });
 
-    expect(config.workerPoolSize).toBe(20);
+    expect(config.workerPoolSize).toBe(4);
     expect(config.backgroundWorkerPoolSize).toBe(2);
     expect(config.cpuQuotaPercent).toBe(120);
     expect(config.memoryMaxMb).toBe(1228);
     expect(config.memoryHighMb).toBe(982);
     expect(config.tasksMax).toBe(256);
+  });
+
+  test("scales the default foreground pool with CPU while keeping an upper bound", () => {
+    expect(resolveEdgeRuntimeCapacityConfig({ env: {}, cpuCount: 8, totalMemoryMb: 16_384 }).workerPoolSize)
+      .toBe(16);
+    expect(resolveEdgeRuntimeCapacityConfig({ env: {}, cpuCount: 32, totalMemoryMb: 65_536 }).workerPoolSize)
+      .toBe(20);
+    expect(resolveEdgeRuntimeCapacityConfig({ env: {}, cpuCount: 1, totalMemoryMb: 1_024 }).workerPoolSize)
+      .toBe(4);
   });
 
   test("honors explicit upgrade environment overrides", () => {
