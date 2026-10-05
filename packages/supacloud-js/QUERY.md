@@ -18,6 +18,9 @@ The adapter targets Query Core `^5.104.1`; the integration tests use Svelte Quer
 and the adapter has no runtime dependency on Supabase, Svelte or Query Core.
 
 Regenerate `client.ts` with a compiler that emits `__supacloudProcedure` metadata.
+Procedures must be callable asynchronous functions; metadata-only objects and
+synchronous functions are rejected by the type contract. Invalid runtime shapes
+are rejected before creating query or mutation options.
 Earlier generated clients remain usable directly, but cannot use these options
 until regenerated. Existing route calls, response validation, interceptors,
 `.query()` and `.mutate()` argument conventions are unchanged.
@@ -146,11 +149,16 @@ Each invocation supplies `{ input, execution }`. A required command idempotency
 key is required both by TypeScript and at runtime. It belongs to the logical
 operation, not to the component or mutation-options factory. Reuse it only when
 reconciling/retrying the same operation, never for a different write.
-The facade validates execution keys; direct generated procedures retain their
-legacy header checks. With the facade, invalid mutation
-execution settings reject with `SupaCloudProcedureError` and
-`SUPACLOUD_EXECUTION_ERROR` before dispatch; direct generated clients retain their
-original validation errors.
+The adapter and facade share execution validation. Missing, empty, oversized and
+invalid-character keys reject with `SupaCloudProcedureError` and
+`SUPACLOUD_EXECUTION_ERROR` before dispatch, including when adapting direct
+generated clients or custom procedures. An input `idempotency-key` header cannot
+replace the per-invocation execution key. Standalone generated procedures enforce
+the same execution rules with native `TypeError` failures; legacy callable routes
+retain their original header conventions.
+
+Use `isSupaCloudProcedureError` from `@supacloud/js` rather than relying on
+constructor identity when catching errors from separately bundled entrypoints.
 
 Mutations set `retry: false`, including when QueryClient defaults enable retry.
 An unknown outcome is not permission to retry; first resolve the server outcome.
