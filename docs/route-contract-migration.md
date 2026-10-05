@@ -33,7 +33,7 @@ Elysia route table 投影契约，不再维护第二套路由清单。
 
 ```ts
 // contracts/item.ts
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 export const CreateItemBody = Type.Object({ name: Type.String() });
 export const RequestHeaders = Type.Object({ authorization: Type.String() });
@@ -83,7 +83,7 @@ export class ItemController {
 使用参数 decorator 的旧式 positional handler 也支持相同契约：
 
 ```ts
-import type { Static } from "@sinclair/typebox";
+import type { Static } from "typebox";
 import { Body, Cookie, Headers, Post } from "@supacloud/app";
 import { status } from "elysia";
 

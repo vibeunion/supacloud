@@ -11,7 +11,7 @@
  *
  * Note: These endpoints require admin privileges and must use an admin API token.
  */
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { HttpTransport } from "../transports/http";

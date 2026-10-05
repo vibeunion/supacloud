@@ -21,7 +21,7 @@ import { tmpdir } from "node:os";
 import { basename, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import { projectRefPathSegment } from "../project-ref";
 import type { HttpResult, HttpTransport } from "../transports/http";

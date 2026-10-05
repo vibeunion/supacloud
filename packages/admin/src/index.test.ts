@@ -141,7 +141,7 @@ async function runInlineAdminCli(source: string): Promise<{ exitCode: number; ou
 
 async function runAggregateFailureCli(): Promise<{ exitCode: number; output: string }> {
     const source = [
-        'import { Type } from "@sinclair/typebox";',
+        'import { Type } from "typebox";',
         'import { runCli } from "./src/shared/cli.ts";',
         'const tools = { fixture: {',
         '  schema: { action: Type.Literal("run") },',

@@ -1,4 +1,4 @@
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { expect, expectTypeOf, test } from "bun:test";
 import type { DurableCommandReceipt } from "@supacloud/contracts";
 import { plaintextCommandInput } from "./index";
@@ -160,8 +160,8 @@ test("contract snapshot preserves constraints despite caller schema mutations", 
     ...definition(f), schemas: { input, result },
     execute: async (tx, value) => { tx.writes++; return value; },
   });
-  input.properties.count.minimum = -10;
-  result.properties.count.minimum = -10;
+  (input.properties.count as unknown as { minimum: number }).minimum = -10;
+  (result.properties.count as unknown as { minimum: number }).minimum = -10;
   await expect(command.execute(identity, "bad", { count: 0 }))
     .rejects.toMatchObject({ code: "COMMAND_INPUT_INVALID" });
   expect(f.stats().transactions).toBe(0);

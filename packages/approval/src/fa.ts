@@ -1,5 +1,5 @@
-import { Type } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
+import { Type } from 'typebox';
+import { Value } from 'typebox/value';
 import { ApprovalContractError, immutableData } from './validation.js';
 import type { ApprovalObservation } from './index.js';
 import { intakeDefinition, reportDefinition, type IntakeEvent, type IntakeState, type ReportEvent, type ReportState } from './fa-models.js';
