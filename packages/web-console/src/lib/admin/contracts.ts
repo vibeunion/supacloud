@@ -1,6 +1,7 @@
-import { Type, type TSchema } from '@sinclair/typebox';
-import { defineResource, type ResourceContract } from '@svadmin/core/resource-contract';
+import { Type, type TSchema } from 'typebox';
+import type { ResourceContract } from '@svadmin/core/resource-contract';
 import type { TableColumnMetadata } from './resources';
+import { defineSvadminResource } from './svadmin-contract';
 
 /**
  * SVAdmin 0.54+ requires a runtime contract for every resource consumed by
@@ -23,19 +24,9 @@ function memoContract(key: string, build: () => ResourceContract): ResourceContr
 
 const nullableText = Type.Optional(Type.Union([Type.String(), Type.Null()]));
 
-/**
- * Dynamic table schemas cannot satisfy the compile-time `SafeSchema` inference:
- * their property map is built at runtime from live column metadata. The runtime
- * `defineResource` validation still closes and validates the produced schema.
- */
-const defineDynamicResource = defineResource as unknown as (
-  name: string,
-  schemas: { record: TSchema },
-) => ResourceContract;
-
 export function tenantTablesContract(projectRef: string): ResourceContract {
   const name = `v1/projects/${projectRef}/database/tables`;
-  return memoContract(name, () => defineResource(name, {
+  return memoContract(name, () => defineSvadminResource(name, {
     record: Type.Object({
       id: Type.String(),
       table_name: Type.String(),
@@ -48,7 +39,7 @@ export function tenantTablesContract(projectRef: string): ResourceContract {
 
 export function tenantAuthUsersContract(projectRef: string): ResourceContract {
   const name = `v1/projects/${projectRef}/auth/users`;
-  return memoContract(name, () => defineResource(name, {
+  return memoContract(name, () => defineSvadminResource(name, {
     record: Type.Object({
       id: Type.String(),
       email: nullableText,
@@ -83,7 +74,7 @@ export function tableRowsContract(
       if (column.column_name === 'id') continue;
       properties[column.column_name] = Type.Optional(databaseValueSchema());
     }
-    return defineDynamicResource(resourceName, { record: Type.Object(properties) });
+    return defineSvadminResource(resourceName, { record: Type.Object(properties) });
   });
 }
 
