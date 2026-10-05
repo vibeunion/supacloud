@@ -54,7 +54,7 @@
 
     "@supacloud/contracts": ["@supacloud/contracts@file:../contracts", { "devDependencies": { "@types/bun": "1.4.2", "typescript": "7.0.2" } }],
 
-    "@supacloud/query": ["@supacloud/query@file:../query", { "devDependencies": { "@tanstack/query-core": "5.104.1", "@types/bun": "^1.4.2", "typescript": "^7.0.2" }, "peerDependencies": { "@tanstack/query-core": "^5.104.1" }, "optionalPeers": ["@tanstack/query-core"] }],
+    "@supacloud/query": ["@supacloud/query@file:../query", { "dependencies": { "@tanstack/query-core": "^5.104.1" }, "devDependencies": { "@types/bun": "^1.4.2", "typescript": "^7.0.2" } }],
 
     "@sveltejs/acorn-typescript": ["@sveltejs/acorn-typescript@1.0.13", "https://registry.npmmirror.com/@sveltejs/acorn-typescript/-/acorn-typescript-1.0.13.tgz", { "peerDependencies": { "acorn": "^8.9.0" } }, "sha512-wgKggnhZVL9Bfx1OaKKTrYY9BFRk6C8UAkQNUcIv1+llzYrIqy+RZm5HPKzn0NpEBvTVhTqB4kQyllZywsRBRQ=="],
 

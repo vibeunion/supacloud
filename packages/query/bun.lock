@@ -4,17 +4,13 @@
   "workspaces": {
     "": {
       "name": "@supacloud/query",
+      "dependencies": {
+        "@tanstack/query-core": "^5.104.1",
+      },
       "devDependencies": {
-        "@tanstack/query-core": "5.104.1",
         "@types/bun": "^1.4.2",
         "typescript": "^7.0.2",
       },
-      "peerDependencies": {
-        "@tanstack/query-core": "^5.104.1",
-      },
-      "optionalPeers": [
-        "@tanstack/query-core",
-      ],
     },
   },
   "packages": {

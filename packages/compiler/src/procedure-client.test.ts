@@ -7,7 +7,6 @@ import * as ts from "@typescript/typescript6";
 import { renderClient } from "./generate";
 import type { ApplicationGraph } from "./types";
 import { writeFixtureProject } from "./fixtures/helpers";
-import { createQueryAdapter } from "../../query/src/index.js";
 
 const graph: ApplicationGraph = {
   externalTokens: [],
@@ -35,7 +34,6 @@ test("grouped procedures preserve main runtime hooks, metadata and required exec
       "schemas.ts": 'export const Result = { type: "object", properties: { id: { type: "string" } }, required: ["id"] } as const;',
       "consumer.ts": [
         'import { createApiClient, createProcedureClient } from "./client";',
-        `import { createQueryAdapter } from ${JSON.stringify(join(import.meta.dir, "../../query/src/index"))};`,
         "const client = createApiClient();",
         "const group = createProcedureClient(client);",
         'const input = { params: { tenant: "t", id: "1" } };',
@@ -44,18 +42,13 @@ test("grouped procedures preserve main runtime hooks, metadata and required exec
         'group.items.get.query({ params: { id: "1" } });',
         "// @ts-expect-error Missing explicit execution key.",
         "group.items.save.mutate(input);",
-        'const adapter = createQueryAdapter(client, { keyPrefix: ["tenant", "actor"] });',
-        "adapter.items.get.queryOptions(input);",
-        "const adapted: Promise<{ id: string }> = adapter.items.get.queryOptions(input).queryFn({});",
         "// @ts-expect-error Response types cannot be fabricated.",
-        "const wrong: Promise<number> = adapter.items.get.queryOptions(input).queryFn({});",
+        "const wrong: Promise<number> = group.items.get.query(input);",
         "// @ts-expect-error Missing required input.",
-        "adapter.items.get.queryOptions();",
+        "group.items.get.query();",
         "// @ts-expect-error Queries do not expose mutations.",
-        "adapter.items.get.mutationOptions();",
-        "// @ts-expect-error Adapter must preserve required execution key.",
-        "adapter.items.save.mutationOptions().mutationFn({ input });",
-        'adapter.items.save.mutationOptions().mutationFn({ input, execution: { idempotencyKey: "attempt-1" } });',
+        "group.items.get.mutate(input);",
+        'group.items.save.mutate(input, { idempotencyKey: "attempt-1" });',
         "const metadata: readonly unknown[] = client.procedures;",
       ].join("\n"),
     });
@@ -89,8 +82,6 @@ test("grouped procedures preserve main runtime hooks, metadata and required exec
       { url: "https://example.test/tenants/t/items/1?fields=id", key: "attempt-1" },
     ]);
     expect(validations).toBe(3);
-    const adapter = createQueryAdapter(client, { keyPrefix: ["t", "actor"] });
-    expect(await adapter.items.get.queryOptions(input).queryFn({})).toEqual({ id: "1" });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
