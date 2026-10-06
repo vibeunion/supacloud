@@ -52,6 +52,15 @@ test('the query publish step is gated on query_released', () => {
   assert.doesNotMatch(query.condition, /outputs\.releases_created/);
 });
 
+test('the query publish step tolerates its missing npm scope grant', () => {
+  // @supacloud/query is not granted to the @supacloud npm scope, so a first
+  // publish always fails with E404. The step must not block unrelated releases
+  // while that bootstrap is outstanding.
+  const step = source.slice(source.indexOf('- name: Publish Query adapter to NPM'));
+  const block = step.slice(0, step.indexOf('working-directory:'));
+  assert.match(block, /continue-on-error: true/);
+});
+
 test('every referenced *_released output is declared in the job outputs', () => {
   for (const { name, condition } of publishSteps) {
     for (const match of condition.matchAll(/needs\.release-please\.outputs\.([a-z0-9_]+)/g)) {
