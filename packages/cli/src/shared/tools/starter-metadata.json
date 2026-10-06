@@ -3,7 +3,7 @@
   "generatedBy": "supacloud/starter-metadata-v1",
   "packages": {
     "compiler": {
-      "version": "0.38.0"
+      "version": "0.38.1"
     },
     "app": {
       "version": "0.23.0",
@@ -12,7 +12,7 @@
       }
     },
     "elysia": {
-      "version": "0.24.0"
+      "version": "0.24.1"
     },
     "commands": {
       "version": "0.9.1"

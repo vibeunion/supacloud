@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.49.2](https://github.com/vibeunion/supacloud/compare/web-console-v0.49.1...web-console-v0.49.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* **deps,perf:** replace Bun native APIs and resolve audit vulnerabilities ([#1667](https://github.com/vibeunion/supacloud/issues/1667)) ([06a9199](https://github.com/vibeunion/supacloud/commit/06a91990c754ce586f2a2353f253dc50f4fa0f98))
+
 ## [0.49.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.49.0...web-console-v0.49.1) (2026-10-06)
 
 

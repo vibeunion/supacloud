@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.38.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.38.0...compiler-v0.38.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **deps,perf:** replace Bun native APIs and resolve audit vulnerabilities ([#1667](https://github.com/vibeunion/supacloud/issues/1667)) ([06a9199](https://github.com/vibeunion/supacloud/commit/06a91990c754ce586f2a2353f253dc50f4fa0f98))
+
 ## [0.38.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.37.0...compiler-v0.38.0) (2026-10-05)
 
 
