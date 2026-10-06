@@ -404,6 +404,14 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      # The standalone native smoke test imports the workspace SDK source, which
+      # now depends on @supacloud/query. Build/link those local prerequisites the
+      # same way the SupaCloud Lite package check does before installing the
+      # standalone consumer.
+      - name: Prepare workspace dependencies
+        working-directory: packages/supacloud-lite
+        run: bun run ../../scripts/build-command-dependencies.ts supacloud-lite
+
       - name: Install dependencies
         working-directory: packages/supacloud-lite
         run: bun install --frozen-lockfile
