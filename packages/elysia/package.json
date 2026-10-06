@@ -58,7 +58,8 @@
   "overrides": {
     "@supacloud/delivery": "file:../delivery",
     "@supacloud/contracts": "file:../contracts",
-    "@supacloud/commands": "file:../commands"
+    "@supacloud/commands": "file:../commands",
+    "@graphql-tools/utils": "^12.0.3"
   },
   "peerDependencies": {
     "elysia": "2.0.0-beta.21"

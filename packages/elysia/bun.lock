@@ -26,6 +26,7 @@
     },
   },
   "overrides": {
+    "@graphql-tools/utils": "^12.0.3",
     "@supacloud/commands": "file:../commands",
     "@supacloud/contracts": "file:../contracts",
     "@supacloud/delivery": "file:../delivery",
@@ -57,11 +58,9 @@
 
     "@graphql-tools/schema": ["@graphql-tools/schema@10.1.1", "https://registry.npmmirror.com/@graphql-tools/schema/-/schema-10.1.1.tgz", { "dependencies": { "@graphql-tools/merge": "^9.2.4", "@graphql-tools/utils": "^12.0.1", "tslib": "^2.4.0" }, "peerDependencies": { "graphql": "^14.0.0 || ^15.0.0 || ^16.0.0 || ^17.0.0" } }, "sha512-24jJghRxEW+SG1lbJ45Zg9HEZ8ZKS923ihbFjOicspFLpryxJkWp6gZJ7D8tCVaSAhli4x1+1wDPAfhT8mLqxg=="],
 
-    "@graphql-tools/utils": ["@graphql-tools/utils@11.2.2", "https://registry.npmmirror.com/@graphql-tools/utils/-/utils-11.2.2.tgz", { "dependencies": { "@graphql-typed-document-node/core": "^3.1.1", "@whatwg-node/promise-helpers": "^1.0.0", "cross-inspect": "1.0.1", "tslib": "^2.4.0" }, "peerDependencies": { "graphql": "^14.0.0 || ^15.0.0 || ^16.0.0 || ^17.0.0" } }, "sha512-Do2A/t6ayqOma8m7PvpYMsCBswL+NB35BQSng4GWSBqafL2/BnfAZy/NSENPwV721Rm2fG0BHETFC0+FJJZmLw=="],
+    "@graphql-tools/utils": ["@graphql-tools/utils@12.0.3", "", { "dependencies": { "@graphql-typed-document-node/core": "^3.1.1", "@whatwg-node/promise-helpers": "^2.0.0", "cross-inspect": "1.0.1", "tslib": "^2.4.0" }, "peerDependencies": { "graphql": "^14.0.0 || ^15.0.0 || ^16.0.0 || ^17.0.0" } }, "sha512-M+04bHvI1SKoug7W2EkwfKjig2mdtgIIlFY8p2jLHmxPNVs5bC/3R+58JrD+7ZXWgPILWTwuqJ9AqTjPlahroA=="],
 
     "@graphql-typed-document-node/core": ["@graphql-typed-document-node/core@3.2.0", "https://registry.npmmirror.com/@graphql-typed-document-node/core/-/core-3.2.0.tgz", { "peerDependencies": { "graphql": "^0.8.0 || ^0.9.0 || ^0.10.0 || ^0.11.0 || ^0.12.0 || ^0.13.0 || ^14.0.0 || ^15.0.0 || ^16.0.0 || ^17.0.0" } }, "sha512-mB9oAsNCm9aM3/SOv4YtBMqZbYj10R7dkq8byBqxGY/ncFwhf2oQzMV+LCRlWoDSEBJ3COiR1yeDvMtsoOsuFQ=="],
-
-    "@sinclair/typebox": ["@sinclair/typebox@0.34.52", "https://registry.npmmirror.com/@sinclair/typebox/-/typebox-0.34.52.tgz", {}, "sha512-XiMQh7qqVlxZzcVD+kkGMNGMzcTrDMLWI7S4x7z1MkCkbDPrekpZXEUK0eZqZFMuHQg2a2DZOcDIh9o5v3Gonw=="],
 
     "@supabase/auth-js": ["@supabase/auth-js@2.115.0", "https://registry.npmmirror.com/@supabase/auth-js/-/auth-js-2.115.0.tgz", { "dependencies": { "tslib": "2.8.1" } }, "sha512-YNQlQWm1H0gsXHSY8Jd/xepBhjO0Zhwx04iW17A83/joQ5kFiUin6iPj9s9kZZvupnwLjXVP/diTFiLz2jUbwQ=="],
 
@@ -79,7 +78,7 @@
 
     "@supacloud/app": ["@supacloud/app@file:../app", { "dependencies": { "@angular/core": "^22.1.5", "@supacloud/contracts": "file:../contracts", "typebox": "1.3.34" }, "devDependencies": { "@types/bun": "^1.4.2", "@types/node": "^26.5.0", "typescript": "^7.0.2" } }],
 
-    "@supacloud/commands": ["@supacloud/commands@file:../commands", { "dependencies": { "@supacloud/contracts": "file:../contracts" }, "devDependencies": { "@sinclair/typebox": "0.34.52", "@types/bun": "1.4.2", "typescript": "7.0.2" }, "peerDependencies": { "@sinclair/typebox": "0.34.52" }, "optionalPeers": ["@sinclair/typebox"] }],
+    "@supacloud/commands": ["@supacloud/commands@file:../commands", { "dependencies": { "@supacloud/contracts": "file:../contracts" }, "devDependencies": { "@types/bun": "1.4.2", "typebox": "1.3.34", "typescript": "7.0.2" }, "peerDependencies": { "typebox": "1.3.34" }, "optionalPeers": ["typebox"] }],
 
     "@supacloud/compiler": ["@supacloud/compiler@file:../compiler", { "dependencies": { "@graphql-codegen/core": "^6.2.0", "@graphql-codegen/typed-document-node": "^7.1.0", "@graphql-codegen/typescript-operations": "^6.1.6", "@graphql-typed-document-node/core": "^3.2.0", "@supacloud/delivery": "file:../delivery", "@typescript/typescript6": "^6.0.2", "graphql": "^16", "typebox": "1.3.34" }, "devDependencies": { "@supabase/supabase-js": "2.115.0", "@types/bun": "^1.4.2", "drizzle-orm": "1.0.0-rc.4", "typescript": "^7.0.2" }, "bin": { "supacloud-compiler": "./dist/cli.js" } }],
 
@@ -137,7 +136,7 @@
 
     "@typescript/typescript6": ["@typescript/typescript6@6.0.2", "https://registry.npmmirror.com/@typescript/typescript6/-/typescript6-6.0.2.tgz", { "dependencies": { "@typescript/old": "npm:typescript@^6" }, "bin": { "tsc6": "bin/tsc6" } }, "sha512-mbCddXd+jm7hfx7w2YU64/Av4/NqqeG3GoRZgxPcgoTxYjhrcfJRw9ULch71SS4G+Q3bOXFhRvPqjguN0Hyp5w=="],
 
-    "@whatwg-node/promise-helpers": ["@whatwg-node/promise-helpers@1.3.2", "https://registry.npmmirror.com/@whatwg-node/promise-helpers/-/promise-helpers-1.3.2.tgz", { "dependencies": { "tslib": "^2.6.3" } }, "sha512-Nst5JdK47VIl9UcGwtv2Rcgyn5lWtZ0/mhRQ4G8NN2isxpq2TO30iqHzmwoJycjWuyUfg3GFXqP/gFHXeV57IA=="],
+    "@whatwg-node/promise-helpers": ["@whatwg-node/promise-helpers@2.0.0", "", { "dependencies": { "tslib": "^2.6.3" } }, "sha512-/i9CS0Z96o+cPwaYoAyVxAThDiUX1wV3tDmNWPJbn+vtdR+JftuCDg1NGCXBrzIYVDGkJ8uT6ctwmrBOUzOpKQ=="],
 
     "auto-bind": ["auto-bind@5.0.1", "https://registry.npmmirror.com/auto-bind/-/auto-bind-5.0.1.tgz", {}, "sha512-ooviqdwwgfIfNmDwo94wlshcdzfO64XV0Cg6oDsDYBJfITDz1EngD2z7DkbvCWn+XIMsIqW27sEVF6qcpJrRcg=="],
 
@@ -217,19 +216,13 @@
 
     "undici-types": ["undici-types@8.9.0", "https://registry.npmmirror.com/undici-types/-/undici-types-8.9.0.tgz", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
 
-    "@graphql-tools/merge/@graphql-tools/utils": ["@graphql-tools/utils@12.0.1", "https://registry.npmmirror.com/@graphql-tools/utils/-/utils-12.0.1.tgz", { "dependencies": { "@graphql-typed-document-node/core": "^3.1.1", "@whatwg-node/promise-helpers": "^1.0.0", "cross-inspect": "1.0.1", "tslib": "^2.4.0" }, "peerDependencies": { "graphql": "^14.0.0 || ^15.0.0 || ^16.0.0 || ^17.0.0" } }, "sha512-8YC6jn4xYDS6YTY6xDAgQAs/nGgvzRaIGHS8GeSfVItQzNK7Ms24CQtE3EJY+amvR+tBnhRSX0N83aGj+V/RIg=="],
+    "@supacloud/app/@supacloud/contracts": ["@supacloud/contracts@file:../contracts", {}],
 
-    "@graphql-tools/relay-operation-optimizer/@graphql-tools/utils": ["@graphql-tools/utils@12.0.1", "https://registry.npmmirror.com/@graphql-tools/utils/-/utils-12.0.1.tgz", { "dependencies": { "@graphql-typed-document-node/core": "^3.1.1", "@whatwg-node/promise-helpers": "^1.0.0", "cross-inspect": "1.0.1", "tslib": "^2.4.0" }, "peerDependencies": { "graphql": "^14.0.0 || ^15.0.0 || ^16.0.0 || ^17.0.0" } }, "sha512-8YC6jn4xYDS6YTY6xDAgQAs/nGgvzRaIGHS8GeSfVItQzNK7Ms24CQtE3EJY+amvR+tBnhRSX0N83aGj+V/RIg=="],
+    "@supacloud/commands/@supacloud/contracts": ["@supacloud/contracts@file:../contracts", {}],
 
-    "@graphql-tools/schema/@graphql-tools/utils": ["@graphql-tools/utils@12.0.1", "https://registry.npmmirror.com/@graphql-tools/utils/-/utils-12.0.1.tgz", { "dependencies": { "@graphql-typed-document-node/core": "^3.1.1", "@whatwg-node/promise-helpers": "^1.0.0", "cross-inspect": "1.0.1", "tslib": "^2.4.0" }, "peerDependencies": { "graphql": "^14.0.0 || ^15.0.0 || ^16.0.0 || ^17.0.0" } }, "sha512-8YC6jn4xYDS6YTY6xDAgQAs/nGgvzRaIGHS8GeSfVItQzNK7Ms24CQtE3EJY+amvR+tBnhRSX0N83aGj+V/RIg=="],
+    "@supacloud/compiler/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", {}],
 
-    "@supacloud/app/@supacloud/contracts": ["@supacloud/contracts@file:../contracts", { "devDependencies": { "@types/bun": "1.4.2", "typescript": "7.0.2" } }],
-
-    "@supacloud/commands/@supacloud/contracts": ["@supacloud/contracts@file:../contracts", { "devDependencies": { "@types/bun": "1.4.2", "typescript": "7.0.2" } }],
-
-    "@supacloud/compiler/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", { "dependencies": { "typebox": "1.3.34" }, "devDependencies": { "@types/bun": "^1.4.2", "typescript": "^7.0.2" } }],
-
-    "@supacloud/db/@supacloud/contracts": ["@supacloud/contracts@file:../contracts", { "devDependencies": { "@types/bun": "1.4.2", "typescript": "7.0.2" } }],
+    "@supacloud/db/@supacloud/contracts": ["@supacloud/contracts@file:../contracts", {}],
 
     "bun-types/@types/node": ["@types/node@22.20.2", "https://registry.npmmirror.com/@types/node/-/node-22.20.2.tgz", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-xlvWf4Vs9n1PEVYwP1n4vvG07M6y8WgvJ2t0vbrWTmijsIHp1cS+uJ2kMIRdY3nHZK0nCYKrPeD171+SzF4/zw=="],
 

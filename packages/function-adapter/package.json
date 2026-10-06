@@ -46,7 +46,8 @@
     }
   },
   "overrides": {
-    "cookie": "0.7.2"
+    "cookie": "0.7.2",
+    "source-map-js": "^1.2.2"
   },
   "devDependencies": {
     "@sveltejs/kit": "^2.70.3",
