@@ -54,6 +54,7 @@ jobs:
       supacloud_lite_released: ${{ steps.release.outputs['packages/supacloud-lite--release_created'] }}
       supacloud_lite_tag_name: ${{ steps.release.outputs['packages/supacloud-lite--tag_name'] }}
       supacloud_js_released: ${{ steps.release.outputs['packages/supacloud-js--release_created'] }}
+      query_released: ${{ steps.release.outputs['packages/query--release_created'] }}
       cli_released: ${{ steps.release.outputs['packages/cli--release_created'] }}
       admin_released: ${{ steps.release.outputs['packages/admin--release_created'] }}
       function_adapter_released: ${{ steps.release.outputs['packages/function-adapter--release_created'] }}
@@ -503,7 +504,12 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish Query adapter to NPM
-        if: ${{ !cancelled() && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true) }}
+        # @supacloud/query has no npm scope grant yet, so its first publish is
+        # rejected with E404 by the registry. Keep the step non-fatal until the
+        # package is bootstrapped and its Trusted Publisher is configured; then
+        # remove continue-on-error so the publication becomes blocking again.
+        continue-on-error: true
+        if: ${{ !cancelled() && (needs.release-please.outputs.query_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/query
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
