@@ -5,7 +5,7 @@ import { get } from "node:https";
 import { tmpdir } from "node:os";
 import { basename, delimiter, isAbsolute, join } from "node:path";
 import { pipeline } from "node:stream/promises";
-import { Transform, type Readable } from "node:stream";
+import { Readable, Transform } from "node:stream";
 
 import {
     RELEASE_ATTESTATION_NAME,
