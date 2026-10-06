@@ -26,7 +26,7 @@
     "README.md"
   ],
   "scripts": {
-    "prebuild": "bun -e \"await $`rm -rf dist`\"",
+    "prebuild": "bun -e 'import { $ } from \"bun\"; await $`rm -rf dist`'",
     "build": "bun build src/index.ts --outfile dist/index.js --target bun --format esm && bun build src/sveltekit.ts --outfile dist/sveltekit.js --target bun --format esm && bun build src/sveltekit-adapter.ts --outfile dist/sveltekit-adapter.js --target bun --format esm && bun x tsc -p tsconfig.json --emitDeclarationOnly --declaration --outDir dist",
     "typecheck": "bun x tsc --noEmit -p tsconfig.json",
     "test": "bun test"

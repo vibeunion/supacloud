@@ -560,7 +560,7 @@ export async function runGithubCliDownload(
     })();
 
     const write = pipeline(
-        Readable.fromWeb(child.stdout as any),
+        Readable.fromWeb(child.stdout as unknown as Parameters<typeof Readable.fromWeb>[0]),
         boundedWriter(maxBytes),
         createWriteStream(destination, { flags: "wx", mode: 0o600 }),
     ).catch((error: unknown) => {
@@ -568,15 +568,23 @@ export async function runGithubCliDownload(
         throw error;
     });
 
-    const [writeState, exitCode, stderr] = await Promise.all([
-        write.then(() => true, (err) => { rmSync(destination, { force: true }); throw err; }),
-        child.exited,
-        stderrPromise,
-    ]);
-    clearTimeout(timeout);
-    if (forceKillTimer) clearTimeout(forceKillTimer);
-
-    return { exitCode: timedOut ? 124 : (exitCode ?? 1), stdout: "", stderr };
+    try {
+        const [writeState, exitState, stderrState] = await Promise.allSettled([
+            write,
+            child.exited,
+            stderrPromise,
+        ]);
+        if (writeState.status === "rejected") throw writeState.reason;
+        if (exitState.status === "rejected") throw exitState.reason;
+        if (stderrState.status === "rejected") throw stderrState.reason;
+        return { exitCode: timedOut ? 124 : exitState.value, stdout: "", stderr: stderrState.value };
+    } catch (error: unknown) {
+        rmSync(destination, { force: true });
+        throw error;
+    } finally {
+        clearTimeout(timeout);
+        if (forceKillTimer) clearTimeout(forceKillTimer);
+    }
 }
 
 function supportsStrictGithubVerification(execution: GithubCliResult): boolean {
