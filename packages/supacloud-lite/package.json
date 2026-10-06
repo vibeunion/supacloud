@@ -36,7 +36,7 @@
     "build:standalone:release": "bun run scripts/build-standalone.ts linux-x64 linux-arm64 macos-x64 macos-arm64 windows-x64",
     "build:types": "bun x tsc --emitDeclarationOnly -p tsconfig.build.json",
     "check": "bun run typecheck && bun run test && bun run build && bun run test:package && bun run build:standalone:host && bun run test:standalone",
-    "clean": "bun -e \"import { rmSync } from 'node:fs'; rmSync('dist', { recursive: true, force: true })\"",
+    "clean": "bun -e \"await $`rm -rf dist`\"",
     "dev": "bun run src/cli.ts start",
     "start": "bun run src/cli.ts start",
     "test": "bun test --timeout 20000",

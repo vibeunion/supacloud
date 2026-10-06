@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { Type } from "typebox";
@@ -385,31 +384,22 @@ function sensitiveValues(environment: NodeJS.ProcessEnv, dbUrl?: string): string
     return values;
 }
 
-function spawnOfficialSupabaseCommand(
+async function spawnOfficialSupabaseCommand(
     command: string[],
     workdir: string,
     environment: Record<string, string>,
 ): Promise<OfficialCliExecutionResult> {
-    const [executable, ...commandArguments] = command;
-    return new Promise((resolveExecution, rejectExecution) => {
-        const child = spawn(executable, commandArguments, {
-            cwd: workdir,
-            env: environment,
-            shell: false,
-            stdio: ["ignore", "pipe", "pipe"],
-            windowsHide: true,
-        });
-        let standardOutput: string = "";
-        let standardError: string = "";
-        child.stdout.setEncoding("utf8");
-        child.stderr.setEncoding("utf8");
-        child.stdout.on("data", (chunk: string) => { standardOutput += chunk; });
-        child.stderr.on("data", (chunk: string) => { standardError += chunk; });
-        child.once("error", rejectExecution);
-        child.once("close", (exitCode) => {
-            resolveExecution({ exitCode: exitCode ?? 1, stdout: standardOutput, stderr: standardError });
-        });
+    const child = Bun.spawn(command, {
+        cwd: workdir,
+        env: environment,
+        stdio: ["ignore", "pipe", "pipe"],
     });
+    const [stdout, stderr, exitCode] = await Promise.all([
+        child.stdout ? new Response(child.stdout).text() : Promise.resolve(""),
+        child.stderr ? new Response(child.stderr).text() : Promise.resolve(""),
+        child.exited,
+    ]);
+    return { exitCode: exitCode ?? 1, stdout, stderr };
 }
 
 async function executeOfficialSupabaseCli(

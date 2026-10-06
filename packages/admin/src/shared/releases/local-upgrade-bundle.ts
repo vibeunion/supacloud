@@ -1,4 +1,3 @@
-import { spawn, type ChildProcessByStdio } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { accessSync, chmodSync, constants as fsConstants, copyFileSync, createWriteStream, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
@@ -493,9 +492,8 @@ function githubCliExecutable(environment: NodeJS.ProcessEnv): string {
 }
 
 type GithubCliResult = { exitCode: number; stdout: string; stderr: string };
-type GithubCliProcess = ChildProcessByStdio<null, Readable, Readable>;
 
-function spawnGithubCli(arguments_: string[], download = false): GithubCliProcess {
+function spawnGithubCli(arguments_: string[], download = false) {
     const environment = directEnvironment();
     if (download) {
         // 仅本地下载沿用操作者的传输代理，签名校验和远端离线执行仍保持原边界。
@@ -503,43 +501,39 @@ function spawnGithubCli(arguments_: string[], download = false): GithubCliProces
             if (process.env[key]) environment[key] = process.env[key];
         }
     }
-    return spawn(githubCliExecutable(environment), arguments_, {
+    return Bun.spawn([githubCliExecutable(environment), ...arguments_], {
         env: environment,
         stdio: ["ignore", "pipe", "pipe"],
     });
 }
 
-function githubCliExitCode(child: GithubCliProcess, timeoutMs: number): Promise<number> {
-    return new Promise<number>((resolve, reject) => {
-        let timedOut: boolean = false;
-        let settled: boolean = false;
-        let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
-        const timeout = setTimeout(() => {
-            timedOut = true;
-            child.kill("SIGTERM");
-            forceKillTimer = setTimeout(() => child.kill("SIGKILL"), GH_TERMINATION_GRACE_MS);
-        }, timeoutMs);
-        const settleExecution = (error: Error | undefined, exitCode: number) => {
-            if (settled) return;
-            settled = true;
-            clearTimeout(timeout);
-            if (forceKillTimer) clearTimeout(forceKillTimer);
-            if (error) reject(error);
-            else resolve(timedOut ? 124 : exitCode);
-        };
-        child.once("error", (error) => settleExecution(error, 127));
-        child.once("close", (code) => settleExecution(undefined, code ?? 1));
-    });
-}
-
 export async function runGithubCli(arguments_: string[], timeoutMs: number): Promise<GithubCliResult> {
     const child = spawnGithubCli(arguments_);
-    let stdout: string = "";
-    let stderr: string = "";
-    child.stdout.on("data", (chunk: Buffer) => { stdout = `${stdout}${chunk.toString()}`.slice(-8_000); });
-    child.stderr.on("data", (chunk: Buffer) => { stderr = `${stderr}${chunk.toString()}`.slice(-8_000); });
-    const exitCode = await githubCliExitCode(child, timeoutMs);
-    return { exitCode, stdout, stderr };
+    let timedOut = false;
+    let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+        forceKillTimer = setTimeout(() => child.kill("SIGKILL"), GH_TERMINATION_GRACE_MS);
+    }, timeoutMs);
+
+    try {
+        const [rawStdout, rawStderr, exitCode] = await Promise.all([
+            child.stdout ? new Response(child.stdout).text() : Promise.resolve(""),
+            child.stderr ? new Response(child.stderr).text() : Promise.resolve(""),
+            child.exited,
+        ]);
+        clearTimeout(timeout);
+        if (forceKillTimer) clearTimeout(forceKillTimer);
+        const stdout = rawStdout.slice(-8_000);
+        const stderr = rawStderr.slice(-8_000);
+        return { exitCode: timedOut ? 124 : (exitCode ?? 1), stdout, stderr };
+    } catch (error) {
+        clearTimeout(timeout);
+        if (forceKillTimer) clearTimeout(forceKillTimer);
+        child.kill("SIGKILL");
+        throw error;
+    }
 }
 
 export async function runGithubCliDownload(
@@ -549,26 +543,40 @@ export async function runGithubCliDownload(
     timeoutMs: number,
 ): Promise<GithubCliResult> {
     const child = spawnGithubCli(arguments_, true);
-    let stderr: string = "";
-    child.stderr.on("data", (chunk: Buffer) => { stderr = `${stderr}${chunk.toString()}`.slice(-8_000); });
+    let timedOut = false;
+    let forceKillTimer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+        forceKillTimer = setTimeout(() => child.kill("SIGKILL"), GH_TERMINATION_GRACE_MS);
+    }, timeoutMs);
+
+    const stderrPromise = (async () => {
+        try {
+            return child.stderr ? (await new Response(child.stderr).text()).slice(-8_000) : "";
+        } catch {
+            return "";
+        }
+    })();
+
     const write = pipeline(
-        child.stdout,
+        Readable.fromWeb(child.stdout as any),
         boundedWriter(maxBytes),
         createWriteStream(destination, { flags: "wx", mode: 0o600 }),
     ).catch((error: unknown) => {
         child.kill("SIGKILL");
         throw error;
     });
-    const [writeState, exitState] = await Promise.allSettled([write, githubCliExitCode(child, timeoutMs)]);
-    if (writeState.status === "rejected") {
-        rmSync(destination, { force: true });
-        throw writeState.reason;
-    }
-    if (exitState.status === "rejected") {
-        rmSync(destination, { force: true });
-        throw exitState.reason;
-    }
-    return { exitCode: exitState.value, stdout: "", stderr };
+
+    const [writeState, exitCode, stderr] = await Promise.all([
+        write.then(() => true, (err) => { rmSync(destination, { force: true }); throw err; }),
+        child.exited,
+        stderrPromise,
+    ]);
+    clearTimeout(timeout);
+    if (forceKillTimer) clearTimeout(forceKillTimer);
+
+    return { exitCode: timedOut ? 124 : (exitCode ?? 1), stdout: "", stderr };
 }
 
 function supportsStrictGithubVerification(execution: GithubCliResult): boolean {

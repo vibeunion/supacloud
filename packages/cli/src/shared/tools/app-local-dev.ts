@@ -1,4 +1,4 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
@@ -38,12 +38,14 @@ async function probeDatabase(url: string, signal?: AbortSignal): Promise<void> {
     await database.close({ timeout: 1 });
   }`;
   try {
-    const stdout = await new Promise<string>((resolveOutput, reject) => {
-      execFile(process.versions.bun ? process.execPath : "bun", ["--no-env-file", "-e", source], {
-        env: { ...process.env, SUPACLOUD_DEV_DATABASE_URL: url },
-        timeout: 12_000, killSignal: "SIGKILL", maxBuffer: 4096, encoding: "utf8", signal,
-      }, (error, output) => error ? reject(error) : resolveOutput(output));
+    const proc = Bun.spawn([process.versions.bun ? process.execPath : "bun", "--no-env-file", "-e", source], {
+      env: { ...process.env, SUPACLOUD_DEV_DATABASE_URL: url },
+      stdout: "pipe",
+      stderr: "pipe",
     });
+    const stdout = await new Response(proc.stdout).text();
+    const exitCode = await proc.exited;
+    if (exitCode !== 0) throw new Error();
     const rows: unknown = JSON.parse(stdout);
     const expected = decodeURIComponent(new URL(url).pathname.slice(1));
     if (!Array.isArray(rows) || rows.length !== 1) throw new Error();

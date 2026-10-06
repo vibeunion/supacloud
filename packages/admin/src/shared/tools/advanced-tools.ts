@@ -37,17 +37,24 @@ Actions: list, deploy, deploy_bundle, source, delete, check`,
 
             // Helper for local TS syntax check
             const checkSyntax = async (sourceCode: string): Promise<{ ok: boolean; err?: string }> => {
-                const fs = require("fs");
                 const os = require("os");
-                const { promisify } = require("util");
-                const execAsync = promisify(require("child_process").exec);
+                const fs = require("fs");
                 const tmpFile = `${os.tmpdir()}/supacloud_edge_${Date.now()}.ts`;
-                fs.writeFileSync(tmpFile, sourceCode);
+                await Bun.write(tmpFile, sourceCode);
                 try {
-                    await execAsync(`bun build ${tmpFile} --external='*'`);
-                    return { ok: true };
+                    const proc = Bun.spawn(["bun", "build", tmpFile, "--external=*"], {
+                        stdout: "pipe",
+                        stderr: "pipe",
+                    });
+                    const exitCode = await proc.exited;
+                    if (exitCode === 0) {
+                        return { ok: true };
+                    }
+                    const stdout = await new Response(proc.stdout).text();
+                    const stderr = await new Response(proc.stderr).text();
+                    return { ok: false, err: stdout + "\n" + (stderr || `exit code ${exitCode}`) };
                 } catch (e: any) {
-                    return { ok: false, err: e.stdout + "\n" + (e.stderr || e.message) };
+                    return { ok: false, err: e.message || String(e) };
                 } finally {
                     try { fs.unlinkSync(tmpFile); } catch (e) {}
                 }
@@ -58,8 +65,6 @@ Actions: list, deploy, deploy_bundle, source, delete, check`,
                 try {
                     const fs = require("fs");
                     const os = require("os");
-                    const { promisify } = require("util");
-                    const execAsync = promisify(require("child_process").exec);
 
                     const stat = fs.statSync(pathArg);
                     let entrypoint = pathArg;
@@ -74,9 +79,17 @@ Actions: list, deploy, deploy_bundle, source, delete, check`,
                     // We bundle the function to a temp file, then read it as the deployment code.
                     const tmpOut = `${os.tmpdir()}/supacloud_bundled_${Date.now()}.js`;
                     try {
-                        const { stderr } = await execAsync(`bun build ${entrypoint} --target bun --outfile ${tmpOut}`);
-                        if (!fs.existsSync(tmpOut)) throw new Error(`Bundle failed: ${stderr}`);
-                        code = fs.readFileSync(tmpOut, "utf-8");
+                        const proc = Bun.spawn(["bun", "build", entrypoint, "--target", "bun", "--outfile", tmpOut], {
+                            stdout: "pipe",
+                            stderr: "pipe",
+                        });
+                        const exitCode = await proc.exited;
+                        const stderr = await new Response(proc.stderr).text();
+                        const fileHandle = Bun.file(tmpOut);
+                        if (exitCode !== 0 || !(await fileHandle.exists())) {
+                            throw new Error(`Bundle failed: ${stderr || `exit code ${exitCode}`}`);
+                        }
+                        code = await fileHandle.text();
                     } finally {
                         try { fs.unlinkSync(tmpOut); } catch (e) {}
                     }

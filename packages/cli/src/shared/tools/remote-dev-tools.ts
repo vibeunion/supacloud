@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { readdir } from "node:fs/promises";
@@ -75,18 +74,14 @@ export const remoteDevToolSchema = {
     drizzle_bin: optional(Type.String(), "drizzle-kit executable"),
 };
 
-function runProcess(executable: string, args: string[], cwd: string): Promise<CommandResult> {
-    return new Promise((resolveResult, reject) => {
-        const child = spawn(executable, args, { cwd, shell: false, stdio: ["ignore", "pipe", "pipe"] });
-        let stdout: string = "";
-        let stderr: string = "";
-        child.stdout?.setEncoding("utf8");
-        child.stderr?.setEncoding("utf8");
-        child.stdout?.on("data", (chunk) => { stdout += String(chunk); });
-        child.stderr?.on("data", (chunk) => { stderr += String(chunk); });
-        child.once("error", reject);
-        child.once("close", (exitCode) => resolveResult({ exitCode: exitCode ?? 1, stdout, stderr }));
-    });
+async function runProcess(executable: string, args: string[], cwd: string): Promise<CommandResult> {
+    const child = Bun.spawn([executable, ...args], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+    const [stdout, stderr, exitCode] = await Promise.all([
+        child.stdout ? new Response(child.stdout).text() : Promise.resolve(""),
+        child.stderr ? new Response(child.stderr).text() : Promise.resolve(""),
+        child.exited,
+    ]);
+    return { exitCode: exitCode ?? 1, stdout, stderr };
 }
 
 function resolveDrizzleCommand(root: string, configured: string | undefined): string {

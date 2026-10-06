@@ -8,7 +8,6 @@
  *
  * General distribution defaults to fully offline; checks npm latest dist-tag only when explicitly requested.
  */
-import { spawn } from "node:child_process";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, parse } from "node:path";
@@ -346,15 +345,16 @@ async function runUpdateCheckCommand(args: string[]): Promise<never> {
 async function dispatchSubcommand(target: Subcommand, forwardedArgs: string[]): Promise<void> {
     const launchPlan = await createLaunchPlan(target, forwardedArgs);
     if (launchPlan.updateNotice) console.error(`ℹ️ ${launchPlan.updateNotice}`);
-    const childProcess = spawn(launchPlan.command, launchPlan.args, {
-        stdio: "inherit",
-        shell: launchPlan.shell,
-    });
-    childProcess.on("close", (code) => process.exit(code ?? 1));
-    childProcess.on("error", (error) => {
-        console.error(`❌ 启动 ${target.pkg} 失败: ${error.message}`);
+    try {
+        const childProcess = Bun.spawn([launchPlan.command, ...launchPlan.args], {
+            stdio: ["inherit", "inherit", "inherit"],
+        });
+        const exitCode = await childProcess.exited;
+        process.exit(exitCode ?? 1);
+    } catch (error: any) {
+        console.error(`❌ 启动 ${target.pkg} 失败: ${error.message || String(error)}`);
         process.exit(1);
-    });
+    }
 }
 
 async function run(args: string[]): Promise<void> {

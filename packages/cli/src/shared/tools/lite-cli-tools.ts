@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { resolveLiteCommand } from "./lite-cli-command";
@@ -134,57 +133,51 @@ export function buildLiteArgs(request: LiteCliArgs): string[] {
     return args;
 }
 
-function spawnLiteCommand(
+async function spawnLiteCommand(
     command: string[],
     workdir: string,
     environment: NodeJS.ProcessEnv,
     inheritOutput: boolean,
 ): Promise<LiteCliExecutionResult> {
-    const [executable, ...commandArguments] = command;
-    return new Promise((resolveExecution, rejectExecution) => {
-        const child = spawn(executable, commandArguments, {
-            cwd: workdir, env: { ...environment, NO_COLOR: "1" }, shell: false,
-            stdio: inheritOutput ? ["inherit", "inherit", "inherit"] : ["ignore", "pipe", "pipe"],
-            windowsHide: true,
-        });
-        const forwardSignal = (signal: NodeJS.Signals) => child.kill(signal);
-        process.once("SIGINT", forwardSignal);
-        process.once("SIGTERM", forwardSignal);
-        const cleanup = () => {
-            process.off("SIGINT", forwardSignal);
-            process.off("SIGTERM", forwardSignal);
-        };
-        if (inheritOutput) {
-            child.once("error", (error) => {
-                cleanup();
-                rejectExecution(error);
-            });
-            child.once("close", (exitCode) => {
-                cleanup();
-                resolveExecution({ exitCode: exitCode ?? 1, stdout: "", stderr: "" });
-            });
-            return;
-        }
-        if (!child.stdout || !child.stderr) {
-            cleanup();
-            rejectExecution(new Error("Lite CLI child process did not expose piped output"));
-            return;
-        }
-        let standardOutput: string = "";
-        let standardError: string = "";
-        child.stdout.setEncoding("utf8");
-        child.stderr.setEncoding("utf8");
-        child.stdout.on("data", (chunk: string) => { standardOutput += chunk; });
-        child.stderr.on("data", (chunk: string) => { standardError += chunk; });
-        child.once("error", (error) => {
-            cleanup();
-            rejectExecution(error);
-        });
-        child.once("close", (exitCode) => {
-            cleanup();
-            resolveExecution({ exitCode: exitCode ?? 1, stdout: standardOutput, stderr: standardError });
-        });
+    const child = Bun.spawn(command, {
+        cwd: workdir,
+        env: { ...environment, NO_COLOR: "1" },
+        stdio: inheritOutput ? ["inherit", "inherit", "inherit"] : ["ignore", "pipe", "pipe"],
     });
+
+    const forwardSignal = (signal: NodeJS.Signals) => {
+        try { child.kill(signal); } catch {}
+    };
+    process.once("SIGINT", forwardSignal);
+    process.once("SIGTERM", forwardSignal);
+    const cleanup = () => {
+        process.off("SIGINT", forwardSignal);
+        process.off("SIGTERM", forwardSignal);
+    };
+
+    if (inheritOutput) {
+        try {
+            const exitCode = await child.exited;
+            cleanup();
+            return { exitCode: exitCode ?? 1, stdout: "", stderr: "" };
+        } catch (error) {
+            cleanup();
+            throw error;
+        }
+    }
+
+    try {
+        const [stdout, stderr, exitCode] = await Promise.all([
+            child.stdout ? new Response(child.stdout).text() : Promise.resolve(""),
+            child.stderr ? new Response(child.stderr).text() : Promise.resolve(""),
+            child.exited,
+        ]);
+        cleanup();
+        return { exitCode: exitCode ?? 1, stdout, stderr };
+    } catch (error) {
+        cleanup();
+        throw error;
+    }
 }
 
 async function executeLiteCli(
