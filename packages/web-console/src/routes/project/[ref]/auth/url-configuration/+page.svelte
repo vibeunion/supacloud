@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { apiClient } from "$lib/api";
-  import { authApiResponseMessage, readAuthApiPayload } from "../../auth-api-response";
+  import { createAuthUrlConfigClient, type AuthUrlConfigInput } from "$lib/auth-url-config";
 
   import { page } from "$app/state";
   import { t } from "svelte-i18n";
@@ -11,20 +10,27 @@
   let saveMsg = $state<string | null>(null);
   let siteUrlError = $state<string | null>(null);
 
-  const projectRef = $derived(page.params.ref);
+  const projectRef = $derived(page.params.ref ?? "");
   const queryClient = useQueryClient();
+  const mutationScope = $derived({ projectRef, controller: new AbortController() });
+  $effect(() => {
+    const scope = mutationScope;
+    newUrl = "";
+    siteUrl = "";
+    redirectUrls = [];
+    saveMsg = null;
+    siteUrlError = null;
+    return () => scope.controller.abort();
+  });
+  function ownsMutation(scope: typeof mutationScope): boolean {
+    return scope === mutationScope && !scope.controller.signal.aborted;
+  }
 
   const urlConfigQuery = createQuery(() => ({
-    queryKey: ["auth_config", projectRef],
-    queryFn: async () => {
-      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`);
-      if (!res.ok) throw new Error($t("AuthUrlConfiguration.load_failed"));
-      const config = await res.json();
-      const siteUrlValue = config.site_url || config.SITE_URL || "";
-      const uris = config.uri_allow_list || config.URI_ALLOW_LIST || config.REDIRECT_URLS || "";
-      const redirectUrlsValue = uris ? uris.split(",").map((u: string) => u.trim()).filter(Boolean) : [];
-      return { siteUrl: siteUrlValue, redirectUrls: redirectUrlsValue };
-    }
+    queryKey: ["auth_url_config", projectRef],
+    enabled: Boolean(projectRef),
+    retry: false,
+    queryFn: ({ signal }) => createAuthUrlConfigClient(projectRef).read(signal),
   }));
 
   let siteUrl = $state("");
@@ -43,7 +49,6 @@
     if (!url) return;
     if (redirectUrls.includes(url)) {
       saveMsg = `❌ ${$t("Auth.redirect_url_duplicate")}`;
-      setTimeout(() => saveMsg = null, 4000);
       return;
     }
     redirectUrls = [...redirectUrls, url];
@@ -55,37 +60,31 @@
   }
 
   const saveConfigMutation = createMutation(() => ({
-    mutationFn: async () => {
-      const res = await apiClient(`/v1/projects/${projectRef}/auth/config`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          site_url: siteUrl,
-          uri_allow_list: redirectUrls.join(","),
-        })
-      });
-      const payload = await readAuthApiPayload(res);
-      if (!res.ok) throw new Error(authApiResponseMessage(payload, res.statusText || $t("AuthUrlConfiguration.save_failed")));
-      return payload;
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["auth_config", projectRef] });
+    retry: false,
+    mutationFn: ({ scope, input }: { scope: typeof mutationScope; input: AuthUrlConfigInput }) =>
+      createAuthUrlConfigClient(scope.projectRef).update(input, scope.controller.signal),
+    onSuccess: (_result, { scope }) => {
+      if (!ownsMutation(scope)) return;
+      queryClient.invalidateQueries({ queryKey: ["auth_url_config", scope.projectRef] });
       siteUrlError = null;
       saveMsg = `✅ ${$t("AuthUrlConfiguration.save_success")}`;
-      setTimeout(() => saveMsg = null, 4000);
     },
-    onError: (err: unknown) => {
+    onError: (err: unknown, { scope }) => {
+      if (!ownsMutation(scope)) return;
       const message = err instanceof Error ? err.message : String(err);
       siteUrlError = message.includes("site_url") ? message : null;
       saveMsg = `❌ ${$t("AuthUrlConfiguration.save_failed")}: ${message}`;
-      setTimeout(() => saveMsg = null, 4000);
     }
   }));
 
   async function saveConfig() {
+    if (saveConfigMutation.isPending || !projectRef || !urlConfigQuery.isSuccess) return;
     saveMsg = null;
     siteUrlError = null;
-    saveConfigMutation.mutate();
+    saveConfigMutation.mutate({
+      scope: mutationScope,
+      input: { site_url: siteUrl, uri_allow_list: redirectUrls.join(",") },
+    });
   }
 </script>
 
@@ -95,7 +94,7 @@
       <h1 class="text-2xl font-bold">{$t("AuthUrlConfiguration.title")}</h1>
       <p class="text-sm text-muted-foreground mt-1">{$t("AuthUrlConfiguration.subtitle")}</p>
     </div>
-    <button onclick={saveConfig} disabled={saveConfigMutation.isPending}
+    <button onclick={saveConfig} disabled={saveConfigMutation.isPending || !projectRef || !urlConfigQuery.isSuccess}
       class="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-brand text-white hover:bg-brand/90 transition-colors disabled:opacity-50">
       {#if saveConfigMutation.isPending}<Loader2 size={14} class="animate-spin" />{:else}<Save size={14} />{/if}
       {$t("Common.save")}
@@ -108,7 +107,9 @@
     </div>
   {/if}
 
-  {#if isLoading}
+  {#if urlConfigQuery.isError}
+    <p role="alert" class="text-sm text-destructive">{$t("AuthUrlConfiguration.load_failed")}</p>
+  {:else if isLoading}
     <div class="rounded-xl border bg-card p-6 flex flex-col items-center justify-center py-24 text-muted-foreground gap-3">
       <Loader2 size={32} class="animate-spin text-brand opacity-50" />
     </div>

@@ -128,6 +128,39 @@ or all Studio forms. Dynamic table writes remain disabled. Other forms, generic
 SVAdmin mutation contracts, and automatic full-route client generation remain
 separate work. No upstream SVAdmin change or SDK release is required here.
 
+### Studio Auth URL configuration
+
+The URL configuration form derives writable inputs from the Management API's
+pure schema and uses a generated copy of its URL validator. Regenerate both with
+`node scripts/generate-auth-url-config-contract.mjs`; `--check` detects drift.
+SVAdmin snapshots the closed input before normalization. A local singleton record
+ID is never transmitted. Reads accept existing uppercase aliases, project only
+URL fields, and reject malformed field types. Writes require a canonical receipt
+whose URL strings exactly match the normalized request.
+
+The generic Auth PATCH route deliberately retains its existing validation and
+structured 400 responses; this is not whole-route static type inference.
+The form uses a dedicated query key, disables mutation retries, and cancels
+captured scopes so late A-to-B-to-A completions cannot alter the current draft.
+Cancellation still does not imply server rollback.
+
+Focused verification:
+
+```sh
+# From packages/web-console
+bun test 'src/routes/project/[ref]/auth/url-configuration/page.test.ts'
+# From packages/management-api
+bun test tests/unit/auth-config-boundary.routes.test.ts
+# From repository root
+node scripts/generate-auth-url-config-contract.mjs --check
+```
+
+These tests cover input/result types, schema drift, malformed receipts, exact
+payloads, credentials, duplicate submission, retry suppression and stale scope
+completion. The compiled Svelte page uses mocked HTTP; backend route tests run
+separately. This is not a browser-to-live-backend or production acceptance claim.
+SMTP, hooks and other unrelated forms remain outside this scoped migration.
+
 ### Web Console upgrade baseline
 
 The Web Console currently tracks the published SVAdmin line:
