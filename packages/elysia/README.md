@@ -704,12 +704,10 @@ const app = registerElysiaRoute(new Elysia(), route);
 The callback is typed from the contract (including decoded transforms and
 declared response statuses). Cookie values retain Elysia's native shape, so a
 declared `session: t.String()` is read as `cookie.session.value`.
-`registerElysiaRoute` returns the fluent result of `app.method(...)`, so the
-registered route stays part of the instance's static route tree: chaining calls
-accumulates route types, and the returned instance can be passed to
-`treaty<typeof app>(app)` for Elysia 2.0/Eden end-to-end inference. The
-compiler-generated client still remains the source of transport types for
-compiled modules, whose route descriptors are only known at runtime.
+`registerElysiaRoute` returns the same instance and preserves its existing type.
+Chaining registers routes at runtime but does not add those routes to Eden's
+static route tree. Use the contract's typed client or the compiler-generated
+client for transport types.
 
 When no schema declares `query` or `headers`, the handler context falls back to
 Elysia's native `Record<string, string | undefined>` (not a narrower `string`),

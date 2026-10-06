@@ -459,10 +459,8 @@ export function defineElysiaRoute<
 /**
  * Register a contract-bound route while preserving Elysia's fluent app API.
  *
- * The return value is the *fluent* result of `app.method(...)`, so the route is
- * added to the caller's static route tree. A consumer can chain
- * `registerElysiaRoute(app, route)` and still hand the result to
- * `treaty<typeof app>(app)` for end-to-end Eden type inference.
+ * Runtime registration preserves the caller's existing instance type. It does
+ * not add the contract to Eden's static route tree.
  */
 export function registerElysiaRoute<
   const App extends AnyElysia,
@@ -472,7 +470,7 @@ export function registerElysiaRoute<
 >(
   app: App,
   route: ElysiaRouteDefinition<Method, Path, Schemas>,
-): ReturnType<App["method"]> {
+): App {
   // Elysia's fluent instance type widens after registration. The helper has
   // already established the contract-specific handler type, so keep the
   // contract handler's own decoding while crossing that mutable fluent boundary.
@@ -484,12 +482,13 @@ export function registerElysiaRoute<
     }
     return value;
   };
-  return app.method(
+  app.method(
     route.method,
     route.path,
     toElysiaRouteSchema(route.contract),
     handler as ((context: unknown) => unknown),
-  ) as ReturnType<App["method"]>;
+  );
+  return app;
 }
 
 export class SchemaContractError extends Error {

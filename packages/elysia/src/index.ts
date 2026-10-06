@@ -1190,9 +1190,10 @@ export function createModulePlugin<
   // the catch-all below still handles ParseError/ValidationError and unknown
   // failures. Both lanes share `mapError`, so `errorMapper` observes every
   // error exactly once regardless of which entry served it.
-  plugin.error(ApplicationError, ({ error, request }) => mapError(error, error.code, request));
+  plugin.error(ApplicationError, ({ error, request }) =>
+    mapError(error, frameworkErrorCode(error), request));
   plugin.error(SchemaContractError, ({ error, request }) =>
-    mapError(error, error.code, request));
+    mapError(error, frameworkErrorCode(error), request));
   plugin.error(({ error, request }) => mapError(error, frameworkErrorCode(error), request));
 
   // Compiled descriptors carry runtime schemas, not native literal route types.
