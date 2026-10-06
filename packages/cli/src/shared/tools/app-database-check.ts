@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -25,12 +24,13 @@ export function checkAppDatabaseSources(projectRoot: string): AppDatabaseCheck |
   const name = "database-source-contracts";
   try {
     // Resolve on the host runtime: a compiled CLI has its own embedded module filesystem.
-    const result = spawnSync(process.versions.bun ? "bun" : process.execPath, [
+    const result = Bun.spawnSync([
+      process.versions.bun ? "bun" : process.execPath,
       ...(process.versions.bun ? ["--no-env-file"] : ["--input-type=module"]),
       "--eval", CHECK_ENTRY, "--", root,
-    ], { cwd: root, encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024 });
-    if (result.error) throw result.error;
-    const report: unknown = JSON.parse(result.stdout);
+    ], { cwd: root, timeout: 30_000 });
+    const stdout = result.stdout ? result.stdout.toString() : "";
+    const report: unknown = JSON.parse(stdout);
     if (!report || typeof report !== "object" || !("scope" in report)
       || report.scope !== "local-source-contracts" || !("ok" in report)
       || typeof report.ok !== "boolean" || !("findings" in report) || !Array.isArray(report.findings)) {
@@ -42,8 +42,8 @@ export function checkAppDatabaseSources(projectRoot: string): AppDatabaseCheck |
         || !("message" in finding) || typeof finding.message !== "string") throw new Error("Invalid source finding");
       messages.push(`${finding.file}: ${finding.message}`);
     }
-    return { name, ok: result.status === 0 && report.ok && !messages.length,
-      detail: messages.join("\n") || (result.status === 0 && report.ok ? "Offline database contracts and boundaries are current" : "Database source check failed") };
+    return { name, ok: (result.exitCode === 0 || result.success) && report.ok && !messages.length,
+      detail: messages.join("\n") || ((result.exitCode === 0 || result.success) && report.ok ? "Offline database contracts and boundaries are current" : "Database source check failed") };
   } catch {
     return { name, ok: false, detail: "Cannot run the project database checker. Install the project runtime and @supacloud/db with source-contracts support, then run `supacloud-db check --root .` for diagnostics." };
   }

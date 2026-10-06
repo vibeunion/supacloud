@@ -41,7 +41,8 @@
     "typebox": "1.3.34"
   },
   "overrides": {
-    "@supacloud/delivery": "file:../delivery"
+    "@supacloud/delivery": "file:../delivery",
+    "@graphql-tools/utils": "^12.0.3"
   },
   "devDependencies": {
     "@supacloud/elysia": "^0.23.1",

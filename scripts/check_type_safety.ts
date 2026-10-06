@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, symlinkSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, rmSync, symlinkSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
@@ -103,8 +103,18 @@ function linkBuiltDist(depDir: string) {
     const linked = join(root, "packages", pkg, "node_modules", ...parts);
     if (!existsSync(linked)) continue;
     const target = join(linked, "dist");
-    if (existsSync(target)) continue;
-    symlinkSync(dist, target);
+    try {
+      const stat = lstatSync(target);
+      if (stat.isSymbolicLink()) {
+        try {
+          if (readlinkSync(target) === dist) continue;
+        } catch {}
+      }
+      rmSync(target, { recursive: true, force: true });
+    } catch {}
+    try {
+      symlinkSync(dist, target);
+    } catch {}
   }
 }
 

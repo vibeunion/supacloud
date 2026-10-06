@@ -64,6 +64,7 @@
     "dompurify": "3.4.16",
     "esbuild": "0.28.2",
     "joi": "18.2.6",
-    "undici": "8.10.2"
+    "undici": "8.10.2",
+    "source-map-js": "^1.2.2"
   }
 }
