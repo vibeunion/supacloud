@@ -116,6 +116,10 @@
           "type": "json",
           "path": "/packages/cli/src/shared/tools/starter-metadata.json",
           "jsonpath": "$.packages.app.version"
+        },
+        {
+          "type": "generic",
+          "path": "/packages/compiler/src/migration-app-version.ts"
         }
       ]
     },
@@ -148,6 +152,10 @@
           "type": "json",
           "path": "/packages/cli/src/shared/tools/starter-metadata.json",
           "jsonpath": "$.packages.elysia.version"
+        },
+        {
+          "type": "generic",
+          "path": "/packages/compiler/src/migration-elysia-version.ts"
         }
       ]
     },
