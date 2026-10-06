@@ -112,6 +112,10 @@ export interface CompiledModule {
     deps: Record<string, unknown>,
     imported: Record<string, Record<string, unknown>>,
   ): Record<string, unknown>;
+  /** Initializes application-scoped instances owned by this module. */
+  initializeServices?(services: Record<string, unknown>): Promise<void>;
+  /** Destroys application-scoped instances owned by this module. */
+  destroyServices?(services: Record<string, unknown>): Promise<void>;
   createRequestScope?(
     services: Record<string, unknown>,
     ctx: unknown,
@@ -198,6 +202,53 @@ function destroyScopeInstances(
   scopeDestructions.set(scope, destruction);
   return destruction;
 }
+
+type CompiledServiceLifecycleEntry = { key: string; index?: number };
+
+async function initializeServiceInstances(
+  services: Record<string, unknown>,
+  plan: readonly CompiledServiceLifecycleEntry[],
+): Promise<void> {
+  const seen = new Set<unknown>();
+  for (const entry of plan) {
+    const value = services[entry.key];
+    const instance = entry.index === undefined
+      ? value
+      : Array.isArray(value) ? value[entry.index] : undefined;
+    if (seen.has(instance)) continue;
+    seen.add(instance);
+    if (!isRecord(instance) || !isFunction(instance.onInit)) continue;
+    await instance.onInit();
+  }
+}
+
+async function destroyServiceInstances(
+  services: Record<string, unknown>,
+  plan: readonly CompiledServiceLifecycleEntry[],
+): Promise<void> {
+  const errors: unknown[] = [];
+  const seen = new Set<unknown>();
+  for (const entry of [...plan].reverse()) {
+    const value = services[entry.key];
+    const instance = entry.index === undefined
+      ? value
+      : Array.isArray(value) ? value[entry.index] : undefined;
+    if (seen.has(instance)) continue;
+    seen.add(instance);
+    if (!isRecord(instance)) continue;
+    const hook = isFunction(instance.onDestroy)
+      ? instance.onDestroy
+      : isFunction(instance.ngOnDestroy) ? instance.ngOnDestroy : undefined;
+    if (!hook) continue;
+    try {
+      await hook.call(instance);
+    } catch (error) {
+      errors.push(error);
+    }
+  }
+  if (errors.length > 0) throw new AggregateError(errors, "Application service destruction failed");
+}
+
 
 export type CompiledApplicationModule = Omit<CompiledModule, "name" | "createServices"> & (
   | { name: "webhook"; createServices: typeof createWebhookServices }
