@@ -93,6 +93,98 @@ delivery and cleanup when upgrading. CRUD/auth providers need not change.
 
 ## Next integration steps
 
+### Studio Auth form coverage
+
+The project Auth page's create-user and invite-user forms now consume a
+browser-only copy of the Management API's pure auth mutation schemas.
+`node scripts/generate-auth-user-contract.mjs` regenerates that file;
+`--check` checks it without writing. The focused web-console test also compares
+the source and generated contract, so schema drift fails CI.
+
+The route handlers use the same input schemas and validate successful GoTrue
+responses. The form client derives its input types from an explicit writable
+subset (not the user record), rejects extra fields before sending, and validates
+the result before triggering success feedback. The existing Studio cookie
+transport is retained; mutations have no automatic retry. A captured project
+scope prevents late results from refreshing a different project's table.
+Cancellation does not prove rollback of a dispatched write.
+SVAdmin's native `parseContractCreateInput` snapshots both forms before dispatch
+and rejects accessors and serialization hooks. Mutation receipts expose only
+the closed public user record (`id`, optional `email` and `phone`).
+
+Acceptance scenarios:
+
+- Given a create or invite form, when it submits valid input, then its fixed
+  tenant route receives one request and the result has a validated string ID.
+- Given missing or incorrectly typed fields, when the consumer is compiled or
+  untyped input is submitted, then it fails before the transport is called.
+- Given a malformed successful response or an API failure, when the response
+  arrives, then the form client rejects it and does not retry the write.
+- Given a pending mutation, when the project changes or the page is destroyed,
+  then the old scope is cancelled and its callbacks cannot refresh the new view.
+
+This is coverage of two specific routes, not all Management API business routes
+or all Studio forms. Dynamic table writes remain disabled. Other forms, generic
+SVAdmin mutation contracts, and automatic full-route client generation remain
+separate work. No upstream SVAdmin change or SDK release is required here.
+
+### Studio Auth URL configuration
+
+The URL configuration form derives writable inputs from the Management API's
+pure schema and uses a generated copy of its URL validator. Regenerate both with
+`node scripts/generate-auth-url-config-contract.mjs`; `--check` detects drift.
+SVAdmin snapshots the closed input before normalization. A local singleton record
+ID is never transmitted. Reads accept existing uppercase aliases, project only
+URL fields, and reject malformed field types. Writes require a canonical receipt
+whose URL strings exactly match the normalized request.
+
+The generic Auth PATCH route deliberately retains its existing validation and
+structured 400 responses; this is not whole-route static type inference.
+The form uses a dedicated query key, disables mutation retries, and cancels
+captured scopes so late A-to-B-to-A completions cannot alter the current draft.
+Cancellation still does not imply server rollback.
+
+Focused verification:
+
+```sh
+# From packages/web-console
+bun test 'src/routes/project/[ref]/auth/url-configuration/page.test.ts'
+# From packages/management-api
+bun test tests/unit/auth-config-boundary.routes.test.ts
+# From repository root
+node scripts/generate-auth-url-config-contract.mjs --check
+```
+
+These tests cover input/result types, schema drift, malformed receipts, exact
+payloads, credentials, duplicate submission, retry suppression and stale scope
+completion. The compiled Svelte page uses mocked HTTP; backend route tests run
+separately. This is not a browser-to-live-backend or production acceptance claim.
+SMTP, hooks and other unrelated forms remain outside this scoped migration.
+
+### Web Console upgrade baseline
+
+The Web Console currently tracks the published SVAdmin line:
+
+- `@svadmin/core` `0.59.0`
+- `@svadmin/ui` `0.82.0`
+- `@svadmin/elysia` `0.14.3`
+- `@svadmin/sveltekit` `0.13.0`
+- `@svadmin/ai-elements` `0.11.0`
+
+This release line requires SvelteKit 3, so the Console also migrated its
+adapter configuration into the Vite `sveltekit` plugin and moved page state
+consumers from `$app/stores` to `$app/state`. The legacy TypeBox 0.34 marker
+bridge was removed because SVAdmin now consumes TypeBox 1.x directly.
+Fixed schemas use the strict `defineResource` entrypoint; only schemas built
+from live database column metadata retain a separate dynamic boundary.
+`bun run check` and `bun run build` are the upgrade gates; the latter may still
+report existing bundle-size and ineffective dynamic-import warnings.
+
+Local Chromium acceptance used mocked HTTP responses, not production data:
+the Auth user list rendered, a valid create submission closed the form and
+showed success, and an invite response with a numeric ID retained the draft
+and showed failure. These checks are not deployment or live backend acceptance.
+
 1. Export browser-safe public operation contracts and generated clients without
    server implementation imports. Do not derive writable fields from table shape.
 2. Bind those artifacts to existing svadmin resource/command contracts. Their

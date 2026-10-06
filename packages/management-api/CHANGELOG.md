@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.97.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.97.0...management-api-v0.97.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **web-console:** enforce typed auth URL configuration contract ([#1663](https://github.com/vibeunion/supacloud/issues/1663)) ([958efa9](https://github.com/vibeunion/supacloud/commit/958efa9a87fdb143578343a8946b1e5e4d248d71))
+
+## [0.97.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.96.0...management-api-v0.97.0) (2026-10-05)
+
+
+### Features
+
+* **web-console:** upgrade svadmin and type auth mutations ([#1662](https://github.com/vibeunion/supacloud/issues/1662)) ([b7bc46c](https://github.com/vibeunion/supacloud/commit/b7bc46cb3aeb57decd9265699cc66a6dd8c0d4ea))
+
+## [0.96.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.95.0...management-api-v0.96.0) (2026-10-05)
+
+
+### Features
+
+* **elysia:** Elysia 2 AOT evaluation and end-to-end typing architecture ([#1654](https://github.com/vibeunion/supacloud/issues/1654)) ([39ee49f](https://github.com/vibeunion/supacloud/commit/39ee49f760e85e789c43c1d18cf5729db592f6bc))
+
+
+### Miscellaneous Chores
+
+* **deps:** complete @sinclair/typebox to typebox 1.3.34 migration ([#1655](https://github.com/vibeunion/supacloud/issues/1655)) ([87d1133](https://github.com/vibeunion/supacloud/commit/87d1133c0fa0eadf145afc6c3747f693e3e36200))
+
 ## [0.95.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.94.0...management-api-v0.95.0) (2026-10-05)
 
 

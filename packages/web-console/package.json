@@ -2,7 +2,7 @@
   "name": "web-console",
   "license": "Apache-2.0",
   "private": true,
-  "version": "0.47.0",
+  "version": "0.49.1",
   "type": "module",
   "scripts": {
     "dev": "bun --bun vite dev",
@@ -13,8 +13,8 @@
     "check:watch": "svelte-kit sync && svelte-check --tsgo-experimental-api --tsconfig ./tsconfig.json --watch"
   },
   "devDependencies": {
-    "@sveltejs/adapter-static": "^3.0.10",
-    "@sveltejs/kit": "^2.70.3",
+    "@sveltejs/adapter-static": "^4.0.0",
+    "@sveltejs/kit": "^3.0.0",
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tailwindcss/forms": "^0.5.11",
     "@tailwindcss/postcss": "^4.3.3",
@@ -44,13 +44,12 @@
     "vite": "8.3.0"
   },
   "dependencies": {
-    "@sinclair/typebox": "^0.34.52",
     "@supacloud/delivery": "file:../delivery",
-    "@svadmin/ai-elements": "0.10.3",
-    "@svadmin/core": "^0.58.0",
-    "@svadmin/elysia": "0.14.2",
-    "@svadmin/sveltekit": "0.12.2",
-    "@svadmin/ui": "0.81.0",
+    "@svadmin/ai-elements": "0.11.0",
+    "@svadmin/core": "^0.59.0",
+    "@svadmin/elysia": "0.14.3",
+    "@svadmin/sveltekit": "0.13.0",
+    "@svadmin/ui": "0.82.0",
     "@tanstack/svelte-query": "^6.3.0",
     "highlight.js": "^11.12.0",
     "isomorphic-dompurify": "^4.3.0",
@@ -58,10 +57,10 @@
     "marked": "^18.0.13",
     "marked-highlight": "^2.2.4",
     "monaco-editor": "^0.57.0",
-    "svelte-i18n": "^4.0.1"
+    "svelte-i18n": "^4.0.1",
+    "typebox": "1.3.34"
   },
   "overrides": {
-    "cookie": "0.7.2",
     "dompurify": "3.4.16",
     "esbuild": "0.28.2",
     "joi": "18.2.6",

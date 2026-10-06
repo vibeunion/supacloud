@@ -2627,7 +2627,7 @@ describe("ssh admin tool", () => {
                 .rejects.toThrow("keep_latest");
         }
         expect(() => tool.invoke({ action: "backup_cleanup_plan", before: "2026-09-03", keep_latest: "2" }))
-            .toThrow("Expected number");
+            .toThrow("must be number");
         await expect(tool.invoke({ action: "backup_cleanup_apply", before: "2026-09-03" }))
             .rejects.toThrow("plan_sha256");
         await expect(tool.invoke({

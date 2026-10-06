@@ -26,7 +26,7 @@ jobs:
           git rev-parse HEAD
           bun --version
           status=0
-          for package in contracts commands delivery compiler db app supacloud-js testing elysia cli; do
+          for package in contracts commands delivery compiler db app query supacloud-js testing elysia cli; do
             (cd "packages/$package" && bun install --frozen-lockfile --ignore-scripts) || status=1
           done
           exit "$status"

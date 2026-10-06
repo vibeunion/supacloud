@@ -1,5 +1,5 @@
-import { Type, type Static } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
+import { Type, type Static } from 'typebox';
+import { Value } from 'typebox/value';
 
 const Text = Type.String({ minLength: 1, maxLength: 256, pattern: '^\\S(?:.*\\S)?$' });
 const Version = Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER });

@@ -14,8 +14,8 @@ const args = process.argv.slice(2);
 assert.ok(args.length === 0 || (args.length === 1 && args[0] === '--sdk-only'),
   'Usage: esm-package.acceptance.mjs [--sdk-only]');
 const sdkOnly = args[0] === '--sdk-only';
-const directories = sdkOnly ? ['contracts', 'supacloud-js']
-  : ['contracts', 'delivery', 'app', 'supacloud-js', 'compiler'];
+const directories = sdkOnly ? ['contracts', 'query', 'supacloud-js']
+  : ['contracts', 'delivery', 'app', 'query', 'supacloud-js', 'compiler'];
 const publicConsumers = new Set(['@supacloud/app', '@supacloud/js', '@supacloud/compiler']);
 const scratch = await mkdtemp(join(tmpdir(), 'supacloud-esm-consumer-'));
 const env = { ...process.env };

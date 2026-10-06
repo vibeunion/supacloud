@@ -302,7 +302,7 @@ generated client:
 
 ```ts
 import { defineRouteContract, type RouteHandler } from "@supacloud/app";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 
 export const ItemBody = Type.Object({ name: Type.String() });
 export const ItemHeaders = Type.Object({ authorization: Type.String() });

@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import {
     readDeliveryMigrationArchive, buildDeliveryMigrationPlan as deliveryMigrationPlan, type DeliveryMigrationArchive,
 } from "@supacloud/delivery";

@@ -110,10 +110,10 @@
   });
   function select(event: SubmitEvent) {
     event.preventDefault();
-    const url = new URL(page.url);
+    const url = new URL(page.url.href);
     url.searchParams.set("application", application.trim());
     url.searchParams.set("environment", environment.trim());
-    void goto(`${url.pathname}${url.search}`, { noScroll: true });
+    void goto(`${url.pathname}${url.search}`, { reset: false });
   }
   function refresh() {
     untrack(() => { cursor = undefined; previousCursors = []; revision += 1; });

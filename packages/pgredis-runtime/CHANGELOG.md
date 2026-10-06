@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.11.0...pgredis-runtime-v0.12.0) (2026-10-05)
+
+
+### Features
+
+* **elysia:** Elysia 2 AOT evaluation and end-to-end typing architecture ([#1654](https://github.com/vibeunion/supacloud/issues/1654)) ([39ee49f](https://github.com/vibeunion/supacloud/commit/39ee49f760e85e789c43c1d18cf5729db592f6bc))
+
 ## [0.11.0](https://github.com/vibeunion/supacloud/compare/pgredis-runtime-v0.10.1...pgredis-runtime-v0.11.0) (2026-10-02)
 
 

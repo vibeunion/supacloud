@@ -1,6 +1,6 @@
-import type { Static, TSchema } from "@sinclair/typebox";
-import { TypeCompiler } from "@sinclair/typebox/compiler";
-import { Value } from "@sinclair/typebox/value";
+import type { Static, TSchema } from "typebox";
+import { Compile } from "typebox/compile";
+import { Value } from "typebox/value";
 import { createTransactionalCommand } from "./transactional";
 import type { CommandIdentity, ContractDecoder } from "@supacloud/contracts";
 import type { CommandStore } from "./store";
@@ -40,7 +40,7 @@ export type TypeBoxCommandDefinition<
 
 function decoder<Schema extends TSchema>(schema: Schema): ContractDecoder<Static<Schema>> {
   // Isolate the compiled contract from subsequent edits to the caller's schema.
-  const validator = TypeCompiler.Compile(Value.Clone(schema));
+  const validator = Compile(Value.Clone(schema));
   return (value: unknown): Static<Schema> => {
     if (!validator.Check(value)) throw new TypeError("Invalid command schema value");
     return value;

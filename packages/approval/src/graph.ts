@@ -1,5 +1,5 @@
-import { Type, type Static } from '@sinclair/typebox';
-import { Value } from '@sinclair/typebox/value';
+import { Type, type Static } from 'typebox';
+import { Value } from 'typebox/value';
 
 const Key = Type.String({ minLength: 1, maxLength: 100, pattern: '^[a-z][a-z0-9_.-]*$' });
 const Scalar = Type.Union([Type.Null(), Type.Boolean(), Type.Number({ minimum: -1e15, maximum: 1e15 }),

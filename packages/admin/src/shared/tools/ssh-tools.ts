@@ -6,7 +6,7 @@ import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import { TextDecoder } from "node:util";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import { redactSshOutput, SshCommandOutcomeUnknownError, type SshTransport } from "../transports/ssh";
 import {

@@ -1,3 +1,6 @@
+import { Value } from "typebox/value";
+import { authUrlConfigInputSchema } from "../contracts/auth-url-config";
+
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001F\u007F]/;
 const ENCODED_CONTROL_CHARACTER_PATTERN = /%(?:0[0-9a-f]|1[0-9a-f]|7f)/i;
 
@@ -67,7 +70,7 @@ function parseAbsoluteHttpUrl(
 }
 
 function validateSiteUrl(candidate: unknown): string {
-  if (typeof candidate !== "string" || !candidate.trim()) {
+  if (!Value.Check(authUrlConfigInputSchema.properties.site_url, candidate) || !candidate.trim()) {
     throw new AuthUrlConfigValidationError("SITE_URL", "site_url must be a non-empty absolute HTTP(S) URL");
   }
 
@@ -79,7 +82,7 @@ function validateSiteUrl(candidate: unknown): string {
 }
 
 function validateUriAllowList(candidate: unknown): string {
-  if (typeof candidate !== "string") {
+  if (!Value.Check(authUrlConfigInputSchema.properties.uri_allow_list, candidate)) {
     throw new AuthUrlConfigValidationError("URI_ALLOW_LIST", "uri_allow_list must be a comma-separated string of absolute HTTP(S) URLs");
   }
   assertSafeUrlText(candidate, "URI_ALLOW_LIST");

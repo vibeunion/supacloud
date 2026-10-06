@@ -1,6 +1,7 @@
-import { Type, type Static, type TSchema } from '@sinclair/typebox';
-import { defineResource, type ResourceContract } from '@svadmin/core/resource-contract';
+import { Type, type Static, type TSchema } from 'typebox';
+import type { ResourceContract } from '@svadmin/core/resource-contract';
 import type { TableColumnMetadata } from './resources';
+import { defineSvadminResource, defineDynamicSvadminResource, type SvadminResourceContract } from './svadmin-contract';
 
 /**
  * SVAdmin 0.54+ requires a runtime contract for every resource consumed by
@@ -13,11 +14,7 @@ import type { TableColumnMetadata } from './resources';
  */
 const contracts = new Map<string, ResourceContract>();
 
-function memoContract<S extends ResourceContract>(
-  cache: Map<string, S>,
-  key: string,
-  build: () => S,
-): S {
+function memoContract<S extends ResourceContract>(cache: Map<string, S>, key: string, build: () => S): S {
   const existing = cache.get(key);
   if (existing) return existing;
   const contract = build();
@@ -40,34 +37,23 @@ const tenantAuthUsersRecordSchema = Type.Object({
   created_at: nullableText,
   last_sign_in_at: nullableText,
 });
-
 export type TenantTableRecord = Static<typeof tenantTablesRecordSchema>;
 export type TenantAuthUserRecord = Static<typeof tenantAuthUsersRecordSchema>;
-type TenantTablesContract = ResourceContract<{ record: typeof tenantTablesRecordSchema }>;
-type TenantAuthUsersContract = ResourceContract<{ record: typeof tenantAuthUsersRecordSchema }>;
+type TenantTablesContract = SvadminResourceContract<typeof tenantTablesRecordSchema>;
+type TenantAuthUsersContract = SvadminResourceContract<typeof tenantAuthUsersRecordSchema>;
 const tableContracts = new Map<string, TenantTablesContract>();
 const authUserContracts = new Map<string, TenantAuthUsersContract>();
 
-/**
- * Dynamic table schemas cannot satisfy the compile-time `SafeSchema` inference:
- * their property map is built at runtime from live column metadata. The runtime
- * `defineResource` validation still closes and validates the produced schema.
- */
-const defineDynamicResource = defineResource as unknown as (
-  name: string,
-  schemas: { record: TSchema },
-) => ResourceContract;
-
 export function tenantTablesContract(projectRef: string): TenantTablesContract {
   const name = `v1/projects/${projectRef}/database/tables`;
-  return memoContract(tableContracts, name, () => defineResource(name, {
+  return memoContract(tableContracts, name, () => defineSvadminResource(name, {
     record: tenantTablesRecordSchema,
   }));
 }
 
 export function tenantAuthUsersContract(projectRef: string): TenantAuthUsersContract {
   const name = `v1/projects/${projectRef}/auth/users`;
-  return memoContract(authUserContracts, name, () => defineResource(name, {
+  return memoContract(authUserContracts, name, () => defineSvadminResource(name, {
     record: tenantAuthUsersRecordSchema,
   }));
 }
@@ -96,7 +82,7 @@ export function tableRowsContract(
       if (column.column_name === 'id') continue;
       properties[column.column_name] = Type.Optional(databaseValueSchema());
     }
-    return defineDynamicResource(resourceName, { record: Type.Object(properties) });
+    return defineDynamicSvadminResource(resourceName, { record: Type.Object(properties) });
   });
 }
 

@@ -2,6 +2,13 @@ import { parseContractRecord } from '@svadmin/core/resource-contract';
 import { tenantAuthUsersContract, tenantTablesContract } from './contracts';
 import { getTenantResources, type TenantResourceLabels } from './resources';
 import { getResourceList } from './typed-list';
+import { Type } from 'typebox';
+import { defineSvadminResource } from './svadmin-contract';
+
+// @ts-expect-error Fixed contracts cannot hide unconstrained fields.
+defineSvadminResource('unsafe-record', { record: Type.Object({ id: Type.String(), value: Type.Unknown() }) });
+// @ts-expect-error Fixed contracts must declare a required ID.
+defineSvadminResource('missing-id', { record: Type.Object({ email: Type.String() }) });
 
 // Compiled by resources.test.ts; never executed or imported into the application.
 export async function checkResourceInference(labels: TenantResourceLabels) {

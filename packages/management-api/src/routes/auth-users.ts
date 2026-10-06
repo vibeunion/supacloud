@@ -1,5 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { Elysia, t, status } from "elysia";
+import { Value } from "typebox/value";
+import {
+  authUserRoutePrefix, createAuthUserPath, inviteAuthUserPath,
+  createAuthUserSchema, inviteAuthUserSchema, authUserResultSchema,
+} from "../contracts/auth-user-mutations";
 import { config } from "../config";
 import { logger } from "../utils/logger";
 import { projectService } from "../services";
@@ -416,7 +421,7 @@ async function searchGoTrueUsers(ref: string, search: string, page: number, limi
 /**
  * User Management routes — Admin API proxy to GoTrue
  */
-export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth" })
+export const userManagementRoutes = new Elysia({ prefix: authUserRoutePrefix })
   .beforeHandle(requireAuthRuntimeManagement("users"))
   .get(
     "/users",
@@ -504,19 +509,10 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
     }
   )
   .post(
-    "/users",
+    createAuthUserPath,
     {
       params: t.Object({ ref: t.String() }),
-      body: t.Object({
-        email: t.Optional(t.String()),
-        phone: t.Optional(t.String()),
-        password: t.Optional(t.String()),
-        email_confirm: t.Optional(t.Boolean()),
-        phone_confirm: t.Optional(t.Boolean()),
-        user_metadata: t.Optional(t.Any()),
-        app_metadata: t.Optional(t.Any()),
-        ban_duration: t.Optional(t.String()),
-      }, { additionalProperties: true }),
+      body: createAuthUserSchema,
       detail: { tags: ["auth"], summary: "Create user" },
     },
     async ({ params, body, set, request }) => {
@@ -555,20 +551,19 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         return readGoTrueError(res, "Failed to create user");
       }
 
-      return res.json();
+      const result: unknown = await res.json().catch(() => null);
+      if (!Value.Check(authUserResultSchema, result)) {
+        return status(502, { message: "Invalid auth user response", code: "502" });
+      }
+      return result;
     }
   )
 
   .post(
-    "/users/invite",
+    inviteAuthUserPath,
     {
       params: t.Object({ ref: t.String() }),
-      body: t.Object({
-        email: t.String(),
-        user_metadata: t.Optional(t.Any()),
-        app_metadata: t.Optional(t.Any()),
-        redirectTo: t.Optional(t.String()),
-      }, { additionalProperties: true }),
+      body: inviteAuthUserSchema,
       detail: { tags: ["auth"], summary: "Invite user by email" },
     },
     async ({ params, body, set, request }) => {
@@ -603,7 +598,11 @@ export const userManagementRoutes = new Elysia({ prefix: "/v1/projects/:ref/auth
         return readGoTrueError(res, "Failed to invite user");
       }
 
-      return res.json();
+      const result: unknown = await res.json().catch(() => null);
+      if (!Value.Check(authUserResultSchema, result)) {
+        return status(502, { message: "Invalid auth user response", code: "502" });
+      }
+      return result;
     }
   )
 

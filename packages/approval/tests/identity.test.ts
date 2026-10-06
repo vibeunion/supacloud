@@ -46,7 +46,7 @@ test('does not treat the JWT subject as the business actor', () => {
 
 test('rejects unverified or cross-project contexts before binding access', () => {
   expect(() => createApprovalIdentityFromSupAuth({
-    ...context, identity: { ...context.identity, authenticated: false as false },
+    ...context, identity: { ...context.identity, authenticated: false as unknown as true },
   }, { applicationId: 'xigu-fa', actorId: 'member' })).toThrow('APPROVAL_IDENTITY_NOT_VERIFIED');
   expect(() => createApprovalIdentityFromSupAuth(context, {
     applicationId: 'xigu-fa', projectId: 'project-other', actorId: 'member',

@@ -13,8 +13,20 @@ import {
 import type { TenantAuthUserRecord, TenantTableRecord } from "./contracts";
 import { tenantTablesContract, tenantAuthUsersContract } from "./contracts";
 import { getResourceList } from "./typed-list";
+import { Type } from "typebox";
+import { parseContractRecord } from "@svadmin/core/resource-contract";
+import { defineSvadminResource } from "./svadmin-contract";
 
 describe("buildResourceRegistry", () => {
+  test("uses native TypeBox contracts without mutating schemas with legacy markers", () => {
+    const schema = Type.Object({ id: Type.String(), email: Type.Optional(Type.String()) });
+    const contract = defineSvadminResource("native-users", { record: schema });
+    expect(Object.getOwnPropertySymbols(schema)).toEqual([]);
+    expect(Object.getOwnPropertySymbols(schema.properties.id)).toEqual([]);
+    expect(parseContractRecord(contract, { id: "user-1" })).toEqual({ id: "user-1" });
+    expect(() => parseContractRecord(contract, { id: "user-1", email: 42 })).toThrow();
+    expect(() => parseContractRecord(contract, { id: "user-1", admin: true })).toThrow();
+  });
   const englishLabels: ResourceLabels = {
     projects: "Projects",
     referenceId: "Reference ID",

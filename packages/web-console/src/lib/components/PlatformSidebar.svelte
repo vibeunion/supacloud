@@ -14,7 +14,7 @@
     SunMoon,
     Terminal,
   } from "lucide-svelte";
-  import { page } from "$app/stores";
+  import { page } from "$app/state";
   import { t, locale } from "svelte-i18n";
   import { mode, toggleMode } from "mode-watcher";
 
@@ -54,7 +54,7 @@
   ];
 
   function isActive(href: string) {
-    return $page.url.pathname === href || $page.url.pathname.startsWith(`${href}/`);
+    return page.url.pathname === href || page.url.pathname.startsWith(`${href}/`);
   }
 </script>
 
