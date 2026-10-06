@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.68.0](https://github.com/vibeunion/supacloud/compare/cli-v0.67.1...cli-v0.68.0) (2026-10-06)
+
+
+### Features
+
+* **elysia,compiler:** upgrade to elysia 2.0.0-beta.21 and document aot compiler integration ([#1665](https://github.com/vibeunion/supacloud/issues/1665)) ([a4ae346](https://github.com/vibeunion/supacloud/commit/a4ae346053e004a82b8e552165b9419d9fd418d8))
+
 ## [0.67.1](https://github.com/vibeunion/supacloud/compare/cli-v0.67.0...cli-v0.67.1) (2026-10-05)
 
 
