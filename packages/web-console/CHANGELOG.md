@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.49.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.49.0...web-console-v0.49.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **web-console:** enforce typed auth URL configuration contract ([#1663](https://github.com/vibeunion/supacloud/issues/1663)) ([958efa9](https://github.com/vibeunion/supacloud/commit/958efa9a87fdb143578343a8946b1e5e4d248d71))
+
 ## [0.49.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.48.0...web-console-v0.49.0) (2026-10-05)
 
 
