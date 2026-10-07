@@ -26,7 +26,11 @@ jobs:
           bun install --cwd packages/worker --frozen-lockfile
       - name: Worker policy and existing adapter regressions
         run: bun run --cwd packages/worker test
+      - name: Prepare immutable native PGMQ fixture
+        timeout-minutes: 3
+        run: timeout --kill-after=10s 120s docker pull ghcr.io/pgmq/pg18-pgmq@sha256:2dd8ac92a1c0eb121d6ea5b12b3f7c015813ae58945a940451d4683afd5a19c2
       - name: Native PGMQ job-key concurrency and mirror consistency
-        run: bun test packages/management-api/tests/unit/pgmq-rpc-idempotency.test.ts
+        timeout-minutes: 3
+        run: timeout --kill-after=10s 150s bun test packages/management-api/tests/unit/pgmq-rpc-idempotency.test.ts
       - name: Verification must not edit tracked files
         run: git diff --exit-code
