@@ -134,6 +134,11 @@
       "signature": "export declare function camelName(token: string): string;"
     },
     {
+      "name": "checkGraphqlCompatibility",
+      "kind": "value",
+      "signature": "export declare function checkGraphqlCompatibility(schema: GraphQLSchema, documents: readonly {\n    source: string;\n    path?: string;\n}[], policy?: GraphqlGovernancePolicy): Omit<GraphqlCompatibilityReport, \"schema\">;"
+    },
+    {
       "name": "checkProject",
       "kind": "value",
       "signature": "export declare function checkProject(options: CompileOptions): Promise<CheckProjectResult>;"
@@ -257,6 +262,11 @@
       "name": "createReleaseEvidence",
       "kind": "value",
       "signature": "export declare function createReleaseEvidence(manifestPath: string, target: string): Promise<ReleaseEvidence>;"
+    },
+    {
+      "name": "createRoleSnapshotReport",
+      "kind": "value",
+      "signature": "export declare function createRoleSnapshotReport(roles: readonly {\n    role: string;\n    path: string;\n    source: string;\n}[]): GraphqlRoleSnapshotReport;"
     },
     {
       "name": "DatabaseContractsOptions",
@@ -397,6 +407,11 @@
       "name": "DiagnosticRepair",
       "kind": "type",
       "signature": "export interface DiagnosticRepair {\n    code: string;\n    errorCode?: string;\n    file?: string;\n    line?: number;\n    type: DiagnosticFix[\"type\"];\n    targetFile: string;\n    fix: DiagnosticFix;\n    readiness: \"preview\" | \"input-required\" | \"manual\";\n    reason: string;\n}"
+    },
+    {
+      "name": "diffGraphqlSchemas",
+      "kind": "value",
+      "signature": "export declare function diffGraphqlSchemas(previous: GraphQLSchema, current: GraphQLSchema): GraphqlSchemaDiff;"
     },
     {
       "name": "diffOpenApiDocuments",
@@ -609,14 +624,64 @@
       "signature": "export declare function getModuleBoundaryProfile(name: ModuleBoundaryPresetName): ModuleBoundaryProfile;"
     },
     {
+      "name": "GraphqlCompatibilityReport",
+      "kind": "type",
+      "signature": "export interface GraphqlCompatibilityReport {\n    ok: boolean;\n    schema: {\n        path: string;\n        schemaHash: string;\n        schemaNormalizedHash: string;\n    };\n    features: GraphqlFeatureMatrix;\n    operations: GraphqlOperationReport[];\n    diagnostics: GraphqlGovernanceDiagnostic[];\n}"
+    },
+    {
       "name": "GraphqlContractSummary",
       "kind": "type",
-      "signature": "export interface GraphqlContractSummary {\n    schema: string;\n    schemaHash?: string;\n    schemaNormalizedHash?: string;\n    documents: string[];\n    operations: Array<{\n        name: string;\n        file: string;\n        line: number;\n    }>;\n}"
+      "signature": "export interface GraphqlContractSummary {\n    schema: string;\n    schemaHash?: string;\n    schemaNormalizedHash?: string;\n    mode?: \"query-only\" | \"query-mutation\";\n    documents: string[];\n    operations: Array<{\n        name: string;\n        file: string;\n        line: number;\n    }>;\n}"
+    },
+    {
+      "name": "graphqlFeatureMatrix",
+      "kind": "value",
+      "signature": "export declare function graphqlFeatureMatrix(schema: GraphQLSchema): GraphqlFeatureMatrix;"
+    },
+    {
+      "name": "GraphqlFeatureMatrix",
+      "kind": "type",
+      "signature": "export interface GraphqlFeatureMatrix {\n    pgGraphql: \"schema-snapshot\";\n    query: boolean;\n    mutation: boolean;\n    subscription: boolean;\n    relayConnections: boolean;\n    filtering: boolean;\n    ordering: boolean;\n    aggregation: boolean;\n    byPk: boolean;\n    functions: boolean;\n}"
+    },
+    {
+      "name": "GraphqlGovernanceDiagnostic",
+      "kind": "type",
+      "signature": "export interface GraphqlGovernanceDiagnostic {\n    severity: GraphqlSeverity;\n    code: string;\n    message: string;\n    file?: string;\n    line?: number;\n    operation?: string;\n}"
+    },
+    {
+      "name": "GraphqlGovernancePolicy",
+      "kind": "type",
+      "signature": "export interface GraphqlGovernancePolicy {\n    operations?: string[];\n    maxDepth?: number;\n    maxFields?: number;\n    maxComplexity?: number;\n    maxPageSize?: number;\n}"
+    },
+    {
+      "name": "GraphqlOperationReport",
+      "kind": "type",
+      "signature": "export interface GraphqlOperationReport {\n    name: string;\n    operation: \"query\" | \"mutation\" | \"subscription\";\n    depth: number;\n    fields: number;\n    complexity: number;\n    pageSizes: number[];\n    allowed: boolean;\n}"
     },
     {
       "name": "GraphqlOptions",
       "kind": "type",
-      "signature": "export interface GraphqlOptions {\n    typedDocuments?: boolean;\n    schema: string;\n    documents?: string[];\n    scalars?: Record<string, string | {\n        input: string;\n        output: string;\n    }>;\n}"
+      "signature": "export interface GraphqlOptions {\n    typedDocuments?: boolean;\n    mutations?: boolean;\n    schema: string;\n    documents?: string[];\n    scalars?: Record<string, string | {\n        input: string;\n        output: string;\n    }>;\n}"
+    },
+    {
+      "name": "GraphqlRoleSnapshot",
+      "kind": "type",
+      "signature": "export interface GraphqlRoleSnapshot {\n    role: string;\n    schema: string;\n    schemaHash: string;\n    schemaNormalizedHash: string;\n}"
+    },
+    {
+      "name": "GraphqlRoleSnapshotReport",
+      "kind": "type",
+      "signature": "export interface GraphqlRoleSnapshotReport {\n    ok: boolean;\n    roles: GraphqlRoleSnapshot[];\n    diagnostics: GraphqlGovernanceDiagnostic[];\n}"
+    },
+    {
+      "name": "GraphqlSchemaChange",
+      "kind": "type",
+      "signature": "export interface GraphqlSchemaChange {\n    severity: \"breaking\" | \"non-breaking\";\n    code: string;\n    message: string;\n    path: string;\n}"
+    },
+    {
+      "name": "GraphqlSchemaDiff",
+      "kind": "type",
+      "signature": "export interface GraphqlSchemaDiff {\n    ok: boolean;\n    breaking: GraphqlSchemaChange[];\n    nonBreaking: GraphqlSchemaChange[];\n}"
     },
     {
       "name": "IncrementalProgramSession",
@@ -627,6 +692,11 @@
       "name": "inspectRouteContracts",
       "kind": "value",
       "signature": "export declare function inspectRouteContracts(graph: ApplicationGraph): any;"
+    },
+    {
+      "name": "introspectionQuery",
+      "kind": "value",
+      "signature": "export declare function introspectionQuery(): string;"
     },
     {
       "name": "JobNode",
@@ -869,6 +939,11 @@
       "signature": "export declare function readExecutionMetadata(path: string): Promise<unknown>;"
     },
     {
+      "name": "readGraphqlSchema",
+      "kind": "value",
+      "signature": "export declare function readGraphqlSchema(path: string): Promise<{\n    path: string;\n    source: string;\n    schema: GraphQLSchema;\n    schemaHash: string;\n    schemaNormalizedHash: string;\n}>;"
+    },
+    {
       "name": "readOpenApiJson",
       "kind": "value",
       "signature": "export declare function readOpenApiJson(path: string): Promise<OpenApiDocument>;"
@@ -987,6 +1062,11 @@
       "name": "scanProductionSource",
       "kind": "value",
       "signature": "export declare function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic[];"
+    },
+    {
+      "name": "schemaFromSource",
+      "kind": "value",
+      "signature": "export declare function schemaFromSource(source: string, path?: string): GraphQLSchema;"
     },
     {
       "name": "Scope",

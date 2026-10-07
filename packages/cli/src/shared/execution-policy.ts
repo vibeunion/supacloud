@@ -20,7 +20,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         local: ["list"],
     },
     database: {
-        read: ["list_tables", "describe_columns", "list_indexes", "list_constraints", "list_extensions", "extension_catalog", "rls_status", "rls_policies", "list_auth_users", "get_auth_user", "connections", "stats", "slow_queries", "list_migrations", "migration_inventory", "delivery_migration_plan", "project_url", "generate_types", "database_lint", "db_lint", "rpc_catalog", "list_rpcs"],
+        read: ["list_tables", "describe_columns", "list_indexes", "list_constraints", "list_extensions", "extension_catalog", "rls_status", "rls_policies", "list_auth_users", "get_auth_user", "connections", "stats", "slow_queries", "list_migrations", "migration_inventory", "migration_import", "delivery_migration_plan", "project_url", "generate_types", "database_lint", "db_lint", "rpc_catalog", "list_rpcs"],
         local: ["lint_migrations", "lint"],
         write: ["query", "execute", "apply_migration", "push_migrations", "baseline_migrations", "create_table_rls", "enable_extension", "disable_extension"],
     },
