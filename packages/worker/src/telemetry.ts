@@ -77,6 +77,64 @@ export function createWorkerTelemetry() {
 
 export interface QueueHealth { pending: number; oldestAgeSeconds: number }
 
+export interface QueueJobMetrics {
+  enqueued: number;
+  started: number;
+  completed: number;
+  retried: number;
+  unknown: number;
+  oldestPendingAgeSeconds: number;
+}
+
+export function createQueueJobMetrics() {
+  const metrics: QueueJobMetrics = {
+    enqueued: 0, started: 0, completed: 0, retried: 0, unknown: 0,
+    oldestPendingAgeSeconds: 0,
+  };
+  let oldestPendingAt = 0;
+  return {
+    enqueue(at = Date.now()) {
+      metrics.enqueued++;
+      if (oldestPendingAt === 0) oldestPendingAt = at;
+      metrics.oldestPendingAgeSeconds = Math.max(0, (Date.now() - oldestPendingAt) / 1000);
+    },
+    start() {
+      metrics.started++;
+    },
+    complete() {
+      metrics.completed++;
+      oldestPendingAt = metrics.enqueued > metrics.completed ? oldestPendingAt : 0;
+      metrics.oldestPendingAgeSeconds = oldestPendingAt === 0
+        ? 0 : Math.max(0, (Date.now() - oldestPendingAt) / 1000);
+    },
+    retry() {
+      metrics.retried++;
+    },
+    outcomeUnknown() {
+      metrics.unknown++;
+    },
+    snapshot(): QueueJobMetrics {
+      return {
+        ...metrics,
+        oldestPendingAgeSeconds: oldestPendingAt === 0
+          ? 0 : Math.max(0, (Date.now() - oldestPendingAt) / 1000),
+      };
+    },
+    prometheus(queueName: string): string {
+      const label = `queue="${queueName}"`;
+      const current = this.snapshot();
+      return [
+        `scw_queue_jobs_enqueued_total{${label}} ${current.enqueued}`,
+        `scw_queue_jobs_started_total{${label}} ${current.started}`,
+        `scw_queue_jobs_completed_total{${label}} ${current.completed}`,
+        `scw_queue_jobs_retried_total{${label}} ${current.retried}`,
+        `scw_queue_jobs_unknown_total{${label}} ${current.unknown}`,
+        `scw_queue_oldest_pending_age_seconds{${label}} ${current.oldestPendingAgeSeconds}`,
+      ].join("\n") + "\n";
+    },
+  };
+}
+
 /** Loopback-only operational endpoint; no task data, credentials or exception text. */
 export function serveWorkerHealth(options: {
   port: number;

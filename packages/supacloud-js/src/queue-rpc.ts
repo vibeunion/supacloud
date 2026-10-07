@@ -20,6 +20,7 @@ export type SupaCloudQueueSendResult = {
   queue_name: string;
   status: "pending";
   payload: SupaCloudQueueJson;
+  deduplicated?: boolean;
 };
 export type SupaCloudQueueMutationResult = {
   id: string;

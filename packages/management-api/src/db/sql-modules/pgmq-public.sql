@@ -8,6 +8,15 @@ $pgmq_extension$;
 
 CREATE SCHEMA IF NOT EXISTS pgmq_public;
 GRANT USAGE ON SCHEMA pgmq_public TO anon, authenticated, service_role;
+CREATE SCHEMA IF NOT EXISTS supacloud_queue;
+CREATE TABLE IF NOT EXISTS supacloud_queue.job_keys (
+  queue_name text NOT NULL,
+  job_key text NOT NULL,
+  msg_id bigint NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY (queue_name, job_key)
+);
+REVOKE ALL ON TABLE supacloud_queue.job_keys FROM PUBLIC, anon, authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION pgmq_public.require_public_queue(queue_name text)
 RETURNS text
@@ -181,6 +190,49 @@ VOLATILE
 SECURITY DEFINER
 SET search_path = ''
 AS $$ SELECT receipt.msg_id::text FROM pgmq.send_batch(pgmq_public.require_public_queue(queue_name), pgmq_public.require_messages(messages), pgmq_public.require_seconds(sleep_seconds)) AS receipt(msg_id); $$;
+
+-- Additive SupaCloud extension; official send/read/archive/delete contracts stay unchanged.
+CREATE OR REPLACE FUNCTION pgmq_public.send_idempotent(
+  queue_name text, message jsonb, p_job_key text, sleep_seconds integer DEFAULT 0
+)
+RETURNS TABLE (msg_id text, created boolean)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  normalized_queue text := pgmq_public.require_public_queue(queue_name);
+  inserted boolean;
+  sent_id bigint;
+  existing_id bigint;
+BEGIN
+  PERFORM pgmq_public.require_message(message);
+  PERFORM pgmq_public.require_seconds(sleep_seconds);
+  IF p_job_key IS NULL OR p_job_key !~ '^[A-Za-z0-9_.:@/-]{1,200}$' THEN
+    RAISE EXCEPTION 'SUPACLOUD_QUEUE_JOB_KEY_INVALID' USING ERRCODE = '22023';
+  END IF;
+  INSERT INTO supacloud_queue.job_keys(queue_name, job_key, msg_id)
+  VALUES (normalized_queue, p_job_key, 0)
+  ON CONFLICT (queue_name, job_key) DO NOTHING;
+  inserted := FOUND;
+  IF NOT inserted THEN
+    SELECT keys.msg_id INTO existing_id
+    FROM supacloud_queue.job_keys AS keys
+    WHERE keys.queue_name = normalized_queue AND keys.job_key = p_job_key;
+    IF existing_id IS NULL OR existing_id = 0 THEN
+      RAISE EXCEPTION 'SUPACLOUD_QUEUE_JOB_KEY_UNAVAILABLE' USING ERRCODE = '55000';
+    END IF;
+    RETURN QUERY SELECT existing_id::text, false;
+    RETURN;
+  END IF;
+  SELECT receipt.msg_id INTO sent_id
+  FROM pgmq.send(normalized_queue, message, sleep_seconds) AS receipt(msg_id);
+  UPDATE supacloud_queue.job_keys SET msg_id = sent_id
+  WHERE queue_name = normalized_queue AND job_key = p_job_key;
+  RETURN QUERY SELECT sent_id::text, true;
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION pgmq_public.read(queue_name text, sleep_seconds integer, n integer)
 RETURNS TABLE (
