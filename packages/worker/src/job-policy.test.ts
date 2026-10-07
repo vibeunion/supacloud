@@ -6,19 +6,19 @@ import {
   validateJobKey,
 } from "./job-policy.js";
 import { runTaskListOnce } from "./task-list-once.js";
-import { createPgmqWakeup } from "./wakeup.js";
+import { createPgmqWakeup, pgmqWakeupChannel } from "./wakeup.js";
 import { backfillOccurrences, scheduledJobKey } from "./schedule.js";
 
 describe("worker job policy", () => {
   test("normalizes bounded retry policy and calculates exponential delay", () => {
     const policy = normalizeJobPolicy({
-      maxAttempts: 4,
+      maxRetries: 4,
       baseDelaySeconds: 3,
       maxDelaySeconds: 10,
       priority: 7,
     });
     expect(policy).toEqual({
-      maxAttempts: 4,
+      maxRetries: 4,
       baseDelaySeconds: 3,
       maxDelaySeconds: 10,
       priority: 7,
@@ -89,8 +89,8 @@ describe("worker job policy", () => {
     await wakeup.signal("report:42");
     await wakeup.wait(new AbortController().signal);
     expect(signals).toEqual([
-      "supacloud_pgmq_scw_reports:report:42",
-      "wait:supacloud_pgmq_scw_reports",
+      `${pgmqWakeupChannel("scw_reports")}:report:42`,
+      `wait:${pgmqWakeupChannel("scw_reports")}`,
     ]);
   });
 });

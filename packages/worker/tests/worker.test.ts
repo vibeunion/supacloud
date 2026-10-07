@@ -458,11 +458,15 @@ describe("pgflow process adapter", () => {
     for (const concurrency of [0, 33, 1.1, NaN]) {
       expect(() =>
         createPgflowQueueWorker({ ...options, concurrency }, handler),
-        ).toThrow("WORKER_CONFIG_INVALID");
+      ).toThrow("WORKER_CONFIG_INVALID");
     }
     expect(() => createPgflowQueueWorker({ ...options, serial: true, concurrency: 2 }, handler))
       .toThrow("WORKER_SERIAL_CONFIG_INVALID");
     expect(createPgflowQueueWorker({ ...options, serial: true, concurrency: 1 }, handler).state).toBe("idle");
+    expect(createPgflowQueueWorker({ ...options, serial: true, concurrency: undefined }, handler).state).toBe("idle");
+    expect(() => createPgflowQueueWorker({ ...options, serial: "true" as never }, handler)).toThrow("WORKER_SERIAL_CONFIG_INVALID");
+    expect(() => createPgflowQueueWorker({ ...options, retryLimit: 11 }, handler)).toThrow("WORKER_CONFIG_INVALID");
+    expect(() => createPgflowQueueWorker({ ...options, retryLimit: 2, policy: { maxRetries: 3 } }, handler)).toThrow("WORKER_RETRY_POLICY_INVALID");
     expect(() =>
       createPgflowQueueWorker(
         { ...options, connectionString: "https://secret.invalid" },
