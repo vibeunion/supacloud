@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
 import { validateRouteContracts } from "./route-contracts";
 import type { GraphqlArtifacts } from "./graphql";
+import { validateClientSchemaBoundaries } from "./client-schema-boundaries";
 
 function withDefaultGovernance(options: CompileOptions): CompileOptions {
   return options.commandCapabilities === undefined
@@ -36,6 +37,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
   const diagnostics: Diagnostic[] = [
     ...(graph.diagnostics ?? []),
     ...validateGraph(graph, options),
+    ...validateClientSchemaBoundaries(graph, options),
   ];
   if (diagnostics.some((item) => item.code === "runtime-injection-disallowed")) {
     return { diagnostics, graph, written: [] };
@@ -105,6 +107,7 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
   const diagnostics: Diagnostic[] = [
     ...(graph.diagnostics ?? []),
     ...validateGraph(graph, options),
+    ...validateClientSchemaBoundaries(graph, options),
   ];
   if (diagnostics.some((item) => item.code === "runtime-injection-disallowed")) {
     return { diagnostics, graph, upToDate: false, mismatches: ["Runtime DI must be migrated to constructor injection."] };
