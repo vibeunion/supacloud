@@ -18,6 +18,7 @@ import { ApplicationRuntimeAllocations } from "./application-runtime-allocation"
 import { ApplicationRuntimeFiles } from "./application-runtime-files";
 import { createApplicationCompatibilityVerifier } from "./application-compatibility";
 import { createApplicationWorkerRetirementChecks } from "./application-worker-retirement";
+import { ApplicationPreviewService } from "./application-preview.service";
 
 type CompatibilityInput = Parameters<
   NonNullable<ApplicationDeploymentDependencies["verifyCompatibility"]>
@@ -136,6 +137,24 @@ export function createDefaultApplicationRouteComposition(
   };
 
   const deployment = new ApplicationDeploymentService(dependencies);
+  const previews = new ApplicationPreviewService({
+    releases: storage,
+    configurations,
+    activate: async input => {
+      const activationId = crypto.randomUUID();
+      const result = await deployment.activateConfigured({
+        runtime: {
+          release: await storage.readRelease(input.branchRef, input.applicationId, input.releaseId),
+          environmentId: input.environmentId,
+          activationId,
+        },
+        configurationId: input.configurationId,
+        expectedActivationId: null,
+        principal: { type: "master", id: "preview-provisioner" },
+      });
+      return { activation_id: result.activation_id };
+    },
+  });
   const routes = createApplicationRoutes({
     storage,
     configurations,
@@ -145,6 +164,7 @@ export function createDefaultApplicationRouteComposition(
     evidence,
     evidenceObserver,
     deployment,
+    previews,
     retirementVerifier: dependencies.retirementVerifier,
   });
   return { deployment, routes };

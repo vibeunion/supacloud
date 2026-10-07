@@ -7,11 +7,13 @@ import {
   type QueueBinding,
   type TaskHandler,
 } from "./queue-handler.js";
+import { normalizeJobPolicy } from "./job-policy.js";
 export * from "./scriptc.js";
 export { workerExecutionFromEnvironment, executionQueueOptions, workerEnvelope } from "./execution-group.js";
 export { createExecutionGroupWorker } from "./group-worker.js";
 export type { ExecutionGroupDomain, WorkerHealth } from "./group-worker.js";
 export { admitWorkerOperation, releaseWorkerOperation, requireDrainedWorkerGroup } from "./admission.js";
+export { createQueueJobMetrics, type QueueJobMetrics } from "./telemetry.js";
 export type { WorkerAdmission, WorkerTransaction } from "./admission.js";
 export { measureWorkerApiLoad, acceptWorkerMixedLoad } from "./acceptance.js";
 export type { WorkerLoadSpec, WorkerLoadMeasurement, WorkerAcceptancePorts } from "./acceptance.js";
@@ -20,6 +22,21 @@ export {
   type TaskContext,
   type TaskHandler,
 } from "./queue-handler.js";
+export {
+  normalizeJobPolicy,
+  retryDelaySeconds,
+  stableJobKey,
+  validateJobKey,
+  type JobPolicyInput,
+  type JobRetryPolicy,
+} from "./job-policy.js";
+export { runTaskListOnce, type TaskListMessage, type TaskListOnceResult } from "./task-list-once.js";
+export { createPgmqWakeup, pgmqWakeupChannel, type PgmqWakeupTransport } from "./wakeup.js";
+export {
+  backfillOccurrences,
+  scheduledJobKey,
+  type BackfillWindow,
+} from "./schedule.js";
 
 export interface ProcessWorkerOptions {
   readonly projectRef: string;
@@ -27,12 +44,16 @@ export interface ProcessWorkerOptions {
   connectionString: string;
   concurrency?: number;
   maxPgConnections?: number;
+  /** Forces one in-flight message for this named queue. */
+  serial?: boolean;
   /** Environment source used for startup validation; defaults to process.env. */
   environment?: Readonly<Record<string, string | undefined>>;
 }
 export interface QueueWorkerOptions extends ProcessWorkerOptions, QueueBinding {
   visibilityTimeoutSeconds?: number;
   retryLimit?: number;
+  /** Forces one in-flight message for this named queue. */
+  serial?: boolean;
   /** Lifecycle supervision only. The upstream engine remains the sole scheduler. */
   supervise?: (run: (signal: AbortSignal) => Promise<void>, signal: AbortSignal, enqueuedAt: number | null) => Promise<void>;
 }
@@ -65,6 +86,7 @@ function config(options: ProcessWorkerOptions) {
   )
     throw new Error("WORKER_CONNECTION_INVALID");
   const maxConcurrent = integer(options.concurrency, 4, 1, 32);
+  if (options.serial && maxConcurrent !== 1) throw new Error("WORKER_SERIAL_CONFIG_INVALID");
   return Object.freeze({
     connectionString: options.connectionString,
     maxConcurrent,
@@ -119,6 +141,10 @@ export function createPgflowQueueWorker<T>(
   ) {
     throw new Error("WORKER_HANDLER_INVALID");
   }
+  const policy = normalizeJobPolicy({
+    ...options.policy,
+    ...(options.retryLimit === undefined ? {} : { maxAttempts: options.retryLimit }),
+  });
   const projectRef = options.projectRef;
   const queueConfig: NonNullable<
     Parameters<typeof EdgeWorker.startQueueWorker>[1]
@@ -126,11 +152,13 @@ export function createPgflowQueueWorker<T>(
     ...config(options),
     queueName: options.queueName,
     visibilityTimeout: integer(options.visibilityTimeoutSeconds, 300, 15, 3600),
+    maxConcurrent: options.serial ? 1 : integer(options.concurrency, 4, 1, 32),
+    batchSize: options.serial ? 1 : integer(options.concurrency, 4, 1, 32),
     retry: {
       strategy: "exponential",
-      limit: integer(options.retryLimit, 5, 0, 10),
-      baseDelay: 5,
-      maxDelay: 300,
+      limit: policy.maxAttempts,
+      baseDelay: policy.baseDelaySeconds,
+      maxDelay: policy.maxDelaySeconds,
     },
   };
   const execute = createQueueHandler(options, handler);

@@ -67,6 +67,7 @@ export { NetService, type NetDelivery } from './net/service.js'
 export { RetentionService, type RetentionConfig } from './retention/service.js'
 export { snapshotSchema, diffSchemas, type SchemaSnapshot } from './db/schema-diff.js'
 export { inspectDb, type TableInfo } from './db/inspect.js'
+export type { GraphqlRequestMetric } from './graphql.js'
 
 /**
  * A running SupaCloud Lite backend. The one field a consumer always needs is

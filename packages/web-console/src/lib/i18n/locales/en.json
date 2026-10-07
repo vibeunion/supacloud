@@ -13,7 +13,17 @@
     "development_unavailable": "Development data unavailable for this release target.",
     "modules": "Modules", "routes": "Routes", "commands": "Commands", "jobs": "Jobs",
     "resources": "Resources", "diagnostics": "Diagnostics", "no_diagnostics": "No development diagnostics",
-    "no_evidence": "No deployment evidence recorded"
+    "relationships": "API and resource relationships", "no_relationships": "No API, command, job, or resource relationships were declared.",
+    "api": "API", "command": "Command", "job": "Job",
+    "no_evidence": "No deployment evidence recorded",
+    "capacity": "Capacity and isolation", "capacity_unavailable": "Capacity data unavailable.",
+    "active_allocations": "Active allocations", "project_allocations": "This project allocations",
+    "active_ports": "Active ports", "memory": "Memory", "concurrency": "Concurrency",
+    "capacity_note": "The report is observational. Runtime admission and queue ownership remain enforced by the server.",
+    "capacity_history": "Capacity history", "time": "Time",
+    "previews": "Application previews", "create_preview": "Create preview", "cleanup_preview": "Clean up preview",
+    "preview": "Preview", "branch": "Database branch", "smoke_test": "Smoke test",
+    "preview_unavailable": "Preview data is unavailable.", "no_previews": "No previews created"
   },
   "GlobalDashboard": {
     "welcome": "Welcome back, Admin",
@@ -112,6 +122,7 @@
   "Navigation": {
     "table_editor": "Table Editor",
     "sql_editor": "SQL Editor",
+    "graphql": "GraphQL Explorer",
     "auth": "Auth",
     "storage": "Storage",
     "edge_functions": "Edge Functions",
@@ -133,6 +144,19 @@
     "home": "Home",
     "select_project": "Select Project",
     "new_project": "New Project"
+  },
+  "Graphql": {
+    "eyebrow": "Database GraphQL",
+    "title": "GraphQL Explorer",
+    "description": "Run role-scoped queries against the project's Supabase-compatible pg_graphql endpoint.",
+    "request": "Request",
+    "response": "Response",
+    "run": "Run",
+    "reset": "Reset",
+    "copy": "Copy",
+    "empty_response": "Run a query to inspect the GraphQL response.",
+    "api_unavailable": "Project API URL unavailable",
+    "operation_name": "Operation name"
   },
   "SqlEditor": {
     "title": "SQL Editor",
@@ -1642,7 +1666,18 @@
     "applies": "Applies",
     "not_applicable": "Not applicable",
     "using": "USING",
-    "with_check": "WITH CHECK"
+    "with_check": "WITH CHECK",
+    "explanation": "Access explanation",
+    "outcome_allowed": "Allowed",
+    "outcome_filtered": "Filtered",
+    "outcome_denied": "Denied",
+    "outcome_unknown": "Needs review",
+    "explanation_note": "This is a diagnostic explanation. PostgreSQL grants and RLS remain the source of truth.",
+    "relation": "Relation",
+    "rls": "RLS",
+    "applicable_policies": "Applicable policies",
+    "enabled": "Enabled",
+    "disabled": "Disabled"
   },
   "TemporaryAccess": {
     "page_title": "Temporary Database Access | SupaCloud",
@@ -1854,6 +1889,7 @@
     "download_logs": "Download Logs",
     "open_functions": "Open Function List",
     "attempt_records": "Execution Attempts",
+    "execution_timeline": "Execution Timeline",
     "all_logs": "All Logs",
     "stdout_only": "stdout Only",
     "stderr_only": "stderr Only",

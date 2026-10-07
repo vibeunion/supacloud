@@ -29,6 +29,7 @@ export const APPLICATION_TOOL_SCHEMA: ToolSchema = {
     "list_releases", "get_release", "upload_release", "get_runtime", "get_deployment_evidence",
     "get_configuration", "put_configuration",
     "activate_release", "reconcile_activation", "retire_activation",
+    "logs",
   ]), "Action"),
   ref: withDescription(Type.String(), "Project ref"),
   id: withDescription(ApplicationIdSchema, "Application ID"),
@@ -42,6 +43,11 @@ export const APPLICATION_TOOL_SCHEMA: ToolSchema = {
   release_id: optional(ApplicationReleaseIdSchema, "[get_release/activate_release/reconcile_activation] Immutable application release ID"),
   cursor: optional(ApplicationReleaseIdSchema, "[list_releases] Last release ID"),
   limit: optional(Type.Integer({ minimum: 1, maximum: 100 }), "[list_releases] Page size, default 50"),
+  offset: optional(Type.Integer({ minimum: 0, maximum: 1_000_000 }), "[logs] Result offset"),
+  service: optional(Type.String(), "[logs] Application target/service filter"),
+  search: optional(Type.String(), "[logs] Full-text log filter"),
+  start: optional(Type.String(), "[logs] ISO start timestamp"),
+  end: optional(Type.String(), "[logs] ISO end timestamp"),
 };
 const responseSchema = Type.Object({
   project_ref: Type.String(), application_id: ApplicationIdSchema, release: ApplicationReleaseRecordSchema,
@@ -216,6 +222,30 @@ export function registerApplicationTools(server: ToolServer, http: HttpTransport
         } catch {
           return releaseControlFailure(operation, "INVALID_RESPONSE", result.status);
         }
+      }
+      if (action === "logs") {
+        const environmentId = text(args, "environment_id");
+        if (!Value.Check(ApplicationIdSchema, environmentId)) throw new Error("Invalid environment ID");
+        const query = new URLSearchParams();
+        for (const [key, value] of [
+          ["limit", args.limit], ["offset", args.offset], ["service", args.service],
+          ["search", args.search], ["start", args.start], ["end", args.end],
+        ] as const) {
+          if (value !== undefined) query.set(key, String(value));
+        }
+        const result = await http.get(
+          `/v1/projects/${project}/applications/${encodeURIComponent(id)}/environments/${encodeURIComponent(environmentId)}/logs${query.size ? `?${query}` : ""}`,
+          { maxJsonBytes: 1_048_576, responseTimeoutMs: 30_000 },
+        );
+        if (!result.ok) return releaseControlFailure(operation, "HTTP_ERROR", result.status);
+        if (!result.data || typeof result.data !== "object"
+          || !("project_ref" in result.data) || result.data.project_ref !== ref
+          || !("application_id" in result.data) || result.data.application_id !== id
+          || !("environment_id" in result.data) || result.data.environment_id !== environmentId
+          || !("result" in result.data) || !Array.isArray(result.data.result)) {
+          return releaseControlFailure(operation, "INVALID_RESPONSE", result.status);
+        }
+        return releaseControlSuccess(operation, result.data);
       }
       if (action === "list_releases") {
         const limit = args.limit ?? 50;

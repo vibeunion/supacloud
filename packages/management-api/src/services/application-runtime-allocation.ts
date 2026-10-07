@@ -23,6 +23,37 @@ export interface ApplicationRuntimeAllocation {
   retiredAt?: string;
 }
 export interface ApplicationPortRange { start: number; end: number }
+export interface ApplicationCapacityBudget extends WorkerResourceUsage {
+  ports: number;
+}
+export interface ApplicationCapacityReport {
+  schema: "supacloud.application-capacity-report.v1";
+  projectRef: string;
+  generatedAt: string;
+  budget: ApplicationCapacityBudget | null;
+  usage: ApplicationCapacityBudget;
+  remaining: ApplicationCapacityBudget | null;
+  pressure: "unknown" | "normal" | "elevated" | "exhausted";
+  activeAllocations: number;
+  activePorts: number;
+  projectAllocations: number;
+  projectUsage: WorkerResourceUsage;
+  queueOwners: Array<{
+    queue: string;
+    projectRef: string;
+    applicationId: string;
+    environmentId: string;
+    activationId: string;
+  }>;
+}
+export interface ApplicationCapacityHistoryEntry {
+  generatedAt: string;
+  budget: ApplicationCapacityBudget | null;
+  usage: ApplicationCapacityBudget;
+  pressure: ApplicationCapacityReport["pressure"];
+  activeAllocations: number;
+  activePorts: number;
+}
 interface AllocationOptions {
   database?: SQL;
   range?: ApplicationPortRange;
@@ -50,6 +81,102 @@ export function applicationResourceUsage(release: ApplicationRuntimeInput["relea
     usage.memoryMiB += target.compute.memoryLimitMiB;
   }
   return usage;
+}
+
+function emptyUsage(): WorkerResourceUsage {
+  return { cpu: 0, memoryMiB: 0, connections: 0, concurrency: 0 };
+}
+
+function addUsage(left: WorkerResourceUsage, right: WorkerResourceUsage): WorkerResourceUsage {
+  return {
+    cpu: Math.round((left.cpu + right.cpu) * 10) / 10,
+    memoryMiB: left.memoryMiB + right.memoryMiB,
+    connections: left.connections + right.connections,
+    concurrency: left.concurrency + right.concurrency,
+  };
+}
+
+function capacityBudget(value: unknown): ApplicationCapacityBudget | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Record<string, unknown>;
+  const numbers = ["cpu", "memoryMiB", "connections", "concurrency", "ports"] as const;
+  if (numbers.some(key => typeof candidate[key] !== "number"
+    || !Number.isFinite(candidate[key]) || candidate[key] < 0)) return null;
+  return {
+    cpu: candidate.cpu as number,
+    memoryMiB: candidate.memoryMiB as number,
+    connections: candidate.connections as number,
+    concurrency: candidate.concurrency as number,
+    ports: candidate.ports as number,
+  };
+}
+
+export function buildApplicationCapacityReport(input: {
+  projectRef: string;
+  allocations: readonly ApplicationRuntimeAllocation[];
+  budget: ApplicationCapacityBudget | null;
+  activePorts: number;
+  queueOwners?: ApplicationCapacityReport["queueOwners"];
+  generatedAt?: string;
+}): ApplicationCapacityReport {
+  const usage = input.allocations.reduce<ApplicationCapacityBudget>((total, candidate) => ({
+    ...addUsage(total, applicationResourceUsage(candidate.runtime.release)),
+    ports: total.ports + Object.keys(candidate.runtime.ports).length,
+  }), { ...emptyUsage(), ports: 0 });
+  const projectAllocations = input.allocations.filter(candidate =>
+    candidate.runtime.release.project_ref === input.projectRef);
+  const projectUsage = projectAllocations.reduce(
+    (total, candidate) => addUsage(total, applicationResourceUsage(candidate.runtime.release)),
+    emptyUsage(),
+  );
+  const remaining = input.budget ? {
+    cpu: Math.max(0, Math.round((input.budget.cpu - usage.cpu) * 10) / 10),
+    memoryMiB: Math.max(0, input.budget.memoryMiB - usage.memoryMiB),
+    connections: Math.max(0, input.budget.connections - usage.connections),
+    concurrency: Math.max(0, input.budget.concurrency - usage.concurrency),
+    ports: Math.max(0, input.budget.ports - input.activePorts),
+  } : null;
+  const exhausted = remaining && Object.values(remaining).some(value => value === 0);
+  const elevated = remaining && input.budget
+    ? Object.entries(remaining).some(([key, value]) => value / input.budget![key as keyof ApplicationCapacityBudget] <= 0.2)
+    : false;
+  return {
+    schema: "supacloud.application-capacity-report.v1",
+    projectRef: input.projectRef,
+    generatedAt: input.generatedAt ?? new Date().toISOString(),
+    budget: input.budget,
+    usage,
+    remaining,
+    pressure: !input.budget ? "unknown" : exhausted ? "exhausted" : elevated ? "elevated" : "normal",
+    activeAllocations: input.allocations.length,
+    activePorts: input.activePorts,
+    projectAllocations: projectAllocations.length,
+    projectUsage,
+    queueOwners: input.queueOwners ?? [],
+  };
+}
+
+function configuredCapacityBudget(): ApplicationCapacityBudget | null {
+  try {
+    const worker = JSON.parse(process.env.SUPACLOUD_APPLICATION_WORKER_BUDGET_JSON ?? "null");
+    const ports = configuredApplicationPortRange();
+    const parsed = capacityBudget({ ...((worker && typeof worker === "object") ? worker : {}), ports: ports.end - ports.start + 1 });
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function parseStoredBudget(value: unknown): ApplicationCapacityBudget | null {
+  return capacityBudget(value);
+}
+
+function assertCapacityBudget(usage: WorkerResourceUsage, ports: number, budget: ApplicationCapacityBudget): void {
+  if (usage.cpu > budget.cpu || usage.memoryMiB > budget.memoryMiB
+    || usage.connections > budget.connections || usage.concurrency > budget.concurrency
+    || ports > budget.ports) {
+    throw new ApplicationRuntimeAllocationError("APPLICATION_CAPACITY_POLICY_EXCEEDED");
+  }
 }
 export class ApplicationRuntimeAllocationError extends Error {
   constructor(readonly code: string) { super(code); }
@@ -179,6 +306,14 @@ export class ApplicationRuntimeAllocations {
       }
       const range = this.options.range ? validRange(this.options.range) : configuredApplicationPortRange();
       const groups = input.runtime.release.targets.flatMap(target => target.execution ? [target.execution] : []);
+      let policyBudget: ApplicationCapacityBudget | null = null;
+      {
+        const [policy] = await transaction`
+          SELECT budget FROM application_capacity_policies
+          WHERE project_ref = ${input.runtime.release.project_ref}
+        `;
+        policyBudget = parseStoredBudget(policy?.budget);
+      }
       if (groups.length || input.runtime.release.targets.some(target => target.compute)) {
         // The existing host-wide allocation lock serializes both ports and compute reservations.
         const active: { runtime: ApplicationRuntimeInput }[] = await transaction`
@@ -206,11 +341,25 @@ export class ApplicationRuntimeAllocations {
           };
         }, requested);
         let budget: unknown = this.options.workerBudget;
+        if (policyBudget) budget = policyBudget;
         if (budget === undefined) {
           try { budget = JSON.parse(process.env.SUPACLOUD_APPLICATION_WORKER_BUDGET_JSON ?? "null"); }
           catch { throw new ApplicationRuntimeAllocationError("WORKER_BUDGET_REQUIRED"); }
         }
         assertWorkerBudget(total, budget);
+      }
+      if (policyBudget) {
+        const active = await transaction`
+          SELECT runtime FROM application_runtime_allocations WHERE retired_at IS NULL
+        ` as Array<{ runtime: ApplicationRuntimeInput }>;
+        const totalUsage = active.reduce<WorkerResourceUsage>((sum, row) =>
+          addUsage(sum, applicationResourceUsage(parseApplicationReleaseRecord(row.runtime.release))),
+        emptyUsage());
+        const requested = applicationResourceUsage(input.runtime.release);
+        const activePorts = await transaction`SELECT count(*)::int AS count FROM application_runtime_ports`;
+        assertCapacityBudget(addUsage(totalUsage, requested),
+          Number(activePorts[0]?.count ?? 0) + input.runtime.release.targets.filter(target => target.kind === "http").length,
+          policyBudget);
       }
       const claimed: { port: number }[] = await transaction`SELECT port FROM application_runtime_ports`;
       const unavailable = new Set<number>([
@@ -255,6 +404,93 @@ export class ApplicationRuntimeAllocations {
   async read(projectRef: string, activationId: string): Promise<ApplicationRuntimeAllocation | null> {
     const row = await this.readRow(this.database, projectRef, activationId);
     return row ? allocation(row) : null;
+  }
+
+  async capacityReport(projectRef: string): Promise<ApplicationCapacityReport> {
+    const rows = await this.database`
+      SELECT allocation.*, COALESCE((
+        SELECT jsonb_object_agg(port.target, port.port) FROM application_runtime_ports port
+        WHERE port.project_ref = allocation.project_ref AND port.activation_id = allocation.activation_id
+      ), '{}'::jsonb) AS owned_ports
+      FROM application_runtime_allocations allocation
+      WHERE allocation.retired_at IS NULL
+      ORDER BY allocation.created_at ASC
+    ` as AllocationRow[];
+    const allocations = rows.map(allocation);
+    const queueOwners = allocations.flatMap(candidate => candidate.runtime.release.targets.flatMap(target =>
+      target.execution ? [{
+        queue: target.execution.queue,
+        projectRef: candidate.runtime.release.project_ref,
+        applicationId: candidate.runtime.release.application_id,
+        environmentId: candidate.runtime.environmentId,
+        activationId: candidate.runtime.activationId,
+      }] : []));
+    const [policy] = await this.database`
+      SELECT budget FROM application_capacity_policies WHERE project_ref = ${projectRef}
+    `;
+    const report = buildApplicationCapacityReport({
+      projectRef,
+      allocations,
+      budget: parseStoredBudget(policy?.budget) ?? configuredCapacityBudget(),
+      activePorts: allocations.reduce((total, candidate) => total + Object.keys(candidate.runtime.ports).length, 0),
+      queueOwners,
+    });
+    await this.database`
+      INSERT INTO application_capacity_history
+        (project_ref, generated_at, budget, usage, pressure, active_allocations, active_ports)
+      VALUES (
+        ${projectRef}, ${report.generatedAt}, ${report.budget}, ${report.usage},
+        ${report.pressure}, ${report.activeAllocations}, ${report.activePorts}
+      )
+    `;
+    return report;
+  }
+
+  async capacityHistory(projectRef: string, limit = 50): Promise<ApplicationCapacityHistoryEntry[]> {
+    const bounded = Math.min(Math.max(Math.trunc(limit), 1), 200);
+    const rows = await this.database`
+      SELECT generated_at, budget, usage, pressure, active_allocations, active_ports
+      FROM application_capacity_history
+      WHERE project_ref = ${projectRef}
+      ORDER BY generated_at DESC, id DESC
+      LIMIT ${bounded}
+    `;
+    return rows.map((row: Record<string, unknown>) => {
+      const budget = parseStoredBudget(row.budget);
+      const usage = parseStoredBudget(row.usage);
+      if (!usage) throw new Error("APPLICATION_CAPACITY_HISTORY_CORRUPT");
+      const pressure = row.pressure;
+      if (pressure !== "unknown" && pressure !== "normal" && pressure !== "elevated" && pressure !== "exhausted") {
+        throw new Error("APPLICATION_CAPACITY_HISTORY_CORRUPT");
+      }
+      return {
+        generatedAt: new Date(String(row.generated_at)).toISOString(),
+        budget,
+        usage,
+        pressure,
+        activeAllocations: Number(row.active_allocations),
+        activePorts: Number(row.active_ports),
+      };
+    });
+  }
+
+  async setCapacityPolicy(projectRef: string, budget: ApplicationCapacityBudget, updatedBy?: string) {
+    if (!capacityBudget(budget)) throw new Error("APPLICATION_CAPACITY_BUDGET_INVALID");
+    const [row] = await this.database`
+      INSERT INTO application_capacity_policies(project_ref, budget, updated_by)
+      VALUES (${projectRef}, ${budget}, ${updatedBy ?? null})
+      ON CONFLICT (project_ref) DO UPDATE SET
+        budget = EXCLUDED.budget,
+        updated_by = EXCLUDED.updated_by,
+        updated_at = clock_timestamp()
+      RETURNING project_ref, budget, updated_by, updated_at
+    `;
+    return {
+      projectRef: row.project_ref as string,
+      budget: parseStoredBudget(row.budget)!,
+      updatedBy: (row.updated_by as string | null) ?? null,
+      updatedAt: new Date(row.updated_at).toISOString(),
+    };
   }
 
   /**

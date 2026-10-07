@@ -33,7 +33,6 @@ test("schema-derived decoders reject malformed values without exposing submitted
     expect(String(error)).not.toContain("secret");
   }
 });
-
 test("the same contract rejects invalid HTTP input before writes and invalid output after one write", async () => {
   let writes = 0;
   const module: CompiledModule = {

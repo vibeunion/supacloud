@@ -433,6 +433,7 @@ describe("supabase bootstrap schema", () => {
       expect(source).toContain("CREATE EXTENSION IF NOT EXISTS pgmq");
       expect(source).toContain("CREATE SCHEMA IF NOT EXISTS pgmq_public");
       expect(source).toContain("CREATE OR REPLACE FUNCTION pgmq_public.send(queue_name text, message jsonb, sleep_seconds integer DEFAULT 0)");
+      expect(source).toContain("CREATE OR REPLACE FUNCTION pgmq_public.send_idempotent");
       expect(source).toContain("CREATE OR REPLACE FUNCTION pgmq_public.pop(queue_name text)");
       expect(source).toContain('CREATE OR REPLACE FUNCTION pgmq_public."delete"(queue_name text, message_id bigint)');
       expect(source).toContain("GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgmq_public TO anon, authenticated, service_role");

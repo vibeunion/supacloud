@@ -19,6 +19,10 @@ import type { ApplicationDeploymentService } from "../services/application-deplo
 import { ConflictError } from "../utils/errors";
 import { ApplicationDeploymentEvidenceStorage } from "../services/application-deployment-evidence";
 import { ApplicationDeploymentEvidenceObserver } from "../services/application-deployment-evidence-observer";
+import { victoriaLogsService } from "../services/victorialogs.service";
+import { applicationRuntimePlan } from "../services/application-runtime";
+import { buildApplicationPreviewReceipt } from "../services/application-preview-contract";
+import { ApplicationPreviewService } from "../services/application-preview.service";
 
 function activationFailure(error: unknown, identity: {
   project_ref: string; application_id: string; environment_id: string; activation_id: string;
@@ -57,6 +61,7 @@ interface ApplicationRouteDependencies {
   deployment?: Pick<ApplicationDeploymentService, "activateConfigured" | "reconcile" | "retireConfigured">;
   retirementVerifier?: unknown;
   principal?: typeof getVerifiedRequestPrincipal;
+  previews?: ApplicationPreviewService;
 }
 
 async function projectExists(ref: string): Promise<boolean> {
@@ -79,6 +84,7 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
   const configurations = dependencies.configurations ?? new ApplicationConfigurations();
   const evidence = dependencies.evidence ?? new ApplicationDeploymentEvidenceStorage();
   const evidenceObserver = dependencies.evidenceObserver;
+  const previews = dependencies.previews ?? new ApplicationPreviewService({ releases: storage });
   const persistObservedEvidence = async (values: { ref: string; id: string; environmentId: string }) => {
     if (!evidenceObserver) return;
     try {
@@ -167,6 +173,128 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       project_ref: values.ref, application_id: values.id, environment_id: values.environmentId,
       evidence: await evidence.read(values.ref, values.id, values.environmentId),
     }))
+    .get("/:id/environments/:environmentId/logs", {
+      params: environmentParams,
+      query: t.Object({
+        limit: t.Optional(t.Numeric({ minimum: 1, maximum: 1000, multipleOf: 1 })),
+        offset: t.Optional(t.Numeric({ minimum: 0, maximum: 1_000_000, multipleOf: 1 })),
+        service: t.Optional(t.String()),
+        search: t.Optional(t.String()),
+        start: t.Optional(t.String()),
+        end: t.Optional(t.String()),
+      }),
+      detail: { tags: ["applications"], summary: "Read logs for the current application activation" },
+    }, async ({ params: values, query }) => {
+      const current = await active.readForApplication(values.ref, values.id, values.environmentId);
+      if (!current) {
+        return {
+          project_ref: values.ref, application_id: values.id, environment_id: values.environmentId,
+          release_id: null, activation_id: null, result: [], pagination: {
+            offset: query.offset ?? 0, limit: query.limit ?? 200, total: 0,
+          },
+        };
+      }
+      const runtime = current.runtime;
+      const plan = applicationRuntimePlan(runtime);
+      const targets = query.service && query.service !== "all"
+        ? plan.targets.filter(target => target.name === query.service || target.sourceTarget === query.service)
+        : plan.targets;
+      if (query.service && query.service !== "all" && targets.length === 0) {
+        return {
+          project_ref: values.ref, application_id: values.id, environment_id: values.environmentId,
+          release_id: runtime.release.release_id, activation_id: runtime.activationId, result: [], pagination: {
+            offset: query.offset ?? 0, limit: query.limit ?? 200, total: 0,
+          },
+        };
+      }
+      const result = await victoriaLogsService.queryProjectLogs(values.ref, {
+        units: targets.map(target => target.unit),
+        search: query.search,
+        start: query.start,
+        end: query.end,
+        limit: query.limit,
+        offset: query.offset,
+      });
+      return {
+        project_ref: values.ref, application_id: values.id, environment_id: values.environmentId,
+        release_id: runtime.release.release_id, activation_id: runtime.activationId,
+        result,
+        pagination: {
+          offset: query.offset ?? 0, limit: query.limit ?? 200, total: result.length,
+        },
+      };
+    })
+    .get("/:id/environments/:environmentId/preview-plan", {
+      params: environmentParams,
+      query: t.Object({
+        release_id: t.String({ pattern: "^[a-f0-9]{64}$" }),
+        branch_ref: t.String({ pattern: "^[A-Za-z0-9_-]{1,20}$" }),
+        data_mode: t.Optional(t.Union([t.Literal("schema_only"), t.Literal("full_clone")])),
+        configuration_id: t.Optional(t.String({ format: "uuid" })),
+      }),
+      detail: { tags: ["applications"], summary: "Build a read-only isolated application preview plan" },
+    }, async ({ params: values, query }) => {
+      const release = await storage.readRelease(values.ref, values.id, query.release_id);
+      return buildApplicationPreviewReceipt({
+        previewId: crypto.randomUUID(),
+        projectRef: values.ref,
+        applicationId: values.id,
+        environmentId: values.environmentId,
+        releaseId: release.release_id,
+        branchRef: query.branch_ref,
+        dataMode: query.data_mode ?? "schema_only",
+      });
+    })
+    .get("/:id/environments/:environmentId/previews", {
+      params: environmentParams,
+      detail: { tags: ["applications"], summary: "List application preview receipts" },
+    }, async ({ params: values }) => ({
+      project_ref: values.ref,
+      application_id: values.id,
+      environment_id: values.environmentId,
+      previews: await previews.list(values.ref, values.id, values.environmentId),
+    }))
+    .post("/:id/environments/:environmentId/previews", {
+      params: environmentParams,
+      body: t.Object({
+        release_id: t.String({ pattern: "^[a-f0-9]{64}$" }),
+        branch_name: t.Optional(t.String({ minLength: 1, maxLength: 80 })),
+        data_mode: t.Optional(t.Union([t.Literal("schema_only"), t.Literal("full_clone")])),
+        configuration_id: t.Optional(t.String({ format: "uuid" })),
+      }),
+      detail: { tags: ["applications"], summary: "Provision an isolated application preview" },
+    }, async ({ params: values, body }) => {
+      const receipt = await previews.create({
+        projectRef: values.ref,
+        applicationId: values.id,
+        environmentId: values.environmentId,
+        releaseId: body.release_id,
+        branchName: body.branch_name,
+        dataMode: body.data_mode,
+        configurationId: body.configuration_id,
+      });
+      return status(202, receipt);
+    })
+    .get("/:id/environments/:environmentId/previews/:previewId", {
+      params: t.Object({ ...environmentParams.properties, previewId: t.String({ pattern: "^[a-f0-9-]{8,64}$" }) }),
+      detail: { tags: ["applications"], summary: "Read an application preview receipt" },
+    }, async ({ params: values }) => {
+      const receipt = await previews.get(values.ref, values.previewId);
+      if (!receipt || receipt.application_id !== values.id || receipt.environment_id !== values.environmentId) {
+        return status(404, { code: "APPLICATION_PREVIEW_NOT_FOUND", error: "Application preview not found" });
+      }
+      return receipt;
+    })
+    .delete("/:id/environments/:environmentId/previews/:previewId", {
+      params: t.Object({ ...environmentParams.properties, previewId: t.String({ pattern: "^[a-f0-9-]{8,64}$" }) }),
+      detail: { tags: ["applications"], summary: "Clean up an application preview" },
+    }, async ({ params: values }) => {
+      const receipt = await previews.get(values.ref, values.previewId);
+      if (!receipt || receipt.application_id !== values.id || receipt.environment_id !== values.environmentId) {
+        return status(404, { code: "APPLICATION_PREVIEW_NOT_FOUND", error: "Application preview not found" });
+      }
+      return await previews.cleanup(values.ref, values.previewId);
+    })
     .put("/:id/environments/:environmentId/deployment-evidence", {
       params: environmentParams,
       body: DeploymentEvidenceSchema,

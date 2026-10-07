@@ -3041,4 +3041,5 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         message: `Custom rate limit removed for ${body.path}`,
       };
     },
-  );
+  )
+  .use(addConfigRoutes("graphql_governance"));

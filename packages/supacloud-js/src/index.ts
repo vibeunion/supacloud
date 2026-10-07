@@ -1707,6 +1707,41 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
     };
   }
 
+  /**
+   * Additive SupaCloud extension backed by a tenant-local unique job key.
+   * The official pgmq_public.send contract remains unchanged.
+   */
+  async sendIdempotent(
+    payload: SupaCloudQueueJson = {},
+    jobKey: string,
+    options: SupaCloudQueueSendOptions = {},
+  ): Promise<SupaCloudQueueSendResult> {
+    const captured = queueJsonSnapshot(payload);
+    if (typeof jobKey !== "string" || !/^[A-Za-z0-9_.:@/-]{1,200}$/.test(jobKey)) {
+      throw new SupaCloudQueueError(false, "QUEUE_JOB_KEY_INVALID");
+    }
+    const result = await this.rpc("send_idempotent", {
+      queue_name: this.name,
+      message: captured,
+      p_job_key: jobKey,
+      sleep_seconds: normalizeSecondsFromOptions(options),
+    }, value => {
+      if (!Array.isArray(value) || value.length !== 1 || !value[0] || typeof value[0] !== "object") {
+        throw new SupaCloudQueueError();
+      }
+      const row = value[0] as Record<string, unknown>;
+      return { msgId: queueMessageId(row.msg_id), created: row.created === true };
+    });
+    return {
+      id: result.msgId,
+      msg_id: result.msgId,
+      queue_name: this.name,
+      status: "pending",
+      payload: captured,
+      deduplicated: !result.created,
+    };
+  }
+
   async sendBatch(
     messages: SupaCloudQueueJson[],
     options: SupaCloudQueueSendOptions = {},

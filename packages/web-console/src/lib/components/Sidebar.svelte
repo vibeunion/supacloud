@@ -3,6 +3,7 @@
   import { cn } from "$lib/utils";
   import {
     Box,
+    Braces,
     ChartNoAxesCombined,
     ChevronDown,
     Code2,
@@ -46,6 +47,7 @@
   const dataItems = $derived(projectRef ? [
     { titleKey: "Navigation.table_editor", icon: Table, href: `/project/${projectRef}/tables` },
     { titleKey: "Navigation.sql_editor", icon: Code2, href: `/project/${projectRef}/sql` },
+    { titleKey: "GraphQL Explorer", icon: Braces, href: `/project/${projectRef}/graphql` },
     { titleKey: "Navigation.database_objects", icon: Database, href: `/project/${projectRef}/database` },
   ] : []);
 

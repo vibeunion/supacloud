@@ -344,6 +344,7 @@ EXAMPLES
   ${preferredCommand} app configure --ref abc123 --id orders --environment_id test --configuration_path configuration.json
   ${preferredCommand} app deploy --ref abc123 --id orders --environment_id test --release_id <sha256> --configuration_id <uuid> --activation_id <uuid> --expected_activation_id absent
   ${preferredCommand} app status --ref abc123 --id orders --environment_id test
+  ${preferredCommand} app logs --ref abc123 --id orders --environment_id test
   ${preferredCommand} app rollback --ref abc123 --id orders --environment_id test --release_id <old-sha256> --configuration_id <uuid> --activation_id <new-uuid> --expected_activation_id <current-uuid>
   ${preferredCommand} app check --root . --strict
   ${preferredCommand} app graph --root . --format json

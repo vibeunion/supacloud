@@ -1,4 +1,6 @@
 import type { EdgeWorker, Json } from "@pgflow/edge-worker";
+import type { JobPolicyInput } from "./job-policy.js";
+import { normalizeJobPolicy, validateJobKey } from "./job-policy.js";
 
 type UpstreamHandler = Parameters<typeof EdgeWorker.startQueueWorker>[0];
 export interface TaskContext {
@@ -6,6 +8,8 @@ export interface TaskContext {
   readonly queueName: string;
   readonly taskKey: string;
   readonly idempotencyKey: string;
+  readonly jobKey?: string;
+  readonly priority?: number;
   readonly messageId: string;
   readonly attempt: number;
   readonly definitionVersion?: string;
@@ -22,6 +26,7 @@ export interface QueueBinding {
   readonly queueName: string;
   readonly taskKey: string;
   readonly definitionVersion?: string;
+  readonly policy?: JobPolicyInput;
 }
 type Failure =
   | "WORKER_TASK_INVALID"
@@ -57,6 +62,7 @@ export function createQueueHandler<T>(
   handlers: TaskHandler<T>,
 ): UpstreamHandler {
   const { projectRef, queueName, taskKey, definitionVersion } = binding;
+  const policy = normalizeJobPolicy(binding.policy);
   const { decode, authorize, execute } = handlers;
   return async (payload, upstream) => {
     if (upstream.shutdownSignal.aborted)
@@ -70,6 +76,9 @@ export function createQueueHandler<T>(
       payload.taskKey !== taskKey ||
       typeof payload.idempotencyKey !== "string" ||
       !/^[A-Za-z0-9_.:@/-]{1,200}$/.test(payload.idempotencyKey) ||
+      (Object.hasOwn(payload, "jobKey") && (() => {
+        try { validateJobKey(payload.jobKey); return false; } catch { return true; }
+      })()) ||
       !Object.hasOwn(payload, "input") ||
       Object.keys(payload).some(
         (key) =>
@@ -78,6 +87,7 @@ export function createQueueHandler<T>(
             "projectRef",
             "taskKey",
             "idempotencyKey",
+            "jobKey",
             "input", ...(definitionVersion === undefined ? [] : ["definitionVersion"]),
           ].includes(key),
       )
@@ -93,6 +103,8 @@ export function createQueueHandler<T>(
       queueName,
       taskKey,
       idempotencyKey: payload.idempotencyKey,
+      ...(Object.hasOwn(payload, "jobKey") ? { jobKey: validateJobKey(payload.jobKey) } : {}),
+      priority: policy.priority,
       messageId,
       attempt,
       ...(definitionVersion === undefined ? {} : { definitionVersion }),

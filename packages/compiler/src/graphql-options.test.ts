@@ -44,6 +44,7 @@ test.each([
   { schema: "schema.graphql", documents: "**/*.graphql" },
   { schema: "schema.graphql", documents: [null] },
   { schema: "schema.graphql", typedDocuments: "true" },
+  { schema: "schema.graphql", mutations: "true" },
   { schema: "schema.graphql", scalars: [] },
   { schema: "schema.graphql", scalars: { JSON: null } },
   { schema: "schema.graphql", scalars: { JSON: { input: "unknown" } } },
@@ -53,6 +54,11 @@ test.each([
   expect(() => assertGraphqlOptions(graphql)).toThrow("Database First only");
   expect(() => defineSupacloudConfig({ graphql: graphql as GraphqlOptions })).toThrow("Database First only");
   expect(() => compileOptionsFromConfig({ graphql: graphql as GraphqlOptions }, "/workspace")).toThrow("Database First only");
+});
+
+test("accepts explicit mutation opt-in and preserves the default", () => {
+  expect(() => assertGraphqlOptions({ schema: "schema.graphql", mutations: true })).not.toThrow();
+  expect(() => assertGraphqlOptions({ schema: "schema.graphql" })).not.toThrow();
 });
 
 test("compile, check and incremental calls reject alternative modes and preserve working artifacts", async () => {

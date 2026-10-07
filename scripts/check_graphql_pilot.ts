@@ -6,6 +6,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { compileProject, checkProject } from "../packages/compiler/src/compile";
 import { pullGraphqlSchema } from "../packages/compiler/src/graphql-schema";
+import { checkGraphqlCompatibility, readGraphqlSchema } from "../packages/compiler/src/graphql-governance";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const fixture = join(repo, "scripts/fixtures/graphql-orders");
@@ -148,6 +149,23 @@ try {
   assert.ok(authenticatedSchema.includes("ordersCollection"));
   assert.ok(!authenticatedSchema.includes("internalMarginCents"));
   assert.ok(!authenticatedSchema.includes("insertIntoOrdersCollection"));
+  const authenticatedGraphql = await readGraphqlSchema(schemaPath);
+  const governance = checkGraphqlCompatibility(authenticatedGraphql.schema, [{
+    path: join(fixture, "order.graphql"),
+    source: await readFile(join(fixture, "order.graphql"), "utf8"),
+  }], {
+    operations: ["OrderDetail"],
+    maxDepth: 12,
+    maxFields: 80,
+    maxComplexity: 120,
+    maxPageSize: 100,
+  });
+  assert.equal(governance.ok, true);
+  assert.equal(governance.features.relayConnections, true);
+  assert.equal(governance.features.filtering, true);
+  assert.equal(governance.features.ordering, true);
+  assert.equal(governance.features.byPk, true);
+  evidence.featureMatrix = governance.features;
   const anonymousPath = join(work, "anonymous.graphql");
   await pullGraphqlSchema({ url, output: anonymousPath, publishableKey: "synthetic-public" });
   assert.ok(!(await readFile(anonymousPath, "utf8")).includes("ordersCollection"));

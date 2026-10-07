@@ -14,6 +14,7 @@ import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
 import { releaseControlFailure, releaseControlMutationFailure } from "./release-control-response";
 import { analyzeMigrationFiles, formatMigrationRiskReport } from "./migration-risk";
+import { createMigrationImportPlan, writeMigrationImportPlan } from "./migration-import";
 
 export interface DatabaseToolsConfig {
     localOnly?: boolean;
@@ -517,7 +518,7 @@ export function registerDatabaseTools(
         "list_auth_users", "get_auth_user",
         "connections", "stats", "slow_queries",
         "list_migrations", "migration_inventory", "delivery_migration_plan", "project_url", "generate_types",
-        "database_lint", "db_lint", "rpc_catalog", "list_rpcs",
+        "database_lint", "db_lint", "rpc_catalog", "list_rpcs", "migration_import",
     ] as const;
     const writeActions = ["execute", "apply_migration", "push_migrations", "baseline_migrations", "create_table_rls", "enable_extension", "disable_extension"] as const;
     const remoteActions = [...readActions, ...localActions] as const;
@@ -556,6 +557,10 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
             name: optional(Type.String(), "[apply_migration] Migration name"),
             delivery_manifest: optional(Type.String(), "[delivery_migration_plan] Local immutable delivery manifest"),
             delivery_target: optional(Type.String(), "[delivery_migration_plan] Target name from the delivery manifest"),
+            import_source: optional(stringEnum(["hasura", "nhost"]), "[migration_import] Source platform"),
+            metadata_file: optional(Type.String(), "[migration_import] Hasura metadata JSON file"),
+            output_dir: optional(Type.String(), "[migration_import] Output migration directory when write=true"),
+            write: optional(Type.Boolean(), "[migration_import] Write the reviewed plan to output_dir; never applies SQL"),
             // create_table_rls
             columns: optional(Type.String(), "[create_table_rls] Column definitions"),
             policy_mode: optional(stringEnum(["deny_all", "owner"]), "[create_table_rls] RLS policy mode (default: deny_all)"),
@@ -765,6 +770,28 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                         { maxResponseBytes: MAX_MIGRATION_INVENTORY_BYTES },
                     );
                     return migrationInventoryResponse(response);
+                }
+                case "migration_import": {
+                    if (args.import_source !== "hasura" && args.import_source !== "nhost") {
+                        throw new Error("migration_import requires import_source=hasura or nhost");
+                    }
+                    const metadata = args.metadata_file
+                        ? JSON.parse(readFileSync(String(args.metadata_file), "utf8")) as unknown
+                        : undefined;
+                    const plan = createMigrationImportPlan({
+                        source: args.import_source,
+                        directory: typeof args.dir === "string" ? args.dir : undefined,
+                        metadata,
+                    });
+                    const written = args.write === true
+                        ? await writeMigrationImportPlan(plan, typeof args.output_dir === "string" ? args.output_dir : "")
+                        : [];
+                    return {
+                        content: [{
+                            type: "text" as const,
+                            text: JSON.stringify({ ...plan, written_files: written, applied: false }, null, 2),
+                        }],
+                    };
                 }
                 case "project_url": {
                     const r = await managementHttp().get(`/v1/projects/${ref}`);
