@@ -124,9 +124,15 @@ describe("GraphQL query contracts", () => {
     expect(result.files["graphql.ts"]).not.toMatch(/^import /m);
     expect(result.files["graphql.ts"]).toContain("unknown");
     expect(scanGeneratedArtifacts({ "graphql.ts": result.files["graphql.ts"] }, true)).toEqual([]);
+    expect(result.contract?.mode).toBe("query-only");
     expect(JSON.parse(result.files["graphql.manifest.json"]!)).toMatchObject({
       mode: "query-only",
       operations: [{ name: "OrderDetail", file: "order.graphql", line: 1 }],
+      persisted_operations: [{
+        name: "OrderDetail",
+        sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+        query: expect.stringContaining("query OrderDetail"),
+      }],
     });
     expect((await renderGraphql(options)).files).toEqual(result.files);
   });
@@ -219,6 +225,19 @@ result.order?.internal;
     expect(error?.file).toBe("order.graphql");
     expect(error?.line).toBeGreaterThan(0);
     expect(result.files).toEqual({});
+  });
+
+  test("generates an explicit mutation client without changing the wire transport", async () => {
+    const options = await fixture();
+    options.graphql!.mutations = true;
+    await writeFile(join(options.rootDir, "order.graphql"), "mutation Delete($id: ID!) { deleteOrder(id: $id) }");
+    const result = await renderGraphql(options);
+    expect(result.diagnostics).toEqual([]);
+    expect(result.contract?.mode).toBe("query-mutation");
+    expect(result.files["graphql.ts"]).toContain("async Delete");
+    expect(result.files["graphql.ts"]).toContain("DeleteMutationVariables");
+    expect(result.files["graphql.ts"]).toContain("parseDeleteMutation");
+    expect(JSON.parse(result.files["graphql.manifest.json"]!)).toMatchObject({ mode: "query-mutation" });
   });
 
   test("supports introspection JSON snapshots and explicit scalar mapping", async () => {

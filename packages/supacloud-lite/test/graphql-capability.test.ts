@@ -60,6 +60,36 @@ test('GraphQL adapter rejects malformed and oversized requests before database e
   } finally { await backend.close() }
 })
 
+test('GraphQL adapter emits sanitized duration metrics for slow requests', async () => {
+  const backend = await createBackend({ startRuntimeServices: false })
+  const metrics: Array<Record<string, unknown>> = []
+  try {
+    const handler = new GraphqlHandler(
+      backend.db,
+      { status: 'supported', extension: 'pg_graphql' },
+      { slowQueryThresholdMs: 1, onRequest: (metric) => metrics.push({ ...metric }) },
+    )
+    await backend.db.exec(`
+      create schema graphql;
+      create function graphql.resolve(text,jsonb,text,jsonb) returns jsonb
+        language sql as $$ select '{"data":{"__typename":"Query"}}'::jsonb $$;
+      grant usage on schema graphql to anon;
+      grant execute on all functions in schema graphql to anon;
+    `)
+    const response = await handler.handle(new Request('http://local/graphql/v1', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ query: '{ __typename }', operationName: 'Health' }),
+    }), { role: 'anon', claims: null })
+    expect(response.status).toBe(200)
+    expect(metrics).toHaveLength(1)
+    expect(metrics[0]).toMatchObject({ operationName: 'Health', status: 200 })
+    expect(typeof metrics[0]?.['slow']).toBe('boolean')
+    expect(metrics[0]).not.toHaveProperty('query')
+    expect(metrics[0]).not.toHaveProperty('variables')
+  } finally { await backend.close() }
+})
+
 test('doctor reports unverified capability without initializing state and fails required capability', async () => {
   const root = await mkdtemp(join(tmpdir(), 'lite-doctor-capability-'))
   try {

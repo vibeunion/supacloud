@@ -80,11 +80,21 @@ operation types; a thin generated facade sends isolated operations and their
 fragments using fetch. Compilation does not contact a database, enable
 an extension, change grants, or enable production introspection.
 
-Mutations and subscriptions are outside this first version. Query-only compilation
-is a developer guardrail, not an authorization boundary: database grants and RLS
-must independently prevent unauthorized reads and writes, including requests
-sent without the generated client. PostgreSQL functions exposed as queries also
-require review for side effects.
+Each generated `graphql.manifest.json` also contains `persisted_operations`.
+Every named operation has a SHA-256 hash of its printed, separated operation
+document and its canonical document text. A gateway or release controller may
+publish this list as an operation allowlist and accept the hash as the stable
+operation identity. The generated client continues to send the normal GraphQL
+document, so existing pg_graphql and Supabase-compatible clients are unchanged;
+enforcement is a separate deployment policy, not a second GraphQL runtime.
+
+Subscriptions remain outside this HTTP contract because they require the Realtime
+transport. Mutations are opt-in with `graphql.mutations: true`; the default remains
+query-only for compatibility and to keep governed business writes on the Command
+API. Mutation opt-in is only a generated-document capability: database grants,
+RLS, audit, idempotency and transaction behavior must independently be reviewed.
+Neither the compiler nor the generated client is an authorization boundary, and
+direct requests sent without the generated client remain possible.
 
 ## Usage
 
@@ -99,6 +109,8 @@ export default defineSupacloudConfig({
   graphql: {
     schema: "graphql/schema.graphql",
     documents: ["**/*.graphql", "**/*.gql"],
+    // Optional. Defaults to false; keep business writes on Command unless reviewed.
+    mutations: true,
     // Optional explicit wire mappings; other custom scalars remain unknown.
     scalars: { BigInt: { input: "string", output: "string" } },
   },
@@ -149,7 +161,8 @@ type ReviewListVariables = VariablesOf<typeof ReviewListDocument>;
 
 The optional document file participates in artifact drift checks and contains
 only type imports for the typed-document library. This does not add a second
-transport or permit mutations.
+transport; mutation documents still require the explicit `graphql.mutations`
+opt-in described above.
 
 Write a named operation in `src/review/reviews.graphql`, for example:
 
@@ -195,8 +208,10 @@ formats, authorization and remote schema freshness remain separate checks.
 Unsupported non-JSON scalar mappings fail compilation instead of generating an
 unchecked validator.
 
-`graphql.manifest.json` records schema hash, query names and source locations
-without timestamps. Module context packs include colocated query inventory and
+`graphql.manifest.json` records schema hash, operation mode, query names and source
+locations without timestamps. The mode is `query-only` by default or
+`query-mutation` after explicit mutation opt-in, so developer tooling can show the
+enabled operation capability. Module context packs include colocated query inventory and
 the schema path. Shared fragments remain ordinary source files; review their
 dependencies alongside the consuming query. Schema and query edits, additions
 and deletions invalidate the incremental contract snapshot. A schema outside

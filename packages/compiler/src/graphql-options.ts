@@ -1,7 +1,7 @@
 import { extname } from "node:path";
 import type { GraphqlOptions } from "./types";
 
-const optionNames = new Set(["schema", "documents", "scalars", "typedDocuments"]);
+const optionNames = new Set(["schema", "documents", "scalars", "typedDocuments", "mutations"]);
 
 export class GraphqlConfigurationError extends Error {
   readonly code = "graphql-config-invalid";
@@ -37,6 +37,9 @@ export function assertGraphqlOptions(value: unknown): asserts value is GraphqlOp
   }
   if (options.typedDocuments !== undefined && typeof options.typedDocuments !== "boolean") {
     fail("graphql.typedDocuments must be a boolean output option.");
+  }
+  if (options.mutations !== undefined && typeof options.mutations !== "boolean") {
+    fail("graphql.mutations must be a boolean opt-in for database-backed mutation documents.");
   }
   if (options.scalars !== undefined) {
     if (!options.scalars || typeof options.scalars !== "object" || Array.isArray(options.scalars)) {
