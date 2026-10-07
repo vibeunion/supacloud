@@ -1,7 +1,7 @@
 name: Prepare Reviewed PR 1689 Fixes
 on:
   push:
-    branches: ['review/pr1689-repair-760ee481']
+    branches: ['review/pr1689-repair-v2-760ee481']
 permissions:
   contents: read
 jobs:
