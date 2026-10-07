@@ -36,14 +36,16 @@ test("native PGMQ atomically binds concurrent job keys, input and exact durable 
     expect((await db`SELECT count(*)::integer AS n FROM pgmq.q_jobs`)[0].n).toBe(1);
     const id = receipts[0]![0].msg_id;
     expect(typeof id).toBe("string");
+    // Bun SQL queries are lazy. Start them before passing to .rejects, whose
+    // internal Promise inspection does not dispatch a lazy SQL Query in Bun 1.4.2.
     for (const query of [
       () => db`SELECT * FROM pgmq_public.send_idempotent('jobs', '{"revision":2}'::jsonb, 'concurrent', 0)`,
       () => db`SELECT * FROM pgmq_public.send_idempotent('jobs', '{"revision":1}'::jsonb, 'concurrent', 1)`,
       () => db`SELECT * FROM pgmq_public.send_idempotent('jobs', '{}'::jsonb, 'legacy', 0)`,
-    ]) await expect(query()).rejects.toMatchObject({ errno: "22023" });
+    ]) await expect(query().execute()).rejects.toMatchObject({ errno: "22023" });
     expect((await db`SELECT count(*)::integer AS n FROM pgmq.q_jobs`)[0].n).toBe(1);
     console.info("PGMQ idempotency: checking rollback and privilege boundaries");
-    await expect(db`SELECT * FROM pgmq_public.send_idempotent('missing', '{}'::jsonb, 'rollback', 0)`).rejects.toBeInstanceOf(Error);
+    await expect(db`SELECT * FROM pgmq_public.send_idempotent('missing', '{}'::jsonb, 'rollback', 0)`.execute()).rejects.toBeInstanceOf(Error);
     expect((await db`SELECT count(*)::integer AS n FROM supacloud_queue.job_keys WHERE job_key = 'rollback'`)[0].n).toBe(0);
     await expect(db.begin(async tx => {
       await tx`SELECT * FROM pgmq_public.send_idempotent('jobs', '{}'::jsonb, 'aborted', 0)`;
@@ -56,9 +58,9 @@ test("native PGMQ atomically binds concurrent job keys, input and exact durable 
         return tx`SELECT * FROM supacloud_queue.job_keys`;
       })).rejects.toMatchObject({ errno: "42501" });
     }
-    await expect(db`SELECT * FROM pgmq_public.send_idempotent('supacloud_internal_jobs', '{}'::jsonb, 'reserved', 0)`)
+    await expect(db`SELECT * FROM pgmq_public.send_idempotent('supacloud_internal_jobs', '{}'::jsonb, 'reserved', 0)`.execute())
       .rejects.toMatchObject({ errno: "42501" });
-    await expect(db`SELECT * FROM pgmq_public.send_idempotent('jobs', '{}'::jsonb, '', 0)`)
+    await expect(db`SELECT * FROM pgmq_public.send_idempotent('jobs', '{}'::jsonb, '', 0)`.execute())
       .rejects.toMatchObject({ errno: "22023" });
     console.info("PGMQ idempotency: checking archived receipts, reinstall and int64 IDs");
     await db`SELECT pgmq_public.archive('jobs', ${id}::bigint)`;
