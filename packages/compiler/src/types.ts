@@ -469,6 +469,8 @@ export interface GraphqlOptions {
   // Database First is the sole server-schema model, not a selectable configuration mode.
   /** Additionally emit standard TypedDocumentNode artifacts for GraphQL ecosystem clients. */
   typedDocuments?: boolean;
+  /** Explicitly allow GraphQL mutations in generated documents. Defaults to false. */
+  mutations?: boolean;
   /** Exported role-scoped database snapshot (.graphql/.gql/.json), never authored SDL or executable code.
    * Relative to rootDir for the programmatic API. Offline compilation does not attest its origin. */
   schema: string;
@@ -520,6 +522,8 @@ export interface GraphqlContractSummary {
   schemaHash?: string;
   /** SHA-256 with physical CRLF/CR normalized to LF; not an integrity or semantic digest. */
   schemaNormalizedHash?: string;
+  /** Generated operation capability; omitted by older consumers and query-only by default. */
+  mode?: "query-only" | "query-mutation";
   documents: string[];
   operations: Array<{ name: string; file: string; line: number }>;
 }

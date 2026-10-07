@@ -5,7 +5,13 @@ import { resolve } from "node:path";
  * Project the standard Codegen result types, rather than independently interpreting
  * selections, fragments and conditional fields. Unsupported wire types fail closed.
  */
-export function renderGraphqlValidators(source: string, operationNames: readonly string[]): string {
+export type GraphqlOperationKind = "query" | "mutation";
+
+export function renderGraphqlValidators(
+  source: string,
+  operationNames: readonly string[],
+  operationKinds: ReadonlyMap<string, GraphqlOperationKind> = new Map(),
+): string {
   const fileName = resolve("/__supacloud_graphql__/contracts.ts");
   const options: ts.CompilerOptions = {
     strict: true,
@@ -94,7 +100,7 @@ export function renderGraphqlValidators(source: string, operationNames: readonly
   }
   const operations = [...operationNames].sort();
   const parsers = operations.map((name) => {
-    const typeName = `${name}Query`;
+    const typeName = `${name}${operationKinds.get(name) === "mutation" ? "Mutation" : "Query"}`;
     const symbol = exports.get(typeName);
     if (!symbol) throw new Error(`Missing generated operation type: ${typeName}`);
     const check = reference(checker.getDeclaredTypeOfSymbol(symbol));

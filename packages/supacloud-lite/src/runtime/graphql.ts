@@ -14,6 +14,15 @@ export interface GraphqlOptions {
   enabled?: boolean
   maxRequestBodyBytes?: number
   statementTimeoutMs?: number
+  slowQueryThresholdMs?: number
+  onRequest?: (metric: GraphqlRequestMetric) => void
+}
+
+export interface GraphqlRequestMetric {
+  operationName?: string
+  status: number
+  durationMs: number
+  slow: boolean
 }
 
 type GraphqlProbe = { query(sql: string): Promise<{ rows: unknown[] }> }
@@ -59,20 +68,36 @@ export async function inspectGraphql(engine: GraphqlProbe): Promise<GraphqlCapab
 export class GraphqlHandler {
   readonly maxBytes: number
   readonly timeoutMs: number
+  readonly slowQueryThresholdMs: number
+  private readonly onRequest?: (metric: GraphqlRequestMetric) => void
 
   constructor(private db: Database, private capability: GraphqlCapability, options: GraphqlOptions = {}, private schemas = ['public']) {
     this.maxBytes = positive(options.maxRequestBodyBytes ?? 1024 * 1024)
     this.timeoutMs = positive(options.statementTimeoutMs ?? 30_000)
+    this.slowQueryThresholdMs = positive(options.slowQueryThresholdMs ?? 1_000)
+    this.onRequest = options.onRequest
   }
 
   async handle(request: Request, context: RequestContext): Promise<Response> {
+    const startedAt = performance.now()
+    let operationName: string | undefined
+    const finish = (result: Response): Response => {
+      const durationMs = Math.round((performance.now() - startedAt) * 100) / 100
+      this.onRequest?.({
+        ...(operationName === undefined ? {} : { operationName }),
+        status: result.status,
+        durationMs,
+        slow: durationMs >= this.slowQueryThresholdMs,
+      })
+      return result
+    }
     if (this.capability.status !== 'supported') {
-      return response(this.capability.status === 'disabled' ? 404 : 501, {
+      return finish(response(this.capability.status === 'disabled' ? 404 : 501, {
         errors: [{ message: 'GraphQL requires the real pg_graphql extension and graphql.resolve.',
           extensions: { code: this.capability.reason ?? 'GRAPHQL_DISABLED' } }],
-      })
+      }))
     }
-    if (request.method !== 'POST') return response(405, { errors: [{ message: 'Use POST for GraphQL requests.' }] }, { allow: 'POST' })
+    if (request.method !== 'POST') return finish(response(405, { errors: [{ message: 'Use POST for GraphQL requests.' }] }, { allow: 'POST' }))
     try {
       if (request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json') {
         throw new ApiError(415, { message: 'GraphQL requests require application/json' })
@@ -84,6 +109,7 @@ export class GraphqlHandler {
         (body.operationName != null && typeof body.operationName !== 'string')) {
         throw new ApiError(400, { message: 'Invalid GraphQL request' })
       }
+      operationName = body.operationName ?? undefined
       const result = await this.db.withContext(context, async (query) => {
         await query<unknown>(`select set_config('statement_timeout', $1, true)`, [String(this.timeoutMs)])
         await query<unknown>(`select set_config('search_path', $1, true)`, [
@@ -98,15 +124,16 @@ export class GraphqlHandler {
       if (result.rows.length !== 1 || !isRecord(row) || !isGraphqlEnvelope(row['result'])) {
         throw new Error('Invalid GraphQL resolver response')
       }
-      return response(200, row['result'])
+      return finish(response(200, row['result']))
     } catch (error) {
-      if (error instanceof ApiError) return response(error.status, { errors: [{ message: error.message }] })
-      if (error instanceof SyntaxError) return response(400, { errors: [{ message: 'Invalid JSON request' }] })
+      if (error instanceof ApiError) return finish(response(error.status, { errors: [{ message: error.message }] }))
+      if (error instanceof SyntaxError) return finish(response(400, { errors: [{ message: 'Invalid JSON request' }] }))
       // Never return SQL, connection details or database exception text to callers.
       const code = errorProperty(error, 'errno') ?? errorProperty(error, 'code')
       const status = code === '42501' ? 403 : code === '57014' ? 504 : 500
-      return response(status, { errors: [{ message: 'GraphQL execution failed',
+      return finish(response(status, { errors: [{ message: 'GraphQL execution failed',
         extensions: { code: status === 403 ? 'GRAPHQL_ACCESS_DENIED' : status === 504 ? 'GRAPHQL_TIMEOUT' : 'GRAPHQL_EXECUTION_FAILED' } }] })
+      )
     }
   }
 }

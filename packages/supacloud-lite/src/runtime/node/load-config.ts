@@ -142,10 +142,11 @@ function readLite(root: ConfigTable, mode: RuntimeMode): ProjectConfig['lite'] {
       enabled: getBool(graphql, 'enabled'),
       maxRequestBodyBytes: getInt(graphql, 'max_request_body_bytes'),
       statementTimeoutMs: getInt(graphql, 'statement_timeout_ms'),
+      slowQueryThresholdMs: getInt(graphql, 'slow_query_threshold_ms'),
     },
     identityModule: getString(tableAt(root, 'lite.identity'), 'module'),
   }
-  for (const key of ['max_request_body_bytes', 'statement_timeout_ms']) {
+  for (const key of ['max_request_body_bytes', 'statement_timeout_ms', 'slow_query_threshold_ms']) {
     const value = graphql?.values.get(key)
     if (value !== undefined && (typeof value !== 'string' || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)) || Number(value) <= 0)) {
       throw new Error(`invalid GraphQL option: ${key}`)

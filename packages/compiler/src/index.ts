@@ -199,4 +199,24 @@ export type {
 export { inspectRouteContracts, validateRouteContracts } from "./route-contracts";
 export { pullGraphqlSchema } from "./graphql-schema";
 export type { PullGraphqlSchemaOptions } from "./graphql-schema";
+export {
+  checkGraphqlCompatibility,
+  createRoleSnapshotReport,
+  diffGraphqlSchemas,
+  graphqlFeatureMatrix,
+  introspectionQuery,
+  readGraphqlSchema,
+  schemaFromSource,
+} from "./graphql-governance";
+export type {
+  GraphqlCompatibilityReport,
+  GraphqlFeatureMatrix,
+  GraphqlGovernanceDiagnostic,
+  GraphqlGovernancePolicy,
+  GraphqlOperationReport,
+  GraphqlRoleSnapshot,
+  GraphqlRoleSnapshotReport,
+  GraphqlSchemaChange,
+  GraphqlSchemaDiff,
+} from "./graphql-governance";
 export { generateDatabaseContracts, parseDatabaseContractsOptions, runDatabaseContractsFile, type DatabaseContractsOptions } from "./database-contracts";
