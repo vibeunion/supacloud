@@ -45,6 +45,23 @@ after stop/failure, let the process supervisor restart a new process.
 
 ## Queue Worker
 
+The adapter also exposes small policy primitives that keep Graphile Worker-style
+ergonomics on top of the existing PGMQ/Workflow boundary:
+
+- `sendIdempotent` on the SDK uses an additive `pgmq_public.send_idempotent`
+  RPC and a tenant-local `(queue_name, job_key)` unique record. The official
+  `send`, `send_batch`, `read`, `pop`, `archive`, and `delete` RPCs are unchanged.
+- `serial: true` forces one in-flight message for a named worker queue.
+- `normalizeJobPolicy` and `retryDelaySeconds` provide bounded exponential retry
+  policy with priority metadata.
+- `runTaskListOnce` runs a finite task list without opening a database connection.
+- `createPgmqWakeup` supplies a queue-scoped `LISTEN/NOTIFY` adapter; the
+  transport owns the actual PostgreSQL connection.
+- `scheduledJobKey` and `backfillOccurrences` provide stable schedule identity
+  and bounded interval backfill.
+- `createQueueJobMetrics` exports queue-level enqueue, start, completion, retry,
+  unknown-outcome and oldest-pending metrics.
+
 ```ts
 import { createPgflowQueueWorker } from '@supacloud/worker';
 

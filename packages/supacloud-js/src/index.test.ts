@@ -1021,6 +1021,33 @@ describe("@supacloud/js", () => {
     expect(deleted).toMatchObject({ msg_id: "104", status: "deleted", success: true });
   });
 
+  test("idempotent queue send uses the additive job-key RPC and preserves payloads", async () => {
+    const { supabase, rpc } = createFakeSupabase();
+    rpc.mockImplementation(async (fn: string) => fn === "send_idempotent"
+      ? { data: [{ msg_id: "9007199254740993", created: false }], error: null }
+      : { data: null, error: null });
+    const client = createSupaCloudClient({
+      supabase: supabase as never,
+      managementApiUrl: "https://admin.example.com/",
+      projectRef: "proj_1",
+    });
+    const result = await client.queue("emails").sendIdempotent(
+      { hello: "world" }, "welcome:user-42",
+    );
+    expect(result).toMatchObject({
+      msg_id: "9007199254740993",
+      queue_name: "emails",
+      deduplicated: true,
+      payload: { hello: "world" },
+    });
+    expect(rpc.mock.calls[0]?.[0]).toBe("send_idempotent");
+    expect(rpc.mock.calls[0]?.[1]).toMatchObject({
+      queue_name: "emails",
+      p_job_key: "welcome:user-42",
+      sleep_seconds: 0,
+    });
+  });
+
   test("queue management extensions use management-api requests with bearer auth", async () => {
     const { supabase } = createFakeSupabase();
     const calls: Array<{ url: string; init: RequestInit | undefined }> = [];
