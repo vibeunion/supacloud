@@ -12,7 +12,7 @@ interface ModulePolicy {
 
 const ACTION_POLICY: Record<string, ModulePolicy> = {
     deploy: { write: ["deploy"] },
-    applications: { read: ["list_releases", "get_release", "get_runtime", "get_deployment_evidence", "get_configuration"],
+    applications: { read: ["list_releases", "get_release", "get_runtime", "get_deployment_evidence", "get_configuration", "logs"],
         write: ["upload_release", "put_configuration", "activate_release", "reconcile_activation", "retire_activation"] },
     project: {
         read: ["get", "endpoints", "health", "logs", "api_keys", "settings", "tasks", "task_detail", "task_stats", "dlq", "background_settings"],
@@ -83,7 +83,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     ai: { local: ["show_skill", "install_skill"] },
     app: {
         local: ["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix", "plan", "build"],
-        read: ["status"],
+        read: ["status", "logs"],
         write: ["upload", "configure", "deploy", "rollback", "reconcile", "retire"],
     },
     db: { local: ["lint", "explain"], read: ["module_check"] },

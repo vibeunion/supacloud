@@ -388,6 +388,11 @@ describe("generated GraphQL client", () => {
     expect(body.variables).toEqual({ id: "42" });
     expect(body.query).toContain("query OrderDetail");
     expect(body.query).toContain("fragment OrderFields");
+    expect(body.operationName).toBe("OrderDetail");
+    expect(body.extensions.persistedQuery).toMatchObject({
+      version: 1,
+      sha256Hash: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
   });
 
   test.each([

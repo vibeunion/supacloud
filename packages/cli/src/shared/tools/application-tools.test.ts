@@ -39,6 +39,35 @@ test("application schema is covered and a bound release is accepted", async () =
   expect(JSON.parse(result.content[0]!.text)).toMatchObject({ ok: true, release });
 });
 
+test("application logs stay bound to the selected environment", async () => {
+  let requested = "";
+  const handler = tool({
+    project_ref: "project", application_id: "reviews", environment_id: "test",
+    release_id: null, activation_id: null, result: [], pagination: { offset: 0, limit: 200, total: 0 },
+  }, {
+    get: (async (path: string) => {
+      requested = path;
+      return {
+        ok: true, status: 200,
+        data: {
+          project_ref: "project", application_id: "reviews", environment_id: "test",
+          release_id: null, activation_id: null, result: [], pagination: { offset: 0, limit: 200, total: 0 },
+        },
+      };
+    }) as HttpTransport["get"],
+  });
+
+  const result = JSON.parse((await handler({
+    action: "logs", ref: "project", id: "reviews", environment_id: "test",
+    service: "api", search: "failed",
+  })).content[0]!.text);
+
+  expect(requested).toBe(
+    "/v1/projects/project/applications/reviews/environments/test/logs?service=api&search=failed",
+  );
+  expect(result).toMatchObject({ ok: true, application_id: "reviews", environment_id: "test" });
+});
+
 test("delivery schemas validate through the CLI argument parser after the TypeBox upgrade", () => {
   const args = {
     action: "activate_release", ref: "project", id: "reviews", environment_id: "test",

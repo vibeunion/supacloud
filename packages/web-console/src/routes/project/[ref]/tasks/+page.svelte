@@ -443,6 +443,30 @@
             <XCircle size={14} />{$t("TaskCenter.cancel_task")}
           </button>
         </div>
+        <section class="mt-5 space-y-2" aria-label={$t("TaskCenter.execution_timeline")}>
+          <h3 class="text-sm font-semibold">{$t("TaskCenter.execution_timeline")}</h3>
+          {#if selected.attempts.length === 0}
+            <p class="text-xs text-muted-foreground">{$t("TaskCenter.no_attempts")}</p>
+          {:else}
+            <ol class="space-y-2 border-l pl-4">
+              {#each selected.attempts as attempt (attempt.id)}
+                <li class="relative">
+                  <span class="absolute -left-[1.3rem] top-1.5 h-2 w-2 rounded-full bg-brand"></span>
+                  <div class="flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <span class="font-medium">{$t("TaskCenter.attempt_number", { values: { count: attempt.attempt_no } })}</span>
+                    <span class="text-muted-foreground">{taskStatusLabel(attempt.status)}</span>
+                  </div>
+                  <div class="mt-1 grid gap-1 text-xs text-muted-foreground sm:grid-cols-3">
+                    <span>{$t("TaskCenter.started_at")}: {attempt.started_at}</span>
+                    <span>{$t("TaskCenter.completed_at")}: {attempt.completed_at ?? "—"}</span>
+                    <span>{$t("TaskCenter.duration")}: {attempt.duration_ms === null ? "—" : `${attempt.duration_ms} ms`}</span>
+                  </div>
+                  {#if attempt.error}<p class="mt-1 break-words text-xs text-destructive">{attempt.error}</p>{/if}
+                </li>
+              {/each}
+            </ol>
+          {/if}
+        </section>
       </div>
     {/if}
   {/if}

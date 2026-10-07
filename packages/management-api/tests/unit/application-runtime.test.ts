@@ -4,7 +4,10 @@ import {
 } from "../../src/services/application-runtime";
 import { assertManagedSystemdUnitContent } from "../../src/services/systemd-unit-broker";
 import { runtimeInput } from "../helpers/application-runtime";
-import { applicationResourceUsage } from "../../src/services/application-runtime-allocation";
+import {
+  applicationResourceUsage, buildApplicationCapacityReport,
+  type ApplicationRuntimeAllocation,
+} from "../../src/services/application-runtime-allocation";
 import { ApplicationReadiness } from "../../src/services/application-readiness";
 
 const running = "LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=123\nInvocationID=" + "a".repeat(32) + "\nResult=success\n";
@@ -35,6 +38,36 @@ test("ordinary HTTP and worker compute is bounded, budgeted and requires cgroup 
   });
   expect((await readiness.inspect(input)).ready).toBe(false);
   expect(probes).toBe(0);
+});
+
+test("capacity report exposes host pressure and project noisy-neighbor usage", () => {
+  const input = runtimeInput();
+  for (const target of input.release.targets) target.compute = { cpuLimit: 0.5, memoryLimitMiB: 256 };
+  const allocation = {
+    schema: "supacloud.application-runtime-allocation.v1" as const,
+    runtime: input,
+    configurationId: "91234567-89ab-4def-8123-456789abcdef",
+    createdAt: "2026-10-08T00:00:00.000Z",
+  } satisfies ApplicationRuntimeAllocation;
+  const report = buildApplicationCapacityReport({
+    projectRef: input.release.project_ref,
+    allocations: [allocation],
+    activePorts: 1,
+    budget: { cpu: 2, memoryMiB: 1024, connections: 10, concurrency: 10, ports: 4 },
+    generatedAt: "2026-10-08T00:00:00.000Z",
+    queueOwners: [{
+      queue: "scw_reviews_v1",
+      projectRef: input.release.project_ref,
+      applicationId: input.release.application_id,
+      environmentId: input.environmentId,
+      activationId: input.activationId,
+    }],
+  });
+  expect(report.pressure).toBe("normal");
+  expect(report.projectAllocations).toBe(1);
+  expect(report.projectUsage.cpu).toBeGreaterThan(0);
+  expect(report.remaining?.ports).toBe(3);
+  expect(report.queueOwners).toHaveLength(1);
 });
 
 test("HTTP and worker plans share immutable release identity and pass the managed broker", () => {
