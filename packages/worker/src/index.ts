@@ -44,7 +44,7 @@ export interface ProcessWorkerOptions {
   connectionString: string;
   concurrency?: number;
   maxPgConnections?: number;
-  /** Forces one in-flight message for this named queue. */
+  /** One in-flight message per worker instance; not a distributed queue lock. */
   serial?: boolean;
   /** Environment source used for startup validation; defaults to process.env. */
   environment?: Readonly<Record<string, string | undefined>>;
@@ -52,7 +52,7 @@ export interface ProcessWorkerOptions {
 export interface QueueWorkerOptions extends ProcessWorkerOptions, QueueBinding {
   visibilityTimeoutSeconds?: number;
   retryLimit?: number;
-  /** Forces one in-flight message for this named queue. */
+  /** One in-flight message per worker instance; not a distributed queue lock. */
   serial?: boolean;
   /** Lifecycle supervision only. The upstream engine remains the sole scheduler. */
   supervise?: (run: (signal: AbortSignal) => Promise<void>, signal: AbortSignal, enqueuedAt: number | null) => Promise<void>;
@@ -85,7 +85,8 @@ function config(options: ProcessWorkerOptions) {
     url.pathname.length < 2
   )
     throw new Error("WORKER_CONNECTION_INVALID");
-  const maxConcurrent = integer(options.concurrency, 4, 1, 32);
+  if (options.serial !== undefined && typeof options.serial !== "boolean") throw new Error("WORKER_SERIAL_CONFIG_INVALID");
+  const maxConcurrent = integer(options.concurrency, options.serial === true ? 1 : 4, 1, 32);
   if (options.serial && maxConcurrent !== 1) throw new Error("WORKER_SERIAL_CONFIG_INVALID");
   return Object.freeze({
     connectionString: options.connectionString,
@@ -141,10 +142,12 @@ export function createPgflowQueueWorker<T>(
   ) {
     throw new Error("WORKER_HANDLER_INVALID");
   }
-  const policy = normalizeJobPolicy({
-    ...options.policy,
-    ...(options.retryLimit === undefined ? {} : { maxAttempts: options.retryLimit }),
-  });
+  const configuredPolicy = normalizeJobPolicy(options.policy);
+  const legacyRetries = options.retryLimit === undefined ? undefined : integer(options.retryLimit, 5, 0, 10);
+  if (legacyRetries !== undefined && options.policy?.maxRetries !== undefined && legacyRetries !== configuredPolicy.maxRetries) {
+    throw new Error("WORKER_RETRY_POLICY_INVALID");
+  }
+  const policy = normalizeJobPolicy({ ...configuredPolicy, maxRetries: legacyRetries ?? configuredPolicy.maxRetries });
   const projectRef = options.projectRef;
   const queueConfig: NonNullable<
     Parameters<typeof EdgeWorker.startQueueWorker>[1]
@@ -152,11 +155,9 @@ export function createPgflowQueueWorker<T>(
     ...config(options),
     queueName: options.queueName,
     visibilityTimeout: integer(options.visibilityTimeoutSeconds, 300, 15, 3600),
-    maxConcurrent: options.serial ? 1 : integer(options.concurrency, 4, 1, 32),
-    batchSize: options.serial ? 1 : integer(options.concurrency, 4, 1, 32),
     retry: {
       strategy: "exponential",
-      limit: policy.maxAttempts,
+      limit: policy.maxRetries,
       baseDelay: policy.baseDelaySeconds,
       maxDelay: policy.maxDelaySeconds,
     },

@@ -45,22 +45,35 @@ after stop/failure, let the process supervisor restart a new process.
 
 ## Queue Worker
 
-The adapter also exposes small policy primitives that keep Graphile Worker-style
-ergonomics on top of the existing PGMQ/Workflow boundary:
+The adapter exposes policy primitives on the existing PGMQ/Workflow boundary:
 
-- `sendIdempotent` on the SDK uses an additive `pgmq_public.send_idempotent`
-  RPC and a tenant-local `(queue_name, job_key)` unique record. The official
-  `send`, `send_batch`, `read`, `pop`, `archive`, and `delete` RPCs are unchanged.
-- `serial: true` forces one in-flight message for a named worker queue.
-- `normalizeJobPolicy` and `retryDelaySeconds` provide bounded exponential retry
-  policy with priority metadata.
-- `runTaskListOnce` runs a finite task list without opening a database connection.
-- `createPgmqWakeup` supplies a queue-scoped `LISTEN/NOTIFY` adapter; the
-  transport owns the actual PostgreSQL connection.
-- `scheduledJobKey` and `backfillOccurrences` provide stable schedule identity
-  and bounded interval backfill.
-- `createQueueJobMetrics` exports queue-level enqueue, start, completion, retry,
-  unknown-outcome and oldest-pending metrics.
+- SDK `sendIdempotent` adds `pgmq_public.send_idempotent`. It binds a tenant-local
+  `(queue_name, job_key)` to the original JSON input and delay in the enqueue
+  transaction. Reusing a key with different input/delay fails. A deduplicated
+  receipt does not claim the old job is still pending or completed. Keys and
+  their input identity survive archive/delete and require an explicit, reviewed
+  administrator retention policy; no automatic cleanup or exactly-once business
+  execution is implied. Existing key-only records fail closed rather than invent
+  input identity. Official PGMQ RPC contracts are unchanged.
+- `serial: true` defaults concurrency and batch size to one **per process**. An
+  explicit conflicting concurrency is rejected. This is not a cross-process
+  mutex and does not serialize replicas or expired visibility leases.
+- `normalizeJobPolicy` uses `maxRetries` (retries after the first attempt, matching
+  pgflow); the existing `retryLimit` remains supported with its previous bounds.
+  `priority` is handler metadata, not priority dequeue ordering.
+- `runTaskListOnce` is a finite local fixture runner, not a database queue drain.
+  It reuses the worker's authorization, cancellation and error-redaction boundary.
+- `createPgmqWakeup` creates bounded hashed notification channels. The transport
+  owns LISTEN registration/connection cleanup; notifications are advisory and
+  require polling/reconciliation. Notify only after enqueue commit, register the
+  listener before checking for queued work, and never put secrets in a notification.
+- `backfillOccurrences` calculates bounded fixed-interval occurrences from an
+  explicit `anchor` (Unix epoch by default), so overlapping polling windows retain
+  the same scheduled keys. It is not a cron scheduler or timezone/DST engine.
+- `createQueueJobMetrics` is explicit instrumentation, not automatically collected
+  queue telemetry. Supply `observePending(oldestTimestamp)` from an authoritative
+  queue query, or `null` for an empty queue. The age gauge is absent until observed;
+  completion counters alone cannot determine the oldest pending message.
 
 ```ts
 import { createPgflowQueueWorker } from '@supacloud/worker';

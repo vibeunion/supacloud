@@ -50,7 +50,7 @@
     "test:runtime": "bun test tests/runtime.test.ts",
     "check:runtime": "tsc -p tsconfig.runtime.json",
     "build": "tsc -p tsconfig.json",
-    "test": "bun test tests/worker.test.ts"
+    "test": "bun test tests/worker.test.ts src/job-policy.test.ts src/job-policy-boundaries.test.ts"
   },
   "dependencies": {
     "@supacloud/delivery": "file:../delivery",
