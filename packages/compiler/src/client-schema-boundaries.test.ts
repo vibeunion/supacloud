@@ -6,6 +6,9 @@ import { validateClientSchemaBoundaries } from "./client-schema-boundaries";
 import { checkProject, compileProject } from "./compile";
 import { writeFixtureProject } from "./fixtures/helpers";
 import type { ApplicationGraph } from "./types";
+import { analyzeProject } from "./analyze";
+import { appStarterFiles } from "../../cli/src/shared/tools/app-starter";
+import { appTemplateFiles } from "../../cli/src/shared/tools/app-starter-templates";
 
 function fixture(): ApplicationGraph {
   return {
@@ -58,6 +61,30 @@ test("error response schemas are checked, not only success schemas", () => {
     method: "GET", path: "", handler: "list", responses: { 200: "Result", "4XX": "Params" },
   }];
   expect(validateClientSchemaBoundaries(graph, { rootDir: "/project", generateClient: true })).toHaveLength(1);
+});
+
+test("shipped starters keep route schemas outside runtime modules", async () => {
+  const starters = [
+    appStarterFiles("example"),
+    appTemplateFiles("example", "http"),
+    appTemplateFiles("example", "minimal", {
+      "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.117.0",
+    }),
+  ];
+  for (const files of starters) {
+    const rootDir = await mkdtemp(join(tmpdir(), "supacloud-starter-boundary-"));
+    try {
+      await writeFixtureProject(rootDir, files);
+      const sourceRoot = join(rootDir, "src");
+      const graph = await analyzeProject(sourceRoot, ["**/*.ts"]);
+      expect(graph.modules.flatMap(module => module.controllers)).not.toHaveLength(0);
+      expect(validateClientSchemaBoundaries(graph, {
+        rootDir: sourceRoot, generateClient: true,
+      })).toEqual([]);
+    } finally {
+      await rm(rootDir, { recursive: true, force: true });
+    }
+  }
 });
 
 test("compile and check report the same diagnostic and strict compilation preserves artifacts", async () => {
