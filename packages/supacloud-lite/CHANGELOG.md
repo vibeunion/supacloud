@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.22.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.21.1...supacloud-lite-v0.22.0) (2026-10-07)
+
+
+### Features
+
+* **platform:** close application platform P0/P1 capabilities ([dbaf3a6](https://github.com/vibeunion/supacloud/commit/dbaf3a6d01daa71455a8cde96e9e233743bfdfca))
+
+
+### Bug Fixes
+
+* **worker:** ship reviewed PGMQ job controls and concurrency repairs ([#1689](https://github.com/vibeunion/supacloud/issues/1689)) ([e283915](https://github.com/vibeunion/supacloud/commit/e283915e66e119b75ad1b909e18816270b5d01e3))
+
 ## [0.21.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.21.0...supacloud-lite-v0.21.1) (2026-10-06)
 
 
