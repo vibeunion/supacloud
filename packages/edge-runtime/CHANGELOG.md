@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.29.0...edge-runtime-v0.29.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* **edge-runtime:** preserve guarded constructor identity ([#1680](https://github.com/vibeunion/supacloud/issues/1680)) ([2bae9a1](https://github.com/vibeunion/supacloud/commit/2bae9a12dd276bd2d4822e7fb2f978374a2e40d0))
+
 ## [0.29.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.28.0...edge-runtime-v0.29.0) (2026-10-05)
 
 
