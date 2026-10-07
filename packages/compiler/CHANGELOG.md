@@ -1,5 +1,83 @@
 # Changelog
 
+## [0.39.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.38.2...compiler-v0.39.0) (2026-10-07)
+
+
+### Features
+
+* **compiler:** diagnose browser-unsafe client schemas ([#1679](https://github.com/vibeunion/supacloud/issues/1679)) ([18582fc](https://github.com/vibeunion/supacloud/commit/18582fcc0384246d87660cb42b6b4acbdc475b5e))
+
+
+### Bug Fixes
+
+* **compiler:** keep generated runtime types strict ([#1682](https://github.com/vibeunion/supacloud/issues/1682)) ([ad319f9](https://github.com/vibeunion/supacloud/commit/ad319f9614c328a5d0f69d581dd55600fd8dfcf7))
+
+## [0.38.2](https://github.com/vibeunion/supacloud/compare/compiler-v0.38.1...compiler-v0.38.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* **release:** keep compiler migration tuple in sync with elysia/app releases ([#1674](https://github.com/vibeunion/supacloud/issues/1674)) ([a072c7d](https://github.com/vibeunion/supacloud/commit/a072c7dbf4a6a313f7fb092256b9c3baa3b00318))
+
+## [0.38.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.38.0...compiler-v0.38.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **deps,perf:** replace Bun native APIs and resolve audit vulnerabilities ([#1667](https://github.com/vibeunion/supacloud/issues/1667)) ([06a9199](https://github.com/vibeunion/supacloud/commit/06a91990c754ce586f2a2353f253dc50f4fa0f98))
+
+## [0.38.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.37.0...compiler-v0.38.0) (2026-10-05)
+
+
+### Features
+
+* **compiler,query,supacloud-js:** procedure façade, supabase-js compatibility, and @supacloud/query adapter ([#1653](https://github.com/vibeunion/supacloud/issues/1653)) ([8ed8d1a](https://github.com/vibeunion/supacloud/commit/8ed8d1ad594ab981e6d03333ad35248608467992))
+
+## [0.37.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.36.0...compiler-v0.37.0) (2026-10-05)
+
+
+### Features
+
+* **elysia:** Elysia 2 AOT evaluation and end-to-end typing architecture ([#1654](https://github.com/vibeunion/supacloud/issues/1654)) ([39ee49f](https://github.com/vibeunion/supacloud/commit/39ee49f760e85e789c43c1d18cf5729db592f6bc))
+
+
+### Miscellaneous Chores
+
+* **deps:** complete @sinclair/typebox to typebox 1.3.34 migration ([#1655](https://github.com/vibeunion/supacloud/issues/1655)) ([87d1133](https://github.com/vibeunion/supacloud/commit/87d1133c0fa0eadf145afc6c3747f693e3e36200))
+
+## [0.36.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.35.0...compiler-v0.36.0) (2026-10-05)
+
+
+### Features
+
+* add agent backend authoring, runtime and observability workflows ([#1648](https://github.com/vibeunion/supacloud/issues/1648)) ([59a66d1](https://github.com/vibeunion/supacloud/commit/59a66d184a47d19c7f8895f24a6ba2c7e74e93d0))
+
+
+### Bug Fixes
+
+* **supacloud-js:** harden procedure execution contracts ([#1643](https://github.com/vibeunion/supacloud/issues/1643)) ([cb20731](https://github.com/vibeunion/supacloud/commit/cb20731961525ee02e8d46467bf45e9b3dbd9147))
+
+## [0.35.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.34.0...compiler-v0.35.0) (2026-10-05)
+
+
+### Features
+
+* **supacloud-js:** add typed procedure facade and unified errors ([#1639](https://github.com/vibeunion/supacloud/issues/1639)) ([fef05e9](https://github.com/vibeunion/supacloud/commit/fef05e98ee1044e1f449bad52d18104d28e17cb4))
+
+## [0.34.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.33.0...compiler-v0.34.0) (2026-10-04)
+
+
+### Features
+
+* **supacloud-js:** add framework-neutral TanStack Query adapter ([#1637](https://github.com/vibeunion/supacloud/issues/1637)) ([071b28c](https://github.com/vibeunion/supacloud/commit/071b28c5ce992834f46a0608d68475eb295c5c3e))
+
+## [0.33.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.32.0...compiler-v0.33.0) (2026-10-04)
+
+
+### Features
+
+* add Supabase-compatible procedure client transport ([#1634](https://github.com/vibeunion/supacloud/issues/1634)) ([661351a](https://github.com/vibeunion/supacloud/commit/661351ae507877a463a5aab1bd49a27c9bd77cfa))
+
 ## [0.32.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.31.2...compiler-v0.32.0) (2026-10-04)
 
 

@@ -8,9 +8,9 @@ is a separately authorized business command, never an assumed rollback.
 
 ## Compatibility and Acceptance Boundary
 
-The Elysia peer and development dependency are pinned to `2.0.0-beta.19`.
+The Elysia peer and development dependency are pinned to `2.0.0-beta.21`.
 `compatibility.json` records the acceptance target: Bun 1.4.2, Elysia
-2.0.0-beta.19, `typebox` 1.3.34, `exact-mirror` 1.2.6, TypeScript CLI 7.0.2
+2.0.0-beta.21, `typebox` 1.3.34, `exact-mirror` 1.2.6, TypeScript CLI 7.0.2
 and the compiler's separate TypeScript 6 semantic API 6.0.2. The matrix is a
 required target, not proof of an execution. See the dated, commit-specific
 [framework acceptance record](../../docs/framework-acceptance.md) for actual
@@ -316,7 +316,7 @@ Runtime adapter that turns `@supacloud/compiler` output into a production-ready
 ## Installation
 
 ```bash
-bun add --exact @supacloud/elysia elysia@2.0.0-beta.19
+bun add --exact @supacloud/elysia elysia@2.0.0-beta.21
 ```
 
 ## Usage
@@ -630,6 +630,16 @@ transaction and persist with a row lock or expected-version check.
 Lightweight error class carrying HTTP `status`, machine-readable `code`, and
 optional structured `details`.
 
+The adapter registers `ApplicationError` and `SchemaContractError` in Elysia
+2.0's native error dictionary (`app.error(ErrorClass, handler)`). Typed entries
+keep these classes out of the generic catch-all, so route response inference
+stays precise while Elysia (and Eden Treaty) knows the errors are handled. The
+dictionary is exported as `applicationErrorDictionary`, and
+`frameworkErrorCode(error)` exposes the same code normalization (`ParseError` →
+`PARSE`, `ValidationError` → `VALIDATION`, otherwise the error's own `code`)
+used by the generic lane. A configured `errorMapper` remains authoritative for
+every lane and still receives the request context.
+
 ### `createMemorySandbox(options): MemorySandbox`
 
 Creates an in-process application harness with `request()`, `db`, `storage`,
@@ -693,9 +703,18 @@ const app = registerElysiaRoute(new Elysia(), route);
 
 The callback is typed from the contract (including decoded transforms and
 declared response statuses). Cookie values retain Elysia's native shape, so a
-declared `session: t.String()` is read as `cookie.session.value`. This helper
-does not add Eden-style client inference to an existing Elysia instance; the
-compiler-generated client remains the source of transport types.
+declared `session: t.String()` is read as `cookie.session.value`.
+`registerElysiaRoute` returns the same instance and preserves its existing type.
+Chaining registers routes at runtime but does not add those routes to Eden's
+static route tree. Use the contract's typed client or the compiler-generated
+client for transport types.
+
+When no schema declares `query` or `headers`, the handler context falls back to
+Elysia's native `Record<string, string | undefined>` (not a narrower `string`),
+and `params` resolves from the path exactly as Elysia does. TypeBox transforms
+(`t.Numeric`, `t.Transform`, `Type.Codec`) are decoded before the handler runs,
+so `query.page` from `t.Object({ page: t.Numeric() })` is a `number`, not a
+string.
 
 Response maps may use concrete statuses, `1XX`-`5XX` families, and `default`.
 The adapter expands family/default entries to concrete validators before

@@ -1,7 +1,7 @@
 /**
  * Auth — Compound tool (10→1)
  */
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { projectRefPathSegment } from "../project-ref";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";

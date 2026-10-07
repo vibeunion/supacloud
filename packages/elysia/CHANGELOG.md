@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.26.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.25.0...elysia-v0.26.0) (2026-10-07)
+
+
+### Features
+
+* **compiler:** diagnose browser-unsafe client schemas ([#1679](https://github.com/vibeunion/supacloud/issues/1679)) ([18582fc](https://github.com/vibeunion/supacloud/commit/18582fcc0384246d87660cb42b6b4acbdc475b5e))
+
+## [0.25.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.24.1...elysia-v0.25.0) (2026-10-06)
+
+
+### Features
+
+* **elysia:** improve Elysia 2.0 type safety and native error handling ([#1669](https://github.com/vibeunion/supacloud/issues/1669)) ([0df61c3](https://github.com/vibeunion/supacloud/commit/0df61c3f82ce61ba9875d9139e0414ae9c68d0e2))
+
+
+### Bug Fixes
+
+* **elysia:** preserve error code normalization ([#1672](https://github.com/vibeunion/supacloud/issues/1672)) ([e7e4ee4](https://github.com/vibeunion/supacloud/commit/e7e4ee47bfafed1c0451e8af4f074c190a967189))
+
+
+### Miscellaneous Chores
+
+* **elysia:** regenerate webhook example fixture ([#1673](https://github.com/vibeunion/supacloud/issues/1673)) ([93c8dad](https://github.com/vibeunion/supacloud/commit/93c8dade33d5380a87154e90576faadcbf3bf763))
+
+## [0.24.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.24.0...elysia-v0.24.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **deps,perf:** replace Bun native APIs and resolve audit vulnerabilities ([#1667](https://github.com/vibeunion/supacloud/issues/1667)) ([06a9199](https://github.com/vibeunion/supacloud/commit/06a91990c754ce586f2a2353f253dc50f4fa0f98))
+
+## [0.24.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.23.1...elysia-v0.24.0) (2026-10-05)
+
+
+### Features
+
+* **elysia:** Elysia 2 AOT evaluation and end-to-end typing architecture ([#1654](https://github.com/vibeunion/supacloud/issues/1654)) ([39ee49f](https://github.com/vibeunion/supacloud/commit/39ee49f760e85e789c43c1d18cf5729db592f6bc))
+
 ## [0.23.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.23.0...elysia-v0.23.1) (2026-10-02)
 
 

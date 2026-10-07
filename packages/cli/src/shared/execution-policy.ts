@@ -25,7 +25,13 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         write: ["query", "execute", "apply_migration", "push_migrations", "baseline_migrations", "create_table_rls", "enable_extension", "disable_extension"],
     },
     supabase: {
-        local: ["version", "migration_new", "db_diff", "db_reset", "db_pull", "db_dump", "migration_list", "gen_types"],
+        read: ["config_pull"],
+        local: [
+            "version", "init", "migration_new", "db_diff", "db_reset", "db_pull",
+            "db_schema_declarative_sync", "db_schema_declarative_generate",
+            "db_dump", "stack_start", "stack_prepare",
+            "stack_status", "stack_stop", "stack_destroy", "migration_list", "gen_types",
+        ],
         write: ["push"],
     },
     lite: {

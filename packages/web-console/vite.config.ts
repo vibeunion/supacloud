@@ -1,11 +1,24 @@
 import { sveltekit } from '@sveltejs/kit/vite';
+import adapter from '@sveltejs/adapter-static';
+import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 import { defineConfig } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import packageJson from './package.json' with { type: 'json' };
 import { webConsoleComponentMarker } from './component-marker.ts';
 
+export const webConsoleAliases = {
+	"$components": "src/lib/components",
+	"$lib": "src/lib",
+	"$management": "../management-api/src",
+	"$supacloud": "../supacloud-js/src"
+};
+
 export default defineConfig({
-	plugins: [tailwindcss(), sveltekit(), webConsoleComponentMarker(packageJson)],
+	plugins: [tailwindcss(), sveltekit({
+		preprocess: vitePreprocess(),
+		adapter: adapter({ fallback: 'index.html', strict: false }),
+		alias: webConsoleAliases
+	}), webConsoleComponentMarker(packageJson)],
 	ssr: {
 		noExternal: ['lucide-svelte'],
 		external: ['bun', 'bun:sql', 'monaco-editor']

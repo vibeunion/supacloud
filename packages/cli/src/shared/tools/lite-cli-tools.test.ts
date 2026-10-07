@@ -19,6 +19,8 @@ describe("SupaCloud Lite CLI adapter", () => {
             project_dir: "/workspace/project",
             file: "remote_schema",
         })).toEqual(["db", "pull", "remote_schema", "--project-dir", "/workspace/project"]);
+        expect(buildLiteArgs({ action: "db_pull", baseline: true })).toEqual(["db", "pull", "--baseline"]);
+        expect(() => buildLiteArgs({ action: "db_diff", baseline: true })).toThrow("baseline requires");
 
         expect(buildLiteArgs({
             action: "snapshot_restore",

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Elysia, t } from "elysia";
 import {
   ApplicationError,
+  applicationErrorDictionary,
   composeAspects,
   composeCommandExecutors,
   createApplication,
@@ -10,8 +11,10 @@ import {
   createTestApp,
   defaultErrorResponse,
   executeJob,
+  frameworkErrorCode,
   requireIdempotencyKey,
   requireTrustedIdentity,
+  SchemaContractError,
   type ApplicationOptions,
   type CommandGovernance,
   type CompiledModule,
@@ -653,6 +656,76 @@ describe("defaultErrorResponse", () => {
       ok: false,
       code: "SERVICE_ROLE_REASON_NOT_ALLOWED",
       message: "Service role reason is not allowed",
+    });
+  });
+});
+
+describe("native error dictionary", () => {
+  test("registers the framework error classes and normalizes framework codes", () => {
+    expect(applicationErrorDictionary.ApplicationError).toBe(ApplicationError);
+    expect(applicationErrorDictionary.SchemaContractError).toBe(SchemaContractError);
+    expect(frameworkErrorCode(Object.assign(new Error("x"), { code: "version-conflict" })))
+      .toBe("VERSION_CONFLICT");
+    expect(frameworkErrorCode(new Error("x"))).toBe("UNKNOWN");
+  });
+
+  test("serves a declared ApplicationError through the typed dictionary", async () => {
+    const module: CompiledModule = {
+      name: "error-dictionary",
+      createServices: () => ({ controller: {
+        run: () => {
+          throw new ApplicationError("Version conflict", {
+            status: 409,
+            code: "VERSION_CONFLICT",
+          });
+        },
+      } }),
+      controllers: [{
+        path: "/dictionary", serviceKey: "controller", scope: "application",
+        routes: [{ method: "GET", path: "", handler: "run" }],
+      }],
+    };
+    const response = await createApplication({ modules: [module] })
+      .handle(new Request("http://localhost/dictionary"));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      ok: false,
+      code: "VERSION_CONFLICT",
+      message: "Version conflict",
+    });
+  });
+
+  test("keeps errorMapper authoritative for typed dictionary errors", async () => {
+    const seen: string[] = [];
+    const module: CompiledModule = {
+      name: "error-dictionary-mapped",
+      createServices: () => ({ controller: {
+        run: () => {
+          throw new ApplicationError("Nope", { status: 403, code: "PERMISSION_DENIED" });
+        },
+      } }),
+      controllers: [{
+        path: "/dictionary-mapped", serviceKey: "controller", scope: "application",
+        routes: [{ method: "GET", path: "", handler: "run" }],
+      }],
+    };
+    const response = await createApplication({
+      modules: [module],
+      errorMapper: (error, context) => {
+        seen.push(String(context.frameworkCode));
+        return Response.json({
+          ok: false,
+          code: context.frameworkCode,
+          message: error instanceof Error ? error.message : String(error),
+        }, { status: 403 });
+      },
+    }).handle(new Request("http://localhost/dictionary-mapped"));
+    expect(response.status).toBe(403);
+    expect(seen).toEqual(["PERMISSION_DENIED"]);
+    expect(await response.json()).toEqual({
+      ok: false,
+      code: "PERMISSION_DENIED",
+      message: "Nope",
     });
   });
 });

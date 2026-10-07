@@ -186,7 +186,7 @@
     if (!validTaskProjectRef(ref)) return;
     let url = `/v1/projects/${ref}/tasks/stream`;
     try {
-      const absolute = new URL(url, page.url ?? "http://localhost/");
+      const absolute = new URL(url, page.url.href);
       absolute.protocol = absolute.protocol === "https:" ? "wss:" : "ws:";
       url = absolute.toString();
     } catch { /* Fall back to the relative path. */ }

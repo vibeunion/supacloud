@@ -181,12 +181,17 @@ for (const module of createUnscopedModules()) {
       });
       const program = ts.createProgram([join(root, "consumer.ts")], {
         noEmit: true, strict: true, skipLibCheck: true,
+        noPropertyAccessFromIndexSignature: true,
         target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
         moduleResolution: ts.ModuleResolutionKind.Bundler, types: [],
       });
-      expect(ts.getPreEmitDiagnostics(program).map((diagnostic) =>
-        ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"))).toEqual([]);
-      expect(rendered.applicationCode).toContain("deps.db as Parameters<typeof makeLabel>[0]");
+      const diagnostics = ts.getPreEmitDiagnostics(program).map((diagnostic) => {
+        const position = diagnostic.file && diagnostic.start !== undefined
+          ? diagnostic.file.getLineAndCharacterOfPosition(diagnostic.start) : undefined;
+        return `${diagnostic.file?.fileName}:${position ? position.line + 1 : "?"}: ${ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")}`;
+      });
+      expect(diagnostics).toEqual([]);
+      expect(rendered.applicationCode).toContain('deps["db"] as Parameters<typeof makeLabel>[0]');
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -263,7 +268,11 @@ for (const module of createUnscopedModules()) {
             importPath: "source", scope: "application", deps: [], hasOnInit: true, hasOnDestroy: true,
             exported: false, file: "source.ts", line: 1,
           }],
-          controllers: [],
+          controllers: [{
+            className: "LifecycleController", path: "/", scope: "application",
+            deps: ["LifecycleService"], importPath: "source", file: "source.ts",
+            routes: [{ method: "GET", path: "/", handler: "status" }],
+          }],
         }],
       };
       const rendered = renderApplication(graph, { rootDir: root, outDir: join(root, "generated") });
@@ -273,9 +282,52 @@ export class LifecycleService {
   onInit() { (globalThis as { events?: string[] }).events?.push("init"); }
   onDestroy() { (globalThis as { events?: string[] }).events?.push("destroy"); }
 }
+export class LifecycleController {
+  constructor(readonly service: LifecycleService) {}
+  status() { return this.service; }
+}
 `,
         "generated/application.ts": rendered.applicationCode,
       });
+      const program = ts.createProgram([join(root, "generated/application.ts")], {
+        noEmit: true, strict: true, skipLibCheck: true,
+        noPropertyAccessFromIndexSignature: true,
+        target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.Bundler, types: [],
+      });
+      expect(ts.getPreEmitDiagnostics(program).map((diagnostic) =>
+        ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"))).toEqual([]);
+      const sourceFile = program.getSourceFile(join(root, "generated/application.ts"));
+      if (!sourceFile) throw new Error("Generated application source is missing");
+      const checker = program.getTypeChecker();
+      const hits = { instance: 0, init: 0, teardown: 0, reflectApply: 0 };
+      const assertNotAny = (node: ts.Node) => {
+        expect(checker.getTypeAtLocation(node).flags & ts.TypeFlags.Any).toBe(0);
+      };
+      const visit = (node: ts.Node): void => {
+        if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+          const name = node.name.text;
+          if (name === "instance" || name === "init" || name === "teardown") {
+            hits[name]++;
+            assertNotAny(node.name);
+            if (node.initializer) assertNotAny(node.initializer);
+          }
+        }
+        if (ts.isCallExpression(node) &&
+          ts.isPropertyAccessExpression(node.expression) &&
+          ts.isIdentifier(node.expression.expression) &&
+          node.expression.expression.text === "Reflect" &&
+          node.expression.name.text === "apply") {
+          hits.reflectApply++;
+          const handler = node.arguments[0];
+          if (!handler) throw new Error("Reflect.apply call is missing its handler argument");
+          assertNotAny(handler);
+          assertNotAny(node);
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sourceFile);
+      expect(hits).toEqual({ instance: 3, init: 1, teardown: 1, reflectApply: 1 });
       const generated = await import(pathToFileURL(join(root, "generated/application.ts")).href);
       const [module] = generated.createCompiledModules() as Array<{
         createServices: (deps: Record<string, unknown>, imported: Record<string, Record<string, unknown>>) => Record<string, unknown>;
@@ -301,10 +353,10 @@ export class LifecycleService {
       "const auditService = new AuditService(auditConfig, logger);",
     );
     expect(applicationCode).toContain(
-      "const caseRepository = new DrizzleCaseRepository(deps.dbClient as ConstructorParameters<typeof DrizzleCaseRepository>[0]);",
+      'const caseRepository = new DrizzleCaseRepository(deps["dbClient"] as ConstructorParameters<typeof DrizzleCaseRepository>[0]);',
     );
     expect(applicationCode).toContain(
-      "const caseService = new CaseService(caseRepository, imported.audit.auditService as ConstructorParameters<typeof CaseService>[1]);",
+      'const caseService = new CaseService(caseRepository, imported["audit"]["auditService"] as ConstructorParameters<typeof CaseService>[1]);',
     );
     expect(applicationCode).toContain(
       "const acceptCaseCommand = new AcceptCaseCommand(caseService);",
@@ -361,7 +413,7 @@ export class LifecycleService {
   test("request 工厂：REQUEST_CONTEXT 传 ctx，其余从 services 解析", () => {
     expect(applicationCode).toContain("createCaseRequestScope");
     expect(applicationCode).toContain(
-      "const caseController = new CaseController(services.caseRepository as ConstructorParameters<typeof CaseController>[0], imported.audit.auditService as ConstructorParameters<typeof CaseController>[1], ctx as ConstructorParameters<typeof CaseController>[2]);",
+      'const caseController = new CaseController(services["caseRepository"] as ConstructorParameters<typeof CaseController>[0], imported["audit"]["auditService"] as ConstructorParameters<typeof CaseController>[1], ctx as ConstructorParameters<typeof CaseController>[2]);',
     );
   });
 
@@ -1149,7 +1201,7 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
 
     expect(rendered.clientCode).toContain("export type ResponseDecoder<T> = (value: unknown) => T;");
     expect(rendered.clientCode).toContain("): Promise<unknown>;");
-    expect(rendered.clientCode).toContain("const responseText = await response.text();");
+    expect(rendered.clientCode).toContain("const responseText = await bodyResponse.text();");
     expect(rendered.clientCode).toContain("value = JSON.parse(responseText);");
     expect(rendered.clientCode).toContain("return decode ? decode(value) : value;");
     expect(rendered.clientCode).not.toContain("response.json() as Promise<T>");

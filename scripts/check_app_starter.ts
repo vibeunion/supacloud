@@ -13,9 +13,11 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 export function starterInstallArgs(profile: "workspace" | "consumer" | "locked-consumer"): string[] {
   return [
     "install", "--no-progress",
-    profile === "locked-consumer" ? "--offline" : "--prefer-offline",
+    // A new consumer has no lockfile; restored CI metadata may predate its pins.
+    profile === "locked-consumer" ? "--offline" : profile === "consumer" ? "--no-cache" : "--prefer-offline",
     ...(profile === "consumer" ? [] : ["--frozen-lockfile"]),
     ...(profile === "workspace" ? [] : ["--ignore-scripts"]),
+    ...(profile === "consumer" ? ["--registry=https://registry.npmjs.org"] : []),
   ];
 }
 
@@ -119,7 +121,7 @@ try {
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   // Test the release artifacts together before they exist on the public registry.
   manifest.overrides = { ...manifest.overrides };
-  for (const name of ["contracts", "commands", "db", "app", "delivery", "compiler", "elysia", "js"]) {
+  for (const name of ["contracts", "commands", "db", "app", "delivery", "compiler", "elysia", "query", "js"]) {
     const directory = join(repo, "packages", name === "js" ? "supacloud-js" : name);
     await run(starterInstallArgs("workspace"), directory);
     await run(["run", "build"], directory);
@@ -135,7 +137,7 @@ try {
     }
     manifest.overrides[`@supacloud/${name}`] = tarballPath;
   }
-  for (const name of ["contracts", "commands", "db", "js"]) {
+  for (const name of ["contracts", "commands", "db", "query", "js"]) {
     if (!Object.hasOwn(manifest.dependencies, `@supacloud/${name}`)) {
       manifest.devDependencies[`@supacloud/${name}`] = tarballs.get(name);
     }

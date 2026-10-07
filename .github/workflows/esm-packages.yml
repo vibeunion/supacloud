@@ -76,7 +76,7 @@ jobs:
           bun-version: '1.4.2'
       - name: Build candidate packages in dependency order
         run: |
-          for package in contracts delivery app supacloud-js compiler; do
+          for package in contracts delivery app query supacloud-js compiler; do
             (cd "packages/$package" && bun install --frozen-lockfile && bun run build)
           done
       - name: Check application and SDK publish inventories
@@ -102,6 +102,7 @@ jobs:
           # Never archive .git, runner credentials, npm user config or untracked env files.
           git archive --format=tar HEAD > "$evidence/source.tar"
           tar -cf "$evidence/dependencies.tar" \
+            packages/query/node_modules packages/query/dist \
             packages/supacloud-js/node_modules packages/supacloud-js/dist \
             packages/contracts/node_modules packages/contracts/dist \
             packages/app/node_modules packages/app/dist \

@@ -47,8 +47,9 @@ for (const [name, staleVersion] of [
   ["@supacloud/app", "0.15.0"],
   ["@supacloud/elysia", "0.17.0"],
   // The immediately preceding release must not be accepted by the new tuple.
-  ["@supacloud/app", "0.21.0"],
-  ["@supacloud/elysia", "0.23.0"],
+  ["@supacloud/app", "0.22.0"],
+  ["@supacloud/elysia", "0.24.0"],
+  ["@supacloud/elysia", "0.23.1"],
   ["@supacloud/app", "0.20.0"],
   ["@supacloud/elysia", "0.22.0"],
   ["@supacloud/app", "0.19.0"],
@@ -97,4 +98,38 @@ test("rejects every missing migration dependency", async () => {
       await writeFile(path, JSON.stringify({ name, version }));
     }
   });
+});
+
+// release-please keeps the tested tuple current through `generic` extra-files.
+// A missing annotation (or a file shared by two packages) makes the next
+// release silently skip the pin bump and breaks the tuple test above, so the
+// wiring itself is asserted here.
+test("each independently versioned migration pin is wired for release-please", async () => {
+  const config: unknown = JSON.parse(await readFile(
+    new URL("../../../release-please-config.json", import.meta.url), "utf8",
+  ));
+  const packages = (config as { packages?: Record<string, { "extra-files"?: unknown[] }> }).packages ?? {};
+  const genericPaths = (component: string): string[] => {
+    const extraFiles = packages[`packages/${component}`]?.["extra-files"] ?? [];
+    return extraFiles
+      .filter((entry): entry is { type: string; path: string } =>
+        !!entry && typeof entry === "object" && (entry as { type?: unknown }).type === "generic")
+      .map(entry => entry.path);
+  };
+
+  const expectations = [
+    { component: "elysia", file: "migration-elysia-version.ts", constant: "MIGRATION_ELYSIA_VERSION" },
+    { component: "app", file: "migration-app-version.ts", constant: "MIGRATION_APP_VERSION" },
+  ] as const;
+
+  for (const { component, file, constant } of expectations) {
+    const paths = genericPaths(component);
+    expect(paths).toContain(`/packages/compiler/src/${file}`);
+    const source = await readFile(new URL(`./${file}`, import.meta.url), "utf8");
+    const annotations = source.split(/\r?\n/).filter(line => line.includes("x-release-please-version"));
+    // Exactly one annotation per file: the generic updater rewrites every
+    // annotated version to the same value, so two pins in one file corrupt.
+    expect(annotations).toHaveLength(1);
+    expect(annotations[0]).toContain(constant);
+  }
 });

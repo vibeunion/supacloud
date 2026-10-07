@@ -35,7 +35,7 @@ existing compiled-module boundary.
 
 These checks are compatibility signals, not a claim that an Elysia 1 package
 cannot run on a beta release. A package is not an approved dependency until it
-passes the repository's Elysia `2.0.0-beta.19` test and type gates.
+passes the repository's Elysia `2.0.0-beta.21` test and type gates.
 
 ### Local probe on 2026-09-29
 
@@ -103,3 +103,97 @@ The prototype is successful when a new application can:
 It is not yet a complete AdonisJS replacement. Database adapters, auth,
 background jobs, documentation and deployment remain SupaCloud integrations,
 not responsibilities of the bootstrap helper.
+
+## Elysia 2 AOT evaluation & SupaCloud compiler alignment
+
+Elysia 2 introduces build-time Ahead-Of-Time (AOT) compilation by shifting route
+handler and schema compilation from server startup to build time via
+bundler-specific plugins such as `elysia/plugin/aot/bun` and
+`elysia/plugin/aot/vite`.
+
+This change upgrades the dependency baseline and documents the evaluation
+boundary; it does not enable AOT in SupaCloud builds or establish cold-start
+or memory improvements. Those require a separate side-effect-isolated build
+experiment and runtime comparison.
+
+### Relationship with SupaCloud Compiler
+
+SupaCloud Compiler and Elysia AOT operate at distinct abstraction layers:
+- **SupaCloud Compiler (Macro / Domain layer)**: responsible for module graph
+  resolution, permission guard injection, schema contract validation, and
+  producing pure declarative router code.
+- **Elysia AOT (Micro / Transport layer)**: responsible for dry-running the
+  generated router skeleton, inlining TypeBox validations, pre-generating HTTP
+  handler execution code, and producing a static route manifest bundle.
+
+They are strictly complementary. SupaCloud does not duplicate HTTP route JIT/AOT
+optimizations, and Elysia AOT does not handle multi-tenant domain boundaries.
+
+### Critical constraint: Build-time side-effect isolation
+
+Because Elysia AOT executes a dry-run import of the application instance at build
+time to extract routes:
+1. **Zero top-level I/O**: Bootstrapping routes must never trigger top-level
+   database connections, remote config pulls, message broker binds, or read
+   production-only secrets during module evaluation.
+2. **Factory-based instantiation**: Router definition (`createRouter()`) must be
+   separated from runtime initialization (`app.listen()`).
+3. **Static route determination**: All routes and plugins exposed to AOT must be
+   statically deterministic at build time; dynamic runtime-only routes must
+   remain explicitly isolated.
+
+## End-to-End Type Safety, Eden Treaty, and svadmin / SDK Integration
+
+A core design feature of Elysia is unifying runtime validation and static TypeScript
+types through TypeBox (`t.Object`, etc.). Combined with Eden Treaty (`treaty<AppRouter>`),
+frontend clients can derive fully typed API clients directly from server router
+definitions with zero codegen.
+
+In SupaCloud, the intended integration is structured across
+three architectural boundaries to respect browser bundle limits, distributed idempotency,
+and platform release decoupling.
+
+### 1. Handler-Level Context & Type Inference
+
+In Elysia route handlers, TypeBox schemas act as the single source of truth:
+- `defineRouteContract` and `defineElysiaRoute` contextually bind `body`, `params`,
+  `query`, `headers`, and `cookie` schemas to the handler function argument.
+- Handlers automatically receive exact static TypeScript types (`ctx.body`, `ctx.query`,
+  `ctx.params`) without requiring manually written DTO interfaces or runtime type assertion.
+- Status code response maps (`responses: { 200: Schema, 409: ErrorSchema }`) enforce
+  exact return types and guard against undeclared HTTP response payloads.
+
+### 2. Boundary 1: svadmin / Web Console Integration (Eden Treaty Pattern)
+
+For administrative consoles such as `svadmin` (`packages/web-console`):
+- **Zero-codegen type derivation**: When consuming Elysia-native routes, svadmin can
+  utilize `@elysiajs/eden` (`treaty<AppRouter>`) or `@svadmin/elysia` adapters to
+  obtain path autocomplete, typed request payloads, and typed response status mapping.
+- **Strict bundle boundary**: svadmin and browser bundles must only consume pure route
+  declarations (`import type { AppRouter } from ...`) or contract definitions. Server
+  runtime dependencies (Node/Bun runtime, database connections, cryptographic modules,
+  and deployment secrets) must never be imported into browser code.
+
+### 3. Boundary 2: Platform SDKs (@supacloud/js) & Business Command Contracts
+
+For platform-level SDKs and authoritative operations (`@Command`):
+- **Beyond plain REST**: Business commands enforce distributed idempotency
+  (`idempotency-key` headers), JWT authentication through SupaCloud Edge Runtime, and
+  authoritative two-phase confirmation (Submit + Read-only Lookup) rather than blind HTTP retries.
+- **Contract Facade with Zero Codegen**: Through `defineJsonContract` in `@supacloud/elysia`
+  and `@supacloud/contracts` (`createAuthoritativeCommandClient`), the SDK derives typed
+  decoders and static payload types directly from TypeBox schemas:
+  - Input types: `Parameters<typeof contract.request>[0]` (equivalent to `Static<typeof BodySchema>`).
+    The runtime decoder `contract.input` deliberately accepts `unknown`.
+  - Output types: `ReturnType<typeof contract.result>` (equivalent to `Static<typeof ResponseSchema>`)
+  - Client callers enjoy full compile-time static type safety without running code generators,
+    while isolating browser code from internal server execution details and avoiding tight
+    version coupling between the platform SDK and server releases.
+
+### 4. Boundary 3: Multi-Language SDKs
+
+For non-TypeScript ecosystems (such as Go, Python, or Flutter):
+- Direct TypeScript type derivation across language boundaries is technically impossible.
+- TypeBox route schemas automatically populate OpenAPI specifications via Elysia's
+  documentation integration (`createDocumentationPlugin`), serving as the standardized
+  metadata source for OpenAPI-based code generators.

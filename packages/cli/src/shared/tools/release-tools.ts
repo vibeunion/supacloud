@@ -1,8 +1,7 @@
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
@@ -391,16 +390,18 @@ function genericScopedReleaseScopeSha256(scope: unknown): string {
     return createHash("sha256").update(genericScopedReleaseScopeJson(scope)).digest("hex");
 }
 
+function runGitRevParse(cwd: string, args: string[]): string {
+    const res = Bun.spawnSync(["git", ...args], { cwd });
+    if (res.exitCode !== 0 || !res.stdout) throw new Error("git failed");
+    return res.stdout.toString().trim();
+}
+
 function resolveGitBaseCommit(cwd: string, explicitRef?: unknown): string {
     if (typeof explicitRef === "string" && explicitRef.trim()) {
         const trimmed = explicitRef.trim();
         if (/^[0-9a-f]{40}$/.test(trimmed)) {
             try {
-                const verified = execFileSync("git", ["rev-parse", "--verify", `${trimmed}^{commit}`], {
-                    cwd,
-                    encoding: "utf8",
-                    stdio: ["ignore", "pipe", "pipe"],
-                }).trim();
+                const verified = runGitRevParse(cwd, ["rev-parse", "--verify", `${trimmed}^{commit}`]);
                 if (/^[0-9a-f]{40}$/.test(verified)) return verified;
             } catch {
                 return trimmed;
@@ -408,11 +409,7 @@ function resolveGitBaseCommit(cwd: string, explicitRef?: unknown): string {
             return trimmed;
         }
         try {
-            const sha = execFileSync("git", ["rev-parse", "--verify", `${trimmed}^{commit}`], {
-                cwd,
-                encoding: "utf8",
-                stdio: ["ignore", "pipe", "pipe"],
-            }).trim();
+            const sha = runGitRevParse(cwd, ["rev-parse", "--verify", `${trimmed}^{commit}`]);
             if (/^[0-9a-f]{40}$/.test(sha)) return sha;
         } catch {
             throw new Error(`Unable to resolve base commit from git ref '${trimmed}'`);
@@ -421,11 +418,7 @@ function resolveGitBaseCommit(cwd: string, explicitRef?: unknown): string {
     const candidateRefs = ["origin/main", "main", "HEAD^", "HEAD"];
     for (const candidate of candidateRefs) {
         try {
-            const sha = execFileSync("git", ["rev-parse", "--verify", `${candidate}^{commit}`], {
-                cwd,
-                encoding: "utf8",
-                stdio: ["ignore", "pipe", "pipe"],
-            }).trim();
+            const sha = runGitRevParse(cwd, ["rev-parse", "--verify", `${candidate}^{commit}`]);
             if (/^[0-9a-f]{40}$/.test(sha)) return sha;
         } catch {
             continue;
@@ -439,13 +432,13 @@ function gitCommitInfo(cwd: string): { head: string | null; originMain: string |
     let originMain: string | null = null;
     let parent: string | null = null;
     try {
-        head = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+        head = runGitRevParse(cwd, ["rev-parse", "HEAD"]);
     } catch {}
     try {
-        originMain = execFileSync("git", ["rev-parse", "--verify", "origin/main^{commit}"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+        originMain = runGitRevParse(cwd, ["rev-parse", "--verify", "origin/main^{commit}"]);
     } catch {}
     try {
-        parent = execFileSync("git", ["rev-parse", "HEAD^"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+        parent = runGitRevParse(cwd, ["rev-parse", "HEAD^"]);
     } catch {}
     return { head, originMain, parent };
 }

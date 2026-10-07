@@ -27,6 +27,7 @@ import {
   createSchemaDecoder,
   responseStatusDeclared,
   responseStatusOf,
+  SchemaContractError,
   toElysiaRouteSchema,
 } from "./schema_contract";
 import {
@@ -495,6 +496,35 @@ export interface ErrorContext {
   request: Request;
   requestContext: unknown;
   frameworkCode: string | number | undefined;
+}
+
+/**
+ * Elysia 2.0 native error dictionary registered by the adapter.
+ *
+ * Declaring the runtime classes here lets Elysia's type system (and therefore
+ * Eden Treaty / generated clients) know these errors are *handled*: the generic
+ * `.error(handler)` catch-all no longer widens every route's response schema
+ * with an untyped fallback. Each entry also documents the public `code` served
+ * by {@link defaultErrorResponse} when a caller does not install an
+ * `errorMapper`.
+ */
+export const applicationErrorDictionary = {
+  ApplicationError,
+  SchemaContractError,
+} as const;
+
+export type ApplicationErrorDictionary = typeof applicationErrorDictionary;
+export type ApplicationErrorClass = ApplicationErrorDictionary[keyof ApplicationErrorDictionary];
+
+/**
+ * Normalize the framework's runtime error code the same way the generic error
+ * hook always has: Elysia's built-in `ParseError`/`ValidationError` become
+ * `PARSE`/`VALIDATION`, while domain errors keep their own `code`.
+ */
+export function frameworkErrorCode(error: unknown): string {
+  return error instanceof Error && "code" in error && typeof error.code === "string"
+    ? error.code.toUpperCase().replaceAll("-", "_")
+    : "UNKNOWN";
 }
 
 export type ErrorMapper = (
@@ -1142,16 +1172,29 @@ export function createModulePlugin<
     }
   });
   // Bind before routes and keep the handler local to its module's request context.
-  plugin.error(async ({ error, request }) => {
-    const code = error instanceof Error && "code" in error && typeof error.code === "string" ? error.code.toUpperCase().replaceAll("-", "_") : "UNKNOWN";
+  const mapError = async (
+    error: unknown,
+    frameworkCode: string | number | undefined,
+    request: Request,
+  ): Promise<Response> => {
     const context: ErrorContext = {
       request,
       requestContext: requestContexts.get(request),
-      frameworkCode: code,
+      frameworkCode,
     };
     const mapped = await options.errorMapper?.(error, context);
-    return mapped ?? defaultErrorResponse(error, code);
-  });
+    return mapped ?? defaultErrorResponse(error, frameworkCode);
+  };
+  // Elysia 2.0 typed error dictionary. Registering the concrete classes keeps
+  // them out of the generic catch-all so route response inference stays tight;
+  // the catch-all below still handles ParseError/ValidationError and unknown
+  // failures. Both lanes share `mapError`, so `errorMapper` observes every
+  // error exactly once regardless of which entry served it.
+  plugin.error(ApplicationError, ({ error, request }) =>
+    mapError(error, frameworkErrorCode(error), request));
+  plugin.error(SchemaContractError, ({ error, request }) =>
+    mapError(error, frameworkErrorCode(error), request));
+  plugin.error(({ error, request }) => mapError(error, frameworkErrorCode(error), request));
 
   // Compiled descriptors carry runtime schemas, not native literal route types.
   // Widen only registration; keep the public plugin's context/service inference.

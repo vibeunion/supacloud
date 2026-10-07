@@ -19,9 +19,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, relative, resolve, sep } from "node:path";
-import { promisify } from "node:util";
-import { execFile } from "node:child_process";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import { projectRefPathSegment } from "../project-ref";
 import type { HttpResult, HttpTransport } from "../transports/http";
@@ -40,8 +38,6 @@ import {
     validObservedFunctionActivationId as validObservedActivationId,
     type FunctionConfigInput as EdgeFunctionConfigInput,
 } from "./edge-function-response";
-
-const execFileAsync = promisify(execFile);
 const SHA256_HEX_PATTERN = /^[a-f0-9]{64}$/;
 const FORBIDDEN_BUNDLE_SEGMENTS = new Set(["node_modules", ".git"]);
 const EDGE_FUNCTION_DEPLOY_TIMEOUT_MS = 5 * 60_000;
@@ -54,7 +50,7 @@ function scaffoldFiles(framework: FunctionFramework, slug: string): Record<strin
             "package.json": JSON.stringify({
                 private: true,
                 type: "module",
-                dependencies: { elysia: "2.0.0-beta.19" },
+                dependencies: { elysia: "2.0.0-beta.21" },
             }, null, 2) + "\n",
             "index.ts": `import { Elysia } from "elysia";\n\nexport default new Elysia()\n  .get("/", () => ({ function: "${slug}", framework: "elysia" }));\n`,
         };
@@ -232,7 +228,22 @@ function preparedBundleFiles(args: Record<string, unknown>): Record<string, stri
 
 async function runBunBuild(args: string[]): Promise<{ stdout: string; stderr: string }> {
     try {
-        return await execFileAsync("bun", ["build", ...args], { maxBuffer: 10 * 1024 * 1024 });
+        const proc = Bun.spawn(["bun", "build", ...args], {
+            stdout: "pipe",
+            stderr: "pipe",
+        });
+        const [stdout, stderr, exitCode] = await Promise.all([
+            new Response(proc.stdout).text(),
+            new Response(proc.stderr).text(),
+            proc.exited,
+        ]);
+        if (exitCode !== 0) {
+            const error = new Error(`bun build exited with code ${exitCode}: ${stderr}`);
+            (error as any).stdout = stdout;
+            (error as any).stderr = stderr;
+            throw error;
+        }
+        return { stdout, stderr };
     } catch (error) {
         const e = error as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
         if (e.code === "ENOENT") {
@@ -248,8 +259,9 @@ async function bundleEdgeFunctionPath(pathArg: string): Promise<string> {
     const outfile = join(tmpDir, `${basename(entrypoint).replace(/\.[^.]+$/, "") || "index"}.js`);
     try {
         const { stderr } = await runBunBuild([entrypoint, "--target", "bun", "--outfile", outfile]);
-        if (!existsSync(outfile)) throw new Error(`Bundle failed: ${stderr}`);
-        return readFileSync(outfile, "utf-8");
+        const outFileHandle = Bun.file(outfile);
+        if (!(await outFileHandle.exists())) throw new Error(`Bundle failed: ${stderr}`);
+        return await outFileHandle.text();
     } finally {
         rmSync(tmpDir, { recursive: true, force: true });
     }

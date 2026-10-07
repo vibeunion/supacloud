@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { apiClient } from "$lib/api";
+  import {
+    createAuthUserClient, type CreateAuthUserInput, type InviteAuthUserInput,
+  } from "$lib/auth-user-mutations";
   import { page } from "$app/state";
   import AutoTable from "@svadmin/ui/components/AutoTable.svelte";
   import Button from "@svadmin/ui/components/ui/button/button.svelte";
@@ -8,7 +10,16 @@
   import { createMutation } from "@tanstack/svelte-query";
   import { toast } from "svelte-sonner";
 
-  const projectRef = $derived(page.params.ref);
+  const projectRef = $derived(page.params.ref ?? "");
+  const mutationScope = $derived({ projectRef, controller: new AbortController() });
+  $effect(() => {
+    const scope = mutationScope;
+    return () => scope.controller.abort();
+  });
+  type MutationTarget<T> = { scope: typeof mutationScope; input: T };
+  function ownsMutation(scope: typeof mutationScope) {
+    return scope === mutationScope && !scope.controller.signal.aborted;
+  }
   let tableVersion = $state(0);
   let showInvite = $state(false);
   let showCreateUser = $state(false);
@@ -16,15 +27,6 @@
   let newUserEmail = $state("");
   let newUserPassword = $state("");
   let confirmEmail = $state(true);
-
-  async function responseError(response: Response, fallback: string): Promise<string> {
-    const body: unknown = await response.json().catch(() => null);
-    if (body && typeof body === "object") {
-      const message = (body as Record<string, unknown>).message ?? (body as Record<string, unknown>).error;
-      if (typeof message === "string" && message.trim()) return message;
-    }
-    return fallback;
-  }
 
   function refreshUsers() {
     tableVersion += 1;
@@ -43,61 +45,56 @@
   }
 
   const inviteMutation = createMutation(() => ({
-    mutationFn: async () => {
-      const response = await apiClient(`/v1/projects/${projectRef}/auth/users/invite`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: inviteEmail.trim() }),
-      });
-      if (!response.ok) throw new Error(await responseError(response, "邀请用户失败"));
-    },
-    onSuccess: () => {
+    retry: false,
+    mutationFn: ({ scope, input }: MutationTarget<InviteAuthUserInput>) =>
+      createAuthUserClient(scope.projectRef).invite(input, scope.controller.signal),
+    onSuccess: (_result, { scope }) => {
+      if (!ownsMutation(scope)) return;
       closeInvite();
       refreshUsers();
       toast.success("邀请已发送");
     },
-    onError: (error: unknown) => {
+    onError: (error: unknown, { scope }) => {
+      if (!ownsMutation(scope)) return;
       toast.error(error instanceof Error ? error.message : "邀请用户失败");
     },
   }));
 
   const createUserMutation = createMutation(() => ({
-    mutationFn: async () => {
-      const response = await apiClient(`/v1/projects/${projectRef}/auth/users`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: newUserEmail.trim(),
-          password: newUserPassword,
-          email_confirm: confirmEmail,
-        }),
-      });
-      if (!response.ok) throw new Error(await responseError(response, "新建用户失败"));
-    },
-    onSuccess: () => {
+    retry: false,
+    mutationFn: ({ scope, input }: MutationTarget<CreateAuthUserInput>) =>
+      createAuthUserClient(scope.projectRef).create(input, scope.controller.signal),
+    onSuccess: (_result, { scope }) => {
+      if (!ownsMutation(scope)) return;
       closeCreateUser();
       refreshUsers();
       toast.success("用户已创建");
     },
-    onError: (error: unknown) => {
+    onError: (error: unknown, { scope }) => {
+      if (!ownsMutation(scope)) return;
       toast.error(error instanceof Error ? error.message : "新建用户失败");
     },
   }));
 
   function inviteUser() {
+    if (inviteMutation.isPending || mutationScope.controller.signal.aborted) return;
     if (!inviteEmail.trim()) {
       toast.error("请输入邮箱地址");
       return;
     }
-    inviteMutation.mutate();
+    inviteMutation.mutate({ scope: mutationScope, input: { email: inviteEmail.trim() } });
   }
 
   function createUser() {
+    if (createUserMutation.isPending || mutationScope.controller.signal.aborted) return;
     if (!newUserEmail.trim() || !newUserPassword) {
       toast.error("邮箱和密码均为必填项");
       return;
     }
-    createUserMutation.mutate();
+    createUserMutation.mutate({
+      scope: mutationScope,
+      input: { email: newUserEmail.trim(), password: newUserPassword, email_confirm: confirmEmail },
+    });
   }
 
   function getProviders(record: Record<string, unknown>): string[] {

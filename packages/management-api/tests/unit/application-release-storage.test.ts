@@ -11,10 +11,11 @@ let root: string;
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), "application-intake-unit-")); });
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
-async function fixture(malformedMigration = false) {
+async function fixture(malformedMigration = false, compute = false) {
   const manifestPath = join(root, "upload/delivery.manifest.json");
   const targets: DeliveryTarget[] = ["api", "jobs"].map(name => ({
     name, kind: name === "jobs" ? "jobs" : "api", isolation: "process",
+    ...(compute ? { compute: { cpuLimit: 0.5, memoryLimitMiB: 256 } } : {}),
     roots: [name], modules: [{ name, reason: "owner", importedBy: [] }],
     routes: [], jobs: [], externalTokens: [],
     requirements: { processIsolation: true, durableQueue: name === "jobs", capabilities: [] },
@@ -68,6 +69,16 @@ test("intake publishes all targets without executing them and reuses concurrent 
   expect(await readdir(join(root, "store/example/reviews/releases"))).toEqual([first!.release_id]);
 });
 
+test("compute limits survive immutable intake and tampered limits are rejected on read", async () => {
+  const input = await fixture(false, true);
+  const storage = new ApplicationReleaseStorage(join(root, "store"));
+  const release = await storage.importRelease(input);
+  expect(release.targets.every(target => target.compute?.cpuLimit === 0.5)).toBe(true);
+  expect(await storage.readRelease(input.projectRef, input.applicationId, release.release_id)).toEqual(release);
+  release.targets[0]!.compute!.memoryLimitMiB = 512;
+  await writeFile(join(root, "store/example/reviews/releases", release.release_id, "release.json"), JSON.stringify(release));
+  await expect(storage.readRelease(input.projectRef, input.applicationId, release.release_id)).rejects.toThrow();
+});
 test("reads do not create storage directories and project/application paths are checked", async () => {
   const storage = new ApplicationReleaseStorage(join(root, "store"));
   await expect(storage.readRelease("example", "reviews", "0".repeat(64))).rejects.toThrow();

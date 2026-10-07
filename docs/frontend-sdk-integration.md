@@ -30,36 +30,43 @@ the current user, and leave operator APIs on a trusted server.
 ```ts
 import { createClient } from "@supabase/supabase-js";
 import { createSupaCloudClient } from "@supacloud/js";
-import { createAuthenticatedFetch } from "@supacloud/js/contracts";
+import { createSupaCloudApiFetch } from "@supacloud/js";
 import { createApiClient } from "./generated/client";
 
 const supabase = createClient("https://project.example.com", "publishable-key");
-
-const getAccessToken = async (): Promise<string | null> => {
-  const { data, error } = await supabase.auth.getSession();
-  if (error) throw error;
-  return data.session?.access_token ?? null;
-};
 
 const supacloud = createSupaCloudClient({
   supabase,
   managementApiUrl: "https://management.example.com",
   projectRef: "project-ref",
-  getAccessToken,
 });
 
 const api = createApiClient({
-  baseUrl: "https://app.example.com/api",
-  fetch: createAuthenticatedFetch({ getAccessToken }),
+  fetch: createSupaCloudApiFetch({ supabase, functionName: "app-api" }),
 });
 
-export { supabase, supacloud, api, getAccessToken };
+export { supabase, supacloud, api };
 ```
 
 The generated client accepts a standard fetch function without Bun-specific
-static properties. Existing native fetch implementations remain valid.
-No additional SDK constructor, transport implementation or runtime engine is
-introduced. Applications retain generated operation types and response checks.
+static properties. `createSupaCloudApiFetch` delegates each call to the
+official `supabase.functions.invoke()` transport, so Supabase auth, apikey,
+CORS and session refresh remain owned by `supabase-js`. It forwards only the
+application request headers and never replaces the caller's session store.
+
+Generated routes also expose a procedure facade:
+
+```ts
+const detail = await api.cases.detail.query({ params: { caseId } });
+const accepted = await api.cases.accept.mutate(
+  { params: { caseId }, body: { reason: "approved" } },
+  { idempotencyKey: `case:${caseId}:accept:v1` },
+);
+```
+
+Commands that declare `idempotency: "required"` require an explicit stable key
+at compile time and reject a missing key before network dispatch. Reuse the same
+key for an uncertain retry; the client never generates a new key silently.
 
 When GraphQL is enabled, pass the same `getAccessToken` to `createGraphqlClient`
 alongside the fixed project URL and public key. Do not capture an access token

@@ -355,6 +355,14 @@ export default defineSupacloudConfig({
 
 ## OpenAPI 与 Client Generator
 
+开启 `generateClient` 后，`compile` 和 `check` 会对直接引用已知应用运行时模块
+（Module、Controller、Provider 所在文件）的路由 schema 报告
+`client-schema-runtime-import`。普通模式为 warning，strict 模式为 error。
+请把这些 schema 提取到纯共享合同文件，再由 controller 导入；仅把生成客户端的
+引用改为 `import type` 并不能隔离浏览器 TypeScript 对服务端装饰器的检查。
+这个诊断只检查已知运行时模块的直接引用，不代表对第三方包、间接依赖或浏览器 bundle
+完成了安全审计；服务端专用的 `generateClient: false` 不受影响。
+
 编译器从同一份 `ApplicationGraph` 生成 `client.ts` 和 `openapi.ts`，不引入
 反射或第二套路由注册。路由装饰器中显式声明的 TypeBox `body`、`params`、
 `query`、`response` schema 会被静态导入；没有 schema 的字段保持为
@@ -494,6 +502,11 @@ route 会自动按 HTTP status 执行内置 response decoder，并返回 schema 
 `unknown`。`headers`、`cookie` 和多状态 `responses` 会同步进入客户端和
 OpenAPI。`buildRouteUrl` 和 `createApiClient` 可直接复用，也支持动态 headers
 和请求拦截器。
+
+每个生成 route 还会按 HTTP 方法暴露 `.query()` 或 `.mutate()` procedure
+facade，并在 `API_PROCEDURES` 中输出 Command/幂等元数据。声明
+`idempotency: "required"` 的 mutation 必须显式传入稳定的 `idempotencyKey`；
+客户端不会静默生成新 key。
 
 ### Migration from manual decoders
 

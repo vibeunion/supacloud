@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.24.2](https://github.com/vibeunion/supacloud/compare/admin-v0.24.1...admin-v0.24.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* **deps,perf:** replace Bun native APIs and resolve audit vulnerabilities ([#1667](https://github.com/vibeunion/supacloud/issues/1667)) ([06a9199](https://github.com/vibeunion/supacloud/commit/06a91990c754ce586f2a2353f253dc50f4fa0f98))
+
+## [0.24.1](https://github.com/vibeunion/supacloud/compare/admin-v0.24.0...admin-v0.24.1) (2026-10-05)
+
+
+### Miscellaneous Chores
+
+* **deps:** complete @sinclair/typebox to typebox 1.3.34 migration ([#1655](https://github.com/vibeunion/supacloud/issues/1655)) ([87d1133](https://github.com/vibeunion/supacloud/commit/87d1133c0fa0eadf145afc6c3747f693e3e36200))
+
 ## [0.24.0](https://github.com/vibeunion/supacloud/compare/admin-v0.23.1...admin-v0.24.0) (2026-10-02)
 
 

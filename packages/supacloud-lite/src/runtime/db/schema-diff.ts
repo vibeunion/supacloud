@@ -1,18 +1,19 @@
 /**
  * Schema snapshot + diff - the engine behind `supacloud-lite db diff`.
  *
- * Snapshots a schema (tables, columns, constraints, indexes, enums) into a
+ * Snapshots a schema (tables, columns, constraints, indexes, enums, views,
+ * functions, triggers, and policies) into a
  * structured form, then emits the DDL to turn one snapshot into another. Used
  * to capture changes made outside migrations (e.g. in the Studio SQL editor)
  * into a new migration, the way `supabase db diff` (migra) does.
  *
  * Covered: enums (create + add value), tables (create/drop), columns
  * (add/drop/alter type/nullability/default), and named constraints + indexes
- * (add/drop by definition). Not yet diffed: functions, triggers, policies,
- * views - noted so the output never silently claims completeness.
+ * (add/drop by definition). Extended objects are compared for drift, but their
+ * migration requires the official pg-delta adapter for dependency ordering.
  */
 import { quoteIdent } from './database.js'
-import type { Database } from './database.js'
+import type { DbEngine } from './engine.js'
 
 interface ColumnSnap {
   name: string
@@ -29,6 +30,8 @@ interface TableSnap {
   order: string[]
 }
 
+type DefinitionMap = Map<string, string>
+
 /** A structured snapshot of one schema, diffable into DDL by {@link diffSchemas}. */
 export interface SchemaSnapshot {
   /** table name → its columns */
@@ -39,10 +42,20 @@ export interface SchemaSnapshot {
   indexes: Map<string, Map<string, string>>
   /** enum type name → its labels in sort order */
   enums: Map<string, string[]>
+  /** view name → view definition */
+  views: DefinitionMap
+  /** function identity → function definition */
+  functions: DefinitionMap
+  /** table/name → trigger definition */
+  triggers: DefinitionMap
+  /** table/name → policy definition */
+  policies: DefinitionMap
+  /** Catalog attributes which table DDL must preserve, including grants and identity. */
+  attributes: DefinitionMap
 }
 
 /** Snapshot a schema's tables, columns, constraints, indexes, and enums. */
-export async function snapshotSchema(db: Database, schema = 'public'): Promise<SchemaSnapshot> {
+export async function snapshotSchema(db: Pick<DbEngine, 'query'>, schema = 'public'): Promise<SchemaSnapshot> {
   const cols = await db.query<{ table: string; column: string; type: string; nullable: boolean; default: string | null }>(
     `select c.relname as table, a.attname as column,
             format_type(a.atttypid, a.atttypmod) as type,
@@ -110,11 +123,147 @@ export async function snapshotSchema(db: Database, schema = 'public'): Promise<S
   const enums = new Map<string, string[]>()
   for (const r of en.rows) enums.set(r.name, r.labels)
 
-  return { tables, constraints, indexes, enums }
+  const viewRows = await db.query<{ name: string; definition: string }>(
+    `select c.relname as name, c.relkind::text || ':' || pg_get_viewdef(c.oid, true) as definition
+     from pg_class c
+     join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = $1 and c.relkind in ('v','m')
+     order by c.relname`,
+    [schema],
+  )
+  const views = new Map<string, string>()
+  for (const row of viewRows.rows) views.set(row.name, row.definition)
+
+  const functionRows = await db.query<{ identity: string; definition: string }>(
+    `select n.nspname || '.' || p.proname || '(' ||
+            pg_get_function_identity_arguments(p.oid) || ')' as identity,
+            pg_get_functiondef(p.oid) as definition
+     from pg_proc p
+     join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = $1 and p.prokind in ('f', 'p')
+     order by p.proname, pg_get_function_identity_arguments(p.oid)`,
+    [schema],
+  )
+  const functions = new Map<string, string>()
+  for (const row of functionRows.rows) functions.set(row.identity, row.definition)
+
+  const triggerRows = await db.query<{ table: string; name: string; definition: string }>(
+    `select c.relname as table, t.tgname as name, pg_get_triggerdef(t.oid, true) as definition
+     from pg_trigger t
+     join pg_class c on c.oid = t.tgrelid
+     join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = $1 and not t.tgisinternal
+     order by c.relname, t.tgname`,
+    [schema],
+  )
+  const triggers = new Map<string, string>()
+  for (const row of triggerRows.rows) triggers.set(`${row.table}.${row.name}`, row.definition)
+
+  const policyRows = await db.query<{
+    table: string
+    name: string
+    permissive: string
+    roles: string[]
+    command: string
+    using_expression: string | null
+    check_expression: string | null
+  }>(
+    `select tablename as table, policyname as name, permissive,
+            roles, cmd as command, qual as using_expression,
+            with_check as check_expression
+     from pg_policies
+     where schemaname = $1
+     order by tablename, policyname`,
+    [schema],
+  )
+  const policies = new Map<string, string>()
+  for (const row of policyRows.rows) policies.set(`${row.table}.${row.name}`, renderPolicy(schema, row))
+
+  const attributesRows = await db.query<{ name: string; definition: string }>(
+    `select 'relation/' || c.relname as name,
+            jsonb_build_array(c.relkind, c.relpersistence, c.relrowsecurity, c.relforcerowsecurity,
+              c.relispartition, pg_get_expr(c.relpartbound, c.oid),
+              pg_get_partkeydef(c.oid), pg_get_userbyid(c.relowner),
+              c.relacl::text, c.reloptions)::text as definition
+     from pg_class c join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = $1 and c.relkind in ('r','p','v','m','S','f')
+     union all
+     select 'column/' || c.relname || '/' || a.attname,
+            jsonb_build_array(a.attidentity, a.attgenerated, a.attacl::text,
+              a.attcollation::regcollation::text)::text
+     from pg_attribute a join pg_class c on c.oid = a.attrelid
+     join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = $1 and c.relkind in ('r','p') and a.attnum > 0 and not a.attisdropped
+     union all
+     select 'function/' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')',
+            jsonb_build_array(pg_get_userbyid(p.proowner), p.proacl::text)::text
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = $1 and p.prokind in ('f','p')
+     union all
+     select 'schema/' || n.nspname,
+            jsonb_build_array(pg_get_userbyid(n.nspowner), n.nspacl::text)::text
+     from pg_namespace n where n.nspname = $1
+     union all
+     select 'sequence/' || c.relname,
+            jsonb_build_array(s.seqtypid::regtype::text, s.seqstart, s.seqincrement,
+              s.seqmax, s.seqmin, s.seqcache, s.seqcycle)::text
+     from pg_sequence s join pg_class c on c.oid = s.seqrelid
+     join pg_namespace n on n.oid = c.relnamespace where n.nspname = $1
+     union all
+     select 'trigger/' || c.relname || '/' || t.tgname, t.tgenabled::text
+     from pg_trigger t join pg_class c on c.oid = t.tgrelid
+     join pg_namespace n on n.oid = c.relnamespace
+     where n.nspname = $1 and not t.tgisinternal
+     union all
+     select 'type/' || t.typname,
+            jsonb_build_array(t.typtype, t.typbasetype::regtype::text, t.typtypmod,
+              t.typnotnull, t.typdefault, t.typacl::text,
+              (select array_agg(pg_get_constraintdef(con.oid) order by con.conname)
+               from pg_constraint con where con.contypid = t.oid))::text
+     from pg_type t join pg_namespace n on n.oid = t.typnamespace
+     where n.nspname = $1 and t.typtype in ('d','r','m')
+     union all
+     select 'defaults/' || pg_get_userbyid(d.defaclrole) || '/' || d.defaclobjtype::text,
+            d.defaclacl::text
+     from pg_default_acl d join pg_namespace n on n.oid = d.defaclnamespace where n.nspname = $1`,
+    [schema],
+  )
+  const attributes = new Map(attributesRows.rows.map(row => [row.name, row.definition]))
+  return { tables, constraints, indexes, enums, views, functions, triggers, policies, attributes }
+}
+
+export function schemasEqual(left: SchemaSnapshot, right: SchemaSnapshot): boolean {
+  const canonical = (value: unknown): unknown => {
+    if (value instanceof Map) return [...value].sort(([a], [b]) => String(a).localeCompare(String(b)))
+      .map(([key, entry]) => [key, canonical(entry)])
+    if (Array.isArray(value)) return value.map(canonical)
+    if (value !== null && typeof value === 'object') return Object.fromEntries(
+      Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([key, entry]) => [key, canonical(entry)]),
+    )
+    return value
+  }
+  return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right))
 }
 
 /** DDL to turn `from` into `to`, scoped to one schema. Empty array = no changes. */
 export function diffSchemas(from: SchemaSnapshot, to: SchemaSnapshot, schema = 'public'): string[] {
+  for (const [key, value] of from.attributes) {
+    if (to.attributes.has(key) && to.attributes.get(key) !== value) {
+      throw new Error('Lite table diff cannot safely migrate catalog attributes; use the official Supabase pg-delta adapter')
+    }
+  }
+  for (const [name, labels] of from.enums) {
+    const next = to.enums.get(name)
+    if (!next || labels.some((label, index) => next[index] !== label)) {
+      throw new Error('Lite table diff only supports appending enum values; use the official Supabase pg-delta adapter')
+    }
+  }
+  for (const kind of ['views', 'functions', 'triggers', 'policies'] as const) {
+    if (from[kind].size !== to[kind].size
+      || [...from[kind]].some(([name, definition]) => to[kind].get(name) !== definition)) {
+      throw new Error(`Lite table diff cannot safely migrate ${kind}; use the official Supabase pg-delta adapter`)
+    }
+  }
   const out: string[] = []
   const q = (n: string) => quoteIdent(n)
   const tbl = (t: string) => `${q(schema)}.${q(t)}`
@@ -195,6 +344,27 @@ export function diffSchemas(from: SchemaSnapshot, to: SchemaSnapshot, schema = '
   })
 
   return out
+}
+
+function renderPolicy(
+  schema: string,
+  row: {
+    table: string
+    name: string
+    permissive: string
+    roles: string[]
+    command: string
+    using_expression: string | null
+    check_expression: string | null
+  },
+): string {
+  const roles = row.roles.length ? row.roles.map((role) => quoteIdent(role)).join(', ') : 'public'
+  const command = row.command.toLowerCase() === '*' ? 'all' : row.command.toLowerCase()
+  const mode = row.permissive.toLowerCase() === 'permissive' ? 'permissive' : 'restrictive'
+  let sql = `create policy ${quoteIdent(row.name)} on ${quoteIdent(schema)}.${quoteIdent(row.table)} as ${mode} for ${command} to ${roles}`
+  if (row.using_expression) sql += ` using (${row.using_expression})`
+  if (row.check_expression) sql += ` with check (${row.check_expression})`
+  return sql
 }
 
 /**

@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.23.0](https://github.com/vibeunion/supacloud/compare/app-v0.22.0...app-v0.23.0) (2026-10-05)
+
+
+### Features
+
+* **elysia:** Elysia 2 AOT evaluation and end-to-end typing architecture ([#1654](https://github.com/vibeunion/supacloud/issues/1654)) ([39ee49f](https://github.com/vibeunion/supacloud/commit/39ee49f760e85e789c43c1d18cf5729db592f6bc))
+
+
+### Miscellaneous Chores
+
+* **deps:** complete @sinclair/typebox to typebox 1.3.34 migration ([#1655](https://github.com/vibeunion/supacloud/issues/1655)) ([87d1133](https://github.com/vibeunion/supacloud/commit/87d1133c0fa0eadf145afc6c3747f693e3e36200))
+
 ## [0.22.0](https://github.com/vibeunion/supacloud/compare/app-v0.21.1...app-v0.22.0) (2026-10-03)
 
 

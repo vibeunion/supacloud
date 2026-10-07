@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { fileURLToPath } from "node:url";
 import {
   buildResourceRegistry,
+  getTenantResources,
   buildTableRowsResource,
   parseTableColumnsResponse,
   tableColumnsEndpoint,
@@ -8,8 +10,23 @@ import {
   tableRowsResourceName,
   type ResourceLabels,
 } from "./resources";
+import type { TenantAuthUserRecord, TenantTableRecord } from "./contracts";
+import { tenantTablesContract, tenantAuthUsersContract } from "./contracts";
+import { getResourceList } from "./typed-list";
+import { Type } from "typebox";
+import { parseContractRecord } from "@svadmin/core/resource-contract";
+import { defineSvadminResource } from "./svadmin-contract";
 
 describe("buildResourceRegistry", () => {
+  test("uses native TypeBox contracts without mutating schemas with legacy markers", () => {
+    const schema = Type.Object({ id: Type.String(), email: Type.Optional(Type.String()) });
+    const contract = defineSvadminResource("native-users", { record: schema });
+    expect(Object.getOwnPropertySymbols(schema)).toEqual([]);
+    expect(Object.getOwnPropertySymbols(schema.properties.id)).toEqual([]);
+    expect(parseContractRecord(contract, { id: "user-1" })).toEqual({ id: "user-1" });
+    expect(() => parseContractRecord(contract, { id: "user-1", email: 42 })).toThrow();
+    expect(() => parseContractRecord(contract, { id: "user-1", admin: true })).toThrow();
+  });
   const englishLabels: ResourceLabels = {
     projects: "Projects",
     referenceId: "Reference ID",
@@ -47,6 +64,77 @@ describe("buildResourceRegistry", () => {
     type: "类型",
     rows: "行数（估算）",
   };
+
+  test("keeps static svadmin record types attached to resource contracts", () => {
+    const table: TenantTableRecord = {
+      id: "users",
+      table_name: "users",
+      table_schema: "public",
+      table_type: "BASE TABLE",
+      row_estimate: "3",
+    };
+    const user: TenantAuthUserRecord = {
+      id: "user-1",
+      email: null,
+      role: "authenticated",
+      created_at: null,
+      last_sign_in_at: null,
+    };
+
+    expect(table.table_name).toBe("users");
+    expect(user.id).toBe("user-1");
+  });
+
+  test("typechecks inferred resource results and rejects incorrect field access", () => {
+    const result = Bun.spawnSync([
+      "./node_modules/.bin/tsc", "--ignoreConfig", "--noEmit", "--strict",
+      "--skipLibCheck", "--module", "esnext", "--moduleResolution", "bundler",
+      "--target", "es2022", "src/lib/admin/typed-list.typecheck.ts",
+    ], { cwd: fileURLToPath(new URL("../../../", import.meta.url)) });
+    expect(new TextDecoder().decode(result.stdout) + new TextDecoder().decode(result.stderr)).toBe("");
+    expect(result.exitCode).toBe(0);
+  }, 30_000);
+
+  test("keeps memoized contracts isolated by resource and tenant", () => {
+    expect(tenantTablesContract("alpha")).toBe(tenantTablesContract("alpha"));
+    expect(tenantAuthUsersContract("alpha")).toBe(tenantAuthUsersContract("alpha"));
+    expect(tenantTablesContract("alpha")).not.toBe(tenantTablesContract("beta"));
+    expect(tenantTablesContract("alpha")).not.toBe(tenantAuthUsersContract("alpha"));
+  });
+
+  test("reads typed tenant resources through projection and strict validation", async () => {
+    const originalFetch = globalThis.fetch;
+    const [tables, users] = getTenantResources("alpha", englishLabels);
+    const requests: string[] = [];
+    let payload: unknown = {
+      data: [{ table_name: "events", table_schema: "public", table_type: "BASE TABLE", row_estimate: "3", extra: true }],
+      total: 1,
+    };
+    globalThis.fetch = async (request) => {
+      requests.push(String(request));
+      return Response.json(payload);
+    };
+    try {
+      const result = await getResourceList(tables);
+      expect(result.data).toEqual([{
+        id: "events", table_name: "events", table_schema: "public",
+        table_type: "BASE TABLE", row_estimate: "3",
+      }]);
+      expect(new URL(requests[0]!).pathname).toBe("/v1/projects/alpha/database/tables");
+      payload = { users: [{ id: "user-1", email: null, user_metadata: { private: true } }], total: 1 };
+      expect((await getResourceList(users)).data).toEqual([{ id: "user-1", email: null }]);
+      expect(new URL(requests[1]!).pathname).toBe("/v1/projects/alpha/auth/users");
+      payload = { users: [{ id: "user-1", email: 42 }], total: 1 };
+      await expect(getResourceList(users)).rejects.toThrow();
+      payload = { data: [{ table_name: "events", table_schema: "public", table_type: "BASE TABLE", row_estimate: false }], total: 1 };
+      await expect(getResourceList(tables)).rejects.toThrow();
+      const requestCount = requests.length;
+      await expect(getResourceList({ ...tables, name: "v1/projects/beta/database/tables" })).rejects.toThrow();
+      expect(requests).toHaveLength(requestCount);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 
   test("includes tenant auth resources for every known project", () => {
     const registry = buildResourceRegistry(["alpha123", "beta456"], englishLabels);

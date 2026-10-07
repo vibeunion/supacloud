@@ -150,10 +150,38 @@ type PathParameters<Path extends string> = [PathParameterNames<Path>] extends [n
   ? Record<string, string>
   : { [Name in PathParameterNames<Path>]: string };
 
+/**
+ * Resolve one declared schema field to the value Elysia hands to the handler.
+ *
+ * Elysia registers the route with the same schema instance, so the handler sees
+ * the *decoded* output of TypeBox transforms (`t.Numeric`, `t.Transform`,
+ * `Type.Codec`). `StaticDecode` mirrors that pipeline exactly, which is why the
+ * decoded type is used here instead of the raw `Static` input type.
+ */
 type DecodedField<Schemas extends RouteContractSchemas, Key extends keyof RouteContractSchemas> =
   [Extract<Schemas[Key], TSchema>] extends [never]
     ? unknown
     : UnwrapSchema<Extract<Schemas[Key], TSchema>>;
+
+/** True when the contract declared a schema for `Key`. */
+type HasField<Schemas extends RouteContractSchemas, Key extends keyof RouteContractSchemas> =
+  [Extract<Schemas[Key], TSchema>] extends [never] ? false : true;
+
+/**
+ * Elysia's native fallback for an undeclared route field.
+ *
+ * The values are copied from Elysia's own `Context` so a contract without a
+ * schema behaves exactly like a hand-written Elysia route (query and headers
+ * stay `string | undefined`, params resolve from the path).
+ */
+type FieldFallback<Schemas extends RouteContractSchemas, Key extends keyof RouteContractSchemas, Path extends string> =
+  HasField<Schemas, Key> extends true
+    ? DecodedField<Schemas, Key>
+    : Key extends "params"
+      ? PathParameters<Path>
+      : Key extends "query" | "headers"
+        ? Record<string, string | undefined>
+        : Record<string, unknown>;
 
 type DecodedCookie<Schemas extends RouteContractSchemas> = DecodedField<Schemas, "cookie"> extends infer Value
   ? Value extends Record<string, unknown>
@@ -180,11 +208,9 @@ export type ElysiaRouteContext<
   Path extends string = "",
 > = {
   body: DecodedField<Schemas, "body">;
-  params: Schemas["params"] extends TSchema ? DecodedField<Schemas, "params"> : PathParameters<Path>;
-  query: Schemas["query"] extends TSchema ? DecodedField<Schemas, "query"> : Record<string, string>;
-  headers: Schemas["headers"] extends TSchema
-    ? DecodedField<Schemas, "headers">
-    : Record<string, string | undefined>;
+  params: FieldFallback<Schemas, "params", Path>;
+  query: FieldFallback<Schemas, "query", Path>;
+  headers: FieldFallback<Schemas, "headers", Path>;
   cookie: DecodedCookie<Schemas>;
   request: Request;
   path: string;
@@ -192,7 +218,7 @@ export type ElysiaRouteContext<
   server: unknown;
   store: Record<string, unknown>;
   set: {
-    headers: Record<string, string>;
+    headers: Record<string, string | number>;
     status?: number | keyof StatusMap;
     redirect?: string;
     cookie?: Record<string, unknown>;
@@ -430,7 +456,12 @@ export function defineElysiaRoute<
   });
 }
 
-/** Register a contract-bound route while preserving Elysia's fluent app API. */
+/**
+ * Register a contract-bound route while preserving Elysia's fluent app API.
+ *
+ * Runtime registration preserves the caller's existing instance type. It does
+ * not add the contract to Eden's static route tree.
+ */
 export function registerElysiaRoute<
   const App extends AnyElysia,
   const Method extends HTTPMethod,
@@ -442,7 +473,7 @@ export function registerElysiaRoute<
 ): App {
   // Elysia's fluent instance type widens after registration. The helper has
   // already established the contract-specific handler type, so keep the
-  // public return stable while crossing that mutable fluent boundary.
+  // contract handler's own decoding while crossing that mutable fluent boundary.
   const handler = async (context: Parameters<typeof route.handler>[0]) => {
     const value = await route.handler(context);
     if (route.contract.responses !== undefined) {

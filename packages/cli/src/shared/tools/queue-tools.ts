@@ -1,7 +1,7 @@
 /**
  * Queue — Compound tool for message queue operations
  */
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
 

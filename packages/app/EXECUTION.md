@@ -13,7 +13,7 @@ This is an additive migration path, not a replacement compiler or a new DI frame
 | Application execution | Authorization and project binding, receipt replay, transaction boundaries, command audit, module/command aspects |
 | Durable adapters and scheduler | Persistent receipts, atomic database work, external-effect reconciliation, explicitly configured retry policies |
 
-Elysia stays pinned to **`2.0.0-beta.19`** in the adapter. Use Elysia 2 object-style
+Elysia stays pinned to **`2.0.0-beta.21`** in the adapter. Use Elysia 2 object-style
 `.macro({ ... })`, `derive` rather than `resolve`, string hook scopes such as
 `"plugin"`, and `.post(path, options, handler)`. Do not copy 1.x lifecycle APIs.
 There is deliberately no replacement HTTP abstraction or decorator dependency.

@@ -3,6 +3,11 @@ import { Value } from "typebox/value";
 
 const closed = { additionalProperties: false } as const;
 const positive = (maximum: number) => Type.Integer({ minimum: 1, maximum });
+export const ComputeResourcesSchema = Type.Object({
+  cpuLimit: Type.Number({ minimum: 0.1, maximum: 64, multipleOf: 0.1 }),
+  memoryLimitMiB: Type.Integer({ minimum: 64, maximum: 262144 }),
+}, closed);
+export type ComputeResources = Static<typeof ComputeResourcesSchema>;
 export const WorkerExecutionGroupSchema = Type.Object({
   name: Type.String({ pattern: "^[a-z][a-z0-9-]{0,47}$" }),
   target: Type.String({ pattern: "^[a-z][a-z0-9-]{0,53}$" }),
@@ -15,10 +20,7 @@ export const WorkerExecutionGroupSchema = Type.Object({
   replicas: positive(16),
   maxReplicas: positive(16),
   concurrencyPerReplica: positive(32),
-  resources: Type.Object({
-    cpuLimit: Type.Number({ minimum: 0.1, maximum: 64, multipleOf: 0.1 }),
-    memoryLimitMiB: Type.Integer({ minimum: 64, maximum: 262144 }),
-  }, closed),
+  resources: ComputeResourcesSchema,
   database: Type.Object({
     engineConnectionsPerReplica: positive(16),
     handlerConnectionsPerReplica: positive(16),

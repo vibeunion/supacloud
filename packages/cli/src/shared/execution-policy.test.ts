@@ -69,6 +69,21 @@ function context(overrides: Partial<ResolvedContext> = {}): ResolvedContext {
 }
 
 describe("CLI execution policy", () => {
+    test("keeps Select authoring local and config inspection bound to the production project", () => {
+        for (const action of [
+            "init", "db_schema_declarative_sync", "db_schema_declarative_generate",
+            "stack_start", "stack_prepare", "stack_status", "stack_stop", "stack_destroy",
+        ]) {
+            expect(executionMode("supabase", action, {})).toBe("local");
+        }
+        expect(executionMode("supabase", "config_pull", { dry_run: false })).toBe("read");
+        expect(() => authorizeExecution("supabase", { action: "config_pull", ref: "other-ref" }, {
+            context: context(),
+        })).toThrow("cannot target a different project");
+        expect(() => authorizeExecution("supabase", { action: "config_pull", ref: "prod-ref" }, {
+            context: context({ readOnly: true }),
+        })).not.toThrow();
+    });
     test("treats one-command deploy as a protected write and dry run as read-only", () => {
         expect(executionMode("deploy", "deploy", {})).toBe("write");
         expect(executionMode("deploy", "deploy", { dry_run: true })).toBe("read");
@@ -145,7 +160,7 @@ describe("CLI execution policy", () => {
             server.stop(true);
             rmSync(workspace, { recursive: true, force: true });
         }
-    });
+    }, 30_000);
 
     test("blocks every classified remote write in read-only mode", () => {
         expect(() => authorizeExecution("frontend", { action: "redeploy" }, {

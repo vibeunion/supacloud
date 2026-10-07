@@ -1,0 +1,14 @@
+import { Type } from "typebox";
+
+export const QuerySchema = Type.Object({
+  count: Type.Codec(Type.String()).Decode(Number).Encode(String),
+});
+export const BodySchema = Type.Object({
+  note: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+});
+export const ResultSchema = Type.Object({
+  note: Type.Union([Type.String(), Type.Null()]),
+  count: Type.Number(),
+  tag: Type.Optional(Type.String()),
+});
+export const ConflictSchema = Type.Object({ conflict: Type.Literal(true) });

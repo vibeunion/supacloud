@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.49.2](https://github.com/vibeunion/supacloud/compare/web-console-v0.49.1...web-console-v0.49.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* **deps,perf:** replace Bun native APIs and resolve audit vulnerabilities ([#1667](https://github.com/vibeunion/supacloud/issues/1667)) ([06a9199](https://github.com/vibeunion/supacloud/commit/06a91990c754ce586f2a2353f253dc50f4fa0f98))
+
+## [0.49.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.49.0...web-console-v0.49.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **web-console:** enforce typed auth URL configuration contract ([#1663](https://github.com/vibeunion/supacloud/issues/1663)) ([958efa9](https://github.com/vibeunion/supacloud/commit/958efa9a87fdb143578343a8946b1e5e4d248d71))
+
+## [0.49.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.48.0...web-console-v0.49.0) (2026-10-05)
+
+
+### Features
+
+* **web-console:** upgrade svadmin and type auth mutations ([#1662](https://github.com/vibeunion/supacloud/issues/1662)) ([b7bc46c](https://github.com/vibeunion/supacloud/commit/b7bc46cb3aeb57decd9265699cc66a6dd8c0d4ea))
+
+## [0.48.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.47.0...web-console-v0.48.0) (2026-10-05)
+
+
+### Features
+
+* **web-console:** preserve typed svadmin resource reads ([#1656](https://github.com/vibeunion/supacloud/issues/1656)) ([2d83827](https://github.com/vibeunion/supacloud/commit/2d8382736a4d877d52e0d03705819bc952bf3a0c))
+
+
+### Miscellaneous Chores
+
+* **deps:** complete @sinclair/typebox to typebox 1.3.34 migration ([#1655](https://github.com/vibeunion/supacloud/issues/1655)) ([87d1133](https://github.com/vibeunion/supacloud/commit/87d1133c0fa0eadf145afc6c3747f693e3e36200))
+
+## [0.47.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.46.0...web-console-v0.47.0) (2026-10-05)
+
+
+### Features
+
+* add agent backend authoring, runtime and observability workflows ([#1648](https://github.com/vibeunion/supacloud/issues/1648)) ([59a66d1](https://github.com/vibeunion/supacloud/commit/59a66d184a47d19c7f8895f24a6ba2c7e74e93d0))
+
+## [0.46.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.45.1...web-console-v0.46.0) (2026-10-04)
+
+
+### Features
+
+* establish single-node delivery baseline ([#1632](https://github.com/vibeunion/supacloud/issues/1632)) ([926de6c](https://github.com/vibeunion/supacloud/commit/926de6c6c72940f7c03e046908ef446c54d37621))
+
 ## [0.45.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.45.0...web-console-v0.45.1) (2026-10-02)
 
 

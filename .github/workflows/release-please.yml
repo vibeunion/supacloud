@@ -54,6 +54,7 @@ jobs:
       supacloud_lite_released: ${{ steps.release.outputs['packages/supacloud-lite--release_created'] }}
       supacloud_lite_tag_name: ${{ steps.release.outputs['packages/supacloud-lite--tag_name'] }}
       supacloud_js_released: ${{ steps.release.outputs['packages/supacloud-js--release_created'] }}
+      query_released: ${{ steps.release.outputs['packages/query--release_created'] }}
       cli_released: ${{ steps.release.outputs['packages/cli--release_created'] }}
       admin_released: ${{ steps.release.outputs['packages/admin--release_created'] }}
       function_adapter_released: ${{ steps.release.outputs['packages/function-adapter--release_created'] }}
@@ -404,6 +405,14 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
+      # The standalone native smoke test imports the workspace SDK source, which
+      # now depends on @supacloud/query. Build/link those local prerequisites the
+      # same way the SupaCloud Lite package check does before installing the
+      # standalone consumer.
+      - name: Prepare workspace dependencies
+        working-directory: packages/supacloud-lite
+        run: bun run ../../scripts/build-command-dependencies.ts supacloud-lite
+
       - name: Install dependencies
         working-directory: packages/supacloud-lite
         run: bun install --frozen-lockfile
@@ -489,6 +498,14 @@ jobs:
         working-directory: packages/contracts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+          node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
+
+      - name: Publish Query adapter to NPM
+        if: ${{ !cancelled() && (needs.release-please.outputs.query_released == 'true' || inputs.recover_npm == true) }}
+        working-directory: packages/query
         run: |
           bun install --frozen-lockfile
           bun run build

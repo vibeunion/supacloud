@@ -1,7 +1,7 @@
 import { Value } from "typebox/value";
 import {
   ApplicationIdSchema, parseApplicationReleaseRecord, type ApplicationReleaseRecord,
-  type WorkerExecutionGroup,
+  type WorkerExecutionGroup, type ComputeResources,
 } from "@supacloud/delivery";
 import { join } from "node:path";
 import { readFile } from "node:fs/promises";
@@ -22,6 +22,7 @@ export interface ApplicationRuntimeTarget {
   name: string;
   sourceTarget?: string;
   execution?: WorkerExecutionGroup;
+  resources?: ComputeResources;
   kind: "http" | "worker";
   objectId: string;
   unit: string;
@@ -67,6 +68,7 @@ export function applicationRuntimePlan(input: ApplicationRuntimeInput): Applicat
   };
   plan.targets = release.targets.flatMap(target => Array.from({ length: target.execution?.replicas ?? 1 }, (_, replica) => {
     const execution = target.execution;
+    const resources = execution?.resources ?? target.compute;
     const name = execution ? `${target.name}-r${replica + 1}` : target.name;
     const unit = `supacloud-application-${release.project_ref}-${input.activationId}-${name}.service`;
     const objectDirectory = join(directory, "objects", target.object_id);
@@ -100,10 +102,10 @@ Environment="SUPACLOUD_OBJECT_ID=${target.object_id}"
 Environment="SHUTDOWN_TIMEOUT_MS=${execution ? execution.lifecycle.shutdownGraceSeconds * 1000 : 10000}"
 ${execution ? `Environment="SUPACLOUD_WORKER_EXECUTION=${Buffer.from(JSON.stringify(execution)).toString("base64")}"
 Environment="SUPACLOUD_WORKER_REPLICA=${replica + 1}"
-CPUAccounting=true
+` : ""}${resources ? `CPUAccounting=true
 MemoryAccounting=true
-CPUQuota=${Math.round(execution.resources.cpuLimit * 100)}%
-MemoryMax=${execution.resources.memoryLimitMiB * 1024 * 1024}
+CPUQuota=${Math.round(resources.cpuLimit * 100)}%
+MemoryMax=${resources.memoryLimitMiB * 1024 * 1024}
 MemorySwapMax=0
 KillMode=control-group
 ` : ""}ExecStart=/opt/supacloud/bun/${bunVersion}/bun --no-env-file ${entrypoint}
@@ -119,6 +121,7 @@ WantedBy=multi-user.target
     return {
       name, kind: target.kind, objectId: target.object_id,
       ...(execution ? { sourceTarget: target.name, execution } : {}),
+      ...(resources ? { resources } : {}),
       unit, directory: objectDirectory, environmentFile, entrypoint, port, unitContent,
     };
   }));
@@ -150,7 +153,7 @@ export interface ApplicationSystemdOperations {
 const operations: ApplicationSystemdOperations = {
   install: installManagedSystemdUnit,
   async resources(target, controlGroup, signal) {
-    if (!target.execution || !/^\/(?:[A-Za-z0-9_.:@-]+\/)*[A-Za-z0-9_.:@-]+$/.test(controlGroup)
+    if (!target.resources || !/^\/(?:[A-Za-z0-9_.:@-]+\/)*[A-Za-z0-9_.:@-]+$/.test(controlGroup)
       || controlGroup.split("/").some(part => part === "." || part === "..")
       || !controlGroup.endsWith(`/${target.unit}`)) return false;
     try {
@@ -162,8 +165,8 @@ const operations: ApplicationSystemdOperations = {
       ]);
       signal?.throwIfAborted();
       const match = /^([1-9][0-9]*) ([1-9][0-9]*)\n?$/.exec(cpu);
-      return !!match && Math.abs(Number(match[1]) / Number(match[2]) - target.execution.resources.cpuLimit) < 0.00001
-        && memory.trim() === String(target.execution.resources.memoryLimitMiB * 1024 * 1024) && swap.trim() === "0";
+      return !!match && Math.abs(Number(match[1]) / Number(match[2]) - target.resources.cpuLimit) < 0.00001
+        && memory.trim() === String(target.resources.memoryLimitMiB * 1024 * 1024) && swap.trim() === "0";
     } catch { return false; }
   },
   async command(args, signal) {
@@ -208,16 +211,16 @@ function observation(target: ApplicationRuntimeTarget, stdout: string): Applicat
   const loadState = properties.get("LoadState")!;
   const activeState = properties.get("ActiveState")!;
   const subState = properties.get("SubState")!;
-  const resourcesVerified = !target.execution || (
-    systemdMicroseconds(properties.get("CPUQuotaPerSecUSec")) === Math.round(target.execution.resources.cpuLimit * 1_000_000)
-    && properties.get("MemoryMax") === String(target.execution.resources.memoryLimitMiB * 1024 * 1024)
+  const resourcesVerified = !target.resources || (
+    systemdMicroseconds(properties.get("CPUQuotaPerSecUSec")) === Math.round(target.resources.cpuLimit * 1_000_000)
+    && properties.get("MemoryMax") === String(target.resources.memoryLimitMiB * 1024 * 1024)
     && properties.get("MemorySwapMax") === "0"
     && properties.get("CPUAccounting") === "yes" && properties.get("MemoryAccounting") === "yes"
     && properties.get("KillMode") === "control-group");
   return {
     target: target.name, unit: target.unit, loadState, activeState, subState,
     mainPid: Number(pid), invocationId: invocation || null, result: properties.get("Result")!,
-    ...(target.execution ? { resourcesVerified } : {}),
+    ...(target.resources ? { resourcesVerified } : {}),
     // This is process liveness, deliberately not application/worker readiness.
     processRunning: loadState === "loaded" && activeState === "active" && subState === "running"
       && Number(pid) > 0 && invocation !== "",
@@ -270,14 +273,14 @@ export class ApplicationSystemdRuntime {
     return Promise.all(plan.targets.map(async target => {
       const result = await this.systemd.command([
         "show", target.unit,
-        `--property=LoadState,ActiveState,SubState,MainPID,InvocationID,Result${target.execution
+        `--property=LoadState,ActiveState,SubState,MainPID,InvocationID,Result${target.resources
           ? ",CPUQuotaPerSecUSec,MemoryMax,MemorySwapMax,CPUAccounting,MemoryAccounting,KillMode,ControlGroup" : ""}`,
         "--all", "--no-pager",
       ], signal);
       signal?.throwIfAborted();
       if (result.exitCode !== 0) throw new Error("APPLICATION_RUNTIME_OBSERVATION_FAILED");
       const state = observation(target, result.stdout);
-      if (target.execution && state.resourcesVerified) {
+      if (target.resources && state.resourcesVerified) {
         const controlGroup = result.stdout.split("\n").find(line => line.startsWith("ControlGroup="))?.slice(13);
         state.resourcesVerified = !!controlGroup && await this.systemd.resources?.(target, controlGroup, signal) === true;
       }

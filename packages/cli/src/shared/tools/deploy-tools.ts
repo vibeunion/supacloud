@@ -2,8 +2,7 @@ import { access, lstat, mkdtemp, opendir, readFile, rm, writeFile } from "node:f
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { spawn } from "node:child_process";
-import { Type } from "@sinclair/typebox";
+import { Type } from "typebox";
 import { zipSync, type Zippable } from "fflate";
 import { optional } from "../schema";
 import type { HttpTransport } from "../transports/http";
@@ -325,14 +324,15 @@ function resolveInsideProject(projectDirectory: string, candidate: string, allow
 }
 
 async function runBuild(command: string, cwd: string): Promise<void> {
-    await new Promise<void>((resolvePromise, reject) => {
-        const child = spawn(command, { cwd, env: process.env, shell: true, stdio: "inherit" });
-        child.once("error", reject);
-        child.once("exit", (code, signal) => {
-            if (code === 0) resolvePromise();
-            else reject(new Error(`Build command failed (${signal ? `signal ${signal}` : `exit ${code ?? "unknown"}`}): ${command}`));
-        });
+    const child = Bun.spawn(["sh", "-c", command], {
+        cwd,
+        env: process.env,
+        stdio: ["inherit", "inherit", "inherit"],
     });
+    const exitCode = await child.exited;
+    if (exitCode !== 0) {
+        throw new Error(`Build command failed (exit ${exitCode ?? "unknown"}): ${command}`);
+    }
 }
 
 async function collectArchiveFiles(root: string): Promise<{ files: Zippable; bytes: number; count: number }> {

@@ -35,6 +35,12 @@
       "initial-version": "0.1.0",
       "changelog-path": "CHANGELOG.md"
     },
+    "packages/query": {
+      "release-type": "node",
+      "component": "query",
+      "initial-version": "0.1.0",
+      "changelog-path": "CHANGELOG.md"
+    },
     "packages/supacloud-js": {
       "release-type": "node",
       "component": "supacloud-js",
@@ -110,6 +116,10 @@
           "type": "json",
           "path": "/packages/cli/src/shared/tools/starter-metadata.json",
           "jsonpath": "$.packages.app.version"
+        },
+        {
+          "type": "generic",
+          "path": "/packages/compiler/src/migration-app-version.ts"
         }
       ]
     },
@@ -142,6 +152,10 @@
           "type": "json",
           "path": "/packages/cli/src/shared/tools/starter-metadata.json",
           "jsonpath": "$.packages.elysia.version"
+        },
+        {
+          "type": "generic",
+          "path": "/packages/compiler/src/migration-elysia-version.ts"
         }
       ]
     },

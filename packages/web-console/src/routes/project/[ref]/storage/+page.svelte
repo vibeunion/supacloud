@@ -252,7 +252,7 @@
       <div class="p-4 border-b flex items-center justify-between bg-muted/30">
         <h2 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{$t("Storage.buckets")}</h2>
         <div class="flex items-center gap-1">
-          <a href={resolve(`/project/${projectRef}/storage/vectors`)} class="p-1 hover:bg-muted rounded transition-colors" title="Vector Buckets"><BrainCircuit size={16} class="text-brand" /></a>
+          <a href={resolve("/project/[ref]/storage/vectors", { ref: projectRef })} class="p-1 hover:bg-muted rounded transition-colors" title="Vector Buckets"><BrainCircuit size={16} class="text-brand" /></a>
           <button onclick={() => showCreateBucket = !showCreateBucket} class="p-1 hover:bg-muted rounded transition-colors" title={$t("Storage.new_bucket")}>
             <Plus size={16} class="text-brand" />
           </button>

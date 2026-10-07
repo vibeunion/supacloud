@@ -112,7 +112,7 @@ function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Reco
       dependencies: {
         "@supacloud/app": `^${appMetadata.version}`,
         "@supacloud/elysia": `^${elysiaMetadata.version}`,
-        elysia: "2.0.0-beta.19",
+        elysia: "2.0.0-beta.21",
         ...(sdkDependencies ?? { rxjs: appMetadata.dependencies.rxjs }),
       },
       devDependencies: {
@@ -165,14 +165,15 @@ export default defineSupacloudConfig({
 function httpTemplate(name: string): Record<string, string> {
   return {
     ...baseFiles(name),
-    "src/orders/orders.ts": `import { Body, Controller, Get, Param, Post, defineFeatureSlice } from "@supacloud/app";
-import { status, t } from "elysia";
-
+    "src/orders/contracts.ts": `import { t } from "elysia";
 export const OrderParams = t.Object({ id: t.String({ minLength: 1 }) });
 export const CreateOrderBody = t.Object({ name: t.String({ minLength: 1 }) });
 export const OrderResult = t.Object({ id: t.String(), name: t.String() });
 export const HealthResult = t.Object({ ok: t.Boolean() });
-
+`,
+    "src/orders/orders.ts": `import { Body, Controller, Get, Param, Post, defineFeatureSlice } from "@supacloud/app";
+import { status } from "elysia";
+import { OrderParams, CreateOrderBody, OrderResult, HealthResult } from "./contracts";
 @Controller("/orders")
 export class OrdersController {
   @Get("/health", { responses: { 200: HealthResult } })
@@ -356,11 +357,11 @@ supacloud doctor --root .
 function minimalTemplate(name: string, sdkDependencies: StarterSdkDependencies): Record<string, string> {
   return {
     ...baseFiles(name, sdkDependencies),
-    "src/features/health/health.ts": `import { Controller, Get, Module } from "@supacloud/app/core";
-import { t } from "elysia";
-
+    "src/features/health/contracts.ts": `import { t } from "elysia";
 export const HealthResult = t.Object({ ok: t.Boolean() });
-
+`,
+    "src/features/health/health.ts": `import { Controller, Get, Module } from "@supacloud/app/core";
+import { HealthResult } from "./contracts";
 @Controller("/health")
 export class HealthController {
   @Get("/", { responses: { 200: HealthResult } })

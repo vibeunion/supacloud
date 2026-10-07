@@ -1,6 +1,7 @@
-import { Type, type TSchema } from '@sinclair/typebox';
-import { defineResource, type ResourceContract } from '@svadmin/core/resource-contract';
+import { Type, type Static, type TSchema } from 'typebox';
+import type { ResourceContract } from '@svadmin/core/resource-contract';
 import type { TableColumnMetadata } from './resources';
+import { defineSvadminResource, defineDynamicSvadminResource, type SvadminResourceContract } from './svadmin-contract';
 
 /**
  * SVAdmin 0.54+ requires a runtime contract for every resource consumed by
@@ -13,49 +14,47 @@ import type { TableColumnMetadata } from './resources';
  */
 const contracts = new Map<string, ResourceContract>();
 
-function memoContract(key: string, build: () => ResourceContract): ResourceContract {
-  const existing = contracts.get(key);
+function memoContract<S extends ResourceContract>(cache: Map<string, S>, key: string, build: () => S): S {
+  const existing = cache.get(key);
   if (existing) return existing;
   const contract = build();
-  contracts.set(key, contract);
+  cache.set(key, contract);
   return contract;
 }
 
 const nullableText = Type.Optional(Type.Union([Type.String(), Type.Null()]));
+const tenantTablesRecordSchema = Type.Object({
+  id: Type.String(),
+  table_name: Type.String(),
+  table_schema: Type.String(),
+  table_type: Type.String(),
+  row_estimate: Type.Union([Type.Number(), Type.String()]),
+});
+const tenantAuthUsersRecordSchema = Type.Object({
+  id: Type.String(),
+  email: nullableText,
+  role: nullableText,
+  created_at: nullableText,
+  last_sign_in_at: nullableText,
+});
+export type TenantTableRecord = Static<typeof tenantTablesRecordSchema>;
+export type TenantAuthUserRecord = Static<typeof tenantAuthUsersRecordSchema>;
+type TenantTablesContract = SvadminResourceContract<typeof tenantTablesRecordSchema>;
+type TenantAuthUsersContract = SvadminResourceContract<typeof tenantAuthUsersRecordSchema>;
+const tableContracts = new Map<string, TenantTablesContract>();
+const authUserContracts = new Map<string, TenantAuthUsersContract>();
 
-/**
- * Dynamic table schemas cannot satisfy the compile-time `SafeSchema` inference:
- * their property map is built at runtime from live column metadata. The runtime
- * `defineResource` validation still closes and validates the produced schema.
- */
-const defineDynamicResource = defineResource as unknown as (
-  name: string,
-  schemas: { record: TSchema },
-) => ResourceContract;
-
-export function tenantTablesContract(projectRef: string): ResourceContract {
+export function tenantTablesContract(projectRef: string): TenantTablesContract {
   const name = `v1/projects/${projectRef}/database/tables`;
-  return memoContract(name, () => defineResource(name, {
-    record: Type.Object({
-      id: Type.String(),
-      table_name: Type.String(),
-      table_schema: Type.String(),
-      table_type: Type.String(),
-      row_estimate: Type.Union([Type.Number(), Type.String()]),
-    }),
+  return memoContract(tableContracts, name, () => defineSvadminResource(name, {
+    record: tenantTablesRecordSchema,
   }));
 }
 
-export function tenantAuthUsersContract(projectRef: string): ResourceContract {
+export function tenantAuthUsersContract(projectRef: string): TenantAuthUsersContract {
   const name = `v1/projects/${projectRef}/auth/users`;
-  return memoContract(name, () => defineResource(name, {
-    record: Type.Object({
-      id: Type.String(),
-      email: nullableText,
-      role: nullableText,
-      created_at: nullableText,
-      last_sign_in_at: nullableText,
-    }),
+  return memoContract(authUserContracts, name, () => defineSvadminResource(name, {
+    record: tenantAuthUsersRecordSchema,
   }));
 }
 
@@ -73,7 +72,7 @@ export function tableRowsContract(
   columns: readonly TableColumnMetadata[],
 ): ResourceContract {
   const signature = columns.map((column) => column.column_name).join(',');
-  return memoContract(`${resourceName}|${signature}`, () => {
+  return memoContract(contracts, `${resourceName}|${signature}`, () => {
     const properties: Record<string, TSchema> = {
       id: Type.String(),
     };
@@ -83,7 +82,7 @@ export function tableRowsContract(
       if (column.column_name === 'id') continue;
       properties[column.column_name] = Type.Optional(databaseValueSchema());
     }
-    return defineDynamicResource(resourceName, { record: Type.Object(properties) });
+    return defineDynamicSvadminResource(resourceName, { record: Type.Object(properties) });
   });
 }
 

@@ -198,9 +198,13 @@ function isFunction(value: unknown): value is (...args: unknown[]) => unknown {
   return typeof value === "function";
 }
 
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
 function resolveFactoryValue(value: unknown): unknown {
-  if (!isRecord(value) || !isFunction(value.factory)) return undefined;
-  return value.factory();
+  if (!isRecord(value) || !isFunction(value["factory"])) return undefined;
+  return value["factory"]();
 }
 
 const scopeDestructions = new WeakMap<object, Promise<void>>();
@@ -223,14 +227,14 @@ function destroyScopeInstances(
     for (const entry of [...plan].reverse()) {
       const value = scope[entry.key];
       const instance = entry.index === undefined ? value
-        : Array.isArray(value) ? value[entry.index] : undefined;
+        : isUnknownArray(value) ? value[entry.index] : undefined;
       if (seen.has(instance)) continue;
       seen.add(instance);
       try {
-        if (isRecord(instance) && isFunction(instance.onDestroy)) {
-          await instance.onDestroy();
-        } else if (isRecord(instance) && isFunction(instance.ngOnDestroy)) {
-          await instance.ngOnDestroy();
+        if (isRecord(instance) && isFunction(instance["onDestroy"])) {
+          await instance["onDestroy"]();
+        } else if (isRecord(instance) && isFunction(instance["ngOnDestroy"])) {
+          await instance["ngOnDestroy"]();
         }
       } catch (error) {
         errors.push(error);
@@ -253,11 +257,11 @@ async function initializeServiceInstances(
     const value = services[entry.key];
     const instance = entry.index === undefined
       ? value
-      : Array.isArray(value) ? value[entry.index] : undefined;
+      : isUnknownArray(value) ? value[entry.index] : undefined;
     if (seen.has(instance)) continue;
     seen.add(instance);
-    if (!isRecord(instance) || !isFunction(instance.onInit)) continue;
-    await instance.onInit();
+    if (!isRecord(instance) || !isFunction(instance["onInit"])) continue;
+    await instance["onInit"]();
   }
 }
 
@@ -271,13 +275,13 @@ async function destroyServiceInstances(
     const value = services[entry.key];
     const instance = entry.index === undefined
       ? value
-      : Array.isArray(value) ? value[entry.index] : undefined;
+      : isUnknownArray(value) ? value[entry.index] : undefined;
     if (seen.has(instance)) continue;
     seen.add(instance);
     if (!isRecord(instance)) continue;
-    const hook = isFunction(instance.onDestroy)
-      ? instance.onDestroy
-      : isFunction(instance.ngOnDestroy) ? instance.ngOnDestroy : undefined;
+    const hook = isFunction(instance["onDestroy"])
+      ? instance["onDestroy"]
+      : isFunction(instance["ngOnDestroy"]) ? instance["ngOnDestroy"] : undefined;
     if (!hook) continue;
     try {
       await hook.call(instance);
@@ -375,9 +379,9 @@ export function renderApplication(
     "}",
     "",
     "export async function initializeApplication(services: Record<string, unknown>): Promise<void> {",
-    '  const initializers = [services.environmentInitializer ?? services["supacloud.environment-initializer"], services.appInitializer ?? services["supacloud.app-initializer"]];',
+    '  const initializers = [services["environmentInitializer"] ?? services["supacloud.environment-initializer"], services["appInitializer"] ?? services["supacloud.app-initializer"]];',
     "  for (const group of initializers) {",
-    "    if (Array.isArray(group)) {",
+    "    if (isUnknownArray(group)) {",
     "      for (const init of group) {",
     '        if (isFunction(init)) await init();',
     "      }",
@@ -388,21 +392,21 @@ export function renderApplication(
     "}",
     "",
     "export async function destroyApplication(services: Record<string, unknown>): Promise<void> {",
-    '  const destroyRef = (Object.prototype.propertyIsEnumerable.call(services, "destroyRef") ? services.destroyRef : undefined)',
+    '  const destroyRef = (Object.prototype.propertyIsEnumerable.call(services, "destroyRef") ? services["destroyRef"] : undefined)',
     '    ?? (Object.prototype.propertyIsEnumerable.call(services, "supacloud.destroy-ref") ? services["supacloud.destroy-ref"] : undefined);',
-    '  if (isRecord(destroyRef) && isFunction(destroyRef.destroy)) {',
-    "    await destroyRef.destroy();",
-    "  } else if (isRecord(destroyRef) && Array.isArray(destroyRef._teardowns)) {",
-    "    for (const teardown of [...destroyRef._teardowns].reverse()) {",
+    '  if (isRecord(destroyRef) && isFunction(destroyRef["destroy"])) {',
+    '    await destroyRef["destroy"]();',
+    '  } else if (isRecord(destroyRef) && isUnknownArray(destroyRef["_teardowns"])) {',
+    '    for (const teardown of [...destroyRef["_teardowns"]].reverse()) {',
     "      if (isFunction(teardown)) await teardown();",
     "    }",
     "  }",
     "  const instances = Object.values(services);",
     "  for (const inst of instances.reverse()) {",
-    '    if (isRecord(inst) && isFunction(inst.onDestroy)) {',
-    "      await inst.onDestroy();",
-    '    } else if (isRecord(inst) && isFunction(inst.ngOnDestroy)) {',
-    "      await inst.ngOnDestroy();",
+    '    if (isRecord(inst) && isFunction(inst["onDestroy"])) {',
+    '      await inst["onDestroy"]();',
+    '    } else if (isRecord(inst) && isFunction(inst["ngOnDestroy"])) {',
+    '      await inst["ngOnDestroy"]();',
     "    }",
     "  }",
     "}",
@@ -854,7 +858,7 @@ class ModuleGenerator {
           `invoker: async (ctrl: unknown, req: { params?: Record<string, unknown>; query?: Record<string, unknown>; body?: unknown; headers?: Record<string, unknown>; cookie?: Record<string, unknown>; context?: unknown }) => { ` +
           `if (!isRecord(ctrl)) throw new TypeError("Route controller is not an object"); ` +
           `const handler = ctrl[${JSON.stringify(route.handler)}]; ` +
-          `if (typeof handler !== "function") throw new TypeError("Route handler ${route.handler} is not callable"); ` +
+          `if (!isFunction(handler)) throw new TypeError("Route handler ${route.handler} is not callable"); ` +
           `return await Reflect.apply(handler, ctrl, [${callArgs}]); }`,
         );
         if (route.contract !== undefined) {
@@ -1025,7 +1029,7 @@ class ModuleGenerator {
         if (emitted.constLine) lines.push(emitted.constLine);
         if (scoped) {
           lines.push(
-            `scope[${JSON.stringify(emitted.key)}] = [...(Array.isArray(scope[${JSON.stringify(emitted.key)}]) ? scope[${JSON.stringify(emitted.key)}] : []), ${emitted.expr}];`,
+            `scope[${JSON.stringify(emitted.key)}] = [...(isUnknownArray(scope[${JSON.stringify(emitted.key)}]) ? scope[${JSON.stringify(emitted.key)}] : []), ${emitted.expr}];`,
           );
         }
         const list = multiGroups.get(emitted.key) ?? [];
@@ -1068,7 +1072,7 @@ class ModuleGenerator {
         if (!this.graph.externalTokens.includes(token)) continue;
         const key = camelName(token);
         const expression = this.depExpr(token, scopeKind, this.depOptions(node, token));
-        if (expression === `services.${key}` || expression === `(services.${key} ?? undefined)`) {
+        if (expression === `services[${JSON.stringify(key)}]` || expression === `(services[${JSON.stringify(key)}] ?? undefined)`) {
           if (!returns.has(key)) borrowed.add(key);
         }
       }
@@ -1076,7 +1080,7 @@ class ModuleGenerator {
     if (borrowed.size > 0) {
       // Borrowed host resources must not enter enumerable instance teardown or
       // the Worker's merged owned-services collection.
-      const descriptors = [...borrowed].map((key) => `${key}: { value: deps.${key} }`);
+      const descriptors = [...borrowed].map((key) => `${key}: { value: deps[${JSON.stringify(key)}] }`);
       lines.push(`return retainPlatformDependencies(Object.defineProperties({ ${entries.join(", ")} }, { ${descriptors.join(", ")} }), deps);`);
     } else {
       lines.push(`return retainPlatformDependencies({ ${entries.join(", ")} }, deps);`);
@@ -1227,10 +1231,10 @@ class ModuleGenerator {
       }
     }
     if (own && factoryOfScope(own.scope) === "services" && kind !== "services" && !isSkipSelf && !isSelf) {
-      return `services.${camelName(token)}`;
+      return `services[${JSON.stringify(camelName(token))}]`;
     }
     if (isSelf) {
-      return isOptional ? "undefined" : `services.${camelName(token)}`;
+      return isOptional ? "undefined" : `services[${JSON.stringify(camelName(token))}]`;
     }
 
     // @Host() is intentionally a no-op for EnvironmentInjector-style scopes:
@@ -1238,25 +1242,25 @@ class ModuleGenerator {
     for (const importName of this.module.imports) {
       const imported = this.graph.modules.find((m) => m.name === importName);
       if (!imported?.exports.includes(token)) continue;
-      if (kind === "services") return `imported.${importName}.${camelName(token)}`;
-      return `imported.${importName}.${camelName(token)}`;
+      if (kind === "services") return `imported[${JSON.stringify(importName)}][${JSON.stringify(camelName(token))}]`;
+      return `imported[${JSON.stringify(importName)}][${JSON.stringify(camelName(token))}]`;
     }
 
     for (const mod of this.graph.modules) {
       const rootProv = mod.providers.find((p) => p.token === token && p.providedIn === "root");
       if (rootProv) {
-        return `imported.${mod.name}.${camelName(token)}`;
+        return `imported[${JSON.stringify(mod.name)}][${JSON.stringify(camelName(token))}]`;
       }
     }
 
-    if (isSelf) return isOptional ? "undefined" : `services.${camelName(token)}`;
-    if (kind === "services") return isOptional ? `(deps.${camelName(token)} ?? undefined)` : `deps.${camelName(token)}`;
+    if (isSelf) return isOptional ? "undefined" : `services[${JSON.stringify(camelName(token))}]`;
+    if (kind === "services") return isOptional ? `(deps[${JSON.stringify(camelName(token))}] ?? undefined)` : `deps[${JSON.stringify(camelName(token))}]`;
     if (isSkipSelf) {
-      const external = `platformDependencies.get(services)?.${camelName(token)}`;
+      const external = `platformDependencies.get(services)?.[${JSON.stringify(camelName(token))}]`;
       return isOptional ? `(${external} ?? undefined)` : external;
     }
     // request/job factories have no deps parameter; platform/external tokens are also passed via services.
-    return isOptional ? `(services.${camelName(token)} ?? undefined)` : `services.${camelName(token)}`;
+    return isOptional ? `(services[${JSON.stringify(camelName(token))}] ?? undefined)` : `services[${JSON.stringify(camelName(token))}]`;
   }
 }
 
@@ -1292,13 +1296,21 @@ function orderProviders(providers: ProviderNode[]): ProviderNode[] {
 export function renderClient(graph: ApplicationGraph, options?: GenerateOptions): string {
   const rootDir = options?.rootDir ?? process.cwd();
   const outDir = options?.outDir ?? process.cwd();
-  const imports = new ImportManager(new Set(["ApiClientError", "ApiClientErrorCode", "ApiClientErrorDetails"]));
+  const imports = new ImportManager(new Set([
+    "ApiClientError", "ApiClientErrorCode", "ApiClientErrorDetails",
+    "ApiClientErrorMapper", "ProcedureExecutionValidator",
+  ]));
   const controllerEntries: string[] = [];
+  const procedureEntries: string[] = [];
   const routeTypes: string[] = [];
   const schemaEntries: string[] = [];
   const schemaLocals = new Map<string, string>();
   const usedTypeNames = new Set<string>();
   const allRoutes: Array<Record<string, unknown>> = [];
+  const allProcedures: Array<Record<string, unknown>> = [];
+  const commandByClassName = new Map(
+    graph.modules.flatMap((module) => module.commands.map((command) => [command.className, command] as const)),
+  );
   let usesStatic = false;
   let usesValue = false;
 
@@ -1334,6 +1346,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     for (const controller of module.controllers) {
       const controllerKey = camelName(controller.className.replace(/Controller$/, ""));
       const routeMethods: string[] = [];
+      const procedureMethods: string[] = [];
 
       for (const route of controller.routes) {
         const fullPath = joinRoutePaths(controller.path, route.path);
@@ -1446,13 +1459,38 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
           ? `{ ${responseSchemaEntries.map(([status, local]) => `${JSON.stringify(status)}: ${local}`).join(", ")} }`
           : "undefined";
         const responseKindArgument = responseKind === undefined ? "undefined" : JSON.stringify(responseKind);
+        const command = route.command === undefined ? undefined : commandByClassName.get(route.command);
+        const procedureKind = route.method === "GET" || route.method === "HEAD" ? "query" : "mutation";
+        const idempotencyMode = command?.idempotency ?? "none";
+        const procedureMetadata = {
+          key: `${controller.className}.${route.handler}`,
+          method: route.method,
+          path: fullPath,
+          controller: controller.className,
+          handler: route.handler,
+          kind: procedureKind,
+          idempotency: idempotencyMode,
+        };
+        allProcedures.push({
+          method: route.method,
+          path: fullPath,
+          controller: controller.className,
+          handler: route.handler,
+          kind: procedureKind,
+          ...(command?.name === undefined ? {} : { command: command.name }),
+          ...(command?.permission === undefined ? {} : { permission: command.permission }),
+          idempotency: idempotencyMode,
+        });
         routeMethods.push(`
-    ${route.handler}: makeRoute<${requestTypeName}, ${responseType === "never" ? "never" : responseTypeName}>(${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}, ${responseSchemaArgument}, ${responseKindArgument}, ${route.parse === "none"}),`);
+    ${route.handler}: makeRoute<${requestTypeName}, ${responseType === "never" ? "never" : responseTypeName}, ${JSON.stringify(procedureKind)}, ${JSON.stringify(idempotencyMode)}>(${JSON.stringify(route.method)}, ${JSON.stringify(fullPath)}, ${responseSchemaArgument}, ${responseKindArgument}, ${route.parse === "none"}, ${JSON.stringify(procedureKind)}, ${JSON.stringify(idempotencyMode)}, ${JSON.stringify(procedureMetadata)}),`);
+        const member = procedureKind === "query" ? "query" : "mutate";
+        procedureMethods.push(`    ${route.handler}: { ${member}: controllers.${controllerKey}.${route.handler}.${member} },`);
       }
 
       controllerEntries.push(`
   ${controllerKey}: {${routeMethods.join("")}
   },`);
+      procedureEntries.push(`    ${controllerKey}: {\n${procedureMethods.join("\n")}\n    },`);
     }
   }
 
@@ -1480,7 +1518,74 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "",
     "export type ResponseDecoder<T> = (value: unknown) => T;",
     "",
+    "export type ProcedureKind = \"query\" | \"mutation\";",
+    "export type IdempotencyMode = \"required\" | \"none\";",
+    "",
+    "export interface ProcedureMetadata<",
+    "  Kind extends ProcedureKind = ProcedureKind,",
+    "  Idempotency extends IdempotencyMode = IdempotencyMode,",
+    "> {",
+    "  key: string;",
+    "  method: string;",
+    "  path: string;",
+    "  controller: string;",
+    "  handler: string;",
+    "  kind: Kind;",
+    "  idempotency: Idempotency;",
+    "}",
+    "",
+    "export interface ProcedureExecutionOptions {",
+    "  /** Reuse the same key when retrying an uncertain mutation. */",
+    "  idempotencyKey?: string;",
+    "  signal?: AbortSignal;",
+    "}",
+    "",
+    "export type RequiredProcedureExecutionOptions = ProcedureExecutionOptions & { idempotencyKey: string };",
+    "",
+    "type ProcedureResult<Result> = [Result] extends [never] ? unknown : Result;",
+    "",
+    "type ProcedureArgs<Options extends ClientRequestOptions, Idempotency extends IdempotencyMode> =",
+    "  Idempotency extends \"required\"",
+    "    ? {} extends Options",
+    "      ? [execution: RequiredProcedureExecutionOptions] | [input: Options, execution: RequiredProcedureExecutionOptions]",
+    "      : [input: Options, execution: RequiredProcedureExecutionOptions]",
+    "    : {} extends Options",
+    "      ? [input?: Options, execution?: ProcedureExecutionOptions]",
+    "      : [input: Options, execution?: ProcedureExecutionOptions];",
+    "",
+    "export type ProcedureCall<",
+    "  Options extends ClientRequestOptions = ClientRequestOptions,",
+    "  Result = never,",
+    "  Idempotency extends IdempotencyMode = \"none\",",
+    "> = (...args: ProcedureArgs<Options, Idempotency>) => Promise<ProcedureResult<Result>>;",
+    "",
+    "export type QueryableProcedure<",
+    "  Options extends ClientRequestOptions,",
+    "  Result,",
+    "  Idempotency extends IdempotencyMode,",
+    "  Kind extends ProcedureKind,",
+    "> = ProcedureCall<Options, Result, Idempotency> & {",
+    "  readonly __supacloudProcedure: ProcedureMetadata<Kind, Idempotency>;",
+    "  readonly __supacloudInput?: Options;",
+    "};",
+    "",
+    "export type ProcedureMember<",
+    "  Options extends ClientRequestOptions,",
+    "  Result,",
+    "  Kind extends ProcedureKind,",
+    "  Idempotency extends IdempotencyMode,",
+    "> = Kind extends \"query\"",
+    "  ? { query: QueryableProcedure<Options, Result, Idempotency, \"query\"> }",
+    "  : { mutate: QueryableProcedure<Options, Result, Idempotency, \"mutation\"> };",
+    "",
     "export type ApiClientErrorCode = \"API_HTTP_ERROR\" | \"API_RESPONSE_INVALID\" | \"API_RESPONSE_UNDECLARED\";",
+    "",
+    "export type ApiClientErrorMapper = (error: unknown) => unknown | Promise<unknown>;",
+    "",
+    "export type ProcedureExecutionValidator = (",
+    "  metadata: ProcedureMetadata,",
+    "  execution?: ProcedureExecutionOptions,",
+    ") => void;",
     "",
     "export interface ApiClientErrorDetails {",
     "  code: ApiClientErrorCode;",
@@ -1498,7 +1603,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "  readonly path: string;",
     "  readonly status: number;",
     "  readonly requestId: string | undefined;",
-    "  /** Undeclared HTTP response for explicit inspection; excluded from JSON serialization. */",
+    "  /** Original response; buffered bodies are decoded from a clone when possible. */",
     "  readonly response: Response | undefined;",
     "  constructor(message: string, details: ApiClientErrorDetails) {",
     "    super(message);",
@@ -1523,6 +1628,17 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "    : { (options: Options): Promise<Result>; <T>(options: Options, decode: ResponseDecoder<T>): Promise<T> }",
     ") & ((...args: {} extends Options ? [options?: Options] : [options: Options]) => Promise<[Result] extends [never] ? unknown : Result>);",
     "",
+    "export interface ApiProcedureDefinition {",
+    "  method: string;",
+    "  path: string;",
+    "  controller: string;",
+    "  handler: string;",
+    "  kind: ProcedureKind;",
+    "  command?: string;",
+    "  permission?: string;",
+    "  idempotency: IdempotencyMode;",
+    "}",
+    "",
     ...routeTypes,
     ...(routeTypes.length > 0 ? [""] : []),
     "export interface HttpInterceptorRequest {",
@@ -1530,6 +1646,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "  url: string;",
     "  headers: Record<string, string>;",
     "  body?: unknown;",
+    "  signal?: AbortSignal;",
     "}",
     "",
     "export type HttpInterceptorFn = (",
@@ -1544,9 +1661,15 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "  interceptors?: HttpInterceptorFn[];",
     "  /** Normalize response objects like Elysia's default schema validator. */",
     "  normalize?: boolean;",
+    "  /** Optional SDK-owned error normalization hook; absent by default for legacy compatibility. */",
+    "  errorMapper?: ApiClientErrorMapper;",
+    "  /** Optional SDK-owned procedure execution policy hook. */",
+    "  procedureExecutionValidator?: ProcedureExecutionValidator;",
     "}",
     "",
     "export const API_ROUTES = " + JSON.stringify(allRoutes, null, 2) + " as const;",
+    "",
+    "export const API_PROCEDURES: readonly ApiProcedureDefinition[] = " + JSON.stringify(allProcedures, null, 2) + ";",
     "",
     "export type AppRoutePath = typeof API_ROUTES[number]['path'];",
     "",
@@ -1773,6 +1896,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     `    responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>,`,
     "    responseKind?: string,",
     "    raw?: boolean,",
+    "    execution?: ProcedureExecutionOptions,",
     "  ): Promise<T>;",
     "  async function request<T>(",
     "    method: string,",
@@ -1782,6 +1906,7 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     `    responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>,`,
     "    responseKind?: string,",
     "    raw?: boolean,",
+    "    execution?: ProcedureExecutionOptions,",
     "  ): Promise<T | unknown>;",
     "  async function request(",
     "    method: string,",
@@ -1796,7 +1921,26 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     `    responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>,`,
     "    responseKind?: string,",
     "    raw = false,",
+    "    execution?: ProcedureExecutionOptions,",
     "  ): Promise<T | unknown> {",
+    "    try {",
+    "      return await executeRequest(method, path, options, decode, responseSchemas, responseKind, raw, execution);",
+    "    } catch (error) {",
+    "      if (config.errorMapper === undefined) throw error;",
+    "      throw await config.errorMapper(error);",
+    "    }",
+    "  }",
+    "",
+    "  async function executeRequest<T>(",
+    "    method: string,",
+    "    path: string,",
+    "    options: ClientRequestOptions,",
+    "    decode: ResponseDecoder<T> | undefined,",
+    `    responseSchemas: Readonly<Record<string, ${responseSchemaType}>> | undefined,`,
+    "    responseKind: string | undefined,",
+    "    raw: boolean,",
+    "    execution: ProcedureExecutionOptions | undefined,",
+    "  ): Promise<unknown> {",
     "    const url = `${baseUrl}${buildRouteUrl(path, options.params, options.query)}`;",
     '    const customHeaders = typeof config.headers === "function" ? await config.headers() : config.headers;',
     "    const headers: Record<string, string> = {",
@@ -1816,36 +1960,47 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "      if (interceptor) {",
     "        return interceptor(reqPayload, (nextPayload) => executeChain(index + 1, nextPayload));",
     "      }",
+    "      const dispatchOptions = withProcedureExecution({ headers: reqPayload.headers }, execution, \"none\");",
     "      return fetcher(reqPayload.url, {",
     "        method: reqPayload.method,",
-    "        headers: reqPayload.headers,",
+    "        headers: dispatchOptions.headers ?? reqPayload.headers,",
     "        ...(reqPayload.body === undefined ? {} : { body: raw ? rawBody(reqPayload.body) : JSON.stringify(reqPayload.body) }),",
     "        ...(raw && reqPayload.body instanceof ReadableStream ? { duplex: \"half\" } : {}),",
+    "        ...(reqPayload.signal === undefined ? {} : { signal: reqPayload.signal }),",
     "      });",
     "    };",
-    "    const response = await executeChain(0, { method, url, headers, body: options.body });",
+    "    const response = await executeChain(0, { method, url, headers, body: options.body, ...(execution?.signal === undefined ? {} : { signal: execution.signal }) });",
     "    const declaredSchema = responseSchemas ? selectResponseSchema(response.status, responseSchemas) : undefined;",
     "    const failure = (code: ApiClientErrorCode, message: string) => new ApiClientError(message, {",
     "      code, method, path, status: response.status, requestId: response.headers.get(\"x-request-id\"),",
-    "      ...(code === \"API_HTTP_ERROR\" ? { response } : {}),",
+    "      response,",
     "    });",
     "    if (!response.ok && declaredSchema === undefined) {",
     "      throw failure(\"API_HTTP_ERROR\", `API request failed: ${method} ${path} -> ${response.status}`);",
     "    }",
     '    const contentType = response.headers?.get("content-type") ?? "";',
+    "    const json = contentType.includes(\"application/json\") || contentType.includes(\"+json\");",
+    "    // Do not tee a live stream: an unread sibling would buffer it without a bound.",
+    "    const streaming = response.ok && responseKind === \"stream\" && !json;",
+    "    let bodyResponse = response;",
+    "    if (!streaming) {",
+    "      try { bodyResponse = response.clone(); } catch { /* Fall back to the original read error. */ }",
+    "    }",
     "    let value: unknown;",
     "    if ([204, 205, 304].includes(response.status)) {",
     "      value = undefined;",
+    "    } else if (streaming) {",
+    "      value = response.body;",
     '    } else if (contentType.includes("application/json") || contentType.includes("+json")) {',
-    "      const responseText = await response.text();",
+    "      const responseText = await bodyResponse.text();",
     "      try { value = JSON.parse(responseText); }",
     "      catch { throw failure(\"API_RESPONSE_INVALID\", \"Response is not valid JSON\"); }",
     '    } else if (responseKind === "binary" || contentType.includes("application/octet-stream")) {',
-    "      value = await response.arrayBuffer();",
+    "      value = await bodyResponse.arrayBuffer();",
     '    } else if (responseKind === "stream") {',
-    "      value = response.body;",
+    "      value = bodyResponse.body;",
     "    } else {",
-    "      value = await response.text();",
+    "      value = await bodyResponse.text();",
     "    }",
     "    if (!responseSchemas) return decode ? decode(value) : value;",
     "    if (declaredSchema === undefined) {",
@@ -1863,7 +2018,54 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "    return decode ? decode(checked) : checked;",
     "  }",
     "",
-    `  function makeRoute<Options extends ClientRequestOptions, Result = never>(method: string, path: string, responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>, responseKind?: string, raw = false): RouteMethod<Options, Result> {`,
+    "  function withProcedureExecution(",
+    "    options: ClientRequestOptions,",
+    "    execution: ProcedureExecutionOptions | undefined,",
+    "    idempotency: IdempotencyMode,",
+    "  ): ClientRequestOptions {",
+    "    if (execution !== undefined && (execution === null || typeof execution !== \"object\" || Array.isArray(execution))) {",
+    "      throw new TypeError(\"Procedure execution must be an options object\");",
+    "    }",
+    "    if (execution?.signal !== undefined && (typeof AbortSignal === \"undefined\" || !(execution.signal instanceof AbortSignal))) {",
+    "      throw new TypeError(\"Procedure signal must be an AbortSignal\");",
+    "    }",
+    "    const headers = { ...(options.headers as Record<string, string> | undefined) };",
+    "    if (execution?.idempotencyKey !== undefined) {",
+    "      if (typeof execution.idempotencyKey !== \"string\" || !/^[A-Za-z0-9._:-]{1,512}$/.test(execution.idempotencyKey)) {",
+    "        throw new TypeError(\"idempotencyKey must contain only safe header characters and be at most 512 characters\");",
+    "      }",
+    "      for (const key of Object.keys(headers)) if (key.toLowerCase() === \"idempotency-key\") delete headers[key];",
+    "      headers[\"idempotency-key\"] = execution.idempotencyKey;",
+    "    }",
+    "    if (idempotency === \"required\" && execution?.idempotencyKey === undefined) {",
+    "      throw new TypeError(\"This mutation requires an idempotencyKey\");",
+    "    }",
+    "    return Object.keys(headers).length === 0 ? options : { ...options, headers };",
+    "  }",
+    "",
+    "  function isProcedureExecution(value: unknown): value is ProcedureExecutionOptions {",
+    "    if (value === null || typeof value !== \"object\" || Array.isArray(value)) return false;",
+    "    return Object.hasOwn(value, \"idempotencyKey\") || Object.hasOwn(value, \"signal\");",
+    "  }",
+    "",
+    `  function makeProcedure<Options extends ClientRequestOptions, Result = never, Idempotency extends IdempotencyMode = "none", Kind extends ProcedureKind = ProcedureKind>(metadata: ProcedureMetadata<Kind, Idempotency>, responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>, responseKind?: string, raw = false): QueryableProcedure<Options, Result, Idempotency, Kind> {`,
+    "    const procedure = async (first?: Options | ProcedureExecutionOptions, second?: ProcedureExecutionOptions): Promise<unknown> => {",
+    "      try {",
+    "        const providedExecution = second !== undefined ? second : (isProcedureExecution(first) ? first : undefined);",
+    "        config.procedureExecutionValidator?.(metadata, providedExecution);",
+    "        const input = (providedExecution === first ? undefined : first) ?? {};",
+    "        const requestOptions = withProcedureExecution(input as ClientRequestOptions, providedExecution, metadata.idempotency);",
+    "        const execution = providedExecution === undefined ? undefined : Object.freeze({ ...providedExecution });",
+    "        return request(metadata.method, metadata.path, requestOptions, undefined, responseSchemas, responseKind, raw, execution);",
+    "      } catch (error) {",
+    "        if (config.errorMapper === undefined) throw error;",
+    "        throw await config.errorMapper(error);",
+    "      }",
+    "    };",
+    "    return Object.assign(procedure, { __supacloudProcedure: Object.freeze(metadata) }) as QueryableProcedure<Options, Result, Idempotency, Kind>;",
+    "  }",
+    "",
+    `  function makeRoute<Options extends ClientRequestOptions, Result = never, Kind extends ProcedureKind = never, Idempotency extends IdempotencyMode = "none">(method: string, path: string, responseSchemas?: Readonly<Record<string, ${responseSchemaType}>>, responseKind?: string, raw = false, kind?: Kind, idempotency: Idempotency = "none" as Idempotency, metadata?: ProcedureMetadata<Kind, Idempotency>): RouteMethod<Options, Result> & ProcedureMember<Options, Result, Kind, Idempotency> {`,
     "    function route<T>(options: Options, decode: ResponseDecoder<T>): Promise<T>;",
     "    function route(options: Options): Promise<Result>;",
     "    function route(options?: Options): Promise<unknown>;",
@@ -1871,18 +2073,32 @@ export function renderClient(graph: ApplicationGraph, options?: GenerateOptions)
     "      const requestOptions = options ?? {};",
     "      return request(method, path, requestOptions, decode, responseSchemas, responseKind, raw);",
     "    }",
-    "    return route as RouteMethod<Options, Result>;",
+    "    if (kind === \"query\" && metadata) Object.assign(route, { query: makeProcedure<Options, Result, Idempotency, \"query\">(metadata as ProcedureMetadata<\"query\", Idempotency>, responseSchemas, responseKind, raw) });",
+    "    if (kind === \"mutation\" && metadata) Object.assign(route, { mutate: makeProcedure<Options, Result, Idempotency, \"mutation\">(metadata as ProcedureMetadata<\"mutation\", Idempotency>, responseSchemas, responseKind, raw) });",
+    "    return route as RouteMethod<Options, Result> & ProcedureMember<Options, Result, Kind, Idempotency>;",
     "  }",
     "",
+    "  const controllers = {",
+    ...controllerEntries,
+    "  };",
     "  return {",
+    "    __supacloudClient: Object.freeze({ hooksVersion: 1 as const }),",
     "    request,",
     "    buildRouteUrl,",
     "    routes: API_ROUTES,",
-    ...controllerEntries,
+    "    procedures: API_PROCEDURES,",
+    "    procedureClient: {",
+    ...procedureEntries,
+    "    },",
+    "    ...controllers,",
     "  };",
     "}",
     "",
     "export type ApiClient = ReturnType<typeof createApiClient>;",
+    "",
+    "export function createProcedureClient(client: ApiClient): ApiClient[\"procedureClient\"] {",
+    "  return client.procedureClient;",
+    "}",
     "",
   ].join("\n");
 }

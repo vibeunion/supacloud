@@ -7,6 +7,7 @@ on:
       - "packages/management-api/**"
       - "packages/web-console/**"
       - "packages/supacloud-js/**"
+      - "packages/query/**"
       - "packages/edge-runtime/**"
       - "packages/pgredis-runtime/**"
       - "packages/supacloud-lite/**"
@@ -148,6 +149,7 @@ jobs:
         run: |
           bun run scripts/build-command-dependencies.ts app
           (cd packages/app && bun install --frozen-lockfile)
+          (cd packages/query && bun install --frozen-lockfile && bun run build)
           (cd packages/supacloud-js && bun install --frozen-lockfile && bun run build)
           (cd packages/cli && bun install --frozen-lockfile --ignore-scripts)
           (cd packages/db && bun install --frozen-lockfile --ignore-scripts)
@@ -186,7 +188,7 @@ jobs:
             working-directory: packages/supacloud-js
             script: |
               bun install --ignore-scripts --frozen-lockfile --cwd ../..
-              node ../../scripts/workspace/cli.mjs prepare --project supacloud-js
+              node ../../scripts/workspace/prepare.mjs supacloud-js
               bun install --frozen-lockfile
               bun x --no-install tsc -p tsconfig.commands.json
               bun run typecheck
@@ -194,6 +196,14 @@ jobs:
               bun run build
               bun run typecheck:consumer
               bun test
+              bun run ../../scripts/audit_dependencies.ts
+          - name: Query Adapter
+            working-directory: packages/query
+            script: |
+              bun install --frozen-lockfile
+              bun run typecheck
+              bun test test/query-adapter.test.ts
+              bun run build
               bun run ../../scripts/audit_dependencies.ts
           - name: Edge Runtime
             working-directory: packages/edge-runtime
@@ -286,6 +296,7 @@ jobs:
               (cd ../management-api && bun run typecheck:application-releases)
               (cd ../cli && bun install --frozen-lockfile)
               (cd ../delivery && bun install --frozen-lockfile && bun run typecheck && bun run build)
+              (cd ../query && bun install --frozen-lockfile && bun run build)
               (cd ../supacloud-js && bun install --frozen-lockfile && bun run build)
               bun test ../../scripts/frontend-sdk.test.ts
               bun test --timeout 60000 ../../scripts/lib/application-release-storage.test.ts

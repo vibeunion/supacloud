@@ -2,6 +2,22 @@ import { describe, expect, test } from "bun:test";
 import { VictoriaLogsService } from "../../src/services/victorialogs.service";
 
 describe("VictoriaLogsService", () => {
+  test("rejects incomplete or malformed samples instead of reporting partial health", async () => {
+    for (const suffix of ['{"_msg":', "null", "[]", "false"]) {
+      const service = new VictoriaLogsService({
+        fetcher: async () => new Response(`${JSON.stringify({
+          project_ref: "proj_1", service: "postgrest", http_status: 200,
+        })}\n${suffix}`),
+      });
+      await expect(service.queryProjectLogs("proj_1", {})).rejects.toThrow("incomplete or invalid records");
+    }
+  });
+  test("rejects oversized bodies and upstream project scope mismatches", async () => {
+    const large = new VictoriaLogsService({ fetcher: async () => new Response("x".repeat(16 * 1024 * 1024 + 1)) });
+    await expect(large.queryProjectLogs("proj_1", {})).rejects.toThrow("size limit");
+    const other = new VictoriaLogsService({ fetcher: async () => Response.json({ project_ref: "other", _msg: "secret" }) });
+    await expect(other.queryProjectLogs("proj_1", {})).rejects.toThrow("scope mismatch");
+  });
   test("queries project-scoped persisted logs and parses JSON lines", async () => {
     let requestedUrl = "";
     let requestedBody = "";

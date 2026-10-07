@@ -15,7 +15,18 @@
     "baseUrl": ".",
     "ignoreDeprecations": "6.0",
     "paths": {
-      "@typescript/typescript6": ["packages/compiler/node_modules/@typescript/typescript6"]
+      "@typescript/typescript6": ["packages/compiler/node_modules/@typescript/typescript6"],
+      "@supacloud/contracts": ["packages/contracts/src/index.ts"],
+      "@supacloud/contracts/client": ["packages/contracts/src/client.ts"],
+      "@supacloud/contracts/browser": ["packages/contracts/src/browser.ts"],
+      "@supacloud/delivery": ["packages/delivery/src/index.ts"],
+      "@supacloud/delivery/worker-execution": ["packages/delivery/src/worker-execution.ts"],
+      "@supacloud/delivery/schema": ["packages/delivery/src/delivery-schema.ts"],
+      "@supacloud/delivery/build-schema": ["packages/delivery/src/delivery-build-schema.ts"],
+      "@supacloud/delivery/files": ["packages/delivery/src/delivery-files.ts"],
+      "@supacloud/delivery/artifact": ["packages/delivery/src/delivery-artifact.ts"],
+      "@supacloud/delivery/development": ["packages/delivery/src/application-development.ts"],
+      "@supacloud/delivery/deployment-evidence": ["packages/delivery/src/deployment-evidence.ts"]
     },
     "typeRoots": ["./packages/compiler/node_modules/@types"],
     "allowImportingTsExtensions": true,

@@ -157,6 +157,35 @@ describe("userManagementRoutes", () => {
   const userUpdateMethods: string[] = [];
   const userUpdateBodies: Array<Record<string, unknown>> = [];
 
+  test.each(["/users", "/users/invite"])("validates successful auth mutations at %s", async path => {
+    let sends = 0;
+    const payload = { id: USER_ID, email: "user@example.test", identities: [] };
+    globalThis.fetch = Object.assign(async () => {
+      sends++;
+      return Response.json(payload);
+    }, { preconnect: originalFetch.preconnect });
+    const response = await request(`/v1/projects/proj_1/auth${path}`, {
+      method: "POST", body: JSON.stringify({ email: "user@example.test", password: "secret" }),
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(payload);
+    expect(sends).toBe(1);
+  });
+
+  test.each(["/users", "/users/invite"])("rejects malformed upstream success at %s", async path => {
+    let sends = 0;
+    globalThis.fetch = Object.assign(async () => {
+      sends++;
+      return Response.json({ success: true });
+    }, { preconnect: originalFetch.preconnect });
+    const response = await request(`/v1/projects/proj_1/auth${path}`, {
+      method: "POST", body: JSON.stringify({ email: "user@example.test", password: "secret" }),
+    });
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({ message: "Invalid auth user response", code: "502" });
+    expect(sends).toBe(1);
+  });
+
   afterAll(() => {
     globalThis.fetch = originalFetch;
     requireProjectOrAdminAuthSpy.mockRestore();

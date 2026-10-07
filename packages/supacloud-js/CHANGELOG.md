@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.40.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.39.1...supacloud-js-v0.40.0) (2026-10-05)
+
+
+### Features
+
+* **compiler,query,supacloud-js:** procedure façade, supabase-js compatibility, and @supacloud/query adapter ([#1653](https://github.com/vibeunion/supacloud/issues/1653)) ([8ed8d1a](https://github.com/vibeunion/supacloud/commit/8ed8d1ad594ab981e6d03333ad35248608467992))
+
+## [0.39.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.39.0...supacloud-js-v0.39.1) (2026-10-05)
+
+
+### Bug Fixes
+
+* **supacloud-js:** harden procedure execution contracts ([#1643](https://github.com/vibeunion/supacloud/issues/1643)) ([cb20731](https://github.com/vibeunion/supacloud/commit/cb20731961525ee02e8d46467bf45e9b3dbd9147))
+
+## [0.39.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.38.0...supacloud-js-v0.39.0) (2026-10-05)
+
+
+### Features
+
+* **supacloud-js:** add typed procedure facade and unified errors ([#1639](https://github.com/vibeunion/supacloud/issues/1639)) ([fef05e9](https://github.com/vibeunion/supacloud/commit/fef05e98ee1044e1f449bad52d18104d28e17cb4))
+
+## [0.38.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.37.0...supacloud-js-v0.38.0) (2026-10-04)
+
+
+### Features
+
+* **supacloud-js:** add framework-neutral TanStack Query adapter ([#1637](https://github.com/vibeunion/supacloud/issues/1637)) ([071b28c](https://github.com/vibeunion/supacloud/commit/071b28c5ce992834f46a0608d68475eb295c5c3e))
+
+## [0.37.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.36.1...supacloud-js-v0.37.0) (2026-10-04)
+
+
+### Features
+
+* add Supabase-compatible procedure client transport ([#1634](https://github.com/vibeunion/supacloud/issues/1634)) ([661351a](https://github.com/vibeunion/supacloud/commit/661351ae507877a463a5aab1bd49a27c9bd77cfa))
+
 ## [0.36.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.36.0...supacloud-js-v0.36.1) (2026-10-03)
 
 

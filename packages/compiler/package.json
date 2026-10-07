@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/compiler",
-  "version": "0.32.0",
+  "version": "0.39.0",
   "description": "Static compiler for @supacloud/app metadata: builds the application graph from AST, validates it, and generates reflection-free factory code",
   "type": "module",
   "main": "./dist/index.js",
@@ -62,6 +62,9 @@
     "@graphql-typed-document-node/core": "^3.2.0",
     "@typescript/typescript6": "^6.0.2",
     "graphql": "^16"
+  },
+  "overrides": {
+    "@graphql-tools/utils": "^12.0.3"
   },
   "devDependencies": {
     "@supabase/supabase-js": "2.115.0",

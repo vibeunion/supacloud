@@ -20,7 +20,7 @@
     Users,
     Zap,
   } from "lucide-svelte";
-  import { page } from "$app/stores";
+  import { page } from "$app/state";
   import { mode, toggleMode } from "mode-watcher";
 
   import ProjectSwitcher from "./ProjectSwitcher.svelte";
@@ -66,11 +66,11 @@
   ] : []);
 
   function isActive(href: string) {
-    return $page.url.pathname === href || $page.url.pathname.startsWith(`${href}/`);
+    return page.url.pathname === href || page.url.pathname.startsWith(`${href}/`);
   }
 
   function isProjectHome() {
-    return $page.url.pathname === `/project/${projectRef}` || $page.url.pathname === `/project/${projectRef}/`;
+    return page.url.pathname === `/project/${projectRef}` || page.url.pathname === `/project/${projectRef}/`;
   }
 
   function hasActive(items: Array<{ href: string }>) {

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.21.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.21.0...supacloud-lite-v0.21.1) (2026-10-06)
+
+
+### Bug Fixes
+
+* **deps,perf:** replace Bun native APIs and resolve audit vulnerabilities ([#1667](https://github.com/vibeunion/supacloud/issues/1667)) ([06a9199](https://github.com/vibeunion/supacloud/commit/06a91990c754ce586f2a2353f253dc50f4fa0f98))
+
+## [0.21.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.20.0...supacloud-lite-v0.21.0) (2026-10-05)
+
+
+### Features
+
+* **elysia:** Elysia 2 AOT evaluation and end-to-end typing architecture ([#1654](https://github.com/vibeunion/supacloud/issues/1654)) ([39ee49f](https://github.com/vibeunion/supacloud/commit/39ee49f760e85e789c43c1d18cf5729db592f6bc))
+
+## [0.20.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.19.0...supacloud-lite-v0.20.0) (2026-10-05)
+
+
+### Features
+
+* add agent backend authoring, runtime and observability workflows ([#1648](https://github.com/vibeunion/supacloud/issues/1648)) ([59a66d1](https://github.com/vibeunion/supacloud/commit/59a66d184a47d19c7f8895f24a6ba2c7e74e93d0))
+
 ## [0.19.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.18.0...supacloud-lite-v0.19.0) (2026-10-03)
 
 

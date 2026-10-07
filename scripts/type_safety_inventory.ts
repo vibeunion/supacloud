@@ -38,12 +38,18 @@ export function discoverTypeSafetyProjects(root: string): TypeSafetyProject[] {
     if (!record(manifest) || typeof manifest.name !== "string") {
       throw new Error(`Invalid package manifest: ${entry.name}`);
     }
+    const dependencies = {
+      ...(record(manifest.dependencies) ? manifest.dependencies : {}),
+      ...(record(manifest.devDependencies) ? manifest.devDependencies : {}),
+    };
     projects.push({
       name: manifest.name,
       directory,
       configs: ["tsconfig.json",
         ...(existsSync(join(directory, "tsconfig.consumer.json")) ? ["tsconfig.consumer.json"] : [])],
-      svelte: existsSync(join(directory, "svelte.config.js")),
+      svelte: existsSync(join(directory, "svelte.config.js"))
+        || (existsSync(join(directory, "vite.config.ts"))
+          && (typeof dependencies["@sveltejs/kit"] === "string" || typeof dependencies.svelte === "string")),
     });
   }
   projects.sort((a, b) => a.directory.localeCompare(b.directory));

@@ -95,6 +95,8 @@ export class ApplicationReleaseStorage {
         entrypoint: object.entrypoint,
         ...(archive.manifest.plan.targets.find(target => target.name === object.name)?.execution
           ? { execution: archive.manifest.plan.targets.find(target => target.name === object.name)!.execution } : {}),
+        ...(archive.manifest.plan.targets.find(target => target.name === object.name)?.compute
+          ? { compute: archive.manifest.plan.targets.find(target => target.name === object.name)!.compute } : {}),
       })),
     };
     const staging = await mkdtemp(join(directory, ".incoming-"));
@@ -208,6 +210,8 @@ export class ApplicationReleaseStorage {
         entrypoint: object.entrypoint,
         ...(archive.manifest.plan.targets.find(target => target.name === object.name)?.execution
           ? { execution: archive.manifest.plan.targets.find(target => target.name === object.name)!.execution } : {}),
+        ...(archive.manifest.plan.targets.find(target => target.name === object.name)?.compute
+          ? { compute: archive.manifest.plan.targets.find(target => target.name === object.name)!.compute } : {}),
       })))) invalid();
     return { record, archive };
   }

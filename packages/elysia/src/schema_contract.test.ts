@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { Elysia, status, t } from "elysia";
 import { Type } from "typebox";
-import { createApplication, type CompiledModule } from "./index";
+import { ApplicationError, createApplication, type CompiledModule } from "./index";
 import {
   createSchemaDecoder,
   defineElysiaRoute,
@@ -407,4 +407,185 @@ test("does not treat domain payloads with code and response fields as HTTP statu
     .handle(new Request("http://localhost/payload-status"));
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({ code: 404, response: "not-found" });
+});
+
+test("end-to-end schema contract derives handler context and client types with zero codegen", async () => {
+  const inputSchema = t.Object({
+    title: t.String({ minLength: 2 }),
+    tags: t.Array(t.String()),
+  });
+  const outputSchema = t.Object({
+    id: t.String(),
+    title: t.String(),
+    tagCount: t.Integer(),
+  });
+
+  const contract = defineJsonContract(
+    { body: inputSchema, response: outputSchema },
+    (input) => ({ method: "POST", url: "/posts", body: input }),
+  );
+
+  // Inferred client contract types (matches Static<typeof Schema> directly)
+  type InferredInput = Parameters<typeof contract.request>[0];
+  type InferredResult = ReturnType<typeof contract.result>;
+
+  // @ts-expect-error The request contract rejects non-string titles.
+  const invalidPayload: InferredInput = { title: 123, tags: [] };
+  void invalidPayload;
+  const payload: InferredInput = { title: "Elysia 2", tags: ["framework", "aot"] };
+  expect(contract.input(payload)).toEqual(payload);
+
+  // Server-side route handler with automatic type inference
+  const postRoute = defineElysiaRoute(
+    "POST",
+    "/posts",
+    { body: inputSchema, responses: { 200: outputSchema } },
+    ({ body }) => ({
+      id: "p-1",
+      title: body.title,
+      tagCount: body.tags.length,
+    }),
+  );
+
+  const app = registerElysiaRoute(new Elysia(), postRoute);
+  const response = await app.handle(new Request("http://localhost/posts", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  }));
+
+  expect(response.status).toBe(200);
+  const json: unknown = await response.json();
+  const result: InferredResult = contract.result(json);
+  expect(result).toEqual({ id: "p-1", title: "Elysia 2", tagCount: 2 });
+});
+
+const transformContract = defineRouteContract({
+  query: t.Object({
+    page: t.Numeric(),
+    flags: t.Optional(t.String()),
+  }),
+  headers: t.Object({ "x-retry": t.Optional(t.Numeric()) }),
+  responses: { 200: t.Object({ page: t.Number(), retry: t.Number() }) },
+});
+const transformRoute = defineElysiaRoute(
+  "GET",
+  "/transform",
+  transformContract,
+  ({ query, headers }) => {
+    // `t.Numeric()` is decoded before the handler runs, so the handler sees a
+    // number even though the wire format is a numeric string.
+    const page: number = query.page;
+    const retry: number = headers["x-retry"] ?? 0;
+    return { page, retry };
+  },
+);
+
+test("typed error handlers preserve normalized mapper codes", async () => {
+  const codes: (string | number | undefined)[] = [];
+  const module: CompiledModule = {
+    name: "normalized-errors",
+    createServices: () => ({
+      controller: {
+        run: () => {
+          throw new ApplicationError("Conflict", { status: 409, code: "version-conflict" });
+        },
+      },
+    }),
+    controllers: [{
+      path: "/normalized", serviceKey: "controller", scope: "application",
+      routes: [{ method: "GET", path: "", handler: "run" }],
+    }],
+  };
+  const app = createApplication({
+    modules: [module],
+    errorMapper: (_error, context) => {
+      codes.push(context.frameworkCode);
+      return undefined;
+    },
+  });
+  const result = await app.handle(new Request("http://localhost/normalized"));
+  expect(result.status).toBe(409);
+  expect(codes).toEqual(["VERSION_CONFLICT"]);
+});
+
+function transformTypes() {
+  const base = new Elysia().get("/existing", () => ({ id: 1 }));
+  const registered = registerElysiaRoute(base, transformRoute);
+  const preserved: typeof base = registered;
+  // Runtime-only registration must not invent a string-indexed route tree.
+  const knownPath: keyof typeof registered["~Routes"] = "existing";
+  // @ts-expect-error Unknown routes must remain invalid.
+  const missingPath: keyof typeof registered["~Routes"] = "missing";
+  // @ts-expect-error Contract registration does not add Eden route inference.
+  const runtimePath: keyof typeof registered["~Routes"] = "transform";
+  void [preserved, knownPath, missingPath, runtimePath];
+  const typed: typeof transformRoute.handler = ({ query }) => {
+    // @ts-expect-error A decoded numeric query field is not a string.
+    const wrong: string = query.page;
+    void wrong;
+    return { page: query.page, retry: 0 };
+  };
+  void typed;
+}
+
+void transformTypes;
+
+test("decodes TypeBox transforms into the strongly-typed handler context", async () => {
+  const app = registerElysiaRoute(new Elysia(), transformRoute);
+  const response = await app.handle(new Request("http://localhost/transform?page=3", {
+    headers: { "x-retry": "2" },
+  }));
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ page: 3, retry: 2 });
+});
+
+test("registerElysiaRoute chains runtime registrations on the same instance", async () => {
+  const chainContract = defineRouteContract({
+    responses: { 200: t.Object({ chained: t.Literal(true) }) },
+  });
+  const chainRoute = defineElysiaRoute(
+    "GET",
+    "/chained",
+    chainContract,
+    () => ({ chained: true as const }),
+  );
+  // Registering twice must keep both routes reachable at runtime.
+  const app = registerElysiaRoute(
+    registerElysiaRoute(new Elysia(), route),
+    chainRoute,
+  );
+  const original = await app.handle(new Request("http://localhost/items/item-1", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer test",
+      cookie: "session=s-1",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ name: "demo" }),
+  }));
+  const chained = await app.handle(new Request("http://localhost/chained"));
+  expect(original.status).toBe(200);
+  expect(await chained.json()).toEqual({ chained: true });
+});
+
+test("ElysiaRouteContext set.headers accepts both strings and numbers", async () => {
+  const customHeaderContract = defineRouteContract({
+    responses: { 200: t.Object({ ok: t.Boolean() }) },
+  });
+  const customHeaderRoute = defineElysiaRoute(
+    "GET",
+    "/custom-headers",
+    customHeaderContract,
+    ({ set }) => {
+      set.headers["x-ratelimit-remaining"] = 100;
+      set.headers["x-custom-tag"] = "test";
+      return { ok: true };
+    },
+  );
+  const app = registerElysiaRoute(new Elysia(), customHeaderRoute);
+  const res = await app.handle(new Request("http://localhost/custom-headers"));
+  expect(res.status).toBe(200);
+  expect(res.headers.get("x-ratelimit-remaining")).toBe("100");
+  expect(res.headers.get("x-custom-tag")).toBe("test");
 });
