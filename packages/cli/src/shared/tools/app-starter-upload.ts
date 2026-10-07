@@ -1,6 +1,6 @@
 export const STARTER_UPLOAD_FEATURE = `import { Body, Controller, Inject, Injectable, Param, Post, DB_CLIENT, REQUEST_CONTEXT } from "@supacloud/app";
 import { ApplicationError } from "@supacloud/elysia";
-import { t } from "elysia";
+import { UploadBody, UploadLocation, UploadParams, UploadResult } from "./contracts";
 
 export interface ReviewUploadInput { reviewId: string; artifactId: string; expectedVersion: number }
 export interface ReviewUploadLocation { artifactId: string; bucketId: string; objectPath: string }
@@ -9,18 +9,6 @@ export interface ReviewUploadPort {
   previewUpload(context: unknown, input: ReviewUploadInput): Promise<ReviewUploadLocation>;
   registerUpload(context: unknown, input: ReviewUploadInput): Promise<ReviewUploadResult>;
 }
-export const UploadParams = t.Object({ id: t.String({ format: "uuid" }) });
-export const UploadBody = t.Object({
-  artifactId: t.String({ format: "uuid" }), expectedVersion: t.Integer({ minimum: 1 }),
-}, { additionalProperties: false });
-export const UploadLocation = t.Object({
-  artifactId: t.String({ format: "uuid" }), bucketId: t.String(), objectPath: t.String(),
-});
-export const UploadResult = t.Object({
-  artifactId: t.String({ format: "uuid" }), runId: t.String({ format: "uuid" }),
-  objectPath: t.String(), sha256: t.String({ pattern: "^[a-f0-9]{64}$" }), bytes: t.Integer({ minimum: 1, maximum: 1048576 }),
-});
-
 @Injectable({ scope: "request" })
 export class ReviewUploads {
   constructor(@Inject(DB_CLIENT) private readonly store: Partial<ReviewUploadPort>,
