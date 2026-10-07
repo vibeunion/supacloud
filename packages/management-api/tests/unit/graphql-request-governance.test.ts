@@ -49,3 +49,19 @@ test("rejects subscriptions on the pg_graphql HTTP path and over-budget operatio
   expect(denied).toBeInstanceOf(Response);
   expect(await (denied as Response).json()).toMatchObject({ code: "GRAPHQL_OPERATION_BUDGET_EXCEEDED" });
 });
+
+test("preserves existing wildcard and prefix policies without allowing anonymous operations", async () => {
+  const request = (query: string) => new Request("http://localhost/graphql", {
+    method: "POST", body: JSON.stringify({ query }),
+  });
+  for (const pattern of ["*", "Ord*", "Orders"]) {
+    const policy = normalizeGraphqlRequestGovernancePolicy({ enabled: true, operations: [pattern] });
+    expect(await governGraphqlRequest(request("query Orders { id }"), policy)).toMatchObject({ operationName: "Orders" });
+    const anonymous = await governGraphqlRequest(request("{ id }"), policy);
+    expect(anonymous).toBeInstanceOf(Response);
+    expect(await (anonymous as Response).json()).toMatchObject({ code: "GRAPHQL_OPERATION_DENIED" });
+  }
+  const denied = await governGraphqlRequest(request("query Other { id }"),
+    normalizeGraphqlRequestGovernancePolicy({ enabled: true, operations: ["Orders"] }));
+  expect(await (denied as Response).json()).toMatchObject({ code: "GRAPHQL_OPERATION_DENIED" });
+});

@@ -61,7 +61,7 @@ export function normalizeGraphqlRequestGovernancePolicy(value: unknown): Graphql
   let operations: string[] | undefined;
   if (value.operations !== undefined) {
     if (!Array.isArray(value.operations) || value.operations.length > 1000
-      || value.operations.some(item => typeof item !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*\*?$/.test(item))) {
+      || value.operations.some(item => typeof item !== "string" || !/^(?:\*|[A-Za-z_][A-Za-z0-9_]*\*?)$/.test(item))) {
       throw new Error("GRAPHQL_POLICY_INVALID");
     }
     operations = [...value.operations];
@@ -162,7 +162,7 @@ function metrics(
       const definition = definitions.get(value.name.value);
       if (!definition) invalidInput();
       const required = definition.type.kind === Kind.NON_NULL_TYPE;
-      const type = required ? definition.type.type : definition.type;
+      const type = definition.type.kind === Kind.NON_NULL_TYPE ? definition.type.type : definition.type;
       if (type.kind !== Kind.NAMED_TYPE || type.name.value !== "Int") invalidInput();
       if (Object.hasOwn(variables, value.name.value)) {
         result = variables[value.name.value];
