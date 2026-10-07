@@ -4,6 +4,8 @@ import { encryptSecretIfNeeded } from "../utils/secret-crypto";
 import { hashSecretApiKey } from "../utils/api-keys";
 import { normalizeProjectConfig } from "../utils/project-config";
 import { projectDatabaseLockKey } from "../services/project-database-lock";
+import type { StoredApplicationPreview } from "../services/application-preview-contract";
+import { persistApplicationPreview, replaceProjectConfig } from "./project-config-writes";
 
 export async function findAll(): Promise<Project[]> {
   return withRetry("ProjectRepository.findAll", async () => {
@@ -108,27 +110,18 @@ export async function activateCreatingProject(ref: string): Promise<Project | nu
   });
 }
 
-  // Update project config
+  // Update project config; separately managed state is read from the live row.
 export async function updateConfig(ref: string, config: Record<string, unknown>): Promise<Project | null> {
   const nextConfig = normalizeProjectConfig(config);
-  return withRetry("ProjectRepository.updateConfig", async () => {
-  const [project] = await sql`
-    UPDATE projects
-    SET config =
-          (${nextConfig}::jsonb - 'scheduled_functions')
-          || CASE
-            WHEN jsonb_typeof(projects.config) = 'object'
-              AND projects.config ? 'scheduled_functions'
-            THEN jsonb_build_object('scheduled_functions', projects.config -> 'scheduled_functions')
-            ELSE '{}'::jsonb
-          END,
-        updated_at = NOW()
-    WHERE ref = ${ref} AND deleted_at IS NULL
-    RETURNING *
-  `;
-  return project || null;
-  });
-  }
+  return withRetry("ProjectRepository.updateConfig", () => replaceProjectConfig(sql, ref, nextConfig));
+}
+
+export async function saveApplicationPreview(
+  ref: string, receipt: StoredApplicationPreview, expectedUpdatedAt: string | null,
+): Promise<StoredApplicationPreview> {
+  // Do not replay an ambiguous commit. Read back the current receipt instead.
+  return persistApplicationPreview(sql, ref, receipt, expectedUpdatedAt);
+}
 
   // Update API keys
 export async function updateApiKeys(ref: string, keys: {
@@ -221,6 +214,7 @@ export const projectRepository = {
   updateStatus,
   activateCreatingProject,
   updateConfig,
+  saveApplicationPreview,
   updateApiKeys,
   updateOpaqueApiKeys,
   softDelete,
