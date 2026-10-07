@@ -52,13 +52,14 @@ test('the query publish step is gated on query_released', () => {
   assert.doesNotMatch(query.condition, /outputs\.releases_created/);
 });
 
-test('the query publish step tolerates its missing npm scope grant', () => {
-  // @supacloud/query is not granted to the @supacloud npm scope, so a first
-  // publish always fails with E404. The step must not block unrelated releases
-  // while that bootstrap is outstanding.
+test('the query publish step authenticates through npm OIDC, not a token', () => {
+  // @supacloud/query is bootstrapped and has a Trusted Publisher, so it must
+  // publish like the other OIDC packages: no static NODE_AUTH_TOKEN (which
+  // would bypass OIDC) and no continue-on-error fallback.
   const step = source.slice(source.indexOf('- name: Publish Query adapter to NPM'));
   const block = step.slice(0, step.indexOf('working-directory:'));
-  assert.match(block, /continue-on-error: true/);
+  assert.doesNotMatch(block, /NODE_AUTH_TOKEN/);
+  assert.doesNotMatch(block, /continue-on-error/);
 });
 
 test('every referenced *_released output is declared in the job outputs', () => {

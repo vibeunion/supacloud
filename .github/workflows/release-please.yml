@@ -504,15 +504,8 @@ jobs:
           node "$GITHUB_WORKSPACE/.github/scripts/publish-npm-package.mjs"
 
       - name: Publish Query adapter to NPM
-        # @supacloud/query has no npm scope grant yet, so its first publish is
-        # rejected with E404 by the registry. Keep the step non-fatal until the
-        # package is bootstrapped and its Trusted Publisher is configured; then
-        # remove continue-on-error so the publication becomes blocking again.
-        continue-on-error: true
         if: ${{ !cancelled() && (needs.release-please.outputs.query_released == 'true' || inputs.recover_npm == true) }}
         working-directory: packages/query
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
           bun install --frozen-lockfile
           bun run build
