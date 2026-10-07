@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.69.0](https://github.com/vibeunion/supacloud/compare/cli-v0.68.2...cli-v0.69.0) (2026-10-07)
+
+
+### Features
+
+* **compiler:** diagnose browser-unsafe client schemas ([#1679](https://github.com/vibeunion/supacloud/issues/1679)) ([18582fc](https://github.com/vibeunion/supacloud/commit/18582fcc0384246d87660cb42b6b4acbdc475b5e))
+
 ## [0.68.2](https://github.com/vibeunion/supacloud/compare/cli-v0.68.1...cli-v0.68.2) (2026-10-06)
 
 

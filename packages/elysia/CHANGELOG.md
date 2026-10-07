@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.25.0...elysia-v0.26.0) (2026-10-07)
+
+
+### Features
+
+* **compiler:** diagnose browser-unsafe client schemas ([#1679](https://github.com/vibeunion/supacloud/issues/1679)) ([18582fc](https://github.com/vibeunion/supacloud/commit/18582fcc0384246d87660cb42b6b4acbdc475b5e))
+
 ## [0.25.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.24.1...elysia-v0.25.0) (2026-10-06)
 
 
