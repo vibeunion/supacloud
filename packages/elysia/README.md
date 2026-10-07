@@ -630,6 +630,16 @@ transaction and persist with a row lock or expected-version check.
 Lightweight error class carrying HTTP `status`, machine-readable `code`, and
 optional structured `details`.
 
+The adapter registers `ApplicationError` and `SchemaContractError` in Elysia
+2.0's native error dictionary (`app.error(ErrorClass, handler)`). Typed entries
+keep these classes out of the generic catch-all, so route response inference
+stays precise while Elysia (and Eden Treaty) knows the errors are handled. The
+dictionary is exported as `applicationErrorDictionary`, and
+`frameworkErrorCode(error)` exposes the same code normalization (`ParseError` →
+`PARSE`, `ValidationError` → `VALIDATION`, otherwise the error's own `code`)
+used by the generic lane. A configured `errorMapper` remains authoritative for
+every lane and still receives the request context.
+
 ### `createMemorySandbox(options): MemorySandbox`
 
 Creates an in-process application harness with `request()`, `db`, `storage`,
@@ -693,9 +703,20 @@ const app = registerElysiaRoute(new Elysia(), route);
 
 The callback is typed from the contract (including decoded transforms and
 declared response statuses). Cookie values retain Elysia's native shape, so a
-declared `session: t.String()` is read as `cookie.session.value`. This helper
-does not add Eden-style client inference to an existing Elysia instance; the
-compiler-generated client remains the source of transport types.
+declared `session: t.String()` is read as `cookie.session.value`.
+`registerElysiaRoute` returns the fluent result of `app.method(...)`, so the
+registered route stays part of the instance's static route tree: chaining calls
+accumulates route types, and the returned instance can be passed to
+`treaty<typeof app>(app)` for Elysia 2.0/Eden end-to-end inference. The
+compiler-generated client still remains the source of transport types for
+compiled modules, whose route descriptors are only known at runtime.
+
+When no schema declares `query` or `headers`, the handler context falls back to
+Elysia's native `Record<string, string | undefined>` (not a narrower `string`),
+and `params` resolves from the path exactly as Elysia does. TypeBox transforms
+(`t.Numeric`, `t.Transform`, `Type.Codec`) are decoded before the handler runs,
+so `query.page` from `t.Object({ page: t.Numeric() })` is a `number`, not a
+string.
 
 Response maps may use concrete statuses, `1XX`-`5XX` families, and `default`.
 The adapter expands family/default entries to concrete validators before

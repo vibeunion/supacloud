@@ -459,3 +459,97 @@ test("end-to-end schema contract derives handler context and client types with z
   const result: InferredResult = contract.result(json);
   expect(result).toEqual({ id: "p-1", title: "Elysia 2", tagCount: 2 });
 });
+
+const transformContract = defineRouteContract({
+  query: t.Object({
+    page: t.Numeric(),
+    flags: t.Optional(t.String()),
+  }),
+  headers: t.Object({ "x-retry": t.Optional(t.Numeric()) }),
+  responses: { 200: t.Object({ page: t.Number(), retry: t.Number() }) },
+});
+const transformRoute = defineElysiaRoute(
+  "GET",
+  "/transform",
+  transformContract,
+  ({ query, headers }) => {
+    // `t.Numeric()` is decoded before the handler runs, so the handler sees a
+    // number even though the wire format is a numeric string.
+    const page: number = query.page;
+    const retry: number = headers["x-retry"] ?? 0;
+    return { page, retry };
+  },
+);
+
+function transformTypes() {
+  const typed: typeof transformRoute.handler = ({ query }) => {
+    // @ts-expect-error A decoded numeric query field is not a string.
+    const wrong: string = query.page;
+    void wrong;
+    return { page: query.page, retry: 0 };
+  };
+  void typed;
+}
+
+void transformTypes;
+
+test("decodes TypeBox transforms into the strongly-typed handler context", async () => {
+  const app = registerElysiaRoute(new Elysia(), transformRoute);
+  const response = await app.handle(new Request("http://localhost/transform?page=3", {
+    headers: { "x-retry": "2" },
+  }));
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ page: 3, retry: 2 });
+});
+
+test("registerElysiaRoute returns the fluent instance so route types stay chained", async () => {
+  const chainContract = defineRouteContract({
+    responses: { 200: t.Object({ chained: t.Literal(true) }) },
+  });
+  const chainRoute = defineElysiaRoute(
+    "GET",
+    "/chained",
+    chainContract,
+    () => ({ chained: true as const }),
+  );
+  // The fluent result preserves the route tree; registering twice must keep both
+  // routes reachable from the returned instance.
+  const app = registerElysiaRoute(
+    registerElysiaRoute(new Elysia(), route),
+    chainRoute,
+  );
+  const original = await app.handle(new Request("http://localhost/items/item-1", {
+    method: "POST",
+    headers: {
+      authorization: "Bearer test",
+      cookie: "session=s-1",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ name: "demo" }),
+  }));
+  const chained = await app.handle(new Request("http://localhost/chained"));
+  expect(original.status).toBe(200);
+  expect(await chained.json()).toEqual({ chained: true });
+});
+
+test("ElysiaRouteContext set.headers accepts both strings and numbers", async () => {
+  const customHeaderContract = defineRouteContract({
+    responses: { 200: t.Object({ ok: t.Boolean() }) },
+  });
+  const customHeaderRoute = defineElysiaRoute(
+    "GET",
+    "/custom-headers",
+    customHeaderContract,
+    ({ set }) => {
+      set.headers["x-ratelimit-remaining"] = 100;
+      set.headers["x-custom-tag"] = "test";
+      return { ok: true };
+    },
+  );
+  const app = registerElysiaRoute(new Elysia(), customHeaderRoute);
+  const res = await app.handle(new Request("http://localhost/custom-headers"));
+  expect(res.status).toBe(200);
+  expect(res.headers.get("x-ratelimit-remaining")).toBe("100");
+  expect(res.headers.get("x-custom-tag")).toBe("test");
+});
+
