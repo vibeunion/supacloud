@@ -33,7 +33,7 @@
     "directory": "packages/supacloud"
   },
   "dependencies": {
-    "@supacloud/cli": "^0.69.0",
+    "@supacloud/cli": "^0.69.1",
     "@supacloud/admin": "^0.24.1"
   },
   "overrides": {
