@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.39.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.38.2...compiler-v0.39.0) (2026-10-07)
+
+
+### Features
+
+* **compiler:** diagnose browser-unsafe client schemas ([#1679](https://github.com/vibeunion/supacloud/issues/1679)) ([18582fc](https://github.com/vibeunion/supacloud/commit/18582fcc0384246d87660cb42b6b4acbdc475b5e))
+
+
+### Bug Fixes
+
+* **compiler:** keep generated runtime types strict ([#1682](https://github.com/vibeunion/supacloud/issues/1682)) ([ad319f9](https://github.com/vibeunion/supacloud/commit/ad319f9614c328a5d0f69d581dd55600fd8dfcf7))
+
+## [0.38.2](https://github.com/vibeunion/supacloud/compare/compiler-v0.38.1...compiler-v0.38.2) (2026-10-06)
+
+
+### Bug Fixes
+
+* **release:** keep compiler migration tuple in sync with elysia/app releases ([#1674](https://github.com/vibeunion/supacloud/issues/1674)) ([a072c7d](https://github.com/vibeunion/supacloud/commit/a072c7dbf4a6a313f7fb092256b9c3baa3b00318))
+
 ## [0.38.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.38.0...compiler-v0.38.1) (2026-10-06)
 
 

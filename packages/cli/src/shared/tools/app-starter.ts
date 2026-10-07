@@ -289,7 +289,7 @@ export function createCompiledModules(): never {
   defineFeatureSlice, defineFeatureSpec, type Aspect,
 } from "@supacloud/app";
 import { ApplicationError, assertFeatureTransition } from "@supacloud/elysia";
-import { t } from "elysia";
+import { ApproveBody, HealthResult, Params, ReviewResult } from "./contracts";
 import { VerifyReviewAttachment } from "./attachment";
 import { ReviewUploads, ReviewUploadsController, type ReviewUploadPort } from "./uploads";
 import type { ReviewRow } from "../../db/schema";
@@ -313,14 +313,6 @@ export interface ReviewStore extends Partial<ReviewUploadPort> {
   get(table: string, key: string): unknown;
   set(table: string, key: string, value: Review): void | Promise<void>;
 }
-
-export const Params = t.Object({ id: t.String({ minLength: 1 }) });
-export const ApproveBody = t.Object({ expectedVersion: t.Integer({ minimum: 1 }) });
-export const ReviewResult = t.Object({
-  state: t.Union([t.Literal("draft"), t.Literal("approved")]),
-  version: t.Integer({ minimum: 1 }),
-});
-export const HealthResult = t.Object({ ok: t.Boolean() });
 
 // Explicit, statically compiled AOP. Do not log identity, request bodies or secrets.
 export const requireRequest: Aspect = (context, next) => {
@@ -378,6 +370,26 @@ export const ReviewFeature = defineFeatureSlice({
 });
 `,
         "src/review/attachment.ts": STARTER_REVIEW_JOB,
+        "src/review/contracts.ts": `import { t } from "elysia";
+export const Params = t.Object({ id: t.String({ minLength: 1 }) });
+export const ApproveBody = t.Object({ expectedVersion: t.Integer({ minimum: 1 }) });
+export const ReviewResult = t.Object({
+  state: t.Union([t.Literal("draft"), t.Literal("approved")]),
+  version: t.Integer({ minimum: 1 }),
+});
+export const HealthResult = t.Object({ ok: t.Boolean() });
+export const UploadParams = t.Object({ id: t.String({ format: "uuid" }) });
+export const UploadBody = t.Object({
+  artifactId: t.String({ format: "uuid" }), expectedVersion: t.Integer({ minimum: 1 }),
+}, { additionalProperties: false });
+export const UploadLocation = t.Object({
+  artifactId: t.String({ format: "uuid" }), bucketId: t.String(), objectPath: t.String(),
+});
+export const UploadResult = t.Object({
+  artifactId: t.String({ format: "uuid" }), runId: t.String({ format: "uuid" }),
+  objectPath: t.String(), sha256: t.String({ pattern: "^[a-f0-9]{64}$" }), bytes: t.Integer({ minimum: 1, maximum: 1048576 }),
+});
+`,
         "src/review/uploads.ts": STARTER_UPLOAD_FEATURE,
         "src/host/review-uploads.ts": STARTER_UPLOAD_ADAPTER,
         "src/host/review-postgres.ts": STARTER_REVIEW_POSTGRES,

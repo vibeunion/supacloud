@@ -1,6 +1,6 @@
 {
   "name": "supacloud",
-  "version": "0.14.14",
+  "version": "0.14.16",
   "description": "Unified entrypoint: `supacloudctl cli` and `supacloudctl admin` in one command",
   "type": "module",
   "main": "./dist/index.js",
@@ -33,7 +33,7 @@
     "directory": "packages/supacloud"
   },
   "dependencies": {
-    "@supacloud/cli": "^0.67.0",
+    "@supacloud/cli": "^0.69.1",
     "@supacloud/admin": "^0.24.1"
   },
   "overrides": {

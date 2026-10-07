@@ -43,7 +43,9 @@ test("fixed legacy fixture upgrades, compiles, types, serves and restores from a
     }
     await symlink(resolve(import.meta.dir, ".."), join(root, "node_modules/@supacloud/elysia"), "dir");
     const original = await readFile(new URL("./fixtures/acceptance-v011/application.ts.txt", import.meta.url), "utf8");
+    const contracts = await readFile(new URL("./fixtures/acceptance-v011/contracts.ts.txt", import.meta.url), "utf8");
     const sourcePath = join(root, "src/application.ts");
+    await writeFile(join(root, "src/contracts.ts"), contracts);
     await writeFile(sourcePath, original);
     const backup = join(root, "checkpoint.txt");
     await cp(sourcePath, backup);

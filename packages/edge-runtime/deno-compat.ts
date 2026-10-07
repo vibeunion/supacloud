@@ -304,6 +304,16 @@ function installGuardedCodeConstructor(
     for (const argument of args) validateSource(String(argument));
     return Reflect.apply(originalConstructor, this, args);
   };
+  // Preserve intrinsic constructor branding used by framework async-function
+  // detection without restoring the unguarded constructor implementation.
+  Object.defineProperty(guardedConstructor, "name", {
+    value: originalConstructor.name,
+    configurable: true,
+  });
+  Object.defineProperty(guardedConstructor, "length", {
+    value: originalConstructor.length,
+    configurable: true,
+  });
   Object.setPrototypeOf(guardedConstructor, Object.getPrototypeOf(originalConstructor));
   Object.defineProperty(guardedConstructor, "prototype", { value: originalConstructor.prototype });
   Object.defineProperty(originalConstructor.prototype, "constructor", {

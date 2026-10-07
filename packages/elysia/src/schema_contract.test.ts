@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { Elysia, status, t } from "elysia";
 import { Type } from "typebox";
-import { createApplication, type CompiledModule } from "./index";
+import { ApplicationError, createApplication, type CompiledModule } from "./index";
 import {
   createSchemaDecoder,
   defineElysiaRoute,
@@ -480,7 +480,45 @@ const transformRoute = defineElysiaRoute(
   },
 );
 
+test("typed error handlers preserve normalized mapper codes", async () => {
+  const codes: (string | number | undefined)[] = [];
+  const module: CompiledModule = {
+    name: "normalized-errors",
+    createServices: () => ({
+      controller: {
+        run: () => {
+          throw new ApplicationError("Conflict", { status: 409, code: "version-conflict" });
+        },
+      },
+    }),
+    controllers: [{
+      path: "/normalized", serviceKey: "controller", scope: "application",
+      routes: [{ method: "GET", path: "", handler: "run" }],
+    }],
+  };
+  const app = createApplication({
+    modules: [module],
+    errorMapper: (_error, context) => {
+      codes.push(context.frameworkCode);
+      return undefined;
+    },
+  });
+  const result = await app.handle(new Request("http://localhost/normalized"));
+  expect(result.status).toBe(409);
+  expect(codes).toEqual(["VERSION_CONFLICT"]);
+});
+
 function transformTypes() {
+  const base = new Elysia().get("/existing", () => ({ id: 1 }));
+  const registered = registerElysiaRoute(base, transformRoute);
+  const preserved: typeof base = registered;
+  // Runtime-only registration must not invent a string-indexed route tree.
+  const knownPath: keyof typeof registered["~Routes"] = "existing";
+  // @ts-expect-error Unknown routes must remain invalid.
+  const missingPath: keyof typeof registered["~Routes"] = "missing";
+  // @ts-expect-error Contract registration does not add Eden route inference.
+  const runtimePath: keyof typeof registered["~Routes"] = "transform";
+  void [preserved, knownPath, missingPath, runtimePath];
   const typed: typeof transformRoute.handler = ({ query }) => {
     // @ts-expect-error A decoded numeric query field is not a string.
     const wrong: string = query.page;
@@ -501,7 +539,7 @@ test("decodes TypeBox transforms into the strongly-typed handler context", async
   expect(await response.json()).toEqual({ page: 3, retry: 2 });
 });
 
-test("registerElysiaRoute returns the fluent instance so route types stay chained", async () => {
+test("registerElysiaRoute chains runtime registrations on the same instance", async () => {
   const chainContract = defineRouteContract({
     responses: { 200: t.Object({ chained: t.Literal(true) }) },
   });
@@ -511,8 +549,7 @@ test("registerElysiaRoute returns the fluent instance so route types stay chaine
     chainContract,
     () => ({ chained: true as const }),
   );
-  // The fluent result preserves the route tree; registering twice must keep both
-  // routes reachable from the returned instance.
+  // Registering twice must keep both routes reachable at runtime.
   const app = registerElysiaRoute(
     registerElysiaRoute(new Elysia(), route),
     chainRoute,

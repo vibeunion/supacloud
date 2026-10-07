@@ -198,9 +198,13 @@ function isFunction(value: unknown): value is (...args: unknown[]) => unknown {
   return typeof value === "function";
 }
 
+function isUnknownArray(value: unknown): value is unknown[] {
+  return Array.isArray(value);
+}
+
 function resolveFactoryValue(value: unknown): unknown {
-  if (!isRecord(value) || !isFunction(value.factory)) return undefined;
-  return value.factory();
+  if (!isRecord(value) || !isFunction(value["factory"])) return undefined;
+  return value["factory"]();
 }
 
 const scopeDestructions = new WeakMap<object, Promise<void>>();
@@ -223,14 +227,14 @@ function destroyScopeInstances(
     for (const entry of [...plan].reverse()) {
       const value = scope[entry.key];
       const instance = entry.index === undefined ? value
-        : Array.isArray(value) ? value[entry.index] : undefined;
+        : isUnknownArray(value) ? value[entry.index] : undefined;
       if (seen.has(instance)) continue;
       seen.add(instance);
       try {
-        if (isRecord(instance) && isFunction(instance.onDestroy)) {
-          await instance.onDestroy();
-        } else if (isRecord(instance) && isFunction(instance.ngOnDestroy)) {
-          await instance.ngOnDestroy();
+        if (isRecord(instance) && isFunction(instance["onDestroy"])) {
+          await instance["onDestroy"]();
+        } else if (isRecord(instance) && isFunction(instance["ngOnDestroy"])) {
+          await instance["ngOnDestroy"]();
         }
       } catch (error) {
         errors.push(error);
@@ -253,11 +257,11 @@ async function initializeServiceInstances(
     const value = services[entry.key];
     const instance = entry.index === undefined
       ? value
-      : Array.isArray(value) ? value[entry.index] : undefined;
+      : isUnknownArray(value) ? value[entry.index] : undefined;
     if (seen.has(instance)) continue;
     seen.add(instance);
-    if (!isRecord(instance) || !isFunction(instance.onInit)) continue;
-    await instance.onInit();
+    if (!isRecord(instance) || !isFunction(instance["onInit"])) continue;
+    await instance["onInit"]();
   }
 }
 
@@ -271,13 +275,13 @@ async function destroyServiceInstances(
     const value = services[entry.key];
     const instance = entry.index === undefined
       ? value
-      : Array.isArray(value) ? value[entry.index] : undefined;
+      : isUnknownArray(value) ? value[entry.index] : undefined;
     if (seen.has(instance)) continue;
     seen.add(instance);
     if (!isRecord(instance)) continue;
-    const hook = isFunction(instance.onDestroy)
-      ? instance.onDestroy
-      : isFunction(instance.ngOnDestroy) ? instance.ngOnDestroy : undefined;
+    const hook = isFunction(instance["onDestroy"])
+      ? instance["onDestroy"]
+      : isFunction(instance["ngOnDestroy"]) ? instance["ngOnDestroy"] : undefined;
     if (!hook) continue;
     try {
       await hook.call(instance);
@@ -375,9 +379,9 @@ export function renderApplication(
     "}",
     "",
     "export async function initializeApplication(services: Record<string, unknown>): Promise<void> {",
-    '  const initializers = [services.environmentInitializer ?? services["supacloud.environment-initializer"], services.appInitializer ?? services["supacloud.app-initializer"]];',
+    '  const initializers = [services["environmentInitializer"] ?? services["supacloud.environment-initializer"], services["appInitializer"] ?? services["supacloud.app-initializer"]];',
     "  for (const group of initializers) {",
-    "    if (Array.isArray(group)) {",
+    "    if (isUnknownArray(group)) {",
     "      for (const init of group) {",
     '        if (isFunction(init)) await init();',
     "      }",
@@ -388,21 +392,21 @@ export function renderApplication(
     "}",
     "",
     "export async function destroyApplication(services: Record<string, unknown>): Promise<void> {",
-    '  const destroyRef = (Object.prototype.propertyIsEnumerable.call(services, "destroyRef") ? services.destroyRef : undefined)',
+    '  const destroyRef = (Object.prototype.propertyIsEnumerable.call(services, "destroyRef") ? services["destroyRef"] : undefined)',
     '    ?? (Object.prototype.propertyIsEnumerable.call(services, "supacloud.destroy-ref") ? services["supacloud.destroy-ref"] : undefined);',
-    '  if (isRecord(destroyRef) && isFunction(destroyRef.destroy)) {',
-    "    await destroyRef.destroy();",
-    "  } else if (isRecord(destroyRef) && Array.isArray(destroyRef._teardowns)) {",
-    "    for (const teardown of [...destroyRef._teardowns].reverse()) {",
+    '  if (isRecord(destroyRef) && isFunction(destroyRef["destroy"])) {',
+    '    await destroyRef["destroy"]();',
+    '  } else if (isRecord(destroyRef) && isUnknownArray(destroyRef["_teardowns"])) {',
+    '    for (const teardown of [...destroyRef["_teardowns"]].reverse()) {',
     "      if (isFunction(teardown)) await teardown();",
     "    }",
     "  }",
     "  const instances = Object.values(services);",
     "  for (const inst of instances.reverse()) {",
-    '    if (isRecord(inst) && isFunction(inst.onDestroy)) {',
-    "      await inst.onDestroy();",
-    '    } else if (isRecord(inst) && isFunction(inst.ngOnDestroy)) {',
-    "      await inst.ngOnDestroy();",
+    '    if (isRecord(inst) && isFunction(inst["onDestroy"])) {',
+    '      await inst["onDestroy"]();',
+    '    } else if (isRecord(inst) && isFunction(inst["ngOnDestroy"])) {',
+    '      await inst["ngOnDestroy"]();',
     "    }",
     "  }",
     "}",
@@ -854,7 +858,7 @@ class ModuleGenerator {
           `invoker: async (ctrl: unknown, req: { params?: Record<string, unknown>; query?: Record<string, unknown>; body?: unknown; headers?: Record<string, unknown>; cookie?: Record<string, unknown>; context?: unknown }) => { ` +
           `if (!isRecord(ctrl)) throw new TypeError("Route controller is not an object"); ` +
           `const handler = ctrl[${JSON.stringify(route.handler)}]; ` +
-          `if (typeof handler !== "function") throw new TypeError("Route handler ${route.handler} is not callable"); ` +
+          `if (!isFunction(handler)) throw new TypeError("Route handler ${route.handler} is not callable"); ` +
           `return await Reflect.apply(handler, ctrl, [${callArgs}]); }`,
         );
         if (route.contract !== undefined) {
@@ -1025,7 +1029,7 @@ class ModuleGenerator {
         if (emitted.constLine) lines.push(emitted.constLine);
         if (scoped) {
           lines.push(
-            `scope[${JSON.stringify(emitted.key)}] = [...(Array.isArray(scope[${JSON.stringify(emitted.key)}]) ? scope[${JSON.stringify(emitted.key)}] : []), ${emitted.expr}];`,
+            `scope[${JSON.stringify(emitted.key)}] = [...(isUnknownArray(scope[${JSON.stringify(emitted.key)}]) ? scope[${JSON.stringify(emitted.key)}] : []), ${emitted.expr}];`,
           );
         }
         const list = multiGroups.get(emitted.key) ?? [];
@@ -1068,7 +1072,7 @@ class ModuleGenerator {
         if (!this.graph.externalTokens.includes(token)) continue;
         const key = camelName(token);
         const expression = this.depExpr(token, scopeKind, this.depOptions(node, token));
-        if (expression === `services.${key}` || expression === `(services.${key} ?? undefined)`) {
+        if (expression === `services[${JSON.stringify(key)}]` || expression === `(services[${JSON.stringify(key)}] ?? undefined)`) {
           if (!returns.has(key)) borrowed.add(key);
         }
       }
@@ -1076,7 +1080,7 @@ class ModuleGenerator {
     if (borrowed.size > 0) {
       // Borrowed host resources must not enter enumerable instance teardown or
       // the Worker's merged owned-services collection.
-      const descriptors = [...borrowed].map((key) => `${key}: { value: deps.${key} }`);
+      const descriptors = [...borrowed].map((key) => `${key}: { value: deps[${JSON.stringify(key)}] }`);
       lines.push(`return retainPlatformDependencies(Object.defineProperties({ ${entries.join(", ")} }, { ${descriptors.join(", ")} }), deps);`);
     } else {
       lines.push(`return retainPlatformDependencies({ ${entries.join(", ")} }, deps);`);
@@ -1227,10 +1231,10 @@ class ModuleGenerator {
       }
     }
     if (own && factoryOfScope(own.scope) === "services" && kind !== "services" && !isSkipSelf && !isSelf) {
-      return `services.${camelName(token)}`;
+      return `services[${JSON.stringify(camelName(token))}]`;
     }
     if (isSelf) {
-      return isOptional ? "undefined" : `services.${camelName(token)}`;
+      return isOptional ? "undefined" : `services[${JSON.stringify(camelName(token))}]`;
     }
 
     // @Host() is intentionally a no-op for EnvironmentInjector-style scopes:
@@ -1238,25 +1242,25 @@ class ModuleGenerator {
     for (const importName of this.module.imports) {
       const imported = this.graph.modules.find((m) => m.name === importName);
       if (!imported?.exports.includes(token)) continue;
-      if (kind === "services") return `imported.${importName}.${camelName(token)}`;
-      return `imported.${importName}.${camelName(token)}`;
+      if (kind === "services") return `imported[${JSON.stringify(importName)}][${JSON.stringify(camelName(token))}]`;
+      return `imported[${JSON.stringify(importName)}][${JSON.stringify(camelName(token))}]`;
     }
 
     for (const mod of this.graph.modules) {
       const rootProv = mod.providers.find((p) => p.token === token && p.providedIn === "root");
       if (rootProv) {
-        return `imported.${mod.name}.${camelName(token)}`;
+        return `imported[${JSON.stringify(mod.name)}][${JSON.stringify(camelName(token))}]`;
       }
     }
 
-    if (isSelf) return isOptional ? "undefined" : `services.${camelName(token)}`;
-    if (kind === "services") return isOptional ? `(deps.${camelName(token)} ?? undefined)` : `deps.${camelName(token)}`;
+    if (isSelf) return isOptional ? "undefined" : `services[${JSON.stringify(camelName(token))}]`;
+    if (kind === "services") return isOptional ? `(deps[${JSON.stringify(camelName(token))}] ?? undefined)` : `deps[${JSON.stringify(camelName(token))}]`;
     if (isSkipSelf) {
-      const external = `platformDependencies.get(services)?.${camelName(token)}`;
+      const external = `platformDependencies.get(services)?.[${JSON.stringify(camelName(token))}]`;
       return isOptional ? `(${external} ?? undefined)` : external;
     }
     // request/job factories have no deps parameter; platform/external tokens are also passed via services.
-    return isOptional ? `(services.${camelName(token)} ?? undefined)` : `services.${camelName(token)}`;
+    return isOptional ? `(services[${JSON.stringify(camelName(token))}] ?? undefined)` : `services[${JSON.stringify(camelName(token))}]`;
   }
 }
 

@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { appStarterFiles, initializeAppProject } from "./app-starter";
+import { appTemplateFiles } from "./app-starter-templates";
 
 const roots: string[] = [];
 async function directory(): Promise<string> {
@@ -71,6 +72,24 @@ test("starter routes use explicit status response maps", () => {
     expect(source).toContain('responses: { 200: ReviewResult }');
     expect(source).not.toContain("response: HealthResult");
     expect(source).not.toContain("response: ReviewResult");
+});
+
+test("starter route schemas live in contract-only files", () => {
+    const framework = appStarterFiles("example");
+    expect(framework["src/review/review.ts"]).toContain('from "./contracts"');
+    expect(framework["src/review/review.ts"]).not.toContain("export const HealthResult");
+    expect(framework["src/review/contracts.ts"]).toContain("export const HealthResult");
+    expect(framework["src/review/uploads.ts"]).toContain('from "./contracts"');
+
+    const http = appTemplateFiles("example", "http");
+    expect(http["src/orders/orders.ts"]).toContain('from "./contracts"');
+    expect(http["src/orders/contracts.ts"]).toContain("export const OrderResult");
+
+    const minimal = appTemplateFiles("example", "minimal", {
+        "@supacloud/js": "^0.40.0", "@supabase/supabase-js": "^2.117.0",
+    });
+    expect(minimal["src/features/health/health.ts"]).toContain('from "./contracts"');
+    expect(minimal["src/features/health/contracts.ts"]).toContain("export const HealthResult");
 });
 
 test("the review handler awaits storage before reporting a successful transition", () => {

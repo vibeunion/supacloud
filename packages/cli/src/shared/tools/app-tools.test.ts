@@ -128,19 +128,21 @@ export class AcceptCaseCommand {
 }
 `,
 
+    "src/features/case/contracts.ts": `export const AcceptCaseBody = { type: "object" } as const;
+export const AcceptCaseParams = { type: "object" } as const;
+export const AcceptCaseQuery = { type: "object" } as const;
+export const DetailParams = {
+  type: "object", properties: { caseId: { type: "string" } }, required: ["caseId"],
+} as const;
+export const CaseResponse = {
+  type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"],
+} as const;
+`,
+
     "src/features/case/case.controller.ts": `import { Body, Controller, Get, Inject, Post } from "../../runtime";
 import { CaseService } from "./case.service";
 import { AcceptCaseCommand } from "./accept-case.command";
-
-const AcceptCaseBody = { type: "object" } as const;
-const AcceptCaseParams = { type: "object" } as const;
-const AcceptCaseQuery = { type: "object" } as const;
-const DetailParams = {
-  type: "object", properties: { caseId: { type: "string" } }, required: ["caseId"],
-} as const;
-const CaseResponse = {
-  type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"],
-} as const;
+import { AcceptCaseBody, AcceptCaseParams, AcceptCaseQuery, DetailParams, CaseResponse } from "./contracts";
 
 @Controller("/cases")
 export class CaseController {
@@ -336,6 +338,52 @@ describe("app tools", () => {
         expect(existsSync(join(root, "generated", "graphql.ts"))).toBe(false);
         expect((await app({ action: "check", root })).isError).toBe(false);
     });
+
+    test("client schema boundaries reject runtime imports without replacing valid artifacts", async () => {
+        const isolatedRoot = mkdtempSync(join(tmpdir(), "supacloud-app-client-boundary-"));
+        try {
+            const { mkdir, writeFile } = await import("node:fs/promises");
+            const { dirname } = await import("node:path");
+            for (const [relativePath, content] of Object.entries(FIXTURE_FILES)) {
+                const absolute = join(isolatedRoot, relativePath);
+                await mkdir(dirname(absolute), { recursive: true });
+                await writeFile(absolute, content, "utf8");
+            }
+            // Exercise the installed compiler through the CLI's strict client-generation defaults.
+            const compiled = await app({ action: "compile", root: isolatedRoot });
+            expect(compiled.isError, compiled.content.map((chunk) => chunk.text).join("\n")).toBe(false);
+            const client = readFileSync(join(isolatedRoot, "generated/client.ts"), "utf8");
+            expect(client).toContain("features/case/contracts");
+            expect(client).not.toContain("features/case/case.controller");
+            const previous = ["application.ts", "app.manifest.json", "client.ts", "openapi.ts", "contracts.manifest.json"]
+                .map((name) => {
+                    const path = join(isolatedRoot, "generated", name);
+                    return { path, bytes: readFileSync(path) };
+                });
+            const controllerPath = join(isolatedRoot, "src/features/case/case.controller.ts");
+            const validController = readFileSync(controllerPath, "utf8");
+            const contracts = readFileSync(join(isolatedRoot, "src/features/case/contracts.ts"), "utf8");
+            const unsafeController = validController.replace(
+                'import { AcceptCaseBody, AcceptCaseParams, AcceptCaseQuery, DetailParams, CaseResponse } from "./contracts";',
+                contracts,
+            );
+            expect(unsafeController).not.toBe(validController);
+            writeFileSync(controllerPath, unsafeController);
+            for (const action of ["check", "compile"] as const) {
+                const result = await app({ action, root: isolatedRoot });
+                expect(result.isError).toBe(true);
+                expect(result.content.map((chunk) => chunk.text).join("\n"))
+                    .toContain("client-schema-runtime-import");
+                for (const { path, bytes } of previous) expect(readFileSync(path)).toEqual(bytes);
+                expect(readFileSync(controllerPath, "utf8")).toBe(unsafeController);
+            }
+            writeFileSync(controllerPath, validController);
+            const recovered = await app({ action: "check", root: isolatedRoot });
+            expect(recovered.isError, recovered.content.map((chunk) => chunk.text).join("\n")).toBe(false);
+        } finally {
+            rmSync(isolatedRoot, { recursive: true, force: true });
+        }
+    }, 30_000);
 
     test("default governance rejects missing idempotency without creating or replacing artifacts", async () => {
         const isolatedRoot = mkdtempSync(join(tmpdir(), "supacloud-app-governance-"));

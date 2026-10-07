@@ -2,6 +2,9 @@ import { readFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { MIGRATION_APP_VERSION } from "./migration-app-version";
+import { MIGRATION_ELYSIA_VERSION } from "./migration-elysia-version";
+
 // Resolved lazily: this module is bundled into consumers (for example the CLI),
 // and the manifest sits next to the installed package, not next to the bundle.
 // Reading it at module load would break every consumer whose bundle runs from a
@@ -26,9 +29,9 @@ function compilerVersion(): string {
 // module from locations where that file does not exist at load time.
 export function migrationDependencies(): Readonly<Record<string, string>> {
   return {
-    "@supacloud/app": "0.23.0",
+    "@supacloud/app": MIGRATION_APP_VERSION,
     "@supacloud/compiler": compilerVersion(),
-    "@supacloud/elysia": "0.24.1",
+    "@supacloud/elysia": MIGRATION_ELYSIA_VERSION,
     elysia: "2.0.0-beta.21",
     typescript: "7.0.2",
   };

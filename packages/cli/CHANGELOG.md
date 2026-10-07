@@ -14,6 +14,27 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.69.1](https://github.com/vibeunion/supacloud/compare/cli-v0.69.0...cli-v0.69.1) (2026-10-07)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#1684](https://github.com/vibeunion/supacloud/issues/1684)) ([348c101](https://github.com/vibeunion/supacloud/commit/348c101a1f36026cf8dc2a1d497f99630d85fa8e))
+
+## [0.69.0](https://github.com/vibeunion/supacloud/compare/cli-v0.68.2...cli-v0.69.0) (2026-10-07)
+
+
+### Features
+
+* **compiler:** diagnose browser-unsafe client schemas ([#1679](https://github.com/vibeunion/supacloud/issues/1679)) ([18582fc](https://github.com/vibeunion/supacloud/commit/18582fcc0384246d87660cb42b6b4acbdc475b5e))
+
+## [0.68.2](https://github.com/vibeunion/supacloud/compare/cli-v0.68.1...cli-v0.68.2) (2026-10-06)
+
+
+### Miscellaneous Chores
+
+* release main ([#1671](https://github.com/vibeunion/supacloud/issues/1671)) ([b413a37](https://github.com/vibeunion/supacloud/commit/b413a37ba0b1c8cf7a33649774c1935febd46f92))
+
 ## [0.68.1](https://github.com/vibeunion/supacloud/compare/cli-v0.68.0...cli-v0.68.1) (2026-10-06)
 
 
