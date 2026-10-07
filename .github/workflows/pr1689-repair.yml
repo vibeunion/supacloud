@@ -1,0 +1,40 @@
+name: Prepare Reviewed PR 1689 Fixes
+on:
+  push:
+    branches: ['review/pr1689-repair-760ee481']
+permissions:
+  contents: read
+jobs:
+  prepare:
+    if: github.repository == 'vibeunion/supacloud'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout immutable repair recipe
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Preserve audited repair data outside checkout
+        run: cp -R .github/repairs/pr1689 "$RUNNER_TEMP/pr1689-repair"
+      - name: Checkout reviewed PR snapshot without credentials
+        uses: actions/checkout@v7
+        with:
+          ref: '760ee481080e06302f30b3d58029e0a7c4632eed'
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Apply only SHA-bound source edits without executing repository code
+        run: python "$RUNNER_TEMP/pr1689-repair/repair.py"
+      - name: Commit reviewed candidate on a separate branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(worker): enforce queue job control boundaries and add native regressions'
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin HEAD:refs/heads/review/pr1689-candidate-760ee481
+          printf 'Reviewed candidate: %s\n' "$(git rev-parse HEAD)"
