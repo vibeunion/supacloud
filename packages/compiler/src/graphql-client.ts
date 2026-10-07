@@ -7,11 +7,18 @@ export interface GraphqlClientOptions {
   publishableKey?: string;
   /** Resolved on every request so session refresh and logout are observed. */
   getAccessToken?: () => string | null | undefined | Promise<string | null | undefined>;
+  /** Include the persisted-operation SHA while retaining the full query for pg_graphql compatibility. */
+  persistedOperations?: boolean;
   fetch?: (url: string, init: RequestInit) => Promise<Response>;
 }
 
 export interface GraphqlRequestOptions {
   signal?: AbortSignal;
+}
+
+export interface GraphqlOperationMetadata {
+  name: string;
+  sha256: string;
 }
 
 export class GraphqlRequestError extends Error {
@@ -41,6 +48,7 @@ export function createGraphqlClient(options: GraphqlClientOptions) {
     query: string,
     variables?: unknown,
     request?: GraphqlRequestOptions,
+    operation?: GraphqlOperationMetadata,
   ): Promise<unknown> => {
     const headers = new Headers({ "Content-Type": "application/json", Accept: "application/json" });
     if (options.publishableKey) headers.set("apikey", options.publishableKey);
@@ -49,7 +57,16 @@ export function createGraphqlClient(options: GraphqlClientOptions) {
     const response = await fetcher(endpoint.toString(), {
       method: "POST",
       headers,
-      body: JSON.stringify({ query, variables }),
+      body: JSON.stringify({
+        query,
+        variables,
+        ...(operation?.name ? { operationName: operation.name } : {}),
+        ...(options.persistedOperations === false || !operation?.sha256 ? {} : {
+          extensions: {
+            persistedQuery: { version: 1, sha256Hash: operation.sha256 },
+          },
+        }),
+      }),
       ...(request?.signal ? { signal: request.signal } : {}),
       redirect: "error",
     });

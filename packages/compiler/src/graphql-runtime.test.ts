@@ -13,10 +13,14 @@ import type { CompileOptions, GraphqlOptions } from "./types";
 
 test("GraphQL validators resolve the virtual source using native path separators", () => {
   const validators = renderGraphqlValidators(
-    'export type PingQuery = { __typename?: "Query"; ping: string };',
-    ["Ping"],
+    'export type PingQuery = { __typename?: "Query"; ping: string };\nexport type RemoveMutation = { remove: boolean };',
+    ["Ping", "Remove"],
+    new Map([["Remove", "mutation"]]),
   );
   expect(validators).toContain("export function parsePingQuery");
+  expect(validators).toContain("export function parseRemoveMutation");
+  expect(validators).toContain('"Remove": RemoveMutation;');
+  expect(validators).toContain("isRemoveMutation(value)");
   expect(validators).toContain('typeof value === "string"');
 });
 

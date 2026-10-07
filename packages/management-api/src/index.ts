@@ -816,6 +816,8 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
     projectRbacRoutes,
     projectWebhookRoutes,
     projectAuditRoutes,
+    projectEventRoutes,
+    projectCapacityRoutes,
     projectCapabilityRoutes,
     projectAuthHookRuntimeRoutes,
     projectOrganizationRoutes,
@@ -950,6 +952,8 @@ export async function registerAllRoutes(): Promise<AnyElysia> {
       .use(projectRbacRoutes)
       .use(projectWebhookRoutes)
       .use(projectAuditRoutes)
+      .use(projectEventRoutes)
+      .use(projectCapacityRoutes)
       .use(projectCapabilityRoutes)
       .use(projectAuthHookRuntimeRoutes)
       .use(projectOrganizationRoutes)

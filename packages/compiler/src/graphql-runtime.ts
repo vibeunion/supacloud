@@ -5,7 +5,13 @@ import { resolve } from "node:path";
  * Project the standard Codegen result types, rather than independently interpreting
  * selections, fragments and conditional fields. Unsupported wire types fail closed.
  */
-export function renderGraphqlValidators(source: string, operationNames: readonly string[]): string {
+export type GraphqlOperationKind = "query" | "mutation";
+
+export function renderGraphqlValidators(
+  source: string,
+  operationNames: readonly string[],
+  operationKinds: ReadonlyMap<string, GraphqlOperationKind> = new Map(),
+): string {
   const fileName = resolve("/__supacloud_graphql__/contracts.ts");
   const options: ts.CompilerOptions = {
     strict: true,
@@ -93,8 +99,10 @@ export function renderGraphqlValidators(source: string, operationNames: readonly
     return unsupported(type);
   }
   const operations = [...operationNames].sort();
+  const suffixFor = (name: string): "Query" | "Mutation" =>
+    operationKinds.get(name) === "mutation" ? "Mutation" : "Query";
   const parsers = operations.map((name) => {
-    const typeName = `${name}Query`;
+    const typeName = `${name}${suffixFor(name)}`;
     const symbol = exports.get(typeName);
     if (!symbol) throw new Error(`Missing generated operation type: ${typeName}`);
     const check = reference(checker.getDeclaredTypeOfSymbol(symbol));
@@ -118,13 +126,13 @@ function isGraphqlArray(value: unknown): value is unknown[] {
 ${[...definitions.values()].join("\n")}
 ${parsers.join("\n")}
 export interface GraphqlQueryResults {
-${operations.map((name) => `  ${JSON.stringify(name)}: ${name}Query;`).join("\n")}
+${operations.map((name) => `  ${JSON.stringify(name)}: ${name}${suffixFor(name)};`).join("\n")}
 }
 export function isGraphqlResult<Name extends keyof GraphqlQueryResults>(
   name: Name, value: unknown,
 ): value is GraphqlQueryResults[Name] {
   switch (name) {
-${operations.map((name) => `    case ${JSON.stringify(name)}: return is${name}Query(value);`).join("\n")}
+${operations.map((name) => `    case ${JSON.stringify(name)}: return is${name}${suffixFor(name)}(value);`).join("\n")}
     default: return false;
   }
 }

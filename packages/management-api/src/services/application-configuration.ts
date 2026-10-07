@@ -7,6 +7,7 @@ import {
   type ApplicationConfigurationView, type ApplicationReleaseRecord,
 } from "@supacloud/delivery";
 import { sql } from "../db";
+import { randomUUID } from "node:crypto";
 import { encryptSecret, decryptSecret } from "../utils/secret-crypto";
 import { stableSha256, stableStringify } from "../utils/stable-json";
 
@@ -102,6 +103,23 @@ export class ApplicationConfigurations {
     assertApplicationConfigurationScope(scope);
     const row = await this.readRow(this.database, scope, configurationId);
     return row ? view(scope, row) : null;
+  }
+
+  async clone(
+    sourceScope: ApplicationConfigurationScope,
+    targetScope: ApplicationConfigurationScope,
+    sourceConfigurationId?: string,
+  ): Promise<ApplicationConfigurationView | null> {
+    assertApplicationConfigurationScope(sourceScope);
+    assertApplicationConfigurationScope(targetScope);
+    const source = await this.readRow(this.database, sourceScope, sourceConfigurationId);
+    if (!source) return null;
+    const decrypted = JSON.parse(this.crypto.decrypt(source.encrypted_configuration)) as unknown;
+    return this.put(targetScope, {
+      configuration_id: randomUUID(),
+      expected_configuration_id: null,
+      configuration: decrypted,
+    });
   }
 
   async resolve(scope: ApplicationConfigurationScope, configurationId: string, release: ApplicationReleaseRecord) {

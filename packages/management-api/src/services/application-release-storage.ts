@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
+import { cp, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { Value } from "typebox/value";
 import {
@@ -185,6 +185,48 @@ export class ApplicationReleaseStorage {
 
   async readRelease(projectRef: string, applicationId: string, id: string): Promise<ApplicationReleaseRecord> {
     return (await this.readArchive(projectRef, applicationId, id)).record;
+  }
+
+  async materializeRelease(
+    sourceProjectRef: string,
+    applicationId: string,
+    sourceReleaseId: string,
+    targetProjectRef: string,
+  ): Promise<ApplicationReleaseRecord> {
+    const source = await this.readArchive(sourceProjectRef, applicationId, sourceReleaseId);
+    const targetDirectory = await this.releasesDirectory(targetProjectRef, applicationId, true);
+    const targetReleaseId = releaseId(targetProjectRef, applicationId, source.record.manifest_sha256);
+    const targetRecord: ApplicationReleaseRecord = {
+      ...source.record,
+      project_ref: targetProjectRef,
+      release_id: targetReleaseId,
+      created_at: new Date().toISOString(),
+    };
+    try {
+      return (await this.storedRecord(targetProjectRef, applicationId, targetReleaseId)).record;
+    } catch (error) {
+      if (!(error instanceof ApplicationReleaseError) || error.code !== "APPLICATION_RELEASE_NOT_FOUND") throw error;
+    }
+    const sourceStored = await this.storedRecord(sourceProjectRef, applicationId, sourceReleaseId);
+    const staging = await mkdtemp(join(targetDirectory, ".clone-"));
+    try {
+      const clone = join(staging, targetReleaseId);
+      await cp(sourceStored.directory, clone, { recursive: true, errorOnExist: true });
+      await rm(join(clone, "release.json"));
+      await writeDurable(join(clone, "release.json"), stableStringify(targetRecord));
+      await syncDirectory(clone);
+      await rename(clone, join(targetDirectory, targetReleaseId));
+      await syncDirectory(targetDirectory);
+      return targetRecord;
+    } catch (error) {
+      try {
+        return (await this.storedRecord(targetProjectRef, applicationId, targetReleaseId)).record;
+      } catch {
+        throw error;
+      }
+    } finally {
+      await rm(staging, { recursive: true, force: true });
+    }
   }
 
   async readMigrations(projectRef: string, applicationId: string, id: string) {

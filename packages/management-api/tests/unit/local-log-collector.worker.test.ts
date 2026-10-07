@@ -49,6 +49,13 @@ describe("LocalLogCollector", () => {
       }),
     });
     expect(projectLogFields("supacloud-edge-runtime.service")).toEqual({ service: "functions-runtime" });
+    expect(projectLogFields(
+      "supacloud-application-proj_1-01234567-89ab-4def-8123-456789abcdef-api.service",
+    )).toEqual({
+      projectRef: "proj_1",
+      service: "application",
+      activationId: "01234567-89ab-4def-8123-456789abcdef",
+    });
   });
 
   test("redacts credentials before they can reach persistent storage", () => {

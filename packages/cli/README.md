@@ -48,6 +48,7 @@ supacloud-cli app upload --ref PROJECT --id orders --manifest_path generated/del
 supacloud-cli app configure --ref PROJECT --id orders --environment_id test --configuration_path configuration.json
 supacloud-cli app deploy --ref PROJECT --id orders --environment_id test --release_id RELEASE_SHA256 --configuration_id CONFIG_UUID --activation_id NEW_UUID --expected_activation_id absent
 supacloud-cli app status --ref PROJECT --id orders --environment_id test
+supacloud-cli app logs --ref PROJECT --id orders --environment_id test
 supacloud-cli app reconcile --ref PROJECT --id orders --environment_id test --release_id RELEASE_SHA256 --activation_id ACTIVATION_UUID
 supacloud-cli app rollback --ref PROJECT --id orders --environment_id test --release_id OLD_RELEASE_SHA256 --configuration_id CONFIG_UUID --activation_id NEW_UUID --expected_activation_id CURRENT_UUID
 supacloud-cli app retire --ref PROJECT --id orders --environment_id test --activation_id ACTIVATION_UUID

@@ -63,7 +63,13 @@ function severityFor(priority: unknown, message: string): VictoriaLogWrite["seve
   return "info";
 }
 
-export function projectLogFields(unit: string): { projectRef?: string; service: string } {
+export function projectLogFields(unit: string): {
+  projectRef?: string;
+  service: string;
+  applicationId?: string;
+  releaseId?: string;
+  activationId?: string;
+} {
   const match = /^supacloud-(gotrue|pgrst|storage|postgres)@([A-Za-z0-9_-]+)\.service$/.exec(unit);
   if (match) {
     const serviceByUnit: Record<string, string> = {
@@ -73,6 +79,14 @@ export function projectLogFields(unit: string): { projectRef?: string; service: 
       postgres: "database",
     };
     return { projectRef: match[2], service: serviceByUnit[match[1]] };
+  }
+  const application = /^supacloud-application-(.+)-([a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})-[^.]+\.service$/.exec(unit);
+  if (application) {
+    return {
+      projectRef: application[1],
+      service: "application",
+      activationId: application[2],
+    };
   }
   if (unit === "supacloud-edge-runtime.service") return { service: "functions-runtime" };
   if (unit === "supacloud-caddy.service") return { service: "gateway" };
@@ -100,6 +114,9 @@ export function parseJournalEvent(value: JournalRecord): JournalEvent | null {
       message: redactLogMessage(message),
       service: fields.service,
       projectRef: fields.projectRef,
+      ...(fields.applicationId ? { applicationId: fields.applicationId } : {}),
+      ...(fields.releaseId ? { releaseId: fields.releaseId } : {}),
+      ...(fields.activationId ? { activationId: fields.activationId } : {}),
       severity: severityFor(value.PRIORITY, message),
       unit,
     },

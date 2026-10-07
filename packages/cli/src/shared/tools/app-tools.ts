@@ -38,6 +38,7 @@ const REMOTE_APP_ACTIONS = {
     rollback: "activate_release",
     reconcile: "reconcile_activation",
     retire: "retire_activation",
+    logs: "logs",
 } as const;
 
 export interface AppToolOptions {
@@ -115,6 +116,11 @@ export interface AppToolArguments {
     /** Integration dev verifies an explicit loopback database before running dev:integration. */
     database_url?: string;
     "database-url"?: string;
+    offset?: number;
+    service?: string;
+    search?: string;
+    start?: string;
+    end?: string;
 }
 
 async function initProject(args: AppToolArguments): Promise<ToolResult> {
@@ -1136,7 +1142,7 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
         {
             ...REMOTE_APP_SCHEMA,
             action: withDescription(stringEnum(["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix",
-                "plan", "build", "upload", "configure", "deploy", "status", "rollback", "reconcile", "retire"]), "App action; upload/configure only prepare, rollback activates an explicit old release without schema downgrade"),
+                "plan", "build", "upload", "configure", "deploy", "status", "rollback", "reconcile", "retire", "logs"]), "App action; upload/configure only prepare, rollback activates an explicit old release without schema downgrade"),
             kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource"]), "[generate] Scaffold kind"),
             template: optional(stringEnum(["minimal", "http", "command", "edge"]), "[init] Minimal application by default; explicit http/command/edge recipes"),
             name: optional(Type.String(), "[init/generate] Project or object name"),

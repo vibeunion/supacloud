@@ -38,6 +38,13 @@ import {
   OpenApiDocumentError,
   readOpenApiJson,
 } from "./openapi-tools";
+import {
+  checkGraphqlCompatibility,
+  createRoleSnapshotReport,
+  diffGraphqlSchemas,
+  readGraphqlSchema,
+  type GraphqlGovernancePolicy,
+} from "./graphql-governance";
 
 function isModuleBoundaryPresetName(value: string | undefined): value is ModuleBoundaryPresetName {
   return value === "modular-monolith"
@@ -81,6 +88,9 @@ Usage:
   supacloud-compiler openapi-diff <base.json> <current.json> [options]
   supacloud-compiler fix     <fix.json> [options]
   supacloud-compiler graphql-schema --url <project-url> --key-env <name> [--token-env <name>]
+  supacloud-compiler graphql compatibility --schema <schema> --documents <file>... [--policy <json>]
+  supacloud-compiler graphql diff --base <schema> --current <schema>
+  supacloud-compiler graphql roles --role <name= schema>...
   supacloud-compiler database-contracts <config.json> [--check]
 
 Commands:
@@ -142,6 +152,69 @@ Options:
 `);
 }
 
+async function runGraphqlGovernanceCommand(args: string[]): Promise<boolean> {
+  if (args[0] !== "graphql" || !args[1]) return false;
+  const subcommand = args[1];
+  const values = new Map<string, string[]>();
+  for (let index = 2; index < args.length; index++) {
+    const flag = args[index];
+    if (!flag?.startsWith("--")) throw new Error(`graphql ${subcommand} accepts named options only`);
+    const value = args[++index];
+    if (!value || value.startsWith("--")) throw new Error(`${flag} requires a value`);
+    const entries = values.get(flag) ?? [];
+    entries.push(value);
+    values.set(flag, entries);
+  }
+  const one = (flag: string): string | undefined => values.get(flag)?.[0];
+  if (subcommand === "compatibility") {
+    const schemaPath = one("--schema");
+    const documentPaths = values.get("--documents") ?? [];
+    if (!schemaPath || documentPaths.length === 0) throw new Error("graphql compatibility requires --schema and at least one --documents");
+    const schema = await readGraphqlSchema(schemaPath);
+    const documents = await Promise.all(documentPaths.map(async (path) => ({ path, source: await readFile(resolve(path), "utf8") })));
+    let policy: GraphqlGovernancePolicy = {};
+    const policyPath = one("--policy");
+    if (policyPath) policy = JSON.parse(await readFile(resolve(policyPath), "utf8")) as GraphqlGovernancePolicy;
+    const report = checkGraphqlCompatibility(schema.schema, documents, policy);
+    const result = {
+      ok: report.ok,
+      schema: { path: schema.path, schemaHash: schema.schemaHash, schemaNormalizedHash: schema.schemaNormalizedHash },
+      features: report.features,
+      operations: report.operations,
+      diagnostics: report.diagnostics,
+    };
+    console.log(JSON.stringify(result, null, 2));
+    if (!report.ok) process.exitCode = 1;
+    return true;
+  }
+  if (subcommand === "diff") {
+    const basePath = one("--base");
+    const currentPath = one("--current");
+    if (!basePath || !currentPath) throw new Error("graphql diff requires --base and --current");
+    const [base, current] = await Promise.all([readGraphqlSchema(basePath), readGraphqlSchema(currentPath)]);
+    const result = diffGraphqlSchemas(base.schema, current.schema);
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exitCode = 1;
+    return true;
+  }
+  if (subcommand === "roles") {
+    const roleValues = values.get("--role") ?? [];
+    if (roleValues.length === 0) throw new Error("graphql roles requires at least one --role name=schema");
+    const roles = await Promise.all(roleValues.map(async (value) => {
+      const separator = value.indexOf("=");
+      if (separator <= 0) throw new Error("--role must use name=schema");
+      const role = value.slice(0, separator);
+      const path = value.slice(separator + 1);
+      return { role, path, source: await readFile(resolve(path), "utf8") };
+    }));
+    const result = createRoleSnapshotReport(roles);
+    console.log(JSON.stringify(result, null, 2));
+    if (!result.ok) process.exitCode = 1;
+    return true;
+  }
+  throw new Error(`Unknown graphql governance command "${subcommand}"`);
+}
+
 async function run(): Promise<void> {
   const args = process.argv.slice(2);
   if (args.length === 0 || args.includes("--help") || args.includes("-h")) {
@@ -150,6 +223,7 @@ async function run(): Promise<void> {
   }
 
   const command = args[0];
+  if (await runGraphqlGovernanceCommand(args)) return;
   if (command === "release-evidence") {
     const { runReleaseEvidenceCommand } = await import("./release-evidence-cli");
     await runReleaseEvidenceCommand(args.slice(1));

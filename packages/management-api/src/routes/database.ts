@@ -38,6 +38,7 @@ import { logger } from "../utils/logger";
 import { normalizeDatabaseSchema, normalizeRpcSchemas } from "../services/database-governance-input";
 import { runDatabaseLinter } from "../services/database-linter.service";
 import { readRpcCatalog } from "../services/database-rpc-catalog.service";
+import { explainRlsAccess, explainRlsDatabaseError } from "../services/rls-explanation";
 
 export type MigrationBody =
   | { query: string; version?: number | string }
@@ -416,6 +417,13 @@ async function executeRlsTest(input: RlsTesterInput) {
   const relations = collectRlsPlanRelations(plan);
   const policies = await readRlsTesterPolicies(projectDb, relations, input.role);
   const relationSecurity = await readRlsRelationSecurity(projectDb, relations);
+  const explanation = explainRlsAccess({
+    role: input.role,
+    relations,
+    relationSecurity,
+    policies,
+    rowCount: rows.length,
+  });
   return {
     role: input.role,
     claims,
@@ -426,6 +434,7 @@ async function executeRlsTest(input: RlsTesterInput) {
     relations,
     relationSecurity,
     policies,
+    explanation,
   };
 }
 
@@ -1721,7 +1730,14 @@ export const databaseRoutes = new Elysia({ prefix: "/v1/projects/:ref/database" 
             } catch (error: unknown) {
                 set.status = 400;
                 const pgError = error as Record<string, unknown>;
-                return { message: pgError.message || "RLS test failed", code: pgError.code || "400", details: pgError.details || null, hint: pgError.hint || null, status: 400 };
+                return {
+                    message: pgError.message || "RLS test failed",
+                    code: pgError.code || "400",
+                    details: pgError.details || null,
+                    hint: pgError.hint || null,
+                    status: 400,
+                    explanation: explainRlsDatabaseError(error),
+                };
             }
         },
     )
