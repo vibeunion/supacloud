@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.26.0...elysia-v0.27.0) (2026-10-07)
+
+
+### Features
+
+* **platform:** close application platform P0/P1 capabilities ([dbaf3a6](https://github.com/vibeunion/supacloud/commit/dbaf3a6d01daa71455a8cde96e9e233743bfdfca))
+
 ## [0.26.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.25.0...elysia-v0.26.0) (2026-10-07)
 
 

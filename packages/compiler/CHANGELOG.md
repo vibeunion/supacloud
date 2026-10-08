@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.39.0...compiler-v0.40.0) (2026-10-07)
+
+
+### Features
+
+* **platform:** close application platform P0/P1 capabilities ([dbaf3a6](https://github.com/vibeunion/supacloud/commit/dbaf3a6d01daa71455a8cde96e9e233743bfdfca))
+
 ## [0.39.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.38.2...compiler-v0.39.0) (2026-10-07)
 
 
