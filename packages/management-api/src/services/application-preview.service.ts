@@ -5,7 +5,9 @@ import { projectService } from "./project.service";
 import { runtimeCacheService } from "./runtime-cache.service";
 import { tenantRuntimeService } from "./tenant-runtime.service";
 import { projectRepository } from "../repositories/project.repository";
-import { mergeProjectConfig, normalizeProjectConfig } from "../utils/project-config";
+import { ApplicationPreviewConflictError } from "../repositories/project-config-writes";
+import { normalizeProjectConfig } from "../utils/project-config";
+import { logger } from "../utils/logger";
 import {
   buildApplicationPreviewReceipt,
   type ApplicationPreviewReceipt,
@@ -82,7 +84,7 @@ export interface ApplicationPreviewServiceDependencies {
     & Partial<Pick<ApplicationReleaseStorage, "materializeRelease">>;
   branches?: Pick<typeof branchService, "createBranch" | "deleteBranch">;
   queues?: Pick<typeof pgmqService, "createQueue" | "dropQueue" | "listQueues">;
-  projects?: Pick<typeof projectRepository, "findByRef" | "updateConfig">;
+  projects?: Pick<typeof projectRepository, "findByRef" | "saveApplicationPreview">;
   secrets?: Pick<typeof projectService, "upsertSecrets" | "deleteSecret">;
   invalidateEnv?: (ref: string) => Promise<boolean>;
   runtime?: Pick<typeof tenantRuntimeService, "checkStatus">;
@@ -115,10 +117,10 @@ export class ApplicationPreviewService {
       projects: projectRepository,
       secrets: projectService,
       invalidateEnv: runtimeCacheService.invalidateProjectRuntimeEnv,
-    runtime: tenantRuntimeService,
-    configurations: undefined,
-    activate: undefined,
-    smokeTest: async () => ({ passed: [], failed: ["application_readiness"] }),
+      runtime: tenantRuntimeService,
+      configurations: undefined,
+      activate: undefined,
+      smokeTest: async () => ({ passed: [], failed: ["application_readiness"] }),
       ...dependencies,
     };
   }
@@ -180,14 +182,14 @@ export class ApplicationPreviewService {
       },
     );
     receipt.status = "provisioning";
-    await this.save(input.projectRef, receipt);
+    await this.save(input.projectRef, receipt, true);
     this.startProvisioning(input.projectRef, receipt);
     return receipt;
   }
 
   async cleanup(projectRef: string, previewId: string): Promise<StoredApplicationPreview | null> {
     const current = await this.get(projectRef, previewId);
-    if (!current) return null;
+    if (!current || current.status === "cleaned") return current;
     const next = structuredClone(current);
     try {
       await this.dependencies.queues.dropQueue(projectRef === current.project_ref ? current.resources.database_branch.branch_ref : projectRef, current.queue_name);
@@ -196,10 +198,9 @@ export class ApplicationPreviewService {
     }
     try { await this.dependencies.secrets.deleteSecret(current.resources.database_branch.branch_ref, current.test_secret_name); } catch { /* retryable */ }
     try { await this.dependencies.invalidateEnv(current.resources.database_branch.branch_ref); } catch { /* best effort */ }
-    try { await this.dependencies.branches.deleteBranch(current.resources.database_branch.branch_ref); } catch (error) {
-      next.cleanup.error = error instanceof Error ? error.message : String(error);
+    try { await this.dependencies.branches.deleteBranch(current.resources.database_branch.branch_ref); } catch {
+      next.cleanup.error = "APPLICATION_PREVIEW_CLEANUP_FAILED";
       next.status = "failed";
-      next.updated_at = new Date().toISOString();
       await this.save(projectRef, next);
       return next;
     }
@@ -209,7 +210,6 @@ export class ApplicationPreviewService {
     next.resources.queue_namespace.status = "cleaned";
     next.resources.storage_namespace.status = "cleaned";
     next.resources.test_secret.status = "cleaned";
-    next.updated_at = new Date().toISOString();
     await this.save(projectRef, next);
     return next;
   }
@@ -296,18 +296,14 @@ export class ApplicationPreviewService {
       receipt.resources.smoke_test.status = receipt.resources.smoke_test.failed.length > 0 ? "failed" : "ready";
       receipt.status = receipt.resources.smoke_test.failed.length > 0 ? "failed" : "ready";
       receipt.cleanup.required = true;
-      receipt.updated_at = new Date().toISOString();
       await this.save(projectRef, receipt);
     } catch (error) {
+      // Never overwrite the winning receipt with a stale failure projection.
+      if (error instanceof ApplicationPreviewConflictError) throw error;
       receipt.status = "failed";
       receipt.resources.smoke_test.status = "failed";
       receipt.resources.smoke_test.failed = [...new Set([...receipt.resources.smoke_test.failed, "provisioning"])];
-      receipt.cleanup = {
-        required: true,
-        completed: false,
-        error: error instanceof Error ? error.message : String(error),
-      };
-      receipt.updated_at = new Date().toISOString();
+      receipt.cleanup = { required: true, completed: false, error: "APPLICATION_PREVIEW_PROVISIONING_FAILED" };
       await this.save(projectRef, receipt);
     }
   }
@@ -317,6 +313,11 @@ export class ApplicationPreviewService {
     if (this.provisioning.has(key)) return;
     const operation = this.provision(projectRef, receipt).finally(() => this.provisioning.delete(key));
     this.provisioning.set(key, operation);
+    // Observe detached failures without hiding them from callers awaiting the
+    // same operation. Do not include credential-bearing provider exceptions.
+    void operation.catch(() => logger.error("[ApplicationPreview] provisioning receipt was not committed", {
+      projectRef, previewId: receipt.preview_id,
+    }));
   }
 
   private async reconcilePending(projectRef: string, receipts: StoredApplicationPreview[]): Promise<void> {
@@ -330,15 +331,10 @@ export class ApplicationPreviewService {
     await Promise.all(operations);
   }
 
-  private async save(projectRef: string, receipt: StoredApplicationPreview): Promise<void> {
-    const project = await this.dependencies.projects.findByRef(projectRef);
-    if (!project) throw new Error("Project not found");
-    const current = previewList(project.config);
-    const index = current.findIndex((item) => item.preview_id === receipt.preview_id);
-    const next = index < 0 ? [...current, receipt] : current.map((item, itemIndex) => itemIndex === index ? receipt : item);
-    await this.dependencies.projects.updateConfig(
-      projectRef,
-      mergeProjectConfig(project.config, { application_previews: next }),
+  private async save(projectRef: string, receipt: StoredApplicationPreview, insert = false): Promise<void> {
+    const saved = await this.dependencies.projects.saveApplicationPreview(
+      projectRef, receipt, insert ? null : receipt.updated_at,
     );
+    receipt.updated_at = saved.updated_at;
   }
 }

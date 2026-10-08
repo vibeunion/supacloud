@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.50.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.49.2...web-console-v0.50.0) (2026-10-07)
+
+
+### Features
+
+* **platform:** close application platform P0/P1 capabilities ([dbaf3a6](https://github.com/vibeunion/supacloud/commit/dbaf3a6d01daa71455a8cde96e9e233743bfdfca))
+
 ## [0.49.2](https://github.com/vibeunion/supacloud/compare/web-console-v0.49.1...web-console-v0.49.2) (2026-10-06)
 
 

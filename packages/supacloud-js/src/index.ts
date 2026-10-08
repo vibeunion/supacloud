@@ -19,13 +19,13 @@ export {
 import {
   SupaCloudQueueError, queueJsonSnapshot, queueMessage,
   queueMessageId, queueReadCount, queueRpcBoolean, queueRpcId, queueRpcIds, queueRpcMessages, queueSeconds,
-  type SupaCloudQueueJson, type SupaCloudQueueMessage, type SupaCloudQueueSendResult,
+  type SupaCloudQueueJson, type SupaCloudQueueMessage, type SupaCloudQueueSendResult, type SupaCloudQueueIdempotentSendResult,
   type SupaCloudQueueMutationResult,
 } from "./queue-rpc.js";
 export { SupaCloudApiError } from "./api-error.js";
 export {
   SupaCloudQueueError, type SupaCloudQueueJson, type SupaCloudQueueMessage,
-  type SupaCloudQueueSendResult, type SupaCloudQueueMutationResult,
+  type SupaCloudQueueSendResult, type SupaCloudQueueIdempotentSendResult, type SupaCloudQueueMutationResult,
 } from "./queue-rpc.js";
 export * from "./oauth-clients.js";
 export * from "./oauth-server.js";
@@ -1715,9 +1715,9 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
     payload: SupaCloudQueueJson = {},
     jobKey: string,
     options: SupaCloudQueueSendOptions = {},
-  ): Promise<SupaCloudQueueSendResult> {
+  ): Promise<SupaCloudQueueIdempotentSendResult> {
     const captured = queueJsonSnapshot(payload);
-    if (typeof jobKey !== "string" || !/^[A-Za-z0-9_.:@/-]{1,200}$/.test(jobKey)) {
+    if (typeof jobKey !== "string" || jobKey.trim() !== jobKey || !/^[A-Za-z0-9_.:@/-]{1,200}$/.test(jobKey)) {
       throw new SupaCloudQueueError(false, "QUEUE_JOB_KEY_INVALID");
     }
     const result = await this.rpc("send_idempotent", {
@@ -1726,17 +1726,18 @@ class SupaCloudQueueClient<TClient extends SupabaseClient = SupabaseClient> exte
       p_job_key: jobKey,
       sleep_seconds: normalizeSecondsFromOptions(options),
     }, value => {
-      if (!Array.isArray(value) || value.length !== 1 || !value[0] || typeof value[0] !== "object") {
+      if (!Array.isArray(value) || value.length !== 1 || !value[0] || Array.isArray(value[0]) || typeof value[0] !== "object") {
         throw new SupaCloudQueueError();
       }
       const row = value[0] as Record<string, unknown>;
+      if (typeof row.created !== "boolean") throw new SupaCloudQueueError();
       return { msgId: queueMessageId(row.msg_id), created: row.created === true };
     });
     return {
       id: result.msgId,
       msg_id: result.msgId,
       queue_name: this.name,
-      status: "pending",
+      status: result.created ? "pending" : "deduplicated",
       payload: captured,
       deduplicated: !result.created,
     };

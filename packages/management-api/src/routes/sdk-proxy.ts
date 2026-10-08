@@ -18,11 +18,7 @@ import { resolveProjectServiceRoleKey } from "../utils/service-role";
 import { getAuthRuntimeDescriptor } from "../services/auth-runtime.service";
 import { GOTRUE_USER_ID_PATTERN } from "../utils/project-user-lifecycle";
 import { beginRequestObservability } from "../utils/observability";
-import { normalizeProjectConfig } from "../utils/project-config";
-import {
-    governGraphqlRequest,
-    normalizeGraphqlRequestGovernancePolicy,
-} from "../services/graphql-request-governance";
+import { governGraphqlProjectRequest } from "../services/graphql-request-governance";
 
 const MAX_ASYNC_BODY_BYTES = 256 * 1024;
 const MAX_TASK_LINK_ID_BYTES = 255;
@@ -809,14 +805,15 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
 const graphqlHandler = async ({ request }: any) => {
     const ref = await getProjectRef(request);
     if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
-    const [project] = await sdkProxySql`
-        SELECT config FROM projects WHERE ref = ${ref} AND deleted_at IS NULL LIMIT 1
-    `.catch(() => []);
-    const projectConfig = normalizeProjectConfig(project?.config);
-    const governance = await governGraphqlRequest(
-        request,
-        normalizeGraphqlRequestGovernancePolicy(projectConfig.graphql_governance),
-    );
+    const governance = await governGraphqlProjectRequest(request, async () => {
+        const rows = await sdkProxySql`
+            SELECT config FROM projects WHERE ref = ${ref} AND deleted_at IS NULL LIMIT 1
+        `;
+        if (rows.length !== 1 || !Object.hasOwn(rows[0]!, "config")) {
+            throw new Error("GRAPHQL_POLICY_UNAVAILABLE");
+        }
+        return rows[0]!.config;
+    });
     if (governance instanceof Response) return governance;
     const ports = await getTenantPorts(ref);
     if (!ports) return new Response(JSON.stringify({ message: 'Tenant backend not active' }), { status: 502, headers: { 'Content-Type': 'application/json' } });

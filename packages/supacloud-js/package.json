@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/js",
-  "version": "0.40.0",
+  "version": "0.41.1",
   "description": "Platform SDK for SupaCloud, built on top of supabase-js",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -96,7 +96,7 @@
     "directory": "packages/supacloud-js"
   },
   "peerDependencies": {
-    "@supabase/supabase-js": "^2.115.0",
+    "@supabase/supabase-js": "^2.117.3",
     "@tanstack/query-core": "^5.104.1"
   },
   "peerDependenciesMeta": {
@@ -111,7 +111,7 @@
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",
-    "@supabase/supabase-js": "^2.115.0",
+    "@supabase/supabase-js": "^2.117.3",
     "typescript": "^7.0.2",
     "@tanstack/query-core": "5.104.1",
     "@tanstack/svelte-query": "6.3.1",

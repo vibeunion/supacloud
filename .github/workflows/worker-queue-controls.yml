@@ -1,0 +1,36 @@
+name: Worker Queue Controls
+on:
+  pull_request:
+    paths:
+      - 'packages/worker/**'
+      - 'packages/delivery/**'
+      - 'packages/management-api/src/db/sql-modules/pgmq-public.sql'
+      - 'packages/management-api/tests/unit/pgmq-rpc-idempotency.test.ts'
+      - '.github/workflows/worker-queue-controls.yml'
+permissions:
+  contents: read
+jobs:
+  worker-and-native-queue:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Install pinned worker dependencies
+        run: |
+          bun install --cwd packages/delivery --frozen-lockfile
+          bun install --cwd packages/worker --frozen-lockfile
+      - name: Worker policy and existing adapter regressions
+        run: bun run --cwd packages/worker test
+      - name: Prepare immutable native PGMQ fixture
+        timeout-minutes: 3
+        run: timeout --kill-after=10s 120s docker pull ghcr.io/pgmq/pg18-pgmq@sha256:2dd8ac92a1c0eb121d6ea5b12b3f7c015813ae58945a940451d4683afd5a19c2
+      - name: Native PGMQ job-key concurrency and mirror consistency
+        timeout-minutes: 3
+        run: timeout --kill-after=10s 150s bun test packages/management-api/tests/unit/pgmq-rpc-idempotency.test.ts
+      - name: Verification must not edit tracked files
+        run: git diff --exit-code

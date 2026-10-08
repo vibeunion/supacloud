@@ -9,7 +9,7 @@ function fixture(t) {
   const root = mkdtempSync(resolve(tmpdir(), 'starter-sync-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const put = (file, value) => { mkdirSync(dirname(resolve(root, file)), { recursive: true }); writeFileSync(resolve(root, file), typeof value === 'string' ? value : `${JSON.stringify(value, null, 2)}\n`); };
-  for (const [, [directory, name]] of Object.entries(STARTER_PACKAGES)) put(`packages/${directory}/package.json`, { name, version: '1.0.0', dependencies: { rxjs: '7.8.2' }, peerDependencies: { 'drizzle-orm': '1.0.0-rc.4', '@supabase/supabase-js': '^2.0.0' }, devDependencies: { 'drizzle-kit': '1.0.0-rc.4' } });
+  for (const [, [directory, name]] of Object.entries(STARTER_PACKAGES)) put(`packages/${directory}/package.json`, { name, version: '1.0.0', dependencies: { rxjs: '7.8.2' }, peerDependencies: { 'drizzle-orm': '1.0.0-rc.5-169397b', '@supabase/supabase-js': '^2.0.0' }, devDependencies: { 'drizzle-kit': '1.0.0-rc.5-ab785fc' } });
   mkdirSync(dirname(resolve(root, STARTER_FILE)), { recursive: true });
   const config = { packages: Object.fromEntries(Object.entries(STARTER_PACKAGES).map(([alias, [directory]]) => [`packages/${directory}`, { 'extra-files': [{ type: 'json', path: `/${STARTER_FILE}`, jsonpath: `$.packages.${alias}.version` }] }])) };
   put('release-please-config.json', config);

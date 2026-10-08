@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.2](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.29.1...edge-runtime-v0.29.2) (2026-10-08)
+
+
+### Miscellaneous Chores
+
+* adopt current Supabase SDK baseline ([#1698](https://github.com/vibeunion/supacloud/issues/1698)) ([4e6613a](https://github.com/vibeunion/supacloud/commit/4e6613aeda3c5958e44cbe9604e30cce0622a66f))
+
 ## [0.29.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.29.0...edge-runtime-v0.29.1) (2026-10-07)
 
 

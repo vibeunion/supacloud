@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/compiler",
-  "version": "0.39.0",
+  "version": "0.40.1",
   "description": "Static compiler for @supacloud/app metadata: builds the application graph from AST, validates it, and generates reflection-free factory code",
   "type": "module",
   "main": "./dist/index.js",
@@ -68,8 +68,8 @@
     "@whatwg-node/promise-helpers": "1.3.2"
   },
   "devDependencies": {
-    "@supabase/supabase-js": "2.115.0",
-    "drizzle-orm": "1.0.0-rc.4",
+    "@supabase/supabase-js": "2.117.3",
+    "drizzle-orm": "1.0.0-rc.5-169397b",
     "@types/bun": "^1.4.2",
     "typescript": "^7.0.2"
   }

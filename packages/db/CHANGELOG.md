@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.14.0](https://github.com/vibeunion/supacloud/compare/db-v0.13.2...db-v0.14.0) (2026-10-08)
+
+
+### Features
+
+* **db:** add migration history rebase workflow ([#1705](https://github.com/vibeunion/supacloud/issues/1705)) ([de0587b](https://github.com/vibeunion/supacloud/commit/de0587b3297ba01b068b280111b69966f0459c23))
+
+## [0.13.2](https://github.com/vibeunion/supacloud/compare/db-v0.13.1...db-v0.13.2) (2026-10-08)
+
+
+### Bug Fixes
+
+* **db:** align Drizzle dependencies with rc5 ([#1696](https://github.com/vibeunion/supacloud/issues/1696)) ([a95da17](https://github.com/vibeunion/supacloud/commit/a95da17b58cdadc8a8148a2002a39e33cee56f3c))
+
 ## [0.13.1](https://github.com/vibeunion/supacloud/compare/db-v0.13.0...db-v0.13.1) (2026-10-05)
 
 

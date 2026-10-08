@@ -1,0 +1,47 @@
+name: Platform Review Regressions
+on:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - 'packages/management-api/**'
+      - '.github/workflows/platform-review-regressions.yml'
+permissions:
+  contents: read
+concurrency:
+  group: platform-review-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  preview-and-graphql:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Install pinned dependencies and real adapter entrypoints
+        run: |
+          bun install --frozen-lockfile --cwd packages/delivery
+          bun install --frozen-lockfile --cwd packages/management-api
+          bun run scripts/build-command-dependencies.ts elysia
+          bun install --frozen-lockfile --cwd packages/elysia
+      - name: Preview lifecycle and GraphQL request boundaries
+        working-directory: packages/management-api
+        run: |
+          bun test tests/unit/application-preview.service.test.ts
+          bun test tests/unit/graphql-request-governance.test.ts tests/unit/graphql-request-governance-boundaries.test.ts
+          bun test tests/unit/sdk-proxy.graphql.test.ts
+          bun test tests/unit/sdk-proxy.functions.test.ts
+          bun test tests/unit/project.repository.test.ts
+      - name: Prepare immutable native PostgreSQL fixture
+        timeout-minutes: 3
+        run: timeout --kill-after=10s 120s docker pull ghcr.io/pgmq/pg18-pgmq@sha256:2dd8ac92a1c0eb121d6ea5b12b3f7c015813ae58945a940451d4683afd5a19c2
+      - name: Native preview concurrency, CAS and configuration preservation
+        timeout-minutes: 3
+        env:
+          SUPACLOUD_PREVIEW_NATIVE_TESTS: '1'
+        run: timeout --kill-after=10s 150s bun test packages/management-api/tests/unit/application-preview-persistence-native.test.ts
+      - name: Verification must not edit tracked files
+        run: git diff --exit-code

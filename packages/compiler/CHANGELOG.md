@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.40.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.40.0...compiler-v0.40.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* **db:** align Drizzle dependencies with rc5 ([#1696](https://github.com/vibeunion/supacloud/issues/1696)) ([a95da17](https://github.com/vibeunion/supacloud/commit/a95da17b58cdadc8a8148a2002a39e33cee56f3c))
+
+
+### Miscellaneous Chores
+
+* adopt current Supabase SDK baseline ([#1698](https://github.com/vibeunion/supacloud/issues/1698)) ([4e6613a](https://github.com/vibeunion/supacloud/commit/4e6613aeda3c5958e44cbe9604e30cce0622a66f))
+
+## [0.40.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.39.0...compiler-v0.40.0) (2026-10-07)
+
+
+### Features
+
+* **platform:** close application platform P0/P1 capabilities ([dbaf3a6](https://github.com/vibeunion/supacloud/commit/dbaf3a6d01daa71455a8cde96e9e233743bfdfca))
+
 ## [0.39.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.38.2...compiler-v0.39.0) (2026-10-07)
 
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.27.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.27.0...elysia-v0.27.1) (2026-10-08)
+
+
+### Miscellaneous Chores
+
+* adopt current Supabase SDK baseline ([#1698](https://github.com/vibeunion/supacloud/issues/1698)) ([4e6613a](https://github.com/vibeunion/supacloud/commit/4e6613aeda3c5958e44cbe9604e30cce0622a66f))
+
+## [0.27.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.26.0...elysia-v0.27.0) (2026-10-07)
+
+
+### Features
+
+* **platform:** close application platform P0/P1 capabilities ([dbaf3a6](https://github.com/vibeunion/supacloud/commit/dbaf3a6d01daa71455a8cde96e9e233743bfdfca))
+
 ## [0.26.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.25.0...elysia-v0.26.0) (2026-10-07)
 
 

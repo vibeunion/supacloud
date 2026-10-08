@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.98.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.98.0...management-api-v0.98.1) (2026-10-08)
+
+
+### Miscellaneous Chores
+
+* adopt current Supabase SDK baseline ([#1698](https://github.com/vibeunion/supacloud/issues/1698)) ([4e6613a](https://github.com/vibeunion/supacloud/commit/4e6613aeda3c5958e44cbe9604e30cce0622a66f))
+
+## [0.98.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.97.1...management-api-v0.98.0) (2026-10-07)
+
+
+### Features
+
+* **platform:** close application platform P0/P1 capabilities ([dbaf3a6](https://github.com/vibeunion/supacloud/commit/dbaf3a6d01daa71455a8cde96e9e233743bfdfca))
+
+
+### Bug Fixes
+
+* **platform:** close preview persistence races and GraphQL governance bypasses ([#1692](https://github.com/vibeunion/supacloud/issues/1692)) ([7f22cfb](https://github.com/vibeunion/supacloud/commit/7f22cfb86da31fcb2ba2594417e24ba3c12eb61c))
+* **worker:** ship reviewed PGMQ job controls and concurrency repairs ([#1689](https://github.com/vibeunion/supacloud/issues/1689)) ([e283915](https://github.com/vibeunion/supacloud/commit/e283915e66e119b75ad1b909e18816270b5d01e3))
+
 ## [0.97.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.97.0...management-api-v0.97.1) (2026-10-06)
 
 
