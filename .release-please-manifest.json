@@ -17,6 +17,6 @@
   "packages/delivery": "0.8.0",
   "packages/compiler": "0.40.1",
   "packages/elysia": "0.27.1",
-  "packages/db": "0.13.2",
+  "packages/db": "0.14.0",
   "packages/testing": "0.6.0"
 }
