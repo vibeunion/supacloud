@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.71.1](https://github.com/vibeunion/supacloud/compare/cli-v0.71.0...cli-v0.71.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* **cli:** allow rebase_migrations in local-only mode ([59972a1](https://github.com/vibeunion/supacloud/commit/59972a107978b331beb979c0830726b4a8ccd29c))
+
 ## [0.71.0](https://github.com/vibeunion/supacloud/compare/cli-v0.70.2...cli-v0.71.0) (2026-10-08)
 
 
