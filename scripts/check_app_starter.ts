@@ -27,7 +27,7 @@ export function addStarterTestDependencies(manifest: {
 }): void {
   manifest.devDependencies.jose = "^6.2.11";
   // The generated command starter already declares this runtime dependency.
-  manifest.dependencies["@supabase/supabase-js"] = "^2.115.0";
+  manifest.dependencies["@supabase/supabase-js"] = "^2.117.3";
   delete manifest.devDependencies["@supabase/supabase-js"];
 }
 
