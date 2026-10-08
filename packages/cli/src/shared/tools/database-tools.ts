@@ -9,6 +9,7 @@ import { Type } from "typebox";
 import {
     readDeliveryMigrationArchive, buildDeliveryMigrationPlan as deliveryMigrationPlan, type DeliveryMigrationArchive,
 } from "@supacloud/delivery";
+import { planMigrationRebase, rebaseMigrations } from "@supacloud/db";
 import { projectRefPathSegment } from "../project-ref";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
@@ -511,7 +512,7 @@ export function registerDatabaseTools(
 ): void {
     const { localOnly = false, readOnly = false, projectRef } = config;
 
-    const localActions = ["lint_migrations", "lint"] as const;
+    const localActions = ["lint_migrations", "lint", "rebase_migrations"] as const;
     const readActions = [
         "query", "list_tables", "describe_columns", "list_indexes", "list_constraints",
         "list_extensions", "extension_catalog", "rls_status", "rls_policies",
@@ -540,7 +541,7 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
             file: optional(Type.String(), "[query/execute/apply_migration/lint_migrations/lint] Read SQL from local file path (avoids shell escaping issues with $$ and multi-statement DDL)"),
             mode: optional(stringEnum(["read", "migration", "admin"]), "[query/execute] SQL execution mode: read, migration, or admin. execute defaults to migration; query defaults to read/auto"),
             admin: optional(Type.Boolean(), "[query/execute] Admin execution flag (required when mode=admin)"),
-            dir: optional(Type.String(), "[push_migrations/baseline_migrations/lint_migrations/lint] Directory containing .sql migration files (default: supabase/migrations)"),
+            dir: optional(Type.String(), "[push_migrations/baseline_migrations/lint_migrations/lint/rebase_migrations] Directory containing .sql migration files (default: supabase/migrations)"),
             dry_run: optional(Type.Boolean(), "[push_migrations/baseline_migrations] Preview changes without applying them"),
             strict: optional(Type.Boolean(), "[push_migrations/lint_migrations/lint/database_lint] Exit with error if high-risk issues or migrations are detected"),
             fail_on_high: optional(Type.Boolean(), "[push_migrations/lint_migrations/lint/database_lint] Alias for --strict"),
@@ -561,6 +562,10 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
             metadata_file: optional(Type.String(), "[migration_import] Hasura metadata JSON file"),
             output_dir: optional(Type.String(), "[migration_import] Output migration directory when write=true"),
             write: optional(Type.Boolean(), "[migration_import] Write the reviewed plan to output_dir; never applies SQL"),
+            baseline_file: optional(Type.String(), "[rebase_migrations] Reviewed schema-only snapshot to use as the new baseline"),
+            baseline_version: optional(Type.String(), "[rebase_migrations] New migration version for the baseline"),
+            baseline_name: optional(Type.String(), "[rebase_migrations] New baseline migration name"),
+            retain_after_version: optional(Type.String(), "[rebase_migrations] Retain migrations newer than this version"),
             // create_table_rls
             columns: optional(Type.String(), "[create_table_rls] Column definitions"),
             policy_mode: optional(stringEnum(["deny_all", "owner"]), "[create_table_rls] RLS policy mode (default: deny_all)"),
@@ -579,6 +584,36 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
             const ref = args.ref || projectRef;
             const schema = args.schema || "public";
             const schemas = args.schemas || ["public"];
+
+            if (action === "rebase_migrations") {
+                const sourceDirectory = args.dir || "supabase/migrations";
+                const outputDirectory = args.output_dir;
+                const baselineFile = args.baseline_file;
+                const baselineVersion = args.baseline_version;
+                if (typeof outputDirectory !== "string" || typeof baselineFile !== "string"
+                    || typeof baselineVersion !== "string") {
+                    throw new Error("rebase_migrations requires output_dir, baseline_file and baseline_version");
+                }
+                const options = {
+                    sourceDirectory,
+                    outputDirectory,
+                    baselineFile,
+                    baselineVersion,
+                    ...(typeof args.baseline_name === "string" ? { baselineName: args.baseline_name } : {}),
+                    ...(typeof args.retain_after_version === "string" ? { retainAfterVersion: args.retain_after_version } : {}),
+                };
+                if (args.write !== true) {
+                    const files = readdirSync(sourceDirectory).filter((file) => file.endsWith(".sql")).sort();
+                    const migrations = files.map((file) => {
+                        const migration = readMigrationFile(sourceDirectory, file);
+                        return { file, version: migration.version, name: migration.name, sql: migration.sql };
+                    });
+                    const plan = planMigrationRebase(migrations, options, readFileSync(baselineFile, "utf8"));
+                    return { content: [{ type: "text" as const, text: JSON.stringify({ mode: "plan", ...plan }, null, 2) }] };
+                }
+                const plan = await rebaseMigrations(options);
+                return { content: [{ type: "text" as const, text: JSON.stringify({ mode: "written", ...plan }, null, 2) }] };
+            }
 
             if (action === "delivery_migration_plan") {
                 const failure = (code: string, httpStatus: number | null = null): DatabaseToolResponse => ({

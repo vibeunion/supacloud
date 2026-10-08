@@ -396,6 +396,35 @@ migration-mode API without executing the migration DDL. It is appropriate only
 when the live schema has already been proven equivalent to those files. Never
 write migration-history tables through `database query`.
 
+For a large historical migration chain, use the local rebase workflow after
+capturing and reviewing a schema-only snapshot. The command never writes the
+remote database and never removes the source directory. Without `--write` it
+only prints the plan:
+
+```bash
+supacloud-cli database rebase_migrations \
+  --dir supabase/migrations \
+  --baseline_file backups/pre-rebase-schema.sql \
+  --baseline_version 20261008000000 \
+  --retain_after_version 20261001000000 \
+  --output_dir supabase/migrations-rebased
+
+supacloud-cli database rebase_migrations \
+  --dir supabase/migrations \
+  --baseline_file backups/pre-rebase-schema.sql \
+  --baseline_version 20261008000000 \
+  --retain_after_version 20261001000000 \
+  --output_dir supabase/migrations-rebased \
+  --write
+```
+
+The output contains one reconstructed baseline, selected forward migrations
+and `migration-rebase.manifest.json` with SHA-256 records for the complete
+source history. Review the baseline for omitted data backfills, reference data,
+extensions, grants, RLS, functions and triggers; replay it in a clean database
+before replacing the active migration directory. Keep the original directory
+as an archive until remote migration history and schema read-back are complete.
+
 ### Database SQL files
 
 For complex SQL, pgvector queries, and transaction blocks, prefer `--file`:

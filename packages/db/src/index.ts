@@ -81,3 +81,11 @@ export { defineReadQuery, decodePostgrestQuery, QueryBoundaryError, type QueryEv
 export {
   createPostgresCommandStore, type CommandDatabase, type CommandTransaction, type CommandSubmissionBinding,
 } from "./command-adapter";
+
+export {
+  planMigrationRebase,
+  rebaseMigrations,
+  type MigrationRebaseOptions,
+  type MigrationRebasePlan,
+  type RebaseMigrationInput,
+} from "./migration-rebase";
