@@ -7,7 +7,7 @@ Use `defineDrizzleDatabaseModule` and `createDrizzleCommandDatabase` from
 `@supacloud/db/drizzle-bun`. Authorization, business writes, receipts and audit
 share one transaction connection. Do not use the outer pool for command writes
 or retain `transaction.db` after the transaction. The adapter currently targets
-`drizzle-orm@1.0.0-rc.4`, not a stable 1.0 release.
+`drizzle-orm@1.0.0-rc.5-169397b`, not a stable 1.0 release.
 
 `executeDecodedSql` keeps SQL results unknown until an explicit decoder validates
 them. Use parameterized templates; `sql<T>` alone does not validate returned data.

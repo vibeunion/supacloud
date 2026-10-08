@@ -28,8 +28,8 @@ test("default checks run before regeneration and Drizzle candidate paths never r
   const files = appStarterFiles("example");
   expect(files["package.json"]).toContain('"check": "bun run db:check &&');
   expect(files["package.json"]).toContain('"build": "bun run db:check &&');
-  expect(files["package.json"]).toContain('"drizzle-orm": "1.0.0-rc.4"');
-  expect(files["package.json"]).toContain('"drizzle-kit": "1.0.0-rc.4"');
+  expect(files["package.json"]).toContain('"drizzle-orm": "1.0.0-rc.5-169397b"');
+  expect(files["package.json"]).toContain('"drizzle-kit": "1.0.0-rc.5-ab785fc"');
   expect(files["drizzle.config.ts"]).toContain("./db/migration-candidates");
   expect(files["drizzle.pull.config.ts"]).toContain("./output/database-audit/drizzle-candidate");
   expect(files[".gitignore"]).toContain("output/database-audit/");

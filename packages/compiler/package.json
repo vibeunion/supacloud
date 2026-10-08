@@ -69,7 +69,7 @@
   },
   "devDependencies": {
     "@supabase/supabase-js": "2.115.0",
-    "drizzle-orm": "1.0.0-rc.4",
+    "drizzle-orm": "1.0.0-rc.5-169397b",
     "@types/bun": "^1.4.2",
     "typescript": "^7.0.2"
   }
