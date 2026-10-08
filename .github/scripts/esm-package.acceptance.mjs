@@ -85,7 +85,7 @@ try {
     name: 'supacloud-esm-installed-consumer', version: '0.0.0', private: true, type: 'module',
   }));
   run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund',
-    ...(sdkOnly ? ['--engine-strict', '@supabase/supabase-js@2.115.0'] : []), ...tarballs], consumer);
+    ...(sdkOnly ? ['--engine-strict', '@supabase/supabase-js@2.117.3'] : []), ...tarballs], consumer);
   if (sdkOnly) {
     for (const name of ['@angular/core', '@supacloud/app', '@supacloud/compiler', '@supacloud/delivery']) {
       await assert.rejects(lstat(join(consumer, 'node_modules', name)), { code: 'ENOENT' },
