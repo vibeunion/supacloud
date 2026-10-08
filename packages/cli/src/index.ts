@@ -317,6 +317,7 @@ EXAMPLES
   ${preferredCommand} database query --ref abc123 --file ./queries/vector-search.sql
   ${preferredCommand} database migration_inventory --ref abc123
   ${preferredCommand} database lint_migrations --dir supabase/migrations
+  ${preferredCommand} database rebase_migrations --dir supabase/migrations --baseline_file backups/schema.sql --baseline_version 20261008000000 --output_dir supabase/migrations-rebased
   ${preferredCommand} database push_migrations --ref abc123 --dir supabase/migrations --dry_run
   ${preferredCommand} supabase migration_new --name add_accounts
   ${preferredCommand} supabase db_diff --schema public --name add_accounts

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrationVersionFromFilename, registerDatabaseTools, vectorWarningsForPendingMigrations } from "./database-tools";
@@ -89,6 +89,47 @@ function sqlBatchReceipt(
 }
 
 describe("database migration helpers", () => {
+    test("rebase_migrations plans by default and writes only after explicit approval", async () => {
+        const root = mkdtempSync(join(tmpdir(), "database-rebase-"));
+        const source = join(root, "migrations");
+        const output = join(root, "rebased");
+        const baseline = join(root, "schema.sql");
+        mkdirSync(source, { recursive: true });
+        writeFileSync(join(source, "20260101000000_one.sql"), "CREATE TABLE one(id int);\n");
+        writeFileSync(join(source, "20260201000000_two.sql"), "ALTER TABLE one ADD COLUMN name text;\n");
+        writeFileSync(baseline, "CREATE TABLE one(id int, name text);\n");
+        try {
+            const callback = captureDatabaseTool({});
+            const plan = await callback({
+                action: "rebase_migrations",
+                dir: source,
+                baseline_file: baseline,
+                baseline_version: "20261008000000",
+                output_dir: output,
+                retain_after_version: "20260101000000",
+            });
+            expect(JSON.parse(plan.content[0].text)).toMatchObject({
+                mode: "plan",
+                baselineMigration: "20261008000000_reconstructed_schema.sql",
+            });
+            expect(existsSync(output)).toBe(false);
+
+            const written = await callback({
+                action: "rebase_migrations",
+                dir: source,
+                baseline_file: baseline,
+                baseline_version: "20261008000000",
+                output_dir: output,
+                retain_after_version: "20260101000000",
+                write: true,
+            });
+            expect(JSON.parse(written.content[0].text)).toMatchObject({ mode: "written" });
+            expect(existsSync(join(output, "migration-rebase.manifest.json"))).toBe(true);
+        } finally {
+            rmSync(root, { recursive: true, force: true });
+        }
+    });
+
     test.each([
         ["apply_migration", { action: "apply_migration", ref: "proj", name: "safe_name", sql: "SELECT 1;" }],
         ["create_table_rls", {
