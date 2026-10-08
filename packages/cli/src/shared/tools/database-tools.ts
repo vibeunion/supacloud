@@ -574,7 +574,7 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
         },
         async (args: any) => {
             const { action } = args;
-            if (localOnly && action !== "lint_migrations" && action !== "lint") {
+            if (localOnly && action !== "lint_migrations" && action !== "lint" && action !== "rebase_migrations") {
                 throw new Error(`Database action '${String(action)}' requires Management API context`);
             }
             const managementHttp = (): HttpTransport => {
