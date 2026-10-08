@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/vibeunion/supacloud/compare/db-v0.13.2...db-v0.14.0) (2026-10-08)
+
+
+### Features
+
+* **db:** add migration history rebase workflow ([#1705](https://github.com/vibeunion/supacloud/issues/1705)) ([de0587b](https://github.com/vibeunion/supacloud/commit/de0587b3297ba01b068b280111b69966f0459c23))
+
 ## [0.13.2](https://github.com/vibeunion/supacloud/compare/db-v0.13.1...db-v0.13.2) (2026-10-08)
 
 
