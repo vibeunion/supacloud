@@ -5,9 +5,9 @@
     "": {
       "name": "@supacloud/worker",
       "dependencies": {
-        "@pgflow/core": "0.16.0",
-        "@pgflow/dsl": "0.16.0",
-        "@pgflow/edge-worker": "0.16.0",
+        "@pgflow/core": "0.17.2",
+        "@pgflow/dsl": "0.17.2",
+        "@pgflow/edge-worker": "0.17.2",
         "@supacloud/delivery": "file:../delivery",
         "libpg-query": "17.7.4",
       },
@@ -20,11 +20,11 @@
   "packages": {
     "@henrygd/queue": ["@henrygd/queue@1.2.0", "https://registry.npmmirror.com/@henrygd/queue/-/queue-1.2.0.tgz", {}, "sha512-jW/BLSTpcvExDhqJGxtIPgGr2O0IFF8XUNDwEbfCfhrXT8a4xztQ9Lv6U/vbYzYC0xVWn+3zv6YnLUh3bEFUKA=="],
 
-    "@pgflow/core": ["@pgflow/core@0.16.0", "https://registry.npmmirror.com/@pgflow/core/-/core-0.16.0.tgz", { "dependencies": { "@pgflow/dsl": "0.16.0", "postgres": "^3.4.5" } }, "sha512-kCcPb+qEo1Opr3PVR/dAlf9N9Xh+kBtakvw5yMTy6F3TRV8yyDsX47pjDb3v2DFMgjqLyZWp4y6/e6sszx6kpg=="],
+    "@pgflow/core": ["@pgflow/core@0.17.2", "https://registry.npmmirror.com/@pgflow/core/-/core-0.17.2.tgz", { "dependencies": { "@pgflow/dsl": "0.17.2", "postgres": "^3.4.5" } }, "sha512-XegzRe/HFkv0o15FQvPWNLxAk8HEu8f2XazkGHJQeHidIPqYTrC1j9r8CXTmU6AuuDgz5sUzddoizHbMSDokoA=="],
 
-    "@pgflow/dsl": ["@pgflow/dsl@0.16.0", "https://registry.npmmirror.com/@pgflow/dsl/-/dsl-0.16.0.tgz", {}, "sha512-430U9P1AlbL+479q7xczGyjmOfaU+HKsJl45NRgfZRlYjBPrd9Y/js5L9Xeb1JuD277jF6Qn7UosxUO6Pey5lQ=="],
+    "@pgflow/dsl": ["@pgflow/dsl@0.17.2", "https://registry.npmmirror.com/@pgflow/dsl/-/dsl-0.17.2.tgz", {}, "sha512-XS7LIT6UZjFqFDHblZlvzTXqkh8YaSwEqLj0OR/7GHh0U18aDIR1zTnDjy3osWkmhJm7WdsHsFNpsyvtswkcSg=="],
 
-    "@pgflow/edge-worker": ["@pgflow/edge-worker@0.16.0", "https://registry.npmmirror.com/@pgflow/edge-worker/-/edge-worker-0.16.0.tgz", { "dependencies": { "@henrygd/queue": "^1.0.7", "@pgflow/core": "0.16.0", "@pgflow/dsl": "0.16.0", "@supabase/supabase-js": "^2.47.10", "postgres": "3.4.5" } }, "sha512-XbLSmSPjABW+g2SEY9FCWHYb1WmeUy+GfoEO6SpZ3DpBRmjCufxuBsuqRQP5C2h9HUnMSXta9BZYmf693flDSg=="],
+    "@pgflow/edge-worker": ["@pgflow/edge-worker@0.17.2", "https://registry.npmmirror.com/@pgflow/edge-worker/-/edge-worker-0.17.2.tgz", { "dependencies": { "@henrygd/queue": "^1.0.7", "@pgflow/core": "0.17.2", "@pgflow/dsl": "0.17.2", "@supabase/supabase-js": "^2.47.10", "postgres": "3.4.5" } }, "sha512-XkismTJEWu5qe3qsUKY1cHM8IvO9Y+6u7/iP3tnE0D7N6BmjWOGdwoxbaTxBZITFWOv+0GzrXYlA84M4H6cpvQ=="],
 
     "@pgsql/types": ["@pgsql/types@17.6.2", "https://registry.npmmirror.com/@pgsql/types/-/types-17.6.2.tgz", {}, "sha512-1UtbELdbqNdyOShhrVfSz3a1gDi0s9XXiQemx+6QqtsrXe62a6zOGU+vjb2GRfG5jeEokI1zBBcfD42enRv0Rw=="],
 

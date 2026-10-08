@@ -55,9 +55,9 @@
   "dependencies": {
     "@supacloud/delivery": "file:../delivery",
     "libpg-query": "17.7.4",
-    "@pgflow/core": "0.16.0",
-    "@pgflow/edge-worker": "0.16.0",
-    "@pgflow/dsl": "0.16.0"
+    "@pgflow/core": "0.17.2",
+    "@pgflow/edge-worker": "0.17.2",
+    "@pgflow/dsl": "0.17.2"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
