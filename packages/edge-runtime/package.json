@@ -18,7 +18,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.117.2",
+    "@supabase/supabase-js": "^2.117.3",
     "elysia": "2.0.0-beta.21",
     "es-module-lexer": "3.0.2",
     "exact-mirror": "1.2.6",
