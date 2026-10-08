@@ -23,10 +23,10 @@
     "db": {
       "version": "0.13.1",
       "peerDependencies": {
-        "drizzle-orm": "1.0.0-rc.4"
+        "drizzle-orm": "1.0.0-rc.5-169397b"
       },
       "devDependencies": {
-        "drizzle-kit": "1.0.0-rc.4"
+        "drizzle-kit": "1.0.0-rc.5-ab785fc"
       }
     },
     "sdk": {
