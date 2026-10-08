@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.22.0...supacloud-lite-v0.22.1) (2026-10-08)
+
+
+### Miscellaneous Chores
+
+* adopt current Supabase SDK baseline ([#1698](https://github.com/vibeunion/supacloud/issues/1698)) ([4e6613a](https://github.com/vibeunion/supacloud/commit/4e6613aeda3c5958e44cbe9604e30cce0622a66f))
+
 ## [0.22.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.21.1...supacloud-lite-v0.22.0) (2026-10-07)
 
 
