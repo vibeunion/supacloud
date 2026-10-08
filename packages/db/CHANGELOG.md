@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/vibeunion/supacloud/compare/db-v0.13.1...db-v0.13.2) (2026-10-08)
+
+
+### Bug Fixes
+
+* **db:** align Drizzle dependencies with rc5 ([#1696](https://github.com/vibeunion/supacloud/issues/1696)) ([a95da17](https://github.com/vibeunion/supacloud/commit/a95da17b58cdadc8a8148a2002a39e33cee56f3c))
+
 ## [0.13.1](https://github.com/vibeunion/supacloud/compare/db-v0.13.0...db-v0.13.1) (2026-10-05)
 
 

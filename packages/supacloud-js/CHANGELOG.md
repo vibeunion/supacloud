@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.1](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.41.0...supacloud-js-v0.41.1) (2026-10-08)
+
+
+### Miscellaneous Chores
+
+* adopt current Supabase SDK baseline ([#1698](https://github.com/vibeunion/supacloud/issues/1698)) ([4e6613a](https://github.com/vibeunion/supacloud/commit/4e6613aeda3c5958e44cbe9604e30cce0622a66f))
+
 ## [0.41.0](https://github.com/vibeunion/supacloud/compare/supacloud-js-v0.40.0...supacloud-js-v0.41.0) (2026-10-07)
 
 

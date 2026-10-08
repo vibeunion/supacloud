@@ -14,6 +14,19 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.70.1](https://github.com/vibeunion/supacloud/compare/cli-v0.70.0...cli-v0.70.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#1694](https://github.com/vibeunion/supacloud/issues/1694)) ([c1322ac](https://github.com/vibeunion/supacloud/commit/c1322acd5a2554ad42c44c3a07da1752787369c4))
+* **db:** align Drizzle dependencies with rc5 ([#1696](https://github.com/vibeunion/supacloud/issues/1696)) ([a95da17](https://github.com/vibeunion/supacloud/commit/a95da17b58cdadc8a8148a2002a39e33cee56f3c))
+
+
+### Miscellaneous Chores
+
+* adopt current Supabase SDK baseline ([#1698](https://github.com/vibeunion/supacloud/issues/1698)) ([4e6613a](https://github.com/vibeunion/supacloud/commit/4e6613aeda3c5958e44cbe9604e30cce0622a66f))
+
 ## [0.70.0](https://github.com/vibeunion/supacloud/compare/cli-v0.69.1...cli-v0.70.0) (2026-10-07)
 
 
