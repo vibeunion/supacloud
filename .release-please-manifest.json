@@ -7,7 +7,7 @@
   "packages/supacloud-js": "0.41.1",
   "packages/cli": "0.70.2",
   "packages/admin": "0.24.2",
-  "packages/supacloud": "0.14.18",
+  "packages/supacloud": "0.14.19",
   "packages/function-adapter": "0.4.1",
   "packages/supacloud-lite": "0.22.1",
   "packages/contracts": "0.8.0",
