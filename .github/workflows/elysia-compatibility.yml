@@ -53,7 +53,7 @@ jobs:
           git diff --exit-code -- packages/elysia/bun.lock packages/supacloud-lite/bun.lock
       - name: Preserve lockfile audit evidence
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: elysia-lockfile-audit
           path: |

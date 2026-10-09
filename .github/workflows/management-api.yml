@@ -1488,7 +1488,7 @@ jobs:
         run: OUT_DIR=packages/management-api/dist bash scripts/build_supacloud_caddy.sh
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: supacloud-binaries-linux-primary-macos-dev
           path: |

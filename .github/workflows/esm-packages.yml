@@ -113,7 +113,7 @@ jobs:
           node --version > "$evidence/node-version.txt"
       - name: Upload SDK type-failure evidence
         if: failure() && matrix.node == '24.x'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: sdk-compatibility-evidence
           path: ${{ runner.temp }}/sdk-compatibility-evidence/
