@@ -1,7 +1,16 @@
 import { afterEach, describe, expect, mock, test } from "bun:test";
-import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { config } from "../../src/config";
+import {
+    makeCorsHeaderHandler,
+    makeCorsSubroute,
+    makeFunctionCorsErrorFallback,
+    makeReverseProxy,
+    setRouteCors,
+    type CaddyRoute,
+} from "../../src/services/gateway-route-builders";
 import {
     CaddyGatewayProvider,
     DEFAULT_CORS_EXPOSED,
@@ -52,7 +61,7 @@ function captureFetch(calls: Array<{ url: string; method: string; body: any }>) 
 }
 
 function findCorsSubroute(route: any) {
-    return route?.handle?.find((handler: any) => handler.handler === "subroute" && Array.isArray(handler.routes));
+    return route?.handle?.find((handler: any) => handler.handler === "subroute" && Array.isArray(handler.routes) && !handler.errors);
 }
 
 function findReverseProxyHandlers(routes: any[]) {
@@ -123,6 +132,173 @@ AwNbYPcbTU4kMp3H5JKzKdI=
 -----END PRIVATE KEY-----`;
 
 describe("GatewayService provider selection", () => {
+    test.skipIf(!process.env.CADDY_CORS_TEST_BINARY)("real Caddy preserves function policy and exposes gateway failures", async () => {
+        const upstream = Bun.serve({
+            hostname: "127.0.0.1", port: 0,
+            async fetch(request) {
+                const url = new URL(request.url);
+                if (url.pathname === "/slow") await Bun.sleep(300);
+                const headers = new Headers({ Vary: "Accept-Language" });
+                if (url.searchParams.has("origin")) headers.set("Access-Control-Allow-Origin", "https://function.example.com");
+                if (url.searchParams.has("credentials")) headers.set("Access-Control-Allow-Credentials", "true");
+                return new Response("upstream", { status: Number(url.searchParams.get("status") || 200), headers });
+            },
+        });
+        const reservation = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response() });
+        const port = reservation.port;
+        reservation.stop(true);
+        const directory = await mkdtemp(resolve(tmpdir(), "supacloud-cors-"));
+        const configuration = resolve(directory, "caddy.json");
+        const proxy = makeReverseProxy(`127.0.0.1:${upstream.port}`, {}, 50, true);
+        proxy.transport = { protocol: "http", response_header_timeout: "100ms" };
+        await writeFile(configuration, JSON.stringify({
+            admin: { disabled: true },
+            apps: { http: { servers: { test: {
+                listen: [`127.0.0.1:${port}`],
+                routes: [
+                    {
+                        match: [{ path: ["/public"] }],
+                        handle: [makeCorsSubroute(["*"]), makeReverseProxy(`127.0.0.1:${upstream.port}`, {})],
+                        terminal: true,
+                    },
+                    { match: [{ path: ["/wildcard"] }], handle: [makeFunctionCorsErrorFallback(["*"]), proxy], terminal: true },
+                    { handle: [makeFunctionCorsErrorFallback(["https://app.example.com"]), proxy], terminal: true },
+                ],
+            } } } },
+        }));
+        const child = Bun.spawn([process.env.CADDY_CORS_TEST_BINARY!, "run", "--config", configuration], {
+            stdout: "ignore", stderr: "ignore",
+        });
+        const base = `http://127.0.0.1:${port}`;
+        const request = (path: string, origin = "https://app.example.com", method = "GET") =>
+            fetch(`${base}${path}`, { method, headers: { Origin: origin }, signal: AbortSignal.timeout(3000) });
+        try {
+            let ready = false;
+            for (let attempt = 0; attempt < 100; attempt++) {
+                try { await request("/"); ready = true; break; } catch { await Bun.sleep(30); }
+            }
+            expect(ready).toBe(true);
+            for (const status of [200, 401, 403, 404]) {
+                const response = await request(`/?status=${status}`);
+                expect(response.status).toBe(status);
+                expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
+            }
+            for (const status of [500, 502, 503, 504]) {
+                const response = await request(`/?status=${status}`);
+                expect(response.status).toBe(status);
+                expect(await response.text()).toBe("upstream");
+                expect(response.headers.get("Access-Control-Allow-Origin")).toBe("https://app.example.com");
+                expect(response.headers.get("Vary")).toContain("Accept-Language");
+                expect(response.headers.get("Vary")).toContain("Origin");
+            }
+            expect((await request("/?status=503", "https://blocked.example.com")).headers.get("Access-Control-Allow-Origin")).toBeNull();
+            expect((await request("/?status=503&origin=1")).headers.get("Access-Control-Allow-Origin")).toBe("https://function.example.com");
+            expect((await request("/", "https://app.example.com", "OPTIONS")).status).toBe(200);
+            expect((await fetch(`${base}/?status=503`)).headers.get("Access-Control-Allow-Origin")).toBeNull();
+            const preflight = await fetch(`${base}/public`, {
+                method: "OPTIONS",
+                headers: {
+                    Origin: "https://any.example.com",
+                    "Access-Control-Request-Method": "POST",
+                    "Access-Control-Request-Headers": "authorization, x-request-id, traceparent",
+                },
+            });
+            expect(preflight.status).toBe(204);
+            expect(preflight.headers.get("Access-Control-Allow-Origin")).toBe("*");
+            expect(preflight.headers.get("Access-Control-Allow-Headers")).toContain("Authorization");
+            expect(preflight.headers.get("Access-Control-Allow-Headers")).toContain("traceparent");
+            expect(preflight.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+            const publicResponse = await request("/public?origin=1&credentials=1", "https://any.example.com", "POST");
+            expect(publicResponse.headers.get("Access-Control-Allow-Origin")).toBe("*");
+            expect(publicResponse.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+            const wildcard = await request("/wildcard?status=503&credentials=1", "https://any.example.com");
+            expect(wildcard.headers.get("Access-Control-Allow-Origin")).toBe("*");
+            expect(wildcard.headers.get("Access-Control-Allow-Credentials")).toBeNull();
+            const timeout = await request("/slow");
+            expect(timeout.status).toBeGreaterThanOrEqual(500);
+            expect(timeout.headers.get("Access-Control-Allow-Origin")).toBe("https://app.example.com");
+            upstream.stop(true);
+            const disconnected = await request("/");
+            expect(disconnected.status).toBe(502);
+            expect(disconnected.headers.get("Access-Control-Allow-Origin")).toBe("https://app.example.com");
+            expect(await disconnected.json()).toMatchObject({ error: "FUNCTION_GATEWAY_ERROR" });
+            const blocked = await request("/", "https://blocked.example.com");
+            expect(blocked.status).toBe(502);
+            expect(blocked.headers.get("Access-Control-Allow-Origin")).toBeNull();
+        } finally {
+            upstream.stop(true);
+            child.kill();
+            await child.exited;
+            await rm(directory, { recursive: true, force: true });
+        }
+    }, 15000);
+
+    test("explicit wildcard uses a literal star without credential grants", () => {
+        const wildcard = makeCorsHeaderHandler(true).response.set;
+        expect(wildcard["Access-Control-Allow-Origin"]).toEqual(["*"]);
+        expect(wildcard["Access-Control-Allow-Credentials"]).toBeUndefined();
+        expect(wildcard["Access-Control-Allow-Headers"][0]).toContain("Authorization");
+        expect(makeCorsSubroute([" * ", "https://app.example.com"])).toMatchObject({
+            routes: [
+                {
+                    match: expect.arrayContaining([{
+                        method: ["OPTIONS"],
+                        header_regexp: { Origin: { name: "cors_any_origin", pattern: ".+" } },
+                    }]),
+                    handle: [{ handler: "headers", response: { set: wildcard } }, { handler: "static_response", status_code: 204 }],
+                    terminal: true,
+                },
+                { handle: [{ handler: "headers", response: { set: wildcard } }] },
+            ],
+        });
+        expect(makeCorsHeaderHandler().response.set["Access-Control-Allow-Credentials"]).toEqual(["true"]);
+        expect(makeCorsSubroute([])).toBeNull();
+    });
+
+    test("function fallback matches only allowed origins and headerless 5xx, never OPTIONS", () => {
+        const fallback = makeFunctionCorsErrorFallback(["https://app.example.com"]);
+        expect(fallback.routes).toEqual([{
+            match: [{ header: { Origin: ["https://app.example.com"] } }],
+            handle: [{
+                handler: "headers",
+                response: {
+                    set: expect.objectContaining({
+                        "Access-Control-Allow-Origin": ["{http.request.header.Origin}"],
+                        "Access-Control-Allow-Credentials": ["true"],
+                    }),
+                    add: { Vary: ["Origin, Access-Control-Request-Headers, Accept-Encoding"] },
+                    require: { status_code: [5], headers: { "Access-Control-Allow-Origin": null } },
+                },
+            }],
+        }]);
+        expect(fallback.errors.routes.at(-1)).toMatchObject({
+            terminal: true,
+            handle: [{
+                handler: "static_response",
+                status_code: "{http.error.status_code}",
+                headers: { "Cache-Control": ["no-store"] },
+            }],
+        });
+        expect(makeFunctionCorsErrorFallback([]).routes).toEqual([]);
+        expect(makeFunctionCorsErrorFallback([" * "]).routes[0]?.handle[0]?.response).toMatchObject({
+            set: { "Access-Control-Allow-Origin": ["*"] },
+            delete: ["Access-Control-Allow-Credentials"],
+        });
+    });
+
+    test("function CORS reconciliation replaces the fallback without taking over preflight", () => {
+        const proxy = { handler: "reverse_proxy", upstreams: [{ dial: "127.0.0.1:9090" }] };
+        const route: CaddyRoute = {
+            "@id": "route-project-testref-functions",
+            handle: [makeFunctionCorsErrorFallback(["https://old.example.com"]), proxy],
+        };
+        setRouteCors(route, ["https://new.example.com"]);
+        setRouteCors(route, ["https://new.example.com"]);
+        expect(route.handle).toEqual([makeFunctionCorsErrorFallback(["https://new.example.com"]), proxy]);
+        const custom: CaddyRoute = { "@id": "route-custom-gateway-testref-public", handle: [proxy] };
+        setRouteCors(custom, ["*"]);
+        expect(custom.handle).toEqual([proxy]);
+    });
     test("defaults to the Caddy gateway provider", () => {
         expect(config.gatewayProvider).toBe("caddy");
         expect(gatewayService.name).toBe("caddy");
@@ -143,6 +319,11 @@ describe("GatewayService provider selection", () => {
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-correlation-id");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-business-task-id");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-task-metadata");
+        expect(DEFAULT_CORS_HEADERS).toContain("x-request-id");
+        expect(DEFAULT_CORS_HEADERS).toContain("x-idempotency-key");
+        expect(DEFAULT_CORS_HEADERS).toContain("traceparent");
+        expect(DEFAULT_CORS_HEADERS).toContain("tracestate");
+        expect(DEFAULT_CORS_HEADERS).toContain("baggage");
         expect(DEFAULT_CORS_HEADERS).not.toContain("x-forwarded-for");
         expect(DEFAULT_CORS_HEADERS).not.toContain("x-forwarded-host");
         expect(DEFAULT_CORS_HEADERS).not.toContain("x-forwarded-proto");
@@ -152,6 +333,10 @@ describe("GatewayService provider selection", () => {
     test("default cors exposed headers allow browsers to read download filenames", () => {
         expect(DEFAULT_CORS_EXPOSED).toContain("Content-Disposition");
         expect(DEFAULT_CORS_EXPOSED).toContain("Retry-After");
+        expect(DEFAULT_CORS_EXPOSED).toContain("x-request-id");
+        expect(DEFAULT_CORS_EXPOSED).toContain("x-supacloud-trace-id");
+        expect(DEFAULT_CORS_EXPOSED).toContain("x-supacloud-correlation-id");
+        expect(DEFAULT_CORS_EXPOSED).toContain("traceparent");
     });
 
     test("default Caddy logger redacts sensitive request headers", () => {
@@ -350,6 +535,9 @@ describe("CaddyGatewayProvider", () => {
         expect(restProxy?.flush_interval).toBe(-1);
         expect(functions?.match?.[0]?.path).toEqual(["/functions/v1*"]);
         expect(findCorsSubroute(functions)).toBeUndefined();
+        expect(functions?.handle?.[0]?.handler).toBe("subroute");
+        expect(functions?.handle?.[0]?.errors?.routes?.[0]?.handle?.[0]?.response?.set?.["Access-Control-Allow-Origin"])
+            .toEqual(["{http.request.header.Origin}"]);
         const functionsProxy = functions?.handle?.find((h: any) => h.handler === "reverse_proxy");
         expect(functionsProxy?.headers?.response).toBeUndefined();
         expect(realtime?.match?.[0]?.path).toEqual(["/realtime/v1/websocket*"]);
