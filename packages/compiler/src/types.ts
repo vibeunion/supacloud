@@ -494,6 +494,16 @@ export interface EffectCompilerOptions {
   requireErrorMappings?: boolean;
   /** Require an explicit dependency list for Effect environments. */
   requireDependencies?: boolean;
+  /** Reject unknown/any failures and require a tagged failure union. */
+  requireTaggedErrorTypes?: boolean;
+  /** Require effect.dependencies to exactly match the Effect environment type. */
+  requireExactDependencyTypes?: boolean;
+  /** Require a timeout whenever the route declares Effect dependencies. */
+  requireTimeoutForDependencies?: boolean;
+  /** Reject direct Effect.run* calls inside governed route handlers. */
+  forbidDirectRuntimeExecution?: boolean;
+  /** Reject direct throw statements inside governed route handlers. */
+  forbidDirectThrows?: boolean;
 }
 
 export interface GraphqlOptions {

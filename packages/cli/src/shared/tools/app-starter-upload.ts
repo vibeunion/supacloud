@@ -6,6 +6,17 @@ import { UploadBody, UploadLocation, UploadParams, UploadResult } from "./contra
 export interface ReviewUploadInput { reviewId: string; artifactId: string; expectedVersion: number }
 export interface ReviewUploadLocation { artifactId: string; bucketId: string; objectPath: string }
 export interface ReviewUploadResult { artifactId: string; runId: string; objectPath: string; sha256: string; bytes: number }
+type PreviewUploadError =
+  | { readonly _tag: "AUTHENTICATION_REQUIRED" }
+  | { readonly _tag: "UPLOAD_INPUT_INVALID" }
+  | { readonly _tag: "UPLOAD_DENIED" }
+  | { readonly _tag: "UPLOADS_UNAVAILABLE" };
+type RegisterUploadError =
+  | PreviewUploadError
+  | { readonly _tag: "UPLOAD_CONTENT_INVALID" }
+  | { readonly _tag: "COMMAND_IDEMPOTENCY_CONFLICT" }
+  | { readonly _tag: "COMMAND_REJECTED" }
+  | { readonly _tag: "UPLOAD_OUTCOME_UNKNOWN" };
 export interface ReviewUploadPort {
   previewUpload(context: unknown, input: ReviewUploadInput): Promise<ReviewUploadLocation>;
   registerUpload(context: unknown, input: ReviewUploadInput): Promise<ReviewUploadResult>;
@@ -45,7 +56,7 @@ export class ReviewUploadsController {
       retry: "none",
     },
   })
-  preview(@Param("id") id: string, @Body() body: { artifactId: string; expectedVersion: number }): Effect.Effect<ReviewUploadLocation, unknown, never> {
+  preview(@Param("id") id: string, @Body() body: { artifactId: string; expectedVersion: number }): Effect.Effect<ReviewUploadLocation, PreviewUploadError, never> {
     return Effect.promise(() => this.uploads.preview({ reviewId: id, artifactId: body.artifactId, expectedVersion: body.expectedVersion }));
   }
   @Post("/:id/attachment-registration", {
@@ -68,7 +79,7 @@ export class ReviewUploadsController {
       retry: "none",
     },
   })
-  register(@Param("id") id: string, @Body() body: { artifactId: string; expectedVersion: number }): Effect.Effect<ReviewUploadResult, unknown, never> {
+  register(@Param("id") id: string, @Body() body: { artifactId: string; expectedVersion: number }): Effect.Effect<ReviewUploadResult, RegisterUploadError, never> {
     return Effect.promise(() => this.uploads.register({ reviewId: id, artifactId: body.artifactId, expectedVersion: body.expectedVersion }));
   }
 }

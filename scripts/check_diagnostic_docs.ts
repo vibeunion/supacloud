@@ -209,6 +209,33 @@ class AcceptCaseCommand {}
 accept(): Effect<{ ok: boolean }, never, never> {}`,
   SC3040: `@Post("/cases", { effect: { required: true, errors: [], dependencies: ["CaseRepository"] } })
 accept(): Effect<{ ok: boolean }, never, never> {}`,
+  SC3041: `@Post("/cases", { effect: { required: true, errors: [], dependencies: [] } })
+accept(): Effect<{ ok: boolean }, unknown, never> {}`,
+  SC3042: `@Post("/cases", {
+  effect: { required: true, errors: [{ tag: "NotFound", status: 404, code: "NOT_FOUND" }], dependencies: [] },
+})
+accept(): Effect<{ ok: boolean }, { _tag: "Conflict" }, never> {}`,
+  SC3043: `@Post("/cases", {
+  effect: { required: true, errors: [], dependencies: ["CaseRepository"], timeoutMs: 1000 },
+})
+accept(): Effect<{ ok: boolean }, never, OtherRepository> {}`,
+  SC3044: `@Post("/cases", {
+  effect: { required: true, errors: [], dependencies: ["CaseRepository"] },
+})
+accept(): Effect<{ ok: boolean }, never, CaseRepository> {}`,
+  SC3045: `import * as Effect from "effect/Effect";
+@Post("/cases", { effect: { required: true, errors: [], dependencies: [] } })
+accept(): Effect<{ ok: boolean }, never, never> {
+  Effect.runPromise(program);
+}`,
+  SC3046: `@Post("/cases", { effect: { required: true, errors: [], dependencies: [] } })
+accept(): Effect<{ ok: boolean }, never, never> {
+  throw new Error("unexpected");
+}`,
+  SC3047: `@Post("/cases", { effect: { required: true, errors: [], dependencies: [] } })
+accept(): Promise<{ ok: boolean }> {
+  return Promise.resolve({ ok: true });
+}`,
   SC3027: `@Get("/items", { responses: { "4XX": ItemResponse, "4xx": ItemResponse } })
 list() {}`,
   SC5001: `@Injectable({ providedIn: "root" })

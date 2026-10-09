@@ -66,6 +66,11 @@ export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
     requireRouteEffects: true,
     requireErrorMappings: true,
     requireDependencies: true,
+    requireTaggedErrorTypes: true,
+    requireExactDependencyTypes: true,
+    requireTimeoutForDependencies: true,
+    forbidDirectRuntimeExecution: true,
+    forbidDirectThrows: true,
   },
 };
 
@@ -154,10 +159,28 @@ function validateGovernanceConfig(config: {
   }
   if (config.effect !== undefined) {
     if (!isRecord(config.effect) || Object.keys(config.effect).some((key) =>
-      !["requireRouteEffects", "requireErrorMappings", "requireDependencies"].includes(key))) {
-      throw new Error("effect accepts requireRouteEffects, requireErrorMappings and requireDependencies.");
+      ![
+        "requireRouteEffects",
+        "requireErrorMappings",
+        "requireDependencies",
+        "requireTaggedErrorTypes",
+        "requireExactDependencyTypes",
+        "requireTimeoutForDependencies",
+        "forbidDirectRuntimeExecution",
+        "forbidDirectThrows",
+      ].includes(key))) {
+      throw new Error("effect contains an unsupported governance option.");
     }
-    for (const key of ["requireRouteEffects", "requireErrorMappings", "requireDependencies"]) {
+    for (const key of [
+      "requireRouteEffects",
+      "requireErrorMappings",
+      "requireDependencies",
+      "requireTaggedErrorTypes",
+      "requireExactDependencyTypes",
+      "requireTimeoutForDependencies",
+      "forbidDirectRuntimeExecution",
+      "forbidDirectThrows",
+    ]) {
       if (config.effect[key] !== undefined && typeof config.effect[key] !== "boolean") {
         throw new Error(`effect.${key} must be boolean.`);
       }

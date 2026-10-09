@@ -89,6 +89,11 @@ export default defineSupacloudConfig({
     requireRouteEffects: true,
     requireErrorMappings: true,
     requireDependencies: true,
+    requireTaggedErrorTypes: true,
+    requireExactDependencyTypes: true,
+    requireTimeoutForDependencies: true,
+    forbidDirectRuntimeExecution: true,
+    forbidDirectThrows: true,
   },
   typeSafety: { scanProductionSource: true, noAnyInGenerated: true },
   disallowControllerDirectDb: true,
@@ -357,6 +362,17 @@ export class ApproveReview {
   }
 }
 
+type ReviewError =
+    | { readonly _tag: "AUTHENTICATION_REQUIRED" }
+    | { readonly _tag: "REVIEW_NOT_FOUND" }
+    | { readonly _tag: "REVIEW_PERMISSION_DENIED" }
+    | { readonly _tag: "REVIEW_CONFLICT" }
+    | { readonly _tag: "FEATURE_TRANSITION_CONFLICT" }
+    | { readonly _tag: "COMMAND_IDEMPOTENCY_CONFLICT" }
+    | { readonly _tag: "COMMAND_REJECTED" }
+    | { readonly _tag: "REVIEW_COMMAND_UNSUPPORTED" }
+    | { readonly _tag: "COMMAND_OUTCOME_UNKNOWN" };
+
 @Controller("/reviews")
 export class ReviewController {
   constructor(@Inject(ApproveReview) private readonly approveReview: ApproveReview) {}
@@ -389,7 +405,7 @@ export class ReviewController {
       retry: "none",
     },
   })
-  approve(@Param("id") id: string, @Body() body: { expectedVersion: number }): Effect.Effect<Review, unknown, never> {
+  approve(@Param("id") id: string, @Body() body: { expectedVersion: number }): Effect.Effect<Review, ReviewError, never> {
     return Effect.promise(() => this.approveReview.execute(id, body.expectedVersion));
   }
 }

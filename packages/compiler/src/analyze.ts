@@ -11,6 +11,7 @@ import type {
   DependencyGraphCache,
   Diagnostic,
   EffectErrorMappingNode,
+  EffectCompilerOptions,
   EffectRouteNode,
   HandlerParamNode,
   FunctionalInjectNode,
@@ -132,7 +133,24 @@ interface AnalysisContext {
   /** Logical resource name -> actual declaration, for duplicate detection and lookups. */
   infraResourceClasses: Map<string, ClassDeclaration>;
   diagnostics: Diagnostic[];
+  effectOptions: RequiredEffectCompilerOptions;
 }
+
+interface RequiredEffectCompilerOptions {
+  requireTaggedErrorTypes: boolean;
+  requireExactDependencyTypes: boolean;
+  requireTimeoutForDependencies: boolean;
+  forbidDirectRuntimeExecution: boolean;
+  forbidDirectThrows: boolean;
+}
+
+const DEFAULT_EFFECT_ANALYSIS_OPTIONS: RequiredEffectCompilerOptions = {
+  requireTaggedErrorTypes: true,
+  requireExactDependencyTypes: true,
+  requireTimeoutForDependencies: true,
+  forbidDirectRuntimeExecution: true,
+  forbidDirectThrows: true,
+};
 
 function nodeText(node: ts.Node): string {
   return node.getText(node.getSourceFile());
@@ -204,6 +222,7 @@ export async function analyzeProject(
   include?: string[],
   cache?: DependencyGraphCache,
   changedPaths?: string[],
+  effectOptions: EffectCompilerOptions = {},
 ): Promise<ApplicationGraph> {
   const session = cache?.programSession ?? createIncrementalProgramSession(rootDir);
   if (cache) cache.programSession = session;
@@ -236,7 +255,20 @@ export async function analyzeProject(
     infraResources: new Map(),
     infraResourceClasses: new Map(),
     diagnostics: [],
+    effectOptions: {
+      ...DEFAULT_EFFECT_ANALYSIS_OPTIONS,
+      requireTaggedErrorTypes: effectOptions.requireTaggedErrorTypes ?? DEFAULT_EFFECT_ANALYSIS_OPTIONS.requireTaggedErrorTypes,
+      requireExactDependencyTypes: effectOptions.requireExactDependencyTypes ?? DEFAULT_EFFECT_ANALYSIS_OPTIONS.requireExactDependencyTypes,
+      requireTimeoutForDependencies: effectOptions.requireTimeoutForDependencies ?? DEFAULT_EFFECT_ANALYSIS_OPTIONS.requireTimeoutForDependencies,
+      forbidDirectRuntimeExecution: effectOptions.forbidDirectRuntimeExecution ?? DEFAULT_EFFECT_ANALYSIS_OPTIONS.forbidDirectRuntimeExecution,
+      forbidDirectThrows: effectOptions.forbidDirectThrows ?? DEFAULT_EFFECT_ANALYSIS_OPTIONS.forbidDirectThrows,
+    },
   };
+  if (ctx.effectOptions.forbidDirectRuntimeExecution) {
+    for (const sourceFile of sourceFiles) {
+      scanEffectRuntimeEscapes(sourceFile, ctx);
+    }
+  }
   const nativeTraitFiles = new Map<string, Set<string>>();
   for (const diagnostic of session.getDiagnostics()) {
     ctx.diagnostics.push(toCompilerDiagnostic(diagnostic, rootDir));
@@ -1608,11 +1640,175 @@ function declaredClassType(declaration: ClassDeclaration, ctx: AnalysisContext):
 }
 
 function typeArgumentsOf(type: ts.Type, ctx: AnalysisContext): readonly ts.Type[] {
-  return isTypeReference(type) ? ctx.checker.getTypeArguments(type) : [];
+  if (!isTypeReference(type)) return [];
+  const argumentsFromChecker = ctx.checker.getTypeArguments(type);
+  if (argumentsFromChecker.length > 0) return argumentsFromChecker;
+  const reference = type as ts.TypeReference & {
+    resolvedTypeArguments?: readonly ts.Type[];
+    aliasTypeArguments?: readonly ts.Type[];
+  };
+  if (reference.resolvedTypeArguments && reference.resolvedTypeArguments.length > 0) {
+    return reference.resolvedTypeArguments;
+  }
+  return reference.aliasTypeArguments ?? [];
 }
 
 function isTypeReference(type: ts.Type): type is ts.TypeReference {
   return "target" in type;
+}
+
+function effectTypeArgumentsOf(
+  type: ts.Type | undefined,
+  ctx: AnalysisContext,
+): readonly [ts.Type, ts.Type, ts.Type] | undefined {
+  if (!type) return undefined;
+  const reference = isTypeReference(type) ? type : undefined;
+  const target = reference?.target ?? type;
+  const symbol = target.aliasSymbol ?? target.getSymbol();
+  const text = ctx.checker.typeToString(type, undefined, ts.TypeFormatFlags.NoTruncation);
+  if (symbol?.getName() !== "Effect" && !/^(?:Effect\.)?Effect</.test(text)) return undefined;
+  const args = typeArgumentsOf(type, ctx);
+  return args.length >= 3
+    ? [args[0]!, args[1]!, args[2]!]
+    : undefined;
+}
+
+function effectTypeName(type: ts.Type, location: ts.Node, ctx: AnalysisContext): string {
+  return ctx.checker.typeToString(type, location, ts.TypeFormatFlags.NoTruncation);
+}
+
+function stringLiteralTypeValue(type: ts.Type): string | undefined {
+  return (type.flags & ts.TypeFlags.StringLiteral) !== 0
+    ? (type as ts.StringLiteralType).value
+    : undefined;
+}
+
+function effectFailureTags(
+  type: ts.Type,
+  location: ts.Node,
+  ctx: AnalysisContext,
+): { tags: string[]; invalid: boolean } {
+  if ((type.flags & ts.TypeFlags.Never) !== 0) return { tags: [], invalid: false };
+  if ((type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) {
+    return { tags: [], invalid: true };
+  }
+  if (type.isUnion()) {
+    return type.types.reduce<{ tags: string[]; invalid: boolean }>(
+      (result, part) => {
+        const next = effectFailureTags(part, location, ctx);
+        result.tags.push(...next.tags);
+        result.invalid ||= next.invalid;
+        return result;
+      },
+      { tags: [], invalid: false },
+    );
+  }
+  const apparent = ctx.checker.getApparentType(type);
+  for (const propertyName of ["_tag", "tag"]) {
+    const property = ctx.checker.getPropertyOfType(apparent, propertyName);
+    if (!property) continue;
+    const propertyType = ctx.checker.getTypeOfSymbolAtLocation(property, location);
+    const tag = stringLiteralTypeValue(propertyType);
+    if (tag) return { tags: [tag], invalid: false };
+  }
+  return { tags: [], invalid: true };
+}
+
+function effectEnvironmentNames(
+  type: ts.Type,
+  location: ts.Node,
+  ctx: AnalysisContext,
+): { names: string[]; invalid: boolean } {
+  if ((type.flags & ts.TypeFlags.Never) !== 0) return { names: [], invalid: false };
+  if ((type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) {
+    return { names: [], invalid: true };
+  }
+  if (type.isUnion() || type.isIntersection()) {
+    return type.types.reduce<{ names: string[]; invalid: boolean }>(
+      (result, part) => {
+        const next = effectEnvironmentNames(part, location, ctx);
+        result.names.push(...next.names);
+        result.invalid ||= next.invalid;
+        return result;
+      },
+      { names: [], invalid: false },
+    );
+  }
+  const literal = stringLiteralTypeValue(type);
+  if (literal) return { names: [literal], invalid: false };
+  const symbolName = type.getSymbol()?.getName();
+  if (symbolName && symbolName !== "__type" && symbolName !== "__object") {
+    return { names: [symbolName], invalid: false };
+  }
+  const text = effectTypeName(type, location, ctx).trim();
+  if (text && text !== "object") return { names: [text], invalid: false };
+  return { names: [], invalid: true };
+}
+
+function sortedUnique(values: readonly string[]): string[] {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right, "en"));
+}
+
+function pushEffectDiagnostic(
+  ctx: AnalysisContext,
+  code: string,
+  file: string,
+  line: number,
+  message: string,
+  suggestion: string,
+): void {
+  const metadata = COMPILER_DIAGNOSTIC_CODES[code];
+  ctx.diagnostics.push({
+    severity: "error",
+    code,
+    ...(metadata ? { errorCode: metadata.code, docsUrl: metadata.docsUrl } : {}),
+    file,
+    line,
+    message,
+    suggestion,
+  });
+}
+
+function scanEffectRuntimeEscapes(sourceFile: SourceFile, ctx: AnalysisContext): void {
+  const namespaceBindings = new Set<string>();
+  const runtimeBindings = new Set<string>();
+  for (const statement of sourceFile.statements) {
+    if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
+    if (statement.moduleSpecifier.text !== "effect/Effect" && statement.moduleSpecifier.text !== "effect/Runtime") continue;
+    const clause = statement.importClause;
+    if (!clause) continue;
+    if (clause.name) namespaceBindings.add(clause.name.text);
+    if (clause.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
+      namespaceBindings.add(clause.namedBindings.name.text);
+    } else if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+      for (const element of clause.namedBindings.elements) {
+        const imported = element.propertyName?.text ?? element.name.text;
+        if (["runPromise", "runPromiseExit", "runSync", "runFork"].includes(imported)) {
+          runtimeBindings.add(element.name.text);
+        }
+      }
+    }
+  }
+  if (namespaceBindings.size === 0 && runtimeBindings.size === 0) return;
+  for (const call of descendantsOfKind<CallExpression>(sourceFile, ts.isCallExpression)) {
+    let runtimeName: string | undefined;
+    if (ts.isPropertyAccessExpression(call.expression)
+      && namespaceBindings.has(call.expression.expression.getText(sourceFile))
+      && ["runPromise", "runPromiseExit", "runSync", "runFork"].includes(call.expression.name.text)) {
+      runtimeName = call.expression.name.text;
+    } else if (ts.isIdentifier(call.expression) && runtimeBindings.has(call.expression.text)) {
+      runtimeName = call.expression.text;
+    }
+    if (!runtimeName) continue;
+    pushEffectDiagnostic(
+      ctx,
+      "effect-direct-runtime-execution",
+      sourcePath(ctx.rootDir, sourceFile.fileName),
+      lineOf(call),
+      `Direct ${runtimeName} execution escapes the Effect boundary.`,
+      "Return the Effect program to the Elysia boundary; only the framework adapter may interpret it.",
+    );
+  }
 }
 
 function isUnknownOrAny(type: ts.Type): boolean {
@@ -1681,7 +1877,8 @@ function parseController(
         handler: propertyName(method.name),
       };
       const signature = ctx.checker.getSignatureFromDeclaration(method);
-      const resultType = signature && ctx.checker.typeToString(signature.getReturnType());
+      const returnType = signature?.getReturnType();
+      const resultType = returnType && ctx.checker.typeToString(returnType);
       if (resultType && /\bResponse\b/.test(resultType)) route.nativeResponse = true;
       const pathParams: string[] = [];
       const paramRegex = /:([a-zA-Z0-9_]+)/g;
@@ -1981,6 +2178,18 @@ function parseController(
                 });
               } else {
                 effect.dependencies = dependenciesExpr.elements.map((element) => (element as ts.StringLiteral).text);
+                if (new Set(effect.dependencies).size !== effect.dependencies.length) {
+                  ctx.diagnostics.push({
+                    severity: "error",
+                    code: "invalid-effect-dependencies",
+                    errorCode: "SC3033",
+                    docsUrl: "https://supacloud.dev/errors/SC3033",
+                    file,
+                    line: lineOf(dependenciesExpr),
+                    message: `Route ${route.handler} effect.dependencies must not contain duplicate service names.`,
+                    suggestion: "List each logical Effect dependency exactly once.",
+                  });
+                }
               }
             }
             const errorsExpr = getProp(effectObject, "errors");
@@ -2029,10 +2238,33 @@ function parseController(
                   errors.push({ tag, code, status, ...(message === undefined ? {} : { message }) });
                 }
                 effect.errors = errors;
+                if (new Set(errors.map((entry) => entry.tag)).size !== errors.length) {
+                  ctx.diagnostics.push({
+                    severity: "error",
+                    code: "invalid-effect-errors",
+                    errorCode: "SC3034",
+                    docsUrl: "https://supacloud.dev/errors/SC3034",
+                    file,
+                    line: lineOf(errorsExpr),
+                    message: `Route ${route.handler} effect.errors must not contain duplicate tags.`,
+                    suggestion: "Map each tagged failure exactly once.",
+                  });
+                }
               }
             }
             route.effect = effect;
-            if (!resultType || !/\bEffect(?:\.Effect)?(?:<|\s)/.test(resultType)) {
+            const effectArguments = effectTypeArgumentsOf(returnType, ctx);
+            const promiseReturn = Boolean(resultType && /\bPromise(?:<|\s)/.test(resultType));
+            if (promiseReturn) {
+              pushEffectDiagnostic(
+                ctx,
+                "effect-promise-return",
+                file,
+                lineOf(method),
+                `Route ${route.handler} returns Promise instead of an Effect program.`,
+                "Return Effect.Effect<Success, Failure, Requirements>; the Elysia boundary owns Promise interpretation.",
+              );
+            } else if (!effectArguments) {
               ctx.diagnostics.push({
                 severity: "error",
                 code: "effect-return-type",
@@ -2044,18 +2276,82 @@ function parseController(
                 suggestion: "Return Effect.Effect<Success, Failure, Requirements> from the handler.",
               });
             }
-            for (const dependency of effect.dependencies ?? []) {
-              if (!resultType?.includes(dependency)) {
-                ctx.diagnostics.push({
-                  severity: "error",
-                  code: "effect-dependency-type",
-                  errorCode: "SC3040",
-                  docsUrl: "https://supacloud.dev/errors/SC3040",
+            if (effectArguments) {
+              const [, failureType, environmentType] = effectArguments;
+              const failure = effectFailureTags(failureType, method, ctx);
+              if (ctx.effectOptions.requireTaggedErrorTypes && failure.invalid) {
+                pushEffectDiagnostic(
+                  ctx,
+                  "effect-error-type",
                   file,
-                  line: lineOf(method),
-                  message: `Route ${route.handler} declares Effect dependency "${dependency}", but it is absent from the return type environment ${resultType ?? "unknown"}.`,
-                  suggestion: "Keep effect.dependencies aligned with the third Effect type parameter.",
-                });
+                  lineOf(method),
+                  `Route ${route.handler} must use never or a tagged failure union in Effect's error channel, not ${effectTypeName(failureType, method, ctx)}.`,
+                  "Replace unknown/any with never or a union of objects carrying a literal _tag.",
+                );
+              } else if (ctx.effectOptions.requireTaggedErrorTypes && effect.errors !== undefined && !failure.invalid) {
+                const declaredTags = sortedUnique(effect.errors.map((entry) => entry.tag));
+                const typedTags = sortedUnique(failure.tags);
+                if (declaredTags.join("\u0000") !== typedTags.join("\u0000")) {
+                  pushEffectDiagnostic(
+                    ctx,
+                    "effect-error-mapping-type",
+                    file,
+                    lineOf(method),
+                    `Route ${route.handler} maps [${declaredTags.join(", ")}], but its Effect failure type declares [${typedTags.join(", ")}].`,
+                    "Make effect.errors and the Effect error type the same tagged union; do not hide unmapped failures.",
+                  );
+                }
+              }
+
+              const environment = effectEnvironmentNames(environmentType, method, ctx);
+              if (ctx.effectOptions.requireExactDependencyTypes && effect.dependencies !== undefined) {
+                if (environment.invalid) {
+                  pushEffectDiagnostic(
+                    ctx,
+                    "effect-dependency-mismatch",
+                    file,
+                    lineOf(method),
+                    `Route ${route.handler} uses an Effect environment that cannot be represented by its explicit dependency list.`,
+                    "Use named service types or never in the third Effect type parameter.",
+                  );
+                } else {
+                  const declaredDependencies = sortedUnique(effect.dependencies);
+                  const typedDependencies = sortedUnique(environment.names);
+                  if (declaredDependencies.join("\u0000") !== typedDependencies.join("\u0000")) {
+                    pushEffectDiagnostic(
+                      ctx,
+                      "effect-dependency-mismatch",
+                      file,
+                      lineOf(method),
+                      `Route ${route.handler} declares dependencies [${declaredDependencies.join(", ")}], but its Effect environment is [${typedDependencies.join(", ")}].`,
+                      "Make effect.dependencies exactly match the third Effect type parameter.",
+                    );
+                  }
+                }
+              }
+              if (ctx.effectOptions.requireTimeoutForDependencies
+                && (effect.dependencies?.length ?? 0) > 0
+                && effect.timeoutMs === undefined) {
+                pushEffectDiagnostic(
+                  ctx,
+                  "effect-timeout-required",
+                  file,
+                  lineOf(method),
+                  `Route ${route.handler} declares external Effect dependencies without a timeout.`,
+                  "Add a positive effect.timeoutMs so external I/O cannot occupy a request indefinitely.",
+                );
+              }
+            }
+            if (ctx.effectOptions.forbidDirectThrows && method.body) {
+              for (const throwStatement of descendantsOfKind(method.body, ts.isThrowStatement)) {
+                pushEffectDiagnostic(
+                  ctx,
+                  "effect-direct-throw",
+                  file,
+                  lineOf(throwStatement),
+                  `Route ${route.handler} throws directly instead of representing failure in Effect.`,
+                  "Use Effect.fail with a tagged error value and map it in effect.errors.",
+                );
               }
             }
           }

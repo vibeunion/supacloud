@@ -34,7 +34,7 @@ async function renderOptionalGraphql(options: CompileOptions): Promise<GraphqlAr
  */
 export async function compileProject(options: CompileOptions): Promise<CompileResult> {
   options = withDefaultGovernance(options);
-  const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths);
+  const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths, options.effect);
   const diagnostics: Diagnostic[] = [
     ...(graph.diagnostics ?? []),
     ...validateGraph(graph, options),
@@ -105,7 +105,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
  */
 export async function checkProject(options: CompileOptions): Promise<CheckProjectResult> {
   options = withDefaultGovernance(options);
-  const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths);
+  const graph = await analyzeProject(options.rootDir, options.include, options.cache, options.changedPaths, options.effect);
   const diagnostics: Diagnostic[] = [
     ...(graph.diagnostics ?? []),
     ...validateGraph(graph, options),

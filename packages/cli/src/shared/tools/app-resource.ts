@@ -46,7 +46,7 @@ export class ${className}Controller {
         responses: { 200: ${className}Response },
         effect: { required: true, dependencies: [], errors: [], retry: "none" },
     })
-    find(@Param("id") id: string): Effect.Effect<${className}Result, unknown, never> {
+    find(@Param("id") id: string): Effect.Effect<${className}Result, never, never> {
         return Effect.promise(() => this.service.find(id));
     }
 }

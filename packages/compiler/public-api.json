@@ -6,7 +6,7 @@
     {
       "name": "analyzeProject",
       "kind": "value",
-      "signature": "export declare function analyzeProject(rootDir: string, include?: string[], cache?: DependencyGraphCache, changedPaths?: string[]): Promise<ApplicationGraph>;"
+      "signature": "export declare function analyzeProject(rootDir: string, include?: string[], cache?: DependencyGraphCache, changedPaths?: string[], effectOptions?: EffectCompilerOptions): Promise<ApplicationGraph>;"
     },
     {
       "name": "ANGULAR_ENTERPRISE_RULES",
@@ -431,7 +431,7 @@
     {
       "name": "EffectCompilerOptions",
       "kind": "type",
-      "signature": "export interface EffectCompilerOptions {\n    requireRouteEffects?: boolean;\n    requireErrorMappings?: boolean;\n    requireDependencies?: boolean;\n}"
+      "signature": "export interface EffectCompilerOptions {\n    requireRouteEffects?: boolean;\n    requireErrorMappings?: boolean;\n    requireDependencies?: boolean;\n    requireTaggedErrorTypes?: boolean;\n    requireExactDependencyTypes?: boolean;\n    requireTimeoutForDependencies?: boolean;\n    forbidDirectRuntimeExecution?: boolean;\n    forbidDirectThrows?: boolean;\n}"
     },
     {
       "name": "EffectErrorMappingNode",
