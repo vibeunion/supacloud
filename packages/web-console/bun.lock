@@ -13,7 +13,7 @@
         "@svadmin/ui": "0.82.0",
         "@tanstack/svelte-query": "^6.3.0",
         "highlight.js": "^11.12.0",
-        "isomorphic-dompurify": "^4.3.0",
+        "isomorphic-dompurify": "^4.4.0",
         "lucide-svelte": "^1.0.1",
         "marked": "^18.0.13",
         "marked-highlight": "^2.2.4",
@@ -798,7 +798,7 @@
 
     "is-reference": ["is-reference@3.0.3", "", { "dependencies": { "@types/estree": "^1.0.6" } }, "sha512-ixkJoqQvAP88E6wLydLGGqCJsrFUnqoH6HnaczB8XmDH1oaWU+xxdptvikTgaEhtZ53Ky6YXiBuUI2WXLMCwjw=="],
 
-    "isomorphic-dompurify": ["isomorphic-dompurify@4.3.0", "", { "dependencies": { "dompurify": "^3.4.12", "jsdom": "^30.0.0" } }, "sha512-prq6x6sxb/da0HP4S81hiK2Hc444CIvNeZ+gj7A9oDE0r6tqUmQ90ylb9BwhP44ZSCxwUAcTPNoQY0mmjpRHcA=="],
+    "isomorphic-dompurify": ["isomorphic-dompurify@4.4.0", "", { "dependencies": { "dompurify": "^3.4.12", "jsdom": "^30.0.0" } }, "sha512-8F6m5CqcxtY3TLBOKibiPMmSIDa6bMAiiLKZ0ksQad1liA8ZtOnBhjoLFGkBB3noVwj5NeCR9p8vD3uXuudF+Q=="],
 
     "jiti": ["jiti@2.7.0", "", { "bin": { "jiti": "lib/jiti-cli.mjs" } }, "sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ=="],
 
