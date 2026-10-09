@@ -33,7 +33,7 @@
         "@types/papaparse": "^5.5.2",
         "@typescript/native": "npm:typescript@^7.0.2",
         "autoprefixer": "^10.6.1",
-        "bits-ui": "^2.19.3",
+        "bits-ui": "^2.19.5",
         "clsx": "^2.1.1",
         "jsdom": "30.0.1",
         "mode-watcher": "^1.1.0",
@@ -542,7 +542,7 @@
 
     "bidi-js": ["bidi-js@1.0.3", "", { "dependencies": { "require-from-string": "^2.0.2" } }, "sha512-RKshQI1R3YQ+n9YJz2QQ147P66ELpa1FQEg20Dk8oW9t2KgLbpDLLp9aGZ7y8WHSshDknG0bknqGw5/tyCs5tw=="],
 
-    "bits-ui": ["bits-ui@2.19.3", "", { "dependencies": { "@floating-ui/core": "^1.7.1", "@floating-ui/dom": "^1.7.1", "esm-env": "^1.1.2", "runed": "^0.35.1", "svelte-toolbelt": "^0.10.6", "tabbable": "^6.2.0" }, "peerDependencies": { "@internationalized/date": "^3.8.1", "svelte": "^5.33.0" } }, "sha512-04COIqqht1h0YRnVTJVHy3+F8NhzS5x0eSM8eqvavaWmK/GLDTgYJW2h1CA//8hh9vSk4rG7rOvJ3QAIpCuYIw=="],
+    "bits-ui": ["bits-ui@2.19.5", "", { "dependencies": { "@floating-ui/core": "^1.7.1", "@floating-ui/dom": "^1.7.1", "esm-env": "^1.1.2", "runed": "^0.35.1", "svelte-toolbelt": "^0.10.6", "tabbable": "^6.2.0" }, "peerDependencies": { "@internationalized/date": "^3.8.1", "svelte": "^5.33.0" } }, "sha512-TEwkLSYElE5SE0fIdcItiFPfyg9vrR67N1Mt6VvZCqZo24dwTA1MpGVV3WeyIg7rfVAaZ0So8a0/dcnPngCoew=="],
 
     "browserslist": ["browserslist@4.28.9", "", { "dependencies": { "baseline-browser-mapping": "^2.11.20", "caniuse-lite": "^1.0.30001810", "electron-to-chromium": "^1.5.420", "node-releases": "^2.0.54", "update-browserslist-db": "^1.3.2" }, "bin": { "browserslist": "cli.js" } }, "sha512-EWazOblFYUvlGZcfGhPUPmYh3nikUxBVb+y9MJun5f3hBi812X+8MSQTujLBtgK3cf51fJWbWfOjyeO954d+Eg=="],
 
