@@ -32,7 +32,8 @@ export class ${className}Service {
     }
 }
 `,
-        [`${name}.controller.ts`]: `import { Controller, Get, Inject, Param } from "@supacloud/app";
+        [`${name}.controller.ts`]: `import * as Effect from "effect/Effect";
+import { Controller, Get, Inject, Param } from "@supacloud/app";
 import { ${className}Params, ${className}Response, type ${className}Result } from "./${name}.model";
 import { ${className}Service } from "./${name}.service";
 
@@ -40,9 +41,13 @@ import { ${className}Service } from "./${name}.service";
 export class ${className}Controller {
     constructor(@Inject(${className}Service) readonly service: Pick<${className}Service, "find">) {}
 
-    @Get("/:id", { params: ${className}Params, responses: { 200: ${className}Response } })
-    find(@Param("id") id: string): Promise<${className}Result> {
-        return this.service.find(id);
+    @Get("/:id", {
+        params: ${className}Params,
+        responses: { 200: ${className}Response },
+        effect: { required: true, dependencies: [], errors: [], retry: "none" },
+    })
+    find(@Param("id") id: string): Effect.Effect<${className}Result, unknown, never> {
+        return Effect.promise(() => this.service.find(id));
     }
 }
 `,
@@ -77,19 +82,20 @@ test("${name} preserves permission denial without a privileged fallback", async 
     await expect(service.find("example")).rejects.toBe(denied);
 });
 `,
-        [`${name}.controller.test.ts`]: `import { expect, test } from "bun:test";
+        [`${name}.controller.test.ts`]: `import * as Effect from "effect/Effect";
+import { expect, test } from "bun:test";
 import { ${className}Controller } from "./${name}.controller";
 
 test("${name} controller delegates to the supplied asynchronous read port", async () => {
     // Unit-test double only; the generated runtime service remains fail-closed.
     const controller = new ${className}Controller({ find: async (id) => ({ id }) });
-    expect(await controller.find("example")).toEqual({ id: "example" });
+    expect(await Effect.runPromise(controller.find("example"))).toEqual({ id: "example" });
 });
 
 test("${name} controller preserves an asynchronous read failure", async () => {
     const failure = new Error("read port unavailable");
     const controller = new ${className}Controller({ find: async () => { throw failure; } });
-    await expect(controller.find("example")).rejects.toBe(failure);
+    await expect(Effect.runPromise(controller.find("example"))).rejects.toThrow("read port unavailable");
 });
 `,
     };

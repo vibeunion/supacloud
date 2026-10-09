@@ -187,14 +187,16 @@ export class OrdersController {
     responses: { 200: HealthResult },
     effect: { required: true, dependencies: [], errors: [], retry: "none" },
   })
-  health() { return Effect.succeed({ ok: true }); }
+  health(): Effect.Effect<{ ok: boolean }, never, never> { return Effect.succeed({ ok: true }); }
 
   @Get("/:id", {
     params: OrderParams,
     responses: { 200: OrderResult },
     effect: { required: true, dependencies: [], errors: [], retry: "none" },
   })
-  get(@Param("id") id: string) { return Effect.succeed({ id, name: "demo" }); }
+  get(@Param("id") id: string): Effect.Effect<{ id: string; name: string }, never, never> {
+    return Effect.succeed({ id, name: "demo" });
+  }
 
   @Post("/", {
     body: CreateOrderBody,
@@ -387,7 +389,7 @@ export class HealthController {
     responses: { 200: HealthResult },
     effect: { required: true, dependencies: [], errors: [], retry: "none" },
   })
-  health() { return Effect.succeed({ ok: true }); }
+  health(): Effect.Effect<{ ok: boolean }, never, never> { return Effect.succeed({ ok: true }); }
 }
 
 @Module({ name: "health", tags: ["type:feature"], controllers: [HealthController] })

@@ -365,7 +365,7 @@ export class ReviewController {
     responses: { 200: HealthResult },
     effect: { required: true, dependencies: [], errors: [], retry: "none" },
   })
-  health() { return Effect.succeed({ ok: true }); }
+  health(): Effect.Effect<{ ok: boolean }, never, never> { return Effect.succeed({ ok: true }); }
 
   @Post("/:id/approve", {
     command: ApproveReview,
@@ -376,13 +376,20 @@ export class ReviewController {
       required: true,
       dependencies: [],
       errors: [
+        { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
         { tag: "REVIEW_NOT_FOUND", status: 404, code: "REVIEW_NOT_FOUND" },
+        { tag: "REVIEW_PERMISSION_DENIED", status: 403, code: "REVIEW_PERMISSION_DENIED" },
         { tag: "REVIEW_CONFLICT", status: 409, code: "REVIEW_CONFLICT" },
+        { tag: "FEATURE_TRANSITION_CONFLICT", status: 409, code: "FEATURE_TRANSITION_CONFLICT" },
+        { tag: "COMMAND_IDEMPOTENCY_CONFLICT", status: 409, code: "COMMAND_IDEMPOTENCY_CONFLICT" },
+        { tag: "COMMAND_REJECTED", status: 403, code: "COMMAND_REJECTED" },
+        { tag: "REVIEW_COMMAND_UNSUPPORTED", status: 501, code: "REVIEW_COMMAND_UNSUPPORTED" },
+        { tag: "COMMAND_OUTCOME_UNKNOWN", status: 503, code: "COMMAND_OUTCOME_UNKNOWN" },
       ],
       retry: "none",
     },
   })
-  approve(@Param("id") id: string, @Body() body: { expectedVersion: number }) {
+  approve(@Param("id") id: string, @Body() body: { expectedVersion: number }): Effect.Effect<Review, unknown, never> {
     return Effect.promise(() => this.approveReview.execute(id, body.expectedVersion));
   }
 }

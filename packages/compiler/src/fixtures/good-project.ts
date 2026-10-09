@@ -14,6 +14,8 @@ import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./runtime-source";
 export const GOOD_PROJECT_FILES: Record<string, string> = {
   "tsconfig.json": FIXTURE_TSCONFIG,
   "src/runtime.ts": RUNTIME_SOURCE,
+  "src/effect.ts": `export type Effect<A, E, R> = { readonly _effect: [A, E, R] };
+`,
 
   "src/features/shared/tokens.ts": `import { InjectionToken } from "../../runtime";
 
@@ -115,6 +117,7 @@ export class AcceptCaseCommand {
 `,
 
   "src/features/case/case.controller.ts": `import { Controller, Inject, Post, REQUEST_CONTEXT } from "../../runtime";
+import type { Effect } from "../../effect";
 import { AUDIT_SERVICE, CASE_REPOSITORY } from "../shared/tokens";
 import { AcceptCaseCommand } from "./accept-case.command";
 import { AcceptParams, AcceptResult, CreateCaseBody } from "./contracts";
@@ -132,9 +135,10 @@ export class CaseController {
     params: AcceptParams,
     response: AcceptResult,
     command: AcceptCaseCommand,
+    effect: { required: true, dependencies: [], errors: [], retry: "none" },
   })
-  accept(): { ok: boolean } {
-    return { ok: true };
+  accept(): Effect<{ ok: boolean }, never, never> {
+    return {} as Effect<{ ok: boolean }, never, never>;
   }
 }
 `,

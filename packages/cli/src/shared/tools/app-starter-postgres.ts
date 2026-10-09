@@ -45,6 +45,10 @@ function rows(value: unknown): Record<string, unknown>[] {
   if (!Array.isArray(value)) throw new TypeError("Invalid database result");
   return value.map(record);
 }
+function isPublicConflict(value: unknown): boolean {
+  return value instanceof ApplicationError && value.status === 409
+    || isRecord(value) && value.expose === true && value.status === 409 && typeof value.code === "string";
+}
 function input(value: unknown): Approval {
   const item = record(value);
   if (typeof item.id !== "string" || !item.id.length || typeof item.expectedVersion !== "number"
@@ -159,7 +163,7 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
           execute: tx => scope.run(tx, async () => {
             try { return await next(); }
             catch (error) {
-              if (error instanceof ApplicationError && error.status === 409) {
+              if (isPublicConflict(error)) {
                 throw new CommandError("COMMAND_IDEMPOTENCY_CONFLICT");
               }
               throw error;

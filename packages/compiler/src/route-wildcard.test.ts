@@ -48,7 +48,7 @@ test("wildcard and named parameter OpenAPI collisions fail before emission", asy
   try {
     const source = GOOD_PROJECT_FILES["src/features/case/case.controller.ts"]
       .replace('"/:caseId/accept"', '"/files/*"')
-      .replace("  accept()", '  other() {}\n  @Post("/files/:wildcard", { response: AcceptResult })\n  accept()');
+      .replace("  accept()", '  other(): Effect<{ ok: boolean }, never, never> { return {} as Effect<{ ok: boolean }, never, never>; }\n  @Post("/files/:wildcard", { response: AcceptResult, effect: { required: true, dependencies: [], errors: [], retry: "none" } })\n  accept()');
     await writeFixtureProject(root, { ...GOOD_PROJECT_FILES, "src/features/case/case.controller.ts": source });
     const compiled = await compileProject({ rootDir: root, outDir: join(root, "generated"), generateOpenApi: true });
     expect(compiled.diagnostics.some(d => d.errorCode === "SC3007" && d.severity === "error"), JSON.stringify(compiled.diagnostics)).toBe(true);

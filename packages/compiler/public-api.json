@@ -166,7 +166,7 @@
     {
       "name": "CompileOptions",
       "kind": "type",
-      "signature": "export interface CompileOptions {\n    graphql?: GraphqlOptions;\n    requireRouteContracts?: boolean;\n    rootDir: string;\n    include?: string[];\n    outDir: string;\n    strict?: boolean;\n    moduleBoundaryPreset?: ModuleBoundaryPresetName;\n    moduleBoundaries?: ModuleBoundaryRule[];\n    allowRouteCommandBindings?: boolean;\n    commandCapabilities?: CommandExecutionCapabilities;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    writeOnError?: boolean;\n    generateClient?: boolean;\n    generateOpenApi?: boolean;\n    openApi?: OpenApiOptions;\n    generatePermissions?: boolean;\n    treeShakeUnusedProviders?: boolean;\n    cache?: DependencyGraphCache;\n    changedPaths?: string[];\n    typeSafety?: TypeSafetyOptions;\n}"
+      "signature": "export interface CompileOptions {\n    graphql?: GraphqlOptions;\n    requireRouteContracts?: boolean;\n    rootDir: string;\n    include?: string[];\n    outDir: string;\n    strict?: boolean;\n    moduleBoundaryPreset?: ModuleBoundaryPresetName;\n    moduleBoundaries?: ModuleBoundaryRule[];\n    allowRouteCommandBindings?: boolean;\n    commandCapabilities?: CommandExecutionCapabilities;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    writeOnError?: boolean;\n    generateClient?: boolean;\n    generateOpenApi?: boolean;\n    openApi?: OpenApiOptions;\n    generatePermissions?: boolean;\n    treeShakeUnusedProviders?: boolean;\n    cache?: DependencyGraphCache;\n    changedPaths?: string[];\n    typeSafety?: TypeSafetyOptions;\n    effect?: EffectCompilerOptions;\n}"
     },
     {
       "name": "compileOptionsFromConfig",
@@ -276,7 +276,7 @@
     {
       "name": "DEFAULT_SUPACLOUD_CONFIG",
       "kind": "value",
-      "signature": "export declare const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<SupaCloudConfig, \"include\" | \"moduleBoundaryPreset\" | \"moduleBoundaries\" | \"typeSafety\" | \"delivery\" | \"allowRouteCommandBindings\" | \"disallowControllerDirectDb\" | \"detectOrphanModules\" | \"openApi\">> & {\n    include: string[];\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n};"
+      "signature": "export declare const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<SupaCloudConfig, \"include\" | \"moduleBoundaryPreset\" | \"moduleBoundaries\" | \"typeSafety\" | \"delivery\" | \"allowRouteCommandBindings\" | \"disallowControllerDirectDb\" | \"detectOrphanModules\" | \"openApi\" | \"effect\">> & {\n    include: string[];\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n    effect: NonNullable<CompileOptions[\"effect\"]>;\n};"
     },
     {
       "name": "defineSupacloudConfig",
@@ -427,6 +427,26 @@
       "name": "DoctorResult",
       "kind": "type",
       "signature": "export interface DoctorResult {\n    checks: Array<{\n        name: string;\n        ok: boolean;\n        detail: string;\n    }>;\n    diagnostics: ApplicationGraph[\"diagnostics\"];\n    errors: number;\n}"
+    },
+    {
+      "name": "EffectCompilerOptions",
+      "kind": "type",
+      "signature": "export interface EffectCompilerOptions {\n    requireRouteEffects?: boolean;\n    requireErrorMappings?: boolean;\n    requireDependencies?: boolean;\n}"
+    },
+    {
+      "name": "EffectErrorMappingNode",
+      "kind": "type",
+      "signature": "export interface EffectErrorMappingNode {\n    tag: string;\n    status: number;\n    code: string;\n    message?: string;\n}"
+    },
+    {
+      "name": "EffectRetryPolicy",
+      "kind": "type",
+      "signature": "export type EffectRetryPolicy = \"none\" | \"explicit\";"
+    },
+    {
+      "name": "EffectRouteNode",
+      "kind": "type",
+      "signature": "export interface EffectRouteNode {\n    required: true;\n    errors?: EffectErrorMappingNode[];\n    dependencies?: string[];\n    retry?: EffectRetryPolicy;\n    maxAttempts?: number;\n    timeoutMs?: number;\n}"
     },
     {
       "name": "ENVIRONMENT_BINDING_REFERENCE_PATTERN",
@@ -1006,12 +1026,12 @@
     {
       "name": "resolveSupacloudConfig",
       "kind": "value",
-      "signature": "export declare function resolveSupacloudConfig(config?: SupaCloudConfig, cwd?: any): {\n    rootDir: string;\n    outDir: string;\n    include: string[];\n    strict: boolean;\n    requireRouteContracts: boolean;\n    generateClient: boolean;\n    generateOpenApi: boolean;\n    openApi?: NonNullable<CompileOptions[\"openApi\"]>;\n    generatePermissions: boolean;\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n    commandCapabilities?: CommandExecutionCapabilities;\n    moduleBoundaries?: NonNullable<CompileOptions[\"moduleBoundaries\"]>;\n    typeSafety?: NonNullable<CompileOptions[\"typeSafety\"]>;\n    allowRouteCommandBindings?: boolean;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    treeShakeUnusedProviders: boolean;\n    graphql?: GraphqlOptions;\n};"
+      "signature": "export declare function resolveSupacloudConfig(config?: SupaCloudConfig, cwd?: any): {\n    rootDir: string;\n    outDir: string;\n    include: string[];\n    strict: boolean;\n    requireRouteContracts: boolean;\n    generateClient: boolean;\n    generateOpenApi: boolean;\n    openApi?: NonNullable<CompileOptions[\"openApi\"]>;\n    generatePermissions: boolean;\n    moduleBoundaryPreset: ModuleBoundaryPresetName;\n    commandCapabilities?: CommandExecutionCapabilities;\n    moduleBoundaries?: NonNullable<CompileOptions[\"moduleBoundaries\"]>;\n    typeSafety?: NonNullable<CompileOptions[\"typeSafety\"]>;\n    allowRouteCommandBindings?: boolean;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    effect?: NonNullable<CompileOptions[\"effect\"]>;\n    treeShakeUnusedProviders: boolean;\n    graphql?: GraphqlOptions;\n};"
     },
     {
       "name": "RouteNode",
       "kind": "type",
-      "signature": "export interface RouteNode {\n    parse?: \"none\";\n    allowDeleteBody?: true;\n    contract?: {\n        body?: \"framework\" | \"domain\";\n        response?: \"framework\" | \"native-json\" | \"binary\" | \"stream\";\n        evidence?: string;\n    };\n    schemaKinds?: Partial<Record<\"body\" | \"params\" | \"query\" | \"headers\" | \"cookie\" | \"response\", \"opaque\" | \"declared\">>;\n    nativeResponse?: boolean;\n    method: \"GET\" | \"POST\" | \"PUT\" | \"PATCH\" | \"DELETE\" | \"HEAD\" | \"OPTIONS\";\n    path: string;\n    handler: string;\n    body?: string;\n    params?: string;\n    query?: string;\n    headers?: string;\n    cookie?: string;\n    response?: string;\n    responses?: Record<string, string>;\n    command?: string;\n    guards?: string[];\n    canMatch?: string[];\n    canDeactivate?: string[];\n    resolvers?: Record<string, string>;\n    redirectTo?: string;\n    pathMatch?: \"full\" | \"prefix\";\n    pathParams?: string[];\n    paramBindings?: string[];\n    queryBindings?: string[];\n    hasBodyBinding?: boolean;\n    paramTransforms?: Record<string, \"number\" | \"boolean\" | \"string\">;\n    paramDefaults?: Record<string, unknown>;\n    queryTransforms?: Record<string, \"number\" | \"boolean\" | \"string\">;\n    queryDefaults?: Record<string, unknown>;\n    title?: string;\n    data?: Record<string, unknown>;\n    handlerParams?: HandlerParamNode[];\n    aspects?: AspectRefNode[];\n}"
+      "signature": "export interface RouteNode {\n    parse?: \"none\";\n    allowDeleteBody?: true;\n    contract?: {\n        body?: \"framework\" | \"domain\";\n        response?: \"framework\" | \"native-json\" | \"binary\" | \"stream\";\n        evidence?: string;\n    };\n    schemaKinds?: Partial<Record<\"body\" | \"params\" | \"query\" | \"headers\" | \"cookie\" | \"response\", \"opaque\" | \"declared\">>;\n    nativeResponse?: boolean;\n    method: \"GET\" | \"POST\" | \"PUT\" | \"PATCH\" | \"DELETE\" | \"HEAD\" | \"OPTIONS\";\n    path: string;\n    handler: string;\n    body?: string;\n    params?: string;\n    query?: string;\n    headers?: string;\n    cookie?: string;\n    response?: string;\n    responses?: Record<string, string>;\n    effect?: EffectRouteNode;\n    command?: string;\n    guards?: string[];\n    canMatch?: string[];\n    canDeactivate?: string[];\n    resolvers?: Record<string, string>;\n    redirectTo?: string;\n    pathMatch?: \"full\" | \"prefix\";\n    pathParams?: string[];\n    paramBindings?: string[];\n    queryBindings?: string[];\n    hasBodyBinding?: boolean;\n    paramTransforms?: Record<string, \"number\" | \"boolean\" | \"string\">;\n    paramDefaults?: Record<string, unknown>;\n    queryTransforms?: Record<string, \"number\" | \"boolean\" | \"string\">;\n    queryDefaults?: Record<string, unknown>;\n    title?: string;\n    data?: Record<string, unknown>;\n    handlerParams?: HandlerParamNode[];\n    aspects?: AspectRefNode[];\n}"
     },
     {
       "name": "runDatabaseContractsFile",
@@ -1101,7 +1121,7 @@
     {
       "name": "SupaCloudConfig",
       "kind": "type",
-      "signature": "export interface SupaCloudConfig {\n    delivery?: DeliveryOptions;\n    graphql?: GraphqlOptions | false;\n    root?: string;\n    outDir?: string;\n    include?: string[];\n    strict?: boolean;\n    requireRouteContracts?: boolean;\n    generateClient?: boolean;\n    generateOpenApi?: boolean;\n    openApi?: NonNullable<CompileOptions[\"openApi\"]>;\n    generatePermissions?: boolean;\n    moduleBoundaryPreset?: ModuleBoundaryPresetName;\n    moduleBoundaries?: NonNullable<CompileOptions[\"moduleBoundaries\"]>;\n    typeSafety?: NonNullable<CompileOptions[\"typeSafety\"]>;\n    allowRouteCommandBindings?: boolean;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    commandCapabilities?: CommandExecutionCapabilities;\n    treeShakeUnusedProviders?: boolean;\n}"
+      "signature": "export interface SupaCloudConfig {\n    delivery?: DeliveryOptions;\n    graphql?: GraphqlOptions | false;\n    root?: string;\n    outDir?: string;\n    include?: string[];\n    strict?: boolean;\n    requireRouteContracts?: boolean;\n    generateClient?: boolean;\n    generateOpenApi?: boolean;\n    openApi?: NonNullable<CompileOptions[\"openApi\"]>;\n    generatePermissions?: boolean;\n    moduleBoundaryPreset?: ModuleBoundaryPresetName;\n    moduleBoundaries?: NonNullable<CompileOptions[\"moduleBoundaries\"]>;\n    typeSafety?: NonNullable<CompileOptions[\"typeSafety\"]>;\n    allowRouteCommandBindings?: boolean;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    effect?: NonNullable<CompileOptions[\"effect\"]>;\n    commandCapabilities?: CommandExecutionCapabilities;\n    treeShakeUnusedProviders?: boolean;\n}"
     },
     {
       "name": "SupaCloudMigration",
@@ -1154,6 +1174,11 @@
       "signature": "export interface TypeSafetyScanOptions extends TypeSafetyOptions {\n    rootDir: string;\n    include?: string[];\n    outDir?: string;\n    strict?: boolean;\n}"
     },
     {
+      "name": "validateEffectPolicies",
+      "kind": "value",
+      "signature": "export declare function validateEffectPolicies(graph: ApplicationGraph, options?: EffectCompilerOptions): Diagnostic[];"
+    },
+    {
       "name": "validateFeatureSpec",
       "kind": "value",
       "signature": "export declare function validateFeatureSpec(spec: FeatureSpecNode, module?: ModuleNode): Diagnostic[];"
@@ -1166,7 +1191,7 @@
     {
       "name": "ValidateOptions",
       "kind": "type",
-      "signature": "export interface ValidateOptions {\n    strict?: boolean;\n    generateOpenApi?: boolean;\n    moduleBoundaryPreset?: ModuleBoundaryPresetName;\n    moduleBoundaries?: ModuleBoundaryRule[];\n    allowRouteCommandBindings?: boolean;\n    commandCapabilities?: CommandExecutionCapabilities;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n}"
+      "signature": "export interface ValidateOptions {\n    strict?: boolean;\n    generateOpenApi?: boolean;\n    moduleBoundaryPreset?: ModuleBoundaryPresetName;\n    moduleBoundaries?: ModuleBoundaryRule[];\n    allowRouteCommandBindings?: boolean;\n    commandCapabilities?: CommandExecutionCapabilities;\n    disallowControllerDirectDb?: boolean;\n    detectOrphanModules?: boolean;\n    effect?: EffectCompilerOptions;\n}"
     },
     {
       "name": "validateRouteContracts",

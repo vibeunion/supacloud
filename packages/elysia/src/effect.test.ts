@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import * as Effect from "effect/Effect";
+import * as Cause from "effect/Cause";
+import * as Runtime from "effect/Runtime";
 import { Elysia } from "elysia";
-import { createModulePlugin } from "./index";
+import { ApplicationError, createModulePlugin } from "./index";
 import { createDefaultEffectRuntime, runCompiledEffect } from "./effect";
 import type { CompiledModule } from "./index";
 
@@ -22,6 +24,25 @@ test("maps tagged Effect failures to the declared public error", async () => {
   )).rejects.toMatchObject({
     status: 404,
     code: "ORDER_NOT_FOUND",
+    expose: true,
+  });
+});
+
+test("unwraps FiberFailure before mapping an ApplicationError", async () => {
+  const applicationError = new ApplicationError("Review state or version changed", {
+    status: 409,
+    code: "REVIEW_CONFLICT",
+  });
+  const fiberFailure = Runtime.makeFiberFailure(Cause.die(applicationError));
+  await expect(runCompiledEffect(
+    Effect.die(fiberFailure),
+    {
+      required: true,
+      errors: [{ tag: "REVIEW_CONFLICT", status: 409, code: "REVIEW_CONFLICT" }],
+    },
+  )).rejects.toMatchObject({
+    status: 409,
+    code: "REVIEW_CONFLICT",
     expose: true,
   });
 });

@@ -49,7 +49,8 @@ test("resource generation is async-ready without adding another validator or per
     const files = resourceScaffold("inventory", "Inventory");
     expect(files["inventory.service.ts"]).toContain("async find(id: string): Promise<InventoryResult>");
     expect(files["inventory.service.ts"]).toContain("return this.reader.readAuthorized(id)");
-    expect(files["inventory.controller.ts"]).toContain('find(@Param("id") id: string): Promise<InventoryResult>');
+    expect(files["inventory.controller.ts"]).toContain('find(@Param("id") id: string): Effect.Effect<InventoryResult, unknown, never>');
+    expect(files["inventory.controller.ts"]).toContain('effect: { required: true, dependencies: [], errors: [], retry: "none" }');
     expect(files["inventory.service.ts"]).not.toContain('from "elysia"');
     expect(files["inventory.model.ts"]).toContain("RouteHandlerOutput");
     expect(files["inventory.service.test.ts"]).toContain(".rejects.toThrow");

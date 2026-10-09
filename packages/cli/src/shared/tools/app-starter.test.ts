@@ -199,7 +199,8 @@ test("uploads are compiled routes with identity-derived paths and a separate mig
     expect(feature).toContain('"/:id/attachment-upload"');
     expect(feature).toContain('"/:id/attachment-registration"');
     expect(feature).toContain("@Inject(REQUEST_CONTEXT)");
-    expect(feature).toContain("UPLOADS_UNAVAILABLE");
+    expect(feature).toContain('{ tag: "UPLOADS_UNAVAILABLE", status: 501, code: "UPLOADS_UNAVAILABLE" }');
+    expect(feature).toContain('{ tag: "UPLOAD_OUTCOME_UNKNOWN", status: 503, code: "UPLOAD_OUTCOME_UNKNOWN" }');
     expect(adapter).toContain("requireTrustedIdentity");
     expect(adapter).toContain('name: "review.attach"');
     expect(adapter).toContain("review.attachment-bound");
