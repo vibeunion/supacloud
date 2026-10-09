@@ -361,6 +361,8 @@ EXAMPLES
   ${preferredCommand} context --format json
   ${preferredCommand} context --target CaseModule --format json
   ${preferredCommand} doctor
+  ${preferredCommand} db context --root . --module_file db/modules.ts --module cases
+  ${preferredCommand} db context --root . --module_file db/modules.ts --target public.case_create
   ${preferredCommand} db lint --root . --module_file db/modules.ts
   ${preferredCommand} db explain --target public.cases --module_file db/modules.ts
   ${preferredCommand} db module_check --module_file db/modules.ts --database_url "postgresql://..."

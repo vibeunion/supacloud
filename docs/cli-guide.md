@@ -229,6 +229,8 @@ supacloud-cli app export-tools
 supacloud-cli app export-tools --format json
 
 # SQL governance over defineDatabaseModule sources
+supacloud-cli db context --root . --module_file db/modules.ts --module cases
+supacloud-cli db context --root . --module_file db/modules.ts --target public.case_create
 supacloud-cli db lint --module_file db/modules.ts
 supacloud-cli db explain --target public.case_create
 
@@ -254,6 +256,12 @@ check runs against a local SupaCloud Lite project instead of a connection
 URL (requires `supacloud-lite` on PATH). See
 [Database Governance](./database-governance.md) and
 [Application Framework](./application-framework.md).
+
+`db context` is a read-only, structured context projection for AI agents. It
+returns only the selected database modules or object and includes each
+maintained source/test path, the Drizzle-versus-SQL ownership boundary,
+protected/generated paths, and focused verification commands. It does not
+read or rewrite the historical migration directory.
 
 ### AI/Agent Skill
 
