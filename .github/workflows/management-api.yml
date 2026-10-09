@@ -393,6 +393,12 @@ jobs:
       - name: Install delivery dependencies
         run: bun install --frozen-lockfile --cwd packages/delivery
 
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Run package checks
         working-directory: ${{ matrix.working-directory }}
         run: ${{ matrix.script }}
@@ -699,6 +705,12 @@ jobs:
           bun run scripts/build-command-dependencies.ts elysia
           bun install --frozen-lockfile --cwd packages/elysia
 
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Run unit tests
         working-directory: packages/management-api
         run: bun run test:unit
@@ -730,6 +742,12 @@ jobs:
           key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('**/bun.lock') }}
           restore-keys: |
             bun-${{ runner.os }}-${{ env.BUN_VERSION }}-
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and start SupaCloud PostgreSQL 18
         run: docker compose -f docker/self-host/docker-compose.yml up -d --build postgres
@@ -848,6 +866,9 @@ jobs:
       postgres:
         # Upstream Supabase compatibility fixture only. SupaCloud deployment remains PostgreSQL 18.
         image: supabase/postgres:17.6.1.177
+        credentials:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
         env:
           POSTGRES_PASSWORD: postgres
         ports:
@@ -859,6 +880,9 @@ jobs:
           --health-retries 5
       postgrest:
         image: postgrest/postgrest:v16.4
+        credentials:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
         ports:
           - 3000:3000
         env:
@@ -868,6 +892,9 @@ jobs:
           PGRST_JWT_SECRET: super-secret-jwt-token-with-at-least-32-characters-long
       gotrue:
         image: supabase/gotrue:v2.197.0
+        credentials:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
         ports:
           - 9999:9999
         env:
@@ -938,6 +965,12 @@ jobs:
           key: bun-${{ runner.os }}-${{ env.BUN_VERSION }}-${{ hashFiles('**/bun.lock') }}
           restore-keys: |
             bun-${{ runner.os }}-${{ env.BUN_VERSION }}-
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v4
