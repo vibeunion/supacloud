@@ -41,11 +41,12 @@ function fixture(t) {
       elysia: [`elysia@${version}`], typebox: ['typebox@1.3.34'], 'exact-mirror': ['exact-mirror@1.2.6'],
     },
   });
-  const lite = { name: '@supacloud/lite', devDependencies: { elysia: version } };
+  const lite = { name: '@supacloud/lite', dependencies: { typebox: '1.3.34' }, devDependencies: { elysia: version } };
   write('packages/supacloud-lite/package.json', lite);
   write('packages/supacloud-lite/bun.lock', {
     workspaces: { '': lite }, packages: {
       elysia: [`elysia@${version}`],
+      typebox: ['typebox@1.3.34'],
       '@supacloud/elysia': ['@supacloud/elysia@file:../elysia', adapter],
     },
   });
@@ -133,6 +134,18 @@ test('rejects a missing core manifest rather than silently reducing coverage', (
 test('checks the resolved active schema tuple, not only declared versions', (t) => {
   const f = fixture(t);
   f.edit('packages/elysia/bun.lock', (p) => { p.packages.typebox[0] = 'typebox@1.3.33'; });
+  assert.match(checkElysiaCompatibility(f.root).join('\n'), /resolved typebox must match compatibility.json/);
+});
+
+test('rejects a drifted typebox pin in an Elysia consumer manifest', (t) => {
+  const f = fixture(t);
+  f.edit('packages/supacloud-lite/package.json', (p) => { p.dependencies.typebox = '1.3.36'; });
+  assert.match(checkElysiaCompatibility(f.root).join('\n'), /active typebox dependency must match compatibility.json/);
+});
+
+test('rejects a drifted resolved typebox in an Elysia consumer lock', (t) => {
+  const f = fixture(t);
+  f.edit('packages/supacloud-lite/bun.lock', (p) => { p.packages.typebox[0] = 'typebox@1.3.36'; });
   assert.match(checkElysiaCompatibility(f.root).join('\n'), /resolved typebox must match compatibility.json/);
 });
 

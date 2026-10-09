@@ -532,6 +532,7 @@ supacloud-cli database query --sql "select now()"
 supacloud-cli database query --ref abc123 --file ./queries/vector-search.sql
 supacloud-cli database migration_inventory --ref abc123
 supacloud-cli database lint_migrations --dir supabase/migrations
+supacloud-cli database rebase_migrations --dir supabase/migrations --baseline_file backups/schema.sql --baseline_version 20261008000000 --output_dir supabase/migrations-rebased
 supacloud-cli database push_migrations --ref abc123 --dir supabase/migrations --dry_run
 supacloud-cli supabase migration_new --name add_accounts
 supacloud-cli supabase db_diff --schema public --name add_accounts
@@ -637,6 +638,17 @@ Dry-run exits non-zero for statements the transactional executor cannot apply,
 even when strict destructive-risk mode is not enabled.
 `CREATE/DROP INDEX CONCURRENTLY`, `VACUUM`, and other non-transactional work must
 run through an approved maintenance path outside `push_migrations`.
+
+`database rebase_migrations` is local-only and never contacts the Management
+API. Without `--write` it only prints the plan; with `--write` it writes a
+reconstructed baseline, the retained forward migrations, and a
+`migration-rebase.manifest.json` (with SHA-256 records for the complete source
+history) into a separate `--output_dir`, never the source directory. Capture and
+review a schema-only snapshot first with `--baseline_file` and
+`--baseline_version`, then use `--retain_after_version` to keep newer
+migrations. Review the baseline for omitted data backfills, reference data,
+extensions, grants, RLS, functions and triggers, replay it in a clean database,
+and archive the original directory until clean replay and remote read-back pass.
 
 Migration applications and DDL executions send PostgREST schema reload
 notifications (`NOTIFY pgrst_<ref>, 'reload schema'`) so schema changes become
