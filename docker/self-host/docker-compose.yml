@@ -182,7 +182,7 @@ services:
       - edge-pgredis
 
   victorialogs:
-    image: victoriametrics/victoria-logs:v1.52.0
+    image: victoriametrics/victoria-logs:v1.53.0
     restart: unless-stopped
     command:
       - -storageDataPath=/victoria-logs-data
