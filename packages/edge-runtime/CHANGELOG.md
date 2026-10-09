@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.29.3](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.29.2...edge-runtime-v0.29.3) (2026-10-09)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @types/node in /packages/edge-runtime ([#1713](https://github.com/vibeunion/supacloud/issues/1713)) ([d213b15](https://github.com/vibeunion/supacloud/commit/d213b1535d9970d52b71e74611a7c906f895e7d2))
+* **deps:** bump es-module-lexer in /packages/edge-runtime ([#1719](https://github.com/vibeunion/supacloud/issues/1719)) ([1a61870](https://github.com/vibeunion/supacloud/commit/1a6187085a154d86f6d8f13a068be33e2985364a))
+
 ## [0.29.2](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.29.1...edge-runtime-v0.29.2) (2026-10-08)
 
 

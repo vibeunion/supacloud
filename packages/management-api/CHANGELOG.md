@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.98.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.98.1...management-api-v0.98.2) (2026-10-09)
+
+
+### Bug Fixes
+
+* **management-api:** allow function tracing headers in CORS ([#1735](https://github.com/vibeunion/supacloud/issues/1735)) ([27e72fc](https://github.com/vibeunion/supacloud/commit/27e72fc47415d288907e066a7a0d4604e12ee261))
+
+
+### Miscellaneous Chores
+
+* **deps:** bump acorn in /packages/management-api ([#1715](https://github.com/vibeunion/supacloud/issues/1715)) ([f9cc4d6](https://github.com/vibeunion/supacloud/commit/f9cc4d6215ea5f7c51b5d90f139d9101c3487a18))
+* **deps:** bump graphql to 17 and migrate input coercion ([dfe027f](https://github.com/vibeunion/supacloud/commit/dfe027fe507d88b1befacd8164c42588997a8342))
+* **deps:** bump nanoid from 6.0.1 to 6.0.2 in /packages/management-api ([#1716](https://github.com/vibeunion/supacloud/issues/1716)) ([3ed7703](https://github.com/vibeunion/supacloud/commit/3ed770373786ae0cb4389cbbaffce8cf5804b7be))
+
 ## [0.98.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.98.0...management-api-v0.98.1) (2026-10-08)
 
 

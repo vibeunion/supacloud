@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.50.1](https://github.com/vibeunion/supacloud/compare/web-console-v0.50.0...web-console-v0.50.1) (2026-10-09)
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @sveltejs/kit in /packages/web-console ([#1727](https://github.com/vibeunion/supacloud/issues/1727)) ([94fa750](https://github.com/vibeunion/supacloud/commit/94fa750fb992bbff8575da3a1270bcf146cfcb9e))
+* **deps-dev:** bump @types/node in /packages/web-console ([#1729](https://github.com/vibeunion/supacloud/issues/1729)) ([ae0c6e0](https://github.com/vibeunion/supacloud/commit/ae0c6e0c2d2ea342b0625f27bc9cc36f35510d54))
+* **deps-dev:** bump bits-ui in /packages/web-console ([#1714](https://github.com/vibeunion/supacloud/issues/1714)) ([eaf159e](https://github.com/vibeunion/supacloud/commit/eaf159eb0fc927159b8ed33be6954b5f5a44d628))
+* **deps-dev:** bump vite from 8.3.0 to 8.3.3 in /packages/web-console ([#1726](https://github.com/vibeunion/supacloud/issues/1726)) ([4e84237](https://github.com/vibeunion/supacloud/commit/4e84237551236aee0a0f77561ec833c3f85bbf6f))
+* **deps:** bump isomorphic-dompurify in /packages/web-console ([#1720](https://github.com/vibeunion/supacloud/issues/1720)) ([2ee4dad](https://github.com/vibeunion/supacloud/commit/2ee4dadd80028a29a7f992e310c5268258ca6dd7))
+
 ## [0.50.0](https://github.com/vibeunion/supacloud/compare/web-console-v0.49.2...web-console-v0.50.0) (2026-10-07)
 
 
