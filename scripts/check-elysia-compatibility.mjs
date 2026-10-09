@@ -56,7 +56,10 @@ export function checkElysiaCompatibility(root) {
         problems.push(`${manifestPath}: ${section}.elysia must equal ${expected}`);
       }
     }
-    if (['@supacloud/app', '@supacloud/compiler', '@supacloud/elysia'].includes(manifest.name)) {
+    // Every repository-owned Elysia consumer, plus the framework packages that
+    // emit TypeBox schemas, must pin the active schema version so a mixed graph
+    // cannot resolve two copies of the same schema runtime.
+    if (declared.length || ['@supacloud/app', '@supacloud/compiler'].includes(manifest.name)) {
       if (manifest.dependencies?.typebox !== matrix.packages.typebox) {
         problems.push(`${manifestPath}: active typebox dependency must match compatibility.json`);
       }
@@ -82,6 +85,9 @@ export function checkElysiaCompatibility(root) {
     }
     if (declared.length && lock.packages?.elysia?.[0] !== `elysia@${expected}`) {
       problems.push(`${lockPath}: resolved Elysia version must equal ${expected}`);
+    }
+    if (declared.length && lock.packages?.typebox?.[0] !== `typebox@${matrix.packages.typebox}`) {
+      problems.push(`${lockPath}: resolved typebox must match compatibility.json`);
     }
     if (manifest.name === '@supacloud/elysia') {
       for (const [name, version] of Object.entries(matrix.packages)) {
