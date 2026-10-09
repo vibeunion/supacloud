@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/vibeunion/supacloud/compare/app-v0.23.0...app-v0.24.0) (2026-10-09)
+
+
+### Features
+
+* enable strict Effect route governance by default ([#1742](https://github.com/vibeunion/supacloud/issues/1742)) ([4e18c90](https://github.com/vibeunion/supacloud/commit/4e18c908b9c08a8895be016b4e00a0158bf539c6))
+
 ## [0.23.0](https://github.com/vibeunion/supacloud/compare/app-v0.22.0...app-v0.23.0) (2026-10-05)
 
 

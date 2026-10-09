@@ -3,16 +3,16 @@
   "generatedBy": "supacloud/starter-metadata-v1",
   "packages": {
     "compiler": {
-      "version": "0.40.1"
+      "version": "0.41.0"
     },
     "app": {
-      "version": "0.23.0",
+      "version": "0.24.0",
       "dependencies": {
         "rxjs": "7.8.2"
       }
     },
     "elysia": {
-      "version": "0.27.1"
+      "version": "0.28.0"
     },
     "commands": {
       "version": "0.9.1"

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.41.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.40.1...compiler-v0.41.0) (2026-10-09)
+
+
+### Features
+
+* enable strict Effect route governance by default ([#1742](https://github.com/vibeunion/supacloud/issues/1742)) ([4e18c90](https://github.com/vibeunion/supacloud/commit/4e18c908b9c08a8895be016b4e00a0158bf539c6))
+
 ## [0.40.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.40.0...compiler-v0.40.1) (2026-10-08)
 
 
