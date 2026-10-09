@@ -394,6 +394,7 @@ jobs:
         run: bun install --frozen-lockfile --cwd packages/delivery
 
       - name: Login to Docker Hub
+        continue-on-error: true
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -706,6 +707,7 @@ jobs:
           bun install --frozen-lockfile --cwd packages/elysia
 
       - name: Login to Docker Hub
+        continue-on-error: true
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -744,6 +746,7 @@ jobs:
             bun-${{ runner.os }}-${{ env.BUN_VERSION }}-
 
       - name: Login to Docker Hub
+        continue-on-error: true
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -967,6 +970,7 @@ jobs:
             bun-${{ runner.os }}-${{ env.BUN_VERSION }}-
 
       - name: Login to Docker Hub
+        continue-on-error: true
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}

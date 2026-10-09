@@ -73,6 +73,7 @@ jobs:
         run: |
           bun run --cwd packages/delivery build
       - name: Login to Docker Hub
+        continue-on-error: true
         uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
