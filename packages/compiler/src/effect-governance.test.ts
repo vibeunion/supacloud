@@ -329,6 +329,34 @@ export class OrdersModule {}
   }
 });
 
+test("allows Effect interpretation in test sources", async () => {
+  const { root } = await analyzeStrictEffectFixture(`import { Controller, Get, Module } from "./runtime";
+import type { Effect } from "./effect";
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", { effect: { required: true, dependencies: [], errors: [], retry: "none" } })
+  list(): Effect<string, never, never> {
+    return {} as Effect<string, never, never>;
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`);
+  try {
+    await writeFixtureProject(root, {
+      "src/orders.controller.test.ts": `import * as EffectRuntime from "effect/Effect";
+EffectRuntime.runPromise({} as never);
+`,
+    });
+    const graph = await analyzeProject(root);
+    expect(graph.diagnostics ?? []).toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("rejects Promise route returns under an Effect contract", async () => {
   const { root, graph } = await analyzeStrictEffectFixture(`import { Controller, Get, Module } from "./runtime";
 

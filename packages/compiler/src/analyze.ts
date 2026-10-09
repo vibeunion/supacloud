@@ -1770,6 +1770,8 @@ function pushEffectDiagnostic(
 }
 
 function scanEffectRuntimeEscapes(sourceFile: SourceFile, ctx: AnalysisContext): void {
+  const relativeFile = sourcePath(ctx.rootDir, sourceFile.fileName);
+  if (/\.(?:test|spec)\.[cm]?[jt]sx?$/.test(relativeFile)) return;
   const namespaceBindings = new Set<string>();
   const runtimeBindings = new Set<string>();
   for (const statement of sourceFile.statements) {
