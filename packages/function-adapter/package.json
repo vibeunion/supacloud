@@ -50,7 +50,7 @@
     "source-map-js": "^1.2.2"
   },
   "devDependencies": {
-    "@sveltejs/kit": "^2.70.3",
+    "@sveltejs/kit": "^3.0.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@types/bun": "^1.4.2",
     "svelte": "^5.57.0",
