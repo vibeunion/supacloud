@@ -45,7 +45,7 @@
     "@graphql-tools/utils": "^12.0.3"
   },
   "devDependencies": {
-    "@supacloud/elysia": "^0.23.1",
+    "@supacloud/elysia": "^0.24.1",
     "@types/bun": "^1.4.2",
     "elysia": "2.0.0-beta.21",
     "typescript": "^7.0.2"

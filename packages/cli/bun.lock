@@ -12,7 +12,7 @@
         "typebox": "1.3.34",
       },
       "devDependencies": {
-        "@supacloud/elysia": "^0.23.1",
+        "@supacloud/elysia": "^0.24.1",
         "@types/bun": "^1.4.2",
         "elysia": "2.0.0-beta.21",
         "typescript": "^7.0.2",
@@ -56,7 +56,7 @@
 
     "@pgsql/types": ["@pgsql/types@18.0.0", "", {}, "sha512-jtAY4JU7jdVYZ/Vv3zlZqVP+FRWZokyCLKPPCnAApiaJAElpyyiMC3HRiquBu29kSrVs+rkqZD50SUIb/zyEGw=="],
 
-    "@supacloud/app": ["@supacloud/app@0.21.1", "", { "dependencies": { "@angular/core": "^22.1.5", "@supacloud/contracts": "0.8.0", "rxjs": "7.8.2", "typebox": "1.3.34" } }, "sha512-Nzxcut8Ie7ZZHxWsd1wAv0UDNmfE1ZZAGVHPVaa91PuM8blMDmRqYW49YrzAGtJO/Fr9V5zc2a+8hLW1emOR5w=="],
+    "@supacloud/app": ["@supacloud/app@0.23.0", "", { "dependencies": { "@angular/core": "^22.1.5", "@supacloud/contracts": "0.8.0", "rxjs": "7.8.2", "typebox": "1.3.34" } }, "sha512-OSlRnRgof5MPQvmDA5jnZIDqzYgT0J5L4UY8lrIhRLUf/AeEZLv9I4i7kyZRV5I9XY9HwBWaDJ/7EW51/txeOA=="],
 
     "@supacloud/compiler": ["@supacloud/compiler@0.40.1", "", { "dependencies": { "@graphql-codegen/core": "^6.2.0", "@graphql-codegen/typed-document-node": "^7.1.0", "@graphql-codegen/typescript-operations": "^6.1.6", "@graphql-typed-document-node/core": "^3.2.0", "@supacloud/delivery": "0.8.0", "@typescript/typescript6": "^6.0.2", "graphql": "^16", "typebox": "1.3.34" }, "bin": { "supacloud-compiler": "dist/cli.js" } }, "sha512-XT30AJtk/gm6jHiDAlIknqzlNm3ua2GhxD7CnYXFvEmqy27Wu0cO+G+EI21RuevbIXGGzxI6iljE94gU3ynWqw=="],
 
@@ -66,7 +66,7 @@
 
     "@supacloud/delivery": ["@supacloud/delivery@file:../delivery", { "dependencies": { "typebox": "1.3.34" }, "devDependencies": { "@types/bun": "^1.4.2", "typescript": "^7.0.2" } }],
 
-    "@supacloud/elysia": ["@supacloud/elysia@0.23.1", "", { "dependencies": { "@supacloud/app": "0.21.1", "@supacloud/contracts": "0.8.0", "exact-mirror": "1.2.6", "jose": "^6.2.11", "typebox": "1.3.34" }, "peerDependencies": { "elysia": "2.0.0-beta.19" } }, "sha512-VIXrL0HUx29AeOn0FXrWATX8rVLWDIDrjX6rFoNhOVxqpEpHPrTvpDW+k6fZgQYJkHXUUDGcjsOn9lVZ5KWf1A=="],
+    "@supacloud/elysia": ["@supacloud/elysia@0.24.1", "", { "dependencies": { "@supacloud/app": "0.23.0", "@supacloud/contracts": "0.8.0", "exact-mirror": "1.2.6", "jose": "^6.2.11", "typebox": "1.3.34" }, "peerDependencies": { "elysia": "2.0.0-beta.21" } }, "sha512-reYnvv8oAb/7BP+Mg/u652jdWN4GbdrIv4KTbK+g/zVauUm3pIsb78r50Tan6QlBuHc8bImkCbjN2kS6Q+sJHw=="],
 
     "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 
