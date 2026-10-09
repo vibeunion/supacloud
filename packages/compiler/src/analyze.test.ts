@@ -127,6 +127,7 @@ describe("analyzeProject：controller 与路由", () => {
       body: "CreateCaseBody",
       params: "AcceptParams",
       response: "AcceptResult",
+      effect: { required: true, dependencies: [], errors: [], retry: "none" },
       schemaKinds: { body: "declared", params: "declared", response: "declared" },
       command: "AcceptCaseCommand",
       pathParams: ["caseId"],

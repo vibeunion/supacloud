@@ -54,7 +54,7 @@ test("resource generation is async-ready without adding another validator or per
     expect(files["inventory.service.ts"]).not.toContain('from "elysia"');
     expect(files["inventory.model.ts"]).toContain("RouteHandlerOutput");
     expect(files["inventory.service.test.ts"]).toContain(".rejects.toThrow");
-    expect(files["inventory.controller.test.ts"]).toContain(".rejects.toBe(failure)");
-    expect(files["inventory.controller.test.ts"]).toContain("expect(await controller.find");
+    expect(files["inventory.controller.test.ts"]).toContain('.rejects.toThrow("read port unavailable")');
+    expect(files["inventory.controller.test.ts"]).toContain("expect(await Effect.runPromise(controller.find");
     expect(Object.keys(files)).toHaveLength(6);
 });

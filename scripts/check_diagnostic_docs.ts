@@ -177,6 +177,38 @@ list() {}`,
 list() {}`,
   SC3026: `@Get("/items", { response: ItemResponse, responses: { 200: ItemResponse } })
 list() {}`,
+  SC3030: `@Post("/cases", { effect: makeEffect() })
+accept() {}`,
+  SC3031: `@Post("/cases", { effect: { required: true, retry: "sometimes" } })
+accept() {}`,
+  SC3032: `@Post("/cases", { effect: { required: true, timeoutMs: 0 } })
+accept() {}`,
+  SC3033: `@Post("/cases", { effect: { required: true, dependencies: "CaseRepository" } })
+accept() {}`,
+  SC3034: `@Post("/cases", { effect: { required: true, errors: [{ tag: "NotFound", code: "not_found" }] } })
+accept() {}`,
+  SC3035: `@Post("/cases", { effect: { required: true, dependencies: [], errors: [] } })
+accept(): { ok: boolean } {
+  return { ok: true };
+}`,
+  SC3036: `// requireRouteEffects is enabled in the compiler config.
+@Post("/cases")
+accept(): Effect<{ ok: boolean }, never, never> {}`,
+  SC3037: `// requireErrorMappings is enabled in the compiler config.
+@Post("/cases", { effect: { required: true, dependencies: [] } })
+accept(): Effect<{ ok: boolean }, never, never> {}`,
+  SC3038: `// requireDependencies is enabled in the compiler config.
+@Post("/cases", { effect: { required: true, errors: [] } })
+accept(): Effect<{ ok: boolean }, never, never> {}`,
+  SC3039: `@Command({ name: "case.accept", permission: "case.accept", idempotency: "none" })
+class AcceptCaseCommand {}
+@Post("/cases/:id/accept", {
+  command: AcceptCaseCommand,
+  effect: { required: true, errors: [], dependencies: [], retry: "explicit", maxAttempts: 3 },
+})
+accept(): Effect<{ ok: boolean }, never, never> {}`,
+  SC3040: `@Post("/cases", { effect: { required: true, errors: [], dependencies: ["CaseRepository"] } })
+accept(): Effect<{ ok: boolean }, never, never> {}`,
   SC3027: `@Get("/items", { responses: { "4XX": ItemResponse, "4xx": ItemResponse } })
 list() {}`,
   SC5001: `@Injectable({ providedIn: "root" })
