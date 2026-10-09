@@ -57,7 +57,7 @@ POST/PUT 的 body schema（字段语义与 `normalizeCustomGatewayRoute` 一致�
 | `rewrite_uri` | string | 否 | 请求改写目标 URI，必须以 `/` 开头；与 `strip_prefix` 互斥；用于 upstream/static 路由 |
 | `strip_prefix` | string | 否 | 剥离指定路径前缀；与 `rewrite_uri` 互斥；用于 upstream/static 路由 |
 | `headers` | Record<string,string> | 否 | upstream 模式作为请求头注入；static 模式作为响应头 |
-| `cors` | string[] | 否 | 1-50 个允许的 Origin；前缀 `~` 视为正则 |
+| `cors` | string[] | 否 | 1-50 个允许的 Origin；前缀 `~` 视为正则；显式使用 `"*"` 时允许任意带 Origin 的请求且不发送 credentials |
 | `priority` | number | 否 | 整数，默认 `0`，用于多路由排序 |
 | `enabled` | boolean | 否 | `false` 时该路由不会被下发到 Caddy |
 
@@ -288,7 +288,7 @@ SupaCloud 会自动为每个项目生成多个域名：API 主域（`<ref>.<base
 - 自定义路由的 `cors` 字段只作用于该路由本身，不会影响系统路由的 CORS。
   项目级 CORS 更新、前端部署和共享认证入口重建均保留该策略；
   未配置 `cors` 的自定义路由也不会自动继承项目的来源列表。
-- `gateway/config` 的 `cors_origins` 会更新该项目所有系统路由的 CORS。
+- `gateway/config` 的 `cors_origins` 更新网关管理的系统路由 CORS；Functions 仅更新错误兜底来源，Storage 仍保留上游策略。
 - `addCorsOriginsForHosts`（内部接口）会把自定义域名并入租户 CORS 计算，用于绑定自定义前端域名时。
 
 因此推荐做法：
@@ -296,6 +296,51 @@ SupaCloud 会自动为每个项目生成多个域名：API 主域（`<ref>.<base
 1. 业务 API 仍走系统路由（`/rest/v1`、`/functions/v1` 等），用 `gateway/config` 统一管理 CORS 与 tier；
 2. 需要接入 SupaCloud 之外的服务或静态站点时，用自定义 `gateway/routes`，并在该路由上用 `cors` 字段精确放行来源；
 3. 不要尝试用自定义路由"重写"系统路由的 `/rest/v1` / `/auth/v1`，那会与系统路由争抢同一 `path` 前缀，排序由 `priority` 决定，容易产生不可预期的覆盖。
+
+### Functions 错误兜底
+
+系统 `/functions/v1*` 的 OPTIONS、正常响应和 4xx 仍由函数负责。只对配置允许的
+Origin，网关为缺少 `Access-Control-Allow-Origin` 的 HTTP 5xx 补充 CORS，保留原状态码、
+响应体和已有 `Vary`；已有该头的响应不覆盖。代理连接失败或超时则返回原错误状态码和
+通用 `FUNCTION_GATEWAY_ERROR` JSON，不向客户端暴露内部异常。
+
+这让浏览器能读取真实失败，并不解决 Edge Runtime 超时本身。直接绕过 Caddy 调用
+Runtime 不受此修复覆盖；函数内的 OPTIONS、401/404 等分支仍须统一设置 CORS。
+升级后需由 Management API 重建/协调该项目的路由，不能仅修改 Caddyfile。
+
+### 显式开放 `*`
+
+自定义路由配置 `"cors": ["*"]`，会返回真正的 `Access-Control-Allow-Origin: *`，
+不返回 `Access-Control-Allow-Credentials`。这会允许任意站点读取该路由的响应，
+但不绕过 JWT、API key 或业务权限；不要向浏览器分发管理员或 service-role 密钥。
+允许的请求头仍是显式列表，包括 Authorization、apikey、追踪和幂等头，而非任意头。
+
+系统路由可通过 `gateway/config` 设置 `"cors_origins": "*"`，但其影响范围是项目级；
+Functions 的成功响应与 OPTIONS 仍需函数自身返回 `*`。优先仅在所需的自定义路由开放，
+不要为解决一个函数的问题全局开放 Auth/REST。
+
+```json
+{
+  "id": "public-function",
+  "hosts": ["functions.example.com"],
+  "path": ["/functions/v1/public-api", "/functions/v1/public-api/*"],
+  "managed_upstream": "edge-functions",
+  "cors": ["*"]
+}
+```
+
+将以上对象交给已有的 `POST /v1/projects/:ref/gateway/routes` 接口。此路由的预检由网关处理，
+上游访问控制头由网关策略取代；不要配置 `/*` 暴露 Runtime 内部接口。
+
+浏览器使用 `credentials: "omit"` 并按需显式传递用户 Bearer token。Cookie 会话或
+`credentials: "include"` 不能使用 `*`，应改为明确的可信 Origin 列表并保留凭据支持。
+
+验收场景：
+
+- Given 允许来源，When 上游返回无 CORS 的 503，Then 浏览器可读原 503 和响应体。
+- Given 上游显式 CORS，When 返回 200 或 5xx，Then 原策略不被覆盖。
+- Given 不允许的来源，When 上游断连，Then 返回 502 且不授予 CORS。
+- Given 显式 `cors: ["*"]`，When 浏览器无 Cookie 预检，Then 返回 204、`*` 和允许请求头，不授予凭据。
 
 ## 排查
 
