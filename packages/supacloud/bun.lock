@@ -21,7 +21,7 @@
   "packages": {
     "@pgsql/types": ["@pgsql/types@18.0.0", "", {}, "sha512-jtAY4JU7jdVYZ/Vv3zlZqVP+FRWZokyCLKPPCnAApiaJAElpyyiMC3HRiquBu29kSrVs+rkqZD50SUIb/zyEGw=="],
 
-    "@supacloud/admin": ["@supacloud/admin@0.24.1", "", { "dependencies": { "@supacloud/cli": "0.67.0", "ssh2": "^1.17.0", "typebox": "1.3.34" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-lbmJQiwL56z/WPymkTsZVMmpfjXs6pYMJI6ikHwE3qGiZqiayqhQidGakiNHtJLVElug6gWUwSUkpUpxn4vcBA=="],
+    "@supacloud/admin": ["@supacloud/admin@0.24.2", "", { "dependencies": { "@supacloud/cli": "0.68.1", "ssh2": "^1.17.0", "typebox": "1.3.34" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-3hUbLHbA2Y6msrPWE2R1ZGnaJ+qDus5BXpDEXWdLXJPK61Ik4+0i0OjtjY4aJJwfKXjX42VDEOWlj2NEbJ9U/w=="],
 
     "@supacloud/cli": ["@supacloud/cli@0.71.1", "", { "dependencies": { "@supacloud/compiler": "^0.40.1", "@supacloud/db": "^0.14.0", "@supacloud/delivery": "0.8.0", "fflate": "^0.8.3", "typebox": "1.3.34" }, "bin": { "supacloud-cli": "dist/index.js" } }, "sha512-ROmbnq3fKQskpGLDxRNz3iLxdcS/d+gzXv5tICHqteH+KyuDtNrsrUpbOYKYTP4+zWG3MP2FciKds+sc4vfOwA=="],
 
@@ -105,7 +105,7 @@
 
     "undici-types": ["undici-types@8.3.0", "https://registry.npmmirror.com/undici-types/-/undici-types-8.3.0.tgz", {}, "sha512-j375ScV60dom+YkPFIfTLcOiPxkN/buHz5GobjLhixFuANaNs3C9l4GmrWqejgXWJ7BbJcFYpTEUkS1Ge8bpZQ=="],
 
-    "@supacloud/admin/@supacloud/cli": ["@supacloud/cli@0.67.0", "", { "dependencies": { "@supacloud/compiler": "^0.37.0", "@supacloud/db": "^0.2.0", "@supacloud/delivery": "0.8.0", "fflate": "^0.8.3", "typebox": "1.3.34" }, "bin": { "supacloud-cli": "dist/index.js" } }, "sha512-51yly53NmEFYI06tnpYgx3XOldHb4P0/PxxhZT95YwcwMW8yi8oBxLPbIlg+OyeAH9r3eQ88+iuo8qTIPdnj7g=="],
+    "@supacloud/admin/@supacloud/cli": ["@supacloud/cli@0.68.1", "", { "dependencies": { "@supacloud/compiler": "^0.38.1", "@supacloud/db": "^0.2.0", "@supacloud/delivery": "0.8.0", "fflate": "^0.8.3", "typebox": "1.3.34" }, "bin": { "supacloud-cli": "dist/index.js" } }, "sha512-No874ZHVo3eozDmtzaeey/99rIB9enQwgcirmVRbD5tdLLkr+nEXo8Ox8ZHD/Fxv2cRKQ7+x7sd7ivu607AAbg=="],
 
     "@supacloud/cli/@supacloud/compiler": ["@supacloud/compiler@file:../compiler", {}],
 
