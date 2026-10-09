@@ -190,6 +190,7 @@ function optionsKeyOf(options: CompileOptions): string {
     openApi: options.openApi,
     generatePermissions: options.generatePermissions,
     typeSafety: options.typeSafety,
+    effect: options.effect,
     treeShakeUnusedProviders: options.treeShakeUnusedProviders,
     graphql: options.graphql,
   });

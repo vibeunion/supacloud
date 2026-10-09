@@ -23,14 +23,24 @@ export default defineSupacloudConfig({
     requireRouteEffects: true,
     requireErrorMappings: true,
     requireDependencies: true,
+    requireTaggedErrorTypes: true,
+    requireExactDependencyTypes: true,
+    requireTimeoutForDependencies: true,
+    forbidDirectRuntimeExecution: true,
+    forbidDirectThrows: true,
   },
 });
 ```
 
-The three checks default to `true`. `dependencies: []` and `errors: []` are
-valid explicit declarations for an Effect that has no environment or expected
-domain failures. Explicit `false` values are the opt-out mechanism for a
-migration boundary:
+All Effect governance checks default to `true`. `dependencies: []` and
+`errors: []` are valid explicit declarations for an Effect that has no
+environment or expected domain failures. Effect failures must be `never` or a
+union of objects with a literal `_tag`; the tags must exactly match
+`effect.errors`. The third `Effect` type parameter must exactly match
+`effect.dependencies`, and a route with dependencies must declare a timeout.
+Route handlers and production source cannot directly throw or interpret an
+Effect with `Effect.run*`; test sources may interpret Effects for assertions.
+Explicit `false` values are the opt-out mechanism for a migration boundary:
 
 ```ts
 export default defineSupacloudConfig({
@@ -38,6 +48,11 @@ export default defineSupacloudConfig({
     requireRouteEffects: false,
     requireErrorMappings: false,
     requireDependencies: false,
+    requireTaggedErrorTypes: false,
+    requireExactDependencyTypes: false,
+    requireTimeoutForDependencies: false,
+    forbidDirectRuntimeExecution: false,
+    forbidDirectThrows: false,
   },
 });
 ```
@@ -46,6 +61,8 @@ When enabled, an Effect route must declare its logical environment and public
 failure mappings:
 
 ```ts
+type OrderNotFound = { readonly _tag: "OrderNotFound" };
+
 @Get("/:id", {
   params: OrderParams,
   responses: { 200: OrderResponse },
@@ -56,6 +73,7 @@ failure mappings:
       { tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" },
     ],
     retry: "none",
+    timeoutMs: 1000,
   },
 })
 getOrder(): Effect.Effect<Order, OrderNotFound, OrderApi> {

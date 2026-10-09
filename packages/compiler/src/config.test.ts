@@ -20,6 +20,11 @@ describe("SupaCloud default configuration", () => {
         requireRouteEffects: true,
         requireErrorMappings: true,
         requireDependencies: true,
+        requireTaggedErrorTypes: true,
+        requireExactDependencyTypes: true,
+        requireTimeoutForDependencies: true,
+        forbidDirectRuntimeExecution: true,
+        forbidDirectThrows: true,
       },
     });
   });
@@ -103,11 +108,21 @@ describe("SupaCloud default configuration", () => {
         requireRouteEffects: true,
         requireErrorMappings: true,
         requireDependencies: true,
+        requireTaggedErrorTypes: true,
+        requireExactDependencyTypes: true,
+        requireTimeoutForDependencies: true,
+        forbidDirectRuntimeExecution: true,
+        forbidDirectThrows: true,
       },
     }, "/workspace/app").effect).toEqual({
       requireRouteEffects: true,
       requireErrorMappings: true,
       requireDependencies: true,
+      requireTaggedErrorTypes: true,
+      requireExactDependencyTypes: true,
+      requireTimeoutForDependencies: true,
+      forbidDirectRuntimeExecution: true,
+      forbidDirectThrows: true,
     });
   });
 
@@ -118,6 +133,11 @@ describe("SupaCloud default configuration", () => {
       requireRouteEffects: false,
       requireErrorMappings: true,
       requireDependencies: true,
+      requireTaggedErrorTypes: true,
+      requireExactDependencyTypes: true,
+      requireTimeoutForDependencies: true,
+      forbidDirectRuntimeExecution: true,
+      forbidDirectThrows: true,
     });
   });
 });

@@ -164,10 +164,11 @@ class OrdersController {
       dependencies: ["OrderApi"],
       errors: [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" }],
       retry: "none",
+      timeoutMs: 1000,
     },
   })
   list(): Effect<string, { _tag: "OrderNotFound" }, "OrderApi"> {
-    throw new Error("fixture");
+    return {} as Effect<string, { _tag: "OrderNotFound" }, "OrderApi">;
   }
 }
 
@@ -179,11 +180,202 @@ export class OrdersModule {}
     const route = graph.modules[0]?.controllers[0]?.routes[0];
     expect(route?.effect).toEqual({
       required: true,
+    dependencies: ["OrderApi"],
+    errors: [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" }],
+    retry: "none",
+    timeoutMs: 1000,
+    });
+    expect(graph.diagnostics ?? []).toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+async function analyzeStrictEffectFixture(source: string, effectSource = "export type Effect<A, E, R> = { readonly _effect: [A, E, R] };\n") {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-effect-strict-"));
+  await writeFixtureProject(root, {
+    "tsconfig.json": FIXTURE_TSCONFIG,
+    "src/runtime.ts": RUNTIME_SOURCE,
+    "src/effect.ts": effectSource,
+    "src/orders.module.ts": source,
+  });
+  return { root, graph: await analyzeProject(root) };
+}
+
+test("rejects unknown Effect failures", async () => {
+  const { root, graph } = await analyzeStrictEffectFixture(`import { Controller, Get, Module } from "./runtime";
+import type { Effect } from "./effect";
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", { effect: { required: true, dependencies: [], errors: [], retry: "none" } })
+  list(): Effect<string, unknown, never> {
+    return {} as Effect<string, unknown, never>;
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`);
+  try {
+    expect(graph.diagnostics).toContainEqual(expect.objectContaining({
+      code: "effect-error-type",
+      errorCode: "SC3041",
+    }));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("requires exact failure mappings and dependency types", async () => {
+  const { root, graph } = await analyzeStrictEffectFixture(`import { Controller, Get, Module } from "./runtime";
+import type { Effect } from "./effect";
+
+type OrderFailure = { _tag: "OrderNotFound" } | { _tag: "OrderConflict" };
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", {
+    effect: {
+      required: true,
       dependencies: ["OrderApi"],
       errors: [{ tag: "OrderNotFound", status: 404, code: "ORDER_NOT_FOUND" }],
       retry: "none",
+      timeoutMs: 1000,
+    },
+  })
+  list(): Effect<string, OrderFailure, "OtherApi"> {
+    return {} as Effect<string, OrderFailure, "OtherApi">;
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`);
+  try {
+    expect(graph.diagnostics).toContainEqual(expect.objectContaining({
+      code: "effect-error-mapping-type",
+      errorCode: "SC3042",
+    }));
+    expect(graph.diagnostics).toContainEqual(expect.objectContaining({
+      code: "effect-dependency-mismatch",
+      errorCode: "SC3043",
+    }));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("requires timeouts for Effect environments", async () => {
+  const { root, graph } = await analyzeStrictEffectFixture(`import { Controller, Get, Module } from "./runtime";
+import type { Effect } from "./effect";
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", {
+    effect: {
+      required: true,
+      dependencies: ["OrderApi"],
+      errors: [],
+      retry: "none",
+    },
+  })
+  list(): Effect<string, never, "OrderApi"> {
+    return {} as Effect<string, never, "OrderApi">;
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`);
+  try {
+    expect(graph.diagnostics).toContainEqual(expect.objectContaining({
+      code: "effect-timeout-required",
+      errorCode: "SC3044",
+    }));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects direct throws and Effect interpretation in governed handlers", async () => {
+  const { root, graph } = await analyzeStrictEffectFixture(`import * as EffectRuntime from "effect/Effect";
+import { Controller, Get, Module } from "./runtime";
+import type { Effect } from "./effect";
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", { effect: { required: true, dependencies: [], errors: [], retry: "none" } })
+  list(): Effect<string, never, never> {
+    EffectRuntime.runPromise({} as never);
+    throw new Error("no");
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`);
+  try {
+    expect(graph.diagnostics).toContainEqual(expect.objectContaining({
+      code: "effect-direct-runtime-execution",
+      errorCode: "SC3045",
+    }));
+    expect(graph.diagnostics).toContainEqual(expect.objectContaining({
+      code: "effect-direct-throw",
+      errorCode: "SC3046",
+    }));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("allows Effect interpretation in test sources", async () => {
+  const { root } = await analyzeStrictEffectFixture(`import { Controller, Get, Module } from "./runtime";
+import type { Effect } from "./effect";
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", { effect: { required: true, dependencies: [], errors: [], retry: "none" } })
+  list(): Effect<string, never, never> {
+    return {} as Effect<string, never, never>;
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`);
+  try {
+    await writeFixtureProject(root, {
+      "src/orders.controller.test.ts": `import * as EffectRuntime from "effect/Effect";
+EffectRuntime.runPromise({} as never);
+`,
     });
+    const graph = await analyzeProject(root);
     expect(graph.diagnostics ?? []).toEqual([]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("rejects Promise route returns under an Effect contract", async () => {
+  const { root, graph } = await analyzeStrictEffectFixture(`import { Controller, Get, Module } from "./runtime";
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", { effect: { required: true, dependencies: [], errors: [], retry: "none" } })
+  list(): Promise<string> {
+    return Promise.resolve("ok");
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`);
+  try {
+    expect(graph.diagnostics).toContainEqual(expect.objectContaining({
+      code: "effect-promise-return",
+      errorCode: "SC3047",
+    }));
   } finally {
     await rm(root, { recursive: true, force: true });
   }
