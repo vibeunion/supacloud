@@ -28,6 +28,7 @@ import {
     buildTenantCorsOrigins,
     isCorsSubroute,
     isCustomGatewayRouteId,
+    makeFunctionCorsErrorFallback,
     makeCorsSubroute,
     makeCustomGatewayRoute,
     makeReverseProxy,
@@ -664,6 +665,11 @@ export class CaddyGatewayProvider implements GatewayProvider {
             if (proxy.headers.response && typeof proxy.headers.response === "object") {
                 delete proxy.headers.response.delete;
                 if (Object.keys(proxy.headers.response).length === 0) delete proxy.headers.response;
+            }
+            if (!migratedHandle.some((handler) => handler.handler === "subroute" && "errors" in handler)) {
+                migratedHandle.unshift(makeFunctionCorsErrorFallback(
+                    buildTenantCorsOrigins(projectRef, undefined, routeMatcherStrings(migrated, "host")),
+                ));
             }
         }
 
@@ -1367,6 +1373,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
         corsOrigins?: string[];
         readTimeout?: number;
         preserveUpstreamCors?: boolean;
+        corsErrorFallback?: boolean;
         streaming?: boolean;
         upstreamTls?: boolean;
         upstreamTlsInsecureSkipVerify?: boolean;
@@ -1391,6 +1398,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
             ? makeCorsSubroute(opts.corsOrigins)
             : null;
         if (corsSubroute) handle.push(corsSubroute);
+        if (opts.corsErrorFallback) handle.push(makeFunctionCorsErrorFallback(opts.corsOrigins || []));
         if (opts.rewriteUri) handle.push({ handler: "rewrite", uri: opts.rewriteUri });
         else if (opts.stripPrefix) handle.push({ handler: "rewrite", strip_path_prefix: opts.stripPrefix });
         // 只压缩迁移清单，不改变认证响应、下载和流式接口的传输行为。
@@ -1841,6 +1849,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     // Functions own their CORS policy (origin allowlists, custom
                     // headers); preflight must reach the function itself.
                     preserveUpstreamCors: true,
+                    corsErrorFallback: true,
                 }),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "storage-resumable"),
