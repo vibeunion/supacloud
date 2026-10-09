@@ -14,6 +14,23 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.72.0](https://github.com/vibeunion/supacloud/compare/cli-v0.71.1...cli-v0.72.0) (2026-10-09)
+
+
+### Features
+
+* **function-adapter:** migrate SvelteKit function adapter to v3 ([a2056f8](https://github.com/vibeunion/supacloud/commit/a2056f89aa8c1d4304b4ae0d8d8edad93371ac98))
+
+
+### Bug Fixes
+
+* **ci:** pin typebox across every Elysia consumer ([#1737](https://github.com/vibeunion/supacloud/issues/1737)) ([a49a3cd](https://github.com/vibeunion/supacloud/commit/a49a3cd0c30fc5c67a4bbdbbbcb7e5d06bcc3014))
+
+
+### Miscellaneous Chores
+
+* **deps-dev:** bump @supacloud/elysia in /packages/cli ([#1717](https://github.com/vibeunion/supacloud/issues/1717)) ([8e03b24](https://github.com/vibeunion/supacloud/commit/8e03b249eddf7e35c22aeaa2624d3679e69bea0e))
+
 ## [0.71.1](https://github.com/vibeunion/supacloud/compare/cli-v0.71.0...cli-v0.71.1) (2026-10-08)
 
 

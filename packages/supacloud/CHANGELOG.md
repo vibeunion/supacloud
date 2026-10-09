@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.21](https://github.com/vibeunion/supacloud/compare/supacloud-v0.14.20...supacloud-v0.14.21) (2026-10-09)
+
+
+### Miscellaneous Chores
+
+* **deps:** bump @supacloud/admin in /packages/supacloud ([#1730](https://github.com/vibeunion/supacloud/issues/1730)) ([81c3541](https://github.com/vibeunion/supacloud/commit/81c3541ef51b755d223c45bf916e26ee812af232))
+
 ## [0.14.20](https://github.com/vibeunion/supacloud/compare/supacloud-v0.14.19...supacloud-v0.14.20) (2026-10-08)
 
 
