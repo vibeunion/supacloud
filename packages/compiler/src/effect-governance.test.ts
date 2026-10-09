@@ -13,6 +13,7 @@ import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./fixtures/runtime-source";
 function graphWith(effect: ApplicationGraph["modules"][number]["controllers"][number]["routes"][number]["effect"], command?: {
   className: string;
   name: string;
+  transaction: "required" | "none";
   idempotency: "required" | "none";
 }): ApplicationGraph {
   return {
@@ -67,6 +68,7 @@ test("requires mappings and dependencies and blocks retry on non-idempotent comm
   }, {
     className: "SaveOrderCommand",
     name: "orders.save",
+    transaction: "required",
     idempotency: "none",
   }), {
     requireErrorMappings: true,
@@ -90,6 +92,7 @@ test("accepts a complete retryable idempotent Effect contract", () => {
   }, {
     className: "SaveOrderCommand",
     name: "orders.save",
+    transaction: "required",
     idempotency: "required",
   }), {
     requireErrorMappings: true,
