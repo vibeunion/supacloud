@@ -78,6 +78,16 @@ supacloud generate --kind contract --module orders --name accept
 
 `supacloud context --format json` 输出已编译的模块图、Provider、路由/Command/Job、诊断与建议命令。`--target <name>` 支持模块名/类名，以及模块拥有的 Provider、Controller、Command、Job 和 Query 名称；结果仍以所属模块的邻域为边界，`subject` 保持规范模块名，版本 1 数据结构不变。存在多个所属模块时会报歧义，要求显式指定模块。AI 读结构化上下文，不接触凭据或真实用户数据。
 
+数据库任务使用同样的边界化上下文：
+
+```bash
+supacloud-cli db context --root . --module_file db/modules.ts --module cases
+supacloud-cli db context --root . --module_file db/modules.ts --target public.case_create
+```
+
+输出会指出 Drizzle 结构源、SQL 行为源、对象对应的测试和允许的验证命令。AI
+应修改维护源并新增前向 migration，不应扫描完整 schema dump、手改生成物或改写已应用 migration。
+
 ## 三条黄金路径
 
 先保证少数几条路径稳定，每条都有模板、生成器、示例、测试与部署流程：

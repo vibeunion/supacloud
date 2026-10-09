@@ -25,7 +25,7 @@ type ToolServer = {
 };
 
 export interface DbToolArguments {
-    action: "lint" | "explain" | "module_check";
+    action: "context" | "lint" | "explain" | "module_check";
     module?: string;
     root?: string;
     module_file?: string;
@@ -34,6 +34,38 @@ export interface DbToolArguments {
     schema?: string;
     lite?: boolean;
     project_dir?: string;
+}
+
+export interface DatabaseAiContextObject {
+    kind: "table" | "policy" | "function" | "trigger" | "grant";
+    name: string;
+    module: string;
+    table?: string;
+    source: string | null;
+    tests: string[];
+    security?: string;
+    permission?: string;
+    transaction?: string;
+    audit?: string;
+    idempotency?: string;
+}
+
+export interface DatabaseAiContext {
+    version: 1;
+    scope: "database-ai-context";
+    root: string;
+    selectedModules: string[];
+    target: string | null;
+    objects: DatabaseAiContextObject[];
+    maintenance: {
+        structureSource: "drizzle";
+        behaviorSource: "sql";
+        generatedPaths: string[];
+        protectedPaths: string[];
+        forwardMigrationPath: string;
+        rules: string[];
+    };
+    verification: string[];
 }
 
 export interface DbGovernanceToolOptions {
@@ -114,6 +146,83 @@ function formatReconcileReport(report: ReconcileReport): string {
     return lines.join("\n");
 }
 
+function moduleObjects(module: DatabaseModule): DatabaseAiContextObject[] {
+    return [
+        ...module.tables.map((table) => ({
+            kind: "table" as const, name: table, module: module.name,
+            source: null, tests: [],
+        })),
+        ...module.policies.map((policy) => ({
+            kind: "policy" as const, name: policy.name, module: module.name,
+            table: policy.table, source: policy.source, tests: policy.tests ?? [],
+        })),
+        ...module.functions.map((fn) => ({
+            kind: "function" as const, name: fn.name, module: module.name,
+            source: fn.source, tests: fn.tests ?? [], security: fn.security,
+            permission: fn.permission, transaction: fn.transaction,
+            audit: fn.audit, idempotency: fn.idempotency,
+        })),
+        ...module.triggers.map((trigger) => ({
+            kind: "trigger" as const, name: trigger.name, module: module.name,
+            table: trigger.table, source: trigger.source, tests: [],
+        })),
+        ...module.grants.map((grant) => ({
+            kind: "grant" as const, name: `${grant.object}:${grant.privilege}:${grant.role}`,
+            module: module.name, source: grant.source, tests: [],
+        })),
+    ];
+}
+
+function objectMatchesTarget(object: DatabaseAiContextObject, target: string): boolean {
+    return object.name === target
+        || object.table === target
+        || (object.kind === "policy" && `${object.table}.${object.name}` === target)
+        || (object.kind === "grant" && object.name.startsWith(`${target}:`));
+}
+
+export function buildDatabaseAiContext(
+    modules: readonly DatabaseModule[],
+    root: string,
+    moduleName?: string,
+    target?: string,
+): DatabaseAiContext {
+    const selected = moduleName
+        ? modules.filter((module) => module.name === moduleName)
+        : [...modules];
+    if (moduleName && selected.length === 0) {
+        throw new Error(`未找到数据库模块: ${moduleName}（可用: ${modules.map((module) => module.name).join(", ") || "none"}）`);
+    }
+    const allObjects = selected.flatMap(moduleObjects);
+    const objects = target ? allObjects.filter((object) => objectMatchesTarget(object, target)) : allObjects;
+    if (target && objects.length === 0) throw new Error(`未找到数据库对象: ${target}`);
+    return {
+        version: 1,
+        scope: "database-ai-context",
+        root,
+        selectedModules: selected.map((module) => module.name),
+        target: target ?? null,
+        objects,
+        maintenance: {
+            structureSource: "drizzle",
+            behaviorSource: "sql",
+            generatedPaths: ["generated/", "bootstrap/schema.sql", "output/database-audit/"],
+            protectedPaths: ["migrations/", "supabase/migrations/", "generated/"],
+            forwardMigrationPath: "migrations/<timestamp>_<intent>.sql",
+            rules: [
+                "Edit the selected maintained source, not a generated snapshot.",
+                "Keep RPC, RLS, trigger and grant behavior in explicit SQL sources.",
+                "Create a new forward migration; never rewrite an applied migration.",
+                "Run lint, focused behavior tests and catalog reconciliation after edits.",
+            ],
+        },
+        verification: [
+            "supacloud-cli db lint --module_file db/modules.ts",
+            "supacloud-cli db explain --target <object>",
+            "supacloud-cli db module_check --module_file db/modules.ts --database_url \"$DATABASE_URL\"",
+        ],
+    };
+}
+
 /** Testable orchestration point: inject executor, read catalog, and reconcile against declared modules. */
 export async function runModuleCheck(
     module: DatabaseModule,
@@ -161,6 +270,15 @@ async function runExplain(args: DbToolArguments, root: string): Promise<ToolResu
     const manifest = buildDatabaseManifest(modules);
     const text = explainObject(manifest, target);
     return textResult(text, text.startsWith("未找到对象"));
+}
+
+async function runContext(args: DbToolArguments, root: string): Promise<ToolResult> {
+    const modules = await loadDatabaseModules(root, args.module_file);
+    return textResult(JSON.stringify(
+        buildDatabaseAiContext(modules, root, args.module, args.target),
+        null,
+        2,
+    ));
 }
 
 interface LiteSubprocessResult {
@@ -241,13 +359,13 @@ export function registerDbGovernanceTools(server: ToolServer, options: DbGoverna
     const liteSpawn = options.liteSpawn || defaultLiteSpawn;
     server.tool(
         "db",
-        "Local database governance (@supacloud/db): lint declared modules, explain objects, reconcile against a live catalog or a local SupaCloud Lite project. Actions: lint, explain, module_check",
+        "Local database governance (@supacloud/db): provide bounded AI context, lint declared modules, explain objects, reconcile against a live catalog or a local SupaCloud Lite project. Actions: context, lint, explain, module_check",
         {
-            action: withDescription(stringEnum(["lint", "explain", "module_check"]), "Database governance action"),
-            module: optional(Type.String(), "[lint] Only lint this manifest module (default: all)"),
+            action: withDescription(stringEnum(["context", "lint", "explain", "module_check"]), "Database governance action"),
+            module: optional(Type.String(), "[context/lint] Only select this manifest module (default: all)"),
             root: optional(Type.String(), "[*] Project root (default: current directory)"),
             module_file: optional(Type.String(), "[*] File exporting defineDatabaseModule(...) (default: <root>/db/modules.ts)"),
-            target: optional(Type.String(), "[explain] Policy / function / table name to explain"),
+            target: optional(Type.String(), "[context/explain] Policy / function / table name to explain"),
             database_url: optional(Type.String(), "[module_check] Postgres connection URL (default: DATABASE_URL)"),
             schema: optional(Type.String(), "[module_check] Comma-separated schemas to inspect (default: public)"),
             lite: optional(Type.Boolean(), "[module_check] Reconcile against a local SupaCloud Lite project (runs supacloud-lite db check)"),
@@ -256,6 +374,7 @@ export function registerDbGovernanceTools(server: ToolServer, options: DbGoverna
         async (request) => {
             const root = resolve(request.root || fallbackRoot);
             switch (request.action) {
+                case "context": return runContext(request, root);
                 case "lint": return runLint(request, root);
                 case "explain": return runExplain(request, root);
                 case "module_check": return runModuleCheckAction(request, root, environment, liteSpawn, options.liteBinary);
