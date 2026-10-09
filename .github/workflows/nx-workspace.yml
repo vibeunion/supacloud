@@ -86,7 +86,7 @@ jobs:
           if [ -f node_modules/nx/package.json ]; then
             node -p "require('./node_modules/nx/package.json').version" > .nx/evidence/nx-version.txt
           fi
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v6
         if: always()
         with:
           name: nx-workspace-evidence
