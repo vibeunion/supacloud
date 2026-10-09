@@ -31,12 +31,21 @@ Use `supacloud-cli` as the project-level control surface and keep durable change
 
 1. Classify the request using [references/command-map.md](references/command-map.md).
 2. For database work, load [references/database-workflow.md](references/database-workflow.md) and choose either new-change or historical-drift reconciliation.
-3. Prefer the smallest read-only inspection that proves current state.
-4. Create or update version-controlled artifacts before remote writes.
-5. Verify locally, inspect the diff, and run the narrowest relevant tests.
-6. Preview remote changes with `--dry_run`.
-7. Apply only within the user-authorized environment and scope.
-8. Read back migration history and affected resources; report exact evidence and any remaining drift.
+3. For AI-assisted database changes, first request bounded context:
+
+   ```bash
+   supacloud-cli db context --module_file db/modules.ts --module <module>
+   supacloud-cli db context --module_file db/modules.ts --target <object>
+   ```
+
+   Use the returned source/test paths and ownership boundary; do not scan or
+   edit the complete schema dump.
+4. Prefer the smallest read-only inspection that proves current state.
+5. Create or update version-controlled artifacts before remote writes.
+6. Verify locally, inspect the diff, and run the narrowest relevant tests.
+7. Preview remote changes with `--dry_run`.
+8. Apply only within the user-authorized environment and scope.
+9. Read back migration history and affected resources; report exact evidence and any remaining drift.
 
 ## Project endpoint inspection
 
