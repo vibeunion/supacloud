@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { GraphQLInt, Kind, parse, print, type DocumentNode, type OperationDefinitionNode, type ValueNode } from "graphql";
+import { GraphQLInt, Kind, coerceInputLiteral, coerceInputValue, parse, print, type DocumentNode, type OperationDefinitionNode, type ValueNode } from "graphql";
 
 export interface GraphqlRequestGovernancePolicy {
   enabled?: boolean;
@@ -167,7 +167,7 @@ function metrics(
       if (Object.hasOwn(variables, value.name.value)) {
         result = variables[value.name.value];
       } else if (definition.defaultValue !== undefined) {
-        result = definition.defaultValue.kind === Kind.NULL ? null : GraphQLInt.parseLiteral(definition.defaultValue);
+        result = definition.defaultValue.kind === Kind.NULL ? null : coerceInputLiteral(definition.defaultValue, GraphQLInt);
       } else {
         if (required) invalidInput();
         return undefined; // Omitted is distinct from null; leave schema defaults to pg_graphql.
@@ -176,10 +176,10 @@ function metrics(
         if (required) invalidInput();
         return null;
       }
-      result = GraphQLInt.parseValue(result);
+      result = coerceInputValue(result, GraphQLInt);
     } else {
       if (value.kind === Kind.NULL) return null;
-      result = GraphQLInt.parseLiteral(value);
+      result = coerceInputLiteral(value, GraphQLInt);
     }
     if (typeof result !== "number" || result < 0) invalidInput();
     return result;
