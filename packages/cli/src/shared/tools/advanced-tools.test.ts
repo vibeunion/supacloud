@@ -112,7 +112,7 @@ describe("edge_functions CLI tool", () => {
                 framework: "sveltekit-function",
                 path: target,
             });
-            expect(await Bun.file(join(target, "svelte.config.js")).text())
+            expect(await Bun.file(join(target, "vite.config.ts")).text())
                 .toContain("sveltekit-adapter");
             expect(await Bun.file(join(target, "src/routes/+server.ts")).text())
                 .toContain("export function GET");

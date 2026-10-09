@@ -73,14 +73,13 @@ function scaffoldFiles(framework: FunctionFramework, slug: string): Record<strin
                 scripts: { build: "vite build" },
                 devDependencies: {
                     "@supacloud/function-adapter": "^0.1.0",
-                    "@sveltejs/kit": "^2.70.3",
+                    "@sveltejs/kit": "^3.0.1",
                     "@sveltejs/vite-plugin-svelte": "^7.3.0",
                     svelte: "^5.57.0",
                     vite: "^8.2.2",
                 },
             }, null, 2) + "\n",
-            "svelte.config.js": `import adapter from "@supacloud/function-adapter/sveltekit-adapter";\n\nexport default { kit: { adapter: adapter() } };\n`,
-            "vite.config.ts": `import { sveltekit } from "@sveltejs/kit/vite";\nimport { defineConfig } from "vite";\n\nexport default defineConfig({ plugins: [sveltekit()] });\n`,
+            "vite.config.ts": `import { sveltekit } from "@sveltejs/kit/vite";\nimport adapter from "@supacloud/function-adapter/sveltekit-adapter";\nimport { defineConfig } from "vite";\n\nexport default defineConfig({ plugins: [sveltekit({ adapter: adapter() })] });\n`,
             "src/routes/+server.ts": `export function GET() {\n  return Response.json({ function: "${slug}", framework: "sveltekit-function" });\n}\n`,
         };
     }

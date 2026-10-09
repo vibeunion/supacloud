@@ -38,7 +38,7 @@
     "directory": "packages/function-adapter"
   },
   "peerDependencies": {
-    "@sveltejs/kit": "^2.0.0"
+    "@sveltejs/kit": "^3.0.0"
   },
   "peerDependenciesMeta": {
     "@sveltejs/kit": {
@@ -46,7 +46,7 @@
     }
   },
   "overrides": {
-    "cookie": "0.7.2",
+    "cookie": "^2.0.1",
     "source-map-js": "^1.2.2"
   },
   "devDependencies": {
