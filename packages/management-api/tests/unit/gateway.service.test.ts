@@ -143,6 +143,11 @@ describe("GatewayService provider selection", () => {
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-correlation-id");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-business-task-id");
         expect(DEFAULT_CORS_HEADERS).toContain("x-supacloud-task-metadata");
+        expect(DEFAULT_CORS_HEADERS).toContain("x-request-id");
+        expect(DEFAULT_CORS_HEADERS).toContain("x-idempotency-key");
+        expect(DEFAULT_CORS_HEADERS).toContain("traceparent");
+        expect(DEFAULT_CORS_HEADERS).toContain("tracestate");
+        expect(DEFAULT_CORS_HEADERS).toContain("baggage");
         expect(DEFAULT_CORS_HEADERS).not.toContain("x-forwarded-for");
         expect(DEFAULT_CORS_HEADERS).not.toContain("x-forwarded-host");
         expect(DEFAULT_CORS_HEADERS).not.toContain("x-forwarded-proto");
@@ -152,6 +157,10 @@ describe("GatewayService provider selection", () => {
     test("default cors exposed headers allow browsers to read download filenames", () => {
         expect(DEFAULT_CORS_EXPOSED).toContain("Content-Disposition");
         expect(DEFAULT_CORS_EXPOSED).toContain("Retry-After");
+        expect(DEFAULT_CORS_EXPOSED).toContain("x-request-id");
+        expect(DEFAULT_CORS_EXPOSED).toContain("x-supacloud-trace-id");
+        expect(DEFAULT_CORS_EXPOSED).toContain("x-supacloud-correlation-id");
+        expect(DEFAULT_CORS_EXPOSED).toContain("traceparent");
     });
 
     test("default Caddy logger redacts sensitive request headers", () => {

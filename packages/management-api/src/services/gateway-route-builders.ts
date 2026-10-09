@@ -48,6 +48,7 @@ export const DEFAULT_CORS_HEADERS = [
     "Idempotency-Key", "x-supacloud-idempotency-key", "x-supacloud-function-version",
     "x-supacloud-trace-id", "x-supacloud-correlation-id",
     "x-supacloud-business-task-id", "x-supacloud-task-metadata",
+    "x-request-id", "x-idempotency-key", "traceparent", "tracestate", "baggage",
 ];
 
 export const DEFAULT_CORS_EXPOSED = [
@@ -55,6 +56,7 @@ export const DEFAULT_CORS_EXPOSED = [
     "x-supabase-api-version", "X-Client-Info", "Prefer",
     "Content-Profile", "accept-profile", "Range", "Range-Unit",
     "X-Relay-Error", "link", "x-total-count", "Content-Disposition", "Retry-After",
+    "x-request-id", "x-supacloud-trace-id", "x-supacloud-correlation-id", "traceparent",
 ];
 
 export const DEFAULT_CORS_ORIGINS = [
