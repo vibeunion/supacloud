@@ -140,7 +140,7 @@ import { Hono } from "hono";
 export default new Hono().get("/", (c) => c.text("hello"));
 
 // Option D: SvelteKit API-only
-// Configure @supacloud/function-adapter/sveltekit-adapter in svelte.config.js.
+// Configure @supacloud/function-adapter/sveltekit-adapter in the Vite sveltekit plugin.
 // It emits a Fetch handler for +server.ts routes and hooks.server.
 ```
 

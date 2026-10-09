@@ -30,7 +30,7 @@ export default function adapter(
       if (builder.prerendered.paths.length > 0) {
         throw new Error("sveltekit-function does not serve prerendered or static output");
       }
-      if (directoryHasEntries(builder.config.kit.files.assets)) {
+      if (directoryHasEntries(builder.config.files.assets)) {
         throw new Error(
           "sveltekit-function does not serve static assets; deploy the application with SvelteKit Hosting",
         );
@@ -45,16 +45,11 @@ export default function adapter(
       builder.rimraf(out);
       builder.mkdirp(out);
       builder.writeServer(`${out}/server`);
-      writeFileSync(
-        `${out}/manifest.js`,
-        `export const manifest = ${builder.generateManifest({ relativePath: "./server" })};\n`,
-      );
+      builder.generateServerInstance(`${out}/server-instance.js`, { serverDirectory: `${out}/server` });
       writeFileSync(
         `${out}/index.js`,
-        `import { Server } from "./server/index.js";
-import { manifest } from "./manifest.js";
+        `import { server } from "./server-instance.js";
 
-const server = new Server(manifest);
 let initialized;
 
 async function fetch(request) {

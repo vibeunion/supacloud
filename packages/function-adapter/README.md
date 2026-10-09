@@ -23,13 +23,14 @@ import { createSvelteKitHandler } from "@supacloud/function-adapter/sveltekit";
 export default createSvelteKitHandler({ respond: server.respond.bind(server) });
 ```
 
-Or configure the build adapter directly:
+Or configure the build adapter in the Vite SvelteKit plugin:
 
 ```js
+import { sveltekit } from "@sveltejs/kit/vite";
 import adapter from "@supacloud/function-adapter/sveltekit-adapter";
 
 export default {
-  kit: { adapter: adapter() },
+  plugins: [sveltekit({ adapter: adapter() })],
 };
 ```
 
