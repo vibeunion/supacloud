@@ -78,10 +78,6 @@ upstream 路由会被渲染成 Caddy 的 `reverse_proxy`，并自动注入这些
 
 `managed_upstream: "edge-functions"` 复用同一套 `reverse_proxy`、项目头、CORS、rewrite、strip prefix 与 timeout 渲染逻辑。路由配置和 API 返回始终保留符号值 `edge-functions`；每次创建、更新或全量重建 Caddy 路由时，Management API 才从当前 `EDGE_RUNTIME_INTERNAL`（`config.edgeRuntimeInternal`）解析实际 dial。因此 embedded、external 或 service-host 部署切换后，下一次 reconcile 会使用新地址，不依赖固定的 `9000`/`9005` 端口。
 
-Functions 路由保留上游的正常响应和 CORS 策略；当 Edge Runtime 或代理连接在返回 HTTP 响应前失败时，网关会对配置允许的 Origin 返回可读的错误响应和 CORS 头。HTTP 4xx/5xx 响应仍由函数决定，不会被网关强行改写。
-
-`Access-Control-Allow-Origin: "*"` 只适用于不依赖 Cookie 的 Bearer/API key 调用；浏览器 `credentials: "include"` 必须使用明确的 Origin 列表或正则，并由网关回显允许的 Origin，同时保留 credentials 语义。
-
 该模式直接进入**同步 Edge Function** 执行，绕过 Management API `sdk-proxy`，因此不会触发 `sdk-proxy` 的异步函数自动入队。它不替代 SupaCloud 自动生成的系统 `/functions/v1` 路由，也不会注入 `x-supacloud-internal-auth`、`x-supacloud-internal-token` 或其它内部 token；请勿用它暴露 Edge Runtime 管理端点。
 
 ### static 模式渲染
