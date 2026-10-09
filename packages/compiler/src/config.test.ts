@@ -16,6 +16,11 @@ describe("SupaCloud default configuration", () => {
       treeShakeUnusedProviders: true,
       moduleBoundaryPreset: "modular-monolith",
       graphql: false,
+      effect: {
+        requireRouteEffects: true,
+        requireErrorMappings: true,
+        requireDependencies: true,
+      },
     });
   });
 
@@ -90,5 +95,29 @@ describe("SupaCloud default configuration", () => {
     expect(compileOptionsFromConfig({
       disallowControllerDirectDb: false, detectOrphanModules: false,
     }, "/workspace")).toMatchObject({ disallowControllerDirectDb: false, detectOrphanModules: false });
+  });
+
+  test("passes Effect governance through the standard configuration", () => {
+    expect(compileOptionsFromConfig({
+      effect: {
+        requireRouteEffects: true,
+        requireErrorMappings: true,
+        requireDependencies: true,
+      },
+    }, "/workspace/app").effect).toEqual({
+      requireRouteEffects: true,
+      requireErrorMappings: true,
+      requireDependencies: true,
+    });
+  });
+
+  test("keeps Effect governance enabled when only part of the policy is overridden", () => {
+    expect(compileOptionsFromConfig({
+      effect: { requireRouteEffects: false },
+    }, "/workspace/app").effect).toEqual({
+      requireRouteEffects: false,
+      requireErrorMappings: true,
+      requireDependencies: true,
+    });
   });
 });

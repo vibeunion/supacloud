@@ -3,7 +3,7 @@ import { runCompilerBenchmark } from "./benchmark";
 
 test("compiler benchmark reports measured generation paths and unchanged incremental ownership", async () => {
   const report = await runCompilerBenchmark();
-  expect(report.fixtureFiles).toBe(14);
+  expect(report.fixtureFiles).toBe(15);
   expect(report.generatedBytes).toBeGreaterThan(0);
   expect(report.reusedModules).toEqual(["audit", "health"]);
   expect(report.reanalyzedModules).toEqual(["case"]);

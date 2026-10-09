@@ -210,6 +210,24 @@ export interface HandlerParamNode {
   default?: unknown;
 }
 
+export type EffectRetryPolicy = "none" | "explicit";
+
+export interface EffectErrorMappingNode {
+  tag: string;
+  status: number;
+  code: string;
+  message?: string;
+}
+
+export interface EffectRouteNode {
+  required: true;
+  errors?: EffectErrorMappingNode[];
+  dependencies?: string[];
+  retry?: EffectRetryPolicy;
+  maxAttempts?: number;
+  timeoutMs?: number;
+}
+
 export interface RouteNode {
   parse?: "none";
   allowDeleteBody?: true;
@@ -230,6 +248,8 @@ export interface RouteNode {
   cookie?: string;
   response?: string;
   responses?: Record<string, string>;
+  /** Static Effect execution contract for this route. */
+  effect?: EffectRouteNode;
   /** @Command-decorated class explicitly bound by the route. */
   command?: string;
   /** Route guards executed before handler (Angular CanActivateFn style). */
@@ -463,6 +483,17 @@ export interface CompileOptions {
   changedPaths?: string[];
   /** Type-safety gates for generated artifacts and production source. */
   typeSafety?: TypeSafetyOptions;
+  /** Compile-time Effect governance for routes and command handlers. */
+  effect?: EffectCompilerOptions;
+}
+
+export interface EffectCompilerOptions {
+  /** Require every discovered route to declare an Effect contract. */
+  requireRouteEffects?: boolean;
+  /** Require explicit public mappings for Effect failures. */
+  requireErrorMappings?: boolean;
+  /** Require an explicit dependency list for Effect environments. */
+  requireDependencies?: boolean;
 }
 
 export interface GraphqlOptions {
@@ -576,6 +607,7 @@ export interface ValidateOptions {
   disallowControllerDirectDb?: boolean;
   /** Detect modules declared in the project that are unreachable from any root module. */
   detectOrphanModules?: boolean;
+  effect?: EffectCompilerOptions;
 }
 
 /** Runtime capabilities declared by the Command executor. */

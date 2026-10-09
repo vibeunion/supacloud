@@ -55,6 +55,7 @@ const AcceptRoute = defineRouteContract({
   cookie: RequestCookie,
   responses: { 201: AcceptResult, 409: ConflictResult },
   command: AcceptCaseCommand,
+  effect: { required: true, dependencies: [], errors: [], retry: "none" },
 });
 
 @Controller("/cases")`,
@@ -65,6 +66,7 @@ const AcceptRoute = defineRouteContract({
     params: AcceptParams,
     response: AcceptResult,
     command: AcceptCaseCommand,
+    effect: { required: true, dependencies: [], errors: [], retry: "none" },
   })`,
         '@Post("/:caseId/accept", AcceptRoute)',
       );

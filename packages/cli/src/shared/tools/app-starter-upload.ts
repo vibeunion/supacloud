@@ -1,4 +1,5 @@
-export const STARTER_UPLOAD_FEATURE = `import { Body, Controller, Inject, Injectable, Param, Post, DB_CLIENT, REQUEST_CONTEXT } from "@supacloud/app";
+export const STARTER_UPLOAD_FEATURE = `import * as Effect from "effect/Effect";
+import { Body, Controller, Inject, Injectable, Param, Post, DB_CLIENT, REQUEST_CONTEXT } from "@supacloud/app";
 import { ApplicationError } from "@supacloud/elysia";
 import { UploadBody, UploadLocation, UploadParams, UploadResult } from "./contracts";
 
@@ -28,13 +29,47 @@ export class ReviewUploads {
 export class ReviewUploadsController {
   constructor(@Inject(ReviewUploads) private readonly uploads: ReviewUploads) {}
 
-  @Post("/:id/attachment-upload", { params: UploadParams, body: UploadBody, responses: { 200: UploadLocation } })
-  preview(@Param("id") id: string, @Body() body: { artifactId: string; expectedVersion: number }): Promise<ReviewUploadLocation> {
-    return this.uploads.preview({ reviewId: id, artifactId: body.artifactId, expectedVersion: body.expectedVersion });
+  @Post("/:id/attachment-upload", {
+    params: UploadParams,
+    body: UploadBody,
+    responses: { 200: UploadLocation },
+    effect: {
+      required: true,
+      dependencies: [],
+      errors: [
+        { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+        { tag: "UPLOAD_INPUT_INVALID", status: 400, code: "UPLOAD_INPUT_INVALID" },
+        { tag: "UPLOAD_DENIED", status: 403, code: "UPLOAD_DENIED" },
+        { tag: "UPLOADS_UNAVAILABLE", status: 501, code: "UPLOADS_UNAVAILABLE" },
+      ],
+      retry: "none",
+    },
+  })
+  preview(@Param("id") id: string, @Body() body: { artifactId: string; expectedVersion: number }): Effect.Effect<ReviewUploadLocation, unknown, never> {
+    return Effect.promise(() => this.uploads.preview({ reviewId: id, artifactId: body.artifactId, expectedVersion: body.expectedVersion }));
   }
-  @Post("/:id/attachment-registration", { params: UploadParams, body: UploadBody, responses: { 200: UploadResult } })
-  register(@Param("id") id: string, @Body() body: { artifactId: string; expectedVersion: number }): Promise<ReviewUploadResult> {
-    return this.uploads.register({ reviewId: id, artifactId: body.artifactId, expectedVersion: body.expectedVersion });
+  @Post("/:id/attachment-registration", {
+    params: UploadParams,
+    body: UploadBody,
+    responses: { 200: UploadResult },
+    effect: {
+      required: true,
+      dependencies: [],
+      errors: [
+        { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+        { tag: "UPLOAD_INPUT_INVALID", status: 400, code: "UPLOAD_INPUT_INVALID" },
+        { tag: "UPLOAD_DENIED", status: 403, code: "UPLOAD_DENIED" },
+        { tag: "UPLOAD_CONTENT_INVALID", status: 400, code: "UPLOAD_CONTENT_INVALID" },
+        { tag: "COMMAND_IDEMPOTENCY_CONFLICT", status: 409, code: "COMMAND_IDEMPOTENCY_CONFLICT" },
+        { tag: "COMMAND_REJECTED", status: 403, code: "COMMAND_REJECTED" },
+        { tag: "UPLOADS_UNAVAILABLE", status: 501, code: "UPLOADS_UNAVAILABLE" },
+        { tag: "UPLOAD_OUTCOME_UNKNOWN", status: 503, code: "UPLOAD_OUTCOME_UNKNOWN" },
+      ],
+      retry: "none",
+    },
+  })
+  register(@Param("id") id: string, @Body() body: { artifactId: string; expectedVersion: number }): Effect.Effect<ReviewUploadResult, unknown, never> {
+    return Effect.promise(() => this.uploads.register({ reviewId: id, artifactId: body.artifactId, expectedVersion: body.expectedVersion }));
   }
 }
 `;

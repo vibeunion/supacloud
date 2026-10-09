@@ -51,6 +51,7 @@ export function appStarterFiles(name: string): Record<string, string> {
                 "drizzle-orm": dbMetadata.peerDependencies["drizzle-orm"],
                 "@supacloud/js": `^${sdkMetadata.version}`,
                 "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
+                effect: "3.22.1",
                 elysia: "2.0.0-beta.21",
                 rxjs: appMetadata.dependencies.rxjs,
             },
@@ -84,6 +85,11 @@ export default defineSupacloudConfig({
   outDir: "generated",
   strict: true,
   moduleBoundaryPreset: "modular-monolith",
+  effect: {
+    requireRouteEffects: true,
+    requireErrorMappings: true,
+    requireDependencies: true,
+  },
   typeSafety: { scanProductionSource: true, noAnyInGenerated: true },
   disallowControllerDirectDb: true,
   detectOrphanModules: true,
@@ -284,7 +290,8 @@ export function createCompiledModules(): never {
   throw new Error("Run bun run compile before starting the application");
 }
 `,
-        "src/review/review.ts": `import {
+        "src/review/review.ts": `import * as Effect from "effect/Effect";
+import {
   Body, Command, Controller, DB_CLIENT, Get, Inject, Param, Post,
   defineFeatureSlice, defineFeatureSpec, type Aspect,
 } from "@supacloud/app";
@@ -354,12 +361,36 @@ export class ApproveReview {
 export class ReviewController {
   constructor(@Inject(ApproveReview) private readonly approveReview: ApproveReview) {}
 
-  @Get("/health", { responses: { 200: HealthResult } })
-  health(): { ok: boolean } { return { ok: true }; }
+  @Get("/health", {
+    responses: { 200: HealthResult },
+    effect: { required: true, dependencies: [], errors: [], retry: "none" },
+  })
+  health(): Effect.Effect<{ ok: boolean }, never, never> { return Effect.succeed({ ok: true }); }
 
-  @Post("/:id/approve", { command: ApproveReview, params: Params, body: ApproveBody, responses: { 200: ReviewResult } })
-  approve(@Param("id") id: string, @Body() body: { expectedVersion: number }): Promise<Review> {
-    return this.approveReview.execute(id, body.expectedVersion);
+  @Post("/:id/approve", {
+    command: ApproveReview,
+    params: Params,
+    body: ApproveBody,
+    responses: { 200: ReviewResult },
+    effect: {
+      required: true,
+      dependencies: [],
+      errors: [
+        { tag: "AUTHENTICATION_REQUIRED", status: 401, code: "AUTHENTICATION_REQUIRED" },
+        { tag: "REVIEW_NOT_FOUND", status: 404, code: "REVIEW_NOT_FOUND" },
+        { tag: "REVIEW_PERMISSION_DENIED", status: 403, code: "REVIEW_PERMISSION_DENIED" },
+        { tag: "REVIEW_CONFLICT", status: 409, code: "REVIEW_CONFLICT" },
+        { tag: "FEATURE_TRANSITION_CONFLICT", status: 409, code: "FEATURE_TRANSITION_CONFLICT" },
+        { tag: "COMMAND_IDEMPOTENCY_CONFLICT", status: 409, code: "COMMAND_IDEMPOTENCY_CONFLICT" },
+        { tag: "COMMAND_REJECTED", status: 403, code: "COMMAND_REJECTED" },
+        { tag: "REVIEW_COMMAND_UNSUPPORTED", status: 501, code: "REVIEW_COMMAND_UNSUPPORTED" },
+        { tag: "COMMAND_OUTCOME_UNKNOWN", status: 503, code: "COMMAND_OUTCOME_UNKNOWN" },
+      ],
+      retry: "none",
+    },
+  })
+  approve(@Param("id") id: string, @Body() body: { expectedVersion: number }): Effect.Effect<Review, unknown, never> {
+    return Effect.promise(() => this.approveReview.execute(id, body.expectedVersion));
   }
 }
 

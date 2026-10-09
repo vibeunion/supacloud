@@ -34,6 +34,12 @@ import {
   createDocumentationPlugin,
   type ApplicationDocumentationOptions,
 } from "./documentation";
+import {
+  createDefaultEffectRuntime,
+  runCompiledEffect,
+  type CompiledEffectDescriptor,
+  type SupaCloudEffectRuntime,
+} from "./effect";
 
 // Compiled route schemas may not retain a `t` import after bundling.
 setupTypebox();
@@ -58,6 +64,13 @@ export {
   SchemaContractError,
   toElysiaRouteSchema,
 } from "./schema_contract";
+export {
+  createDefaultEffectRuntime,
+  createEffectRuntimeFromLayer,
+  EffectApplicationError,
+  runCompiledEffect,
+} from "./effect";
+export type { CompiledEffectDescriptor, SupaCloudEffectRuntime } from "./effect";
 export type {
   ElysiaRouteContext,
   ElysiaRouteDefinition,
@@ -103,6 +116,7 @@ export interface CompiledRoute {
   /** @deprecated Use `responses` with an explicit HTTP status map. */
   response?: unknown;
   responses?: Record<string | number, unknown>;
+  effect?: CompiledEffectDescriptor;
   /** Compile-time ownership and transport classification for the route boundary. */
   contract?: {
     body?: "framework" | "domain";
@@ -586,6 +600,8 @@ export interface ApplicationOptions<Http extends AnyElysia = Elysia, RequestCont
   commandExecutor?: CommandExecutor;
   /** Maps framework or application failures to the public HTTP contract. */
   errorMapper?: ErrorMapper;
+  /** Runs Effect route programs and provides their environment at the HTTP boundary. */
+  effectRuntime?: SupaCloudEffectRuntime;
   /** Best-effort execution metadata only; durable audit belongs to governance. */
   onExecution?: ExecutionObserver;
   /** Optional read-only OpenAPI and GraphQL documentation endpoints. */
@@ -1070,7 +1086,7 @@ export function createModulePlugin<
   compiled: CompiledModule,
   services: Services,
   ctxFactory: HttpRequestContextFactory<Http> = defaultRequestContext,
-  options: Pick<ApplicationOptions<Http>, "http" | "httpPolicies" | "commandGovernance" | "commandExecutor" | "errorMapper" | "onExecution" | "normalize"> = {},
+  options: Pick<ApplicationOptions<Http>, "http" | "httpPolicies" | "commandGovernance" | "commandExecutor" | "errorMapper" | "effectRuntime" | "onExecution" | "normalize"> = {},
   imported: Record<string, Record<string, unknown>> = {},
   pendingWork?: PendingWorkRegistry,
 ) {
@@ -1080,6 +1096,7 @@ export function createModulePlugin<
   const supportedFields = new Set([
     "method", "path", "handler", "body", "params", "query", "headers", "cookie",
     "response", "responses", "contract", "schemaKinds", "nativeResponse", "invoker",
+    "effect",
     "command", "aspects", "aspectPipeline",
     "paramTransforms", "paramDefaults", "queryTransforms", "queryDefaults", "title", "data",
     // defineJsonContract can be spread into a route; these helpers are not hooks.
@@ -1125,6 +1142,21 @@ export function createModulePlugin<
         throw new ApplicationError(`Command "${route.command}" is not registered`, {
           code: "COMMAND_NOT_REGISTERED",
         });
+      }
+      if (route.effect?.retry === "explicit" && route.command) {
+        const command = commandsByClassName.get(route.command);
+        if (command && command.idempotency !== "required") {
+          throw new ApplicationError(
+            `Effect retry is not allowed for non-idempotent command "${command.name}"`,
+            { code: "EFFECT_RETRY_IDEMPOTENCY_REQUIRED" },
+          );
+        }
+      }
+      if (route.effect?.dependencies && route.effect.dependencies.length > 0 && !options.effectRuntime) {
+        throw new ApplicationError(
+          `Route ${route.method} ${controller.path}${route.path} declares Effect dependencies without an effectRuntime`,
+          { code: "EFFECT_RUNTIME_UNCONFIGURED" },
+        );
       }
     }
   }
@@ -1314,13 +1346,15 @@ export function createModulePlugin<
           const handlerCall = () => route.invoker
             ? route.invoker(instance, input)
             : Reflect.apply(method, instance, [input]);
-          const invoke = once(() => route.command && options.commandGovernance ? handlerCall()
+          const invokeHandler = async () =>
+            runCompiledEffect(await handlerCall(), route.effect, options.effectRuntime);
+          const invoke = once(() => route.command && options.commandGovernance ? invokeHandler()
             : observeExecution(options.onExecution, {
               kind: route.command ? "command" : "route",
               operation: route.command ?? `${route.method} ${path}`,
               stage: "handler",
               ...executionTrace(requestContext),
-            }, handlerCall));
+            }, invokeHandler));
           const routeContext: ApplicationAspectContext = {
             kind: "route",
             name: `${route.method} ${path}`,

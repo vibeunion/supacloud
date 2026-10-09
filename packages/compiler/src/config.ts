@@ -30,6 +30,7 @@ export interface SupaCloudConfig {
   allowRouteCommandBindings?: boolean;
   disallowControllerDirectDb?: boolean;
   detectOrphanModules?: boolean;
+  effect?: NonNullable<CompileOptions["effect"]>;
   commandCapabilities?: CommandExecutionCapabilities;
   treeShakeUnusedProviders?: boolean;
 }
@@ -37,10 +38,11 @@ export interface SupaCloudConfig {
 export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
   SupaCloudConfig,
   "include" | "moduleBoundaryPreset" | "moduleBoundaries" | "typeSafety" | "delivery"
-  | "allowRouteCommandBindings" | "disallowControllerDirectDb" | "detectOrphanModules" | "openApi"
+  | "allowRouteCommandBindings" | "disallowControllerDirectDb" | "detectOrphanModules" | "openApi" | "effect"
 >> & {
   include: string[];
   moduleBoundaryPreset: ModuleBoundaryPresetName;
+  effect: NonNullable<CompileOptions["effect"]>;
 } = {
   graphql: false,
   root: "src",
@@ -60,6 +62,11 @@ export const DEFAULT_SUPACLOUD_CONFIG: Required<Omit<
     transaction: true,
   },
   moduleBoundaryPreset: "modular-monolith",
+  effect: {
+    requireRouteEffects: true,
+    requireErrorMappings: true,
+    requireDependencies: true,
+  },
 };
 
 export function defineSupacloudConfig(config: SupaCloudConfig = {}): SupaCloudConfig {
@@ -71,6 +78,9 @@ export function defineSupacloudConfig(config: SupaCloudConfig = {}): SupaCloudCo
     ...config,
     include: config.include ?? [...DEFAULT_SUPACLOUD_CONFIG.include],
     graphql: config.graphql ?? DEFAULT_SUPACLOUD_CONFIG.graphql,
+    effect: config.effect === undefined
+      ? { ...DEFAULT_SUPACLOUD_CONFIG.effect }
+      : { ...DEFAULT_SUPACLOUD_CONFIG.effect, ...config.effect },
   };
 }
 
@@ -82,6 +92,7 @@ function validateGovernanceConfig(config: {
   allowRouteCommandBindings?: unknown;
   disallowControllerDirectDb?: unknown;
   detectOrphanModules?: unknown;
+  effect?: unknown;
 }): void {
   const isRecord = (value: unknown): value is Record<string, unknown> =>
     value !== null && typeof value === "object" && !Array.isArray(value);
@@ -141,6 +152,17 @@ function validateGovernanceConfig(config: {
   for (const key of ["allowRouteCommandBindings", "disallowControllerDirectDb", "detectOrphanModules"] as const) {
     if (config[key] !== undefined && typeof config[key] !== "boolean") throw new Error(`${key} must be a boolean.`);
   }
+  if (config.effect !== undefined) {
+    if (!isRecord(config.effect) || Object.keys(config.effect).some((key) =>
+      !["requireRouteEffects", "requireErrorMappings", "requireDependencies"].includes(key))) {
+      throw new Error("effect accepts requireRouteEffects, requireErrorMappings and requireDependencies.");
+    }
+    for (const key of ["requireRouteEffects", "requireErrorMappings", "requireDependencies"]) {
+      if (config.effect[key] !== undefined && typeof config.effect[key] !== "boolean") {
+        throw new Error(`effect.${key} must be boolean.`);
+      }
+    }
+  }
 }
 
 export function resolveSupacloudConfig(
@@ -163,6 +185,7 @@ export function resolveSupacloudConfig(
   allowRouteCommandBindings?: boolean;
   disallowControllerDirectDb?: boolean;
   detectOrphanModules?: boolean;
+  effect?: NonNullable<CompileOptions["effect"]>;
   treeShakeUnusedProviders: boolean;
   graphql?: GraphqlOptions;
 } {
@@ -184,6 +207,9 @@ export function resolveSupacloudConfig(
     ...(resolved.allowRouteCommandBindings === undefined ? {} : { allowRouteCommandBindings: resolved.allowRouteCommandBindings }),
     ...(resolved.disallowControllerDirectDb === undefined ? {} : { disallowControllerDirectDb: resolved.disallowControllerDirectDb }),
     ...(resolved.detectOrphanModules === undefined ? {} : { detectOrphanModules: resolved.detectOrphanModules }),
+    effect: resolved.effect === undefined
+      ? { ...DEFAULT_SUPACLOUD_CONFIG.effect }
+      : { ...DEFAULT_SUPACLOUD_CONFIG.effect, ...resolved.effect },
     treeShakeUnusedProviders: resolved.treeShakeUnusedProviders ?? DEFAULT_SUPACLOUD_CONFIG.treeShakeUnusedProviders,
     graphql: resolved.graphql ? {
       ...resolved.graphql,

@@ -241,6 +241,8 @@ export interface RouteOptions<Schemas extends RouteContractSchemas = RouteContra
   /** TypeBox schemas keyed by the HTTP response status code. */
   responses?: Schemas["responses"] extends Readonly<Record<string | number, unknown>>
     ? Schemas["responses"] : Readonly<Record<string | number, unknown>>;
+  /** Explicit Effect runtime contract for routes that return an Effect program. */
+  effect?: EffectRouteOptions;
   /** Command class whose governance metadata must be enforced for this route. */
   command?: Type<unknown>;
   /** Angular-style functional route guards executed before handler. */
@@ -261,6 +263,34 @@ export interface RouteOptions<Schemas extends RouteContractSchemas = RouteContra
   data?: Record<string, unknown>;
   /** Explicit static aspects applied around this route invocation. */
   aspects?: Aspect[];
+}
+
+export type EffectRetryPolicy = "none" | "explicit";
+
+export interface EffectErrorMapping {
+  /** Tagged error identity: `_tag`, `tag`, `code`, or constructor name. */
+  tag: string;
+  /** Public HTTP status emitted for the tagged failure. */
+  status: number;
+  /** Stable public error code. */
+  code: string;
+  /** Optional safe public message; raw Effect failures are never exposed. */
+  message?: string;
+}
+
+export interface EffectRouteOptions {
+  /** Effect execution is required for this route. */
+  required?: true;
+  /** Every declared domain failure must be mapped before it crosses HTTP. */
+  errors?: readonly EffectErrorMapping[];
+  /** Logical services required by the Effect environment. */
+  dependencies?: readonly string[];
+  /** Retries are disabled by default and must be explicitly governed. */
+  retry?: EffectRetryPolicy;
+  /** Total execution attempts when retry is "explicit", including the first. */
+  maxAttempts?: number;
+  /** Optional execution timeout owned by the runtime adapter. */
+  timeoutMs?: number;
 }
 
 export type RouteDefinition<Schemas extends RouteContractSchemas = RouteContractSchemas> = RouteOptions<Schemas> & {

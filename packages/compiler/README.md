@@ -8,6 +8,13 @@ response unions, caller decoders, binary/stream routes and GraphQL stay intact.
 These errors do not prove write rollback and do not add automatic retries.
 See [typed clients and recovery](../../docs/framework-composition.md).
 
+For Elysia routes, the compiler governs Effect contracts by default:
+`effect.dependencies` documents the runtime environment, `effect.errors`
+documents safe HTTP mappings, and `effect.retry` requires explicit bounded
+attempts. The default policy requires `requireRouteEffects`,
+`requireErrorMappings` and `requireDependencies`. See
+[Effect governance](../../docs/effect-governance.md).
+
 ## Unified Database Contracts
 
 `supacloud-compiler database-contracts database-contracts.json` generates a shared
@@ -320,6 +327,7 @@ bunx supacloud-compiler dev
 | OpenAPI 3.1 module | 开启 |
 | permissions manifest | 开启 |
 | module boundary preset | `modular-monolith` |
+| Effect route governance | 三项严格检查均开启 |
 | provider tree-shaking | 开启 |
 
 需要覆盖默认值时，在项目根目录添加 `supacloud.config.ts`：

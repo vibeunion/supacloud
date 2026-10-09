@@ -421,7 +421,7 @@ export class LifecycleController {
     expect(applicationCode).toContain('serviceKey: "caseController"');
     expect(applicationCode).toContain('path: "/cases"');
     expect(applicationCode).toContain(
-      'handler: "accept", body: CreateCaseBody, params: AcceptParams, response: AcceptResult, command: "AcceptCaseCommand", invoker: async (ctrl: unknown',
+      'handler: "accept", body: CreateCaseBody, params: AcceptParams, response: AcceptResult, effect: {"required":true,"retry":"none","dependencies":[],"errors":[]}, command: "AcceptCaseCommand", invoker: async (ctrl: unknown',
     );
   });
 

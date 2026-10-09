@@ -10,6 +10,8 @@ import type {
   ControllerNode,
   DependencyGraphCache,
   Diagnostic,
+  EffectErrorMappingNode,
+  EffectRouteNode,
   HandlerParamNode,
   FunctionalInjectNode,
   FeatureSpecNode,
@@ -1875,6 +1877,189 @@ function parseController(
             } else if (value) Object.assign(route.contract, { [field]: value });
           }
         }
+        const effectExpr = getProp(optionsObject, "effect");
+        if (effectExpr) {
+          const effectObject = resolveStaticObjectLiteral(effectExpr, ctx);
+          if (!effectObject) {
+            ctx.diagnostics.push({
+              severity: "error",
+              code: "invalid-effect-contract",
+              errorCode: "SC3030",
+              docsUrl: "https://supacloud.dev/errors/SC3030",
+              file,
+              line: lineOf(effectExpr),
+              message: `Route ${route.handler} effect must be a statically resolvable object literal.`,
+              suggestion: "Use effect: { required: true, errors: [...], dependencies: [...] }.",
+            });
+          } else {
+            const effect: EffectRouteNode = { required: true };
+            const requiredExpr = getProp(effectObject, "required");
+            if (requiredExpr !== undefined && booleanProp(effectObject, "required") !== true) {
+              ctx.diagnostics.push({
+                severity: "error",
+                code: "invalid-effect-contract",
+                errorCode: "SC3030",
+                docsUrl: "https://supacloud.dev/errors/SC3030",
+                file,
+                line: lineOf(requiredExpr),
+                message: `Route ${route.handler} effect.required must be the literal true.`,
+              });
+            }
+            const retry = stringLiteralProp(effectObject, "retry");
+            if (retry !== undefined) {
+              if (retry !== "none" && retry !== "explicit") {
+                ctx.diagnostics.push({
+                  severity: "error",
+                  code: "invalid-effect-retry",
+                  errorCode: "SC3031",
+                  docsUrl: "https://supacloud.dev/errors/SC3031",
+                  file,
+                  line: lineOf(getProp(effectObject, "retry")!),
+                  message: `Route ${route.handler} effect.retry must be "none" or "explicit".`,
+                });
+              } else {
+                effect.retry = retry;
+              }
+            }
+            const maxAttemptsExpr = getProp(effectObject, "maxAttempts");
+            if (maxAttemptsExpr !== undefined) {
+              const maxAttempts = numberLiteralProp(effectObject, "maxAttempts");
+              if (maxAttempts === undefined || maxAttempts < 1 || !Number.isInteger(maxAttempts)) {
+                ctx.diagnostics.push({
+                  severity: "error",
+                  code: "invalid-effect-retry",
+                  errorCode: "SC3031",
+                  docsUrl: "https://supacloud.dev/errors/SC3031",
+                  file,
+                  line: lineOf(maxAttemptsExpr),
+                  message: `Route ${route.handler} effect.maxAttempts must be a positive integer.`,
+                });
+              } else {
+                effect.maxAttempts = maxAttempts;
+              }
+            }
+            if (effect.retry === "explicit" && effect.maxAttempts === undefined) {
+              ctx.diagnostics.push({
+                severity: "error",
+                code: "invalid-effect-retry",
+                errorCode: "SC3031",
+                docsUrl: "https://supacloud.dev/errors/SC3031",
+                file,
+                line: lineOf(effectExpr),
+                message: `Route ${route.handler} effect.maxAttempts is required when retry is "explicit".`,
+              });
+            }
+            const timeoutExpr = getProp(effectObject, "timeoutMs");
+            if (timeoutExpr !== undefined) {
+              const timeoutMs = numberLiteralProp(effectObject, "timeoutMs");
+              if (timeoutMs === undefined || timeoutMs <= 0 || !Number.isInteger(timeoutMs)) {
+                ctx.diagnostics.push({
+                  severity: "error",
+                  code: "invalid-effect-timeout",
+                  errorCode: "SC3032",
+                  docsUrl: "https://supacloud.dev/errors/SC3032",
+                  file,
+                  line: lineOf(timeoutExpr),
+                  message: `Route ${route.handler} effect.timeoutMs must be a positive integer.`,
+                });
+              } else {
+                effect.timeoutMs = timeoutMs;
+              }
+            }
+            const dependenciesExpr = getProp(effectObject, "dependencies");
+            if (dependenciesExpr !== undefined) {
+              if (!ts.isArrayLiteralExpression(dependenciesExpr)
+                || dependenciesExpr.elements.some((element) => !ts.isStringLiteral(element) || element.text.trim().length === 0)) {
+                ctx.diagnostics.push({
+                  severity: "error",
+                  code: "invalid-effect-dependencies",
+                  errorCode: "SC3033",
+                  docsUrl: "https://supacloud.dev/errors/SC3033",
+                  file,
+                  line: lineOf(dependenciesExpr),
+                  message: `Route ${route.handler} effect.dependencies must be an explicit string array.`,
+                });
+              } else {
+                effect.dependencies = dependenciesExpr.elements.map((element) => (element as ts.StringLiteral).text);
+              }
+            }
+            const errorsExpr = getProp(effectObject, "errors");
+            if (errorsExpr !== undefined) {
+              if (!ts.isArrayLiteralExpression(errorsExpr)) {
+                ctx.diagnostics.push({
+                  severity: "error",
+                  code: "invalid-effect-errors",
+                  errorCode: "SC3034",
+                  docsUrl: "https://supacloud.dev/errors/SC3034",
+                  file,
+                  line: lineOf(errorsExpr),
+                  message: `Route ${route.handler} effect.errors must be an explicit object array.`,
+                });
+              } else {
+                const errors: EffectErrorMappingNode[] = [];
+                for (const errorExpr of errorsExpr.elements) {
+                  if (!ts.isObjectLiteralExpression(errorExpr)) {
+                    ctx.diagnostics.push({
+                      severity: "error",
+                      code: "invalid-effect-errors",
+                      errorCode: "SC3034",
+                      docsUrl: "https://supacloud.dev/errors/SC3034",
+                      file,
+                      line: lineOf(errorExpr),
+                      message: `Route ${route.handler} effect.errors entries must be object literals.`,
+                    });
+                    continue;
+                  }
+                  const tag = stringLiteralProp(errorExpr, "tag");
+                  const code = stringLiteralProp(errorExpr, "code");
+                  const status = numberLiteralProp(errorExpr, "status");
+                  const message = stringLiteralProp(errorExpr, "message");
+                  if (!tag || !code || status === undefined || !Number.isInteger(status) || status < 400 || status > 599) {
+                    ctx.diagnostics.push({
+                      severity: "error",
+                      code: "invalid-effect-errors",
+                      errorCode: "SC3034",
+                      docsUrl: "https://supacloud.dev/errors/SC3034",
+                      file,
+                      line: lineOf(errorExpr),
+                      message: `Route ${route.handler} effect.errors entries require tag, code and an HTTP status from 400 to 599.`,
+                    });
+                    continue;
+                  }
+                  errors.push({ tag, code, status, ...(message === undefined ? {} : { message }) });
+                }
+                effect.errors = errors;
+              }
+            }
+            route.effect = effect;
+            if (!resultType || !/\bEffect(?:\.Effect)?(?:<|\s)/.test(resultType)) {
+              ctx.diagnostics.push({
+                severity: "error",
+                code: "effect-return-type",
+                errorCode: "SC3035",
+                docsUrl: "https://supacloud.dev/errors/SC3035",
+                file,
+                line: lineOf(method),
+                message: `Route ${route.handler} declares an Effect contract but returns ${resultType ?? "an unresolved type"}.`,
+                suggestion: "Return Effect.Effect<Success, Failure, Requirements> from the handler.",
+              });
+            }
+            for (const dependency of effect.dependencies ?? []) {
+              if (!resultType?.includes(dependency)) {
+                ctx.diagnostics.push({
+                  severity: "error",
+                  code: "effect-dependency-type",
+                  errorCode: "SC3040",
+                  docsUrl: "https://supacloud.dev/errors/SC3040",
+                  file,
+                  line: lineOf(method),
+                  message: `Route ${route.handler} declares Effect dependency "${dependency}", but it is absent from the return type environment ${resultType ?? "unknown"}.`,
+                  suggestion: "Keep effect.dependencies aligned with the third Effect type parameter.",
+                });
+              }
+            }
+          }
+        }
         for (const field of ["body", "params", "query", "headers", "cookie", "response"] as const) {
           const schemaExpr = getProp(optionsObject, field);
           if (schemaExpr && ts.isIdentifier(schemaExpr)) {
@@ -2574,6 +2759,13 @@ function toCompilerDiagnostic(diagnostic: ts.Diagnostic, rootDir: string): Diagn
 function stringLiteralProp(obj: ObjectLiteralExpression, name: string): string | undefined {
   const expr = getProp(obj, name);
   return expr && ts.isStringLiteral(expr) ? expr.text : undefined;
+}
+
+function numberLiteralProp(obj: ObjectLiteralExpression, name: string): number | undefined {
+  const expr = getProp(obj, name);
+  if (!expr || !ts.isNumericLiteral(expr)) return undefined;
+  const value = Number(expr.text);
+  return Number.isFinite(value) ? value : undefined;
 }
 
 function arrayProp(obj: ObjectLiteralExpression, name: string): Expression[] {

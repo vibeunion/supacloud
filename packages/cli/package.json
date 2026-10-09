@@ -47,6 +47,7 @@
   "devDependencies": {
     "@supacloud/elysia": "^0.24.1",
     "@types/bun": "^1.4.2",
+    "effect": "3.22.1",
     "elysia": "2.0.0-beta.21",
     "typescript": "^7.0.2"
   }

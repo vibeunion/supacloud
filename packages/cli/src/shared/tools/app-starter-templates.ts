@@ -112,6 +112,7 @@ function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Reco
       dependencies: {
         "@supacloud/app": `^${appMetadata.version}`,
         "@supacloud/elysia": `^${elysiaMetadata.version}`,
+        effect: "3.22.1",
         elysia: "2.0.0-beta.21",
         ...(sdkDependencies ?? { rxjs: appMetadata.dependencies.rxjs }),
       },
@@ -142,6 +143,11 @@ export default defineSupacloudConfig({
   outDir: "generated",
   strict: true,
   moduleBoundaryPreset: "modular-monolith",
+  effect: {
+    requireRouteEffects: true,
+    requireErrorMappings: true,
+    requireDependencies: true,
+  },
   typeSafety: { scanProductionSource: true, noAnyInGenerated: true },
   disallowControllerDirectDb: true,
   detectOrphanModules: true,
@@ -171,20 +177,34 @@ export const CreateOrderBody = t.Object({ name: t.String({ minLength: 1 }) });
 export const OrderResult = t.Object({ id: t.String(), name: t.String() });
 export const HealthResult = t.Object({ ok: t.Boolean() });
 `,
-    "src/orders/orders.ts": `import { Body, Controller, Get, Param, Post, defineFeatureSlice } from "@supacloud/app";
+    "src/orders/orders.ts": `import * as Effect from "effect/Effect";
+import { Body, Controller, Get, Param, Post, defineFeatureSlice } from "@supacloud/app";
 import { status } from "elysia";
 import { OrderParams, CreateOrderBody, OrderResult, HealthResult } from "./contracts";
 @Controller("/orders")
 export class OrdersController {
-  @Get("/health", { responses: { 200: HealthResult } })
-  health(): { ok: boolean } { return { ok: true }; }
+  @Get("/health", {
+    responses: { 200: HealthResult },
+    effect: { required: true, dependencies: [], errors: [], retry: "none" },
+  })
+  health(): Effect.Effect<{ ok: boolean }, never, never> { return Effect.succeed({ ok: true }); }
 
-  @Get("/:id", { params: OrderParams, responses: { 200: OrderResult } })
-  get(@Param("id") id: string): { id: string; name: string } { return { id, name: "demo" }; }
+  @Get("/:id", {
+    params: OrderParams,
+    responses: { 200: OrderResult },
+    effect: { required: true, dependencies: [], errors: [], retry: "none" },
+  })
+  get(@Param("id") id: string): Effect.Effect<{ id: string; name: string }, never, never> {
+    return Effect.succeed({ id, name: "demo" });
+  }
 
-  @Post("/", { body: CreateOrderBody, responses: { 201: OrderResult } })
+  @Post("/", {
+    body: CreateOrderBody,
+    responses: { 201: OrderResult },
+    effect: { required: true, dependencies: [], errors: [], retry: "none" },
+  })
   create(@Body() body: { name: string }) {
-    return status(201, { id: "demo", name: body.name });
+    return Effect.succeed(status(201, { id: "demo", name: body.name }));
   }
 }
 
@@ -360,22 +380,27 @@ function minimalTemplate(name: string, sdkDependencies: StarterSdkDependencies):
     "src/features/health/contracts.ts": `import { t } from "elysia";
 export const HealthResult = t.Object({ ok: t.Boolean() });
 `,
-    "src/features/health/health.ts": `import { Controller, Get, Module } from "@supacloud/app/core";
+    "src/features/health/health.ts": `import * as Effect from "effect/Effect";
+import { Controller, Get, Module } from "@supacloud/app/core";
 import { HealthResult } from "./contracts";
 @Controller("/health")
 export class HealthController {
-  @Get("/", { responses: { 200: HealthResult } })
-  health(): { ok: boolean } { return { ok: true }; }
+  @Get("/", {
+    responses: { 200: HealthResult },
+    effect: { required: true, dependencies: [], errors: [], retry: "none" },
+  })
+  health(): Effect.Effect<{ ok: boolean }, never, never> { return Effect.succeed({ ok: true }); }
 }
 
 @Module({ name: "health", tags: ["type:feature"], controllers: [HealthController] })
 export class HealthModule {}
 `,
-    "src/features/health/health.test.ts": `import { expect, test } from "bun:test";
+    "src/features/health/health.test.ts": `import * as Effect from "effect/Effect";
+import { expect, test } from "bun:test";
 import { HealthController } from "./health";
 
-test("health is a public, side-effect-free operation", () => {
-  expect(new HealthController().health()).toEqual({ ok: true });
+test("health is a public, side-effect-free operation", async () => {
+  expect(await Effect.runPromise(new HealthController().health())).toEqual({ ok: true });
 });
 `,
     "src/app.module.ts": `import { Module } from "@supacloud/app/core";
