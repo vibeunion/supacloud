@@ -65,6 +65,8 @@ export const DEFAULT_CORS_ORIGINS = [
     "~^https?://127\\.0\\.0\\.1(:[0-9]+)?$",
 ];
 
+const WILDCARD_CORS_ORIGIN = "*";
+
 const UPSTREAM_CORS_RESPONSE_HEADERS = [
     "Access-Control-Allow-Origin",
     "Access-Control-Allow-Credentials",
@@ -334,13 +336,13 @@ export function normalizeCustomGatewayRoutes(value: unknown): CustomGatewayRoute
     return value.map((route) => normalizeCustomGatewayRoute(route as CustomGatewayRouteConfig));
 }
 
-export function makeCorsHeaderHandler(): Record<string, unknown> {
+export function makeCorsHeaderHandler(wildcard = false) {
     return {
         handler: "headers",
         response: {
             set: {
-                "Access-Control-Allow-Origin": ["{http.request.header.Origin}"],
-                "Access-Control-Allow-Credentials": ["true"],
+                "Access-Control-Allow-Origin": [wildcard ? WILDCARD_CORS_ORIGIN : "{http.request.header.Origin}"],
+                ...(wildcard ? {} : { "Access-Control-Allow-Credentials": ["true"] }),
                 "Access-Control-Allow-Methods": ["GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD"],
                 "Access-Control-Allow-Headers": [DEFAULT_CORS_HEADERS.join(", ")],
                 "Access-Control-Expose-Headers": [DEFAULT_CORS_EXPOSED.join(", ")],
@@ -352,7 +354,10 @@ export function makeCorsHeaderHandler(): Record<string, unknown> {
 }
 
 function makeCorsOriginMatchers(origins: string[], extra: CaddyMatcher = {}): CaddyMatcher[] {
-    const exactOrigins = uniqueStrings(origins.map((origin) => origin.trim()).filter((origin) => origin && !origin.startsWith("~")));
+    const wildcard = origins.some((origin) => origin.trim() === WILDCARD_CORS_ORIGIN);
+    const exactOrigins = uniqueStrings(origins
+        .map((origin) => origin.trim())
+        .filter((origin) => origin && origin !== WILDCARD_CORS_ORIGIN && !origin.startsWith("~")));
     const regexOrigins = origins
         .map((origin) => origin.trim())
         .filter((origin) => origin.startsWith("~"))
@@ -360,6 +365,7 @@ function makeCorsOriginMatchers(origins: string[], extra: CaddyMatcher = {}): Ca
         .filter(Boolean);
 
     const matchers: CaddyMatcher[] = [];
+    if (wildcard) matchers.push({ ...extra, header_regexp: { Origin: { name: "cors_any_origin", pattern: ".+" } } });
     if (exactOrigins.length > 0) matchers.push({ ...extra, header: { Origin: exactOrigins } });
     if (regexOrigins.length > 0) {
         matchers.push({
@@ -376,6 +382,7 @@ function makeCorsOriginMatchers(origins: string[], extra: CaddyMatcher = {}): Ca
 }
 
 export function makeCorsSubroute(origins: string[]): Record<string, unknown> | null {
+    const wildcard = origins.some((origin) => origin.trim() === WILDCARD_CORS_ORIGIN);
     const preflightMatchers = makeCorsOriginMatchers(origins, { method: ["OPTIONS"] });
     const originMatchers = makeCorsOriginMatchers(origins);
     if (preflightMatchers.length === 0 && originMatchers.length === 0) return null;
@@ -384,14 +391,53 @@ export function makeCorsSubroute(origins: string[]): Record<string, unknown> | n
     if (preflightMatchers.length > 0) {
         routes.push({
             match: preflightMatchers,
-            handle: [makeCorsHeaderHandler(), { handler: "static_response", status_code: 204 }],
+            handle: [makeCorsHeaderHandler(wildcard), { handler: "static_response", status_code: 204 }],
             terminal: true,
         });
     }
     if (originMatchers.length > 0) {
-        routes.push({ match: originMatchers, handle: [makeCorsHeaderHandler()] });
+        routes.push({ match: originMatchers, handle: [makeCorsHeaderHandler(wildcard)] });
     }
     return { handler: "subroute", routes };
+}
+
+export function makeFunctionCorsErrorFallback(origins: string[]) {
+    const matcher = makeCorsOriginMatchers(origins);
+    const wildcard = origins.some((origin) => origin.trim() === WILDCARD_CORS_ORIGIN);
+    const { Vary, ...headers } = makeCorsHeaderHandler(wildcard).response.set;
+    const corsHandler = {
+        handler: "headers",
+        response: {
+            set: headers,
+            add: { Vary },
+            ...(wildcard ? { delete: ["Access-Control-Allow-Credentials"] } : {}),
+            require: { status_code: [5], headers: { "Access-Control-Allow-Origin": null } },
+        },
+    };
+    // A non-terminal subroute wraps the remaining handler chain, including the
+    // proxy. Deferred headers cover upstream 5xx; errors cover transport errors.
+    return {
+        handler: "subroute",
+        routes: matcher.length ? [{ match: matcher, handle: [corsHandler] }] : [],
+        errors: {
+            routes: [
+                ...(matcher.length ? [{ match: matcher, handle: [corsHandler] }] : []),
+                {
+                    handle: [{
+                        handler: "static_response",
+                        status_code: "{http.error.status_code}",
+                        headers: { "Content-Type": ["application/json"], "Cache-Control": ["no-store"] },
+                        body: '{"error":"FUNCTION_GATEWAY_ERROR","message":"Function upstream unavailable"}',
+                    }],
+                    terminal: true,
+                },
+            ],
+        },
+    };
+}
+
+function isFunctionCorsErrorFallback(handler: Record<string, unknown>): boolean {
+    return handler.handler === "subroute" && "errors" in handler;
 }
 
 function isCorsHeaderHandler(handler: Record<string, unknown>): boolean {
@@ -400,6 +446,7 @@ function isCorsHeaderHandler(handler: Record<string, unknown>): boolean {
 }
 
 export function isCorsSubroute(handler: Record<string, unknown>): boolean {
+    if (isFunctionCorsErrorFallback(handler)) return false;
     if (handler.handler !== "subroute" || !Array.isArray(handler.routes)) return false;
     return handler.routes.some((route: any) =>
         Array.isArray(route?.handle) && route.handle.some((item: any) => isCorsHeaderHandler(item)),
@@ -423,6 +470,16 @@ export function setRouteCors(route: CaddyRoute, origins: string[]): void {
     // Custom routes own their policy, including deliberately omitting CORS.
     // Tenant/frontend reconciliation must not replace that persisted policy.
     if (String(route["@id"] || "").startsWith("route-custom-gateway-")) return;
+    if (String(route["@id"] || "").startsWith("route-project-")
+        && String(route["@id"]).endsWith("-functions")) {
+        const handle = Array.isArray(route.handle) ? route.handle as Record<string, unknown>[] : [];
+        route.handle = [
+            makeFunctionCorsErrorFallback(origins),
+            ...handle.filter((handler) => !isFunctionCorsErrorFallback(handler)
+                && !isCorsHeaderHandler(handler) && !isCorsSubroute(handler)),
+        ];
+        return;
+    }
     // Routes that preserve upstream CORS (functions, storage) answer preflight
     // themselves; never re-attach the gateway CORS subroute to them.
     if (routePreservesUpstreamCors(route)) return;
