@@ -8,6 +8,7 @@ import { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
 import { validateRouteContracts } from "./route-contracts";
 import type { GraphqlArtifacts } from "./graphql";
 import { validateClientSchemaBoundaries } from "./client-schema-boundaries";
+import { validateEffectPolicies } from "./effect-governance";
 
 function withDefaultGovernance(options: CompileOptions): CompileOptions {
   return options.commandCapabilities === undefined
@@ -38,6 +39,7 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
     ...(graph.diagnostics ?? []),
     ...validateGraph(graph, options),
     ...validateClientSchemaBoundaries(graph, options),
+    ...validateEffectPolicies(graph, options.effect),
   ];
   if (diagnostics.some((item) => item.code === "runtime-injection-disallowed")) {
     return { diagnostics, graph, written: [] };
@@ -108,6 +110,7 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
     ...(graph.diagnostics ?? []),
     ...validateGraph(graph, options),
     ...validateClientSchemaBoundaries(graph, options),
+    ...validateEffectPolicies(graph, options.effect),
   ];
   if (diagnostics.some((item) => item.code === "runtime-injection-disallowed")) {
     return { diagnostics, graph, upToDate: false, mismatches: ["Runtime DI must be migrated to constructor injection."] };

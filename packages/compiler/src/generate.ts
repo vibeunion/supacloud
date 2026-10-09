@@ -56,6 +56,14 @@ const INTERFACES = `export interface CompiledRoute {
   cookie?: unknown;
   response?: unknown;
   responses?: Record<string | number, unknown>;
+  effect?: {
+    required: true;
+    errors?: Array<{ tag: string; status: number; code: string; message?: string }>;
+    dependencies?: string[];
+    retry?: "none" | "explicit";
+    maxAttempts?: number;
+    timeoutMs?: number;
+  };
   /** Compile-time ownership and transport classification for the route boundary. */
   contract?: {
     body?: "framework" | "domain";
@@ -774,6 +782,9 @@ class ModuleGenerator {
             return `${JSON.stringify(status)}: ${local}`;
           });
           fields.push(`responses: { ${responseFields.join(", ")} }`);
+        }
+        if (route.effect !== undefined) {
+          fields.push(`effect: ${JSON.stringify(route.effect)}`);
         }
         if (route.command) fields.push(`command: ${JSON.stringify(route.command)}`);
         if (route.guards && route.guards.length > 0) {

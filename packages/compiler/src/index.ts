@@ -172,6 +172,10 @@ export type {
   DependencyGraphIndex,
   Diagnostic,
   DiagnosticFix,
+  EffectCompilerOptions,
+  EffectErrorMappingNode,
+  EffectRetryPolicy,
+  EffectRouteNode,
   ModuleBoundaryPresetName,
   ModuleBoundaryProfile,
   ModuleBoundaryRule,
@@ -197,6 +201,7 @@ export type {
   OpenApiServer,
 } from "./types";
 export { inspectRouteContracts, validateRouteContracts } from "./route-contracts";
+export { validateEffectPolicies } from "./effect-governance";
 export { pullGraphqlSchema } from "./graphql-schema";
 export type { PullGraphqlSchemaOptions } from "./graphql-schema";
 export {
