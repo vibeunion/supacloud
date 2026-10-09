@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.27.1...elysia-v0.28.0) (2026-10-09)
+
+
+### Features
+
+* enable strict Effect route governance by default ([#1742](https://github.com/vibeunion/supacloud/issues/1742)) ([4e18c90](https://github.com/vibeunion/supacloud/commit/4e18c908b9c08a8895be016b4e00a0158bf539c6))
+
 ## [0.27.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.27.0...elysia-v0.27.1) (2026-10-08)
 
 

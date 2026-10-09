@@ -14,6 +14,14 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.73.0](https://github.com/vibeunion/supacloud/compare/cli-v0.72.0...cli-v0.73.0) (2026-10-09)
+
+
+### Features
+
+* **cli:** add bounded database context for AI ([#1740](https://github.com/vibeunion/supacloud/issues/1740)) ([54dafa5](https://github.com/vibeunion/supacloud/commit/54dafa5172f99939c812f2cd4ed07bd447f97f65))
+* enable strict Effect route governance by default ([#1742](https://github.com/vibeunion/supacloud/issues/1742)) ([4e18c90](https://github.com/vibeunion/supacloud/commit/4e18c908b9c08a8895be016b4e00a0158bf539c6))
+
 ## [0.72.0](https://github.com/vibeunion/supacloud/compare/cli-v0.71.1...cli-v0.72.0) (2026-10-09)
 
 
