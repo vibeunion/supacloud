@@ -76,10 +76,15 @@ describe("Edge Runtime auth material invalidation", () => {
   });
 
   test("external requests use one resolved activation snapshot and ignore version headers", () => {
-    const requestHandler = source.slice(
-      source.indexOf("async function handleFunctionRequest("),
-      source.indexOf("const app = new Elysia()"),
-    );
+    // CORS decorates the response after the activation-validated dispatch finishes.
+    const requestDispatchStart = source.indexOf("async function dispatchFunctionRequest(");
+    const corsHandlerStart = source.indexOf("async function handleFunctionRequest(");
+    const appStart = source.indexOf("const app = new Elysia()");
+    expect(requestDispatchStart).toBeGreaterThanOrEqual(0);
+    expect(corsHandlerStart).toBeGreaterThan(requestDispatchStart);
+    expect(appStart).toBeGreaterThan(corsHandlerStart);
+    const requestHandler = source.slice(requestDispatchStart, corsHandlerStart);
+    const corsHandler = source.slice(corsHandlerStart, appStart);
     const dispatcher = source.slice(
       source.indexOf("async function dispatchFunction("),
       source.indexOf("async function appendFunctionRuntimeLog("),
@@ -95,6 +100,9 @@ describe("Edge Runtime auth material invalidation", () => {
     expect(requestHandler).toContain("activation.verifyJwt");
     expect(requestHandler).toContain("activation,");
     expect(requestHandler).not.toContain("x-supacloud-function-version");
+    expect(corsHandler).toContain("const response = await dispatchFunctionRequest(c, functionName)");
+    expect(corsHandler).not.toContain("x-supacloud-function-version");
+    expect(corsHandler).not.toContain("resolveFunctionPath(");
     expect(poolDispatch).toContain("functionVersion: responseVersion");
     expect(poolDispatch).not.toContain("functionVersion: activeVersion");
     expect(dispatcher).not.toContain("x-supacloud-function-version");
