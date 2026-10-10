@@ -65,7 +65,7 @@ export interface AppAdapters {
   deps: NonNullable<ApplicationOptions["deps"]>;
   requestContext: NonNullable<ApplicationOptions["requestContext"]>;
   commandGovernance: CommandGovernance;
-  onExecution?: ApplicationOptions["onExecution"];
+  onExecution?: NonNullable<ApplicationOptions["onExecution"]>;
 }
 
 // The host verifies external identity (SupAuth for unified login) before creating requestContext.

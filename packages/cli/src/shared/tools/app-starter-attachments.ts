@@ -39,12 +39,12 @@ function record(value: unknown): Record<string, unknown> {
 }
 function durableResult(value: unknown): ReviewAttachmentResult {
   const item = record(value);
-  if (typeof item.reviewId !== "string" || typeof item.artifactId !== "string"
-    || typeof item.version !== "number" || typeof item.sha256 !== "string"
-    || typeof item.bytes !== "number" || Object.keys(item).length !== 5) {
+  if (typeof item["reviewId"] !== "string" || typeof item["artifactId"] !== "string"
+    || typeof item["version"] !== "number" || typeof item["sha256"] !== "string"
+    || typeof item["bytes"] !== "number" || Object.keys(item).length !== 5) {
     throw new Error("Invalid durable attachment result");
   }
-  return { reviewId: item.reviewId, artifactId: item.artifactId, version: item.version, sha256: item.sha256, bytes: item.bytes };
+  return { reviewId: item["reviewId"], artifactId: item["artifactId"], version: item["version"], sha256: item["sha256"], bytes: item["bytes"] };
 }
 
 export async function createReviewAttachmentAdapters(options: ReviewAttachmentOptions): Promise<{
@@ -57,7 +57,7 @@ export async function createReviewAttachmentAdapters(options: ReviewAttachmentOp
   const binding = rows(await database.transaction(tx => tx.query(
     "SELECT project_id,tenant_id FROM public.starter_application WHERE singleton",
   )));
-  if (binding.length !== 1 || binding[0]?.project_id !== projectId || binding[0]?.tenant_id !== tenantId) {
+  if (binding.length !== 1 || binding[0]?.["project_id"] !== projectId || binding[0]?.["tenant_id"] !== tenantId) {
     throw new Error("Attachment database project/tenant binding mismatch");
   }
   async function authorize(tx: CommandTransaction, input: ReviewAttachmentInput) {
@@ -71,7 +71,7 @@ export async function createReviewAttachmentAdapters(options: ReviewAttachmentOp
       "FOR UPDATE OF r,a,m FOR SHARE OF p",
       [input.reviewId, input.artifactId, input.version, projectId, tenantId],
     ));
-    if (allowed.length !== 1 || typeof allowed[0]?.object_path !== "string") {
+    if (allowed.length !== 1 || typeof allowed[0]?.["object_path"] !== "string") {
       throw new Error("Attachment worker authorization or review revision is no longer valid");
     }
     return allowed[0];
@@ -82,11 +82,11 @@ export async function createReviewAttachmentAdapters(options: ReviewAttachmentOp
         "SELECT artifact_id FROM public.starter_attachments WHERE review_id=$1", [reviewId],
       ))[0];
       if (!found) return;
-      const input = { reviewId, version, artifactId: String(found.artifact_id) };
+      const input = { reviewId, version, artifactId: String(found["artifact_id"]) };
       const allowed = await authorize(tx, input);
       // Bind serialized JSON as text so drivers cannot encode the string as a JSON scalar.
       await tx.query("SELECT supacloud_workflows.start_run($1::uuid,$2,'1','verify',$3::text::jsonb,3)", [
-        String(allowed.run_id), "review.verify-attachment", JSON.stringify(input),
+        String(allowed["run_id"]), "review.verify-attachment", JSON.stringify(input),
       ]);
     },
     store: {
@@ -94,7 +94,7 @@ export async function createReviewAttachmentAdapters(options: ReviewAttachmentOp
         const allowed = await database.transaction(tx => authorize(tx, input));
         const artifact = await artifacts.get(input.artifactId);
         if (!artifact || artifact.bucketId !== "review-attachments"
-          || artifact.objectPath !== allowed.object_path || artifact.artifactType !== "review.attachment"
+          || artifact.objectPath !== allowed["object_path"] || artifact.artifactType !== "review.attachment"
           || artifact.mimeType !== "text/plain" || !/^[1-9][0-9]*$/.test(artifact.sizeBytes)
           || BigInt(artifact.sizeBytes) > 1048576n) throw new Error("Invalid attachment artifact");
         const downloaded = await service.storage.from(artifact.bucketId).download(artifact.objectPath);
@@ -117,7 +117,7 @@ export async function createReviewAttachmentAdapters(options: ReviewAttachmentOp
           const saved = rows(await tx.query(
             "SELECT result FROM public.starter_attachment_results WHERE review_id=$1 AND version=$2 AND artifact_id=$3",
             [input.reviewId, input.version, input.artifactId],
-          ))[0]?.result;
+          ))[0]?.["result"];
           const value = durableResult(saved);
           if (value.reviewId !== result.reviewId || value.version !== result.version || value.artifactId !== result.artifactId
             || value.sha256 !== result.sha256 || value.bytes !== result.bytes) {

@@ -143,18 +143,18 @@ function rows(value: unknown): Record<string, unknown>[] {
 }
 function capture(value: unknown): ReviewUploadInput {
   const item = record(value), uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-  if (typeof item.reviewId !== "string" || !uuid.test(item.reviewId)
-    || typeof item.artifactId !== "string" || !uuid.test(item.artifactId)
-    || typeof item.expectedVersion !== "number" || !Number.isSafeInteger(item.expectedVersion) || item.expectedVersion < 1) {
+  if (typeof item["reviewId"] !== "string" || !uuid.test(item["reviewId"])
+    || typeof item["artifactId"] !== "string" || !uuid.test(item["artifactId"])
+    || typeof item["expectedVersion"] !== "number" || !Number.isSafeInteger(item["expectedVersion"]) || item["expectedVersion"] < 1) {
     throw new ApplicationError("Invalid upload input", { status: 400, code: "UPLOAD_INPUT_INVALID" });
   }
-  return { reviewId: item.reviewId.toLowerCase(), artifactId: item.artifactId.toLowerCase(), expectedVersion: item.expectedVersion };
+  return { reviewId: item["reviewId"].toLowerCase(), artifactId: item["artifactId"].toLowerCase(), expectedVersion: item["expectedVersion"] };
 }
 function result(value: unknown): ReviewUploadResult {
   const item = record(value);
-  if (typeof item.artifactId !== "string" || typeof item.runId !== "string" || typeof item.objectPath !== "string"
-    || typeof item.sha256 !== "string" || typeof item.bytes !== "number") throw new TypeError("Invalid upload receipt");
-  return { artifactId: item.artifactId, runId: item.runId, objectPath: item.objectPath, sha256: item.sha256, bytes: item.bytes };
+  if (typeof item["artifactId"] !== "string" || typeof item["runId"] !== "string" || typeof item["objectPath"] !== "string"
+    || typeof item["sha256"] !== "string" || typeof item["bytes"] !== "number") throw new TypeError("Invalid upload receipt");
+  return { artifactId: item["artifactId"], runId: item["runId"], objectPath: item["objectPath"], sha256: item["sha256"], bytes: item["bytes"] };
 }
 
 export async function createReviewUploadAdapters(options: ReviewAttachmentOptions): Promise<ReviewUploadPort> {
@@ -163,15 +163,15 @@ export async function createReviewUploadAdapters(options: ReviewAttachmentOption
     "SELECT project_id,tenant_id FROM public.starter_application WHERE singleton",
   )));
   if (!projectId.trim() || !tenantId.trim() || binding.length !== 1
-    || binding[0]?.project_id !== projectId || binding[0]?.tenant_id !== tenantId) {
+    || binding[0]?.["project_id"] !== projectId || binding[0]?.["tenant_id"] !== tenantId) {
     throw new Error("Upload database project/tenant binding mismatch");
   }
   const artifacts = new SupaCloudArtifactsClient(service);
   function actor(context: unknown): string {
     const who = requireTrustedIdentity(context);
-    const access = record(record(context).access);
-    if (access.projectId !== projectId || access.tenantId !== tenantId
-      || !Array.isArray(access.permissions) || !access.permissions.includes("review.approve")) {
+    const access = record(record(context)["access"]);
+    if (access["projectId"] !== projectId || access["tenantId"] !== tenantId
+      || !Array.isArray(access["permissions"]) || !access["permissions"].includes("review.approve")) {
       throw new ApplicationError("Upload permission denied", { status: 403, code: "UPLOAD_DENIED" });
     }
     return who.subject;
@@ -188,10 +188,10 @@ export async function createReviewUploadAdapters(options: ReviewAttachmentOption
       "AND p.singleton AND p.project_id=$4 AND p.tenant_id=$5 FOR UPDATE OF r,m FOR SHARE OF p",
       [input.reviewId, subject, input.expectedVersion, projectId, tenantId, replay, input.artifactId],
     ));
-    if (allowed.length !== 1 || typeof allowed[0]?.storage_subject !== "string") {
+    if (allowed.length !== 1 || typeof allowed[0]?.["storage_subject"] !== "string") {
       throw new ApplicationError("Upload ownership, permission or revision changed", { status: 403, code: "UPLOAD_DENIED" });
     }
-    return allowed[0].storage_subject + "/" + input.reviewId + "/" + input.artifactId + ".txt";
+    return allowed[0]["storage_subject"] + "/" + input.reviewId + "/" + input.artifactId + ".txt";
   }
   return {
     async previewUpload(context, value) {

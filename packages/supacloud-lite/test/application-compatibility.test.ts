@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { startProjectServer } from '../src/project-runtime.js'
@@ -13,8 +13,25 @@ test('current generated starter runs through Lite bundling, routes, contracts an
   let running: Awaited<ReturnType<typeof startProjectServer>> | undefined
   try {
     await initializeAppProject({ root: project, name: 'lite-compatibility', template: 'command' })
-    await symlink(join(import.meta.dir, '../node_modules'), join(project, 'node_modules'),
-      process.platform === 'win32' ? 'junction' : 'dir')
+    const dependencies = join(project, 'node_modules')
+    const installed = join(import.meta.dir, '../node_modules')
+    const linkType = process.platform === 'win32' ? 'junction' : 'dir'
+    await mkdir(dependencies)
+    for (const name of await readdir(installed)) {
+      if (name.startsWith('.') || name === '@supacloud') continue
+      await symlink(join(installed, name), join(dependencies, name), linkType)
+    }
+    await mkdir(join(dependencies, '@supacloud'))
+    for (const name of await readdir(join(installed, '@supacloud'))) {
+      if (['commands', 'db', 'contracts', 'js'].includes(name)) continue
+      await symlink(join(installed, '@supacloud', name), join(dependencies, '@supacloud', name), linkType)
+    }
+    // Compile the shipped command host against the same workspace contracts as its adapters.
+    for (const [name, directory] of [
+      ['commands', 'commands'], ['db', 'db'], ['contracts', 'contracts'], ['js', 'supacloud-js'],
+    ] as const) {
+      await symlink(join(import.meta.dir, '../..', directory), join(dependencies, '@supacloud', name), linkType)
+    }
     const result = await compileProject({
       rootDir: join(project, 'src'), outDir: join(project, 'generated'),
       graphql: { schema: join(project, 'graphql/schema.graphql') },

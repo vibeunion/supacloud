@@ -59,6 +59,17 @@ class Service { repository = inject(Repository); }`,
 const count = sql<number>\`count(*)\`;`,
   SC6008: `import { sql } from "drizzle-orm";
 const statement = sql.raw(request.body);`,
+  SC6009: `declare const input: any;
+export const value: string = input;`,
+  SC6010: `async function work(): Promise<void> {}
+work();`,
+  SC6011: `type State = "draft" | "approved";
+function render(state: State): number {
+  switch (state) {
+    case "draft": return 0;
+    default: return 1;
+  }
+}`,
   SC3001: `@Get("/:id") findById() {}
 @Get("/health") health() {}`,
   SC3002: `const routes = [{ path: "/old", redirectTo: "/missing" }];`,
