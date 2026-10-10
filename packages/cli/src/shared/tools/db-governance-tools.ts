@@ -15,7 +15,7 @@ import {
 import { runDbWorkflow, type DbWorkflowAction } from "./db-workflow";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
-import { registerTool, type ToolServer } from "../tool-server";
+import { registerTool, type ToolServer, type ToolResult } from "../tool-server";
 
 export interface DbToolArguments {
     action: "context" | "lint" | "explain" | "module_check" | DbWorkflowAction;
@@ -79,11 +79,6 @@ export interface DbGovernanceToolOptions {
     projectRef?: string;
     apiUrl?: string;
     runDatabase?: () => ((args: Record<string, unknown>) => Promise<ToolResult>) | undefined;
-}
-
-interface ToolResult {
-    isError: boolean;
-    content: Array<{ type: "text"; text: string }>;
 }
 
 function textResult(text: string, isError = false): ToolResult {
