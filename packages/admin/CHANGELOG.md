@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/vibeunion/supacloud/compare/admin-v0.24.2...admin-v0.25.0) (2026-10-10)
+
+
+### Features
+
+* **frontend:** avoid history scans during deploy and retain rollback authority ([#1763](https://github.com/vibeunion/supacloud/issues/1763)) ([772d687](https://github.com/vibeunion/supacloud/commit/772d687e885d912a37d3a03f67fd0b52cb306869))
+
 ## [0.24.2](https://github.com/vibeunion/supacloud/compare/admin-v0.24.1...admin-v0.24.2) (2026-10-06)
 
 
