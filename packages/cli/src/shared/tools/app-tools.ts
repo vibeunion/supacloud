@@ -70,6 +70,9 @@ const REMOTE_APP_DESCRIPTIONS: Record<string, string> = {
     branch_ref: "[preview-plan] Proposed branch ref; preview assigns its own",
     branch_name: "[preview] Branch display name",
     data_mode: "[preview-plan/preview] Default schema_only; full_clone copies rows",
+    ttl_seconds: "[preview-plan/preview] Lifetime from 300 to 604800 seconds; creation defaults to the platform TTL",
+    wait: "[preview/preview-status] Wait for verified readiness of the selected preview",
+    timeout_seconds: "[preview/preview-status] Observation budget with --wait, from 1 to 3600 seconds (default 300)",
 };
 
 const { action: _remoteAction, ...remoteFields } = APPLICATION_TOOL_SCHEMA;
@@ -95,6 +98,9 @@ export interface AppToolArguments {
     branch_ref?: string;
     branch_name?: string;
     data_mode?: "schema_only" | "full_clone";
+    ttl_seconds?: number;
+    wait?: boolean;
+    timeout_seconds?: number;
     kind?: "module" | "command" | "query" | "controller" | "job" | "contract" | "resource";
     template?: "minimal" | "http" | "command" | "edge";
     name?: string;

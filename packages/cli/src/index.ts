@@ -342,9 +342,9 @@ EXAMPLES
   ${preferredCommand} app deploy --ref abc123 --id orders --environment_id test --release_id <sha256> --configuration_id <uuid> --activation_id <uuid> --expected_activation_id absent
   ${preferredCommand} app status --ref abc123 --id orders --environment_id test
   ${preferredCommand} app preview-plan --ref abc123 --id orders --environment_id test --release_id <sha256> --branch_ref preview-orders
-  ${preferredCommand} app preview --ref abc123 --id orders --environment_id test --release_id <sha256> --configuration_id <uuid>
+  ${preferredCommand} app preview --ref abc123 --id orders --environment_id test --release_id <sha256> --configuration_id <uuid> --ttl_seconds 3600 --wait
   ${preferredCommand} app previews --ref abc123 --id orders --environment_id test
-  ${preferredCommand} app preview-status --ref abc123 --id orders --environment_id test --preview_id <uuid>
+  ${preferredCommand} app preview-status --ref abc123 --id orders --environment_id test --preview_id <uuid> --wait --timeout_seconds 300
   ${preferredCommand} app preview-cleanup --ref abc123 --id orders --environment_id test --preview_id <uuid>
   ${preferredCommand} app logs --ref abc123 --id orders --environment_id test
   ${preferredCommand} app rollback --ref abc123 --id orders --environment_id test --release_id <old-sha256> --configuration_id <uuid> --activation_id <new-uuid> --expected_activation_id <current-uuid>

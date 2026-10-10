@@ -83,9 +83,9 @@ Management API credentials except local plan/build and authoring commands.
 
 ```sh
 supacloud-cli app preview-plan --env test --id orders --environment_id test --release_id RELEASE_SHA256 --branch_ref preview-orders
-supacloud-cli app preview --env test --id orders --environment_id test --release_id RELEASE_SHA256 --configuration_id CONFIG_UUID
+supacloud-cli app preview --env test --id orders --environment_id test --release_id RELEASE_SHA256 --configuration_id CONFIG_UUID --ttl_seconds 3600 --wait --timeout_seconds 300
 supacloud-cli app previews --env test --id orders --environment_id test
-supacloud-cli app preview-status --env test --id orders --environment_id test --preview_id PREVIEW_UUID
+supacloud-cli app preview-status --env test --id orders --environment_id test --preview_id PREVIEW_UUID --wait --timeout_seconds 300
 supacloud-cli app preview-cleanup --env test --id orders --environment_id test --preview_id PREVIEW_UUID
 ```
 
@@ -97,9 +97,28 @@ selecting `--data_mode full_clone`. Creation requires an immutable source
 configuration ID and verifies the branch release identity against the source
 manifest. A `provisioning` receipt means accepted, not ready.
 
+New previews use the platform's default 24-hour TTL. `--ttl_seconds` accepts 300
+through 604800 seconds for creation or read-only planning. `expires_at` remains
+in the public receipt; a plan has no deadline unless a TTL is requested. Receipt
+expiry requires the matching platform cleanup contract (#1774), not the older
+CLI-only lifecycle contract.
+
+`--wait` on creation observes only the accepted Preview ID; it never repeats
+creation. `preview-status --wait` continues observing that same ID. The observation
+budget is 300 seconds by default and accepts 1 through 3600 seconds with
+`--timeout_seconds`; creation's source verification and initial POST precede that
+budget, while status includes its initial GET. Header and body share the remaining
+request budget. Completed readiness ends waiting; a failed/cleaned receipt, failed
+query or identity drift ends it with nonzero status. A wait timeout returns
+`waiting.status: "timed_out"` with the last validated receipt and the exact
+same-ID continuation in `reconciliation`. It does not mark provisioning failed,
+retry a failed lifecycle GET, delete resources or promote an environment.
+
 `preview-plan` is read-only. Preview list/status requests may resume persisted
 provisioning on the server, so they are classified as writes, including in
-read-only and production profiles. Cleanup is explicit. Failed previews return
+read-only and production profiles. The platform may clean eligible expired
+previews, but never interrupts a serving preview or empties nonempty Storage
+automatically. Explicit cleanup remains available. Failed previews return
 nonzero with the validated receipt and cleanup state. Unknown create outcomes
 are never retried: list existing previews and reconcile their receipts first.
 No production deployment, database promotion or data rollback is implied.
@@ -118,6 +137,23 @@ Feature: Platform-owned application previews
     When preview creates an isolated environment
     Then exactly one create request is sent
     And a provisioning receipt is returned without claiming readiness
+
+  Scenario: TTL is validated before dispatch
+    Given a lifetime outside 300 through 604800 integer seconds
+    When preview or preview-plan is requested
+    Then no HTTP request is sent
+
+  Scenario: Wait preserves the selected preview
+    Given a valid provisioning receipt and an exhausted observation budget
+    When preview --wait returns
+    Then its exit status is nonzero and the accepted receipt is preserved
+    And reconciliation selects the same Preview ID without another creation
+
+  Scenario: Ready requires verified platform evidence
+    Given a provisioning preview selected by its scope, digest and Preview ID
+    When its complete readiness receipt is observed
+    Then waiting succeeds with that receipt
+    And foreign or malformed receipts never become success
 
   Scenario: Safety guards precede effects
     Given a read-only or unconfirmed production profile

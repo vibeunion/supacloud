@@ -12,11 +12,19 @@ export const APPLICATION_PREVIEW_ACTIONS = [
 
 const previewIdSchema = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$" });
 const branchRefSchema = Type.String({ pattern: "^[a-z0-9-]{1,20}$" });
+const ttlSecondsSchema = Type.Integer({ minimum: 300, maximum: 604_800 });
+const waitSecondsSchema = Type.Integer({ minimum: 1, maximum: 3600 });
+const timestampSchema = Type.String({
+  pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$", maxLength: 24,
+});
 export const APPLICATION_PREVIEW_FIELDS = {
   preview_id: optional(previewIdSchema, "[get_preview/cleanup_preview] Preview receipt ID"),
   branch_ref: optional(branchRefSchema, "[get_preview_plan] Proposed branch ref; create assigns its own"),
   branch_name: optional(Type.String({ minLength: 1, maxLength: 80 }), "[create_preview] Branch display name"),
   data_mode: optional(stringEnum(["schema_only", "full_clone"]), "[get_preview_plan/create_preview] Default schema_only; full_clone copies rows"),
+  ttl_seconds: optional(ttlSecondsSchema, "[get_preview_plan/create_preview] Lifetime from 300 to 604800 seconds; creation defaults to the platform TTL"),
+  wait: optional(Type.Boolean(), "[create_preview/get_preview] Wait for verified readiness of this preview only"),
+  timeout_seconds: optional(waitSecondsSchema, "[create_preview/get_preview] Observation budget with wait, from 1 to 3600 seconds (default 300)"),
 };
 
 const strict = { additionalProperties: false };
@@ -29,6 +37,7 @@ const receiptSchema = Type.Object({
   preview_id: previewIdSchema, project_ref: branchRefSchema,
   application_id: ApplicationIdSchema, environment_id: ApplicationIdSchema,
   release_id: ApplicationReleaseIdSchema,
+  expires_at: Type.Union([timestampSchema, Type.Null()]),
   status: stringEnum(["planned", "provisioning", "ready", "failed", "cleaned"]),
   resources: Type.Object({
     build_artifact: Type.Object({ status: phase, release_id: ApplicationReleaseIdSchema }, strict),
@@ -48,8 +57,8 @@ const receiptSchema = Type.Object({
   queue_name: Type.Optional(Type.String({ maxLength: 128 })),
   test_secret_name: Type.Optional(Type.String({ pattern: "^[A-Z0-9_]{1,128}$" })),
   source_configuration_id: Type.Optional(revision),
-  created_at: Type.Optional(Type.String({ maxLength: 64 })),
-  updated_at: Type.Optional(Type.String({ maxLength: 64 })),
+  created_at: Type.Optional(timestampSchema),
+  updated_at: Type.Optional(timestampSchema),
 }, strict);
 
 function required(args: Record<string, unknown>, field: string): string {
@@ -64,12 +73,16 @@ const mandatoryChecks = [
 ];
 
 const actionFields: Record<string, readonly string[]> = {
-  get_preview_plan: ["release_id", "branch_ref", "data_mode", "configuration_id"],
-  create_preview: ["release_id", "configuration_id", "data_mode", "branch_name"],
+  get_preview_plan: ["release_id", "branch_ref", "data_mode", "configuration_id", "ttl_seconds"],
+  create_preview: ["release_id", "configuration_id", "data_mode", "branch_name", "ttl_seconds", "wait", "timeout_seconds"],
   list_previews: [],
-  get_preview: ["preview_id"],
+  get_preview: ["preview_id", "wait", "timeout_seconds"],
   cleanup_preview: ["preview_id"],
 };
+
+function timestamp(value: string): boolean {
+  return Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value;
+}
 
 function receipt(value: unknown, identity: { ref: string; id: string; environment: string; previewId?: string }) {
   if (!Value.Check(receiptSchema, value) || value.project_ref !== identity.ref
@@ -78,6 +91,13 @@ function receipt(value: unknown, identity: { ref: string; id: string; environmen
     || value.resources.build_artifact.release_id !== value.release_id
     || value.resources.storage_namespace.namespace !== value.resources.database_branch.branch_ref) {
     throw new Error("Invalid preview receipt");
+  }
+  if ((value.expires_at !== null && !timestamp(value.expires_at))
+    || (value.created_at !== undefined && !timestamp(value.created_at))
+    || (value.updated_at !== undefined && !timestamp(value.updated_at))
+    || (value.expires_at !== null && value.created_at !== undefined
+      && !Value.Check(ttlSecondsSchema, (Date.parse(value.expires_at) - Date.parse(value.created_at)) / 1000))) {
+    throw new Error("Invalid preview expiry");
   }
   if (value.status === "ready") {
     if (value.resources.smoke_test.status !== "ready" || value.resources.smoke_test.failed.length > 0
@@ -118,6 +138,68 @@ async function sourceManifest(http: HttpTransport, path: string, ref: string, id
   }
 }
 
+async function waitForPreview(
+  http: HttpTransport, path: string, operation: string,
+  identity: { project_ref: string; application_id: string; environment_id: string },
+  initial: ReturnType<typeof receipt>, timeoutSeconds: number, startedAt = performance.now(),
+) {
+  const deadline = startedAt + timeoutSeconds * 1000;
+  let current = initial;
+  const state = () => ({
+    ...identity, preview_id: initial.preview_id, preview: current,
+    reconciliation: {
+      action: "get_preview", ref: identity.project_ref, id: identity.application_id,
+      environment_id: identity.environment_id, preview_id: initial.preview_id,
+      wait: true, timeout_seconds: timeoutSeconds,
+    },
+  });
+  while (true) {
+    if (current.status === "ready") return releaseControlSuccess(operation, {
+      ...identity, preview: current, waiting: { status: "ready", timeout_seconds: timeoutSeconds },
+    });
+    if (current.status !== "provisioning") return releaseControlFailure(operation, "MUTATION_NOT_SUCCEEDED", null, {
+      ...state(), waiting: { status: "stopped", timeout_seconds: timeoutSeconds },
+    });
+    const remaining = Math.floor(deadline - performance.now());
+    if (remaining < 2) return releaseControlFailure(operation, "MUTATION_NOT_SUCCEEDED", null, {
+      ...state(), waiting: { status: "timed_out", timeout_seconds: timeoutSeconds },
+    });
+    // Lifecycle GETs can resume provisioning. Keep one shared header/body
+    // deadline and never repeat a failed observation automatically.
+    const requestBudget = Math.min(120_000, remaining);
+    const result = await http.get(`${path}/previews/${initial.preview_id}`, {
+      retry: false, timeoutMs: requestBudget, responseTimeoutMs: requestBudget,
+      totalTimeoutMs: requestBudget, maxJsonBytes: 1_048_576,
+    });
+    if (!result.ok) return releaseControlFailure(operation, "HTTP_ERROR", result.transportError ? null : result.status, {
+      ...state(), waiting: { status: "observation_failed", timeout_seconds: timeoutSeconds },
+    });
+    try {
+      const next = receipt(result.data, {
+        ref: identity.project_ref, id: identity.application_id, environment: identity.environment_id,
+        previewId: initial.preview_id,
+      });
+      if (next.status === "planned" || next.release_id !== initial.release_id || next.expires_at !== initial.expires_at
+        || next.resources.database_branch.branch_ref !== initial.resources.database_branch.branch_ref
+        || next.resources.database_branch.data_mode !== initial.resources.database_branch.data_mode
+        || (current.resources.application_activation.activation_id !== null
+          && next.resources.application_activation.activation_id !== current.resources.application_activation.activation_id)
+        || (current.resources.configuration_revision.configuration_id !== null
+          && next.resources.configuration_revision.configuration_id !== current.resources.configuration_revision.configuration_id)) {
+        throw new Error("Preview identity changed during observation");
+      }
+      current = next;
+    } catch {
+      return releaseControlFailure(operation, "INVALID_RESPONSE", result.status, {
+        ...state(), waiting: { status: "observation_failed", timeout_seconds: timeoutSeconds },
+      });
+    }
+    if (current.status === "provisioning") {
+      await new Promise<void>(resolve => setTimeout(resolve, Math.max(0, Math.min(1000, deadline - performance.now()))));
+    }
+  }
+}
+
 export async function applicationPreviewAction(http: HttpTransport, args: Record<string, unknown>, project: string) {
   const action = required(args, "action"), ref = required(args, "ref"), id = required(args, "id");
   const environment = required(args, "environment_id");
@@ -126,6 +208,16 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
   if (Object.entries(args).some(([key, value]) => value !== undefined && !fields.has(key))) {
     throw new Error("Invalid option for preview action");
   }
+  if (args.ttl_seconds !== undefined && !Value.Check(ttlSecondsSchema, args.ttl_seconds)) {
+    throw new Error("ttl_seconds must be an integer from 300 to 604800");
+  }
+  if (args.wait !== undefined && typeof args.wait !== "boolean") throw new Error("wait must be boolean");
+  if (args.timeout_seconds !== undefined
+    && (args.wait !== true || !Value.Check(waitSecondsSchema, args.timeout_seconds))) {
+    throw new Error("timeout_seconds requires wait and must be an integer from 1 to 3600");
+  }
+  const timeoutSeconds = args.wait === true ? ((args.timeout_seconds as number | undefined) ?? 300) : undefined;
+  const startedAt = action === "get_preview" && timeoutSeconds !== undefined ? performance.now() : undefined;
   const operation = `applications.${action}`;
   const identity = { project_ref: ref, application_id: id, environment_id: environment };
   const applicationPath = `/v1/projects/${project}/applications/${encodeURIComponent(id)}`;
@@ -133,7 +225,11 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
   const previewId = action === "get_preview" || action === "cleanup_preview" ? required(args, "preview_id") : undefined;
   const mutation = action === "create_preview" || action === "cleanup_preview";
   // GET 状态查询会恢复服务端编排，不能套用普通只读 GET 的自动重试。
-  const options = { timeoutMs: 120_000, maxJsonBytes: 1_048_576, responseTimeoutMs: 120_000, retry: false };
+  const requestBudget = startedAt === undefined ? 120_000 : Math.min(120_000, timeoutSeconds! * 1000);
+  const options = {
+    timeoutMs: requestBudget, maxJsonBytes: 1_048_576, responseTimeoutMs: requestBudget, retry: false,
+    ...(startedAt === undefined ? {} : { totalTimeoutMs: requestBudget }),
+  };
   let sourceHash: string | undefined;
   let releaseId: string | undefined;
   let result: HttpResult<unknown>;
@@ -144,6 +240,7 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
       const query = new URLSearchParams({ release_id: releaseId, branch_ref: required(args, "branch_ref") });
       if (typeof args.data_mode === "string") query.set("data_mode", args.data_mode);
       if (typeof args.configuration_id === "string") query.set("configuration_id", args.configuration_id);
+      if (args.ttl_seconds !== undefined) query.set("ttl_seconds", String(args.ttl_seconds));
       result = await http.get(`${path}/preview-plan?${query}`, options);
     } else {
       const configurationId = required(args, "configuration_id");
@@ -155,6 +252,7 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
       result = await http.post(`${path}/previews`, {
         release_id: releaseId, configuration_id: configurationId, data_mode: args.data_mode ?? "schema_only",
         ...(args.branch_name === undefined ? {} : { branch_name: args.branch_name }),
+        ...(args.ttl_seconds === undefined ? {} : { ttl_seconds: args.ttl_seconds }),
       }, options);
     }
   } else if (action === "list_previews") {
@@ -170,7 +268,9 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
   const state = {
     ...identity, ...(previewId ? { preview_id: previewId } : {}),
     ...(releaseId ? { source_release_id: releaseId } : {}),
-    reconciliation: { action: "list_previews", ref, id, environment_id: environment },
+    reconciliation: previewId
+      ? { action: "get_preview", ref, id, environment_id: environment, preview_id: previewId }
+      : { action: "list_previews", ref, id, environment_id: environment },
   };
   if (!result.ok) return mutation
     ? releaseControlMutationFailure(operation, result, state)
@@ -191,18 +291,23 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
     if (action === "get_preview_plan") {
       if (preview.status !== "planned" || preview.release_id !== releaseId
         || preview.resources.database_branch.branch_ref !== args.branch_ref
-        || preview.resources.database_branch.data_mode !== (args.data_mode ?? "schema_only")) throw new Error();
+        || preview.resources.database_branch.data_mode !== (args.data_mode ?? "schema_only")
+        || (args.ttl_seconds === undefined ? preview.expires_at !== null : preview.expires_at === null)) throw new Error();
     } else {
       if (preview.status === "planned"
         || preview.resources.database_branch.branch_ref !== `pv${preview.preview_id.replaceAll("-", "").slice(0, 18)}`) throw new Error();
       if (action === "create_preview" && (preview.release_id !== applicationReleaseId(
         preview.resources.database_branch.branch_ref, id, sourceHash!,
       ) || preview.resources.database_branch.data_mode !== (args.data_mode ?? "schema_only")
-        || !Value.Check(receiptSchema, result.data) || result.data.source_configuration_id !== args.configuration_id)) throw new Error();
+        || !Value.Check(receiptSchema, result.data) || result.data.source_configuration_id !== args.configuration_id
+        || preview.expires_at === null || result.data.created_at === undefined
+        || (args.ttl_seconds !== undefined
+          && Date.parse(preview.expires_at) - Date.parse(result.data.created_at) !== (args.ttl_seconds as number) * 1000))) throw new Error();
     }
     if (preview.status === "failed" || (action === "cleanup_preview" && preview.status !== "cleaned")) {
       return releaseControlFailure(operation, "MUTATION_NOT_SUCCEEDED", result.status, { ...identity, preview });
     }
+    if (timeoutSeconds !== undefined) return await waitForPreview(http, path, operation, identity, preview, timeoutSeconds, startedAt);
     return releaseControlSuccess(operation, { ...identity, preview });
   } catch {
     return releaseControlFailure(operation, mutation ? "OUTCOME_UNKNOWN" : "INVALID_RESPONSE", result.status, state);

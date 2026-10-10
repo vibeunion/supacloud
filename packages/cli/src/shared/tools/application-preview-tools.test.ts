@@ -34,6 +34,7 @@ function preview(status: ApplicationPreviewReceipt["status"] = "provisioning"): 
   return {
     schema: "supacloud.application-preview.v1", preview_id: previewId, project_ref: ref,
     application_id: id, environment_id: environment, release_id: releaseId, status,
+    expires_at: "2026-10-11T00:00:00.000Z",
     resources: {
       build_artifact: { status: "ready", release_id: releaseId },
       database_branch: { status: phase, branch_ref: branchRef, data_mode: "schema_only" },
@@ -60,6 +61,9 @@ function plan() {
   value.resources.build_artifact.release_id = sourceRelease.release_id;
   value.resources.database_branch.branch_ref = "preview-orders";
   value.resources.storage_namespace.namespace = "preview-orders";
+  value.expires_at = null;
+  delete value.created_at;
+  delete value.updated_at;
   return value;
 }
 
@@ -141,7 +145,9 @@ test("preview creation verifies the source then posts once without claiming read
     const result = await register(http)({
       action: "create_preview", ...args, release_id: sourceRelease.release_id, configuration_id: configurationId,
     });
-    expect(output(result)).toMatchObject({ ok: true, preview: { status: "provisioning", preview_id: previewId } });
+    expect(output(result)).toMatchObject({
+      ok: true, preview: { status: "provisioning", preview_id: previewId, expires_at: preview().expires_at },
+    });
     expect(result.isError).not.toBe(true);
     expect(output(result).ready).toBeUndefined();
     for (const field of ["source_configuration_id", "queue_name", "test_secret_name", "created_at", "branch_name"]) {
@@ -154,6 +160,281 @@ test("preview creation verifies the source then posts once without claiming read
       release_id: sourceRelease.release_id, configuration_id: configurationId, data_mode: "schema_only",
     } },
   ]);
+});
+
+test("TTL is forwarded to the platform as a plan query or one creation body", async () => {
+  for (const ttlSeconds of [300, 3600, 604_800]) {
+    for (const action of ["get_preview_plan", "create_preview"] as const) {
+      let mutations = 0;
+      const expiresAt = new Date(Date.parse(preview().created_at!) + ttlSeconds * 1000).toISOString();
+      await withServer(async request => {
+        const url = new URL(request.url);
+        if (url.pathname.includes("/releases/")) {
+          return Response.json({ project_ref: ref, application_id: id, release: sourceRelease });
+        }
+        if (action === "get_preview_plan") {
+          expect(request.method).toBe("GET");
+          expect(url.searchParams.get("ttl_seconds")).toBe(String(ttlSeconds));
+          return Response.json({ ...plan(), expires_at: expiresAt });
+        }
+        mutations++;
+        expect(await request.json()).toMatchObject({ ttl_seconds: ttlSeconds });
+        return Response.json({ ...preview(), expires_at: expiresAt }, { status: 202 });
+      }, async http => {
+        const result = await register(http)({
+          action, ...args, release_id: sourceRelease.release_id, ttl_seconds: ttlSeconds,
+          ...(action === "get_preview_plan" ? { branch_ref: "preview-orders" } : { configuration_id: configurationId }),
+        });
+        expect(output(result)).toMatchObject({ ok: true, preview: { expires_at: expiresAt } });
+      });
+      expect(mutations).toBe(action === "create_preview" ? 1 : 0);
+    }
+  }
+});
+
+test("invalid TTL and wait options fail before any HTTP request", async () => {
+  let requests = 0;
+  await withServer(() => { requests++; return Response.json({}); }, async http => {
+    const tool = register(http);
+    for (const ttlSeconds of [0, 299, 604_801, 300.5, Number.NaN, Number.POSITIVE_INFINITY, "3600"]) {
+      await expect(tool({
+        action: "create_preview", ...args, release_id: sourceRelease.release_id,
+        configuration_id: configurationId, ttl_seconds: ttlSeconds,
+      })).rejects.toThrow("ttl_seconds");
+    }
+    for (const invalid of [
+      { wait: "true" }, { timeout_seconds: 1 }, { wait: false, timeout_seconds: 1 },
+      { wait: true, timeout_seconds: 0 }, { wait: true, timeout_seconds: 3601 },
+      { wait: true, timeout_seconds: 1.5 }, { wait: true, timeout_seconds: Number.NaN },
+    ]) {
+      await expect(tool({ action: "get_preview", ...args, preview_id: previewId, ...invalid })).rejects.toThrow();
+    }
+    await expect(tool({ action: "get_preview", ...args, preview_id: previewId, ttl_seconds: 3600 })).rejects.toThrow("Invalid option");
+    await expect(tool({ action: "cleanup_preview", ...args, preview_id: previewId, wait: true })).rejects.toThrow("Invalid option");
+  });
+  expect(requests).toBe(0);
+});
+
+test("creation rejects missing, malformed or mismatched expiry without recreating", async () => {
+  for (const expiresAt of [
+    undefined, null, "invalid", "2026-02-30T00:00:00.000Z",
+    "2026-10-10T00:04:59.000Z", "2026-10-11T00:00:00.000Z",
+  ]) {
+    let mutations = 0;
+    await withServer(request => {
+      if (request.method === "GET") return Response.json({ project_ref: ref, application_id: id, release: sourceRelease });
+      mutations++;
+      return Response.json({ ...preview(), expires_at: expiresAt }, { status: 202 });
+    }, async http => {
+      const result = await register(http)({
+        action: "create_preview", ...args, release_id: sourceRelease.release_id,
+        configuration_id: configurationId, ttl_seconds: 300,
+      });
+      expect(output(result)).toMatchObject({ ok: false, error: { code: "OUTCOME_UNKNOWN" } });
+    });
+    expect(mutations).toBe(1);
+  }
+});
+
+test("plan expiry is present only when a TTL was explicitly requested", async () => {
+  for (const ttlSeconds of [undefined, 300]) {
+    await withServer(() => Response.json({
+      ...plan(), expires_at: ttlSeconds === undefined ? preview().expires_at : null,
+    }), async http => {
+      const result = await register(http)({
+        action: "get_preview_plan", ...args, release_id: sourceRelease.release_id,
+        branch_ref: "preview-orders", ...(ttlSeconds === undefined ? {} : { ttl_seconds: ttlSeconds }),
+      });
+      expect(output(result)).toMatchObject({ ok: false, error: { code: "INVALID_RESPONSE" } });
+    });
+  }
+});
+
+test("wait observes one accepted preview until complete readiness without another create request", async () => {
+  const requests: string[] = [];
+  let reads = 0;
+  await withServer(request => {
+    const pathname = new URL(request.url).pathname;
+    requests.push(`${request.method} ${pathname}`);
+    if (pathname.includes("/releases/")) return Response.json({ project_ref: ref, application_id: id, release: sourceRelease });
+    if (request.method === "POST") return Response.json(preview(), { status: 202 });
+    return Response.json(preview(++reads === 1 ? "provisioning" : "ready"));
+  }, async http => {
+    const result = await register(http)({
+      action: "create_preview", ...args, release_id: sourceRelease.release_id,
+      configuration_id: configurationId, wait: true, timeout_seconds: 5,
+    });
+    expect(output(result)).toMatchObject({
+      ok: true, operation: "applications.create_preview",
+      preview: { status: "ready", preview_id: previewId },
+      waiting: { status: "ready", timeout_seconds: 5 },
+    });
+  });
+  expect(requests).toEqual([
+    `GET /v1/projects/${ref}/applications/${id}/releases/${sourceRelease.release_id}`,
+    `POST ${path}/previews`, `GET ${path}/previews/${previewId}`, `GET ${path}/previews/${previewId}`,
+  ]);
+});
+
+test("wait timeout preserves the accepted receipt and same-ID continuation without cleanup or recreation", async () => {
+  const requests: string[] = [];
+  await withServer(request => {
+    const pathname = new URL(request.url).pathname;
+    requests.push(`${request.method} ${pathname}`);
+    return Response.json(pathname.includes("/releases/")
+      ? { project_ref: ref, application_id: id, release: sourceRelease } : preview(),
+    { status: request.method === "POST" ? 202 : 200 });
+  }, async http => {
+    const result = await register(http)({
+      action: "create_preview", ...args, release_id: sourceRelease.release_id,
+      configuration_id: configurationId, wait: true, timeout_seconds: 1,
+    });
+    expect(result.isError).toBe(true);
+    expect(output(result)).toMatchObject({
+      ok: false, preview_id: previewId, preview: { status: "provisioning" },
+      waiting: { status: "timed_out", timeout_seconds: 1 },
+      reconciliation: { action: "get_preview", ...args, preview_id: previewId, wait: true },
+    });
+  });
+  expect(requests.filter(value => value.startsWith("POST"))).toEqual([`POST ${path}/previews`]);
+  expect(requests.some(value => value.startsWith("DELETE"))).toBe(false);
+});
+
+test("wait stops on a provider error without retrying a lifecycle GET or losing the last accepted receipt", async () => {
+  const requests: string[] = [];
+  await withServer(request => {
+    const pathname = new URL(request.url).pathname;
+    requests.push(`${request.method} ${pathname}`);
+    if (pathname.includes("/releases/")) return Response.json({ project_ref: ref, application_id: id, release: sourceRelease });
+    if (request.method === "POST") return Response.json(preview(), { status: 202 });
+    return Response.json({ error: "private-provider-secret" }, { status: 503 });
+  }, async http => {
+    const result = await register(http)({
+      action: "create_preview", ...args, release_id: sourceRelease.release_id,
+      configuration_id: configurationId, wait: true, timeout_seconds: 5,
+    });
+    expect(output(result)).toMatchObject({
+      ok: false, error: { code: "HTTP_ERROR" }, preview: { status: "provisioning", preview_id: previewId },
+      waiting: { status: "observation_failed" }, reconciliation: { action: "get_preview", preview_id: previewId },
+    });
+    expect(result.content[0]!.text).not.toContain("private-provider-secret");
+  });
+  expect(requests.filter(value => value === `GET ${path}/previews/${previewId}`)).toHaveLength(1);
+  expect(requests.filter(value => value.startsWith("POST"))).toHaveLength(1);
+});
+
+test("wait rejects foreign readiness, digest drift and Secret-bearing receipts without reflecting them", async () => {
+  const values = [
+    { ...preview("ready"), environment_id: "production" },
+    { ...preview("ready"), release_id: "e".repeat(64),
+      resources: { ...preview("ready").resources, build_artifact: { status: "ready", release_id: "e".repeat(64) } } },
+    { ...preview("ready"), expires_at: "2026-10-11T01:00:00.000Z" },
+    { ...preview("ready"), private_secret: "private-provider-secret" },
+  ];
+  for (const value of values) {
+    let observations = 0;
+    await withServer(() => Response.json(++observations === 1 ? preview() : value), async http => {
+      const result = await register(http)({
+        action: "get_preview", ...args, preview_id: previewId, wait: true, timeout_seconds: 5,
+      });
+      expect(output(result)).toMatchObject({
+        ok: false, error: { code: "INVALID_RESPONSE" }, preview: { status: "provisioning", preview_id: previewId },
+      });
+      expect(result.content[0]!.text).not.toContain("private-provider-secret");
+    });
+    expect(observations).toBe(2);
+  }
+});
+
+test("wait cannot observe a different activation once the selected identity is known", async () => {
+  const pending = preview();
+  pending.resources.application_activation.activation_id = activationId;
+  const changed = preview("ready");
+  changed.resources.application_activation.activation_id = "41234567-89ab-4def-8123-456789abcdef";
+  let observations = 0;
+  await withServer(() => Response.json(++observations === 1 ? pending : changed), async http => {
+    const result = await register(http)({
+      action: "get_preview", ...args, preview_id: previewId, wait: true, timeout_seconds: 5,
+    });
+    expect(output(result)).toMatchObject({
+      ok: false, error: { code: "INVALID_RESPONSE" }, preview: { status: "provisioning" },
+    });
+  });
+  expect(observations).toBe(2);
+});
+
+test("a failed or cleaned preview ends waiting without a readiness claim", async () => {
+  for (const status of ["failed", "cleaned"] as const) {
+    let observations = 0;
+    await withServer(() => Response.json(++observations === 1 ? preview() : preview(status)), async http => {
+      const result = await register(http)({
+        action: "get_preview", ...args, preview_id: previewId, wait: true, timeout_seconds: 5,
+      });
+      expect(output(result)).toMatchObject({
+        ok: false, error: { code: "MUTATION_NOT_SUCCEEDED" }, preview: { status },
+        waiting: { status: "stopped" },
+      });
+    });
+    expect(observations).toBe(2);
+  }
+});
+
+test("status wait allows slow headers within its full observation budget and does not poll an already ready preview", async () => {
+  let observations = 0;
+  await withServer(async () => {
+    observations++;
+    await Bun.sleep(650);
+    return Response.json(preview("ready"));
+  }, async http => {
+    const result = await register(http)({
+      action: "get_preview", ...args, preview_id: previewId, wait: true, timeout_seconds: 1,
+    });
+    expect(output(result)).toMatchObject({ ok: true, preview: { status: "ready" }, waiting: { status: "ready" } });
+  });
+  expect(observations).toBe(1);
+});
+
+test("slow headers and a stalled observation body share the deadline and preserve the accepted receipt", async () => {
+  let observations = 0, mutations = 0;
+  await withServer(async request => {
+    const pathname = new URL(request.url).pathname;
+    if (pathname.includes("/releases/")) return Response.json({ project_ref: ref, application_id: id, release: sourceRelease });
+    if (request.method === "POST") { mutations++; return Response.json(preview(), { status: 202 }); }
+    observations++;
+    await Bun.sleep(650);
+    return new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode('{"private_secret":"do-not-echo"')); },
+    }), { headers: { "content-type": "application/json" } });
+  }, async http => {
+    const started = performance.now();
+    const result = await register(http)({
+      action: "create_preview", ...args, release_id: sourceRelease.release_id,
+      configuration_id: configurationId, wait: true, timeout_seconds: 1,
+    });
+    expect(performance.now() - started).toBeLessThan(1500);
+    expect(output(result)).toMatchObject({
+      ok: false, error: { code: "HTTP_ERROR" }, waiting: { status: "observation_failed" },
+      preview: { status: "provisioning", preview_id: previewId },
+      reconciliation: { action: "get_preview", preview_id: previewId },
+    });
+    expect(result.content[0]!.text).not.toContain("do-not-echo");
+  });
+  expect(observations).toBe(1);
+  expect(mutations).toBe(1);
+});
+
+test("total HTTP deadline cannot enable retries, unbounded response reads or invalid timeouts", async () => {
+  let requests = 0;
+  await withServer(() => { requests++; return Response.json({}); }, async http => {
+    for (const totalTimeoutMs of [0, -1, 0.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      await expect(http.get("/invalid", {
+        retry: false, maxJsonBytes: 1000, totalTimeoutMs,
+      })).rejects.toThrow("timeout");
+    }
+    await expect(http.get("/invalid", { totalTimeoutMs: 1000, maxJsonBytes: 1000 })).rejects.toThrow("retry: false");
+    await expect(http.get("/invalid", { totalTimeoutMs: 1000, retry: false })).rejects.toThrow("bounded JSON");
+  });
+  expect(requests).toBe(0);
 });
 
 test("missing immutable configuration or foreign source release prevents create before mutation", async () => {
@@ -331,9 +612,9 @@ async function cli(flags: string[], variables: Record<string, string> = {}) {
 
 test("preview action help works without credentials and includes scoped flags", async () => {
   for (const [action, fields] of [
-    ["preview", ["environment_id", "release_id", "configuration_id", "data_mode"]],
-    ["preview-plan", ["environment_id", "release_id", "branch_ref"]],
-    ["preview-status", ["environment_id", "preview_id"]],
+    ["preview", ["environment_id", "release_id", "configuration_id", "data_mode", "ttl_seconds", "wait", "timeout_seconds"]],
+    ["preview-plan", ["environment_id", "release_id", "branch_ref", "ttl_seconds"]],
+    ["preview-status", ["environment_id", "preview_id", "wait", "timeout_seconds"]],
     ["preview-cleanup", ["environment_id", "preview_id"]],
   ] as const) {
     const result = await cli(["app", action, "--help"]);
@@ -351,6 +632,8 @@ test("CLI preview recovery respects read-only and production guards before HTTP"
         "app", action, "--id", id, "--environment_id", environment,
         ...(action === "preview" ? ["--release_id", sourceRelease.release_id, "--configuration_id", configurationId] : []),
         ...(action === "preview-status" || action === "preview-cleanup" ? ["--preview_id", previewId] : []),
+        ...(action === "preview" || action === "preview-status" ? ["--wait", "--timeout_seconds", "1"] : []),
+        ...(action === "preview" ? ["--ttl_seconds", "300"] : []),
       ];
       const readOnly = await cli(input, { ...env, SUPACLOUD_READ_ONLY: "true" });
       expect(readOnly.code, readOnly.output).toBe(1);
@@ -380,4 +663,63 @@ test("CLI read-only preview plan uses the context ref and sends no resource muta
     expect(JSON.parse(result.output)).toMatchObject({ project_ref: ref, preview: { status: "planned" } });
   });
   expect(requests).toEqual([`GET ${path}/preview-plan`]);
+}, 30_000);
+
+test("CLI creation wait forwards numeric TTL but keeps wait options local and emits one ready receipt", async () => {
+  const requests: string[] = [];
+  const expiresAt = "2026-10-10T00:05:00.000Z";
+  await withServer(async request => {
+    const pathname = new URL(request.url).pathname;
+    requests.push(`${request.method} ${pathname}`);
+    if (pathname.includes("/releases/")) return Response.json({ project_ref: ref, application_id: id, release: sourceRelease });
+    if (request.method === "POST") {
+      expect(await request.json()).toEqual({
+        release_id: sourceRelease.release_id, configuration_id: configurationId,
+        data_mode: "schema_only", ttl_seconds: 300,
+      });
+      return Response.json({ ...preview(), expires_at: expiresAt }, { status: 202 });
+    }
+    return Response.json({ ...preview("ready"), expires_at: expiresAt });
+  }, async (_http, origin) => {
+    const result = await cli([
+      "app", "preview", "--id", id, "--environment_id", environment,
+      "--release_id", sourceRelease.release_id, "--configuration_id", configurationId,
+      "--ttl_seconds", "300", "--wait", "--timeout_seconds", "1",
+    ], {
+      SUPACLOUD_API_URL: origin, SUPACLOUD_API_TOKEN: "fixture-management-token", SUPACLOUD_PROJECT_REF: ref,
+    });
+    expect(result.code, result.output).toBe(0);
+    expect(JSON.parse(result.output)).toMatchObject({
+      ok: true, operation: "applications.create_preview",
+      preview: { status: "ready", preview_id: previewId, expires_at: expiresAt },
+      waiting: { status: "ready", timeout_seconds: 1 },
+    });
+    expect(result.output).not.toContain("fixture-management-token");
+  });
+  expect(requests).toEqual([
+    `GET /v1/projects/${ref}/applications/${id}/releases/${sourceRelease.release_id}`,
+    `POST ${path}/previews`, `GET ${path}/previews/${previewId}`,
+  ]);
+}, 30_000);
+
+test("CLI status wait exits nonzero on timeout with the same Preview ID and no mutations", async () => {
+  const requests: string[] = [];
+  await withServer(request => {
+    requests.push(`${request.method} ${new URL(request.url).pathname}`);
+    return Response.json(preview());
+  }, async (_http, origin) => {
+    const result = await cli([
+      "app", "preview-status", "--id", id, "--environment_id", environment,
+      "--preview_id", previewId, "--wait", "--timeout_seconds", "1",
+    ], {
+      SUPACLOUD_API_URL: origin, SUPACLOUD_API_TOKEN: "fixture-management-token", SUPACLOUD_PROJECT_REF: ref,
+    });
+    expect(result.code, result.output).toBe(1);
+    expect(JSON.parse(result.output)).toMatchObject({
+      ok: false, preview: { status: "provisioning" }, waiting: { status: "timed_out" },
+      reconciliation: { action: "get_preview", preview_id: previewId },
+    });
+  });
+  expect(requests.length).toBeGreaterThan(0);
+  expect(requests.every(value => value === `GET ${path}/previews/${previewId}`)).toBe(true);
 }, 30_000);
