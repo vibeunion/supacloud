@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.28.0...elysia-v0.29.0) (2026-10-10)
+
+
+### Features
+
+* **effect:** upgrade runtime governance to Effect 4 ([#1748](https://github.com/vibeunion/supacloud/issues/1748)) ([2b48efc](https://github.com/vibeunion/supacloud/commit/2b48efcbe78db2a61c0c086f3350eaa87c697e90))
+
 ## [0.28.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.27.1...elysia-v0.28.0) (2026-10-09)
 
 
