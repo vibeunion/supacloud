@@ -6,7 +6,7 @@
       "name": "supacloud",
       "dependencies": {
         "@supacloud/admin": "^0.24.1",
-        "@supacloud/cli": "^0.72.0",
+        "@supacloud/cli": "^0.74.0",
       },
       "devDependencies": {
         "@types/bun": "^1.4.2",
@@ -23,7 +23,7 @@
 
     "@supacloud/admin": ["@supacloud/admin@0.24.2", "", { "dependencies": { "@supacloud/cli": "0.68.1", "ssh2": "^1.17.0", "typebox": "1.3.34" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-3hUbLHbA2Y6msrPWE2R1ZGnaJ+qDus5BXpDEXWdLXJPK61Ik4+0i0OjtjY4aJJwfKXjX42VDEOWlj2NEbJ9U/w=="],
 
-    "@supacloud/cli": ["@supacloud/cli@0.72.0", "", { "dependencies": { "@supacloud/compiler": "^0.40.1", "@supacloud/db": "^0.14.0", "@supacloud/delivery": "0.8.0", "fflate": "^0.8.3", "typebox": "1.3.34" }, "bin": { "supacloud-cli": "dist/index.js" } }, "sha512-emSjA3vraVJyzBWcBT8tIDAgqvc+2Ko8HrhRj7NdIxxqb8E00jkR7xlSXzd77mc0ak547mFjTYYACxJirWmR1g=="],
+    "@supacloud/cli": ["@supacloud/cli@0.74.0", "", { "dependencies": { "@supacloud/compiler": "^0.42.0", "@supacloud/db": "^0.14.0", "@supacloud/delivery": "0.8.0", "fflate": "^0.8.3", "typebox": "1.3.34" }, "bin": { "supacloud-cli": "dist/index.js" } }, "sha512-VN28R4901Oad5Z2VtQYpVDglgt/RZ8Wtv7GOfHMtYW1iIKjKkZHDIU19gzf9zcBcakY1kc4vbDjnQhIrcey7sQ=="],
 
     "@supacloud/contracts": ["@supacloud/contracts@0.8.0", "", {}, "sha512-PxN4RZ3/LnBHebgzlTVjKQpNQ0oqsML+eNHTDR4CjdcdqdhgnZyCv7J8e8LPTEsGWnai1PywhPM/FBqau3REEA=="],
 
