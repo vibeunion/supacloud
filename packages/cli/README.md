@@ -246,6 +246,7 @@ supacloud-cli frontend activate_release --ref abc123 --id web \
   --expected_activation_id absent \
   --mutation_id <retry-stable-uuid-v4>
 supacloud-cli frontend rollback --ref abc123 --id web --release_id <retained-sha256>
+supacloud-cli frontend rollback --ref abc123 --id web
 ```
 
 `upload_release` hashes and streams an existing regular ZIP file without
@@ -261,9 +262,11 @@ normal exact `--confirm-production <ref>` value, and
 `get_active_release` automatically handles older servers returning HTTP 404
 with a one-record history page and exact active artifact readback. It never
 falls back for authentication, integrity or server failures.
-`rollback` reads the current CAS identity and generates the mutation ID itself;
-the retained target release must be explicit. It does not infer the previous
-version from content-hash-sorted history, reupload assets or restore a database.
+`rollback` without `--release_id` asks SupaCloud for a journal-verified previous
+immutable release, reads the current CAS identity and generates the mutation ID
+itself. An explicit `--release_id` remains available for a deliberate rollback
+to any retained release. It never infers a target from content-hash-sorted
+history, reuploads assets or restores a database.
 An uncertain result includes the mutation ID for read-only reconciliation and
 must not be blindly retried.
 

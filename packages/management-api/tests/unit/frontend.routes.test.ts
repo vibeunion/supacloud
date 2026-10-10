@@ -1069,6 +1069,46 @@ describe("Frontend deployment upload routes", () => {
     }
   });
 
+  test("routes the journal-verified previous release snapshot without requesting release history", async () => {
+    const previousReleaseId = "f".repeat(64);
+    const rollbackSnapshot = spyOn(frontendReleaseService, "rollbackSnapshot").mockResolvedValue({
+      schema: "supacloud.frontend-rollback-snapshot.v1",
+      project_ref: "proj123",
+      deployment_id: "dep123",
+      active_release_id: "a".repeat(64),
+      active_activation_id: "00000000-0000-4000-8000-000000000001",
+      previous_release: {
+        schema: "supacloud.frontend-release.v1",
+        project_ref: "proj123",
+        deployment_id: "dep123",
+        release_id: previousReleaseId,
+        sha256: previousReleaseId,
+        tree_sha256: "b".repeat(64),
+        size_bytes: testZipBytes.byteLength,
+        file_count: 1,
+        created_at: "2026-08-12T00:00:00.000Z",
+        kind: "prebuilt_static",
+      },
+      previous_activation_id: "00000000-0000-4000-8000-000000000002",
+    });
+    const listReleases = spyOn(frontendReleaseService, "listReleases");
+    try {
+      const response = await app.handle(new Request(
+        "http://localhost/v1/projects/proj123/frontend/deployments/dep123/rollback-release",
+      ));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(expect.objectContaining({
+        schema: "supacloud.frontend-rollback-snapshot.v1",
+        previous_release: expect.objectContaining({ release_id: previousReleaseId }),
+      }));
+      expect(rollbackSnapshot).toHaveBeenCalledWith("proj123", "dep123");
+      expect(listReleases).not.toHaveBeenCalled();
+    } finally {
+      rollbackSnapshot.mockRestore();
+      listReleases.mockRestore();
+    }
+  });
+
   test("gets one release and rejects non-raw or unbounded immutable uploads", async () => {
     const releaseId = "a".repeat(64);
     const release = {

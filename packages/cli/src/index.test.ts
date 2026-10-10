@@ -144,6 +144,83 @@ function releaseBasePath(projectRef: string, deploymentId: string): string {
 }
 
 describe("supacloud-cli process contract", () => {
+    test("rolls back to the platform previous release without a release_id flag", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-previous-rollback-"));
+        temporaryDirectories.push(workspace);
+        const projectRef = "abc123";
+        const deploymentId = "web";
+        const previousId = "f".repeat(64);
+        let activeId = "a".repeat(64);
+        let activationId = SCHEDULE_ID;
+        const calls: string[] = [];
+        const release = (id: string) => ({
+            schema: "supacloud.frontend-release.v1",
+            project_ref: projectRef, deployment_id: deploymentId,
+            release_id: id, sha256: id, tree_sha256: id,
+            size_bytes: 1, file_count: 1,
+            created_at: "2026-10-10T00:00:00.000Z", kind: "prebuilt_static",
+        });
+        const server = Bun.serve({
+            hostname: "127.0.0.1", port: 0,
+            async fetch(request) {
+                const pathname = new URL(request.url).pathname;
+                calls.push(`${request.method} ${pathname}`);
+                const base = `/v1/projects/${projectRef}/frontend/deployments/${deploymentId}`;
+                if (request.method === "GET" && pathname === `${base}/rollback-release`) {
+                    return Response.json({
+                        schema: "supacloud.frontend-rollback-snapshot.v1",
+                        project_ref: projectRef, deployment_id: deploymentId,
+                        active_release_id: activeId, active_activation_id: activationId,
+                        previous_release: release(previousId), previous_activation_id: EXPECTED_ACTIVATION_ID,
+                    });
+                }
+                if (request.method === "GET" && pathname === `${base}/active-release`) {
+                    return Response.json({
+                        project_ref: projectRef, deployment_id: deploymentId,
+                        active_release_id: activeId, active_activation_id: activationId,
+                        releases: [release(activeId)], next_cursor: null,
+                    });
+                }
+                if (request.method === "GET" && pathname === `${base}/releases/${previousId}`) {
+                    return Response.json({ project_ref: projectRef, deployment_id: deploymentId, release: release(previousId) });
+                }
+                if (request.method === "POST" && pathname === `${base}/releases/${previousId}/activate`) {
+                    const body = await request.json() as Record<string, string>;
+                    expect(body.expected_active_release_id).toBe(activeId);
+                    expect(body.expected_activation_id).toBe(activationId);
+                    activationId = body.mutation_id!;
+                    activeId = previousId;
+                    return Response.json({
+                        project_ref: projectRef, deployment_id: deploymentId,
+                        active_release_id: activeId, activation_id: activationId, release: release(activeId),
+                        mutation: { mutation_id: activationId, status: "succeeded", replayed: false },
+                    });
+                }
+                return Response.json({}, { status: 404 });
+            },
+        });
+        servers.push(server);
+        const env = {
+            SUPACLOUD_ENV: "test", SUPACLOUD_PROJECT_REF: projectRef,
+            SUPACLOUD_API_URL: `http://127.0.0.1:${server.port}`,
+            SUPACLOUD_API_TOKEN: "previous-rollback-test-token",
+        };
+        const args = ["frontend", "rollback", "--ref", projectRef, "--id", deploymentId];
+        const denied = await runProjectCli(args, { ...env, SUPACLOUD_READ_ONLY: "true" }, workspace);
+        expect(denied.exitCode).toBe(1);
+        expect(calls).toEqual([]);
+        const rolledBack = await runProjectCli(args, env, workspace);
+        expect(rolledBack.exitCode).toBe(0);
+        expect(JSON.parse(rolledBack.stdout)).toMatchObject({ rollback: true, active_release_id: previousId });
+        expect(calls).toEqual([
+            `GET /v1/projects/${projectRef}/frontend/deployments/${deploymentId}/rollback-release`,
+            `POST /v1/projects/${projectRef}/frontend/deployments/${deploymentId}/releases/${previousId}/activate`,
+            `GET /v1/projects/${projectRef}/frontend/deployments/${deploymentId}/active-release`,
+            `GET /v1/projects/${projectRef}/frontend/deployments/${deploymentId}/releases/${previousId}`,
+        ]);
+        expect(rolledBack.stdout + rolledBack.stderr).not.toContain("previous-rollback-test-token");
+    });
+
     test("prints the installed package version without project context", async () => {
         const response = await runProjectCli(["--version"]);
 

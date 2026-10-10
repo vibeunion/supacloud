@@ -45,7 +45,7 @@ Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy,
             git_url: optional(Type.String(), "[deploy_git] Git repository URL"),
             branch: optional(Type.String(), "[deploy_git] Branch (default: main)"),
             zip_path: optional(Type.String(), "[deploy_upload/upload_release] Local ZIP file path"),
-            release_id: optional(Type.String(), "[get_release/activate_release/rollback] SHA-256 release ID"),
+            release_id: optional(Type.String(), "[get_release/activate_release] SHA-256 release ID; [rollback] optional, defaults to journal-verified previous release"),
             expected_active_release_id: optional(Type.String(), "[activate_release] Current release SHA-256 or absent"),
             expected_activation_id: optional(Type.String(), "[activate_release] Current activation UUIDv4 or absent"),
             mutation_id: optional(Type.String(), "[activate_release] Required retry-stable UUIDv4"),
@@ -172,7 +172,7 @@ Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy,
                         mutationId: mutation_id,
                     });
                 case "rollback":
-                    need("ref", ref); need("id", id); need("release_id", release_id);
+                    need("ref", ref); need("id", id);
                     return rollbackFrontendRelease(http, ref, id, release_id);
                 default: text = `❌ Unknown action`;
             }

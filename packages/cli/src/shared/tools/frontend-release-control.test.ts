@@ -150,7 +150,7 @@ describe("immutable frontend release control", () => {
         }
     });
 
-    test("rolls back with one high-level command while hiding CAS identity boilerplate", async () => {
+    test.each([true, false])("rolls back with one high-level command (explicit target: %s)", async (explicit) => {
         const calls: Array<{ path: string; body?: unknown }> = [];
         const targetReleaseId = "c".repeat(64);
         let activeReleaseId = RELEASE_ID;
@@ -158,6 +158,18 @@ describe("immutable frontend release control", () => {
         const response = await rollbackFrontendRelease({
             get: async (path: string) => {
                 calls.push({ path });
+                if (path.endsWith("/rollback-release")) {
+                    return {
+                        ok: true, status: 200,
+                        data: {
+                            schema: "supacloud.frontend-rollback-snapshot.v1",
+                            project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                            active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+                            previous_release: release(targetReleaseId),
+                            previous_activation_id: "00000000-0000-4000-8000-000000000002",
+                        },
+                    };
+                }
                 if (path.endsWith("/active-release")) {
                     return {
                         ok: true, status: 200,
@@ -197,7 +209,7 @@ describe("immutable frontend release control", () => {
                     },
                 };
             },
-        } as never, PROJECT_REF, DEPLOYMENT_ID, targetReleaseId);
+        } as never, PROJECT_REF, DEPLOYMENT_ID, explicit ? targetReleaseId : undefined);
 
         expect(response.isError).not.toBe(true);
         expect(parsed(response)).toMatchObject({
@@ -206,21 +218,87 @@ describe("immutable frontend release control", () => {
             previous_activation_id: MUTATION_ID,
             active_release_id: targetReleaseId,
         });
-        expect(calls[2]?.body).toMatchObject({
+        expect(calls.find(({ body }) => body !== undefined)?.body).toMatchObject({
             expected_active_release_id: RELEASE_ID,
             expected_activation_id: MUTATION_ID,
         });
         expect(activationId).toMatch(/^[0-9a-f-]{36}$/);
         expect(calls.map(({ path }) => path)).toEqual([
-            `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/active-release`,
-            `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/releases/${targetReleaseId}`,
+            `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/${explicit ? "active-release" : "rollback-release"}`,
+            ...(explicit ? [`/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/releases/${targetReleaseId}`] : []),
             `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/releases/${targetReleaseId}/activate`,
             `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/active-release`,
             `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/releases/${targetReleaseId}`,
         ]);
     });
 
-    test.each([409, 500])("rollback never retries a conflicting or uncertain HTTP %s mutation", async (status) => {
+    test.each([401, 403, 404, 409, 500])("default rollback never guesses from history after HTTP %s", async (status) => {
+        const calls: string[] = [];
+        const response = await rollbackFrontendRelease({
+            get: async (path: string) => {
+                calls.push(path);
+                return { ok: false, status, data: { token: "must-not-escape" } };
+            },
+            post: async () => { throw new Error("Unexpected mutation"); },
+        } as never, PROJECT_REF, DEPLOYMENT_ID);
+        expect(response.isError).toBe(true);
+        expect(parsed(response)).toMatchObject({
+            error: { code: status === 404 ? "PREVIOUS_RELEASE_UNSUPPORTED" : "HTTP_ERROR" },
+        });
+        expect(calls).toEqual([`/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/rollback-release`]);
+        expect(response.content[0].text).not.toContain("must-not-escape");
+    });
+
+    test("default rollback requires a strict scoped previous-release snapshot before any mutation", async () => {
+        const valid = {
+            schema: "supacloud.frontend-rollback-snapshot.v1",
+            project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+            active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+            previous_release: release("c".repeat(64)),
+            previous_activation_id: "00000000-0000-4000-8000-000000000002",
+        };
+        for (const data of [
+            { ...valid, project_ref: "other" },
+            { ...valid, schema: "unknown" },
+            { ...valid, previous_release: { ...valid.previous_release, deployment_id: "other" } },
+            { ...valid, previous_release: null },
+            { ...valid, active_release_id: null, active_activation_id: null },
+            { ...valid, previous_activation_id: null },
+            { ...valid, token: "must-not-escape" },
+        ]) {
+            let reads = 0;
+            const response = await rollbackFrontendRelease({
+                get: async () => { reads++; return { ok: true, status: 200, data }; },
+                post: async () => { throw new Error("Unexpected mutation"); },
+            } as never, PROJECT_REF, DEPLOYMENT_ID);
+            expect(response.isError).toBe(true);
+            expect(parsed(response)).toMatchObject({ error: { code: "INVALID_RESPONSE" } });
+            expect(reads).toBe(1);
+            expect(response.content[0].text).not.toContain("must-not-escape");
+        }
+    });
+
+    test("default rollback without a previous immutable release does not activate", async () => {
+        const response = await rollbackFrontendRelease({
+            get: async () => ({
+                ok: true, status: 200,
+                data: {
+                    schema: "supacloud.frontend-rollback-snapshot.v1",
+                    project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                    active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+                    previous_release: null, previous_activation_id: null,
+                },
+            }),
+            post: async () => { throw new Error("Unexpected mutation"); },
+        } as never, PROJECT_REF, DEPLOYMENT_ID);
+        expect(response.isError).toBe(true);
+        expect(parsed(response)).toMatchObject({ error: { code: "NO_PREVIOUS_RELEASE" } });
+    });
+
+    test.each([
+        { status: 409, explicit: true }, { status: 500, explicit: true },
+        { status: 409, explicit: false }, { status: 500, explicit: false },
+    ])("rollback never retries a conflicting or uncertain mutation: %j", async ({ status, explicit }) => {
         const targetReleaseId = "c".repeat(64);
         let writes = 0;
         let mutationId = "";
@@ -229,6 +307,18 @@ describe("immutable frontend release control", () => {
             get: async (path: string) => {
                 reads.push(path);
                 if (path.includes("/mutations/")) return { ok: false, status: 404, data: null };
+                if (path.endsWith("/rollback-release")) {
+                    return {
+                        ok: true, status: 200,
+                        data: {
+                            schema: "supacloud.frontend-rollback-snapshot.v1",
+                            project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                            active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+                            previous_release: release(targetReleaseId),
+                            previous_activation_id: "00000000-0000-4000-8000-000000000002",
+                        },
+                    };
+                }
                 return {
                     ok: true, status: 200,
                     data: path.endsWith("/active-release") ? {
@@ -246,7 +336,7 @@ describe("immutable frontend release control", () => {
                 mutationId = body.mutation_id;
                 return { ok: false, status, data: { token: "must-not-escape" } };
             },
-        } as never, PROJECT_REF, DEPLOYMENT_ID, targetReleaseId);
+        } as never, PROJECT_REF, DEPLOYMENT_ID, explicit ? targetReleaseId : undefined);
         expect(response.isError).toBe(true);
         expect(writes).toBe(1);
         expect(parsed(response)).toMatchObject({

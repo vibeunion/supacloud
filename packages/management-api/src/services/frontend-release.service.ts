@@ -11,6 +11,7 @@ import {
   type FrontendReleaseListPage,
   type FrontendReleaseRecord,
   type FrontendReleaseUploadSession,
+  type FrontendRollbackSnapshot,
   type VerifiedStagedFrontendArchive,
 } from "./frontend-release-contract";
 import { gatewayService } from "./gateway.service";
@@ -114,6 +115,11 @@ export class FrontendReleaseService {
   activeReleaseSnapshot(projectRef: string, deploymentId: string): Promise<FrontendReleaseInventory> {
     return this.deploymentLock(projectRef, deploymentId, () =>
       this.storage.activeReleaseSnapshot(projectRef, deploymentId));
+  }
+
+  rollbackSnapshot(projectRef: string, deploymentId: string): Promise<FrontendRollbackSnapshot> {
+    return this.deploymentLock(projectRef, deploymentId, () =>
+      this.activation.rollbackSnapshot(projectRef, deploymentId));
   }
 
   activeBuildDir(projectRef: string, deploymentId: string): Promise<string | null> {

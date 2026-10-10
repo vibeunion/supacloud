@@ -69,6 +69,16 @@ export interface FrontendReleaseInventory {
   next_cursor: string | null;
 }
 
+export interface FrontendRollbackSnapshot {
+  schema: "supacloud.frontend-rollback-snapshot.v1";
+  project_ref: string;
+  deployment_id: string;
+  active_release_id: string | null;
+  active_activation_id: string | null;
+  previous_release: FrontendReleaseRecord | null;
+  previous_activation_id: string | null;
+}
+
 export interface FrontendReleaseListPage {
   cursor?: string;
   limit: number;
