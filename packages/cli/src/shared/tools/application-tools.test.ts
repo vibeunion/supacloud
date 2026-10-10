@@ -70,7 +70,7 @@ test("application logs stay bound to the selected environment", async () => {
 
 test("delivery schemas validate through the CLI argument parser after the TypeBox upgrade", () => {
   const args = {
-    action: "activate_release", ref: "project", id: "reviews", environment_id: "test",
+    action: "activate_release" as const, ref: "project", id: "reviews", environment_id: "test",
     activation_id: "01234567-89ab-4def-8123-456789abcdef", release_id: "a".repeat(64),
     configuration_id: "11234567-89ab-4def-8123-456789abcdef", expected_activation_id: "absent",
   };

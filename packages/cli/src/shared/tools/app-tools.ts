@@ -19,8 +19,9 @@ import {
     type Diagnostic,
     type ModuleNode,
 } from "@supacloud/compiler";
-import { optional, parseToolArguments, stringEnum, withDescription } from "../schema";
+import { optional, stringEnum, validateToolArguments, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
+import { registerTool, type ToolServer } from "../tool-server";
 import { buildToolDefinitions, type AppManifest } from "./app-tool-export";
 import { initializeAppProject } from "./app-starter";
 import { checkAppDatabaseSources } from "./app-database-check";
@@ -62,20 +63,12 @@ const REMOTE_APP_DESCRIPTIONS: Record<string, string> = {
     release_id: "[deploy/rollback/reconcile] Required immutable application release ID",
 };
 
-const REMOTE_APP_SCHEMA: ToolSchema = Object.fromEntries(
-    Object.entries(APPLICATION_TOOL_SCHEMA)
-        .filter(([name]) => name !== "action")
-        .map(([name, schema]) => [name, optional(schema, REMOTE_APP_DESCRIPTIONS[name])]),
-);
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (requestArguments: AppToolArguments) => Promise<unknown>,
-    ) => void;
-};
+const { action: _remoteAction, ...remoteFields } = APPLICATION_TOOL_SCHEMA;
+const REMOTE_APP_SCHEMA = Type.Partial(Type.Object(remoteFields)).properties;
+for (const [name, schema] of Object.entries(REMOTE_APP_SCHEMA)) {
+    const description = REMOTE_APP_DESCRIPTIONS[name];
+    if (description !== undefined) Object.assign(schema, { description });
+}
 
 export interface AppToolArguments {
     action: "init" | "generate" | "dev" | "watch" | "verify-plan" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "doctor" | "fix"
@@ -1092,9 +1085,10 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
         const delegate = options.getApplications?.();
         if (!delegate) return textResult("App remote actions require a Management API context.", true);
         const action = REMOTE_APP_ACTIONS[request.action as keyof typeof REMOTE_APP_ACTIONS];
-        const args = parseToolArguments(APPLICATION_TOOL_SCHEMA, {
+        const args = {
             ...request, action, ref: request.ref ?? options.projectRef,
-        });
+        };
+        validateToolArguments(APPLICATION_TOOL_SCHEMA, args);
         // Preserve the original receipt, including unknown outcomes. Never infer a rollback or retry.
         return delegate(args);
     }
@@ -1136,7 +1130,7 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
 }
 
 export function registerAppTools(server: ToolServer, options: AppToolOptions = {}): void {
-    server.tool(
+    registerTool(server,
         "app",
         "Application authoring and delivery. Plan is read-only; build, upload and configure never deploy. Deploy/rollback explicitly activate a release; rollback never downgrades schema.",
         {
@@ -1179,7 +1173,7 @@ const APP_ALIAS_ACTIONS = ["generate", "compile", "check", "graph", "explain", "
  * these aliases share one implementation and one execution-policy classification.
  */
 export function registerAppAliases(server: ToolServer): void {
-    const schema: ToolSchema = {
+    const schema = {
         kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource"]), "[generate] Scaffold kind"),
         name: optional(Type.String(), "[generate] Object name"),
         module: optional(Type.String(), "[generate] Target feature module"),
@@ -1197,9 +1191,10 @@ export function registerAppAliases(server: ToolServer): void {
         target: optional(Type.String(), "[explain/context] Provider class name / token name / command name / job name / module name"),
         fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
         write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
-    };
+    } satisfies ToolSchema;
     for (const action of APP_ALIAS_ACTIONS) {
-        server.tool(action, `Top-level alias of \`app ${action}\`.`, schema, (request) => runAppTool({ ...request, action }));
+        registerTool(server, action, `Top-level alias of \`app ${action}\`.`, schema,
+            (request) => runAppTool({ ...request, action }));
     }
 }
 

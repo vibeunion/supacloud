@@ -16,15 +16,12 @@ import { canonical, digest } from "@supacloud/delivery/files";
 import { optional, stringEnum, withDescription, type ToolSchema } from "../schema";
 import { projectRefPathSegment } from "../project-ref";
 import type { HttpResult, HttpTransport } from "../transports/http";
+import { registerTool, type ToolServer } from "../tool-server";
 import {
   releaseControlFailure, releaseControlMutationFailure, releaseControlSuccess, type ReleaseControlToolResponse,
 } from "./release-control-response";
 
-type ToolServer = {
-  tool(name: string, description: string, schema: ToolSchema,
-    callback: (args: Record<string, unknown>) => Promise<ReleaseControlToolResponse>): void;
-};
-export const APPLICATION_TOOL_SCHEMA: ToolSchema = {
+export const APPLICATION_TOOL_SCHEMA = {
   action: withDescription(stringEnum([
     "list_releases", "get_release", "upload_release", "get_runtime", "get_deployment_evidence",
     "get_configuration", "put_configuration",
@@ -85,10 +82,10 @@ async function configurationAction(http: HttpTransport, args: Record<string, unk
     expectedId = input.configuration_id;
     result = await http.put(`${path}/configuration`, input, { maxJsonBytes: 524_288, responseTimeoutMs: 30_000 });
   } else {
-    if (args.configuration_id !== undefined && !Value.Check(ApplicationConfigurationIdSchema, args.configuration_id)) {
+    if (args["configuration_id"] !== undefined && !Value.Check(ApplicationConfigurationIdSchema, args["configuration_id"])) {
       throw new Error("Invalid application configuration ID");
     }
-    expectedId = args.configuration_id as string | undefined;
+    expectedId = args["configuration_id"] as string | undefined;
     result = await http.get(expectedId ? `${path}/configurations/${expectedId}` : `${path}/configuration`,
       { maxJsonBytes: 524_288, responseTimeoutMs: 30_000 });
   }
@@ -117,7 +114,7 @@ async function configurationAction(http: HttpTransport, args: Record<string, unk
 async function activationAction(http: HttpTransport, args: Record<string, unknown>, project: string) {
   const action = text(args, "action"), ref = text(args, "ref"), id = text(args, "id");
   const environmentId = text(args, "environment_id"), activationId = text(args, "activation_id");
-  const releaseId = args.release_id === undefined ? undefined : text(args, "release_id");
+  const releaseId = args["release_id"] === undefined ? undefined : text(args, "release_id");
   if (action === "retire_activation" && releaseId !== undefined) {
     throw new Error("release_id is not accepted for retire_activation");
   }
@@ -136,8 +133,8 @@ async function activationAction(http: HttpTransport, args: Record<string, unknow
   if (action === "activate_release") {
     body = {
       activation_id: activationId, release_id: releaseId,
-      configuration_id: args.configuration_id,
-      expected_activation_id: args.expected_activation_id === "absent" ? null : args.expected_activation_id,
+      configuration_id: args["configuration_id"],
+      expected_activation_id: args["expected_activation_id"] === "absent" ? null : args["expected_activation_id"],
     };
     if (!Value.Check(ApplicationActivationWriteSchema, body)) throw new Error("Invalid application activation request");
   }
@@ -162,8 +159,8 @@ async function activationAction(http: HttpTransport, args: Record<string, unknow
 }
 
 export function registerApplicationTools(server: ToolServer, http: HttpTransport): void {
-  server.tool("applications", "Store, inspect and explicitly activate immutable HTTP/Worker application releases. Upload does not activate a release.",
-    APPLICATION_TOOL_SCHEMA, async args => {
+  registerTool(server, "applications", "Store, inspect and explicitly activate immutable HTTP/Worker application releases. Upload does not activate a release.",
+    APPLICATION_TOOL_SCHEMA, async (args) => {
       const action = text(args, "action"), ref = text(args, "ref"), id = text(args, "id");
       const project = projectRefPathSegment(ref, "Applications");
       if (!Value.Check(ApplicationIdSchema, id)) throw new Error("Invalid application ID");
@@ -228,8 +225,8 @@ export function registerApplicationTools(server: ToolServer, http: HttpTransport
         if (!Value.Check(ApplicationIdSchema, environmentId)) throw new Error("Invalid environment ID");
         const query = new URLSearchParams();
         for (const [key, value] of [
-          ["limit", args.limit], ["offset", args.offset], ["service", args.service],
-          ["search", args.search], ["start", args.start], ["end", args.end],
+          ["limit", args["limit"]], ["offset", args["offset"]], ["service", args["service"]],
+          ["search", args["search"]], ["start", args["start"]], ["end", args["end"]],
         ] as const) {
           if (value !== undefined) query.set(key, String(value));
         }
@@ -248,13 +245,13 @@ export function registerApplicationTools(server: ToolServer, http: HttpTransport
         return releaseControlSuccess(operation, result.data);
       }
       if (action === "list_releases") {
-        const limit = args.limit ?? 50;
+        const limit = args["limit"] ?? 50;
         if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 100
-          || (args.cursor !== undefined && !Value.Check(ApplicationReleaseIdSchema, args.cursor))) {
+          || (args["cursor"] !== undefined && !Value.Check(ApplicationReleaseIdSchema, args["cursor"]))) {
           throw new Error("Invalid release page");
         }
         const query = new URLSearchParams({ limit: String(limit) });
-        if (typeof args.cursor === "string") query.set("cursor", args.cursor);
+        if (typeof args["cursor"] === "string") query.set("cursor", args["cursor"]);
         const result = await http.get(`${path}?${query}`);
         if (!result.ok) return releaseControlFailure(operation, "HTTP_ERROR", result.status);
         try {
@@ -262,7 +259,7 @@ export function registerApplicationTools(server: ToolServer, http: HttpTransport
             || result.data.project_ref !== ref || result.data.application_id !== id
             || result.data.releases.length > limit) throw new Error();
           const releases = result.data.releases.map(value => boundRelease(value, ref, id));
-          let previous = typeof args.cursor === "string" ? args.cursor : "";
+          let previous = typeof args["cursor"] === "string" ? args["cursor"] : "";
           for (const release of releases) {
             if (release.release_id <= previous) throw new Error();
             previous = release.release_id;

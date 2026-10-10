@@ -8,6 +8,7 @@ import {
     resolveOfficialSupabaseCommand,
     type SupabaseCliArgs,
 } from "./supabase-cli-tools";
+import type { ToolInvocation } from "../tool-server";
 
 describe("official Supabase CLI adapter", () => {
     test("initializes through upstream defaults without overwriting existing configuration", () => {
@@ -209,7 +210,7 @@ describe("official Supabase CLI adapter", () => {
             action: "db_reset",
             db_url: "postgresql://postgres:secret@db.example.com/postgres",
             workdir: "/workspace/project",
-        } as any)).not.toContain("--db-url");
+        })).not.toContain("--db-url");
     });
 
     test("does not forward control-plane or database secrets to the official CLI", () => {
@@ -283,7 +284,7 @@ describe("official Supabase CLI adapter", () => {
     });
 
     test("routes push through the configured Management migration callback", async () => {
-        let registered: { callback: (args: any) => Promise<any> } | undefined;
+        let registered: { callback: ToolInvocation } | undefined;
         let pushedArgs: Record<string, unknown> | undefined;
         let officialExecutions = 0;
 
@@ -293,7 +294,10 @@ describe("official Supabase CLI adapter", () => {
             },
         }, {
             getPushMigrations: () => async (args) => {
-                pushedArgs = args;
+                if (args === null || typeof args !== "object" || Array.isArray(args)) {
+                    throw new Error("Invalid migration arguments");
+                }
+                pushedArgs = Object.fromEntries(Object.entries(args));
                 return { content: [{ type: "text", text: "dry run ok" }] };
             },
             executeOfficialCli: async () => {
@@ -321,7 +325,7 @@ describe("official Supabase CLI adapter", () => {
     });
 
     test("preserves a non-zero CLI contract when the migration API reports failure text", async () => {
-        let registered: { callback: (args: any) => Promise<any> } | undefined;
+        let registered: { callback: ToolInvocation } | undefined;
         registerSupabaseCliTools({
             tool(_name, _description, _schema, callback) {
                 registered = { callback };
@@ -340,7 +344,7 @@ describe("official Supabase CLI adapter", () => {
     });
 
     test("blocks migration push before callback dispatch in read-only mode", async () => {
-        let registered: { callback: (args: any) => Promise<any> } | undefined;
+        let registered: { callback: ToolInvocation } | undefined;
         let pushCalls = 0;
         registerSupabaseCliTools({
             tool(_name, _description, _schema, callback) {

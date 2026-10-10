@@ -5,7 +5,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
-import type { HttpTransport } from "../transports/http";
+import type { HttpResult, HttpTransport } from "../transports/http";
+import { registerTool, type ToolServer } from "../tool-server";
 import {
     activateFrontendRelease,
     getFrontendRelease,
@@ -13,8 +14,8 @@ import {
     uploadFrontendRelease,
 } from "./frontend-release-control";
 
-export function registerFrontendTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
-    server.tool(
+export function registerFrontendTools(server: ToolServer, http: HttpTransport): void {
+    registerTool(server,
         "frontend",
         `Frontend hosting and immutable prebuilt releases. Supports: static, react, vue, svelte, sveltekit, sveltekit-static, nextjs, nuxt, astro.
 Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy, build_logs, add_domain, remove_domain, set_env, list_frameworks, list_records, list_releases, get_release, upload_release, activate_release`,
@@ -49,14 +50,16 @@ Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy,
             cursor: optional(Type.String(), "[list_releases] Last release SHA-256 cursor"),
             limit: optional(Type.Number(), "[list_releases] Page size, 1-100 (default 50)"),
         },
-        async (args: any) => {
+        async (args) => {
             const {
                 action, ref, id, name, framework, domain, build_command, output_dir, install_command,
                 node_version, health_check_path, env_vars, git_url, branch, zip_path, release_id,
                 expected_active_release_id, expected_activation_id, mutation_id, cursor, limit,
             } = args;
-            const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
-            const ok = (res: any) => res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`;
+            const need: <T>(field: string, value: T) => asserts value is NonNullable<T> = (field, value) => {
+                if (value === undefined || value === null || value === "") throw new Error(`'${field}' required for '${action}'`);
+            };
+            const ok = (res: HttpResult<unknown>) => res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`;
 
             let text: string;
             switch (action) {
@@ -90,15 +93,15 @@ Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy,
                     break;
                 case "deploy_upload":
                     need("ref", ref); need("id", id); need("zip_path", zip_path);
-                    if (!existsSync(zip_path!)) {
+                    if (!existsSync(zip_path)) {
                         throw new Error(`Zip file not found: ${zip_path}`);
                     }
-                    const zipBuffer = readFileSync(zip_path!);
+                    const zipBuffer = readFileSync(zip_path);
                     const form = new FormData();
                     form.append(
                         "file",
                         new Blob([zipBuffer], { type: "application/zip" }),
-                        basename(zip_path!),
+                        basename(zip_path),
                     );
                     text = ok(
                         await http.postMultipart(
@@ -114,7 +117,10 @@ Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy,
                 case "build_logs":
                     need("ref", ref); need("id", id);
                     const lr = await http.get(`/v1/projects/${ref}/frontend/deployments/${id}/logs`);
-                    text = lr.ok ? ((lr.data as any)?.logs || "(no logs)") : `❌ Failed (${lr.status})`;
+                    text = lr.ok
+                        ? (typeof lr.data === "object" && lr.data !== null && "logs" in lr.data
+                            && typeof lr.data.logs === "string" ? lr.data.logs : "(no logs)")
+                        : `❌ Failed (${lr.status})`;
                     break;
                 case "add_domain":
                     need("ref", ref); need("id", id); need("domain", domain);
@@ -129,7 +135,7 @@ Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy,
                 case "set_env":
                     need("ref", ref); need("id", id); need("env_vars", env_vars);
                     text = (await http.put(`/v1/projects/${ref}/frontend/deployments/${id}/env`, { env_vars })).ok
-                        ? `✅ Set ${Object.keys(env_vars!).length} env vars` : `❌ Failed`;
+                        ? `✅ Set ${Object.keys(env_vars).length} env vars` : `❌ Failed`;
                     break;
                 case "list_frameworks":
                     text = ok(await http.get("/v1/projects/_/frontend/frameworks"));

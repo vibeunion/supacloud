@@ -22,6 +22,7 @@ import { basename, join, relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import { projectRefPathSegment } from "../project-ref";
+import { registerTool, type ToolServer } from "../tool-server";
 import type { HttpResult, HttpTransport } from "../transports/http";
 import {
     releaseControlFailure,
@@ -238,8 +239,7 @@ async function runBunBuild(args: string[]): Promise<{ stdout: string; stderr: st
         ]);
         if (exitCode !== 0) {
             const error = new Error(`bun build exited with code ${exitCode}: ${stderr}`);
-            (error as any).stdout = stdout;
-            (error as any).stderr = stderr;
+            if (error instanceof Error) Object.assign(error, { stdout, stderr });
             throw error;
         }
         return { stdout, stderr };
@@ -957,14 +957,14 @@ async function activateFunctionVersion(
 }
 
 export function registerAdvancedTools(
-    server: { tool: (...args: any[]) => void },
+    server: ToolServer,
     http: HttpTransport,
     environment: NodeJS.ProcessEnv = process.env,
     options: { readOnly?: boolean } = {},
 ): void {
 
     // ═══ Edge Functions (8→1) ═══
-    server.tool(
+    registerTool(server,
         "edge_functions",
         `Edge Function management (Deno/Bun serverless). Source deploys are bundled; verified prebuilt artifacts stay byte-exact.
 Actions: list, get_config, deploy, deploy_bundle, config, source, activate, delete, check, scaffold`,
@@ -1010,7 +1010,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                 "[deploy/deploy_bundle/config/activate/delete] Required activation ID from list, or 'legacy' for a new or legacy function",
             ),
         },
-        async (args: any) => {
+        async (args) => {
             if (args.action === "activate") return activateFunctionVersion(http, args, options.readOnly);
             if (args.action === "scaffold") {
                 return { content: [{ type: "text" as const, text: scaffoldFunction(args.path, args.slug, args.framework) }] };
@@ -1027,8 +1027,10 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             const expectedActivationId = FUNCTION_IDENTITY_MUTATIONS.has(action)
                 ? requiredExpectedActivationId(args, action)
                 : undefined;
-            let code = args.code as string | undefined;
-            const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
+            let code = args.code;
+            const need: <T>(field: string, value: T) => asserts value is NonNullable<T> = (field, value) => {
+                if (value === undefined || value === null || value === "") throw new Error(`'${field}' required for '${action}'`);
+            };
 
             let text: string;
 
@@ -1045,7 +1047,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
             const functionConfig = (): EdgeFunctionConfigInput => ({
                 ...(typeof verify_jwt === "boolean" ? { verify_jwt } : {}),
                 ...(Array.isArray(background_routes) ? { background_routes } : {}),
-                ...(typeof framework === "string" ? { framework: framework as EdgeFunctionConfigInput["framework"] } : {}),
+                ...(framework === undefined ? {} : { framework }),
                 ...(capabilities === undefined ? {} : { capabilities }),
                 ...(resolvedLimits === undefined ? {} : { limits: resolvedLimits }),
             });
@@ -1059,8 +1061,13 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                 try {
                     await runBunBuild([tmpFile, "--external", "*"]);
                     return { ok: true };
-                } catch (e: any) {
-                    return { ok: false, err: `${e.stdout || ""}\n${e.stderr || e.message}` };
+                } catch (error: unknown) {
+                    const stdout = typeof error === "object" && error !== null && "stdout" in error
+                        && typeof error.stdout === "string" ? error.stdout : "";
+                    const stderr = typeof error === "object" && error !== null && "stderr" in error
+                        && typeof error.stderr === "string" ? error.stderr : "";
+                    const message = error instanceof Error ? error.message : String(error);
+                    return { ok: false, err: `${stdout}\n${stderr || message}` };
                 } finally {
                     rmSync(tmpDir, { recursive: true, force: true });
                 }
@@ -1077,13 +1084,15 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
 
             switch (action) {
                 case "list":
+                    need("ref", ref);
                     return functionListResponse(await http.get(edgeFunctionResourcePath(ref)));
                 case "get_config":
+                    need("ref", ref);
                     need("slug", slug);
                     return readFunctionIdentity(http, ref, slug);
                 case "check":
                     need("code (or path)", code);
-                    const checkRes = await checkSyntax(code!);
+                    const checkRes = await checkSyntax(code);
                     if (checkRes.ok) {
                         text = `✅ Syntax check passed for function`;
                     } else {
@@ -1091,6 +1100,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                     }
                     break;
                 case "deploy":
+                    need("ref", ref);
                     need("slug", slug);
                     const deployCode = await preparedDeployCode(args);
                     if (!deployCode.prebundled) {
@@ -1118,6 +1128,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                         config: functionConfig(),
                     }, deploymentResponse);
                 case "deploy_bundle":
+                    need("ref", ref);
                     need("slug", slug);
                     const deployBundleFiles = preparedBundleFiles(args);
                     const bundleResponse = await http.postReleaseMutation(`${edgeFunctionResourcePath(ref, slug)}/bundle`, {
@@ -1137,6 +1148,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                         config: functionConfig(),
                     }, bundleResponse);
                 case "config":
+                    need("ref", ref);
                     need("slug", slug);
                     if (!hasFunctionConfig()) {
                         throw new Error("'verify_jwt', 'background_routes', 'framework', 'capabilities', 'limits', 'max_request_body_bytes', or 'max_body_size_mb' required for 'config'");
@@ -1148,6 +1160,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                         config: functionConfig(),
                     });
                 case "source":
+                    need("ref", ref);
                     need("slug", slug);
                     return readFunctionSource(http, {
                         projectRef: ref,
@@ -1156,6 +1169,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
                         output,
                     });
                 case "delete":
+                    need("ref", ref);
                     need("slug", slug);
                     return deleteFunction(http, {
                         projectRef: ref,
@@ -1169,7 +1183,7 @@ Actions: list, get_config, deploy, deploy_bundle, config, source, activate, dele
     );
 
     // ═══ Secrets (3→1) ═══
-    server.tool(
+    registerTool(server,
         "secrets",
         `Project secrets (environment variables for Edge Functions).
 Actions: list, upsert, delete`,
@@ -1183,7 +1197,7 @@ Actions: list, upsert, delete`,
             ),
             name: optional(Type.String(), "[delete] Secret name to delete"),
         },
-        async (args: any) => {
+        async (args) => {
             const { action, ref, secrets, name } = args;
             const environmentNames = args["from-env"] as string[] | undefined;
             let text: string;
@@ -1219,7 +1233,7 @@ Actions: list, upsert, delete`,
     );
 
     // ═══ Platform (metrics + backup + network + org → 1) ═══
-    server.tool(
+    registerTool(server,
         "platform",
         `Platform monitoring, backups, network, and organizations.
 Actions: metrics, list_backups, create_backup, network, update_network, list_orgs, get_org`,
@@ -1233,9 +1247,9 @@ Actions: metrics, list_backups, create_backup, network, update_network, list_org
             slug: optional(Type.String(), "[get_org] Organization slug"),
             allowed_cidrs: optional(Type.Array(Type.String()), "[update_network] Allowed CIDRs"),
         },
-        async (args: any) => {
+        async (args) => {
             const { action, ref, slug, allowed_cidrs } = args;
-            const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
+            const need = (f: string, v: unknown) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
             let text: string;
             switch (action) {
                 case "metrics":
@@ -1274,7 +1288,7 @@ Actions: metrics, list_backups, create_backup, network, update_network, list_org
     );
 
     // ═══ Task Events (3→1) ═══
-    server.tool(
+    registerTool(server,
         "task_events",
         `Task lifecycle webhook configuration.
 Actions: register_webhook, unregister_webhook, inspect_webhook`,
@@ -1284,7 +1298,7 @@ Actions: register_webhook, unregister_webhook, inspect_webhook`,
             url: optional(Type.String(), "[register_webhook] HTTPS webhook URL for task lifecycle events"),
             secret: optional(Type.String(), "[register_webhook] Optional HMAC secret for webhook verification"),
         },
-        async (args: any) => {
+        async (args) => {
             const { action, ref, url, secret } = args;
             let text: string;
             switch (action) {
@@ -1320,7 +1334,7 @@ Actions: register_webhook, unregister_webhook, inspect_webhook`,
     );
 
     // ═══ Diagnostics (4→1) ═══
-    server.tool(
+    registerTool(server,
         "diagnostics",
         `Platform and project diagnostics: health checks, diagnostic runs, and repair.
 Actions: list_checks, run_checks, get_run, repair`,
@@ -1330,7 +1344,7 @@ Actions: list_checks, run_checks, get_run, repair`,
             run_id: optional(Type.String(), "[get_run/repair] Diagnostic run ID"),
             check_id: optional(Type.String(), "[repair] Check result ID to repair"),
         },
-        async (args: any) => {
+        async (args) => {
             const { action, ref, run_id, check_id } = args;
             let text: string;
             switch (action) {
