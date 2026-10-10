@@ -66,6 +66,10 @@ export function appStarterFiles(name: string): Record<string, string> {
             compilerOptions: {
                 target: "ES2022", module: "ESNext", moduleResolution: "bundler",
                 strict: true, experimentalDecorators: true, skipLibCheck: true,
+                noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
+                noImplicitOverride: true, noPropertyAccessFromIndexSignature: true,
+                noFallthroughCasesInSwitch: true, forceConsistentCasingInFileNames: true,
+                useUnknownInCatchVariables: true,
                 noEmit: true, types: ["bun"],
             },
             include: ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "generated/**/*.ts", "db/schema.ts", "db/contracts/**/*.ts", "supacloud.config.ts", "drizzle*.config.ts"],
@@ -164,7 +168,7 @@ test("generated query client preserves its read contract without a live database
         "tests/environment.test.ts": STARTER_ENVIRONMENT_TEST,
         "scripts/dev.ts": `import { watchProject, compileOptionsFromConfig, loadSupacloudConfig } from "@supacloud/compiler";
 
-if (process.env.APP_ENV !== "development") throw new Error("The demo server is development-only");
+if (process.env["APP_ENV"] !== "development") throw new Error("The demo server is development-only");
 let server: ReturnType<typeof Bun.spawn> | undefined;
 let restarts = Promise.resolve();
 let closing = false;
@@ -177,7 +181,7 @@ const watcher = watchProject({
     restarts = restarts.then(async () => {
       if (server) { server.kill(); await server.exited; }
       if (closing) return;
-      const entry = process.env.SUPACLOUD_DEV_PROFILE === "integration" ? "scripts/serve-integration.ts" : "scripts/serve.ts";
+      const entry = process.env["SUPACLOUD_DEV_PROFILE"] === "integration" ? "scripts/serve-integration.ts" : "scripts/serve.ts";
       server = Bun.spawn([process.execPath, "--no-env-file", entry], {
         stdin: "inherit", stdout: "inherit", stderr: "inherit", env: process.env,
       });
@@ -195,16 +199,16 @@ process.once("SIGINT", close);
 process.once("SIGTERM", close);
 await watcher.ready;
 `,
-        "scripts/integration.ts": `if (process.env.APP_ENV !== "development") throw new Error("Integration is development-only");
-process.env.SUPACLOUD_DEV_PROFILE = "integration";
+        "scripts/integration.ts": `if (process.env["APP_ENV"] !== "development") throw new Error("Integration is development-only");
+process.env["SUPACLOUD_DEV_PROFILE"] = "integration";
 await import("./dev");
 export {};
 `,
         "scripts/serve-integration.ts": `import { createCompiledModules } from "../generated/application";
 import { createDeliveryApplication } from "../src/delivery-host";
 
-if (process.env.APP_ENV !== "development") throw new Error("Integration is development-only");
-const databaseUrl = process.env.SUPACLOUD_DEV_DATABASE_URL;
+if (process.env["APP_ENV"] !== "development") throw new Error("Integration is development-only");
+const databaseUrl = process.env["SUPACLOUD_DEV_DATABASE_URL"];
 try {
   if (!databaseUrl) throw new Error();
   const url = new URL(databaseUrl);
@@ -214,12 +218,12 @@ try {
 } catch {
   throw new Error("Integration requires an explicit loopback PostgreSQL database");
 }
-if (process.env.DATABASE_SOCKET_PATH
-  || (process.env.DATABASE_URL && process.env.DATABASE_URL !== databaseUrl)) {
+if (process.env["DATABASE_SOCKET_PATH"]
+  || (process.env["DATABASE_URL"] && process.env["DATABASE_URL"] !== databaseUrl)) {
   throw new Error("Conflicting integration database settings");
 }
-process.env.DATABASE_URL = databaseUrl;
-const port = Number(process.env.PORT ?? "3000");
+process.env["DATABASE_URL"] = databaseUrl;
+const port = Number(process.env["PORT"] ?? "3000");
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("Invalid PORT");
 const abort = new AbortController();
 const stopStartup = () => abort.abort();
@@ -239,8 +243,8 @@ console.log("Local integration: " + server.url);
 `,
         "scripts/serve.ts": `import { createDemo } from "./sandbox";
 
-if (process.env.APP_ENV !== "development") throw new Error("The demo server is development-only");
-const port = Number(process.env.PORT ?? "3000");
+if (process.env["APP_ENV"] !== "development") throw new Error("The demo server is development-only");
+const port = Number(process.env["PORT"] ?? "3000");
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("Invalid PORT");
 const sandbox = createDemo();
 const server = Bun.serve({
@@ -253,7 +257,7 @@ console.log("Local demo: " + server.url);
 import { createCompiledModules } from "../generated/application";
 
 export function createDemo() {
-  if (process.env.APP_ENV !== "development" && process.env.APP_ENV !== "test") {
+  if (process.env["APP_ENV"] !== "development" && process.env["APP_ENV"] !== "test") {
     throw new Error("Memory adapters are restricted to development and test");
   }
   const sandbox = createMemorySandbox({

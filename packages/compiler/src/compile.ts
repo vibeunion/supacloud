@@ -73,11 +73,13 @@ export async function compileProject(options: CompileOptions): Promise<CompileRe
     }, options.strict ?? false));
   }
   const hasErrors = diagnostics.some((diagnostic) => diagnostic.severity === "error");
+  const hasTypeErrors = diagnostics.some(({ severity, code }) =>
+    severity === "error" && (code.startsWith("source-") || code === "generated-any"));
   const generatedOptions = {
     ...options,
     ...(options.cache ? { artifactHashes: options.cache.generatedHashes } : {}),
   };
-  const written = !hasErrors || options.writeOnError === true
+  const written = !hasErrors || (options.writeOnError === true && !hasTypeErrors)
     ? await writeRenderedApplication(rendered, generatedOptions)
     : [];
   if (!hasErrors) {
@@ -189,8 +191,8 @@ export async function checkProject(options: CompileOptions): Promise<CheckProjec
 
 function resolveTypeSafety(options: CompileOptions): NonNullable<CompileOptions["typeSafety"]> {
   return {
-    noAnyInGenerated: options.typeSafety?.noAnyInGenerated ?? options.strict ?? false,
-    scanProductionSource: options.typeSafety?.scanProductionSource ?? options.strict ?? false,
+    noAnyInGenerated: true,
+    scanProductionSource: true,
     ...(options.typeSafety?.exclude ? { exclude: options.typeSafety.exclude } : {}),
   };
 }

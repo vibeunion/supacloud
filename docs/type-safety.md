@@ -9,6 +9,16 @@ declaration quality.
 
 `bun run check:type-safety` must pass.
 
+SupaCloud application compilation always checks selected production source under
+TypeScript strict mode and the additional indexed-access, optional-property,
+override, index-signature and switch-fallthrough checks. Explicit or inferred
+`any` reported in this source, and explicit `any` in generated artifacts, are
+errors even with `strict: false` or disabled `typeSafety` toggles. Type errors
+preserve existing artifacts even with `writeOnError: true`. Incremental runs
+recheck these gates, including enclosing configuration and imported declarations.
+Scan exclusions and third-party declarations remain scope boundaries; this is
+not a proof that all possible `any` flows or excluded files are safe.
+
 - Every package's production `tsconfig.json` is checked. The gate reports the
   files selected by those configs; it does not invent a repository-wide source
   coverage percentage from unrelated test or fixture files.

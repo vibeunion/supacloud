@@ -1,9 +1,25 @@
-import { describe, expect, test } from "bun:test";
-import { mkdtemp } from "node:fs/promises";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
 import { writeFixtureProject } from "./fixtures/helpers";
+import { compileProject, checkProject } from "./compile";
+import { createIncrementalCompiler } from "./incremental";
+import { appStarterFiles } from "../../cli/src/shared/tools/app-starter";
+import { appTemplateFiles } from "../../cli/src/shared/tools/app-starter-templates";
+
+const temporaryProjects: string[] = [];
+afterEach(async () => {
+  await Promise.all(temporaryProjects.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+async function projectFixture(files: Record<string, string>): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-strict-types-"));
+  temporaryProjects.push(root);
+  await writeFixtureProject(root, files);
+  return root;
+}
 
 describe("compiler type-safety gates", () => {
   test("strict generated-artifact scan rejects any", () => {
@@ -18,6 +34,147 @@ describe("compiler type-safety gates", () => {
       file: "application.ts",
       line: 1,
     });
+  });
+
+  test("any remains a hard error when other strict diagnostics are disabled", async () => {
+    const rootDir = await projectFixture({
+      "tsconfig.json": JSON.stringify({ compilerOptions: { strict: true } }),
+      "src/production.ts": "export const unsafe: any = 1;",
+    });
+
+    const diagnostics = scanProductionSource({ rootDir, strict: false });
+
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        severity: "error",
+        code: "source-any",
+        errorCode: "SC6002",
+      }),
+    ]);
+    expect(scanGeneratedArtifacts({ "application.ts": "export const value: any = 1;" }, false)).toEqual([
+      expect.objectContaining({ severity: "error", code: "generated-any" }),
+    ]);
+  });
+
+  test.each([
+    ["noImplicitAny", "export function echo(value) { return value; }", "TS7006"],
+    ["strictNullChecks", "export const value: string = null;", "TS2322"],
+    ["strictFunctionTypes", "export const handler: (value: string | number) => void = (value: string) => {};", "TS2322"],
+    ["strictBindCallApply", 'function echo(value: number) { return value; }\nexport const value = echo.call(null, "wrong");', "TS2345"],
+    ["strictPropertyInitialization", "export class Value { value: string; }", "TS2564"],
+    ["noImplicitThis", "export function read() { return this.value; }", "TS2683"],
+    ["useUnknownInCatchVariables", 'try { throw 1; } catch (error) { error.message; }\nexport {};', "TS18046"],
+    ["strictBuiltinIteratorReturn", "export const value: number = new Set<number>().values().next().value;", "TS2322"],
+    ["noUncheckedIndexedAccess", "export const values: string[] = [];\nexport const value: string = values[0];", "TS2322"],
+    ["exactOptionalPropertyTypes", "export const value: { name?: string } = { name: undefined };", "TS2375"],
+    ["noImplicitOverride", "class Base { value() {} }\nexport class Derived extends Base { value() {} }", "TS4114"],
+    ["noPropertyAccessFromIndexSignature", "export const values: Record<string, number> = {};\nexport const value = values.item;", "TS4111"],
+    ["noFallthroughCasesInSwitch", "export function run(value: number) { switch (value) { case 0: value += 1; case 1: break; } }", "TS7029"],
+  ])("enforces %s even when the project disables it and strict diagnostics", async (option, source, errorCode) => {
+    const rootDir = await projectFixture({
+      "tsconfig.json": JSON.stringify({
+        compilerOptions: { strict: false, [option]: false, target: "ES2022", types: [] },
+      }),
+      "src/production.ts": source,
+    });
+    expect(scanProductionSource({ rootDir, strict: false })).toContainEqual(
+      expect.objectContaining({ severity: "error", code: "source-typescript", errorCode }),
+    );
+  });
+
+  test("safe unknown narrowing, optional omission, indexed access and override remain accepted", async () => {
+    const rootDir = await projectFixture({
+      "tsconfig.json": JSON.stringify({ compilerOptions: { strict: false, types: [], target: "ES2022" } }),
+      "src/production.ts": [
+        "export function decode(value: unknown): string {",
+        '  if (typeof value !== "string") throw new Error("Invalid input");',
+        "  return value;",
+        "}",
+        "export const optional: { name?: string } = {};",
+        "export const values: Record<string, number> = {};",
+        'export const value: number = values["item"] ?? 0;',
+        "class Base { value(): number { return 1; } }",
+        "export class Derived extends Base { override value(): number { return 2; } }",
+      ].join("\n"),
+    });
+    expect(scanProductionSource({ rootDir, strict: true })).toEqual([]);
+  });
+
+  test.each([
+    ["export const value: any = 1;", "source-any"],
+    ["export const value: string = null;", "source-typescript"],
+  ])("compile and check cannot disable type gates for %s", async (source, code) => {
+    const lastGood = "// last good application\n";
+    const rootDir = await projectFixture({
+      "tsconfig.json": JSON.stringify({ compilerOptions: { strict: false, types: [] } }),
+      "src/production.ts": source,
+      "generated/application.ts": lastGood,
+    });
+    const options = {
+      rootDir: join(rootDir, "src"),
+      outDir: join(rootDir, "generated"),
+      strict: false,
+      writeOnError: true,
+      typeSafety: { scanProductionSource: false, noAnyInGenerated: false },
+    };
+    const compiled = await compileProject(options);
+    const checked = await checkProject(options);
+    for (const result of [compiled, checked]) {
+      expect(result.diagnostics).toContainEqual(expect.objectContaining({ code, severity: "error" }));
+    }
+    expect(compiled.written).toEqual([]);
+    expect(await readFile(join(rootDir, "generated/application.ts"), "utf8")).toBe(lastGood);
+  });
+
+  test.each(["explicit", "default"] as const)("incremental %s compilation rechecks imported declarations outside the watched root", async (mode) => {
+    const root = await projectFixture({
+      "tsconfig.json": JSON.stringify({ compilerOptions: { strict: false, types: [] } }),
+      "external.d.ts": "export declare const input: string;",
+      "src/production.ts": 'import { input } from "../external";\nexport const value: string = input;',
+    });
+    const options = {
+      rootDir: join(root, "src"),
+      outDir: join(root, "generated"),
+      ...(mode === "explicit" ? { strict: false, typeSafety: { scanProductionSource: false } } : {}),
+    };
+    const incremental = createIncrementalCompiler();
+    const first = await incremental.compile(options);
+    expect(first.diagnostics.filter(({ code }) => code.startsWith("source-"))).toEqual([]);
+    await writeFixtureProject(root, { "external.d.ts": "export declare const input: string | null;" });
+    const second = await incremental.compile(options, []);
+    expect(second.stats.cacheHit).toBe(false);
+    expect(second.diagnostics).toContainEqual(
+      expect.objectContaining({ code: "source-typescript", severity: "error", errorCode: "TS2322" }),
+    );
+  });
+
+  test("official starters emit the enhanced strict TypeScript baseline", () => {
+    const starters = [
+      appStarterFiles("strict-app"),
+      ...(["minimal", "http", "edge"] as const)
+        .map((template) => appTemplateFiles("strict-app", template, {
+          "@supacloud/js": "^0.0.0",
+          "@supabase/supabase-js": "^0.0.0",
+        })),
+      appStarterFiles("strict-command"),
+    ];
+    for (const files of starters) {
+      const source = files["tsconfig.json"];
+      if (!source) throw new Error("Starter is missing tsconfig.json");
+      const config: unknown = JSON.parse(source);
+      expect(config).toMatchObject({
+        compilerOptions: {
+          strict: true,
+          noUncheckedIndexedAccess: true,
+          exactOptionalPropertyTypes: true,
+          noImplicitOverride: true,
+          noPropertyAccessFromIndexSignature: true,
+          noFallthroughCasesInSwitch: true,
+          forceConsistentCasingInFileNames: true,
+          useUnknownInCatchVariables: true,
+        },
+      });
+    }
   });
 
   test("production scan reports any, assertions, non-null assertions and widening", async () => {

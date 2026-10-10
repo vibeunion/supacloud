@@ -107,7 +107,7 @@ export default defineConfig({
 });
 `,
     "drizzle.pull.config.ts": `import { defineConfig } from "drizzle-kit";
-const url = process.env.DATABASE_URL;
+const url = process.env["DATABASE_URL"];
 if (!url) throw new Error("Select an explicit DATABASE_URL for introspection");
 export default defineConfig({
   dialect: "postgresql",

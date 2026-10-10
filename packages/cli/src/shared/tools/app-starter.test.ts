@@ -214,7 +214,7 @@ test("uploads are compiled routes with identity-derived paths and a separate mig
     expect(schema).toContain("AS RESTRICTIVE FOR UPDATE TO authenticated");
     expect(schema).toContain("AS RESTRICTIVE FOR DELETE TO authenticated");
     expect(schema).toContain("1048576");
-    expect(files["src/delivery-host.ts"]).toContain('process.env.REVIEW_ATTACHMENTS');
+    expect(files["src/delivery-host.ts"]).toContain('process.env["REVIEW_ATTACHMENTS"]');
     expect(files["src/delivery-host.ts"]).toContain("afterApproved: durable?.enqueue");
 });
 

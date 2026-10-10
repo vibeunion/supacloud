@@ -608,8 +608,8 @@ export default defineSupacloudConfig({
 | `invalid-aspect-reference` | error | aspect 不是可静态解析的函数声明、箭头函数或函数表达式 |
 | `invalid-command-mode` | error | transaction/idempotency 必须显式为 `"required"` 或 `"none"`，不允许拼写错误或动态值悄悄关闭治理（SC4012） |
 | `missing-deps` | warn（strict 时 error） | 构造/工厂依赖无法静态解析 |
-| `generated-any` | warn（strict 时 error） | 生成的 TypeScript 产物包含 `any` |
-| `source-any` | warn（strict 时 error） | 未被排除的生产源码包含显式 `any` |
+| `generated-any` | error | 生成的 TypeScript 产物包含 `any` |
+| `source-any` | error | 未被排除的生产源码包含显式或推断出的 `any` |
 | `source-type-assertion` | warn（strict 时 error） | 生产源码使用 `as T` 或 `<T>value` 类型断言 |
 | `source-non-null-assertion` | warn（strict 时 error） | 生产源码使用非空断言 `value!` |
 | `source-implicit-widening` | warn（strict 时 error） | 可静态判定的字面量类型隐式宽化 |
@@ -619,7 +619,11 @@ export default defineSupacloudConfig({
 
 ## 类型安全扫描
 
-`strict: true` 默认开启两道类型安全门；也可以单独配置 `typeSafety`。生产源码扫描默认排除测试、fixture、声明文件、`generated` 和 `dist`，并支持 `typeSafety.exclude` 增加项目自定义排除规则。
+生产源码与生成产物的类型安全门始终开启，不能通过 `strict: false`、`--no-strict` 或 `typeSafety.scanProductionSource/noAnyInGenerated: false` 关闭。`strict` 仍控制其他 warning 是否升级为 error。
+
+生产源码检查强制启用 TypeScript `strict` 及其子选项，以及 `noUncheckedIndexedAccess`、`exactOptionalPropertyTypes`、`noImplicitOverride`、`noPropertyAccessFromIndexSignature` 和 `noFallthroughCasesInSwitch`。项目关闭这些选项不会降低编译检查强度。类型错误及 `any` 错误不会被 `writeOnError` 绕过，增量编译也会重新执行类型安全门。
+
+生产源码扫描默认排除测试、fixture、声明文件、`generated` 和 `dist`，并支持 `typeSafety.exclude` 增加项目自定义排除规则。这些排除项属于检查范围边界，不代表被排除文件已经通过类型检查。第三方声明的完整安全性仍不在保证范围内。
 
 ```bash
 supacloud-compiler check --root ./app --out ./app/generated --strict

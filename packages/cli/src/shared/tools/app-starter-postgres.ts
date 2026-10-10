@@ -250,8 +250,8 @@ function required(name: string): string {
 }
 
 function databaseConnection(): SQL.Options {
-  const socket = process.env.DATABASE_SOCKET_PATH;
-  if (socket && process.env.DATABASE_URL) throw new Error("Conflicting database connection settings");
+  const socket = process.env["DATABASE_SOCKET_PATH"];
+  if (socket && process.env["DATABASE_URL"]) throw new Error("Conflicting database connection settings");
   if (socket) {
     return { adapter: "postgres", path: socket, database: required("DATABASE_NAME"), username: required("DATABASE_USER") };
   }
@@ -267,7 +267,7 @@ function databaseConnection(): SQL.Options {
 export async function createDeliveryApplication(modules: CompiledModule[], lifecycle: { signal: AbortSignal }) {
   lifecycle.signal.throwIfAborted();
   const connection = databaseConnection();
-  const attachments = process.env.REVIEW_ATTACHMENTS;
+  const attachments = process.env["REVIEW_ATTACHMENTS"];
   if (attachments !== undefined && attachments !== "enabled") throw new Error("Invalid attachment configuration");
   const settings = {
     tenantId: required("APP_TENANT_ID"),

@@ -51,26 +51,13 @@ export function createIncrementalCompiler(): IncrementalCompiler {
         ? diffFiles(previousSnapshot.files, snapshot.files)
         : diffFiles(previousSnapshot?.files, snapshot.files);
       const activeCache = options.cache ?? cache;
-      // Type gates may depend on enclosing configs and imports outside the watched root.
+      // Record unchanged graph inputs, but always rerun the mandatory type gates.
       const cacheHit = Boolean(
         previousSnapshot
         && previousSnapshot.optionsKey === snapshot.optionsKey
         && previousCache === activeCache
         && changedFiles.length === 0,
-      ) && !(options.typeSafety?.scanProductionSource ?? options.strict ?? false);
-
-      if (cacheHit && previousResult) {
-        return {
-          ...previousResult,
-          stats: {
-            cacheHit: true,
-            changedFiles: [],
-            affectedModules: [],
-            reusedModules: previousResult.graph.modules.map((m) => m.name),
-            reanalyzedModules: [],
-          },
-        };
-      }
+      ) && options.strict === undefined && options.typeSafety === undefined;
 
       if (!activeCache.dependencyGraph && previousResult) {
         activeCache.dependencyGraph = new ModuleDependencyGraph(previousResult.graph.modules);
@@ -89,7 +76,7 @@ export function createIncrementalCompiler(): IncrementalCompiler {
         activeCache.dependencyGraph = new ModuleDependencyGraph(result.graph.modules);
       }
       const stats: CompileStats = {
-        cacheHit: false,
+        cacheHit: cacheHit && !result.diagnostics.some(({ severity }) => severity === "error"),
         changedFiles,
         affectedModules,
         reusedModules,

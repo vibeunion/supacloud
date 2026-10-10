@@ -14,7 +14,7 @@ const json = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
 const DEV_SCRIPT = `import { watchProject, compileOptionsFromConfig, loadSupacloudConfig } from "@supacloud/compiler";
 
-if (process.env.APP_ENV !== "development") throw new Error("The demo server is development-only");
+if (process.env["APP_ENV"] !== "development") throw new Error("The demo server is development-only");
 let server: ReturnType<typeof Bun.spawn> | undefined;
 let restarts = Promise.resolve();
 let closing = false;
@@ -47,8 +47,8 @@ await watcher.ready;
 
 const SERVE_SCRIPT = `import { createDemo } from "./sandbox";
 
-if (process.env.APP_ENV !== "development") throw new Error("The demo server is development-only");
-const port = Number(process.env.PORT ?? "3000");
+if (process.env["APP_ENV"] !== "development") throw new Error("The demo server is development-only");
+const port = Number(process.env["PORT"] ?? "3000");
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error("Invalid PORT");
 const sandbox = createDemo();
 const server = Bun.serve({
@@ -126,6 +126,10 @@ function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Reco
       compilerOptions: {
         target: "ES2022", module: "ESNext", moduleResolution: "bundler",
         strict: true, experimentalDecorators: true, skipLibCheck: true,
+        noUncheckedIndexedAccess: true, exactOptionalPropertyTypes: true,
+        noImplicitOverride: true, noPropertyAccessFromIndexSignature: true,
+        noFallthroughCasesInSwitch: true, forceConsistentCasingInFileNames: true,
+        useUnknownInCatchVariables: true,
         noEmit: true, types: ["bun"],
       },
       include: ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts", "generated/**/*.ts", "supacloud.config.ts"],
@@ -223,7 +227,7 @@ export const OrdersFeature = defineFeatureSlice({
 import { createCompiledModules } from "../generated/application";
 
 export function createDemo() {
-  if (process.env.APP_ENV !== "development" && process.env.APP_ENV !== "test") {
+  if (process.env["APP_ENV"] !== "development" && process.env["APP_ENV"] !== "test") {
     throw new Error("Memory adapters are restricted to development and test");
   }
   return createMemorySandbox({
@@ -327,7 +331,7 @@ export const SyncFeature = defineFeatureSlice({
 import { createCompiledModules } from "../generated/application";
 
 export function createDemo() {
-  if (process.env.APP_ENV !== "development" && process.env.APP_ENV !== "test") {
+  if (process.env["APP_ENV"] !== "development" && process.env["APP_ENV"] !== "test") {
     throw new Error("Memory adapters are restricted to development and test");
   }
   return createMemorySandbox({
@@ -418,7 +422,7 @@ export class AppModule {}
 import { createCompiledModules } from "../generated/application";
 
 export function createDemo() {
-  if (process.env.APP_ENV !== "development" && process.env.APP_ENV !== "test") {
+  if (process.env["APP_ENV"] !== "development" && process.env["APP_ENV"] !== "test") {
     throw new Error("Local adapters are restricted to development and test");
   }
   return createMemorySandbox({ modules: createCompiledModules() });

@@ -86,7 +86,27 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
     file,
     [...DEFAULT_EXCLUDES, ...(options.exclude ?? [])],
   ));
-  const compilerOptions: ts.CompilerOptions = { ...projectConfig.options, noEmit: true };
+  // Project settings retain resolution and emit metadata, but cannot weaken application typing.
+  const compilerOptions: ts.CompilerOptions = {
+    ...projectConfig.options,
+    strict: true,
+    noImplicitAny: true,
+    strictNullChecks: true,
+    strictFunctionTypes: true,
+    strictBindCallApply: true,
+    strictPropertyInitialization: true,
+    strictBuiltinIteratorReturn: true,
+    noImplicitThis: true,
+    useUnknownInCatchVariables: true,
+    alwaysStrict: true,
+    noUncheckedIndexedAccess: true,
+    exactOptionalPropertyTypes: true,
+    noImplicitOverride: true,
+    noPropertyAccessFromIndexSignature: true,
+    noFallthroughCasesInSwitch: true,
+    forceConsistentCasingInFileNames: true,
+    noEmit: true,
+  };
   const host = ts.createCompilerHost(compilerOptions);
   host.getCurrentDirectory = () => dirname(configPath);
   const program = ts.createProgram(rootNames, compilerOptions, host);
@@ -395,7 +415,7 @@ function makeDiagnostic(
       : fileOrSourceFile.fileName;
   const meta = TYPE_SAFETY_DIAGNOSTIC_CODES[code];
   return {
-    severity: strict ? "error" : "warn",
+    severity: strict || code === "source-any" || code === "generated-any" ? "error" : "warn",
     code,
     message,
     file,
