@@ -14,6 +14,18 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.75.0](https://github.com/vibeunion/supacloud/compare/cli-v0.74.1...cli-v0.75.0) (2026-10-10)
+
+
+### Features
+
+* **db:** add controlled declarative adoption workflow ([#1756](https://github.com/vibeunion/supacloud/issues/1756)) ([873c781](https://github.com/vibeunion/supacloud/commit/873c781827508a23cff6868d15728d40826c78be))
+
+
+### Bug Fixes
+
+* **cli:** enforce schema-derived tool boundaries ([#1755](https://github.com/vibeunion/supacloud/issues/1755)) ([3a0e80f](https://github.com/vibeunion/supacloud/commit/3a0e80f9f58af73fc0fae77009a6c6aeb27a65c9))
+
 ## [0.74.1](https://github.com/vibeunion/supacloud/compare/cli-v0.74.0...cli-v0.74.1) (2026-10-10)
 
 
