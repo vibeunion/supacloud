@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { Type } from "typebox";
-import { stringEnum } from "./shared/schema";
+import { stringEnum, validateToolArguments } from "./shared/schema";
 import { cliToolResultIsError, runCli } from "./shared/cli";
 import {
     resolveSupaCloudContext,
@@ -32,9 +32,11 @@ import { registerMutationTools } from "./shared/tools/mutation-tools";
 import { registerReleaseTools } from "./shared/tools/release-tools";
 import { deployToolSchema, findDeployConfigRoot, registerDeployTools } from "./shared/tools/deploy-tools";
 import { registerRemoteDevTools } from "./shared/tools/remote-dev-tools";
+import type { ToolSchema } from "./shared/schema";
+import type { ToolInvocation, ToolResult, ToolServer } from "./shared/tool-server";
 import packageMetadata from "../package.json" with { type: "json" };
 
-type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
+type ToolEntry = { schema: ToolSchema; callback: (args: unknown) => Promise<ToolResult> };
 type ToolMap = Record<string, ToolEntry>;
 
 const commandName = "supacloud-cli";
@@ -218,27 +220,21 @@ async function createProjectStatusResult(context: ResolvedContext) {
     };
 }
 
-function unwrapMcpSchema(schema: any): any {
-    if (schema && typeof schema === "object" && !Array.isArray(schema) && "args" in schema) {
-        const argsSchema = schema.args;
-        if (argsSchema && typeof argsSchema === "object" && !Array.isArray(argsSchema)) {
-            return argsSchema;
-        }
-    }
-    return schema;
-}
-
-function captureTools(register: (server: { tool: (...args: any[]) => void }) => void): ToolMap {
+function captureTools(register: (server: ToolServer) => void): ToolMap {
     const tools: ToolMap = {};
     const server = {
-        tool(name: string, _description: string, schemaOrCallback: any, callback?: any) {
-            if (typeof schemaOrCallback === "function") {
-                tools[name] = { schema: {}, callback: schemaOrCallback };
-            } else {
-                tools[name] = { schema: unwrapMcpSchema(schemaOrCallback), callback };
-            }
+        tool(
+            name: string,
+            _description: string,
+            schema: ToolSchema,
+            callback: (args: unknown) => Promise<ToolResult>,
+        ) {
+            tools[name] = {
+                schema,
+                callback,
+            };
         },
-    };
+    } satisfies ToolServer;
     register(server);
     return tools;
 }
@@ -405,7 +401,8 @@ function authorizedToolMap(
     validateExecutionPolicyCoverage(tools);
     for (const [moduleName, tool] of Object.entries(tools)) {
         const callback = tool.callback;
-        tool.callback = async (args: Record<string, unknown>) => {
+        tool.callback = async (args) => {
+            validateToolArguments(tool.schema, args);
             authorizeExecution(moduleName, args, { context, confirmProduction });
             return callback(args);
         };
@@ -419,7 +416,7 @@ function writeDevProgress(result: { content: Array<{ type: string; text: string 
 }
 
 function createCliTools(context: ResolvedContext, confirmProduction?: string): ToolMap {
-    let pushMigrations: ((args: Record<string, unknown>) => Promise<any>) | undefined;
+    let pushMigrations: ToolInvocation | undefined;
     const tools: ToolMap = {
         status: {
             schema: {},
@@ -427,15 +424,15 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         },
     };
 
-    Object.assign(tools, captureTools((server) => registerSupabaseCliTools(server as any, {
+    Object.assign(tools, captureTools((server) => registerSupabaseCliTools(server, {
         getPushMigrations: () => pushMigrations,
         projectRef: context.projectRef || undefined,
         readOnly: context.readOnly,
     })));
-    Object.assign(tools, captureTools((server) => registerLiteCliTools(server as any)));
-    Object.assign(tools, captureTools((server) => registerAiTools(server as any)));
-    Object.assign(tools, captureTools((server) => registerAppTools(server as any, { onDevProgress: writeDevProgress })));
-    Object.assign(tools, captureTools((server) => registerAppAliases(server as any)));
+    Object.assign(tools, captureTools((server) => registerLiteCliTools(server)));
+    Object.assign(tools, captureTools((server) => registerAiTools(server)));
+    Object.assign(tools, captureTools((server) => registerAppTools(server, { onDevProgress: writeDevProgress })));
+    Object.assign(tools, captureTools((server) => registerAppAliases(server)));
     Object.assign(tools, captureTools((server) => registerDbGovernanceTools(server, {
         projectRef: context.projectRef || undefined,
         apiUrl: context.apiUrl || undefined,
@@ -484,12 +481,12 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
             };
         }
         const storageContextCallback = tools.storage.callback;
-        const storageHelpTool = captureTools((server) => registerStorageTools(server as any, {} as HttpTransport)).storage;
+        const storageHelpTool = captureTools((server) => registerStorageTools(server, {} as HttpTransport)).storage;
         if (storageHelpTool) {
             tools.storage = { schema: storageHelpTool.schema, callback: storageContextCallback };
         }
         const branchContextCallback = tools.branch.callback;
-        const branchHelpTool = captureTools((server) => registerBranchTools(server as any, {} as any, {
+        const branchHelpTool = captureTools((server) => registerBranchTools(server, {} as HttpTransport, {
             readOnly: true,
         })).branch;
         if (branchHelpTool) {
@@ -498,7 +495,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         const frontendContextCallback = tools.frontend.callback;
         tools.applications = { schema: APPLICATION_TOOL_SCHEMA, callback: tools.applications.callback };
         const frontendHelpTool = captureTools((server) => (
-            registerFrontendTools(server as any, {} as HttpTransport)
+            registerFrontendTools(server, {} as HttpTransport)
         )).frontend;
         if (frontendHelpTool) {
             tools.frontend = { schema: frontendHelpTool.schema, callback: frontendContextCallback };
@@ -517,14 +514,14 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
                 }],
             }),
         };
-        Object.assign(tools, captureTools((server) => registerDatabaseTools(server as any, undefined, {
+        Object.assign(tools, captureTools((server) => registerDatabaseTools(server, undefined, {
             localOnly: true,
         })));
-        Object.assign(tools, captureTools((server) => registerReleaseTools(server as any, undefined, {
+        Object.assign(tools, captureTools((server) => registerReleaseTools(server, undefined, {
             localOnly: true,
             projectRef: context.projectRef || undefined,
         })));
-        Object.assign(tools, captureTools((server) => registerRemoteDevTools(server as any, {
+        Object.assign(tools, captureTools((server) => registerRemoteDevTools(server, {
             cwd: process.cwd(),
             host: process.env.SUPACLOUD_DEV_HOST || context.host,
             sshUser: context.sshUser,
@@ -582,16 +579,16 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
 
     const assign = (extra: ToolMap) => Object.assign(tools, extra);
 
-    assign(captureTools((server) => registerUserProjectCliTools(server as any, http, {
+    assign(captureTools((server) => registerUserProjectCliTools(server, http, {
         projectRef: context.projectRef || undefined,
     })));
-    const databaseTools = captureTools((server) => registerDatabaseTools(server as any, http, {
+    const databaseTools = captureTools((server) => registerDatabaseTools(server, http, {
         projectRef: context.projectRef || undefined,
         readOnly: context.readOnly,
     }));
     pushMigrations = databaseTools.database?.callback;
     assign(databaseTools);
-    assign(captureTools((server) => registerRemoteDevTools(server as any, {
+    assign(captureTools((server) => registerRemoteDevTools(server, {
         cwd: process.cwd(),
         host: process.env.SUPACLOUD_DEV_HOST || context.host,
         sshUser: context.sshUser,
@@ -601,42 +598,42 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         environment: context.environment,
         runDatabase: databaseTools.database?.callback,
     })));
-    assign(captureTools((server) => registerAuthTools(server as any, http)));
-    assign(captureTools((server) => registerOAuthClientTools(server as any, http)));
-    assign(captureTools((server) => registerStorageTools(server as any, http)));
-    const advancedTools = captureTools((server) => registerAdvancedTools(server as any, http, process.env, {
+    assign(captureTools((server) => registerAuthTools(server, http)));
+    assign(captureTools((server) => registerOAuthClientTools(server, http)));
+    assign(captureTools((server) => registerStorageTools(server, http)));
+    const advancedTools = captureTools((server) => registerAdvancedTools(server, http, process.env, {
         readOnly: context.readOnly,
     }));
     assign(advancedTools);
-    assign(captureTools((server) => registerScheduledFunctionTools(server as any, http, process.env, {
+    assign(captureTools((server) => registerScheduledFunctionTools(server, http, process.env, {
         readOnly: context.readOnly,
     })));
-    assign(captureTools((server) => registerMutationTools(server as any, http)));
-    assign(captureTools((server) => registerReleaseTools(server as any, http, {
+    assign(captureTools((server) => registerMutationTools(server, http)));
+    assign(captureTools((server) => registerReleaseTools(server, http, {
         projectRef: context.projectRef || undefined,
         applicationHttp,
         applicationOrigin: context.inferredSupabaseUrl || undefined,
     })));
-    assign(captureTools((server) => registerFrontendTools(server as any, http)));
+    assign(captureTools((server) => registerFrontendTools(server, http)));
     assign(captureTools((server) => registerApplicationTools(server, http)));
-    Object.assign(tools, captureTools((server) => registerAppTools(server as any, {
+    Object.assign(tools, captureTools((server) => registerAppTools(server, {
         getApplications: () => tools.applications?.callback,
         onDevProgress: writeDevProgress,
         projectRef: context.projectRef || undefined,
     })));
-    assign(captureTools((server) => registerDeployTools(server as any, http, {
+    assign(captureTools((server) => registerDeployTools(server, http, {
         projectRef: context.projectRef || undefined,
         cwd: process.cwd(),
         edgeFunctionDeploy: advancedTools.edge_functions?.callback,
     })));
-    assign(captureTools((server) => registerGatewayTools(server as any, http, {
+    assign(captureTools((server) => registerGatewayTools(server, http, {
         projectRef: context.projectRef || undefined,
     })));
-    assign(captureTools((server) => registerBranchTools(server as any, http, {
+    assign(captureTools((server) => registerBranchTools(server, http, {
         projectRef: context.projectRef || undefined,
         readOnly: context.readOnly,
     })));
-    assign(captureTools((server) => registerQueueTools(server as any, http, {
+    assign(captureTools((server) => registerQueueTools(server, http, {
         projectRef: context.projectRef || undefined,
     })));
 
@@ -665,6 +662,15 @@ async function main() {
 
     const cliTools = createCliTools(context, globalOptions.confirmProduction);
     if (args.length === 1 && !["ai", "supabase", "lite", "app", "db"].includes(args[0]) && cliTools[args[0]]) {
+        if ("action" in cliTools[args[0]].schema) {
+            if (context.credentialScope !== "management" || !context.apiUrl || !context.apiToken) {
+                console.error(`This command requires Management API context. Run \`${preferredCommand} status\` to inspect current detection.`);
+                process.exitCode = 1;
+                return;
+            }
+            await runCli(cliTools, args, { commandName });
+            return;
+        }
         const result = await cliTools[args[0]].callback({});
         if (result?.content && Array.isArray(result.content)) {
             for (const chunk of result.content) {

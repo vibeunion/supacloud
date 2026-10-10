@@ -6,6 +6,8 @@ import { createHash } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { Type } from "typebox";
+import type { TSchema } from "typebox";
+import { Value } from "typebox/value";
 import {
     readDeliveryMigrationArchive, buildDeliveryMigrationPlan as deliveryMigrationPlan, type DeliveryMigrationArchive,
 } from "@supacloud/delivery";
@@ -13,6 +15,7 @@ import { planMigrationRebase, rebaseMigrations } from "@supacloud/db";
 import { projectRefPathSegment } from "../project-ref";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
+import { registerTool, type ToolServer } from "../tool-server";
 import { releaseControlFailure, releaseControlMutationFailure } from "./release-control-response";
 import { analyzeMigrationFiles, formatMigrationRiskReport } from "./migration-risk";
 import { createMigrationImportPlan, writeMigrationImportPlan } from "./migration-import";
@@ -93,20 +96,20 @@ function migrationInventoryChecksum(entry: Pick<MigrationInventoryEntry, "versio
 function migrationInventoryEntry(rawEntry: unknown): MigrationInventoryEntry | null {
     if (!rawEntry || typeof rawEntry !== "object" || Array.isArray(rawEntry)) return null;
     const entry = rawEntry as Record<string, unknown>;
-    if (!isMigrationInventoryVersion(entry.version)) return null;
-    if (!isMigrationInventoryName(entry.name)) return null;
-    if (!isMigrationInventoryStatements(entry.statements)) return null;
-    if (typeof entry.statement_count !== "number" || !Number.isInteger(entry.statement_count)) return null;
-    if (entry.statement_count !== entry.statements.length) return null;
-    if (typeof entry.checksum !== "string" || !/^[0-9a-f]{64}$/.test(entry.checksum)) return null;
-    if (!isMigrationInventoryAppliedAt(entry.applied_at)) return null;
+    if (!isMigrationInventoryVersion(entry["version"])) return null;
+    if (!isMigrationInventoryName(entry["name"])) return null;
+    if (!isMigrationInventoryStatements(entry["statements"])) return null;
+    if (typeof entry["statement_count"] !== "number" || !Number.isInteger(entry["statement_count"])) return null;
+    if (entry["statement_count"] !== entry["statements"].length) return null;
+    if (typeof entry["checksum"] !== "string" || !/^[0-9a-f]{64}$/.test(entry["checksum"])) return null;
+    if (!isMigrationInventoryAppliedAt(entry["applied_at"])) return null;
     const migration: MigrationInventoryEntry = {
-        version: entry.version,
-        name: entry.name,
-        statements: entry.statements,
-        statement_count: entry.statement_count,
-        checksum: entry.checksum,
-        applied_at: entry.applied_at,
+        version: entry["version"],
+        name: entry["name"],
+        statements: entry["statements"],
+        statement_count: entry["statement_count"],
+        checksum: entry["checksum"],
+        applied_at: entry["applied_at"],
     };
     return migration.checksum === migrationInventoryChecksum(migration) ? migration : null;
 }
@@ -173,12 +176,14 @@ function readMigrationFile(dir: string, file: string): MigrationFile {
 export function migrationVersionFromFilename(file: string): string {
     const match = basename(file).match(/^(\d{8,20})[_-]/);
     if (match) {
-        const version = BigInt(match[1]);
+        const versionText = match[1];
+        if (versionText === undefined) throw new Error(`Invalid migration version in ${basename(file)}`);
+        const version = BigInt(versionText);
         if (version < 1n || version > MAX_MIGRATION_VERSION) {
-            throw new Error(`Invalid migration version '${match[1]}' in ${basename(file)}: expected 1..${MAX_MIGRATION_VERSION}`);
+            throw new Error(`Invalid migration version '${versionText}' in ${basename(file)}: expected 1..${MAX_MIGRATION_VERSION}`);
         }
         if (version >= FALLBACK_MIGRATION_VERSION_BASE && version < FALLBACK_MIGRATION_VERSION_LIMIT) {
-            throw new Error(`Invalid migration version '${match[1]}' in ${basename(file)}: version range ${FALLBACK_MIGRATION_VERSION_BASE}..${FALLBACK_MIGRATION_VERSION_LIMIT - 1n} is reserved for non-timestamp migrations`);
+            throw new Error(`Invalid migration version '${versionText}' in ${basename(file)}: version range ${FALLBACK_MIGRATION_VERSION_BASE}..${FALLBACK_MIGRATION_VERSION_LIMIT - 1n} is reserved for non-timestamp migrations`);
         }
         return version.toString();
     }
@@ -199,6 +204,7 @@ function sortMigrationFiles(migrations: MigrationFile[]): MigrationFile[] {
     for (let i: number = 1; i < sorted.length; i += 1) {
         const previous = sorted[i - 1];
         const current = sorted[i];
+        if (previous === undefined || current === undefined) continue;
         if (previous.version === current.version && (previous.file !== current.file || previous.name !== current.name)) {
             throw new Error(`Migration version collision for ${current.version}: ${previous.file} and ${current.file}`);
         }
@@ -228,13 +234,13 @@ function migrationIdentity(row: unknown): RemoteMigrationIdentity {
         throw new Error("Invalid remote migration identity");
     }
     const migration = row as Record<string, unknown>;
-    if (!isMigrationInventoryVersion(migration.version) || !isMigrationInventoryName(migration.name)) {
+    if (!isMigrationInventoryVersion(migration["version"]) || !isMigrationInventoryName(migration["name"])) {
         throw new Error("Invalid remote migration identity");
     }
     return {
-        version: migration.version,
-        name: migration.name !== null && GENERIC_MIGRATION_NAMES.has(migration.name) ? null : migration.name,
-        statements: migration.statements,
+        version: migration["version"],
+        name: migration["name"] !== null && GENERIC_MIGRATION_NAMES.has(migration["name"]) ? null : migration["name"],
+        statements: migration["statements"],
     };
 }
 
@@ -250,14 +256,14 @@ function baselineMigrationIdentity(row: unknown): RemoteMigrationIdentity {
         throw new Error("Invalid remote migration identity");
     }
     const migration = row as Record<string, unknown>;
-    const version = historicalMigrationVersion(migration.version);
-    if (!version || !isMigrationInventoryName(migration.name)) {
+    const version = historicalMigrationVersion(migration["version"]);
+    if (!version || !isMigrationInventoryName(migration["name"])) {
         throw new Error("Invalid remote migration identity");
     }
     return {
         version,
-        name: migration.name !== null && GENERIC_MIGRATION_NAMES.has(migration.name) ? null : migration.name,
-        statements: migration.statements,
+        name: migration["name"] !== null && GENERIC_MIGRATION_NAMES.has(migration["name"]) ? null : migration["name"],
+        statements: migration["statements"],
     };
 }
 
@@ -353,13 +359,13 @@ function recordPayload(payload: unknown): Record<string, unknown> | null {
 
 function confirmedMigrationReceipt(payload: unknown, expected: MigrationReceiptExpectation): boolean {
     const receipt = recordPayload(payload);
-    if (!receipt || !isMigrationInventoryVersion(receipt.version)) return false;
+    if (!receipt || !isMigrationInventoryVersion(receipt["version"])) return false;
     const responseStatements = [expected.sql.trim()];
     const checksumStatements = [normalizedMigrationStatement(expected.sql)];
     const name = expected.name.trim();
-    if (receipt.name !== name || JSON.stringify(receipt.statements) !== JSON.stringify(responseStatements)) return false;
-    if (expected.version !== undefined && receipt.version !== expected.version) return false;
-    return receipt.checksum === migrationInventoryChecksum({ version: receipt.version, name, statements: checksumStatements });
+    if (receipt["name"] !== name || JSON.stringify(receipt["statements"]) !== JSON.stringify(responseStatements)) return false;
+    if (expected.version !== undefined && receipt["version"] !== expected.version) return false;
+    return receipt["checksum"] === migrationInventoryChecksum({ version: receipt["version"], name, statements: checksumStatements });
 }
 
 function isAlreadyAppliedMigrationResponse(
@@ -371,11 +377,11 @@ function isAlreadyAppliedMigrationResponse(
     const body = response.data as Record<string, unknown>;
     const name = migration.name.trim();
     const statements = [normalizedMigrationStatement(migration.sql)];
-    return body.code === "409"
-        && body.message === "Migration already applied"
-        && body.version === migration.version
-        && body.name === name
-        && body.checksum === migrationInventoryChecksum({ version: migration.version, name, statements });
+    return body["code"] === "409"
+        && body["message"] === "Migration already applied"
+        && body["version"] === migration.version
+        && body["name"] === name
+        && body["checksum"] === migrationInventoryChecksum({ version: migration.version, name, statements });
 }
 
 function expectedBaselineChecksum(migration: MigrationFile): string {
@@ -388,23 +394,23 @@ function expectedBaselineChecksum(migration: MigrationFile): string {
 
 function confirmedBaselineReceipt(payload: unknown, migrations: MigrationFile[]): BaselineReceipt | null {
     const receipt = recordPayload(payload);
-    if (!receipt || typeof receipt.marked !== "number" || typeof receipt.already_applied !== "number") return null;
-    if (!Number.isSafeInteger(receipt.marked) || !Number.isSafeInteger(receipt.already_applied)) return null;
-    if (receipt.marked < 0 || receipt.already_applied < 0) return null;
-    if (receipt.marked + receipt.already_applied !== migrations.length) return null;
-    if (!Array.isArray(receipt.migrations) || receipt.migrations.length !== receipt.marked) return null;
+    if (!receipt || typeof receipt["marked"] !== "number" || typeof receipt["already_applied"] !== "number") return null;
+    if (!Number.isSafeInteger(receipt["marked"]) || !Number.isSafeInteger(receipt["already_applied"])) return null;
+    if (receipt["marked"] < 0 || receipt["already_applied"] < 0) return null;
+    if (receipt["marked"] + receipt["already_applied"] !== migrations.length) return null;
+    if (!Array.isArray(receipt["migrations"]) || receipt["migrations"].length !== receipt["marked"]) return null;
     const expected = new Map(migrations.map((migration) => [migration.version, migration]));
     const marked: MigrationFile[] = [];
-    for (const rawMigration of receipt.migrations) {
+    for (const rawMigration of receipt["migrations"]) {
         const migration = recordPayload(rawMigration);
-        if (!migration || typeof migration.version !== "string") return null;
-        const local = expected.get(migration.version);
-        if (!local || migration.name !== local.name || migration.checksum !== expectedBaselineChecksum(local)) return null;
-        expected.delete(migration.version);
+        if (!migration || typeof migration["version"] !== "string") return null;
+        const local = expected.get(migration["version"]);
+        if (!local || migration["name"] !== local.name || migration["checksum"] !== expectedBaselineChecksum(local)) return null;
+        expected.delete(migration["version"]);
         marked.push(local);
     }
-    return expected.size === receipt.already_applied
-        ? { marked, concurrentlyAlreadyApplied: receipt.already_applied }
+    return expected.size === receipt["already_applied"]
+        ? { marked, concurrentlyAlreadyApplied: receipt["already_applied"] }
         : null;
 }
 
@@ -423,23 +429,23 @@ function baselineInventoryIsApplied(payload: unknown, migrations: MigrationFile[
 
 function confirmedSqlBatchReceipt(payload: unknown, expectedCommands: string[]): boolean {
     const receipt = recordPayload(payload);
-    if (!receipt || receipt.command !== "BATCH" || !Array.isArray(receipt.statements)) return false;
-    if (receipt.statements.length !== expectedCommands.length) return false;
-    return receipt.statements.every((rawStatement, index) => {
+    if (!receipt || receipt["command"] !== "BATCH" || !Array.isArray(receipt["statements"])) return false;
+    if (receipt["statements"].length !== expectedCommands.length) return false;
+    return receipt["statements"].every((rawStatement, index) => {
         const statement = recordPayload(rawStatement);
-        if (!statement || statement.index !== index + 1 || statement.command !== expectedCommands[index]) return false;
-        if (typeof statement.rowCount !== "number" || !Number.isSafeInteger(statement.rowCount) || statement.rowCount < 0) return false;
-        if (typeof statement.durationMs !== "number" || !Number.isFinite(statement.durationMs) || statement.durationMs < 0) return false;
+        if (!statement || statement["index"] !== index + 1 || statement["command"] !== expectedCommands[index]) return false;
+        if (typeof statement["rowCount"] !== "number" || !Number.isSafeInteger(statement["rowCount"]) || statement["rowCount"] < 0) return false;
+        if (typeof statement["durationMs"] !== "number" || !Number.isFinite(statement["durationMs"]) || statement["durationMs"] < 0) return false;
         return true;
     });
 }
 
 function schemaReloadStatus(payload: unknown): "notified" | "notification_failed" | null {
     const receipt = recordPayload(payload);
-    const schemaReload = recordPayload(receipt?.schema_reload);
-    if (schemaReload?.ddl_committed !== true) return null;
-    return schemaReload.status === "notified" || schemaReload.status === "notification_failed"
-        ? schemaReload.status
+    const schemaReload = recordPayload(receipt?.["schema_reload"]);
+    if (schemaReload?.["ddl_committed"] !== true) return null;
+    return schemaReload["status"] === "notified" || schemaReload["status"] === "notification_failed"
+        ? schemaReload["status"]
         : null;
 }
 
@@ -506,7 +512,7 @@ export function vectorWarningsForPendingMigrations(
 }
 
 export function registerDatabaseTools(
-    server: { tool: (...args: any[]) => void },
+    server: ToolServer,
     http: HttpTransport | undefined,
     config: DatabaseToolsConfig = {}
 ): void {
@@ -529,12 +535,12 @@ export function registerDatabaseTools(
             ? remoteActions
             : [...remoteActions, ...writeActions] as const;
 
-    server.tool(
+    registerTool(server,
         "database",
         `Database operations: query, schema, RLS, migrations, stats.
 Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ? " (read-only mode)" : ""}`,
         {
-            action: withDescription(stringEnum(allActions as unknown as [string, ...string[]]), "Action"),
+            action: withDescription(stringEnum(allActions), "Action"),
             ref: projectRef ? Type.Optional(Type.String()) : optional(Type.String(), "Project ref"),
             // query / execute
             sql: optional(Type.String(), "[query/execute/apply_migration/lint_migrations/lint] SQL statement"),
@@ -572,7 +578,7 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
             owner_column: optional(Type.String(), "[create_table_rls owner] UUID owner column matched to auth.uid()"),
             extension: optional(Type.String(), "[enable_extension/disable_extension] PostgreSQL extension or pgflow"),
         },
-        async (args: any) => {
+        async (args) => {
             const { action } = args;
             if (localOnly && action !== "lint_migrations" && action !== "lint" && action !== "rebase_migrations") {
                 throw new Error(`Database action '${String(action)}' requires Management API context`);
@@ -622,9 +628,10 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                         error: { code, http_status: httpStatus },
                     }) }],
                 });
-                if (typeof args.delivery_manifest !== "string" || !args.delivery_manifest
+                if (typeof ref !== "string" || !ref
+                    || typeof args.delivery_manifest !== "string" || !args.delivery_manifest
                     || typeof args.delivery_target !== "string" || !args.delivery_target
-                    || ["sql", "file", "dir", "name", "admin", "mode", "dry_run"].some(key => args[key] !== undefined)) {
+                    || (["sql", "file", "dir", "name", "admin", "mode", "dry_run"] as const).some(key => args[key] !== undefined)) {
                     return failure("INVALID_INPUT");
                 }
                 let path: string;
@@ -638,8 +645,8 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                 catch { return failure("HTTP_ERROR"); }
                 if (!response.ok) return failure("HTTP_ERROR", response.transportError ? null : response.status);
                 const body = recordPayload(response.data);
-                const inventory = body?.read_only === true && body.project_ref === ref
-                    ? migrationInventory(body.migrations) : null;
+                const inventory = body?.["read_only"] === true && body["project_ref"] === ref
+                    ? migrationInventory(body["migrations"]) : null;
                 if (!inventory) return failure("INVALID_RESPONSE", response.status);
                 const plan = deliveryMigrationPlan(archive, inventory, ref);
                 return {
@@ -652,8 +659,9 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
             if (args.file && !args.sql && action !== "lint_migrations" && action !== "lint") {
                 try {
                     args.sql = readFileSync(args.file, "utf-8");
-                } catch (e: any) {
-                    return { content: [{ type: "text" as const, text: `❌ Failed to read file ${args.file}: ${e.message}` }] };
+                } catch (e: unknown) {
+                    const message = e instanceof Error ? e.message : String(e);
+                    return { content: [{ type: "text" as const, text: `❌ Failed to read file ${args.file}: ${message}` }] };
                 }
             }
 
@@ -830,7 +838,11 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                 }
                 case "project_url": {
                     const r = await managementHttp().get(`/v1/projects/${ref}`);
-                    text = r.ok ? JSON.stringify({ url: (r.data as any).api?.url || `https://${ref}.supabase.co` }, null, 2) : `❌ Failed (${r.status})`;
+                    const api = recordPayload(recordPayload(r.data)?.["api"]);
+                    const url = api?.["url"];
+                    text = r.ok ? JSON.stringify({
+                        url: typeof url === "string" && url ? url : `https://${ref}.supabase.co`,
+                    }, null, 2) : `❌ Failed (${r.status})`;
                     break;
                 }
                 case "generate_types": {
@@ -944,7 +956,7 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                         if (pendingWithSql.some(({ sql }) => sqlReferencesVector(sql) || sqlCreatesVectorExtension(sql))) {
                             const extResult = await execSql("SELECT extname AS name FROM pg_extension WHERE extname = 'vector';");
                             vectorEnabled = extResult.ok
-                                ? extensionRows(extResult.data).some((row) => row.name === "vector" || row.extname === "vector")
+                                ? extensionRows(extResult.data).some((row) => row["name"] === "vector" || row["extname"] === "vector")
                                 : null;
                         }
                         const warnings = vectorWarningsForPendingMigrations(pendingWithSql, vectorEnabled);
@@ -1162,7 +1174,10 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                         text = formatDatabaseLintReport(r.data);
                     }
                     const strict = args.strict === true || args.fail_on_high === true;
-                    const dangerCount = (r.data as any)?.danger_count || 0;
+                    const dangerCount = recordPayload(r.data)?.["danger_count"];
+                    if (typeof dangerCount !== "number" || !Number.isSafeInteger(dangerCount) || dangerCount < 0) {
+                        throw new Error("Invalid database lint response: danger_count must be a nonnegative integer");
+                    }
                     if (strict && dangerCount > 0) {
                         return { content: [{ type: "text" as const, text }], isError: true };
                     }
@@ -1333,8 +1348,27 @@ function formatSqlResult(data: unknown): string {
     return JSON.stringify(data, null, 2);
 }
 
+function responseRows<T extends TSchema>(data: unknown, rowSchema: T) {
+    const rows = recordPayload(data)?.["rows"];
+    const schema = Type.Array(rowSchema);
+    if (!Value.Check(schema, rows)) throw new Error("Invalid database response: unexpected rows");
+    return Value.Decode(schema, rows);
+}
+
+const authUserSchema = Type.Object({
+    id: Type.String(),
+    email: Type.Union([Type.String(), Type.Null()]),
+    role: Type.Union([Type.String(), Type.Null()]),
+    created_at: Type.String(),
+    phone: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    email_confirmed_at: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    last_sign_in_at: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    is_sso_user: Type.Optional(Type.Boolean()),
+    raw_user_meta_data: Type.Optional(Type.Unknown()),
+});
+
 function formatTableList(data: unknown, schemas: string[]): string {
-    const rows = (data as any)?.rows || [];
+    const rows = responseRows(data, Type.Object({ schema: Type.String(), table: Type.String() }));
     if (!rows.length) return `No tables in: ${schemas.join(", ")}`;
     const grouped: Record<string, string[]> = {};
     for (const r of rows) { (grouped[r.schema] ??= []).push(r.table); }
@@ -1344,7 +1378,11 @@ function formatTableList(data: unknown, schemas: string[]): string {
 }
 
 function formatColumnsList(data: unknown, schema: string, table: string): string {
-    const rows = (data as any)?.rows || [];
+    const rows = responseRows(data, Type.Object({
+        column_name: Type.String(), data_type: Type.String(), is_nullable: Type.String(),
+        character_maximum_length: Type.Optional(Type.Union([Type.Number(), Type.Null()])),
+        column_default: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    }));
     if (!rows.length) return `No columns for ${schema}.${table}`;
     let out = `📋 Columns for ${schema}.${table}:\n\n`;
     for (const c of rows) {
@@ -1355,32 +1393,37 @@ function formatColumnsList(data: unknown, schema: string, table: string): string
 }
 
 function formatIndexList(data: unknown): string {
-    const rows = (data as any)?.rows || [];
+    const rows = responseRows(data, Type.Object({ indexname: Type.String(), indexdef: Type.String() }));
     if (!rows.length) return "No indexes.";
-    return "📇 Indexes:\n\n" + rows.map((i: any) => `  - ${i.indexname}\n    ${i.indexdef}\n`).join("\n");
+    return "📇 Indexes:\n\n" + rows.map((i) => `  - ${i.indexname}\n    ${i.indexdef}\n`).join("\n");
 }
 
 function formatConstraintList(data: unknown): string {
-    const rows = (data as any)?.rows || [];
+    const rows = responseRows(data, Type.Object({ name: Type.String(), type: Type.String(), definition: Type.String() }));
     if (!rows.length) return "No constraints.";
     const types: Record<string, string> = { p: "PK", f: "FK", u: "UNIQUE", c: "CHECK" };
-    return "🔗 Constraints:\n\n" + rows.map((c: any) => `  - ${c.name} (${types[c.type] || c.type})\n    ${c.definition}\n`).join("\n");
+    return "🔗 Constraints:\n\n" + rows.map((c) => `  - ${c.name} (${types[c.type] || c.type})\n    ${c.definition}\n`).join("\n");
 }
 
 function formatExtensionList(data: unknown): string {
-    const rows = (data as any)?.rows || [];
+    const rows = responseRows(data, Type.Object({ name: Type.String(), version: Type.String(), schema: Type.String() }));
     if (!rows.length) return "No extensions.";
-    return "🔌 Extensions:\n\n" + rows.map((e: any) => `  - ${e.name} v${e.version} (${e.schema})`).join("\n");
+    return "🔌 Extensions:\n\n" + rows.map((e) => `  - ${e.name} v${e.version} (${e.schema})`).join("\n");
 }
 
 function formatRlsStatus(data: unknown): string {
-    const rows = (data as any)?.rows || [];
+    const rows = responseRows(data, Type.Object({ tablename: Type.String(), rls_enabled: Type.Boolean() }));
     if (!rows.length) return "No tables.";
-    return "🔒 RLS Status:\n\n" + rows.map((t: any) => `  - ${t.tablename}: ${t.rls_enabled ? "✅ ON" : "❌ OFF"}`).join("\n");
+    return "🔒 RLS Status:\n\n" + rows.map((t) => `  - ${t.tablename}: ${t.rls_enabled ? "✅ ON" : "❌ OFF"}`).join("\n");
 }
 
 function formatRlsPolicies(data: unknown, schema: string, table: string): string {
-    const rows = (data as any)?.rows || [];
+    const rows = responseRows(data, Type.Object({
+        policyname: Type.String(), cmd: Type.String(), permissive: Type.String(),
+        roles: Type.Optional(Type.Array(Type.String())),
+        qual: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+        with_check: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    }));
     if (!rows.length) return `No RLS policies on ${schema}.${table}.`;
     let out = `🛡️ RLS Policies on ${schema}.${table}:\n\n`;
     for (const p of rows) {
@@ -1393,7 +1436,7 @@ function formatRlsPolicies(data: unknown, schema: string, table: string): string
 }
 
 function formatAuthUsers(data: unknown): string {
-    const rows = (data as any)?.rows || [];
+    const rows = responseRows(data, authUserSchema);
     if (!rows.length) return "No users.";
     let out: string = "👥 Auth Users:\n\n";
     for (const u of rows) {
@@ -1405,7 +1448,7 @@ function formatAuthUsers(data: unknown): string {
 }
 
 function formatSingleUser(data: unknown): string {
-    const user = (data as any)?.rows?.[0];
+    const user = responseRows(data, authUserSchema)[0];
     if (!user) return "User not found.";
     let out = `👤 ${user.email}\n  ID: ${user.id}\n  Role: ${user.role}\n  Phone: ${user.phone || "N/A"}\n`;
     out += `  Confirmed: ${user.email_confirmed_at || "Pending"}\n  Created: ${user.created_at}\n`;
@@ -1415,7 +1458,13 @@ function formatSingleUser(data: unknown): string {
 }
 
 function formatConnections(data: unknown): string {
-    const rows = (data as any)?.rows || [];
+    const rows = responseRows(data, Type.Object({
+        pid: Type.Union([Type.String(), Type.Number()]),
+        usename: Type.Union([Type.String(), Type.Null()]),
+        client_addr: Type.Union([Type.String(), Type.Null()]),
+        state: Type.Union([Type.String(), Type.Null()]),
+        query: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+    }));
     if (!rows.length) return "No active connections.";
     let out = `🔗 Connections (${rows.length}):\n\n`;
     for (const c of rows) {
@@ -1426,7 +1475,11 @@ function formatConnections(data: unknown): string {
 }
 
 function formatDbStats(data: unknown): string {
-    const rows = (data as any)?.rows || [];
+    const rows = responseRows(data, Type.Object({
+        schemaname: Type.String(), table_name: Type.String(),
+        row_count: Type.Union([Type.Number(), Type.String()]),
+        total_size: Type.String(), table_size: Type.String(), index_size: Type.String(),
+    }));
     if (!rows.length) return "No stats.";
     let out: string = "📊 Stats:\n\n  Table                          | Rows      | Total      | Table      | Index\n  -------------------------------|-----------|------------|------------|----------\n";
     for (const t of rows) {
@@ -1436,21 +1489,39 @@ function formatDbStats(data: unknown): string {
 }
 
 function formatMigrations(data: unknown): string {
-    const rows = (data as any)?.rows || [];
+    const rows = recordPayload(data)?.["rows"];
+    if (!Array.isArray(rows)) return "No migrations.";
     if (!rows.length) return "No migrations.";
-    return "📝 Migrations:\n\n" + rows.map((m: any) => `  - ${m.version} (${m.applied_at})`).join("\n");
+    return "📝 Migrations:\n\n" + rows.map((raw) => {
+        const row = recordPayload(raw);
+        return `  - ${String(row?.["version"] ?? "unknown")} (${String(row?.["applied_at"] ?? "unknown")})`;
+    }).join("\n");
 }
 
 function generateTypeScriptTypes(data: unknown, schemas: string[]): string {
-    const rows = (data as any)?.rows || [];
+    const rawRows = recordPayload(data)?.["rows"];
+    const rows = Array.isArray(rawRows) ? rawRows : [];
     const tables: Record<string, Record<string, { type: string; nullable: boolean }>> = {};
-    for (const c of rows) {
-        const key = `${c.table_schema}.${c.table_name}`;
-        (tables[key] ??= {})[c.column_name] = { type: pgToTs(c.data_type), nullable: c.is_nullable === "YES" };
+    for (const rawColumn of rows) {
+        const column = recordPayload(rawColumn);
+        if (typeof column?.["table_schema"] !== "string"
+            || typeof column["table_name"] !== "string"
+            || typeof column["column_name"] !== "string"
+            || typeof column["data_type"] !== "string") continue;
+        const key = `${column["table_schema"]}.${column["table_name"]}`;
+        (tables[key] ??= {})[column["column_name"]] = {
+            type: pgToTs(column["data_type"]),
+            nullable: column["is_nullable"] === "YES",
+        };
     }
     let out = `// Types from ${schemas.join(", ")}\n\n`;
     for (const [key, cols] of Object.entries(tables)) {
-        const name = key.split(".")[1].split(/[-_]+/).map((w: string) => w[0].toUpperCase() + w.slice(1)).join("");
+        const tableName = key.split(".")[1];
+        if (tableName === undefined) continue;
+        const name = tableName.split(/[-_]+/).map((word) => {
+            const first = word[0];
+            return first === undefined ? "" : first.toUpperCase() + word.slice(1);
+        }).join("");
         out += `export interface ${name} {\n`;
         for (const [col, info] of Object.entries(cols)) out += `  ${col}: ${info.type}${info.nullable ? " | null" : ""};\n`;
         out += "}\n\n";

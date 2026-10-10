@@ -15,17 +15,9 @@ import { fileURLToPath } from "node:url";
 import { Type } from "typebox";
 import { optional, stringEnum } from "../schema";
 import type { ToolSchema } from "../schema";
+import { registerTool, type ToolServer } from "../tool-server";
 
 const SKILL_NAME = "supacloud-cli";
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (requestArguments: AiToolArguments) => Promise<unknown>,
-    ) => void;
-};
 
 type InstallMode = "dry-run" | "write";
 type ConflictPolicy = "reject" | "replace";
@@ -218,7 +210,7 @@ function textResponse(payload: unknown) {
 }
 
 export function registerAiTools(server: ToolServer): void {
-    server.tool(
+    registerTool(server,
         "ai",
         "Install or inspect the bundled SupaCloud CLI AI skill. Actions: show_skill, install_skill",
         {

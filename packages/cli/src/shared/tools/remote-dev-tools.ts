@@ -7,11 +7,11 @@ import { Type } from "typebox";
 import { compileProject } from "@supacloud/compiler";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
+import { registerTool, type ToolServer } from "../tool-server";
 
-type ToolServer = { tool: (name: string, description: string, schema: ToolSchema, callback: (args: any) => Promise<any>) => void };
 type CommandResult = { exitCode: number; stdout: string; stderr: string };
 type CommandExecutor = (command: string, args: string[], cwd: string) => Promise<CommandResult>;
-type DatabaseCallback = (args: Record<string, unknown>) => Promise<any>;
+type DatabaseCallback = (args: Record<string, unknown>) => Promise<unknown>;
 
 export interface RemoteDevToolOptions {
     cwd?: string;
@@ -90,8 +90,17 @@ function resolveDrizzleCommand(root: string, configured: string | undefined): st
     return existsSync(local) ? local : "drizzle-kit";
 }
 
-function toolFailed(value: any): boolean {
-    return value?.isError === true || value?.content?.some((chunk: any) => typeof chunk?.text === "string" && chunk.text.trimStart().startsWith("❌"));
+function toolFailed(value: unknown): boolean {
+    if (!value || typeof value !== "object") return false;
+    const result = value as { isError?: unknown; content?: unknown };
+    const content = Array.isArray(result.content) ? result.content : [];
+    return result.isError === true || content.some((chunk: unknown) =>
+        chunk !== null
+        && typeof chunk === "object"
+        && "text" in chunk
+        && typeof chunk.text === "string"
+        && chunk.text.trimStart().startsWith("❌")
+    );
 }
 
 async function migrateDatabase(args: Record<string, unknown>, options: RemoteDevToolOptions): Promise<Record<string, unknown>> {
@@ -163,16 +172,23 @@ function remoteRoot(value: string): string {
 function targetDirectory(root: string, target: string, functionSlug?: string, config: Record<string, unknown> = {}): string {
     if (target === "db") return join(root, "supabase", "migrations");
     if (target === "functions") {
-        const targets = config.targets && typeof config.targets === "object" ? config.targets as Record<string, any> : {};
-        const match = Object.values(targets).find((entry) => entry?.type === "edge_function"
-            && (!functionSlug || String(entry.slug || "") === functionSlug));
-        const base = match?.root ? resolve(root, String(match.root)) : join(root, "supabase", "functions");
+        const targets = config["targets"];
+        const entries: unknown[] = targets && typeof targets === "object" ? Object.values(targets) : [];
+        const match = entries.find((entry): entry is { type: "edge_function"; root?: string; slug?: string } =>
+            entry !== null && typeof entry === "object" && "type" in entry && entry.type === "edge_function"
+            && (!("root" in entry) || typeof entry.root === "string")
+            && (!("slug" in entry) || typeof entry.slug === "string")
+            && (!functionSlug || ("slug" in entry && entry.slug === functionSlug)));
+        const base = match?.root ? resolve(root, match.root) : join(root, "supabase", "functions");
         return match?.root ? base : functionSlug ? join(base, safeToken(functionSlug, "function")) : base;
     }
     if (target === "frontend") {
-        const targets = config.targets && typeof config.targets === "object" ? config.targets as Record<string, any> : {};
-        const match = Object.values(targets).find((entry) => entry?.type === "frontend");
-        return match?.root ? resolve(root, String(match.root)) : join(root, "apps", "web");
+        const targets = config["targets"];
+        const entries: unknown[] = targets && typeof targets === "object" ? Object.values(targets) : [];
+        const match = entries.find((entry): entry is { type: "frontend"; root?: string } =>
+            entry !== null && typeof entry === "object" && "type" in entry && entry.type === "frontend"
+            && (!("root" in entry) || typeof entry.root === "string"));
+        return match?.root ? resolve(root, match.root) : join(root, "apps", "web");
     }
     return root;
 }
@@ -264,7 +280,7 @@ async function syncOnce(args: Record<string, unknown>, options: RemoteDevToolOpt
 }
 
 export function registerRemoteDevTools(server: ToolServer, options: RemoteDevToolOptions = {}): void {
-    server.tool("dev", "Remote test-server development sync. It never targets production and never syncs secrets.", remoteDevToolSchema, async (args) => {
+    registerTool(server, "dev", "Remote test-server development sync. It never targets production and never syncs secrets.", remoteDevToolSchema, async (args) => {
         if (["production", "prod"].includes((options.environment || "").toLowerCase())) throw new Error("Remote dev mode is forbidden for production environments");
         if (args.action === "status") {
             const root = resolve(String(args.project_dir || options.cwd || process.cwd()));

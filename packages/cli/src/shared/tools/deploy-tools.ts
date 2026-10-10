@@ -6,6 +6,7 @@ import { Type } from "typebox";
 import { zipSync, type Zippable } from "fflate";
 import { optional } from "../schema";
 import type { HttpTransport } from "../transports/http";
+import { registerTool, type ToolServer } from "../tool-server";
 import {
     activateFrontendRelease,
     listFrontendReleases,
@@ -426,15 +427,15 @@ function deployResponse(result: Record<string, unknown>, json: boolean | undefin
 }
 
 export function registerDeployTools(
-    server: { tool: (...args: any[]) => void },
+    server: ToolServer,
     http: HttpTransport,
     options: DeployToolOptions = {},
 ): void {
-    server.tool(
+    registerTool(server,
         "deploy",
         "Build and publish the linked frontend with one command",
         deployToolSchema,
-        async (args: Record<string, unknown>) => {
+        async (args) => {
             const invocationDirectory = resolve(String(args.cwd || options.cwd || process.cwd()));
             const projectRef = String(args.ref || options.projectRef || "").trim();
             if (!projectRef) throw new Error("A linked project ref is required. Set SUPACLOUD_PROJECT_REF or pass --ref");

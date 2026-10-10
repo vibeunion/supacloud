@@ -15,15 +15,7 @@ import {
 import { runDbWorkflow, type DbWorkflowAction } from "./db-workflow";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (requestArguments: DbToolArguments) => Promise<unknown>,
-    ) => void;
-};
+import { registerTool, type ToolServer } from "../tool-server";
 
 export interface DbToolArguments {
     action: "context" | "lint" | "explain" | "module_check" | DbWorkflowAction;
@@ -372,7 +364,7 @@ export function registerDbGovernanceTools(server: ToolServer, options: DbGoverna
     const environment = options.environment || process.env;
     const fallbackRoot = options.currentWorkingDirectory || process.cwd();
     const liteSpawn = options.liteSpawn || defaultLiteSpawn;
-    server.tool(
+    registerTool(server,
         "db",
         "Database governance (@supacloud/db): inspect, reverse-adopt, diff, plan and apply through explicit source and migration boundaries. Actions: context, lint, explain, module_check, reverse, diff, plan, apply, role_check, role_sql",
         {

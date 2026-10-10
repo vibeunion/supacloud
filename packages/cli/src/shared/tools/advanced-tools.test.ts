@@ -637,7 +637,7 @@ describe("edge_functions CLI tool", () => {
                 ref: "proj",
                 slug: "fa-api",
                 version,
-            })).rejects.toThrow("canonical positive safe integer");
+            })).rejects.toThrow(/- version:|Function version must be a canonical positive safe integer/);
             expect(requestCount).toBe(0);
         },
     );
@@ -813,7 +813,7 @@ describe("edge_functions CLI tool", () => {
                 slug: "hook",
                 files: { "index.ts": "export default {}" },
                 "expected-active-version": expectedActiveVersion,
-            })).rejects.toThrow("canonical non-negative safe integer");
+            })).rejects.toThrow(/expected-active-version:|Expected active version must be a canonical non-negative safe integer/);
             expect(requestCount).toBe(0);
         },
     );
@@ -1511,7 +1511,7 @@ describe("edge_functions CLI tool", () => {
             slug: "public-hook",
             version: 0,
             "expected-active-version": 2,
-        })).rejects.toThrow("canonical positive safe integer");
+        })).rejects.toThrow("- version:");
         expect(requestCount).toBe(0);
     });
 
@@ -1696,7 +1696,7 @@ describe("edge_functions CLI tool", () => {
         expect(requestCount).toBe(0);
     });
 
-    test("blocks activate in read-only mode before validation or HTTP dispatch", async () => {
+    test("blocks activate in read-only mode before handler validation or HTTP dispatch", async () => {
         let requestCount = 0;
         const { callback } = captureEdgeFunctionsTool({
             post: async () => {
@@ -1709,7 +1709,7 @@ describe("edge_functions CLI tool", () => {
             action: "activate",
             ref: "../unsafe-ref",
             slug: "../unsafe-slug",
-            version: "invalid",
+            version: 1,
             path: "/definitely/not/exist/private-source.ts",
         });
 
@@ -1864,7 +1864,7 @@ describe("secrets CLI tool", () => {
         const response = await callback({
             action: "upsert",
             ref: "proj",
-            "from-env": ["API_KEY", "WEBHOOK_SECRET"],
+            "from-env": "API_KEY,WEBHOOK_SECRET",
         });
 
         expect(requests).toEqual([{
@@ -1877,6 +1877,29 @@ describe("secrets CLI tool", () => {
         expect(response.content[0].text).toBe("✅ Updated 2 secrets");
         expect(response.content[0].text).not.toContain(primarySecret);
         expect(response.content[0].text).not.toContain(secondarySecret);
+    });
+
+    test("rejects decoded environment-name arrays at the external invocation boundary", async () => {
+        let requests = 0;
+        let reads = 0;
+        const environment = new Proxy<Record<string, string>>({ API_KEY: "boundary-secret-sentinel" }, {
+            get(target, name) {
+                reads++;
+                return typeof name === "string" ? target[name] : undefined;
+            },
+        });
+        const { callback } = captureSecretsTool({
+            post: async () => {
+                requests++;
+                return { ok: true, status: 200, data: {} };
+            },
+        }, environment);
+
+        await expect(callback({
+            action: "upsert", ref: "proj", "from-env": ["API_KEY"],
+        })).rejects.toThrow("- from-env:");
+        expect(requests).toBe(0);
+        expect(reads).toBe(0);
     });
 
     test.each([
@@ -1894,7 +1917,7 @@ describe("secrets CLI tool", () => {
         await expect(callback({
             action: "upsert",
             ref: "proj",
-            "from-env": ["API_KEY"],
+            "from-env": "API_KEY",
         })).rejects.toThrow("Environment secret values are missing or exceed safe limits");
         expect(requestCount).toBe(0);
     });
@@ -1914,7 +1937,7 @@ describe("secrets CLI tool", () => {
         await callback({
             action: "upsert",
             ref: "proj",
-            "from-env": ["API_KEY", "WEBHOOK_SECRET"],
+            "from-env": "API_KEY,WEBHOOK_SECRET",
         });
 
         expect(Object.fromEntries(reads)).toEqual({ API_KEY: 1, WEBHOOK_SECRET: 1 });
@@ -1930,7 +1953,7 @@ describe("secrets CLI tool", () => {
             },
         }, { API_KEY: boundarySecret });
 
-        await callback({ action: "upsert", ref: "proj", "from-env": ["API_KEY"] });
+        await callback({ action: "upsert", ref: "proj", "from-env": "API_KEY" });
 
         expect(Buffer.byteLength(boundarySecret)).toBe(24 * 1024);
         expect(requestBody).toEqual([{ name: "API_KEY", value: boundarySecret }]);
@@ -1950,7 +1973,7 @@ describe("secrets CLI tool", () => {
             },
         }, environment);
 
-        await expect(callback({ action: "upsert", ref: "proj", "from-env": names }))
+        await expect(callback({ action: "upsert", ref: "proj", "from-env": names.join(",") }))
             .rejects.toThrow("Environment secret values are missing or exceed safe limits");
         expect(requestCount).toBe(0);
     });
@@ -1969,7 +1992,7 @@ describe("secrets CLI tool", () => {
             action: "upsert",
             ref: "proj",
             secrets: [{ name: "INLINE_KEY", value: inlineSecret }],
-            "from-env": ["API_KEY"],
+            "from-env": "API_KEY",
         })).rejects.toThrow("'--from-env' cannot be combined with '--secrets'");
         expect(requestCount).toBe(0);
     });
