@@ -9,6 +9,7 @@ import type { HttpResult, HttpTransport } from "../transports/http";
 import { registerTool, type ToolServer } from "../tool-server";
 import {
     activateFrontendRelease,
+    getActiveFrontendRelease,
     getFrontendRelease,
     listFrontendReleases,
     uploadFrontendRelease,
@@ -18,14 +19,14 @@ export function registerFrontendTools(server: ToolServer, http: HttpTransport): 
     registerTool(server,
         "frontend",
         `Frontend hosting and immutable prebuilt releases. Supports: static, react, vue, svelte, sveltekit, sveltekit-static, nextjs, nuxt, astro.
-Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy, build_logs, add_domain, remove_domain, set_env, list_frameworks, list_records, list_releases, get_release, upload_release, activate_release`,
+Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy, build_logs, add_domain, remove_domain, set_env, list_frameworks, list_records, list_releases, get_active_release, get_release, upload_release, activate_release`,
         {
             action: withDescription(stringEnum([
                 "list", "get", "create", "update", "delete",
                 "deploy_git", "deploy_upload", "redeploy", "build_logs",
                 "add_domain", "remove_domain", "set_env",
                 "list_frameworks", "list_records",
-                "list_releases", "get_release", "upload_release", "activate_release",
+                "list_releases", "get_active_release", "get_release", "upload_release", "activate_release",
             ]), "Action"),
             ref: optional(Type.String(), "Project ref"),
             id: optional(Type.String(), "Deployment ID"),
@@ -150,6 +151,9 @@ Actions: list, get, create, update, delete, deploy_git, deploy_upload, redeploy,
                 case "get_release":
                     need("ref", ref); need("id", id); need("release_id", release_id);
                     return getFrontendRelease(http, ref, id, release_id);
+                case "get_active_release":
+                    need("ref", ref); need("id", id);
+                    return getActiveFrontendRelease(http, ref, id);
                 case "upload_release":
                     need("ref", ref); need("id", id); need("zip_path", zip_path);
                     return uploadFrontendRelease(http, ref, id, zip_path);

@@ -3,6 +3,7 @@ import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
 import {
     activateFrontendRelease,
+    getActiveFrontendRelease,
     getFrontendRelease,
     listFrontendReleases,
     uploadFrontendRelease,
@@ -12,10 +13,10 @@ export function registerFrontendTools(server: { tool: (...args: any[]) => void }
     server.tool(
         "frontend",
         `Immutable prebuilt frontend release control.
-Actions: list_releases, get_release, upload_release, activate_release`,
+Actions: list_releases, get_active_release, get_release, upload_release, activate_release`,
         {
             action: withDescription(stringEnum([
-                "list_releases", "get_release", "upload_release", "activate_release",
+                "list_releases", "get_active_release", "get_release", "upload_release", "activate_release",
             ]), "Action"),
             ref: optional(Type.String(), "Project ref"),
             id: optional(Type.String(), "Deployment ID"),
@@ -40,6 +41,9 @@ Actions: list_releases, get_release, upload_release, activate_release`,
                 case "get_release":
                     need("ref", ref); need("id", id); need("release_id", release_id);
                     return getFrontendRelease(http, ref, id, release_id);
+                case "get_active_release":
+                    need("ref", ref); need("id", id);
+                    return getActiveFrontendRelease(http, ref, id);
                 case "upload_release":
                     need("ref", ref); need("id", id); need("zip_path", zip_path);
                     return uploadFrontendRelease(http, ref, id, zip_path);

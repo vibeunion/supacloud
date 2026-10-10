@@ -184,10 +184,14 @@ function releaseInventory(
     };
 }
 
-function releaseEndpoint(projectRef: string, deploymentId: string): string {
+function deploymentEndpoint(projectRef: string, deploymentId: string): string {
     if (!PROJECT_REF_PATTERN.test(projectRef)) throw new Error("'ref' is invalid for frontend releases");
     if (!DEPLOYMENT_ID_PATTERN.test(deploymentId)) throw new Error("'id' is invalid for frontend releases");
-    return `/v1/projects/${encodeURIComponent(projectRef)}/frontend/deployments/${encodeURIComponent(deploymentId)}/releases`;
+    return `/v1/projects/${encodeURIComponent(projectRef)}/frontend/deployments/${encodeURIComponent(deploymentId)}`;
+}
+
+function releaseEndpoint(projectRef: string, deploymentId: string): string {
+    return `${deploymentEndpoint(projectRef, deploymentId)}/releases`;
 }
 
 function releasePath(projectRef: string, deploymentId: string, releaseId: string): string {
@@ -462,16 +466,30 @@ async function activeReleaseReadback(
     identity: ActivationIdentity,
 ): Promise<ActiveReleaseReadback> {
     const endpoint = releaseEndpoint(identity.projectRef, identity.deploymentId);
-    const inventoryRead = await http.get(`${endpoint}?limit=${RELEASE_LIST_LIMIT_MAX}`, {
+    let inventoryRead = await http.get(`${deploymentEndpoint(identity.projectRef, identity.deploymentId)}/active-release`, {
         maxJsonBytes: RESPONSE_MAX_BYTES,
     });
+    if (!inventoryRead.ok && inventoryRead.status === 404) {
+        inventoryRead = await http.get(`${endpoint}?limit=1`, { maxJsonBytes: RESPONSE_MAX_BYTES });
+    } else {
+        const snapshot = inventoryRead.ok && inventoryRead.status === 200
+            ? releaseInventory(inventoryRead.data, {
+                projectRef: identity.projectRef,
+                deploymentId: identity.deploymentId,
+            })
+            : null;
+        if (!snapshot || snapshot.next_cursor !== null || snapshot.releases.length !== 1
+            || snapshot.releases[0]?.release_id !== identity.releaseId) {
+            return { release: null, status: inventoryRead.status };
+        }
+    }
     const inventory = inventoryRead.ok
         ? releaseInventory(inventoryRead.data, {
             projectRef: identity.projectRef,
             deploymentId: identity.deploymentId,
         })
         : null;
-    if (!inventory || inventory.releases.length > RELEASE_LIST_LIMIT_MAX
+    if (!inventory || inventory.releases.length > 1
         || inventory.active_release_id !== identity.releaseId
         || inventory.active_activation_id !== identity.mutationId) {
         return { release: null, status: inventoryRead.status };
@@ -490,6 +508,41 @@ async function activeReleaseReadback(
         })
         : null;
     return { release, status: releaseRead.status };
+}
+
+export async function getActiveFrontendRelease(
+    http: FrontendReleaseHttp,
+    projectRef: string,
+    deploymentId: string,
+): Promise<ToolResponse> {
+    const response = await http.get(`${deploymentEndpoint(projectRef, deploymentId)}/active-release`, {
+        maxJsonBytes: RESPONSE_MAX_BYTES,
+    });
+    const inventory = response.ok && response.status === 200
+        ? releaseInventory(response.data, { projectRef, deploymentId }) : null;
+    if (!inventory || inventory.next_cursor !== null
+        || inventory.releases.length !== (inventory.active_release_id === null ? 0 : 1)
+        || (inventory.releases[0] && inventory.releases[0].release_id !== inventory.active_release_id)) {
+        return releaseReadFailure("frontend.get_active_release", response);
+    }
+    return toolResponse(inventory);
+}
+
+export async function readFrontendReleaseAuthority(
+    http: FrontendReleaseHttp,
+    projectRef: string,
+    deploymentId: string,
+): Promise<ToolResponse> {
+    const active = await getActiveFrontendRelease(http, projectRef, deploymentId);
+    if (!active.isError) return active;
+    const failure: unknown = JSON.parse(active.content[0]!.text);
+    if (failure && typeof failure === "object" && "error" in failure
+        && failure.error && typeof failure.error === "object"
+        && "code" in failure.error && failure.error.code === "HTTP_ERROR"
+        && "http_status" in failure.error && failure.error.http_status === 404) {
+        return listFrontendReleases(http, projectRef, deploymentId, undefined, 1);
+    }
+    return active;
 }
 
 export async function activateFrontendRelease(

@@ -9,7 +9,7 @@ import type { HttpTransport } from "../transports/http";
 import { registerTool, type ToolServer } from "../tool-server";
 import {
     activateFrontendRelease,
-    listFrontendReleases,
+    readFrontendReleaseAuthority,
     uploadFrontendRelease,
 } from "./frontend-release-control";
 import { projectedFunctionList } from "./edge-function-response";
@@ -560,7 +560,7 @@ export function registerDeployTools(
             report("package", relative(projectDirectory, outputDirectory) || ".");
             const archive = await createFrontendArchive(outputDirectory);
             try {
-                const inventory = payload(await listFrontendReleases(http, projectRef, selected.id, undefined, 100));
+                const inventory = payload(await readFrontendReleaseAuthority(http, projectRef, selected.id));
                 const activeReleaseId = typeof inventory.active_release_id === "string" ? inventory.active_release_id : null;
                 const activeActivationId = typeof inventory.active_activation_id === "string" ? inventory.active_activation_id : null;
 
@@ -607,6 +607,8 @@ export function registerDeployTools(
                     deployment_id: selected.id,
                     release_id: activated.active_release_id,
                     activation_id: activated.activation_id,
+                    previous_release_id: activeReleaseId,
+                    previous_activation_id: activeActivationId,
                     url: finalDeployment.deploymentUrl,
                     file_count: archive.fileCount,
                     source_bytes: archive.sourceBytes,

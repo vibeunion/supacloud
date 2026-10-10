@@ -111,6 +111,11 @@ export class FrontendReleaseService {
     return this.storage.listReleases(projectRef, deploymentId, page);
   }
 
+  activeReleaseSnapshot(projectRef: string, deploymentId: string): Promise<FrontendReleaseInventory> {
+    return this.deploymentLock(projectRef, deploymentId, () =>
+      this.storage.activeReleaseSnapshot(projectRef, deploymentId));
+  }
+
   activeBuildDir(projectRef: string, deploymentId: string): Promise<string | null> {
     return this.storage.activeBuildDir(projectRef, deploymentId);
   }

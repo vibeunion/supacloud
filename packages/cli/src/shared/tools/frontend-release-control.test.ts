@@ -4,8 +4,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
     activateFrontendRelease,
+    getActiveFrontendRelease,
     getFrontendRelease,
     listFrontendReleases,
+    readFrontendReleaseAuthority,
     uploadFrontendRelease,
 } from "./frontend-release-control";
 
@@ -41,6 +43,98 @@ afterEach(async () => {
 });
 
 describe("immutable frontend release control", () => {
+    test("reads only the active release authority without scanning release history", async () => {
+        const calls: string[] = [];
+        const response = await getActiveFrontendRelease({
+            get: async (path: string) => {
+                calls.push(path);
+                return {
+                    ok: true,
+                    status: 200,
+                    data: {
+                        project_ref: PROJECT_REF,
+                        deployment_id: DEPLOYMENT_ID,
+                        active_release_id: RELEASE_ID,
+                        active_activation_id: MUTATION_ID,
+                        releases: [release()],
+                        next_cursor: null,
+                    },
+                };
+            },
+        } as never, PROJECT_REF, DEPLOYMENT_ID);
+
+        expect(response.isError).not.toBe(true);
+        expect(calls).toEqual([
+            `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/active-release`,
+        ]);
+        expect(parsed(response)).toMatchObject({
+            active_release_id: RELEASE_ID,
+            active_activation_id: MUTATION_ID,
+        });
+    });
+
+    test("falls back to a single history record only for an unsupported active endpoint", async () => {
+        const calls: string[] = [];
+        const response = await readFrontendReleaseAuthority({
+            get: async (path: string) => {
+                calls.push(path);
+                return path.endsWith("/active-release")
+                    ? { ok: false, status: 404, data: null }
+                    : {
+                        ok: true, status: 200,
+                        data: {
+                            project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                            active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+                            releases: [release()], next_cursor: RELEASE_ID,
+                        },
+                    };
+            },
+        } as never, PROJECT_REF, DEPLOYMENT_ID);
+        expect(response.isError).not.toBe(true);
+        expect(calls).toHaveLength(2);
+        expect(calls[1]).toEndWith("?limit=1");
+    });
+
+    test.each([401, 403, 500])("never downgrades a failed active snapshot HTTP %s", async (status) => {
+        let reads = 0;
+        const response = await readFrontendReleaseAuthority({
+            get: async () => {
+                reads += 1;
+                return { ok: false, status, data: { token: "must-not-escape" } };
+            },
+        } as never, PROJECT_REF, DEPLOYMENT_ID);
+        expect(response.isError).toBe(true);
+        expect(reads).toBe(1);
+        expect(response.content[0].text).not.toContain("must-not-escape");
+    });
+
+    test("rejects malformed or foreign native snapshots without downgrading to history", async () => {
+        const valid = {
+            project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+            active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+            releases: [release()], next_cursor: null,
+        };
+        for (const data of [
+            { ...valid, project_ref: "other-project" },
+            { ...valid, releases: [] },
+            { ...valid, releases: [release("c".repeat(64))] },
+            { ...valid, next_cursor: RELEASE_ID },
+            { ...valid, token: "must-not-escape" },
+            { ...valid, active_release_id: null, active_activation_id: null },
+        ]) {
+            let reads = 0;
+            const response = await readFrontendReleaseAuthority({
+                get: async () => {
+                    reads++;
+                    return { ok: true, status: 200, data };
+                },
+            } as never, PROJECT_REF, DEPLOYMENT_ID);
+            expect(response.isError).toBe(true);
+            expect(reads).toBe(1);
+            expect(response.content[0].text).not.toContain("must-not-escape");
+        }
+    });
+
     test("lists and gets only strict secret-free release projections", async () => {
         const inventory = {
             project_ref: PROJECT_REF,
@@ -597,8 +691,8 @@ describe("immutable frontend release control", () => {
                         deployment_id: DEPLOYMENT_ID,
                         active_release_id: RELEASE_ID,
                         active_activation_id: MUTATION_ID,
-                        releases: olderReleases,
-                        next_cursor: olderReleases.at(-1)!.release_id,
+                        releases: path.endsWith("/active-release") ? [release()] : olderReleases.slice(0, 1),
+                        next_cursor: path.endsWith("/active-release") ? null : olderReleases[0]!.release_id,
                     },
                 };
             },
