@@ -29,7 +29,7 @@ function fixture() {
   const release = (id: string): FrontendReleaseRecord => ({
     schema: FRONTEND_RELEASE_SCHEMA, project_ref: REF, deployment_id: ID,
     release_id: id, sha256: id, tree_sha256: id,
-    size_bytes: 1, file_count: 1, created_at: TIME, kind: "prebuilt_static",
+    size_bytes: 1, file_count: 1, created_at: TIME, kind: "prebuilt_static", archive_format: "tar.zst",
   });
   const authority = (id: string, activation: string): FrontendActiveReleaseRecord => ({
     schema: FRONTEND_ACTIVE_RELEASE_SCHEMA, project_ref: REF, deployment_id: ID,

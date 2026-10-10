@@ -17,7 +17,9 @@ matching the file count alone is not evidence of a matching build.
 
 ## Platform Ownership
 
-- SupaCloud stores and verifies immutable ZIPs and trees.
+- SupaCloud stores and verifies immutable tar.zst archives and trees.
+  The v2 format is breaking; existing v1 inventory requires a coordinated cutover.
+  See [deployment experience](deploy-experience.md#frontend-archive-cutover).
 - SupaCloud owns the active release/activation authority and CAS mutation ledger.
 - SupaCloud selects the previous release from the verified activation journal,
   not history ordering, and verifies both retained artifacts in one locked snapshot.

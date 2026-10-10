@@ -57,7 +57,7 @@ supacloud-cli supabase db_diff --schema public --name add_accounts
 supacloud-cli supabase push --ref abc123 --dir supabase/migrations --dry_run
 supacloud-cli frontend list --ref abc123
 supacloud-cli frontend list_releases --ref abc123 --id web
-supacloud-cli frontend upload_release --ref abc123 --id web --zip_path ./dist.zip
+supacloud-cli frontend upload_release --ref abc123 --id web --archive_path ./dist.tar.zst
 ```
 
 ### One-command deploy
@@ -503,11 +503,11 @@ Use a direct Postgres DSN with `pg`, `postgres.js`, or equivalent drivers for ap
 - `diagnostics`
 - `gateway` (requires an admin-capable token)
 
-The `frontend` group supports both the existing deployment/Git/legacy ZIP
+The `frontend` group supports both the existing deployment/Git/tar.zst
 actions and immutable prebuilt release control. Use `get_active_release` to read
 the verified current artifact and activation IDs without scanning historical
 archives. `list_releases` remains the paginated, full-integrity audit interface.
-Use `upload_release` to stream a local ZIP bound
+Use `upload_release` to stream a local tar.zst archive bound
 to its SHA-256, and `activate_release` with the observed IDs plus a retry-stable
 UUIDv4 mutation ID. The CLI verifies upload and activation readback before
 reporting success. Production mutations require exact project confirmation;

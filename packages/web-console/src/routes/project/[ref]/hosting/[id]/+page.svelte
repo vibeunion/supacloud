@@ -38,7 +38,7 @@
   let newDomain = $state("");
   let isAddingDomain = $state(false);
 
-  let zipFile = $state<File | null>(null);
+  let archiveFile = $state<File | null>(null);
 
   let isCreatingToken = $state(false);
   let newTokenName = $state("");
@@ -217,22 +217,21 @@
 
   const uploadMutation = createMutation(() => ({
     mutationFn: async (file: File) => {
-      const uploadBody = new FormData();
-      uploadBody.append("file", file);
       const res = await apiClient(`/v1/projects/${projectRef}/frontend/deployments/${deployId}/deploy/upload`, {
         method: "POST",
-        body: uploadBody,
+        headers: { "Content-Type": "application/vnd.supacloud.frontend.tar+zstd" },
+        body: file,
         timeoutMs: FRONTEND_DEPLOY_TIMEOUT_MS,
       });
       const deploymentResult = await res.json();
       if (!res.ok || deploymentResult.success === false) {
-        throw new Error(deploymentResult.message || deploymentResult.error || "ZIP 部署失败");
+        throw new Error(deploymentResult.message || deploymentResult.error || "制品部署失败");
       }
       return deploymentResult;
     },
     onSuccess: () => {
-      actionMsg = "✅ ZIP 部署已完成";
-      zipFile = null;
+      actionMsg = "✅ 制品部署已完成";
+      archiveFile = null;
       queryClient.invalidateQueries({ queryKey: ["deployment", projectRef, deployId] });
       queryClient.invalidateQueries({ queryKey: ["deployment_logs", projectRef, deployId] });
       queryClient.invalidateQueries({
@@ -246,13 +245,13 @@
     },
   }));
 
-  function selectZipFile(event: Event) {
+  function selectArchiveFile(event: Event) {
     const input = event.currentTarget as HTMLInputElement;
-    zipFile = input.files?.[0] || null;
+    archiveFile = input.files?.[0] || null;
   }
 
-  function uploadZip() {
-    if (zipFile) uploadMutation.mutate(zipFile);
+  function uploadArchive() {
+    if (archiveFile) uploadMutation.mutate(archiveFile);
   }
 
   const removeDomainMutation = createMutation(() => ({
@@ -399,13 +398,12 @@
 
     <div class="rounded-xl border bg-card overflow-hidden">
       <div class="border-b px-5 py-3 bg-muted/20">
-        <h3 class="text-sm font-semibold flex items-center gap-2"><Upload size={16} /> ZIP 部署</h3>
+        <h3 class="text-sm font-semibold flex items-center gap-2"><Upload size={16} /> 制品部署</h3>
       </div>
       <div class="p-5 space-y-3">
-        <label for="zip-upload" class="text-xs font-semibold text-muted-foreground block">上传站点 ZIP 文件</label>
-        <input id="zip-upload" type="file" accept=".zip,application/zip" onchange={selectZipFile} class="block w-full text-xs file:mr-3 file:rounded-md file:border-0 file:bg-brand file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-brand/90" />
-        <p class="text-[10px] text-muted-foreground">ZIP 内容会经过路径、文件数量和解压大小校验后部署。</p>
-        <button onclick={uploadZip} disabled={!zipFile || uploadMutation.isPending} class="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md bg-brand text-white hover:bg-brand/90 disabled:opacity-50">
+        <label for="archive-upload" class="text-xs font-semibold text-muted-foreground block">站点制品 (.tar.zst)</label>
+        <input id="archive-upload" type="file" accept=".tar.zst,application/vnd.supacloud.frontend.tar+zstd" onchange={selectArchiveFile} class="block w-full text-xs file:mr-3 file:rounded-md file:border-0 file:bg-brand file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-brand/90" />
+        <button onclick={uploadArchive} disabled={!archiveFile || uploadMutation.isPending} class="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold rounded-md bg-brand text-white hover:bg-brand/90 disabled:opacity-50">
           {#if uploadMutation.isPending}<Loader2 size={12} class="animate-spin" />{:else}<Upload size={12} />{/if}
           {uploadMutation.isPending ? "部署中..." : "上传并部署"}
         </button>

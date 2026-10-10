@@ -12,14 +12,14 @@ describe("hosting deployment entrypoints", () => {
     expect(layoutSource).not.toContain('{ id: "new"');
   });
 
-  test("exposes the existing ZIP deployment endpoint in site settings", () => {
-    expect(settingsSource).toContain('id="zip-upload"');
-    expect(settingsSource).toContain('accept=".zip,application/zip"');
+  test("sends tar.zst as a raw upload from site settings", () => {
+    expect(settingsSource).toContain('id="archive-upload"');
+    expect(settingsSource).toContain('accept=".tar.zst,application/vnd.supacloud.frontend.tar+zstd"');
     expect(settingsSource).toContain("/deployments/${deployId}/deploy/upload");
-    expect(settingsSource).toContain("new FormData()");
-    expect(settingsSource).toContain('uploadBody.append("file", file)');
+    expect(settingsSource).toContain("body: file");
+    expect(settingsSource).not.toContain("new FormData()");
     expect(settingsSource).toContain("timeoutMs: FRONTEND_DEPLOY_TIMEOUT_MS");
-    expect(settingsSource).not.toContain('headers: { "Content-Type": "application/zip" }');
+    expect(settingsSource).toContain('headers: { "Content-Type": "application/vnd.supacloud.frontend.tar+zstd" }');
     expect(settingsSource).toContain('keys().data.list(`v1/projects/${projectRef}/frontend/deployments`)');
   });
 

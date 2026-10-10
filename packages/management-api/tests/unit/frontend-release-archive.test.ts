@@ -1,273 +1,151 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, open, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  extractVerifiedZip,
-  verifiedZipArchive,
-  type VerifiedZipFileEntry,
+  createFrontendTarZstd,
+  FRONTEND_ARCHIVE_CONTENT_TYPE,
+} from "@supacloud/delivery/frontend-archive";
+import { readFrontendTarZstd } from "@supacloud/delivery/frontend-archive-reader";
+import {
+  verifiedFrontendArchive, extractVerifiedFrontendArchive,
 } from "../../src/services/frontend-release-archive";
-import { FrontendReleaseError } from "../../src/services/frontend-release-contract";
+import { FRONTEND_RELEASE_MAX_UNCOMPRESSED_BYTES } from "../../src/services/frontend-release-contract";
 
-const END_SIGNATURE = 0x06054b50;
-const CENTRAL_SIGNATURE = 0x02014b50;
-const DATA_DESCRIPTOR_SIGNATURE = 0x08074b50;
-
-function endOffset(archive: Uint8Array): number {
-  const view = Buffer.from(archive.buffer, archive.byteOffset, archive.byteLength);
-  for (let offset = view.byteLength - 22; offset >= 0; offset -= 1) {
-    if (view.readUInt32LE(offset) === END_SIGNATURE) return offset;
-  }
-  throw new Error("fixture has no zip end record");
+async function* chunks(bytes: Uint8Array): AsyncGenerator<Uint8Array> {
+  for (let offset = 0; offset < bytes.byteLength; offset += 37) yield bytes.subarray(offset, offset + 37);
 }
 
-function firstCentralOffset(archive: Uint8Array): number {
-  const view = Buffer.from(archive.buffer, archive.byteOffset, archive.byteLength);
-  const offset = view.readUInt32LE(endOffset(archive) + 16);
-  if (view.readUInt32LE(offset) !== CENTRAL_SIGNATURE) throw new Error("fixture has no central record");
-  return offset;
-}
-
-async function zipFixture(entries: Record<string, string>): Promise<Uint8Array> {
-  const base = join(tmpdir(), `frontend-release-archive-${crypto.randomUUID()}`);
-  await Bun.$`mkdir -p ${base}`;
-  for (const [path, contents] of Object.entries(entries)) {
-    const absolutePath = join(base, path);
-    await Bun.$`mkdir -p ${join(absolutePath, "..")} `.quiet();
-    await writeFile(absolutePath, contents);
-  }
-  const archivePath = `${base}.zip`;
-  const zipped = await Bun.$`zip -q -X -r ${archivePath} .`.cwd(base).nothrow();
-  if (zipped.exitCode !== 0) throw new Error("zip fixture failed");
-  const archive = new Uint8Array(await readFile(archivePath));
-  await Bun.$`chmod -R u+w ${base}`.nothrow();
-  await Bun.$`rm -r ${base} ${archivePath}`.nothrow();
-  return archive;
-}
-
-async function verifiedEntries(archive: Uint8Array): Promise<readonly VerifiedZipFileEntry[]> {
-  const archivePath = join(tmpdir(), `frontend-release-read-${crypto.randomUUID()}.zip`);
-  await writeFile(archivePath, archive);
-  const handle = await open(archivePath, "r");
+async function withArchive<T>(bytes: Uint8Array, work: (handle: Awaited<ReturnType<typeof open>>, root: string) => Promise<T>): Promise<T> {
+  const root = await mkdtemp(join(tmpdir(), "frontend-tar-zstd-test-"));
+  const path = join(root, "site.tar.zst");
+  await Bun.write(path, bytes);
+  const handle = await open(path, "r");
   try {
-    return (await verifiedZipArchive(handle, archive.byteLength)).entries;
+    return await work(handle, root);
   } finally {
     await handle.close();
-    await unlink(archivePath);
+    await rm(root, { recursive: true, force: true });
   }
 }
 
-async function expectInvalid(archive: Uint8Array): Promise<void> {
-  try {
-    await verifiedEntries(archive);
-    throw new Error("Expected invalid zip archive");
-  } catch (error: unknown) {
-    expect(error).toBeInstanceOf(FrontendReleaseError);
-    expect(error).toMatchObject({ code: "FRONTEND_RELEASE_ARCHIVE_INVALID", statusCode: 400 });
-  }
+async function invalid(bytes: Uint8Array): Promise<void> {
+  await withArchive(bytes, async handle => {
+    await expect(verifiedFrontendArchive(handle, bytes.byteLength))
+      .rejects.toMatchObject({ code: "FRONTEND_RELEASE_ARCHIVE_INVALID", statusCode: 400 });
+  });
 }
 
-function dataDescriptorFixture(source: Uint8Array, centralIndex = 0): Uint8Array {
-  const sourceView = Buffer.from(source.buffer, source.byteOffset, source.byteLength);
-  const sourceCentralDirectory = firstCentralOffset(source);
-  let sourceCentral = sourceCentralDirectory;
-  for (let index = 0; index < centralIndex; index += 1) {
-    sourceCentral += 46 + sourceView.readUInt16LE(sourceCentral + 28)
-      + sourceView.readUInt16LE(sourceCentral + 30) + sourceView.readUInt16LE(sourceCentral + 32);
-  }
-  const localOffset = sourceView.readUInt32LE(sourceCentral + 42);
-  const compressedSize = sourceView.readUInt32LE(sourceCentral + 20);
-  const localNameLength = sourceView.readUInt16LE(localOffset + 26);
-  const localExtraLength = sourceView.readUInt16LE(localOffset + 28);
-  const dataEnd = localOffset + 30 + localNameLength + localExtraLength + compressedSize;
-  const descriptor = Buffer.alloc(16);
-  descriptor.writeUInt32LE(DATA_DESCRIPTOR_SIGNATURE, 0);
-  descriptor.writeUInt32LE(sourceView.readUInt32LE(sourceCentral + 16), 4);
-  descriptor.writeUInt32LE(compressedSize, 8);
-  descriptor.writeUInt32LE(sourceView.readUInt32LE(sourceCentral + 24), 12);
-  const archive = Buffer.concat([
-    sourceView.subarray(0, dataEnd),
-    descriptor,
-    sourceView.subarray(dataEnd),
-  ]);
-  const central = sourceCentral + descriptor.byteLength;
-  const firstCentral = sourceCentralDirectory + descriptor.byteLength;
-  const end = endOffset(archive);
-  archive.writeUInt16LE(archive.readUInt16LE(localOffset + 6) | 0x0008, localOffset + 6);
-  archive.writeUInt32LE(0, localOffset + 14);
-  archive.writeUInt32LE(0, localOffset + 18);
-  archive.writeUInt32LE(0, localOffset + 22);
-  archive.writeUInt16LE(archive.readUInt16LE(central + 8) | 0x0008, central + 8);
-  archive.writeUInt32LE(firstCentral, end + 16);
-  let centralCursor = firstCentral;
-  while (centralCursor < end) {
-    const shiftedLocalOffset = archive.readUInt32LE(centralCursor + 42);
-    if (shiftedLocalOffset >= dataEnd) {
-      archive.writeUInt32LE(shiftedLocalOffset + descriptor.byteLength, centralCursor + 42);
-    }
-    centralCursor += 46 + archive.readUInt16LE(centralCursor + 28)
-      + archive.readUInt16LE(centralCursor + 30) + archive.readUInt16LE(centralCursor + 32);
-  }
-  return new Uint8Array(archive);
+function checksum(tar: Buffer, offset = 0): void {
+  tar.fill(0x20, offset + 148, offset + 156);
+  const sum = tar.subarray(offset, offset + 512).reduce((total, byte) => total + byte, 0);
+  tar.write(`${sum.toString(8).padStart(6, "0")}\0 `, offset + 148, "ascii");
 }
 
-describe("verified frontend release archives", () => {
-  test("accepts a bounded static site with an index", async () => {
-    const archive = await zipFixture({ "index.html": "ok", "assets/app.js": "js" });
-    expect((await verifiedEntries(archive)).map((entry) => entry.path).sort()).toEqual([
-      "assets/app.js",
-      "index.html",
+async function rawTar(): Promise<Buffer> {
+  return Buffer.from(await new Bun.Archive({ "index.html": "ok" }).bytes());
+}
+
+describe("verified frontend tar.zst archives", () => {
+  test("round trips deterministic files", async () => {
+    const files = new Map([
+      ["assets/app.js", new TextEncoder().encode("console.log('ok');\n")],
+      ["index.html", new TextEncoder().encode("<h1>ok</h1>\n")],
     ]);
+    const first = await createFrontendTarZstd(files);
+    const second = await createFrontendTarZstd(files);
+    expect(Buffer.from(first).equals(second)).toBe(true);
+    expect(FRONTEND_ARCHIVE_CONTENT_TYPE).toBe("application/vnd.supacloud.frontend.tar+zstd");
+    expect(await readFrontendTarZstd(chunks(first))).toEqual(
+      [...files].map(([path, data]) => ({ path, size: data.byteLength })),
+    );
   });
 
-  test("rejects encrypted, ZIP64, overlapping, duplicate, traversal, and non-regular metadata", async () => {
-    const source = await zipFixture({ "index.html": "ok" });
-    const encrypted = source.slice();
-    Buffer.from(encrypted.buffer).writeUInt16LE(1, firstCentralOffset(encrypted) + 8);
-    await expectInvalid(encrypted);
-
-    const zip64 = source.slice();
-    Buffer.from(zip64.buffer).writeUInt32LE(0xffffffff, endOffset(zip64) + 16);
-    await expectInvalid(zip64);
-
-    const overlap = source.slice();
-    const overlapView = Buffer.from(overlap.buffer);
-    const central = firstCentralOffset(overlap);
-    overlapView.writeUInt32LE(central - 1, central + 20);
-    await expectInvalid(overlap);
-
-    const duplicate = source.slice();
-    const duplicateView = Buffer.from(duplicate.buffer);
-    const duplicateEnd = endOffset(duplicate);
-    duplicateView.writeUInt16LE(2, duplicateEnd + 8);
-    duplicateView.writeUInt16LE(2, duplicateEnd + 10);
-    await expectInvalid(duplicate);
-
-    const traversal = source.slice();
-    const traversalView = Buffer.from(traversal.buffer);
-    const traversalCentral = firstCentralOffset(traversal);
-    const nameLength = traversalView.readUInt16LE(traversalCentral + 28);
-    const unsafeName = "../evil.ht";
-    expect(Buffer.byteLength(unsafeName)).toBe(nameLength);
-    traversalView.write(unsafeName, traversalCentral + 46, "utf8");
-    const localOffset = traversalView.readUInt32LE(traversalCentral + 42);
-    traversalView.write(unsafeName, localOffset + 30, "utf8");
-    await expectInvalid(traversal);
-
-    const symlink = source.slice();
-    const symlinkView = Buffer.from(symlink.buffer);
-    const symlinkCentral = firstCentralOffset(symlink);
-    symlinkView.writeUInt16LE(3 << 8, symlinkCentral + 4);
-    symlinkView.writeUInt32LE(0o120777 * 65_536, symlinkCentral + 38);
-    await expectInvalid(symlink);
+  test("extracts regular files only after inventory verification", async () => {
+    const bytes = await createFrontendTarZstd(new Map([["index.html", new TextEncoder().encode("ok")]]));
+    await withArchive(bytes, async (handle, root) => {
+      const output = join(root, "build");
+      await mkdir(output);
+      const archive = await verifiedFrontendArchive(handle, bytes.byteLength);
+      await extractVerifiedFrontendArchive(handle, archive, output);
+      expect(await readFile(join(output, "index.html"), "utf8")).toBe("ok");
+      await expect(extractVerifiedFrontendArchive(handle, archive, output)).rejects.toThrow();
+    });
   });
 
-  test("accepts a valid data descriptor and rejects descriptor corruption", async () => {
-    const descriptor = dataDescriptorFixture(await zipFixture({ "index.html": "ok" }));
-    const [descriptorEntry] = await verifiedEntries(descriptor);
-    if (!descriptorEntry) throw new Error("Missing descriptor entry");
-    expect(descriptorEntry.recordEnd).toBe(firstCentralOffset(descriptor));
-
-    const corrupted = descriptor.slice();
-    const entry = (await verifiedEntries(corrupted))[0];
-    if (!entry) throw new Error("Missing descriptor entry");
-    Buffer.from(corrupted.buffer).writeUInt32LE(0, entry.dataEnd + 4);
-    await expectInvalid(corrupted);
+  test("rejects ZIP, gzip, garbage, truncated zstd, corrupt tar and missing index", async () => {
+    await invalid(new Uint8Array([0x50, 0x4b, 3, 4, 0, 0]));
+    await invalid(Bun.gzipSync(await rawTar()));
+    await invalid(new Uint8Array([1, 2, 3]));
+    const bytes = await createFrontendTarZstd(new Map([["index.html", new TextEncoder().encode("ok")]]));
+    await invalid(bytes.subarray(0, bytes.byteLength - 1));
+    const corrupt = await rawTar();
+    corrupt[0] ^= 1;
+    await invalid(await Bun.zstdCompress(corrupt));
+    await invalid(await createFrontendTarZstd(new Map([["assets/app.js", new TextEncoder().encode("js")]])));
+    await invalid(await Bun.zstdCompress((await rawTar()).subarray(0, 513)));
   });
 
-  test("rejects a second local record that overlaps the first data descriptor", async () => {
-    const descriptor = dataDescriptorFixture(await zipFixture({
-      "index.html": "ok",
-      "second.txt": "second",
-    }), 1);
-    const entries = await verifiedEntries(descriptor);
-    expect(entries).toHaveLength(2);
-    const archive = descriptor.slice();
-    const central = firstCentralOffset(archive);
-    const view = Buffer.from(archive.buffer);
-    const firstCentralNameLength = view.readUInt16LE(central + 28);
-    const firstCentralExtraLength = view.readUInt16LE(central + 30);
-    const firstCentralCommentLength = view.readUInt16LE(central + 32);
-    const secondCentral = central + 46 + firstCentralNameLength
-      + firstCentralExtraLength + firstCentralCommentLength;
-    const secondEntry = entries[1];
-    if (!secondEntry) throw new Error("Missing second archive entry");
-    view.writeUInt32LE(secondEntry.dataEnd, secondCentral + 42);
-    await expectInvalid(archive);
-  });
-
-  test("streams extraction and rejects CRC or deflate corruption", async () => {
-    const source = await zipFixture({ "index.html": "streamed-content".repeat(1024) });
-    const archivePath = join(tmpdir(), `frontend-release-extract-${crypto.randomUUID()}.zip`);
-    const buildDir = await mkdtemp(join(tmpdir(), "frontend-release-build-"));
-    await writeFile(archivePath, source);
-    const handle = await open(archivePath, "r");
-    try {
-      const verified = await verifiedZipArchive(handle, source.byteLength);
-      await extractVerifiedZip(handle, verified, buildDir);
-      expect((await readFile(join(buildDir, "index.html"), "utf8")).startsWith("streamed-content")).toBe(true);
-    } finally {
-      await handle.close();
-      await unlink(archivePath);
-      await rm(buildDir, { recursive: true, force: true });
+  test("rejects unsafe paths on both writer and reader", async () => {
+    for (const path of ["../index.html", "/index.html", "C:/index.html", "a\\index.html", "a/../index.html", "./index.html", "a//index.html"]) {
+      await expect(createFrontendTarZstd(new Map([
+        [path, new TextEncoder().encode("unsafe")],
+      ]))).rejects.toThrow("unsafe path");
+      const tar = await rawTar();
+      tar.fill(0, 0, 100);
+      tar.write(path, 0, "utf8");
+      checksum(tar);
+      await invalid(await Bun.zstdCompress(tar));
     }
+  });
 
-    for (const corrupt of ["crc", "deflate"] as const) {
-      const archive = source.slice();
-      const view = Buffer.from(archive.buffer, archive.byteOffset, archive.byteLength);
-      const central = firstCentralOffset(archive);
-      if (corrupt === "crc") {
-        view.writeUInt32LE((view.readUInt32LE(central + 16) ^ 1) >>> 0, central + 16);
-        const local = view.readUInt32LE(central + 42);
-        view.writeUInt32LE(view.readUInt32LE(central + 16), local + 14);
-      } else {
-        const local = view.readUInt32LE(central + 42);
-        const dataOffset = local + 30 + view.readUInt16LE(local + 26) + view.readUInt16LE(local + 28);
-        view.writeUInt8(view.readUInt8(dataOffset) ^ 0xff, dataOffset);
-      }
-      const corruptPath = join(tmpdir(), `frontend-release-corrupt-${crypto.randomUUID()}.zip`);
-      const outputDir = await mkdtemp(join(tmpdir(), "frontend-release-corrupt-build-"));
-      await writeFile(corruptPath, archive);
-      const corruptHandle = await open(corruptPath, "r");
+  test.each(["1", "2", "3", "4", "5", "6"])("rejects non-regular tar type %s", async type => {
+    const tar = await rawTar();
+    tar[156] = type.charCodeAt(0);
+    checksum(tar);
+    await invalid(await Bun.zstdCompress(tar));
+  });
+
+  test("rejects duplicate entries and file/directory conflicts in both orders", async () => {
+    const tar = await rawTar();
+    await invalid(await Bun.zstdCompress(Buffer.concat([tar.subarray(0, 1024), tar])));
+    for (const files of [
+      { "index.html": "ok", "assets": "file", "assets/app.js": "js" },
+      { "index.html": "ok", "assets/app.js": "js", "assets": "file" },
+    ]) await invalid(await Bun.zstdCompress(await new Bun.Archive(files).bytes()));
+  });
+
+  test("rejects an oversized declaration without allocating its contents", async () => {
+    const tar = await rawTar();
+    tar.write(`${(FRONTEND_RELEASE_MAX_UNCOMPRESSED_BYTES + 1).toString(8).padStart(11, "0")}\0`, 124, "ascii");
+    checksum(tar);
+    await invalid(await Bun.zstdCompress(tar));
+  });
+
+  test("detects held archive mutation before extracting", async () => {
+    const bytes = await createFrontendTarZstd(new Map([["index.html", new TextEncoder().encode("ok")]]));
+    await withArchive(bytes, async (handle, root) => {
+      const archive = await verifiedFrontendArchive(handle, bytes.byteLength);
+      await writeFile(join(root, "site.tar.zst"), bytes.subarray(0, bytes.byteLength - 1));
+      await expect(extractVerifiedFrontendArchive(handle, archive, join(root, "build"))).rejects.toThrow("changed");
+    });
+  });
+
+  test("streams highly compressible files with bounded memory", async () => {
+    const fixtureBytes = 8 * 1024 * 1024;
+    const bytes = await createFrontendTarZstd(new Map([["index.html", Buffer.alloc(fixtureBytes, 0x61)]]));
+    await withArchive(bytes, async (handle, root) => {
+      const output = join(root, "build");
+      await mkdir(output);
+      const initialRss = process.memoryUsage.rss();
+      let peakRss = initialRss;
+      const sampler = setInterval(() => { peakRss = Math.max(peakRss, process.memoryUsage.rss()); }, 1);
       try {
-        const verified = await verifiedZipArchive(corruptHandle, archive.byteLength);
-        await expect(extractVerifiedZip(corruptHandle, verified, outputDir))
-          .rejects.toMatchObject({ code: "FRONTEND_RELEASE_ARCHIVE_INVALID" });
-      } finally {
-        await corruptHandle.close();
-        await unlink(corruptPath);
-        await rm(outputDir, { recursive: true, force: true });
-      }
-    }
-  });
-
-  test("extracts highly compressible content without materializing the entry", async () => {
-    const base = await mkdtemp(join(tmpdir(), "frontend-release-compressed-"));
-    const archivePath = `${base}.zip`;
-    const buildDir = `${base}-build`;
-    const fixtureSize = 8 * 1024 * 1024;
-    await writeFile(join(base, "index.html"), Buffer.alloc(fixtureSize, 0x61));
-    const zipped = await Bun.$`zip -q -X ${archivePath} index.html`.cwd(base).nothrow();
-    if (zipped.exitCode !== 0) throw new Error("zip fixture failed");
-    await mkdir(buildDir);
-    const handle = await open(archivePath, "r");
-    const archiveSize = (await handle.stat()).size;
-    const startingRss = process.memoryUsage.rss();
-    let peakRss = startingRss;
-    const sample = setInterval(() => {
-      peakRss = Math.max(peakRss, process.memoryUsage.rss());
-    }, 1);
-    try {
-      const verified = await verifiedZipArchive(handle, archiveSize);
-      await extractVerifiedZip(handle, verified, buildDir);
-      expect((await readFile(join(buildDir, "index.html"))).byteLength).toBe(fixtureSize);
-      expect(peakRss - startingRss).toBeLessThan(64 * 1024 * 1024);
-    } finally {
-      clearInterval(sample);
-      await handle.close();
-      await rm(base, { recursive: true, force: true });
-      await rm(archivePath, { force: true });
-      await rm(buildDir, { recursive: true, force: true });
-    }
+        const archive = await verifiedFrontendArchive(handle, bytes.byteLength);
+        await extractVerifiedFrontendArchive(handle, archive, output);
+        expect(Bun.file(join(output, "index.html")).size).toBe(fixtureBytes);
+        expect(peakRss - initialRss).toBeLessThan(64 * 1024 * 1024);
+      } finally { clearInterval(sampler); }
+    });
   });
 });

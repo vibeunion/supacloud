@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { cliToolResultIsError } from "./shared/cli";
+import { createFrontendTarZstd } from "@supacloud/delivery/frontend-archive";
 import packageMetadata from "../package.json" with { type: "json" };
 
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -154,11 +155,11 @@ describe("supacloud-cli process contract", () => {
         let activationId = SCHEDULE_ID;
         const calls: string[] = [];
         const release = (id: string) => ({
-            schema: "supacloud.frontend-release.v1",
+            schema: "supacloud.frontend-release.v2",
             project_ref: projectRef, deployment_id: deploymentId,
             release_id: id, sha256: id, tree_sha256: id,
             size_bytes: 1, file_count: 1,
-            created_at: "2026-10-10T00:00:00.000Z", kind: "prebuilt_static",
+            created_at: "2026-10-10T00:00:00.000Z", kind: "prebuilt_static", archive_format: "tar.zst",
         });
         const server = Bun.serve({
             hostname: "127.0.0.1", port: 0,
@@ -307,7 +308,7 @@ describe("supacloud-cli process contract", () => {
         expect(response.stderr).toContain("get_release");
         expect(response.stderr).toContain("upload_release");
         expect(response.stderr).toContain("activate_release");
-        expect(response.stderr).toContain("--zip_path");
+        expect(response.stderr).toContain("--archive_path");
         expect(response.stderr).toContain("--expected_active_release_id");
         expect(response.stderr).toContain("--expected_activation_id");
         expect(response.stderr).toContain("--mutation_id");
@@ -463,7 +464,7 @@ describe("supacloud-cli process contract", () => {
 
         const response = await runProjectCli([
             "frontend", "upload_release", "--ref", "prod-ref", "--id", "web",
-            "--zip_path", join(workspace, "missing.zip"), "--env", "production",
+            "--archive_path", join(workspace, "missing.tar.zst"), "--env", "production",
         ], {}, workspace);
 
         expect(response.exitCode).toBe(1);
@@ -475,25 +476,26 @@ describe("supacloud-cli process contract", () => {
     test("runs authoritative immutable frontend release list, upload, and activation flows", async () => {
         const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-frontend-release-"));
         temporaryDirectories.push(workspace);
-        const archivePath = join(workspace, "site.zip");
-        writeFileSync(archivePath, "zip");
+        const archivePath = join(workspace, "site.tar.zst");
+        const archiveBytes = await createFrontendTarZstd(new Map([["index.html", Buffer.from("ok")]]));
+        await Bun.write(archivePath, archiveBytes);
         const projectRef = "abc123";
         const deploymentId = "web";
-        const releaseId = createHash("sha256").update("zip").digest("hex");
+        const releaseId = createHash("sha256").update(archiveBytes).digest("hex");
         const treeSha256 = "b".repeat(64);
         const mutationId = SCHEDULE_ID;
         const requested: Array<{ method: string; path: string; body?: unknown; sha256?: string }> = [];
         const release = {
-            schema: "supacloud.frontend-release.v1",
+            schema: "supacloud.frontend-release.v2",
             project_ref: projectRef,
             deployment_id: deploymentId,
             release_id: releaseId,
             sha256: releaseId,
             tree_sha256: treeSha256,
-            size_bytes: 3,
+            size_bytes: archiveBytes.byteLength,
             file_count: 1,
             created_at: "2026-08-20T00:00:00.000Z",
-            kind: "prebuilt_static",
+            archive_format: "tar.zst" as const, kind: "prebuilt_static",
         };
         const inventory = (active: boolean) => ({
             project_ref: projectRef,
@@ -520,7 +522,7 @@ describe("supacloud-cli process contract", () => {
                 }
                 if (request.method === "POST" && url.pathname === releaseBase) {
                     entry.sha256 = request.headers.get("x-supacloud-content-sha256") || undefined;
-                    expect(new TextDecoder().decode(await request.arrayBuffer())).toBe("zip");
+                    expect(new Uint8Array(await request.arrayBuffer())).toEqual(new Uint8Array(archiveBytes));
                     return Response.json({ project_ref: projectRef, deployment_id: deploymentId, release }, {
                         status: 201,
                     });
@@ -556,7 +558,7 @@ describe("supacloud-cli process contract", () => {
         ], environment, workspace);
         const uploaded = await runProjectCli([
             "frontend", "upload_release", "--ref", projectRef, "--id", deploymentId,
-            "--zip_path", archivePath,
+            "--archive_path", archivePath,
         ], environment, workspace);
         const activated = await runProjectCli([
             "frontend", "activate_release", "--ref", projectRef, "--id", deploymentId,
