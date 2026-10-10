@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import { TextDecoder } from "node:util";
 import { Type } from "typebox";
+import { registerTool, type ToolServer } from "../../../../cli/src/shared/tool-server";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import { redactSshOutput, SshCommandOutcomeUnknownError, type SshTransport } from "../transports/ssh";
 import {
@@ -1170,8 +1171,8 @@ function platformVersionsToolResult(report: Awaited<ReturnType<typeof platformVe
     };
 }
 
-export function registerSshTools(server: { tool: (...args: any[]) => void }, ssh: SshTransport): void {
-    server.tool(
+export function registerSshTools(server: ToolServer, ssh: SshTransport): void {
+    registerTool(server,
         "ssh",
         `Server management via SSH. Available before & after SupaCloud installation.
 Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec, troubleshoot, container_logs, backup_cleanup_plan, backup_cleanup_apply, tenant_manage, tenant_list, tenant_inspect, tenant_diagnose, tenant_migrate`,
@@ -1208,7 +1209,7 @@ Actions: ping, setup, install, upgrade, upgrade_status, versions, diagnose, exec
             schemas: optional(Type.String(), "[tenant_migrate] Schemas (default: public,auth,storage)"),
             data_only: optional(Type.Boolean(), "[tenant_migrate] Data only, no structure"),
         },
-        async (args: any) => {
+        async (args) => {
             const { action } = args;
             let text: string;
 

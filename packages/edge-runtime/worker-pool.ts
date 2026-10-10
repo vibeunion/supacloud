@@ -1,4 +1,4 @@
-import { Worker } from "worker_threads";
+import { Worker, type WorkerOptions } from "worker_threads";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
@@ -368,9 +368,10 @@ export class WorkerPool {
 
   private createWorker(): Worker {
     const workerEntry = resolveWorkerEntry();
-    const w = new Worker(workerEntry, {
+    const options: WorkerOptions & { smol?: boolean } = {
       ...(this.config.smol ? { smol: true } : {}),
-    } as any);
+    };
+    const w = new Worker(workerEntry, options);
     this.workers.push(w);
     this.workerMetadata.set(w, { generation: this.workerGeneration });
     w.once("exit", () => this.onWorkerExit(w));
@@ -649,7 +650,7 @@ export class WorkerPool {
       if (lower === "set-cookie" || lower === FUNCTION_VERSION_HEADER) return;
       headers[k] = v;
     });
-    const cookies = (opts.request.headers as any).getSetCookie?.();
+    const cookies = opts.request.headers.getSetCookie();
     if (cookies && cookies.length > 0) {
       headers["set-cookie"] = cookies;
     }
@@ -712,7 +713,7 @@ export class WorkerPool {
     let waitUntilTimeout: ReturnType<typeof setTimeout> | undefined;
     let failActiveStream: ((error: Error) => void) | undefined;
 
-    const onMsg = (msg: {
+    type WorkerResponseMessage = {
       type?: string;
       status: number;
       streamId?: string;
@@ -725,7 +726,11 @@ export class WorkerPool {
       waitUntilPending?: boolean;
       moduleCacheHit?: boolean;
       moduleCacheSize?: number;
-    }) => {
+      chunk?: ArrayBuffer;
+      done?: boolean;
+      error?: string;
+    };
+    const onMsg = (msg: WorkerResponseMessage) => {
       if (msg.type === "execution_started") {
         opts.onExecutionStarted?.();
         return;
@@ -795,7 +800,7 @@ export class WorkerPool {
       if (msg.type === "stream_start" && msg.streamId) {
         const streamId = msg.streamId;
         let streamFinished: boolean = false;
-        let streamListener: ((streamMsg: any) => void) | undefined;
+        let streamListener: ((streamMsg: WorkerResponseMessage) => void) | undefined;
         const clearStreamState = () => {
           streamFinished = true;
           if (streamListener) worker.removeListener("message", streamListener);
@@ -821,7 +826,7 @@ export class WorkerPool {
               controller.error(error);
               abandonStream();
             };
-            streamListener = (streamMsg: any) => {
+            streamListener = (streamMsg: WorkerResponseMessage) => {
               if (streamMsg.type === "stream_chunk" && streamMsg.streamId === streamId) {
                 if (streamMsg.done) {
                   if (streamMsg.error) {
@@ -857,7 +862,7 @@ export class WorkerPool {
         );
         if (waitUntilPending) {
           worker.removeListener("message", onMsg);
-          const waitUntilListener = (waitMsg: any) => {
+          const waitUntilListener = (waitMsg: WorkerResponseMessage) => {
             if (waitMsg.type === "log" && opts.onLog && waitMsg.timestamp && waitMsg.stream && waitMsg.level && waitMsg.message) {
               opts.onLog({
                 timestamp: waitMsg.timestamp,

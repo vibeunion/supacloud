@@ -258,6 +258,7 @@ export async function runReconciliation(): Promise<ReconcileStats> {
 
 // ── Lifecycle ────────────────────────────────────────────────────
 let reconcileTimer: Timer | null = null;
+let initialDelayTimer: Timer | null = null;
 
 export function startStorageReconcileWorker() {
     if (reconcileTimer) return;
@@ -265,7 +266,8 @@ export function startStorageReconcileWorker() {
     logger.info(`[StorageReconcile] Worker started (interval: ${RECONCILE_INTERVAL_MS / 3600000}h, grace: ${ORPHAN_GRACE_PERIOD_MS / 3600000}h)`);
 
     // First run after 5 minutes (avoid blocking bootstrap)
-    const initialDelay = setTimeout(() => {
+    initialDelayTimer = setTimeout(() => {
+        initialDelayTimer = null;
         runReconciliation().catch(e =>
             logger.error("[StorageReconcile] Unhandled error:", { error: e instanceof Error ? e.message : String(e) })
         );
@@ -277,15 +279,13 @@ export function startStorageReconcileWorker() {
         );
     }, RECONCILE_INTERVAL_MS);
 
-    // Store both timers for cleanup
-    (reconcileTimer as any).__initialDelay = initialDelay;
 }
 
 export function stopStorageReconcileWorker() {
     if (reconcileTimer) {
         clearInterval(reconcileTimer);
-        const initialDelay = (reconcileTimer as any).__initialDelay;
-        if (initialDelay) clearTimeout(initialDelay);
+        if (initialDelayTimer) clearTimeout(initialDelayTimer);
+        initialDelayTimer = null;
         reconcileTimer = null;
         logger.info("[StorageReconcile] Worker stopped");
     }

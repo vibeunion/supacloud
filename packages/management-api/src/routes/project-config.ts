@@ -14,6 +14,7 @@ import {
 } from "../services/gateway.service";
 import { certificateService } from "../services/certificate.service";
 import { logger } from "../utils/logger";
+import { recordOrEmpty } from "../utils/record";
 import {
   OPENAPI_AUTH_CONFIG_RESPONSE_TEMPLATE,
   OPENAPI_CUSTOM_HOSTNAME_RESPONSE_TEMPLATE,
@@ -511,20 +512,20 @@ async function applyCustomGatewayRoutes(projectRef: string, settings: Record<str
 function buildCustomHostnameResponse(domainInfo: unknown) {
   const response = cloneTemplate(
     OPENAPI_CUSTOM_HOSTNAME_RESPONSE_TEMPLATE,
-  ) as Record<string, any>;
+  ) as Record<string, unknown>;
   const raw = (domainInfo as Record<string, unknown>) || {};
   const hostname =
     typeof raw.custom_hostname === "string" ? raw.custom_hostname : "";
   const configured = hostname.length > 0;
-  const data = (response.data as Record<string, any>) || {};
-  const result = (data.result as Record<string, any>) || {};
-  const ssl = (result.ssl as Record<string, any>) || {};
+  const data = recordOrEmpty(response["data"]);
+  const result = recordOrEmpty(data["result"]);
+  const ssl = recordOrEmpty(result["ssl"]);
 
-  response.custom_hostname = hostname;
-  response.status = configured
+  response["custom_hostname"] = hostname;
+  response["status"] = configured
     ? "5_services_reconfigured"
     : "1_not_started";
-  response.data = {
+  response["data"] = {
     ...data,
     success: configured,
     result: {
@@ -535,7 +536,7 @@ function buildCustomHostnameResponse(domainInfo: unknown) {
       status: configured ? "active" : "pending",
       ssl: {
         ...ssl,
-        status: configured ? "active" : ssl.status,
+        status: configured ? "active" : ssl["status"],
       },
     },
   };
@@ -545,35 +546,36 @@ function buildCustomHostnameResponse(domainInfo: unknown) {
 function buildStorageConfigResponse(raw: Record<string, unknown>) {
   const response = cloneTemplate(
     OPENAPI_STORAGE_CONFIG_RESPONSE_TEMPLATE,
-  ) as Record<string, any>;
-  const features = (raw.features as Record<string, any>) || {};
+  ) as Record<string, unknown>;
+  const features = recordOrEmpty(raw.features);
+  const defaults = recordOrEmpty(response["features"]);
 
-  response.fileSizeLimit = Number(
-    raw.fileSizeLimit ?? raw.file_size_limit ?? response.fileSizeLimit,
+  response["fileSizeLimit"] = Number(
+    raw.fileSizeLimit ?? raw.file_size_limit ?? response["fileSizeLimit"],
   );
-  response.features = {
-    ...(response.features as Record<string, unknown>),
+  response["features"] = {
+    ...defaults,
     ...features,
     imageTransformation: {
-      ...((response.features as Record<string, any>).imageTransformation || {}),
-      ...((features.imageTransformation as Record<string, unknown>) || {}),
+      ...recordOrEmpty(defaults["imageTransformation"]),
+      ...recordOrEmpty(features["imageTransformation"]),
     },
     s3Protocol: {
-      ...((response.features as Record<string, any>).s3Protocol || {}),
-      ...((features.s3Protocol as Record<string, unknown>) || {}),
+      ...recordOrEmpty(defaults["s3Protocol"]),
+      ...recordOrEmpty(features["s3Protocol"]),
     },
     purgeCache: {
-      ...((response.features as Record<string, any>).purgeCache || {}),
-      ...((features.purgeCache as Record<string, unknown>) || {}),
+      ...recordOrEmpty(defaults["purgeCache"]),
+      ...recordOrEmpty(features["purgeCache"]),
     },
     icebergCatalog: {
-      ...((response.features as Record<string, any>).icebergCatalog || {}),
-      ...((features.icebergCatalog as Record<string, unknown>) || {}),
+      ...recordOrEmpty(defaults["icebergCatalog"]),
+      ...recordOrEmpty(features["icebergCatalog"]),
       enabled: false,
     },
     vectorBuckets: {
-      ...((response.features as Record<string, any>).vectorBuckets || {}),
-      ...((features.vectorBuckets as Record<string, unknown>) || {}),
+      ...recordOrEmpty(defaults["vectorBuckets"]),
+      ...recordOrEmpty(features["vectorBuckets"]),
       enabled: true,
       experimental: true,
       dataPlane: "bounded_exact_scan",
@@ -582,8 +584,8 @@ function buildStorageConfigResponse(raw: Record<string, unknown>) {
       maxValuesPerIndex: 1_000_000,
     },
   };
-  response.capabilities = {
-    ...(response.capabilities as Record<string, unknown>),
+  response["capabilities"] = {
+    ...recordOrEmpty(response["capabilities"]),
     ...(((raw.capabilities as Record<string, unknown>) || {}) as Record<
       string,
       unknown
@@ -593,26 +595,26 @@ function buildStorageConfigResponse(raw: Record<string, unknown>) {
     storage_vectors: true,
     storage_vectors_experimental: true,
   };
-  response.external = {
-    ...(response.external as Record<string, unknown>),
+  response["external"] = {
+    ...recordOrEmpty(response["external"]),
     ...(((raw.external as Record<string, unknown>) || {}) as Record<
       string,
       unknown
     >),
   };
-  response.migrationVersion =
+  response["migrationVersion"] =
     (raw.migrationVersion as string) ??
     (raw.migration_version as string) ??
-    response.migrationVersion;
-  response.databasePoolMode =
+    response["migrationVersion"];
+  response["databasePoolMode"] =
     (raw.databasePoolMode as string) ??
     (raw.database_pool_mode as string) ??
-    response.databasePoolMode;
+    response["databasePoolMode"];
 
   return {
     ...raw,
     ...response,
-    fileSizeLimit: response.fileSizeLimit,
+    fileSizeLimit: response["fileSizeLimit"],
     features: response.features,
     capabilities: response.capabilities,
     external: response.external,
@@ -1338,20 +1340,20 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
           const hookName = hookMap[key];
           if (hookName) {
             const currentHooks =
-              (currentAuth.hooks as Record<string, any>) || {};
-            const pendingHooks = (otherUpdates.hooks as Record<string, any>) || {};
+              recordOrEmpty(currentAuth.hooks);
+            const pendingHooks = recordOrEmpty(otherUpdates.hooks);
             const currentHook = {
-              ...(currentHooks[hookName] || {}),
-              ...(pendingHooks[hookName] || {}),
+              ...recordOrEmpty(currentHooks[hookName]),
+              ...recordOrEmpty(pendingHooks[hookName]),
             };
             if (key.endsWith("_enabled")) {
               otherUpdates.hooks = {
-                ...((otherUpdates.hooks as Record<string, any>) || {}),
+                ...recordOrEmpty(otherUpdates.hooks),
                 [hookName]: { ...currentHook, enabled: !!val },
               };
             } else if (key.endsWith("_uri")) {
               otherUpdates.hooks = {
-                ...((otherUpdates.hooks as Record<string, any>) || {}),
+                ...recordOrEmpty(otherUpdates.hooks),
                 [hookName]: { ...currentHook, uri: val },
               };
             } else if (key.endsWith("_secrets") && isNewControlSecret(val)) {
@@ -1430,8 +1432,8 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
         ...(otherUpdates.hooks
           ? {
               hooks: {
-                ...((mergeBaseAuth.hooks as Record<string, any>) || {}),
-                ...(otherUpdates.hooks as Record<string, any>),
+                ...recordOrEmpty(mergeBaseAuth.hooks),
+                ...recordOrEmpty(otherUpdates.hooks),
               },
             }
           : {}),
@@ -1457,8 +1459,8 @@ export const projectConfigRoutes = new Elysia({ prefix: "/v1/projects" })
       delete mergedAuth.smtp;
       if (otherUpdates.hooks)
         mergedAuth.hooks = {
-          ...((mergeBaseAuth.hooks as Record<string, any>) || {}),
-          ...(otherUpdates.hooks as Record<string, any>),
+          ...recordOrEmpty(mergeBaseAuth.hooks),
+          ...recordOrEmpty(otherUpdates.hooks),
         };
       if (otherUpdates.smtp)
         mergedAuth.smtp = {

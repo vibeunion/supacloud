@@ -429,10 +429,12 @@ export default async function handler(req: Request) {
 
     // Refresh after the GoTrue metadata update so the response carries its authoritative user.
     const finalUser = await getAuthUser(req, sessionUser.id)
-    const finalSession = { ...session, user: finalUser || sessionUser }
+    const finalSession = {
+      ...session,
+      user: finalUser || sessionUser,
+      ...(typeof session_key === "string" && session_key ? { provider_token: session_key } : {}),
+    }
     const responseUser = finalSession.user ?? null
-    // Embed native OAuth provider tokens to complete the session payload matching Official Supabase
-    if (session_key) (finalSession as any).provider_token = session_key;
 
     // Wrapped in { data: { session, user } }, matching supabase-mp-js signInWithWechat contract
     // signInWithWechat destructures session/user from responseData.data.session and responseData.data.user
@@ -502,11 +504,13 @@ export default async function handler(req: Request) {
 
     // Refresh after the GoTrue metadata update so the response carries its authoritative user.
     const finalUser = await getAuthUser(req, sessionUser.id)
-    const finalSession = { ...session, user: finalUser || sessionUser }
+    const finalSession = {
+      ...session,
+      user: finalUser || sessionUser,
+      ...(typeof tokenData.access_token === "string" && tokenData.access_token ? { provider_token: tokenData.access_token } : {}),
+      ...(typeof tokenData.refresh_token === "string" && tokenData.refresh_token ? { provider_refresh_token: tokenData.refresh_token } : {}),
+    }
     const responseUser = finalSession.user ?? null
-    // Embed native OAuth provider tokens to complete the session payload matching Official Supabase
-    if (tokenData.access_token) (finalSession as any).provider_token = tokenData.access_token;
-    if (tokenData.refresh_token) (finalSession as any).provider_refresh_token = tokenData.refresh_token;
 
     // Wrapped in { data: { session, user } }, matching supabase-mp-js signInWithWechat contract
     return new Response(JSON.stringify({ data: { session: finalSession, user: responseUser } }), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" } })

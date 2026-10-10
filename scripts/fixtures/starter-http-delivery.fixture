@@ -35,7 +35,7 @@ export function createDeliveryApplication(modules: CompiledModule[]) {
   assert.ok(!bundle.includes("@typescript/typescript6"));
   assert.ok(!bundle.includes("Local demo:"));
   child = Bun.spawn([process.execPath, "--no-env-file", "index.js"], {
-    cwd: detached, env: {PATH: process.env.PATH, PORT: "0", HOST: "127.0.0.1"},
+    cwd: detached, env: {PATH: process.env["PATH"], PORT: "0", HOST: "127.0.0.1"},
     stdout: "pipe", stderr: "pipe",
   });
   assert.ok(child.stdout && typeof child.stdout !== "number");

@@ -20,7 +20,7 @@ function firstStringArray(...candidates: unknown[]): string[] {
 export function buildNetworkRestrictionsResponse(value: unknown) {
   const response = structuredClone(
     OPENAPI_NETWORK_RESTRICTIONS_RESPONSE_TEMPLATE,
-  ) as Record<string, any>;
+  ) as Record<string, unknown>;
   const raw = (value as Record<string, unknown>) || {};
   const config = (raw.config as Record<string, unknown>) || raw;
   const dbAllowedCidrs = firstStringArray(

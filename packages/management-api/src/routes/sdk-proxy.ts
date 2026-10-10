@@ -718,7 +718,7 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: P
             headers: proxyHeaders
         });
 
-    } catch (err: any) {
+    } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         const name = err instanceof Error ? err.name : "";
         if (name === "TimeoutError" || name === "AbortError" || /abort|timeout/i.test(message)) {
@@ -739,7 +739,7 @@ async function executeProxy(request: Request, targetUrl: string, interceptors: P
 
 const sdkProxyRoutesBase = new Elysia({ prefix: "" })
     .group("/auth/v1", (app) => {
-        const handler = async ({ request }: any) => {
+        const handler = async ({ request }: { request: Request }) => {
             const ref = await getProjectRef(request);
             if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
             const authAuthorityRef = getAuthRuntimeDescriptor(ref).authority_project_ref;
@@ -782,7 +782,7 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
                   .get("", { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }, handler).post("", { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }, handler).put("", { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }, handler).patch("", { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }, handler).delete("", { detail: { tags: ["sdk-proxy"], summary: "Proxy Auth request" } }, handler).options("", handler);
     })
     .group("/rest/v1", (app) => {
-        const handler = async ({ request }: any) => {
+        const handler = async ({ request }: { request: Request }) => {
             const ref = await getProjectRef(request);
             if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
             if (isOpenApiSchemaRequest(request) && !(await hasProjectServiceRoleCredential(request, ref))) {
@@ -802,7 +802,7 @@ const sdkProxyRoutesBase = new Elysia({ prefix: "" })
                   .get("", { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }, handler).post("", { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }, handler).put("", { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }, handler).patch("", { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }, handler).delete("", { detail: { tags: ["sdk-proxy"], summary: "Proxy REST request" } }, handler).options("", handler);
     });
 
-const graphqlHandler = async ({ request }: any) => {
+const graphqlHandler = async ({ request }: { request: Request }) => {
     const ref = await getProjectRef(request);
     if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     const governance = await governGraphqlProjectRequest(request, async () => {
@@ -832,7 +832,7 @@ const graphqlHandler = async ({ request }: any) => {
     });
 };
 
-const realtimeHandler = async ({ request }: any) => {
+const realtimeHandler = async ({ request }: { request: Request }) => {
     const ref = await getProjectRef(request);
     if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     
@@ -841,7 +841,7 @@ const realtimeHandler = async ({ request }: any) => {
     return executeProxy(request, targetUrl, { ref });
 };
 
-const functionsHandler = async ({ request }: any) => {
+const functionsHandler = async ({ request }: { request: Request }) => {
     const ref = await getProjectRef(request);
     if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 

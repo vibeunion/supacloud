@@ -399,8 +399,12 @@ const originalConsole = {
   debug: console.debug,
 };
 
+const edgeRuntimeGlobal = globalThis as typeof globalThis & {
+  EdgeRuntime?: { waitUntil(promise: unknown): void };
+};
+
 function setupConsoleCapture(functionId: string) {
-  const sendLog = (stream: "stdout" | "stderr", level: string, ...args: any[]) => {
+  const sendLog = (stream: "stdout" | "stderr", level: string, ...args: unknown[]) => {
     try {
       postToParent({
         type: "log",
@@ -413,11 +417,11 @@ function setupConsoleCapture(functionId: string) {
     } catch {}
   };
 
-  console.log = (...args: any[]) => { originalConsole.log(...args); sendLog("stdout", "info", ...args); };
-  console.warn = (...args: any[]) => { originalConsole.warn(...args); sendLog("stderr", "warn", ...args); };
-  console.error = (...args: any[]) => { originalConsole.error(...args); sendLog("stderr", "error", ...args); };
-  console.info = (...args: any[]) => { originalConsole.info(...args); sendLog("stdout", "info", ...args); };
-  console.debug = (...args: any[]) => { originalConsole.debug(...args); sendLog("stdout", "debug", ...args); };
+  console.log = (...args: unknown[]) => { originalConsole.log(...args); sendLog("stdout", "info", ...args); };
+  console.warn = (...args: unknown[]) => { originalConsole.warn(...args); sendLog("stderr", "warn", ...args); };
+  console.error = (...args: unknown[]) => { originalConsole.error(...args); sendLog("stderr", "error", ...args); };
+  console.info = (...args: unknown[]) => { originalConsole.info(...args); sendLog("stdout", "info", ...args); };
+  console.debug = (...args: unknown[]) => { originalConsole.debug(...args); sendLog("stdout", "debug", ...args); };
 }
 
 function restoreConsole() {
@@ -437,7 +441,7 @@ function runCleanup(cleanup: () => void): void {
 
 function setupEdgeRuntimeCompat(backgroundAllowed = true) {
   currentWaitUntilTasks = [];
-  (globalThis as any).EdgeRuntime = {
+  edgeRuntimeGlobal.EdgeRuntime = {
     waitUntil(promise: PromiseLike<unknown> | unknown) {
       if (!backgroundAllowed) {
         throw new Error("EdgeRuntime.waitUntil is not enabled by the Function capability policy");
@@ -464,7 +468,7 @@ async function flushWaitUntilTasks(functionId: string) {
 
 function clearEdgeRuntimeCompat() {
   currentWaitUntilTasks = [];
-  delete (globalThis as any).EdgeRuntime;
+  delete edgeRuntimeGlobal.EdgeRuntime;
 }
 
 async function loadModule(input: {
@@ -727,11 +731,11 @@ async function onParentMessage(msg: unknown): Promise<void> {
       } finally {
         restoreFetchTlsPolicy();
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       postToParent({
         type: "preheat_error",
         functionId: msg.functionId,
-        error: err.message,
+        error: err instanceof Error ? err.message : String(err),
       });
     } finally {
       restoreEnv();
@@ -852,13 +856,13 @@ async function onParentMessage(msg: unknown): Promise<void> {
                 done: false,
               });
             }
-          } catch (err: any) {
+          } catch (err: unknown) {
             traceStatus = 500;
             postToParent({
               type: "stream_chunk",
               streamId,
               done: true,
-              error: err.message,
+              error: err instanceof Error ? err.message : String(err),
             });
           }
 
@@ -876,7 +880,7 @@ async function onParentMessage(msg: unknown): Promise<void> {
         const resHeaders: Record<string, string | string[]> = {};
         response.headers.forEach((v, k) => {
           if (k.toLowerCase() === "set-cookie") {
-            const cookies = (response.headers as any).getSetCookie?.();
+            const cookies = response.headers.getSetCookie();
             if (cookies && cookies.length > 1) {
               resHeaders[k] = cookies;
               return;
@@ -895,14 +899,14 @@ async function onParentMessage(msg: unknown): Promise<void> {
         });
         await flushWaitUntilTasks(functionId);
       }), () => traceStatus);
-  } catch (err: any) {
-    const aborted = currentAbortController?.signal.aborted || err?.name === "AbortError";
+  } catch (err: unknown) {
+    const aborted = currentAbortController?.signal.aborted || (err instanceof Error && err.name === "AbortError");
     const message = err instanceof Error ? err.message : String(err);
     postToParent({
       status: aborted ? 499 : err instanceof FunctionResponseLimitError ? 502 : 500,
       headers: { "Content-Type": "application/json" },
       body: Buffer.from(
-        JSON.stringify({ error: message, name: err.name }),
+        JSON.stringify({ error: message, name: err instanceof Error ? err.name : "Error" }),
       ).buffer,
     });
   } finally {

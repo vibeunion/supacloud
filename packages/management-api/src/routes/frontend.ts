@@ -24,6 +24,15 @@ const FRONTEND_UPLOAD_MAX_UNCOMPRESSED_BYTES = Number(process.env.FRONTEND_UPLOA
 const SAFE_ID_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
 const IMMUTABLE_UPLOAD_CHUNK_BYTES = 64 * 1024;
 
+type ArrayBufferBody = { arrayBuffer(): Promise<ArrayBuffer> };
+
+function hasArrayBuffer(value: unknown): value is ArrayBufferBody {
+  return value !== null
+    && typeof value === "object"
+    && "arrayBuffer" in value
+    && typeof value.arrayBuffer === "function";
+}
+
 function isSafeZipEntryName(name: string): boolean {
   const normalized = name.replace(/\\/g, "/");
   return !!normalized && !normalized.startsWith("/") && !normalized.includes("../") && normalized !== ".." && !normalized.split("/").includes("..");
@@ -72,9 +81,9 @@ async function validateZipArchive(zipPath: string): Promise<{ ok: true } | { ok:
 
 async function readUploadedZip(request: Request, body: unknown): Promise<Uint8Array> {
   // 1. If body is already File / Blob or has arrayBuffer method
-  if (body && typeof body === "object" && typeof (body as any).arrayBuffer === "function") {
+  if (hasArrayBuffer(body)) {
     try {
-      return new Uint8Array(await (body as any).arrayBuffer());
+      return new Uint8Array(await body.arrayBuffer());
     } catch {
       // ignore
     }
@@ -83,9 +92,9 @@ async function readUploadedZip(request: Request, body: unknown): Promise<Uint8Ar
   // 2. If body is an object, inspect its properties (e.g. file field or any field containing arrayBuffer)
   if (body && typeof body === "object") {
     const directFile = (body as Record<string, unknown>).file;
-    if (directFile && typeof directFile === "object" && typeof (directFile as any).arrayBuffer === "function") {
+    if (hasArrayBuffer(directFile)) {
       try {
-        return new Uint8Array(await (directFile as any).arrayBuffer());
+        return new Uint8Array(await directFile.arrayBuffer());
       } catch {
         // ignore
       }
@@ -93,9 +102,9 @@ async function readUploadedZip(request: Request, body: unknown): Promise<Uint8Ar
 
     // Iterate all keys to support custom field names from different clients
     for (const val of Object.values(body)) {
-      if (val && typeof val === "object" && typeof (val as any).arrayBuffer === "function") {
+      if (hasArrayBuffer(val)) {
         try {
-          return new Uint8Array(await (val as any).arrayBuffer());
+          return new Uint8Array(await val.arrayBuffer());
         } catch {
           // ignore
         }
@@ -109,8 +118,8 @@ async function readUploadedZip(request: Request, body: unknown): Promise<Uint8Ar
     try {
       const form = await request.formData();
       const file = form.get("file");
-      if (file && typeof file === "object" && typeof (file as any).arrayBuffer === "function") {
-        return new Uint8Array(await (file as any).arrayBuffer());
+      if (hasArrayBuffer(file)) {
+        return new Uint8Array(await file.arrayBuffer());
       }
     } catch {
       // ignore

@@ -110,7 +110,7 @@ export async function verifyAttachmentWorkerDelivery(options: {
       child = Bun.spawn([process.execPath, "--no-env-file", "index.js"], {
         cwd: bundle, stdout: "pipe", stderr: "pipe",
         env: {
-          PATH: process.env.PATH, DATABASE_SOCKET_PATH: options.connection.socketPath,
+          PATH: process.env["PATH"], DATABASE_SOCKET_PATH: options.connection.socketPath,
           DATABASE_NAME: options.connection.database, DATABASE_USER: options.connection.username,
           SUPACLOUD_URL: options.database.storage.url, SUPACLOUD_SERVICE_ROLE_KEY: options.database.storage.serviceRoleKey,
           SUPACLOUD_PROJECT_ID: "starter-test", APP_TENANT_ID: "starter-test",

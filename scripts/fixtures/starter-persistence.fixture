@@ -25,9 +25,9 @@ function rows(value: unknown): Record<string, unknown>[] {
 }
 function result(value: unknown): Review {
   const item = record(value);
-  assert.ok(item.state === "draft" || item.state === "approved");
-  assert.ok(typeof item.version === "number" && Number.isSafeInteger(item.version) && item.version > 0);
-  return { state: item.state, version: item.version };
+  assert.ok(item["state"] === "draft" || item["state"] === "approved");
+  assert.ok(typeof item["version"] === "number" && Number.isSafeInteger(item["version"]) && item["version"] > 0);
+  return { state: item["state"], version: item["version"] };
 }
 
 /** Exercises the installed starter's compiled handler, not a second approval implementation. */
@@ -115,7 +115,7 @@ export async function verifyPersistentStarter(
   ))[0]);
   const count = async (table: "execution_receipts" | "execution_audit", key: string) => rows(await query(
     `SELECT count(*)::integer AS count FROM supacloud_commands.${table} WHERE operation_key=$1`, [key],
-  ))[0]?.count;
+  ))[0]?.["count"];
 
   const id = await seed(), key = crypto.randomUUID();
   for (const bearer of ["", await token("owner", "wrong-audience")]) {

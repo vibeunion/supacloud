@@ -14,20 +14,19 @@ import { registerAdvancedTools } from "./shared/tools/advanced-tools";
 import { registerAdminProjectCliTools } from "./shared/tools/project-cli-tools";
 import { registerGatewayTools } from "./shared/tools/gateway-tools";
 import { registerFrontendTools } from "./shared/tools/frontend-tools";
+import type { ToolInvocation, ToolServer } from "../../cli/src/shared/tool-server";
+import { parseToolArguments } from "../../cli/src/shared/schema";
+import type { ToolSchema } from "../../cli/src/shared/schema";
 import packageMetadata from "../package.json" with { type: "json" };
 
-type ToolEntry = { schema: any; callback: (args: any) => Promise<any> };
+type ToolEntry = { schema: ToolSchema; callback: ToolInvocation };
 type ToolMap = Record<string, ToolEntry>;
 
-function captureTools(register: (server: { tool: (...args: any[]) => void }) => void): ToolMap {
+function captureTools(register: (server: ToolServer) => void): ToolMap {
     const tools: ToolMap = {};
-    const server = {
-        tool(name: string, _description: string, schemaOrCallback: any, callback?: any) {
-            if (typeof schemaOrCallback === "function") {
-                tools[name] = { schema: {}, callback: schemaOrCallback };
-            } else {
-                tools[name] = { schema: schemaOrCallback, callback };
-            }
+    const server: ToolServer = {
+        tool(name, _description, schema, callback) {
+            tools[name] = { schema, callback };
         },
     };
     register(server);
@@ -48,15 +47,15 @@ function unavailableAdminSchemas(): Record<"project" | "platform" | "gateway" | 
     const schemaOnlyHttp = {} as HttpTransport;
     return {
         project: captureTools((server) =>
-            registerAdminProjectCliTools(server as any, schemaOnlyHttp)).project.schema,
+            registerAdminProjectCliTools(server, schemaOnlyHttp)).project.schema,
         platform: captureTools((server) =>
-            registerAdvancedTools(server as any, schemaOnlyHttp)).platform.schema,
+            registerAdvancedTools(server, schemaOnlyHttp)).platform.schema,
         gateway: captureTools((server) =>
-            registerGatewayTools(server as any, schemaOnlyHttp)).gateway.schema,
+            registerGatewayTools(server, schemaOnlyHttp)).gateway.schema,
         frontend: captureTools((server) =>
-            registerFrontendTools(server as any, schemaOnlyHttp)).frontend.schema,
+            registerFrontendTools(server, schemaOnlyHttp)).frontend.schema,
         ssh: captureTools((server) =>
-            registerSshTools(server as any, {} as SshTransport)).ssh.schema,
+            registerSshTools(server, {} as SshTransport)).ssh.schema,
     };
 }
 
@@ -150,7 +149,8 @@ function authorizedToolMap(
     validateExecutionPolicyCoverage(tools);
     for (const [moduleName, tool] of Object.entries(tools)) {
         const callback = tool.callback;
-        tool.callback = async (args: Record<string, unknown>) => {
+        tool.callback = async (input) => {
+            const args = parseToolArguments(tool.schema, input);
             authorizeExecution(moduleName, args, { context, confirmProduction });
             return callback(args);
         };
@@ -203,7 +203,7 @@ export function createAdminTools(
                 password: context.sshPass || undefined,
                 hostFingerprint: context.sshHostFingerprint,
             });
-            Object.assign(tools, captureTools((server) => registerSshTools(server as any, ssh)));
+            Object.assign(tools, captureTools((server) => registerSshTools(server, ssh)));
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             tools.ssh = {
@@ -240,11 +240,11 @@ export function createAdminTools(
             token: context.apiToken,
         });
 
-        Object.assign(tools, captureTools((server) => registerAdminProjectCliTools(server as any, http)));
-        Object.assign(tools, captureTools((server) => registerGatewayTools(server as any, http)));
-        Object.assign(tools, captureTools((server) => registerFrontendTools(server as any, http)));
+        Object.assign(tools, captureTools((server) => registerAdminProjectCliTools(server, http)));
+        Object.assign(tools, captureTools((server) => registerGatewayTools(server, http)));
+        Object.assign(tools, captureTools((server) => registerFrontendTools(server, http)));
 
-        const advancedTools = captureTools((server) => registerAdvancedTools(server as any, http));
+        const advancedTools = captureTools((server) => registerAdvancedTools(server, http));
         if (advancedTools.platform) {
             tools.platform = advancedTools.platform;
         }

@@ -16,6 +16,9 @@ import {
   type AuthContext,
 } from "../middleware/auth";
 import { logger } from "../utils/logger";
+import { parsePhoenixMessage } from "../utils/phoenix-message";
+import { parsePostgresChangeSubscriptions } from "../utils/realtime-change";
+import { isRecord } from "../utils/record";
 
 // --- Subscriber registry ---
 interface WsClient {
@@ -378,21 +381,22 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
                 try {
                     const data = typeof event.data === 'string' ? event.data : '';
                     if (data) {
-                        const raw = JSON.parse(data);
-                        let parsed: any;
-                        if (Array.isArray(raw)) {
-                            parsed = { join_ref: raw[0], ref: raw[1], topic: raw[2], event: raw[3], payload: raw[4] };
-                        } else {
-                            parsed = raw;
-                        }
-                        if (parsed.event === 'phx_reply' && parsed.payload?.response?.postgres_changes) {
-                            const mappings = parsed.payload.response.postgres_changes;
+                        const parsed = parsePhoenixMessage(data);
+                        const response = parsed?.payload["response"];
+                        if (parsed?.event === 'phx_reply' && isRecord(response)) {
+                            const mappings = response["postgres_changes"];
                             if (Array.isArray(mappings) && ref) {
+                                const ids: Array<{ id: string | number }> = [];
+                                for (const mapping of mappings as unknown[]) {
+                                    if (!isRecord(mapping)) continue;
+                                    const id = mapping["id"];
+                                    if (typeof id === "string" || (typeof id === "number" && Number.isSafeInteger(id))) ids.push({ id });
+                                }
                                 import("../services/realtime-bun.service").then(({ realtimeBunService }) => {
                                     realtimeBunService.registerSubscriptionIds(
                                         ref,
                                         typeof parsed.join_ref === "string" ? parsed.join_ref : "upstream",
-                                        mappings,
+                                        ids,
                                     );
                                 }).catch(() => {});
                             }
@@ -452,13 +456,8 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
         try {
             // P0-1: Handle Phoenix V2 array format [join_ref, ref, topic, event, payload]
             // The Supabase Realtime SDK uses V2 serialization by default (DEFAULT_VSN = '2.0.0')
-            const raw = typeof rawMessage === "string" ? JSON.parse(rawMessage) : rawMessage;
-            let parsed: { join_ref?: string | null; ref?: string | null; topic: string; event: string; payload: any };
-            if (Array.isArray(raw)) {
-                parsed = { join_ref: raw[0], ref: raw[1], topic: raw[2], event: raw[3], payload: raw[4] };
-            } else {
-                parsed = raw;
-            }
+            const parsed = parsePhoenixMessage(rawMessage);
+            if (!parsed) return;
             
             // P0-12, P0-4: phx_leave intercept (graceful teardown locally + proxy)
             if (parsed.event === 'phx_leave') {
@@ -505,8 +504,8 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
 
             // P0-13: access_token intercept
             if (parsed.event === 'access_token') {
-                const newToken = parsed.payload?.access_token;
-                if (newToken) {
+                const newToken = parsed.payload["access_token"];
+                if (typeof newToken === "string" && newToken.length > 0) {
                     state.token = newToken;
                     // Forward to Elixir for upstream tenant isolation
                 }
@@ -514,13 +513,15 @@ export const wsRoutes = new Elysia({ prefix: "/ws" })
 
             // P0-14: postgres_changes multiplexing
             if (parsed.event === 'phx_join') {
-                const joinToken = parsed.payload?.access_token || state.token || state.apikey;
+                const accessToken = parsed.payload["access_token"];
+                const joinToken = typeof accessToken === "string" && accessToken.length > 0 ? accessToken : state.token || state.apikey;
                 if (joinToken) {
                     state.token = joinToken;
                 }
 
-                const changes = parsed.payload?.config?.postgres_changes;
-                if (changes && Array.isArray(changes) && changes.length > 0 && ref) {
+                const config = parsed.payload["config"];
+                const changes = isRecord(config) ? parsePostgresChangeSubscriptions(config["postgres_changes"]) : null;
+                if (changes && ref) {
                     const topic = parsed.topic;
                     const subscriptions = changes;
                     state.pendingJoins.get(topic)?.abort();

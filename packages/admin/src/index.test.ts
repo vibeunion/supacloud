@@ -719,7 +719,8 @@ describe("supacloud-admin process contract", () => {
         });
 
         expect(execution.exitCode).toBe(1);
-        expect(execution.output).toContain("❌ Unknown action: undefined");
+        expect(execution.output).toContain("Invalid arguments");
+        expect(execution.output).toContain("required properties action");
         expect(execution.output).not.toContain("test-token");
     });
 

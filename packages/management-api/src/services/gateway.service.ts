@@ -11,6 +11,7 @@ import {
 } from "../utils/project-routing";
 import { normalizeProjectConfig, resolveExternalAuthEndpointConfig } from "../utils/project-config";
 import { uniqueStrings } from "../utils/strings";
+import { isRecord, recordOrEmpty } from "../utils/record";
 import { stableStringify } from "../utils/stable-json";
 import { GOTRUE_USER_ID_POSTGRES_PATTERN } from "../utils/project-user-lifecycle";
 import { assertUniqueCaddyIds, runCaddyStartupPreflight } from "./caddy-startup-preflight";
@@ -581,13 +582,16 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }
 
     private hydrateCertificatesFromConfig(parsed: CaddyConfig): void {
-        const certs = (parsed.apps?.tls as Record<string, any> | undefined)?.["certificates"]?.load_files;
+        const tls = recordOrEmpty(parsed.apps?.tls);
+        const certs = recordOrEmpty(tls["certificates"])["load_files"];
         if (!Array.isArray(certs)) return;
         for (const cert of certs) {
-            if (typeof cert?.certificate !== "string" || typeof cert?.key !== "string") continue;
-            const id = `disk-${hashStr(`${cert.certificate}:${cert.key}`)}`;
+            if (!isRecord(cert) || typeof cert["certificate"] !== "string" || typeof cert["key"] !== "string") continue;
+            const certificate = cert["certificate"];
+            const key = cert["key"];
+            const id = `disk-${hashStr(`${certificate}:${key}`)}`;
             if (!this.certsById.has(id)) {
-                this.certsById.set(id, { certificate: cert.certificate, key: cert.key });
+                this.certsById.set(id, { certificate, key });
             }
         }
     }
@@ -644,22 +648,26 @@ export class CaddyGatewayProvider implements GatewayProvider {
             && !isCorsSubroute(handler));
         migrated["handle"] = migratedHandle;
 
-        const proxy = migratedHandle.find((handler) => handler["handler"] === "reverse_proxy") as Record<string, any> | undefined;
+        const proxy = migratedHandle.find((handler) => handler["handler"] === "reverse_proxy");
         if (!proxy) return migrated;
 
         const canonicalHost = `${projectRef}.api.${config.baseDomain}`;
-        proxy["headers"] = proxy["headers"] && typeof proxy["headers"] === "object" ? proxy["headers"] : {};
-        proxy["headers"].request = proxy["headers"].request && typeof proxy["headers"].request === "object" ? proxy["headers"].request : {};
-        proxy["headers"].request.set = proxy["headers"].request.set && typeof proxy["headers"].request.set === "object" ? proxy["headers"].request.set : {};
-        proxy["headers"].request.set.Host = [canonicalHost];
-        proxy["headers"].request.set["X-Forwarded-Host"] = [canonicalHost];
-        proxy["headers"].request.set["X-Project-Ref"] = [projectRef];
-        proxy["headers"].request.set["x-project-ref"] = [projectRef];
-        proxy["headers"].request.set["X-Forwarded-Proto"] = ["{http.request.scheme}"];
+        const headers = recordOrEmpty(proxy["headers"]);
+        const request = recordOrEmpty(headers["request"]);
+        const set = recordOrEmpty(request["set"]);
+        proxy["headers"] = headers;
+        headers["request"] = request;
+        request["set"] = set;
+        set["Host"] = [canonicalHost];
+        set["X-Forwarded-Host"] = [canonicalHost];
+        set["X-Project-Ref"] = [projectRef];
+        set["x-project-ref"] = [projectRef];
+        set["X-Forwarded-Proto"] = ["{http.request.scheme}"];
 
         if (isStorageRoute) {
-            proxy["headers"].response = proxy["headers"].response && typeof proxy["headers"].response === "object" ? proxy["headers"].response : {};
-            delete proxy["headers"].response.delete;
+            const response = recordOrEmpty(headers["response"]);
+            headers["response"] = response;
+            delete response["delete"];
             delete proxy["flush_interval"];
         }
 
@@ -672,9 +680,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 ));
             } else {
                 // Preserve function-owned CORS headers on existing deployments.
-                if (proxy["headers"]["response"] && typeof proxy["headers"]["response"] === "object") {
-                    delete proxy["headers"]["response"]["delete"];
-                    if (Object.keys(proxy["headers"]["response"]).length === 0) delete proxy["headers"]["response"];
+                if (isRecord(headers["response"])) {
+                    delete headers["response"]["delete"];
+                    if (Object.keys(headers["response"]).length === 0) delete headers["response"];
                 }
                 if (!migratedHandle.some((handler) => handler["handler"] === "subroute" && "errors" in handler)) {
                     migratedHandle.unshift(makeFunctionCorsErrorFallback(
@@ -709,9 +717,10 @@ export class CaddyGatewayProvider implements GatewayProvider {
         if (!zones || typeof zones !== "object") return null;
 
         const limits = { second: 0, minute: 0, hour: 0 };
-        for (const [zoneName, zone] of Object.entries(zones as Record<string, any>)) {
-            const window = String(zone?.window || "");
-            const maxEvents = Number(zone?.max_events || 0);
+        for (const [zoneName, rawZone] of Object.entries(recordOrEmpty(zones))) {
+            const zone = recordOrEmpty(rawZone);
+            const window = String(zone["window"] || "");
+            const maxEvents = Number(zone["max_events"] || 0);
             const encoded = zoneName.match(/_(second|minute|hour)_configured_([0-9]+(?:\.[0-9]+)?)$/);
             if (encoded) {
                 const dimension = encoded[1] as keyof RateLimitConfig;
@@ -754,16 +763,18 @@ export class CaddyGatewayProvider implements GatewayProvider {
         const bPriority = typeof b["__supacloud_priority"] === "number" ? b["__supacloud_priority"] : 0;
         if (aPriority !== bPriority) return bPriority - aPriority;
 
-        const aPath = Array.isArray((a["match"] as any)?.[0]?.path) ? String((a["match"] as any)[0].path[0] || "") : "";
-        const bPath = Array.isArray((b["match"] as any)?.[0]?.path) ? String((b["match"] as any)[0].path[0] || "") : "";
+        const aMatch = Array.isArray(a["match"]) && isRecord(a["match"][0]) ? a["match"][0] : undefined;
+        const bMatch = Array.isArray(b["match"]) && isRecord(b["match"][0]) ? b["match"][0] : undefined;
+        const aPath = Array.isArray(aMatch?.["path"]) ? String(aMatch["path"][0] || "") : "";
+        const bPath = Array.isArray(bMatch?.["path"]) ? String(bMatch["path"][0] || "") : "";
         if (aPath.length !== bPath.length) return bPath.length - aPath.length;
 
-        const aProtocolMatcher = (a["match"] as any)?.[0]?.vars?.["{http.request.scheme}"];
-        const bProtocolMatcher = (b["match"] as any)?.[0]?.vars?.["{http.request.scheme}"];
+        const aProtocolMatcher = recordOrEmpty(aMatch?.["vars"])["{http.request.scheme}"];
+        const bProtocolMatcher = recordOrEmpty(bMatch?.["vars"])["{http.request.scheme}"];
         const aProtocol = typeof aProtocolMatcher === "string" || Array.isArray(aProtocolMatcher)
-            || typeof (a["match"] as any)?.[0]?.protocol === "string";
+            || typeof aMatch?.["protocol"] === "string";
         const bProtocol = typeof bProtocolMatcher === "string" || Array.isArray(bProtocolMatcher)
-            || typeof (b["match"] as any)?.[0]?.protocol === "string";
+            || typeof bMatch?.["protocol"] === "string";
         if (aProtocol !== bProtocol) return aProtocol ? -1 : 1;
         return aid.localeCompare(bid);
     }

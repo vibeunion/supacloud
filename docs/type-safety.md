@@ -7,7 +7,8 @@ declaration quality.
 
 ## Merge contract
 
-`bun run check:type-safety` must pass.
+`bun run check:type-safety`, `bun run check:platform-source` and
+`bun run check:strict-governance` must pass.
 
 SupaCloud application compilation always checks selected production source under
 TypeScript strict mode and the additional indexed-access, optional-property,
@@ -39,8 +40,24 @@ source root. Library class instances and declaration internals are boundary type
 not recursively verified application DTOs. Direct `any` and generic `any` results
 are checked at use sites, but excluded declarations can still hide nested unsafe
 types. This does not add Rust ownership, borrowing or whole-program soundness.
-The stronger baseline belongs to user compilation and official starters; shared
-repository tooling retains its existing strict configuration.
+User compilation and official starters enforce the stronger baseline. Shared
+production configurations and repository tooling also enable strict indexed
+access, optional-property, override, index-signature, catch-variable and
+switch-fallthrough checks through `tsconfig.strict.json`.
+
+## Platform source policy
+
+`bun run check:platform-source` parses authored TS/JS source under `packages/*`
+and `scripts`, plus Svelte scripts and template expressions. Explicit `any` and
+type-checking suppressions are forbidden. There is no compatibility allowlist,
+audited-debt baseline or per-file production waiver.
+
+Test/spec files, fixture directories, generated output, build output and
+third-party dependencies are separate boundaries. `.typecheck.` negative
+contracts may use `@ts-expect-error`; they still cannot use explicit `any`,
+`@ts-ignore` or `@ts-nocheck`. This source-policy gate does not prove the absence
+of every inferred `any` from third-party declarations; production typechecks
+and the application compiler's semantic gates remain necessary.
 
 ## Repository inventory
 

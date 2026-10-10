@@ -119,7 +119,7 @@ export async function setupStarterAttachments(options: {
     assert.deepEqual(await (await uploadRequest(reviewId, artifactId, "registration")).json(), expected);
     assert.equal(rows(await query(
       "SELECT count(*)::integer AS count FROM supacloud_commands.execution_audit WHERE operation_key=$1", [artifactId],
-    ))[0]?.count, 1);
+    ))[0]?.["count"], 1);
     assert.ok((await service.storage.from(bucket).update(path, new TextEncoder().encode("changed"))).error,
       "Even service-role writes must respect the immutable registry");
     assert.ok((await service.storage.from(bucket).remove([path])).error);
@@ -210,7 +210,7 @@ export async function setupStarterAttachments(options: {
       assert.equal(rows(await query("SELECT review_id FROM public.starter_attachments WHERE review_id=$1", [reviewId])).length, 0);
       for (const table of ["execution_receipts", "execution_audit"]) {
         assert.equal(rows(await query(`SELECT count(*)::integer AS count FROM supacloud_commands.${table} WHERE operation_key=$1`,
-          [artifactId]))[0]?.count, 0);
+          [artifactId]))[0]?.["count"], 0);
       }
       assert.ok((await owner.storage.from(bucket).download(path)).error);
     } finally {
@@ -242,7 +242,7 @@ export async function setupStarterAttachments(options: {
   });
   const count = async (reviewId: string) => rows(await query(
     "SELECT count(*)::integer AS count FROM public.starter_attachment_results WHERE review_id=$1", [reviewId],
-  ))[0]?.count;
+  ))[0]?.["count"];
   const until = async (check: () => Promise<boolean>) => {
     const deadline = Date.now() + 20_000;
     while (!await check()) {

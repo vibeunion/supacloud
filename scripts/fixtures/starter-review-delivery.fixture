@@ -64,7 +64,7 @@ export async function verifyReviewDelivery(options: {
       try { claims = decodeJwt(bearer); }
       catch { throw new Error("Invalid injected test token"); }
       assert.ok(claims.sub === subject && claims.iss === identity.issuer &&
-        (claims.client_id ?? claims.azp) === identity.clientId && claims.role === "authenticated",
+        (claims["client_id"] ?? claims["azp"]) === identity.clientId && claims["role"] === "authenticated",
       "Injected token identity does not match its test case");
       const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
       assert.ok(audiences.includes(identity.audience) === audienceMatches,
@@ -160,7 +160,7 @@ export async function verifyReviewDelivery(options: {
     const ownerSubject = options.identity?.ownerSubject ?? "owner";
     const ownerToken = options.identity?.tokens.owner ?? await token("owner");
     const env = {
-      PATH: process.env.PATH, ...options.runtimeEnv,
+      PATH: process.env["PATH"], ...options.runtimeEnv,
       PORT: "0", HOST: "127.0.0.1", ...(certificate ? { NODE_EXTRA_CA_CERTS: certificate } : {}),
       ...(options.connection ? {
         DATABASE_SOCKET_PATH: options.connection.socketPath, DATABASE_NAME: options.connection.database,

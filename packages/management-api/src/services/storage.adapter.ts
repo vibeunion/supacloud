@@ -773,7 +773,7 @@ export class S3Driver implements StorageDriver {
     }
   }
 
-  async listFiles(projectRef: string, bucket: string): Promise<any[]> {
+  async listFiles(projectRef: string, bucket: string) {
     const creds = await this.getCreds(projectRef);
     if (!creds?.accessKey || !creds?.secretKey) return [];
 

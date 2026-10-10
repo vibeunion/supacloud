@@ -4,6 +4,7 @@
 import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
+import { registerTool, type ToolServer } from "../../../../cli/src/shared/tool-server";
 import { createFullPhysicalBackup, listPhysicalBackups } from "./backup-release-control";
 import {
     createVerifiedLogicalBackup,
@@ -11,10 +12,10 @@ import {
     restoreVerifiedLogicalBackup,
 } from "./logical-backup-control";
 
-export function registerAdvancedTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
+export function registerAdvancedTools(server: ToolServer, http: HttpTransport): void {
 
     // ═══ Edge Functions (5→1) ═══
-    server.tool(
+    registerTool(server,
         "edge_functions",
         `Edge Function management (Deno/Bun serverless). Server auto-bundles dependencies.
 Actions: list, deploy, deploy_bundle, source, delete, check`,
@@ -28,10 +29,12 @@ Actions: list, deploy, deploy_bundle, source, delete, check`,
             entrypoint: optional(Type.String(), "[deploy_bundle] Entrypoint file (default: index.ts)"),
             minify: optional(Type.Boolean(), "[deploy/deploy_bundle] Minify bundle"),
         },
-        async (args: any) => {
+        async (args) => {
             const { action, ref, slug, path: pathArg, files, entrypoint, minify } = args;
             let code = args.code as string | undefined;
-            const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
+            function need<T>(f: string, v: T): asserts v is NonNullable<T> {
+                if (!v) throw new Error(`'${f}' required for '${action}'`);
+            }
 
             let text: string;
 
@@ -53,8 +56,8 @@ Actions: list, deploy, deploy_bundle, source, delete, check`,
                     const stdout = await new Response(proc.stdout).text();
                     const stderr = await new Response(proc.stderr).text();
                     return { ok: false, err: stdout + "\n" + (stderr || `exit code ${exitCode}`) };
-                } catch (e: any) {
-                    return { ok: false, err: e.message || String(e) };
+                } catch (e: unknown) {
+                    return { ok: false, err: e instanceof Error ? e.message : String(e) };
                 } finally {
                     try { fs.unlinkSync(tmpFile); } catch (e) {}
                 }
@@ -93,8 +96,8 @@ Actions: list, deploy, deploy_bundle, source, delete, check`,
                     } finally {
                         try { fs.unlinkSync(tmpOut); } catch (e) {}
                     }
-                } catch (e: any) {
-                    throw new Error(`Failed to bundle/read path ${pathArg}: ${e.message}`);
+                } catch (e: unknown) {
+                    throw new Error(`Failed to bundle/read path ${pathArg}: ${e instanceof Error ? e.message : String(e)}`);
                 }
             }
 
@@ -142,7 +145,7 @@ Actions: list, deploy, deploy_bundle, source, delete, check`,
     );
 
     // ═══ Secrets (3→1) ═══
-    server.tool(
+    registerTool(server,
         "secrets",
         `Project secrets (environment variables for Edge Functions).
 Actions: list, upsert, delete`,
@@ -155,7 +158,7 @@ Actions: list, upsert, delete`,
             ),
             name: optional(Type.String(), "[delete] Secret name to delete"),
         },
-        async (args: any) => {
+        async (args) => {
             const { action, ref, secrets, name } = args;
             let text: string;
             switch (action) {
@@ -179,7 +182,7 @@ Actions: list, upsert, delete`,
     );
 
     // ═══ Platform (metrics + backup + network + org → 1) ═══
-    server.tool(
+    registerTool(server,
         "platform",
         `Platform monitoring, backups, network, and organizations.
 Actions: metrics, list_backups, create_backup, list_logical_backups, create_logical_backup, restore_logical_backup, network, update_network, list_orgs, get_org`,
@@ -198,12 +201,14 @@ Actions: metrics, list_backups, create_backup, list_logical_backups, create_logi
             slug: optional(Type.String(), "[get_org] Organization slug"),
             allowed_cidrs: optional(Type.Array(Type.String()), "[update_network] Allowed CIDRs"),
         },
-        async (args: any) => {
+        async (args) => {
             const {
                 action, ref, backup_type, backup_id, expected_sha256,
                 confirmation, slug, allowed_cidrs,
             } = args;
-            const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
+            function need<T>(f: string, v: T): asserts v is NonNullable<T> {
+                if (!v) throw new Error(`'${f}' required for '${action}'`);
+            }
             let text: string;
             switch (action) {
                 case "metrics":

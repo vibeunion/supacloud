@@ -160,9 +160,12 @@ jobs:
 
       - name: Run workspace architecture gates
         run: |
+          bun install --frozen-lockfile --cwd packages/web-console
           bun test scripts/check_workspace_boundaries.test.ts
           bun test scripts/check_strict_governance.test.ts
+          bun test scripts/check_platform_source.test.ts
           bun run check:strict-governance
+          bun run check:platform-source
           bun run check:boundaries
           bun run check:source-regressions
           bun run typecheck:tools

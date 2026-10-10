@@ -227,7 +227,7 @@ test("PostgreSQL host never falls back to demo identity or unbound business stor
   const adapters = await createReviewPostgresAdapters({ database: db, identity, tenantId: "review-test" });
   await expect(adapters.requestContext(new Request("http://localhost/reviews/health")))
     .rejects.toMatchObject({ code: "AUTHENTICATION_REQUIRED" });
-  const store = adapters.deps.dbClient as ReviewStore;
+  const store = adapters.deps["dbClient"] as ReviewStore;
   await expect(store.get("reviews", "example")).rejects.toThrow("durable command transaction");
   await expect(store.set("reviews", "example", { state: "approved", version: 2 }))
     .rejects.toThrow("durable command transaction");

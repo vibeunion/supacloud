@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
+import { registerTool, type ToolServer } from "../../../../cli/src/shared/tool-server";
 import {
     activateFrontendRelease,
     getFrontendRelease,
@@ -8,8 +9,8 @@ import {
     uploadFrontendRelease,
 } from "./frontend-release-control";
 
-export function registerFrontendTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
-    server.tool(
+export function registerFrontendTools(server: ToolServer, http: HttpTransport): void {
+    registerTool(server,
         "frontend",
         `Immutable prebuilt frontend release control.
 Actions: list_releases, get_release, upload_release, activate_release`,
@@ -27,12 +28,14 @@ Actions: list_releases, get_release, upload_release, activate_release`,
             cursor: optional(Type.String(), "[list_releases] Last release SHA-256 cursor"),
             limit: optional(Type.Number(), "[list_releases] Page size, 1-100 (default 50)"),
         },
-        async (args: any) => {
+        async (args) => {
             const {
                 action, ref, id, zip_path, release_id,
                 expected_active_release_id, expected_activation_id, mutation_id, cursor, limit,
             } = args;
-            const need = (f: string, v: any) => { if (!v) throw new Error(`'${f}' required for '${action}'`); };
+            function need<T>(f: string, v: T): asserts v is NonNullable<T> {
+                if (!v) throw new Error(`'${f}' required for '${action}'`);
+            }
             switch (action) {
                 case "list_releases":
                     need("ref", ref); need("id", id);

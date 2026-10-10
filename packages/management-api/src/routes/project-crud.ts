@@ -32,7 +32,17 @@ import {
 } from "../utils/auth-email-templates";
 import { validationErrorResponse } from "../utils/http-validation";
 import { ProjectStateTransitionLockedError } from "../services/project-database-lock";
+import { isRecord, recordOrEmpty } from "../utils/record";
 
+type ProjectResponseInput = Record<string, unknown>;
+
+function projectResponseRecord(value: unknown): ProjectResponseInput {
+  if (!isRecord(value) || typeof value["ref"] !== "string" || typeof value["name"] !== "string"
+    || (typeof value["id"] !== "string" && typeof value["id"] !== "number")) {
+    throw new TypeError("Invalid project response");
+  }
+  return value;
+}
 // Available regions list
 const AVAILABLE_REGIONS = [
   { code: "local", name: "Local", continent: "local" },
@@ -150,37 +160,42 @@ function isServiceRoleJwt(candidate: unknown): candidate is string {
     && jwtClaims.exp > Date.now() / 1_000;
 }
 
-export function toPublicV1ProjectResponse(p: any) {
+export function toPublicV1ProjectResponse(input: unknown) {
+  const p = projectResponseRecord(input);
   return {
-    id: String(p.id),
-    ref: p.ref,
-    organization_id: p.organization_id || "default",
-    organization_slug: p.organization_slug || p.organization_id || "default",
-    name: p.name,
-    region: p.region || "local",
-    created_at: normalizeTimestamp(p.created_at),
-    status: mapStatus(p.status),
+    id: String(p["id"]),
+    ref: String(p["ref"] ?? ""),
+    organization_id: String(p["organization_id"] || "default"),
+    organization_slug: String(p["organization_slug"] || p["organization_id"] || "default"),
+    name: String(p["name"] ?? ""),
+    region: String(p["region"] || "local"),
+    created_at: normalizeTimestamp(p["created_at"]),
+    status: mapStatus(typeof p["status"] === "string" ? p["status"] : undefined),
   };
 }
 
-export function toPublicV1ProjectWithDatabaseResponse(p: any) {
+export function toPublicV1ProjectWithDatabaseResponse(input: unknown) {
+  const p = projectResponseRecord(input);
+  const database = recordOrEmpty(p["database"]);
+  const api = recordOrEmpty(p["api"]);
+  const studio = recordOrEmpty(p["studio"]);
   return {
     ...toPublicV1ProjectResponse(p),
     database: {
-      host: p.database?.host || "localhost",
-      version: p.database?.version || "15",
-      postgres_engine: p.database?.postgres_engine || "15",
-      release_channel: p.database?.release_channel || "stable",
+      host: String(database["host"] || "localhost"),
+      version: String(database["version"] || "15"),
+      postgres_engine: String(database["postgres_engine"] || "15"),
+      release_channel: String(database["release_channel"] || "stable"),
     },
-    api: p.api,
-    studio: p.studio,
-    config: publicScheduledFunctionProjectConfig(p.config),
-    anon_key: p.anon_key,
-    services: p.services,
+    ...(typeof api["url"] === "string" ? { api: { ...api, url: api["url"] } } : {}),
+    ...(typeof studio["url"] === "string" ? { studio: { ...studio, url: studio["url"] } } : {}),
+    config: publicScheduledFunctionProjectConfig(p["config"]),
+    ...(typeof p["anon_key"] === "string" ? { anon_key: p["anon_key"] } : {}),
+    ...(Array.isArray(p["services"]) ? { services: p["services"] as unknown[] } : {}),
   };
 }
 
-export function toPublicV1ProjectCreateResponse(p: any, serviceRoleKey: unknown) {
+export function toPublicV1ProjectCreateResponse(p: unknown, serviceRoleKey: unknown) {
   if (!isServiceRoleJwt(serviceRoleKey)) {
     throw new Error("Project creation credentials are unavailable");
   }
@@ -284,10 +299,13 @@ function buildPitrStatus(ref: string, stanza: string, backups: BackupInfo[]) {
 }
 
 export async function buildProjectResponse(
-  project: any,
+  input: unknown,
   detailed = false,
 ): Promise<Record<string, unknown>> {
-  const ref = project.ref;
+  const project = projectResponseRecord(input);
+  const ref = String(project["ref"] ?? "");
+  const database = recordOrEmpty(project.database);
+  const api = recordOrEmpty(project.api);
   const dbName = await resolveDbName(ref);
   const dbUser = resolveRoleName(ref);
 
@@ -295,27 +313,27 @@ export async function buildProjectResponse(
     id: project.id,
     ref: project.ref,
     name: project.name,
-    status: mapStatus(project.status),
+    status: mapStatus(typeof project["status"] === "string" ? project["status"] : undefined),
     region: project.region || "local",
     organization_id: project.organization_id || "default",
     organization_slug:
-      (project as Record<string, unknown>).organization_slug ||
+      project.organization_slug ||
       project.organization_id ||
       "default",
     cloud_provider:
-      (project as Record<string, unknown>).cloud_provider || "localhost",
+      project.cloud_provider || "localhost",
     created_at: project.created_at,
     updated_at: project.updated_at,
     inserted_at: project.created_at,
     pause_status: project.status === "paused" ? "paused" : null,
     preview_branch_refs: [],
     database: {
-      host: project.database?.host || "localhost",
+      host: database["host"] || "localhost",
       version: "15",
       postgres_engine: "15",
       release_channel: "stable",
     },
-    endpoint: project.api?.url || `https://${ref}.localhost`,
+    endpoint: api["url"] || `https://${ref}.localhost`,
   };
 
   if (!detailed) return base;
@@ -350,19 +368,19 @@ export async function buildProjectResponse(
   return {
     ...base,
     database: {
-      host: project.database?.host || "localhost",
-      port: (project.database as Record<string, unknown>)?.port || 5432,
+      host: database["host"] || "localhost",
+      port: database["port"] || 5432,
       version: dbVersion,
       postgres_engine: dbVersion.split(".")[0],
       release_channel: "stable",
       size: dbSize,
       connection_count: connectionCount,
     },
-    db_port: (project.database as Record<string, unknown>)?.port || 5432,
-    db_host: project.database?.host || "localhost",
+    db_port: database["port"] || 5432,
+    db_host: database["host"] || "localhost",
     db_name: dbName,
     db_user: dbUser,
-    connection_string: `postgresql://${dbUser}:[YOUR-PASSWORD]@${project.database?.host || "localhost"}:${(project.database as Record<string, unknown>)?.port || 5432}/${dbName}`,
+    connection_string: `postgresql://${dbUser}:[YOUR-PASSWORD]@${database["host"] || "localhost"}:${database["port"] || 5432}/${dbName}`,
     ...(serviceStatuses ? { services: serviceStatuses } : {}),
     anon_key: project.anon_key,
     api: project.api,

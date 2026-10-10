@@ -1,4 +1,5 @@
 import { config } from "../config";
+import { isRecord, recordOrEmpty } from "../utils/record";
 import {
     type ProjectRoutingConfig,
     normalizeProjectRoutingConfig,
@@ -461,15 +462,18 @@ function isFunctionCorsErrorFallback(handler: Record<string, unknown>): boolean 
 }
 
 function isCorsHeaderHandler(handler: Record<string, unknown>): boolean {
+    const response = recordOrEmpty(handler["response"]);
+    const set = recordOrEmpty(response["set"]);
     return handler["handler"] === "headers"
-        && typeof (handler["response"] as any)?.set?.["Access-Control-Allow-Origin"] !== "undefined";
+        && typeof set["Access-Control-Allow-Origin"] !== "undefined";
 }
 
 export function isCorsSubroute(handler: Record<string, unknown>): boolean {
     if (isFunctionCorsErrorFallback(handler)) return false;
     if (handler["handler"] !== "subroute" || !Array.isArray(handler["routes"])) return false;
-    return handler["routes"].some((route: any) =>
-        Array.isArray(route?.handle) && route.handle.some((item: any) => isCorsHeaderHandler(item)),
+    return handler["routes"].some((route: unknown) =>
+        isRecord(route) && Array.isArray(route["handle"])
+        && route["handle"].some((item: unknown) => isRecord(item) && isCorsHeaderHandler(item)),
     );
 }
 
@@ -478,10 +482,11 @@ export function isCorsSubroute(handler: Record<string, unknown>): boolean {
  * upstream access-control-* headers instead of deleting them at the gateway.
  */
 export function routePreservesUpstreamCors(route: CaddyRoute): boolean {
-    const handle = Array.isArray(route["handle"]) ? route["handle"] as Array<Record<string, any>> : [];
+    const handle: unknown[] = Array.isArray(route["handle"]) ? route["handle"] : [];
     return handle.some((handler) => {
-        if (handler?.["handler"] !== "reverse_proxy") return false;
-        const deletions = handler?.["headers"]?.response?.delete;
+        if (!isRecord(handler) || handler["handler"] !== "reverse_proxy") return false;
+        const response = recordOrEmpty(recordOrEmpty(handler["headers"])["response"]);
+        const deletions = response["delete"];
         return !(Array.isArray(deletions) && deletions.includes("Access-Control-Allow-Origin"));
     });
 }
