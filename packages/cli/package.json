@@ -51,7 +51,7 @@
     "directory": "packages/cli"
   },
   "dependencies": {
-    "@supacloud/compiler": "^0.42.1",
+    "@supacloud/compiler": "^0.43.0",
     "@supacloud/delivery": "file:../delivery",
     "@supacloud/db": "file:../db",
     "fflate": "^0.8.3",
