@@ -20,10 +20,15 @@ const ALLOWED_ORIGIN = "https://app.example.com";
 let fixtureRoot = "";
 let projectRoot = "";
 let edgeBaseUrl = "";
+let defaultBaseUrl = "";
 let managementServer: Bun.Server<undefined> | undefined;
-let edgeProcess: Bun.Subprocess<"ignore", "pipe", "pipe"> | undefined;
-let edgeStdout: Promise<string> | undefined;
-let edgeStderr: Promise<string> | undefined;
+interface TestRuntime {
+  baseUrl: string;
+  process: Bun.Subprocess<"ignore", "pipe", "pipe">;
+  stdout: Promise<string>;
+  stderr: Promise<string>;
+}
+const runtimes: TestRuntime[] = [];
 
 const CORS_GUARD_SOURCE = `
 export default (req) => {
@@ -47,6 +52,8 @@ export default (req) => {
     headers: {
       "content-type": "application/json",
       "access-control-allow-origin": ${JSON.stringify(ALLOWED_ORIGIN)},
+      "access-control-allow-credentials": "true",
+      "access-control-expose-headers": "x-function-header",
     },
   });
 };
@@ -75,12 +82,12 @@ function isConnectionRefused(error: unknown): boolean {
   return error.code === "ConnectionRefused" || error.code === "ECONNREFUSED";
 }
 
-async function waitForEdgeRuntime(): Promise<void> {
+async function waitForEdgeRuntime(runtime: TestRuntime): Promise<void> {
   const deadline = Date.now() + 8_000;
   while (Date.now() < deadline) {
-    if (edgeProcess?.exitCode !== null) break;
+    if (runtime.process.exitCode !== null) break;
     try {
-      if ((await fetch(`${edgeBaseUrl}/health`)).ok) return;
+      if ((await fetch(`${runtime.baseUrl}/health`)).ok) return;
     } catch (error) {
       if (!isConnectionRefused(error)) throw error;
     }
@@ -104,10 +111,9 @@ function startManagementServer(): Bun.Server<undefined> {
   });
 }
 
-function startEdgeRuntime(managementPort: number): void {
+function startEdgeRuntime(managementPort: number, corsMode = ""): TestRuntime {
   const edgePort = reserveEdgePort();
-  edgeBaseUrl = `http://127.0.0.1:${edgePort}`;
-  edgeProcess = Bun.spawn([
+  const edgeProcess = Bun.spawn([
     process.execPath,
     join(import.meta.dir, "server.ts"),
   ], {
@@ -126,14 +132,21 @@ function startEdgeRuntime(managementPort: number): void {
       TENANTS_DIR: join(fixtureRoot, "tenants"),
       WORKER_POOL_SIZE: "1",
       BACKGROUND_WORKER_POOL_SIZE: "1",
+      EDGE_FUNCTIONS_CORS_MODE: corsMode,
     },
   });
-  edgeStdout = new Response(edgeProcess.stdout).text();
-  edgeStderr = new Response(edgeProcess.stderr).text();
+  const runtime = {
+    baseUrl: `http://127.0.0.1:${edgePort}`,
+    process: edgeProcess,
+    stdout: new Response(edgeProcess.stdout).text(),
+    stderr: new Response(edgeProcess.stderr).text(),
+  };
+  runtimes.push(runtime);
+  return runtime;
 }
 
-async function stopEdgeRuntime(): Promise<void> {
-  if (!edgeProcess) return;
+async function stopEdgeRuntime(runtime: TestRuntime): Promise<void> {
+  const edgeProcess = runtime.process;
   if (edgeProcess.exitCode === null) edgeProcess.kill("SIGTERM");
   const timeout = Symbol("timeout");
   const exitCode = await Promise.race([
@@ -152,24 +165,77 @@ beforeAll(async () => {
   await mkdir(projectRoot, { recursive: true });
   projectRoot = await realpath(projectRoot);
   managementServer = startManagementServer();
-  startEdgeRuntime(managementServer.port);
-  await waitForEdgeRuntime();
   await writeFile(join(projectRoot, "cors-guard.ts"), CORS_GUARD_SOURCE);
   await writeFile(join(projectRoot, "no-cors.ts"), NO_CORS_SOURCE);
+  const permissiveRuntime = startEdgeRuntime(managementServer.port, "permissive");
+  edgeBaseUrl = permissiveRuntime.baseUrl;
+  await waitForEdgeRuntime(permissiveRuntime);
+  const defaultRuntime = startEdgeRuntime(managementServer.port);
+  defaultBaseUrl = defaultRuntime.baseUrl;
+  await waitForEdgeRuntime(defaultRuntime);
 });
 
 afterAll(async () => {
-  await stopEdgeRuntime();
+  for (const runtime of runtimes) {
+    await stopEdgeRuntime(runtime);
+    if (runtime.process.exitCode !== 0) {
+      console.warn("[edge stdout]", await runtime.stdout);
+      console.warn("[edge stderr]", await runtime.stderr);
+    }
+  }
   managementServer?.stop(true);
   if (fixtureRoot) await rm(fixtureRoot, { recursive: true, force: true });
-  if (edgeProcess && edgeProcess.exitCode !== 0) {
-    console.warn("[edge stdout]", await edgeStdout);
-    console.warn("[edge stderr]", await edgeStderr);
-  }
 });
 
-describe("Edge Runtime OPTIONS preflight passthrough", () => {
-  test("OPTIONS preflight reaches the function and returns its CORS policy verbatim", async () => {
+describe("Edge Runtime default Function-owned CORS", () => {
+  test("preserves a Function's explicit preflight policy", async () => {
+    const response = await fetch(`${defaultBaseUrl}/functions/v1/cors-guard/cases`, {
+      method: "OPTIONS",
+      headers: {
+        "x-project-ref": PROJECT_REF,
+        origin: ALLOWED_ORIGIN,
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "authorization, x-fa-client",
+      },
+    });
+    expect(response.status).toBe(204);
+    expect(response.headers.get("x-preflight-handler")).toBe("function");
+    expect(response.headers.get("access-control-allow-origin")).toBe(ALLOWED_ORIGIN);
+    expect(response.headers.get("access-control-allow-headers")).toBe("authorization, x-fa-client, content-type");
+    expect(response.headers.get("access-control-allow-methods")).toBe("GET, POST, OPTIONS");
+  });
+
+  test("does not grant an origin rejected by the Function", async () => {
+    const response = await fetch(`${defaultBaseUrl}/functions/v1/cors-guard`, {
+      method: "OPTIONS",
+      headers: { "x-project-ref": PROJECT_REF, origin: "https://other.example.com" },
+    });
+    expect(response.status).toBe(204);
+    expect(response.headers.get("x-preflight-handler")).toBe("function");
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  test("preserves explicit actual response headers", async () => {
+    const response = await fetch(`${defaultBaseUrl}/functions/v1/cors-guard`, {
+      headers: { "x-project-ref": PROJECT_REF, apikey: SERVICE_ROLE_KEY },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBe(ALLOWED_ORIGIN);
+    expect(response.headers.get("access-control-allow-credentials")).toBe("true");
+    expect(response.headers.get("access-control-expose-headers")).toBe("x-function-header");
+  });
+
+  test("does not add CORS headers to a Function without them", async () => {
+    const response = await fetch(`${defaultBaseUrl}/functions/v1/no-cors`, {
+      headers: { "x-project-ref": PROJECT_REF, apikey: SERVICE_ROLE_KEY },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+  });
+});
+
+describe("Edge Runtime permissive Function CORS", () => {
+  test("OPTIONS preflight is handled before function dispatch", async () => {
     const response = await fetch(`${edgeBaseUrl}/functions/v1/cors-guard/cases`, {
       method: "OPTIONS",
       headers: {
@@ -181,13 +247,13 @@ describe("Edge Runtime OPTIONS preflight passthrough", () => {
     });
 
     expect(response.status).toBe(204);
-    expect(response.headers.get("x-preflight-handler")).toBe("function");
-    expect(response.headers.get("access-control-allow-origin")).toBe(ALLOWED_ORIGIN);
-    expect(response.headers.get("access-control-allow-headers")).toBe("authorization, x-fa-client, content-type");
-    expect(response.headers.get("access-control-allow-methods")).toBe("GET, POST, OPTIONS");
+    expect(response.headers.get("x-preflight-handler")).toBeNull();
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-headers")).toBe("authorization, x-fa-client");
+    expect(response.headers.get("access-control-allow-methods")).toContain("OPTIONS");
   });
 
-  test("does not synthesize allow-origin for a function-rejected preflight", async () => {
+  test("allows an arbitrary origin in preflight", async () => {
     const response = await fetch(`${edgeBaseUrl}/functions/v1/cors-guard/cases`, {
       method: "OPTIONS",
       headers: {
@@ -199,11 +265,11 @@ describe("Edge Runtime OPTIONS preflight passthrough", () => {
     });
 
     expect(response.status).toBe(204);
-    expect(response.headers.get("x-preflight-handler")).toBe("function");
-    expect(response.headers.get("access-control-allow-origin")).toBeNull();
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-methods")).toContain("OPTIONS");
   });
 
-  test("function responses keep their own allow-origin over the platform default", async () => {
+  test("overrides restrictive origins but preserves custom exposed headers", async () => {
     const response = await fetch(`${edgeBaseUrl}/functions/v1/cors-guard`, {
       headers: {
         "x-project-ref": PROJECT_REF,
@@ -214,10 +280,13 @@ describe("Edge Runtime OPTIONS preflight passthrough", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
-    expect(response.headers.get("access-control-allow-origin")).toBe(ALLOWED_ORIGIN);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-credentials")).toBeNull();
+    expect(response.headers.get("access-control-expose-headers")).toContain("x-function-header");
+    expect(response.headers.get("access-control-expose-headers")).toContain("content-disposition");
   });
 
-  test("does not add wildcard CORS to a function response without CORS headers", async () => {
+  test("adds wildcard CORS to a Function response without CORS headers", async () => {
     const response = await fetch(`${edgeBaseUrl}/functions/v1/no-cors`, {
       headers: {
         "x-project-ref": PROJECT_REF,
@@ -228,6 +297,50 @@ describe("Edge Runtime OPTIONS preflight passthrough", () => {
 
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true });
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-headers")).toContain("authorization");
+  });
+
+  test("handles preflight for a Function without OPTIONS handling", async () => {
+    const response = await fetch(`${edgeBaseUrl}/functions/v1/no-cors`, {
+      method: "OPTIONS",
+      headers: {
+        "x-project-ref": PROJECT_REF,
+        origin: "null",
+        "access-control-request-method": "PATCH",
+        "access-control-request-headers": "authorization, x-custom-client",
+      },
+    });
+    expect(response.status).toBe(204);
+    expect(await response.text()).toBe("");
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    expect(response.headers.get("access-control-allow-headers")).toBe("authorization, x-custom-client");
+    expect(response.headers.get("vary")).toContain("Access-Control-Request-Headers");
+  });
+
+  test("does not bypass authentication on actual requests", async () => {
+    const response = await fetch(`${edgeBaseUrl}/functions/v1/no-cors`, {
+      headers: { "x-project-ref": PROJECT_REF, origin: "http://localhost:5173" },
+    });
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ msg: "Invalid JWT" });
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  test("preserves routing errors rather than treating unknown Functions as successful preflights", async () => {
+    const response = await fetch(`${edgeBaseUrl}/functions/v1/missing`, {
+      method: "OPTIONS",
+      headers: { "x-project-ref": PROJECT_REF, origin: ALLOWED_ORIGIN },
+    });
+    expect(response.status).toBe(404);
+    expect(response.headers.get("access-control-allow-origin")).toBe("*");
+  });
+
+  test("does not apply permissive CORS to internal control routes", async () => {
+    const response = await fetch(`${edgeBaseUrl}/metrics`, {
+      headers: { origin: ALLOWED_ORIGIN },
+    });
+    expect(response.status).toBe(401);
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
   });
 });

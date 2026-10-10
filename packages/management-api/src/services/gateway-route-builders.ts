@@ -89,7 +89,13 @@ function hostToCorsOrigins(host: string): string[] {
     try {
         const parsed = new URL(trimmed.includes("://") ? trimmed : `https://${trimmed}`);
         if (!parsed.host) return [];
-        if (parsed.host.startsWith("localhost") || parsed.host.startsWith("127.0.0.1")) {
+        const hostname = parsed.hostname.replace(/^\[|\]$/g, "");
+        if (
+            parsed.host.startsWith("localhost")
+            || parsed.host.startsWith("127.0.0.1")
+            || hostname.includes(":")
+            || /^\d{1,3}(?:\.\d{1,3}){3}$/.test(hostname)
+        ) {
             return [`http://${parsed.host}`, `https://${parsed.host}`];
         }
         return [`https://${parsed.host}`];
@@ -104,11 +110,16 @@ export function buildTenantCorsOrigins(
     extraHosts: string[] = [],
 ): string[] {
     const routingConfig = normalizeProjectRoutingConfig(projectRouting);
+    const customDomain = typeof routingConfig?.custom_domain === "string"
+        ? routingConfig.custom_domain
+        : undefined;
     const hosts = [
         ...resolveProjectApiHosts(projectRef, routingConfig),
         resolveProjectAuthHost(projectRef, routingConfig),
         `studio-${projectRef}.${config.baseDomain}`,
         resolveProjectStudioHost(projectRef, routingConfig),
+        ...(customDomain ? [customDomain] : []),
+        config.dockerHostIp,
         ...extraHosts,
     ];
     return uniqueStrings([...DEFAULT_CORS_ORIGINS, ...hosts.flatMap(hostToCorsOrigins)]);
@@ -473,6 +484,27 @@ export function setRouteCors(route: CaddyRoute, origins: string[]): void {
     if (String(route["@id"] || "").startsWith("route-project-")
         && String(route["@id"]).endsWith("-functions")) {
         const handle = Array.isArray(route.handle) ? route.handle as Record<string, unknown>[] : [];
+        if (config.edgeFunctionsCorsMode === "auto") {
+            const proxy = handle.find((handler) => handler.handler === "reverse_proxy") as Record<string, unknown> | undefined;
+            if (proxy) {
+                const headers = proxy.headers && typeof proxy.headers === "object" && !Array.isArray(proxy.headers)
+                    ? proxy.headers as Record<string, unknown>
+                    : {};
+                const response = headers.response && typeof headers.response === "object" && !Array.isArray(headers.response)
+                    ? headers.response as Record<string, unknown>
+                    : {};
+                response.delete = [...UPSTREAM_CORS_RESPONSE_HEADERS];
+                headers.response = response;
+                proxy.headers = headers;
+            }
+            const corsSubroute = makeCorsSubroute(origins);
+            route.handle = corsSubroute
+                ? [corsSubroute, ...handle.filter((handler) =>
+                    !isFunctionCorsErrorFallback(handler) && !isCorsHeaderHandler(handler) && !isCorsSubroute(handler))]
+                : handle.filter((handler) =>
+                    !isFunctionCorsErrorFallback(handler) && !isCorsHeaderHandler(handler) && !isCorsSubroute(handler));
+            return;
+        }
         route.handle = [
             makeFunctionCorsErrorFallback(origins),
             ...handle.filter((handler) => !isFunctionCorsErrorFallback(handler)

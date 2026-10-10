@@ -168,6 +168,7 @@ export interface Config {
   llmEndpoint: string;
   llmModel: string;
   edgeRuntimeMode: "embedded" | "external";
+  edgeFunctionsCorsMode: "function" | "auto" | "permissive";
   edgeRuntimeUrl: string;
   edgeRuntimePort: number;
   edgeRuntimeInternal: string;
@@ -199,6 +200,11 @@ const DEVELOPMENT_ENVS = new Set(["development", "test"]);
 const isGithubActions = getEnv("GITHUB_ACTIONS") === "true";
 const edgeRuntimePort = Number(getEnv("EDGE_RUNTIME_PORT", "9005"));
 const edgeRuntimeMode = getEnv("EDGE_RUNTIME_MODE", "embedded") === "external" ? "external" : "embedded";
+const edgeFunctionsCorsModeValue = getEnv("EDGE_FUNCTIONS_CORS_MODE", "auto").trim().toLowerCase();
+if (!["function", "auto", "permissive"].includes(edgeFunctionsCorsModeValue)) {
+  throw new Error("EDGE_FUNCTIONS_CORS_MODE must be function, auto, or permissive");
+}
+const edgeFunctionsCorsMode = edgeFunctionsCorsModeValue as "function" | "auto" | "permissive";
 const dashboardUsername = getEnv("DASHBOARD_USERNAME", getEnv("STUDIO_USERNAME", "admin"));
 const dashboardPassword = getEnv("DASHBOARD_PASSWORD", getEnv("STUDIO_PASSWORD", "supabase"));
 const port = Number(getEnv("PORT", "9090"));
@@ -368,6 +374,7 @@ export const config: Config = {
   llmModel: getEnv("LLM_MODEL", "gpt-4o-mini"),
 
   edgeRuntimeMode,
+  edgeFunctionsCorsMode,
   edgeRuntimeUrl: getEnv("EDGE_RUNTIME_URL", `http://127.0.0.1:${edgeRuntimePort}`),
   edgeRuntimePort,
   edgeRuntimeInternal,
