@@ -150,8 +150,10 @@ function parseConfigAssignments(content: string): Map<string, string> | null {
     const trimmedLine = line.trim();
     if (!trimmedLine || trimmedLine.startsWith("#")) continue;
     const match = trimmedLine.match(CONFIG_ASSIGNMENT_PATTERN);
-    if (!match || assignments.has(match[1])) return null;
-    assignments.set(match[1], tomlValueWithoutInlineComment(match[2].trim()));
+    const key = match?.[1];
+    const value = match?.[2];
+    if (key === undefined || value === undefined || assignments.has(key)) return null;
+    assignments.set(key, tomlValueWithoutInlineComment(value.trim()));
   }
   return assignments;
 }
@@ -237,7 +239,9 @@ export function renderManagedPostgrestDbPool(
     if (!managed) return null;
     throw new Error("Managed PostgREST config must contain exactly one db-pool setting");
   }
-  return renderDbPoolMatch(content, matches[0], desiredPool);
+  const match = matches[0];
+  if (match === undefined) throw new Error("PostgREST db-pool match is missing");
+  return renderDbPoolMatch(content, match, desiredPool);
 }
 
 function isEligible(request: PostgrestPoolReconcileRequest): boolean {

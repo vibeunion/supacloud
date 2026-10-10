@@ -75,12 +75,12 @@ function age(value: unknown): number | null {
 function metric(value: unknown): PgmqQueueMetrics {
   const data = row(value);
   return {
-    queue_name: pgmqQueueName(data.queue_name),
-    queue_length: pgmqSafeCount(data.queue_length),
-    total_messages: pgmqSafeCount(data.total_messages),
-    newest_msg_age_sec: age(data.newest_msg_age_sec),
-    oldest_msg_age_sec: age(data.oldest_msg_age_sec),
-    scrape_time: timestamp(data.scrape_time),
+    queue_name: pgmqQueueName(data["queue_name"]),
+    queue_length: pgmqSafeCount(data["queue_length"]),
+    total_messages: pgmqSafeCount(data["total_messages"]),
+    newest_msg_age_sec: age(data["newest_msg_age_sec"]),
+    oldest_msg_age_sec: age(data["oldest_msg_age_sec"]),
+    scrape_time: timestamp(data["scrape_time"]),
   };
 }
 
@@ -89,7 +89,7 @@ function publicRows<T extends { queue_name: string }>(value: unknown, decode: (v
   const result: T[] = [];
   for (const valueRow of rows(value, 10000)) {
     const data = row(valueRow);
-    const name = pgmqQueueName(data.queue_name);
+    const name = pgmqQueueName(data["queue_name"]);
     if (names.has(name)) return invalid();
     names.add(name);
     // Reserved queues are deliberately excluded, not interpreted as user queues.
@@ -103,10 +103,10 @@ export function readPgmqQueueInfo(value: unknown): PgmqQueueInfo[] {
   return publicRows(value, valueRow => {
     const data = row(valueRow);
     return {
-      queue_name: pgmqQueueName(data.queue_name),
-      created_at: data.created_at === null ? null : timestamp(data.created_at),
-      is_partitioned: flag(data.is_partitioned),
-      is_unlogged: flag(data.is_unlogged),
+      queue_name: pgmqQueueName(data["queue_name"]),
+      created_at: data["created_at"] === null ? null : timestamp(data["created_at"]),
+      is_partitioned: flag(data["is_partitioned"]),
+      is_unlogged: flag(data["is_unlogged"]),
     };
   });
 }
@@ -123,10 +123,10 @@ export function readPgmqMetricsAll(value: unknown): PgmqQueueMetrics[] {
 export function readPgmqPurgeReceipt(value: unknown): number {
   const result = rows(value, 1);
   if (result.length !== 1) return invalid();
-  return pgmqSafeCount(row(result[0]).purged);
+  return pgmqSafeCount(row(result[0])["purged"]);
 }
 export function readPgmqDropReceipt(value: unknown): boolean {
   const result = rows(value, 1);
   if (result.length !== 1) return invalid();
-  return flag(row(result[0]).dropped);
+  return flag(row(result[0])["dropped"]);
 }

@@ -296,7 +296,7 @@ type RuntimeFunctionActivationControl = RuntimeControlStatus & {
 };
 
 function resolveExternalPackages(): string[] {
-  return (process.env.EDGE_FUNCTION_EXTERNAL_PACKAGES || "")
+  return (process.env["EDGE_FUNCTION_EXTERNAL_PACKAGES"] || "")
     .split(",")
     .map((pkg) => pkg.trim())
     .filter((pkg) => pkg.length > 0 && EXTERNAL_PACKAGE_REGEX.test(pkg));
@@ -442,7 +442,7 @@ async function preflightAndAcquireFunctionDeployLock(
 }
 
 function getFunctionsRoot(): string {
-  return path.resolve(process.env.EDGE_FUNCTIONS_DIR || config.edgeFunctionsDir);
+  return path.resolve(process.env["EDGE_FUNCTIONS_DIR"] || config.edgeFunctionsDir);
 }
 
 type FunctionLogsIdentity = {
@@ -722,28 +722,28 @@ function validatedFunctionCapabilities(value: unknown): EdgeFunctionCapabilities
   }
   const record = value as Record<string, unknown>;
   const capabilities: EdgeFunctionCapabilities = {};
-  if (record.secrets !== undefined) {
-    const secrets = validatedStringList(record.secrets, "capabilities.secrets");
+  if (record["secrets"] !== undefined) {
+    const secrets = validatedStringList(record["secrets"], "capabilities.secrets");
     if (secrets.some((name) => isSystemManagedProjectSecretName(name))) {
       throw new Error("Function config contains reserved capabilities.secrets");
     }
     capabilities.secrets = secrets;
   }
-  if (record.outbound_hosts !== undefined) {
-    const hosts = validatedStringList(record.outbound_hosts, "capabilities.outbound_hosts");
+  if (record["outbound_hosts"] !== undefined) {
+    const hosts = validatedStringList(record["outbound_hosts"], "capabilities.outbound_hosts");
     if (hosts.some((host) => !FUNCTION_HOST_PATTERN.test(host))) {
       throw new Error("Function config contains invalid capabilities.outbound_hosts");
     }
     capabilities.outbound_hosts = hosts.map((host) => host.toLowerCase());
   }
-  if (record.bindings !== undefined) {
-    capabilities.bindings = validatedStringList(record.bindings, "capabilities.bindings");
+  if (record["bindings"] !== undefined) {
+    capabilities.bindings = validatedStringList(record["bindings"], "capabilities.bindings");
   }
-  if (record.background !== undefined) {
-    if (typeof record.background !== "boolean") {
+  if (record["background"] !== undefined) {
+    if (typeof record["background"] !== "boolean") {
       throw new Error("Function config contains invalid capabilities.background");
     }
-    capabilities.background = record.background;
+    capabilities.background = record["background"];
   }
   return capabilities;
 }
@@ -761,26 +761,26 @@ function validatedFunctionLimits(value: unknown): EdgeFunctionLimits {
   }
   const record = value as Record<string, unknown>;
   const limits: EdgeFunctionLimits = {};
-  if (record.timeout_ms !== undefined) {
-    limits.timeout_ms = validatedPositiveLimit(record.timeout_ms, "limits.timeout_ms", MAX_FUNCTION_TIMEOUT_MS);
+  if (record["timeout_ms"] !== undefined) {
+    limits.timeout_ms = validatedPositiveLimit(record["timeout_ms"], "limits.timeout_ms", MAX_FUNCTION_TIMEOUT_MS);
   }
-  if (record.max_request_body_bytes !== undefined) {
+  if (record["max_request_body_bytes"] !== undefined) {
     limits.max_request_body_bytes = validatedPositiveLimit(
-      record.max_request_body_bytes,
+      record["max_request_body_bytes"],
       "limits.max_request_body_bytes",
       MAX_FUNCTION_BODY_BYTES,
     );
   }
-  if (record.max_response_body_bytes !== undefined) {
+  if (record["max_response_body_bytes"] !== undefined) {
     limits.max_response_body_bytes = validatedPositiveLimit(
-      record.max_response_body_bytes,
+      record["max_response_body_bytes"],
       "limits.max_response_body_bytes",
       MAX_FUNCTION_BODY_BYTES,
     );
   }
-  if (record.wait_until_timeout_ms !== undefined) {
+  if (record["wait_until_timeout_ms"] !== undefined) {
     limits.wait_until_timeout_ms = validatedPositiveLimit(
-      record.wait_until_timeout_ms,
+      record["wait_until_timeout_ms"],
       "limits.wait_until_timeout_ms",
       MAX_WAIT_UNTIL_TIMEOUT_MS,
     );
@@ -1235,7 +1235,7 @@ async function prepareBundleFunctionVersion(
     entrypoint: resolveInside(sourceDir, entrypoint),
     outdir: buildDir,
     minify: request.minify ?? false,
-    importMapPath: importMap ? resolveInside(sourceDir, importMap) : undefined,
+    ...(importMap === null ? {} : { importMapPath: resolveInside(sourceDir, importMap) }),
   });
   const artifact = await writePreparedReleaseBundle(stageDir, finalDir, bundle.code, bundle.sizeBytes);
   await fs.rm(buildDir, { recursive: true, force: true });
@@ -1363,35 +1363,35 @@ async function readFunctionVersionMetadata(
   if (!metadataRecord || typeof metadataRecord !== "object" || Array.isArray(metadataRecord)) {
     throw new Error("Function version metadata must be an object");
   }
-  if (metadataRecord.version !== version
-    || typeof metadataRecord.verify_jwt !== "boolean"
-    || (metadataRecord.artifact_sha256 !== undefined
-      && (typeof metadataRecord.artifact_sha256 !== "string"
-        || !SHA256_HEX_REGEX.test(metadataRecord.artifact_sha256)))) {
+  if (metadataRecord["version"] !== version
+    || typeof metadataRecord["verify_jwt"] !== "boolean"
+    || (metadataRecord["artifact_sha256"] !== undefined
+      && (typeof metadataRecord["artifact_sha256"] !== "string"
+        || !SHA256_HEX_REGEX.test(metadataRecord["artifact_sha256"])))) {
     throw new Error("Function version metadata does not match the requested version and policy");
   }
-  if (!Array.isArray(metadataRecord.background_routes)
-    || !metadataRecord.background_routes.every(
+  if (!Array.isArray(metadataRecord["background_routes"])
+    || !metadataRecord["background_routes"].every(
       (route) => typeof route === "string" && route.trim().length > 0,
     )) {
     throw new Error("Function version metadata contains invalid background routes");
   }
   const metadata: FunctionVersionMetadata = {
     version,
-    verify_jwt: metadataRecord.verify_jwt,
-    artifact_sha256: typeof metadataRecord.artifact_sha256 === "string"
-      ? metadataRecord.artifact_sha256
+    verify_jwt: metadataRecord["verify_jwt"],
+    artifact_sha256: typeof metadataRecord["artifact_sha256"] === "string"
+      ? metadataRecord["artifact_sha256"]
       : null,
-    background_routes: metadataRecord.background_routes as string[],
+    background_routes: metadataRecord["background_routes"] as string[],
     import_map: nullableMetadataPath(metadataRecord, "import_map"),
     entrypoint: nullableMetadataPath(metadataRecord, "entrypoint"),
-    framework: metadataRecord.framework === undefined ? "fetch" : metadataRecord.framework as EdgeFunctionFramework,
-    ...(metadataRecord.capabilities === undefined
+    framework: metadataRecord["framework"] === undefined ? "fetch" : metadataRecord["framework"] as EdgeFunctionFramework,
+    ...(metadataRecord["capabilities"] === undefined
       ? {}
-      : { capabilities: validatedFunctionCapabilities(metadataRecord.capabilities) }),
-    ...(metadataRecord.limits === undefined
+      : { capabilities: validatedFunctionCapabilities(metadataRecord["capabilities"]) }),
+    ...(metadataRecord["limits"] === undefined
       ? {}
-      : { limits: validatedFunctionLimits(metadataRecord.limits) }),
+      : { limits: validatedFunctionLimits(metadataRecord["limits"]) }),
   };
   if (!EDGE_FUNCTION_FRAMEWORKS.includes(metadata.framework)) {
     throw new Error("Function version metadata contains an unsupported framework");
@@ -1434,7 +1434,9 @@ async function sourceMetadataConfig(
     return versionConfig;
   }
   versionConfig.entrypoint = entrypoint;
-  versionConfig.import_map = await detectedImportMap(sourceDir) ?? undefined;
+  const importMap = await detectedImportMap(sourceDir);
+  if (importMap === null) delete versionConfig.import_map;
+  else versionConfig.import_map = importMap;
   return versionConfig;
 }
 
@@ -1864,8 +1866,7 @@ async function preheatRuntimeFunction(
     const acknowledgementError = acknowledgement
       ? undefined
       : "Edge Runtime returned an invalid preheat attestation";
-    return {
-      summary: {
+    const summary: EdgeFunctionPreheatResult = {
         ok: preheatRes.ok && acknowledgement !== null,
         status: preheatRes.status,
         duration_ms: durationMs,
@@ -1875,10 +1876,9 @@ async function preheatRuntimeFunction(
         cache_misses: foreground.cacheMisses + background.cacheMisses,
         foreground,
         background,
-        error: acknowledgementError,
-      },
-      attestation: acknowledgement,
+        ...(acknowledgementError === undefined ? {} : { error: acknowledgementError }),
     };
+    return { summary, attestation: acknowledgement };
   } catch (error) {
     return {
       summary: {
@@ -1926,26 +1926,26 @@ function runtimeFunctionActivationAck(
   activationId: string,
 ): RuntimeFunctionActivationAck | null {
   if (!hasExactRecordKeys(payload, RUNTIME_FUNCTION_ACTIVATION_KEYS)
-    || payload.schema !== RUNTIME_FUNCTION_ACTIVATION_SCHEMA
-    || payload.activation_id !== activationId
+    || payload["schema"] !== RUNTIME_FUNCTION_ACTIVATION_SCHEMA
+    || payload["activation_id"] !== activationId
     || !RUNTIME_FUNCTION_ACTIVATION_STATES.includes(
-      payload.state as RuntimeFunctionActivationState,
+      payload["state"] as RuntimeFunctionActivationState,
     )
-    || typeof payload.runtime_instance_id !== "string"
-    || !RUNTIME_INSTANCE_ID_PATTERN.test(payload.runtime_instance_id)
-    || !Number.isSafeInteger(payload.foreground_generation)
-    || Number(payload.foreground_generation) < 0
-    || !Number.isSafeInteger(payload.background_generation)
-    || Number(payload.background_generation) < 0
-    || !Number.isSafeInteger(payload.cancelled_queued)
-    || Number(payload.cancelled_queued) < 0) return null;
+    || typeof payload["runtime_instance_id"] !== "string"
+    || !RUNTIME_INSTANCE_ID_PATTERN.test(payload["runtime_instance_id"])
+    || !Number.isSafeInteger(payload["foreground_generation"])
+    || Number(payload["foreground_generation"]) < 0
+    || !Number.isSafeInteger(payload["background_generation"])
+    || Number(payload["background_generation"]) < 0
+    || !Number.isSafeInteger(payload["cancelled_queued"])
+    || Number(payload["cancelled_queued"]) < 0) return null;
   return {
     activationId,
-    state: payload.state as RuntimeFunctionActivationState,
-    runtimeInstanceId: payload.runtime_instance_id,
-    foregroundGeneration: payload.foreground_generation as number,
-    backgroundGeneration: payload.background_generation as number,
-    cancelledQueued: payload.cancelled_queued as number,
+    state: payload["state"] as RuntimeFunctionActivationState,
+    runtimeInstanceId: payload["runtime_instance_id"],
+    foregroundGeneration: payload["foreground_generation"] as number,
+    backgroundGeneration: payload["background_generation"] as number,
+    cancelledQueued: payload["cancelled_queued"] as number,
   };
 }
 
@@ -2179,8 +2179,8 @@ async function activatedFunctionVersions(ref: string, slug: string): Promise<Set
       throw new Error("Function retention activation lineage is invalid");
     }
     if (parent.target_state === "absent") break;
-    const version = typeof manifest.config.version === "string"
-      ? parseVersionNumber(manifest.config.version)
+    const version = typeof manifest.config["version"] === "string"
+      ? parseVersionNumber(manifest.config["version"])
       : null;
     if (version === null) throw new Error("Function retention ancestor has no immutable version");
     // Previously pruned ancestors can remain in the journal. Never let a record
@@ -2279,12 +2279,16 @@ async function functionVersionRecord(
 function parseLegacyVersionedFile(entry: string): { slug: string; version: string; kind: "js" | "src" } | null {
   const jsMatch = entry.match(/^(.*)\.v(\d+)\.js$/);
   if (jsMatch) {
-    return { slug: jsMatch[1], version: jsMatch[2], kind: "js" };
+    const slug = jsMatch[1];
+    const version = jsMatch[2];
+    return slug === undefined || version === undefined ? null : { slug, version, kind: "js" };
   }
 
   const srcMatch = entry.match(/^(.*)\.v(\d+)\.src\.ts$/);
   if (srcMatch) {
-    return { slug: srcMatch[1], version: srcMatch[2], kind: "src" };
+    const slug = srcMatch[1];
+    const version = srcMatch[2];
+    return slug === undefined || version === undefined ? null : { slug, version, kind: "src" };
   }
 
   return null;
@@ -2293,7 +2297,9 @@ function parseLegacyVersionedFile(entry: string): { slug: string; version: strin
 function parseLegacyVersionedSourceDir(entry: string): { slug: string; version: string } | null {
   const match = entry.match(/^\.src-(.*)-v(\d+)$/);
   if (!match) return null;
-  return { slug: match[1], version: match[2] };
+  const slug = match[1];
+  const version = match[2];
+  return slug === undefined || version === undefined ? null : { slug, version };
 }
 
 function isMissingPathError(error: unknown): error is NodeJS.ErrnoException {
@@ -2708,7 +2714,7 @@ function releaseResult(
     activation_id: functionConfig.activation_id,
     version: prepared.version,
     bundled: prepared.bundled,
-    files: prepared.files,
+    ...(prepared.files === undefined ? {} : { files: prepared.files }),
     import_map: prepared.importMap,
     bundle_hash: prepared.bundleHash,
     bundle_size_bytes: prepared.bundleSizeBytes,
@@ -2838,7 +2844,7 @@ export async function prepareProjectReleaseMembers(
       headers: runtimeInternalHeaders(), redirect: "error", signal: AbortSignal.timeout(5000),
     });
     const body = await readRuntimeControlBody(response);
-    if (!response.ok || body.project_release_schema !== "supacloud.project-function-release.v1") {
+    if (!response.ok || body["project_release_schema"] !== "supacloud.project-function-release.v1") {
       throw new Error("Edge Runtime does not support project release manifests");
     }
     return body;
@@ -2863,7 +2869,7 @@ export async function prepareProjectReleaseMembers(
       verifyJwt: nextConfig.verify_jwt, activationId: null,
     });
     const proof = requiredPreheatAttestation(readiness, "project release readiness");
-    if (proof.identity.runtimeInstanceId !== before.runtime_instance_id) {
+    if (proof.identity.runtimeInstanceId !== before["runtime_instance_id"]) {
       throw new Error("Runtime restarted during project release preheat");
     }
     members[entry.slug] = {
@@ -2872,9 +2878,9 @@ export async function prepareProjectReleaseMembers(
     };
   }
   const after = await epoch();
-  if (after.runtime_instance_id !== before.runtime_instance_id
-    || after.foreground_generation !== before.foreground_generation
-    || after.background_generation !== before.background_generation) {
+  if (after["runtime_instance_id"] !== before["runtime_instance_id"]
+    || after["foreground_generation"] !== before["foreground_generation"]
+    || after["background_generation"] !== before["background_generation"]) {
     throw new Error("Runtime pools changed during project release preheat");
   }
   return members;
@@ -3096,7 +3102,7 @@ export const edgeFunctionService = {
         artifact_exists: artifactExists,
         runtime_healthy: runtimeHealthy,
         preheat_ok: readiness.summary.ok,
-        preheat_status: readiness.summary.status,
+        ...(readiness.summary.status === undefined ? {} : { preheat_status: readiness.summary.status }),
         deploy_metrics: snapshotDeployMetrics(),
         ...(readiness.summary.error ? { error: readiness.summary.error } : {}),
       };

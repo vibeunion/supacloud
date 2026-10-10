@@ -1,5 +1,5 @@
 export function isCiLikeRuntime(env: NodeJS.ProcessEnv = process.env): boolean {
-  return Boolean(env.CI || env.GITHUB_ACTIONS || env.NODE_ENV === "test");
+  return Boolean(env["CI"] || env["GITHUB_ACTIONS"] || env.NODE_ENV === "test");
 }
 
 export function normalizeCiS3Endpoint(

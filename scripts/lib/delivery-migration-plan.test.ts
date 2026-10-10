@@ -15,9 +15,11 @@ import { startStarterPostgres } from "./starter-postgres";
 async function archiveFixture(root: string) {
   const sql = "CREATE TABLE public.delivery_check(id integer);\r\n-- private-sql-value\r\n";
   const operator = "CREATE ROLE delivery_operator NOLOGIN;\n";
+  const runtime = GOOD_PROJECT_FILES["src/runtime.ts"];
+  if (runtime === undefined) throw new Error("Missing runtime fixture");
   await writeFixtureProject(root, {
     ...GOOD_PROJECT_FILES,
-    "src/runtime.ts": GOOD_PROJECT_FILES["src/runtime.ts"].replaceAll("() => {}", "(..._args: unknown[]) => {}"),
+    "src/runtime.ts": runtime.replaceAll("() => {}", "(..._args: unknown[]) => {}"),
     "migrations/review.sql": sql, "migrations/operator.sql": operator,
   });
   const built = await buildDeliveryProject({
@@ -55,7 +57,7 @@ test("delivery migration planning verifies detached artifacts and canonical inve
     type Result = { isError?: boolean; content: Array<{ text: string }> };
     let execute!: (args: Record<string, unknown>) => Promise<Result>;
     registerDatabaseTools({ tool(_name, _description, schema, callback) {
-      expect(JSON.stringify(schema.action)).toContain("delivery_migration_plan");
+      expect(JSON.stringify(schema["action"])).toContain("delivery_migration_plan");
       execute = callback;
     } }, http, { projectRef: "test-project", readOnly: true });
     const args = { action: "delivery_migration_plan", delivery_manifest: manifest, delivery_target: "api" };
@@ -124,7 +126,7 @@ test("delivery migration planning verifies detached artifacts and canonical inve
   } finally { await rm(root, { recursive: true, force: true }); }
 }, 120_000);
 
-const bin = process.env.SUPACLOUD_STARTER_POSTGRES_BIN;
+const bin = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];
 (bin ? test : test.skip)("delivery plan matches the native canonical ledger across restart and detects SQL drift", async () => {
   const root = await mkdtemp(join(tmpdir(), "delivery-ledger-native-"));
   const database = await startStarterPostgres(bin!);

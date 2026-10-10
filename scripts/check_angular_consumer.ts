@@ -20,16 +20,16 @@ for (const key of ["PATH", "SystemRoot", "SYSTEMROOT", "WINDIR", "ComSpec", "COM
   const value = process.env[key];
   if (value !== undefined) env[key] = value;
 }
-env.HOME = join(temporary, "home");
-env.USERPROFILE = env.HOME;
-env.XDG_CONFIG_HOME = join(env.HOME, ".config");
-env.BUN_TMPDIR = join(temporary, "bun-tmp");
+env["HOME"] = join(temporary, "home");
+env["USERPROFILE"] = env["HOME"];
+env["XDG_CONFIG_HOME"] = join(env["HOME"], ".config");
+env["BUN_TMPDIR"] = join(temporary, "bun-tmp");
 const run = (args: string[], cwd = project): Promise<string> => runStarterCommand(args, {
   cwd, env, signal: interruption.signal, timeoutMs: 180_000,
 });
 
 try {
-  for (const directory of [project, env.HOME, env.BUN_TMPDIR]) await mkdir(directory, { recursive: true });
+  for (const directory of [project, env["HOME"], env["BUN_TMPDIR"]]) await mkdir(directory, { recursive: true });
   const overrides: Record<string, string> = {};
   for (const directory of ["contracts", "app", "testing", "delivery", "compiler", "commands", "db", "elysia"]) {
     const root = join(repo, "packages", directory);
@@ -48,7 +48,7 @@ try {
     overrides[metadata.name] = `file:${join(temporary, packed)}`;
   }
   const app = JSON.parse(await readFile(join(repo, "packages/app/package.json"), "utf8"));
-  const angularVersion = process.env.SUPACLOUD_ANGULAR_TEST_VERSION
+  const angularVersion = process.env["SUPACLOUD_ANGULAR_TEST_VERSION"]
     ?? app.peerDependencies?.["@angular/core"] ?? app.dependencies?.["@angular/core"];
   assert.equal(typeof angularVersion, "string", "A declared Angular compatibility range is required");
   await writeFile(join(project, "package.json"), JSON.stringify({

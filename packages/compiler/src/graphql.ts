@@ -76,8 +76,8 @@ export async function renderGraphql(options: CompileOptions): Promise<GraphqlArt
       severity: "error",
       code,
       message: error instanceof Error ? error.message : String(error),
-      file: source ? localPath(source) : undefined,
-      line: gql?.locations?.[0]?.line,
+      ...(source === undefined ? {} : { file: localPath(source) }),
+      ...(gql?.locations?.[0]?.line === undefined ? {} : { line: gql.locations[0].line }),
       suggestion: "Update the role-scoped local schema snapshot or correct the query, then recompile.",
     });
   };
@@ -123,8 +123,8 @@ export async function renderGraphql(options: CompileOptions): Promise<GraphqlArt
         severity: "error",
         code: "graphql-query-only",
         message: "GraphQL subscriptions are not supported by the HTTP contract compiler. Use the governed Realtime transport for subscriptions.",
-        file: definition.loc ? localPath(definition.loc.source.name) : undefined,
-        line: definition.loc?.startToken.line,
+        ...(definition.loc ? { file: localPath(definition.loc.source.name) } : {}),
+        ...(definition.loc?.startToken.line === undefined ? {} : { line: definition.loc.startToken.line }),
         suggestion: "Remove this subscription from the GraphQL documents and use the supported Realtime contract.",
       });
     } else if (definition.operation === "mutation" && !options.graphql.mutations) {
@@ -132,8 +132,8 @@ export async function renderGraphql(options: CompileOptions): Promise<GraphqlArt
         severity: "error",
         code: "graphql-query-only",
         message: "GraphQL mutations are disabled by default. Set graphql.mutations to true only after reviewing database grants, RLS, audit and idempotency behavior.",
-        file: definition.loc ? localPath(definition.loc.source.name) : undefined,
-        line: definition.loc?.startToken.line,
+        ...(definition.loc ? { file: localPath(definition.loc.source.name) } : {}),
+        ...(definition.loc?.startToken.line === undefined ? {} : { line: definition.loc.startToken.line }),
         suggestion: "Keep business writes in the governed Command API, or explicitly opt in with graphql.mutations: true.",
       });
     }

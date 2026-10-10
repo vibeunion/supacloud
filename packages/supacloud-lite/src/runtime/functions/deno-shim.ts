@@ -80,11 +80,11 @@ export function installDenoShim(): void {
 /** Return and clear the handler captured by the most recent Deno.serve() call. */
 export function takeCapturedHandler(): DenoHandler | undefined {
   const h = captured.handler
-  captured.handler = undefined
+  delete captured.handler
   return h
 }
 
 /** Clear any handler captured by Deno.serve(), without returning it. */
 export function resetCapturedHandler(): void {
-  captured.handler = undefined
+  delete captured.handler
 }

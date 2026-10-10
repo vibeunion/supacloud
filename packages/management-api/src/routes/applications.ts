@@ -209,11 +209,11 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       }
       const result = await victoriaLogsService.queryProjectLogs(values.ref, {
         units: targets.map(target => target.unit),
-        search: query.search,
-        start: query.start,
-        end: query.end,
-        limit: query.limit,
-        offset: query.offset,
+        ...(query.search === undefined ? {} : { search: query.search }),
+        ...(query.start === undefined ? {} : { start: query.start }),
+        ...(query.end === undefined ? {} : { end: query.end }),
+        ...(query.limit === undefined ? {} : { limit: query.limit }),
+        ...(query.offset === undefined ? {} : { offset: query.offset }),
       });
       return {
         project_ref: values.ref, application_id: values.id, environment_id: values.environmentId,
@@ -269,9 +269,9 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
         applicationId: values.id,
         environmentId: values.environmentId,
         releaseId: body.release_id,
-        branchName: body.branch_name,
-        dataMode: body.data_mode,
-        configurationId: body.configuration_id,
+        ...(body.branch_name === undefined ? {} : { branchName: body.branch_name }),
+        ...(body.data_mode === undefined ? {} : { dataMode: body.data_mode }),
+        ...(body.configuration_id === undefined ? {} : { configurationId: body.configuration_id }),
       });
       return status(202, receipt);
     })

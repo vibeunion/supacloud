@@ -39,7 +39,7 @@ export class HttpParams {
       for (const [key, val] of Object.entries(options.fromObject)) {
         if (val === undefined || val === null) continue;
         if (Array.isArray(val)) {
-          this.map.set(key, val.map((v) => String(v)));
+          this.map.set(key, val.map((v: string | number | boolean) => String(v)));
         } else {
           this.map.set(key, [String(val)]);
         }
@@ -81,7 +81,7 @@ export class HttpParams {
 
   append(param: string, value: string | number | boolean): HttpParams {
     const newMap = new Map(this.map);
-    const existing = newMap.get(param) ? [...newMap.get(param)!] : [];
+    const existing = [...(newMap.get(param) ?? [])];
     existing.push(String(value));
     newMap.set(param, existing);
     return this.clone(newMap);
@@ -94,7 +94,7 @@ export class HttpParams {
       newMap.delete(param);
     } else {
       const target = String(value);
-      const existing = newMap.get(param)!.filter((v) => v !== target);
+      const existing = (newMap.get(param) ?? []).filter((v) => v !== target);
       if (existing.length === 0) {
         newMap.delete(param);
       } else {

@@ -162,13 +162,13 @@ test("release identity is bound to project and application, with expected object
   await expect(storage.readRelease(input.projectRef, "other", first.release_id)).rejects.toThrow();
   await expect(storage.importRelease({ ...input, expectedObjects: { ...input.expectedObjects, api: "0".repeat(64) } }))
     .rejects.toThrow("APPLICATION_RELEASE_OBJECT_MISMATCH");
-  await expect(storage.importRelease({ ...input, expectedObjects: { api: input.expectedObjects.api! } }))
+  await expect(storage.importRelease({ ...input, expectedObjects: { api: input.expectedObjects["api"]! } }))
     .rejects.toThrow("APPLICATION_RELEASE_OBJECT_MISMATCH");
   await expect(storage.importRelease({ ...input, applicationId: "../escape" })).rejects.toThrow();
 });
 
 test("rejects tampered or unexpected source files before publishing", async () => {
-  const entrypoint = join(dirname(input.manifestPath), "objects", input.expectedObjects.api!, "bundle/index.js");
+  const entrypoint = join(dirname(input.manifestPath), "objects", input.expectedObjects["api"]!, "bundle/index.js");
   const original = await readFile(entrypoint);
   await writeFile(entrypoint, "throw new Error('must not execute');");
   await expect(storage.importRelease(input)).rejects.toThrow("Artifact hash mismatch");
@@ -181,7 +181,7 @@ test("rejects tampered or unexpected source files before publishing", async () =
 test("rejects factory-only builds and source symlinks", async () => {
   await expect(storage.importRelease({ ...input, manifestPath: join(factoryArchive, "delivery.manifest.json") }))
     .rejects.toThrow("Invalid executable delivery inventory");
-  const entrypoint = join(dirname(input.manifestPath), "objects", input.expectedObjects.api!, "bundle/index.js");
+  const entrypoint = join(dirname(input.manifestPath), "objects", input.expectedObjects["api"]!, "bundle/index.js");
   await writeFile(join(root, "external.js"), await readFile(entrypoint));
   await rm(entrypoint);
   await symlink(join(root, "external.js"), entrypoint);
@@ -191,7 +191,7 @@ test("rejects factory-only builds and source symlinks", async () => {
 
 test("detects stored corruption on read and repeat import rather than overwriting it", async () => {
   const record = await storage.importRelease(input);
-  const entrypoint = join(stored(record.release_id), "objects", input.expectedObjects.api!, "bundle/index.js");
+  const entrypoint = join(stored(record.release_id), "objects", input.expectedObjects["api"]!, "bundle/index.js");
   await writeFile(entrypoint, "corrupted");
   await expect(storage.readRelease(input.projectRef, input.applicationId, record.release_id)).rejects.toThrow();
   await expect(storage.importRelease(input)).rejects.toThrow();
@@ -368,7 +368,7 @@ test("prepared detached HTTP and Worker objects really start and drain on SIGTER
     const child = Bun.spawn({
       cmd: [process.execPath, "--no-env-file", join(directory, "objects", target.object_id, target.entrypoint)],
       cwd: join(directory, "objects", target.object_id),
-      env: { PATH: process.env.PATH ?? "", HOST: "127.0.0.1", PORT: "0", SHUTDOWN_TIMEOUT_MS: "2000" },
+      env: { PATH: process.env["PATH"] ?? "", HOST: "127.0.0.1", PORT: "0", SHUTDOWN_TIMEOUT_MS: "2000" },
       stdout: "pipe", stderr: "ignore",
     });
     const deadline = setTimeout(() => child.kill("SIGKILL"), 8000);
@@ -410,7 +410,7 @@ test("runtime copy permissions survive restrictive umask and existing private ro
   for (const path of [runtimeRoot, join(runtimeRoot, input.projectRef), directory]) {
     expect((await lstat(path)).mode & 0o777).toBe(0o711);
   }
-  const objectDirectory = join(directory, "objects", input.expectedObjects.api!);
+  const objectDirectory = join(directory, "objects", input.expectedObjects["api"]!);
   expect((await lstat(join(objectDirectory, "bundle"))).mode & 0o777).toBe(0o755);
   const entry = join(objectDirectory, "bundle/index.js");
   expect((await lstat(entry)).mode & 0o777).toBe(0o444);
@@ -442,7 +442,7 @@ test("deployment composition starts real detached targets and recovers persisted
           const child = Bun.spawn({
             cmd: [process.execPath, "--no-env-file", join(directory, "bundle/index.js")], cwd: directory,
             env: {
-              PATH: process.env.PATH ?? "", HOST: "127.0.0.1", PORT: String(port), SHUTDOWN_TIMEOUT_MS: "2000",
+              PATH: process.env["PATH"] ?? "", HOST: "127.0.0.1", PORT: String(port), SHUTDOWN_TIMEOUT_MS: "2000",
               SUPACLOUD_PROJECT_REF: plan.projectRef, SUPACLOUD_APPLICATION_ID: plan.applicationId,
               SUPACLOUD_ENVIRONMENT_ID: plan.environmentId, SUPACLOUD_RELEASE_ID: plan.releaseId,
               SUPACLOUD_ACTIVATION_ID: plan.activationId, SUPACLOUD_TARGET: target.name, SUPACLOUD_OBJECT_ID: target.objectId,
@@ -569,7 +569,7 @@ test("managed detached hosts expose bound readiness and honor an application rea
         cmd: [process.execPath, "--no-env-file", join(directory, "objects", target.object_id, target.entrypoint)],
         cwd: join(directory, "objects", target.object_id),
         env: {
-          PATH: process.env.PATH ?? "", HOST: "127.0.0.1", PORT: "0", SHUTDOWN_TIMEOUT_MS: "2000",
+          PATH: process.env["PATH"] ?? "", HOST: "127.0.0.1", PORT: "0", SHUTDOWN_TIMEOUT_MS: "2000",
           SUPACLOUD_PROJECT_REF: release.project_ref, SUPACLOUD_APPLICATION_ID: release.application_id,
           SUPACLOUD_ENVIRONMENT_ID: runtimeInput.environmentId, SUPACLOUD_RELEASE_ID: release.release_id,
           SUPACLOUD_ACTIVATION_ID: runtimeInput.activationId, SUPACLOUD_TARGET: target.name,

@@ -135,7 +135,7 @@ function ensureWorkspaceBuilds(project: string, directory: string) {
     const depName = (JSON.parse(readFileSync(join(depDir, "package.json"), "utf8")) as { name?: string }).name ?? depDir;
     ensureInstall(depName, depDir);
     ensureWorkspaceBuilds(depName, depDir);
-    if (typeof dep.scripts?.build === "string" && !built.has(depDir) && !packageReady(depDir)) {
+    if (typeof dep.scripts?.["build"] === "string" && !built.has(depDir) && !packageReady(depDir)) {
       const tsc = resolveTypeScript(depDir);
       if (!tsc || !execute(depName, depDir, "build:types", tsc, [
         "-p", "tsconfig.json", "--emitDeclarationOnly",
@@ -184,7 +184,7 @@ if (!args.includes("--inventory")) {
     ensureInstall(project.name, project.directory);
     ensureWorkspaceBuilds(project.name, project.directory);
     const scripts = readManifest(project.directory).scripts ?? {};
-    if (project.svelte && typeof scripts.check === "string") {
+    if (project.svelte && typeof scripts["check"] === "string") {
       const svelteCheck = resolveExecutable(project.directory, "svelte-check");
       if (!svelteCheck) {
         failed = true;
@@ -195,7 +195,7 @@ if (!args.includes("--inventory")) {
       }
       continue;
     }
-    if (typeof scripts.typecheck === "string") {
+    if (typeof scripts["typecheck"] === "string") {
       const tsc = resolveTypeScript(project.directory);
       if (!tsc) {
         failed = true;
@@ -206,7 +206,7 @@ if (!args.includes("--inventory")) {
       }
     }
     if (typeof scripts["typecheck:consumer"] === "string") {
-      if (typeof scripts.build === "string" && !packageReady(project.directory)) {
+      if (typeof scripts["build"] === "string" && !packageReady(project.directory)) {
         const tsc = resolveTypeScript(project.directory);
         if (!tsc || !execute(project.name, project.directory, "build:types", tsc, [
           "-p", "tsconfig.json", "--emitDeclarationOnly",

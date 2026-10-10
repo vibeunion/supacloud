@@ -16,7 +16,7 @@ export function createDeliveryApplication(modules: CompiledModule[]) {
   return {
     fetch: (request: Request) => app.handle(request),
     close: async () => {
-      if (process.env.CLOSE_RECEIPT) await Bun.write(process.env.CLOSE_RECEIPT, "closed");
+      if (process.env["CLOSE_RECEIPT"]) await Bun.write(process.env["CLOSE_RECEIPT"], "closed");
     },
   };
 }`;
@@ -86,10 +86,10 @@ test("detached execution feedback uses its verified build snapshot without curre
         export function createDeliveryApplication(modules: CompiledModule[]) {
           const events: ExecutionEvent[] = [];
           const app = createApplication({ modules, requestContext: () => ({ requestId: "delivered-feedback" }),
-            onExecution: event => { events.push(event); } });
+            onExecution: (event: ExecutionEvent) => { events.push(event); } });
           return { fetch: (request: Request) => app.handle(request),
             async close() {
-              if (process.env.EXECUTION_RECEIPT) await Bun.write(process.env.EXECUTION_RECEIPT, JSON.stringify({version: 1, events}));
+              if (process.env["EXECUTION_RECEIPT"]) await Bun.write(process.env["EXECUTION_RECEIPT"], JSON.stringify({version: 1, events}));
             } };
         }`,
     });
@@ -102,7 +102,7 @@ test("detached execution feedback uses its verified build snapshot without curre
     const observationPath = join(archive, "observations.json");
     await rm(project, { recursive: true, force: true });
     child = Bun.spawn([process.execPath, "--no-env-file", join(bundle, "index.js")], {
-      cwd: archive, env: { PATH: process.env.PATH, PORT: "0", HOST: "127.0.0.1", EXECUTION_RECEIPT: observationPath },
+      cwd: archive, env: { PATH: process.env["PATH"], PORT: "0", HOST: "127.0.0.1", EXECUTION_RECEIPT: observationPath },
       stdout: "pipe", stderr: "pipe",
     });
     if (!child.stderr || typeof child.stderr === "number") throw new Error("Missing child error stream");
@@ -134,7 +134,7 @@ test("detached execution feedback uses its verified build snapshot without curre
     const cli = Bun.spawn([process.execPath, "--no-env-file", join(import.meta.dir, "cli.ts"),
       "context", "health", "--delivery-manifest", manifest, "--delivery-target", "api",
       "--events", observationPath, "--request-id", "delivered-feedback", "--json"], {
-      cwd: archive, env: { PATH: process.env.PATH }, stdout: "pipe", stderr: "pipe",
+      cwd: archive, env: { PATH: process.env["PATH"] }, stdout: "pipe", stderr: "pipe",
     });
     const cliTimeout = setTimeout(() => cli.kill("SIGKILL"), 15_000);
     try {
@@ -236,7 +236,7 @@ test("HTTP artifacts run detached, retain compiled routes, reuse identity and cl
     for (const signal of ["SIGINT", "SIGTERM"] as const) {
       const receipt = join(detached, `closed-${signal}`);
       const child = Bun.spawn([process.execPath, "--no-env-file", join(detached, "index.js")], {
-        cwd: detached, env: { PATH: process.env.PATH, PORT: "0", HOST: "127.0.0.1", CLOSE_RECEIPT: receipt },
+        cwd: detached, env: { PATH: process.env["PATH"], PORT: "0", HOST: "127.0.0.1", CLOSE_RECEIPT: receipt },
         stdout: "pipe", stderr: "pipe",
       });
       const errors = new Response(child.stderr).text();
@@ -323,9 +323,9 @@ test("HTTP lifecycle cancels initialization, bounds streaming and cleanup, and s
     await writeFixtureProject(project, {
       "src/host.ts": `import { createApplication, type CompiledModule } from ${JSON.stringify(runtime)};
         export async function createDeliveryApplication(modules: CompiledModule[], {signal}: {signal: AbortSignal}) {
-          const mode = process.env.HOST_TEST_MODE;
+          const mode = process.env["HOST_TEST_MODE"];
           if (mode === "startup-error") throw new Error(${JSON.stringify(marker)});
-          if (process.env.INIT_RECEIPT) await Bun.write(process.env.INIT_RECEIPT, "initialized");
+          if (process.env["INIT_RECEIPT"]) await Bun.write(process.env["INIT_RECEIPT"], "initialized");
           if (mode === "startup-wait") {
             await new Promise<void>((resolve) => {
               if (signal.aborted) resolve();
@@ -341,8 +341,8 @@ test("HTTP lifecycle cancels initialization, bounds streaming and cleanup, and s
             start(controller) {controller.enqueue(new TextEncoder().encode("open\\n"));}
           }));
           return {fetch, async close() {
-            if (process.env.CLOSE_RECEIPT) {
-              const file = Bun.file(process.env.CLOSE_RECEIPT);
+            if (process.env["CLOSE_RECEIPT"]) {
+              const file = Bun.file(process.env["CLOSE_RECEIPT"]);
               await Bun.write(file, (await file.exists() ? await file.text() : "") + "closed\\n");
             }
             if (mode?.endsWith("close-stuck")) await new Promise<void>(() => {});
@@ -362,7 +362,7 @@ test("HTTP lifecycle cancels initialization, bounds streaming and cleanup, and s
       const child = Bun.spawn([process.execPath, "--no-env-file", join(detached, "index.js")], {
         cwd: detached, stdout: "pipe", stderr: "pipe",
         env: {
-          PATH: process.env.PATH, PORT: String(occupied?.port ?? 0), HOST: "127.0.0.1",
+          PATH: process.env["PATH"], PORT: String(occupied?.port ?? 0), HOST: "127.0.0.1",
           HOST_TEST_MODE: mode, CLOSE_RECEIPT: receipt, INIT_RECEIPT: initialized, SHUTDOWN_TIMEOUT_MS: "1000",
         },
       });

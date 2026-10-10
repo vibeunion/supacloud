@@ -1,10 +1,10 @@
 import { parseDeploymentEvidence, type DeploymentEvidence } from "../packages/delivery/src/deployment-evidence";
 
-const apiUrl = (process.env.SUPACLOUD_ACCEPTANCE_API_URL || "").replace(/\/+$/, "");
-const token = process.env.SUPACLOUD_ACCEPTANCE_TOKEN;
-const projectRef = process.env.SUPACLOUD_ACCEPTANCE_PROJECT_REF || "";
-const applicationId = process.env.SUPACLOUD_ACCEPTANCE_APPLICATION_ID || "";
-const environmentId = process.env.SUPACLOUD_ACCEPTANCE_ENVIRONMENT_ID || "";
+const apiUrl = (process.env["SUPACLOUD_ACCEPTANCE_API_URL"] || "").replace(/\/+$/, "");
+const token = process.env["SUPACLOUD_ACCEPTANCE_TOKEN"];
+const projectRef = process.env["SUPACLOUD_ACCEPTANCE_PROJECT_REF"] || "";
+const applicationId = process.env["SUPACLOUD_ACCEPTANCE_APPLICATION_ID"] || "";
+const environmentId = process.env["SUPACLOUD_ACCEPTANCE_ENVIRONMENT_ID"] || "";
 const refresh = process.argv.includes("--refresh-evidence");
 
 if (!apiUrl || !projectRef || !applicationId || !environmentId) {
@@ -43,16 +43,16 @@ const backups = await readJson(`/v1/projects/${encodeURIComponent(projectRef)}/d
 
 let evidence: DeploymentEvidence | null = null;
 const evidenceEnvelope = record(evidenceResponse.value);
-if (evidenceResponse.status === 200 && evidenceEnvelope?.evidence !== null) {
-  evidence = parseDeploymentEvidence(evidenceEnvelope?.evidence);
+if (evidenceResponse.status === 200 && evidenceEnvelope?.["evidence"] !== null) {
+  evidence = parseDeploymentEvidence(evidenceEnvelope?.["evidence"]);
 }
 
 const runtimeEnvelope = record(runtime.value);
-const readiness = record(runtimeEnvelope?.readiness);
+const readiness = record(runtimeEnvelope?.["readiness"]);
 const checks = {
-  management_health: health.status === 200 && record(health.value)?.status === "ok",
+  management_health: health.status === 200 && record(health.value)?.["status"] === "ok",
   runtime_http: runtime.status === 200,
-  runtime_ready: readiness?.ready === true,
+  runtime_ready: readiness?.["ready"] === true,
   deployment_evidence: evidence !== null,
   deployment_confirmed: evidence?.status === "confirmed",
   backup_inventory: backups.status === 200 && Array.isArray(backups.value),

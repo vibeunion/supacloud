@@ -98,6 +98,104 @@ describe("compiler type-safety gates", () => {
     expect(scanProductionSource({ rootDir, strict: true })).toEqual([]);
   });
 
+  test("noCheck cannot disable the mandatory TypeScript gate", async () => {
+    const rootDir = await projectFixture({
+      "tsconfig.json": JSON.stringify({ compilerOptions: { noCheck: true, types: [] } }),
+      "src/production.ts": "export const value: string = 1;",
+    });
+    expect(scanProductionSource({ rootDir, strict: false })).toContainEqual(
+      expect.objectContaining({ code: "source-typescript", errorCode: "TS2322", severity: "error" }),
+    );
+  });
+
+  test("rejects any propagated through imported results, assignments and arguments", async () => {
+    const rootDir = await projectFixture({
+      "tsconfig.json": JSON.stringify({ compilerOptions: { types: [], target: "ES2022" } }),
+      "vendor.d.ts": "export declare function read(): any;\nexport declare function readMany(): Promise<any[]>;",
+      "src/bridge.ts": 'import { read, readMany } from "../vendor";\nexport { read, readMany };',
+      "src/production.ts": [
+        'import { read, readMany } from "./bridge";',
+        "export const value: string = read();",
+        "export let target: string = '';",
+        "target = read();",
+        "export function typed(value: string): string { return value; }",
+        "typed(read());",
+        "export function result(): string { return read(); }",
+        "export const batch = readMany();",
+        "export const raw: unknown = read();",
+        "export const rawBatch: Promise<unknown> = readMany();",
+      ].join("\n"),
+    });
+    expect(scanProductionSource({ rootDir, strict: false })
+      .filter(({ code }) => code === "source-unsafe-any").map(({ line }) => line))
+      .toEqual([2, 4, 6, 7, 8]);
+  });
+
+  test("unhandled Promise and void Promise fail while await, return and rejection handling pass", async () => {
+    const rootDir = await projectFixture({
+      "tsconfig.json": JSON.stringify({ compilerOptions: { types: [], target: "ES2022" } }),
+      "src/production.ts": [
+        "export async function work(): Promise<void> {}",
+        "work();",
+        "void work();",
+        "work().then(() => {});",
+        "work().finally(() => {});",
+        "work().catch(undefined);",
+        "work().catch(() => {});",
+        "work().then(() => {}, () => {});",
+        "export async function owned(): Promise<void> { await work(); }",
+        "export function forwarded(): Promise<void> { return work(); }",
+      ].join("\n"),
+    });
+    expect(scanProductionSource({ rootDir, strict: false })
+      .filter(({ code }) => code === "source-floating-promise").map(({ line }) => line))
+      .toEqual([2, 3, 4, 5, 6]);
+  });
+
+  test("library handles, inferred arrows, casts and rest arguments cannot hide any", async () => {
+    const rootDir = await projectFixture({
+      "tsconfig.json": JSON.stringify({ compilerOptions: { types: [], target: "ES2022" } }),
+      "node_modules/vendor/index.d.ts": [
+        "export declare class Handle<T = any> { private internals; read(): any; }",
+      ].join("\n"),
+      "src/production.ts": [
+        'import { Handle } from "vendor";',
+        "export const handle = new Handle();",
+        "export const leaked = () => handle.read();",
+        "export const decoded: string = handle.read() as string;",
+        "export const object: { value: string } = { value: handle.read() };",
+        "export function consume(...values: string[]): void {}",
+        'consume("safe", handle.read());',
+        "export const quarantined: unknown = handle.read();",
+        "export const boundary = (): unknown => handle.read();",
+      ].join("\n"),
+    });
+    expect(scanProductionSource({ rootDir, strict: false })
+      .filter(({ code }) => code === "source-unsafe-any").map(({ line }) => line))
+      .toEqual([3, 4, 5, 7]);
+  });
+
+  test("finite union switches must list all cases, even with a permissive default", async () => {
+    const rootDir = await projectFixture({
+      "tsconfig.json": JSON.stringify({ compilerOptions: { types: [], target: "ES2022" } }),
+      "src/production.ts": [
+        'type State = { kind: "draft" } | { kind: "approved" };',
+        "export function incomplete(value: State): number {",
+        '  switch (value.kind) { case "draft": return 0; default: return 1; }',
+        "}",
+        "export function complete(value: State): number {",
+        '  switch (value.kind) { case "draft": return 0; case "approved": return 1; }',
+        "}",
+        "export function open(value: string): number {",
+        '  switch (value) { case "draft": return 0; default: return 1; }',
+        "}",
+      ].join("\n"),
+    });
+    expect(scanProductionSource({ rootDir, strict: false })
+      .filter(({ code }) => code === "source-non-exhaustive-switch").map(({ line }) => line))
+      .toEqual([3]);
+  });
+
   test.each([
     ["export const value: any = 1;", "source-any"],
     ["export const value: string = null;", "source-typescript"],
@@ -172,6 +270,7 @@ describe("compiler type-safety gates", () => {
       "source-non-null-assertion",
       "source-any",
       "source-implicit-widening",
+      "source-unsafe-any",
     ]);
     expect(diagnostics.every((diagnostic) => diagnostic.severity === "error")).toBe(true);
     expect(diagnostics.every((diagnostic) => diagnostic.file === "src/production.ts")).toBe(true);

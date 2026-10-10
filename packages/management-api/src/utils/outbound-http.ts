@@ -90,6 +90,7 @@ async function resolveTarget(urlValue: string): Promise<ResolvedTarget> {
     throw new Error("url host must not resolve to a private or local address");
   }
   const selected = candidates[0];
+  if (selected === undefined) throw new Error("url host resolution returned no address");
   return { url, hostname, address: selected.address, family: selected.family as 4 | 6 };
 }
 

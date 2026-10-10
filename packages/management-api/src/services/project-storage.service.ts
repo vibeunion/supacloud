@@ -25,7 +25,7 @@ export function createConfiguredProjectS3Driver(configuration: ProjectS3Configur
 
 export const projectStorageService = createProjectStorageRegistry({
   database: sql, getProjectDb, decryptSecret, encryptSecret,
-  allowedOrigins: () => process.env.SUPACLOUD_PROJECT_S3_ALLOWED_ORIGINS ?? "",
+  allowedOrigins: () => process.env["SUPACLOUD_PROJECT_S3_ALLOWED_ORIGINS"] ?? "",
   defaultBackend: () => config.storageType || "s3",
   createDriver: createConfiguredProjectS3Driver,
   inventory: createProjectStorageInventory({ database: sql, getProjectDb }),

@@ -320,23 +320,32 @@ export function normalizeCustomGatewayRoute(input: CustomGatewayRouteConfig): Cu
     const headers = hasUpstream || hasManagedUpstream
         ? normalizeCustomProxyHeaders(input.headers)
         : normalizeCustomHeaders(input.headers);
+    const firstPath = normalizedPaths[0];
+    if (firstPath === undefined) throw new Error("Custom route path is missing");
+    const upstream = hasUpstream && input.upstream !== undefined ? input.upstream.trim() : undefined;
+    const staticRoot = hasStaticRoot && input.static_root !== undefined
+        ? normalizeCustomStaticRoot(input.static_root) : undefined;
+    const protocol = normalizeCustomProtocol(input.protocol);
+    const redirectStatus = normalizeCustomRedirectStatus(input.redirect_status, hasRedirect);
+    const cors = input.cors
+        ? uniqueStrings(input.cors.map((origin) => origin.trim()).filter(Boolean)).slice(0, 50) : undefined;
 
     return {
         id,
         hosts,
-        path: Array.isArray(input.path) ? normalizedPaths : normalizedPaths[0],
-        upstream: hasUpstream ? input.upstream!.trim() : undefined,
-        managed_upstream: managedUpstream,
+        path: Array.isArray(input.path) ? normalizedPaths : firstPath,
+        ...(upstream === undefined ? {} : { upstream }),
+        ...(managedUpstream === undefined ? {} : { managed_upstream: managedUpstream }),
         upstream_tls_insecure_skip_verify: input.upstream_tls_insecure_skip_verify === true,
-        static_root: hasStaticRoot ? normalizeCustomStaticRoot(input.static_root!) : undefined,
-        spa: hasStaticRoot && input.spa === true ? true : undefined,
-        protocol: normalizeCustomProtocol(input.protocol),
-        redirect_to: redirectTo,
-        redirect_status: normalizeCustomRedirectStatus(input.redirect_status, hasRedirect),
-        rewrite_uri: rewriteUri,
-        strip_prefix: stripPrefix,
-        headers,
-        cors: input.cors ? uniqueStrings(input.cors.map((origin) => origin.trim()).filter(Boolean)).slice(0, 50) : undefined,
+        ...(staticRoot === undefined ? {} : { static_root: staticRoot }),
+        ...(hasStaticRoot && input.spa === true ? { spa: true } : {}),
+        ...(protocol === undefined ? {} : { protocol }),
+        ...(redirectTo === undefined ? {} : { redirect_to: redirectTo }),
+        ...(redirectStatus === undefined ? {} : { redirect_status: redirectStatus }),
+        ...(rewriteUri === undefined ? {} : { rewrite_uri: rewriteUri }),
+        ...(stripPrefix === undefined ? {} : { strip_prefix: stripPrefix }),
+        ...(headers === undefined ? {} : { headers }),
+        ...(cors === undefined ? {} : { cors }),
         priority: Number.isFinite(input.priority) ? Math.trunc(input.priority || 0) : 0,
         enabled: input.enabled ?? true,
     };
@@ -448,18 +457,18 @@ export function makeFunctionCorsErrorFallback(origins: string[]) {
 }
 
 function isFunctionCorsErrorFallback(handler: Record<string, unknown>): boolean {
-    return handler.handler === "subroute" && "errors" in handler;
+    return handler["handler"] === "subroute" && "errors" in handler;
 }
 
 function isCorsHeaderHandler(handler: Record<string, unknown>): boolean {
-    return handler.handler === "headers"
-        && typeof (handler.response as any)?.set?.["Access-Control-Allow-Origin"] !== "undefined";
+    return handler["handler"] === "headers"
+        && typeof (handler["response"] as any)?.set?.["Access-Control-Allow-Origin"] !== "undefined";
 }
 
 export function isCorsSubroute(handler: Record<string, unknown>): boolean {
     if (isFunctionCorsErrorFallback(handler)) return false;
-    if (handler.handler !== "subroute" || !Array.isArray(handler.routes)) return false;
-    return handler.routes.some((route: any) =>
+    if (handler["handler"] !== "subroute" || !Array.isArray(handler["routes"])) return false;
+    return handler["routes"].some((route: any) =>
         Array.isArray(route?.handle) && route.handle.some((item: any) => isCorsHeaderHandler(item)),
     );
 }
@@ -469,10 +478,10 @@ export function isCorsSubroute(handler: Record<string, unknown>): boolean {
  * upstream access-control-* headers instead of deleting them at the gateway.
  */
 export function routePreservesUpstreamCors(route: CaddyRoute): boolean {
-    const handle = Array.isArray(route.handle) ? route.handle as Array<Record<string, any>> : [];
+    const handle = Array.isArray(route["handle"]) ? route["handle"] as Array<Record<string, any>> : [];
     return handle.some((handler) => {
-        if (handler?.handler !== "reverse_proxy") return false;
-        const deletions = handler?.headers?.response?.delete;
+        if (handler?.["handler"] !== "reverse_proxy") return false;
+        const deletions = handler?.["headers"]?.response?.delete;
         return !(Array.isArray(deletions) && deletions.includes("Access-Control-Allow-Origin"));
     });
 }
@@ -483,29 +492,29 @@ export function setRouteCors(route: CaddyRoute, origins: string[]): void {
     if (String(route["@id"] || "").startsWith("route-custom-gateway-")) return;
     if (String(route["@id"] || "").startsWith("route-project-")
         && String(route["@id"]).endsWith("-functions")) {
-        const handle = Array.isArray(route.handle) ? route.handle as Record<string, unknown>[] : [];
+        const handle = Array.isArray(route["handle"]) ? route["handle"] as Record<string, unknown>[] : [];
         if (config.edgeFunctionsCorsMode === "auto") {
-            const proxy = handle.find((handler) => handler.handler === "reverse_proxy") as Record<string, unknown> | undefined;
+            const proxy = handle.find((handler) => handler["handler"] === "reverse_proxy");
             if (proxy) {
-                const headers = proxy.headers && typeof proxy.headers === "object" && !Array.isArray(proxy.headers)
-                    ? proxy.headers as Record<string, unknown>
+                const headers = proxy["headers"] && typeof proxy["headers"] === "object" && !Array.isArray(proxy["headers"])
+                    ? proxy["headers"] as Record<string, unknown>
                     : {};
-                const response = headers.response && typeof headers.response === "object" && !Array.isArray(headers.response)
-                    ? headers.response as Record<string, unknown>
+                const response = headers["response"] && typeof headers["response"] === "object" && !Array.isArray(headers["response"])
+                    ? headers["response"] as Record<string, unknown>
                     : {};
-                response.delete = [...UPSTREAM_CORS_RESPONSE_HEADERS];
-                headers.response = response;
-                proxy.headers = headers;
+                response["delete"] = [...UPSTREAM_CORS_RESPONSE_HEADERS];
+                headers["response"] = response;
+                proxy["headers"] = headers;
             }
             const corsSubroute = makeCorsSubroute(origins);
-            route.handle = corsSubroute
+            route["handle"] = corsSubroute
                 ? [corsSubroute, ...handle.filter((handler) =>
                     !isFunctionCorsErrorFallback(handler) && !isCorsHeaderHandler(handler) && !isCorsSubroute(handler))]
                 : handle.filter((handler) =>
                     !isFunctionCorsErrorFallback(handler) && !isCorsHeaderHandler(handler) && !isCorsSubroute(handler));
             return;
         }
-        route.handle = [
+        route["handle"] = [
             makeFunctionCorsErrorFallback(origins),
             ...handle.filter((handler) => !isFunctionCorsErrorFallback(handler)
                 && !isCorsHeaderHandler(handler) && !isCorsSubroute(handler)),
@@ -516,9 +525,9 @@ export function setRouteCors(route: CaddyRoute, origins: string[]): void {
     // themselves; never re-attach the gateway CORS subroute to them.
     if (routePreservesUpstreamCors(route)) return;
     const corsSubroute = makeCorsSubroute(origins);
-    const handle = Array.isArray(route.handle) ? route.handle as Record<string, unknown>[] : [];
+    const handle = Array.isArray(route["handle"]) ? route["handle"] as Record<string, unknown>[] : [];
     const withoutCors = handle.filter((handler) => !isCorsHeaderHandler(handler) && !isCorsSubroute(handler));
-    route.handle = corsSubroute ? [corsSubroute, ...withoutCors] : withoutCors;
+    route["handle"] = corsSubroute ? [corsSubroute, ...withoutCors] : withoutCors;
 }
 
 export function makeReverseProxy(
@@ -531,7 +540,7 @@ export function makeReverseProxy(
     upstreamTlsInsecureSkipVerify?: boolean,
 ): Record<string, unknown> {
     const responseHeaders: Record<string, unknown> = {};
-    if (!preserveUpstreamCors) responseHeaders.delete = [...UPSTREAM_CORS_RESPONSE_HEADERS];
+    if (!preserveUpstreamCors) responseHeaders["delete"] = [...UPSTREAM_CORS_RESPONSE_HEADERS];
     const proxy: Record<string, unknown> = {
         handler: "reverse_proxy",
         upstreams: [{ dial: caddyDial(upstream) }],
@@ -547,14 +556,14 @@ export function makeReverseProxy(
         },
     };
     if (upstreamTls) {
-        (proxy.transport as Record<string, unknown>).tls = upstreamTlsInsecureSkipVerify
+        (proxy["transport"] as Record<string, unknown>)["tls"] = upstreamTlsInsecureSkipVerify
             ? { insecure_skip_verify: true }
             : {};
     }
     if (Object.keys(responseHeaders).length > 0) {
-        (proxy.headers as Record<string, unknown>).response = responseHeaders;
+        (proxy["headers"] as Record<string, unknown>)["response"] = responseHeaders;
     }
-    if (streaming !== false) proxy.flush_interval = -1;
+    if (streaming !== false) proxy["flush_interval"] = -1;
     return proxy;
 }
 
@@ -641,7 +650,7 @@ export function makeCustomGatewayRoute(projectRef: string, input: CustomGatewayR
         const responseHeaders = Object.fromEntries(
             Object.entries(route.headers || {}).map(([key, value]) => [key, [value]]),
         );
-        responseHeaders.Location = [route.redirect_to];
+        responseHeaders["Location"] = [route.redirect_to];
         handle.push({
             handler: "static_response",
             headers: responseHeaders,
@@ -656,7 +665,7 @@ export function makeCustomGatewayRoute(projectRef: string, input: CustomGatewayR
         path: Array.isArray(route.path) ? route.path : [route.path],
     };
     if (route.protocol) {
-        match.vars = {
+        match["vars"] = {
             "{http.request.scheme}": [route.protocol],
         };
     }

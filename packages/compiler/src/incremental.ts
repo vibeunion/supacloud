@@ -57,7 +57,7 @@ export function createIncrementalCompiler(): IncrementalCompiler {
         && previousSnapshot.optionsKey === snapshot.optionsKey
         && previousCache === activeCache
         && changedFiles.length === 0,
-      ) && options.strict === undefined && options.typeSafety === undefined;
+      );
 
       if (!activeCache.dependencyGraph && previousResult) {
         activeCache.dependencyGraph = new ModuleDependencyGraph(previousResult.graph.modules);

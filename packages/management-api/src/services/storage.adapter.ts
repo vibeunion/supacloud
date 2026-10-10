@@ -519,10 +519,10 @@ export class S3Driver implements StorageDriver {
     endpoint: string;
     bucket: string;
   } | null> {
-    if (process.env.CI || process.env.GITHUB_ACTIONS || process.env.NODE_ENV === "test") {
+    if (process.env["CI"] || process.env["GITHUB_ACTIONS"] || process.env.NODE_ENV === "test") {
       return {
-        accessKey: process.env.S3_ACCESS_KEY || "minioadmin",
-        secretKey: process.env.S3_SECRET_KEY || "minioadmin",
+        accessKey: process.env["S3_ACCESS_KEY"] || "minioadmin",
+        secretKey: process.env["S3_SECRET_KEY"] || "minioadmin",
         endpoint: this.normalizeEndpoint(
           config.s3Endpoint || "http://127.0.0.1:9000",
         ),
@@ -535,16 +535,20 @@ export class S3Driver implements StorageDriver {
       projectRef,
     ]);
     if (!success) {
+      const accessKey = process.env["S3_ACCESS_KEY"] || undefined;
+      const secretKey = process.env["S3_SECRET_KEY"] || undefined;
       return {
-        accessKey: process.env.S3_ACCESS_KEY,
-        secretKey: process.env.S3_SECRET_KEY,
+        ...(accessKey === undefined ? {} : { accessKey }),
+        ...(secretKey === undefined ? {} : { secretKey }),
         endpoint: this.normalizeEndpoint(config.s3Endpoint),
         bucket: resolveBucketName(projectRef),
       };
     }
+    const accessKey = output.match(/ACCESS_KEY=([^\n]+)/)?.[1]?.trim();
+    const secretKey = output.match(/SECRET_KEY=([^\n]+)/)?.[1]?.trim();
     return {
-      accessKey: output.match(/ACCESS_KEY=([^\n]+)/)?.[1]?.trim(),
-      secretKey: output.match(/SECRET_KEY=([^\n]+)/)?.[1]?.trim(),
+      ...(accessKey === undefined ? {} : { accessKey }),
+      ...(secretKey === undefined ? {} : { secretKey }),
       endpoint: this.normalizeEndpoint(
         output.match(/ENDPOINT=([^\n]+)/)?.[1]?.trim() || config.s3Endpoint,
       ),
@@ -573,7 +577,7 @@ export class S3Driver implements StorageDriver {
   }
 
   async createBucket(projectRef: string, bucket: string): Promise<boolean> {
-    if (process.env.CI || process.env.GITHUB_ACTIONS || process.env.NODE_ENV === "test") {
+    if (process.env["CI"] || process.env["GITHUB_ACTIONS"] || process.env.NODE_ENV === "test") {
       const creds = await this.getCreds(projectRef);
       if (creds?.accessKey && creds?.secretKey) {
         const { endpoint, bucket: physicalBucket, accessKey, secretKey } = creds;
@@ -622,7 +626,7 @@ export class S3Driver implements StorageDriver {
 
       await Promise.all(
         contents.map((file: Record<string, unknown>) =>
-          s3.file(String(file.key)).delete(),
+          s3.file(String(file["key"])).delete(),
         ),
       );
       return true;
@@ -657,7 +661,8 @@ export class S3Driver implements StorageDriver {
         // Find top-level directories which represent buckets in our mapping
         const parts = obj.key.split("/");
         if (parts.length > 1) {
-          buckets.add(parts[0]);
+          const bucket = parts[0];
+          if (bucket !== undefined) buckets.add(bucket);
         }
       }
 
@@ -685,7 +690,7 @@ export class S3Driver implements StorageDriver {
     try {
       const cleanFileName = normalizeObjectKey(key);
 
-      if (process.env.CI || process.env.GITHUB_ACTIONS || process.env.NODE_ENV === "test") {
+      if (process.env["CI"] || process.env["GITHUB_ACTIONS"] || process.env.NODE_ENV === "test") {
         return await putS3ObjectWithFetch(
           creds.endpoint,
           creds.bucket,
@@ -784,17 +789,17 @@ export class S3Driver implements StorageDriver {
       const res = await s3.list();
       const s3Contents = (res.contents || []).filter(
         (f: Record<string, unknown>) =>
-          typeof f.key === "string" && f.key.startsWith(`${bucket}/`),
+          typeof f["key"] === "string" && f["key"].startsWith(`${bucket}/`),
       );
 
       return s3Contents.map((file: Record<string, unknown>) => {
-        const key = file.key as string;
+        const key = file["key"] as string;
         const relativeKey = key.substring(bucket.length + 1);
         return {
           id: relativeKey,
           name: relativeKey,
-          updated: String(file.lastModified),
-          size: Math.round((Number(file.size) ?? 0) / 1024) + " KB",
+          updated: String(file["lastModified"]),
+          size: Math.round((Number(file["size"]) ?? 0) / 1024) + " KB",
           type: key.includes(".")
             ? key.split(".").pop() || "unknown"
             : "unknown",

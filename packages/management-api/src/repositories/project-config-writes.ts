@@ -52,16 +52,16 @@ export async function persistApplicationPreview(
       WHERE ref = ${projectRef} AND deleted_at IS NULL FOR UPDATE`;
     if (rows.length !== 1) throw new Error("APPLICATION_PREVIEW_PROJECT_NOT_FOUND");
     const config = storedConfig(rows[0].config);
-    const previews: unknown = config.application_previews ?? [];
+    const previews: unknown = config["application_previews"] ?? [];
     if (!Array.isArray(previews)) throw new Error("APPLICATION_PREVIEW_CONFIG_INVALID");
     const ids = new Set<string>();
     for (const item of previews) {
-      if (!object(item) || item.schema !== "supacloud.application-preview.v1"
-        || typeof item.preview_id !== "string" || item.project_ref !== projectRef
-        || !timestamp(item.updated_at) || ids.has(item.preview_id)) {
+      if (!object(item) || item["schema"] !== "supacloud.application-preview.v1"
+        || typeof item["preview_id"] !== "string" || item["project_ref"] !== projectRef
+        || !timestamp(item["updated_at"]) || ids.has(item["preview_id"])) {
         throw new Error("APPLICATION_PREVIEW_CONFIG_INVALID");
       }
-      ids.add(item.preview_id);
+      ids.add(item["preview_id"]);
     }
     const index = previews.findIndex(item => item.preview_id === receipt.preview_id);
     const current = index < 0 ? undefined : previews[index];

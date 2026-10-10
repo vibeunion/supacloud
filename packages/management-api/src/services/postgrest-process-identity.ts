@@ -408,29 +408,29 @@ function strictProbeResult(candidate: unknown): PostgrestProcessIdentityProbeRes
   ])) {
     throw new Error("Invalid PostgREST process identity probe output");
   }
-  if (probeOutput.version !== 1
-    || !boundedProbeString(probeOutput.startId, MAX_PROCESS_START_ID_BYTES)
-    || !/^(?:0|[1-9]\d*)$/.test(probeOutput.startId)
-    || !boundedProbeString(probeOutput.executable, MAX_EXECUTABLE_PATH_BYTES)
-    || !isAbsolute(probeOutput.executable)
-    || probeOutput.executable.includes("\0")) {
+  if (probeOutput["version"] !== 1
+    || !boundedProbeString(probeOutput["startId"], MAX_PROCESS_START_ID_BYTES)
+    || !/^(?:0|[1-9]\d*)$/.test(probeOutput["startId"])
+    || !boundedProbeString(probeOutput["executable"], MAX_EXECUTABLE_PATH_BYTES)
+    || !isAbsolute(probeOutput["executable"])
+    || probeOutput["executable"].includes("\0")) {
     throw new Error("Invalid PostgREST process identity probe output");
   }
-  if (!Array.isArray(probeOutput.commandLine)
-    || probeOutput.commandLine.length === 0
-    || probeOutput.commandLine.length > MAX_COMMAND_LINE_ARGUMENTS
-    || probeOutput.commandLine.some((argument) => !boundedProbeArgument(argument))) {
+  if (!Array.isArray(probeOutput["commandLine"])
+    || probeOutput["commandLine"].length === 0
+    || probeOutput["commandLine"].length > MAX_COMMAND_LINE_ARGUMENTS
+    || probeOutput["commandLine"].some((argument) => !boundedProbeArgument(argument))) {
     throw new Error("Invalid PostgREST process identity probe output");
   }
-  if (!Array.isArray(probeOutput.environmentNames)
-    || probeOutput.environmentNames.length > MAX_ENVIRONMENT_NAMES
-    || probeOutput.environmentNames.some((name) => !boundedProbeString(name, MAX_ENVIRONMENT_NAME_BYTES)
+  if (!Array.isArray(probeOutput["environmentNames"])
+    || probeOutput["environmentNames"].length > MAX_ENVIRONMENT_NAMES
+    || probeOutput["environmentNames"].some((name) => !boundedProbeString(name, MAX_ENVIRONMENT_NAME_BYTES)
       || !ENVIRONMENT_NAME_PATTERN.test(name))) {
     throw new Error("Invalid PostgREST process identity probe output");
   }
-  const sortedNames = [...probeOutput.environmentNames].sort();
-  if (JSON.stringify(sortedNames) !== JSON.stringify(probeOutput.environmentNames)
-    || new Set(probeOutput.environmentNames).size !== probeOutput.environmentNames.length) {
+  const sortedNames = [...probeOutput["environmentNames"]].sort();
+  if (JSON.stringify(sortedNames) !== JSON.stringify(probeOutput["environmentNames"])
+    || new Set(probeOutput["environmentNames"]).size !== probeOutput["environmentNames"].length) {
     throw new Error("Invalid PostgREST process identity probe output");
   }
   return probeOutput as unknown as PostgrestProcessIdentityProbeResult;

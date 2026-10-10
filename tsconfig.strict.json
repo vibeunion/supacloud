@@ -6,8 +6,6 @@
     "exactOptionalPropertyTypes": true,
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": true,
-    "noFallthroughCasesInSwitch": true,
-    "forceConsistentCasingInFileNames": true,
-    "useUnknownInCatchVariables": true
+    "noFallthroughCasesInSwitch": true
   }
 }

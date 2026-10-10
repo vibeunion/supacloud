@@ -16,9 +16,9 @@ async function fixture(source: string, run: (root: string) => Promise<void>) {
 }
 const source = `
 import { Module, Controller, Command, Post, Delete, Body } from "@supacloud/app";
-const Type = { Unknown: () => ({}) };
-export const Input = Type.Unknown();
-export const Result = {};
+const Type: { Unknown: () => Record<string, never> } = { Unknown: () => ({}) };
+export const Input: Record<string, never> = Type.Unknown();
+export const Result: Record<string, never> = {};
 @Command({name: "remove", permission: "remove", rpc: "remove_item", transaction: "required", audit: "removed", idempotency: "required"})
 export class Remove {}
 @Controller("/items")

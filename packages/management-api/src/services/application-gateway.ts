@@ -56,8 +56,8 @@ export function applicationGatewayRoute(input: ApplicationGatewayInput): { id: s
 }
 
 function routeHosts(route: CaddyRoute): string[] {
-  if (!Array.isArray(route.match)) return [];
-  return route.match.flatMap((match: unknown) =>
+  if (!Array.isArray(route["match"])) return [];
+  return route["match"].flatMap((match: unknown) =>
     match && typeof match === "object" && "host" in match && Array.isArray(match.host)
       ? match.host.filter((host): host is string => typeof host === "string") : []);
 }
@@ -71,8 +71,8 @@ function overlaps(host: string, candidate: string): boolean {
 }
 
 function hasUnrestrictedHostMatcher(route: CaddyRoute): boolean {
-  if (!Array.isArray(route.match) || route.match.length === 0) return true;
-  return route.match.some((match: unknown) =>
+  if (!Array.isArray(route["match"]) || route["match"].length === 0) return true;
+  return route["match"].some((match: unknown) =>
     !match || typeof match !== "object" || !("host" in match)
       || !Array.isArray(match.host) || match.host.length === 0);
 }
@@ -124,13 +124,13 @@ export function verifyApplicationGatewayActivationAbsent(routes: unknown, input:
       throw new Error("APPLICATION_GATEWAY_ACTIVATION_STILL_ROUTED");
     }
     if ("dial" in node) {
-      if (typeof node.dial !== "string" || /[{}]/.test(node.dial)) {
+      if (typeof node["dial"] !== "string" || /[{}]/.test(node["dial"])) {
         throw new Error("APPLICATION_GATEWAY_READBACK_INVALID");
       }
-      const port = /:([0-9]+)$/.exec(node.dial)?.[1];
+      const port = /:([0-9]+)$/.exec(node["dial"])?.[1];
       if (port && ports.has(Number(port))) throw new Error("APPLICATION_GATEWAY_ACTIVATION_STILL_ROUTED");
     }
-    if (node.handler === "reverse_proxy" && node.dynamic_upstreams !== undefined) {
+    if (node["handler"] === "reverse_proxy" && node["dynamic_upstreams"] !== undefined) {
       throw new Error("APPLICATION_GATEWAY_READBACK_INVALID");
     }
     pending.push(...Object.values(node));

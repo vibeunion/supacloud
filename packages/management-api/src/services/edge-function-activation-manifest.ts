@@ -87,17 +87,17 @@ export function parseEdgeFunctionActivationAuthority(
   if (!isPlainRecord(candidate) || !hasExactKeys(candidate, [...AUTHORITY_KEYS].sort())) {
     throw new Error("Function activation authority has an invalid shape");
   }
-  if (candidate.schema !== EDGE_FUNCTION_ACTIVATION_SCHEMA
-    || typeof candidate.activation_id !== "string"
-    || !EDGE_FUNCTION_ACTIVATION_ID_PATTERN.test(candidate.activation_id)
-    || !Number.isSafeInteger(candidate.activation_generation)
-    || Number(candidate.activation_generation) < 1
-    || !nullableActivationId(candidate.previous_activation_id)
-    || (candidate.target_state !== "active" && candidate.target_state !== "absent")) {
+  if (candidate["schema"] !== EDGE_FUNCTION_ACTIVATION_SCHEMA
+    || typeof candidate["activation_id"] !== "string"
+    || !EDGE_FUNCTION_ACTIVATION_ID_PATTERN.test(candidate["activation_id"])
+    || !Number.isSafeInteger(candidate["activation_generation"])
+    || Number(candidate["activation_generation"]) < 1
+    || !nullableActivationId(candidate["previous_activation_id"])
+    || (candidate["target_state"] !== "active" && candidate["target_state"] !== "absent")) {
     throw new Error("Function activation authority contains invalid identity fields");
   }
-  const artifactSha256 = candidate.artifact_sha256;
-  if (candidate.target_state === "active") {
+  const artifactSha256 = candidate["artifact_sha256"];
+  if (candidate["target_state"] === "active") {
     if (typeof artifactSha256 !== "string" || !SHA256_PATTERN.test(artifactSha256)) {
       throw new Error("Active Function activation authority requires an artifact digest");
     }

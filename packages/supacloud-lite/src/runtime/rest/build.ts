@@ -183,7 +183,8 @@ export class QueryBuilder {
       .map((row) => {
         const cells = columns.map((c) => {
           if (!(c in row)) {
-            const col = tinfo.columns.find((x) => x.name === c)!
+            const col = tinfo.columns.find((x) => x.name === c)
+            if (!col) throw new ApiError(400, { code: 'PGRST204', message: `Column ${c} does not exist` })
             return opts.missingDefault && col.hasDefault ? 'default' : 'null'
           }
           return this.pushParam(params, tinfo, c, row[c])
@@ -336,7 +337,8 @@ export class QueryBuilder {
         )
       })
     } else {
-      const j = rel.junction!
+      const j = rel.junction
+      if (!j) throw new Error('many-to-many relationship is missing its junction table')
       const jAlias = this.nextAlias()
       const joinConds = j.fkToTarget.srcColumns.map(
         (src, i) =>
@@ -672,7 +674,8 @@ function renderFilter(f: FilterCond, alias: string): string {
     case 'wfts': {
       const fn = { fts: 'to_tsquery', plfts: 'plainto_tsquery', phfts: 'phraseto_tsquery', wfts: 'websearch_to_tsquery' }[
         f.op
-      ]!
+      ]
+      if (!fn) throw new Error(`Unsupported full-text operator: ${f.op}`)
       expr = f.ftsConfig
         ? `${colExpr} @@ ${fn}(${quoteLiteral(f.ftsConfig)}, ${quoteLiteral(f.value)})`
         : `${colExpr} @@ ${fn}(${quoteLiteral(f.value)})`

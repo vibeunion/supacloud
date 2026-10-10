@@ -71,7 +71,7 @@ async function updateLockedBucket(database: SQL, input: BucketUpdateInput): Prom
       FLOOR(EXTRACT(EPOCH FROM updated_at) * 1000000)::bigint::text AS revision
   ` as BucketRow[];
   return bucket
-    ? { ...bucket, file_size_limit: normalizedStorageFileSizeLimit(bucket.file_size_limit) }
+    ? { ...bucket, file_size_limit: normalizedStorageFileSizeLimit(bucket["file_size_limit"]) }
     : null;
 }
 

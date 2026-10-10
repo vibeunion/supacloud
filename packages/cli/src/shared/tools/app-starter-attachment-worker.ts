@@ -81,7 +81,7 @@ export async function createReviewAttachmentWorker(options: ReviewAttachmentWork
         }
       },
     },
-    mapClaim: claim => ({
+    mapClaim: (claim: SupaCloudWorkflowClaim) => ({
       id: claim.stepId, jobName: claim.workflowName, input: claim.input, attempt: claim.attempt,
       requestContext: { workerId, jobId: claim.stepId, requestId: claim.runId },
     }),

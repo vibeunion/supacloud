@@ -47,19 +47,19 @@ function rows(value: unknown): Record<string, unknown>[] {
 }
 function isPublicConflict(value: unknown): boolean {
   return value instanceof ApplicationError && value.status === 409
-    || isRecord(value) && value.expose === true && value.status === 409 && typeof value.code === "string";
+    || isRecord(value) && value["expose"] === true && value["status"] === 409 && typeof value["code"] === "string";
 }
 function input(value: unknown): Approval {
   const item = record(value);
-  if (typeof item.id !== "string" || !item.id.length || typeof item.expectedVersion !== "number"
-    || !Number.isSafeInteger(item.expectedVersion) || item.expectedVersion < 1) throw new TypeError("Invalid approval input");
-  return { id: item.id, expectedVersion: item.expectedVersion };
+  if (typeof item["id"] !== "string" || !item["id"].length || typeof item["expectedVersion"] !== "number"
+    || !Number.isSafeInteger(item["expectedVersion"]) || item["expectedVersion"] < 1) throw new TypeError("Invalid approval input");
+  return { id: item["id"], expectedVersion: item["expectedVersion"] };
 }
 function result(value: unknown): Review {
   const item = record(value);
-  if ((item.state !== "draft" && item.state !== "approved") || typeof item.version !== "number"
-    || !Number.isSafeInteger(item.version) || item.version < 1) throw new TypeError("Invalid review result");
-  return { state: item.state, version: item.version };
+  if ((item["state"] !== "draft" && item["state"] !== "approved") || typeof item["version"] !== "number"
+    || !Number.isSafeInteger(item["version"]) || item["version"] < 1) throw new TypeError("Invalid review result");
+  return { state: item["state"], version: item["version"] };
 }
 
 export interface ReviewPostgresOptions {
@@ -83,7 +83,7 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
   const binding = rows(await query(
     "SELECT project_id,tenant_id FROM public.starter_application WHERE singleton",
   ));
-  if (binding.length !== 1 || binding[0]?.project_id !== projectId || binding[0]?.tenant_id !== tenantId) {
+  if (binding.length !== 1 || binding[0]?.["project_id"] !== projectId || binding[0]?.["tenant_id"] !== tenantId) {
     throw new Error("Review database project/tenant binding mismatch");
   }
   const requestContext = createSupAuthRequestContext({
@@ -95,7 +95,7 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
         [who.subject, projectId, tenantId],
       ));
       return found.length === 1 ? { projectId, tenantId,
-        permissions: found[0]?.can_approve === true ? ["review.approve"] : [],
+        permissions: found[0]?.["can_approve"] === true ? ["review.approve"] : [],
       } : null;
     },
   });
@@ -126,9 +126,9 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
   };
   function actor(invocation: CommandInvocation): string {
     const who = requireTrustedIdentity(invocation.requestContext);
-    const access = record(record(invocation.requestContext).access);
-    if (access.projectId !== projectId || access.tenantId !== tenantId
-      || !Array.isArray(access.permissions) || !access.permissions.includes("review.approve")) {
+    const access = record(record(invocation.requestContext)["access"]);
+    if (access["projectId"] !== projectId || access["tenantId"] !== tenantId
+      || !Array.isArray(access["permissions"]) || !access["permissions"].includes("review.approve")) {
       throw new ApplicationError("Command permission denied", { status: 403, code: "REVIEW_PERMISSION_DENIED" });
     }
     return who.subject;
@@ -174,7 +174,7 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
         try {
           const receipt = await command.execute(
             { actorId: actor(invocation), tenantId }, requireIdempotencyKey(invocation),
-            { id: invocation.input.params.id, expectedVersion: record(invocation.input.body).expectedVersion },
+            { id: invocation.input.params["id"], expectedVersion: record(invocation.input.body)["expectedVersion"] },
             invocation.request.signal,
           );
           if (receipt.status !== "confirmed") throw new CommandError("COMMAND_OUTCOME_UNKNOWN");
@@ -294,8 +294,9 @@ export async function createDeliveryApplication(modules: CompiledModule[], lifec
     const uploads = attachmentOptions ? await createReviewUploadAdapters(attachmentOptions) : undefined;
     stage = "postgres";
     const adapters = await createReviewPostgresAdapters({
-      database, tenantId: settings.tenantId, identity: settings.identity, uploads,
-      afterApproved: durable?.enqueue,
+      database, tenantId: settings.tenantId, identity: settings.identity,
+      ...(uploads ? { uploads } : {}),
+      ...(durable ? { afterApproved: durable.enqueue } : {}),
     });
     lifecycle.signal.throwIfAborted();
     stage = "application";

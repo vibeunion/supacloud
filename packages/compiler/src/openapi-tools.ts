@@ -89,31 +89,31 @@ function resolveSchema(
 ): OpenApiObject | undefined {
   const schema = recordValue(value);
   if (!schema) return undefined;
-  const ref = stringValue(schema.$ref);
+  const ref = stringValue(schema["$ref"]);
   if (!ref || !ref.startsWith("#/components/schemas/")) return schema;
   if (seen.has(ref)) return schema;
   const name = decodeJsonPointerPart(ref.slice("#/components/schemas/".length));
-  const components = recordValue(document.components);
-  const schemas = recordValue(components?.schemas);
+  const components = recordValue(document["components"]);
+  const schemas = recordValue(components?.["schemas"]);
   const target = schemas?.[name];
   if (target === undefined) return schema;
   return resolveSchema(target, document, new Set([...seen, ref]));
 }
 
 function schemaEnum(value: OpenApiObject | undefined): unknown[] | undefined {
-  return Array.isArray(value?.enum) ? value.enum : undefined;
+  return Array.isArray(value?.["enum"]) ? value["enum"] : undefined;
 }
 
 function schemaProperties(value: OpenApiObject | undefined): OpenApiObject | undefined {
-  return recordValue(value?.properties);
+  return recordValue(value?.["properties"]);
 }
 
 function schemaRequired(value: OpenApiObject | undefined): Set<string> {
-  return new Set(arrayValue(value?.required).filter((item): item is string => typeof item === "string"));
+  return new Set(arrayValue(value?.["required"]).filter((item): item is string => typeof item === "string"));
 }
 
 function schemaType(value: OpenApiObject | undefined): unknown {
-  return value?.type;
+  return value?.["type"];
 }
 
 function addChange(
@@ -174,7 +174,7 @@ function compareSchema(
   if (baseProperties && currentProperties) {
     for (const name of sortedKeys(baseProperties)) {
       if (currentProperties[name] === undefined) {
-        const inputRemovalIsBreaking = baseSchema.additionalProperties === false;
+        const inputRemovalIsBreaking = baseSchema["additionalProperties"] === false;
         if (direction === "output" || inputRemovalIsBreaking) {
           addChange(changes, {
             kind: "breaking",
@@ -207,7 +207,7 @@ function compareSchema(
         });
       }
     }
-    if (baseSchema.additionalProperties !== false && currentSchema.additionalProperties === false) {
+    if (baseSchema["additionalProperties"] !== false && currentSchema["additionalProperties"] === false) {
       addChange(changes, {
         kind: "breaking",
         code: "request-additional-properties-rejected",
@@ -231,14 +231,14 @@ function compareSchema(
 
 function parameterKey(value: unknown): string | undefined {
   const parameter = recordValue(value);
-  const name = stringValue(parameter?.name);
-  const location = stringValue(parameter?.in);
+  const name = stringValue(parameter?.["name"]);
+  const location = stringValue(parameter?.["in"]);
   return name && location ? `${location}:${name}` : undefined;
 }
 
 function operationParameters(pathItem: OpenApiObject, operation: OpenApiObject): Map<string, OpenApiObject> {
   const result = new Map<string, OpenApiObject>();
-  for (const source of [pathItem.parameters, operation.parameters]) {
+  for (const source of [pathItem["parameters"], operation["parameters"]]) {
     for (const item of arrayValue(source)) {
       const parameter = recordValue(item);
       const key = parameterKey(parameter);
@@ -249,7 +249,7 @@ function operationParameters(pathItem: OpenApiObject, operation: OpenApiObject):
 }
 
 function parameterSchema(value: OpenApiObject): unknown {
-  return value.schema;
+  return value["schema"];
 }
 
 function compareParameters(
@@ -276,7 +276,7 @@ function compareParameters(
       });
       continue;
     }
-    if (currentParameter.required === true && baseParameter.required !== true) {
+    if (currentParameter["required"] === true && baseParameter["required"] !== true) {
       addChange(changes, {
         kind: "breaking",
         code: "parameter-required",
@@ -296,10 +296,10 @@ function compareParameters(
     const parameter = currentParameters.get(key);
     if (!parameter) continue;
     addChange(changes, {
-      kind: parameter.required === true ? "breaking" : "non-breaking",
-      code: parameter.required === true ? "parameter-required" : "parameter-added",
+      kind: parameter["required"] === true ? "breaking" : "non-breaking",
+      code: parameter["required"] === true ? "parameter-required" : "parameter-added",
       path: `${path}.parameters.${key}`,
-      message: parameter.required === true
+      message: parameter["required"] === true
         ? "A new required parameter was added."
         : "An optional parameter was added.",
     });
@@ -314,8 +314,8 @@ function compareRequestBody(
   path: string,
   changes: OpenApiDiffChange[],
 ): void {
-  const baseBody = recordValue(baseOperation.requestBody);
-  const currentBody = recordValue(currentOperation.requestBody);
+  const baseBody = recordValue(baseOperation["requestBody"]);
+  const currentBody = recordValue(currentOperation["requestBody"]);
   if (!baseBody || !currentBody) {
     if (baseBody && !currentBody) {
       addChange(changes, {
@@ -324,7 +324,7 @@ function compareRequestBody(
         path: `${path}.requestBody`,
         message: "A request body from the previous contract was removed.",
       });
-    } else if (!baseBody && currentBody?.required === true) {
+    } else if (!baseBody && currentBody?.["required"] === true) {
       addChange(changes, {
         kind: "breaking",
         code: "request-body-required",
@@ -341,7 +341,7 @@ function compareRequestBody(
     }
     return;
   }
-  if (currentBody.required === true && baseBody.required !== true) {
+  if (currentBody["required"] === true && baseBody["required"] !== true) {
     addChange(changes, {
       kind: "breaking",
       code: "request-body-required",
@@ -349,8 +349,8 @@ function compareRequestBody(
       message: "An optional request body became required.",
     });
   }
-  const baseContent = recordValue(baseBody.content);
-  const currentContent = recordValue(currentBody.content);
+  const baseContent = recordValue(baseBody["content"]);
+  const currentContent = recordValue(currentBody["content"]);
   for (const mediaType of sortedKeys(baseContent)) {
     const baseMedia = recordValue(baseContent?.[mediaType]);
     const currentMedia = recordValue(currentContent?.[mediaType]);
@@ -363,9 +363,9 @@ function compareRequestBody(
       });
       continue;
     }
-    if (baseMedia.schema !== undefined && currentMedia.schema !== undefined) {
+    if (baseMedia["schema"] !== undefined && currentMedia["schema"] !== undefined) {
       compareSchema(
-        baseMedia.schema, currentMedia.schema, baseDocument, currentDocument,
+        baseMedia["schema"], currentMedia["schema"], baseDocument, currentDocument,
         `${path}.requestBody.content.${mediaType}.schema`, "input", changes,
       );
     }
@@ -380,8 +380,8 @@ function compareResponses(
   path: string,
   changes: OpenApiDiffChange[],
 ): void {
-  const baseResponses = recordValue(baseOperation.responses);
-  const currentResponses = recordValue(currentOperation.responses);
+  const baseResponses = recordValue(baseOperation["responses"]);
+  const currentResponses = recordValue(currentOperation["responses"]);
   for (const status of sortedKeys(baseResponses)) {
     const baseResponse = recordValue(baseResponses?.[status]);
     const currentResponse = recordValue(currentResponses?.[status]);
@@ -394,8 +394,8 @@ function compareResponses(
       });
       continue;
     }
-    const baseContent = recordValue(baseResponse.content);
-    const currentContent = recordValue(currentResponse.content);
+    const baseContent = recordValue(baseResponse["content"]);
+    const currentContent = recordValue(currentResponse["content"]);
     for (const mediaType of sortedKeys(baseContent)) {
       const baseMedia = recordValue(baseContent?.[mediaType]);
       const currentMedia = recordValue(currentContent?.[mediaType]);
@@ -408,9 +408,9 @@ function compareResponses(
         });
         continue;
       }
-      if (baseMedia.schema !== undefined && currentMedia.schema !== undefined) {
+      if (baseMedia["schema"] !== undefined && currentMedia["schema"] !== undefined) {
         compareSchema(
-          baseMedia.schema, currentMedia.schema, baseDocument, currentDocument,
+          baseMedia["schema"], currentMedia["schema"], baseDocument, currentDocument,
           `${path}.responses.${status}.content.${mediaType}.schema`, "output", changes,
         );
       }
@@ -444,8 +444,8 @@ function compareOperation(
   compareRequestBody(baseOperation, currentOperation, baseDocument, currentDocument, path, changes);
   compareResponses(baseOperation, currentOperation, baseDocument, currentDocument, path, changes);
 
-  const baseSecurity = baseOperation.security;
-  const currentSecurity = currentOperation.security;
+  const baseSecurity = baseOperation["security"];
+  const currentSecurity = currentOperation["security"];
   if (Array.isArray(currentSecurity) && currentSecurity.length > 0
     && (!Array.isArray(baseSecurity) || baseSecurity.length === 0)) {
     addChange(changes, {
@@ -462,8 +462,8 @@ function compareComponents(
   currentDocument: OpenApiDocument,
   changes: OpenApiDiffChange[],
 ): void {
-  const baseComponents = recordValue(baseDocument.components);
-  const currentComponents = recordValue(currentDocument.components);
+  const baseComponents = recordValue(baseDocument["components"]);
+  const currentComponents = recordValue(currentDocument["components"]);
   for (const group of COMPONENT_GROUPS) {
     const baseGroup = recordValue(baseComponents?.[group]);
     const currentGroup = recordValue(currentComponents?.[group]);
@@ -490,13 +490,13 @@ function compareComponents(
 
 export function parseOpenApiDocument(value: unknown): OpenApiDocument {
   if (!isRecord(value)
-    || typeof value.openapi !== "string"
-    || !/^3\.[0-9]+(?:\.[0-9]+)?$/.test(value.openapi)
-    || !isRecord(value.info)
-    || !isRecord(value.paths)) {
+    || typeof value["openapi"] !== "string"
+    || !/^3\.[0-9]+(?:\.[0-9]+)?$/.test(value["openapi"])
+    || !isRecord(value["info"])
+    || !isRecord(value["paths"])) {
     throw new OpenApiDocumentError();
   }
-  return { ...value, openapi: value.openapi, info: value.info, paths: value.paths };
+  return { ...value, openapi: value["openapi"], info: value["info"], paths: value["paths"] };
 }
 
 export function serializeOpenApiJson(document: unknown, space = 2): string {
@@ -547,7 +547,7 @@ export async function loadGeneratedOpenApiDocument(modulePath: string): Promise<
     moduleUrl.searchParams.set("supacloud-openapi-export", "1");
     const loaded: unknown = await import(moduleUrl.href);
     if (!isRecord(loaded)) throw new OpenApiDocumentError();
-    return parseOpenApiDocument(loaded.OPENAPI_DOCUMENT);
+    return parseOpenApiDocument(loaded["OPENAPI_DOCUMENT"]);
   } catch (error) {
     if (error instanceof OpenApiDocumentError) throw error;
     throw new OpenApiDocumentError();

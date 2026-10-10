@@ -120,30 +120,30 @@ export function releaseAssetSizeLimit(component: ReleaseComponent, name: string)
 function parseSource(candidate: unknown): ReleaseManifest["source"] {
   const source = manifestObject(candidate, "Release manifest source");
   assertExactKeys(source, ["ref", "commit"], "Release manifest source");
-  if (source.ref !== RELEASE_SOURCE_REF || typeof source.commit !== "string"
-    || !/^[0-9a-f]{40}$/.test(source.commit)) {
+  if (source["ref"] !== RELEASE_SOURCE_REF || typeof source["commit"] !== "string"
+    || !/^[0-9a-f]{40}$/.test(source["commit"])) {
     throw new Error("Release manifest source is invalid");
   }
-  return { ref: RELEASE_SOURCE_REF, commit: source.commit };
+  return { ref: RELEASE_SOURCE_REF, commit: source["commit"] };
 }
 
 function parseRelease(candidate: unknown, expected: ExpectedReleaseManifest): ReleaseManifest["release"] {
   const release = manifestObject(candidate, "Release manifest release");
   assertExactKeys(release, ["component", "version", "tag"], "Release manifest release");
-  const version = exactStableVersion(release.version);
-  if (release.component !== expected.component || version !== expected.version
-    || release.tag !== releaseTag(expected.component, expected.version)) {
+  const version = exactStableVersion(release["version"]);
+  if (release["component"] !== expected.component || version !== expected.version
+    || release["tag"] !== releaseTag(expected.component, expected.version)) {
     throw new Error("Release manifest component, version, or tag does not match the requested release");
   }
-  return { component: expected.component, version, tag: release.tag as string };
+  return { component: expected.component, version, tag: release["tag"] as string };
 }
 
 function parseArtifact(candidate: unknown, index: number): ReleaseManifestArtifact {
   const artifact = manifestObject(candidate, `Release manifest artifact ${index}`);
   assertExactKeys(artifact, ["name", "sha256", "size"], `Release manifest artifact ${index}`);
-  if (typeof artifact.name !== "string" || !/^[A-Za-z0-9._-]+$/.test(artifact.name)
-    || typeof artifact.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(artifact.sha256)
-    || !Number.isSafeInteger(artifact.size) || (artifact.size as number) <= 0) {
+  if (typeof artifact["name"] !== "string" || !/^[A-Za-z0-9._-]+$/.test(artifact["name"])
+    || typeof artifact["sha256"] !== "string" || !/^[0-9a-f]{64}$/.test(artifact["sha256"])
+    || !Number.isSafeInteger(artifact["size"]) || (artifact["size"] as number) <= 0) {
     throw new Error(`Release manifest artifact ${index} is invalid`);
   }
   return artifact as ReleaseManifestArtifact;
@@ -168,18 +168,18 @@ function parseIdentity(
   source: ReleaseManifest["source"],
   release: ReleaseManifest["release"],
 ): Pick<ReleaseManifest, "repository" | "workflow"> {
-  const current = manifest.repository === RELEASE_REPOSITORY
-    && manifest.workflow === RELEASE_SIGNER_WORKFLOW;
-  const legacyEdgeRuntime = manifest.repository === LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.repository
-    && manifest.workflow === LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.workflow
+  const current = manifest["repository"] === RELEASE_REPOSITORY
+    && manifest["workflow"] === RELEASE_SIGNER_WORKFLOW;
+  const legacyEdgeRuntime = manifest["repository"] === LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.repository
+    && manifest["workflow"] === LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.workflow
     && release.component === LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.component
     && release.version === LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.version
     && release.tag === LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.tag
     && source.commit === LEGACY_EDGE_RUNTIME_RELEASE_IDENTITY.sourceCommit;
   if (!current && !legacyEdgeRuntime) throw new Error("Release manifest identity is invalid");
   return {
-    repository: manifest.repository as ReleaseManifest["repository"],
-    workflow: manifest.workflow as ReleaseManifest["workflow"],
+    repository: manifest["repository"] as ReleaseManifest["repository"],
+    workflow: manifest["workflow"] as ReleaseManifest["workflow"],
   };
 }
 
@@ -192,16 +192,16 @@ export function parseReleaseManifest(text: string, expected: ExpectedReleaseMani
   }
   const manifest = manifestObject(candidate, "Release manifest");
   assertExactKeys(manifest, ["schemaVersion", "repository", "source", "workflow", "release", "artifacts"], "Release manifest");
-  if (manifest.schemaVersion !== 1) throw new Error("Release manifest identity is invalid");
-  const source = parseSource(manifest.source);
-  const release = parseRelease(manifest.release, expected);
+  if (manifest["schemaVersion"] !== 1) throw new Error("Release manifest identity is invalid");
+  const source = parseSource(manifest["source"]);
+  const release = parseRelease(manifest["release"], expected);
   const identity = parseIdentity(manifest, source, release);
   return {
     schemaVersion: 1,
     ...identity,
     source,
     release,
-    artifacts: parseArtifacts(manifest.artifacts, expected.component),
+    artifacts: parseArtifacts(manifest["artifacts"], expected.component),
   };
 }
 

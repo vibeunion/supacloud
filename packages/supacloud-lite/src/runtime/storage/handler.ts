@@ -1061,7 +1061,8 @@ export class StorageHandler {
       ...[...folders].map((name) => ({ name, row: null })),
       ...Object.entries(files).map(([name, row]) => ({ name, row })),
     ]
-    if (body.search) entries = entries.filter((e) => e.name.includes(body.search!))
+    const search = body.search
+    if (search) entries = entries.filter((e) => e.name.includes(search))
 
     const column = body.sortBy?.column ?? 'name'
     const asc = (body.sortBy?.order ?? 'asc') === 'asc'
@@ -1242,7 +1243,8 @@ function parseSizeLimit(v: number | string | null | undefined): number | null {
   // a provided-but-unparseable limit must be rejected, not silently treated as
   // unlimited (which would disable the cap on a typo like "10 megabytes")
   if (!m) throw new StorageValidationError(`invalid file_size_limit: ${v}`)
-  const mult = { b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3 }[(m[2] ?? 'b').toLowerCase()]!
+  const mult = { b: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3 }[(m[2] ?? 'b').toLowerCase()]
+  if (mult === undefined) throw new StorageValidationError(`invalid file_size_limit: ${v}`)
   return Math.floor(parseFloat(m[1]) * mult)
 }
 

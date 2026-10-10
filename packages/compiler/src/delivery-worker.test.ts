@@ -20,8 +20,8 @@ export function createDeliveryWorker(modules: CompiledModule[]) {
         claimed = true;
         return {id: "one", jobName: "report.render", input: {value: "compiled"}};
       },
-      async ack(_claim, output) {
-        if (process.env.JOB_RECEIPT) await Bun.write(process.env.JOB_RECEIPT, JSON.stringify(output));
+      async ack(_claim: unknown, output: unknown) {
+        if (process.env["JOB_RECEIPT"]) await Bun.write(process.env["JOB_RECEIPT"], JSON.stringify(output));
       },
       fail() {throw new Error("Fixture Job failed");},
     },
@@ -30,7 +30,7 @@ export function createDeliveryWorker(modules: CompiledModule[]) {
     start: () => worker.start(),
     async close() {
       await worker.stop();
-      if (process.env.CLOSE_RECEIPT) await Bun.write(process.env.CLOSE_RECEIPT, "closed");
+      if (process.env["CLOSE_RECEIPT"]) await Bun.write(process.env["CLOSE_RECEIPT"], "closed");
     },
   };
 }`;
@@ -49,9 +49,9 @@ async function fixture() {
     "src/report.ts": `import { Job, Module } from "./runtime";
       @Job({name: "report.render", mode: "task", idempotency: "required"})
       export class RenderReport {async run(input: {value: string}): Promise<{rendered: string}> {
-        if (process.env.JOB_STARTED) await Bun.write(process.env.JOB_STARTED, "executing");
-        if (process.env.JOB_RELEASE) {
-          while (!await Bun.file(process.env.JOB_RELEASE).exists()) await Bun.sleep(10);
+        if (process.env["JOB_STARTED"]) await Bun.write(process.env["JOB_STARTED"], "executing");
+        if (process.env["JOB_RELEASE"]) {
+          while (!await Bun.file(process.env["JOB_RELEASE"]).exists()) await Bun.sleep(10);
         }
         return {rendered: input.value + "-job"};
       }}
@@ -125,7 +125,7 @@ test("worker artifacts execute compiled Jobs detached, preserve identity and clo
       const child = Bun.spawn([process.execPath, "--no-env-file", join(detached, "index.js")], {
         cwd: detached, stdout: "pipe", stderr: "pipe",
         env: {
-          PATH: process.env.PATH, CLOSE_RECEIPT: closeReceipt, JOB_RECEIPT: jobReceipt,
+          PATH: process.env["PATH"], CLOSE_RECEIPT: closeReceipt, JOB_RECEIPT: jobReceipt,
           JOB_STARTED: jobStarted, ...(signal === "SIGTERM" ? {JOB_RELEASE: jobRelease} : {}),
         },
       });
@@ -216,13 +216,13 @@ test("worker lifecycle bounds cancellation and cleanup, suppresses premature sta
   try {
     await writeFixtureProject(project, {
       "src/host.ts": `export async function createDeliveryWorker(_modules: unknown, {signal}: {signal: AbortSignal}) {
-        const mode = process.env.WORKER_TEST_MODE;
+        const mode = process.env["WORKER_TEST_MODE"];
         if (mode === "factory-error") throw new Error(${JSON.stringify(marker)});
         if (mode === "abort-error") signal.addEventListener("abort", () => {throw new Error(${JSON.stringify(marker)});});
-        if (mode === "abort-rejection") signal.addEventListener("abort", async () => {throw new Error(${JSON.stringify(marker)});});
+        if (mode === "abort-rejection") signal.addEventListener("abort", async (): Promise<void> => {throw new Error(${JSON.stringify(marker)});});
         const closed = Promise.withResolvers<void>();
         const failure = Promise.withResolvers<never>();
-        const mark = async () => {if (process.env.INIT_RECEIPT) await Bun.write(process.env.INIT_RECEIPT, "initialized");};
+        const mark = async () => {if (process.env["INIT_RECEIPT"]) await Bun.write(process.env["INIT_RECEIPT"], "initialized");};
         const wait = async () => {
           await new Promise<void>(resolve => {
             if (signal.aborted) resolve();
@@ -251,12 +251,12 @@ test("worker lifecycle bounds cancellation and cleanup, suppresses premature sta
             if (mode === "start-stuck") await new Promise<void>(() => {});
             if (mode === "start-needs-close") await closed.promise;
             if (mode === "runtime-error") setTimeout(() => {throw new Error(${JSON.stringify(marker)});}, 10);
-            if (mode === "runtime-rejection") setTimeout(() => {void Promise.reject(new Error(${JSON.stringify(marker)}));}, 10);
+            if (mode === "runtime-rejection") setTimeout(async () => {throw new Error(${JSON.stringify(marker)});}, 10);
           },
           async close() {
             closed.resolve();
-            if (process.env.CLOSE_RECEIPT) {
-              const file = Bun.file(process.env.CLOSE_RECEIPT);
+            if (process.env["CLOSE_RECEIPT"]) {
+              const file = Bun.file(process.env["CLOSE_RECEIPT"]);
               await Bun.write(file, (await file.exists() ? await file.text() : "") + "closed\\n");
             }
             if (mode?.endsWith("close-stuck")) await new Promise<void>(() => {});
@@ -282,7 +282,7 @@ test("worker lifecycle bounds cancellation and cleanup, suppresses premature sta
       const child = Bun.spawn([process.execPath, "--no-env-file", join(detached, "index.js")], {
         cwd: detached, stdout: "pipe", stderr: "pipe",
         env: {
-          PATH: process.env.PATH, WORKER_TEST_MODE: mode, CLOSE_RECEIPT: closeReceipt,
+          PATH: process.env["PATH"], WORKER_TEST_MODE: mode, CLOSE_RECEIPT: closeReceipt,
           INIT_RECEIPT: initReceipt, SHUTDOWN_TIMEOUT_MS: "700",
         },
       });

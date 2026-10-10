@@ -92,11 +92,11 @@ function normalizeTimestamp(value: string | undefined, field: string): string | 
 }
 
 function severityFor(record: Record<string, unknown>, message: string): VictoriaProjectLog["severity"] {
-  const explicit = String(record.severity ?? record.level ?? "").toLowerCase();
+  const explicit = String(record["severity"] ?? record["level"] ?? "").toLowerCase();
   if (["fatal", "panic", "error", "err"].includes(explicit)) return "error";
   if (["warning", "warn"].includes(explicit)) return "warning";
   if (["debug", "trace"].includes(explicit)) return "debug";
-  const priority = Number(record.PRIORITY ?? record.priority);
+  const priority = Number(record["PRIORITY"] ?? record["priority"]);
   if (Number.isFinite(priority)) {
     if (priority <= 3) return "error";
     if (priority === 4) return "warning";
@@ -132,7 +132,7 @@ export class VictoriaLogsService {
   private readonly timeoutMs: number;
 
   constructor(options: VictoriaLogsServiceOptions = {}) {
-    this.baseUrl = (options.baseUrl || process.env.VICTORIALOGS_URL || "http://127.0.0.1:9428").replace(/\/+$/, "");
+    this.baseUrl = (options.baseUrl || process.env["VICTORIALOGS_URL"] || "http://127.0.0.1:9428").replace(/\/+$/, "");
     this.fetcher = options.fetcher || fetch;
     this.timeoutMs = options.timeoutMs ?? 5_000;
   }
@@ -192,13 +192,13 @@ export class VictoriaLogsService {
     }
 
     return parseJsonLines(await boundedLogBody(response)).slice(0, limit).map((record, index) => {
-      if (record.project_ref !== ref) throw new Error("VictoriaLogs project scope mismatch");
-      const message = String(record._msg ?? record.message ?? record.MESSAGE ?? "");
-      const rawTimestamp = String(record._time ?? record.timestamp ?? new Date().toISOString());
+      if (record["project_ref"] !== ref) throw new Error("VictoriaLogs project scope mismatch");
+      const message = String(record["_msg"] ?? record["message"] ?? record["MESSAGE"] ?? "");
+      const rawTimestamp = String(record["_time"] ?? record["timestamp"] ?? new Date().toISOString());
       const timestamp = Number.isFinite(Date.parse(rawTimestamp)) ? new Date(rawTimestamp).toISOString() : new Date().toISOString();
-      const service = String(record.service ?? record.SYSLOG_IDENTIFIER ?? record._SYSTEMD_UNIT ?? "system");
+      const service = String(record["service"] ?? record["SYSLOG_IDENTIFIER"] ?? record["_SYSTEMD_UNIT"] ?? "system");
       return {
-        id: String(record.id ?? `${ref}-${timestamp}-${index}`),
+        id: String(record["id"] ?? `${ref}-${timestamp}-${index}`),
         timestamp,
         event_message: message,
         severity: severityFor(record, message),

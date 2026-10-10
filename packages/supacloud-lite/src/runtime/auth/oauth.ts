@@ -14,6 +14,8 @@ import type { Database } from '../db/database.js'
 import { randomToken } from '../jwt.js'
 import { resolveRedirect } from './redirect.js'
 
+type OAuthRawProfile = Record<string, unknown>
+
 /** Operator-supplied config for one OAuth provider. Endpoint URLs are optional for presets (google, github). */
 export interface OAuthProviderConfig {
   /** OAuth client id issued by the provider */
@@ -29,7 +31,7 @@ export interface OAuthProviderConfig {
   /** space-separated scopes to request; falls back to the preset's */
   scopes?: string
   /** Map the provider's raw userinfo JSON to a normalized profile. */
-  profileMap?: (raw: any) => OAuthProfile
+  profileMap?: (raw: OAuthRawProfile) => OAuthProfile
 }
 
 /** Normalized profile extracted from a provider's userinfo response. */
@@ -48,7 +50,7 @@ export interface OAuthProfile {
 
 interface ResolvedProvider extends Required<Omit<OAuthProviderConfig, 'profileMap'>> {
   name: string
-  profileMap: (raw: any) => OAuthProfile
+  profileMap: (raw: OAuthRawProfile) => OAuthProfile
 }
 
 const PRESETS: Record<string, Partial<OAuthProviderConfig>> = {
@@ -57,12 +59,12 @@ const PRESETS: Record<string, Partial<OAuthProviderConfig>> = {
     tokenUrl: 'https://oauth2.googleapis.com/token',
     userInfoUrl: 'https://openidconnect.googleapis.com/v1/userinfo',
     scopes: 'openid email profile',
-    profileMap: (r) => ({
-      id: r.sub,
-      email: r.email,
-      emailVerified: r.email_verified === true,
-      name: r.name,
-      metadata: { avatar_url: r.picture, full_name: r.name },
+    profileMap: (r: OAuthRawProfile) => ({
+      id: typeof r['sub'] === 'string' ? r['sub'] : '',
+      ...(typeof r['email'] === 'string' ? { email: r['email'] } : {}),
+      emailVerified: r['email_verified'] === true,
+      ...(typeof r['name'] === 'string' ? { name: r['name'] } : {}),
+      metadata: { avatar_url: r['picture'], full_name: r['name'] },
     }),
   },
   github: {
@@ -70,7 +72,14 @@ const PRESETS: Record<string, Partial<OAuthProviderConfig>> = {
     tokenUrl: 'https://github.com/login/oauth/access_token',
     userInfoUrl: 'https://api.github.com/user',
     scopes: 'read:user user:email',
-    profileMap: (r) => ({ id: String(r.id), email: r.email, name: r.name ?? r.login, metadata: { avatar_url: r.avatar_url, user_name: r.login } }),
+    profileMap: (r: OAuthRawProfile) => ({
+      id: String(r['id']),
+      ...(typeof r['email'] === 'string' ? { email: r['email'] } : {}),
+      ...(typeof r['name'] === 'string' || typeof r['login'] === 'string'
+        ? { name: typeof r['name'] === 'string' ? r['name'] : r['login'] as string }
+        : {}),
+      metadata: { avatar_url: r['avatar_url'], user_name: r['login'] },
+    }),
   },
 }
 
@@ -96,7 +105,11 @@ export function resolveProvider(name: string, cfg: OAuthProviderConfig): Resolve
     tokenUrl,
     userInfoUrl,
     scopes: cfg.scopes ?? preset.scopes ?? '',
-    profileMap: cfg.profileMap ?? preset.profileMap ?? ((r) => ({ id: String(r.id ?? r.sub), email: r.email, name: r.name })),
+    profileMap: cfg.profileMap ?? preset.profileMap ?? ((r: OAuthRawProfile) => ({
+      id: String(r['id'] ?? r['sub']),
+      ...(typeof r['email'] === 'string' ? { email: r['email'] } : {}),
+      ...(typeof r['name'] === 'string' ? { name: r['name'] } : {}),
+    })),
   }
 }
 

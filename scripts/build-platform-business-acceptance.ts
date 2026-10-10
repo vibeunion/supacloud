@@ -15,7 +15,7 @@ const output = await mkdtemp(join(tmpdir(), "supacloud-platform-business-"));
 const project = join(output, "project");
 try {
   await initializeAppProject({ root: project, name: "platform-business-acceptance", template: "command" });
-  const rolePrefix = process.env.SUPACLOUD_BUSINESS_ROLE_PREFIX;
+  const rolePrefix = process.env["SUPACLOUD_BUSINESS_ROLE_PREFIX"];
   if (rolePrefix) {
     await writeFile(join(project, "migrations/004-review-runtime-roles.sql"),
       renderStarterRuntimeRolesSchema(`${rolePrefix}_http`, `${rolePrefix}_worker`));

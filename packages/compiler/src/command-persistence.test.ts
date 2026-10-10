@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defineSupacloudConfig } from "./config";
@@ -76,11 +76,13 @@ test("untrusted configuration rejects mistyped persistence capabilities", () => 
 test("a complete decorated module retains the persistent binding and refuses an unsafe external migration", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-webhook-migration-"));
   try {
+    await symlink(join(import.meta.dir, "../node_modules"), join(root, "node_modules"),
+      process.platform === "win32" ? "junction" : "dir");
     await writeFixtureProject(root, { "webhook.ts": `
 import { Module, Controller, Command, Post, Body } from "@supacloud/app";
-import { t } from "elysia";
-export const Input = t.Object({ id: t.String(), enabled: t.Boolean() });
-export const Receipt = t.Object({ status: t.Literal("confirmed"), result: Input });
+import { Type } from "typebox";
+export const Input = Type.Object({ id: Type.String(), enabled: Type.Boolean() });
+export const Receipt = Type.Object({ status: Type.Literal("confirmed"), result: Input });
 @Command({ name: "webhook.update.v1", permission: "webhook.update", rpc: "webhookUpdate",
   transaction: "required", audit: "webhook.updated", idempotency: "required" })
 export class UpdateWebhook {}

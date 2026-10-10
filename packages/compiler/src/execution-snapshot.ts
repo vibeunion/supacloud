@@ -58,7 +58,12 @@ export function createExecutionSnapshot(graph: ApplicationGraph, subjects = grap
       ({ module: module.name, name: command.name, alias: command.className }))),
     contexts: subjects.map(subject => {
       const context = createContextPack(graph, subject);
-      const owner = graph.modules.find(module => module.name === context.subject)!;
+      const owner = graph.modules.find(module => module.name === context.subject);
+      if (owner === undefined) throw new Error(`Execution context owner is missing: ${context.subject}`);
+      const modules = context.modules.map(module => {
+        const file = executionSourceFile(module.file);
+        return { name: module.name, ...(file === undefined ? {} : { file }) };
+      });
       return {
         subject: context.subject,
         aliases: [...new Set([
@@ -69,9 +74,7 @@ export function createExecutionSnapshot(graph: ApplicationGraph, subjects = grap
           ...(owner.jobs ?? []).flatMap(job => [job.name, job.className, job.serviceKey]),
           ...owner.queries.flatMap(query => [query.name, query.className]),
         ])],
-        modules: context.modules.map(module => ({
-          name: module.name, ...(executionSourceFile(module.file) ? { file: executionSourceFile(module.file) } : {}),
-        })),
+        modules,
         // Invalid paths remain represented by omission counts in the current-source API.
         files: context.files,
         diagnostics: context.diagnostics.map(diagnostic => {

@@ -49,29 +49,30 @@ function isLogDrainConfig(value: unknown): value is LogDrainConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const drain = value as Record<string, unknown>;
   return (
-    typeof drain.id === "string" &&
-    typeof drain.name === "string" &&
-    typeof drain.type === "string" &&
-    ALLOWED_TYPES.has(drain.type as LogDrainType) &&
-    typeof drain.url === "string" &&
-    typeof drain.enabled === "boolean"
+    typeof drain["id"] === "string" &&
+    typeof drain["name"] === "string" &&
+    typeof drain["type"] === "string" &&
+    ALLOWED_TYPES.has(drain["type"] as LogDrainType) &&
+    typeof drain["url"] === "string" &&
+    typeof drain["enabled"] === "boolean"
   );
 }
 
 function readDrains(projectConfig: unknown): LogDrainConfig[] {
   const config = normalizeProjectConfig(projectConfig as Record<string, unknown> | null | undefined);
-  const raw = config.log_drains;
+  const raw = config["log_drains"];
   if (!Array.isArray(raw)) return [];
   return raw.filter(isLogDrainConfig);
 }
 
 function sanitizeDrain(drain: LogDrainConfig): LogDrainConfig {
+  const token = typeof drain.token === "string" && drain.token.trim().length > 0 ? drain.token.trim() : undefined;
   return {
     id: drain.id,
     name: drain.name.slice(0, 120),
     type: drain.type,
     url: drain.url,
-    token: typeof drain.token === "string" && drain.token.trim().length > 0 ? drain.token.trim() : undefined,
+    ...(token === undefined ? {} : { token }),
     enabled: drain.enabled,
   };
 }
@@ -134,7 +135,7 @@ export const logDrainRoutes = new Elysia({ prefix: "/v1/projects/:ref/log-drains
       name: input.name.trim(),
       type: input.type,
       url: urlResult.url,
-      token: input.token?.trim() || undefined,
+      ...(input.token?.trim() ? { token: input.token.trim() } : {}),
       enabled: true,
     });
 
@@ -182,14 +183,16 @@ export const logDrainRoutes = new Elysia({ prefix: "/v1/projects/:ref/log-drains
       return status(400, { error: nextUrl.error });
     }
 
+    const token = input.token === undefined ? target.token : input.token.trim() || undefined;
     const updatedDrain: LogDrainConfig = {
       ...target,
       name: input.name !== undefined ? input.name.trim().slice(0, 120) : target.name,
       url: typeof nextUrl === "string" ? nextUrl : nextUrl.url,
       enabled: input.enabled !== undefined ? !!input.enabled : target.enabled,
       // Empty token clears the secret; missing key keeps the previous one.
-      token: input.token !== undefined ? (input.token.trim() || undefined) : target.token,
+      ...(token === undefined ? {} : { token }),
     };
+    if (token === undefined) delete updatedDrain.token;
 
     const next = drains.map((drain) => (drain.id === target.id ? updatedDrain : drain));
     const updated = await projectRepository.updateConfig(

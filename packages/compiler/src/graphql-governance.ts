@@ -246,15 +246,20 @@ export function checkGraphqlCompatibility(
     try {
       parsed = parse(document.source);
     } catch (error) {
-      diagnostics.push({ severity: "error", code: "graphql-document-invalid", message: error instanceof Error ? error.message : String(error), file: document.path });
+      diagnostics.push({
+        severity: "error",
+        code: "graphql-document-invalid",
+        message: error instanceof Error ? error.message : String(error),
+        ...(document.path === undefined ? {} : { file: document.path }),
+      });
       continue;
     }
     diagnostics.push(...validate(schema, parsed).map((error) => ({
       severity: "error" as const,
       code: "graphql-validation",
       message: error.message,
-      file: document.path,
-      line: error.locations?.[0]?.line,
+      ...(document.path === undefined ? {} : { file: document.path }),
+      ...(error.locations?.[0]?.line === undefined ? {} : { line: error.locations[0].line }),
     })));
     const fragmentDefinitions = new Map(parsed.definitions
       .filter((definition): definition is Extract<DocumentNode["definitions"][number], { kind: typeof Kind.FRAGMENT_DEFINITION }> =>
@@ -264,7 +269,10 @@ export function checkGraphqlCompatibility(
       if (definition.kind !== Kind.OPERATION_DEFINITION) continue;
       const result = operationReport(schema, definition, fragmentDefinitions, policy);
       operations.push(result.report);
-      diagnostics.push(...result.diagnostics.map((item) => ({ ...item, file: document.path })));
+      diagnostics.push(...result.diagnostics.map((item) => ({
+        ...item,
+        ...(document.path === undefined ? {} : { file: document.path }),
+      })));
     }
   }
   return { ok: diagnostics.every((item) => item.severity !== "error"), features: graphqlFeatureMatrix(schema), operations, diagnostics };

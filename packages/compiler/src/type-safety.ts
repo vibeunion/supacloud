@@ -3,6 +3,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import * as ts from "@typescript/typescript6";
 import type { Diagnostic, TypeSafetyOptions } from "./types";
 import { scanDrizzleSql, SQL_SAFETY_DIAGNOSTIC_CODES } from "./sql-safety";
+import { scanSourceSemantics, SOURCE_SEMANTIC_DIAGNOSTIC_CODES } from "./source-semantics";
 
 const DEFAULT_EXCLUDES = [
   "**/*.test.ts",
@@ -18,6 +19,7 @@ const DEFAULT_EXCLUDES = [
 
 export const TYPE_SAFETY_DIAGNOSTIC_CODES = {
   ...SQL_SAFETY_DIAGNOSTIC_CODES,
+  ...SOURCE_SEMANTIC_DIAGNOSTIC_CODES,
   "generated-any": { errorCode: "SC6001", docsUrl: "https://supacloud.dev/errors/SC6001" },
   "source-any": { errorCode: "SC6002", docsUrl: "https://supacloud.dev/errors/SC6002" },
   "source-type-assertion": { errorCode: "SC6003", docsUrl: "https://supacloud.dev/errors/SC6003" },
@@ -68,6 +70,7 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
     : {
         options: {
           strict: true,
+          experimentalDecorators: true,
           skipLibCheck: true,
           target: ts.ScriptTarget.ES2022,
           module: ts.ModuleKind.ESNext,
@@ -89,6 +92,7 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
   // Project settings retain resolution and emit metadata, but cannot weaken application typing.
   const compilerOptions: ts.CompilerOptions = {
     ...projectConfig.options,
+    noCheck: false,
     strict: true,
     noImplicitAny: true,
     strictNullChecks: true,
@@ -151,6 +155,9 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
   }
   for (const sourceFile of sourceFiles) {
     scanSourceFile(sourceFile, checker, rootDir, diagnostics, options.strict ?? false);
+    diagnostics.push(...scanSourceSemantics(
+      sourceFile, checker, normalizeRelative(rootDir, sourceFile.fileName), rootDir,
+    ));
     diagnostics.push(...scanDrizzleSql(
       sourceFile, checker, normalizeRelative(rootDir, sourceFile.fileName), options.strict ?? false,
     ));

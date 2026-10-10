@@ -35,21 +35,21 @@ export function discoverTypeSafetyProjects(root: string): TypeSafetyProject[] {
     const path = join(directory, "package.json");
     if (!existsSync(path)) throw new Error(`Package directory has no manifest: ${entry.name}`);
     const manifest: unknown = JSON.parse(readFileSync(path, "utf8"));
-    if (!record(manifest) || typeof manifest.name !== "string") {
+    if (!record(manifest) || typeof manifest["name"] !== "string") {
       throw new Error(`Invalid package manifest: ${entry.name}`);
     }
     const dependencies = {
-      ...(record(manifest.dependencies) ? manifest.dependencies : {}),
-      ...(record(manifest.devDependencies) ? manifest.devDependencies : {}),
+      ...(record(manifest["dependencies"]) ? manifest["dependencies"] : {}),
+      ...(record(manifest["devDependencies"]) ? manifest["devDependencies"] : {}),
     };
     projects.push({
-      name: manifest.name,
+      name: manifest["name"],
       directory,
       configs: ["tsconfig.json",
         ...(existsSync(join(directory, "tsconfig.consumer.json")) ? ["tsconfig.consumer.json"] : [])],
       svelte: existsSync(join(directory, "svelte.config.js"))
         || (existsSync(join(directory, "vite.config.ts"))
-          && (typeof dependencies["@sveltejs/kit"] === "string" || typeof dependencies.svelte === "string")),
+          && (typeof dependencies["@sveltejs/kit"] === "string" || typeof dependencies["svelte"] === "string")),
     });
   }
   projects.sort((a, b) => a.directory.localeCompare(b.directory));

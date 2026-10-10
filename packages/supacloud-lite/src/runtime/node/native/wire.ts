@@ -16,7 +16,7 @@ interface ConnectOpts {
 }
 
 /** Result of one wire query: returned rows plus, for writes, the affected row count. */
-export interface WireResults<T = any> {
+export interface WireResults<T = unknown> {
   /** result rows, typed as `T` */
   rows: T[]
   /** rows touched by an INSERT/UPDATE/DELETE; undefined for plain SELECTs */
@@ -128,12 +128,12 @@ export class PgWireClient {
             } else if (code === 3) {
               // cleartext password
               if (!needPassword()) return
-              this.socket.write(message(0x70, cstring(opts.password!)))
+              this.socket.write(message(0x70, cstring(opts.password ?? '')))
             } else if (code === 5) {
               // md5 password: 'md5' + md5(md5(password + user) + salt)
               if (!needPassword()) return
               const salt = payload.subarray(4, 8)
-              const inner = md5Hex(Buffer.from(opts.password! + opts.user, 'utf8'))
+              const inner = md5Hex(Buffer.from((opts.password ?? '') + opts.user, 'utf8'))
               const token = 'md5' + md5Hex(Buffer.concat([Buffer.from(inner, 'utf8'), salt]))
               this.socket.write(message(0x70, cstring(token)))
             } else if (code === 10) {
@@ -158,9 +158,13 @@ export class PgWireClient {
                 reject(new Error('SCRAM: server nonce does not extend client nonce'))
                 return
               }
-              const salt = Buffer.from(attrs.s!, 'base64')
-              const iterations = parseInt(attrs.i!, 10)
-              const saltedPassword = pbkdf2Sync(opts.password!, salt, iterations, 32, 'sha256')
+              if (!attrs.s || !attrs.i || !opts.password) {
+                reject(new Error('SCRAM: incomplete server challenge'))
+                return
+              }
+              const salt = Buffer.from(attrs.s, 'base64')
+              const iterations = parseInt(attrs.i, 10)
+              const saltedPassword = pbkdf2Sync(opts.password, salt, iterations, 32, 'sha256')
               const clientKey = hmac(saltedPassword, 'Client Key')
               const storedKey = sha256(clientKey)
               const finalNoProof = `c=biws,r=${attrs.r}`
@@ -223,7 +227,7 @@ export class PgWireClient {
   }
 
   /** Extended query protocol with text-format params. */
-  async query<T = any>(sql: string, params: unknown[] = []): Promise<WireResults<T>> {
+  async query<T = unknown>(sql: string, params: unknown[] = []): Promise<WireResults<T>> {
     const results = await this.run(() => {
       const parse = message(0x50, Buffer.concat([cstring(''), cstring(sql), int16(0)]))
       const paramBufs: Buffer[] = [int16(0), int16(params.length)]

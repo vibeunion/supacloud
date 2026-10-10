@@ -364,11 +364,12 @@ export class HttpTransport {
         timeoutMs = DEFAULT_TIMEOUT,
     ): Promise<HttpResult<T>> {
         try {
-            const response = await fetchWithRetry(`${this.baseUrl}${path}`, {
+            const request: RequestInit = {
                 method,
                 headers: this.headers(),
-                body: serializedBody,
-            }, timeoutMs, this.insecureTls);
+                ...(serializedBody === undefined ? {} : { body: serializedBody }),
+            };
+            const response = await fetchWithRetry(`${this.baseUrl}${path}`, request, timeoutMs, this.insecureTls);
             const responseBody = await responseReader(response);
             return responseBody.ok
                 ? { ok: response.ok, status: response.status, data: responseBody.parsedJson }
@@ -419,11 +420,13 @@ export class HttpTransport {
                     timeoutMs,
                 );
             }
-            const response = await fetchWithRetry(`${this.baseUrl}${path}`, {
+            const serializedBody = serializedRequestBody(body);
+            const request: RequestInit = {
                 method: "POST",
                 headers: this.headers(),
-                body: serializedRequestBody(body),
-            }, timeoutMs, this.insecureTls);
+                ...(serializedBody === undefined ? {} : { body: serializedBody }),
+            };
+            const response = await fetchWithRetry(`${this.baseUrl}${path}`, request, timeoutMs, this.insecureTls);
             const data = await boundedResponseJson(response, maxJsonBytes, responseTimeoutMs);
             return data === null
                 ? responseReadFailure<T>(response.status)
@@ -537,11 +540,13 @@ export class HttpTransport {
 
     async patch<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
         try {
-            const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
+            const serializedBody = body ? JSON.stringify(body) : undefined;
+            const request: RequestInit = {
                 method: "PATCH",
                 headers: this.headers(),
-                body: body ? JSON.stringify(body) : undefined,
-            }, DEFAULT_TIMEOUT, this.insecureTls);
+                ...(serializedBody === undefined ? {} : { body: serializedBody }),
+            };
+            const res = await fetchWithRetry(`${this.baseUrl}${path}`, request, DEFAULT_TIMEOUT, this.insecureTls);
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {
@@ -554,11 +559,13 @@ export class HttpTransport {
         const maxJsonBytes = validatedJsonResponseLimit(options?.maxJsonBytes);
         const responseTimeoutMs = validatedResponseTimeout(options?.responseTimeoutMs);
         try {
-            const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
+            const serializedBody = body ? JSON.stringify(body) : undefined;
+            const request: RequestInit = {
                 method: "PUT",
                 headers: this.headers(),
-                body: body ? JSON.stringify(body) : undefined,
-            }, timeoutMs, this.insecureTls);
+                ...(serializedBody === undefined ? {} : { body: serializedBody }),
+            };
+            const res = await fetchWithRetry(`${this.baseUrl}${path}`, request, timeoutMs, this.insecureTls);
             if (maxJsonBytes !== undefined) {
                 const data = await boundedResponseJson(res, maxJsonBytes, responseTimeoutMs);
                 return data === null
@@ -574,11 +581,13 @@ export class HttpTransport {
 
     async delete<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
         try {
-            const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
+            const serializedBody = serializedRequestBody(body);
+            const request: RequestInit = {
                 method: "DELETE",
                 headers: this.headers(),
-                body: serializedRequestBody(body),
-            }, DEFAULT_TIMEOUT, this.insecureTls);
+                ...(serializedBody === undefined ? {} : { body: serializedBody }),
+            };
+            const res = await fetchWithRetry(`${this.baseUrl}${path}`, request, DEFAULT_TIMEOUT, this.insecureTls);
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {

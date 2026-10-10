@@ -78,9 +78,9 @@ function buildPostgresProcessEnvironment(connection: ParsedPostgresConnection): 
   for (const key of Object.keys(environment)) {
     if (key === "DATABASE_URL" || key.startsWith("PG")) delete environment[key];
   }
-  environment.PGPASSWORD = connection.password;
-  if (connection.environment.PGSSLMODE) {
-    environment.PGSSLMODE = connection.environment.PGSSLMODE;
+  environment["PGPASSWORD"] = connection.password;
+  if (connection.environment["PGSSLMODE"]) {
+    environment["PGSSLMODE"] = connection.environment["PGSSLMODE"];
   }
   return environment;
 }
@@ -423,7 +423,7 @@ class BranchService {
     dataMode: BranchDataMode = "full_clone",
   ): Promise<void> {
     // The platform admin DB credentials are used for both sides of the dump/restore.
-    const adminDbUrl = process.env.DATABASE_URL;
+    const adminDbUrl = process.env["DATABASE_URL"];
     if (!adminDbUrl) throw new Error("DATABASE_URL is not set; cannot clone branch database");
     const connection = this.parsePostgresConnection(adminDbUrl);
     const processEnvironment = buildPostgresProcessEnvironment(connection);
@@ -531,7 +531,7 @@ class BranchService {
     if (sslModes.length > 1 || (sslModes[0] && !POSTGRES_SSL_MODES.has(sslModes[0]))) {
       throw new Error("DATABASE_URL contains an invalid sslmode");
     }
-    if (sslModes[0]) environment.PGSSLMODE = sslModes[0];
+    if (sslModes[0]) environment["PGSSLMODE"] = sslModes[0];
     return { username, password, hostname, port, database, environment };
   }
 
@@ -1294,7 +1294,7 @@ class BranchService {
   }
 
   private adminPostgresConnection(database: string): ParsedPostgresConnection {
-    const adminDbUrl = process.env.DATABASE_URL;
+    const adminDbUrl = process.env["DATABASE_URL"];
     if (!adminDbUrl) throw new Error("DATABASE_URL is not set");
     return { ...this.parsePostgresConnection(adminDbUrl), database };
   }

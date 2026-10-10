@@ -14,7 +14,7 @@ import { ApplicationActiveStorage } from "../../packages/management-api/src/serv
 import { runtimeInput } from "../../packages/management-api/tests/helpers/application-runtime";
 import { MANAGEMENT_SQL_IDLE_TIMEOUT } from "../../packages/management-api/src/db";
 
-const postgresBin = process.env.SUPACLOUD_STARTER_POSTGRES_BIN;
+const postgresBin = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];
 let postgres: StarterPostgres | undefined;
 let database: SQL | undefined;
 let root: string | undefined;
@@ -68,7 +68,7 @@ test.skipIf(!postgresBin)("management mutation lease survives a host operation l
     const stored = await mutations.read("demo", mutationId);
     expect(effectCompleted).toBe(true);
     expect(stored?.status).toBe("succeeded");
-    expect(stored?.checkpoint.phase).toBe("transitioning");
+    expect(stored?.checkpoint["phase"]).toBe("transitioning");
   } finally {
     try {
       await db`DELETE FROM project_mutations WHERE project_ref = ${"demo"} AND mutation_id = ${mutationId}`;
@@ -287,7 +287,7 @@ test.skipIf(!postgresBin)("expired committed activation is reconciled after rest
   expect((await authority.read(next.runtime))?.hosts).toEqual(next.hosts);
   expect((await authority.read(next.runtime))?.configurationId).toBe(next.configurationId);
   await expect(make(database).activate({
-    ...next, configurationId: input.configurationId,
+    ...next, ...(input.configurationId === undefined ? {} : { configurationId: input.configurationId }),
   })).rejects.toThrow("fingerprint_conflict");
   expect((await make(database).activate(next)).replayed).toBe(true);
   expect((await make(database).reconcile(recovery)).replayed).toBe(true);

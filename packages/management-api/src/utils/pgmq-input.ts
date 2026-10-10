@@ -47,13 +47,13 @@ function optionalBoolean(value: unknown): boolean {
 
 export function pgmqCreateOptions(value: unknown): Readonly<{ unlogged: boolean }> {
   const data = options(value, ["unlogged"]);
-  return Object.freeze({ unlogged: optionalBoolean(data.unlogged) });
+  return Object.freeze({ unlogged: optionalBoolean(data["unlogged"]) });
 }
 
 export function pgmqListOptions(value: unknown): Readonly<{ archived: boolean; limit: number }> {
   const data = options(value, ["archived", "limit"]);
   return Object.freeze({
-    archived: optionalBoolean(data.archived),
-    limit: data.limit === undefined ? 50 : pgmqInteger(data.limit, 1, 500),
+    archived: optionalBoolean(data["archived"]),
+    limit: data["limit"] === undefined ? 50 : pgmqInteger(data["limit"], 1, 500),
   });
 }

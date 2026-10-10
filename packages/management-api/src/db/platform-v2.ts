@@ -642,14 +642,14 @@ function canonicalProviderLinkingProjectConfig(
 ): Record<string, unknown> | null {
   const config = strictConfigObject(rawConfig, `projects.config[${projectRef}]`);
   if (!config || !("auth" in config)) return null;
-  const auth = strictConfigObject(config.auth, `projects.config.auth[${projectRef}]`);
+  const auth = strictConfigObject(config["auth"], `projects.config.auth[${projectRef}]`);
   if (!auth || !("experimental" in auth)) return null;
   const experimental = strictConfigObject(
-    auth.experimental,
+    auth["experimental"],
     `projects.config.auth.experimental[${projectRef}]`,
   );
   if (!experimental || !("providers_with_own_linking_domain" in experimental)) return null;
-  config.auth = canonicalAuthProviderLinkingConfig({ ...auth, experimental });
+  config["auth"] = canonicalAuthProviderLinkingConfig({ ...auth, experimental });
   return config;
 }
 
@@ -784,25 +784,25 @@ export async function migrateLegacyDeploymentHistory(db: SQL): Promise<number> {
   ` as Array<Record<string, unknown>>;
 
   for (const row of rows) {
-    if (row.id === undefined || row.id === null) {
+    if (row["id"] === undefined || row["id"] === null) {
       throw new Error("deployment_history migration blocked: legacy row without id cannot be mapped");
     }
     await db`
       INSERT INTO deployment_history (id, app, tenant, version, status, deployed_at, triggered_by, config, created_at)
       VALUES (
-        ${String(row.id)},
-        ${requiredLegacyText(row.deploy_type, "deploy_type")},
-        ${requiredLegacyText(row.project_ref, "project_ref")},
-        ${requiredLegacyText(row.version ?? row.description, "version/description")},
-        ${row.status === undefined || row.status === null
+        ${String(row["id"])},
+        ${requiredLegacyText(row["deploy_type"], "deploy_type")},
+        ${requiredLegacyText(row["project_ref"], "project_ref")},
+        ${requiredLegacyText(row["version"] ?? row["description"], "version/description")},
+        ${row["status"] === undefined || row["status"] === null
           ? "success"
-          : requiredLegacyText(row.status, "status")},
-        ${requiredLegacyTimestamp(row.deployed_at ?? row.created_at, "deployed_at/created_at")},
-        ${typeof row.triggered_by === "string" && row.triggered_by.trim() !== ""
-          ? row.triggered_by
+          : requiredLegacyText(row["status"], "status")},
+        ${requiredLegacyTimestamp(row["deployed_at"] ?? row["created_at"], "deployed_at/created_at")},
+        ${typeof row["triggered_by"] === "string" && row["triggered_by"].trim() !== ""
+          ? row["triggered_by"]
           : "legacy-migration"},
-        ${parseLegacyDeploymentConfig(row.config)}::jsonb,
-        ${requiredLegacyTimestamp(row.created_at ?? row.deployed_at, "created_at/deployed_at")}
+        ${parseLegacyDeploymentConfig(row["config"])}::jsonb,
+        ${requiredLegacyTimestamp(row["created_at"] ?? row["deployed_at"], "created_at/deployed_at")}
       )
     `;
   }
@@ -832,7 +832,7 @@ export async function migrateLegacyProjectWebhooks(db: SQL): Promise<number> {
   for (const project of projects) {
     const config = configObject(project.config);
     if (!config) continue;
-    const rawWebhooks = config.webhooks;
+    const rawWebhooks = config["webhooks"];
     if (!Array.isArray(rawWebhooks)) continue;
 
     for (const rawWebhook of rawWebhooks as LegacyWebhook[]) {
@@ -844,8 +844,8 @@ export async function migrateLegacyProjectWebhooks(db: SQL): Promise<number> {
 
     // Do not leave webhook credentials in the generic project JSON blob.
     const nextConfig = structuredClone(config);
-    delete nextConfig.webhooks;
-    delete nextConfig.webhook_delivery_logs;
+    delete nextConfig["webhooks"];
+    delete nextConfig["webhook_delivery_logs"];
     await db`
       UPDATE projects
       SET config = ${nextConfig}::jsonb, updated_at = NOW()
@@ -932,41 +932,41 @@ export async function migrateLegacyControlSecrets(db: SQL): Promise<number> {
     const parsedConfig = configObject(project.config);
     if (!parsedConfig) continue;
     const nextConfig = structuredClone(parsedConfig);
-    const auth = isRecord(nextConfig.auth) ? nextConfig.auth : null;
+    const auth = isRecord(nextConfig["auth"]) ? nextConfig["auth"] : null;
     if (!auth) continue;
     let changed = false;
 
-    const external = isRecord(auth.external) ? auth.external : null;
+    const external = isRecord(auth["external"]) ? auth["external"] : null;
     if (external) {
       for (const [provider, rawProvider] of Object.entries(external)) {
         if (!isRecord(rawProvider) || !("client_secret" in rawProvider)) continue;
-        if (await persistControlSecret(db, project.ref, "connector", provider, rawProvider.client_secret)) {
+        if (await persistControlSecret(db, project.ref, "connector", provider, rawProvider["client_secret"])) {
           migrated += 1;
         }
-        delete rawProvider.client_secret;
+        delete rawProvider["client_secret"];
         changed = true;
       }
     }
 
     if ("security_captcha_secret" in auth) {
-      const provider = typeof auth.security_captcha_provider === "string"
-        ? auth.security_captcha_provider.toLowerCase().replaceAll(/[^a-z0-9_.-]/g, "-")
+      const provider = typeof auth["security_captcha_provider"] === "string"
+        ? auth["security_captcha_provider"].toLowerCase().replaceAll(/[^a-z0-9_.-]/g, "-")
         : "default";
-      if (await persistControlSecret(db, project.ref, "captcha", provider || "default", auth.security_captcha_secret)) {
+      if (await persistControlSecret(db, project.ref, "captcha", provider || "default", auth["security_captcha_secret"])) {
         migrated += 1;
       }
-      delete auth.security_captcha_secret;
+      delete auth["security_captcha_secret"];
       changed = true;
     }
 
-    const hooks = isRecord(auth.hooks) ? auth.hooks : null;
+    const hooks = isRecord(auth["hooks"]) ? auth["hooks"] : null;
     if (hooks) {
       for (const [hookName, rawHook] of Object.entries(hooks)) {
         if (!isRecord(rawHook) || !("secrets" in rawHook)) continue;
-        if (await persistControlSecret(db, project.ref, "auth-hook", hookName, rawHook.secrets)) {
+        if (await persistControlSecret(db, project.ref, "auth-hook", hookName, rawHook["secrets"])) {
           migrated += 1;
         }
-        delete rawHook.secrets;
+        delete rawHook["secrets"];
         changed = true;
       }
     }

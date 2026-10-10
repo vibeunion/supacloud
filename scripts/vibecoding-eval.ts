@@ -56,11 +56,11 @@ function trial(value: unknown): Trial {
 
 /** Evaluate recorded agent runs, not synthetic claims that an agent actually ran. */
 export function evaluateVibecodingRuns(value: unknown) {
-  if (!record(value) || value.version !== 1 || Object.keys(value).some(key => !["version", "trials"].includes(key))
-    || !Array.isArray(value.trials) || !value.trials.length || value.trials.length > 1000) {
+  if (!record(value) || value["version"] !== 1 || Object.keys(value).some(key => !["version", "trials"].includes(key))
+    || !Array.isArray(value["trials"]) || !value["trials"].length || value["trials"].length > 1000) {
     throw new Error("Expected version 1 with 1-1000 recorded trials");
   }
-  const trials = value.trials.map(trial);
+  const trials = value["trials"].map(trial);
   if (new Set(trials.map(item => item.id)).size !== trials.length) throw new Error("Duplicate trial ID");
   const results = trials.map(item => {
     const allowed: readonly string[] = VIBECODING_TASKS[item.task].allowed;

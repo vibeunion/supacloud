@@ -25,7 +25,7 @@ import { buildWireEngine } from './wire-engine.js'
 const DEFAULT_PG_VERSION = '17.7.0'
 const POSTGRES_MIRROR_URL_ERROR =
   'SUPACLOUD_LITE_POSTGRES_MIRROR must be an absolute HTTPS URL or a loopback HTTP URL'
-export const NATIVE_POSTGRES_MAJOR = DEFAULT_PG_VERSION.split('.')[0]!
+export const NATIVE_POSTGRES_MAJOR = DEFAULT_PG_VERSION.split('.')[0] ?? '17'
 
 export function nativePostgresMajor(installDir = process.env.SUPACLOUD_LITE_POSTGRES_DIR): string {
   if (!installDir) return NATIVE_POSTGRES_MAJOR
@@ -368,14 +368,15 @@ export async function createNativeEngine(opts: NativeEngineOptions): Promise<DbE
       connect,
       onClose: async () => {
         removeExitHandler?.()
-        await stopPostgres(postgres!, () => postgresExited)
-        rmSync(socketDirectory!, { recursive: true, force: true })
+        if (postgres) await stopPostgres(postgres, () => postgresExited)
+        if (socketDirectory) rmSync(socketDirectory, { recursive: true, force: true })
         await releaseLock()
       },
     })
   } catch (error) {
     removeExitHandler?.()
-    if (postgres) await stopPostgres(postgres, () => postgres!.exitCode !== null)
+    const processToStop = postgres
+    if (processToStop) await stopPostgres(processToStop, () => processToStop.exitCode !== null)
     if (socketDirectory) rmSync(socketDirectory, { recursive: true, force: true })
     await releaseLock()
     throw error

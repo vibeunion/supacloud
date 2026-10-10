@@ -113,18 +113,18 @@ export class ProjectLogService {
       // Best-effort forward error/warning events to configured log drains.
       // Fire-and-forget: never block log queries on drain delivery.
       const forwardable = sliced.filter((entry) => {
-        const metaItems = (entry.metadata?.items as Record<string, unknown>[] | undefined) || [];
-        const sev = metaItems[0]?.severity;
+        const metaItems = (entry.metadata?.["items"] as Record<string, unknown>[] | undefined) || [];
+        const sev = metaItems[0]?.["severity"];
         return sev === "error" || sev === "warning";
       });
       if (forwardable.length > 0) {
         for (const entry of forwardable) {
-          const items = (entry.metadata?.items as Record<string, unknown>[] | undefined) || [];
+          const items = (entry.metadata?.["items"] as Record<string, unknown>[] | undefined) || [];
           const item = items[0] || {};
           void forwardLogEvent(ref, {
             timestamp: entry.timestamp,
-            source: String(item.source || "system"),
-            severity: String(item.severity || "info"),
+            source: String(item["source"] || "system"),
+            severity: String(item["severity"] || "info"),
             message: entry.event_message,
             metadata: { id: entry.id },
           });

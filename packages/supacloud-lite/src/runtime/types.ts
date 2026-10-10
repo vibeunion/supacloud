@@ -199,6 +199,6 @@ export class ApiError extends Error {
     public status: number,
     public body: Record<string, unknown>
   ) {
-    super(typeof body.message === 'string' ? body.message : JSON.stringify(body))
+    super(typeof body["message"] === 'string' ? body["message"] : JSON.stringify(body))
   }
 }

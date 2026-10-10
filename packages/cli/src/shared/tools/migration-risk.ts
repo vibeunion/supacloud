@@ -191,8 +191,11 @@ function normalizedTransactionStatement(statement: string): string {
 
 function migrationExecutionStatements(statements: readonly string[]): string[] {
     if (statements.length < 2) return [...statements];
-    const first = normalizedTransactionStatement(statements[0]);
-    const last = normalizedTransactionStatement(statements[statements.length - 1]);
+    const firstRaw = statements[0];
+    const lastRaw = statements[statements.length - 1];
+    if (firstRaw === undefined || lastRaw === undefined) return [...statements];
+    const first = normalizedTransactionStatement(firstRaw);
+    const last = normalizedTransactionStatement(lastRaw);
     const hasOuterTransaction = /^(?:BEGIN(?:\s+(?:WORK|TRANSACTION))?|START\s+TRANSACTION)$/i.test(first)
         && /^(?:COMMIT|END)(?:\s+(?:WORK|TRANSACTION))?$/i.test(last);
     return hasOuterTransaction ? statements.slice(1, -1) : [...statements];
@@ -201,7 +204,11 @@ function migrationExecutionStatements(statements: readonly string[]): string[] {
 function skipSqlTrivia(sql: string, start: number): number {
     let cursor = start;
     for (;;) {
-        while (cursor < sql.length && /\s/.test(sql[cursor])) cursor++;
+        while (cursor < sql.length) {
+            const character = sql[cursor];
+            if (character === undefined || !/\s/.test(character)) break;
+            cursor++;
+        }
         if (sql.startsWith("--", cursor)) {
             cursor = lineCommentEnd(sql, cursor);
             continue;

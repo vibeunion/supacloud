@@ -117,17 +117,17 @@ function readTemplateFromObject(value: unknown): Partial<AuthEmailTemplate> {
   if (!value || typeof value !== "object") return {};
   const record = value as Record<string, unknown>;
   return {
-    ...(typeof record.subject === "string" ? { subject: record.subject } : {}),
-    ...(typeof record.content === "string" ? { content: record.content } : {}),
-    ...(typeof record.body === "string" ? { content: record.body } : {}),
+    ...(typeof record["subject"] === "string" ? { subject: record["subject"] } : {}),
+    ...(typeof record["content"] === "string" ? { content: record["content"] } : {}),
+    ...(typeof record["body"] === "string" ? { content: record["body"] } : {}),
   };
 }
 
 export function parseAuthEmailTemplatePatch(body: unknown): AuthEmailTemplatePatch {
   if (!body || typeof body !== "object") return {};
   const record = body as Record<string, unknown>;
-  const source = record.templates && typeof record.templates === "object"
-    ? record.templates as Record<string, unknown>
+  const source = record["templates"] && typeof record["templates"] === "object"
+    ? record["templates"] as Record<string, unknown>
     : record;
   const patch: AuthEmailTemplatePatch = {};
 

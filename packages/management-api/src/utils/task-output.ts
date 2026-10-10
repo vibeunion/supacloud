@@ -34,7 +34,7 @@ export function taskOutputScope(projectRef: unknown, taskId: unknown): { project
 export function isTaskOutputReadRequest(request: Request): boolean {
   if (request.method !== "GET") return false;
   const match = /^\/v1\/projects\/([a-zA-Z0-9_-]{1,20})\/tasks\/([^/]+)\/events\/?$/.exec(new URL(request.url).pathname);
-  return !!match && UUID.test(match[2]);
+  return match?.[2] !== undefined && UUID.test(match[2]);
 }
 
 export async function resolveTaskOutputInvoker(
@@ -45,11 +45,12 @@ export async function resolveTaskOutputInvoker(
 ): Promise<string | null> {
   if (!isTaskOutputReadRequest(request) || delegated) return null;
   const ref = new URL(request.url).pathname.split("/")[3];
+  if (ref === undefined) return null;
   if (expectedRef !== undefined && expectedRef !== ref) return null;
   const authorization = request.headers.get("authorization") || "";
   if (!authorization.startsWith("Bearer ")) return null;
   const jwt = await verify(authorization.slice(7).trim(), ref);
-  return jwt?.ref === ref && jwt.role === "authenticated" && typeof jwt.sub === "string" && UUID.test(jwt.sub)
+  return jwt !== null && jwt.ref === ref && jwt.role === "authenticated" && typeof jwt.sub === "string" && UUID.test(jwt.sub)
     ? jwt.sub.toLowerCase() : null;
 }
 
@@ -77,14 +78,14 @@ export function parseTaskOutput(value: unknown): AppendTaskOutput {
     throw new TaskOutputError(400, "TASK_OUTPUT_INVALID_INPUT", "Expected an event object");
   }
   const input = value as Record<string, unknown>;
-  if (!Number.isSafeInteger(input.attempt) || Number(input.attempt) < 1 || Number(input.attempt) > 2147483647
-    || typeof input.event_id !== "string" || !UUID.test(input.event_id)
-    || !TASK_OUTPUT_TYPES.includes(input.type as TaskOutputType)
-    || !input.payload || typeof input.payload !== "object" || Array.isArray(input.payload)) {
+  if (!Number.isSafeInteger(input["attempt"]) || Number(input["attempt"]) < 1 || Number(input["attempt"]) > 2147483647
+    || typeof input["event_id"] !== "string" || !UUID.test(input["event_id"])
+    || !TASK_OUTPUT_TYPES.includes(input["type"] as TaskOutputType)
+    || !input["payload"] || typeof input["payload"] !== "object" || Array.isArray(input["payload"])) {
     throw new TaskOutputError(400, "TASK_OUTPUT_INVALID_INPUT", "Invalid attempt, event_id, type or payload");
   }
   let encoded: string;
-  try { encoded = JSON.stringify(input.payload); } catch {
+  try { encoded = JSON.stringify(input["payload"]); } catch {
     throw new TaskOutputError(400, "TASK_OUTPUT_INVALID_INPUT", "Payload must be JSON serializable");
   }
   if (new TextEncoder().encode(encoded).byteLength > TASK_OUTPUT_EVENT_BYTES) {
@@ -97,12 +98,12 @@ export function parseTaskOutput(value: unknown): AppendTaskOutput {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) {
     throw new TaskOutputError(400, "TASK_OUTPUT_INVALID_INPUT", "Payload must encode an object");
   }
-  return { attempt: Number(input.attempt), event_id: input.event_id.toLowerCase(), type: input.type as TaskOutputType, payload: snapshot as Record<string, unknown> };
+  return { attempt: Number(input["attempt"]), event_id: input["event_id"].toLowerCase(), type: input["type"] as TaskOutputType, payload: snapshot as Record<string, unknown> };
 }
 
 /** Authenticate before calling this reader; do not let Elysia preparse the body. */
 export async function readTaskOutputBody(request: Request): Promise<AppendTaskOutput> {
-  if (request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") {
+  if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/json") {
     throw new TaskOutputError(415, "TASK_OUTPUT_INVALID_INPUT", "Content-Type must be application/json");
   }
   const declaredLength = request.headers.get("content-length");

@@ -62,7 +62,7 @@ function pickUrlScheme(value: unknown): "http" | "https" | undefined {
 }
 
 function splitHost(host: string): string {
-  return host.trim().replace(/^\[|\]$/g, "").split(":")[0].toLowerCase();
+  return host.trim().replace(/^\[|\]$/g, "").split(":")[0]?.toLowerCase() ?? "";
 }
 
 function isLocalHttpHost(host: string): boolean {
@@ -268,7 +268,7 @@ export function matchProjectRefFromHost(
   projectConfig: unknown,
 ): boolean {
   const normalizedConfig = normalizeProjectRoutingConfig(projectConfig);
-  const normalizedHost = host.split(":")[0].trim().toLowerCase();
+  const normalizedHost = host.split(":")[0]?.trim().toLowerCase() ?? "";
   if (!normalizedHost) return false;
 
   const baseDomain = normalizeBaseDomain(config.baseDomain).toLowerCase();

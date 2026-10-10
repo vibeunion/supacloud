@@ -34,7 +34,7 @@ describe("starter dependency installation", () => {
     addStarterTestDependencies(manifest);
     expect(manifest.dependencies["@supabase/supabase-js"]).toBe("^2.117.3");
     expect(manifest.devDependencies["@supabase/supabase-js"]).toBeUndefined();
-    expect(manifest.devDependencies.jose).toBe("^6.2.11");
+    expect(manifest.devDependencies["jose"]).toBe("^6.2.11");
   });
 
   test("performs a fresh resolution followed by offline frozen verification", async () => {
