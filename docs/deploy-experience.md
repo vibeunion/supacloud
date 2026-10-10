@@ -46,6 +46,9 @@ asynchronous `Bun.zstdCompress` at level 3. Configuration and build contents use
 `Bun.file`, and temporary archives use `Bun.write`. Untrusted uploads are decoded
 as bounded zstd/tar streams, not as an unbounded `Bun.zstdDecompress` allocation.
 Compressed bytes, window size, expanded bytes, file count and paths are bounded.
+`Bun.zstdDecompress` and `Bun.zstdDecompressSync` remain available for trusted,
+already-bounded local tooling; they are not used for the network upload reader
+because the API does not expose an output limit or zstd window limit.
 Storage keeps bound descriptors, exclusive/no-follow creation, atomic publish
 and durability checks; ordinary path-based writes cannot replace those gates.
 
