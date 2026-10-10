@@ -1252,7 +1252,7 @@ WantedBy=multi-user.target
     const availableCommands = new Map<string, string | null>();
     const resolveCommand = (command: string): string | null => {
       if (availableCommands.has(command)) return availableCommands.get(command) || null;
-      const resolved = Bun.which(command, { PATH: process.env.PATH ?? "" });
+      const resolved = Bun.which(command, { PATH: process.env["PATH"] ?? "" });
       availableCommands.set(command, resolved);
       return resolved;
     };
