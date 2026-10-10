@@ -1,5 +1,15 @@
 export type PreviewPhaseStatus = "pending" | "ready" | "failed" | "cleaned";
 
+export interface ApplicationPreviewProbeInput {
+  projectRef: string;
+  branchRef: string;
+  applicationId: string;
+  environmentId: string;
+  releaseId: string;
+  configurationId: string;
+  activationId: string;
+}
+
 export interface ApplicationPreviewReceipt {
   schema: "supacloud.application-preview.v1";
   preview_id: string;

@@ -19,6 +19,7 @@ import { ApplicationRuntimeFiles } from "./application-runtime-files";
 import { createApplicationCompatibilityVerifier } from "./application-compatibility";
 import { createApplicationWorkerRetirementChecks } from "./application-worker-retirement";
 import { ApplicationPreviewService } from "./application-preview.service";
+import { createApplicationPreviewReadiness } from "./application-preview-readiness";
 
 type CompatibilityInput = Parameters<
   NonNullable<ApplicationDeploymentDependencies["verifyCompatibility"]>
@@ -140,13 +141,13 @@ export function createDefaultApplicationRouteComposition(
   const previews = new ApplicationPreviewService({
     releases: storage,
     configurations,
+    smokeTest: createApplicationPreviewReadiness({ active, readiness }),
     activate: async input => {
-      const activationId = crypto.randomUUID();
       const result = await deployment.activateConfigured({
         runtime: {
           release: await storage.readRelease(input.branchRef, input.applicationId, input.releaseId),
           environmentId: input.environmentId,
-          activationId,
+          activationId: input.activationId,
         },
         configurationId: input.configurationId,
         expectedActivationId: null,

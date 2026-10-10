@@ -10,6 +10,7 @@ import { normalizeProjectConfig } from "../utils/project-config";
 import { logger } from "../utils/logger";
 import {
   buildApplicationPreviewReceipt,
+  type ApplicationPreviewProbeInput,
   type ApplicationPreviewReceipt,
   type StoredApplicationPreview,
 } from "./application-preview-contract";
@@ -80,8 +81,7 @@ type PreviewDependencies = Omit<ApplicationPreviewServiceDependencies, "branches
   };
 
 export interface ApplicationPreviewServiceDependencies {
-  releases: Pick<ApplicationReleaseStorage, "readRelease">
-    & Partial<Pick<ApplicationReleaseStorage, "materializeRelease">>;
+  releases: Pick<ApplicationReleaseStorage, "readRelease" | "materializeRelease">;
   branches?: Pick<typeof branchService, "createBranch" | "deleteBranch">;
   queues?: Pick<typeof pgmqService, "createQueue" | "dropQueue" | "listQueues">;
   projects?: Pick<typeof projectRepository, "findByRef" | "saveApplicationPreview">;
@@ -96,14 +96,9 @@ export interface ApplicationPreviewServiceDependencies {
     environmentId: string;
     releaseId: string;
     configurationId: string;
+    activationId: string;
   }) => Promise<{ activation_id: string }>;
-  smokeTest?: (input: {
-    projectRef: string;
-    branchRef: string;
-    applicationId: string;
-    environmentId: string;
-    releaseId: string;
-  }) => Promise<{ passed: string[]; failed: string[] }>;
+  smokeTest?: (input: ApplicationPreviewProbeInput) => Promise<{ passed: string[]; failed: string[] }>;
 }
 
 export class ApplicationPreviewService {
@@ -118,8 +113,8 @@ export class ApplicationPreviewService {
       secrets: projectService,
       invalidateEnv: runtimeCacheService.invalidateProjectRuntimeEnv,
       runtime: tenantRuntimeService,
-      smokeTest: async () => ({ passed: [], failed: ["application_readiness"] }),
       ...dependencies,
+      smokeTest: dependencies.smokeTest ?? (async () => ({ passed: [], failed: ["application_readiness"] })),
     };
   }
 
@@ -155,11 +150,13 @@ export class ApplicationPreviewService {
     const sourceRelease = await this.dependencies.releases.readRelease(input.projectRef, input.applicationId, input.releaseId);
     const id = randomUUID();
     const branchRef = branchRefFor(id);
-    const release = this.dependencies.releases.materializeRelease
-      ? await this.dependencies.releases.materializeRelease(
-        input.projectRef, input.applicationId, sourceRelease.release_id, branchRef,
-      )
-      : sourceRelease;
+    const release = await this.dependencies.releases.materializeRelease(
+      input.projectRef, input.applicationId, sourceRelease.release_id, branchRef,
+    );
+    if (release.project_ref !== branchRef || release.application_id !== input.applicationId
+      || release.manifest_sha256 !== sourceRelease.manifest_sha256) {
+      throw new Error("APPLICATION_PREVIEW_RELEASE_IDENTITY_MISMATCH");
+    }
     const queueName = queueNameFor(id);
     const testSecretName = secretNameFor(id);
     const receipt = storedReceipt(
@@ -230,7 +227,7 @@ export class ApplicationPreviewService {
       receipt.resources.database_branch.status = "ready";
       await this.save(projectRef, receipt);
 
-      if (this.dependencies.configurations) {
+      if (receipt.resources.configuration_revision.status !== "ready" && this.dependencies.configurations) {
         const configuration = await this.dependencies.configurations.clone(
           { projectRef, applicationId: receipt.application_id, environmentId: receipt.environment_id },
           { projectRef: branchRef, applicationId: receipt.application_id, environmentId: receipt.environment_id },
@@ -255,7 +252,12 @@ export class ApplicationPreviewService {
       await this.dependencies.invalidateEnv(branchRef);
       receipt.resources.test_secret.status = "ready";
       receipt.resources.storage_namespace.status = "ready";
-      if (receipt.resources.configuration_revision.configuration_id && this.dependencies.activate) {
+      if (receipt.resources.application_activation.status !== "ready"
+        && receipt.resources.configuration_revision.status === "ready"
+        && receipt.resources.configuration_revision.configuration_id && this.dependencies.activate) {
+        // 在调用激活前持久化身份，重启恢复必须复用同一次操作。
+        receipt.resources.application_activation.activation_id ??= randomUUID();
+        await this.save(projectRef, receipt);
         const activated = await this.dependencies.activate({
           projectRef,
           branchRef,
@@ -263,34 +265,46 @@ export class ApplicationPreviewService {
           environmentId: receipt.environment_id,
           releaseId: receipt.release_id,
           configurationId: receipt.resources.configuration_revision.configuration_id,
+          activationId: receipt.resources.application_activation.activation_id,
         });
+        if (activated.activation_id !== receipt.resources.application_activation.activation_id) {
+          throw new Error("APPLICATION_PREVIEW_ACTIVATION_IDENTITY_MISMATCH");
+        }
         receipt.resources.application_activation = {
           status: "ready",
           activation_id: activated.activation_id,
         };
-      } else {
-        receipt.resources.application_activation.status = "pending";
       }
       await this.save(projectRef, receipt);
 
       const runtime = await this.dependencies.runtime.checkStatus(branchRef);
-      const smoke = await this.dependencies.smokeTest({
+      const configurationId = receipt.resources.configuration_revision.configuration_id;
+      const activationId = receipt.resources.application_activation.activation_id;
+      const activated = receipt.resources.configuration_revision.status === "ready" && configurationId !== null
+        && receipt.resources.application_activation.status === "ready" && activationId !== null;
+      const smoke = activated ? await this.dependencies.smokeTest({
         projectRef,
         branchRef,
         applicationId: receipt.application_id,
         environmentId: receipt.environment_id,
         releaseId: receipt.release_id,
-      });
-      receipt.resources.smoke_test.passed = [
+        configurationId,
+        activationId,
+      }) : { passed: [], failed: ["application_readiness"] };
+      const runtimeReady = runtime.status === "running" && runtime.health === "healthy";
+      const passed = [
         "release_artifact", "database_branch", "queue_namespace", "storage_namespace", "test_secret",
-        ...(receipt.resources.configuration_revision.status === "ready" ? ["configuration_revision"] : []),
-        ...(receipt.resources.application_activation.status === "ready" ? ["application_activation"] : []),
-        ...(runtime.status === "running" && runtime.health === "healthy" ? ["tenant_runtime"] : []),
-        ...smoke.passed,
+        ...(receipt.resources.configuration_revision.status === "ready" && configurationId ? ["configuration_revision"] : []),
+        ...(receipt.resources.application_activation.status === "ready" && activationId ? ["application_activation"] : []),
+        ...(runtimeReady ? ["tenant_runtime"] : []),
+        ...(smoke.passed.includes("application_readiness") && !smoke.failed.includes("application_readiness")
+          ? ["application_readiness"] : []),
       ];
-      receipt.resources.smoke_test.failed = smoke.failed.length > 0
-        ? [...smoke.failed]
-        : (runtime.status === "running" && runtime.health === "healthy" ? [] : ["tenant_runtime"]);
+      const checks = [...new Set([...receipt.resources.smoke_test.checks,
+        "configuration_revision", "application_activation", "application_readiness", "tenant_runtime"])];
+      receipt.resources.smoke_test.checks = checks;
+      receipt.resources.smoke_test.failed = [...new Set([...checks.filter(check => !passed.includes(check)), ...smoke.failed])];
+      receipt.resources.smoke_test.passed = passed.filter(check => !receipt.resources.smoke_test.failed.includes(check));
       receipt.resources.smoke_test.status = receipt.resources.smoke_test.failed.length > 0 ? "failed" : "ready";
       receipt.status = receipt.resources.smoke_test.failed.length > 0 ? "failed" : "ready";
       receipt.cleanup.required = true;
