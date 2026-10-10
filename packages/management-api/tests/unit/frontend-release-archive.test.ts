@@ -61,6 +61,35 @@ describe("verified frontend tar.zst archives", () => {
     );
   });
 
+  test("native Bun decoders preserve the tar inventory and binary file bytes", async () => {
+    const files = new Map([
+      ["assets/data.bin", new Uint8Array([0x00, 0xff, 0x80, 0x0a, 0x00])],
+      ["index.html", new TextEncoder().encode("<h1>native zstd</h1>\n")],
+    ]);
+    const compressed = await createFrontendTarZstd(files);
+    // 原生整块解码仅消费本测试生成的小型可信归档，不替代上传的受限流式校验。
+    const asyncTar = await Bun.zstdDecompress(compressed);
+    const syncTar = Bun.zstdDecompressSync(compressed);
+    expect(syncTar).toEqual(asyncTar);
+    for (const tar of [asyncTar, syncTar]) {
+      const decoded = await new Bun.Archive(tar).files();
+      expect([...decoded.keys()]).toEqual([...files.keys()]);
+      for (const [path, content] of files) {
+        expect(new Uint8Array(await decoded.get(path)!.arrayBuffer())).toEqual(content);
+      }
+    }
+  });
+
+  test.each(["async", "sync"] as const)("bounded reader accepts Bun %s compression", async mode => {
+    const tar = await rawTar();
+    const compressed = mode === "async"
+      ? await Bun.zstdCompress(tar, { level: 3 })
+      : Bun.zstdCompressSync(tar, { level: 3 });
+    expect(await readFrontendTarZstd(chunks(compressed))).toEqual([
+      { path: "index.html", size: 2 },
+    ]);
+  });
+
   test("extracts regular files only after inventory verification", async () => {
     const bytes = await createFrontendTarZstd(new Map([["index.html", new TextEncoder().encode("ok")]]));
     await withArchive(bytes, async (handle, root) => {

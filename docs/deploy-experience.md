@@ -49,6 +49,9 @@ Compressed bytes, window size, expanded bytes, file count and paths are bounded.
 `Bun.zstdDecompress` and `Bun.zstdDecompressSync` remain available for trusted,
 already-bounded local tooling; they are not used for the network upload reader
 because the API does not expose an output limit or zstd window limit.
+Archive tests exercise both native Bun decoders against the deterministic output,
+including binary file bytes, and both Bun compressors against the bounded reader.
+These small trusted fixtures do not bypass network upload validation.
 Storage keeps bound descriptors, exclusive/no-follow creation, atomic publish
 and durability checks; ordinary path-based writes cannot replace those gates.
 
