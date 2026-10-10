@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { FormArray, FormControl, FormGroup } from "./forms";
+import { FormArray, FormControl, FormGroup, type AbstractControl } from "./forms";
 import { InjectionToken } from "./token";
 import { provideToken } from "./provider";
 import type { CanActivateFn, CanDeactivateFn } from "./decorators";
@@ -7,7 +7,31 @@ import { inject, type EnvironmentInjector } from "./inject";
 import { TestBed } from "./testing";
 import { executeRoutePipeline } from "./route_pipeline";
 
+type TypeEquals<Left, Right> =
+  (<Value>() => Value extends Left ? 1 : 2) extends
+  (<Value>() => Value extends Right ? 1 : 2) ? true : false;
+
 describe("public type safety", () => {
+  test("abstract control writes and uninitialized controls preserve their value contracts", () => {
+    const abstractDefault: TypeEquals<AbstractControl["value"], unknown> = true;
+    const controlDefault: TypeEquals<FormControl["value"], unknown> = true;
+    const abstractSet: TypeEquals<Parameters<AbstractControl<string | null>["setValue"]>[0], string | null> = true;
+    const abstractPatch: TypeEquals<Parameters<AbstractControl<string | null>["patchValue"]>[0], string | null> = true;
+    const abstractReset: TypeEquals<Parameters<AbstractControl<string | null>["reset"]>[0], string | null | undefined> = true;
+    const controlSet: TypeEquals<Parameters<FormControl<string>["setValue"]>[0], string | null> = true;
+    const controlPatch: TypeEquals<Parameters<FormControl<string>["patchValue"]>[0], string | null> = true;
+    expect([abstractDefault, controlDefault, abstractSet, abstractPatch, abstractReset, controlSet, controlPatch])
+      .toEqual([true, true, true, true, true, true, true]);
+
+    const control: AbstractControl<string | null> = new FormControl("initial");
+    control.setValue("updated");
+    expect(control.value).toBe("updated");
+    control.patchValue(null);
+    expect(control.value).toBeNull();
+    control.reset("restored");
+    expect(control.value).toBe("restored");
+  });
+
   test("form reset and absent initial state agree with nullable values", () => {
     const control = new FormControl("initial");
     control.reset();
