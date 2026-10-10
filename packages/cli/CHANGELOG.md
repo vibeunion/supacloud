@@ -14,6 +14,14 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.77.0](https://github.com/vibeunion/supacloud/compare/cli-v0.76.0...cli-v0.77.0) (2026-10-10)
+
+
+### Features
+
+* **frontend:** select journal verified rollback target ([#1768](https://github.com/vibeunion/supacloud/issues/1768)) ([28d8a08](https://github.com/vibeunion/supacloud/commit/28d8a08d0e235d4fda04489d7f1760778fc54a10))
+* **governance:** enforce strict user and platform type contracts ([#1754](https://github.com/vibeunion/supacloud/issues/1754)) ([b22f889](https://github.com/vibeunion/supacloud/commit/b22f88919c349f088848028f13b15e44994e0d9c))
+
 ## [0.76.0](https://github.com/vibeunion/supacloud/compare/cli-v0.75.1...cli-v0.76.0) (2026-10-10)
 
 

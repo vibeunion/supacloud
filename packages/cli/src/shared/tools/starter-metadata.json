@@ -3,10 +3,10 @@
   "generatedBy": "supacloud/starter-metadata-v1",
   "packages": {
     "compiler": {
-      "version": "0.42.1"
+      "version": "0.43.0"
     },
     "app": {
-      "version": "0.24.1",
+      "version": "0.25.0",
       "dependencies": {
         "rxjs": "7.8.2"
       }
@@ -21,7 +21,7 @@
       "version": "0.8.0"
     },
     "db": {
-      "version": "0.15.0",
+      "version": "0.16.0",
       "peerDependencies": {
         "drizzle-orm": "1.0.0-rc.5-169397b"
       },

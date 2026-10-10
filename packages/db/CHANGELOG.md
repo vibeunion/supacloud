@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/vibeunion/supacloud/compare/db-v0.15.0...db-v0.16.0) (2026-10-10)
+
+
+### Features
+
+* **governance:** enforce strict user and platform type contracts ([#1754](https://github.com/vibeunion/supacloud/issues/1754)) ([b22f889](https://github.com/vibeunion/supacloud/commit/b22f88919c349f088848028f13b15e44994e0d9c))
+
 ## [0.15.0](https://github.com/vibeunion/supacloud/compare/db-v0.14.0...db-v0.15.0) (2026-10-10)
 
 

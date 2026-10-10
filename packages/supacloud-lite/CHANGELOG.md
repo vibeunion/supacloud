@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.24.0...supacloud-lite-v0.25.0) (2026-10-10)
+
+
+### Features
+
+* **governance:** enforce strict user and platform type contracts ([#1754](https://github.com/vibeunion/supacloud/issues/1754)) ([b22f889](https://github.com/vibeunion/supacloud/commit/b22f88919c349f088848028f13b15e44994e0d9c))
+
 ## [0.24.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.23.0...supacloud-lite-v0.24.0) (2026-10-10)
 
 
