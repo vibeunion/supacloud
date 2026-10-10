@@ -46,6 +46,7 @@ export class OrdersModule {}
 `);
     await writeFile(join(root, "supacloud.config.ts"), `export default {
         root: "src", outDir: "artifacts", strict: false,
+        effect: { requireRouteEffects: false, requireErrorMappings: false, requireDependencies: false },
         delivery: { version: 1, targets: [{ name: "api", kind: "api", modules: ["orders"] }] }
     };`);
     return root;
