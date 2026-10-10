@@ -1,3 +1,4 @@
+// @supacloud-test-isolate - exercises real archive files and a CLI subprocess.
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readdir, realpath, rm, symlink } from "node:fs/promises";
