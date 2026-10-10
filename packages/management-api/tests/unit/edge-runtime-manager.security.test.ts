@@ -19,6 +19,7 @@ describe("embedded Edge Runtime process boundary", () => {
       PGREDIS_RUNTIME_INTERNAL_URL: "http://127.0.0.1:9010",
       PGREDIS_RUNTIME_INTERNAL_TOKEN: "request-plane-token",
       WORKER_POOL_SIZE: "4",
+      EDGE_FUNCTIONS_CORS_MODE: "permissive",
     }, {
       EDGE_RUNTIME_MASTER_KEY: "edge-master-token",
       MANAGEMENT_API_URL: "http://127.0.0.1:9090",
@@ -29,6 +30,7 @@ describe("embedded Edge Runtime process boundary", () => {
       PGREDIS_RUNTIME_INTERNAL_URL: "http://127.0.0.1:9010",
       PGREDIS_RUNTIME_INTERNAL_TOKEN: "request-plane-token",
       WORKER_POOL_SIZE: "4",
+      EDGE_FUNCTIONS_CORS_MODE: "permissive",
       EDGE_RUNTIME_MASTER_KEY: "edge-master-token",
       MANAGEMENT_API_URL: "http://127.0.0.1:9090",
     });
