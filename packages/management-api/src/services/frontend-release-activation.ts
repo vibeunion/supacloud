@@ -18,6 +18,7 @@ import {
   type FrontendReleaseGateway,
   type FrontendReleaseRecord,
   type FrontendReleaseStoragePort,
+  type FrontendRollbackSnapshot,
 } from "./frontend-release-contract";
 import {
   frontendReleaseMutationStore,
@@ -787,6 +788,45 @@ export class FrontendReleaseActivationService {
       await this.storage.activeRelease(input.projectRef, input.deploymentId),
     );
     return this.executeClaimed(input, await this.claim(input, checkpoint), deployment, release);
+  }
+
+  async rollbackSnapshot(projectRef: string, deploymentId: string): Promise<FrontendRollbackSnapshot> {
+    assertFrontendIdentity(projectRef, deploymentId);
+    await this.storage.deployment(projectRef, deploymentId);
+    if (await this.mutations.activeForDeployment(projectRef, deploymentId)) {
+      throw frontendReleaseError("FRONTEND_RELEASE_BUSY", 409, "Frontend release activation remains unresolved");
+    }
+    const active = await this.storage.activeRelease(projectRef, deploymentId);
+    const snapshot: FrontendRollbackSnapshot = {
+      schema: "supacloud.frontend-rollback-snapshot.v1",
+      project_ref: projectRef,
+      deployment_id: deploymentId,
+      active_release_id: active?.release_id ?? null,
+      active_activation_id: active?.activation_id ?? null,
+      previous_release: null,
+      previous_activation_id: null,
+    };
+    if (!active) return snapshot;
+    const mutation = await this.mutations.read(projectRef, active.mutation_id);
+    const checkpoint = mutation ? parseActivationCheckpoint(mutation.checkpoint) : null;
+    if (!mutation || !checkpoint) return this.successJournalInvalid();
+    const input: ActivateFrontendReleaseInput = {
+      projectRef, deploymentId, releaseId: active.release_id, mutationId: active.mutation_id,
+      expectedActiveReleaseId: checkpoint.expected_active_release_id,
+      expectedActivationId: checkpoint.expected_activation_id,
+      principal: mutation.principal,
+    };
+    const current = await this.storage.releaseRecord(projectRef, deploymentId, active.release_id);
+    if (!this.successfulMutationMatches(mutation, input, current)) return this.successJournalInvalid();
+    this.successfulCheckpoint(mutation, input);
+    await this.verifiedActivation(input, current, checkpoint);
+    const previous = checkpoint.previous_authority;
+    if (!previous) return snapshot;
+    const release = await this.storage.releaseRecord(projectRef, deploymentId, previous.release_id);
+    if (release.sha256 !== previous.sha256 || release.tree_sha256 !== previous.tree_sha256) {
+      throw frontendReleaseError("FRONTEND_RELEASE_AUTHORITY_INVALID", 500, "Previous release artifact does not match its authority");
+    }
+    return { ...snapshot, previous_release: release, previous_activation_id: previous.activation_id };
   }
 
   async resume(

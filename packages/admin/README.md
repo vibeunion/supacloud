@@ -80,6 +80,8 @@ supacloud-admin frontend activate_release --ref abc123 --id web \
   --confirm-production abc123
 supacloud-admin frontend rollback --ref abc123 --id web \
   --release_id <retained-sha256> --confirm-production abc123
+supacloud-admin frontend rollback --ref abc123 --id web \
+  --confirm-production abc123
 ```
 
 The CLI reads the archive through a no-follow file descriptor, verifies its
@@ -93,9 +95,10 @@ body, creates release directories, or writes a mutation journal.
 
 The active snapshot automatically supports older HTTP 404 endpoints through
 bounded history and exact artifact readback, never authorization or integrity
-failures. `rollback` handles current CAS and mutation IDs automatically while
-requiring an explicit retained target. It never retries a concurrent conflict,
-restores a database or infers the previous version from sorted history.
+failures. `rollback` handles current CAS and mutation IDs automatically, defaulting
+to a journal-verified previous retained target. An explicit target is still
+supported for deliberate rollback. It never retries a concurrent conflict,
+restores a database or infers a target from sorted history.
 Unknown results include the mutation ID for read-only reconciliation.
 
 SSH host keys are fail-closed: setting `SUPACLOUD_HOST` and credentials is not

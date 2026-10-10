@@ -76,7 +76,8 @@ function toolResponse(payload: object): ToolResponse {
 
 function releaseFailure(
     operation: string,
-    code: "HTTP_ERROR" | "INVALID_RESPONSE" | "OUTCOME_UNKNOWN" | "NO_ACTIVE_RELEASE",
+    code: "HTTP_ERROR" | "INVALID_RESPONSE" | "OUTCOME_UNKNOWN" | "NO_ACTIVE_RELEASE"
+        | "NO_PREVIOUS_RELEASE" | "PREVIOUS_RELEASE_UNSUPPORTED",
     status: number | null,
 ): ToolResponse {
     return {
@@ -569,12 +570,20 @@ export async function rollbackFrontendRelease(
     http: FrontendReleaseHttp,
     projectRef: string,
     deploymentId: string,
-    releaseId: string,
+    releaseId?: string,
 ): Promise<ToolResponse> {
-    if (!RELEASE_ID_PATTERN.test(releaseId)) throw new Error("'release_id' must be a SHA-256 digest");
-    const authority = await readActiveFrontendRelease(http, projectRef, deploymentId);
+    if (releaseId !== undefined && !RELEASE_ID_PATTERN.test(releaseId)) {
+        throw new Error("'release_id' must be a SHA-256 digest");
+    }
+    const authority: ActiveReleaseSnapshot & { previousRelease?: FrontendReleaseRecord } = releaseId === undefined
+        ? await readPreviousFrontendRelease(http, projectRef, deploymentId)
+        : await readActiveFrontendRelease(http, projectRef, deploymentId);
     if ("failure" in authority) return authority.failure;
     const inventory = authority.inventory;
+    if (releaseId === undefined) {
+        releaseId = authority.previousRelease?.release_id;
+    }
+    if (releaseId === undefined) return releaseFailure("frontend.rollback", "NO_PREVIOUS_RELEASE", 409);
     if (inventory.active_release_id === releaseId) {
         return toolResponse({
             project_ref: projectRef,
@@ -587,8 +596,10 @@ export async function rollbackFrontendRelease(
     if (inventory.active_release_id === null || inventory.active_activation_id === null) {
         return releaseFailure("frontend.rollback", "NO_ACTIVE_RELEASE", 409);
     }
-    const target = await getFrontendRelease(http, projectRef, deploymentId, releaseId);
-    if (target.isError) return target;
+    if (!authority.previousRelease) {
+        const target = await getFrontendRelease(http, projectRef, deploymentId, releaseId);
+        if (target.isError) return target;
+    }
     const mutationId = crypto.randomUUID();
     const activation = await activateFrontendRelease(http, {
         projectRef,
@@ -617,6 +628,51 @@ export async function rollbackFrontendRelease(
         previous_release_id: inventory.active_release_id,
         previous_activation_id: inventory.active_activation_id,
     });
+}
+
+async function readPreviousFrontendRelease(
+    http: FrontendReleaseHttp,
+    projectRef: string,
+    deploymentId: string,
+): Promise<ActiveReleaseSnapshot & { previousRelease?: FrontendReleaseRecord }> {
+    const response = await http.get(`${deploymentEndpoint(projectRef, deploymentId)}/rollback-release`, {
+        maxJsonBytes: RESPONSE_MAX_BYTES,
+    });
+    if (!response.ok && response.status === 404) {
+        return {
+            failure: releaseFailure("frontend.rollback", "PREVIOUS_RELEASE_UNSUPPORTED", 404),
+            status: 404,
+        };
+    }
+    const data = response.data;
+    const value = data && typeof data === "object" && !Array.isArray(data)
+        ? data as Record<string, unknown> : null;
+    const activeReleaseId = value ? nullableIdentity(value.active_release_id, RELEASE_ID_PATTERN) : undefined;
+    const activeActivationId = value ? nullableIdentity(value.active_activation_id, MUTATION_ID_PATTERN) : undefined;
+    const previousActivationId = value ? nullableIdentity(value.previous_activation_id, MUTATION_ID_PATTERN) : undefined;
+    const previous = value?.previous_release === null ? null : releaseRecord(value?.previous_release);
+    if (!response.ok || response.status !== 200 || !value || !exactKeys(value, [
+        "schema", "project_ref", "deployment_id", "active_release_id", "active_activation_id",
+        "previous_release", "previous_activation_id",
+    ]) || value.schema !== "supacloud.frontend-rollback-snapshot.v1"
+        || value.project_ref !== projectRef || value.deployment_id !== deploymentId
+        || activeReleaseId === undefined || activeActivationId === undefined || previousActivationId === undefined
+        || (activeReleaseId === null) !== (activeActivationId === null)
+        || (previous === null && value.previous_release !== null)
+        || (previous === null) !== (previousActivationId === null)
+        || (previous && (activeReleaseId === null || previous.project_ref !== projectRef
+            || previous.deployment_id !== deploymentId))) {
+        return { failure: releaseReadFailure("frontend.rollback", response), status: response.status };
+    }
+    return {
+        inventory: {
+            project_ref: projectRef, deployment_id: deploymentId,
+            active_release_id: activeReleaseId, active_activation_id: activeActivationId,
+            releases: [], next_cursor: null,
+        },
+        exactReadback: false,
+        ...(previous ? { previousRelease: previous } : {}),
+    };
 }
 
 export async function activateFrontendRelease(

@@ -292,6 +292,21 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
   )
 
   .get(
+    "/deployments/:id/rollback-release",
+    {
+      params: t.Object({ ref: t.String(), id: t.String() }),
+      detail: { tags: ["frontend"], summary: "Read the journal-verified previous release and current CAS for rollback" },
+    },
+    async ({ params }) => {
+      try {
+        return await frontendReleaseService.rollbackSnapshot(params.ref, params.id);
+      } catch (error: unknown) {
+        return releaseError(error);
+      }
+    }
+  )
+
+  .get(
     "/deployments/:id/releases/:releaseId",
     {
       params: t.Object({ ref: t.String(), id: t.String(), releaseId: t.String() }),
