@@ -652,6 +652,15 @@ async function main() {
 
     const cliTools = createCliTools(context, globalOptions.confirmProduction);
     if (args.length === 1 && !["ai", "supabase", "lite", "app", "db"].includes(args[0]) && cliTools[args[0]]) {
+        if ("action" in cliTools[args[0]].schema) {
+            if (context.credentialScope !== "management" || !context.apiUrl || !context.apiToken) {
+                console.error(`This command requires Management API context. Run \`${preferredCommand} status\` to inspect current detection.`);
+                process.exitCode = 1;
+                return;
+            }
+            await runCli(cliTools, args, { commandName });
+            return;
+        }
         const result = await cliTools[args[0]].callback({});
         if (result?.content && Array.isArray(result.content)) {
             for (const chunk of result.content) {
