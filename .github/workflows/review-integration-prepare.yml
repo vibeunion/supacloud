@@ -1,0 +1,56 @@
+name: Review Integration Preparation
+on:
+  push:
+    branches: [review/pr-integration-20261011]
+    paths: [.github/workflows/review-integration-prepare.yml]
+permissions:
+  contents: read
+concurrency:
+  group: review-integration-preparation-20261011
+  cancel-in-progress: false
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Fetch review refs without changing main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main:refs/remotes/review/main
+          for pr in 1771 1774 1776 1778 1779 1780 1781 1782 1784 1785 1786 1787 1788; do
+            git fetch --no-tags origin "refs/pull/${pr}/head:refs/remotes/review/pr-${pr}"
+          done
+          git for-each-ref --format='%(refname) %(objectname)' refs/remotes/review/ > /tmp/review-refs.txt
+          git checkout --detach refs/remotes/review/main
+      - name: Prepare locked focused test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          for package in delivery contracts compiler db management-api cli; do
+            bun install --frozen-lockfile --cwd "packages/${package}"
+          done
+          bun run --cwd packages/cli prepare:db
+      - name: Package private review workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/review-workspace/runtime
+          cp "$(command -v bun)" /tmp/review-workspace/runtime/bun
+          cp /tmp/review-refs.txt /tmp/review-workspace/review-refs.txt
+          git status --porcelain > /tmp/review-workspace/preparation-status.txt
+          tar --exclude='./.git/config' --exclude='./.git/hooks' --exclude='./.git/logs' --exclude='./.git/FETCH_HEAD' -czf /tmp/review-workspace/source.tar.gz .
+      - uses: actions/upload-artifact@v6
+        with:
+          name: supacloud-review-workspace-20261011
+          path: /tmp/review-workspace/
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
