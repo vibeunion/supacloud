@@ -24,7 +24,13 @@
       "@supacloud/delivery/files": ["packages/delivery/src/delivery-files.ts"],
       "@supacloud/delivery/artifact": ["packages/delivery/src/delivery-artifact.ts"],
       "@supacloud/delivery/development": ["packages/delivery/src/application-development.ts"],
-      "@supacloud/delivery/deployment-evidence": ["packages/delivery/src/deployment-evidence.ts"]
+      "@supacloud/delivery/deployment-evidence": ["packages/delivery/src/deployment-evidence.ts"],
+      "@supacloud/db": ["packages/db/src/index.ts"],
+      "@supacloud/db/bun": ["packages/db/src/command-bun.ts"],
+      "@supacloud/db/source-contracts": ["packages/db/src/source-contracts.ts"],
+      "@supacloud/db/sql-analysis": ["packages/db/src/sql-analysis.ts"],
+      "@supacloud/db/drizzle": ["packages/db/src/drizzle.ts"],
+      "@supacloud/db/drizzle-bun": ["packages/db/src/drizzle-bun.ts"]
     },
     "typeRoots": ["./packages/compiler/node_modules/@types"],
     "allowImportingTsExtensions": true,
