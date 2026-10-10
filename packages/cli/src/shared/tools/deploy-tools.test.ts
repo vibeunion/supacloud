@@ -187,6 +187,68 @@ describe("one-command deploy", () => {
         expect(requests.every((request) => request.startsWith("GET "))).toBe(true);
     });
 
+    test("keeps build logs on stderr and only the final JSON on stdout", async () => {
+        const directory = await workspace();
+        await Bun.write(join(directory, "build.ts"), [
+            'console.log("build output");',
+            'console.error("build warning");',
+            'await Bun.write("built.txt", "built");',
+        ].join("\n"));
+        await Bun.write(join(directory, "supacloud.json"), JSON.stringify({
+            frontend: { id: "web", buildCommand: "bun build.ts" },
+        }));
+        const server = Bun.serve({
+            hostname: "127.0.0.1", port: 0,
+            fetch(request) {
+                if (new URL(request.url).pathname.endsWith("/deployments")) return Response.json([deployment()]);
+                return Response.json({
+                    project_ref: "abc123", deployment_id: "web",
+                    active_release_id: null, active_activation_id: null, releases: [], next_cursor: null,
+                });
+            },
+        });
+        servers.push(server);
+        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, ["deploy", "--plan", "--json"]);
+        expect(response.exitCode).toBe(0);
+        expect(JSON.parse(response.stdout)).toMatchObject({ planned: true, published: false });
+        expect(response.stderr).toContain("build output");
+        expect(response.stderr).toContain("build warning");
+        expect(await Bun.file(join(directory, "built.txt")).text()).toBe("built");
+    });
+
+    test.each(["deploy", "plan", "diff"])("rejects contradictory archive/tree identity before %s", async (mode) => {
+        const directory = await workspace();
+        const archive = await createFrontendArchive(join(directory, "dist"));
+        const releaseId = archive.sha256;
+        await archive.cleanup();
+        const requests: string[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1", port: 0,
+            fetch(request) {
+                const path = new URL(request.url).pathname;
+                requests.push(`${request.method} ${path}`);
+                if (path.endsWith("/deployments")) return Response.json([deployment()]);
+                return Response.json({
+                    project_ref: "abc123", deployment_id: "web",
+                    active_release_id: releaseId,
+                    active_activation_id: "00000000-0000-4000-8000-000000000001",
+                    releases: [{ ...release("abc123", "web", releaseId), tree_sha256: "0".repeat(64) }],
+                    next_cursor: null,
+                });
+            },
+        });
+        servers.push(server);
+        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, [
+            "deploy", "--skip_build", "--json", ...(mode === "deploy" ? [] : [`--${mode}`]),
+        ]);
+        expect(response.exitCode).toBe(1);
+        expect(response.stderr).toContain("Active release tree does not match the local archive");
+        expect(requests).toEqual([
+            "GET /v1/projects/abc123/frontend/deployments",
+            "GET /v1/projects/abc123/frontend/deployments/web/active-release",
+        ]);
+    });
+
     test("unknown activation preserves its mutation identity without replay", async () => {
         const directory = await workspace();
         let writes = 0;
