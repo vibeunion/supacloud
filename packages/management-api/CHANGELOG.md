@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.102.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.101.0...management-api-v0.102.0) (2026-10-10)
+
+
+### Features
+
+* **preview:** expire and safely clean isolated previews ([#1774](https://github.com/vibeunion/supacloud/issues/1774)) ([05f0605](https://github.com/vibeunion/supacloud/commit/05f060552dc49464b791109d64662c4a4f73eecc))
+
+
+### Bug Fixes
+
+* **preview:** gate readiness on branch activation evidence ([#1772](https://github.com/vibeunion/supacloud/issues/1772)) ([19bd977](https://github.com/vibeunion/supacloud/commit/19bd977415fb887195c4f164a808adef269a4cf6))
+
 ## [0.101.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.100.0...management-api-v0.101.0) (2026-10-10)
 
 
