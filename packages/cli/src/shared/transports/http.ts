@@ -21,6 +21,8 @@ export interface HttpResult<T = unknown> {
 }
 
 export interface HttpGetOptions {
+    timeoutMs?: number;
+    retry?: boolean;
     maxResponseBytes?: number;
     maxJsonBytes?: number;
     responseTimeoutMs?: number;
@@ -380,6 +382,7 @@ export class HttpTransport {
     }
 
     async get<T = unknown>(path: string, options: HttpGetOptions = {}): Promise<HttpResult<T>> {
+        const timeoutMs = validatedPostTimeout(options);
         const maxResponseBytes = validatedGetResponseLimit(options);
         const maxJsonBytes = validatedJsonResponseLimit(options.maxJsonBytes);
         const responseTimeoutMs = validatedResponseTimeout(options.responseTimeoutMs);
@@ -387,10 +390,11 @@ export class HttpTransport {
             throw new RangeError("HTTP response limit options are mutually exclusive");
         }
         try {
-            const res = await fetchWithRetry(`${this.baseUrl}${path}`, {
+            const request = options.retry === false ? fetchWithTimeout : fetchWithRetry;
+            const res = await request(`${this.baseUrl}${path}`, {
                 method: "GET",
                 headers: this.headers(),
-            }, DEFAULT_TIMEOUT, this.insecureTls);
+            }, timeoutMs, this.insecureTls);
             if (maxJsonBytes !== undefined) {
                 const data = await boundedResponseJson(res, maxJsonBytes, responseTimeoutMs);
                 return data === null

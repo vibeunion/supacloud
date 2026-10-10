@@ -79,6 +79,58 @@ deployment. An unknown mutation outcome remains unknown; reconcile the same
 activation identity rather than blindly deploying again. These commands require
 Management API credentials except local plan/build and authoring commands.
 
+### Isolated Application Previews
+
+```sh
+supacloud-cli app preview-plan --env test --id orders --environment_id test --release_id RELEASE_SHA256 --branch_ref preview-orders
+supacloud-cli app preview --env test --id orders --environment_id test --release_id RELEASE_SHA256 --configuration_id CONFIG_UUID
+supacloud-cli app previews --env test --id orders --environment_id test
+supacloud-cli app preview-status --env test --id orders --environment_id test --preview_id PREVIEW_UUID
+supacloud-cli app preview-cleanup --env test --id orders --environment_id test --preview_id PREVIEW_UUID
+```
+
+The platform owns branch provisioning, queue/Storage namespaces, test Secrets,
+configuration cloning, activation and runtime readiness. The CLI never performs
+these operations through SSH or sequential client-side resource mutations.
+Creation defaults to `schema_only`; copying source rows requires explicitly
+selecting `--data_mode full_clone`. Creation requires an immutable source
+configuration ID and verifies the branch release identity against the source
+manifest. A `provisioning` receipt means accepted, not ready.
+
+`preview-plan` is read-only. Preview list/status requests may resume persisted
+provisioning on the server, so they are classified as writes, including in
+read-only and production profiles. Cleanup is explicit. Failed previews return
+nonzero with the validated receipt and cleanup state. Unknown create outcomes
+are never retried: list existing previews and reconcile their receipts first.
+No production deployment, database promotion or data rollback is implied.
+Runtime readiness is not authenticated business-flow acceptance.
+
+```gherkin
+Feature: Platform-owned application previews
+  Scenario: Read-only planning
+    Given an explicit release and proposed branch ref
+    When preview-plan runs in read-only mode
+    Then only a GET plan request is sent
+    And no preview is created
+
+  Scenario: Accepted is not ready
+    Given an immutable source release and configuration
+    When preview creates an isolated environment
+    Then exactly one create request is sent
+    And a provisioning receipt is returned without claiming readiness
+
+  Scenario: Safety guards precede effects
+    Given a read-only or unconfirmed production profile
+    When preview creation, status recovery or cleanup is requested
+    Then the CLI rejects the request before HTTP dispatch
+
+  Scenario: Unknown outcome preserves reconciliation
+    Given a create response is lost or belongs to another environment
+    When the CLI handles that response
+    Then it reports OUTCOME_UNKNOWN without retrying creation
+    And it retains the selected scope for receipt reconciliation
+```
+
 ### Framework source upgrades
 
 Breaking source-contract changes use the compiler's migration command, which is
