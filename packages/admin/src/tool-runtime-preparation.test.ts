@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { copyFile, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { copyFile, cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -13,7 +13,8 @@ test("Admin preparation refreshes public runtime files after a clean file-depend
     const admin = join(root, "admin");
     const run = (args: string[], cwd = admin): void => {
         const result = Bun.spawnSync([process.execPath, "--no-env-file", ...args], {
-            cwd, stdout: "pipe", stderr: "pipe",
+            cwd, env: { ...process.env, BUN_INSTALL_CACHE_DIR: join(root, "empty-cache") },
+            stdout: "pipe", stderr: "pipe",
         });
         if (result.exitCode !== 0) {
             throw new Error(`${args.join(" ")} failed:\n${new TextDecoder().decode(result.stdout)}${new TextDecoder().decode(result.stderr)}`);
@@ -31,19 +32,21 @@ test("Admin preparation refreshes public runtime files after a clean file-depend
         }
         await symlink(join(cliSource, "node_modules"), join(cli, "node_modules"),
             process.platform === "win32" ? "junction" : "dir");
+        await cp(join(cliSource, "node_modules/typebox"), join(root, "typebox"), {
+            recursive: true, dereference: true,
+        });
         await writeFile(join(cli, "package.json"), JSON.stringify({
             name: cliMetadata.name,
             version: cliMetadata.version,
             type: cliMetadata.type,
             exports: { "./tool-runtime": cliMetadata.exports["./tool-runtime"] },
             files: ["dist"],
-            dependencies: { typebox: cliMetadata.dependencies.typebox },
             scripts: { "build:tool-runtime": cliMetadata.scripts["build:tool-runtime"] },
         }));
         await writeFile(join(admin, "package.json"), JSON.stringify({
             name: "admin-runtime-preparation-fixture",
             type: "module",
-            dependencies: { "@supacloud/cli": "file:../cli" },
+            dependencies: { "@supacloud/cli": "file:../cli", typebox: "file:../typebox" },
             scripts: {
                 "prepare:tool-runtime": adminMetadata.scripts["prepare:tool-runtime"],
                 pretypecheck: adminMetadata.scripts.pretypecheck,
