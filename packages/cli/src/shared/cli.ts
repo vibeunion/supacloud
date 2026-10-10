@@ -1,12 +1,13 @@
 import type { TSchema } from "typebox";
 import { Value } from "typebox/value";
 import {
-    parseToolArguments,
+    validateToolArguments,
     schemaDescription,
     schemaEnumValues,
     schemaProperties,
 } from "./schema";
 import type { ToolSchema } from "./schema";
+import type { ToolInvocation } from "./tool-server";
 import { outcomeUnknownGuidance } from "./outcome-guidance";
 
 interface CliRunOptions {
@@ -75,7 +76,7 @@ function parseCliFlags(args: string[], startIndex: number, schema: ToolSchema): 
 }
 
 export async function runCli(
-    cliTools: Record<string, { schema: ToolSchema; callback: (args: any) => Promise<any> }>,
+    cliTools: Record<string, { schema: ToolSchema; callback: ToolInvocation }>,
     args: string[],
     options: CliRunOptions = {}
 ) {
@@ -182,9 +183,9 @@ export async function runCli(
     try {
         const parsedArgs = parseCliFlags(args, startIdx, tool.schema);
         if (startIdx === 2) parsedArgs.action = args[1];
-        const validatedArgs = parseToolArguments(tool.schema, parsedArgs);
+        validateToolArguments(tool.schema, parsedArgs);
 
-        const result = await tool.callback(validatedArgs) as CliToolResult;
+        const result = await tool.callback(parsedArgs);
         if (result && result.content && Array.isArray(result.content)) {
             for (const c of result.content) {
                 if (c.type === "text") {

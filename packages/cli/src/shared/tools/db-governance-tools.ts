@@ -14,15 +14,7 @@ import {
 } from "@supacloud/db";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (requestArguments: DbToolArguments) => Promise<unknown>,
-    ) => void;
-};
+import { registerTool, type ToolServer } from "../tool-server";
 
 export interface DbToolArguments {
     action: "context" | "lint" | "explain" | "module_check";
@@ -357,7 +349,7 @@ export function registerDbGovernanceTools(server: ToolServer, options: DbGoverna
     const environment = options.environment || process.env;
     const fallbackRoot = options.currentWorkingDirectory || process.cwd();
     const liteSpawn = options.liteSpawn || defaultLiteSpawn;
-    server.tool(
+    registerTool(server,
         "db",
         "Local database governance (@supacloud/db): provide bounded AI context, lint declared modules, explain objects, reconcile against a live catalog or a local SupaCloud Lite project. Actions: context, lint, explain, module_check",
         {

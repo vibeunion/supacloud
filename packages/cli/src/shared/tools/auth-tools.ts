@@ -5,6 +5,7 @@ import { Type } from "typebox";
 import { projectRefPathSegment } from "../project-ref";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
+import { registerTool, type ToolServer } from "../tool-server";
 
 const authConfigRecord = Type.Record(Type.String(), Type.Unknown());
 const safeAuthMutationCodes = new Set([
@@ -415,8 +416,8 @@ function formatProviders(data: unknown): string {
     return out;
 }
 
-export function registerAuthTools(server: { tool: (...args: any[]) => void }, http: HttpTransport): void {
-    server.tool(
+export function registerAuthTools(server: ToolServer, http: HttpTransport): void {
+    registerTool(server,
         "auth",
         `Auth & OAuth provider management, controlled user lookup, and login-link generation.
 Actions: list_users, get_user, generate_link, list_providers, get_provider, configure_provider, update_provider, disable_provider, supported_providers, wechat_mini, wechat_open, get_settings, update_settings, get_config, update_config, get_oauth_server, migrate_oauth_server`,
@@ -450,10 +451,10 @@ Actions: list_users, get_user, generate_link, list_providers, get_provider, conf
             allow_dynamic_registration: optional(Type.Boolean(), "[migrate_oauth_server] Enable dynamic client registration"),
             authorization_path: optional(Type.String(), "[migrate_oauth_server] Hosted OAuth authorization path"),
         },
-        async (args: any) => {
+        async (args) => {
             const { action, ref, provider, client_id, client_secret, redirect_uri, url, app_id, app_secret, config } = args;
             const need = (f: string) => { if (!ref) throw new Error(`'ref' required for '${action}'`); };
-            const ok = (res: any) => res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`;
+            const ok = (res: HttpResult<unknown>) => res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`;
 
             let text: string;
             switch (action) {

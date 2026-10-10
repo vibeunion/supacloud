@@ -5,15 +5,7 @@ export { resolveLiteCommand } from "./lite-cli-command";
 import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (requestArguments: any) => Promise<any>,
-    ) => void;
-};
+import { registerTool, type ToolServer } from "../tool-server";
 
 export type LiteCliAction =
     | "version" | "start" | "migrate" | "status" | "keys" | "gen_types"
@@ -211,7 +203,7 @@ export function registerLiteCliTools(server: ToolServer, options: LiteCliToolOpt
     const environment = options.environment || process.env;
     const fallbackWorkdir = options.currentWorkingDirectory || process.cwd();
     const execute = options.executeLiteCli || ((request) => executeLiteCli(request, environment, fallbackWorkdir));
-    server.tool(
+    registerTool(server,
         "lite",
         "Controlled adapter for the local SupaCloud Lite CLI. Lite actions are local-only and never use the Management API or official Supabase CLI.",
         {
@@ -247,7 +239,7 @@ export function registerLiteCliTools(server: ToolServer, options: LiteCliToolOpt
             json: optional(Type.Boolean(), "[doctor] Emit machine-readable output"),
             baseline: optional(Type.Boolean(), "[db_pull] Record already-present schema in local migration history after review"),
         },
-        async (request: LiteCliArgs) => {
+        async (request) => {
             buildLiteArgs(request);
             const execution = await execute(request);
             return {

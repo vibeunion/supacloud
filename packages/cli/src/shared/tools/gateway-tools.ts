@@ -14,16 +14,8 @@
 import { Type } from "typebox";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
-import type { HttpTransport } from "../transports/http";
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (args: any) => Promise<any>,
-    ) => void;
-};
+import type { HttpResult, HttpTransport } from "../transports/http";
+import { registerTool, type ToolServer } from "../tool-server";
 
 type CliScalar = string | number | boolean;
 
@@ -78,8 +70,8 @@ const redirectStatus = Type.Optional(Type.Union([
     Type.Literal(301), Type.Literal(302), Type.Literal(307), Type.Literal(308),
 ]));
 
-const ok = (res: any) => (res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`);
-const simple = (res: any, msg: string) => (res.ok ? `✅ ${msg}` : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`);
+const ok = (res: HttpResult<unknown>) => (res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`);
+const simple = (res: HttpResult<unknown>, msg: string) => (res.ok ? `✅ ${msg}` : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`);
 
 export function registerGatewayTools(
     server: ToolServer,
@@ -88,7 +80,7 @@ export function registerGatewayTools(
 ): void {
     const { projectRef } = options;
 
-    server.tool(
+    registerTool(server,
         "gateway",
         `Gateway / Caddy 配置（通过 JSON Admin API 注入）。要求 admin 权限。
 Actions: routes, upsert_route, update_route, delete_route, config, get_certificate, update_certificate, issue_certificate, deploy_certificate, rebuild, custom_hostname, set_custom_hostname, delete_custom_hostname, verify_custom_hostname`,
@@ -140,13 +132,13 @@ Actions: routes, upsert_route, update_route, delete_route, config, get_certifica
             // Custom domain
             custom_hostname: optional(Type.String(), "[set_custom_hostname] 自定义域名"),
         },
-        async (args: any) => {
+        async (args) => {
             const resolveRef = (override?: string) => {
                 const ref = options.refPriority === "project" ? projectRef || override : override || projectRef;
                 if (!ref) throw new Error("'ref' is required for this action");
                 return ref;
             };
-            const need = (field: string, value: any) => {
+            const need = (field: string, value: unknown) => {
                 if (value === undefined || value === null || value === "") throw new Error(`'${field}' is required for '${args.action}'`);
             };
 
