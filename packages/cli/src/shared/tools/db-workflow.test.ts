@@ -103,8 +103,8 @@ test("reverse adapter publishes declarative SQL and a real catalog without sourc
     const catalog: unknown = JSON.parse(await readFile(join(root, "output/reverse/catalog.json"), "utf8"));
     expect(catalog).toMatchObject({ kind: "database-reverse-candidate", tables: [{ name: "items", rlsEnabled: true }] });
     expect(await readFile(join(root, "migrations/20261010000000_initial.sql"), "utf8")).toBe(initial);
-    expect(await pool`SELECT * FROM public.items`).toEqual([{ id: 1, label: "original" }]);
-    expect(await pool`SELECT to_regclass('drizzle.__drizzle_migrations') AS ledger`).toEqual([{ ledger: null }]);
+    expect(await pool<{ id: number; label: string }[]>`SELECT * FROM public.items`).toEqual([{ id: 1, label: "original" }]);
+    expect(await pool<{ ledger: string | null }[]>`SELECT to_regclass('drizzle.__drizzle_migrations') AS ledger`).toEqual([{ ledger: null }]);
     expect((await readdir(join(root, "output"), { recursive: true })).some((path) => path.includes("pull.config"))).toBe(false);
     await expect(runDbWorkflow({ action: "reverse", out: "output/reverse" }, root)).rejects.toThrow("already exists");
 }, 30_000);
@@ -125,7 +125,7 @@ test("diff adapter stages SQL sources and history separately and publishes only 
     const draft = await readFile(join(root, "db/candidates", newSql[0]!), "utf8");
     expect(draft).toContain("ADD COLUMN extra");
     expect(draft).not.toContain("CREATE TABLE");
-    expect(await pool`SELECT count(*)::int AS count FROM information_schema.columns
+    expect(await pool<{ count: number }[]>`SELECT count(*)::int AS count FROM information_schema.columns
         WHERE table_schema='public' AND table_name='items' AND column_name='extra'`).toEqual([{ count: 0 }]);
 }, 30_000);
 
@@ -152,7 +152,7 @@ test.skipIf(!process.env.SUPACLOUD_SUPABASE_CLI_BIN)("pinned official engine rev
     const files = await readdir(join(root, "output/native-diff"));
     expect(files).toHaveLength(1);
     expect(await readFile(join(root, "output/native-diff", files[0]!), "utf8")).toContain("extra");
-    expect(await pool`SELECT count(*)::int AS count FROM information_schema.columns
+    expect(await pool<{ count: number }[]>`SELECT count(*)::int AS count FROM information_schema.columns
         WHERE table_schema='adoption' AND table_name='samples' AND column_name='extra'`).toEqual([{ count: 0 }]);
 }, 360_000);
 
@@ -191,10 +191,10 @@ test("role provisioning removes CREATE and privileged membership while preservin
     expect((await runDbWorkflow({ action: "role_check" }, root, options)).isError).toBe(false);
     expect(sql).toContain('ALTER DEFAULT PRIVILEGES FOR ROLE "app_migrator" REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;');
     await pool.unsafe("GRANT CREATE ON SCHEMA public TO app_migrator; SET ROLE app_migrator; CREATE FUNCTION public.future_rpc() RETURNS int LANGUAGE sql AS 'SELECT 1'; RESET ROLE;");
-    expect(await pool`SELECT has_function_privilege('app_user', 'public.future_rpc()', 'EXECUTE') AS allowed`).toEqual([{ allowed: false }]);
+    expect(await pool<{ allowed: boolean }[]>`SELECT has_function_privilege('app_user', 'public.future_rpc()', 'EXECUTE') AS allowed`).toEqual([{ allowed: false }]);
     const app = new SQL(appUrl);
     try {
-        expect(await app`SELECT * FROM public.items`).toEqual([{ id: 1, label: "original" }]);
+        expect(await app<{ id: number; label: string }[]>`SELECT * FROM public.items`).toEqual([{ id: 1, label: "original" }]);
         for (const ddl of [
             "CREATE TABLE public.forbidden(id int)", "ALTER TABLE public.items ADD COLUMN forbidden int",
             "DROP TABLE public.items", "CREATE SCHEMA forbidden",
