@@ -504,8 +504,10 @@ Use a direct Postgres DSN with `pg`, `postgres.js`, or equivalent drivers for ap
 - `gateway` (requires an admin-capable token)
 
 The `frontend` group supports both the existing deployment/Git/legacy ZIP
-actions and immutable prebuilt release control. Use `list_releases` to read the
-active release and activation IDs, `upload_release` to stream a local ZIP bound
+actions and immutable prebuilt release control. Use `get_active_release` to read
+the verified current artifact and activation IDs without scanning historical
+archives. `list_releases` remains the paginated, full-integrity audit interface.
+Use `upload_release` to stream a local ZIP bound
 to its SHA-256, and `activate_release` with the observed IDs plus a retry-stable
 UUIDv4 mutation ID. The CLI verifies upload and activation readback before
 reporting success. Production mutations require exact project confirmation;
@@ -513,13 +515,35 @@ read-only mode blocks them before opening the archive or sending HTTP.
 
 ```bash
 supacloud-cli frontend list_releases --ref abc123 --id web
+supacloud-cli frontend get_active_release --ref abc123 --id web
 supacloud-cli frontend get_release --ref abc123 --id web --release_id <sha256>
+supacloud-cli frontend rollback --ref abc123 --id web --release_id <retained-sha256>
 supacloud-cli frontend activate_release --ref abc123 --id web \
   --release_id <sha256> \
   --expected_active_release_id <current-sha256-or-absent> \
   --expected_activation_id <current-uuid-v4-or-absent> \
   --mutation_id <retry-stable-uuid-v4>
 ```
+
+The active snapshot is read-only and protected by the deployment lock. It
+verifies the active immutable archive/tree, returns zero or one release, and
+does not hash unrelated historical releases. All consumers, including `deploy`,
+`rollback` and activation readback, use this path; an older server returning HTTP
+404 automatically falls back to `limit=1` plus exact active artifact readback
+and receives the same zero-or-one contract. Authentication, malformed snapshots and server
+failures never trigger this fallback.
+
+For immutable frontend deployments the platform already retains previous
+artifacts. `deploy --json` returns `previous_release_id` and
+`previous_activation_id` alongside the new CAS identity. For an operator rollback,
+run `frontend rollback --release_id <previous-release-sha256>`; the CLI observes
+current CAS and creates the mutation UUID. Concurrent writes fail without
+refreshing CAS or retrying. Release history is content-hash-sorted, so a target
+must be explicit. Automated compensation tied to a release receipt must still
+use `activate_release` with that receipt's expected identity, never refresh it.
+No download, rebuild or reupload is needed. A null previous release indicates legacy/initial
+deployment, not a verified rollback backup. This does not replace database or
+Storage backups and never authorizes automatic database restore.
 
 `edge_functions deploy --path <file-or-directory>` uses Bun to bundle local
 TypeScript and dependencies and runs a local syntax check before upload. The

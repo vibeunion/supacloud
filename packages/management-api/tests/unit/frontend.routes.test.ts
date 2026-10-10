@@ -1027,6 +1027,48 @@ describe("Frontend deployment upload routes", () => {
     expect(stream.upload.abort).toHaveBeenCalledTimes(1);
   });
 
+  test("routes the active release snapshot without requesting release history", async () => {
+    const releaseId = "a".repeat(64);
+    const activeReleaseSnapshot = spyOn(frontendReleaseService, "activeReleaseSnapshot").mockResolvedValue({
+      project_ref: "proj123",
+      deployment_id: "dep123",
+      active_release_id: releaseId,
+      active_activation_id: "00000000-0000-4000-8000-000000000001",
+      releases: [{
+        schema: "supacloud.frontend-release.v1",
+        project_ref: "proj123",
+        deployment_id: "dep123",
+        release_id: releaseId,
+        sha256: releaseId,
+        tree_sha256: "b".repeat(64),
+        size_bytes: testZipBytes.byteLength,
+        file_count: 1,
+        created_at: "2026-08-12T00:00:00.000Z",
+        kind: "prebuilt_static",
+      }],
+      next_cursor: null,
+    });
+    const listReleases = spyOn(frontendReleaseService, "listReleases");
+    listReleases.mockClear();
+
+    try {
+      const response = await app.handle(new Request(
+        "http://localhost/v1/projects/proj123/frontend/deployments/dep123/active-release",
+      ));
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(expect.objectContaining({
+        project_ref: "proj123",
+        deployment_id: "dep123",
+        active_release_id: releaseId,
+      }));
+      expect(activeReleaseSnapshot).toHaveBeenCalledWith("proj123", "dep123");
+      expect(listReleases).not.toHaveBeenCalled();
+    } finally {
+      activeReleaseSnapshot.mockRestore();
+      listReleases.mockRestore();
+    }
+  });
+
   test("gets one release and rejects non-raw or unbounded immutable uploads", async () => {
     const releaseId = "a".repeat(64);
     const release = {

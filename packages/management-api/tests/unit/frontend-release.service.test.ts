@@ -503,6 +503,12 @@ describe.skipIf(process.platform !== "linux")("FrontendReleaseService", () => {
     const inventory = await prepared.service.listReleases(PROJECT_REF, DEPLOYMENT_ID);
     expect(inventory.active_release_id).toBe(prepared.sha256);
     expect(inventory.releases).toHaveLength(1);
+
+    const active = await prepared.service.activeReleaseSnapshot(PROJECT_REF, DEPLOYMENT_ID);
+    expect(active.active_release_id).toBe(prepared.sha256);
+    expect(active.active_activation_id).toBe(activated.activation_id);
+    expect(active.releases).toHaveLength(1);
+    expect(active.next_cursor).toBeNull();
   });
 
   test("paginates multiple releases in the same release-id order as its cursor", async () => {

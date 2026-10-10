@@ -373,7 +373,7 @@ describe("one-command deploy", () => {
                 if (request.method === "GET" && url.pathname === "/v1/projects/abc123/frontend/deployments") {
                     return Response.json([deployment()]);
                 }
-                if (request.method === "GET" && url.pathname === base) {
+                if (request.method === "GET" && url.pathname === "/v1/projects/abc123/frontend/deployments/web/active-release") {
                     return Response.json({
                         project_ref: "abc123",
                         deployment_id: "web",
@@ -435,14 +435,16 @@ describe("one-command deploy", () => {
             activation_id: activationId,
             url: "https://web.example.com",
             file_count: 2,
+            previous_release_id: null,
+            previous_activation_id: null,
         });
         expect(requests).toEqual([
             "GET /v1/projects/abc123/frontend/deployments",
-            "GET /v1/projects/abc123/frontend/deployments/web/releases?limit=100",
+            "GET /v1/projects/abc123/frontend/deployments/web/active-release",
             "POST /v1/projects/abc123/frontend/deployments/web/releases",
             `GET /v1/projects/abc123/frontend/deployments/web/releases/${releaseId}`,
             `POST /v1/projects/abc123/frontend/deployments/web/releases/${releaseId}/activate`,
-            "GET /v1/projects/abc123/frontend/deployments/web/releases?limit=100",
+            "GET /v1/projects/abc123/frontend/deployments/web/active-release",
             `GET /v1/projects/abc123/frontend/deployments/web/releases/${releaseId}`,
             "GET /v1/projects/abc123/frontend/deployments/web",
         ]);
@@ -463,7 +465,7 @@ describe("one-command deploy", () => {
                 if (request.method === "GET" && url.pathname === "/v1/projects/abc123/frontend/deployments") {
                     return Response.json([deployment()]);
                 }
-                if (request.method === "GET" && url.pathname === base) {
+                if (request.method === "GET" && url.pathname === "/v1/projects/abc123/frontend/deployments/web/active-release") {
                     return Response.json({
                         project_ref: "abc123",
                         deployment_id: "web",

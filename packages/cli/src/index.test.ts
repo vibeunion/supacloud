@@ -515,7 +515,8 @@ describe("supacloud-cli process contract", () => {
                     mutation_id: mutationId,
                 },
             },
-            { method: "GET", path: `${releaseBasePath(projectRef, deploymentId)}?limit=100` },
+            { method: "GET", path: `/v1/projects/${projectRef}/frontend/deployments/${deploymentId}/active-release` },
+            { method: "GET", path: `${releaseBasePath(projectRef, deploymentId)}?limit=1` },
             { method: "GET", path: `${releaseBasePath(projectRef, deploymentId)}/${releaseId}` },
         ]);
         expect(listed.stdout + uploaded.stdout + activated.stdout).not.toContain("frontend-test-token");

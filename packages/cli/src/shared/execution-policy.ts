@@ -66,8 +66,8 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     },
     secrets: { read: ["list"], write: ["upsert", "delete"] },
     frontend: {
-        read: ["list", "get", "build_logs", "list_frameworks", "list_records", "list_releases", "get_release"],
-        write: ["create", "update", "delete", "deploy_git", "deploy_upload", "redeploy", "add_domain", "remove_domain", "set_env", "upload_release", "activate_release"],
+        read: ["list", "get", "build_logs", "list_frameworks", "list_records", "list_releases", "get_active_release", "get_release"],
+        write: ["create", "update", "delete", "deploy_git", "deploy_upload", "redeploy", "add_domain", "remove_domain", "set_env", "upload_release", "activate_release", "rollback"],
     },
     task_events: { read: ["inspect_webhook"], write: ["register_webhook", "unregister_webhook"] },
     diagnostics: { read: ["list_checks", "get_run"], write: ["run_checks", "repair"] },
