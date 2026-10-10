@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.99.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.98.2...management-api-v0.99.0) (2026-10-10)
+
+
+### Features
+
+* **gateway:** auto-configure Function CORS origins ([#1749](https://github.com/vibeunion/supacloud/issues/1749)) ([5b6853b](https://github.com/vibeunion/supacloud/commit/5b6853bd563297cb632aee3b9b7e6729de18d0f4))
+
 ## [0.98.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.98.1...management-api-v0.98.2) (2026-10-09)
 
 
