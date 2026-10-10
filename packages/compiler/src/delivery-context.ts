@@ -80,15 +80,15 @@ export async function createDeliveryExecutionContextPack(
   if (!observations || typeof observations !== "object" || Array.isArray(observations)) throw invalid();
   const envelope = observations as Record<string, unknown>;
   if (Object.keys(envelope).some(key => !["version", "events", "delivery"].includes(key))
-    || !envelope.delivery || typeof envelope.delivery !== "object" || Array.isArray(envelope.delivery)) throw invalid();
-  const identity = envelope.delivery as Record<string, unknown>;
-  if (Object.keys(identity).length !== 2 || typeof identity.target !== "string"
-    || typeof identity.objectId !== "string" || !/^[a-f0-9]{64}$/.test(identity.objectId)) throw invalid();
+    || !envelope["delivery"] || typeof envelope["delivery"] !== "object" || Array.isArray(envelope["delivery"])) throw invalid();
+  const identity = envelope["delivery"] as Record<string, unknown>;
+  if (Object.keys(identity).length !== 2 || typeof identity["target"] !== "string"
+    || typeof identity["objectId"] !== "string" || !/^[a-f0-9]{64}$/.test(identity["objectId"])) throw invalid();
   let object: DeliveryObject;
   let snapshot: ReturnType<typeof parseExecutionSnapshot>;
   try {
     const { root, object: found, planned } = await readDeliverySelection(manifestPath, target);
-    if (!found || identity.target !== target || identity.objectId !== found.objectId) {
+    if (!found || identity["target"] !== target || identity["objectId"] !== found.objectId) {
       throw new DeliveryContextError("DELIVERY_CONTEXT_IDENTITY_MISMATCH");
     }
     object = found;
@@ -102,7 +102,7 @@ export async function createDeliveryExecutionContextPack(
     throw new DeliveryContextError("DELIVERY_CONTEXT_INTEGRITY_FAILED");
   }
   const pack: DeliveryExecutionContextPack = {
-    ...executionContextFromSnapshot(snapshot, subject, { version: envelope.version, events: envelope.events }, requestId),
+    ...executionContextFromSnapshot(snapshot, subject, { version: envelope["version"], events: envelope["events"] }, requestId),
     correlation: "verified-build-snapshot",
     delivery: { target, objectId: object.objectId, artifactVerified: true },
   };
