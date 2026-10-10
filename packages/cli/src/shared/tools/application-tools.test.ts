@@ -108,7 +108,9 @@ test("activation and reconciliation post once and validate bound receipts", asyn
         return response;
       }) as HttpTransport["post"] });
       const output = JSON.parse((await handler({
-        action, ref: "project", id: "reviews", ...identity,
+        action, ref: identity.project_ref, id: identity.application_id,
+        environment_id: identity.environment_id, release_id: identity.release_id,
+        activation_id: identity.activation_id,
         configuration_id: configurationId, expected_activation_id: "absent",
       })).content[0]!.text);
       expect(requests).toBe(1);
@@ -118,6 +120,32 @@ test("activation and reconciliation post once and validate bound receipts", asyn
       else expect(output.error.code).toBe("OUTCOME_UNKNOWN");
     }
   }
+});
+
+test("application mutations reject response-only identity fields before issuing a request", async () => {
+  let requests = 0;
+  const handler = tool(null, { post: (async () => {
+    requests++;
+    throw new Error("Unexpected request");
+  }) as HttpTransport["post"] });
+  for (const action of ["activate_release", "reconcile_activation", "retire_activation"]) {
+    const args = {
+      action, ref: "project", id: "reviews", environment_id: "test",
+      activation_id: "01234567-89ab-4def-8123-456789abcdef",
+      ...(action === "retire_activation" ? {} : { release_id: record().release_id }),
+      ...(action === "activate_release" ? {
+        configuration_id: "21234567-89ab-4def-8123-456789abcdef",
+        expected_activation_id: "absent",
+      } : {}),
+    };
+    for (const field of [
+      { project_ref: args.ref },
+      { application_id: args.id },
+    ]) {
+      await expect(handler({ ...args, ...field })).rejects.toThrow("Invalid arguments");
+    }
+  }
+  expect(requests).toBe(0);
 });
 
 test("activation cannot infer the expected revision or accept mutable release/configuration aliases", async () => {
@@ -154,7 +182,8 @@ test("retirement posts once, binds activation identity and does not require a re
       return response;
     }) as HttpTransport["post"] });
     const output = JSON.parse((await handler({
-      action: "retire_activation", ref: "project", id: "reviews", ...identity,
+      action: "retire_activation", ref: identity.project_ref, id: identity.application_id,
+      environment_id: identity.environment_id, activation_id: identity.activation_id,
     })).content[0]!.text);
     expect(requests).toBe(1);
     expect(output.activation_id).toBe(identity.activation_id);
