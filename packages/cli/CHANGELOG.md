@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.74.1](https://github.com/vibeunion/supacloud/compare/cli-v0.74.0...cli-v0.74.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#1745](https://github.com/vibeunion/supacloud/issues/1745)) ([1f76247](https://github.com/vibeunion/supacloud/commit/1f7624794f57160dd0c19c428ce1149d1b7141aa))
+
 ## [0.74.0](https://github.com/vibeunion/supacloud/compare/cli-v0.73.0...cli-v0.74.0) (2026-10-10)
 
 
