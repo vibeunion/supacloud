@@ -19,6 +19,31 @@ recheck these gates, including enclosing configuration and imported declarations
 Scan exclusions and third-party declarations remain scope boundaries; this is
 not a proof that all possible `any` flows or excluded files are safe.
 
+## Application semantic checks
+
+- `SC6009` rejects checked `any` flows into concrete assignments, arguments and
+  returns, including type assertions. It also checks application aliases, generic
+  arguments, inferred DTOs, class fields and locally declared function signatures.
+  Quarantine untrusted results as `unknown`, then narrow or decode them.
+- `SC6010` rejects bare Promise/PromiseLike statements and `void promise`.
+  Await or return the work, or provide a callable rejection handler using `catch`
+  or the second argument of `then`. This is a rejection-handling check, not a
+  proof of cancellation ownership or runtime resource limits.
+- `SC6011` requires explicit coverage of every finite literal-union switch member.
+  A `default` branch does not replace missing cases. Open string/number domains
+  are not finite-union exhaustiveness checks.
+- `noCheck` cannot disable the mandatory TypeScript gate.
+
+Application properties and function signatures are inspected under the selected
+source root. Library class instances and declaration internals are boundary types,
+not recursively verified application DTOs. Direct `any` and generic `any` results
+are checked at use sites, but excluded declarations can still hide nested unsafe
+types. This does not add Rust ownership, borrowing or whole-program soundness.
+The stronger baseline belongs to user compilation and official starters; shared
+repository tooling retains its existing strict configuration.
+
+## Repository inventory
+
 - Every package's production `tsconfig.json` is checked. The gate reports the
   files selected by those configs; it does not invent a repository-wide source
   coverage percentage from unrelated test or fixture files.
