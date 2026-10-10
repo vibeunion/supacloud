@@ -35,7 +35,7 @@ describe("Admin execution policy", () => {
                 "platform.metrics", "platform.list_backups", "platform.list_logical_backups", "platform.network",
                 "platform.list_orgs", "platform.get_org",
                 "gateway.routes", "gateway.get_certificate", "gateway.custom_hostname",
-                "frontend.list_releases", "frontend.get_release",
+                "frontend.list_releases", "frontend.get_active_release", "frontend.get_release",
                 "ssh.ping", "ssh.versions", "ssh.diagnose", "ssh.exec",
                 "ssh.troubleshoot", "ssh.container_logs", "ssh.backup_cleanup_plan", "ssh.tenant_list",
                 "ssh.tenant_inspect", "ssh.tenant_diagnose", "ssh.upgrade_status",
@@ -49,7 +49,7 @@ describe("Admin execution policy", () => {
                 "gateway.config", "gateway.update_certificate", "gateway.issue_certificate",
                 "gateway.deploy_certificate", "gateway.rebuild", "gateway.set_custom_hostname",
                 "gateway.delete_custom_hostname", "gateway.verify_custom_hostname",
-                "frontend.upload_release", "frontend.activate_release",
+                "frontend.upload_release", "frontend.activate_release", "frontend.rollback",
                 "ssh.setup", "ssh.install", "ssh.upgrade", "ssh.backup_cleanup_apply", "ssh.tenant_migrate",
             ],
         } as const;
@@ -136,9 +136,9 @@ describe("Admin execution policy", () => {
         })).not.toThrow();
     });
 
-    test("requires the exact production project ref for frontend release writes", () => {
+    test.each(["activate_release", "rollback"])("requires the exact production project ref for frontend %s", (action) => {
         const args = {
-            action: "activate_release",
+            action,
             ref: "prod-ref",
             id: "web",
             release_id: "a".repeat(64),

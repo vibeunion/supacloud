@@ -1103,6 +1103,22 @@ export class FrontendReleaseStorage implements FrontendReleaseStoragePort {
     return readBack;
   }
 
+  async activeReleaseSnapshot(
+    projectRef: string,
+    deploymentId: string,
+  ): Promise<FrontendReleaseInventory> {
+    await this.deployment(projectRef, deploymentId);
+    const active = await this.activeRelease(projectRef, deploymentId);
+    return {
+      project_ref: projectRef,
+      deployment_id: deploymentId,
+      active_release_id: active?.release_id ?? null,
+      active_activation_id: active?.activation_id ?? null,
+      releases: active ? [await this.releaseRecord(projectRef, deploymentId, active.release_id)] : [],
+      next_cursor: null,
+    };
+  }
+
   async listReleases(
     projectRef: string,
     deploymentId: string,

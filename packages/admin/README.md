@@ -70,6 +70,7 @@ production requires the exact project ref confirmation:
 
 ```bash
 supacloud-admin frontend list_releases --ref abc123 --id web
+supacloud-admin frontend get_active_release --ref abc123 --id web
 supacloud-admin frontend get_release --ref abc123 --id web --release_id <sha256>
 supacloud-admin frontend upload_release --ref abc123 --id web \
   --zip_path /secure/site.zip --confirm-production abc123
@@ -77,6 +78,8 @@ supacloud-admin frontend activate_release --ref abc123 --id web \
   --release_id <sha256> --expected_active_release_id absent \
   --expected_activation_id absent --mutation_id <uuid-v4> \
   --confirm-production abc123
+supacloud-admin frontend rollback --ref abc123 --id web \
+  --release_id <retained-sha256> --confirm-production abc123
 ```
 
 The CLI reads the archive through a no-follow file descriptor, verifies its
@@ -87,6 +90,13 @@ Listing and release readback work on every Management API platform. Upload and
 activation mutations require the Linux held-directory-FD implementation; on
 other platforms, Management API returns HTTP 503 before it reads the upload
 body, creates release directories, or writes a mutation journal.
+
+The active snapshot automatically supports older HTTP 404 endpoints through
+bounded history and exact artifact readback, never authorization or integrity
+failures. `rollback` handles current CAS and mutation IDs automatically while
+requiring an explicit retained target. It never retries a concurrent conflict,
+restores a database or infers the previous version from sorted history.
+Unknown results include the mutation ID for read-only reconciliation.
 
 SSH host keys are fail-closed: setting `SUPACLOUD_HOST` and credentials is not
 enough to enable SSH actions. Obtain the fingerprint through a trusted channel,

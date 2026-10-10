@@ -231,6 +231,7 @@ actions and also exposes the immutable prebuilt release workflow:
 
 ```bash
 supacloud-cli frontend list_releases --ref abc123 --id web
+supacloud-cli frontend get_active_release --ref abc123 --id web
 supacloud-cli frontend get_release --ref abc123 --id web --release_id <sha256>
 supacloud-cli frontend upload_release --ref abc123 --id web --zip_path ./dist.zip
 supacloud-cli frontend activate_release --ref abc123 --id web \
@@ -238,6 +239,7 @@ supacloud-cli frontend activate_release --ref abc123 --id web \
   --expected_active_release_id absent \
   --expected_activation_id absent \
   --mutation_id <retry-stable-uuid-v4>
+supacloud-cli frontend rollback --ref abc123 --id web --release_id <retained-sha256>
 ```
 
 `upload_release` hashes and streams an existing regular ZIP file without
@@ -245,10 +247,19 @@ buffering the full archive. The Management API binds the upload to that SHA-256,
 and the CLI reads the immutable release back before reporting success.
 `activate_release` uses both the observed active release and activation IDs as
 optimistic concurrency tokens, then verifies the authoritative active release.
-Use the values returned by `list_releases`; `absent` is valid only when no
-release has been activated. Production uploads and activations require the
+Use the values returned by `get_active_release`; `absent` is valid only when no
+release has been activated. Production uploads, activations and rollback require the
 normal exact `--confirm-production <ref>` value, and
-`SUPACLOUD_READ_ONLY=true` blocks both mutations.
+`SUPACLOUD_READ_ONLY=true` blocks all mutations.
+
+`get_active_release` automatically handles older servers returning HTTP 404
+with a one-record history page and exact active artifact readback. It never
+falls back for authentication, integrity or server failures.
+`rollback` reads the current CAS identity and generates the mutation ID itself;
+the retained target release must be explicit. It does not infer the previous
+version from content-hash-sorted history, reupload assets or restore a database.
+An uncertain result includes the mutation ID for read-only reconciliation and
+must not be blindly retried.
 
 ### Immutable application releases
 

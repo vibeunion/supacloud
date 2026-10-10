@@ -1,10 +1,12 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FrontendDeployment } from "../../src/types/frontend";
 import {
   FRONTEND_RELEASE_SCHEMA,
+  FRONTEND_ACTIVE_RELEASE_SCHEMA,
+  type FrontendActiveReleaseRecord,
   type FrontendReleaseRecord,
 } from "../../src/services/frontend-release-contract";
 import { FrontendReleaseStorage } from "../../src/services/frontend-release-storage";
@@ -21,6 +23,8 @@ function releaseId(index: number): string {
 class ObservedReleaseStorage extends FrontendReleaseStorage {
   reads = 0;
   peakConcurrentReads = 0;
+  releaseIds: string[] = [];
+  corruptReleaseId: string | null = null;
   private concurrentReads = 0;
 
   override async deployment(projectRef: string, deploymentId: string): Promise<FrontendDeployment> {
@@ -48,6 +52,8 @@ class ObservedReleaseStorage extends FrontendReleaseStorage {
     deploymentId: string,
     id: string,
   ): Promise<FrontendReleaseRecord> {
+    this.releaseIds.push(id);
+    if (id === this.corruptReleaseId) throw new Error("Release integrity verification failed");
     this.concurrentReads += 1;
     this.peakConcurrentReads = Math.max(this.peakConcurrentReads, this.concurrentReads);
     try {
@@ -70,9 +76,6 @@ class ObservedReleaseStorage extends FrontendReleaseStorage {
     }
   }
 
-  override async activeRelease(): Promise<null> {
-    return null;
-  }
 }
 
 afterEach(async () => {
@@ -95,4 +98,44 @@ test("validates a maximum release page with one full integrity read at a time", 
   expect(inventory.releases).toHaveLength(100);
   expect(storage.reads).toBe(100);
   expect(storage.peakConcurrentReads).toBe(1);
+});
+
+test("the active snapshot verifies only its artifact even with corrupt historical releases", async () => {
+  const root = await mkdtemp(join(tmpdir(), "frontend-active-snapshot-"));
+  roots.add(root);
+  const directory = join(root, PROJECT_REF, DEPLOYMENT_ID);
+  for (let index = 0; index < 100; index += 1) {
+    await mkdir(join(directory, "releases", releaseId(index)), { recursive: true });
+  }
+  const active: FrontendActiveReleaseRecord = {
+    schema: FRONTEND_ACTIVE_RELEASE_SCHEMA,
+    project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+    release_id: releaseId(1), sha256: releaseId(1), tree_sha256: releaseId(1),
+    activation_id: "11111111-1111-4111-8111-111111111111",
+    mutation_id: "11111111-1111-4111-8111-111111111111",
+    activated_at: CREATED_AT,
+  };
+  await writeFile(join(directory, "active-release.json"), JSON.stringify(active));
+  const storage = new ObservedReleaseStorage({ baseDir: root });
+  storage.corruptReleaseId = releaseId(99);
+  const snapshot = await storage.activeReleaseSnapshot(PROJECT_REF, DEPLOYMENT_ID);
+  expect(snapshot.active_release_id).toBe(active.release_id);
+  expect(snapshot.active_activation_id).toBe(active.activation_id);
+  expect(snapshot.releases).toHaveLength(1);
+  expect(snapshot.next_cursor).toBeNull();
+  expect(storage.releaseIds).toEqual([active.release_id, active.release_id]);
+  storage.corruptReleaseId = active.release_id;
+  await expect(storage.activeReleaseSnapshot(PROJECT_REF, DEPLOYMENT_ID))
+    .rejects.toThrow("integrity verification failed");
+});
+
+test("an absent active authority returns an empty snapshot without inspecting history", async () => {
+  const root = await mkdtemp(join(tmpdir(), "frontend-active-absent-"));
+  roots.add(root);
+  const storage = new ObservedReleaseStorage({ baseDir: root });
+  expect(await storage.activeReleaseSnapshot(PROJECT_REF, DEPLOYMENT_ID)).toEqual({
+    project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+    active_release_id: null, active_activation_id: null, releases: [], next_cursor: null,
+  });
+  expect(storage.reads).toBe(0);
 });
