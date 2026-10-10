@@ -44,6 +44,7 @@ export async function persistApplicationPreview(
     || typeof receipt.preview_id !== "string"
     || !/^[a-f0-9-]{8,64}$/.test(receipt.preview_id)
     || !timestamp(receipt.created_at) || !timestamp(receipt.updated_at)
+    || (receipt.expires_at !== null && receipt.expires_at !== undefined && !timestamp(receipt.expires_at))
     || (expectedUpdatedAt !== null && !timestamp(expectedUpdatedAt))) {
     throw new Error("APPLICATION_PREVIEW_RECEIPT_INVALID");
   }
@@ -72,6 +73,7 @@ export async function persistApplicationPreview(
       || current.environment_id !== receipt.environment_id
       || current.release_id !== receipt.release_id
       || current.created_at !== receipt.created_at
+      || (current.expires_at ?? null) !== (receipt.expires_at ?? null)
       || (current.status === "cleaned" && receipt.status !== "cleaned"))) {
       throw new ApplicationPreviewConflictError();
     }

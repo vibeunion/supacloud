@@ -17,6 +17,7 @@ export interface ApplicationPreviewReceipt {
   application_id: string;
   environment_id: string;
   release_id: string;
+  expires_at: string | null;
   status: "planned" | "provisioning" | "ready" | "failed" | "cleaned";
   resources: {
     build_artifact: { status: PreviewPhaseStatus; release_id: string };
@@ -36,6 +37,7 @@ export type StoredApplicationPreview = ApplicationPreviewReceipt & {
   queue_name: string;
   test_secret_name: string;
   source_configuration_id: string | null;
+  expires_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -48,6 +50,7 @@ export function buildApplicationPreviewReceipt(input: {
   releaseId: string;
   branchRef: string;
   dataMode: "schema_only" | "full_clone";
+  expiresAt?: string | null;
 }): ApplicationPreviewReceipt {
   const namespace = `preview_${input.previewId}`;
   return {
@@ -57,6 +60,7 @@ export function buildApplicationPreviewReceipt(input: {
     application_id: input.applicationId,
     environment_id: input.environmentId,
     release_id: input.releaseId,
+    expires_at: input.expiresAt ?? null,
     status: "planned",
     resources: {
       build_artifact: { status: "ready", release_id: input.releaseId },

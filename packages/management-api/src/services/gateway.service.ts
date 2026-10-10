@@ -246,6 +246,7 @@ export interface GatewayProvider {
     upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }): Promise<{ success: boolean; certificateId?: string; error?: string }>;
     configureFrontendRoute(route: FrontendGatewayRoute): Promise<void>;
     configureApplicationRoute(input: ApplicationGatewayInput): Promise<void>;
+    removeApplicationRoute(input: ApplicationGatewayInput): Promise<void>;
     verifyApplicationRoute(input: ApplicationGatewayInput): Promise<void>;
     verifyApplicationRouteAbsent(input: ApplicationGatewayInput): Promise<void>;
     removeFrontendRoute(projectRef: string, deploymentId: string): Promise<void>;
@@ -2191,6 +2192,17 @@ export class CaddyGatewayProvider implements GatewayProvider {
         });
     }
 
+    async removeApplicationRoute(input: ApplicationGatewayInput): Promise<void> {
+        const owned = structuredClone(input);
+        const { id } = applicationGatewayRoute(owned);
+        await this.serializeOperation(async () => {
+            if (this.deferredPersistDepth > 0) throw new Error("APPLICATION_GATEWAY_DEFERRED_WRITE");
+            await this.verifyApplicationRouteUnlocked(owned);
+            await this.removeRoutes([id]);
+            await this.verifyApplicationRouteAbsentUnlocked(owned);
+        });
+    }
+
     async verifyApplicationRoute(input: ApplicationGatewayInput): Promise<void> {
         const owned = structuredClone(input);
         await this.serializeOperation(() => this.verifyApplicationRouteUnlocked(owned));
@@ -2427,6 +2439,7 @@ export class GatewayService implements GatewayProvider {
     upsertCertificateForSnis(opts: { projectRef: string; cert: string; key: string; snis: string[]; existingCertificateId?: string }) { return this.provider.upsertCertificateForSnis(opts); }
     configureFrontendRoute(route: FrontendGatewayRoute) { return this.provider.configureFrontendRoute(route); }
     configureApplicationRoute(input: ApplicationGatewayInput) { return this.provider.configureApplicationRoute(input); }
+    removeApplicationRoute(input: ApplicationGatewayInput) { return this.provider.removeApplicationRoute(input); }
     verifyApplicationRoute(input: ApplicationGatewayInput) { return this.provider.verifyApplicationRoute(input); }
     verifyApplicationRouteAbsent(input: ApplicationGatewayInput) { return this.provider.verifyApplicationRouteAbsent(input); }
     removeFrontendRoute(projectRef: string, deploymentId: string) { return this.provider.removeFrontendRoute(projectRef, deploymentId); }
