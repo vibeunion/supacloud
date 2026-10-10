@@ -279,3 +279,32 @@ test("starter documents external unified identity without adding an identity run
     const manifest = JSON.parse(requireValue(files["package.json"]));
     expect(Object.keys(manifest.dependencies).some((name) => name.startsWith("@supauth/"))).toBe(false);
 });
+
+test("official starters emit the enhanced strict TypeScript baseline", () => {
+    const starters = [
+        appStarterFiles("strict-app"),
+        ...(["minimal", "http", "edge"] as const)
+            .map((template) => appTemplateFiles("strict-app", template, {
+                "@supacloud/js": "^0.0.0",
+                "@supabase/supabase-js": "^0.0.0",
+            })),
+        appStarterFiles("strict-command"),
+    ];
+    for (const files of starters) {
+        const source = files["tsconfig.json"];
+        if (!source) throw new Error("Starter is missing tsconfig.json");
+        const config: unknown = JSON.parse(source);
+        expect(config).toMatchObject({
+            compilerOptions: {
+                strict: true,
+                noUncheckedIndexedAccess: true,
+                exactOptionalPropertyTypes: true,
+                noImplicitOverride: true,
+                noPropertyAccessFromIndexSignature: true,
+                noFallthroughCasesInSwitch: true,
+                forceConsistentCasingInFileNames: true,
+                useUnknownInCatchVariables: true,
+            },
+        });
+    }
+});

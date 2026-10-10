@@ -70,8 +70,10 @@ export interface AppAdapters {
 
 // The host verifies external identity (SupAuth for unified login) before creating requestContext.
 export function createApp(adapters: AppAdapters) {
+  const { onExecution, ...rest } = adapters;
   return createApplication({
-    ...adapters,
+    ...rest,
+    ...(onExecution === undefined ? {} : { onExecution }),
     name: ${JSON.stringify(name)},
     modules: createCompiledModules(),
   });

@@ -6,8 +6,6 @@ import { scanGeneratedArtifacts, scanProductionSource } from "./type-safety";
 import { writeFixtureProject } from "./fixtures/helpers";
 import { compileProject, checkProject } from "./compile";
 import { createIncrementalCompiler } from "./incremental";
-import { appStarterFiles } from "../../cli/src/shared/tools/app-starter";
-import { appTemplateFiles } from "../../cli/src/shared/tools/app-starter-templates";
 
 const temporaryProjects: string[] = [];
 afterEach(async () => {
@@ -146,35 +144,6 @@ describe("compiler type-safety gates", () => {
     expect(second.diagnostics).toContainEqual(
       expect.objectContaining({ code: "source-typescript", severity: "error", errorCode: "TS2322" }),
     );
-  });
-
-  test("official starters emit the enhanced strict TypeScript baseline", () => {
-    const starters = [
-      appStarterFiles("strict-app"),
-      ...(["minimal", "http", "edge"] as const)
-        .map((template) => appTemplateFiles("strict-app", template, {
-          "@supacloud/js": "^0.0.0",
-          "@supabase/supabase-js": "^0.0.0",
-        })),
-      appStarterFiles("strict-command"),
-    ];
-    for (const files of starters) {
-      const source = files["tsconfig.json"];
-      if (!source) throw new Error("Starter is missing tsconfig.json");
-      const config: unknown = JSON.parse(source);
-      expect(config).toMatchObject({
-        compilerOptions: {
-          strict: true,
-          noUncheckedIndexedAccess: true,
-          exactOptionalPropertyTypes: true,
-          noImplicitOverride: true,
-          noPropertyAccessFromIndexSignature: true,
-          noFallthroughCasesInSwitch: true,
-          forceConsistentCasingInFileNames: true,
-          useUnknownInCatchVariables: true,
-        },
-      });
-    }
   });
 
   test("production scan reports any, assertions, non-null assertions and widening", async () => {
