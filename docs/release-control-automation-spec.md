@@ -181,7 +181,7 @@ Provides immutable artifact retention and instant zero-reupload rollbacks for Su
 supacloud-cli frontend upload_release \
   --ref "$PROJECT_REF" \
   --id "$DEPLOYMENT_ID" \
-  --zip_path ./app/build.zip
+  --archive_path ./app/build.tar.zst
 
 # Activate a previously uploaded release with compare-and-swap protection
 supacloud-cli frontend activate_release \

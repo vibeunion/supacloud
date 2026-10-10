@@ -42,6 +42,18 @@
       "bun": "./src/delivery-artifact.ts",
       "import": "./dist/delivery-artifact.js"
     },
+    "./frontend-archive": {
+      "types": "./src/frontend-archive.ts",
+      "supacloud-source": "./src/frontend-archive.ts",
+      "bun": "./src/frontend-archive.ts",
+      "import": "./dist/frontend-archive.js"
+    },
+    "./frontend-archive-reader": {
+      "types": "./src/frontend-archive-reader.ts",
+      "supacloud-source": "./src/frontend-archive-reader.ts",
+      "bun": "./src/frontend-archive-reader.ts",
+      "import": "./dist/frontend-archive-reader.js"
+    },
     "./development": {
       "types": "./src/application-development.ts",
       "supacloud-source": "./src/application-development.ts",
@@ -63,16 +75,18 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun build src/index.ts src/worker-execution.ts src/delivery-schema.ts src/delivery-build-schema.ts src/delivery-files.ts src/delivery-artifact.ts src/application-activation.ts src/application-development.ts src/deployment-evidence.ts --outdir dist --target node --splitting --entry-naming [name].[ext]",
+    "build": "bun build src/index.ts src/worker-execution.ts src/delivery-schema.ts src/delivery-build-schema.ts src/delivery-files.ts src/delivery-artifact.ts src/frontend-archive.ts src/frontend-archive-reader.ts src/application-activation.ts src/application-development.ts src/deployment-evidence.ts --outdir dist --target node --splitting --entry-naming [name].[ext]",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "prepublishOnly": "bun run build"
   },
   "dependencies": {
+    "tar-stream": "^3.1.7",
     "typebox": "1.3.34"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",
+    "@types/tar-stream": "^3.1.4",
     "typescript": "^7.0.2"
   },
   "license": "Apache-2.0",

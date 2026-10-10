@@ -21,6 +21,7 @@ import { loadHostingDetail } from "../../../web-console/src/lib/hosting-detail";
 import { saveHostingConfiguration, HostingConfigurationUpdateError, HostingConfigurationConflictError } from "../../../web-console/src/lib/hosting-configuration";
 import { createFrontendConfigurationRevision } from "../../src/utils/frontend-configuration-revision";
 import { createFrontendEnvironmentRevision } from "../../src/utils/frontend-environment-revision";
+import { createFrontendTarZstd, FRONTEND_ARCHIVE_CONTENT_TYPE } from "@supacloud/delivery/frontend-archive";
 
 const requireProjectOrAdminAuth = mock<typeof authModule.requireProjectOrAdminAuth>(async () => undefined);
 const authModule = await import("../../src/middleware/auth");
@@ -41,27 +42,16 @@ function deploymentFixture(overrides: Partial<FrontendDeployment> = {}): Fronten
 
 describe("Frontend deployment upload routes", () => {
   const app = new Elysia().use(frontendRoutes);
-  let testZipBytes: Uint8Array<ArrayBuffer>;
-  let tempZipPath: string;
+  let testArchiveBytes: Uint8Array<ArrayBuffer>;
 
   afterAll(() => {
     requireProjectOrAdminAuthSpy.mockRestore();
   });
 
   beforeAll(async () => {
-    // Dynamically generate a valid minimal zip binary for complete unzip verification testing
-    const tempDir = path.join(tmpdir(), "supacloud-test-zip-");
-    const testFile = path.join(tempDir, "index.html");
-    tempZipPath = path.join(tempDir, "test.zip");
-
-    await Bun.$`mkdir -p ${tempDir}`;
-    await writeFile(testFile, "<h1>Hello</h1>");
-    await Bun.$`cd ${tempDir} && zip -q test.zip index.html`;
-
-    testZipBytes = new Uint8Array(await Bun.file(tempZipPath).arrayBuffer());
-
-    // Clean up temporary directory
-    await rm(tempDir, { recursive: true, force: true });
+    testArchiveBytes = new Uint8Array(await createFrontendTarZstd(
+      new Map([["index.html", new TextEncoder().encode("<h1>Hello</h1>")]]),
+    ));
   });
 
   beforeEach(() => {
@@ -96,7 +86,7 @@ describe("Frontend deployment upload routes", () => {
 
   function mockImmutableUpload(releaseId: string) {
     const written: Uint8Array[] = [];
-    const staged = Object.freeze({ size_bytes: testZipBytes.byteLength, sha256: releaseId });
+    const staged = Object.freeze({ size_bytes: testArchiveBytes.byteLength, sha256: releaseId });
     const upload = {
       write: mock(async (chunk: Uint8Array) => { written.push(chunk.slice()); }),
       finish: mock(async (expected: string) => {
@@ -790,16 +780,16 @@ describe("Frontend deployment upload routes", () => {
     expect(cancelled).toBe(true);
   });
 
-  test("supports direct raw binary uploads (application/zip)", async () => {
+  test("supports direct raw binary uploads (application/vnd.supacloud.frontend.tar+zstd)", async () => {
     const req = new Request(
       "http://localhost/v1/projects/proj123/frontend/deployments/dep123/deploy/upload",
       {
         method: "POST",
         headers: {
-          "Content-Type": "application/zip",
-          "Content-Length": String(testZipBytes.byteLength),
+          "Content-Type": "application/vnd.supacloud.frontend.tar+zstd",
+          "Content-Length": String(testArchiveBytes.byteLength),
         },
-        body: testZipBytes,
+        body: testArchiveBytes,
       }
     );
 
@@ -886,13 +876,10 @@ describe("Frontend deployment upload routes", () => {
     );
   });
 
-  test("supports multipart/form-data upload when parsed by Elysia (mocked body.file)", async () => {
-    // Simulate Elysia built-in parsed object format: body: { file: Blob }
-    const mockFile = new Blob([testZipBytes], { type: "application/zip" });
-
-    // Send request with FormData directly; Elysia should parse it by default
+  test("rejects multipart uploads instead of guessing or downgrading formats", async () => {
+    const mockFile = new Blob([testArchiveBytes], { type: FRONTEND_ARCHIVE_CONTENT_TYPE });
     const form = new FormData();
-    form.append("file", mockFile, "upload.zip");
+    form.append("file", mockFile, "upload.tar.zst");
 
     const req = new Request(
       "http://localhost/v1/projects/proj123/frontend/deployments/dep123/deploy/upload",
@@ -903,19 +890,33 @@ describe("Frontend deployment upload routes", () => {
     );
 
     const res = await app.handle(req);
-    expect(res.status).toBe(200);
-    const data = await res.json();
-    expect(data.success).toBe(true);
+    expect(res.status).toBe(415);
+    expect(await res.json()).toMatchObject({ code: "FRONTEND_RELEASE_CONTENT_TYPE_INVALID" });
   });
 
-  test("gracefully handles invalid zip archive upload", async () => {
+  test.each(["deploy/upload", "releases"])("rejects legacy ZIP at %s before consuming its body", async endpoint => {
+    const prepare = spyOn(frontendReleaseService, "prepareReleaseUpload");
+    const deploy = spyOn(frontendService, "deployFromSource");
+    prepare.mockClear();
+    deploy.mockClear();
+    const response = await app.handle(new Request(
+      `http://localhost/v1/projects/proj123/frontend/deployments/dep123/${endpoint}`,
+      { method: "POST", headers: { "Content-Type": "application/zip", "Content-Length": "4" }, body: new Uint8Array([0x50, 0x4b, 3, 4]) },
+    ));
+    expect(response.status).toBe(415);
+    expect(prepare).not.toHaveBeenCalled();
+    expect(deploy).not.toHaveBeenCalled();
+  });
+
+  test("rejects invalid tar.zst archive upload without invoking deployment", async () => {
     const invalidBytes = new Uint8Array([1, 2, 3, 4, 5]);
     const req = new Request(
       "http://localhost/v1/projects/proj123/frontend/deployments/dep123/deploy/upload",
       {
         method: "POST",
         headers: {
-          "Content-Type": "application/zip",
+          "Content-Type": "application/vnd.supacloud.frontend.tar+zstd",
+          "Content-Length": String(invalidBytes.byteLength),
         },
         body: invalidBytes,
       }
@@ -923,9 +924,9 @@ describe("Frontend deployment upload routes", () => {
 
     const res = await app.handle(req);
     expect(res.status).toBe(400);
-    const data = await res.json() as any;
+    const data = await res.json();
     expect(data.success).toBe(false);
-    expect(data.message).toBe("Invalid zip archive");
+    expect(data.message).toBe("Invalid frontend tar.zst archive");
   });
 
   test("denies the request when project authorization fails and skips the service", async () => {
@@ -988,16 +989,16 @@ describe("Frontend deployment upload routes", () => {
       next_cursor: null,
     });
     const createRelease = spyOn(frontendReleaseService, "createRelease").mockResolvedValue({
-      schema: "supacloud.frontend-release.v1",
+      schema: "supacloud.frontend-release.v2",
       project_ref: "proj123",
       deployment_id: "dep123",
       release_id: releaseId,
       sha256: releaseId,
       tree_sha256: "b".repeat(64),
-      size_bytes: testZipBytes.byteLength,
+      size_bytes: testArchiveBytes.byteLength,
       file_count: 1,
       created_at: "2026-08-12T00:00:00.000Z",
-      kind: "prebuilt_static",
+      archive_format: "tar.zst" as const, kind: "prebuilt_static",
     });
     const inventory = await app.handle(new Request(
       "http://localhost/v1/projects/proj123/frontend/deployments/dep123/releases",
@@ -1010,17 +1011,17 @@ describe("Frontend deployment upload routes", () => {
       {
         method: "POST",
         headers: {
-          "Content-Type": "application/zip",
-          "Content-Length": String(testZipBytes.byteLength),
+          "Content-Type": "application/vnd.supacloud.frontend.tar+zstd",
+          "Content-Length": String(testArchiveBytes.byteLength),
           "x-supacloud-content-sha256": releaseId,
         },
-        body: testZipBytes,
+        body: testArchiveBytes,
       },
     ));
     expect(upload.status).toBe(201);
     expect(createRelease).toHaveBeenCalledTimes(1);
-    expect(Buffer.concat(stream.written).equals(testZipBytes)).toBe(true);
-    expect(stream.prepare).toHaveBeenCalledWith("proj123", "dep123", testZipBytes.byteLength);
+    expect(Buffer.concat(stream.written).equals(testArchiveBytes)).toBe(true);
+    expect(stream.prepare).toHaveBeenCalledWith("proj123", "dep123", testArchiveBytes.byteLength);
     expect(createRelease.mock.calls[0]?.slice(0, 2)).toEqual(["proj123", "dep123"]);
     expect(createRelease.mock.calls[0]?.[2]).toBe(stream.staged);
     expect(stream.upload.finish).toHaveBeenCalledWith(releaseId);
@@ -1035,16 +1036,16 @@ describe("Frontend deployment upload routes", () => {
       active_release_id: releaseId,
       active_activation_id: "00000000-0000-4000-8000-000000000001",
       releases: [{
-        schema: "supacloud.frontend-release.v1",
+        schema: "supacloud.frontend-release.v2",
         project_ref: "proj123",
         deployment_id: "dep123",
         release_id: releaseId,
         sha256: releaseId,
         tree_sha256: "b".repeat(64),
-        size_bytes: testZipBytes.byteLength,
+        size_bytes: testArchiveBytes.byteLength,
         file_count: 1,
         created_at: "2026-08-12T00:00:00.000Z",
-        kind: "prebuilt_static",
+        archive_format: "tar.zst" as const, kind: "prebuilt_static",
       }],
       next_cursor: null,
     });
@@ -1078,16 +1079,16 @@ describe("Frontend deployment upload routes", () => {
       active_release_id: "a".repeat(64),
       active_activation_id: "00000000-0000-4000-8000-000000000001",
       previous_release: {
-        schema: "supacloud.frontend-release.v1",
+        schema: "supacloud.frontend-release.v2",
         project_ref: "proj123",
         deployment_id: "dep123",
         release_id: previousReleaseId,
         sha256: previousReleaseId,
         tree_sha256: "b".repeat(64),
-        size_bytes: testZipBytes.byteLength,
+        size_bytes: testArchiveBytes.byteLength,
         file_count: 1,
         created_at: "2026-08-12T00:00:00.000Z",
-        kind: "prebuilt_static",
+        kind: "prebuilt_static", archive_format: "tar.zst",
       },
       previous_activation_id: "00000000-0000-4000-8000-000000000002",
     });
@@ -1112,16 +1113,16 @@ describe("Frontend deployment upload routes", () => {
   test("gets one release and rejects non-raw or unbounded immutable uploads", async () => {
     const releaseId = "a".repeat(64);
     const release = {
-      schema: "supacloud.frontend-release.v1" as const,
+      schema: "supacloud.frontend-release.v2" as const,
       project_ref: "proj123",
       deployment_id: "dep123",
       release_id: releaseId,
       sha256: releaseId,
       tree_sha256: "b".repeat(64),
-      size_bytes: testZipBytes.byteLength,
+      size_bytes: testArchiveBytes.byteLength,
       file_count: 1,
       created_at: "2026-08-12T00:00:00.000Z",
-      kind: "prebuilt_static" as const,
+      archive_format: "tar.zst" as const, kind: "prebuilt_static" as const,
     };
     const getRelease = spyOn(frontendReleaseService, "release").mockResolvedValue(release);
     const createRelease = spyOn(frontendReleaseService, "createRelease");
@@ -1140,7 +1141,7 @@ describe("Frontend deployment upload routes", () => {
 
     for (const headers of [
       { "Content-Type": "application/json", "Content-Length": "2" },
-      { "Content-Type": "application/zip" },
+      { "Content-Type": "application/vnd.supacloud.frontend.tar+zstd" },
     ]) {
       const response = await app.handle(new Request(
         "http://localhost/v1/projects/proj123/frontend/deployments/dep123/releases",
@@ -1167,7 +1168,7 @@ describe("Frontend deployment upload routes", () => {
       {
         method: "POST",
         headers: {
-          "Content-Type": "application/zip",
+          "Content-Type": "application/vnd.supacloud.frontend.tar+zstd",
           "Content-Length": "64",
           "x-supacloud-content-sha256": "a".repeat(64),
         },
@@ -1214,7 +1215,7 @@ describe("Frontend deployment upload routes", () => {
     };
     spyOn(frontendReleaseService, "prepareReleaseUpload").mockResolvedValue(upload);
     spyOn(frontendReleaseService, "createRelease").mockResolvedValue({
-      schema: "supacloud.frontend-release.v1",
+      schema: "supacloud.frontend-release.v2",
       project_ref: "proj123",
       deployment_id: "dep123",
       release_id: releaseId,
@@ -1223,14 +1224,14 @@ describe("Frontend deployment upload routes", () => {
       size_bytes: byteLength,
       file_count: 1,
       created_at: "2026-08-12T00:00:00.000Z",
-      kind: "prebuilt_static",
+      archive_format: "tar.zst" as const, kind: "prebuilt_static",
     });
     const response = await app.handle(new Request(
       "http://localhost/v1/projects/proj123/frontend/deployments/dep123/releases",
       {
         method: "POST",
         headers: {
-          "content-type": "application/zip",
+          "content-type": "application/vnd.supacloud.frontend.tar+zstd",
           "content-length": String(byteLength),
           "x-supacloud-content-sha256": releaseId,
         },
@@ -1286,7 +1287,7 @@ describe("Frontend deployment upload routes", () => {
         {
           method: "POST",
           headers: {
-            "content-type": "application/zip",
+            "content-type": "application/vnd.supacloud.frontend.tar+zstd",
             "content-length": "2",
             "x-supacloud-content-sha256": "a".repeat(64),
           },
@@ -1311,7 +1312,7 @@ describe("Frontend deployment upload routes", () => {
       {
         method: "POST",
         headers: {
-          "content-type": "application/zip",
+          "content-type": "application/vnd.supacloud.frontend.tar+zstd",
           "content-length": "2",
           "x-supacloud-content-sha256": "a".repeat(64),
         },
@@ -1339,7 +1340,7 @@ describe("Frontend deployment upload routes", () => {
       active_release_id: releaseId,
       activation_id: mutationId,
       release: {
-        schema: "supacloud.frontend-release.v1",
+        schema: "supacloud.frontend-release.v2",
         project_ref: "proj123",
         deployment_id: "dep123",
         release_id: releaseId,
@@ -1348,7 +1349,7 @@ describe("Frontend deployment upload routes", () => {
         size_bytes: 1,
         file_count: 1,
         created_at: "2026-08-12T00:00:00.000Z",
-        kind: "prebuilt_static",
+        archive_format: "tar.zst" as const, kind: "prebuilt_static",
       },
       mutation: { mutation_id: mutationId, status: "succeeded", replayed: false },
     });

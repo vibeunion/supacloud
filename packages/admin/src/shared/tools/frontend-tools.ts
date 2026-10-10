@@ -22,7 +22,7 @@ Actions: list_releases, get_active_release, get_release, upload_release, activat
             ]), "Action"),
             ref: optional(Type.String(), "Project ref"),
             id: optional(Type.String(), "Deployment ID"),
-            zip_path: optional(Type.String(), "[upload_release] Local ZIP file path"),
+            archive_path: optional(Type.String(), "[upload_release] Local tar.zst file path"),
             release_id: optional(Type.String(), "[get_release/activate_release] SHA-256 release ID; [rollback] optional, defaults to journal-verified previous release"),
             expected_active_release_id: optional(Type.String(), "[activate_release] Current release SHA-256 or absent"),
             expected_activation_id: optional(Type.String(), "[activate_release] Current activation UUIDv4 or absent"),
@@ -32,7 +32,7 @@ Actions: list_releases, get_active_release, get_release, upload_release, activat
         },
         async (args) => {
             const {
-                action, ref, id, zip_path, release_id,
+                action, ref, id, archive_path, release_id,
                 expected_active_release_id, expected_activation_id, mutation_id, cursor, limit,
             } = args;
             function need<T>(f: string, v: T): asserts v is NonNullable<T> {
@@ -49,8 +49,8 @@ Actions: list_releases, get_active_release, get_release, upload_release, activat
                     need("ref", ref); need("id", id);
                     return getActiveFrontendRelease(http, ref, id);
                 case "upload_release":
-                    need("ref", ref); need("id", id); need("zip_path", zip_path);
-                    return uploadFrontendRelease(http, ref, id, zip_path);
+                    need("ref", ref); need("id", id); need("archive_path", archive_path);
+                    return uploadFrontendRelease(http, ref, id, archive_path);
                 case "activate_release":
                     need("ref", ref); need("id", id); need("release_id", release_id);
                     need("expected_active_release_id", expected_active_release_id);
