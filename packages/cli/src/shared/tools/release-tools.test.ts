@@ -586,7 +586,7 @@ test("an unsupported release action cannot issue a mutation", async () => {
         },
     });
 
-    await expect(callback({ action: "delete_everything" })).rejects.toThrow("Unknown release control action");
+    await expect(callback({ action: "delete_everything" })).rejects.toThrow("- action:");
     expect(postCalls).toBe(0);
 });
 

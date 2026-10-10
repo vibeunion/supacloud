@@ -5,17 +5,9 @@ import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
+import { registerTool, type ToolServer } from "../tool-server";
 import { releaseControlFailure, releaseControlSuccess, type ReleaseControlToolResponse } from "./release-control-response";
 import { PROJECT_ENDPOINT_RESPONSE_MAX_BYTES, projectApiOrigins } from "./project-endpoint-read";
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (args: Record<string, unknown>) => Promise<ReleaseControlToolResponse>,
-    ) => void;
-};
 
 type ReleaseOperation =
     | "release.logical_backup.list"
@@ -717,11 +709,11 @@ export function registerReleaseTools(
     ] as const;
     const allActions = [...remoteActions, ...localActions] as const;
 
-    server.tool(
+    registerTool(server,
         "release",
         "Verified release controls. Scope management actions operate locally; management actions use the Management API; release canary stage/disable replay additionally require the selected project's SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
         {
-            action: withDescription(stringEnum(allActions as unknown as [string, ...string[]]), "Release control action"),
+            action: withDescription(stringEnum(allActions), "Release control action"),
             ref: optional(Type.String(), options.projectRef ? "Optional override when not auto-linked" : "Project ref"),
             file: optional(Type.String(), "[scope_inspect/scope_rebind/scope_create] Path to release scope JSON file"),
             files: optional(Type.String(), "[scope_rebind] Comma-separated list of release scope JSON files"),
@@ -743,7 +735,7 @@ export function registerReleaseTools(
             disable_request_id: optional(Type.String(), "[release_canary_fixture_disable_replay] Exact idempotent disable request UUID"),
             issuer: optional(Type.String(), "[release_canary_fixture_disable_replay] Exact HTTP(S) issuer"),
         },
-        async (args: any) => {
+        async (args) => {
             const { action } = args;
             if (action === "scope_rebind") {
                 return handleScopeRebind(args);

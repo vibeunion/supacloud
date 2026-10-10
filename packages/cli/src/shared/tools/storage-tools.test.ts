@@ -239,7 +239,7 @@ describe("Storage bucket lifecycle", () => {
         };
         const { callback } = captureStorageTool({ get: request, delete: request });
 
-        await expect(callback(args)).rejects.toThrow("invalid for Storage buckets");
+        await expect(callback(args)).rejects.toThrow(/- (ref|bucket):/);
         expect(requestCount).toBe(0);
     });
 
@@ -875,7 +875,7 @@ describe("Storage file upload", () => {
                 bucket: "reports",
                 file_path: testFile,
                 timeout_ms: -5,
-            })).rejects.toThrow("'timeout_ms' must be a positive integer");
+            })).rejects.toThrow("- timeout_ms:");
 
             await expect(callback({
                 action: "upload",
@@ -883,7 +883,7 @@ describe("Storage file upload", () => {
                 bucket: "reports",
                 file_path: testFile,
                 timeout_ms: 36 * 60_000 + 1,
-            })).rejects.toThrow("'timeout_ms' must be a positive integer");
+            })).rejects.toThrow("- timeout_ms:");
         } finally {
             rmSync(tempDir, { recursive: true, force: true });
         }
