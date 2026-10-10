@@ -15,6 +15,12 @@ export type {
   ApplicationRollbackSnapshot,
 } from "./application-activation";
 export {
+  ApplicationActivationHistoryPositionSchema, ApplicationActivationHistoryCursorSchema,
+  ApplicationActivationHistorySchema, applicationHistoryCursor, applicationHistoryPositionBefore,
+  applicationHistoryTimestampMilliseconds, parseApplicationActivationHistory, parseApplicationHistoryCursor,
+} from "./application-history";
+export type { ApplicationActivationHistory, ApplicationActivationHistoryPosition } from "./application-history";
+export {
   ApplicationIdSchema, ApplicationReleaseIdSchema, ApplicationReleaseRecordSchema,
   applicationReleaseId, parseApplicationReleaseRecord,
 } from "./application-release";

@@ -5,12 +5,14 @@ import {
   parseApplicationReadinessReport,
   parseApplicationConfigurationWrite, parseApplicationConfigurationView,
   parseDeploymentEvidence,
+  parseApplicationActivationHistory, parseApplicationHistoryCursor, applicationHistoryPositionBefore,
   type ApplicationReleaseRecord,
 } from "@supacloud/delivery";
 import {
   ApplicationIdSchema, ApplicationReleaseIdSchema, ApplicationReleaseRecordSchema,
   ApplicationConfigurationIdSchema, ApplicationActivationIdSchema, ApplicationActivationWriteSchema,
   ApplicationActivationResultSchema, ApplicationActivationRetirementResultSchema, ApplicationRollbackSnapshotSchema,
+  ApplicationActivationHistoryCursorSchema,
 } from "./application-schemas";
 import { canonical, digest } from "@supacloud/delivery/files";
 import { optional, stringEnum, withDescription, type ToolSchema } from "../schema";
@@ -25,12 +27,12 @@ export const APPLICATION_TOOL_SCHEMA = {
   action: withDescription(stringEnum([
     "list_releases", "get_release", "upload_release", "get_runtime", "get_deployment_evidence",
     "get_configuration", "put_configuration",
-    "activate_release", "rollback_release", "get_rollback_snapshot", "reconcile_activation", "retire_activation",
+    "activate_release", "rollback_release", "get_rollback_snapshot", "get_history", "reconcile_activation", "retire_activation",
     "logs",
   ]), "Action"),
   ref: withDescription(Type.String(), "Project ref"),
   id: withDescription(ApplicationIdSchema, "Application ID"),
-  environment_id: optional(withDescription(ApplicationIdSchema, "[get_runtime/get_configuration/put_configuration/get_rollback_snapshot/rollback_release] Environment ID")),
+  environment_id: optional(withDescription(ApplicationIdSchema, "[get_runtime/get_configuration/put_configuration/get_rollback_snapshot/rollback_release/get_history] Environment ID")),
   configuration_id: optional(ApplicationConfigurationIdSchema, "[get_configuration/activate_release/rollback_release] Immutable revision; required for explicit activation"),
   activation_id: optional(ApplicationActivationIdSchema, "[activate_release/reconcile_activation/retire_activation/rollback_release] Explicit stable activation ID; generated for rollback if omitted"),
   expected_activation_id: optional(Type.Union([ApplicationActivationIdSchema, Type.Null(), Type.Literal("absent")]),
@@ -38,8 +40,8 @@ export const APPLICATION_TOOL_SCHEMA = {
   configuration_path: optional(Type.String(), "[put_configuration] Local configuration write JSON including revision and expected revision"),
   manifest_path: optional(Type.String(), "[upload_release] Local delivery.manifest.json"),
   release_id: optional(ApplicationReleaseIdSchema, "[get_release/activate_release/reconcile_activation/rollback_release] Immutable application release ID; platform selects previous for default rollback"),
-  cursor: optional(ApplicationReleaseIdSchema, "[list_releases] Last release ID"),
-  limit: optional(Type.Integer({ minimum: 1, maximum: 100 }), "[list_releases] Page size, default 50"),
+  cursor: optional(Type.Union([ApplicationReleaseIdSchema, ApplicationActivationHistoryCursorSchema]), "[list_releases/get_history] Returned page cursor"),
+  limit: optional(Type.Integer({ minimum: 1, maximum: 100 }), "[list_releases/get_history] Page size, default 50/20"),
   offset: optional(Type.Integer({ minimum: 0, maximum: 1_000_000 }), "[logs] Result offset"),
   service: optional(Type.String(), "[logs] Application target/service filter"),
   search: optional(Type.String(), "[logs] Full-text log filter"),
@@ -211,6 +213,35 @@ async function rollbackAction(http: HttpTransport, args: Record<string, unknown>
   });
 }
 
+async function historyAction(http: HttpTransport, args: Record<string, unknown>, project: string) {
+  const ref = text(args, "ref"), id = text(args, "id"), environmentId = text(args, "environment_id");
+  if (!Value.Check(ApplicationIdSchema, environmentId)) throw new Error("Invalid environment ID");
+  const limit = args["limit"] ?? 20, cursor = args["cursor"];
+  if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 100
+    || (cursor !== undefined && typeof cursor !== "string")) throw new Error("Invalid history page");
+  const query = new URLSearchParams({ limit: String(limit) });
+  const scope = { project_ref: ref, application_id: id, environment_id: environmentId };
+  const before = typeof cursor === "string" ? parseApplicationHistoryCursor(cursor, scope) : null;
+  if (typeof cursor === "string") query.set("cursor", cursor);
+  const operation = "applications.get_history";
+  const response = await http.get(
+    `/v1/projects/${project}/applications/${encodeURIComponent(id)}/environments/${encodeURIComponent(environmentId)}/history?${query}`,
+    { maxJsonBytes: 262_144, responseTimeoutMs: 30_000 },
+  );
+  if (!response.ok) return releaseControlFailure(operation, "HTTP_ERROR",
+    response.transportError ? null : response.status, scope);
+  try {
+    if (response.status !== 200) throw new Error();
+    const history = parseApplicationActivationHistory(response.data);
+    if (history.project_ref !== ref || history.application_id !== id || history.environment_id !== environmentId
+      || history.activations.length > limit || (history.next_cursor !== null && history.activations.length !== limit)
+      || (before && history.activations.some(entry => !applicationHistoryPositionBefore(entry, before)))) throw new Error();
+    return releaseControlSuccess(operation, { project_ref: ref, application_id: id, environment_id: environmentId, history });
+  } catch {
+    return releaseControlFailure(operation, "INVALID_RESPONSE", response.status, scope);
+  }
+}
+
 export function registerApplicationTools(server: ToolServer, http: HttpTransport): void {
   registerTool(server, "applications", "Store, inspect and explicitly activate immutable HTTP/Worker application releases. Upload does not activate a release.",
     APPLICATION_TOOL_SCHEMA, async (args) => {
@@ -222,6 +253,7 @@ export function registerApplicationTools(server: ToolServer, http: HttpTransport
       if (action === "rollback_release" || action === "get_rollback_snapshot") {
         return rollbackAction(http, args, project);
       }
+      if (action === "get_history") return historyAction(http, args, project);
       if (action === "activate_release" || action === "reconcile_activation" || action === "retire_activation") {
         return activationAction(http, args, project);
       }

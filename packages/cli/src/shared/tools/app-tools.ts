@@ -2,6 +2,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { Type } from "typebox";
+import { Value } from "typebox/value";
+import { ApplicationActivationHistorySchema, parseApplicationActivationHistory } from "@supacloud/delivery";
 import {
     applyDiagnosticFix,
     buildDeliveryProject,
@@ -26,6 +28,7 @@ import { buildToolDefinitions, type AppManifest } from "./app-tool-export";
 import { initializeAppProject } from "./app-starter";
 import { checkAppDatabaseSources } from "./app-database-check";
 import { APPLICATION_TOOL_SCHEMA } from "./application-tools";
+import { RELEASE_CONTROL_RESPONSE_SCHEMA, releaseControlFailure } from "./release-control-response";
 import { resourceScaffold } from "./app-resource";
 import { runLocalDevelopment } from "./app-local-dev";
 import { createVerificationPlan } from "./app-verification-plan";
@@ -38,6 +41,7 @@ const REMOTE_APP_ACTIONS = {
     status: "get_runtime",
     rollback: "rollback_release",
     "rollback-plan": "get_rollback_snapshot",
+    history: "get_history",
     reconcile: "reconcile_activation",
     retire: "retire_activation",
     logs: "logs",
@@ -53,15 +57,17 @@ export interface AppToolOptions {
 }
 
 const REMOTE_APP_DESCRIPTIONS: Record<string, string> = {
-    ref: "[upload/configure/deploy/status/rollback/rollback-plan/reconcile/retire] Project ref (defaults to context)",
-    id: "[upload/configure/deploy/status/rollback/rollback-plan/reconcile/retire] Application ID",
-    environment_id: "[configure/deploy/status/rollback/rollback-plan/reconcile/retire] Environment ID",
+    ref: "[upload/configure/deploy/status/rollback/rollback-plan/history/reconcile/retire] Project ref (defaults to context)",
+    id: "[upload/configure/deploy/status/rollback/rollback-plan/history/reconcile/retire] Application ID",
+    environment_id: "[configure/deploy/status/rollback/rollback-plan/history/reconcile/retire] Environment ID",
     configuration_id: "[deploy/rollback] Required for deploy/explicit rollback; platform selects for default rollback",
     activation_id: "[deploy/rollback/reconcile/retire] Required explicit activation ID; generated for rollback if omitted",
     expected_activation_id: "[deploy/rollback] Required for deploy/explicit rollback; platform selects current CAS for default rollback",
     configuration_path: "[configure] Configuration write JSON including revision and expected revision",
     manifest_path: "[upload] Local delivery.manifest.json",
     release_id: "[deploy/rollback/reconcile] Required for deploy/reconcile; defaults to journal-selected previous for rollback",
+    cursor: "[history] Returned page cursor",
+    limit: "[history] Page size, default 20 (1-100)",
 };
 
 const { action: _remoteAction, ...remoteFields } = APPLICATION_TOOL_SCHEMA;
@@ -83,6 +89,8 @@ export interface AppToolArguments {
     configuration_path?: string;
     manifest_path?: string;
     release_id?: string;
+    cursor?: string;
+    limit?: number;
     kind?: "module" | "command" | "query" | "controller" | "job" | "contract" | "resource";
     template?: "minimal" | "http" | "command" | "edge";
     name?: string;
@@ -98,6 +106,7 @@ export interface AppToolArguments {
     out_dir?: string;
     strict?: boolean;
     format?: "text" | "json";
+    json?: true;
     target?: string;
     fix?: string;
     write?: boolean;
@@ -1064,6 +1073,44 @@ async function runDelivery(args: AppToolArguments): Promise<ToolResult> {
     return textResult(JSON.stringify(result, null, 2), !result.ok);
 }
 
+const historyReceiptSchema = Type.Object({
+    schema: Type.Literal(RELEASE_CONTROL_RESPONSE_SCHEMA),
+    ok: Type.Literal(true),
+    operation: Type.Literal("applications.get_history"),
+    project_ref: Type.String(), application_id: Type.String(), environment_id: Type.String(),
+    history: ApplicationActivationHistorySchema,
+}, { additionalProperties: false });
+
+function historyText(result: ToolResult, request: AppToolArguments, projectRef: string | undefined): ToolResult {
+    if (result.isError) return result;
+    try {
+        if (result.content.length !== 1 || result.content[0]!.text.length > 262_144) throw new Error();
+        const receipt: unknown = JSON.parse(result.content[0]!.text);
+        if (!Value.Check(historyReceiptSchema, receipt)) throw new Error();
+        const history = parseApplicationActivationHistory(receipt.history);
+        if (history.project_ref !== projectRef || history.application_id !== request.id
+            || history.environment_id !== request.environment_id
+            || receipt.project_ref !== history.project_ref || receipt.application_id !== history.application_id
+            || receipt.environment_id !== history.environment_id) throw new Error();
+        const lines = [
+            `Activation History: ${history.project_ref}/${history.application_id}/${history.environment_id}`,
+            `Active activation: ${history.active_activation_id ?? "none"}`,
+            "",
+        ];
+        if (history.activations.length === 0) lines.push("No successful activations on this page.");
+        else {
+            lines.push(`${"Completed (UTC)".padEnd(29)}  ${"State".padEnd(7)}  ${"Activation ID".padEnd(36)}  Release (12)`);
+            for (const entry of history.activations) lines.push(
+                `${entry.completed_at.padEnd(29)}  ${(entry.is_active ? "current" : "-").padEnd(7)}  ${entry.activation_id}  ${entry.release_id.slice(0, 12)}`,
+            );
+        }
+        if (history.next_cursor) lines.push("", `Next cursor: ${history.next_cursor}`);
+        return textResult(lines.join("\n"));
+    } catch {
+        return releaseControlFailure("applications.get_history", "INVALID_RESPONSE", null);
+    }
+}
+
 export async function runAppTool(request: AppToolArguments, options: AppToolOptions = {}): Promise<ToolResult> {
     if ((request.dry_run !== undefined && request["dry-run"] !== undefined)
         || (request.register_in !== undefined && request["register-in"] !== undefined)
@@ -1082,16 +1129,24 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
     if (request.database_url !== undefined && request.action !== "dev" && request.action !== "watch") {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--database-url applies only to app dev --profile integration");
     }
+    if (request.json !== undefined && (request.action !== "history" || request.json !== true || request.format === "text")) {
+        throw new Error("--json applies only to app history and cannot be combined with --format text");
+    }
     if (Object.hasOwn(REMOTE_APP_ACTIONS, request.action)) {
         const delegate = options.getApplications?.();
         if (!delegate) return textResult("App remote actions require a Management API context.", true);
         const action = REMOTE_APP_ACTIONS[request.action as keyof typeof REMOTE_APP_ACTIONS];
+        const { format: _format, json: _json, ...historyRequest } = request;
         const args = {
-            ...request, action, ref: request.ref ?? options.projectRef,
+            ...(request.action === "history" ? historyRequest : request), action, ref: request.ref ?? options.projectRef,
         };
         validateToolArguments(APPLICATION_TOOL_SCHEMA, args);
+        const result = await delegate(args);
+        if (request.action === "history" && request.format !== "json" && request.json !== true) {
+            return historyText(result, request, args.ref);
+        }
         // Preserve the original receipt, including unknown outcomes. Never infer a rollback or retry.
-        return delegate(args);
+        return result;
     }
     switch (request.action) {
         case "verify-plan": {
@@ -1137,7 +1192,7 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
         {
             ...REMOTE_APP_SCHEMA,
             action: withDescription(stringEnum(["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix",
-                "plan", "build", "upload", "configure", "deploy", "status", "rollback", "rollback-plan", "reconcile", "retire", "logs"]), "App action; upload/configure only prepare, rollback activates the journal-selected previous release without schema downgrade"),
+                "plan", "build", "upload", "configure", "deploy", "status", "rollback", "rollback-plan", "history", "reconcile", "retire", "logs"]), "App action; upload/configure only prepare, history is read-only, rollback activates the journal-selected previous release without schema downgrade"),
             kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource"]), "[generate] Scaffold kind"),
             template: optional(stringEnum(["minimal", "http", "command", "edge"]), "[init] Minimal application by default; explicit http/command/edge recipes"),
             name: optional(Type.String(), "[init/generate] Project or object name"),
@@ -1152,7 +1207,8 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             include: optional(Type.String(), "[dev/compile/check] Comma-separated glob patterns for source files"),
             out_dir: optional(Type.String(), "[dev/compile/plan/build/export-tools] Output directory (default: configured outDir)"),
             strict: optional(Type.Boolean(), "[dev/compile/check] Promote warnings to errors"),
-            format: optional(stringEnum(["text", "json"]), "[dev/generate/compile/check/plan/graph/export-tools] Output format (default: text)"),
+            format: optional(stringEnum(["text", "json"]), "[dev/generate/compile/check/plan/graph/export-tools/history] Output format (default: text)"),
+            json: optional(Type.Literal(true), "[history] Return the validated JSON receipt"),
             profile: optional(stringEnum(["fast", "integration"]), "[dev] Run dev or dev:integration; integration verifies an explicit loopback database"),
             once: optional(Type.Boolean(), "[dev] Validate and report once without watching"),
             watch: optional(Type.Boolean(), "[dev] Watch for changes (default: true; --once disables)"),
