@@ -1,9 +1,4 @@
-import * as Duration from "effect/Duration";
-import * as Effect from "effect/Effect";
-import * as Schedule from "effect/Schedule";
-import * as Cause from "effect/Cause";
-import * as Exit from "effect/Exit";
-import * as Runtime from "effect/Runtime";
+import { Cause, Duration, Effect, Exit, Schedule } from "effect";
 import type * as Layer from "effect/Layer";
 
 export interface CompiledEffectError {
@@ -75,21 +70,10 @@ function effectErrorTag(error: unknown): string | undefined {
   return undefined;
 }
 
-function unwrapFiberFailure(error: unknown): unknown {
-  let current = error;
-  const seen = new Set<unknown>();
-  while (Runtime.isFiberFailure(current) && !seen.has(current)) {
-    seen.add(current);
-    current = Cause.squash(current[Runtime.FiberFailureCauseId]);
-  }
-  return current;
-}
-
 function mapEffectFailure(
   error: unknown,
   descriptor: CompiledEffectDescriptor | undefined,
 ): EffectApplicationError {
-  error = unwrapFiberFailure(error);
   const tag = effectErrorTag(error);
   const mapping = tag && descriptor?.errors?.find((entry) => entry.tag === tag);
   if (mapping) {

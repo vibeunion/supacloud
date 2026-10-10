@@ -223,7 +223,7 @@ accept(): Effect<{ ok: boolean }, never, OtherRepository> {}`,
   effect: { required: true, errors: [], dependencies: ["CaseRepository"] },
 })
 accept(): Effect<{ ok: boolean }, never, CaseRepository> {}`,
-  SC3045: `import * as Effect from "effect/Effect";
+  SC3045: `import { Effect } from "effect";
 @Post("/cases", { effect: { required: true, errors: [], dependencies: [] } })
 accept(): Effect<{ ok: boolean }, never, never> {
   Effect.runPromise(program);

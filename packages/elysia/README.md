@@ -9,9 +9,12 @@ is a separately authorized business command, never an assumed rollback.
 ## Compatibility and Acceptance Boundary
 
 The Elysia peer and development dependency are pinned to `2.0.0-beta.21`.
+The runtime adapter pins Effect `4.0.2` and consumes its `Exit`-based
+execution boundary.
 `compatibility.json` records the acceptance target: Bun 1.4.2, Elysia
-2.0.0-beta.21, `typebox` 1.3.34, `exact-mirror` 1.2.6, TypeScript CLI 7.0.2
-and the compiler's separate TypeScript 6 semantic API 6.0.2. The matrix is a
+2.0.0-beta.21, Effect 4.0.2, `typebox` 1.3.34, `exact-mirror` 1.2.6,
+TypeScript CLI 7.0.2 and the compiler's separate TypeScript 6 semantic API 6.0.2.
+The matrix is a
 required target, not proof of an execution. See the dated, commit-specific
 [framework acceptance record](../../docs/framework-acceptance.md) for actual
 results. The contract-upgrade gate checks both TypeScript engines. These tests

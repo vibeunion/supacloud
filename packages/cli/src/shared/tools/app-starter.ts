@@ -51,7 +51,7 @@ export function appStarterFiles(name: string): Record<string, string> {
                 "drizzle-orm": dbMetadata.peerDependencies["drizzle-orm"],
                 "@supacloud/js": `^${sdkMetadata.version}`,
                 "@supabase/supabase-js": sdkMetadata.peerDependencies["@supabase/supabase-js"],
-                effect: "3.22.1",
+                effect: "4.0.2",
                 elysia: "2.0.0-beta.21",
                 rxjs: appMetadata.dependencies.rxjs,
             },
@@ -295,7 +295,7 @@ export function createCompiledModules(): never {
   throw new Error("Run bun run compile before starting the application");
 }
 `,
-        "src/review/review.ts": `import * as Effect from "effect/Effect";
+        "src/review/review.ts": `import { Effect } from "effect";
 import {
   Body, Command, Controller, DB_CLIENT, Get, Inject, Param, Post,
   defineFeatureSlice, defineFeatureSpec, type Aspect,

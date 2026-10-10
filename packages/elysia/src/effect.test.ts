@@ -1,7 +1,5 @@
 import { expect, test } from "bun:test";
-import * as Effect from "effect/Effect";
-import * as Cause from "effect/Cause";
-import * as Runtime from "effect/Runtime";
+import { Effect } from "effect";
 import { Elysia } from "elysia";
 import { ApplicationError, createModulePlugin } from "./index";
 import { createDefaultEffectRuntime, runCompiledEffect } from "./effect";
@@ -28,14 +26,13 @@ test("maps tagged Effect failures to the declared public error", async () => {
   });
 });
 
-test("unwraps FiberFailure before mapping an ApplicationError", async () => {
+test("maps defect failures from the Effect 4 exit cause", async () => {
   const applicationError = new ApplicationError("Review state or version changed", {
     status: 409,
     code: "REVIEW_CONFLICT",
   });
-  const fiberFailure = Runtime.makeFiberFailure(Cause.die(applicationError));
   await expect(runCompiledEffect(
-    Effect.die(fiberFailure),
+    Effect.die(applicationError),
     {
       required: true,
       errors: [{ tag: "REVIEW_CONFLICT", status: 409, code: "REVIEW_CONFLICT" }],
