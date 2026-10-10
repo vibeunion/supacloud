@@ -26,7 +26,7 @@ export function checkElysiaCompatibility(root) {
   if (typeof expected !== 'string' || !/^2\.0\.0-beta\.\d+$/.test(expected)) {
     return ['compatibility.json must declare an exact Elysia 2.0 beta version'];
   }
-  for (const name of ['typebox', 'exact-mirror']) {
+  for (const name of ['effect', 'typebox', 'exact-mirror']) {
     if (typeof matrix.packages?.[name] !== 'string' || !/^\d+\.\d+\.\d+$/.test(matrix.packages[name])) {
       problems.push(`compatibility.json must declare the active ${name} version`);
     }
@@ -44,6 +44,7 @@ export function checkElysiaCompatibility(root) {
     if (!existsSync(resolve(root, manifestPath))) continue;
     const manifest = readJSON(manifestPath);
     const declared = sections.filter((section) => manifest[section]?.elysia !== undefined);
+    const effectDeclared = sections.filter((section) => manifest[section]?.effect !== undefined);
     for (const section of sections) {
       for (const [name, spec] of Object.entries(manifest[section] ?? {})) {
         if (frameworkPackages.has(manifest.name)
@@ -54,6 +55,9 @@ export function checkElysiaCompatibility(root) {
       }
       if (manifest[section]?.elysia !== undefined && manifest[section].elysia !== expected) {
         problems.push(`${manifestPath}: ${section}.elysia must equal ${expected}`);
+      }
+      if (manifest[section]?.effect !== undefined && manifest[section].effect !== matrix.packages.effect) {
+        problems.push(`${manifestPath}: ${section}.effect must equal ${matrix.packages.effect}`);
       }
     }
     // Every repository-owned Elysia consumer, plus the framework packages that
@@ -74,7 +78,9 @@ export function checkElysiaCompatibility(root) {
     }
     const lockPath = `${directory}/bun.lock`;
     if (!existsSync(resolve(root, lockPath))) {
-      if (declared.length) problems.push(`${lockPath}: missing lockfile for a direct Elysia consumer`);
+      if (declared.length || effectDeclared.length) {
+        problems.push(`${lockPath}: missing lockfile for a direct Elysia or Effect consumer`);
+      }
       continue;
     }
     const lock = parseLockfile(readFileSync(resolve(root, lockPath), 'utf8'));
@@ -83,8 +89,16 @@ export function checkElysiaCompatibility(root) {
         problems.push(`${lockPath}: stale workspace ${section}.elysia`);
       }
     }
+    for (const section of effectDeclared) {
+      if (lock.workspaces?.['']?.[section]?.effect !== matrix.packages.effect) {
+        problems.push(`${lockPath}: stale workspace ${section}.effect`);
+      }
+    }
     if (declared.length && lock.packages?.elysia?.[0] !== `elysia@${expected}`) {
       problems.push(`${lockPath}: resolved Elysia version must equal ${expected}`);
+    }
+    if (effectDeclared.length && lock.packages?.effect?.[0] !== `effect@${matrix.packages.effect}`) {
+      problems.push(`${lockPath}: resolved Effect version must match compatibility.json`);
     }
     if (declared.length && lock.packages?.typebox?.[0] !== `typebox@${matrix.packages.typebox}`) {
       problems.push(`${lockPath}: resolved typebox must match compatibility.json`);

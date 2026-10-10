@@ -4,6 +4,11 @@ SupaCloud treats Effect as an execution contract for complex routes and
 commands. Elysia remains the HTTP boundary, while the SupaCloud compiler owns
 static application rules and generated route metadata.
 
+SupaCloud currently pins Effect `4.0.2`. The adapter follows the Effect 4
+execution model: the framework boundary receives an `Exit`, maps
+`Cause.squash(exit.cause)`, and does not depend on the removed v3
+`Runtime<R>` type or FiberFailure wrapper APIs.
+
 ```text
 TypeBox/Elysia schemas -> HTTP boundary
 SupaCloud Compiler      -> module, dependency, error and retry governance
@@ -40,6 +45,9 @@ union of objects with a literal `_tag`; the tags must exactly match
 `effect.dependencies`, and a route with dependencies must declare a timeout.
 Route handlers and production source cannot directly throw or interpret an
 Effect with `Effect.run*`; test sources may interpret Effects for assertions.
+The compiler recognizes both the subpath imports used by existing starters
+(`effect/Effect`, `effect/Runtime`) and Effect 4 aggregate imports
+(`import { Effect } from "effect"`).
 Explicit `false` values are the opt-out mechanism for a migration boundary:
 
 ```ts

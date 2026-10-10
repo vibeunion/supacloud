@@ -112,7 +112,7 @@ function baseFiles(name: string, sdkDependencies?: StarterSdkDependencies): Reco
       dependencies: {
         "@supacloud/app": `^${appMetadata.version}`,
         "@supacloud/elysia": `^${elysiaMetadata.version}`,
-        effect: "3.22.1",
+        effect: "4.0.2",
         elysia: "2.0.0-beta.21",
         ...(sdkDependencies ?? { rxjs: appMetadata.dependencies.rxjs }),
       },
@@ -182,7 +182,7 @@ export const CreateOrderBody = t.Object({ name: t.String({ minLength: 1 }) });
 export const OrderResult = t.Object({ id: t.String(), name: t.String() });
 export const HealthResult = t.Object({ ok: t.Boolean() });
 `,
-    "src/orders/orders.ts": `import * as Effect from "effect/Effect";
+    "src/orders/orders.ts": `import { Effect } from "effect";
 import { Body, Controller, Get, Param, Post, defineFeatureSlice } from "@supacloud/app";
 import { status } from "elysia";
 import { OrderParams, CreateOrderBody, OrderResult, HealthResult } from "./contracts";
@@ -385,7 +385,7 @@ function minimalTemplate(name: string, sdkDependencies: StarterSdkDependencies):
     "src/features/health/contracts.ts": `import { t } from "elysia";
 export const HealthResult = t.Object({ ok: t.Boolean() });
 `,
-    "src/features/health/health.ts": `import * as Effect from "effect/Effect";
+    "src/features/health/health.ts": `import { Effect } from "effect";
 import { Controller, Get, Module } from "@supacloud/app/core";
 import { HealthResult } from "./contracts";
 @Controller("/health")
@@ -400,7 +400,7 @@ export class HealthController {
 @Module({ name: "health", tags: ["type:feature"], controllers: [HealthController] })
 export class HealthModule {}
 `,
-    "src/features/health/health.test.ts": `import * as Effect from "effect/Effect";
+    "src/features/health/health.test.ts": `import { Effect } from "effect";
 import { expect, test } from "bun:test";
 import { HealthController } from "./health";
 

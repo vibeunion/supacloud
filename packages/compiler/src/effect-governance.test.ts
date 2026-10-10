@@ -299,15 +299,16 @@ export class OrdersModule {}
 });
 
 test("rejects direct throws and Effect interpretation in governed handlers", async () => {
-  const { root, graph } = await analyzeStrictEffectFixture(`import * as EffectRuntime from "effect/Effect";
+  const { root, graph } = await analyzeStrictEffectFixture(`import { Effect, Runtime as EffectRuntime } from "effect";
 import { Controller, Get, Module } from "./runtime";
-import type { Effect } from "./effect";
+import type { Effect as RouteEffect } from "./effect";
 
 @Controller("/orders")
 class OrdersController {
   @Get("/", { effect: { required: true, dependencies: [], errors: [], retry: "none" } })
-  list(): Effect<string, never, never> {
-    EffectRuntime.runPromise({} as never);
+  list(): RouteEffect<string, never, never> {
+    Effect.runPromise({} as never);
+    EffectRuntime.runSync({} as never);
     throw new Error("no");
   }
 }

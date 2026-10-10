@@ -1,4 +1,4 @@
-export const STARTER_UPLOAD_FEATURE = `import * as Effect from "effect/Effect";
+export const STARTER_UPLOAD_FEATURE = `import { Effect } from "effect";
 import { Body, Controller, Inject, Injectable, Param, Post, DB_CLIENT, REQUEST_CONTEXT } from "@supacloud/app";
 import { ApplicationError } from "@supacloud/elysia";
 import { UploadBody, UploadLocation, UploadParams, UploadResult } from "./contracts";

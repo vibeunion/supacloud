@@ -26,26 +26,27 @@ function fixture(t) {
   };
   write('package.json', { private: true });
   write('packages/elysia/compatibility.json', {
-    bun: '1.4.2', packages: { elysia: version, typebox: '1.3.34', 'exact-mirror': '1.2.6' },
+    bun: '1.4.2', packages: { elysia: version, effect: '4.0.2', typebox: '1.3.34', 'exact-mirror': '1.2.6' },
   });
   for (const name of ['app', 'compiler']) {
     write(`packages/${name}/package.json`, { name: `@supacloud/${name}`, dependencies: { typebox: '1.3.34' } });
   }
   const adapter = {
-    name: '@supacloud/elysia', dependencies: { typebox: '1.3.34', 'exact-mirror': '1.2.6' },
+    name: '@supacloud/elysia', dependencies: { effect: '4.0.2', typebox: '1.3.34', 'exact-mirror': '1.2.6' },
     peerDependencies: { elysia: version }, devDependencies: { elysia: version },
   };
   write('packages/elysia/package.json', adapter);
   write('packages/elysia/bun.lock', {
     workspaces: { '': adapter }, packages: {
-      elysia: [`elysia@${version}`], typebox: ['typebox@1.3.34'], 'exact-mirror': ['exact-mirror@1.2.6'],
+      elysia: [`elysia@${version}`], effect: ['effect@4.0.2'], typebox: ['typebox@1.3.34'], 'exact-mirror': ['exact-mirror@1.2.6'],
     },
   });
-  const lite = { name: '@supacloud/lite', dependencies: { typebox: '1.3.34' }, devDependencies: { elysia: version } };
+  const lite = { name: '@supacloud/lite', dependencies: { typebox: '1.3.34' }, devDependencies: { effect: '4.0.2', elysia: version } };
   write('packages/supacloud-lite/package.json', lite);
   write('packages/supacloud-lite/bun.lock', {
     workspaces: { '': lite }, packages: {
       elysia: [`elysia@${version}`],
+      effect: ['effect@4.0.2'],
       typebox: ['typebox@1.3.34'],
       '@supacloud/elysia': ['@supacloud/elysia@file:../elysia', adapter],
     },
@@ -147,6 +148,15 @@ test('rejects a drifted resolved typebox in an Elysia consumer lock', (t) => {
   const f = fixture(t);
   f.edit('packages/supacloud-lite/bun.lock', (p) => { p.packages.typebox[0] = 'typebox@1.3.36'; });
   assert.match(checkElysiaCompatibility(f.root).join('\n'), /resolved typebox must match compatibility.json/);
+});
+
+test('rejects a drifted direct Effect declaration and resolved version', (t) => {
+  const f = fixture(t);
+  f.edit('packages/supacloud-lite/package.json', (p) => { p.devDependencies.effect = '3.22.1'; });
+  assert.match(checkElysiaCompatibility(f.root).join('\n'), /devDependencies\.effect must equal/);
+  f.edit('packages/supacloud-lite/package.json', (p) => { p.devDependencies.effect = '4.0.2'; });
+  f.edit('packages/supacloud-lite/bun.lock', (p) => { p.packages.effect[0] = 'effect@3.22.1'; });
+  assert.match(checkElysiaCompatibility(f.root).join('\n'), /resolved Effect version/);
 });
 
 test('rejects stale direct and nested local schema snapshots in the adapter lock', (t) => {

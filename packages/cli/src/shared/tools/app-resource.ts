@@ -32,7 +32,7 @@ export class ${className}Service {
     }
 }
 `,
-        [`${name}.controller.ts`]: `import * as Effect from "effect/Effect";
+        [`${name}.controller.ts`]: `import { Effect } from "effect";
 import { Controller, Get, Inject, Param } from "@supacloud/app";
 import { ${className}Params, ${className}Response, type ${className}Result } from "./${name}.model";
 import { ${className}Service } from "./${name}.service";
@@ -82,7 +82,7 @@ test("${name} preserves permission denial without a privileged fallback", async 
     await expect(service.find("example")).rejects.toBe(denied);
 });
 `,
-        [`${name}.controller.test.ts`]: `import * as Effect from "effect/Effect";
+        [`${name}.controller.test.ts`]: `import { Effect } from "effect";
 import { expect, test } from "bun:test";
 import { ${className}Controller } from "./${name}.controller";
 

@@ -49,6 +49,7 @@ test("compiler dependencies and demo adapters stay outside the production entry"
     const manifest = JSON.parse(requireValue(files["package.json"]));
     expect(manifest.dependencies["@supacloud/compiler"]).toBeUndefined();
     expect(manifest.devDependencies["@supacloud/compiler"]).toMatch(/^\^\d+\.\d+\.\d+/);
+    expect(manifest.dependencies.effect).toBe("4.0.2");
     expect(files["src/application.ts"]).not.toContain("@supacloud/compiler");
     expect(files["src/application.ts"]).not.toContain("createMemorySandbox");
     expect(files["generated/application.ts"]).toContain("Run bun run compile");

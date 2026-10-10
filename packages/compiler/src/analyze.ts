@@ -1776,7 +1776,8 @@ function scanEffectRuntimeEscapes(sourceFile: SourceFile, ctx: AnalysisContext):
   const runtimeBindings = new Set<string>();
   for (const statement of sourceFile.statements) {
     if (!ts.isImportDeclaration(statement) || !ts.isStringLiteral(statement.moduleSpecifier)) continue;
-    if (statement.moduleSpecifier.text !== "effect/Effect" && statement.moduleSpecifier.text !== "effect/Runtime") continue;
+    const moduleName = statement.moduleSpecifier.text;
+    if (moduleName !== "effect" && moduleName !== "effect/Effect" && moduleName !== "effect/Runtime") continue;
     const clause = statement.importClause;
     if (!clause) continue;
     if (clause.name) namespaceBindings.add(clause.name.text);
@@ -1785,6 +1786,9 @@ function scanEffectRuntimeEscapes(sourceFile: SourceFile, ctx: AnalysisContext):
     } else if (clause.namedBindings && ts.isNamedImports(clause.namedBindings)) {
       for (const element of clause.namedBindings.elements) {
         const imported = element.propertyName?.text ?? element.name.text;
+        if (moduleName === "effect" && (imported === "Effect" || imported === "Runtime")) {
+          namespaceBindings.add(element.name.text);
+        }
         if (["runPromise", "runPromiseExit", "runSync", "runFork"].includes(imported)) {
           runtimeBindings.add(element.name.text);
         }
