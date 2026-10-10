@@ -65,6 +65,7 @@ const FIXTURE_FILES: Record<string, string> = {
     "tsconfig.json": FIXTURE_TSCONFIG,
     "package.json": `{\n  "name": "fixture",\n  "dependencies": { "@supacloud/app": "0.0.0", "@supacloud/elysia": "0.0.0", "elysia": "1.4.30" }\n}\n`,
     "src/runtime.ts": RUNTIME_SOURCE,
+    "src/effect.ts": `export type Effect<A, E, R> = { readonly _effect: A; readonly _error?: E; readonly _requirements?: R };\n`,
     "src/elysia.ts": `export const t = {
   Object: (_shape: Record<string, unknown>) => ({ type: "object" }),
   String: (_options?: Record<string, unknown>) => ({ type: "string" }),
@@ -139,7 +140,8 @@ export const CaseResponse = {
 } as const;
 `,
 
-    "src/features/case/case.controller.ts": `import { Body, Controller, Get, Inject, Post } from "../../runtime";
+    "src/features/case/case.controller.ts": `import type { Effect } from "../../effect";
+import { Body, Controller, Get, Inject, Post } from "../../runtime";
 import { CaseService } from "./case.service";
 import { AcceptCaseCommand } from "./accept-case.command";
 import { AcceptCaseBody, AcceptCaseParams, AcceptCaseQuery, DetailParams, CaseResponse } from "./contracts";
@@ -148,9 +150,9 @@ import { AcceptCaseBody, AcceptCaseParams, AcceptCaseQuery, DetailParams, CaseRe
 export class CaseController {
   constructor(@Inject(CaseService) readonly cases: unknown) {}
 
-  @Get("/:caseId", { params: DetailParams, response: CaseResponse })
-  detail(): { ok: boolean } {
-    return { ok: true };
+  @Get("/:caseId", { params: DetailParams, response: CaseResponse, effect: { required: true, dependencies: [], errors: [], retry: "none" } })
+  detail(): Effect<{ ok: boolean }, never, never> {
+    return { _effect: { ok: true } };
   }
 
   @Post("/accept", {
@@ -159,9 +161,10 @@ export class CaseController {
     params: AcceptCaseParams,
     query: AcceptCaseQuery,
     response: CaseResponse,
+    effect: { required: true, dependencies: [], errors: [], retry: "none" },
   })
-  accept(@Body() _body: unknown): { ok: boolean } {
-    return { ok: true };
+  accept(@Body() _body: unknown): Effect<{ ok: boolean }, never, never> {
+    return { _effect: { ok: true } };
   }
 }
 `,
