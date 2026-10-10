@@ -49,6 +49,11 @@ Compressed bytes, window size, expanded bytes, file count and paths are bounded.
 Storage keeps bound descriptors, exclusive/no-follow creation, atomic publish
 and durability checks; ordinary path-based writes cannot replace those gates.
 
+Source-build static asset precompression also uses `Bun.file`, `Bun.write` and
+asynchronous `Bun.zstdCompress` at level 3, without an external zstd executable.
+HTTP gzip and Brotli sidecars remain separate from the tar.zst upload format.
+This optimization does not rewrite retained immutable release trees.
+
 This is a breaking format change, not an in-place inventory migration. Existing
 v1 archives have different content hashes and cannot be renamed to tar.zst or
 have their metadata edited in place. Old active authority, deployment pointers,

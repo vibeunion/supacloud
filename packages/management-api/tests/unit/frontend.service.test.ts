@@ -4,6 +4,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { access, chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { config } from "../../src/config";
 import { FrontendService } from "../../src/services/frontend.service";
 import { FrontendDomainService } from "../../src/services/frontend-domain.service";
@@ -1318,19 +1319,31 @@ describe("FrontendService deployment serialization", () => {
 });
 
 describe("FrontendService optimizer", () => {
-  test("generates br and gzip sidecars for static text assets", async () => {
+  test("generates lossless br, gzip and native zstd sidecars for static text assets", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-optimizer-test-"));
     const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
     const assetPath = join(baseDir, "app.js");
 
     try {
-      await writeFile(assetPath, "console.log('supacloud');\n".repeat(128));
-      await (service as any).precompressStaticAssets(baseDir);
-
-      await access(`${assetPath}.br`);
-      await access(`${assetPath}.gz`);
-      if ((await Bun.spawn(["which", "zstd"]).exited) === 0) {
-        await access(`${assetPath}.zst`);
+      const content = "console.log('supacloud');\n".repeat(128);
+      await Bun.write(assetPath, content);
+      const compressor = spyOn(Bun, "zstdCompress");
+      try {
+        await Reflect.apply(
+          Reflect.get(service, "precompressStaticAssets"), service, [baseDir],
+        );
+        expect(compressor).toHaveBeenCalledTimes(1);
+        expect(compressor).toHaveBeenCalledWith(new TextEncoder().encode(content), { level: 3 });
+        const gzip = new Uint8Array(await Bun.file(`${assetPath}.gz`).arrayBuffer());
+        const brotli = new Uint8Array(await Bun.file(`${assetPath}.br`).arrayBuffer());
+        const zstd = new Uint8Array(await Bun.file(`${assetPath}.zst`).arrayBuffer());
+        expect(gunzipSync(gzip).toString()).toBe(content);
+        expect(brotliDecompressSync(brotli).toString()).toBe(content);
+        expect(new TextDecoder().decode(await Bun.zstdDecompress(zstd))).toBe(content);
+        expect(await Bun.file(assetPath).text()).toBe(content);
+        expect((await readdir(baseDir)).sort()).toEqual(["app.js", "app.js.br", "app.js.gz", "app.js.zst"]);
+      } finally {
+        compressor.mockRestore();
       }
     } finally {
       await rm(baseDir, { recursive: true, force: true });

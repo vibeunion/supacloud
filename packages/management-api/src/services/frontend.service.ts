@@ -12,7 +12,7 @@
  *   SSR: build -> start process -> readiness -> switch proxy route
  */
 import { $ } from "bun";
-import { chmod, mkdtemp, open, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, open, readdir, realpath, rename, rm, stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { brotliCompressSync, constants as zlibConstants, gzipSync } from "node:zlib";
@@ -1262,21 +1262,15 @@ WantedBy=multi-user.target
       const fileStat = await stat(filePath);
       if (!fileStat.isFile() || !this.shouldPrecompressStaticFile(filePath, fileStat.size)) return;
 
-      const input = await readFile(filePath);
-      await writeFile(`${filePath}.gz`, gzipSync(input, { level: 9 }));
-      await writeFile(`${filePath}.br`, brotliCompressSync(input, {
+      const input = new Uint8Array(await Bun.file(filePath).arrayBuffer());
+      await Bun.write(`${filePath}.gz`, gzipSync(input, { level: 9 }));
+      await Bun.write(`${filePath}.br`, brotliCompressSync(input, {
         params: {
           [zlibConstants.BROTLI_PARAM_QUALITY]: 11,
         },
       }));
 
-      const zstdPath = await resolveCommand("zstd");
-      if (zstdPath) {
-        const result = await $`${zstdPath} -q -f -19 -o ${filePath}.zst -- ${filePath}`.nothrow().quiet();
-        if (result.exitCode !== 0) {
-          logger.warn("[FrontendService] Failed to generate zstd sidecar", { path: filePath, stderr: result.stderr.toString() });
-        }
-      }
+      await Bun.write(`${filePath}.zst`, await Bun.zstdCompress(input, { level: 3 }));
     };
 
     const optimizeImage = async (filePath: string) => {
