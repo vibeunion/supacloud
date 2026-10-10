@@ -52,18 +52,18 @@ function sqlFile(file: string, root: string, source: "hasura" | "nhost"): Migrat
 }
 
 function hasuraMetadataSql(input: Record<string, unknown>): string[] {
-  const metadata = record(input.metadata) ?? input;
-  const sources = Array.isArray(metadata.sources) ? metadata.sources : [];
+  const metadata = record(input["metadata"]) ?? input;
+  const sources = Array.isArray(metadata["sources"]) ? metadata["sources"] : [];
   const sql: string[] = [];
   for (const rawSource of sources) {
     const source = record(rawSource);
     if (!source) continue;
-    const tables = Array.isArray(source.tables) ? source.tables : [];
+    const tables = Array.isArray(source["tables"]) ? source["tables"] : [];
     for (const rawTable of tables) {
       const table = record(rawTable);
-      const tableName = record(table?.table);
-      const schema = typeof tableName?.schema === "string" ? tableName.schema : "public";
-      const name = typeof tableName?.name === "string" ? tableName.name : null;
+      const tableName = record(table?.["table"]);
+      const schema = typeof tableName?.["schema"] === "string" ? tableName["schema"] : "public";
+      const name = typeof tableName?.["name"] === "string" ? tableName["name"] : null;
       if (!name || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(schema) || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) continue;
       sql.push(`ALTER TABLE "${schema}"."${name}" ENABLE ROW LEVEL SECURITY;`);
     }
@@ -114,15 +114,15 @@ export function createMigrationImportPlan(input: {
     } else {
       warnings.push("No Hasura table metadata was found; permission rules require manual review.");
     }
-    const actions = Array.isArray(metadata.actions) ? metadata.actions : [];
-    const remoteSchemas = Array.isArray(metadata.remote_schemas) ? metadata.remote_schemas : [];
-    const eventTriggers = Array.isArray(metadata.sources)
-      ? metadata.sources.flatMap(source => {
+    const actions = Array.isArray(metadata["actions"]) ? metadata["actions"] : [];
+    const remoteSchemas = Array.isArray(metadata["remote_schemas"]) ? metadata["remote_schemas"] : [];
+    const eventTriggers = Array.isArray(metadata["sources"])
+      ? metadata["sources"].flatMap(source => {
         const sourceRecord = record(source);
-        const tables = Array.isArray(sourceRecord?.tables) ? sourceRecord.tables : [];
+        const tables = Array.isArray(sourceRecord?.["tables"]) ? sourceRecord["tables"] : [];
         return tables.flatMap(table => {
           const tableRecord = record(table);
-          return Array.isArray(tableRecord?.event_triggers) ? tableRecord.event_triggers : [];
+          return Array.isArray(tableRecord?.["event_triggers"]) ? tableRecord["event_triggers"] : [];
         });
       })
       : [];

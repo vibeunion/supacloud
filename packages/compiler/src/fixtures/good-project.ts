@@ -14,7 +14,7 @@ import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./runtime-source";
 export const GOOD_PROJECT_FILES: Record<string, string> = {
   "tsconfig.json": FIXTURE_TSCONFIG,
   "src/runtime.ts": RUNTIME_SOURCE,
-  "src/effect.ts": `export type Effect<A, E, R> = { readonly _effect: [A, E, R] };
+  "src/effect.ts": `export type Effect<A, E, R> = { readonly _effect: A; readonly _error?: E; readonly _requirements?: R };
 `,
 
   "src/features/shared/tokens.ts": `import { InjectionToken } from "../../runtime";
@@ -68,15 +68,15 @@ export class AuditModule {}
   "src/features/case/contracts.ts": `export const CreateCaseBody = {
   type: "object",
   properties: { title: { type: "string" } },
-};
+} as const;
 export const AcceptParams = {
   type: "object",
   properties: { caseId: { type: "string" } },
-};
+} as const;
 export const AcceptResult = {
   type: "object",
   properties: { ok: { type: "boolean" } },
-};
+} as const;
 `,
 
   "src/features/case/case.repository.ts": `import { Inject, Injectable } from "../../runtime";
@@ -138,7 +138,7 @@ export class CaseController {
     effect: { required: true, dependencies: [], errors: [], retry: "none" },
   })
   accept(): Effect<{ ok: boolean }, never, never> {
-    return {} as Effect<{ ok: boolean }, never, never>;
+    return { _effect: { ok: true } };
   }
 }
 `,
