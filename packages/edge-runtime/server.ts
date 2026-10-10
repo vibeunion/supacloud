@@ -88,6 +88,18 @@ const FUNCTIONS_BASE_DIR = path.resolve(process.env.EDGE_FUNCTIONS_BASE_DIR || F
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
 const FUNCTION_REQUEST_TIMEOUT_MS = Number(process.env.EDGE_FUNCTION_TIMEOUT_MS) || 60_000;
 const BACKGROUND_FUNCTION_TIMEOUT_MS = Number(process.env.EDGE_BACKGROUND_FUNCTION_TIMEOUT_MS) || 300_000;
+const FUNCTION_CORS_MODE = process.env.EDGE_FUNCTIONS_CORS_MODE?.trim() || "function";
+if (FUNCTION_CORS_MODE !== "function" && FUNCTION_CORS_MODE !== "permissive") {
+  throw new Error("EDGE_FUNCTIONS_CORS_MODE must be function or permissive");
+}
+const FUNCTION_CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD",
+  "Access-Control-Allow-Headers":
+    "authorization, apikey, content-type, prefer, accept, accept-profile, content-profile, range, x-upsert, x-client-info, cache-control, idempotency-key, x-request-id, traceparent, tracestate, baggage",
+  "Access-Control-Expose-Headers": "content-range, range-unit, content-profile, content-disposition, x-request-id, x-supacloud-trace-id, x-supacloud-correlation-id, traceparent",
+  "Access-Control-Max-Age": "86400",
+} as const;
 const WORKER_RECYCLE_RESPONSE_GRACE_MS = 100;
 const WORKER_REPLACEMENT_BUDGET = resolveWorkerReplacementBudget(
   process.env.EDGE_MAX_WORKER_REPLACEMENTS_BEFORE_RECYCLE,
@@ -1348,7 +1360,7 @@ async function abortFunctionActivationFence(
   return state;
 }
 
-async function handleFunctionRequest(
+async function dispatchFunctionRequest(
   c: { params: Record<string, string>; headers: Record<string, string | undefined>; request: Request; set: { headers: Record<string, string | number | string[]> } },
   functionName: string,
 ) {
@@ -1365,6 +1377,14 @@ async function handleFunctionRequest(
   }
   const fencedResponse = activationFenceResponse(projectRef, functionName);
   if (fencedResponse) return fencedResponse;
+  if (FUNCTION_CORS_MODE === "permissive" && c.request.method === "OPTIONS") {
+    try {
+      await resolveFunctionPath(projectRef, functionName);
+    } catch (error) {
+      return functionDispatchError(error, c.set.headers as Record<string, string>);
+    }
+    return new Response(null, { status: 204 });
+  }
   const blockedResponse = await authFailureBlockResponse(projectRef, functionName, authHeader, apikeyHeader);
   if (blockedResponse) {
     return blockedResponse;
@@ -1424,9 +1444,35 @@ async function handleFunctionRequest(
   return response;
 }
 
+async function handleFunctionRequest(
+  c: Parameters<typeof dispatchFunctionRequest>[0],
+  functionName: string,
+): Promise<Response> {
+  const response = await dispatchFunctionRequest(c, functionName);
+  if (FUNCTION_CORS_MODE === "function") return response;
+  // 显式启用时由平台接管跨域；实际请求仍经过原有 JWT 和函数授权。
+  const headers = new Headers(response.headers);
+  for (const [name, value] of Object.entries(FUNCTION_CORS_HEADERS)) {
+    if (name !== "Access-Control-Expose-Headers") headers.set(name, value);
+  }
+  const exposed = [headers.get("Access-Control-Expose-Headers"), FUNCTION_CORS_HEADERS["Access-Control-Expose-Headers"]]
+    .filter(Boolean).join(", ");
+  headers.set("Access-Control-Expose-Headers", exposed);
+  headers.delete("Access-Control-Allow-Credentials");
+  if (c.request.method === "OPTIONS") {
+    const requestedHeaders = c.request.headers.get("Access-Control-Request-Headers");
+    if (requestedHeaders) headers.set("Access-Control-Allow-Headers", requestedHeaders);
+    headers.append("Vary", "Access-Control-Request-Headers");
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 const app = new Elysia()
-  // Functions own CORS, including OPTIONS. The platform must not add headers
-  // that grant an origin or credentials rejected by the function.
+  // 默认保留函数自有 CORS；只有显式启用 permissive 才由平台接管。
   .get("/health", () => ({
     status: "ok",
     instanceId: RUNTIME_INSTANCE_ID,

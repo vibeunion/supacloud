@@ -39,6 +39,28 @@ Important:
 - `external` should only be enabled if you intentionally run a dedicated `supacloud-edge-runtime.service`.
 - Do **not** run both modes at once; they will compete for `EDGE_RUNTIME_PORT` (default: `9005`).
 
+### Function CORS
+
+`EDGE_FUNCTIONS_CORS_MODE` selects who owns CORS for all public Function routes:
+
+- `function` (default): forward `OPTIONS` and preserve Function responses
+  without adding CORS headers. Existing Function allow-lists remain unchanged.
+- `permissive`: handle `OPTIONS` for existing Functions with `204`, allow any
+  origin (`Access-Control-Allow-Origin: *`), and allow the preflight's requested
+  headers. Actual responses, including JWT failures, receive the same policy.
+  Function-specific origin/method/header restrictions are overridden; custom
+  exposed headers are retained.
+
+For embedded mode, set `EDGE_FUNCTIONS_CORS_MODE=permissive` in the Management
+API service environment. For external mode, set it in the Edge Runtime service
+environment. Restart the owning service after changing it. The setting applies
+only to public Function routes, not internal control, REST, Auth, or Storage.
+Unset it or use `function` to restore Function-owned CORS.
+
+Permissive mode does not skip JWT verification or application authorization.
+It does not support cross-origin cookie credentials and removes
+`Access-Control-Allow-Credentials` to keep the wildcard response valid.
+
 ## Performance
 
 | Metric | Value |
