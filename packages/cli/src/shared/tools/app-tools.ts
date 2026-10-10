@@ -1261,14 +1261,14 @@ function formatWorkflowObservation(result: ToolResult, action: AppToolArguments[
                 ...(status.promotion.backup_id ? [`Backup: ${status.promotion.backup_id}`] : []),
             ].join("\n"));
         }
-        if (action === "preview-list") {
+        if (action === "preview-list" || action === "previews") {
             const list = parsePreviewList({ ...identity, previews: data.previews }, identity);
             return textResult([`${label}: ${list.previews.length} preview(s)`,
                 ...list.previews.map(preview => `${preview.preview_id}  ${preview.status}  ${preview.resources.database_branch.branch_ref}`),
             ].join("\n"));
         }
-        if (["preview-create", "preview-status", "preview-reconcile", "preview-cleanup"].includes(action)) {
-            const preview = parsePreviewReceipt(data.preview, identity);
+        if (["preview-plan", "preview-create", "preview-status", "preview-reconcile", "preview-cleanup"].includes(action)) {
+            const preview = parsePreviewReceipt(data.preview ?? data, identity);
             return textResult([
                 `${label}: ${preview.status}`,
                 `Preview: ${preview.preview_id}`,

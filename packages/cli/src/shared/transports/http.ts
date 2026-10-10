@@ -597,7 +597,10 @@ export class HttpTransport {
         }
     }
 
-    async delete<T = unknown>(path: string, body?: unknown): Promise<HttpResult<T>> {
+    async delete<T = unknown>(path: string, body?: unknown, options?: HttpPostOptions): Promise<HttpResult<T>> {
+        const timeoutMs = validatedPostTimeout(options);
+        const maxJsonBytes = validatedJsonResponseLimit(options?.maxJsonBytes);
+        const responseTimeoutMs = validatedResponseTimeout(options?.responseTimeoutMs);
         try {
             const serializedBody = serializedRequestBody(body);
             const request: RequestInit = {
@@ -605,7 +608,13 @@ export class HttpTransport {
                 headers: this.headers(),
                 ...(serializedBody === undefined ? {} : { body: serializedBody }),
             };
-            const res = await fetchWithRetry(`${this.baseUrl}${path}`, request, DEFAULT_TIMEOUT, this.insecureTls);
+            const res = await fetchWithRetry(`${this.baseUrl}${path}`, request, timeoutMs, this.insecureTls);
+            if (maxJsonBytes !== undefined) {
+                const data = await boundedResponseJson(res, maxJsonBytes, responseTimeoutMs);
+                return data === null
+                    ? responseReadFailure<T>(res.status)
+                    : { ok: res.ok, status: res.status, data: data as T };
+            }
             const data = (await res.json().catch(() => null)) as T;
             return { ok: res.ok, status: res.status, data };
         } catch (error: unknown) {

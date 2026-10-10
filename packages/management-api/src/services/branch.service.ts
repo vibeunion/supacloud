@@ -221,6 +221,7 @@ export interface CreateBranchInput {
   branchRef: string;
   name: string;
   dataMode?: BranchDataMode;
+  previewId?: string;
 }
 
 export type BranchDataMode = "schema_only" | "full_clone";
@@ -286,6 +287,9 @@ interface ReplacementRecoveryResult {
 class BranchService {
   async createBranch(input: CreateBranchInput): Promise<void> {
     const { parentRef, branchRef, name } = input;
+    if (input.previewId !== undefined && !/^[a-f0-9-]{8,64}$/.test(input.previewId)) {
+      throw new Error("APPLICATION_PREVIEW_ID_INVALID");
+    }
     const dataMode = input.dataMode ?? "schema_only";
     const parent = await projectRepository.findByRef(parentRef);
     if (!parent) throw new Error("Parent project not found");
@@ -319,6 +323,7 @@ class BranchService {
         branch_name: name,
         is_branch: true,
         branch_data_mode: dataMode,
+        ...(input.previewId === undefined ? {} : { application_preview_id: input.previewId }),
       },
     });
     if (!branchProject) throw new Error("Failed to create branch project record");
@@ -849,27 +854,13 @@ class BranchService {
   }
 
   async deleteBranch(branchRef: string): Promise<void> {
-    // Stop runtime first.
-    try {
-      await tenantRuntimeService.stopRuntime(branchRef);
-    } catch (err: unknown) {
-      logger.warn(`[branch] failed to stop runtime for ${branchRef}`, {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    // Drop the branch database.
-    try {
-      const dbName = generateDbName(branchRef);
-      await sql.unsafe(`DROP DATABASE IF EXISTS ${this.identQuote(dbName)}`);
-    } catch (err: unknown) {
-      logger.warn(`[branch] failed to drop database for ${branchRef}`, {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    // Soft-delete the branch project row.
-    await projectRepository.softDelete(branchRef);
+    // 停止或删除失败时保留项目身份，允许重试，不能把软删除误报为资源已清理。
+    await tenantRuntimeService.stopRuntime(branchRef);
+    const dbName = generateDbName(branchRef);
+    await removeProjectDbCache(dbName);
+    await sql.unsafe(`DROP DATABASE IF EXISTS ${this.identQuote(dbName)}`);
+    if (await this.databaseExists(dbName)) throw new Error("BRANCH_DATABASE_DELETION_UNCONFIRMED");
+    if (!await projectRepository.softDelete(branchRef)) throw new Error("BRANCH_PROJECT_DELETION_UNCONFIRMED");
   }
 
   /** Preview callers hold admission and lifecycle locks and verify ownership first. */

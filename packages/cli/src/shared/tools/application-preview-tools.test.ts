@@ -99,10 +99,11 @@ test("preview aliases preserve receipts and classify recovery as an explicit wri
   validateExecutionPolicyCoverage({ app: { schema }, applications: { schema: APPLICATION_TOOL_SCHEMA } });
   const aliases = {
     "preview-plan": "get_preview_plan", preview: "create_preview", previews: "list_previews",
-    "preview-status": "get_preview", "preview-reconcile": "reconcile_preview", "preview-cleanup": "cleanup_preview",
+    "preview-list": "list_previews", "preview-status": "get_preview",
+    "preview-reconcile": "reconcile_preview", "preview-cleanup": "cleanup_preview",
   } as const;
   for (const [alias, action] of Object.entries(aliases)) {
-    const readOnly = ["preview-plan", "previews", "preview-status"].includes(alias);
+    const readOnly = ["preview-plan", "previews", "preview-list", "preview-status"].includes(alias);
     expect(executionMode("app", alias, {})).toBe(readOnly ? "read" : "write");
     expect(executionMode("applications", action, {})).toBe(readOnly ? "read" : "write");
     const receipt = { content: [{ type: "text" as const, text: '{"fixture":true}' }] };
@@ -144,7 +145,8 @@ test("preview creation verifies the source then posts once without claiming read
       : preview(), { status: request.method === "GET" ? 200 : 202 });
   }, async http => {
     const result = await register(http)({
-      action: "create_preview", ...args, release_id: sourceRelease.release_id, configuration_id: configurationId,
+      action: "create_preview", ...args, preview_id: previewId,
+      release_id: sourceRelease.release_id, configuration_id: configurationId,
     });
     expect(output(result)).toMatchObject({
       ok: true, preview: { status: "provisioning", preview_id: previewId, expires_at: preview().expires_at },
@@ -158,7 +160,8 @@ test("preview creation verifies the source then posts once without claiming read
   expect(requests).toEqual([
     { method: "GET", path: `/v1/projects/${ref}/applications/${id}/releases/${sourceRelease.release_id}`, body: null },
     { method: "POST", path: `${path}/previews`, body: {
-      release_id: sourceRelease.release_id, configuration_id: configurationId, data_mode: "schema_only",
+      preview_id: previewId, release_id: sourceRelease.release_id,
+      configuration_id: configurationId, data_mode: "schema_only",
     } },
   ]);
 });
@@ -202,7 +205,8 @@ test("TTL is forwarded to the platform as a plan query or one creation body", as
         return Response.json({ ...preview(), expires_at: expiresAt }, { status: 202 });
       }, async http => {
         const result = await register(http)({
-          action, ...args, release_id: sourceRelease.release_id, ttl_seconds: ttlSeconds,
+          action, ...args, ...(action === "create_preview" ? { preview_id: previewId } : {}),
+          release_id: sourceRelease.release_id, ttl_seconds: ttlSeconds,
           ...(action === "get_preview_plan" ? { branch_ref: "preview-orders" } : { configuration_id: configurationId }),
         });
         expect(output(result)).toMatchObject({ ok: true, preview: { expires_at: expiresAt } });
@@ -247,7 +251,7 @@ test("creation rejects missing, malformed or mismatched expiry without recreatin
       return Response.json({ ...preview(), expires_at: expiresAt }, { status: 202 });
     }, async http => {
       const result = await register(http)({
-        action: "create_preview", ...args, release_id: sourceRelease.release_id,
+        action: "create_preview", ...args, preview_id: previewId, release_id: sourceRelease.release_id,
         configuration_id: configurationId, ttl_seconds: 300,
       });
       expect(output(result)).toMatchObject({ ok: false, error: { code: "OUTCOME_UNKNOWN" } });
@@ -281,7 +285,7 @@ test("wait observes one accepted preview until complete readiness without anothe
     return Response.json(preview(++reads === 1 ? "provisioning" : "ready"));
   }, async http => {
     const result = await register(http)({
-      action: "create_preview", ...args, release_id: sourceRelease.release_id,
+      action: "create_preview", ...args, preview_id: previewId, release_id: sourceRelease.release_id,
       configuration_id: configurationId, wait: true, timeout_seconds: 5,
     });
     expect(output(result)).toMatchObject({
@@ -306,7 +310,7 @@ test("wait timeout preserves the accepted receipt and same-ID continuation witho
     { status: request.method === "POST" ? 202 : 200 });
   }, async http => {
     const result = await register(http)({
-      action: "create_preview", ...args, release_id: sourceRelease.release_id,
+      action: "create_preview", ...args, preview_id: previewId, release_id: sourceRelease.release_id,
       configuration_id: configurationId, wait: true, timeout_seconds: 1,
     });
     expect(result.isError).toBe(true);
@@ -330,7 +334,7 @@ test("wait stops on a provider error without retrying a lifecycle GET or losing 
     return Response.json({ error: "private-provider-secret" }, { status: 503 });
   }, async http => {
     const result = await register(http)({
-      action: "create_preview", ...args, release_id: sourceRelease.release_id,
+      action: "create_preview", ...args, preview_id: previewId, release_id: sourceRelease.release_id,
       configuration_id: configurationId, wait: true, timeout_seconds: 5,
     });
     expect(output(result)).toMatchObject({
@@ -428,7 +432,7 @@ test("slow headers and a stalled observation body share the deadline and preserv
   }, async http => {
     const started = performance.now();
     const result = await register(http)({
-      action: "create_preview", ...args, release_id: sourceRelease.release_id,
+      action: "create_preview", ...args, preview_id: previewId, release_id: sourceRelease.release_id,
       configuration_id: configurationId, wait: true, timeout_seconds: 1,
     });
     expect(performance.now() - started).toBeLessThan(1500);
@@ -465,15 +469,20 @@ test("missing immutable configuration or foreign source release prevents create 
     return Response.json({ project_ref: ref, application_id: id, release: { ...sourceRelease, project_ref: "foreign" } });
   }, async http => {
     const tool = register(http);
-    await expect(tool({ action: "create_preview", ...args, release_id: sourceRelease.release_id })).rejects.toThrow("configuration_id");
-    expect(gets).toBe(0);
     const result = await tool({
-      action: "create_preview", ...args, release_id: sourceRelease.release_id, configuration_id: configurationId,
+      action: "create_preview", ...args, preview_id: previewId, release_id: sourceRelease.release_id,
+      configuration_id: configurationId,
     });
     expect(output(result)).toMatchObject({ ok: false, error: { code: "INVALID_RESPONSE" } });
+    expect(result.isError).toBe(true);
+    expect(gets).toBe(1);
+    const missingConfiguration = await tool({
+      action: "create_preview", ...args, release_id: sourceRelease.release_id, configuration_id: configurationId,
+    });
+    expect(output(missingConfiguration)).toMatchObject({ ok: false, error: { code: "INVALID_RESPONSE" } });
   });
   expect(posts).toBe(0);
-  expect(gets).toBe(1);
+  expect(gets).toBe(2);
 });
 
 test("unknown, foreign, modified or secret-bearing create receipts never trigger a retry", async () => {
@@ -493,12 +502,13 @@ test("unknown, foreign, modified or secret-bearing create receipts never trigger
       return Response.json(candidate, { status: 202 });
     }, async http => {
       const result = await register(http)({
-        action: "create_preview", ...args, release_id: sourceRelease.release_id, configuration_id: configurationId,
+        action: "create_preview", ...args, preview_id: previewId,
+        release_id: sourceRelease.release_id, configuration_id: configurationId,
       });
       expect(result.isError).toBe(true);
       expect(output(result)).toMatchObject({
         error: { code: "OUTCOME_UNKNOWN" }, project_ref: ref,
-        reconciliation: { action: "list_previews", ...args },
+        reconciliation: { action: "get_preview", ...args, preview_id: previewId },
       });
       expect(result.content[0]!.text).not.toContain("private-secret");
     });
@@ -513,8 +523,9 @@ test("transport-failed creation preserves the source scope without exposing prov
     posts++;
     return Response.json({ error: "private-provider-token" }, { status: 503 });
   }, async http => {
-    const result = await register(http)({
-      action: "create_preview", ...args, release_id: sourceRelease.release_id, configuration_id: configurationId,
+      const result = await register(http)({
+        action: "create_preview", ...args, preview_id: previewId,
+        release_id: sourceRelease.release_id, configuration_id: configurationId,
     });
     expect(output(result)).toMatchObject({ error: { code: "OUTCOME_UNKNOWN" }, source_release_id: sourceRelease.release_id });
     expect(result.content[0]!.text).not.toContain("private-provider-token");
@@ -645,27 +656,37 @@ test("preview action help works without credentials and includes scoped flags", 
 }, 30_000);
 
 test("CLI preview recovery respects read-only and production guards before HTTP", async () => {
-  let requests = 0;
-  await withServer(() => { requests++; return Response.json(preview()); }, async (_http, origin) => {
+  const requests: string[] = [];
+  await withServer(request => {
+    requests.push(`${request.method} ${new URL(request.url).pathname}`);
+    return Response.json({
+      project_ref: ref, application_id: id, environment_id: environment, previews: [],
+    });
+  }, async (_http, origin) => {
     const env = { SUPACLOUD_API_URL: origin, SUPACLOUD_API_TOKEN: "fixture-management-token", SUPACLOUD_PROJECT_REF: ref };
-    for (const action of ["preview", "preview-reconcile", "preview-cleanup"]) {
-      const input = [
-        "app", action, "--id", id, "--environment_id", environment,
-        ...(action === "preview" ? ["--release_id", sourceRelease.release_id, "--configuration_id", configurationId] : []),
-        ...(action === "preview-status" || action === "preview-reconcile" || action === "preview-cleanup"
-          ? ["--preview_id", previewId] : []),
-        ...(action === "preview" || action === "preview-status" ? ["--wait", "--timeout_seconds", "1"] : []),
-        ...(action === "preview" ? ["--ttl_seconds", "300"] : []),
-      ];
-      const readOnly = await cli(input, { ...env, SUPACLOUD_READ_ONLY: "true" });
-      expect(readOnly.code, readOnly.output).toBe(1);
-      expect(readOnly.output).toContain("read-only");
-      const production = await cli(input, { ...env, SUPACLOUD_ENV: "production" });
-      expect(production.code, production.output).toBe(1);
-      expect(production.output).toContain(`--confirm-production ${ref}`);
+    const create = ["app", "preview", "--id", id, "--environment_id", environment,
+      "--release_id", sourceRelease.release_id, "--configuration_id", configurationId, "--ttl_seconds", "300"];
+    const protectedEnvironments: Record<string, string>[] = [
+      { SUPACLOUD_READ_ONLY: "true" }, { SUPACLOUD_ENV: "production" },
+    ];
+    for (const variables of protectedEnvironments) {
+      const result = await cli(create, { ...env, ...variables });
+      expect(result.code, result.output).toBe(1);
+      expect(result.output).toContain(variables.SUPACLOUD_READ_ONLY === "true"
+        ? "read-only" : `--confirm-production ${ref}`);
     }
+    for (const action of ["preview-reconcile", "preview-cleanup"]) {
+      const result = await cli(["app", action, "--id", id, "--environment_id", environment,
+        "--preview_id", previewId], { ...env, SUPACLOUD_READ_ONLY: "true" });
+      expect(result.code, result.output).toBe(1);
+      expect(result.output).toContain("read-only");
+    }
+    const reads = await cli(["app", "previews", "--id", id, "--environment_id", environment], {
+      ...env, SUPACLOUD_READ_ONLY: "true",
+    });
+    expect(reads.code, reads.output).toBe(0);
   });
-  expect(requests).toBe(0);
+  expect(requests).toEqual([`GET ${path}/previews`]);
 }, 30_000);
 
 test("CLI read-only preview plan uses the context ref and sends no resource mutation", async () => {
@@ -676,7 +697,7 @@ test("CLI read-only preview plan uses the context ref and sends no resource muta
   }, async (_http, origin) => {
     const result = await cli([
       "app", "preview-plan", "--id", id, "--environment_id", environment,
-      "--release_id", sourceRelease.release_id, "--branch_ref", "preview-orders",
+      "--release_id", sourceRelease.release_id, "--branch_ref", "preview-orders", "--format", "json",
     ], {
       SUPACLOUD_API_URL: origin, SUPACLOUD_API_TOKEN: "fixture-management-token",
       SUPACLOUD_PROJECT_REF: ref, SUPACLOUD_READ_ONLY: "true",
@@ -696,7 +717,7 @@ test("CLI creation wait forwards numeric TTL but keeps wait options local and em
     if (pathname.includes("/releases/")) return Response.json({ project_ref: ref, application_id: id, release: sourceRelease });
     if (request.method === "POST") {
       expect(await request.json()).toEqual({
-        release_id: sourceRelease.release_id, configuration_id: configurationId,
+        preview_id: previewId, release_id: sourceRelease.release_id, configuration_id: configurationId,
         data_mode: "schema_only", ttl_seconds: 300,
       });
       return Response.json({ ...preview(), expires_at: expiresAt }, { status: 202 });
@@ -706,7 +727,7 @@ test("CLI creation wait forwards numeric TTL but keeps wait options local and em
     const result = await cli([
       "app", "preview", "--id", id, "--environment_id", environment,
       "--release_id", sourceRelease.release_id, "--configuration_id", configurationId,
-      "--ttl_seconds", "300", "--wait", "--timeout_seconds", "1",
+      "--ttl_seconds", "300", "--preview_id", previewId, "--wait", "--timeout_seconds", "1",
     ], {
       SUPACLOUD_API_URL: origin, SUPACLOUD_API_TOKEN: "fixture-management-token", SUPACLOUD_PROJECT_REF: ref,
     });

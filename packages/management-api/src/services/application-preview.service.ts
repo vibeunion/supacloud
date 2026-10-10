@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { applicationPreviewBranchRef, applicationReleaseId } from "@supacloud/delivery";
 import { branchService } from "./branch.service";
 import { pgmqService } from "./pgmq.service";
 import { projectService } from "./project.service";
@@ -48,7 +49,7 @@ function previewId(value: string): boolean {
 }
 
 function branchRefFor(preview: string): string {
-  return `pv${preview.replace(/-/g, "").slice(0, 18)}`;
+  return applicationPreviewBranchRef(preview);
 }
 
 function queueNameFor(preview: string): string {
@@ -71,6 +72,7 @@ function storedReceipt(
     queue_name: input.queueName,
     test_secret_name: input.testSecretName,
     source_configuration_id: input.sourceConfigurationId,
+    expires_at: receipt.expires_at ?? null,
     created_at: input.now,
     updated_at: input.now,
   };
@@ -175,6 +177,7 @@ export class ApplicationPreviewService {
     applicationId: string;
     environmentId: string;
     releaseId: string;
+    previewId?: string;
     configurationId?: string;
     branchName?: string;
     dataMode?: PreviewDataMode;
@@ -187,27 +190,35 @@ export class ApplicationPreviewService {
       throw new Error("APPLICATION_PREVIEW_TTL_INVALID");
     }
     const sourceRelease = await this.dependencies.releases.readRelease(input.projectRef, input.applicationId, input.releaseId);
+    const id = input.previewId ?? randomUUID();
+    if (!previewId(id)) throw new Error("APPLICATION_PREVIEW_ID_INVALID");
+    const branchRef = branchRefFor(id);
+    const queueName = queueNameFor(id);
+    const testSecretName = secretNameFor(id);
     const sourceConfigurationId = input.configurationId ?? (await this.dependencies.configurations?.read({
       projectRef: input.projectRef, applicationId: input.applicationId, environmentId: input.environmentId,
     }))?.configuration_id ?? null;
-    const id = randomUUID();
-    const branchRef = branchRefFor(id);
-    const release = await this.dependencies.releases.materializeRelease(
-      input.projectRef, input.applicationId, sourceRelease.release_id, branchRef,
-    );
-    if (release.project_ref !== branchRef || release.application_id !== input.applicationId
-      || release.manifest_sha256 !== sourceRelease.manifest_sha256) {
-      throw new Error("APPLICATION_PREVIEW_RELEASE_IDENTITY_MISMATCH");
+    const candidateReleaseId = applicationReleaseId(branchRef, input.applicationId, sourceRelease.manifest_sha256);
+    const existing = await this.read(input.projectRef, id);
+    const matchesRequest = (receipt: StoredApplicationPreview) =>
+      receipt.project_ref === input.projectRef && receipt.application_id === input.applicationId
+      && receipt.environment_id === input.environmentId
+      && receipt.release_id === candidateReleaseId
+      && receipt.source_configuration_id === sourceConfigurationId
+      && receipt.resources.database_branch.branch_ref === branchRef
+      && receipt.resources.database_branch.data_mode === (input.dataMode ?? "schema_only")
+      && receipt.branch_name === (input.branchName?.trim() || `app-${input.applicationId}-${id.slice(0, 8)}`);
+    if (existing) {
+      if (!matchesRequest(existing)) throw new ApplicationPreviewConflictError();
+      return existing;
     }
-    const queueName = queueNameFor(id);
-    const testSecretName = secretNameFor(id);
     const receipt = storedReceipt(
       buildApplicationPreviewReceipt({
         previewId: id,
         projectRef: input.projectRef,
         applicationId: input.applicationId,
         environmentId: input.environmentId,
-        releaseId: release.release_id,
+        releaseId: candidateReleaseId,
         branchRef,
         dataMode: input.dataMode ?? "schema_only",
         expiresAt: new Date(now + ttlSeconds * 1000).toISOString(),
@@ -220,8 +231,18 @@ export class ApplicationPreviewService {
         now: new Date(now).toISOString(),
       },
     );
+    receipt.source_release_id = sourceRelease.release_id;
+    receipt.source_manifest_sha256 = sourceRelease.manifest_sha256;
+    receipt.resources.build_artifact.status = "pending";
     receipt.status = "provisioning";
-    await this.save(input.projectRef, receipt, true);
+    try {
+      await this.save(input.projectRef, receipt, true);
+    } catch (error) {
+      if (!(error instanceof ApplicationPreviewConflictError)) throw error;
+      const winner = await this.read(input.projectRef, id);
+      if (!winner || !matchesRequest(winner)) throw error;
+      return winner;
+    }
     this.startProvisioning(input.projectRef, receipt);
     return receipt;
   }
@@ -234,8 +255,10 @@ export class ApplicationPreviewService {
     return this.dependencies.lifecycle(projectRef, previewId, async () => {
       const current = await this.read(projectRef, previewId);
       if (!current || current.status === "cleaned") return current;
-      if (options.automatic && (current.expires_at === null || !Number.isFinite(Date.parse(current.expires_at))
-        || Date.parse(current.expires_at) > this.dependencies.now())) return current;
+      const expiresAt = current.expires_at;
+      if (options.automatic && (expiresAt === null || expiresAt === undefined
+        || !Number.isFinite(Date.parse(expiresAt))
+        || Date.parse(expiresAt) > this.dependencies.now())) return current;
       return this.dependencies.branchLifecycle(current.resources.database_branch.branch_ref,
         () => this.cleanupUnderLock(projectRef, current, options.automatic === true));
     });
@@ -331,6 +354,20 @@ export class ApplicationPreviewService {
     const receipt = structuredClone(initial);
     const branchRef = receipt.resources.database_branch.branch_ref;
     try {
+      if (receipt.resources.build_artifact.status !== "ready") {
+        if (!receipt.source_release_id || !receipt.source_manifest_sha256) {
+          throw new Error("APPLICATION_PREVIEW_RELEASE_SOURCE_REQUIRED");
+        }
+        const release = await this.dependencies.releases.materializeRelease(
+          projectRef, receipt.application_id, receipt.source_release_id, branchRef,
+        );
+        if (release.project_ref !== branchRef || release.application_id !== receipt.application_id
+          || release.manifest_sha256 !== receipt.source_manifest_sha256 || release.release_id !== receipt.release_id) {
+          throw new Error("APPLICATION_PREVIEW_RELEASE_IDENTITY_MISMATCH");
+        }
+        receipt.resources.build_artifact.status = "ready";
+        await this.save(projectRef, receipt);
+      }
       const existingBranch = await this.dependencies.projects.findByRef(branchRef);
       if (!existingBranch || existingBranch.ref !== branchRef) {
         await this.dependencies.branches.createBranch({
@@ -338,6 +375,7 @@ export class ApplicationPreviewService {
           branchRef,
           name: receipt.branch_name,
           dataMode: receipt.resources.database_branch.data_mode,
+          previewId: receipt.preview_id,
         });
       } else if (existingBranch.config?.["parent_ref"] !== projectRef) {
         throw new Error("APPLICATION_PREVIEW_BRANCH_IDENTITY_CONFLICT");

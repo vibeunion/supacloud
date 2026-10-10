@@ -59,6 +59,7 @@ jobs:
         run: bun run --cwd packages/cli prepare:db
       - name: Validate deployment evidence and platform routes
         run: |
+          bun run --cwd packages/cli prepare:db
           bun test packages/delivery/src/deployment-evidence.test.ts
           bun test packages/management-api/tests/unit/application-runtime.routes.test.ts
           bun test packages/management-api/tests/unit/mcp-developer-surface.test.ts
@@ -67,6 +68,11 @@ jobs:
           bun test packages/cli/src/shared/tools/application-tools.test.ts
           bun test packages/cli/src/shared/tools/application-promotion.test.ts
           bun test packages/management-api/tests/unit/application-promotion.test.ts
+          bun test packages/cli/src/shared/tools/application-preview.test.ts
+          bun test packages/management-api/tests/unit/application-preview.service.test.ts
+          bun test packages/management-api/tests/unit/application-preview.routes.test.ts
+          bun test packages/management-api/tests/unit/branch-deletion.test.ts
+          bun run --cwd packages/management-api tsc --project tsconfig.application-preview-tests.json
       - name: Typecheck changed platform packages
         run: |
           bun run --cwd packages/delivery typecheck

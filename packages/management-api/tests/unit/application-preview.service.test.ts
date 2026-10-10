@@ -339,8 +339,12 @@ test("a foreign artifact cannot be accepted as the branch release or start provi
     },
     branches: { createBranch: async () => { started = true; }, deleteBranch: async () => {} },
   });
-  await expect(service.create({ projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64) }))
-    .rejects.toThrow("APPLICATION_PREVIEW_RELEASE_IDENTITY_MISMATCH");
+  const created = await service.create({
+    projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64),
+  });
+  const receipt = await service.reconcile("demo", created.preview_id);
+  expect(receipt?.status).toBe("failed");
+  expect(receipt?.resources.smoke_test.failed).toContain("provisioning");
   expect(started).toBe(false);
 });
 

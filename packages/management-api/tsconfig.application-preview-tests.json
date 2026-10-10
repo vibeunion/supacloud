@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "types": ["bun"],
+    "noEmit": true
+  },
+  "include": [
+    "src/types/*.d.ts",
+    "tests/unit/application-preview-contract.test.ts",
+    "tests/unit/application-preview.service.test.ts",
+    "tests/unit/application-preview.routes.test.ts",
+    "tests/unit/branch-deletion.test.ts"
+  ]
+}
