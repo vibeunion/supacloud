@@ -10,4 +10,12 @@ export {
     withDescription,
     type ToolArguments,
     type ToolSchema,
-} from "@supacloud/cli/tool-runtime";
+} from "./shared/schema.js";
+export {
+    registerTool,
+    type ToolCallback,
+    type ToolInvocation,
+    type ToolResult,
+    type ToolServer,
+    type ToolTextContent,
+} from "./shared/tool-server.js";

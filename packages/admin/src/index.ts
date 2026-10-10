@@ -14,9 +14,7 @@ import { registerAdvancedTools } from "./shared/tools/advanced-tools";
 import { registerAdminProjectCliTools } from "./shared/tools/project-cli-tools";
 import { registerGatewayTools } from "./shared/tools/gateway-tools";
 import { registerFrontendTools } from "./shared/tools/frontend-tools";
-import type { ToolInvocation, ToolServer } from "../../cli/src/shared/tool-server";
-import { parseToolArguments } from "../../cli/src/shared/schema";
-import type { ToolSchema } from "../../cli/src/shared/schema";
+import { parseToolArguments, type ToolInvocation, type ToolServer, type ToolSchema } from "@supacloud/cli/tool-runtime";
 import packageMetadata from "../package.json" with { type: "json" };
 
 type ToolEntry = { schema: ToolSchema; callback: ToolInvocation };

@@ -2,8 +2,14 @@
 
 Project-scoped CLI for SupaCloud users.
 
-This package exposes only `supacloud-cli`. The bare `supacloud` name is reserved
+The only command-line executable is `supacloud-cli`. The bare `supacloud` name is reserved
 for the compiled server binary installed at `/usr/local/bin/supacloud`.
+
+Tool adapters import `@supacloud/cli/tool-runtime` for typed registration and
+schema decoding. This side-effect-free entrypoint does not initialize the CLI.
+Registration accepts unknown boundary input, decodes it before invoking the
+typed callback, and validates the callback's result. Private `src/shared` imports
+are not supported.
 
 ## Application Starter
 

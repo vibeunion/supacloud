@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
-import { registerTool, type ToolServer } from "../../../../cli/src/shared/tool-server";
+import { registerTool, type ToolServer } from "@supacloud/cli/tool-runtime";
 import type { HttpResult, HttpTransport } from "../transports/http";
 import {
     discardPreparedProjectEnvFile,

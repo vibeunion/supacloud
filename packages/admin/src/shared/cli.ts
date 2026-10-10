@@ -7,7 +7,7 @@ import {
 } from "./schema";
 import type { ToolSchema } from "./schema";
 import { redactSshOutput } from "./transports/ssh";
-import type { ToolInvocation } from "../../../cli/src/shared/tool-server";
+import type { ToolInvocation } from "@supacloud/cli/tool-runtime";
 
 interface CliRunOptions {
     commandName?: string;

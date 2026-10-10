@@ -7,7 +7,7 @@ import { randomUUID } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 import { TextDecoder } from "node:util";
 import { Type } from "typebox";
-import { registerTool, type ToolServer } from "../../../../cli/src/shared/tool-server";
+import { registerTool, type ToolServer } from "@supacloud/cli/tool-runtime";
 import { decodedSchema, optional, stringEnum, withDescription } from "../schema";
 import { redactSshOutput, SshCommandOutcomeUnknownError, type SshTransport } from "../transports/ssh";
 import {

@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { HttpTransport } from "../transports/http";
-import { registerTool, type ToolServer } from "../../../../cli/src/shared/tool-server";
+import { registerTool, type ToolServer } from "@supacloud/cli/tool-runtime";
 import {
     activateFrontendRelease,
     getActiveFrontendRelease,

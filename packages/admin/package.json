@@ -15,8 +15,10 @@
   ],
   "scripts": {
     "dev": "bun run --watch src/index.ts",
+    "prebuild": "bun run --cwd ../cli build:tool-runtime",
     "build": "bun build src/index.ts --outdir dist --target node --external cpu-features",
     "prepublishOnly": "bun run build",
+    "pretypecheck": "bun run --cwd ../cli build:tool-runtime",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
