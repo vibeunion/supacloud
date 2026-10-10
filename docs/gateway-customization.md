@@ -283,12 +283,12 @@ curl -X PUT "$HOST/v1/projects/$REF/gateway/custom-rate-limits" \
 
 ## 与多域名 / CORS 的组合
 
-SupaCloud 会自动为每个项目生成多个域名：API 主域（`<ref>.<base_domain>`）、Auth 域、Studio 域，并为这些域名构建租户级 CORS origins（`buildTenantCorsOrigins`）。自定义路由与这套自动 CORS 体系是**正交**的：
+SupaCloud 会自动为每个项目生成多个域名：API 主域（`<ref>.<base_domain>`）、Auth 域、Studio 域，并为这些域名构建租户级 CORS origins（`buildTenantCorsOrigins`）。默认情况下，Functions 也使用这套自动来源集合；集合还包含项目配置中的 IP、自定义域名和已绑定前端域名，并在租户 reconcile 时重新生成。自定义路由与这套自动 CORS 体系是**正交**的：
 
 - 自定义路由的 `cors` 字段只作用于该路由本身，不会影响系统路由的 CORS。
   项目级 CORS 更新、前端部署和共享认证入口重建均保留该策略；
   未配置 `cors` 的自定义路由也不会自动继承项目的来源列表。
-- `gateway/config` 的 `cors_origins` 更新网关管理的系统路由 CORS；Functions 仅更新错误兜底来源，Storage 仍保留上游策略。
+- `gateway/config` 的 `cors_origins` 更新网关管理的系统路由 CORS；Functions 在 `EDGE_FUNCTIONS_CORS_MODE=auto` 下也使用该精确来源集合，`function` 模式仅更新错误兜底来源，Storage 仍保留上游策略。
 - `addCorsOriginsForHosts`（内部接口）会把自定义域名并入租户 CORS 计算，用于绑定自定义前端域名时。
 
 因此推荐做法：
@@ -299,10 +299,12 @@ SupaCloud 会自动为每个项目生成多个域名：API 主域（`<ref>.<base
 
 ### Functions 错误兜底
 
-系统 `/functions/v1*` 的 OPTIONS、正常响应和 4xx 仍由函数负责。只对配置允许的
-Origin，网关为缺少 `Access-Control-Allow-Origin` 的 HTTP 5xx 补充 CORS，保留原状态码、
-响应体和已有 `Vary`；已有该头的响应不覆盖。代理连接失败或超时则返回原错误状态码和
-通用 `FUNCTION_GATEWAY_ERROR` JSON，不向客户端暴露内部异常。
+默认 `EDGE_FUNCTIONS_CORS_MODE=auto` 时，系统 `/functions/v1*` 的 OPTIONS、正常响应和
+错误响应都由网关根据项目来源集合处理，函数不需要重复声明平台域名。设置为
+`function` 时才恢复函数自管：网关只对配置允许的 Origin，为缺少
+`Access-Control-Allow-Origin` 的 HTTP 5xx 补充 CORS，保留原状态码、响应体和已有
+`Vary`；已有该头的响应不覆盖。代理连接失败或超时则返回原错误状态码和通用
+`FUNCTION_GATEWAY_ERROR` JSON，不向客户端暴露内部异常。
 
 这让浏览器能读取真实失败，并不解决 Edge Runtime 超时本身。直接绕过 Caddy 调用
 Runtime 不受此修复覆盖；函数内的 OPTIONS、401/404 等分支仍须统一设置 CORS。

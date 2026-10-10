@@ -286,18 +286,24 @@ describe("GatewayService provider selection", () => {
         });
     });
 
-    test("function CORS reconciliation replaces the fallback without taking over preflight", () => {
+    test("function CORS reconciliation replaces the fallback in function-owned mode", () => {
+        const originalCorsMode = config.edgeFunctionsCorsMode;
+        config.edgeFunctionsCorsMode = "function";
         const proxy = { handler: "reverse_proxy", upstreams: [{ dial: "127.0.0.1:9090" }] };
-        const route: CaddyRoute = {
-            "@id": "route-project-testref-functions",
-            handle: [makeFunctionCorsErrorFallback(["https://old.example.com"]), proxy],
-        };
-        setRouteCors(route, ["https://new.example.com"]);
-        setRouteCors(route, ["https://new.example.com"]);
-        expect(route.handle).toEqual([makeFunctionCorsErrorFallback(["https://new.example.com"]), proxy]);
-        const custom: CaddyRoute = { "@id": "route-custom-gateway-testref-public", handle: [proxy] };
-        setRouteCors(custom, ["*"]);
-        expect(custom.handle).toEqual([proxy]);
+        try {
+            const route: CaddyRoute = {
+                "@id": "route-project-testref-functions",
+                handle: [makeFunctionCorsErrorFallback(["https://old.example.com"]), proxy],
+            };
+            setRouteCors(route, ["https://new.example.com"]);
+            setRouteCors(route, ["https://new.example.com"]);
+            expect(route.handle).toEqual([makeFunctionCorsErrorFallback(["https://new.example.com"]), proxy]);
+            const custom: CaddyRoute = { "@id": "route-custom-gateway-testref-public", handle: [proxy] };
+            setRouteCors(custom, ["*"]);
+            expect(custom.handle).toEqual([proxy]);
+        } finally {
+            config.edgeFunctionsCorsMode = originalCorsMode;
+        }
     });
     test("defaults to the Caddy gateway provider", () => {
         expect(config.gatewayProvider).toBe("caddy");
@@ -365,17 +371,27 @@ describe("GatewayService provider selection", () => {
     });
 
     test("tenant cors origins include exact api and studio custom domains", () => {
-        const origins = buildTenantCorsOrigins("dbbabyref", {
-            api_domain: "sapi.dbbaby.top",
-            additional_api_domains: ["api-alt.dbbaby.top"],
-            auth_domain: "auth.dbbaby.top",
-            studio_domain: "sadmin.dbbaby.top",
-        });
+        const originalDockerHostIp = config.dockerHostIp;
+        config.dockerHostIp = "192.0.2.50";
+        try {
+            const origins = buildTenantCorsOrigins("sampleproject", {
+                api_domain: "api.example.com",
+                additional_api_domains: ["api-alt.example.com"],
+                auth_domain: "auth.example.com",
+                studio_domain: "studio.example.com",
+                custom_domain: "app.example.com",
+            });
 
-        expect(origins).toContain("https://sapi.dbbaby.top");
-        expect(origins).toContain("https://api-alt.dbbaby.top");
-        expect(origins).toContain("https://auth.dbbaby.top");
-        expect(origins).toContain("https://sadmin.dbbaby.top");
+            expect(origins).toContain("https://api.example.com");
+            expect(origins).toContain("https://api-alt.example.com");
+            expect(origins).toContain("https://auth.example.com");
+            expect(origins).toContain("https://studio.example.com");
+            expect(origins).toContain("https://app.example.com");
+            expect(origins).toContain("http://192.0.2.50");
+            expect(origins).toContain("https://192.0.2.50");
+        } finally {
+            config.dockerHostIp = originalDockerHostIp;
+        }
     });
 
     test("shared auth owner routes include dependent frontend origins", async () => {
@@ -391,7 +407,7 @@ describe("GatewayService provider selection", () => {
                 await provider.configureFrontendRoute({
                     projectRef: "dependent-project",
                     deploymentId: "fa-web",
-                    hosts: ["fa.xai.xigu.team"],
+                    hosts: ["fa.example.com"],
                     mode: "static",
                     root: "/srv/fa-web",
                 });
@@ -399,7 +415,7 @@ describe("GatewayService provider selection", () => {
                 const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
                 const ownerAuthRoute = routes.find((route: any) => String(route?.match?.[0]?.path ?? "").includes("/auth/v1"));
                 const serialized = JSON.stringify(ownerAuthRoute);
-                expect(serialized).toContain("fa.xai.xigu.team");
+                expect(serialized).toContain("fa.example.com");
             } finally {
                 restore();
             }
@@ -511,8 +527,7 @@ describe("CaddyGatewayProvider", () => {
         for (const handler of reverseProxyHandlers) {
             const routeId = findRouteIdForHandler(routes, handler);
             const preservesUpstreamCors = routeId?.endsWith("-storage")
-                || routeId?.endsWith("-storage-resumable")
-                || routeId?.endsWith("-functions");
+                || routeId?.endsWith("-storage-resumable");
             if (preservesUpstreamCors) {
                 expect(handler.headers?.response?.delete).toBeUndefined();
             } else {
@@ -534,12 +549,10 @@ describe("CaddyGatewayProvider", () => {
         const restProxy = rest?.handle?.find((h: any) => h.handler === "reverse_proxy");
         expect(restProxy?.flush_interval).toBe(-1);
         expect(functions?.match?.[0]?.path).toEqual(["/functions/v1*"]);
-        expect(findCorsSubroute(functions)).toBeUndefined();
-        expect(functions?.handle?.[0]?.handler).toBe("subroute");
-        expect(functions?.handle?.[0]?.errors?.routes?.[0]?.handle?.[0]?.response?.set?.["Access-Control-Allow-Origin"])
-            .toEqual(["{http.request.header.Origin}"]);
+        expect(findCorsSubroute(functions)).toBeDefined();
+        expect(functions?.handle?.[0]?.errors).toBeUndefined();
         const functionsProxy = functions?.handle?.find((h: any) => h.handler === "reverse_proxy");
-        expect(functionsProxy?.headers?.response).toBeUndefined();
+        expect(functionsProxy?.headers?.response?.delete).toContain("Access-Control-Allow-Origin");
         expect(realtime?.match?.[0]?.path).toEqual(["/realtime/v1/websocket*"]);
         expect(management?.match?.[0]?.path).toEqual(["/v1/projects/testref123", "/v1/projects/testref123/*"]);
         const appMcp = routes.find((route: { "@id"?: string }) => route["@id"] === "route-project-testref123-app-mcp");
@@ -864,10 +877,10 @@ describe("CaddyGatewayProvider", () => {
         expect(exactMatcher?.header?.Origin).toContain("https://site.example.com");
         expect(exactMatcher?.header?.Origin).toContain("https://www.example.com");
         expect(exactMatcher?.header?.Origin).toContain("https://api.example.com");
-        // The functions route owns its upstream CORS policy and never carries a
-        // gateway-rendered CORS subroute.
+        // The default auto mode renders the same exact-origin CORS policy for
+        // Functions as for the other tenant API routes.
         const functionsRoute = routes.find((item: any) => item["@id"] === "route-project-proj123-functions");
-        expect(findCorsSubroute(functionsRoute)).toBeUndefined();
+        expect(findCorsSubroute(functionsRoute)).toBeDefined();
 
         restore();
     });
@@ -933,10 +946,11 @@ describe("CaddyGatewayProvider", () => {
         const exactMatcher = corsSubroute?.routes?.[0]?.match?.find((matcher: any) => matcher.header?.Origin);
         expect(exactMatcher?.header?.Origin).toContain("https://app.example.com");
         expect(exactMatcher?.header?.Origin).toContain("https://api.example.com");
-        // Functions keep their upstream-owned CORS policy instead of the
-        // gateway-rendered subroute.
+        // Frontend binding updates the Functions route's derived origins too.
         const functionsRoute = routes.find((item: any) => item["@id"] === "route-project-proj123-functions");
-        expect(findCorsSubroute(functionsRoute)).toBeUndefined();
+        const functionsCors = findCorsSubroute(functionsRoute);
+        const functionsMatcher = functionsCors?.routes?.[0]?.match?.find((matcher) => matcher.header?.Origin);
+        expect(functionsMatcher?.header?.Origin).toContain("https://app.example.com");
 
         restore();
     });
@@ -1651,7 +1665,7 @@ describe("CaddyGatewayProvider", () => {
                 id: "ocr",
                 hosts: ["ocr.example.com"],
                 path: "/api/*",
-                upstream: "https://10.20.0.12:4001",
+                upstream: "https://192.0.2.12:4001",
                 upstream_tls_insecure_skip_verify: true,
                 rewrite_uri: "/functions/v1/supauth{http.request.uri.path}",
                 headers: { "X-Custom-Upstream": "ocr" },
@@ -1691,7 +1705,7 @@ describe("CaddyGatewayProvider", () => {
         expect(ocr?.match?.[0]?.path).toEqual(["/api/*"]);
         expect(corsSubroute?.routes?.[0]?.match?.[0]?.header?.Origin).toContain("https://app.example.com");
         expect(rewrite?.uri).toBe("/functions/v1/supauth{http.request.uri.path}");
-        expect(proxy?.upstreams?.[0]?.dial).toBe("10.20.0.12:4001");
+        expect(proxy?.upstreams?.[0]?.dial).toBe("192.0.2.12:4001");
         expect(proxy?.transport?.tls).toEqual({ insecure_skip_verify: true });
         // Caddy 2.11 rewrites Host for HTTPS upstreams unless the route sets it.
         expect(proxy?.headers?.request?.set?.Host).toEqual(["{http.request.host}"]);
@@ -2672,7 +2686,7 @@ describe("CaddyGatewayProvider route headers", () => {
         restore();
     });
 
-    test("hydrates legacy functions routes into upstream-owned CORS", async () => {
+    test("hydrates legacy functions routes into automatic gateway CORS", async () => {
         await mkdir("/tmp/supacloud-caddy-test", { recursive: true });
         await writeFile("/tmp/supacloud-caddy-test/config.json", JSON.stringify({
             apps: {
@@ -2732,10 +2746,9 @@ describe("CaddyGatewayProvider route headers", () => {
         const routes = load?.body?.apps?.http?.servers?.supacloud?.routes ?? [];
         const functions = routes.find((route: any) => route["@id"] === "route-project-legacyfn2-functions");
         expect(functions).toBeDefined();
-        // Gateway CORS subroute is stripped and never re-attached by setCors.
-        expect(findCorsSubroute(functions)).toBeUndefined();
+        expect(findCorsSubroute(functions)).toBeDefined();
         const functionsProxy = functions?.handle?.find((h: any) => h.handler === "reverse_proxy");
-        expect(functionsProxy?.headers?.response).toBeUndefined();
+        expect(functionsProxy?.headers?.response?.delete).toContain("Access-Control-Allow-Origin");
         expect(functionsProxy?.headers?.request?.set?.["X-Project-Ref"]).toEqual(["legacyfn2"]);
 
         restore();
