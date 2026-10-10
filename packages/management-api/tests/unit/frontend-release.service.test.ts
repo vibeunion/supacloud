@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { createFrontendTarZstd } from "@supacloud/delivery/frontend-archive";
 import {
   FrontendReleaseError,
   FrontendReleaseService,
@@ -313,13 +314,9 @@ async function createFixtureRelease(service: FrontendReleaseService, source: Fix
 }
 
 async function archiveBytes(root: string, content: string): Promise<Uint8Array> {
-  const source = join(root, "source");
-  const archive = join(root, "site.zip");
-  await mkdir(source, { mode: 0o700 });
-  await writeFile(join(source, "index.html"), content);
-  const zipped = await Bun.$`zip -q -X ${archive} index.html`.cwd(source).nothrow();
-  if (zipped.exitCode !== 0) throw new Error("zip fixture failed");
-  return new Uint8Array(await readFile(archive));
+  const archive = await createFrontendTarZstd(new Map([["index.html", new TextEncoder().encode(content)]]));
+  await writeFile(join(root, "site.tar.zst"), archive);
+  return archive;
 }
 
 async function fixture(
@@ -825,6 +822,39 @@ describe.skipIf(process.platform !== "linux")("FrontendReleaseService", () => {
     await expect(prepared.service.listReleases(PROJECT_REF, DEPLOYMENT_ID)).rejects.toBeInstanceOf(FrontendReleaseError);
   });
 
+  test("rejects retained v1 metadata without rewriting authority, journal or artifacts", async () => {
+    const prepared = await fixture();
+    await createFixtureRelease(prepared.service, prepared);
+    await prepared.service.activateRelease(activation(prepared));
+    const deploymentRoot = join(prepared.root, PROJECT_REF, DEPLOYMENT_ID);
+    const releaseRoot = join(deploymentRoot, "releases", prepared.sha256);
+    const metadataPath = join(releaseRoot, "release.json");
+    const release = await Bun.file(metadataPath).json() as Record<string, unknown>;
+    const { archive_format: _format, ...fields } = release;
+    const legacy = `${JSON.stringify({ ...fields, schema: "supacloud.frontend-release.v1" })}\n`;
+    await chmod(metadataPath, 0o644);
+    await Bun.write(metadataPath, legacy);
+    const authorityPath = join(deploymentRoot, "active-release.json");
+    const authority = await Bun.file(authorityPath).text();
+    const journal = JSON.stringify([...prepared.mutations.mutations]);
+    const route = prepared.gateway.root;
+    const writes = prepared.gateway.writeCalls;
+
+    await expect(prepared.service.activeReleaseSnapshot(PROJECT_REF, DEPLOYMENT_ID))
+      .rejects.toBeInstanceOf(FrontendReleaseError);
+    await expect(prepared.service.activateRelease(activation(prepared, {
+      mutationId: SECOND_MUTATION_ID,
+      expectedActiveReleaseId: prepared.sha256,
+      expectedActivationId: MUTATION_ID,
+    }))).rejects.toBeInstanceOf(FrontendReleaseError);
+    expect(await Bun.file(metadataPath).text()).toBe(legacy);
+    expect(await Bun.file(authorityPath).text()).toBe(authority);
+    expect(new Uint8Array(await Bun.file(join(releaseRoot, "archive.tar.zst")).arrayBuffer())).toEqual(prepared.archive);
+    expect(JSON.stringify([...prepared.mutations.mutations])).toBe(journal);
+    expect(prepared.gateway.root).toBe(route);
+    expect(prepared.gateway.writeCalls).toBe(writes);
+  });
+
   test("rejects split active authority before inventory, build lookup, or Gateway mutation", async () => {
     const prepared = await fixture();
     await createFixtureRelease(prepared.service, prepared);
@@ -898,7 +928,7 @@ describe.skipIf(process.platform !== "linux")("FrontendReleaseService", () => {
     const stagingRoot = join(prepared.root, PROJECT_REF, DEPLOYMENT_ID, "releases", ".staging");
     const [sessionName] = await readdir(stagingRoot);
     if (!sessionName) throw new Error("Missing staged archive session");
-    const archivePath = join(stagingRoot, sessionName, "archive.zip");
+    const archivePath = join(stagingRoot, sessionName, "archive.tar.zst");
     await rename(archivePath, `${archivePath}.moved`);
     await writeFile(archivePath, "attacker-controlled");
 

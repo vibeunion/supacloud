@@ -134,7 +134,7 @@ EXAMPLES
   supacloud-admin gateway config --ref abc123 --rate_limit_tier pro
   supacloud-admin gateway rebuild --ref abc123 --clean
   supacloud-admin frontend list_releases --ref abc123 --id web
-  supacloud-admin frontend upload_release --ref abc123 --id web --zip_path /secure/site.zip
+  supacloud-admin frontend upload_release --ref abc123 --id web --archive_path /secure/site.tar.zst
   supacloud-admin frontend activate_release --ref abc123 --id web --release_id <sha256> --expected_active_release_id absent --expected_activation_id absent --mutation_id <uuid-v4>
 `);
 }

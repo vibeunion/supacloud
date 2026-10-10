@@ -64,7 +64,7 @@ npx @supacloud/admin --env production ssh upgrade \
   --confirm-production host:production.example.com:2201
 ```
 
-Immutable prebuilt frontend releases use a content-addressed ZIP and an explicit
+Immutable prebuilt frontend releases use a content-addressed tar.zst archive and an explicit
 compare-and-swap activation. Upload and activation are separate writes, and
 production requires the exact project ref confirmation:
 
@@ -73,7 +73,7 @@ supacloud-admin frontend list_releases --ref abc123 --id web
 supacloud-admin frontend get_active_release --ref abc123 --id web
 supacloud-admin frontend get_release --ref abc123 --id web --release_id <sha256>
 supacloud-admin frontend upload_release --ref abc123 --id web \
-  --zip_path /secure/site.zip --confirm-production abc123
+  --archive_path /secure/site.tar.zst --confirm-production abc123
 supacloud-admin frontend activate_release --ref abc123 --id web \
   --release_id <sha256> --expected_active_release_id absent \
   --expected_activation_id absent --mutation_id <uuid-v4> \

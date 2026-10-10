@@ -4,7 +4,6 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { unzipSync } from "fflate";
 import { createFrontendArchive } from "./deploy-tools";
 
 const CLI_ENTRYPOINT = fileURLToPath(new URL("../../index.ts", import.meta.url));
@@ -20,16 +19,17 @@ afterEach(async () => {
 
 function release(projectRef: string, deploymentId: string, releaseId: string) {
     return {
-        schema: "supacloud.frontend-release.v1",
+        schema: "supacloud.frontend-release.v2",
         project_ref: projectRef,
         deployment_id: deploymentId,
         release_id: releaseId,
         sha256: releaseId,
-        tree_sha256: "b".repeat(64),
+        tree_sha256: "dc8451fa5e9f82057e51c9cbf6848589753ece913961c1d8c57d5945c1376d47",
         size_bytes: 128,
         file_count: 2,
         created_at: "2026-09-02T08:00:00.000Z",
         kind: "prebuilt_static",
+        archive_format: "tar.zst",
     };
 }
 
@@ -57,7 +57,7 @@ async function runCli(
     directory: string,
     apiUrl: string,
     args: string[],
-    options: { injectContext?: boolean } = {},
+    options: { injectContext?: boolean; env?: Record<string, string> } = {},
 ) {
     const environment: Record<string, string | undefined> = { ...process.env };
     if (options.injectContext === false) {
@@ -72,6 +72,7 @@ async function runCli(
             SUPACLOUD_ENV: "test",
         });
     }
+    Object.assign(environment, options.env);
     const child = Bun.spawn([process.execPath, CLI_ENTRYPOINT, ...args], {
         cwd: directory,
         env: environment,
@@ -87,6 +88,208 @@ async function runCli(
 }
 
 describe("one-command deploy", () => {
+    test.each(["plan", "diff"])("%s compares a built release without writes in read-only production", async (flag) => {
+        const directory = await workspace();
+        const archive = await createFrontendArchive(join(directory, "dist"));
+        const { sha256, treeSha256 } = archive;
+        await archive.cleanup();
+        const requests: string[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1", port: 0,
+            fetch(request) {
+                const path = new URL(request.url).pathname;
+                requests.push(`${request.method} ${path}`);
+                if (path.endsWith("/deployments")) return Response.json([deployment()]);
+                if (path.endsWith("/active-release")) return Response.json({
+                    project_ref: "abc123", deployment_id: "web",
+                    active_release_id: null, active_activation_id: null, releases: [], next_cursor: null,
+                });
+                return new Response("not found", { status: 404 });
+            },
+        });
+        servers.push(server);
+        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, [
+            "deploy", `--${flag}`, "--skip_build", "--json",
+        ], { env: { SUPACLOUD_ENV: "production", SUPACLOUD_READ_ONLY: "true" } });
+        expect(response.exitCode).toBe(0);
+        expect(JSON.parse(response.stdout)).toMatchObject({
+            schema: "supacloud.frontend-deploy-plan.v1",
+            planned: true, published: false, unchanged: false, environment: "production",
+            comparison: "immutable_release", release_id: sha256, tree_sha256: treeSha256,
+            expected_active_release_id: "absent", expected_activation_id: "absent",
+            actions: ["upload_release", "activate_release"],
+        });
+        expect(requests).toEqual([
+            "GET /v1/projects/abc123/frontend/deployments",
+            "GET /v1/projects/abc123/frontend/deployments/web/active-release",
+        ]);
+    });
+
+    test.each([true, false])("content-equivalent trees skip writes despite different archive identities (plan: %s)", async (plan) => {
+        const directory = await workspace();
+        const archive = await createFrontendArchive(join(directory, "dist"));
+        const treeSha256 = archive.treeSha256;
+        await archive.cleanup();
+        const activeId = "a".repeat(64);
+        const requests: string[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1", port: 0,
+            fetch(request) {
+                const path = new URL(request.url).pathname;
+                requests.push(`${request.method} ${path}`);
+                if (path.endsWith("/deployments")) return Response.json([deployment()]);
+                if (path.endsWith("/active-release")) return Response.json({
+                    project_ref: "abc123", deployment_id: "web",
+                    active_release_id: activeId, active_activation_id: "00000000-0000-4000-8000-000000000001",
+                    releases: [{ ...release("abc123", "web", activeId), tree_sha256: treeSha256 }], next_cursor: null,
+                });
+                return new Response("not found", { status: 404 });
+            },
+        });
+        servers.push(server);
+        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, [
+            "deploy", "--skip_build", "--json", ...(plan ? ["--plan"] : []),
+        ]);
+        expect(response.exitCode).toBe(0);
+        expect(JSON.parse(response.stdout)).toMatchObject({
+            unchanged: true, tree_sha256: treeSha256,
+            ...(plan ? { actions: [], published: false } : { release_id: activeId }),
+        });
+        expect(requests.every((request) => request.startsWith("GET "))).toBe(true);
+        expect(requests).toHaveLength(2);
+    });
+
+    test("plan runs a local build but conflicting dry_run stops before HTTP", async () => {
+        const directory = await workspace();
+        await writeFile(join(directory, "supacloud.json"), JSON.stringify({
+            frontend: { id: "web", buildCommand: "bun -e \"require('fs').writeFileSync('built.txt','built')\"" },
+        }));
+        const requests: string[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1", port: 0,
+            fetch(request) {
+                const path = new URL(request.url).pathname;
+                requests.push(`${request.method} ${path}`);
+                if (path.endsWith("/deployments")) return Response.json([deployment()]);
+                return Response.json({
+                    project_ref: "abc123", deployment_id: "web",
+                    active_release_id: null, active_activation_id: null, releases: [], next_cursor: null,
+                });
+            },
+        });
+        servers.push(server);
+        const conflict = await runCli(directory, `http://127.0.0.1:${server.port}`, ["deploy", "--dry_run", "--plan", "--json"]);
+        expect(conflict.exitCode).toBe(1);
+        expect(requests).toEqual([]);
+        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, ["deploy", "--plan", "--json"]);
+        expect(response.exitCode).toBe(0);
+        expect(await readFile(join(directory, "built.txt"), "utf8")).toBe("built");
+        expect(requests.every((request) => request.startsWith("GET "))).toBe(true);
+    });
+
+    test("keeps build logs on stderr and only the final JSON on stdout", async () => {
+        const directory = await workspace();
+        await Bun.write(join(directory, "build.ts"), [
+            'console.log("build output");',
+            'console.error("build warning");',
+            'await Bun.write("built.txt", "built");',
+        ].join("\n"));
+        await Bun.write(join(directory, "supacloud.json"), JSON.stringify({
+            frontend: { id: "web", buildCommand: "bun build.ts" },
+        }));
+        const server = Bun.serve({
+            hostname: "127.0.0.1", port: 0,
+            fetch(request) {
+                if (new URL(request.url).pathname.endsWith("/deployments")) return Response.json([deployment()]);
+                return Response.json({
+                    project_ref: "abc123", deployment_id: "web",
+                    active_release_id: null, active_activation_id: null, releases: [], next_cursor: null,
+                });
+            },
+        });
+        servers.push(server);
+        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, ["deploy", "--plan", "--json"]);
+        expect(response.exitCode).toBe(0);
+        expect(JSON.parse(response.stdout)).toMatchObject({ planned: true, published: false });
+        expect(response.stderr).toContain("build output");
+        expect(response.stderr).toContain("build warning");
+        expect(await Bun.file(join(directory, "built.txt")).text()).toBe("built");
+    });
+
+    test.each(["deploy", "plan", "diff"])("rejects contradictory archive/tree identity before %s", async (mode) => {
+        const directory = await workspace();
+        const archive = await createFrontendArchive(join(directory, "dist"));
+        const releaseId = archive.sha256;
+        await archive.cleanup();
+        const requests: string[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1", port: 0,
+            fetch(request) {
+                const path = new URL(request.url).pathname;
+                requests.push(`${request.method} ${path}`);
+                if (path.endsWith("/deployments")) return Response.json([deployment()]);
+                return Response.json({
+                    project_ref: "abc123", deployment_id: "web",
+                    active_release_id: releaseId,
+                    active_activation_id: "00000000-0000-4000-8000-000000000001",
+                    releases: [{ ...release("abc123", "web", releaseId), tree_sha256: "0".repeat(64) }],
+                    next_cursor: null,
+                });
+            },
+        });
+        servers.push(server);
+        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, [
+            "deploy", "--skip_build", "--json", ...(mode === "deploy" ? [] : [`--${mode}`]),
+        ]);
+        expect(response.exitCode).toBe(1);
+        expect(response.stderr).toContain("Active release tree does not match the local archive");
+        expect(requests).toEqual([
+            "GET /v1/projects/abc123/frontend/deployments",
+            "GET /v1/projects/abc123/frontend/deployments/web/active-release",
+        ]);
+    });
+
+    test("unknown activation preserves its mutation identity without replay", async () => {
+        const directory = await workspace();
+        let writes = 0;
+        let releaseId = "";
+        let mutationId = "";
+        const server = Bun.serve({
+            hostname: "127.0.0.1", port: 0,
+            async fetch(request) {
+                const path = new URL(request.url).pathname;
+                if (request.method === "GET" && path.endsWith("/deployments")) return Response.json([deployment()]);
+                if (request.method === "GET" && path.endsWith("/active-release")) return Response.json({
+                    project_ref: "abc123", deployment_id: "web", active_release_id: null,
+                    active_activation_id: null, releases: [], next_cursor: null,
+                });
+                if (request.method === "POST" && path.endsWith("/releases")) {
+                    writes++;
+                    releaseId = createHash("sha256").update(new Uint8Array(await request.arrayBuffer())).digest("hex");
+                    return Response.json({ project_ref: "abc123", deployment_id: "web", release: release("abc123", "web", releaseId) }, { status: 201 });
+                }
+                if (request.method === "GET" && path.endsWith(`/releases/${releaseId}`)) {
+                    return Response.json({ project_ref: "abc123", deployment_id: "web", release: release("abc123", "web", releaseId) });
+                }
+                if (request.method === "POST" && path.endsWith("/activate")) {
+                    writes++;
+                    mutationId = (await request.json() as Record<string, string>).mutation_id!;
+                    return Response.json({ token: "must-not-escape" }, { status: 503 });
+                }
+                return new Response("not found", { status: 404 });
+            },
+        });
+        servers.push(server);
+        const response = await runCli(directory, `http://127.0.0.1:${server.port}`, ["deploy", "--skip_build", "--json"]);
+        expect(response.exitCode).toBe(1);
+        expect(JSON.parse(response.stdout)).toMatchObject({
+            operation: "deploy", error: { code: "OUTCOME_UNKNOWN" },
+            mutation_id: mutationId, target_release_id: releaseId,
+            expected_active_release_id: "absent", expected_activation_id: "absent",
+        });
+        expect(writes).toBe(2);
+        expect(response.stdout + response.stderr).not.toContain("must-not-escape");
+    });
     test("loads repository-root context when invoked from a nested frontend workspace", async () => {
         const directory = await mkdtemp(join(tmpdir(), "supacloud-monorepo-env-test-"));
         temporaryDirectories.push(directory);
@@ -350,9 +553,11 @@ describe("one-command deploy", () => {
         const second = await createFrontendArchive(join(directory, "dist"));
         try {
             expect(first.sha256).toBe(second.sha256);
-            const archive = unzipSync(new Uint8Array(await readFile(first.archivePath)));
-            expect(Object.keys(archive).sort()).toEqual(["assets/app.js", "index.html"]);
-            expect(new TextDecoder().decode(archive["index.html"])).toBe("<h1>hello</h1>\n");
+            const tar = await Bun.zstdDecompress(new Uint8Array(await readFile(first.archivePath)));
+            const archive = await new Bun.Archive(tar).files();
+            expect([...archive.keys()].sort()).toEqual(["assets/app.js", "index.html"]);
+            expect(await archive.get("index.html")!.text()).toBe("<h1>hello</h1>\n");
+            expect(first.archivePath.endsWith(".tar.zst")).toBe(true);
         } finally {
             await Promise.all([first.cleanup(), second.cleanup()]);
         }

@@ -14,12 +14,13 @@ import {
   unlink,
 } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
+import { FRONTEND_ARCHIVE_FILENAME, FRONTEND_ARCHIVE_FORMAT } from "@supacloud/delivery/frontend-archive";
 import { FRAMEWORK_DEFAULTS, type FrontendDeployment } from "../types/frontend";
 import {
-  extractVerifiedZip,
-  verifiedZipArchive,
-  type VerifiedZipArchive,
-  type VerifiedZipFileEntry,
+  extractVerifiedFrontendArchive,
+  verifiedFrontendArchive,
+  type VerifiedFrontendArchive,
+  type VerifiedFrontendFileEntry,
 } from "./frontend-release-archive";
 import {
   assertFrontendIdentity,
@@ -417,7 +418,7 @@ function treeSha256(files: readonly TreeFile[]): string {
 
 async function verifiedTree(
   buildDir: string,
-  zipEntries: readonly VerifiedZipFileEntry[],
+  archiveEntries: readonly VerifiedFrontendFileEntry[],
   requireReadOnly = false,
 ): Promise<TreeFile[]> {
   if (await realpath(buildDir) !== resolve(buildDir)) {
@@ -428,12 +429,12 @@ async function verifiedTree(
     );
   }
   const files = await treeFiles(buildDir, requireReadOnly);
-  const expected = new Map(zipEntries.map((entry) => [entry.path, entry.uncompressedSize]));
+  const expected = new Map(archiveEntries.map((entry) => [entry.path, entry.uncompressedSize]));
   if (files.length !== expected.size || files.some((file) => expected.get(file.path) !== file.size)) {
     throw frontendReleaseError(
       "FRONTEND_RELEASE_ARCHIVE_INVALID",
       400,
-      "Extracted release does not match its zip inventory",
+      "Extracted release does not match its archive inventory",
     );
   }
   return files;
@@ -750,7 +751,7 @@ export class FrontendReleaseStorage implements FrontendReleaseStoragePort {
       const stagingDirIdentity = await pathIdentity(boundStagingDir, "directory");
       stagingDirBinding = await openTrustedDirectory(stagingDir);
       await assertBoundEntry(stagingRoot, stagingRootBinding, stagingDirName, stagingDirIdentity, "directory");
-      const archivePath = join(boundDirectoryPath(stagingDirBinding), "archive.zip");
+      const archivePath = join(boundDirectoryPath(stagingDirBinding), FRONTEND_ARCHIVE_FILENAME);
       archiveHandle = await open(
         archivePath,
         fsConstants.O_RDWR | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW,
@@ -864,8 +865,8 @@ export class FrontendReleaseStorage implements FrontendReleaseStoragePort {
         "Frontend release identity does not match its storage path",
       );
     }
-    const archive = await openVerifiedFile(join(releaseDir, "archive.zip"), metadata.size_bytes);
-    let zip: VerifiedZipArchive;
+    const archive = await openVerifiedFile(join(releaseDir, FRONTEND_ARCHIVE_FILENAME), metadata.size_bytes);
+    let verified: VerifiedFrontendArchive;
     try {
       if (archive.sha256 !== metadata.sha256) {
         throw frontendReleaseError(
@@ -874,11 +875,11 @@ export class FrontendReleaseStorage implements FrontendReleaseStoragePort {
           "Frontend release archive verification failed",
         );
       }
-      zip = await verifiedZipArchive(archive.handle, metadata.size_bytes);
+      verified = await verifiedFrontendArchive(archive.handle, metadata.size_bytes);
     } finally {
       await archive.handle.close();
     }
-    const files = await verifiedTree(join(releaseDir, "build"), zip.entries, true);
+    const files = await verifiedTree(join(releaseDir, "build"), verified.entries, true);
     if (files.length !== metadata.file_count || treeSha256(files) !== metadata.tree_sha256) {
       throw frontendReleaseError(
         "FRONTEND_RELEASE_STORAGE_INVALID",
@@ -1025,7 +1026,7 @@ export class FrontendReleaseStorage implements FrontendReleaseStoragePort {
         "Frontend release staged archive identity changed",
       );
     }
-    const requested = await pathIdentity(join(state.stagingDir, "archive.zip"), "file");
+    const requested = await pathIdentity(join(state.stagingDir, FRONTEND_ARCHIVE_FILENAME), "file");
     if (requested.dev !== current.dev || requested.ino !== current.ino) {
       throw frontendReleaseError(
         "FRONTEND_RELEASE_STORAGE_UNTRUSTED",
@@ -1039,24 +1040,24 @@ export class FrontendReleaseStorage implements FrontendReleaseStoragePort {
     state: PreparedArchiveState,
     releaseId: string,
   ): Promise<FrontendReleaseRecord> {
-    const zip = await verifiedZipArchive(state.archiveHandle, state.expectedLength);
-    return this.publishStagingRelease({ state, releaseId, zip });
+    const archive = await verifiedFrontendArchive(state.archiveHandle, state.expectedLength);
+    return this.publishStagingRelease({ state, releaseId, archive });
   }
 
   private async publishStagingRelease(input: {
     state: PreparedArchiveState;
     releaseId: string;
-    zip: VerifiedZipArchive;
+    archive: VerifiedFrontendArchive;
   }): Promise<FrontendReleaseRecord> {
     const artifactDir = join(input.state.stagingDir, "artifact");
-    const archivePath = join(artifactDir, "archive.zip");
+    const archivePath = join(artifactDir, FRONTEND_ARCHIVE_FILENAME);
     const buildDir = join(artifactDir, "build");
     await mkdir(artifactDir, { mode: 0o700 });
     await mkdir(buildDir, { mode: 0o700 });
-    await extractVerifiedZip(input.state.archiveHandle, input.zip, buildDir);
+    await extractVerifiedFrontendArchive(input.state.archiveHandle, input.archive, buildDir);
     await rename(input.state.archivePath, archivePath);
     await input.state.stagingDirBinding.handle.sync();
-    const files = await verifiedTree(buildDir, input.zip.entries);
+    const files = await verifiedTree(buildDir, input.archive.entries);
     const record: FrontendReleaseRecord = {
       schema: FRONTEND_RELEASE_SCHEMA,
       project_ref: input.state.projectRef,
@@ -1068,6 +1069,7 @@ export class FrontendReleaseStorage implements FrontendReleaseStoragePort {
       file_count: files.length,
       created_at: this.now().toISOString(),
       kind: "prebuilt_static",
+      archive_format: FRONTEND_ARCHIVE_FORMAT,
     };
     await writeFileAtomic(artifactDir, join(artifactDir, "release.json"), `${JSON.stringify(record)}\n`);
     await freezeTree(artifactDir, false);

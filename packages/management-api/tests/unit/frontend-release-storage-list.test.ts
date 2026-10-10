@@ -69,7 +69,7 @@ class ObservedReleaseStorage extends FrontendReleaseStorage {
         size_bytes: 1,
         file_count: 1,
         created_at: CREATED_AT,
-        kind: "prebuilt_static",
+        archive_format: "tar.zst" as const, kind: "prebuilt_static",
       };
     } finally {
       this.concurrentReads -= 1;

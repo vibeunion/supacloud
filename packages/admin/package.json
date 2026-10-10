@@ -17,7 +17,7 @@
     "dev": "bun run --watch src/index.ts",
     "prepare:tool-runtime": "bun run --cwd ../cli build:tool-runtime && bun install --force --ignore-scripts --frozen-lockfile",
     "prebuild": "bun run prepare:tool-runtime",
-    "build": "bun build src/index.ts --outdir dist --target node --external cpu-features",
+    "build": "bun build src/index.ts --outdir dist --target node --conditions=supacloud-source --external cpu-features",
     "prepublishOnly": "bun run build",
     "pretypecheck": "bun run prepare:tool-runtime",
     "typecheck": "tsc --noEmit"
@@ -35,6 +35,7 @@
     "directory": "packages/admin"
   },
   "dependencies": {
+    "@supacloud/delivery": "file:../delivery",
     "typebox": "1.3.34",
     "@supacloud/cli": "file:../cli",
     "ssh2": "^1.17.0"
@@ -45,6 +46,9 @@
     "typescript": "^7.0.2"
   },
   "overrides": {
+    "@supacloud/contracts": "file:../contracts",
+    "@supacloud/db": "file:../db",
+    "@supacloud/delivery": "file:../delivery",
     "@graphql-tools/utils": "^12.0.3"
   }
 }

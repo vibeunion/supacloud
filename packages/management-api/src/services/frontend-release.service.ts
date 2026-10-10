@@ -2,8 +2,10 @@ import { getVerifiedRequestPrincipal } from "../middleware/auth";
 import type { MutationPrincipal } from "./project-mutation.service";
 import { FrontendReleaseActivationService } from "./frontend-release-activation";
 import {
+  assertFrontendIdentity,
   FRONTEND_RELEASE_LIST_DEFAULT_LIMIT,
   FrontendReleaseError,
+  frontendReleaseError,
   type ActivateFrontendReleaseInput,
   type FrontendReleaseActivation,
   type FrontendReleaseGateway,
@@ -51,6 +53,7 @@ export class FrontendReleaseService {
   private readonly storage: FrontendReleaseStorage;
   private readonly activation: FrontendReleaseActivationService;
   private readonly mutations: FrontendReleaseMutationStore;
+  private readonly gateway: FrontendReleaseGateway;
   private readonly deploymentLock: FrontendDeploymentLock;
 
   constructor(options: FrontendReleaseServiceOptions = {}) {
@@ -58,6 +61,7 @@ export class FrontendReleaseService {
     const mutations = options.mutations ?? frontendReleaseMutationStore();
     this.deploymentLock = options.deploymentLock ?? withFrontendDeploymentLock;
     this.mutations = mutations;
+    this.gateway = gateway;
     this.storage = new FrontendReleaseStorage({
       ...(options.baseDir === undefined ? {} : { baseDir: options.baseDir }),
       ...(options.now === undefined ? {} : { now: options.now }),
@@ -113,8 +117,23 @@ export class FrontendReleaseService {
   }
 
   activeReleaseSnapshot(projectRef: string, deploymentId: string): Promise<FrontendReleaseInventory> {
-    return this.deploymentLock(projectRef, deploymentId, () =>
-      this.storage.activeReleaseSnapshot(projectRef, deploymentId));
+    assertFrontendIdentity(projectRef, deploymentId);
+    return this.deploymentLock(projectRef, deploymentId, async () => {
+      if (await this.mutations.activeForDeployment(projectRef, deploymentId)) {
+        throw frontendReleaseError("FRONTEND_RELEASE_BUSY", 409, "Frontend release activation remains unresolved");
+      }
+      const snapshot = await this.storage.activeReleaseSnapshot(projectRef, deploymentId);
+      if (snapshot.active_release_id !== null) {
+        const root = await this.gateway.readFrontendStaticRoot(projectRef, deploymentId);
+        const expectedRoot = this.storage.releaseBuildDir(projectRef, deploymentId, snapshot.active_release_id);
+        if (root !== expectedRoot) {
+          throw frontendReleaseError(
+            "FRONTEND_RELEASE_READBACK_MISMATCH", 503, "Frontend active release and Caddy route do not match",
+          );
+        }
+      }
+      return snapshot;
+    });
   }
 
   rollbackSnapshot(projectRef: string, deploymentId: string): Promise<FrontendRollbackSnapshot> {

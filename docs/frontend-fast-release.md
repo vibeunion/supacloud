@@ -17,7 +17,9 @@ matching the file count alone is not evidence of a matching build.
 
 ## Platform Ownership
 
-- SupaCloud stores and verifies immutable ZIPs and trees.
+- SupaCloud stores and verifies immutable tar.zst archives and trees.
+  The v2 format is breaking; existing v1 inventory requires a coordinated cutover.
+  See [deployment experience](deploy-experience.md#frontend-archive-cutover).
 - SupaCloud owns the active release/activation authority and CAS mutation ledger.
 - SupaCloud selects the previous release from the verified activation journal,
   not history ordering, and verifies both retained artifacts in one locked snapshot.
@@ -41,6 +43,12 @@ Scenario: Preserve read-only and project boundaries
   When get_active_release is requested
   Then a secret-free exact project/deployment projection is returned
   And no mutation or backup is created
+
+Scenario: A stored release is not sufficient for a no-op
+  Given an unresolved activation or a route pointing away from the verified active artifact
+  When deployment requests the active release snapshot
+  Then the platform refuses the snapshot without modifying authority, routing or the journal
+  And deployment does not report already up to date or publish a new activation
 
 Scenario: Older server compatibility
   Given an older server whose active endpoint returns 404
@@ -85,6 +93,11 @@ Scenario: Older server cannot select the previous activation
 Test and production use the same identity/integrity gates. Full history audit
 is an explicit operation, not a routine publish prerequisite. No measured
 production latency improvement is claimed by the local tests.
+The active snapshot checks unresolved mutation state, current artifact integrity
+and the live static route in one deployment lock. A matching archive identity
+with a contradictory tree digest is an error, not a no-op.
+With `deploy --json`, build stdout and stderr are streamed to stderr; stdout
+contains only the final JSON result.
 
 ## Developer Experience Contract
 

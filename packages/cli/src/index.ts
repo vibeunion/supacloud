@@ -622,6 +622,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         projectRef: context.projectRef || undefined,
     })));
     assign(captureTools((server) => registerDeployTools(server, http, {
+        environment: context.environment,
         projectRef: context.projectRef || undefined,
         cwd: process.cwd(),
         edgeFunctionDeploy: advancedTools.edge_functions?.callback,
