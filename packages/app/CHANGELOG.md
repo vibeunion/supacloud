@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.1](https://github.com/vibeunion/supacloud/compare/app-v0.24.0...app-v0.24.1) (2026-10-10)
+
+
+### Bug Fixes
+
+* **app:** remove untyped form control writes ([#1758](https://github.com/vibeunion/supacloud/issues/1758)) ([ff8a277](https://github.com/vibeunion/supacloud/commit/ff8a277574d6271e85f87c33699ff19c0f827456))
+
 ## [0.24.0](https://github.com/vibeunion/supacloud/compare/app-v0.23.0...app-v0.24.0) (2026-10-09)
 
 

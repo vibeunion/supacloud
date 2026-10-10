@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/vibeunion/supacloud/compare/db-v0.14.0...db-v0.15.0) (2026-10-10)
+
+
+### Features
+
+* **db:** add controlled declarative adoption workflow ([#1756](https://github.com/vibeunion/supacloud/issues/1756)) ([873c781](https://github.com/vibeunion/supacloud/commit/873c781827508a23cff6868d15728d40826c78be))
+
 ## [0.14.0](https://github.com/vibeunion/supacloud/compare/db-v0.13.2...db-v0.14.0) (2026-10-08)
 
 
