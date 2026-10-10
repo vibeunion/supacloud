@@ -178,6 +178,7 @@ describe("CLI execution policy", () => {
 
     test("classifies immutable frontend release reads and protects their mutations", () => {
         expect(executionMode("frontend", "get_active_release", {})).toBe("read");
+        expect(executionMode("frontend", "rollback", {})).toBe("write");
         expect(() => authorizeExecution("frontend", { action: "get_active_release", ref: "prod-ref" }, {
             context: context({ readOnly: true }),
         })).not.toThrow();

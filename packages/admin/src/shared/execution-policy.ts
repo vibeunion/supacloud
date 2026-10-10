@@ -31,7 +31,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     },
     frontend: {
         read: ["list_releases", "get_active_release", "get_release"],
-        write: ["upload_release", "activate_release"],
+        write: ["upload_release", "activate_release", "rollback"],
     },
     ssh: {
         read: [

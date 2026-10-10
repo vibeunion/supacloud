@@ -8,6 +8,7 @@ import {
     getFrontendRelease,
     listFrontendReleases,
     readFrontendReleaseAuthority,
+    rollbackFrontendRelease,
     uploadFrontendRelease,
 } from "./frontend-release-control";
 
@@ -78,21 +79,35 @@ describe("immutable frontend release control", () => {
         const response = await readFrontendReleaseAuthority({
             get: async (path: string) => {
                 calls.push(path);
-                return path.endsWith("/active-release")
-                    ? { ok: false, status: 404, data: null }
-                    : {
+                if (path.endsWith("/active-release")) return { ok: false, status: 404, data: null };
+                if (path.endsWith(`/${RELEASE_ID}`)) {
+                    return {
                         ok: true, status: 200,
                         data: {
                             project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
-                            active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
-                            releases: [release()], next_cursor: RELEASE_ID,
+                            release: release(),
                         },
                     };
+                }
+                return {
+                    ok: true, status: 200,
+                    data: {
+                        project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                        active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+                        releases: [release("c".repeat(64))], next_cursor: "c".repeat(64),
+                    },
+                };
             },
         } as never, PROJECT_REF, DEPLOYMENT_ID);
         expect(response.isError).not.toBe(true);
-        expect(calls).toHaveLength(2);
+        expect(calls).toHaveLength(3);
         expect(calls[1]).toEndWith("?limit=1");
+        expect(calls[2]).toEndWith(`/${RELEASE_ID}`);
+        expect(parsed(response)).toMatchObject({
+            active_release_id: RELEASE_ID,
+            releases: [expect.objectContaining({ release_id: RELEASE_ID })],
+            next_cursor: null,
+        });
     });
 
     test.each([401, 403, 500])("never downgrades a failed active snapshot HTTP %s", async (status) => {
@@ -132,6 +147,143 @@ describe("immutable frontend release control", () => {
             expect(response.isError).toBe(true);
             expect(reads).toBe(1);
             expect(response.content[0].text).not.toContain("must-not-escape");
+        }
+    });
+
+    test("rolls back with one high-level command while hiding CAS identity boilerplate", async () => {
+        const calls: Array<{ path: string; body?: unknown }> = [];
+        const targetReleaseId = "c".repeat(64);
+        let activeReleaseId = RELEASE_ID;
+        let activationId = MUTATION_ID;
+        const response = await rollbackFrontendRelease({
+            get: async (path: string) => {
+                calls.push({ path });
+                if (path.endsWith("/active-release")) {
+                    return {
+                        ok: true, status: 200,
+                        data: {
+                            project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                            active_release_id: activeReleaseId, active_activation_id: activationId,
+                            releases: [release(activeReleaseId)], next_cursor: null,
+                        },
+                    };
+                }
+                if (path.endsWith(`/${targetReleaseId}`)) {
+                    return {
+                        ok: true, status: 200,
+                        data: {
+                            project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                            release: release(targetReleaseId),
+                        },
+                    };
+                }
+                throw new Error(`unexpected GET ${path}`);
+            },
+            post: async (path: string, body: unknown) => {
+                calls.push({ path, body });
+                const input = body as Record<string, string>;
+                activationId = input.mutation_id!;
+                activeReleaseId = targetReleaseId;
+                return {
+                    ok: true, status: 200,
+                    data: {
+                        project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                        active_release_id: targetReleaseId, activation_id: activationId,
+                        release: release(targetReleaseId),
+                        mutation: {
+                            mutation_id: activationId,
+                            status: "succeeded", replayed: false,
+                        },
+                    },
+                };
+            },
+        } as never, PROJECT_REF, DEPLOYMENT_ID, targetReleaseId);
+
+        expect(response.isError).not.toBe(true);
+        expect(parsed(response)).toMatchObject({
+            rollback: true,
+            previous_release_id: RELEASE_ID,
+            previous_activation_id: MUTATION_ID,
+            active_release_id: targetReleaseId,
+        });
+        expect(calls[2]?.body).toMatchObject({
+            expected_active_release_id: RELEASE_ID,
+            expected_activation_id: MUTATION_ID,
+        });
+        expect(activationId).toMatch(/^[0-9a-f-]{36}$/);
+        expect(calls.map(({ path }) => path)).toEqual([
+            `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/active-release`,
+            `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/releases/${targetReleaseId}`,
+            `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/releases/${targetReleaseId}/activate`,
+            `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/active-release`,
+            `/v1/projects/${PROJECT_REF}/frontend/deployments/${DEPLOYMENT_ID}/releases/${targetReleaseId}`,
+        ]);
+    });
+
+    test.each([409, 500])("rollback never retries a conflicting or uncertain HTTP %s mutation", async (status) => {
+        const targetReleaseId = "c".repeat(64);
+        let writes = 0;
+        let mutationId = "";
+        const reads: string[] = [];
+        const response = await rollbackFrontendRelease({
+            get: async (path: string) => {
+                reads.push(path);
+                if (path.includes("/mutations/")) return { ok: false, status: 404, data: null };
+                return {
+                    ok: true, status: 200,
+                    data: path.endsWith("/active-release") ? {
+                        project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                        active_release_id: RELEASE_ID, active_activation_id: MUTATION_ID,
+                        releases: [release()], next_cursor: null,
+                    } : {
+                        project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                        release: release(targetReleaseId),
+                    },
+                };
+            },
+            post: async (_path: string, body: { mutation_id: string }) => {
+                writes++;
+                mutationId = body.mutation_id;
+                return { ok: false, status, data: { token: "must-not-escape" } };
+            },
+        } as never, PROJECT_REF, DEPLOYMENT_ID, targetReleaseId);
+        expect(response.isError).toBe(true);
+        expect(writes).toBe(1);
+        expect(parsed(response)).toMatchObject({
+            operation: "frontend.rollback",
+            mutation_id: mutationId,
+            target_release_id: targetReleaseId,
+            expected_active_release_id: RELEASE_ID,
+            expected_activation_id: MUTATION_ID,
+            error: { code: status === 409 ? "HTTP_ERROR" : "OUTCOME_UNKNOWN" },
+        });
+        expect(reads.filter((path) => path.includes("/mutations/"))).toHaveLength(status === 409 ? 0 : 1);
+        expect(response.content[0].text).not.toContain("must-not-escape");
+    });
+
+    test.each([null, RELEASE_ID])("rollback does not mutate an absent or already selected release: %s", async (activeId) => {
+        const calls: string[] = [];
+        const response = await rollbackFrontendRelease({
+            get: async (path: string) => {
+                calls.push(path);
+                return {
+                    ok: true, status: 200,
+                    data: {
+                        project_ref: PROJECT_REF, deployment_id: DEPLOYMENT_ID,
+                        active_release_id: activeId,
+                        active_activation_id: activeId ? MUTATION_ID : null,
+                        releases: activeId ? [release()] : [], next_cursor: null,
+                    },
+                };
+            },
+            post: async () => { throw new Error("unexpected mutation"); },
+        } as never, PROJECT_REF, DEPLOYMENT_ID, RELEASE_ID);
+        expect(calls).toHaveLength(1);
+        if (activeId) {
+            expect(parsed(response)).toMatchObject({ unchanged: true, active_release_id: RELEASE_ID });
+        } else {
+            expect(response.isError).toBe(true);
+            expect(parsed(response)).toMatchObject({ error: { code: "NO_ACTIVE_RELEASE" } });
         }
     });
 

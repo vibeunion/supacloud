@@ -60,6 +60,10 @@ interface FrontendReleaseInventory {
     next_cursor: string | null;
 }
 
+type ActiveReleaseSnapshot =
+    | { inventory: FrontendReleaseInventory; exactReadback: boolean }
+    | { failure: ToolResponse; status: number };
+
 interface LocalArchive {
     handle: FileHandle;
     sizeBytes: number;
@@ -72,7 +76,7 @@ function toolResponse(payload: object): ToolResponse {
 
 function releaseFailure(
     operation: string,
-    code: "HTTP_ERROR" | "INVALID_RESPONSE" | "OUTCOME_UNKNOWN",
+    code: "HTTP_ERROR" | "INVALID_RESPONSE" | "OUTCOME_UNKNOWN" | "NO_ACTIVE_RELEASE",
     status: number | null,
 ): ToolResponse {
     return {
@@ -465,34 +469,15 @@ async function activeReleaseReadback(
     http: FrontendReleaseHttp,
     identity: ActivationIdentity,
 ): Promise<ActiveReleaseReadback> {
-    const endpoint = releaseEndpoint(identity.projectRef, identity.deploymentId);
-    let inventoryRead = await http.get(`${deploymentEndpoint(identity.projectRef, identity.deploymentId)}/active-release`, {
-        maxJsonBytes: RESPONSE_MAX_BYTES,
-    });
-    if (!inventoryRead.ok && inventoryRead.status === 404) {
-        inventoryRead = await http.get(`${endpoint}?limit=1`, { maxJsonBytes: RESPONSE_MAX_BYTES });
-    } else {
-        const snapshot = inventoryRead.ok && inventoryRead.status === 200
-            ? releaseInventory(inventoryRead.data, {
-                projectRef: identity.projectRef,
-                deploymentId: identity.deploymentId,
-            })
-            : null;
-        if (!snapshot || snapshot.next_cursor !== null || snapshot.releases.length !== 1
-            || snapshot.releases[0]?.release_id !== identity.releaseId) {
-            return { release: null, status: inventoryRead.status };
-        }
-    }
-    const inventory = inventoryRead.ok
-        ? releaseInventory(inventoryRead.data, {
-            projectRef: identity.projectRef,
-            deploymentId: identity.deploymentId,
-        })
-        : null;
-    if (!inventory || inventory.releases.length > 1
-        || inventory.active_release_id !== identity.releaseId
+    const snapshot = await readActiveFrontendRelease(http, identity.projectRef, identity.deploymentId);
+    if ("failure" in snapshot) return { release: null, status: snapshot.status };
+    const inventory = snapshot.inventory;
+    if (inventory.active_release_id !== identity.releaseId
         || inventory.active_activation_id !== identity.mutationId) {
-        return { release: null, status: inventoryRead.status };
+        return { release: null, status: 200 };
+    }
+    if (snapshot.exactReadback) {
+        return { release: inventory.releases[0] ?? null, status: 200 };
     }
 
     const releaseRead = await http.get(releasePath(
@@ -510,22 +495,66 @@ async function activeReleaseReadback(
     return { release, status: releaseRead.status };
 }
 
-export async function getActiveFrontendRelease(
+async function readActiveFrontendRelease(
     http: FrontendReleaseHttp,
     projectRef: string,
     deploymentId: string,
-): Promise<ToolResponse> {
+): Promise<ActiveReleaseSnapshot> {
     const response = await http.get(`${deploymentEndpoint(projectRef, deploymentId)}/active-release`, {
         maxJsonBytes: RESPONSE_MAX_BYTES,
     });
     const inventory = response.ok && response.status === 200
         ? releaseInventory(response.data, { projectRef, deploymentId }) : null;
-    if (!inventory || inventory.next_cursor !== null
-        || inventory.releases.length !== (inventory.active_release_id === null ? 0 : 1)
-        || (inventory.releases[0] && inventory.releases[0].release_id !== inventory.active_release_id)) {
-        return releaseReadFailure("frontend.get_active_release", response);
+    if (inventory) {
+        if (inventory.next_cursor !== null
+            || inventory.releases.length !== (inventory.active_release_id === null ? 0 : 1)
+            || (inventory.releases[0] && inventory.releases[0].release_id !== inventory.active_release_id)) {
+            return { failure: releaseReadFailure("frontend.get_active_release", response), status: response.status };
+        }
+        return { inventory, exactReadback: false };
     }
-    return toolResponse(inventory);
+    if (response.ok || response.status !== 404) {
+        return { failure: releaseReadFailure("frontend.get_active_release", response), status: response.status };
+    }
+
+    // 旧 Management API 没有 active-release 路由：限制历史页为 1 条，
+    // 再按权威 active_release_id 精确读回，避免把排序后的第一条误当成当前版本。
+    const historyResponse = await http.get(`${releaseEndpoint(projectRef, deploymentId)}?limit=1`, {
+        maxJsonBytes: RESPONSE_MAX_BYTES,
+    });
+    const history = historyResponse.ok && historyResponse.status === 200
+        ? releaseInventory(historyResponse.data, { projectRef, deploymentId }) : null;
+    if (!history || history.releases.length > 1) {
+        return {
+            failure: releaseReadFailure("frontend.get_active_release", historyResponse),
+            status: historyResponse.status,
+        };
+    }
+    if (history.active_release_id === null) {
+        return { inventory: { ...history, releases: [], next_cursor: null }, exactReadback: false };
+    }
+    const exactResponse = await http.get(releasePath(projectRef, deploymentId, history.active_release_id), {
+        maxJsonBytes: RESPONSE_MAX_BYTES,
+    });
+    const release = exactResponse.ok && exactResponse.status === 200
+        ? releaseEnvelope(exactResponse.data, { projectRef, deploymentId, releaseId: history.active_release_id })
+        : null;
+    if (!release) {
+        return {
+            failure: releaseReadFailure("frontend.get_active_release", exactResponse),
+            status: exactResponse.status,
+        };
+    }
+    return { inventory: { ...history, releases: [release], next_cursor: null }, exactReadback: true };
+}
+
+export async function getActiveFrontendRelease(
+    http: FrontendReleaseHttp,
+    projectRef: string,
+    deploymentId: string,
+): Promise<ToolResponse> {
+    const snapshot = await readActiveFrontendRelease(http, projectRef, deploymentId);
+    return "failure" in snapshot ? snapshot.failure : toolResponse(snapshot.inventory);
 }
 
 export async function readFrontendReleaseAuthority(
@@ -533,16 +562,61 @@ export async function readFrontendReleaseAuthority(
     projectRef: string,
     deploymentId: string,
 ): Promise<ToolResponse> {
-    const active = await getActiveFrontendRelease(http, projectRef, deploymentId);
-    if (!active.isError) return active;
-    const failure: unknown = JSON.parse(active.content[0]!.text);
-    if (failure && typeof failure === "object" && "error" in failure
-        && failure.error && typeof failure.error === "object"
-        && "code" in failure.error && failure.error.code === "HTTP_ERROR"
-        && "http_status" in failure.error && failure.error.http_status === 404) {
-        return listFrontendReleases(http, projectRef, deploymentId, undefined, 1);
+    return getActiveFrontendRelease(http, projectRef, deploymentId);
+}
+
+export async function rollbackFrontendRelease(
+    http: FrontendReleaseHttp,
+    projectRef: string,
+    deploymentId: string,
+    releaseId: string,
+): Promise<ToolResponse> {
+    if (!RELEASE_ID_PATTERN.test(releaseId)) throw new Error("'release_id' must be a SHA-256 digest");
+    const authority = await readActiveFrontendRelease(http, projectRef, deploymentId);
+    if ("failure" in authority) return authority.failure;
+    const inventory = authority.inventory;
+    if (inventory.active_release_id === releaseId) {
+        return toolResponse({
+            project_ref: projectRef,
+            deployment_id: deploymentId,
+            active_release_id: releaseId,
+            activation_id: inventory.active_activation_id,
+            unchanged: true,
+        });
     }
-    return active;
+    if (inventory.active_release_id === null || inventory.active_activation_id === null) {
+        return releaseFailure("frontend.rollback", "NO_ACTIVE_RELEASE", 409);
+    }
+    const target = await getFrontendRelease(http, projectRef, deploymentId, releaseId);
+    if (target.isError) return target;
+    const mutationId = crypto.randomUUID();
+    const activation = await activateFrontendRelease(http, {
+        projectRef,
+        deploymentId,
+        releaseId,
+        expectedActiveReleaseId: inventory.active_release_id,
+        expectedActivationId: inventory.active_activation_id,
+        mutationId,
+    });
+    if (activation.isError) {
+        return {
+            ...toolResponse({
+                ...JSON.parse(activation.content[0]!.text),
+                operation: "frontend.rollback",
+                mutation_id: mutationId,
+                target_release_id: releaseId,
+                expected_active_release_id: inventory.active_release_id,
+                expected_activation_id: inventory.active_activation_id,
+            }),
+            isError: true,
+        };
+    }
+    return toolResponse({
+        ...JSON.parse(activation.content[0]!.text),
+        rollback: true,
+        previous_release_id: inventory.active_release_id,
+        previous_activation_id: inventory.active_activation_id,
+    });
 }
 
 export async function activateFrontendRelease(
