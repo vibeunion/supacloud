@@ -546,8 +546,8 @@ export class LifecycleController {
         @Injectable({ scope: "job" })
         export class CreatedBeforeFailure {
           onDestroy() {
-            (globalThis as Record<string, unknown>).__supacloudRollbackCount =
-              ((globalThis as Record<string, unknown>).__supacloudRollbackCount as number ?? 0) + 1;
+            const count = Reflect.get(globalThis, "__supacloudRollbackCount");
+            Reflect.set(globalThis, "__supacloudRollbackCount", (typeof count === "number" ? count : 0) + 1);
           }
         }
 

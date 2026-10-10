@@ -16,9 +16,9 @@ test("analyzes headers, cookies and status-code response maps", async () => {
       .replace("import { AcceptParams, AcceptResult, CreateCaseBody } from \"./contracts\";", "import { AcceptParams, AcceptResult, CreateCaseBody, RequestHeaders, RequestCookie, ConflictResult } from \"./contracts\";")
       .replace("response: AcceptResult,", "headers: RequestHeaders, cookie: RequestCookie, responses: { 201: AcceptResult, 409: ConflictResult },");
     const contracts = `${GOOD_PROJECT_FILES["src/features/case/contracts.ts"]}
-export const RequestHeaders = { type: "object", properties: { authorization: { type: "string" } }, required: ["authorization"] };
-export const RequestCookie = { type: "object", properties: { session: { type: "string" } }, required: ["session"] };
-export const ConflictResult = { type: "object", properties: { conflict: { type: "boolean" } }, required: ["conflict"] };
+export const RequestHeaders = { type: "object", properties: { authorization: { type: "string" } }, required: ["authorization"] } as const;
+export const RequestCookie = { type: "object", properties: { session: { type: "string" } }, required: ["session"] } as const;
+export const ConflictResult = { type: "object", properties: { conflict: { type: "boolean" } }, required: ["conflict"] } as const;
 `;
     await writeFixtureProject(root, {
       ...GOOD_PROJECT_FILES,
@@ -71,9 +71,9 @@ const AcceptRoute = defineRouteContract({
         '@Post("/:caseId/accept", AcceptRoute)',
       );
     const contracts = `${GOOD_PROJECT_FILES["src/features/case/contracts.ts"]}
-export const RequestHeaders = { type: "object", properties: { authorization: { type: "string" } }, required: ["authorization"] };
-export const RequestCookie = { type: "object", properties: { session: { type: "string" } }, required: ["session"] };
-export const ConflictResult = { type: "object", properties: { conflict: { type: "boolean" } }, required: ["conflict"] };
+export const RequestHeaders = { type: "object", properties: { authorization: { type: "string" } }, required: ["authorization"] } as const;
+export const RequestCookie = { type: "object", properties: { session: { type: "string" } }, required: ["session"] } as const;
+export const ConflictResult = { type: "object", properties: { conflict: { type: "boolean" } }, required: ["conflict"] } as const;
 `;
     await writeFixtureProject(root, {
       ...GOOD_PROJECT_FILES,
@@ -103,9 +103,9 @@ test("generated clients decode declared responses without a caller decoder", asy
       .replace("import { AcceptParams, AcceptResult, CreateCaseBody } from \"./contracts\";", "import { AcceptParams, AcceptResult, CreateCaseBody, RequestHeaders, RequestCookie, ConflictResult } from \"./contracts\";")
       .replace("response: AcceptResult,", "headers: RequestHeaders, cookie: RequestCookie, responses: { 201: AcceptResult, 409: ConflictResult },");
     const contracts = `${GOOD_PROJECT_FILES["src/features/case/contracts.ts"]}
-export const RequestHeaders = { type: "object", properties: { authorization: { type: "string" } }, required: ["authorization"] };
-export const RequestCookie = { type: "object", properties: { session: { type: "string" } }, required: ["session"] };
-export const ConflictResult = { type: "object", properties: { conflict: { type: "boolean" } }, required: ["conflict"] };
+export const RequestHeaders = { type: "object", properties: { authorization: { type: "string" } }, required: ["authorization"] } as const;
+export const RequestCookie = { type: "object", properties: { session: { type: "string" } }, required: ["session"] } as const;
+export const ConflictResult = { type: "object", properties: { conflict: { type: "boolean" } }, required: ["conflict"] } as const;
 `;
     await writeFixtureProject(root, {
       ...GOOD_PROJECT_FILES,
