@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.42.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.41.0...compiler-v0.42.0) (2026-10-10)
+
+
+### Features
+
+* **compiler:** enforce semantic Effect guardrails ([#1746](https://github.com/vibeunion/supacloud/issues/1746)) ([d1995ef](https://github.com/vibeunion/supacloud/commit/d1995ef1add86792946b5efa03e0dfb43386e3e6))
+* **effect:** upgrade runtime governance to Effect 4 ([#1748](https://github.com/vibeunion/supacloud/issues/1748)) ([2b48efc](https://github.com/vibeunion/supacloud/commit/2b48efcbe78db2a61c0c086f3350eaa87c697e90))
+
 ## [0.41.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.40.1...compiler-v0.41.0) (2026-10-09)
 
 

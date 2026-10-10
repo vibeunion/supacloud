@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.23.0...supacloud-lite-v0.24.0) (2026-10-10)
+
+
+### Features
+
+* **effect:** upgrade runtime governance to Effect 4 ([#1748](https://github.com/vibeunion/supacloud/issues/1748)) ([2b48efc](https://github.com/vibeunion/supacloud/commit/2b48efcbe78db2a61c0c086f3350eaa87c697e90))
+
 ## [0.23.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.22.1...supacloud-lite-v0.23.0) (2026-10-09)
 
 

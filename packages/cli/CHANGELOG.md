@@ -14,6 +14,14 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.74.0](https://github.com/vibeunion/supacloud/compare/cli-v0.73.0...cli-v0.74.0) (2026-10-10)
+
+
+### Features
+
+* **compiler:** enforce semantic Effect guardrails ([#1746](https://github.com/vibeunion/supacloud/issues/1746)) ([d1995ef](https://github.com/vibeunion/supacloud/commit/d1995ef1add86792946b5efa03e0dfb43386e3e6))
+* **effect:** upgrade runtime governance to Effect 4 ([#1748](https://github.com/vibeunion/supacloud/issues/1748)) ([2b48efc](https://github.com/vibeunion/supacloud/commit/2b48efcbe78db2a61c0c086f3350eaa87c697e90))
+
 ## [0.73.0](https://github.com/vibeunion/supacloud/compare/cli-v0.72.0...cli-v0.73.0) (2026-10-09)
 
 
