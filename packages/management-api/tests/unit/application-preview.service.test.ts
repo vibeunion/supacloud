@@ -6,8 +6,25 @@ import { type ApplicationPreviewServiceDependencies } from "../../src/services/a
 import { createApplicationPreviewReadiness } from "../../src/services/application-preview-readiness";
 import { applicationReleaseId, type ApplicationReadinessReport } from "@supacloud/delivery";
 import { runtimeInput } from "../helpers/application-runtime";
+import { runApplicationPreviewCleanupSweep } from "../../src/workers/application-preview-cleanup.worker";
+import { buildApplicationPreviewReceipt } from "../../src/services/application-preview-contract";
+import { cleanupEmptyPreviewStorage, createApplicationPreviewCleanupChecks } from "../../src/services/application-preview-cleanup";
+import { ApplicationDeploymentService, type ApplicationDeploymentDependencies } from "../../src/services/application-deployment";
+import { ApplicationActiveStorage } from "../../src/services/application-active-storage";
+import type { ApplicationActiveRecord } from "../../src/services/application-activation";
+import type { ApplicationRuntimeAllocation } from "../../src/services/application-runtime-allocation";
+import { activationJournal } from "../helpers/application-activation-journal";
+import { mkdtemp, mkdir, realpath, rm, symlink } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { resolveBucketName } from "../../src/db";
 
 const configurationId = "91234567-89ab-4def-8123-456789abcdef";
+const testLifecycle: Pick<ApplicationPreviewServiceDependencies, "lifecycle" | "branchLifecycle" | "storage"> = {
+  lifecycle: async (_projectRef, _previewId, operation) => operation(),
+  branchLifecycle: async (_projectRef, operation) => operation(),
+  storage: { createBucket: async () => ({ success: true }) },
+};
 
 function releases(): ApplicationPreviewServiceDependencies["releases"] {
   const record = runtimeInput().release;
@@ -62,6 +79,7 @@ test("preview provisioning reaches ready only after all isolated resources and s
   const configs: Record<string, unknown>[] = [{}];
   const calls: string[] = [];
   const service = new ApplicationPreviewService({
+    ...testLifecycle,
     releases: releases(),
     ...activation(),
     projects: previewStore(configs),
@@ -98,7 +116,12 @@ test("preview cleanup is explicit and idempotent at the receipt boundary", async
   const configs: Record<string, unknown>[] = [{}];
   const calls: string[] = [];
   const service = new ApplicationPreviewService({
+    ...testLifecycle,
     releases: releases(),
+    cleanupChecks: {
+      assertSafe: async () => {}, cleanupStorage: async () => {}, verifyBranchDeleted: async () => {},
+      verifySecretDeleted: async () => {},
+    },
     projects: previewStore(configs),
     branches: {
       createBranch: async () => {},
@@ -107,7 +130,10 @@ test("preview cleanup is explicit and idempotent at the receipt boundary", async
     queues: {
       createQueue: async () => {},
       dropQueue: async () => { calls.push("queue:drop"); return true; },
-      listQueues: async () => [],
+      listQueues: async () => {
+        const receipt = (configs[0]?.application_previews as StoredApplicationPreview[])[0]!;
+        return calls.includes("queue:drop") ? [] : [{ queue_name: receipt.queue_name } as never];
+      },
     },
     secrets: {
       upsertSecrets: async () => true,
@@ -152,6 +178,7 @@ test("preview reads resume a persisted provisioning receipt without recreating i
   }];
   const calls: string[] = [];
   const service = new ApplicationPreviewService({
+    ...testLifecycle,
     releases: releases(),
     ...activation(),
     projects: {
@@ -188,6 +215,7 @@ test("concurrent creates across service instances preserve every receipt and unr
     if (all.length === 12 && all.every(item => item.status === "ready")) finished.resolve();
   });
   const make = () => new ApplicationPreviewService({
+    ...testLifecycle,
     releases: releases(),
     ...activation(),
     projects,
@@ -214,6 +242,7 @@ test("concurrent creates across service instances preserve every receipt and unr
 test("an initial receipt write failure never starts branch or queue provisioning", async () => {
   let started = false;
   const service = new ApplicationPreviewService({
+    ...testLifecycle,
     releases: releases(),
     projects: {
       findByRef: async () => project(),
@@ -229,6 +258,7 @@ test("an initial receipt write failure never starts branch or queue provisioning
 function provisioningFixture(overrides: Partial<ApplicationPreviewServiceDependencies> = {}) {
   const configs: Record<string, unknown>[] = [{}];
   const dependencies: ApplicationPreviewServiceDependencies = {
+    ...testLifecycle,
     releases: releases(),
     ...activation(),
     projects: previewStore(configs),
@@ -437,4 +467,416 @@ test("preview readiness rejects foreign, changed, absent and unavailable runtime
     readiness: { inspect: async () => report },
   });
   expect(await probe(input)).toEqual({ passed: [], failed: ["application_readiness"] });
+});
+
+function cleanupFixture(overrides: Partial<ApplicationPreviewServiceDependencies> = {}) {
+  const id = "81234567-89ab-4def-8123-456789abcdef";
+  const branchRef = `pv${id.replaceAll("-", "").slice(0, 18)}`;
+  const receipt: StoredApplicationPreview = {
+    ...buildApplicationPreviewReceipt({
+      previewId: id, projectRef: "demo", applicationId: "api", environmentId: "test",
+      releaseId: "a".repeat(64), branchRef, dataMode: "schema_only", expiresAt: "2026-10-11T00:00:00.000Z",
+    }),
+    status: "failed", branch_name: "fixture", queue_name: `preview_${id.replaceAll("-", "")}`,
+    test_secret_name: `PREVIEW_TOKEN_${id.replaceAll("-", "").toUpperCase()}`, source_configuration_id: null,
+    created_at: "2026-10-10T00:00:00.000Z", updated_at: "2026-10-10T00:00:00.000Z",
+  };
+  const configs: Record<string, unknown>[] = [{ application_previews: [receipt], owner_setting: "retained" }];
+  const calls: string[] = [];
+  let queue = true;
+  const dependencies: ApplicationPreviewServiceDependencies = {
+    ...testLifecycle, releases: releases(), projects: previewStore(configs),
+    now: () => Date.parse("2026-10-12T00:00:00.000Z"),
+    branches: { createBranch: async () => { calls.push("create"); }, deleteBranch: async () => { calls.push("branch"); } },
+    queues: {
+      createQueue: async () => {}, listQueues: async () => queue ? [{ queue_name: receipt.queue_name } as never] : [],
+      dropQueue: async () => { calls.push("queue"); queue = false; return true; },
+    },
+    secrets: { upsertSecrets: async () => true, deleteSecret: async () => { calls.push("secret"); return true; } },
+    invalidateEnv: async () => { calls.push("invalidate"); return true; },
+    cleanupChecks: {
+      assertSafe: async () => { calls.push("guard"); },
+      cleanupStorage: async () => { calls.push("storage"); },
+      verifySecretDeleted: async () => { calls.push("verify-secret"); },
+      verifyBranchDeleted: async () => { calls.push("verify-branch"); },
+    },
+    ...overrides,
+  };
+  return { receipt, configs, calls, dependencies, service: new ApplicationPreviewService(dependencies) };
+}
+
+test("preview TTL is platform-owned, bounded and validated before materialization", async () => {
+  const now = Date.parse("2026-10-11T00:00:00.000Z");
+  const f = provisioningFixture({ now: () => now });
+  for (const ttlSeconds of [undefined, 300, 604800]) {
+    const created = await f.service.create({
+      projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64), ttlSeconds,
+    });
+    expect(created.created_at).toBe(new Date(now).toISOString());
+    expect(created.expires_at).toBe(new Date(now + (ttlSeconds ?? 86400) * 1000).toISOString());
+    await f.service.get("demo", created.preview_id);
+  }
+  let materialized = false;
+  const invalid = provisioningFixture({ releases: {
+    readRelease: async () => { materialized = true; throw new Error("must not read"); },
+    materializeRelease: async () => { throw new Error("must not materialize"); },
+  } });
+  for (const ttlSeconds of [0, 299, 604801, 300.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    await expect(invalid.service.create({
+      projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64), ttlSeconds,
+    })).rejects.toThrow("APPLICATION_PREVIEW_TTL_INVALID");
+  }
+  expect(materialized).toBe(false);
+});
+
+test("cleanup checkpoints every confirmed resource and leaves earlier failures retryable", async () => {
+  const f = cleanupFixture();
+  let fail = true;
+  const service = new ApplicationPreviewService({
+    ...f.dependencies,
+    cleanupChecks: { ...f.dependencies.cleanupChecks!,
+      cleanupStorage: async () => { f.calls.push("storage"); if (fail) throw new Error("provider-private-credential"); } },
+  });
+  const first = await service.cleanup("demo", f.receipt.preview_id);
+  expect(first).toMatchObject({
+    status: "failed", cleanup: { required: true, completed: false, error: "APPLICATION_PREVIEW_CLEANUP_FAILED" },
+    resources: { queue_namespace: { status: "cleaned" }, test_secret: { status: "cleaned" } },
+  });
+  expect(f.calls).not.toContain("branch");
+  expect(JSON.stringify(first)).not.toContain("provider-private-credential");
+  fail = false;
+  const cleaned = await service.cleanup("demo", f.receipt.preview_id);
+  expect(cleaned).toMatchObject({ status: "cleaned", cleanup: { required: false, completed: true, error: null } });
+  expect(f.calls.filter(call => call === "queue")).toHaveLength(1);
+  expect(f.calls.filter(call => call === "secret")).toHaveLength(1);
+  expect(f.calls.slice(-4)).toEqual(["guard", "storage", "branch", "verify-branch"]);
+  expect(f.configs[0]?.owner_setting).toBe("retained");
+});
+
+test("queue, Secret, invalidation and branch readback failures never become cleaned", async () => {
+  const failures: Array<(f: ReturnType<typeof cleanupFixture>) => Partial<ApplicationPreviewServiceDependencies>> = [
+    f => ({ queues: { ...f.dependencies.queues!, dropQueue: async () => false } }),
+    f => ({ secrets: { ...f.dependencies.secrets!, deleteSecret: async () => false } }),
+    () => ({ invalidateEnv: async () => false }),
+    f => ({ cleanupChecks: { ...f.dependencies.cleanupChecks!,
+      verifySecretDeleted: async () => { throw new Error("secret remains"); } } }),
+    f => ({ cleanupChecks: { ...f.dependencies.cleanupChecks!,
+      verifyBranchDeleted: async () => { throw new Error("database remains"); } } }),
+  ];
+  for (const change of failures) {
+    const f = cleanupFixture();
+    const service = new ApplicationPreviewService({ ...f.dependencies, ...change(f) });
+    const receipt = await service.cleanup("demo", f.receipt.preview_id);
+    expect(receipt?.status).toBe("failed");
+    expect(receipt?.cleanup.completed).toBe(false);
+    expect(receipt?.cleanup.required).toBe(true);
+    expect(receipt?.resources.database_branch.status).not.toBe("cleaned");
+  }
+});
+
+test("missing verifier, foreign ownership and CAS failure cannot trigger deletion", async () => {
+  for (const kind of ["missing", "foreign", "cas"]) {
+    const f = cleanupFixture();
+    if (kind === "foreign") {
+      const stored = f.configs[0]?.application_previews as StoredApplicationPreview[];
+      stored[0]!.resources.database_branch.branch_ref = "production";
+    }
+    const service = new ApplicationPreviewService({
+      ...f.dependencies,
+      ...(kind === "missing" ? { cleanupChecks: undefined } : {}),
+      ...(kind === "cas" ? { projects: { ...f.dependencies.projects!,
+        saveApplicationPreview: async () => { throw new ApplicationPreviewConflictError(); } } } : {}),
+    });
+    if (kind === "cas") {
+      await expect(service.cleanup("demo", f.receipt.preview_id)).rejects.toBeInstanceOf(ApplicationPreviewConflictError);
+    } else {
+      expect((await service.cleanup("demo", f.receipt.preview_id))?.cleanup.completed).toBe(false);
+    }
+    expect(f.calls.filter(call => call !== "guard")).toEqual([]);
+  }
+});
+
+test("cleanup commits intent before deactivation and cannot stop an application after a CAS conflict", async () => {
+  for (const conflict of [false, true]) {
+    const f = cleanupFixture();
+    const stored = (f.configs[0]?.application_previews as StoredApplicationPreview[])[0]!;
+    stored.resources.application_activation = { status: "ready", activation_id: runtimeInput().activationId };
+    const service = new ApplicationPreviewService({
+      ...f.dependencies,
+      projects: conflict ? {
+        ...f.dependencies.projects!,
+        saveApplicationPreview: async () => { throw new ApplicationPreviewConflictError(); },
+      } : f.dependencies.projects,
+      cleanupChecks: {
+        ...f.dependencies.cleanupChecks!,
+        deactivateApplication: async () => {
+          const intent = (f.configs[0]?.application_previews as StoredApplicationPreview[])[0]!;
+          expect(intent.cleanup.error).toBe("APPLICATION_PREVIEW_CLEANUP_PENDING");
+          expect(intent.status).toBe("failed");
+          f.calls.push("deactivate");
+        },
+      },
+    });
+    if (conflict) {
+      await expect(service.cleanup("demo", stored.preview_id)).rejects.toBeInstanceOf(ApplicationPreviewConflictError);
+      expect(f.calls).toEqual(["guard"]);
+    } else {
+      expect((await service.cleanup("demo", stored.preview_id))?.status).toBe("cleaned");
+      expect(f.calls.slice(0, 3)).toEqual(["guard", "deactivate", "queue"]);
+    }
+  }
+});
+
+test("cleanup reads never resume provisioning and automatic cleanup rechecks the persisted deadline", async () => {
+  const f = cleanupFixture();
+  const stored = (f.configs[0]?.application_previews as StoredApplicationPreview[])[0]!;
+  stored.status = "provisioning";
+  stored.expires_at = "2026-10-13T00:00:00.000Z";
+  expect((await f.service.cleanup("demo", stored.preview_id, { automatic: true }))?.status).toBe("provisioning");
+  expect(f.calls).toEqual([]);
+  stored.expires_at = null;
+  await f.service.cleanup("demo", stored.preview_id, { automatic: true });
+  expect(f.calls).toEqual([]);
+  stored.expires_at = "2026-10-11T00:00:00.000Z";
+  expect((await f.service.cleanup("demo", stored.preview_id, { automatic: true }))?.status).toBe("cleaned");
+  expect(f.calls).not.toContain("create");
+  expect((await f.service.get("demo", stored.preview_id))?.status).toBe("cleaned");
+});
+
+test("the maintenance sweep is bounded, scope checked and continues after an individual failure", async () => {
+  const f = cleanupFixture();
+  const secondId = "91234567-89ab-4def-8123-456789abcdef";
+  const attempted: string[] = [];
+  const result = await runApplicationPreviewCleanupSweep({
+    now: Date.parse("2026-10-12T00:00:00.000Z"),
+    discover: async (cursor, limit) => {
+      expect(cursor).toBeNull();
+      expect(limit).toBe(16);
+      return [
+        { projectRef: "demo", preview: { ...f.receipt, expires_at: null } },
+        { projectRef: "demo", preview: { ...f.receipt, expires_at: "2026-10-13T00:00:00.000Z" } },
+        { projectRef: "other", preview: f.receipt },
+        { projectRef: "demo", preview: { ...f.receipt, expires_at: "broken" } },
+        { projectRef: "demo", preview: f.receipt },
+        { projectRef: "demo", preview: { ...f.receipt, preview_id: secondId } },
+      ];
+    },
+    previews: { cleanup: async (ref, id, options) => {
+      expect(ref).toBe("demo");
+      expect(options).toEqual({ automatic: true });
+      attempted.push(id);
+      if (id === f.receipt.preview_id) throw new Error("private-provider-credential");
+      return { ...f.receipt, preview_id: id, status: "cleaned", cleanup: { required: false, completed: true, error: null } };
+    } },
+  });
+  expect(result).toEqual({
+    checked: 6, attempted: 2, cleaned: 1, pending: 1, skipped: 4,
+    cursor: { projectRef: "demo", previewId: secondId },
+  });
+  expect(attempted).toEqual([f.receipt.preview_id, secondId]);
+  const empty = await runApplicationPreviewCleanupSweep({
+    previews: f.service, cursor: result.cursor, discover: async cursor => { expect(cursor).toEqual(result.cursor); return []; },
+  });
+  expect(empty.cursor).toBeNull();
+});
+
+test("automatic cleanup blocks active and uncertain activations before deactivation or resource deletion", async () => {
+  const f = cleanupFixture();
+  const runtime = runtimeInput();
+  let effects = 0;
+  const current: ApplicationActiveRecord = {
+    schema: "supacloud.application-active.v1", runtime, configurationId, configurationDigest: "b".repeat(64), hosts: { api: ["app.test"] },
+  };
+  const checks = createApplicationPreviewCleanupChecks(
+    { readForApplication: async () => current },
+    { deactivateConfigured: async () => { effects++; throw new Error("must not deactivate"); } },
+    { projects: { findByRef: async () => null }, runtimeOccupied: async () => false },
+  );
+  await expect(checks.assertSafe(f.receipt, true)).rejects.toThrow("APPLICATION_PREVIEW_CLEANUP_ACTIVE");
+  const uncertain = structuredClone(f.receipt);
+  uncertain.resources.application_activation = { status: "pending", activation_id: runtime.activationId };
+  const absent = createApplicationPreviewCleanupChecks(
+    { readForApplication: async () => null },
+    { deactivateConfigured: async () => { effects++; throw new Error("must not deactivate"); } },
+    { projects: { findByRef: async () => null }, runtimeOccupied: async () => false },
+  );
+  await expect(absent.assertSafe(uncertain, false)).rejects.toThrow("APPLICATION_PREVIEW_CLEANUP_ACTIVATION_UNRESOLVED");
+  expect(effects).toBe(0);
+});
+
+test("explicit cleanup admission is read-only and deactivation verifies remaining occupancy", async () => {
+  const f = cleanupFixture();
+  const runtime = runtimeInput();
+  f.receipt.resources.application_activation = { status: "ready", activation_id: runtime.activationId };
+  f.receipt.resources.configuration_revision = { status: "ready", configuration_id: configurationId };
+  const current: ApplicationActiveRecord = {
+    schema: "supacloud.application-active.v1",
+    runtime: { ...runtime, release: { ...runtime.release,
+      project_ref: f.receipt.resources.database_branch.branch_ref, release_id: f.receipt.release_id } },
+    configurationId, configurationDigest: "b".repeat(64), hosts: { api: ["app.test"] },
+  };
+  let effects = 0;
+  const checks = createApplicationPreviewCleanupChecks(
+    { readForApplication: async () => current },
+    { deactivateConfigured: async () => {
+      effects++;
+      return { project_ref: current.runtime.release.project_ref, application_id: f.receipt.application_id,
+        environment_id: f.receipt.environment_id, activation_id: runtime.activationId,
+        mutation_id: f.receipt.preview_id, deactivated: true };
+    } },
+    { projects: { findByRef: async () => null }, runtimeOccupied: async () => true },
+  );
+  await checks.assertSafe(f.receipt, false);
+  expect(effects).toBe(0);
+  await expect(checks.deactivateApplication!(f.receipt)).rejects.toThrow("APPLICATION_PREVIEW_CLEANUP_ACTIVATION_UNRESOLVED");
+  expect(effects).toBe(1);
+});
+
+test("Storage cleanup removes only an empty owned root and refuses objects or symlinks", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "preview-cleanup-storage-")));
+  const branchRef = "pv8123456789ab4def81";
+  const directory = join(root, resolveBucketName(branchRef));
+  try {
+    await mkdir(directory);
+    await cleanupEmptyPreviewStorage(branchRef, root);
+    await expect(realpath(directory)).rejects.toMatchObject({ code: "ENOENT" });
+    await cleanupEmptyPreviewStorage(branchRef, root);
+    await mkdir(directory);
+    await Bun.write(join(directory, "retained.txt"), "retained");
+    await expect(cleanupEmptyPreviewStorage(branchRef, root)).rejects.toThrow("APPLICATION_PREVIEW_CLEANUP_STORAGE_OCCUPIED");
+    expect(await Bun.file(join(directory, "retained.txt")).text()).toBe("retained");
+    await rm(directory, { recursive: true });
+    const outside = join(root, "outside");
+    await mkdir(outside);
+    await Bun.write(join(outside, "retained.txt"), "outside");
+    await symlink(outside, directory);
+    await expect(cleanupEmptyPreviewStorage(branchRef, root)).rejects.toThrow("APPLICATION_PREVIEW_CLEANUP_STORAGE_UNSUPPORTED");
+    expect(await Bun.file(join(outside, "retained.txt")).text()).toBe("outside");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+async function deactivationFixture() {
+  const root = await mkdtemp(join(tmpdir(), "preview-deactivation-"));
+  const active = new ApplicationActiveStorage(join(root, "authority"));
+  const runtime = runtimeInput();
+  const hosts = { api: ["app.example.test"] };
+  const record: ApplicationActiveRecord = {
+    schema: "supacloud.application-active.v1", runtime, hosts, configurationId, configurationDigest: "b".repeat(64),
+  };
+  await active.write(record, null);
+  const { journal, states } = activationJournal();
+  const calls: string[] = [];
+  let stopped = false;
+  let routed = true;
+  let allocation: ApplicationRuntimeAllocation = {
+    schema: "supacloud.application-runtime-allocation.v1", runtime, configurationId, createdAt: new Date().toISOString(),
+  };
+  const dependencies: ApplicationDeploymentDependencies = {
+    active, mutations: journal, verifyCompatibility: async () => {},
+    withProjectLifecycle: async (_ref, operation) => { calls.push("lock"); return operation(); },
+    configurations: { resolve: async () => ({ bunVersion: "1.4.2", hosts, environment: { api: {}, jobs: {} } }) },
+    allocations: {
+      allocate: async () => { throw new Error("must not allocate"); },
+      read: async () => structuredClone(allocation),
+      retire: async (_ref, _id, verify) => {
+        await verify(allocation);
+        calls.push("retire");
+        allocation = { ...allocation, retiredAt: new Date().toISOString() };
+        return structuredClone(allocation);
+      },
+    },
+    runtime: {
+      install: async () => { throw new Error("must not install"); },
+      start: async () => { throw new Error("must not start"); },
+      stop: async () => { calls.push("stop"); stopped = true; return []; },
+      requireStopped: async () => { if (!stopped) throw new Error("still running"); return []; },
+    },
+    gateway: {
+      configureApplicationRoute: async () => { throw new Error("must not route"); },
+      verifyApplicationRoute: async () => { throw new Error("must not probe readiness"); },
+      removeApplicationRoute: async () => { calls.push("unroute"); routed = false; },
+      verifyApplicationRouteAbsent: async () => { if (routed) throw new Error("still routed"); },
+    },
+  };
+  const input = {
+    projectRef: runtime.release.project_ref, applicationId: runtime.release.application_id, environmentId: runtime.environmentId,
+    activationId: runtime.activationId, mutationId: "81234567-89ab-4def-8123-456789abcdef",
+    principal: { type: "master" as const, id: "preview-cleanup" },
+  };
+  return { root, active, dependencies, journal, states, calls, input, runtime };
+}
+
+test("explicit deactivation preserves former authority and retires only the selected activation", async () => {
+  const f = await deactivationFixture();
+  try {
+    const service = new ApplicationDeploymentService(f.dependencies);
+    expect(await service.deactivateConfigured(f.input)).toMatchObject({ deactivated: true, activation_id: f.input.activationId });
+    expect(f.calls).toEqual(["lock", "stop", "unroute", "retire"]);
+    expect(await f.active.read(f.runtime)).toBeNull();
+    const archived = Bun.file(join(f.root, "authority", f.input.projectRef, f.input.applicationId, f.input.environmentId,
+      `deactivated-${f.input.activationId}.json`));
+    expect((await archived.json()).runtime.activationId).toBe(f.input.activationId);
+    expect(f.states.get(f.input.mutationId)?.status).toBe("succeeded");
+    f.calls.length = 0;
+    await service.deactivateConfigured(f.input);
+    expect(f.calls).toEqual(["lock"]);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("deactivation cannot stop a newer activation or resume unknown partial effects", async () => {
+  const f = await deactivationFixture();
+  try {
+    const service = new ApplicationDeploymentService(f.dependencies);
+    await expect(service.deactivateConfigured({ ...f.input, applicationId: "different" })).rejects.toThrow("IDENTITY_INVALID");
+    expect(f.calls).toEqual(["lock"]);
+    f.calls.length = 0;
+    f.dependencies.gateway!.removeApplicationRoute = async () => { throw new Error("provider response lost"); };
+    await expect(new ApplicationDeploymentService(f.dependencies).deactivateConfigured(f.input)).rejects.toThrow("provider response lost");
+    expect(f.states.get(f.input.mutationId)?.status).toBe("outcome_unknown");
+    const calls = [...f.calls];
+    await expect(new ApplicationDeploymentService(f.dependencies).deactivateConfigured(f.input)).rejects.toThrow("RECONCILIATION_REQUIRED");
+    expect(f.calls).toEqual([...calls, "lock"]);
+    expect(await f.active.read(f.runtime)).not.toBeNull();
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("a lost final deactivation receipt is reconciled observationally without replaying effects", async () => {
+  const f = await deactivationFixture();
+  try {
+    f.journal.success = async () => { throw new Error("receipt response lost"); };
+    await expect(new ApplicationDeploymentService(f.dependencies).deactivateConfigured(f.input)).rejects.toThrow("receipt response lost");
+    expect(f.states.get(f.input.mutationId)?.status).toBe("outcome_unknown");
+    f.calls.length = 0;
+    await new ApplicationDeploymentService(f.dependencies).deactivateConfigured(f.input);
+    expect(f.calls).toEqual(["lock"]);
+    expect(f.states.get(f.input.mutationId)?.status).toBe("succeeded");
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});
+
+test("active clear refuses a newer authority and repairs directory durability after a lost response", async () => {
+  const f = await deactivationFixture();
+  try {
+    const wrongId = "71234567-89ab-4def-8123-456789abcdef";
+    await expect(f.active.clear(f.runtime, wrongId)).rejects.toThrow("APPLICATION_ACTIVATION_REVISION_CONFLICT");
+    expect((await f.active.read(f.runtime))?.runtime.activationId).toBe(f.runtime.activationId);
+    let failSync = true;
+    let syncs = 0;
+    const storage = new ApplicationActiveStorage(join(f.root, "authority"), {
+      beforeDirectorySync: async () => {
+        syncs++;
+        if (failSync) throw new Error("directory sync failed");
+      },
+    });
+    await expect(storage.clear(f.runtime, f.runtime.activationId)).rejects.toThrow("directory sync failed");
+    expect(await storage.read(f.runtime)).toBeNull();
+    const archive = Bun.file(join(f.root, "authority", f.input.projectRef, f.input.applicationId, f.input.environmentId,
+      `deactivated-${f.runtime.activationId}.json`));
+    const archived = await archive.text();
+    failSync = false;
+    await storage.clear(f.runtime, f.runtime.activationId);
+    expect(syncs).toBeGreaterThan(1);
+    expect(await archive.text()).toBe(archived);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
 });

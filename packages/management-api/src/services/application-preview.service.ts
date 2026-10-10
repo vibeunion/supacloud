@@ -16,8 +16,13 @@ import {
 } from "./application-preview-contract";
 import type { ApplicationReleaseStorage } from "./application-release-storage";
 import type { ApplicationConfigurations } from "./application-configuration";
+import { withApplicationPreviewLifecycle, withApplicationProjectLifecycle } from "./application-lifecycle-lock";
+import { StorageService } from "./storage.service";
 
 type PreviewDataMode = "schema_only" | "full_clone";
+export const APPLICATION_PREVIEW_DEFAULT_TTL_SECONDS = 24 * 60 * 60;
+export const APPLICATION_PREVIEW_MIN_TTL_SECONDS = 5 * 60;
+export const APPLICATION_PREVIEW_MAX_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 function previewList(config: unknown): StoredApplicationPreview[] {
   const raw = normalizeProjectConfig(config as Record<string, unknown> | null | undefined)["application_previews"];
@@ -28,6 +33,7 @@ function previewList(config: unknown): StoredApplicationPreview[] {
       && typeof (item as StoredApplicationPreview).preview_id === "string")
     .map(item => ({
       ...item,
+      expires_at: item.expires_at ?? null,
       source_configuration_id: item.source_configuration_id ?? null,
       resources: {
         ...item.resources,
@@ -55,21 +61,24 @@ function secretNameFor(preview: string): string {
 
 function storedReceipt(
   receipt: ApplicationPreviewReceipt,
-  input: { branchName: string; queueName: string; testSecretName: string; sourceConfigurationId: string | null },
+  input: {
+    branchName: string; queueName: string; testSecretName: string; sourceConfigurationId: string | null; now: string;
+  },
 ): StoredApplicationPreview {
-  const now = new Date().toISOString();
   return {
     ...receipt,
     branch_name: input.branchName,
     queue_name: input.queueName,
     test_secret_name: input.testSecretName,
     source_configuration_id: input.sourceConfigurationId,
-    created_at: now,
-    updated_at: now,
+    created_at: input.now,
+    updated_at: input.now,
   };
 }
 
-type PreviewDependencies = Omit<ApplicationPreviewServiceDependencies, "branches" | "queues" | "projects" | "secrets" | "invalidateEnv" | "runtime">
+type PreviewDependencies = Omit<ApplicationPreviewServiceDependencies,
+  "branches" | "queues" | "projects" | "secrets" | "invalidateEnv" | "runtime" | "storage"
+  | "lifecycle" | "branchLifecycle" | "now">
   & {
     branches: NonNullable<ApplicationPreviewServiceDependencies["branches"]>;
     queues: NonNullable<ApplicationPreviewServiceDependencies["queues"]>;
@@ -77,7 +86,11 @@ type PreviewDependencies = Omit<ApplicationPreviewServiceDependencies, "branches
     secrets: NonNullable<ApplicationPreviewServiceDependencies["secrets"]>;
     invalidateEnv: NonNullable<ApplicationPreviewServiceDependencies["invalidateEnv"]>;
     runtime: NonNullable<ApplicationPreviewServiceDependencies["runtime"]>;
+    storage: NonNullable<ApplicationPreviewServiceDependencies["storage"]>;
     smokeTest: NonNullable<ApplicationPreviewServiceDependencies["smokeTest"]>;
+    lifecycle: NonNullable<ApplicationPreviewServiceDependencies["lifecycle"]>;
+    branchLifecycle: NonNullable<ApplicationPreviewServiceDependencies["branchLifecycle"]>;
+    now: NonNullable<ApplicationPreviewServiceDependencies["now"]>;
   };
 
 export interface ApplicationPreviewServiceDependencies {
@@ -88,6 +101,7 @@ export interface ApplicationPreviewServiceDependencies {
   secrets?: Pick<typeof projectService, "upsertSecrets" | "deleteSecret">;
   invalidateEnv?: (ref: string) => Promise<boolean>;
   runtime?: Pick<typeof tenantRuntimeService, "checkStatus">;
+  storage?: Pick<typeof StorageService, "createBucket">;
   configurations?: Pick<ApplicationConfigurations, "clone">;
   activate?: (input: {
     projectRef: string;
@@ -99,6 +113,17 @@ export interface ApplicationPreviewServiceDependencies {
     activationId: string;
   }) => Promise<{ activation_id: string }>;
   smokeTest?: (input: ApplicationPreviewProbeInput) => Promise<{ passed: string[]; failed: string[] }>;
+  lifecycle?: typeof withApplicationPreviewLifecycle;
+  branchLifecycle?: typeof withApplicationProjectLifecycle;
+  now?: () => number;
+  cleanupChecks?: {
+    assertSafe(receipt: StoredApplicationPreview, automatic: boolean): Promise<void>;
+    deactivateApplication?(receipt: StoredApplicationPreview): Promise<void>;
+    cleanupStorage(receipt: StoredApplicationPreview): Promise<void>;
+    verifySecretDeleted(receipt: StoredApplicationPreview): Promise<void>;
+    verifyBranchDeleted(receipt: StoredApplicationPreview): Promise<void>;
+    databaseExists?(receipt: StoredApplicationPreview): Promise<boolean>;
+  };
 }
 
 export class ApplicationPreviewService {
@@ -113,6 +138,10 @@ export class ApplicationPreviewService {
       secrets: projectService,
       invalidateEnv: runtimeCacheService.invalidateProjectRuntimeEnv,
       runtime: tenantRuntimeService,
+      storage: { createBucket: ref => StorageService.createBucket(ref) },
+      lifecycle: withApplicationPreviewLifecycle,
+      branchLifecycle: withApplicationProjectLifecycle,
+      now: Date.now,
       ...dependencies,
       smokeTest: dependencies.smokeTest ?? (async () => ({ passed: [], failed: ["application_readiness"] })),
     };
@@ -130,12 +159,15 @@ export class ApplicationPreviewService {
   }
 
   async get(projectRef: string, id: string): Promise<StoredApplicationPreview | null> {
+    const receipt = await this.read(projectRef, id);
+    if (receipt) await this.reconcilePending(projectRef, [receipt]);
+    return await this.read(projectRef, id);
+  }
+
+  async read(projectRef: string, id: string): Promise<StoredApplicationPreview | null> {
     if (!previewId(id)) return null;
     const project = await this.dependencies.projects.findByRef(projectRef);
-    const receipt = previewList(project?.config).find((item) => item.preview_id === id) ?? null;
-    if (receipt) await this.reconcilePending(projectRef, [receipt]);
-    const refreshed = await this.dependencies.projects.findByRef(projectRef);
-    return previewList(refreshed?.config).find((item) => item.preview_id === id) ?? receipt;
+    return previewList(project?.config).find((item) => item.preview_id === id && item.project_ref === projectRef) ?? null;
   }
 
   async create(input: {
@@ -146,7 +178,14 @@ export class ApplicationPreviewService {
     configurationId?: string;
     branchName?: string;
     dataMode?: PreviewDataMode;
+    ttlSeconds?: number;
   }): Promise<StoredApplicationPreview> {
+    const now = this.dependencies.now();
+    const ttlSeconds = input.ttlSeconds ?? APPLICATION_PREVIEW_DEFAULT_TTL_SECONDS;
+    if (!Number.isInteger(ttlSeconds) || ttlSeconds < APPLICATION_PREVIEW_MIN_TTL_SECONDS
+      || ttlSeconds > APPLICATION_PREVIEW_MAX_TTL_SECONDS) {
+      throw new Error("APPLICATION_PREVIEW_TTL_INVALID");
+    }
     const sourceRelease = await this.dependencies.releases.readRelease(input.projectRef, input.applicationId, input.releaseId);
     const id = randomUUID();
     const branchRef = branchRefFor(id);
@@ -168,12 +207,14 @@ export class ApplicationPreviewService {
         releaseId: release.release_id,
         branchRef,
         dataMode: input.dataMode ?? "schema_only",
+        expiresAt: new Date(now + ttlSeconds * 1000).toISOString(),
       }),
       {
         branchName: input.branchName?.trim() || `app-${input.applicationId}-${id.slice(0, 8)}`,
         queueName,
         testSecretName,
         sourceConfigurationId: input.configurationId ?? null,
+        now: new Date(now).toISOString(),
       },
     );
     receipt.status = "provisioning";
@@ -182,31 +223,105 @@ export class ApplicationPreviewService {
     return receipt;
   }
 
-  async cleanup(projectRef: string, previewId: string): Promise<StoredApplicationPreview | null> {
-    const current = await this.get(projectRef, previewId);
+  async cleanup(
+    projectRef: string, previewId: string, options: { automatic?: boolean } = {},
+  ): Promise<StoredApplicationPreview | null> {
+    const pending = this.provisioning.get(`${projectRef}:${previewId}`);
+    if (pending) await pending;
+    return this.dependencies.lifecycle(projectRef, previewId, async () => {
+      const current = await this.read(projectRef, previewId);
+      if (!current || current.status === "cleaned") return current;
+      if (options.automatic && (current.expires_at === null || !Number.isFinite(Date.parse(current.expires_at))
+        || Date.parse(current.expires_at) > this.dependencies.now())) return current;
+      return this.dependencies.branchLifecycle(current.resources.database_branch.branch_ref,
+        () => this.cleanupUnderLock(projectRef, current, options.automatic === true));
+    });
+  }
+
+  private async cleanupUnderLock(
+    projectRef: string, current: StoredApplicationPreview, automatic: boolean,
+  ): Promise<StoredApplicationPreview> {
     if (!current || current.status === "cleaned") return current;
     const next = structuredClone(current);
     try {
-      await this.dependencies.queues.dropQueue(projectRef === current.project_ref ? current.resources.database_branch.branch_ref : projectRef, current.queue_name);
-    } catch {
-      // Cleanup remains retryable; branch teardown is still attempted.
-    }
-    try { await this.dependencies.secrets.deleteSecret(current.resources.database_branch.branch_ref, current.test_secret_name); } catch { /* retryable */ }
-    try { await this.dependencies.invalidateEnv(current.resources.database_branch.branch_ref); } catch { /* best effort */ }
-    try { await this.dependencies.branches.deleteBranch(current.resources.database_branch.branch_ref); } catch {
-      next.cleanup.error = "APPLICATION_PREVIEW_CLEANUP_FAILED";
+      const branchRef = next.resources.database_branch.branch_ref;
+      if (next.project_ref !== projectRef || branchRef !== branchRefFor(next.preview_id)
+        || next.queue_name !== queueNameFor(next.preview_id)
+        || next.test_secret_name !== secretNameFor(next.preview_id)
+        || next.resources.storage_namespace.namespace !== branchRef) {
+        throw new Error("APPLICATION_PREVIEW_CLEANUP_IDENTITY_MISMATCH");
+      }
+      if (!this.dependencies.cleanupChecks) throw new Error("APPLICATION_PREVIEW_CLEANUP_VERIFIER_REQUIRED");
+      if (next.resources.application_activation.activation_id !== null
+        && !this.dependencies.cleanupChecks.deactivateApplication) {
+        throw new Error("APPLICATION_PREVIEW_CLEANUP_VERIFIER_REQUIRED");
+      }
+      await this.dependencies.cleanupChecks.assertSafe(structuredClone(next), automatic);
+      // A durable intent prevents restarted provisioning after cleanup begins.
       next.status = "failed";
+      next.cleanup = { required: true, completed: false, error: "APPLICATION_PREVIEW_CLEANUP_PENDING" };
+      await this.save(projectRef, next);
+      if (next.resources.application_activation.activation_id !== null) {
+        await this.dependencies.cleanupChecks.deactivateApplication!(structuredClone(next));
+        next.resources.application_activation.status = "cleaned";
+        await this.save(projectRef, next);
+      }
+      if (next.resources.queue_namespace.status !== "cleaned") {
+        const databaseExists = !this.dependencies.cleanupChecks.databaseExists
+          || await this.dependencies.cleanupChecks.databaseExists(structuredClone(next));
+        if (databaseExists) {
+          const queues = await this.dependencies.queues.listQueues(branchRef);
+          if (queues.some(queue => queue.queue_name === next.queue_name)) {
+            if (!await this.dependencies.queues.dropQueue(branchRef, next.queue_name)) {
+              throw new Error("APPLICATION_PREVIEW_CLEANUP_FAILED");
+            }
+          }
+          if ((await this.dependencies.queues.listQueues(branchRef)).some(queue => queue.queue_name === next.queue_name)) {
+            throw new Error("APPLICATION_PREVIEW_CLEANUP_FAILED");
+          }
+        }
+        next.resources.queue_namespace.status = "cleaned";
+        await this.save(projectRef, next);
+      }
+      if (next.resources.test_secret.status !== "cleaned") {
+        if (!await this.dependencies.secrets.deleteSecret(branchRef, next.test_secret_name)) {
+          throw new Error("APPLICATION_PREVIEW_CLEANUP_FAILED");
+        }
+        if (!await this.dependencies.invalidateEnv(branchRef)) throw new Error("APPLICATION_PREVIEW_CLEANUP_FAILED");
+        await this.dependencies.cleanupChecks.verifySecretDeleted(structuredClone(next));
+        next.resources.test_secret.status = "cleaned";
+        await this.save(projectRef, next);
+      }
+      if (next.resources.storage_namespace.status !== "cleaned") {
+        await this.dependencies.cleanupChecks.cleanupStorage(structuredClone(next));
+        next.resources.storage_namespace.status = "cleaned";
+        await this.save(projectRef, next);
+      }
+      if (next.resources.database_branch.status !== "cleaned") {
+        await this.dependencies.branches.deleteBranch(branchRef);
+        await this.dependencies.cleanupChecks.verifyBranchDeleted(structuredClone(next));
+        next.resources.database_branch.status = "cleaned";
+      }
+      next.status = "cleaned";
+      next.cleanup = { required: false, completed: true, error: null };
+      await this.save(projectRef, next);
+      return next;
+    } catch (error) {
+      if (error instanceof ApplicationPreviewConflictError) throw error;
+      const code = error instanceof Error ? error.message : "";
+      next.cleanup = {
+        required: true, completed: false,
+        error: [
+          "APPLICATION_PREVIEW_CLEANUP_IDENTITY_MISMATCH", "APPLICATION_PREVIEW_CLEANUP_VERIFIER_REQUIRED",
+          "APPLICATION_PREVIEW_CLEANUP_ACTIVE", "APPLICATION_PREVIEW_CLEANUP_STORAGE_OCCUPIED",
+          "APPLICATION_PREVIEW_CLEANUP_ACTIVATION_UNRESOLVED",
+          "APPLICATION_PREVIEW_CLEANUP_STORAGE_UNSUPPORTED",
+        ].includes(code) ? code : "APPLICATION_PREVIEW_CLEANUP_FAILED",
+      };
+      if (code !== "APPLICATION_PREVIEW_CLEANUP_ACTIVE") next.status = "failed";
       await this.save(projectRef, next);
       return next;
     }
-    next.status = "cleaned";
-    next.cleanup = { required: false, completed: true, error: null };
-    next.resources.database_branch.status = "cleaned";
-    next.resources.queue_namespace.status = "cleaned";
-    next.resources.storage_namespace.status = "cleaned";
-    next.resources.test_secret.status = "cleaned";
-    await this.save(projectRef, next);
-    return next;
   }
 
   private async provision(projectRef: string, initial: StoredApplicationPreview): Promise<void> {
@@ -251,6 +366,8 @@ export class ApplicationPreviewService {
       if (!secretSaved) throw new Error("PREVIEW_TEST_SECRET_PERSIST_FAILED");
       await this.dependencies.invalidateEnv(branchRef);
       receipt.resources.test_secret.status = "ready";
+      const storage = await this.dependencies.storage.createBucket(branchRef);
+      if (!storage.success) throw new Error("PREVIEW_STORAGE_NAMESPACE_PERSIST_FAILED");
       receipt.resources.storage_namespace.status = "ready";
       if (receipt.resources.application_activation.status !== "ready"
         && receipt.resources.configuration_revision.status === "ready"
@@ -323,7 +440,10 @@ export class ApplicationPreviewService {
   private startProvisioning(projectRef: string, receipt: StoredApplicationPreview): void {
     const key = `${projectRef}:${receipt.preview_id}`;
     if (this.provisioning.has(key)) return;
-    const operation = this.provision(projectRef, receipt).finally(() => this.provisioning.delete(key));
+    const operation = this.dependencies.lifecycle(projectRef, receipt.preview_id, async () => {
+      const current = await this.read(projectRef, receipt.preview_id);
+      if (current?.status === "provisioning") await this.provision(projectRef, current);
+    }).finally(() => this.provisioning.delete(key));
     this.provisioning.set(key, operation);
     // Observe detached failures without hiding them from callers awaiting the
     // same operation. Do not include credential-bearing provider exceptions.
