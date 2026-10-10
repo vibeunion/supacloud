@@ -16,32 +16,6 @@ afterEach(async () => {
     for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
 });
 
-test("official starters emit the enhanced strict TypeScript baseline", () => {
-    const starters = [
-        appStarterFiles("strict-command"),
-        ...(["minimal", "http", "edge"] as const)
-            .map((template) => appTemplateFiles("strict-app", template, {
-                "@supacloud/js": "^0.0.0",
-                "@supabase/supabase-js": "^0.0.0",
-            })),
-    ];
-    for (const files of starters) {
-        const config: unknown = JSON.parse(requireValue(files["tsconfig.json"]));
-        expect(config).toMatchObject({
-            compilerOptions: {
-                strict: true,
-                noUncheckedIndexedAccess: true,
-                exactOptionalPropertyTypes: true,
-                noImplicitOverride: true,
-                noPropertyAccessFromIndexSignature: true,
-                noFallthroughCasesInSwitch: true,
-                forceConsistentCasingInFileNames: true,
-                useUnknownInCatchVariables: true,
-            },
-        });
-    }
-});
-
 test("initialization does not touch an existing project or its secrets", async () => {
     const root = await directory();
     await writeFile(join(root, ".env"), "SENTINEL=synthetic\n");

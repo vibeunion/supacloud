@@ -131,8 +131,7 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
       errorCode: `TS${diagnostic.code}`,
     }));
   const checker = program.getTypeChecker();
-  // Module-resolution failures describe the environment, not a type escape in the
-  // scanned source; dependency installation and build gates report them separately.
+  // Resolution failures are configuration errors, but must still block emission.
   const moduleResolutionCodes = new Set([2307, 2688, 2792]);
   for (const diagnostic of [
     ...program.getGlobalDiagnostics(),
@@ -141,10 +140,9 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
       ...program.getSemanticDiagnostics(sourceFile),
     ]),
   ]) {
-    if (moduleResolutionCodes.has(diagnostic.code)) continue;
     diagnostics.push({
       severity: "error",
-      code: "source-typescript",
+      code: moduleResolutionCodes.has(diagnostic.code) ? "source-config" : "source-typescript",
       message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
       ...(diagnostic.file ? { file: normalizeRelative(rootDir, diagnostic.file.fileName) } : {}),
       ...(diagnostic.file && diagnostic.start !== undefined

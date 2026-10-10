@@ -373,6 +373,23 @@ describe("compiler type-safety gates", () => {
     ]));
   });
 
+  test("missing module declarations block emission even when the return is quarantined", async () => {
+    const root = await projectFixture({
+      "tsconfig.json": JSON.stringify({ compilerOptions: { types: [] } }),
+      "src/production.ts": 'import { read } from "missing-library";\nexport const value: unknown = read();',
+      "generated/application.ts": "// last good application",
+    });
+    const compiled = await compileProject({
+      rootDir: join(root, "src"), outDir: join(root, "generated"), writeOnError: true,
+      strict: false, typeSafety: { scanProductionSource: false },
+    });
+    expect(compiled.diagnostics).toContainEqual(
+      expect.objectContaining({ severity: "error", code: "source-config", errorCode: "TS2307" }),
+    );
+    expect(compiled.written).toEqual([]);
+    expect(await readFile(join(root, "generated/application.ts"), "utf8")).toBe("// last good application");
+  });
+
   test("semantic errors fail even when no escape syntax is present or strict scanning is disabled", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "supacloud-compiler-semantic-"));
     await writeFixtureProject(rootDir, {
