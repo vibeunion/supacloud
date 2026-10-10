@@ -326,11 +326,11 @@ function resolveInsideProject(projectDirectory: string, candidate: string, allow
     return resolved;
 }
 
-async function runBuild(command: string, cwd: string): Promise<void> {
+async function runBuild(command: string, cwd: string, json: boolean): Promise<void> {
     const child = Bun.spawn(["sh", "-c", command], {
         cwd,
         env: process.env,
-        stdio: ["inherit", "inherit", "inherit"],
+        stdio: ["inherit", json ? 2 : "inherit", "inherit"],
     });
     const exitCode = await child.exited;
     if (exitCode !== 0) {
@@ -512,7 +512,7 @@ export function registerDeployTools(
                 }
                 if (args.skip_build !== true) {
                     report("build", buildCommand);
-                    await runBuild(buildCommand, projectDirectory);
+                    await runBuild(buildCommand, projectDirectory, args.json === true);
                 } else {
                     report("build", "skipped");
                 }
@@ -572,7 +572,7 @@ export function registerDeployTools(
 
             if (args.skip_build !== true) {
                 report("build", buildCommand);
-                await runBuild(buildCommand, projectDirectory);
+                await runBuild(buildCommand, projectDirectory, args.json === true);
             } else {
                 report("build", "skipped");
             }
@@ -584,7 +584,10 @@ export function registerDeployTools(
                 const activeReleaseId = typeof inventory.active_release_id === "string" ? inventory.active_release_id : null;
                 const activeActivationId = typeof inventory.active_activation_id === "string" ? inventory.active_activation_id : null;
                 const current = Array.isArray(inventory.releases) ? record(inventory.releases[0]) : null;
-                const unchanged = archive.sha256 === activeReleaseId || archive.treeSha256 === current?.tree_sha256;
+                if (archive.sha256 === activeReleaseId && archive.treeSha256 !== current?.tree_sha256) {
+                    throw new Error("Active release tree does not match the local archive");
+                }
+                const unchanged = archive.treeSha256 === current?.tree_sha256;
 
                 if (args.plan === true || args.diff === true) {
                     const durationMs = report("done", unchanged ? "unchanged plan" : "release diff ready");

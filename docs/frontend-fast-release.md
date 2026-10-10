@@ -44,6 +44,12 @@ Scenario: Preserve read-only and project boundaries
   Then a secret-free exact project/deployment projection is returned
   And no mutation or backup is created
 
+Scenario: A stored release is not sufficient for a no-op
+  Given an unresolved activation or a route pointing away from the verified active artifact
+  When deployment requests the active release snapshot
+  Then the platform refuses the snapshot without modifying authority, routing or the journal
+  And deployment does not report already up to date or publish a new activation
+
 Scenario: Older server compatibility
   Given an older server whose active endpoint returns 404
   When any CLI consumer requests get_active_release
@@ -87,6 +93,11 @@ Scenario: Older server cannot select the previous activation
 Test and production use the same identity/integrity gates. Full history audit
 is an explicit operation, not a routine publish prerequisite. No measured
 production latency improvement is claimed by the local tests.
+The active snapshot checks unresolved mutation state, current artifact integrity
+and the live static route in one deployment lock. A matching archive identity
+with a contradictory tree digest is an error, not a no-op.
+With `deploy --json`, build stdout and stderr are streamed to stderr; stdout
+contains only the final JSON result.
 
 ## Developer Experience Contract
 
