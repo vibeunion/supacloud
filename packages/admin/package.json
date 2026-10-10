@@ -15,10 +15,11 @@
   ],
   "scripts": {
     "dev": "bun run --watch src/index.ts",
-    "prebuild": "bun run --cwd ../cli build:tool-runtime",
+    "prepare:tool-runtime": "bun run --cwd ../cli build:tool-runtime && bun install --force --ignore-scripts --frozen-lockfile",
+    "prebuild": "bun run prepare:tool-runtime",
     "build": "bun build src/index.ts --outdir dist --target node --external cpu-features",
     "prepublishOnly": "bun run build",
-    "pretypecheck": "bun run --cwd ../cli build:tool-runtime",
+    "pretypecheck": "bun run prepare:tool-runtime",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
