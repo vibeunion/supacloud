@@ -9,6 +9,8 @@
   "include": [
     "scripts/frontend-archive-cutover.ts",
     "scripts/lib/frontend-archive-cutover.ts",
-    "tests/unit/frontend-archive-cutover.test.ts"
+    "scripts/lib/frontend-cutover-file.ts",
+    "tests/unit/frontend-archive-cutover.test.ts",
+    "tests/unit/frontend-cutover-file.test.ts"
   ]
 }

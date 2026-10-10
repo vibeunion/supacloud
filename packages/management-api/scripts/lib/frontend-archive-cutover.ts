@@ -3,6 +3,7 @@ import { constants } from "node:fs";
 import { lstat, mkdir, open, readdir, realpath } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fromBufferPromise } from "yauzl";
+import { readBoundedCutoverFile } from "./frontend-cutover-file";
 import {
   assertFrontendArchivePath, createFrontendTarZstd,
   FRONTEND_ARCHIVE_MAX_BYTES, FRONTEND_ARCHIVE_MAX_FILES, FRONTEND_ARCHIVE_MAX_SOURCE_BYTES,
@@ -131,8 +132,8 @@ class SnapshotReader {
     try {
       const before = await handle.stat({ bigint: true });
       if (!before.isFile() || before.size > BigInt(maximum)) throw new Error("Snapshot file exceeds limits");
-      // 冻结副本也可能漂移；安全读取绑定已验证的 FD，不重新按路径打开。
-      const bytes = await handle.readFile();
+      // 冻结副本也可能漂移；绑定 FD 和已验证的字节上限，不使用可随文件增长的 readFile。
+      const bytes = await readBoundedCutoverFile(handle, before.size, maximum);
       const after = await handle.stat({ bigint: true });
       if (before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size
         || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs
