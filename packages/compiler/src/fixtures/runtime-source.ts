@@ -45,7 +45,19 @@ export function InfraResource(_options: { name: string; kind: string }) {
   return (..._args: unknown[]) => {};
 }
 
-export function Controller(_path: string) {
+export function Controller(_path: string | Record<string, unknown>) {
+  return (..._args: unknown[]) => {};
+}
+
+export function Body() {
+  return (..._args: unknown[]) => {};
+}
+
+export function Headers(_name?: string) {
+  return (..._args: unknown[]) => {};
+}
+
+export function UseGuards(..._guards: string[]) {
   return (..._args: unknown[]) => {};
 }
 

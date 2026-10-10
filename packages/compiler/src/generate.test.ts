@@ -823,8 +823,9 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     const standaloneDir = await mkdtemp(join(tmpdir(), "supacloud-standalone-"));
     await writeFixtureProject(standaloneDir, {
       "tsconfig.json": GOOD_PROJECT_FILES["tsconfig.json"],
+      "src/runtime.ts": RUNTIME_SOURCE,
       "src/standalone.controller.ts": `
-        import { Controller, Get, UseGuards } from "@supacloud/app";
+        import { Controller, Get, UseGuards } from "./runtime";
 
         @UseGuards("authGuard")
         @Controller({ path: "/standalone", standalone: true })
@@ -834,7 +835,7 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
         }
       `,
       "src/standalone.command.ts": `
-        import { Command } from "@supacloud/app";
+        import { Command } from "./runtime";
 
         @Command({ name: "standalone.run", permission: "standalone.run", standalone: true })
         export class StandaloneCommand {}

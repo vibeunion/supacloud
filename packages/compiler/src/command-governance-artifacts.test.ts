@@ -4,9 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { checkProject, compileProject } from "./compile";
 import { writeFixtureProject } from "./fixtures/helpers";
+import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./fixtures/runtime-source";
 
 const validSource = `
-import { Command, Module } from "@supacloud/app";
+import { Command, Module } from "./runtime";
 @Command({ name: "case.update", permission: "case:update", transaction: "required",
   idempotency: "required", audit: "case.updated" })
 export class UpdateCase {}
@@ -20,9 +21,8 @@ test("implicit governance defaults preserve both factories and manifest on failu
   const root = await mkdtemp(join(tmpdir(), "supacloud-default-artifacts-"));
   try {
     await writeFixtureProject(root, {
-      "tsconfig.json": JSON.stringify({
-        compilerOptions: { experimentalDecorators: true }, include: ["src/**/*.ts"],
-      }),
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
       "src/case.module.ts": validSource,
     });
     const options = { rootDir: root, outDir: join(root, "generated") };

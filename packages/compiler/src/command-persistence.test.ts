@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { defineSupacloudConfig } from "./config";
 import { compileProject, checkProject } from "./compile";
 import { writeFixtureProject } from "./fixtures/helpers";
+import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./fixtures/runtime-source";
 import { validateGraph } from "./validate";
 import type { ApplicationGraph, CommandExecutionCapabilities } from "./types";
 
@@ -78,8 +79,11 @@ test("a complete decorated module retains the persistent binding and refuses an 
   try {
     await symlink(join(import.meta.dir, "../node_modules"), join(root, "node_modules"),
       process.platform === "win32" ? "junction" : "dir");
-    await writeFixtureProject(root, { "webhook.ts": `
-import { Module, Controller, Command, Post, Body } from "@supacloud/app";
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "runtime.ts": RUNTIME_SOURCE,
+      "webhook.ts": `
+import { Module, Controller, Command, Post, Body } from "./runtime";
 import { Type } from "typebox";
 export const Input = Type.Object({ id: Type.String(), enabled: Type.Boolean() });
 export const Receipt = Type.Object({ status: Type.Literal("confirmed"), result: Input });

@@ -73,16 +73,17 @@ test("public declarations retain strict callback inference for detached NodeNext
         await writeFile(join(packageRoot, "package.json"), await readFile(join(import.meta.dir, "../package.json")));
         await symlink(join(import.meta.dir, "../node_modules/typebox"), join(root, "node_modules/typebox"), "dir");
 
-        const declarations = ts.createProgram([join(import.meta.dir, "tool-runtime.ts")], {
-            target: ts.ScriptTarget.ES2022,
-            module: ts.ModuleKind.ESNext,
-            moduleResolution: ts.ModuleResolutionKind.Bundler,
-            strict: true,
-            types: [],
+        const config = ts.readConfigFile(join(import.meta.dir, "../tsconfig.tool-runtime.json"), ts.sys.readFile);
+        expect(config.error).toBeUndefined();
+        const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, join(import.meta.dir, ".."));
+        expect(parsed.errors).toEqual([]);
+        expect(parsed.fileNames).toEqual([join(import.meta.dir, "tool-runtime.ts")]);
+        const declarations = ts.createProgram(parsed.fileNames, {
+            ...parsed.options,
+            skipLibCheck: false,
             declaration: true,
             emitDeclarationOnly: true,
             noEmitOnError: true,
-            rootDir: import.meta.dir,
             outDir: join(packageRoot, "dist"),
         });
         expect(ts.getPreEmitDiagnostics(declarations).map(diagnostic => diagnostic.messageText)).toEqual([]);

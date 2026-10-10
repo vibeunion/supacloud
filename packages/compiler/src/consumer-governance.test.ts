@@ -4,18 +4,23 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compileProject } from "./compile";
 import { writeFixtureProject } from "./fixtures/helpers";
+import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./fixtures/runtime-source";
 import { inspectRouteContracts } from "./route-contracts";
 import { createExecutionPlans } from "./inspect";
 
 async function fixture(source: string, run: (root: string) => Promise<void>) {
   const root = await mkdtemp(join(tmpdir(), "consumer-governance-"));
   try {
-    await writeFixtureProject(root, { "app.ts": source });
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "runtime.ts": RUNTIME_SOURCE,
+      "app.ts": source,
+    });
     await run(root);
   } finally { await rm(root, { recursive: true, force: true }); }
 }
 const source = `
-import { Module, Controller, Command, Post, Delete, Body } from "@supacloud/app";
+import { Module, Controller, Command, Post, Delete, Body } from "./runtime";
 const Type: { Unknown: () => Record<string, never> } = { Unknown: () => ({}) };
 export const Input: Record<string, never> = Type.Unknown();
 export const Result: Record<string, never> = {};
