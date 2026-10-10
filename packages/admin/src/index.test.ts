@@ -24,9 +24,15 @@ const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const ADMIN_ENTRYPOINT = join(PACKAGE_ROOT, "src/index.ts");
 
 beforeAll(() => {
-    const build = Bun.spawnSync([process.execPath, "run", "build"], { cwd: PACKAGE_ROOT });
-    expect(build.exitCode).toBe(0);
-});
+    const build = Bun.spawnSync([process.execPath, "run", "build"], {
+        cwd: PACKAGE_ROOT, stdout: "pipe", stderr: "pipe", timeout: 60_000,
+    });
+    expect({
+        exitCode: build.exitCode,
+        diagnostics: build.exitCode === 0 ? "" :
+            new TextDecoder().decode(build.stdout) + new TextDecoder().decode(build.stderr),
+    }).toEqual({ exitCode: 0, diagnostics: "" });
+}, 60_000);
 const ADMIN_CONTEXT_KEYS = new Set([
     "SUPABASE_URL",
     "SUPABASE_SERVICE_ROLE_KEY",
