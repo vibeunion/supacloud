@@ -43,8 +43,13 @@ Important:
 
 `EDGE_FUNCTIONS_CORS_MODE` selects who owns CORS for all public Function routes:
 
-- `function` (default): forward `OPTIONS` and preserve Function responses
-  without adding CORS headers. Existing Function allow-lists remain unchanged.
+- `auto` (default): Management API/Caddy derives exact origins from the project's
+  generated API/Auth/Studio hosts, configured custom domains, bound frontend
+  hosts, and the configured gateway IP. It handles preflight and response CORS
+  without requiring each Function to repeat the platform domains. The list is
+  regenerated during tenant reconciliation.
+- `function`: forward `OPTIONS` and preserve Function responses without adding
+  CORS headers. Existing Function allow-lists remain unchanged.
 - `permissive`: handle `OPTIONS` for existing Functions with `204`, allow any
   origin (`Access-Control-Allow-Origin: *`), and allow the preflight's requested
   headers. Actual responses, including JWT failures, receive the same policy.
@@ -55,7 +60,8 @@ For embedded mode, set `EDGE_FUNCTIONS_CORS_MODE=permissive` in the Management
 API service environment. For external mode, set it in the Edge Runtime service
 environment. Restart the owning service after changing it. The setting applies
 only to public Function routes, not internal control, REST, Auth, or Storage.
-Unset it or use `function` to restore Function-owned CORS.
+Use `auto` to restore the default platform-managed, exact-origin behavior, or
+`function` to restore Function-owned CORS.
 
 Permissive mode does not skip JWT verification or application authorization.
 It does not support cross-origin cookie credentials and removes

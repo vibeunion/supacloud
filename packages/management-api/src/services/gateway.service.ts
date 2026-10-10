@@ -661,15 +661,23 @@ export class CaddyGatewayProvider implements GatewayProvider {
         }
 
         if (isFunctionsRoute) {
-            // Preserve function-owned CORS headers on existing deployments.
-            if (proxy.headers.response && typeof proxy.headers.response === "object") {
-                delete proxy.headers.response.delete;
-                if (Object.keys(proxy.headers.response).length === 0) delete proxy.headers.response;
-            }
-            if (!migratedHandle.some((handler) => handler.handler === "subroute" && "errors" in handler)) {
-                migratedHandle.unshift(makeFunctionCorsErrorFallback(
-                    buildTenantCorsOrigins(projectRef, undefined, routeMatcherStrings(migrated, "host")),
+            if (config.edgeFunctionsCorsMode === "auto") {
+                setRouteCors(migrated, buildTenantCorsOrigins(
+                    projectRef,
+                    undefined,
+                    routeMatcherStrings(migrated, "host"),
                 ));
+            } else {
+                // Preserve function-owned CORS headers on existing deployments.
+                if (proxy.headers.response && typeof proxy.headers.response === "object") {
+                    delete proxy.headers.response.delete;
+                    if (Object.keys(proxy.headers.response).length === 0) delete proxy.headers.response;
+                }
+                if (!migratedHandle.some((handler) => handler.handler === "subroute" && "errors" in handler)) {
+                    migratedHandle.unshift(makeFunctionCorsErrorFallback(
+                        buildTenantCorsOrigins(projectRef, undefined, routeMatcherStrings(migrated, "host")),
+                    ));
+                }
             }
         }
 
@@ -1736,6 +1744,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 resolveProjectStudioHost(projectRef, routingConfig),
             ]);
             const corsOrigins = buildTenantCorsOrigins(projectRef, routingConfig, [
+                hostIp,
                 ...hosts,
                 ...authHosts,
                 ...studioHosts,
@@ -1846,10 +1855,8 @@ export class CaddyGatewayProvider implements GatewayProvider {
                     ],
                     readTimeout: 500_000,
                     corsOrigins,
-                    // Functions own their CORS policy (origin allowlists, custom
-                    // headers); preflight must reach the function itself.
-                    preserveUpstreamCors: true,
-                    corsErrorFallback: true,
+                    preserveUpstreamCors: config.edgeFunctionsCorsMode !== "auto",
+                    corsErrorFallback: config.edgeFunctionsCorsMode !== "auto",
                 }),
                 this.makeRoute({
                     id: caddyRouteId(projectRef, "storage-resumable"),
@@ -2204,7 +2211,12 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 const existing = this.routesById.get(id);
                 return existing ? [[id, JSON.parse(JSON.stringify(existing)) as CaddyRoute] as const] : [];
             }));
-            const allHosts = uniqueStrings([...this.hostsForProjectRoutes(route.projectRef), ...route.hosts]);
+            const gatewayHostIp = await this.detectHostIp();
+            const allHosts = uniqueStrings([
+                ...this.hostsForProjectRoutes(route.projectRef),
+                ...route.hosts,
+                gatewayHostIp,
+            ]);
             const origins = buildTenantCorsOrigins(route.projectRef, undefined, allHosts);
             for (const id of routeIds) {
                 const projectRoute = this.routesById.get(id);
@@ -2216,6 +2228,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 const ownerOrigins = buildTenantCorsOrigins(authOwnerRef, undefined, [
                     ...this.hostsForProjectRoutes(authOwnerRef),
                     ...route.hosts,
+                    gatewayHostIp,
                 ]);
                 for (const id of ownerRouteIds) {
                     const ownerRoute = this.routesById.get(id);

@@ -89,8 +89,8 @@ const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
 const FUNCTION_REQUEST_TIMEOUT_MS = Number(process.env.EDGE_FUNCTION_TIMEOUT_MS) || 60_000;
 const BACKGROUND_FUNCTION_TIMEOUT_MS = Number(process.env.EDGE_BACKGROUND_FUNCTION_TIMEOUT_MS) || 300_000;
 const FUNCTION_CORS_MODE = process.env.EDGE_FUNCTIONS_CORS_MODE?.trim() || "function";
-if (FUNCTION_CORS_MODE !== "function" && FUNCTION_CORS_MODE !== "permissive") {
-  throw new Error("EDGE_FUNCTIONS_CORS_MODE must be function or permissive");
+if (FUNCTION_CORS_MODE !== "function" && FUNCTION_CORS_MODE !== "auto" && FUNCTION_CORS_MODE !== "permissive") {
+  throw new Error("EDGE_FUNCTIONS_CORS_MODE must be function, auto, or permissive");
 }
 const FUNCTION_CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -1449,7 +1449,7 @@ async function handleFunctionRequest(
   functionName: string,
 ): Promise<Response> {
   const response = await dispatchFunctionRequest(c, functionName);
-  if (FUNCTION_CORS_MODE === "function") return response;
+  if (FUNCTION_CORS_MODE === "function" || FUNCTION_CORS_MODE === "auto") return response;
   // 显式启用时由平台接管跨域；实际请求仍经过原有 JWT 和函数授权。
   const headers = new Headers(response.headers);
   for (const [name, value] of Object.entries(FUNCTION_CORS_HEADERS)) {

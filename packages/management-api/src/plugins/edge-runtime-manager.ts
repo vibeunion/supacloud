@@ -164,6 +164,7 @@ export class EdgeRuntimeManager {
         PORT: String(this.config.port),
         EDGE_FUNCTIONS_DIR: edgeFunctionsDir,
         EDGE_FUNCTIONS_BASE_DIR: process.env.EDGE_FUNCTIONS_BASE_DIR || edgeFunctionsDir,
+        EDGE_FUNCTIONS_CORS_MODE: config.edgeFunctionsCorsMode,
         EDGE_RUNTIME_MASTER_KEY: config.edgeRuntimeMasterKey,
         EDGE_RUNTIME_INSTANCE_ID: instanceId,
         MANAGEMENT_API_URL: `http://127.0.0.1:${config.port || 9090}`,
