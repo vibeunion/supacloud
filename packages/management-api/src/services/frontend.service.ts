@@ -1250,10 +1250,9 @@ WantedBy=multi-user.target
 
   private async precompressStaticAssets(root: string): Promise<void> {
     const availableCommands = new Map<string, string | null>();
-    const resolveCommand = async (command: string): Promise<string | null> => {
+    const resolveCommand = (command: string): string | null => {
       if (availableCommands.has(command)) return availableCommands.get(command) || null;
-      const result = await $`which ${command}`.nothrow().quiet();
-      const resolved = result.exitCode === 0 ? result.stdout.toString().trim().split("\n")[0] || null : null;
+      const resolved = Bun.which(command, { PATH: process.env.PATH ?? "" });
       availableCommands.set(command, resolved);
       return resolved;
     };
@@ -1262,7 +1261,7 @@ WantedBy=multi-user.target
       const fileStat = await stat(filePath);
       if (!fileStat.isFile() || !this.shouldPrecompressStaticFile(filePath, fileStat.size)) return;
 
-      const input = new Uint8Array(await Bun.file(filePath).arrayBuffer());
+      const input = await Bun.file(filePath).bytes();
       await Bun.write(`${filePath}.gz`, gzipSync(input, { level: 9 }));
       await Bun.write(`${filePath}.br`, brotliCompressSync(input, {
         params: {
@@ -1277,7 +1276,7 @@ WantedBy=multi-user.target
       const fileStat = await stat(filePath);
       if (!fileStat.isFile() || !this.shouldOptimizeStaticImage(filePath, fileStat.size)) return;
 
-      const cwebpPath = await resolveCommand("cwebp");
+      const cwebpPath = resolveCommand("cwebp");
       if (cwebpPath) {
         const result = await $`${cwebpPath} -quiet -q 82 ${filePath} -o ${filePath}.webp`.nothrow().quiet();
         if (result.exitCode !== 0) {
@@ -1285,7 +1284,7 @@ WantedBy=multi-user.target
         }
       }
 
-      const avifencPath = await resolveCommand("avifenc");
+      const avifencPath = resolveCommand("avifenc");
       if (avifencPath) {
         const result = await $`${avifencPath} --quiet --min 28 --max 38 --speed 6 ${filePath} ${filePath}.avif`.nothrow().quiet();
         if (result.exitCode !== 0) {

@@ -51,6 +51,8 @@ and durability checks; ordinary path-based writes cannot replace those gates.
 
 Source-build static asset precompression also uses `Bun.file`, `Bun.write` and
 asynchronous `Bun.zstdCompress` at level 3, without an external zstd executable.
+Binary asset reads use `Bun.file(path).bytes()`. Optional image tools are resolved
+with `Bun.which` once per optimization pass; missing tools leave originals intact.
 HTTP gzip and Brotli sidecars remain separate from the tar.zst upload format.
 This optimization does not rewrite retained immutable release trees.
 
