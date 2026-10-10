@@ -367,6 +367,12 @@ EXAMPLES
   ${preferredCommand} db explain --target public.cases --module_file db/modules.ts
   ${preferredCommand} db module_check --module_file db/modules.ts --database_url "postgresql://..."
   ${preferredCommand} db module_check --lite --project_dir .
+  ${preferredCommand} db reverse --schema public --out output/database-audit/reverse
+  ${preferredCommand} db diff --schema_dir supabase/schemas --out output/database-audit/diff
+  ${preferredCommand} db plan --dir supabase/migrations
+  ${preferredCommand} db apply --dir supabase/migrations --approved_digest <reviewed-digest>
+  ${preferredCommand} db role_check --schema public
+  ${preferredCommand} db role_sql --application_role app_user --migration_role app_migrator --database app_db
   ${preferredCommand} edge_functions get_config --ref abc123 --slug hello
   ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello --expected-active-version absent --expected-activation-id legacy
   ${preferredCommand} edge_functions deploy --ref abc123 --slug hello --prebundled-path ./dist/hello.js --expected-sha256 <sha256> --expected-active-version 4 --expected-activation-id <uuid>
@@ -430,7 +436,11 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     Object.assign(tools, captureTools((server) => registerAiTools(server as any)));
     Object.assign(tools, captureTools((server) => registerAppTools(server as any, { onDevProgress: writeDevProgress })));
     Object.assign(tools, captureTools((server) => registerAppAliases(server as any)));
-    Object.assign(tools, captureTools((server) => registerDbGovernanceTools(server as any)));
+    Object.assign(tools, captureTools((server) => registerDbGovernanceTools(server, {
+        projectRef: context.projectRef || undefined,
+        apiUrl: context.apiUrl || undefined,
+        runDatabase: () => tools.database?.callback,
+    })));
     const registerContextAwareHelp = () => {
         tools.project = {
             schema: { action: projectActionSchema },

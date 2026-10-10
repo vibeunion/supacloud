@@ -16,8 +16,10 @@
   ],
   "scripts": {
     "dev": "bun run --watch src/index.ts",
+    "prepare:db": "bun install --cwd ../contracts --frozen-lockfile && bun run --cwd ../contracts build && bun install --cwd ../db --force --frozen-lockfile && bun run --cwd ../db build && bun install --force --frozen-lockfile",
+    "prebuild": "bun run prepare:db",
     "build": "bun build src/index.ts --outdir dist --target node --conditions=supacloud-source",
-    "pretypecheck": "bun install --cwd ../delivery --frozen-lockfile && bun install --cwd ../compiler --frozen-lockfile && bun run --cwd ../compiler build && bun install --frozen-lockfile",
+    "pretypecheck": "bun install --cwd ../delivery --frozen-lockfile && bun install --cwd ../compiler --frozen-lockfile && bun run --cwd ../compiler build && bun run prepare:db",
     "prepublishOnly": "bun run build",
     "typecheck": "tsc --noEmit"
   },
@@ -36,11 +38,12 @@
   "dependencies": {
     "@supacloud/compiler": "^0.42.0",
     "@supacloud/delivery": "file:../delivery",
-    "@supacloud/db": "^0.14.0",
+    "@supacloud/db": "file:../db",
     "fflate": "^0.8.3",
     "typebox": "1.3.34"
   },
   "overrides": {
+    "@supacloud/contracts": "file:../contracts",
     "@supacloud/delivery": "file:../delivery",
     "@graphql-tools/utils": "^12.0.3"
   },
