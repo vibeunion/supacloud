@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.0](https://github.com/vibeunion/supacloud/compare/admin-v0.25.0...admin-v0.26.0) (2026-10-10)
+
+
+### Features
+
+* **frontend:** select journal verified rollback target ([#1768](https://github.com/vibeunion/supacloud/issues/1768)) ([28d8a08](https://github.com/vibeunion/supacloud/commit/28d8a08d0e235d4fda04489d7f1760778fc54a10))
+* **governance:** enforce strict user and platform type contracts ([#1754](https://github.com/vibeunion/supacloud/issues/1754)) ([b22f889](https://github.com/vibeunion/supacloud/commit/b22f88919c349f088848028f13b15e44994e0d9c))
+
 ## [0.25.0](https://github.com/vibeunion/supacloud/compare/admin-v0.24.2...admin-v0.25.0) (2026-10-10)
 
 
