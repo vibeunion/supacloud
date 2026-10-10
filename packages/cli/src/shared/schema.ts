@@ -1,13 +1,14 @@
 import { Type } from "typebox";
 import type {
-    Static,
     StaticDecode,
+    TObject,
     TSchema,
     TSchemaOptions,
 } from "typebox";
 import { Value } from "typebox/value";
 
 export type ToolSchema = Record<string, TSchema>;
+export type ToolArguments<S extends ToolSchema> = StaticDecode<TObject<S>>;
 
 /** Loosely typed view for reading JSON-Schema keywords off a generated schema. */
 type SchemaView = {
@@ -18,12 +19,19 @@ type SchemaView = {
     properties?: unknown;
 };
 
-/**
- * Non-enumerable marker attached by `decodedSchema` so argument validation can
- * re-check the decoded value against its declared output schema and report the
- * owning argument name. TypeBox 1.x codec callbacks do not receive a path.
- */
-const OUTPUT_SCHEMA = "~supacloudOutputSchema";
+// TypeBox codecs do not receive a path; retain identity to locate output errors.
+const DECODE_ID = "~supacloudDecodeId";
+
+class OutputDecodeError extends Error {
+    constructor(readonly decodeId: symbol, readonly issues: ReadonlyArray<{ path: string; message: string }>) {
+        super(issues.map((issue) => `- ${issue.path}: ${issue.message}`).join("\n"));
+    }
+}
+
+function decodeIdOf(schema: TSchema): symbol | undefined {
+    const value: unknown = Object.getOwnPropertyDescriptor(schema, DECODE_ID)?.value;
+    return typeof value === "symbol" ? value : undefined;
+}
 
 function schemaErrorPath(path: string): string {
     return path.replace(/^\//, "").replaceAll("/", ".") || "args";
@@ -46,37 +54,47 @@ function transformErrorLine(error: unknown): string {
     return `- ${path}: ${message}`;
 }
 
-export function parseToolArguments(schema: ToolSchema, input: unknown): Record<string, unknown> {
-    const objectSchema = Type.Object(schema, { additionalProperties: false });
-    const issues = schemaErrorLines(objectSchema, input);
+export function validateToolArguments(schema: ToolSchema, input: unknown): asserts input is Record<string, unknown> {
+    const issues = schemaErrorLines(Type.Object(schema, { additionalProperties: false }), input);
     if (issues.length > 0) throw new Error(`Invalid arguments:\n${issues.join("\n")}`);
+}
 
-    let decoded: Record<string, unknown>;
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+export function parseToolArguments<S extends ToolSchema>(
+    schema: S,
+    input: unknown,
+): ToolArguments<S> {
+    const objectSchema = Type.Object(schema, { additionalProperties: false });
+    validateToolArguments(schema, input);
+
+    let decoded: ToolArguments<S>;
     try {
-        decoded = Value.Decode(objectSchema, input) as Record<string, unknown>;
+        decoded = Value.Decode(objectSchema, input);
     } catch (error) {
+        if (error instanceof OutputDecodeError) {
+            const entry = Object.entries(schema).find(([, property]) => decodeIdOf(property) === error.decodeId);
+            const path = entry?.[0] ?? "args";
+            const issues = error.issues.map((issue) =>
+                `- ${issue.path === "args" ? path : `${path}.${issue.path}`}: ${issue.message}`);
+            throw new Error(`Invalid arguments:\n${issues.join("\n")}`);
+        }
         throw new Error(`Invalid arguments:\n${transformErrorLine(error)}`);
     }
-
-    const decodedIssues: string[] = [];
-    for (const [name, propertySchema] of Object.entries(schema)) {
-        const outputSchema = (propertySchema as Record<string, unknown> | undefined)?.[OUTPUT_SCHEMA] as TSchema | undefined;
-        if (outputSchema === undefined || decoded[name] === undefined) continue;
-        for (const issue of Value.Errors(outputSchema, decoded[name])) {
-            const path = schemaErrorPath(issue.instancePath);
-            decodedIssues.push(`- ${path === "args" ? name : `${name}.${path}`}: ${issue.message}`);
-        }
+    const decodedFields: unknown = decoded;
+    if (!isRecord(decodedFields)) {
+        throw new Error("Invalid arguments: decoded value must be an object");
     }
-    if (decodedIssues.length > 0) throw new Error(`Invalid arguments:\n${decodedIssues.join("\n")}`);
     return decoded;
 }
 
-export function stringEnum(
-    values: readonly [string, ...string[]],
+export function stringEnum<const Values extends readonly [string, ...string[]]>(
+    values: Values,
     options?: TSchemaOptions,
-): TSchema {
-    const enumRecord = Object.fromEntries(values.map((entry) => [entry, entry]));
-    return Type.Enum(enumRecord, options);
+) {
+    return Type.Enum<Array<Values[number]>>([...values], options);
 }
 
 /**
@@ -85,7 +103,8 @@ export function stringEnum(
  * properties, so an object spread would silently discard them.
  */
 function mergeSchemaOptions<T extends TSchema>(schema: T, options: TSchemaOptions): T {
-    const result = Object.create(Object.getPrototypeOf(schema)) as T;
+    const result = { ...schema };
+    Object.setPrototypeOf(result, Object.getPrototypeOf(schema));
     Object.defineProperties(result, Object.getOwnPropertyDescriptors(schema));
     for (const [key, value] of Object.entries(options)) {
         Object.defineProperty(result, key, { value, enumerable: true, writable: true, configurable: true });
@@ -107,11 +126,17 @@ export function decodedSchema<TInput extends TSchema, TOutput extends TSchema>(
     decode: (input: StaticDecode<TInput>) => unknown,
     options?: TSchemaOptions,
 ) {
-    const transform = Type.Codec(inputSchema)
-        .Decode((input) => decode(input) as Static<TOutput>)
-        .Encode((output) => output as StaticDecode<TInput>);
+    const decodeId = Symbol("decodedSchema");
+    const transform = Type.Decode(inputSchema, (input) => {
+        const value = decode(input);
+        const issues = [...Value.Errors(outputSchema, value)].map((issue) => ({
+            path: schemaErrorPath(issue.instancePath), message: issue.message,
+        }));
+        if (issues.length > 0) throw new OutputDecodeError(decodeId, issues);
+        return Value.Decode(outputSchema, value);
+    });
     const result = options ? mergeSchemaOptions(transform, options) : transform;
-    Object.defineProperty(result, OUTPUT_SCHEMA, { value: outputSchema, enumerable: false, configurable: true });
+    Object.defineProperty(result, DECODE_ID, { value: decodeId, enumerable: false, configurable: true });
     return result;
 }
 

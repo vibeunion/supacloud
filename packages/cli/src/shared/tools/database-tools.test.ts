@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { migrationVersionFromFilename, registerDatabaseTools, vectorWarningsForPendingMigrations } from "./database-tools";
+import type { ToolInvocation } from "../tool-server";
 
 interface CapturedDatabaseToolResponse {
     content: Array<{ text: string }>;
@@ -2208,19 +2209,18 @@ describe("database migration helpers", () => {
   });
 
   test("execute action is rejected when readOnly is enabled", async () => {
-    let callback: ((args: Record<string, unknown>) => Promise<CapturedDatabaseToolResponse>) | undefined;
+    let callback: ToolInvocation | undefined;
     registerDatabaseTools({
-      tool(name: string, _description: string, _schema: Record<string, unknown>, toolCallback: typeof callback) {
+      tool(name, _description, _schema, toolCallback) {
         if (name === "database") callback = toolCallback;
       },
-    }, {} as any, { readOnly: true });
+    }, undefined, { readOnly: true });
+    if (!callback) throw new Error("database tool was not registered");
 
-    const response = await callback!({
+    await expect(callback({
       action: "execute",
       ref: "proj",
       sql: "INSERT INTO items VALUES (1)",
-    });
-
-    expect(response.content[0].text).toContain("Write blocked: execute (read-only mode)");
+    })).rejects.toThrow("- action:");
   });
 });

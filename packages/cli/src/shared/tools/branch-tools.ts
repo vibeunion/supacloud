@@ -2,19 +2,11 @@ import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
 import type { HttpResult, HttpTransport } from "../transports/http";
+import { registerTool, type ToolServer } from "../tool-server";
 
 type ToolResult = {
     isError?: boolean;
     content: Array<{ type: "text"; text: string }>;
-};
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (args: Record<string, unknown>) => Promise<ToolResult>,
-    ) => void;
 };
 
 interface PromotionPlanEntry {
@@ -158,7 +150,7 @@ export function registerBranchTools(
     http: HttpTransport,
     options: { projectRef?: string; readOnly?: boolean } = {},
 ): void {
-    server.tool(
+    registerTool(server,
         "branch",
         "Preview branch lifecycle and safe migration promotion. Whole-database replacement is intentionally not exposed by this project CLI.",
         {

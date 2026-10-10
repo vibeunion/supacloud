@@ -3,15 +3,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
 import type { ToolSchema } from "../schema";
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (requestArguments: any) => Promise<any>,
-    ) => void;
-};
+import { registerTool, type ToolInvocation, type ToolServer } from "../tool-server";
 
 export type SupabaseCliAction =
     | "version"
@@ -66,7 +58,7 @@ export interface OfficialCliExecutionResult {
     stderr: string;
 }
 
-type MigrationPushCallback = (requestArguments: Record<string, unknown>) => Promise<any>;
+type MigrationPushCallback = ToolInvocation;
 type OfficialCliExecutor = (request: SupabaseCliArgs) => Promise<OfficialCliExecutionResult>;
 
 export interface SupabaseCliToolOptions {
@@ -495,7 +487,7 @@ async function executeMigrationPush(request: SupabaseCliArgs, runtime: SupabaseC
         action: "push_migrations",
         ref: projectRef,
         dir: migrationDirectory,
-        dry_run: request.dry_run,
+        ...(request.dry_run === undefined ? {} : { dry_run: request.dry_run }),
     });
     const failureText = migrationResponse?.content?.some(
         (content: { type?: string; text?: string }) => content.type === "text" && content.text?.trimStart().startsWith("❌"),
@@ -566,7 +558,7 @@ export function registerSupabaseCliTools(
         executeOfficialCli: options.executeOfficialCli || ((request) => executeOfficialSupabaseCli(request, environment)),
     };
 
-    server.tool(
+    registerTool(server,
         "supabase",
         "Controlled adapter for the official open-source Supabase CLI. Remote push stays on the SupaCloud Management API and requires explicit Management credentials.",
         {
@@ -600,6 +592,6 @@ export function registerSupabaseCliTools(
             dump_mode: optional(stringEnum(["schema", "data", "roles"]), "[db_dump] Dump schema (default), data, or roles"),
             language: optional(stringEnum(["typescript", "go", "swift", "python"]), "[gen_types] Output language (default: typescript)"),
         },
-        (request: SupabaseCliArgs) => executeSupabaseAction(request, runtime),
+        (request) => executeSupabaseAction(request, runtime),
     );
 }
