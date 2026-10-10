@@ -1,7 +1,38 @@
 import { expect, test } from "bun:test";
 import { ApplicationPreviewService } from "../../src/services/application-preview.service";
-import type { StoredApplicationPreview } from "../../src/services/application-preview-contract";
+import type { ApplicationPreviewProbeInput, StoredApplicationPreview } from "../../src/services/application-preview-contract";
 import { ApplicationPreviewConflictError } from "../../src/repositories/project-config-writes";
+import { type ApplicationPreviewServiceDependencies } from "../../src/services/application-preview.service";
+import { createApplicationPreviewReadiness } from "../../src/services/application-preview-readiness";
+import { applicationReleaseId, type ApplicationReadinessReport } from "@supacloud/delivery";
+import { runtimeInput } from "../helpers/application-runtime";
+
+const configurationId = "91234567-89ab-4def-8123-456789abcdef";
+
+function releases(): ApplicationPreviewServiceDependencies["releases"] {
+  const record = runtimeInput().release;
+  return {
+    readRelease: async (projectRef, applicationId, releaseId) => ({
+      ...record, project_ref: projectRef, application_id: applicationId, release_id: releaseId,
+    }),
+    materializeRelease: async (_projectRef, applicationId, _releaseId, branchRef) => ({
+      ...record, project_ref: branchRef, application_id: applicationId,
+      release_id: applicationReleaseId(branchRef, applicationId, record.manifest_sha256),
+    }),
+  };
+}
+
+function activation(): Pick<ApplicationPreviewServiceDependencies, "configurations" | "activate"> {
+  return {
+    configurations: { clone: async (_source, target) => ({
+      schema: "supacloud.application-configuration.v1", configuration_id: configurationId,
+      project_ref: target.projectRef, application_id: target.applicationId, environment_id: target.environmentId,
+      created_at: "2026-10-10T00:00:00.000Z", bun_version: "1.4.2",
+      targets: [],
+    }) },
+    activate: async input => ({ activation_id: input.activationId }),
+  };
+}
 
 function project(config: Record<string, unknown> = {}) {
   return { config, ref: "demo" } as never;
@@ -31,7 +62,8 @@ test("preview provisioning reaches ready only after all isolated resources and s
   const configs: Record<string, unknown>[] = [{}];
   const calls: string[] = [];
   const service = new ApplicationPreviewService({
-    releases: { readRelease: async () => ({ release_id: "a".repeat(64) } as never) },
+    releases: releases(),
+    ...activation(),
     projects: previewStore(configs),
     branches: {
       createBranch: async () => { calls.push("branch:create"); },
@@ -54,9 +86,11 @@ test("preview provisioning reaches ready only after all isolated resources and s
     projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64),
   });
   expect(initial.status).toBe("provisioning");
-  await new Promise(resolve => setTimeout(resolve, 0));
   const receipts = await service.list("demo", "api", "test");
   expect(receipts[0]).toMatchObject({ status: "ready", resources: { smoke_test: { status: "ready", failed: [] } } });
+  expect(receipts[0]?.resources.configuration_revision).toEqual({ status: "ready", configuration_id: configurationId });
+  expect(receipts[0]?.resources.application_activation.status).toBe("ready");
+  expect(receipts[0]?.resources.smoke_test.passed).toEqual(expect.arrayContaining(receipts[0]?.resources.smoke_test.checks ?? []));
   expect(calls).toEqual(["branch:create", "queue:create", "secret:create"]);
 });
 
@@ -64,7 +98,7 @@ test("preview cleanup is explicit and idempotent at the receipt boundary", async
   const configs: Record<string, unknown>[] = [{}];
   const calls: string[] = [];
   const service = new ApplicationPreviewService({
-    releases: { readRelease: async () => ({ release_id: "b".repeat(64) } as never) },
+    releases: releases(),
     projects: previewStore(configs),
     branches: {
       createBranch: async () => {},
@@ -86,7 +120,6 @@ test("preview cleanup is explicit and idempotent at the receipt boundary", async
   const initial = await service.create({
     projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "b".repeat(64),
   });
-  await new Promise(resolve => setTimeout(resolve, 0));
   const cleaned = await service.cleanup("demo", initial.preview_id);
   expect(cleaned).toMatchObject({ status: "cleaned", cleanup: { completed: true } });
   expect(await service.cleanup("demo", initial.preview_id)).toEqual(cleaned);
@@ -119,7 +152,8 @@ test("preview reads resume a persisted provisioning receipt without recreating i
   }];
   const calls: string[] = [];
   const service = new ApplicationPreviewService({
-    releases: { readRelease: async () => ({ release_id: "c".repeat(64) } as never) },
+    releases: releases(),
+    ...activation(),
     projects: {
       ...previewStore(configs),
       findByRef: async ref => ref === branchRef
@@ -154,7 +188,8 @@ test("concurrent creates across service instances preserve every receipt and unr
     if (all.length === 12 && all.every(item => item.status === "ready")) finished.resolve();
   });
   const make = () => new ApplicationPreviewService({
-    releases: { readRelease: async () => ({ release_id: "d".repeat(64) } as never) },
+    releases: releases(),
+    ...activation(),
     projects,
     branches: { createBranch: async () => { await start.promise; }, deleteBranch: async () => {} },
     queues: { createQueue: async () => {}, dropQueue: async () => true, listQueues: async () => [] },
@@ -179,7 +214,7 @@ test("concurrent creates across service instances preserve every receipt and unr
 test("an initial receipt write failure never starts branch or queue provisioning", async () => {
   let started = false;
   const service = new ApplicationPreviewService({
-    releases: { readRelease: async () => ({ release_id: "e".repeat(64) } as never) },
+    releases: releases(),
     projects: {
       findByRef: async () => project(),
       saveApplicationPreview: async () => { throw new Error("storage unavailable"); },
@@ -189,4 +224,217 @@ test("an initial receipt write failure never starts branch or queue provisioning
   await expect(service.create({ projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "e".repeat(64) }))
     .rejects.toThrow("storage unavailable");
   expect(started).toBe(false);
+});
+
+function provisioningFixture(overrides: Partial<ApplicationPreviewServiceDependencies> = {}) {
+  const configs: Record<string, unknown>[] = [{}];
+  const dependencies: ApplicationPreviewServiceDependencies = {
+    releases: releases(),
+    ...activation(),
+    projects: previewStore(configs),
+    branches: { createBranch: async () => {}, deleteBranch: async () => {} },
+    queues: { createQueue: async () => {}, dropQueue: async () => true, listQueues: async () => [] },
+    secrets: { upsertSecrets: async () => true, deleteSecret: async () => true },
+    invalidateEnv: async () => true,
+    runtime: { checkStatus: async () => ({ status: "running", health: "healthy" } as never) },
+    smokeTest: async () => ({ passed: ["application_readiness"], failed: [] }),
+    ...overrides,
+  };
+  const service = new ApplicationPreviewService(dependencies);
+  return { configs, service, dependencies };
+}
+
+test("missing configuration, activation or explicit readiness evidence cannot yield a ready preview", async () => {
+  const cases: Array<{ overrides: Partial<ApplicationPreviewServiceDependencies>; missing: string }> = [
+    { overrides: { configurations: undefined }, missing: "configuration_revision" },
+    { overrides: { configurations: { clone: async () => null } }, missing: "configuration_revision" },
+    { overrides: { activate: undefined }, missing: "application_activation" },
+    { overrides: { smokeTest: undefined }, missing: "application_readiness" },
+    { overrides: { smokeTest: async () => ({ passed: [], failed: [] }) }, missing: "application_readiness" },
+    { overrides: { smokeTest: async () => ({ passed: ["tenant_runtime"], failed: ["application_readiness"] }) }, missing: "application_readiness" },
+  ];
+  for (const { overrides, missing } of cases) {
+    const { service } = provisioningFixture(overrides);
+    const created = await service.create({ projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64) });
+    const receipt = await service.get("demo", created.preview_id);
+    expect(receipt?.status).toBe("failed");
+    expect(receipt?.resources.smoke_test.status).toBe("failed");
+    expect(receipt?.resources.smoke_test.failed).toContain(missing);
+    expect(receipt?.cleanup).toMatchObject({ required: true, completed: false });
+  }
+});
+
+test("a failing application smoke cannot hide unhealthy tenant runtime or fabricate core resource evidence", async () => {
+  const { service } = provisioningFixture({
+    configurations: undefined,
+    runtime: { checkStatus: async () => ({ status: "stopped", health: "unhealthy" } as never) },
+    smokeTest: async () => ({
+      passed: ["configuration_revision", "application_activation", "tenant_runtime", "application_readiness"], failed: ["custom_probe"],
+    }),
+  });
+  const created = await service.create({ projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64) });
+  const receipt = await service.get("demo", created.preview_id);
+  expect(receipt?.resources.smoke_test.failed).toEqual(expect.arrayContaining([
+    "configuration_revision", "application_activation", "application_readiness", "tenant_runtime",
+  ]));
+  expect(receipt?.resources.smoke_test.passed).not.toContain("tenant_runtime");
+  expect(receipt?.resources.smoke_test.passed).not.toContain("configuration_revision");
+});
+
+test("tenant runtime failure is retained alongside a real application smoke failure", async () => {
+  const { service } = provisioningFixture({
+    runtime: { checkStatus: async () => ({ status: "stopped", health: "unhealthy" } as never) },
+    smokeTest: async () => ({ passed: [], failed: ["application_readiness", "route_probe"] }),
+  });
+  const created = await service.create({ projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64) });
+  const receipt = await service.get("demo", created.preview_id);
+  expect(receipt?.status).toBe("failed");
+  expect(receipt?.resources.smoke_test.failed).toEqual(expect.arrayContaining([
+    "tenant_runtime", "application_readiness", "route_probe",
+  ]));
+});
+
+test("a foreign artifact cannot be accepted as the branch release or start provisioning", async () => {
+  let started = false;
+  const adapter = releases();
+  const { service } = provisioningFixture({
+    releases: {
+      ...adapter,
+      materializeRelease: async (source, applicationId, releaseId) => adapter.readRelease(source, applicationId, releaseId),
+    },
+    branches: { createBranch: async () => { started = true; }, deleteBranch: async () => {} },
+  });
+  await expect(service.create({ projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64) }))
+    .rejects.toThrow("APPLICATION_PREVIEW_RELEASE_IDENTITY_MISMATCH");
+  expect(started).toBe(false);
+});
+
+test("activation identity is persisted before effects and reused after process recovery", async () => {
+  const blocked = Promise.withResolvers<void>();
+  const invoked = Promise.withResolvers<void>();
+  let saved: StoredApplicationPreview | undefined;
+  let attemptedId: string | undefined;
+  const fixture = provisioningFixture({
+    activate: async input => {
+      attemptedId = input.activationId;
+      const receipts = fixture.configs[0]?.application_previews as StoredApplicationPreview[];
+      saved = structuredClone(receipts[0]!);
+      expect(saved.resources.application_activation).toEqual({ status: "pending", activation_id: attemptedId });
+      expect(saved.resources.configuration_revision).toEqual({ status: "ready", configuration_id: configurationId });
+      invoked.resolve();
+      await blocked.promise;
+      throw new ApplicationPreviewConflictError();
+    },
+  });
+  const created = await fixture.service.create({
+    projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64),
+  });
+  await invoked.promise;
+  expect(saved).toBeDefined();
+  const recoveredConfigs: Record<string, unknown>[] = [{ application_previews: [saved] }];
+  let clones = 0;
+  const recovered = new ApplicationPreviewService({
+    ...fixture.dependencies,
+    projects: previewStore(recoveredConfigs),
+    configurations: { clone: async () => { clones++; throw new Error("Must reuse configuration"); } },
+    activate: async input => {
+      expect(input.activationId).toBe(attemptedId);
+      expect(input.configurationId).toBe(configurationId);
+      return { activation_id: input.activationId };
+    },
+  });
+  try {
+    expect(await recovered.get("demo", created.preview_id)).toMatchObject({ status: "ready" });
+    expect(clones).toBe(0);
+  } finally {
+    blocked.resolve();
+    await expect(fixture.service.get("demo", created.preview_id)).rejects.toBeInstanceOf(ApplicationPreviewConflictError);
+  }
+});
+
+test("an activation response with a different identity fails without a fabricated success", async () => {
+  const { service } = provisioningFixture({
+    activate: async () => ({ activation_id: "81234567-89ab-4def-8123-456789abcdef" }),
+  });
+  const created = await service.create({ projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64) });
+  const receipt = await service.get("demo", created.preview_id);
+  expect(receipt?.status).toBe("failed");
+  expect(receipt?.resources.application_activation.status).toBe("pending");
+  expect(receipt?.resources.smoke_test.failed).toContain("provisioning");
+});
+
+function readinessFixture() {
+  const runtime = runtimeInput();
+  const current = {
+    schema: "supacloud.application-active.v1" as const,
+    runtime, configurationId, configurationDigest: "d".repeat(64),
+  };
+  const input: ApplicationPreviewProbeInput = {
+    projectRef: "parent", branchRef: runtime.release.project_ref, applicationId: runtime.release.application_id,
+    environmentId: runtime.environmentId, releaseId: runtime.release.release_id, configurationId, activationId: runtime.activationId,
+  };
+  const report: ApplicationReadinessReport = {
+    project_ref: input.branchRef, application_id: input.applicationId, environment_id: input.environmentId,
+    release_id: input.releaseId, activation_id: input.activationId, ready: true,
+    targets: [{ target: "api", kind: "http", unit: "fixture.service", pid: 1, invocation_id: "fixture", ready: true, code: "READY" }],
+  };
+  return { current, input, report };
+}
+
+test("default preview readiness probes the exact branch activation and rereads authority", async () => {
+  const { current, input, report } = readinessFixture();
+  const calls: string[] = [];
+  const probe = createApplicationPreviewReadiness({
+    active: { readForApplication: async (project, application, environment) => {
+      expect([project, application, environment]).toEqual([input.branchRef, input.applicationId, input.environmentId]);
+      calls.push("read");
+      return structuredClone(current);
+    } },
+    readiness: { inspect: async runtime => { expect(runtime).toEqual(current.runtime); calls.push("probe"); return report; } },
+  });
+  expect(await probe(input)).toEqual({ passed: ["application_readiness"], failed: [] });
+  expect(calls).toEqual(["read", "probe", "read"]);
+});
+
+test("preview readiness rejects foreign, changed, absent and unavailable runtime evidence", async () => {
+  const { current, input, report } = readinessFixture();
+  const changes: Array<Partial<ApplicationPreviewProbeInput>> = [
+    { branchRef: "other" }, { applicationId: "other" }, { environmentId: "other" },
+    { releaseId: "f".repeat(64) }, { configurationId: "81234567-89ab-4def-8123-456789abcdef" },
+    { activationId: "81234567-89ab-4def-8123-456789abcdef" },
+  ];
+  for (const change of changes) {
+    let probes = 0;
+    const probe = createApplicationPreviewReadiness({
+      active: { readForApplication: async () => current },
+      readiness: { inspect: async () => { probes++; return report; } },
+    });
+    expect(await probe({ ...input, ...change })).toEqual({ passed: [], failed: ["application_readiness"] });
+    expect(probes).toBe(0);
+  }
+  for (const invalidReport of [
+    { ...report, ready: false }, { ...report, activation_id: "81234567-89ab-4def-8123-456789abcdef" },
+    { ...report, project_ref: "parent" }, { ...report, targets: [] },
+    { ...report, targets: report.targets.map(target => ({ ...target, ready: false })) },
+  ]) {
+    const probe = createApplicationPreviewReadiness({
+      active: { readForApplication: async () => current }, readiness: { inspect: async () => invalidReport },
+    });
+    expect(await probe(input)).toEqual({ passed: [], failed: ["application_readiness"] });
+  }
+  for (const changed of [null, {
+    ...current, runtime: { ...current.runtime, activationId: "81234567-89ab-4def-8123-456789abcdef" },
+  }]) {
+    let reads = 0;
+    const probe = createApplicationPreviewReadiness({
+      active: { readForApplication: async () => reads++ === 0 ? current : changed },
+      readiness: { inspect: async () => report },
+    });
+    expect(await probe(input)).toEqual({ passed: [], failed: ["application_readiness"] });
+  }
+  const probe = createApplicationPreviewReadiness({
+    active: { readForApplication: async () => { throw new Error("private-provider-credential"); } },
+    readiness: { inspect: async () => report },
+  });
+  expect(await probe(input)).toEqual({ passed: [], failed: ["application_readiness"] });
 });
