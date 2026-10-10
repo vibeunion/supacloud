@@ -35,6 +35,7 @@ export { frontendRoutes } from "./frontend";
 export { createApplicationRoutes } from "./applications";
 const defaultApplicationRouteComposition = createDefaultApplicationRouteComposition();
 export const applicationRoutes = defaultApplicationRouteComposition.routes;
+export const applicationPreviews = defaultApplicationRouteComposition.previews;
 export { createDefaultApplicationRouteComposition };
 export { webhookRoutes } from "./webhook";
 export { deployRoutes } from "./deploy";
