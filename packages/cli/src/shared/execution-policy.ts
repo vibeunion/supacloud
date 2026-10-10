@@ -86,7 +86,11 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         read: ["status", "logs"],
         write: ["upload", "configure", "deploy", "rollback", "reconcile", "retire"],
     },
-    db: { local: ["context", "lint", "explain"], read: ["module_check"] },
+    db: {
+        local: ["context", "lint", "explain", "diff", "role_sql"],
+        read: ["module_check", "reverse", "plan", "role_check"],
+        write: ["apply"],
+    },
     dev: { read: ["status"], write: ["sync", "watch", "migrate"] },
 };
 

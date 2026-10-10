@@ -37,6 +37,22 @@ export { planModule, type ModulePlan, type PlanStep } from './plan.js';
 export { applyModulePlan, type ApplyResult } from './apply.js';
 
 export {
+  reverseDatabase,
+  renderReverseSnapshot,
+  type DatabaseColumn,
+  type DatabaseReverseSnapshot,
+  type DatabaseReverseTable,
+} from './reverse.js';
+
+export {
+  readDatabaseRole,
+  assertApplicationRoleRestricted,
+  renderDatabaseRoleGuardSql,
+  type DatabaseRoleGuardOptions,
+  type DatabaseRoleState,
+} from './role-guard.js';
+
+export {
   migrationBindingSha256,
   parseMigrationBindingManifest,
   renderMigrationBindings,
