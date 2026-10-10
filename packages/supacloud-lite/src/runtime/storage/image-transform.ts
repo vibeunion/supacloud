@@ -167,7 +167,9 @@ function applyResize(image: Bun.Image, metadata: Bun.Image.Metadata, options: Im
     image.resize(options.width)
     return
   }
-  const proportionalWidth = Math.max(1, Math.round((metadata.width * options.height!) / metadata.height))
+  const height = options.height
+  if (height === undefined) return
+  const proportionalWidth = Math.max(1, Math.round((metadata.width * height) / metadata.height))
   image.resize(proportionalWidth)
 }
 

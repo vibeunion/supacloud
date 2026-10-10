@@ -11,7 +11,7 @@ function expectWechatLoginResponseContract(functionCode: string) {
   expect(functionCode).toContain("const responseUser = finalSession.user ?? null");
   expect(functionCode).toContain("JSON.stringify({ data: { session: finalSession, user: responseUser } })");
   expect(functionCode).toContain("JSON.stringify({ data: { session: null, user: null }, error:");
-  expect(functionCode).not.toContain("(finalSession as any).user");
+  expect(functionCode).not.toContain("as any");
 }
 
 function expectGoTrueOwnedIdentityContract(functionCode: string) {

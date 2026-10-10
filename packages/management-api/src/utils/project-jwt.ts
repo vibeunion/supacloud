@@ -149,10 +149,10 @@ export function normalizeProjectJwtJwks(value: unknown): { keys: JWK[] } | null 
 
 export function extractJwtJwksFromConfig(config: unknown): { keys: JWK[] } | null {
   const projectConfig = normalizeProjectConfig(config);
-  const auth = (projectConfig.auth || {}) as Record<string, unknown>;
-  const oauthServer = (auth.oauth_server || {}) as Record<string, unknown>;
+  const auth = (projectConfig["auth"] || {}) as Record<string, unknown>;
+  const oauthServer = (auth["oauth_server"] || {}) as Record<string, unknown>;
   try {
-    return normalizeProjectJwtJwks(oauthServer.jwt_jwks);
+    return normalizeProjectJwtJwks(oauthServer["jwt_jwks"]);
   } catch {
     return null;
   }
@@ -214,8 +214,8 @@ function assertThirdPartyPublicJwk(key: JWK, index: number): JWK {
 
 export function resolveThirdPartyJwtPolicy(config: unknown): ThirdPartyJwtPolicy | null {
   const projectConfig = normalizeProjectConfig(config);
-  const auth = (projectConfig.auth || {}) as Record<string, unknown>;
-  const thirdParty = normalizeThirdPartyAuthConfig(auth.third_party_auth);
+  const auth = (projectConfig["auth"] || {}) as Record<string, unknown>;
+  const thirdParty = normalizeThirdPartyAuthConfig(auth["third_party_auth"]);
   if (!thirdParty.enabled) return null;
 
   if (!thirdParty.issuer) throw new Error("third_party_auth.issuer is required");
@@ -289,9 +289,9 @@ export function resolveProjectJwtVerificationMaterial(
   jwtSecret: string,
 ): ProjectJwtVerificationMaterial {
   const projectConfig = normalizeProjectConfig(config);
-  const auth = (projectConfig.auth || {}) as Record<string, unknown>;
-  const oauthServer = (auth.oauth_server || {}) as Record<string, unknown>;
-  const localJwks = normalizeProjectJwtJwks(oauthServer.jwt_jwks);
+  const auth = (projectConfig["auth"] || {}) as Record<string, unknown>;
+  const oauthServer = (auth["oauth_server"] || {}) as Record<string, unknown>;
+  const localJwks = normalizeProjectJwtJwks(oauthServer["jwt_jwks"]);
   const thirdParty = resolveThirdPartyJwtPolicy(projectConfig);
 
   if (!localJwks && !thirdParty) {
@@ -331,11 +331,11 @@ export function buildSharedProjectJwtVerificationMaterial(input: {
   ownerConfig: unknown;
 }): ProjectJwtVerificationMaterial {
   const ownerConfig = normalizeProjectConfig(input.ownerConfig);
-  const ownerAuth = (ownerConfig.auth || {}) as Record<string, unknown>;
-  const ownerOauthServer = normalizeOAuthServerConfig(ownerAuth.oauth_server);
-  const signingAlg = ownerOauthServer.signing_alg;
-  const ownerSigningKeys = normalizeProjectJwtKeys(ownerOauthServer.jwt_keys);
-  const signingEnabled = ownerOauthServer.enabled === true
+  const ownerAuth = (ownerConfig["auth"] || {}) as Record<string, unknown>;
+  const ownerOauthServer = normalizeOAuthServerConfig(ownerAuth["oauth_server"]);
+  const signingAlg = ownerOauthServer["signing_alg"];
+  const ownerSigningKeys = normalizeProjectJwtKeys(ownerOauthServer["jwt_keys"]);
+  const signingEnabled = ownerOauthServer["enabled"] === true
     && (signingAlg === "ES256" || signingAlg === "RS256")
     && ownerSigningKeys?.some((key) => key.alg === signingAlg);
   const ownerKeys = publicAsymmetricKeys(extractJwtJwksFromConfig(ownerConfig));
@@ -363,10 +363,10 @@ export function buildSharedProjectJwtVerificationMaterial(input: {
 
 export function resolveSharedAuthIssuer(ownerRef: string, ownerConfig: unknown): string {
   const normalizedOwnerConfig = normalizeProjectConfig(ownerConfig);
-  const ownerAuth = (normalizedOwnerConfig.auth || {}) as Record<string, unknown>;
-  const ownerOauthServer = normalizeOAuthServerConfig(ownerAuth.oauth_server);
-  const configuredIssuer = typeof ownerOauthServer.issuer === "string"
-    ? ownerOauthServer.issuer.trim().replace(/\/+$/, "")
+  const ownerAuth = (normalizedOwnerConfig["auth"] || {}) as Record<string, unknown>;
+  const ownerOauthServer = normalizeOAuthServerConfig(ownerAuth["oauth_server"]);
+  const configuredIssuer = typeof ownerOauthServer["issuer"] === "string"
+    ? ownerOauthServer["issuer"].trim().replace(/\/+$/, "")
     : "";
   return configuredIssuer || `${resolveProjectAuthUrl(ownerRef, normalizedOwnerConfig)}/auth/v1`;
 }
@@ -463,11 +463,11 @@ function isThirdPartyTokenCandidate(
   payload: Record<string, unknown>,
   policy: ThirdPartyJwtPolicy,
 ): boolean {
-  const kid = typeof header.kid === "string" ? header.kid : "";
-  const alg = typeof header.alg === "string" ? header.alg : "";
+  const kid = typeof header["kid"] === "string" ? header["kid"] : "";
+  const alg = typeof header["alg"] === "string" ? header["alg"] : "";
   if (policy.jwtJwks.keys.some((key) => key.kid === kid && key.alg === alg)) return true;
-  if (payload.iss === policy.issuer) return true;
-  return payload.client_id === policy.clientId;
+  if (payload["iss"] === policy.issuer) return true;
+  return payload["client_id"] === policy.clientId;
 }
 
 async function verifyThirdPartyJwt(
@@ -480,8 +480,8 @@ async function verifyThirdPartyJwt(
       issuer: policy.issuer,
       audience: policy.audience,
     });
-    if (result.payload.client_id !== policy.clientId) return null;
-    if (result.payload.role !== "authenticated") return null;
+    if (result.payload["client_id"] !== policy.clientId) return null;
+    if (result.payload["role"] !== "authenticated") return null;
     return result;
   } catch {
     return null;
@@ -520,8 +520,8 @@ async function verifyLegacyHs256Jwt(
   jwtSecret: string,
   header: Record<string, unknown>,
 ): Promise<{ payload: JWTPayload; protectedHeader: JWTHeaderParameters } | null> {
-  if (header.alg !== "HS256") return null;
-  if (header.kid !== undefined && header.kid !== "legacy-hs256") return null;
+  if (header["alg"] !== "HS256") return null;
+  if (header["kid"] !== undefined && header["kid"] !== "legacy-hs256") return null;
   try {
     return await jwtVerify(token, new TextEncoder().encode(jwtSecret), {
       algorithms: ["HS256"],
@@ -558,9 +558,12 @@ export async function verifyProjectJwtPayload(
   if (!project?.jwt_secret) return null;
   const parts = cleanToken.split(".");
   if (parts.length !== 3) return null;
-  const header = decodeJwtPart(parts[0]);
-  const payload = decodeJwtPart(parts[1]);
-  if (!header || !payload || typeof header.alg !== "string") return null;
+  const headerPart = parts[0];
+  const payloadPart = parts[1];
+  if (headerPart === undefined || payloadPart === undefined) return null;
+  const header = decodeJwtPart(headerPart);
+  const payload = decodeJwtPart(payloadPart);
+  if (!header || !payload || typeof header["alg"] !== "string") return null;
 
   const authRuntime = getAuthRuntimeDescriptor(ref);
   let material: ProjectJwtVerificationMaterial;
@@ -594,7 +597,7 @@ export async function verifyProjectJwtPayload(
     result = await verifyThirdPartyJwt(cleanToken, material.thirdParty);
   } else {
     result = await verifyLocalAsymmetricJwt(cleanToken, material.localJwks, sharedAuthIssuer);
-    if (result && authRuntime.mode === "shared" && result.payload.role !== "authenticated") {
+    if (result && authRuntime.mode === "shared" && result.payload["role"] !== "authenticated") {
       return null;
     }
     if (!result && authRuntime.mode === "shared") {

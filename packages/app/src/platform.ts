@@ -6,14 +6,23 @@ export const PLATFORM_EDGE_ID = "edge";
 
 export type PlatformId = "server" | "browser" | "edge";
 
+interface RuntimeGlobals {
+  document?: Document;
+  EdgeRuntime?: string;
+}
+
+function runtimeGlobals(): RuntimeGlobals {
+  return globalThis as typeof globalThis & RuntimeGlobals;
+}
+
 /**
  * Detects the runtime execution platform.
  */
 export function detectPlatform(): PlatformId {
-  if (typeof window !== "undefined" && typeof (window as any).document !== "undefined") {
+  if (typeof window !== "undefined" && typeof window.document !== "undefined") {
     return PLATFORM_BROWSER_ID;
   }
-  if (typeof (globalThis as any).EdgeRuntime === "string") {
+  if (typeof runtimeGlobals().EdgeRuntime === "string") {
     return PLATFORM_EDGE_ID;
   }
   return PLATFORM_SERVER_ID;
@@ -23,11 +32,11 @@ export function detectPlatform(): PlatformId {
  * A DI Token representing the main rendering context's Document.
  * Modeled directly after Angular's DOCUMENT token in @angular/common.
  */
-export const DOCUMENT = new InjectionToken<any>("supacloud.document", {
+export const DOCUMENT = new InjectionToken<Document | undefined>("supacloud.document", {
   scope: "application",
   factory: () => {
-    if (typeof globalThis !== "undefined" && (globalThis as any).document) {
-      return (globalThis as any).document;
+    if (typeof globalThis !== "undefined" && runtimeGlobals().document) {
+      return runtimeGlobals().document;
     }
     return undefined;
   },

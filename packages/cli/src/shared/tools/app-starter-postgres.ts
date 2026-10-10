@@ -47,19 +47,19 @@ function rows(value: unknown): Record<string, unknown>[] {
 }
 function isPublicConflict(value: unknown): boolean {
   return value instanceof ApplicationError && value.status === 409
-    || isRecord(value) && value.expose === true && value.status === 409 && typeof value.code === "string";
+    || isRecord(value) && value["expose"] === true && value["status"] === 409 && typeof value["code"] === "string";
 }
 function input(value: unknown): Approval {
   const item = record(value);
-  if (typeof item.id !== "string" || !item.id.length || typeof item.expectedVersion !== "number"
-    || !Number.isSafeInteger(item.expectedVersion) || item.expectedVersion < 1) throw new TypeError("Invalid approval input");
-  return { id: item.id, expectedVersion: item.expectedVersion };
+  if (typeof item["id"] !== "string" || !item["id"].length || typeof item["expectedVersion"] !== "number"
+    || !Number.isSafeInteger(item["expectedVersion"]) || item["expectedVersion"] < 1) throw new TypeError("Invalid approval input");
+  return { id: item["id"], expectedVersion: item["expectedVersion"] };
 }
 function result(value: unknown): Review {
   const item = record(value);
-  if ((item.state !== "draft" && item.state !== "approved") || typeof item.version !== "number"
-    || !Number.isSafeInteger(item.version) || item.version < 1) throw new TypeError("Invalid review result");
-  return { state: item.state, version: item.version };
+  if ((item["state"] !== "draft" && item["state"] !== "approved") || typeof item["version"] !== "number"
+    || !Number.isSafeInteger(item["version"]) || item["version"] < 1) throw new TypeError("Invalid review result");
+  return { state: item["state"], version: item["version"] };
 }
 
 export interface ReviewPostgresOptions {
@@ -83,7 +83,7 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
   const binding = rows(await query(
     "SELECT project_id,tenant_id FROM public.starter_application WHERE singleton",
   ));
-  if (binding.length !== 1 || binding[0]?.project_id !== projectId || binding[0]?.tenant_id !== tenantId) {
+  if (binding.length !== 1 || binding[0]?.["project_id"] !== projectId || binding[0]?.["tenant_id"] !== tenantId) {
     throw new Error("Review database project/tenant binding mismatch");
   }
   const requestContext = createSupAuthRequestContext({
@@ -95,7 +95,7 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
         [who.subject, projectId, tenantId],
       ));
       return found.length === 1 ? { projectId, tenantId,
-        permissions: found[0]?.can_approve === true ? ["review.approve"] : [],
+        permissions: found[0]?.["can_approve"] === true ? ["review.approve"] : [],
       } : null;
     },
   });
@@ -126,9 +126,9 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
   };
   function actor(invocation: CommandInvocation): string {
     const who = requireTrustedIdentity(invocation.requestContext);
-    const access = record(record(invocation.requestContext).access);
-    if (access.projectId !== projectId || access.tenantId !== tenantId
-      || !Array.isArray(access.permissions) || !access.permissions.includes("review.approve")) {
+    const access = record(record(invocation.requestContext)["access"]);
+    if (access["projectId"] !== projectId || access["tenantId"] !== tenantId
+      || !Array.isArray(access["permissions"]) || !access["permissions"].includes("review.approve")) {
       throw new ApplicationError("Command permission denied", { status: 403, code: "REVIEW_PERMISSION_DENIED" });
     }
     return who.subject;
@@ -174,7 +174,7 @@ export async function createReviewPostgresAdapters(options: ReviewPostgresOption
         try {
           const receipt = await command.execute(
             { actorId: actor(invocation), tenantId }, requireIdempotencyKey(invocation),
-            { id: invocation.input.params.id, expectedVersion: record(invocation.input.body).expectedVersion },
+            { id: invocation.input.params["id"], expectedVersion: record(invocation.input.body)["expectedVersion"] },
             invocation.request.signal,
           );
           if (receipt.status !== "confirmed") throw new CommandError("COMMAND_OUTCOME_UNKNOWN");
@@ -227,7 +227,7 @@ test("PostgreSQL host never falls back to demo identity or unbound business stor
   const adapters = await createReviewPostgresAdapters({ database: db, identity, tenantId: "review-test" });
   await expect(adapters.requestContext(new Request("http://localhost/reviews/health")))
     .rejects.toMatchObject({ code: "AUTHENTICATION_REQUIRED" });
-  const store = adapters.deps.dbClient as ReviewStore;
+  const store = adapters.deps["dbClient"] as ReviewStore;
   await expect(store.get("reviews", "example")).rejects.toThrow("durable command transaction");
   await expect(store.set("reviews", "example", { state: "approved", version: 2 }))
     .rejects.toThrow("durable command transaction");
@@ -250,8 +250,8 @@ function required(name: string): string {
 }
 
 function databaseConnection(): SQL.Options {
-  const socket = process.env.DATABASE_SOCKET_PATH;
-  if (socket && process.env.DATABASE_URL) throw new Error("Conflicting database connection settings");
+  const socket = process.env["DATABASE_SOCKET_PATH"];
+  if (socket && process.env["DATABASE_URL"]) throw new Error("Conflicting database connection settings");
   if (socket) {
     return { adapter: "postgres", path: socket, database: required("DATABASE_NAME"), username: required("DATABASE_USER") };
   }
@@ -267,7 +267,7 @@ function databaseConnection(): SQL.Options {
 export async function createDeliveryApplication(modules: CompiledModule[], lifecycle: { signal: AbortSignal }) {
   lifecycle.signal.throwIfAborted();
   const connection = databaseConnection();
-  const attachments = process.env.REVIEW_ATTACHMENTS;
+  const attachments = process.env["REVIEW_ATTACHMENTS"];
   if (attachments !== undefined && attachments !== "enabled") throw new Error("Invalid attachment configuration");
   const settings = {
     tenantId: required("APP_TENANT_ID"),
@@ -294,8 +294,9 @@ export async function createDeliveryApplication(modules: CompiledModule[], lifec
     const uploads = attachmentOptions ? await createReviewUploadAdapters(attachmentOptions) : undefined;
     stage = "postgres";
     const adapters = await createReviewPostgresAdapters({
-      database, tenantId: settings.tenantId, identity: settings.identity, uploads,
-      afterApproved: durable?.enqueue,
+      database, tenantId: settings.tenantId, identity: settings.identity,
+      ...(uploads ? { uploads } : {}),
+      ...(durable ? { afterApproved: durable.enqueue } : {}),
     });
     lifecycle.signal.throwIfAborted();
     stage = "application";

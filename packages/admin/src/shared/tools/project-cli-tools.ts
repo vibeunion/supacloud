@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { optional, stringEnum, withDescription } from "../schema";
-import type { ToolSchema } from "../schema";
+import { registerTool, type ToolServer } from "@supacloud/cli/tool-runtime";
 import type { HttpResult, HttpTransport } from "../transports/http";
 import {
     discardPreparedProjectEnvFile,
@@ -30,15 +30,6 @@ import {
     projectEndpointRead,
 } from "./project-endpoint-read";
 import { parseProjectRuntimeSnapshot } from "./project-runtime-snapshot";
-
-type ToolServer = {
-    tool: (
-        name: string,
-        description: string,
-        schema: ToolSchema,
-        callback: (args: any) => Promise<any>,
-    ) => void;
-};
 
 const PROJECT_SERVICE_NAMES = [
     "postgrest", "gotrue", "storage", "postgresql", "realtime", "gateway",
@@ -490,9 +481,12 @@ const formatTasks = (data: unknown): string => {
     if (data.length === 0) return "No tasks found.";
     const emoji: Record<string, string> = { pending: "⏳", processing: "🔄", completed: "✅", failed: "❌" };
     let out = `📋 Tasks (${data.length}):\n\n`;
-    for (const t of data as any[]) {
-        out += `  ${emoji[t.status] || "❓"} ${t.task_type} — ${t.status}\n     ID: ${t.id}\n`;
-        if (t.retries > 0) out += `     Retries: ${t.retries}\n`;
+    for (const item of data as unknown[]) {
+        if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Invalid task response");
+        const t = item as Record<string, unknown>;
+        const taskStatus = typeof t.status === "string" ? t.status : "unknown";
+        out += `  ${emoji[taskStatus] || "❓"} ${t.task_type} — ${taskStatus}\n     ID: ${t.id}\n`;
+        if (typeof t.retries === "number" && t.retries > 0) out += `     Retries: ${t.retries}\n`;
         if (t.error) out += `     Error: ${t.error}\n`;
         if (t.created_at) out += `     Created: ${t.created_at}\n`;
         out += "\n";
@@ -500,8 +494,8 @@ const formatTasks = (data: unknown): string => {
     return out;
 };
 
-const ok = (res: any) => res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`;
-const simple = (res: any, msg: string) => res.ok ? `✅ ${msg}` : `❌ Failed (${res.status})`;
+const ok = (res: HttpResult<unknown>) => res.ok ? JSON.stringify(res.data, null, 2) : `❌ Failed (${res.status}): ${JSON.stringify(res.data)}`;
+const simple = (res: HttpResult<unknown>, msg: string) => res.ok ? `✅ ${msg}` : `❌ Failed (${res.status})`;
 
 function buildProjectLogsPath(ref: string, logType?: string): string {
     const params = new URLSearchParams({ limit: "200" });
@@ -528,7 +522,7 @@ export function registerUserProjectCliTools(
 ): void {
     const { projectRef } = options;
 
-    server.tool(
+    registerTool(server,
         "project",
         "Project-scoped inspection and developer operations. Actions: get, health, logs, api_keys, settings, tasks",
         {
@@ -582,7 +576,7 @@ export function registerAdminProjectCliTools(
     options: { projectEnvFileOperations?: ProjectEnvFileOperations } = {},
 ): void {
     const fileOperations = options.projectEnvFileOperations;
-    server.tool(
+    registerTool(server,
         "project",
         "Platform-level project lifecycle management. Actions: list, list_endpoints, create, get, endpoints, delete, pause, restore, restart, settings, update_settings, api_keys, health, logs, tasks, services, runtime_snapshot, service_control",
         {

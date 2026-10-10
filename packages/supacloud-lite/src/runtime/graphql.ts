@@ -69,7 +69,7 @@ export class GraphqlHandler {
   readonly maxBytes: number
   readonly timeoutMs: number
   readonly slowQueryThresholdMs: number
-  private readonly onRequest?: (metric: GraphqlRequestMetric) => void
+  private readonly onRequest: GraphqlOptions['onRequest']
 
   constructor(private db: Database, private capability: GraphqlCapability, options: GraphqlOptions = {}, private schemas = ['public']) {
     this.maxBytes = positive(options.maxRequestBodyBytes ?? 1024 * 1024)
@@ -103,13 +103,13 @@ export class GraphqlHandler {
         throw new ApiError(415, { message: 'GraphQL requests require application/json' })
       }
       const body: unknown = JSON.parse(await boundedBody(request, this.maxBytes))
-      if (!isObject(body) || typeof body.query !== 'string' || !body.query.trim() ||
-        (body.variables != null && !isObject(body.variables)) ||
-        (body.extensions != null && !isObject(body.extensions)) ||
-        (body.operationName != null && typeof body.operationName !== 'string')) {
+      if (!isObject(body) || typeof body["query"] !== 'string' || !body["query"].trim() ||
+        (body["variables"] != null && !isObject(body["variables"])) ||
+        (body["extensions"] != null && !isObject(body["extensions"])) ||
+        (body["operationName"] != null && typeof body["operationName"] !== 'string')) {
         throw new ApiError(400, { message: 'Invalid GraphQL request' })
       }
-      operationName = body.operationName ?? undefined
+      operationName = body["operationName"] ?? undefined
       const result = await this.db.withContext(context, async (query) => {
         await query<unknown>(`select set_config('statement_timeout', $1, true)`, [String(this.timeoutMs)])
         await query<unknown>(`select set_config('search_path', $1, true)`, [
@@ -117,7 +117,7 @@ export class GraphqlHandler {
         ])
         return query<unknown>(
           'select graphql.resolve($1::text, $2::jsonb, $3::text, $4::jsonb) as result',
-          [body.query, JSON.stringify(body.variables ?? {}), body.operationName ?? null, JSON.stringify(body.extensions ?? {})]
+          [body["query"], JSON.stringify(body["variables"] ?? {}), body["operationName"] ?? null, JSON.stringify(body["extensions"] ?? {})]
         )
       })
       const row = result.rows[0]

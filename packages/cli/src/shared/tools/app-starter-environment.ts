@@ -15,13 +15,13 @@ export function loadEnvironment(
   if (!targets.includes(target)) throw new Error("Explicit environment required: " + targets.join(", "));
   const platform = target === "production" ? "production" : "test";
   const checkSelectors = (source: Record<string, string | undefined>) => {
-    if (source.APP_ENV !== undefined && source.APP_ENV !== target) throw new Error("APP_ENV conflicts with selected target");
-    if (source.SUPACLOUD_ENV !== undefined && source.SUPACLOUD_ENV !== platform) throw new Error("SUPACLOUD_ENV conflicts with selected target");
+    if (source["APP_ENV"] !== undefined && source["APP_ENV"] !== target) throw new Error("APP_ENV conflicts with selected target");
+    if (source["SUPACLOUD_ENV"] !== undefined && source["SUPACLOUD_ENV"] !== platform) throw new Error("SUPACLOUD_ENV conflicts with selected target");
   };
   checkSelectors(inherited);
   // Untagged or partial process credentials must not be completed from another profile.
   if (remoteKeys.some((key) => inherited[key] !== undefined)) {
-    if (inherited.SUPACLOUD_ENV !== platform || remoteKeys.some((key) => !inherited[key]?.trim())) {
+    if (inherited["SUPACLOUD_ENV"] !== platform || remoteKeys.some((key) => !inherited[key]?.trim())) {
       throw new Error("Inherited remote context must be complete and tagged with SUPACLOUD_ENV");
     }
   }
@@ -47,9 +47,9 @@ export function loadEnvironment(
     throw new Error("Remote context requires API URL, token and project ref together");
   }
   // Target selection and runtime optimization are distinct; staging uses production runtime mode.
-  values.APP_ENV = target;
-  values.SUPACLOUD_ENV = platform;
-  values.NODE_ENV = target === "development" ? "development" : target === "test" ? "test" : "production";
+  values["APP_ENV"] = target;
+  values["SUPACLOUD_ENV"] = platform;
+  values["NODE_ENV"] = target === "development" ? "development" : target === "test" ? "test" : "production";
   return values;
 }
 
@@ -98,7 +98,7 @@ test("only selected files are loaded, with process > local > target precedence",
 test("test ignores local overrides and staging uses production runtime optimization", () => {
   const root = fixture();
   writeFileSync(join(root, ".env.test.local"), "LEAK=local\n");
-  expect(loadEnvironment("test", root, {}).LEAK).toBeUndefined();
+  expect(loadEnvironment("test", root, {})["LEAK"]).toBeUndefined();
   expect(loadEnvironment("staging", root, {})).toEqual({
     APP_ENV: "staging", SUPACLOUD_ENV: "test", NODE_ENV: "production",
   });
@@ -123,7 +123,7 @@ test("partial and untagged inherited remote profiles cannot mix with selected fi
   expect(loadEnvironment("staging", root, {
     SUPACLOUD_ENV: "test", SUPACLOUD_API_URL: "https://ci.invalid",
     SUPACLOUD_API_TOKEN: "ci-fixture", SUPACLOUD_PROJECT_REF: "ci-fixture",
-  }).SUPACLOUD_API_URL).toBe("https://ci.invalid");
+  })["SUPACLOUD_API_URL"]).toBe("https://ci.invalid");
   writeFileSync(join(root, ".env.staging.local"), "SUPACLOUD_API_URL=https://other.invalid\n");
   expect(() => loadEnvironment("staging", root, {})).toThrow("Each remote file profile");
 });

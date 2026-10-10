@@ -3,6 +3,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import * as ts from "@typescript/typescript6";
 import type { Diagnostic, TypeSafetyOptions } from "./types";
 import { scanDrizzleSql, SQL_SAFETY_DIAGNOSTIC_CODES } from "./sql-safety";
+import { scanSourceSemantics, SOURCE_SEMANTIC_DIAGNOSTIC_CODES } from "./source-semantics";
 
 const DEFAULT_EXCLUDES = [
   "**/*.test.ts",
@@ -18,6 +19,7 @@ const DEFAULT_EXCLUDES = [
 
 export const TYPE_SAFETY_DIAGNOSTIC_CODES = {
   ...SQL_SAFETY_DIAGNOSTIC_CODES,
+  ...SOURCE_SEMANTIC_DIAGNOSTIC_CODES,
   "generated-any": { errorCode: "SC6001", docsUrl: "https://supacloud.dev/errors/SC6001" },
   "source-any": { errorCode: "SC6002", docsUrl: "https://supacloud.dev/errors/SC6002" },
   "source-type-assertion": { errorCode: "SC6003", docsUrl: "https://supacloud.dev/errors/SC6003" },
@@ -68,6 +70,7 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
     : {
         options: {
           strict: true,
+          experimentalDecorators: true,
           skipLibCheck: true,
           target: ts.ScriptTarget.ES2022,
           module: ts.ModuleKind.ESNext,
@@ -86,7 +89,28 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
     file,
     [...DEFAULT_EXCLUDES, ...(options.exclude ?? [])],
   ));
-  const compilerOptions: ts.CompilerOptions = { ...projectConfig.options, noEmit: true };
+  // Project settings retain resolution and emit metadata, but cannot weaken application typing.
+  const compilerOptions: ts.CompilerOptions = {
+    ...projectConfig.options,
+    noCheck: false,
+    strict: true,
+    noImplicitAny: true,
+    strictNullChecks: true,
+    strictFunctionTypes: true,
+    strictBindCallApply: true,
+    strictPropertyInitialization: true,
+    strictBuiltinIteratorReturn: true,
+    noImplicitThis: true,
+    useUnknownInCatchVariables: true,
+    alwaysStrict: true,
+    noUncheckedIndexedAccess: true,
+    exactOptionalPropertyTypes: true,
+    noImplicitOverride: true,
+    noPropertyAccessFromIndexSignature: true,
+    noFallthroughCasesInSwitch: true,
+    forceConsistentCasingInFileNames: true,
+    noEmit: true,
+  };
   const host = ts.createCompilerHost(compilerOptions);
   host.getCurrentDirectory = () => dirname(configPath);
   const program = ts.createProgram(rootNames, compilerOptions, host);
@@ -108,6 +132,8 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
       errorCode: `TS${diagnostic.code}`,
     }));
   const checker = program.getTypeChecker();
+  // Resolution failures are configuration errors, but must still block emission.
+  const moduleResolutionCodes = new Set([2307, 2688, 2792]);
   for (const diagnostic of [
     ...program.getGlobalDiagnostics(),
     ...sourceFiles.flatMap((sourceFile) => [
@@ -117,7 +143,7 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
   ]) {
     diagnostics.push({
       severity: "error",
-      code: "source-typescript",
+      code: moduleResolutionCodes.has(diagnostic.code) ? "source-config" : "source-typescript",
       message: ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n"),
       ...(diagnostic.file ? { file: normalizeRelative(rootDir, diagnostic.file.fileName) } : {}),
       ...(diagnostic.file && diagnostic.start !== undefined
@@ -127,6 +153,9 @@ export function scanProductionSource(options: TypeSafetyScanOptions): Diagnostic
   }
   for (const sourceFile of sourceFiles) {
     scanSourceFile(sourceFile, checker, rootDir, diagnostics, options.strict ?? false);
+    diagnostics.push(...scanSourceSemantics(
+      sourceFile, checker, normalizeRelative(rootDir, sourceFile.fileName), rootDir,
+    ));
     diagnostics.push(...scanDrizzleSql(
       sourceFile, checker, normalizeRelative(rootDir, sourceFile.fileName), options.strict ?? false,
     ));
@@ -395,7 +424,7 @@ function makeDiagnostic(
       : fileOrSourceFile.fileName;
   const meta = TYPE_SAFETY_DIAGNOSTIC_CODES[code];
   return {
-    severity: strict ? "error" : "warn",
+    severity: strict || code === "source-any" || code === "generated-any" ? "error" : "warn",
     code,
     message,
     file,

@@ -83,8 +83,9 @@ async function withDelta<T>(
       const liveSnap = await snapshotSchema(tx, schema)
       const ddl = diffSchemas(shadowSnap, liveSnap, schema)
       try {
-        if (ddl.length) await shadow!.db.exec(ddl.join('\n'))
-        if (!schemasEqual(await snapshotSchema(shadow!.db, schema), liveSnap)) {
+        if (!shadow) throw new Error('Shadow database was closed before schema replay')
+        if (ddl.length) await shadow.db.exec(ddl.join('\n'))
+        if (!schemasEqual(await snapshotSchema(shadow.db, schema), liveSnap)) {
           throw new Error('Generated DDL does not reproduce the live schema')
         }
       } catch (cause) {

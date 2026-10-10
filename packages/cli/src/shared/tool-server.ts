@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { Value } from "typebox/value";
-import { parseToolArguments, type ToolArguments, type ToolSchema } from "./schema";
+import { parseToolArguments, type ToolArguments, type ToolSchema } from "./schema.js";
 
 export interface ToolTextContent {
     readonly type: "text";

@@ -216,8 +216,8 @@ export async function readCatalog(
       name: row.name,
       command: POLCMD_MAP[row.command] ?? 'all',
       roles: row.roles ?? [],
-      usingExpr: row.using_expr ?? undefined,
-      checkExpr: row.check_expr ?? undefined,
+      ...(row.using_expr == null ? {} : { usingExpr: row.using_expr }),
+      ...(row.check_expr == null ? {} : { checkExpr: row.check_expr }),
     })),
     functions: functionRows.map((row) => ({
       schema: row.schema,

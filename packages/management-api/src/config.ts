@@ -1,10 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isIP } from "node:net";
 
-const MANAGEMENT_API_ENV = process.env.SUPACLOUD_MANAGEMENT_ENV_FILE
+const MANAGEMENT_API_ENV = process.env["SUPACLOUD_MANAGEMENT_ENV_FILE"]
   ?? "/etc/supabase/management-api.env";
-const LOCAL_ENV = process.env.SUPACLOUD_LOCAL_ENV_FILE ?? ".env";
-const LEGACY_CONFIG_ENV = process.env.SUPACLOUD_LEGACY_CONFIG_ENV_FILE
+const LOCAL_ENV = process.env["SUPACLOUD_LOCAL_ENV_FILE"] ?? ".env";
+const LEGACY_CONFIG_ENV = process.env["SUPACLOUD_LEGACY_CONFIG_ENV_FILE"]
   ?? "/opt/supacloud/config.env";
 
 // Tracks values injected by config files so install.ts can distinguish an
@@ -52,12 +52,12 @@ loadEnvFile(MANAGEMENT_API_ENV);
 // The tracked repository config.env is never a production runtime source by
 // default. Legacy loading is explicit and cannot overwrite management env or
 // process-level values because loadEnvFile only fills undefined keys.
-if (process.env.SUPACLOUD_LOAD_LEGACY_CONFIG_ENV === "true") {
+if (process.env["SUPACLOUD_LOAD_LEGACY_CONFIG_ENV"] === "true") {
   loadEnvFile(LEGACY_CONFIG_ENV);
 }
 
 const runtimeNodeEnv = process.env.NODE_ENV
-  ?? process.env.BUN_ENV
+  ?? process.env["BUN_ENV"]
   ?? (hasManagementRuntimeEnv ? "production" : "development");
 process.env.NODE_ENV ??= runtimeNodeEnv;
 if (runtimeNodeEnv === "development" || runtimeNodeEnv === "test") {
@@ -227,7 +227,10 @@ function isPrivateNetworkAddress(address: string): boolean {
 
   const addressFamily = isIP(normalized);
   if (addressFamily === 4) {
-    const [first, second] = normalized.split(".").map(Number);
+    const parts = normalized.split(".").map(Number);
+    const first = parts[0];
+    const second = parts[1];
+    if (first === undefined || second === undefined) return false;
     return first === 10
       || first === 127
       || (first === 172 && second >= 16 && second <= 31)
@@ -236,7 +239,9 @@ function isPrivateNetworkAddress(address: string): boolean {
   }
   if (addressFamily !== 6) return false;
 
-  const firstHextet = Number.parseInt(normalized.split(":")[0], 16);
+  const firstHextetText = normalized.split(":")[0];
+  if (firstHextetText === undefined || firstHextetText === "") return false;
+  const firstHextet = Number.parseInt(firstHextetText, 16);
   return (firstHextet & 0xfe00) === 0xfc00 || (firstHextet & 0xffc0) === 0xfe80;
 }
 
@@ -277,13 +282,13 @@ export const config: Config = {
   caddyAdminUrl: getEnv("CADDY_ADMIN_URL", "http://127.0.0.1:2019"),
   caddyConfigPath: getEnv(
     "CADDY_CONFIG_PATH",
-    process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"
+    process.env.NODE_ENV === "test" || process.env["BUN_ENV"] === "test"
       ? "/tmp/supacloud-caddy-test/config.json"
       : "/etc/supacloud/caddy/config.json",
   ),
   caddyStateDir: getEnv(
     "CADDY_STATE_DIR",
-    process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"
+    process.env.NODE_ENV === "test" || process.env["BUN_ENV"] === "test"
       ? "/tmp/supacloud-caddy-test/state"
       : "/var/lib/supacloud/caddy",
   ),
@@ -315,7 +320,7 @@ export const config: Config = {
   homePath: getEnv("HOME", "/root"),
   masterToken: getEnv(
     "MASTER_TOKEN",
-    process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"
+    process.env.NODE_ENV === "test" || process.env["BUN_ENV"] === "test"
       ? "dev-master-token"
       : "",
   ),
@@ -383,7 +388,7 @@ export const config: Config = {
     "EDGE_RUNTIME_MASTER_KEY",
     getEnv(
       "MASTER_TOKEN",
-      process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"
+      process.env.NODE_ENV === "test" || process.env["BUN_ENV"] === "test"
         ? "dev-master-token"
         : "",
     ),
@@ -395,14 +400,14 @@ export const config: Config = {
   restProxyTimeoutMs: Number(getEnv("REST_PROXY_TIMEOUT_MS", "300000")),
   secretsEncryptionKey: getEnv(
     "SECRETS_ENCRYPTION_KEY",
-    process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"
+    process.env.NODE_ENV === "test" || process.env["BUN_ENV"] === "test"
       ? "dev-secrets-encryption-key-change-me"
       : "",
   ),
   legacySecretsEncryptionKey: getEnv("LEGACY_SECRETS_ENCRYPTION_KEY"),
   supaoauthBffSigningSecret: getEnv(
     "SUPAOAUTH_BFF_SIGNING_SECRET",
-    process.env.NODE_ENV === "test" || process.env.BUN_ENV === "test"
+    process.env.NODE_ENV === "test" || process.env["BUN_ENV"] === "test"
       ? "dev-supaoauth-bff-signing-secret-change-me"
       : "",
   ),
@@ -459,7 +464,7 @@ function validateConfig() {
     }
   }
 
-  const isDevelopment = DEVELOPMENT_ENVS.has(config.nodeEnv) || process.env.BUN_ENV === "test" || config.isGithubActions;
+  const isDevelopment = DEVELOPMENT_ENVS.has(config.nodeEnv) || process.env["BUN_ENV"] === "test" || config.isGithubActions;
   const weakMasterToken = !config.masterToken || config.masterToken.length < 32 || config.masterToken === "dev-master-token";
   const weakJwtSecret = !config.jwtSecret || config.jwtSecret.length < 32 || config.jwtSecret === DEFAULT_JWT_SECRET;
   const weakDashboardPassword = !config.dashboardPassword || config.dashboardPassword.length < 12 || DEFAULT_DASHBOARD_PASSWORDS.has(config.dashboardPassword.toLowerCase());

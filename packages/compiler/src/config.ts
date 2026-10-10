@@ -234,10 +234,10 @@ export function resolveSupacloudConfig(
       ? { ...DEFAULT_SUPACLOUD_CONFIG.effect }
       : { ...DEFAULT_SUPACLOUD_CONFIG.effect, ...resolved.effect },
     treeShakeUnusedProviders: resolved.treeShakeUnusedProviders ?? DEFAULT_SUPACLOUD_CONFIG.treeShakeUnusedProviders,
-    graphql: resolved.graphql ? {
+    ...(resolved.graphql === undefined || resolved.graphql === false ? {} : { graphql: {
       ...resolved.graphql,
       schema: resolve(cwd, resolved.graphql.schema),
-    } : undefined,
+    } }),
   };
 }
 

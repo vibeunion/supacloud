@@ -4,12 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { compileProject } from "./compile";
 import { writeFixtureProject } from "./fixtures/helpers";
+import { FIXTURE_TSCONFIG, RUNTIME_SOURCE } from "./fixtures/runtime-source";
 
 test("named headers compile to lower-case selection while unnamed headers preserve the map", async () => {
   const root = await mkdtemp(join(tmpdir(), "supacloud-headers-"));
   try {
-    await writeFixtureProject(root, { "webhook.ts": `
-import { Module, Controller, Get, Headers } from "@supacloud/app";
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "runtime.ts": RUNTIME_SOURCE,
+      "webhook.ts": `
+import { Module, Controller, Get, Headers } from "./runtime";
 @Controller("/headers")
 export class HeaderController {
   @Get("/")

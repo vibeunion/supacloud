@@ -109,12 +109,12 @@ function preflight(
     throw new Error("WORKER_REQUIRES_DEDICATED_PROCESS");
   }
   if (
-    process.env.SUPACLOUD_PROJECT_REF !== projectRef ||
-    environment.SUPACLOUD_PROJECT_REF !== projectRef ||
-    !environment.SUPABASE_URL ||
-    !environment.SUPABASE_SERVICE_ROLE_KEY ||
-    environment.SUPABASE_URL !== process.env.SUPABASE_URL ||
-    environment.SUPABASE_SERVICE_ROLE_KEY !== process.env.SUPABASE_SERVICE_ROLE_KEY
+    process.env["SUPACLOUD_PROJECT_REF"] !== projectRef ||
+    environment["SUPACLOUD_PROJECT_REF"] !== projectRef ||
+    !environment["SUPABASE_URL"] ||
+    !environment["SUPABASE_SERVICE_ROLE_KEY"] ||
+    environment["SUPABASE_URL"] !== process.env["SUPABASE_URL"] ||
+    environment["SUPABASE_SERVICE_ROLE_KEY"] !== process.env["SUPABASE_SERVICE_ROLE_KEY"]
   ) {
     throw new Error("WORKER_PROJECT_ENV_REQUIRED");
   }

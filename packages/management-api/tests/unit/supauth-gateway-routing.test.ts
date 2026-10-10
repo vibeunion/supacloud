@@ -9,7 +9,7 @@ describe("SupAuth gateway routing", () => {
     expect(source).toContain("? `${hostIp}:${config.port}`");
     expect(source).toContain('id: caddyRouteId(projectRef, "auth")');
     expect(source).toContain("upstream: authUpstream");
-    expect(source).toContain('stripPrefix: sharedAuthProxy ? undefined : "/auth/v1"');
+    expect(source).toContain('...(sharedAuthProxy ? {} : { stripPrefix: "/auth/v1" })');
   });
 
   test("keeps well-known metadata on the direct owner runtime", () => {

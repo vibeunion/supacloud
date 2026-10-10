@@ -245,7 +245,8 @@ export class HttpClientCore {
       const attempt = { method: requestMethod, url: req.url, body: requestBody, headers: headerFingerprint };
       for (const guard of inheritedGuards) guard(attempt);
       guardTransport(attempt);
-      return fetchFn!(req.url, {
+      if (!fetchFn) throw new Error("No fetch implementation is configured");
+      return fetchFn(req.url, {
         method: requestMethod,
         headers,
         body: requestBody,

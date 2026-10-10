@@ -81,7 +81,7 @@ export async function createReviewAttachmentWorker(options: ReviewAttachmentWork
         }
       },
     },
-    mapClaim: claim => ({
+    mapClaim: (claim: SupaCloudWorkflowClaim) => ({
       id: claim.stepId, jobName: claim.workflowName, input: claim.input, attempt: claim.attempt,
       requestContext: { workerId, jobId: claim.stepId, requestId: claim.runId },
     }),
@@ -118,8 +118,8 @@ function required(name: string): string {
 }
 
 function databaseConnection(): SQL.Options {
-  const socket = process.env.DATABASE_SOCKET_PATH;
-  if (socket && process.env.DATABASE_URL) throw new Error("Conflicting database connection settings");
+  const socket = process.env["DATABASE_SOCKET_PATH"];
+  if (socket && process.env["DATABASE_URL"]) throw new Error("Conflicting database connection settings");
   if (socket) {
     return { adapter: "postgres", path: socket, database: required("DATABASE_NAME"), username: required("DATABASE_USER") };
   }

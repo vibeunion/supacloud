@@ -100,6 +100,7 @@ function existsInCatalog(step: PlanStep, catalog: DatabaseCatalog): boolean {
     }
     case 'grant': {
       const [object, privilege, role] = step.name.split(':');
+      if (!object || !privilege || !role) return false;
       const [schema, name] = splitQualifiedName(object);
       return catalog.grants.some(
         (g) =>
@@ -117,6 +118,7 @@ function planSchemas(plan: ModulePlan): string[] {
   const schemas = new Set<string>();
   for (const step of plan.steps) {
     const target = step.kind === 'grant' ? step.name.split(':')[0] : step.name;
+    if (!target) throw new Error(`Invalid plan target: ${step.name}`);
     schemas.add(splitQualifiedName(target)[0]);
   }
   return schemas.size > 0 ? [...schemas].sort() : ['public'];

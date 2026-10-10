@@ -181,10 +181,11 @@ export function createApplicationDevelopmentContext(
       moduleIndex < APPLICATION_DEVELOPMENT_LIMITS.modules ? remainingProviders : 0);
     remainingProviders -= providers.items.length;
     omittedProviders += providers.omitted;
+    const file = executionSourceFile(module.file);
     developmentModules.push({
       name: module.name,
       className: module.className,
-      ...(executionSourceFile(module.file) ? { file: executionSourceFile(module.file) } : {}),
+      ...(file === undefined ? {} : { file }),
       ...(module.tags && module.tags.length > 0 ? { tags: names(module.tags) } : {}),
       providers: providers.items,
       controllers: names(module.controllers.map((controller) => controller.className)),
@@ -198,6 +199,7 @@ export function createApplicationDevelopmentContext(
       for (const route of controller.routes) {
         const candidates = module.commands.filter(command => command.className === route.command || command.name === route.command);
         const command = candidates.length === 1 ? candidates[0]?.name : undefined;
+        const kinds = schemaKinds(route);
         routes.push({
           module: module.name,
           method: route.method,
@@ -206,7 +208,7 @@ export function createApplicationDevelopmentContext(
           handler: route.handler,
           ...(command === undefined ? {} : { command }),
           aspects: (route.aspects ?? []).map((aspect) => aspect.name),
-          ...(schemaKinds(route) ? { schemaKinds: schemaKinds(route) } : {}),
+          ...(kinds === undefined ? {} : { schemaKinds: kinds }),
         });
       }
     }
@@ -254,11 +256,14 @@ export function createApplicationDevelopmentContext(
   const diagnostics: ApplicationDevelopmentDiagnostic[] = [];
   for (const diagnostic of (graph.diagnostics ?? [])) {
     const repair = createDiagnosticRepairPlan([diagnostic])[0];
+    const file = executionSourceFile(diagnostic.file);
+    const line = Number.isSafeInteger(diagnostic.line) && diagnostic.line !== undefined && diagnostic.line > 0
+      ? diagnostic.line : undefined;
     diagnostics.push({
       code: diagnostic.code,
       severity: diagnostic.severity,
-      ...(executionSourceFile(diagnostic.file) ? { file: executionSourceFile(diagnostic.file) } : {}),
-      ...(Number.isSafeInteger(diagnostic.line) && diagnostic.line! > 0 ? { line: diagnostic.line } : {}),
+      ...(file === undefined ? {} : { file }),
+      ...(line === undefined ? {} : { line }),
       ...(repair ? { repair: { type: repair.type, readiness: repair.readiness } } : {}),
     });
   }

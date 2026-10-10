@@ -63,11 +63,11 @@ export function pgmqSettingsProject(value: unknown, ref: string): {
   id: string; config: Record<string, unknown>; queues: Record<string, unknown>;
 } {
   const project = record(value);
-  if (project.ref !== ref || project.deleted_at !== null
-    || typeof project.id !== "string" || project.id.length === 0) throw new PgmqSettingsError();
-  const config = record(project.config);
-  const queues = Object.hasOwn(config, "queue_settings") ? record(config.queue_settings) : {};
-  return { id: project.id, config, queues };
+  if (project["ref"] !== ref || project["deleted_at"] !== null
+    || typeof project["id"] !== "string" || project["id"].length === 0) throw new PgmqSettingsError();
+  const config = record(project["config"]);
+  const queues = Object.hasOwn(config, "queue_settings") ? record(config["queue_settings"]) : {};
+  return { id: project["id"], config, queues };
 }
 
 export function readPgmqSettings(queues: Record<string, unknown>, name: string, complete = false): QueueSettings {

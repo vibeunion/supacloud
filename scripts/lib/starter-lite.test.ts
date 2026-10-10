@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { startStarterLite } from "./starter-lite";
 
 for (const profile of ["pglite", "native"] as const) {
-  const postgresBin = profile === "native" ? process.env.SUPACLOUD_STARTER_POSTGRES_BIN : undefined;
+  const postgresBin = profile === "native" ? process.env["SUPACLOUD_STARTER_POSTGRES_BIN"] : undefined;
   const lifecycleTest = profile === "native" && !postgresBin ? test.skip : test;
 
   lifecycleTest(`${profile} Lite fixture preserves HTTP identity and database state across a shared restart`, async () => {

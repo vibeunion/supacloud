@@ -153,8 +153,11 @@ function parse(file: string, text: string): ts.SourceFile {
 }
 
 function unique<T>(items: readonly T[], description: string): T {
-  if (items.length !== 1) throw new Error(`Expected exactly one ${description}; found ${items.length}`);
-  return items[0];
+  const [item] = items;
+  if (items.length !== 1 || item === undefined) {
+    throw new Error(`Expected exactly one ${description}; found ${items.length}`);
+  }
+  return item;
 }
 
 function identifier(value: string): void {

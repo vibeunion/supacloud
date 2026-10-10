@@ -351,8 +351,8 @@ async function dispatchSubcommand(target: Subcommand, forwardedArgs: string[]): 
         });
         const exitCode = await childProcess.exited;
         process.exit(exitCode ?? 1);
-    } catch (error: any) {
-        console.error(`❌ 启动 ${target.pkg} 失败: ${error.message || String(error)}`);
+    } catch (error: unknown) {
+        console.error(`❌ 启动 ${target.pkg} 失败: ${error instanceof Error ? error.message : String(error)}`);
         process.exit(1);
     }
 }

@@ -49,8 +49,9 @@ function validVersion(value: string): boolean {
 
 function migrationVersion(file: string): string {
   const match = basename(file).match(/^(\d{8,19})[_-]/);
-  if (!match || !validVersion(match[1])) throw new Error(`Invalid migration version in ${file}`);
-  return BigInt(match[1]).toString();
+  const version = match?.[1];
+  if (!version || !validVersion(version)) throw new Error(`Invalid migration version in ${file}`);
+  return BigInt(version).toString();
 }
 
 function migrationName(file: string): string {
@@ -65,8 +66,10 @@ function sortMigrations(migrations: RebaseMigrationInput[]): RebaseMigrationInpu
     return left.file.localeCompare(right.file);
   });
   for (let index = 1; index < sorted.length; index += 1) {
-    if (sorted[index - 1].version === sorted[index].version) {
-      throw new Error(`Duplicate migration version ${sorted[index].version}`);
+    const previous = sorted[index - 1];
+    const current = sorted[index];
+    if (previous && current && previous.version === current.version) {
+      throw new Error(`Duplicate migration version ${current.version}`);
     }
   }
   return sorted;

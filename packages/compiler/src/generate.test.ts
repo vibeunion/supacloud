@@ -546,8 +546,8 @@ export class LifecycleController {
         @Injectable({ scope: "job" })
         export class CreatedBeforeFailure {
           onDestroy() {
-            (globalThis as Record<string, unknown>).__supacloudRollbackCount =
-              ((globalThis as Record<string, unknown>).__supacloudRollbackCount as number ?? 0) + 1;
+            const count: unknown = Reflect.get(globalThis, "__supacloudRollbackCount");
+            Reflect.set(globalThis, "__supacloudRollbackCount", (typeof count === "number" ? count : 0) + 1);
           }
         }
 
@@ -823,8 +823,9 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
     const standaloneDir = await mkdtemp(join(tmpdir(), "supacloud-standalone-"));
     await writeFixtureProject(standaloneDir, {
       "tsconfig.json": GOOD_PROJECT_FILES["tsconfig.json"],
+      "src/runtime.ts": RUNTIME_SOURCE,
       "src/standalone.controller.ts": `
-        import { Controller, Get, UseGuards } from "@supacloud/app";
+        import { Controller, Get, UseGuards } from "./runtime";
 
         @UseGuards("authGuard")
         @Controller({ path: "/standalone", standalone: true })
@@ -834,7 +835,7 @@ describe("generate：client.ts 与 permissions.ts 端到端代码生成", () => 
         }
       `,
       "src/standalone.command.ts": `
-        import { Command } from "@supacloud/app";
+        import { Command } from "./runtime";
 
         @Command({ name: "standalone.run", permission: "standalone.run", standalone: true })
         export class StandaloneCommand {}

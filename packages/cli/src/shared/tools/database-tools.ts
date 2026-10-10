@@ -823,7 +823,7 @@ Actions: ${allActions.join(", ")}${localOnly ? " (local-only mode)" : readOnly ?
                         : undefined;
                     const plan = createMigrationImportPlan({
                         source: args.import_source,
-                        directory: typeof args.dir === "string" ? args.dir : undefined,
+                        ...(typeof args.dir === "string" ? { directory: args.dir } : {}),
                         metadata,
                     });
                     const written = args.write === true

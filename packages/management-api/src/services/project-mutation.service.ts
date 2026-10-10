@@ -750,9 +750,11 @@ export async function completeProjectMutationFailure(
   if (input.status !== "failed_retryable" && input.recoveryNotBefore !== undefined) {
     throw new Error("Only retryable mutation failures may set a recovery timestamp");
   }
+  const { recoveryNotBefore: recoveryInput, ...completion } = input;
+  const recoveryNotBefore = recoveryTimestamp(recoveryInput);
   return finishProjectMutation(transaction, {
-    ...input,
-    recoveryNotBefore: recoveryTimestamp(input.recoveryNotBefore),
+    ...completion,
+    ...(recoveryNotBefore === undefined ? {} : { recoveryNotBefore }),
     receipt: input.receipt ?? {},
     responseStatus: input.responseStatus ?? null,
   });

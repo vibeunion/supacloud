@@ -28,15 +28,15 @@ export function createDeliveryWorker(modules: CompiledModule[]) {
         return {id: "test", jobName: "sync.orders", input: {}};
       },
       async ack(_claim, output) {
-        if (!process.env.JOB_RECEIPT) throw new Error("Missing test receipt path");
-        await Bun.write(process.env.JOB_RECEIPT, JSON.stringify(output));
+        if (!process.env["JOB_RECEIPT"]) throw new Error("Missing test receipt path");
+        await Bun.write(process.env["JOB_RECEIPT"], JSON.stringify(output));
       },
       fail() {throw new Error("Packed test job failed");},
     },
   });
   return {start: () => worker.start(), async close() {
     await worker.stop();
-    if (process.env.CLOSE_RECEIPT) await Bun.write(process.env.CLOSE_RECEIPT, "closed");
+    if (process.env["CLOSE_RECEIPT"]) await Bun.write(process.env["CLOSE_RECEIPT"], "closed");
   }};
 }
 `);
@@ -62,7 +62,7 @@ export function createDeliveryWorker(modules: CompiledModule[]) {
   const jobReceipt = join(detached, "job.json"), closeReceipt = join(detached, "closed");
   child = Bun.spawn([process.execPath, "--no-env-file", "index.js"], {
     cwd: detached,
-    env: {PATH: process.env.PATH, JOB_RECEIPT: jobReceipt, CLOSE_RECEIPT: closeReceipt},
+    env: {PATH: process.env["PATH"], JOB_RECEIPT: jobReceipt, CLOSE_RECEIPT: closeReceipt},
     stdout: "pipe", stderr: "pipe",
   });
   assert.ok(child.stdout && typeof child.stdout !== "number");

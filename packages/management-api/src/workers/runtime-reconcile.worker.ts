@@ -5,6 +5,7 @@ const RECONCILE_INTERVAL_MS = Number(process.env.RUNTIME_RECONCILE_INTERVAL_MS |
 const INITIAL_DELAY_MS = Number(process.env.RUNTIME_RECONCILE_INITIAL_DELAY_MS || 60 * 1000);
 
 let reconcileTimer: Timer | null = null;
+let initialDelayTimer: Timer | null = null;
 let reconciliationInFlight: Promise<void> | null = null;
 
 async function performRuntimeReconciliation(): Promise<void> {
@@ -37,7 +38,8 @@ export function startRuntimeReconcileWorker(): void {
 
     logger.info(`[RuntimeReconcile] Worker started (interval: ${RECONCILE_INTERVAL_MS}ms)`);
 
-    const initialDelay = setTimeout(() => {
+    initialDelayTimer = setTimeout(() => {
+        initialDelayTimer = null;
         void runRuntimeReconciliation();
     }, INITIAL_DELAY_MS);
 
@@ -45,15 +47,14 @@ export function startRuntimeReconcileWorker(): void {
         void runRuntimeReconciliation();
     }, RECONCILE_INTERVAL_MS);
 
-    (reconcileTimer as any).__initialDelay = initialDelay;
 }
 
 export function stopRuntimeReconcileWorker(): void {
     if (!reconcileTimer) return;
 
     clearInterval(reconcileTimer);
-    const initialDelay = (reconcileTimer as any).__initialDelay;
-    if (initialDelay) clearTimeout(initialDelay);
+    if (initialDelayTimer) clearTimeout(initialDelayTimer);
+    initialDelayTimer = null;
     reconcileTimer = null;
     logger.info("[RuntimeReconcile] Worker stopped");
 }

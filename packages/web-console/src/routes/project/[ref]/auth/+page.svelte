@@ -116,21 +116,21 @@
 
   <div class="flex-1 rounded-xl bg-background overflow-hidden relative min-h-[500px]">
     {#key `${projectRef}:${tableVersion}`}
-      {#snippet emailRenderer({ value, record }: { value: any, record: any })}
+      {#snippet emailRenderer({ value, record }: { value: unknown, record: Record<string, unknown> })}
         <div class="flex items-center gap-3">
           <div class="w-8 h-8 rounded-full bg-brand/10 text-brand flex items-center justify-center font-bold text-xs ring-1 ring-brand/20">
             {String(value || '?').charAt(0).toUpperCase()}
           </div>
           <div class="flex flex-col">
-            <span class="font-medium text-sm">{value || "-"}</span>
-            <span class="text-[10px] text-muted-foreground font-mono">{record.id}</span>
+            <span class="font-medium text-sm">{String(value || "-")}</span>
+            <span class="text-[10px] text-muted-foreground font-mono">{String(record.id ?? "")}</span>
           </div>
         </div>
       {/snippet}
 
-      {#snippet roleRenderer({ value, record }: { value: any, record: any })}
+      {#snippet roleRenderer({ value, record }: { value: unknown, record: Record<string, unknown> })}
         <span class="px-2 py-0.5 bg-brand/10 text-brand text-[10px] rounded-full uppercase font-medium tracking-wider">
-          {value || "user"}
+          {String(value || "user")}
         </span>
         <div class="mt-1 flex gap-1 flex-wrap">
           {#each getProviders(record) as provider}
@@ -141,7 +141,7 @@
         </div>
       {/snippet}
 
-      {#snippet dateRenderer({ value }: { value: any })}
+      {#snippet dateRenderer({ value }: { value: unknown })}
         <span class="text-xs text-muted-foreground tabular-nums">
           {value ? new Date(String(value)).toLocaleString() : '-'}
         </span>

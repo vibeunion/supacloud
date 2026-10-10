@@ -14,7 +14,7 @@ import { removeManagedSystemdUnit } from "../packages/management-api/src/service
 // This runner owns ports 80/443/2019 and requires a disposable, dedicated machine.
 assert.equal(process.platform, "linux");
 assert.equal(process.getuid?.(), 0);
-assert.equal(process.env.SUPACLOUD_LINUX_ACCEPTANCE, "1");
+assert.equal(process.env["SUPACLOUD_LINUX_ACCEPTANCE"], "1");
 assert.equal(Bun.version, "1.4.2");
 assert.equal(config.caddyTlsIssuer, "internal");
 const build = JSON.parse(await readFile(join(import.meta.dir, "acceptance-build.json"), "utf8"));
@@ -117,7 +117,7 @@ try {
         [expected, expected, expected, expected], "Runtime must use the exact tenant identity");
     }
   }
-  evidence.initialReadiness = ready;
+  evidence["initialReadiness"] = ready;
   const provider = new CaddyGatewayProvider();
   assert.equal(caddy.exitCode, null);
   assert.equal((await step(() => provider.ensureGatewayReady({ maxAttempts: 10, intervalMs: 200 }))).ready, true);
@@ -128,9 +128,9 @@ try {
   });
   assert.equal(response.status, 200);
   assert.equal(await response.text(), "linux-delivery-ready");
-  evidence.httpThroughCaddy = true;
+  evidence["httpThroughCaddy"] = true;
   await step(() => new CaddyGatewayProvider().verifyApplicationRoute(route));
-  evidence.providerRestartReadback = true;
+  evidence["providerRestartReadback"] = true;
 
   // Real supervisor restart must produce fresh PIDs and journal invocation identities.
   await step(() => runtime.stop(input));
@@ -141,13 +141,13 @@ try {
     const previous = ready.targets.find(item => item.target === target.target)!;
     assert.notEqual(target.invocation_id, previous.invocation_id);
   }
-  evidence.restartedReadiness = restarted;
+  evidence["restartedReadiness"] = restarted;
   await fetch(`http://127.0.0.1:${port}/not-ready`, { signal: AbortSignal.timeout(5000) });
   const unhealthy = await step(() => readiness.inspect(input));
   assert.equal(unhealthy.ready, false);
   assert.equal(unhealthy.targets.find(target => target.kind === "http")?.code, "HTTP_NOT_READY");
   assert.equal(unhealthy.targets.find(target => target.kind === "worker")?.ready, true);
-  evidence.unhealthyReadiness = unhealthy;
+  evidence["unhealthyReadiness"] = unhealthy;
   assert.equal(caddy.exitCode, null, "Owned Caddy exited during acceptance");
   cancellation.signal.throwIfAborted();
 } catch (error) {
@@ -157,7 +157,7 @@ try {
   try {
     const stopped = await runtime.stop(input);
     assert.ok(stopped.every(target => target.mainPid === 0));
-    evidence.stopped = stopped;
+    evidence["stopped"] = stopped;
   } catch (error) { cleanup.push(String(error)); }
   for (const target of plan.targets) {
     try { await removeManagedSystemdUnit(target.unit); }
@@ -173,8 +173,8 @@ try {
   process.off("SIGTERM", interrupt);
   if (cleanup.length) failure = new AggregateError([failure, ...cleanup], "Linux acceptance cleanup failed");
   if (cancellation.signal.aborted) failure ??= cancellation.signal.reason;
-  evidence.status = failure ? "FAIL" : "PASS";
-  if (failure) evidence.error = String(failure);
+  evidence["status"] = failure ? "FAIL" : "PASS";
+  if (failure) evidence["error"] = String(failure);
   await writeFile(join(root, "receipt.json"), JSON.stringify(evidence, null, 2));
   const { build: _build, ...summary } = evidence;
   console.log(JSON.stringify(summary, null, 2));

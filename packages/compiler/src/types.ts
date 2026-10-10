@@ -462,7 +462,7 @@ export interface CompileOptions {
   disallowControllerDirectDb?: boolean;
   /** Detect modules declared in the project that are unreachable from any root module. */
   detectOrphanModules?: boolean;
-  /** Explicit unsafe opt-in to emit artifacts with errors (default: false). */
+  /** Emit artifacts with governance errors (default: false). Type errors always prevent emission. */
   writeOnError?: boolean;
   /** Generate typed API client in client.ts (default: false). */
   generateClient?: boolean;
@@ -570,9 +570,9 @@ export interface GraphqlContractSummary {
 }
 
 export interface TypeSafetyOptions {
-  /** Reject the `any` keyword in generated TypeScript artifacts. */
+  /** @deprecated Generated `any` checks are mandatory; false no longer disables them. */
   noAnyInGenerated?: boolean;
-  /** Scan non-test production source for unsafe type escapes and widening. */
+  /** @deprecated Production type checks are mandatory; false no longer disables them. */
   scanProductionSource?: boolean;
   /** Additional relative glob patterns excluded from the production-source scan. */
   exclude?: string[];

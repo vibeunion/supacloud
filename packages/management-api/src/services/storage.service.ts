@@ -154,7 +154,9 @@ export class StorageService {
                // Look for "100.00%" or similar
                const match = line.match(/(\d{1,3}\.\d+)%/);
                if (match) {
-                 job.progress = parseFloat(match[1]);
+                 const progress = match[1];
+                 if (progress === undefined) continue;
+                 job.progress = parseFloat(progress);
                  job.updatedAt = new Date();
                }
 

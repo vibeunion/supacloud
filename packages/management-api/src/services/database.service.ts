@@ -170,7 +170,7 @@ export class DatabaseService {
 
   private async loadSupabaseSchema(): Promise<string> {
     const candidates = [
-      process.env.SUPABASE_SCHEMA_PATH,
+      process.env["SUPABASE_SCHEMA_PATH"],
       path.join(import.meta.dir, "../db/schemas/supabase.sql"),
       path.join(process.cwd(), "src/db/schemas/supabase.sql"),
       path.join(process.cwd(), "db/schemas/supabase.sql"),
@@ -230,8 +230,12 @@ export class DatabaseService {
       if (dfOut.exitCode === 0) {
         const lines = dfOut.text().trim().split("\n");
         if (lines.length >= 2) {
-          const parts = lines[1].trim().split(/\s+/);
-          const availKb = parseInt(parts[3]);
+          const line = lines[1];
+          if (line === undefined) throw new Error("Disk space response is missing");
+          const parts = line.trim().split(/\s+/);
+          const available = parts[3];
+          if (available === undefined) throw new Error("Disk space response is missing the available capacity");
+          const availKb = parseInt(available, 10);
 
           if (availKb < minKb) {
             throw new Error(
@@ -728,10 +732,10 @@ export class DatabaseService {
       ORDER BY name
     `;
     return rows.map((row: Record<string, unknown>) => ({
-      name: row.name as string,
-      value: decryptSecretIfNeeded(row.value as string),
-      updated_at: row.updated_at != null
-        ? new Date(row.updated_at as string).toISOString()
+      name: row["name"] as string,
+      value: decryptSecretIfNeeded(row["value"] as string),
+      updated_at: row["updated_at"] != null
+        ? new Date(row["updated_at"] as string).toISOString()
         : new Date().toISOString(),
     }));
   }
@@ -787,12 +791,11 @@ export class DatabaseService {
     const { tenantRuntimeService } = await import("./tenant-runtime.service");
     try {
       const status = await tenantRuntimeService.startRuntime(projectRef);
-      return {
+      const result = {
         success: status.status === "running" || status.status === "starting",
         output: `PORT=${status.port}\nGOTRUE_PORT=${status.gotruePort}`,
-        error:
-          status.health === "unhealthy" ? "Health check failed" : undefined,
       };
+      return status.health === "unhealthy" ? { ...result, error: "Health check failed" } : result;
     } catch (error: unknown) {
       return {
         success: false,

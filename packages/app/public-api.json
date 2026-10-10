@@ -486,7 +486,7 @@
     {
       "name": "FactoryProvider",
       "kind": "type",
-      "signature": "export interface FactoryProvider<T = unknown> extends BaseProvider {\n    provide: Token<T>;\n    useFactory: (...deps: any[]) => T;\n    deps?: ProviderDep[];\n}"
+      "signature": "export interface FactoryProvider<T = unknown> extends BaseProvider {\n    provide: Token<T>;\n    useFactory: (...deps: never[]) => T;\n    deps?: ProviderDep[];\n}"
     },
     {
       "name": "FeatureEvent",
@@ -611,7 +611,7 @@
     {
       "name": "getPipeMetadata",
       "kind": "value",
-      "signature": "export declare function getPipeMetadata(target: any): PipeMetadata | undefined;"
+      "signature": "export declare function getPipeMetadata(target: Function | null | undefined): PipeMetadata | undefined;"
     },
     {
       "name": "getQueryMeta",
@@ -1116,7 +1116,7 @@
     {
       "name": "PipeTransform",
       "kind": "type",
-      "signature": "export interface PipeTransform<T = any, R = any> {\n    transform(value: T, ...args: any[]): R;\n}"
+      "signature": "export interface PipeTransform<T = unknown, R = unknown> {\n    transform(value: T, ...args: unknown[]): R;\n}"
     },
     {
       "name": "PLATFORM_BROWSER_ID",
@@ -1481,7 +1481,7 @@
     {
       "name": "TestModuleMetadata",
       "kind": "type",
-      "signature": "export interface TestModuleMetadata {\n    providers?: Array<Provider | EnvironmentProviders>;\n    imports?: Array<{\n        providers?: Array<Provider | EnvironmentProviders>;\n    } | any>;\n}"
+      "signature": "export interface TestModuleMetadata {\n    providers?: Array<Provider | EnvironmentProviders>;\n    imports?: Array<{\n        providers?: Array<Provider | EnvironmentProviders>;\n    }>;\n}"
     },
     {
       "name": "Title",
@@ -1521,7 +1521,7 @@
     {
       "name": "Type",
       "kind": "type",
-      "signature": "export interface Type<T> {\n    new (...args: any[]): T;\n}"
+      "signature": "export interface Type<T> {\n    new (...args: never[]): T;\n}"
     },
     {
       "name": "untracked",

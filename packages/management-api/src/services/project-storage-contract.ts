@@ -76,39 +76,39 @@ export function logicalBucket(value: string): string {
 /** Syntax only; permission to contact an origin is checked separately at runtime. */
 export function parseProjectS3Settings(value: unknown): Readonly<ProjectS3Settings> {
   if (!record(value)) invalid();
-  const endpoint = text(value.endpoint, 2048);
+  const endpoint = text(value["endpoint"], 2048);
   let url: URL;
   try { url = new URL(endpoint); } catch { return invalid(); }
   if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash
     || url.pathname !== '/' || endpoint.includes("\\")) invalid();
-  const region = text(value.region, 64);
+  const region = text(value["region"], 64);
   if (!/^[a-z0-9-]+$/.test(region)) invalid();
-  const bucket = text(value.bucket, 63);
+  const bucket = text(value["bucket"], 63);
   if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket) || bucket.includes("..") || /^\d+\.\d+\.\d+\.\d+$/.test(bucket)) invalid();
-  const rawPrefix = value.prefix ?? "";
+  const rawPrefix = value["prefix"] ?? "";
   if (typeof rawPrefix !== "string" || rawPrefix.startsWith("/")) invalid();
   const prefix = storagePath(rawPrefix.endsWith('/') ? rawPrefix.slice(0, -1) : rawPrefix, true);
-  if (value.virtualHostedStyle !== undefined && typeof value.virtualHostedStyle !== "boolean") invalid();
-  if (value.enabled !== undefined && typeof value.enabled !== "boolean") invalid();
-  const sessionToken = value.sessionToken === undefined ? undefined : text(value.sessionToken, 16384);
+  if (value["virtualHostedStyle"] !== undefined && typeof value["virtualHostedStyle"] !== "boolean") invalid();
+  if (value["enabled"] !== undefined && typeof value["enabled"] !== "boolean") invalid();
+  const sessionToken = value["sessionToken"] === undefined ? undefined : text(value["sessionToken"], 16384);
   return Object.freeze({
     endpoint: url.origin, region, bucket, prefix: prefix ? `${prefix}/` : "",
-    virtualHostedStyle: value.virtualHostedStyle ?? false,
-    accessKeyId: text(value.accessKeyId, 256),
-    secretAccessKey: text(value.secretAccessKey, 4096),
+    virtualHostedStyle: value["virtualHostedStyle"] ?? false,
+    accessKeyId: text(value["accessKeyId"], 256),
+    secretAccessKey: text(value["secretAccessKey"], 4096),
     ...(sessionToken === undefined ? {} : { sessionToken }),
-    enabled: value.enabled ?? true,
+    enabled: value["enabled"] ?? true,
   });
 }
 
 export function parseStoredProjectS3(ref: string, value: unknown): Readonly<ProjectS3Configuration> {
   assertProjectRef(ref);
-  if (!record(value) || value.version !== 1 || value.projectRef !== ref
-    || typeof value.revision !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.revision)) {
+  if (!record(value) || value["version"] !== 1 || value["projectRef"] !== ref
+    || typeof value["revision"] !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value["revision"])) {
     throw new ProjectStorageError("STORAGE_CONFIG_UNAVAILABLE");
   }
   try {
-    return Object.freeze({ ...parseProjectS3Settings(value), version: 1, projectRef: ref, revision: value.revision });
+    return Object.freeze({ ...parseProjectS3Settings(value), version: 1, projectRef: ref, revision: value["revision"] });
   } catch { throw new ProjectStorageError("STORAGE_CONFIG_UNAVAILABLE"); }
 }
 

@@ -4,8 +4,8 @@
  * payloads, and presentation layers.
  */
 
-export interface PipeTransform<T = any, R = any> {
-  transform(value: T, ...args: any[]): R;
+export interface PipeTransform<T = unknown, R = unknown> {
+  transform(value: T, ...args: unknown[]): R;
 }
 
 export interface PipeMetadata {
@@ -16,27 +16,41 @@ export interface PipeMetadata {
 
 const PIPE_METADATA_KEY = Symbol.for("supacloud.pipe");
 
+type PipeTarget = Function & { [PIPE_METADATA_KEY]?: PipeMetadata };
+interface ReflectMetadataApi {
+  defineMetadata?: (key: symbol, value: PipeMetadata, target: Function) => void;
+  getMetadata?: (key: symbol, target: Function) => unknown;
+}
+
+function pipeTarget(target: Function): PipeTarget {
+  return target as PipeTarget;
+}
+
 export function Pipe(options: PipeMetadata): ClassDecorator {
-  return (target: any) => {
+  return (target: Function) => {
     const meta: PipeMetadata = {
       pure: true,
       standalone: true,
       ...options,
     };
-    if (typeof Reflect !== "undefined" && typeof (Reflect as any).defineMetadata === "function") {
-      (Reflect as any).defineMetadata(PIPE_METADATA_KEY, meta, target);
+    const metadata = Reflect as typeof Reflect & ReflectMetadataApi;
+    if (typeof metadata.defineMetadata === "function") {
+      metadata.defineMetadata(PIPE_METADATA_KEY, meta, target);
     }
-    target[PIPE_METADATA_KEY] = meta;
+    pipeTarget(target)[PIPE_METADATA_KEY] = meta;
   };
 }
 
-export function getPipeMetadata(target: any): PipeMetadata | undefined {
+export function getPipeMetadata(target: Function | null | undefined): PipeMetadata | undefined {
   if (!target) return undefined;
-  if (typeof Reflect !== "undefined" && typeof (Reflect as any).getMetadata === "function") {
-    const meta = (Reflect as any).getMetadata(PIPE_METADATA_KEY, target);
-    if (meta) return meta;
+  const metadata = Reflect as typeof Reflect & ReflectMetadataApi;
+  if (typeof metadata.getMetadata === "function") {
+    const meta = metadata.getMetadata(PIPE_METADATA_KEY, target);
+    if (meta && typeof meta === "object" && "name" in meta && typeof meta.name === "string") {
+      return meta as PipeMetadata;
+    }
   }
-  return target[PIPE_METADATA_KEY];
+  return pipeTarget(target)[PIPE_METADATA_KEY];
 }
 
 /**

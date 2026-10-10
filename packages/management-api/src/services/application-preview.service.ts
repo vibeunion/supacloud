@@ -19,7 +19,7 @@ import type { ApplicationConfigurations } from "./application-configuration";
 type PreviewDataMode = "schema_only" | "full_clone";
 
 function previewList(config: unknown): StoredApplicationPreview[] {
-  const raw = normalizeProjectConfig(config as Record<string, unknown> | null | undefined).application_previews;
+  const raw = normalizeProjectConfig(config as Record<string, unknown> | null | undefined)["application_previews"];
   if (!Array.isArray(raw)) return [];
   return raw
     .filter((item): item is StoredApplicationPreview =>
@@ -118,8 +118,6 @@ export class ApplicationPreviewService {
       secrets: projectService,
       invalidateEnv: runtimeCacheService.invalidateProjectRuntimeEnv,
       runtime: tenantRuntimeService,
-      configurations: undefined,
-      activate: undefined,
       smokeTest: async () => ({ passed: [], failed: ["application_readiness"] }),
       ...dependencies,
     };
@@ -226,7 +224,7 @@ export class ApplicationPreviewService {
           name: receipt.branch_name,
           dataMode: receipt.resources.database_branch.data_mode,
         });
-      } else if (existingBranch.config?.parent_ref !== projectRef) {
+      } else if (existingBranch.config?.["parent_ref"] !== projectRef) {
         throw new Error("APPLICATION_PREVIEW_BRANCH_IDENTITY_CONFLICT");
       }
       receipt.resources.database_branch.status = "ready";

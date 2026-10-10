@@ -74,6 +74,7 @@ import {
   CONTROL_PLANE_DATABASE_GUARD_EXIT_CODE,
   ControlPlaneDatabaseGuardError,
 } from "./db/control-plane-database-identity";
+import { recordOrEmpty } from "./utils/record";
 
 function getWebConsoleDir(): string {
   return resolveWebConsoleDir();
@@ -122,7 +123,10 @@ function isStudioCompatibilityRequest(request: Request): boolean {
   return host.startsWith("studio.") || host.startsWith("studio-");
 }
 
-async function rejectStudioCompatibilityRequest(request: Request, set: any) {
+async function rejectStudioCompatibilityRequest(
+  request: Request,
+  set: Pick<import("elysia").Context["set"], "status" | "headers">,
+) {
   if (!isStudioCompatibilityRequest(request)) {
     set.status = 404;
     return STUDIO_COMPAT_NOT_FOUND;
@@ -149,44 +153,51 @@ async function rejectStudioCompatibilityRequest(request: Request, set: any) {
 
 async function listStudioCompatibilityProjects() {
   const { projectService } = await import("./services");
-  const projects = await projectService.listProjects();
+  const projects: unknown[] = await projectService.listProjects();
 
-  return projects.map((project: any) => ({
-    id: project.id,
-    ref: project.ref,
-    name: project.name,
-    status: project.status?.toUpperCase() || "ACTIVE_HEALTHY",
-    region: project.region || "local",
+  return projects.map((project) => {
+    const record = recordOrEmpty(project);
+    const database = recordOrEmpty(record["database"]);
+    const api = recordOrEmpty(record["api"]);
+    const studio = recordOrEmpty(record["studio"]);
+    return {
+    id: record["id"],
+    ref: record["ref"],
+    name: record["name"],
+    status: typeof record["status"] === "string" ? record["status"].toUpperCase() : "ACTIVE_HEALTHY",
+    region: record["region"] || "local",
     organization_id: "default",
-    cloud_provider: project.cloud_provider || "localhost",
-    inserted_at: project.created_at,
-    updated_at: project.updated_at ?? null,
+    cloud_provider: record["cloud_provider"] || "localhost",
+    inserted_at: record["created_at"],
+    updated_at: record["updated_at"] ?? null,
     database: {
-      host: project.database?.host || "localhost",
-      name: project.database?.name || `supa_${project.ref}`,
-      user: project.database?.user || `role_${project.ref}`,
-      port: project.database?.port || 5432,
-      pool_size: project.database?.pool_size || 20,
+      host: database["host"] || "localhost",
+      name: database["name"] || `supa_${String(record["ref"] ?? "")}`,
+      user: database["user"] || `role_${String(record["ref"] ?? "")}`,
+      port: database["port"] || 5432,
+      pool_size: database["pool_size"] || 20,
     },
     api: {
-      url: project.api?.url || "",
+      url: api["url"] || "",
     },
     studio: {
-      url: project.studio?.url || "",
+      url: studio["url"] || "",
     },
-    services: project.services || [],
-    rest: project.rest || {},
-    realtime: project.realtime || false,
-  }));
+    services: record["services"] || [],
+    rest: recordOrEmpty(record["rest"]),
+    realtime: record["realtime"] || false,
+    };
+  });
 }
 
 async function getStudioCompatibilityProject(ref: string) {
   const { projectService } = await import("./services");
-  let project: Record<string, any> | null = await projectService.getProject(ref) as Record<string, any> | null;
+  const candidate = await projectService.getProject(ref);
+  let project: Record<string, unknown> | null = candidate ? recordOrEmpty(candidate) : null;
 
   if (!project && ref === "default") {
-    const projects = await projectService.listProjects();
-    project = (projects[0] as Record<string, any> | undefined) ?? null;
+    const projects: unknown[] = await projectService.listProjects();
+    project = projects[0] ? recordOrEmpty(projects[0]) : null;
   }
 
   if (!project) return null;
@@ -195,30 +206,30 @@ async function getStudioCompatibilityProject(ref: string) {
     id: project.id,
     ref: project.ref,
     name: project.name,
-    status: project.status?.toUpperCase() || "ACTIVE_HEALTHY",
-    region: project.region || "local",
+    status: typeof project["status"] === "string" ? project["status"].toUpperCase() : "ACTIVE_HEALTHY",
+    region: project["region"] || "local",
     organization_id: "default",
-    cloud_provider: project.cloud_provider || "localhost",
-    inserted_at: project.created_at,
-    connectionString: project.connectionString || "",
-    created_at: project.created_at,
-    updated_at: project.updated_at ?? null,
+    cloud_provider: project["cloud_provider"] || "localhost",
+    inserted_at: project["created_at"],
+    connectionString: project["connectionString"] || "",
+    created_at: project["created_at"],
+    updated_at: project["updated_at"] ?? null,
     database: {
-      host: project.database?.host || "localhost",
-      name: project.database?.name || `supa_${project.ref}`,
-      user: project.database?.user || `role_${project.ref}`,
-      port: project.database?.port || 5432,
-      pool_size: project.database?.pool_size || 20,
+      host: recordOrEmpty(project["database"])["host"] || "localhost",
+      name: recordOrEmpty(project["database"])["name"] || `supa_${String(project["ref"] ?? "")}`,
+      user: recordOrEmpty(project["database"])["user"] || `role_${String(project["ref"] ?? "")}`,
+      port: recordOrEmpty(project["database"])["port"] || 5432,
+      pool_size: recordOrEmpty(project["database"])["pool_size"] || 20,
     },
     api: {
-      url: project.api?.url || "",
+      url: recordOrEmpty(project["api"])["url"] || "",
     },
     studio: {
-      url: project.studio?.url || "",
+      url: recordOrEmpty(project["studio"])["url"] || "",
     },
-    services: project.services || [],
-    rest: project.rest || {},
-    realtime: project.realtime || false,
+    services: project["services"] || [],
+    rest: recordOrEmpty(project["rest"]),
+    realtime: project["realtime"] || false,
   };
 }
 
@@ -1306,7 +1317,10 @@ async function bootstrap() {
             return;
           }
           const { upstreamUrl, requestHeaders } = data;
-          const upstream = new (WebSocket as any)(upstreamUrl, {
+          const WebSocketWithHeaders = WebSocket as typeof WebSocket & {
+            new (url: string, options: Bun.WebSocketOptions): WebSocket;
+          };
+          const upstream = new WebSocketWithHeaders(upstreamUrl, {
             headers: requestHeaders,
           });
 
@@ -1322,7 +1336,7 @@ async function bootstrap() {
             }
           });
 
-          upstream.addEventListener("message", (event: any) => {
+          upstream.addEventListener("message", (event: MessageEvent) => {
             try {
               ws.send(event.data as string | ArrayBufferLike);
             } catch {
@@ -1330,7 +1344,7 @@ async function bootstrap() {
             }
           });
 
-          upstream.addEventListener("close", (event: any) => {
+          upstream.addEventListener("close", (event: CloseEvent) => {
             try {
               ws.close(event.code, event.reason);
             } catch {
@@ -1389,7 +1403,7 @@ async function bootstrap() {
           }
         },
       },
-      async fetch(request: Request, server: any) {
+      async fetch(request: Request, server: Bun.Server<unknown>) {
         recordRequestPeerAddress(request, server.requestIP(request)?.address);
         const url = new URL(request.url);
 

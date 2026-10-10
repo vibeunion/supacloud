@@ -27,7 +27,7 @@ import { HttpTransport } from "../../packages/cli/src/shared/transports/http";
 import { registerApplicationTools } from "../../packages/cli/src/shared/tools/application-tools";
 import type { ReleaseControlToolResponse } from "../../packages/cli/src/shared/tools/release-control-response";
 
-const postgresBin = process.env.SUPACLOUD_STARTER_POSTGRES_BIN;
+const postgresBin = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];
 let postgres: StarterPostgres | undefined;
 let database: SQL;
 let root: string;
@@ -72,7 +72,7 @@ test.skipIf(!postgresBin)("concurrent independent applications and retries canno
   expect(repeated[0]).toEqual(repeated[1]);
   const other = request("other");
   const multiple = await Promise.all([service.allocate(request()), service.allocate(other)]);
-  expect(new Set([repeated[0]!.runtime.ports.api, ...multiple.map(value => value.runtime.ports.api)]).size).toBe(3);
+  expect(new Set([repeated[0]!.runtime.ports["api"], ...multiple.map(value => value.runtime.ports["api"])]).size).toBe(3);
   const rows = await database`SELECT port FROM application_runtime_ports WHERE port BETWEEN 20000 AND 20009`;
   expect(rows).toHaveLength(3);
   expect(await service.read("wrong", input.runtime.activationId)).toBeNull();
@@ -94,7 +94,7 @@ test.skipIf(!postgresBin)("allocation ownership survives PostgreSQL restart and 
   expect(await next.allocate(input)).toEqual(old);
   expect(await next.read("demo", input.runtime.activationId)).toEqual(old);
   const upgrade = await allocator(20100, 20101).allocate(request());
-  expect(upgrade.runtime.ports.api).not.toBe(old.runtime.ports.api);
+  expect(upgrade.runtime.ports["api"]).not.toBe(old.runtime.ports["api"]);
   await expect(allocator(20100, 20101).allocate(request())).rejects.toThrow("EXHAUSTED");
 });
 
@@ -106,13 +106,13 @@ test.skipIf(!postgresBin)("occupied sockets and persisted tenant overrides are u
     await expect(service.allocate(input)).rejects.toThrow("EXHAUSTED");
     expect(await service.read("demo", input.runtime.activationId)).toBeNull();
   } finally { await server.stop(true); }
-  expect((await service.allocate(input)).runtime.ports.api).toBe(port);
+  expect((await service.allocate(input)).runtime.ports["api"]).toBe(port);
   await database`INSERT INTO projects(ref, config) VALUES ('overrides', ${{
     postgrest_port: 20300, gotrue_port: "20301",
   }}::jsonb)`;
   await database`INSERT INTO projects(ref, config) VALUES ('legacy', to_jsonb(${JSON.stringify({ postgrest_port: 20302 })}::text))`;
   const reserved = request(), probe = allocator(20300, 20303);
-  expect((await probe.allocate(reserved)).runtime.ports.api).toBe(20303);
+  expect((await probe.allocate(reserved)).runtime.ports["api"]).toBe(20303);
   await expect(probe.allocate(request())).rejects.toThrow("EXHAUSTED");
 });
 
@@ -143,7 +143,7 @@ test.skipIf(!postgresBin)("worker-only allocations still bind revision identity 
   await expect(service.allocate(input)).rejects.toThrow("CORRUPT");
   // Deliberate damage is repaired only inside this owned fixture for later assertions.
   await database`
-    INSERT INTO application_runtime_ports VALUES (${allocated.runtime.ports.api}, 'demo', ${input.runtime.activationId}, 'api')
+    INSERT INTO application_runtime_ports VALUES (${allocated.runtime.ports["api"]}, 'demo', ${input.runtime.activationId}, 'api')
   `;
 });
 
@@ -194,7 +194,7 @@ test.skipIf(!postgresBin)("retirement releases claims only after explicit stoppe
     throw new Error("APPLICATION_RUNTIME_NOT_STOPPED");
   })).rejects.toThrow("APPLICATION_RUNTIME_NOT_STOPPED");
   expect(verified).toBe(1);
-  expect(await database`SELECT port FROM application_runtime_ports WHERE port = ${original.runtime.ports.api}`)
+  expect(await database`SELECT port FROM application_runtime_ports WHERE port = ${original.runtime.ports["api"]}`)
     .toHaveLength(1);
   const retired = await service.retire("demo", input.runtime.activationId, async allocation => {
     verified++;
@@ -202,15 +202,17 @@ test.skipIf(!postgresBin)("retirement releases claims only after explicit stoppe
   });
   expect(verified).toBe(2);
   expect(retired.retiredAt).toBeString();
-  expect(await database`SELECT port FROM application_runtime_ports WHERE port = ${original.runtime.ports.api}`)
+  expect(await database`SELECT port FROM application_runtime_ports WHERE port = ${original.runtime.ports["api"]}`)
     .toHaveLength(0);
   expect(await service.retire("demo", input.runtime.activationId, async () => {
     throw new Error("Verifier must not rerun for an already retired allocation");
   })).toEqual(retired);
   await expect(service.allocate(input)).rejects.toThrow("APPLICATION_PORT_ALLOCATION_RETIRED");
   const replacement = await service.allocate(request("other"));
-  expect([20900, 20901]).toContain(replacement.runtime.ports.api);
-  expect(await database`SELECT port FROM application_runtime_ports WHERE port = ${replacement.runtime.ports.api}`)
+  const replacementPort = replacement.runtime.ports["api"];
+  if (replacementPort === undefined) throw new Error("Expected an API port allocation");
+  expect([20900, 20901]).toContain(replacementPort);
+  expect(await database`SELECT port FROM application_runtime_ports WHERE port = ${replacement.runtime.ports["api"]}`)
     .toHaveLength(1);
 });
 
@@ -247,9 +249,11 @@ test.skipIf(!postgresBin)("configured control-plane deployment and explicit roll
       }) }, inventory: async () => [],
     }),
     verifyCompatibility: async ({ environment }) => {
-      expect(["first-fixture", "second-fixture"]).toContain(environment.api!.APP_SETTING);
+      const setting = environment["api"]?.["APP_SETTING"];
+      if (setting === undefined) throw new Error("Expected API APP_SETTING");
+      expect(["first-fixture", "second-fixture"]).toContain(setting);
     },
-    files: { prepare: async (_runtime, environment) => { environments.push(environment.api!.APP_SETTING!); return root; } },
+    files: { prepare: async (_runtime, environment) => { environments.push(environment["api"]!["APP_SETTING"]!); return root; } },
     runtime: {
       install: async runtime => applicationRuntimePlan(runtime),
       start: async runtime => { running.add(runtime.activationId); starts.push(runtime.activationId); return []; },

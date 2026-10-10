@@ -6,7 +6,7 @@ export function capturePgmqBatch(value: unknown): string[] {
     if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) throw new PgmqInputError();
     const array: object = value;
     const properties = Object.getOwnPropertyDescriptors(array);
-    const length: unknown = properties.length?.value;
+    const length: unknown = properties["length"]?.value;
     if (typeof length !== "number" || !Number.isSafeInteger(length) || length < 0 || length > 10000
       || Reflect.ownKeys(properties).length !== length + 1) throw new PgmqInputError();
     const result: string[] = [];

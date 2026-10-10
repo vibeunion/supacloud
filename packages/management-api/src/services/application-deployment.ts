@@ -88,7 +88,7 @@ export class ApplicationDeploymentService {
     const migrations = dependencies.migrations ?? new ApplicationMigrations({ storage });
     const gateway = dependencies.gateway ?? gatewayService;
     this.activation = new ApplicationActivationService({
-      mutations: dependencies.mutations,
+      ...(dependencies.mutations === undefined ? {} : { mutations: dependencies.mutations }),
       readActive: input => active.read(input),
       writeActive: (record, expected) => active.write(record, expected),
       confirmActive: record => active.confirm(record),

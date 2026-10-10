@@ -70,10 +70,10 @@ function withRetry<T>(operation: string, run: () => Promise<T>): Promise<T> {
 }
 
 function taskInvokerUserId(payload: Record<string, unknown>): string | null {
-  const auth = payload.auth;
+  const auth = payload["auth"];
   if (auth === undefined) return null;
   if (!isRecord(auth)) throw new Error("Invalid task auth context");
-  const candidate = auth.invoker_user_id;
+  const candidate = auth["invoker_user_id"];
   if (candidate === undefined || candidate === null) return null;
   if (typeof candidate !== "string") throw new Error("Task invoker user id must be a GoTrue UUID");
   const normalized = normalizedGoTrueUserId(candidate);
@@ -633,7 +633,7 @@ export async function retryTask(id: string, projectRef: string): Promise<Project
     if (rows.length === 0) return null;
     if (rows.length !== 1) throw new InvalidTaskRecordError();
     const row = rows[0];
-    if (!isRecord(row) || row.retry_identity_matches !== true) throw new InvalidTaskRecordError();
+    if (!isRecord(row) || row["retry_identity_matches"] !== true) throw new InvalidTaskRecordError();
     // Compare UUID identity in PostgreSQL, which canonicalizes valid input forms.
     const { retry_identity_matches: _, ...record } = row;
     const task = mapTask(record);
@@ -769,18 +769,18 @@ export async function countActiveTasksByInvoker(
     );
 
     if (!Array.isArray(rows)) throw new InvalidTaskRecordError();
-    if (rows.some((row: unknown) => !isRecord(row) || row.invoker_consistent !== true)) {
+    if (rows.some((row: unknown) => !isRecord(row) || row["invoker_consistent"] !== true)) {
       throw new Error("TASK_INVOKER_MISMATCH: project_tasks invoker columns disagree");
     }
     const records = rows.map((row: unknown) => {
-      if (!isRecord(row) || typeof row.count !== "number" || !Number.isSafeInteger(row.count)
-        || row.count < rows.length || typeof row.id !== "string" || !row.id
-        || typeof row.task_type !== "string" || !row.task_type
-        || typeof row.status !== "string"
-        || !["pending", "leased", "running", "retry_scheduled"].includes(row.status)) {
+      if (!isRecord(row) || typeof row["count"] !== "number" || !Number.isSafeInteger(row["count"])
+        || row["count"] < rows.length || typeof row["id"] !== "string" || !row["id"]
+        || typeof row["task_type"] !== "string" || !row["task_type"]
+        || typeof row["status"] !== "string"
+        || !["pending", "leased", "running", "retry_scheduled"].includes(row["status"])) {
         throw new InvalidTaskRecordError();
       }
-      return { id: row.id, task_type: row.task_type, status: row.status, count: row.count };
+      return { id: row["id"], task_type: row["task_type"], status: row["status"], count: row["count"] };
     });
     const count = records[0]?.count ?? 0;
     if (records.some((row) => row.count !== count)) throw new InvalidTaskRecordError();

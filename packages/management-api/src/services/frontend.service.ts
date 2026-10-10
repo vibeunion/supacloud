@@ -125,7 +125,7 @@ function assertBuildCommandPolicy(command: string): void {
   if (command.length > MAX_BUILD_COMMAND_LENGTH) {
     throw new Error(`Build command exceeds ${MAX_BUILD_COMMAND_LENGTH} characters`);
   }
-  if (process.env.SUPACLOUD_RESTRICT_BUILD_COMMANDS === "true" && RESTRICTED_BUILD_SHELL_PATTERN.test(command)) {
+  if (process.env["SUPACLOUD_RESTRICT_BUILD_COMMANDS"] === "true" && RESTRICTED_BUILD_SHELL_PATTERN.test(command)) {
     throw new Error("Build command contains unsupported shell syntax");
   }
 }
@@ -140,7 +140,7 @@ function buildCommandEnvironment(
     if (value !== undefined) env[key] = value;
   }
   Object.assign(env, normalizeFrontendEnvVars(deploymentEnv));
-  env.NODE_VERSION = nodeVersion;
+  env["NODE_VERSION"] = nodeVersion;
   return env;
 }
 

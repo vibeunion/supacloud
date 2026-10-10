@@ -5,16 +5,16 @@ import {
 } from "../utils/project-config";
 
 function postgrestVerifierProjection(authConfig: Record<string, unknown>) {
-  const oauthServer = normalizeOAuthServerConfig(authConfig.oauth_server);
-  const thirdPartyAuth = normalizeThirdPartyAuthConfig(authConfig.third_party_auth);
+  const oauthServer = normalizeOAuthServerConfig(authConfig["oauth_server"]);
+  const thirdPartyAuth = normalizeThirdPartyAuthConfig(authConfig["third_party_auth"]);
 
   return {
     oauth_server: {
-      enabled: oauthServer.enabled === true,
-      issuer: oauthServer.issuer ?? null,
-      signing_alg: oauthServer.signing_alg ?? null,
-      jwt_keys: oauthServer.jwt_keys ?? null,
-      jwt_jwks: oauthServer.jwt_jwks ?? null,
+      enabled: oauthServer["enabled"] === true,
+      issuer: oauthServer["issuer"] ?? null,
+      signing_alg: oauthServer["signing_alg"] ?? null,
+      jwt_keys: oauthServer["jwt_keys"] ?? null,
+      jwt_jwks: oauthServer["jwt_jwks"] ?? null,
     },
     third_party_auth: {
       enabled: thirdPartyAuth.enabled,

@@ -14,7 +14,7 @@ import { HttpTransport } from "../../packages/cli/src/shared/transports/http";
 import { registerApplicationTools } from "../../packages/cli/src/shared/tools/application-tools";
 import type { ReleaseControlToolResponse } from "../../packages/cli/src/shared/tools/release-control-response";
 
-const postgresBin = process.env.SUPACLOUD_STARTER_POSTGRES_BIN;
+const postgresBin = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];
 let postgres: StarterPostgres | undefined;
 let database: SQL;
 let configurations: ApplicationConfigurations;
@@ -63,9 +63,9 @@ test.skipIf(!postgresBin)("immutable revisions survive PostgreSQL restart and ol
   configurations = new ApplicationConfigurations(database, crypto);
   expect(await configurations.put(identity, first)).toEqual(saved);
   expect((await configurations.read(identity))?.configuration_id).toBe(next.configuration_id);
-  expect((await configurations.resolve(identity, first.configuration_id, runtimeInput().release)).environment.api)
+  expect((await configurations.resolve(identity, first.configuration_id, runtimeInput().release)).environment["api"])
     .toEqual({ APP_SETTING: "private-config-fixture" });
-  expect((await configurations.resolve(identity, next.configuration_id, runtimeInput().release)).environment.api)
+  expect((await configurations.resolve(identity, next.configuration_id, runtimeInput().release)).environment["api"])
     .toEqual({ APP_SETTING: "new-config-fixture" });
 });
 

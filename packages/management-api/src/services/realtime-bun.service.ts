@@ -8,6 +8,7 @@ import type { ProjectJwtVerification } from '../utils/project-jwt';
 import { verifyProjectJwtPayload } from '../utils/project-jwt';
 import { isRealtimeIdentifier } from '../utils/realtime-change';
 import { canEvaluateRealtimeFilterNatively } from '../utils/realtime-filter-contract';
+import { matchesRealtimeFilter, parseRealtimeChange, parseWalChanges, type RealtimeChange } from "../utils/realtime-change";
 
 const IDENTIFIER_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
 
@@ -30,8 +31,8 @@ interface ChangeEvent {
     data: {
         columns: Array<{ name: string; type: string }>;
         commit_timestamp: string;
-        record: Record<string, any>;
-        old_record?: Record<string, any>;
+        record: Record<string, unknown>;
+        old_record?: Record<string, unknown>;
         schema: string;
         table: string;
         type: 'INSERT' | 'UPDATE' | 'DELETE';
@@ -63,7 +64,7 @@ export interface RealtimeBunServiceDependencies {
 }
 
 export class RealtimeBunService {
-    private tenantListeners = new Map<string, any>();
+    private tenantListeners = new Map<string, SqlListenHandle>();
     public events = new EventEmitter();
     private tenantSubscriptions = new Map<string, RealtimeSubscriptionState[]>();
     private subscriptionIdMap = new Map<string, Map<number, string>>();
@@ -197,7 +198,7 @@ export class RealtimeBunService {
         }
     }
 
-    private async detectWal2json(db: any, projectRef: string): Promise<boolean> {
+    private async detectWal2json(db: SQL, projectRef: string): Promise<boolean> {
         const cached = this.wal2jsonAvailable.get(projectRef);
         if (cached !== undefined) return cached;
 
@@ -226,7 +227,7 @@ export class RealtimeBunService {
         }
     }
 
-    private startWalPolling(projectRef: string, db: any) {
+    private startWalPolling(projectRef: string, db: SQL) {
         if (this.walPollingIntervals.has(projectRef)) return;
 
         const poll = async () => {
@@ -240,7 +241,9 @@ export class RealtimeBunService {
                             const walData = typeof change.data === 'string' ? JSON.parse(change.data) : change.data;
                             const formatted = this.wal2jsonToChangeEvent(walData);
                             if (formatted) {
-                                await this.filterAndEmit(projectRef, formatted);
+                                for (const entry of Array.isArray(formatted) ? formatted : [formatted]) {
+                                    await this.filterAndEmit(projectRef, entry);
+                                }
                             }
                         } catch { /* skip malformed WAL entries */ }
                     }
@@ -255,50 +258,10 @@ export class RealtimeBunService {
         poll();
     }
 
-    private wal2jsonToChangeEvent(walData: any): any | null {
-        if (!walData?.change || !Array.isArray(walData.change)) return null;
-
-        const results: any[] = [];
-        for (const entry of walData.change) {
-            const kind = entry.kind;
-            const schema = entry.schema;
-            const table = entry.table;
-
-            let type: string;
-            if (kind === 'insert') type = 'INSERT';
-            else if (kind === 'update') type = 'UPDATE';
-            else if (kind === 'delete') type = 'DELETE';
-            else continue;
-
-            const record: Record<string, any> = {};
-            const oldRecord: Record<string, any> = {};
-
-            if (entry.columnnames && entry.columnvalues) {
-                for (let i = 0; i < entry.columnnames.length; i++) {
-                    record[entry.columnnames[i]] = entry.columnvalues[i];
-                }
-            }
-            if (entry.oldkeys?.keynames && entry.oldkeys?.keyvalues) {
-                for (let i = 0; i < entry.oldkeys.keynames.length; i++) {
-                    oldRecord[entry.oldkeys.keynames[i]] = entry.oldkeys.keyvalues[i];
-                }
-            }
-
-            results.push({
-                type,
-                schema,
-                table,
-                record: type !== 'DELETE' ? record : null,
-                old_record: type !== 'INSERT' ? oldRecord : null,
-                commit_timestamp: new Date().toISOString(),
-                columns: (entry.columnnames || []).map((name: string, i: number) => ({
-                    name,
-                    type: entry.columntypes?.[i] || 'text'
-                }))
-            });
-        }
-
-        return results.length === 1 ? results[0] : results.length > 0 ? results : null;
+    private wal2jsonToChangeEvent(walData: unknown): RealtimeChange | RealtimeChange[] | null {
+        const changes = parseWalChanges(walData);
+        if (!changes || changes.length === 0) return null;
+        return changes.length === 1 ? changes[0] ?? null : changes;
     }
 
     private async ensureTriggers(projectRef: string, subscriptions: PostgresChangeConfig[], db: SQL) {
@@ -417,12 +380,13 @@ export class RealtimeBunService {
         }
     }
 
-    private async filterAndEmit(projectRef: string, raw: any): Promise<void> {
-        const inner = raw.payload || raw;
+    private async filterAndEmit(projectRef: string, raw: unknown): Promise<void> {
+        const inner = parseRealtimeChange(raw);
+        if (!inner) return;
         const states = this.tenantSubscriptions.get(projectRef);
-        const changeType = inner.type || inner.event || '';
-        const schema = inner.schema || 'public';
-        const table = inner.table || '';
+        const changeType = inner.type;
+        const schema = inner.schema;
+        const table = inner.table;
 
         if (!states || states.length === 0) return;
 
@@ -434,7 +398,7 @@ export class RealtimeBunService {
                 if (sub.event !== '*' && sub.event !== changeType) continue;
                 if (sub.schema !== schema) continue;
                 if (sub.table && sub.table !== table) continue;
-                if (sub.filter && !this.matchesFilter(sub.filter, inner.record || {})) continue;
+                if (sub.filter && !matchesRealtimeFilter(sub.filter, inner.record)) continue;
                 const serverSubId = idMap?.get(typeof sub.id === 'number' ? sub.id : parseInt(String(sub.id), 10));
                 matchingIds.push(serverSubId || String(sub.id ?? i));
             }
@@ -455,7 +419,7 @@ export class RealtimeBunService {
         projectRef: string,
         schema: string,
         table: string,
-        record: Record<string, any>,
+        record: Record<string, unknown>,
         changeType: string,
         token?: string
     ): Promise<boolean> {
@@ -489,7 +453,7 @@ export class RealtimeBunService {
         projectRef: string,
         schema: string,
         table: string,
-        record: Record<string, any>,
+        record: Record<string, unknown>,
         jwtPayload: JWTPayload,
         changeType: string
     ): Promise<boolean> {
@@ -554,53 +518,19 @@ export class RealtimeBunService {
         }
     }
 
-    private matchesFilter(filter: string, record: Record<string, any>): boolean {
-        const parts = filter.split('=');
-        if (parts.length !== 2) return false;
-        const column = parts[0].trim();
-        const valuePart = parts[1].trim();
-        const dotIdx = valuePart.indexOf('.');
-        if (dotIdx === -1) return false;
-        const op = valuePart.substring(0, dotIdx);
-        const val = valuePart.substring(dotIdx + 1);
-        const recordVal = String(record[column] ?? '');
-        switch (op) {
-            case 'eq': return recordVal === val;
-            case 'neq': return recordVal !== val;
-            case 'gt': return recordVal > val;
-            case 'gte': return recordVal >= val;
-            case 'lt': return recordVal < val;
-            case 'lte': return recordVal <= val;
-            case 'like': return new RegExp(val.replace(/%/g, '.*')).test(recordVal);
-            case 'ilike': return new RegExp(val.replace(/%/g, '.*'), 'i').test(recordVal);
-            case 'in': {
-                const inValues = val.replace(/^\(|\)$/g, '').split(',').map(s => s.trim().replace(/^"|"$/g, ''));
-                return inValues.includes(recordVal);
-            }
-            default: return false;
-        }
-    }
-
-    private formatEvent(inner: any, ids: string[]): ChangeEvent {
-        const record = inner.record || inner.new || {};
-        const oldRecord = inner.old_record || inner.old || null;
-
-        const columns = Array.isArray(inner.columns) && inner.columns[0]?.name && inner.columns[0]?.type
-            ? inner.columns
-            : Object.keys(record).map(k => ({
-                name: k,
-                type: inner.columns?.[k] || (typeof record[k] === 'number' ? 'int8' : 'text')
-            }));
+    private formatEvent(inner: RealtimeChange, ids: string[]): ChangeEvent {
+        const record = inner.record;
+        const oldRecord = inner.old_record;
 
         return {
             data: {
-                columns,
-                commit_timestamp: inner.commit_timestamp || new Date().toISOString(),
+                columns: inner.columns,
+                commit_timestamp: inner.commit_timestamp,
                 record,
                 ...(oldRecord ? { old_record: oldRecord } : {}),
-                schema: inner.schema || 'public',
-                table: inner.table || '',
-                type: inner.type || inner.event || 'INSERT',
+                schema: inner.schema,
+                table: inner.table,
+                type: inner.type,
                 errors: []
             },
             ids

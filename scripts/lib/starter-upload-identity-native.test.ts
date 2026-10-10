@@ -4,7 +4,7 @@ import { STARTER_REVIEW_SCHEMA } from "../../packages/cli/src/shared/tools/app-s
 import { STARTER_UPLOAD_SCHEMA } from "../../packages/cli/src/shared/tools/app-starter-upload";
 import { startStarterPostgres } from "./starter-postgres";
 
-const postgresBin = process.env.SUPACLOUD_STARTER_POSTGRES_BIN;
+const postgresBin = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];
 
 test.skipIf(!postgresBin)("starter upload RLS accepts native sub, mapped external_sub, and denies another subject", async () => {
   const postgres = await startStarterPostgres(postgresBin!);

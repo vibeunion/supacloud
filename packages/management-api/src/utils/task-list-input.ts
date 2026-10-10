@@ -47,10 +47,10 @@ export function captureTaskListFilters(value: unknown): TaskListFilters {
     if (typeof input !== "boolean") throw new InvalidTaskListInputError();
     return input;
   };
-  const statuses = strings(data.statuses);
-  const taskTypes = strings(data.taskTypes);
-  const onlyDeadLettered = boolean(data.onlyDeadLettered);
-  const limit = data.limit === undefined ? 50 : data.limit;
+  const statuses = strings(data["statuses"]);
+  const taskTypes = strings(data["taskTypes"]);
+  const onlyDeadLettered = boolean(data["onlyDeadLettered"]);
+  const limit = data["limit"] === undefined ? 50 : data["limit"];
   if (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit < 1
     || (onlyDeadLettered && statuses?.some(status => status !== "dead_lettered"))) {
     throw new InvalidTaskListInputError();
@@ -58,10 +58,10 @@ export function captureTaskListFilters(value: unknown): TaskListFilters {
   return {
     ...(statuses === undefined ? {} : { statuses }),
     ...(taskTypes === undefined ? {} : { taskTypes }),
-    ...(data.functionSlug === undefined ? {} : { functionSlug: taskListText(data.functionSlug) }),
-    ...(data.functionVersion === undefined ? {} : { functionVersion: taskListText(data.functionVersion) }),
-    ...(data.correlationId === undefined ? {} : { correlationId: taskListText(data.correlationId) }),
-    ...(data.businessTaskId === undefined ? {} : { businessTaskId: taskListText(data.businessTaskId) }),
-    onlyDeadLettered, limit, summary: boolean(data.summary),
+    ...(data["functionSlug"] === undefined ? {} : { functionSlug: taskListText(data["functionSlug"]) }),
+    ...(data["functionVersion"] === undefined ? {} : { functionVersion: taskListText(data["functionVersion"]) }),
+    ...(data["correlationId"] === undefined ? {} : { correlationId: taskListText(data["correlationId"]) }),
+    ...(data["businessTaskId"] === undefined ? {} : { businessTaskId: taskListText(data["businessTaskId"]) }),
+    onlyDeadLettered, limit, summary: boolean(data["summary"]),
   };
 }

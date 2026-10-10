@@ -1,11 +1,11 @@
 /**
  * Local stand-in for @supacloud/app in fixture projects: noop implementations of decorators and tokens.
  * AST analysis matches decorators by name only and generated code does not import it;
- * implementation exists only so fixture sources can be dynamically imported and executed by bun.
+ * implementation lets fixture sources pass TypeScript checks and execute under bun.
  */
 export const RUNTIME_SOURCE = `export class InjectionToken<T = unknown> {
   readonly name: string;
-  readonly scope?: string;
+  readonly scope: string | undefined;
 
   constructor(name: string, options: { scope?: string } = {}) {
     this.name = name;
@@ -14,15 +14,15 @@ export const RUNTIME_SOURCE = `export class InjectionToken<T = unknown> {
 }
 
 export function Injectable(_options: { scope?: string; deps?: unknown[] } = {}) {
-  return () => {};
+  return (..._args: unknown[]) => {};
 }
 
 export function Inject(_token: unknown) {
-  return () => {};
+  return (..._args: unknown[]) => {};
 }
 
 export function Module(_options: Record<string, unknown>) {
-  return () => {};
+  return (..._args: unknown[]) => {};
 }
 
 export function defineModule(_options: Record<string, unknown>) {
@@ -30,27 +30,39 @@ export function defineModule(_options: Record<string, unknown>) {
 }
 
 export function Command(_options: Record<string, unknown>) {
-  return () => {};
+  return (..._args: unknown[]) => {};
 }
 
 export function Job(_options: Record<string, unknown>) {
-  return () => {};
+  return (..._args: unknown[]) => {};
 }
 
 export function Query(_options: Record<string, unknown>) {
-  return () => {};
+  return (..._args: unknown[]) => {};
 }
 
 export function InfraResource(_options: { name: string; kind: string }) {
-  return () => {};
+  return (..._args: unknown[]) => {};
 }
 
-export function Controller(_path: string) {
-  return () => {};
+export function Controller(_path: string | Record<string, unknown>) {
+  return (..._args: unknown[]) => {};
+}
+
+export function Body() {
+  return (..._args: unknown[]) => {};
+}
+
+export function Headers(_name?: string) {
+  return (..._args: unknown[]) => {};
+}
+
+export function UseGuards(..._guards: string[]) {
+  return (..._args: unknown[]) => {};
 }
 
 function routeDecorator(_method: string) {
-  return (_path: string, _options?: Record<string, unknown>) => () => {};
+  return (_path: string, _options?: Record<string, unknown>) => (..._args: unknown[]) => {};
 }
 
 export const Get = routeDecorator("GET");

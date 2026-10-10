@@ -2,6 +2,7 @@ import { logger } from "../utils/logger";
 import { config } from "../config";
 import { db } from "../db/index";
 import { createPgListener, type PgListenerHandle } from "../lib/pg-listen";
+import { isRecord } from "../utils/record";
 
 /**
  * A general-purpose long-running task / message queue foundation (Queue Base)
@@ -116,7 +117,9 @@ export class QueueWorker {
   /**
    * Process a single specific task based on business logic via strategic dispatch
    */
-  private async processTask(task: any) {
+  private async processTask(task: { id: unknown; project_ref: unknown; task_type: unknown; payload: unknown }) {
+    if (typeof task.id !== "string" || typeof task.project_ref !== "string" || typeof task.task_type !== "string"
+      || !isRecord(task.payload)) throw new TypeError("Invalid queue task");
     // Lock the status (pending -> processing)
     // Note: Although SKIP LOCKED locks the row, updating the state machine ensures other sweeps skip it
     await db.sql`
@@ -128,7 +131,7 @@ export class QueueWorker {
     logger.debug(`[QueueWorker] Executing dispatch for task [${task.task_type}] ID: ${task.id}`);
 
     const taskType = String(task.task_type);
-    const payload = task.payload as Record<string, any>;
+    const payload = task.payload;
     
     // ----- TASK DISPATCHER (Business Routing) -----
     if (taskType.startsWith('ai_') || taskType === 'edge_function') {
@@ -139,18 +142,25 @@ export class QueueWorker {
         // we POST the task back to the specific Edge Function unique to each tenant's environment.
         // This achieves concurrency control, Token protection, and flexible business isolation.
         const webhookUrl = payload.webhook_url;
-        if (webhookUrl) {
-           const maxRetries = payload.max_retries || 1;
-           let lastError = null;
+        if (typeof webhookUrl === "string" && webhookUrl.length > 0) {
+           const maxRetries = payload.max_retries ?? 1;
+           if (typeof maxRetries !== "number" || !Number.isSafeInteger(maxRetries) || maxRetries < 1 || maxRetries > 10) {
+             throw new TypeError("Invalid queue retry count");
+           }
+           const headers = new Headers({ "Content-Type": "application/json" });
+           if (payload.headers !== undefined) {
+             if (!isRecord(payload.headers)) throw new TypeError("Invalid queue headers");
+             for (const [key, value] of Object.entries(payload.headers)) {
+               if (typeof value !== "string") throw new TypeError("Invalid queue header value");
+               headers.set(key, value);
+             }
+           }
+           let lastError: unknown = null;
            for(let i = 0; i < maxRetries; i++) {
              try {
                const res = await fetch(webhookUrl, {
                  method: "POST",
-                 headers: {
-                   "Content-Type": "application/json",
-                   // If the tenant has configured custom Tokens, they can be passed via headers
-                   ...(payload.headers || {})
-                 },
+                 headers,
                  body: JSON.stringify(payload.data || {})
                });
                if (!res.ok) {

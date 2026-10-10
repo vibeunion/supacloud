@@ -12,7 +12,7 @@ import { resolveForwardRef } from "./forward_ref";
 
 export interface TestModuleMetadata {
   providers?: Array<Provider | EnvironmentProviders>;
-  imports?: Array<{ providers?: Array<Provider | EnvironmentProviders> } | any>;
+  imports?: Array<{ providers?: Array<Provider | EnvironmentProviders> }>;
 }
 
 /**

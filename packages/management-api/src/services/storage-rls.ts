@@ -3,11 +3,42 @@ import { logger } from "../utils/logger";
 import { verifyProjectJwtPayload } from "../utils/project-jwt";
 import { isOpaqueApiKey } from "../utils/api-keys";
 import { resolveProjectApiKey } from "../utils/project-auth";
+import { isRecord } from "../utils/record";
 
 
 // ── TEST MOCK STATE ──
-export const mockBuckets = new Map<string, any>();
-export const mockObjects = new Map<string, any>();
+type StorageMockBucket = {
+  id: string;
+  name: string;
+  public: boolean;
+  file_size_limit: number | null;
+  allowed_mime_types: string[] | null;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type StorageMockObject = {
+  metadata: Record<string, unknown>;
+  updated: string;
+};
+
+export type StorageListObject = {
+  id: string | null;
+  name: string;
+  updated_at?: string;
+  created_at?: string;
+  last_accessed_at?: string;
+  size: number;
+  type?: string | null;
+  metadata?: Record<string, unknown> | null;
+  isFolder?: boolean;
+  bucket_id?: string;
+  owner?: string;
+  sortKey?: string;
+};
+
+export const mockBuckets = new Map<string, StorageMockBucket>();
+export const mockObjects = new Map<string, StorageMockObject>();
 
 type LogicalBucketInput = {
   id: string;
@@ -72,8 +103,8 @@ export class StorageRLS {
               allowedMimeTypes,
             });
         });
-    } catch (e: any) {
-        throw new Error(e.message || "Failed to create bucket");
+    } catch (e: unknown) {
+        throw new Error(e instanceof Error ? e.message : "Failed to create bucket");
     }
   }
 
@@ -218,20 +249,20 @@ export class StorageRLS {
     if (ref === 'test_mock') {
       const obj = mockObjects.get(bucketId + '/' + objectName);
       if (!obj) return null;
-      const size = normalizeStorageObjectSize(obj.metadata?.size);
+      const size = normalizeStorageObjectSize(obj.metadata["size"]);
       return {
         id: bucketId + '/' + objectName,
         name: objectName,
         bucket_id: bucketId,
         size,
         cache_control: 'no-cache',
-        content_type: obj.metadata?.mimetype || 'application/octet-stream',
+        content_type: obj.metadata["mimetype"] || 'application/octet-stream',
         created_at: obj.updated || new Date().toISOString(),
         updated_at: obj.updated || new Date().toISOString(),
         last_modified: obj.updated || new Date().toISOString(),
         etag: 'mock-etag-' + Date.now(),
         version: 'v1-' + Date.now(),
-        metadata: obj.metadata?.userMetadata || {},
+        metadata: isRecord(obj.metadata["userMetadata"]) ? obj.metadata["userMetadata"] : {},
       };
     }
 
@@ -386,8 +417,9 @@ export class StorageRLS {
                try {
                    await physicalAction();
                    physicalActionCompleted = true;
-               } catch (e: any) {
-                   return { permitted: false, error: e.message === 'PHYSICAL_UPLOAD_FAILED' ? 'Failed to write physical object' : e.message };
+               } catch (e: unknown) {
+                   const message = e instanceof Error ? e.message : String(e);
+                   return { permitted: false, error: message === 'PHYSICAL_UPLOAD_FAILED' ? 'Failed to write physical object' : message };
                }
            }
            if (!dryRun) mockObjects.set(bucketId + '/' + objectName, { metadata, updated: new Date().toISOString() });
@@ -492,8 +524,9 @@ export class StorageRLS {
           try {
             await physicalAction();
             physicalActionCompleted = true;
-          } catch (e: any) {
-            throw new Error(e.message === 'PHYSICAL_UPLOAD_FAILED' ? 'PHYSICAL_UPLOAD_FAILED' : 'PHYSICAL_ACTION_FAILED');
+          } catch (e: unknown) {
+            const message = e instanceof Error ? e.message : String(e);
+            throw new Error(message === 'PHYSICAL_UPLOAD_FAILED' ? 'PHYSICAL_UPLOAD_FAILED' : 'PHYSICAL_ACTION_FAILED');
           }
         }
       });
@@ -518,7 +551,7 @@ export class StorageRLS {
       if (e instanceof Error && e.message === 'PHYSICAL_UPLOAD_FAILED') {
         return { permitted: false, error: 'Failed to write physical object' };
       }
-      if ((e as any).code === '23505') {
+      if (isRecord(e) && e["code"] === '23505') {
         return { permitted: false, error: 'The resource already exists' };
       }
       // If error is RLS related (row level security policy violation) or Postgres throws, deny
@@ -551,10 +584,10 @@ export class StorageRLS {
     sortBy?: { column?: string; order?: string },
     search: string = '',
     with_delimiter: boolean = true
-  ): Promise<any[]> {
+  ): Promise<StorageListObject[]> {
     if (ref === 'test_mock') {
       const folders = new Set<string>();
-      const uniqueObjects: any[] = [];
+      const uniqueObjects: StorageListObject[] = [];
       const searchLower = search.toLowerCase();
       
       for (const [key, val] of mockObjects.entries()) {
@@ -583,8 +616,8 @@ export class StorageRLS {
                     });
                 }
             } else {
-                const size = normalizeStorageObjectSize(val.metadata?.size);
-                const mimetype = val.metadata?.mimetype || (rawName.includes('.') ? rawName.split('.').pop() : 'unknown');
+                const size = normalizeStorageObjectSize(val.metadata["size"]);
+                const mimetype = val.metadata["mimetype"] || (rawName.includes('.') ? rawName.split('.').pop() : 'unknown');
                 uniqueObjects.push({ 
                     id: key, 
                     name: rawName, 
@@ -592,11 +625,11 @@ export class StorageRLS {
                     created_at: val.updated,
                     last_accessed_at: val.updated,
                     size,
-                    type: mimetype,
+                    type: String(mimetype),
                     metadata: {
                         size,
                         mimetype,
-                        cacheControl: String(val.metadata?.cacheControl || val.metadata?.cache_control || '3600').replace(/^max-age=/, '')
+                        cacheControl: String(val.metadata["cacheControl"] || val.metadata["cache_control"] || '3600').replace(/^max-age=/, '')
                     },
                     isFolder: false,
                     sortKey: nameWithoutPrefix
@@ -610,15 +643,15 @@ export class StorageRLS {
         const order = (sortBy?.order || 'asc').toLowerCase() === 'desc' ? -1 : 1;
 
         if (column === 'updated_at' || column === 'updated') {
-          return (new Date(a.updated_at || a.updated).getTime() - new Date(b.updated_at || b.updated).getTime()) * order;
+          return (new Date(a.updated_at || "").getTime() - new Date(b.updated_at || "").getTime()) * order;
         }
         if (column === 'created_at' || column === 'created') {
-          return (new Date(a.created_at || a.updated_at || a.updated).getTime() - new Date(b.created_at || b.updated_at || b.updated).getTime()) * order;
+          return (new Date(a.created_at || a.updated_at || "").getTime() - new Date(b.created_at || b.updated_at || "").getTime()) * order;
         }
         if (column === 'metadata.size' || column === 'size') {
           return (a.size - b.size) * order;
         }
-        return a.sortKey.localeCompare(b.sortKey) * order;
+        return (a.sortKey ?? a.name).localeCompare(b.sortKey ?? b.name) * order;
       });
 
       return sorted.slice(offset, offset + limit);
@@ -637,7 +670,7 @@ export class StorageRLS {
     }
 
     try {
-      let results: any[] = [];
+      let results: Record<string, unknown>[] = [];
       await db.begin(async (tx) => {
         await applyRlsContext(tx, payload);
 
@@ -741,21 +774,21 @@ export class StorageRLS {
       });
 
       return results.map(row => {
-          const meta = row.metadata || {};
-          const size = normalizeStorageObjectSize(row.size ?? meta.size);
+          const meta = isRecord(row.metadata) ? row.metadata : {};
+          const size = normalizeStorageObjectSize(row["size"] ?? meta["size"]);
           return {
-              name: row.name,
-              id: row.id ? String(row.id) : null,
-              updated_at: row.updated_at || row.updated,
-              created_at: row.created_at || row.created || row.updated,
-              last_accessed_at: row.last_accessed_at || row.last_accessed || row.updated,
+              name: String(row["name"] ?? ""),
+              id: row["id"] ? String(row["id"]) : null,
+              updated_at: String(row["updated_at"] ?? row["updated"] ?? ""),
+              created_at: String(row["created_at"] ?? row["created"] ?? row["updated"] ?? ""),
+              last_accessed_at: String(row["last_accessed_at"] ?? row["last_accessed"] ?? row["updated"] ?? ""),
               bucket_id: bucketId,
-              owner: row.owner ? String(row.owner) : undefined,
+              owner: row["owner"] ? String(row["owner"]) : undefined,
               size,
-              metadata: row.is_folder || row.isFolder ? null : {
+              metadata: row["is_folder"] || row["isFolder"] ? null : {
                   size,
-                  mimetype: String(meta.mimetype || 'application/octet-stream'),
-                  cacheControl: String(meta.cacheControl || meta.cache_control || '3600').replace(/^max-age=/, '')
+                  mimetype: String(meta["mimetype"] || 'application/octet-stream'),
+                  cacheControl: String(meta["cacheControl"] || meta["cache_control"] || '3600').replace(/^max-age=/, '')
               }
           };
       });
@@ -786,11 +819,12 @@ export class StorageRLS {
             if (resBuckets.length === 0) throw new Error("RLS_VIOLATION");
             if (dryRun) throw new Error("DRY_RUN_ROLLBACK");
         });
-    } catch (e: any) {
-        if (e.message === 'DRY_RUN_ROLLBACK') return;
+    } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (message === 'DRY_RUN_ROLLBACK') return;
         // Map native Postgres FK constraint error for non-empty folders
-        if (e.code === '23503') throw new Error("Bucket is not empty");
-        throw new Error(e.message === 'RLS_VIOLATION' ? "You do not have permission to delete this bucket" : (e.message || "Failed to delete bucket"));
+        if (isRecord(e) && e["code"] === '23503') throw new Error("Bucket is not empty");
+        throw new Error(message === 'RLS_VIOLATION' ? "You do not have permission to delete this bucket" : (message || "Failed to delete bucket"));
     }
   }
 
@@ -816,10 +850,11 @@ export class StorageRLS {
             }
             await tx`DELETE FROM storage.objects WHERE bucket_id = ${bucketId}`;
         });
-    } catch (e: any) {
-        if (e.message === 'DRY_RUN_ROLLBACK') return;
-        if (e.message === 'RLS_PARTIAL_DELETE') throw new Error("You do not have permission to empty this bucket entirely");
-        throw new Error(e.message || "Failed to empty bucket");
+    } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (message === 'DRY_RUN_ROLLBACK') return;
+        if (message === 'RLS_PARTIAL_DELETE') throw new Error("You do not have permission to empty this bucket entirely");
+        throw new Error(message || "Failed to empty bucket");
     }
   }
 }

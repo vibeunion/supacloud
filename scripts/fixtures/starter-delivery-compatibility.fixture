@@ -21,13 +21,13 @@ ALTER TABLE public.starter_attachment_results ADD COLUMN writer_revision text NO
     ["src/reference-revision.ts", `import { SQL } from "bun";
 export async function requireReferenceRevision(signal: AbortSignal) {
   signal.throwIfAborted();
-  const socket = process.env.DATABASE_SOCKET_PATH;
-  if (socket && process.env.DATABASE_URL) throw new Error("Conflicting database connection settings");
+  const socket = process.env["DATABASE_SOCKET_PATH"];
+  if (socket && process.env["DATABASE_URL"]) throw new Error("Conflicting database connection settings");
   const connection: SQL.Options = socket
-    ? { adapter: "postgres", path: socket, database: process.env.DATABASE_NAME, username: process.env.DATABASE_USER }
+    ? { adapter: "postgres", path: socket, database: process.env["DATABASE_NAME"], username: process.env["DATABASE_USER"] }
     : (() => {
-      if (!process.env.DATABASE_URL) throw new Error("Missing reference database connection");
-      const url = new URL(process.env.DATABASE_URL);
+      if (!process.env["DATABASE_URL"]) throw new Error("Missing reference database connection");
+      const url = new URL(process.env["DATABASE_URL"]);
       if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") throw new Error("Invalid reference database URL");
       return {
         adapter: "postgres", url: url.href, hostname: url.hostname.replace(/^\\[|\\]$/g, ""), port: Number(url.port || 5432),
@@ -35,7 +35,7 @@ export async function requireReferenceRevision(signal: AbortSignal) {
         database: decodeURIComponent(url.pathname.slice(1)),
       };
     })();
-  if (!socket && !process.env.DATABASE_URL) throw new Error("Missing reference database connection");
+  if (!socket && !process.env["DATABASE_URL"]) throw new Error("Missing reference database connection");
   const pool = new SQL({
     ...connection, max: 1, connectionTimeout: 5,
   });
@@ -103,7 +103,7 @@ export async function verifyReferenceUpgradeRefused(options: {
     child = Bun.spawn([process.execPath, "--no-env-file", "index.js"], {
       cwd: bundle, stdout: "pipe", stderr: "pipe",
       env: {
-        PATH: process.env.PATH, DATABASE_SOCKET_PATH: options.connection.socketPath,
+        PATH: process.env["PATH"], DATABASE_SOCKET_PATH: options.connection.socketPath,
         DATABASE_NAME: options.connection.database, DATABASE_USER: options.connection.username,
         HOST: "127.0.0.1", PORT: "0", SHUTDOWN_TIMEOUT_MS: "5000",
       },

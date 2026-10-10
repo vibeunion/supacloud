@@ -7,7 +7,7 @@ import { STARTER_REVIEW_DELIVERY_HOST } from "../../packages/cli/src/shared/tool
 import { STARTER_ATTACHMENT_DELIVERY_WORKER } from "../../packages/cli/src/shared/tools/app-starter-attachment-worker";
 import { startStarterPostgres } from "./starter-postgres";
 
-const bin = process.env.SUPACLOUD_STARTER_POSTGRES_BIN;
+const bin = process.env["SUPACLOUD_STARTER_POSTGRES_BIN"];
 
 // Execute the shipped connection expression, without importing application adapters
 // or rebuilding the starter/compiler. AST selection fails if the source contract moves.

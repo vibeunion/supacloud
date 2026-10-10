@@ -4,15 +4,15 @@ import type { Json } from "@pgflow/edge-worker";
 export function workerExecutionFromEnvironment(
   environment: Readonly<Record<string, string | undefined>> = process.env,
 ): WorkerExecutionGroup {
-  const encoded = environment.SUPACLOUD_WORKER_EXECUTION;
+  const encoded = environment["SUPACLOUD_WORKER_EXECUTION"];
   if (!encoded || encoded.length > 8192 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) {
     throw new Error("WORKER_EXECUTION_REQUIRED");
   }
   try {
     const group = parseWorkerExecutionGroup(JSON.parse(Buffer.from(encoded, "base64").toString("utf8")));
-    const replica = environment.SUPACLOUD_WORKER_REPLICA;
+    const replica = environment["SUPACLOUD_WORKER_REPLICA"];
     if (!replica || !/^[1-9][0-9]*$/.test(replica) || Number(replica) > group.replicas
-      || environment.SUPACLOUD_TARGET !== `${group.target}-r${replica}`) {
+      || environment["SUPACLOUD_TARGET"] !== `${group.target}-r${replica}`) {
       throw new Error("WORKER_EXECUTION_BINDING_INVALID");
     }
     return group;

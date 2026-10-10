@@ -91,8 +91,8 @@ export async function startStarterLite(root: string, signal: AbortSignal, postgr
   return {
     ...(native ? {
       async workerConnection() {
-        const directory = (await current().db.engine.query("SHOW unix_socket_directories")).rows[0]?.unix_socket_directories;
-        const port = (await current().db.engine.query("SHOW port")).rows[0]?.port;
+        const directory = (await current().db.engine.query<{ unix_socket_directories: string }>("SHOW unix_socket_directories")).rows[0]?.unix_socket_directories;
+        const port = (await current().db.engine.query<{ port: string }>("SHOW port")).rows[0]?.port;
         assert.ok(typeof directory === "string" && directory.startsWith("/") && !directory.includes(","));
         assert.ok(typeof port === "string" && /^\d+$/.test(port));
         return { socketPath: join(directory, ".s.PGSQL." + port), database: "postgres", username: "postgres" };

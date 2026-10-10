@@ -238,8 +238,9 @@ export class FunctionsHandler {
       const invoke = () => this.invoke(entry.handler, request, ctx, env)
       const inner = () => runWithDenoEnv(env, () => runWithPgredisCache(this.pgredis, invoke))
       // 3. Outbound host allowlist; undeclared means fetch is not wrapped at all.
-      const run = capabilities?.outboundHosts
-        ? () => runWithFetchPolicy(capabilities.outboundHosts!, inner)
+      const outboundHosts = capabilities?.outboundHosts
+      const run = outboundHosts
+        ? () => runWithFetchPolicy(outboundHosts, inner)
         : inner
       // 5. EdgeRuntime.waitUntil scope. Always installed (ALS overhead is
       // negligible) so the lite default of allowing background tasks holds;
@@ -247,12 +248,15 @@ export class FunctionsHandler {
       // production, and waitUntilTimeoutMs caps the post-response flush.
       const invokeWithBackground = () =>
         runWithBackgroundTasks(
-          { allowed: capabilities?.background !== false, timeoutMs: limits?.waitUntilTimeoutMs },
+          {
+            allowed: capabilities?.background !== false,
+            ...(limits?.waitUntilTimeoutMs === undefined ? {} : { timeoutMs: limits.waitUntilTimeoutMs }),
+          },
           run
         )
       const res =
-        timeoutMs !== undefined
-          ? await this.withTimeout(name, timeoutMs, invokeWithBackground, abort!)
+        timeoutMs !== undefined && abort !== undefined
+          ? await this.withTimeout(name, timeoutMs, invokeWithBackground, abort)
           : await invokeWithBackground()
       if (!(res instanceof Response)) {
         return json(500, { error: `function "${name}" did not return a Response` })
@@ -346,7 +350,8 @@ function withCountedBody(req: Request, limit: number): Request {
     },
   })
   // `duplex: 'half'` is required when the body is a stream (undici; harmless in Bun).
-  return new Request(req, { body: req.body!.pipeThrough(counter), duplex: 'half' } as RequestInit)
+  if (!req.body) return new Request(req)
+  return new Request(req, { body: req.body.pipeThrough(counter), duplex: 'half' } as RequestInit)
 }
 
 /**

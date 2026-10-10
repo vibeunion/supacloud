@@ -103,11 +103,11 @@ function capacityBudget(value: unknown): ApplicationCapacityBudget | null {
   if (numbers.some(key => typeof candidate[key] !== "number"
     || !Number.isFinite(candidate[key]) || candidate[key] < 0)) return null;
   return {
-    cpu: candidate.cpu as number,
-    memoryMiB: candidate.memoryMiB as number,
-    connections: candidate.connections as number,
-    concurrency: candidate.concurrency as number,
-    ports: candidate.ports as number,
+    cpu: candidate["cpu"] as number,
+    memoryMiB: candidate["memoryMiB"] as number,
+    connections: candidate["connections"] as number,
+    concurrency: candidate["concurrency"] as number,
+    ports: candidate["ports"] as number,
   };
 }
 
@@ -158,7 +158,7 @@ export function buildApplicationCapacityReport(input: {
 
 function configuredCapacityBudget(): ApplicationCapacityBudget | null {
   try {
-    const worker = JSON.parse(process.env.SUPACLOUD_APPLICATION_WORKER_BUDGET_JSON ?? "null");
+    const worker = JSON.parse(process.env["SUPACLOUD_APPLICATION_WORKER_BUDGET_JSON"] ?? "null");
     const ports = configuredApplicationPortRange();
     const parsed = capacityBudget({ ...((worker && typeof worker === "object") ? worker : {}), ports: ports.end - ports.start + 1 });
     return parsed;
@@ -343,7 +343,7 @@ export class ApplicationRuntimeAllocations {
         let budget: unknown = this.options.workerBudget;
         if (policyBudget) budget = policyBudget;
         if (budget === undefined) {
-          try { budget = JSON.parse(process.env.SUPACLOUD_APPLICATION_WORKER_BUDGET_JSON ?? "null"); }
+          try { budget = JSON.parse(process.env["SUPACLOUD_APPLICATION_WORKER_BUDGET_JSON"] ?? "null"); }
           catch { throw new ApplicationRuntimeAllocationError("WORKER_BUDGET_REQUIRED"); }
         }
         assertWorkerBudget(total, budget);
@@ -456,20 +456,20 @@ export class ApplicationRuntimeAllocations {
       LIMIT ${bounded}
     `;
     return rows.map((row: Record<string, unknown>) => {
-      const budget = parseStoredBudget(row.budget);
-      const usage = parseStoredBudget(row.usage);
+      const budget = parseStoredBudget(row["budget"]);
+      const usage = parseStoredBudget(row["usage"]);
       if (!usage) throw new Error("APPLICATION_CAPACITY_HISTORY_CORRUPT");
-      const pressure = row.pressure;
+      const pressure = row["pressure"];
       if (pressure !== "unknown" && pressure !== "normal" && pressure !== "elevated" && pressure !== "exhausted") {
         throw new Error("APPLICATION_CAPACITY_HISTORY_CORRUPT");
       }
       return {
-        generatedAt: new Date(String(row.generated_at)).toISOString(),
+        generatedAt: new Date(String(row["generated_at"])).toISOString(),
         budget,
         usage,
         pressure,
-        activeAllocations: Number(row.active_allocations),
-        activePorts: Number(row.active_ports),
+        activeAllocations: Number(row["active_allocations"]),
+        activePorts: Number(row["active_ports"]),
       };
     });
   }

@@ -25,7 +25,7 @@ export function assertSafeGitUrl(gitUrl: unknown): asserts gitUrl is string {
   if (/^(169\.254\.169\.254|metadata\.google\.internal)$/i.test(host)) {
     throw new Error("Git URL metadata service targets are not allowed");
   }
-  if (process.env.SUPACLOUD_RESTRICT_GIT_PRIVATE_NETWORKS === "true"
+  if (process.env["SUPACLOUD_RESTRICT_GIT_PRIVATE_NETWORKS"] === "true"
     && /^(10\.|127\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(host)) {
     throw new Error("Git URL private network targets are not allowed");
   }

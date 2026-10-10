@@ -297,9 +297,10 @@ export class RestHandler {
     if (!opts.returning) {
       return new Response(null, { status: opts.status === 201 ? 201 : 204, headers: countHeader })
     }
-    return this.dataResponse(rows!, {
+    const responseRows = rows ?? []
+    return this.dataResponse(responseRows, {
       status: opts.status,
-      count: opts.prefer.count !== undefined ? rows!.length : null,
+      count: opts.prefer.count !== undefined ? responseRows.length : null,
       offset: 0,
       wantsObject: opts.wantsObject,
       wantsCsv: opts.wantsCsv,
@@ -464,7 +465,7 @@ export class RestHandler {
       if (item.name === '*') {
         exprs.push(`${quoteIdent(alias)}.*`)
       } else {
-        const out = item.alias ?? item.name.split(/->>|->/).pop()!.trim()
+        const out = item.alias ?? (item.name.split(/->>|->/).pop() ?? item.name).trim()
         const cast = item.cast ? `::${sanitizeCast(item.cast)}` : ''
         exprs.push(`${renderColumnExpr(alias, item.name)}${cast} as ${quoteIdent(out)}`)
       }

@@ -27,7 +27,35 @@
     get id() { return projectRef; }
   });
 
-  const project = $derived((query.data?.data || {}) as Record<string, any>);
+  function record(value: unknown): Record<string, unknown> {
+    return value !== null && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown> : {};
+  }
+
+  function rateLimits(value: unknown): Record<string, { second?: number; minute?: number; hour?: number }> {
+    const entries: Array<[string, { second?: number; minute?: number; hour?: number }]> = [];
+    for (const [path, raw] of Object.entries(record(value))) {
+      const limits = record(raw);
+      entries.push([path, {
+        ...(typeof limits["second"] === "number" ? { second: limits["second"] } : {}),
+        ...(typeof limits["minute"] === "number" ? { minute: limits["minute"] } : {}),
+        ...(typeof limits["hour"] === "number" ? { hour: limits["hour"] } : {}),
+      }]);
+    }
+    return Object.fromEntries(entries);
+  }
+
+  const project = $derived.by(() => {
+    const data = record(query.data?.data);
+    return {
+      api: record(data["api"]),
+      endpoint: data["endpoint"],
+      publishable_key: String(data["publishable_key"] ?? ""),
+      anon_key: String(data["anon_key"] ?? ""),
+      service_role_key: String(data["service_role_key"] ?? ""),
+      rate_limits: rateLimits(data["rate_limits"]),
+    };
+  });
   const apiUrl = $derived(getProjectApiUrl(project));
   const publishableKey = $derived(String((project as Record<string, unknown>)?.publishable_key || ""));
   const isLoading = $derived(query.isLoading);
@@ -67,8 +95,8 @@
       newMinute = "";
       newHour = "";
       refetch();
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err));
     } finally {
       isSubmittingLimit = false;
     }
@@ -86,8 +114,8 @@
       if (!res.ok) throw new Error(data.error || "删除失败");
       toast.success("限流规则已删除");
       refetch();
-    } catch (err: any) {
-      toast.error(err.message);
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : String(err));
     }
   }
 </script>
@@ -251,9 +279,9 @@
                   {#each Object.entries(project.rate_limits || {}) as [path, limits] (path)}
                     <tr class="hover:bg-muted/20">
                       <td class="px-4 py-3 font-mono text-xs">{path}</td>
-                      <td class="px-4 py-3">{(limits as any).second || "-"}</td>
-                      <td class="px-4 py-3">{(limits as any).minute || "-"}</td>
-                      <td class="px-4 py-3">{(limits as any).hour || "-"}</td>
+                      <td class="px-4 py-3">{limits.second || "-"}</td>
+                      <td class="px-4 py-3">{limits.minute || "-"}</td>
+                      <td class="px-4 py-3">{limits.hour || "-"}</td>
                       <td class="px-4 py-3 text-right">
                         <button onclick={() => removeCustomRateLimit(path)} class="text-red-500 hover:text-red-700 transition-colors" title="删除规则">
                           <Trash2 size={16} />

@@ -119,28 +119,28 @@ function requestIdentifier(input: unknown): input is string {
 function decodeMetadata(input: unknown): ExecutionMetadata[] {
   const envelope = record(input);
   if (Object.keys(envelope).some((key) => key !== "version" && key !== "events")
-    || envelope.version !== 1 || !Array.isArray(envelope.events)
-    || envelope.events.length > EXECUTION_CONTEXT_LIMITS.inputEvents) return invalid();
-  const events = envelope.events.map((entry: unknown): ExecutionMetadata => {
+    || envelope["version"] !== 1 || !Array.isArray(envelope["events"])
+    || envelope["events"].length > EXECUTION_CONTEXT_LIMITS.inputEvents) return invalid();
+  const events = envelope["events"].map((entry: unknown): ExecutionMetadata => {
     const event = record(entry);
     if (Object.keys(event).some((key) =>
       !["kind", "operation", "stage", "phase", "requestId", "durationMs", "attempt", "traceId"].includes(key))
-      || (event.kind !== "route" && event.kind !== "command" && event.kind !== "job")
-      || (event.phase !== "started" && event.phase !== "succeeded" && event.phase !== "failed")
-      || !metadataText(event.operation, 512) || !metadataText(event.stage, 256)
-      || ("requestId" in event && !requestIdentifier(event.requestId))
-      || ("traceId" in event && !requestIdentifier(event.traceId))
-      || ("attempt" in event && (typeof event.attempt !== "number" || !Number.isInteger(event.attempt)
-        || event.attempt < 1 || event.attempt > 1_000_000))
-      || ("durationMs" in event && (typeof event.durationMs !== "number" || !Number.isFinite(event.durationMs)
-        || event.durationMs < 0 || event.durationMs > Number.MAX_SAFE_INTEGER))) return invalid();
+      || (event["kind"] !== "route" && event["kind"] !== "command" && event["kind"] !== "job")
+      || (event["phase"] !== "started" && event["phase"] !== "succeeded" && event["phase"] !== "failed")
+      || !metadataText(event["operation"], 512) || !metadataText(event["stage"], 256)
+      || ("requestId" in event && !requestIdentifier(event["requestId"]))
+      || ("traceId" in event && !requestIdentifier(event["traceId"]))
+      || ("attempt" in event && (typeof event["attempt"] !== "number" || !Number.isInteger(event["attempt"])
+        || event["attempt"] < 1 || event["attempt"] > 1_000_000))
+      || ("durationMs" in event && (typeof event["durationMs"] !== "number" || !Number.isFinite(event["durationMs"])
+        || event["durationMs"] < 0 || event["durationMs"] > Number.MAX_SAFE_INTEGER))) return invalid();
     return {
-      kind: event.kind,
-      operation: event.operation, stage: event.stage, phase: event.phase,
-      ...(event.requestId === undefined ? {} : { requestId: event.requestId as string }),
-      ...(event.durationMs === undefined ? {} : { durationMs: event.durationMs as number }),
-      ...(event.attempt === undefined ? {} : { attempt: event.attempt as number }),
-      ...(event.traceId === undefined ? {} : { traceId: event.traceId as string }),
+      kind: event["kind"],
+      operation: event["operation"], stage: event["stage"], phase: event["phase"],
+      ...(event["requestId"] === undefined ? {} : { requestId: event["requestId"] as string }),
+      ...(event["durationMs"] === undefined ? {} : { durationMs: event["durationMs"] as number }),
+      ...(event["attempt"] === undefined ? {} : { attempt: event["attempt"] as number }),
+      ...(event["traceId"] === undefined ? {} : { traceId: event["traceId"] as string }),
     };
   });
   if (Buffer.byteLength(JSON.stringify({ version: 1, events }), "utf8") > EXECUTION_CONTEXT_LIMITS.inputBytes) return invalid();
@@ -331,9 +331,10 @@ function correlateSnapshot(
   const pack: ExecutionContextPack = {
     version: 1, subject: context.subject, requestId, correlation: "current-graph-only",
     deploymentVerified: false, eventsTrusted: false,
-    modules: modules.slice(0, EXECUTION_CONTEXT_LIMITS.modules).map((module) => ({
-      name: module.name, ...(sourceFile(module.file) ? { file: sourceFile(module.file) } : {}),
-    })),
+    modules: modules.slice(0, EXECUTION_CONTEXT_LIMITS.modules).map((module) => {
+      const file = sourceFile(module.file);
+      return { name: module.name, ...(file === undefined ? {} : { file }) };
+    }),
     files: files.slice(0, EXECUTION_CONTEXT_LIMITS.files),
     executionPlans: [...matchedPlans].slice(0, EXECUTION_CONTEXT_LIMITS.plans),
     events: retained, diagnostics: diagnostics.slice(0, EXECUTION_CONTEXT_LIMITS.diagnostics),

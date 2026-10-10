@@ -130,14 +130,14 @@ export function parseApplicationActiveRecord(candidate: unknown, desired: {
 }
 
 function parseCheckpoint(value: Record<string, unknown>, desired: ApplicationActiveRecord): ActivationCheckpoint {
-  if (value.schema !== "supacloud.application-activation.v1"
-    || !PHASES.includes(value.phase as Phase)
-    || stableStringify(decodeRecord(value.desired, desired.runtime)) !== stableStringify(desired)) {
+  if (value["schema"] !== "supacloud.application-activation.v1"
+    || !PHASES.includes(value["phase"] as Phase)
+    || stableStringify(decodeRecord(value["desired"], desired.runtime)) !== stableStringify(desired)) {
     throw new Error("APPLICATION_ACTIVATION_CHECKPOINT_INVALID");
   }
   return {
-    schema: "supacloud.application-activation.v1", phase: value.phase as Phase, desired,
-    previous: value.previous === null ? null : decodeRecord(value.previous, desired.runtime),
+    schema: "supacloud.application-activation.v1", phase: value["phase"] as Phase, desired,
+    previous: value["previous"] === null ? null : decodeRecord(value["previous"], desired.runtime),
   };
 }
 
@@ -210,7 +210,7 @@ function recoveryFingerprint(desired: ApplicationActiveRecord): string {
 function hasSuccessReceipt(state: ProjectMutationState, desired: ApplicationActiveRecord): boolean {
   if (state.status !== "succeeded" || state.responseStatus !== 200) return false;
   if (stableStringify(state.receipt) === stableStringify(result(desired.runtime, false))) return true;
-  const reconciliation = state.receipt?.reconciliation;
+  const reconciliation = state.receipt?.["reconciliation"];
   if (!reconciliation || typeof reconciliation !== "object" || Array.isArray(reconciliation)
     || !("observed_at" in reconciliation) || typeof reconciliation.observed_at !== "string") return false;
   const observedAt = new Date(reconciliation.observed_at);
@@ -342,7 +342,7 @@ export class ApplicationActivationService {
       || state.mutationId !== input.activationId || stableStringify(state.principal) !== stableStringify(input.principal)) {
       throw new Error("APPLICATION_ACTIVATION_RECOVERY_IDENTITY_MISMATCH");
     }
-    const desired = decodeRecord(state.checkpoint.desired, {
+    const desired = decodeRecord(state.checkpoint["desired"], {
       release: { project_ref: input.projectRef, application_id: input.applicationId }, environmentId: input.environmentId,
     });
     const checkpoint = parseCheckpoint(state.checkpoint, desired);

@@ -427,7 +427,7 @@ describe("worker execution groups", () => {
       .rejects.toThrow("WORKER_GROUP_NOT_DRAINED");
   });
 
-  test.skipIf(process.env.WORKER_GROUP_DATABASE_ACCEPTANCE !== "1")(
+  test.skipIf(process.env["WORKER_GROUP_DATABASE_ACCEPTANCE"] !== "1")(
     "real PostgreSQL atomic admission, rollback, replay and domain-terminal release",
     async () => {
       await withPgflowDatabase(async (db, url, install) => {

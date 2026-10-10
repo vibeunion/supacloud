@@ -45,6 +45,10 @@ union of objects with a literal `_tag`; the tags must exactly match
 `effect.dependencies`, and a route with dependencies must declare a timeout.
 Route handlers and production source cannot directly throw or interpret an
 Effect with `Effect.run*`; test sources may interpret Effects for assertions.
+The only production interpreter allowlisted by the workspace source gate is
+`packages/elysia/src/effect.ts`, the framework adapter. New production calls to
+`Effect.runPromise`, `Effect.runPromiseExit`, `Effect.runSync`, or
+`Effect.runFork` fail the source regression gate.
 The compiler recognizes both the subpath imports used by existing starters
 (`effect/Effect`, `effect/Runtime`) and Effect 4 aggregate imports
 (`import { Effect } from "effect"`).

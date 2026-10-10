@@ -23,18 +23,18 @@ for (const [key, value] of Object.entries(process.env)) {
     if (value !== undefined && !/^(SUPACLOUD_|SUPABASE_|APP_ENV$|NODE_ENV$|PORT$|NODE_PATH$)/.test(key)) environment[key] = value;
 }
 // No developer context or credentials should participate in a local generator test.
-environment.HOME = join(temporary, "home");
-environment.USERPROFILE = environment.HOME;
-environment.XDG_CONFIG_HOME = join(environment.HOME, ".config");
-environment.BUN_TMPDIR = join(temporary, "bun-tmp");
+environment["HOME"] = join(temporary, "home");
+environment["USERPROFILE"] = environment["HOME"];
+environment["XDG_CONFIG_HOME"] = join(environment["HOME"], ".config");
+environment["BUN_TMPDIR"] = join(temporary, "bun-tmp");
 async function run(args: string[], cwd = project, success = true): Promise<string> {
     return runStarterCommand(args, { cwd, env: environment, signal: interruption.signal, success, timeoutMs: 180_000 });
 }
 
 try {
     await mkdir(runner, { recursive: true });
-    await mkdir(environment.HOME, { recursive: true });
-    await mkdir(environment.BUN_TMPDIR, { recursive: true });
+    await mkdir(environment["HOME"], { recursive: true });
+    await mkdir(environment["BUN_TMPDIR"], { recursive: true });
     const overrides: Record<string, string> = {};
     for (const name of ["contracts", "commands", "delivery", "compiler", "db", "app", "elysia", "cli"]) {
         const directory = join(repo, "packages", name);

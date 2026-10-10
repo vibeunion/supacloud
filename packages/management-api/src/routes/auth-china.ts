@@ -214,10 +214,12 @@ export default async function handler(req: Request) {
 
     // Refresh after the GoTrue metadata update so the response carries its authoritative user.
     const { data: finalUser } = await supabaseAdmin.auth.admin.getUserById(sessionData.user.id)
-    const finalSession = finalUser?.user ? { ...sessionData.session, user: finalUser.user } : sessionData.session
-    // Embed native OAuth provider tokens to complete the session payload matching Official Supabase
-    if (tokenData.access_token) (finalSession as any).provider_token = tokenData.access_token;
-    if (tokenData.refresh_token) (finalSession as any).provider_refresh_token = tokenData.refresh_token;
+    const finalSession = {
+      ...sessionData.session,
+      ...(finalUser?.user ? { user: finalUser.user } : {}),
+      ...(typeof tokenData.access_token === "string" && tokenData.access_token ? { provider_token: tokenData.access_token } : {}),
+      ...(typeof tokenData.refresh_token === "string" && tokenData.refresh_token ? { provider_refresh_token: tokenData.refresh_token } : {}),
+    }
 
     return new Response(JSON.stringify(finalSession), { headers: { ...corsHeaders, ...corsOriginHeader(req), "Content-Type": "application/json" } })
   } catch (error: unknown) {

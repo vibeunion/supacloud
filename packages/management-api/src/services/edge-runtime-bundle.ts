@@ -60,42 +60,42 @@ function walkSyntax(node: SyntaxNode, visit: (syntaxNode: SyntaxNode) => void): 
 
 function objectPatternIdentifiers(property: unknown): string[] {
   if (!isSyntaxNode(property)) return [];
-  if (property.type === "RestElement") return patternIdentifiers(property.argument);
-  return property.type === "Property" ? patternIdentifiers(property.value) : [];
+  if (property.type === "RestElement") return patternIdentifiers(property["argument"]);
+  return property.type === "Property" ? patternIdentifiers(property["value"]) : [];
 }
 
 function patternIdentifiers(pattern: unknown): string[] {
   if (!isSyntaxNode(pattern)) return [];
-  if (pattern.type === "Identifier") return [String(pattern.name)];
-  if (pattern.type === "RestElement") return patternIdentifiers(pattern.argument);
-  if (pattern.type === "AssignmentPattern") return patternIdentifiers(pattern.left);
-  if (pattern.type === "ArrayPattern") return (pattern.elements as unknown[]).flatMap(patternIdentifiers);
+  if (pattern.type === "Identifier") return [String(pattern["name"])];
+  if (pattern.type === "RestElement") return patternIdentifiers(pattern["argument"]);
+  if (pattern.type === "AssignmentPattern") return patternIdentifiers(pattern["left"]);
+  if (pattern.type === "ArrayPattern") return (pattern["elements"] as unknown[]).flatMap(patternIdentifiers);
   if (pattern.type === "ObjectPattern") {
-    return (pattern.properties as unknown[]).flatMap(objectPatternIdentifiers);
+    return (pattern["properties"] as unknown[]).flatMap(objectPatternIdentifiers);
   }
   return [];
 }
 
 function declarationIdentifiers(node: SyntaxNode): string[] {
-  if (node.type === "VariableDeclarator") return patternIdentifiers(node.id);
+  if (node.type === "VariableDeclarator") return patternIdentifiers(node["id"]);
   if (["FunctionDeclaration", "FunctionExpression", "ArrowFunctionExpression"].includes(node.type)) {
-    const parameters = Array.isArray(node.params) ? node.params.flatMap(patternIdentifiers) : [];
-    return [...patternIdentifiers(node.id), ...parameters];
+    const parameters = Array.isArray(node["params"]) ? node["params"].flatMap(patternIdentifiers) : [];
+    return [...patternIdentifiers(node["id"]), ...parameters];
   }
-  if (["ClassDeclaration", "ClassExpression"].includes(node.type)) return patternIdentifiers(node.id);
+  if (["ClassDeclaration", "ClassExpression"].includes(node.type)) return patternIdentifiers(node["id"]);
   if (["ImportSpecifier", "ImportDefaultSpecifier", "ImportNamespaceSpecifier"].includes(node.type)) {
-    return patternIdentifiers(node.local);
+    return patternIdentifiers(node["local"]);
   }
-  return node.type === "CatchClause" ? patternIdentifiers(node.param) : [];
+  return node.type === "CatchClause" ? patternIdentifiers(node["param"]) : [];
 }
 
 function assignedIdentifiers(node: SyntaxNode): string[] {
-  if (node.type === "AssignmentExpression") return patternIdentifiers(node.left);
-  if (node.type === "UpdateExpression") return patternIdentifiers(node.argument);
+  if (node.type === "AssignmentExpression") return patternIdentifiers(node["left"]);
+  if (node.type === "UpdateExpression") return patternIdentifiers(node["argument"]);
   if (["ForInStatement", "ForOfStatement"].includes(node.type)
-    && isSyntaxNode(node.left)
-    && node.left.type !== "VariableDeclaration") {
-    return patternIdentifiers(node.left);
+    && isSyntaxNode(node["left"])
+    && node["left"].type !== "VariableDeclaration") {
+    return patternIdentifiers(node["left"]);
   }
   return [];
 }
@@ -126,13 +126,13 @@ function blankDirectiveComment(code: string, comment: CommentToken): SourceRepla
 }
 
 function staticStringBinding(declaration: SyntaxNode): [string, StaticStringBinding] | null {
-  if (!isSyntaxNode(declaration.id) || declaration.id.type !== "Identifier") return null;
-  if (!isSyntaxNode(declaration.init) || declaration.init.type !== "Literal") return null;
-  if (typeof declaration.init.value !== "string") return null;
+  if (!isSyntaxNode(declaration["id"]) || declaration["id"].type !== "Identifier") return null;
+  if (!isSyntaxNode(declaration["init"]) || declaration["init"].type !== "Literal") return null;
+  if (typeof declaration["init"]["value"] !== "string") return null;
   return [
-    String(declaration.id.name),
+    String(declaration["id"]["name"]),
     {
-      moduleSpecifier: declaration.init.value,
+      moduleSpecifier: declaration["init"]["value"],
       declarations: 0,
       writes: 0,
     },
@@ -141,11 +141,11 @@ function staticStringBinding(declaration: SyntaxNode): [string, StaticStringBind
 
 function topLevelStringBindings(program: SyntaxNode): Map<string, StaticStringBinding> {
   const bindings = new Map<string, StaticStringBinding>();
-  const statements = Array.isArray(program.body) ? program.body.filter(isSyntaxNode) : [];
+  const statements = Array.isArray(program["body"]) ? program["body"].filter(isSyntaxNode) : [];
   for (const statement of statements.filter((entry) => entry.type === "VariableDeclaration")) {
     // An uninitialized top-level var resolves to undefined; lexical bindings would throw in TDZ.
-    if (statement.kind !== "var") continue;
-    const declarations = Array.isArray(statement.declarations) ? statement.declarations : [];
+    if (statement["kind"] !== "var") continue;
+    const declarations = Array.isArray(statement["declarations"]) ? statement["declarations"] : [];
     for (const declaration of declarations.filter(isSyntaxNode)) {
       const binding = staticStringBinding(declaration);
       if (binding) bindings.set(...binding);
@@ -177,33 +177,33 @@ function dynamicImports(program: SyntaxNode): SyntaxNode[] {
 
 function computedDynamicImports(program: SyntaxNode): SyntaxNode[] {
   return dynamicImports(program)
-    .filter((dynamicImport) => !isLiteralModuleSpecifier(dynamicImport.source));
+    .filter((dynamicImport) => !isLiteralModuleSpecifier(dynamicImport["source"]));
 }
 
 function directEval(program: SyntaxNode): SyntaxNode | undefined {
   let call: SyntaxNode | undefined;
   walkSyntax(program, (node) => {
-    if (call || node.type !== "CallExpression" || !isSyntaxNode(node.callee)) return;
-    if (node.callee.type === "Identifier" && node.callee.name === "eval") call = node;
+    if (call || node.type !== "CallExpression" || !isSyntaxNode(node["callee"])) return;
+    if (node["callee"].type === "Identifier" && node["callee"]["name"] === "eval") call = node;
   });
   return call;
 }
 
 function isLiteralModuleSpecifier(source: unknown): boolean {
   if (!isSyntaxNode(source)) return false;
-  if (source.type === "Literal") return typeof source.value === "string";
+  if (source.type === "Literal") return typeof source["value"] === "string";
   return source.type === "TemplateLiteral"
-    && Array.isArray(source.expressions)
-    && source.expressions.length === 0;
+    && Array.isArray(source["expressions"])
+    && source["expressions"].length === 0;
 }
 
 function literalModuleSpecifier(source: unknown): string | null {
   if (!isSyntaxNode(source)) return null;
-  if (source.type === "Literal") return typeof source.value === "string" ? source.value : null;
-  if (!isLiteralModuleSpecifier(source) || !Array.isArray(source.quasis)) return null;
-  const quasi = source.quasis.find(isSyntaxNode);
-  if (!quasi || !quasi.value || typeof quasi.value !== "object") return null;
-  const cooked = (quasi.value as Record<string, unknown>).cooked;
+  if (source.type === "Literal") return typeof source["value"] === "string" ? source["value"] : null;
+  if (!isLiteralModuleSpecifier(source) || !Array.isArray(source["quasis"])) return null;
+  const quasi = source["quasis"].find(isSyntaxNode);
+  if (!quasi || !quasi["value"] || typeof quasi["value"] !== "object") return null;
+  const cooked = (quasi["value"] as Record<string, unknown>)["cooked"];
   return typeof cooked === "string" ? cooked : null;
 }
 
@@ -212,7 +212,7 @@ function finalBundleImportCount(program: SyntaxNode): number {
   walkSyntax(program, (node) => {
     if (!["ImportDeclaration", "ImportExpression", "ExportNamedDeclaration", "ExportAllDeclaration"]
       .includes(node.type)) return;
-    const moduleSpecifier = literalModuleSpecifier(node.source);
+    const moduleSpecifier = literalModuleSpecifier(node["source"]);
     if (moduleSpecifier !== null) moduleSpecifiers.add(moduleSpecifier);
   });
   return moduleSpecifiers.size;
@@ -229,7 +229,7 @@ function literalDynamicImport(
   dynamicImport: SyntaxNode,
   moduleSpecifier: string,
 ): string {
-  const source = dynamicImport.source as SyntaxNode;
+  const source = dynamicImport["source"] as SyntaxNode;
   return code.slice(dynamicImport.start, source.start)
     + JSON.stringify(moduleSpecifier)
     + code.slice(source.end, dynamicImport.end);
@@ -239,10 +239,10 @@ function provenImportBinding(
   dynamicImport: SyntaxNode,
   bindings: Map<string, StaticStringBinding>,
 ): { name: string; binding: StaticStringBinding } {
-  if (!isSyntaxNode(dynamicImport.source) || dynamicImport.source.type !== "Identifier") {
+  if (!isSyntaxNode(dynamicImport["source"]) || dynamicImport["source"].type !== "Identifier") {
     throw compatibilityError(dynamicImport, "computed dynamic imports are disabled");
   }
-  const name = String(dynamicImport.source.name);
+  const name = String(dynamicImport["source"]["name"]);
   const binding = bindings.get(name);
   if (!binding
     || binding.declarations !== 1
@@ -283,7 +283,7 @@ function applyReplacements(code: string, replacements: SourceReplacement[]): str
 function validatedFinalProgram(code: string): SyntaxNode {
   const program = parseBundle(code);
   const unsupported = dynamicImports(program)
-    .find((dynamicImport) => !isLiteralModuleSpecifier(dynamicImport.source));
+    .find((dynamicImport) => !isLiteralModuleSpecifier(dynamicImport["source"]));
   if (unsupported) throw compatibilityError(unsupported, "computed dynamic imports are disabled");
   return program;
 }

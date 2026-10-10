@@ -86,6 +86,7 @@ export async function verifyJwt(token: string, secret: string): Promise<JwtClaim
   const parts = token.split('.')
   if (parts.length !== 3) return null
   const [header, payload, signature] = parts
+  if (!header || !payload || !signature) return null
   try {
     // Pin the algorithm to HS256 - reject alg:"none" and any alg-swap attempt
     // rather than relying on the HMAC verify to fail.
@@ -111,8 +112,10 @@ export async function verifyJwt(token: string, secret: string): Promise<JwtClaim
 export function decodeJwt(token: string): JwtClaims | null {
   const parts = token.split('.')
   if (parts.length !== 3) return null
+  const payload = parts[1]
+  if (!payload) return null
   try {
-    return JSON.parse(decoder.decode(base64UrlToBytes(parts[1])))
+    return JSON.parse(decoder.decode(base64UrlToBytes(payload)))
   } catch {
     return null
   }

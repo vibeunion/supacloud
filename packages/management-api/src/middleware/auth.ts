@@ -81,14 +81,17 @@ export async function verifyProjectJwt(
   try {
     const parts = token.split(".");
     if (parts.length !== 3) return null;
+    const headerPart = parts[0];
+    const payloadPart = parts[1];
+    if (headerPart === undefined || payloadPart === undefined) return null;
 
-    const header = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8")) as Record<string, unknown>;
-    if (typeof header.alg !== "string") return null;
+    const header = JSON.parse(Buffer.from(headerPart, "base64url").toString("utf8")) as Record<string, unknown>;
+    if (typeof header["alg"] !== "string") return null;
 
-    const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8")) as Record<string, unknown>;
-    if (typeof payload.role !== "string" || !payload.role) return null;
+    const payload = JSON.parse(Buffer.from(payloadPart, "base64url").toString("utf8")) as Record<string, unknown>;
+    if (typeof payload["role"] !== "string" || !payload["role"]) return null;
 
-    if (typeof payload.exp === "number" && payload.exp < Date.now() / 1000) {
+    if (typeof payload["exp"] === "number" && payload["exp"] < Date.now() / 1000) {
       return null;
     }
 
@@ -98,10 +101,11 @@ export async function verifyProjectJwt(
     for (const ref of candidateRefs) {
       const verification = await verifyProjectJwtPayload(ref, token);
       if (verification) {
+        const sub = typeof verification.payload["sub"] === "string" ? verification.payload["sub"] : undefined;
         return {
-          role: String(verification.payload.role),
+          role: String(verification.payload["role"]),
           ref,
-          sub: typeof verification.payload.sub === "string" ? verification.payload.sub : undefined,
+          ...(sub === undefined ? {} : { sub }),
         };
       }
     }

@@ -54,7 +54,7 @@ export class ProjectOpsService {
     if (!project) return null;
 
     const projectConfig = normalizeProjectConfig(project.config);
-    const domain = projectConfig.custom_domain as string | undefined;
+    const domain = projectConfig["custom_domain"] as string | undefined;
     if (domain) {
       return { custom_hostname: domain, status: "active" };
     }
@@ -87,13 +87,13 @@ export class ProjectOpsService {
     if (!project) return false;
 
     const projectConfig = normalizeProjectConfig(project.config);
-    const domain = projectConfig.custom_domain as string | undefined;
+    const domain = projectConfig["custom_domain"] as string | undefined;
     if (!domain) return true;
 
     const result = await routerService.removeCustomDomain(ref, domain);
     if (result.success) {
       const newConfig = normalizeProjectConfig(project.config);
-      delete newConfig.custom_domain;
+      delete newConfig["custom_domain"];
       await projectRepository.updateConfig(ref, newConfig);
       try {
         const { tenantRuntimeService } = await import("./tenant-runtime.service");

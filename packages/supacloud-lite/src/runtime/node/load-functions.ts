@@ -128,8 +128,9 @@ async function loadFunctionsUnlocked(
     const dir = join(root, name)
     if (!(await stat(dir)).isDirectory()) continue
     // A config.toml entrypoint overrides the default index.* discovery.
-    const candidates = options[name]?.entrypoint
-      ? [join(projectDir, options[name].entrypoint!)]
+    const entrypoint = options[name]?.entrypoint
+    const candidates = entrypoint
+      ? [join(projectDir, entrypoint)]
       : ['index.ts', 'index.tsx', 'index.js', 'index.mjs'].map((f) => join(dir, f))
     for (const path of candidates) {
       try {

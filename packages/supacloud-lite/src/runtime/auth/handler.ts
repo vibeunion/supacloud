@@ -1066,6 +1066,7 @@ export class AuthHandler {
         app_metadata?: Record<string, unknown>
       }
       if (!body.email) return authError(400, 'validation_failed', 'email is required')
+      const email = body.email
       const hashed = body.password ? await hashPassword(body.password) : null
       const created = await this.db.transaction(async (query) => {
         const res = await query<UserRow>(
@@ -1074,7 +1075,7 @@ export class AuthHandler {
            values ('authenticated', 'authenticated', $1, $2, case when $3 then now() else null end, $4, $5)
            returning *`,
           [
-            body.email!.toLowerCase().trim(),
+            email.toLowerCase().trim(),
             hashed,
             body.email_confirm ?? true,
             JSON.stringify({ provider: 'email', providers: ['email'], ...(body.app_metadata ?? {}) }),

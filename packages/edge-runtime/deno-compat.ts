@@ -648,7 +648,7 @@ export function assertPathInProject(value: unknown): void {
 
 const envWriteLog: Set<string> = new Set();
 
-(globalThis as Record<string, unknown>).Deno = {
+const denoCompat = {
   env: {
     get: (k: string) => injectedEnvRef[k],
     set: (k: string, v: string) => {
@@ -835,7 +835,7 @@ const envWriteLog: Set<string> = new Set();
   },
 };
 
-(globalThis as any).Deno.errors = {
+const denoErrors = {
   NotFound: class NotFound extends Error {
     constructor(msg?: string) { super(msg); this.name = "NotFound"; }
   },
@@ -892,17 +892,21 @@ const envWriteLog: Set<string> = new Set();
   },
 };
 
-(globalThis as any).Deno.permissions = {
+const denoPermissions = {
   query: async (_desc: unknown) => ({ state: "granted" as const }),
   request: async (_desc: unknown) => ({ state: "granted" as const }),
   revoke: async (_desc: unknown) => ({ state: "denied" as const }),
 };
 
-(globalThis as any).Deno.openKv = async (_path?: string) => {
-  throw new (globalThis as any).Deno.errors.NotSupported(
+const openKv = async (_path?: string) => {
+  throw new denoErrors.NotSupported(
     "Deno.openKv is disabled; use the request-scoped SupaCloud.pgredis binding",
   );
 };
+
+Object.assign(globalThis, {
+  Deno: { ...denoCompat, errors: denoErrors, permissions: denoPermissions, openKv },
+});
 
 export { envWriteLog };
 

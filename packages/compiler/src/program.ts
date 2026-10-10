@@ -266,7 +266,6 @@ function readProjectConfig(rootDir: string): ProjectConfig {
         skipLibCheck: true,
       },
       errors: [],
-      projectReferences: undefined,
       configFingerprint: "defaults",
     };
   }
@@ -297,7 +296,7 @@ function readProjectConfig(rootDir: string): ProjectConfig {
   return {
     options: parsed.options,
     errors: parsed.errors,
-    projectReferences: parsed.projectReferences,
+    ...(parsed.projectReferences === undefined ? {} : { projectReferences: parsed.projectReferences }),
     configFingerprint: JSON.stringify([...configReads]),
   };
 }
