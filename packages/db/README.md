@@ -1,5 +1,24 @@
 # @supacloud/db
 
+## Reverse Adoption and Role Guards
+
+`reverseDatabase(executor, schemas)` captures a review-only catalog/column
+candidate in a pinned read-only transaction. It does not overwrite sources or
+register applied migrations. `readDatabaseRole` and
+`assertApplicationRoleRestricted` check selected-schema role privileges and
+ownership; `renderDatabaseRoleGuardSql` renders reviewed provisioning SQL without
+executing it. Review privileged function entrypoints independently.
+
+The project CLI exposes `db reverse`, `db diff`, `db plan`, `db apply`,
+`db role_check` and `db role_sql`. See
+[Database Adoption Workflow](../../docs/database-adoption-workflow.md) for the
+manual declarative SQL baseline boundary, exact-digest approval and existing-ledger
+delivery. These commands do not provide automatic production synchronization
+or down migrations.
+SQL-first projects author structure in `supabase/schemas`; the Drizzle APIs below
+remain query adapters or legacy Drizzle-first integrations, not a second authoring
+source for the same SQL-first migration history.
+
 ## Drizzle, Read Queries and SQL Impact
 
 Use `defineDrizzleDatabaseModule` and `createDrizzleCommandDatabase` from

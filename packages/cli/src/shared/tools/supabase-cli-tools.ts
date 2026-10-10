@@ -178,6 +178,7 @@ function declarativeGenerateArguments(request: SupabaseCliArgs): string[] {
         ...target,
         ...(request.experimental === false ? [] : ["--experimental"]),
         ...(request.overwrite ? ["--overwrite"] : []),
+        ...(request.strict_coverage ? ["--strict-coverage"] : []),
         ...schemaArguments(request.schema),
     ];
 }
@@ -579,7 +580,7 @@ export function registerSupabaseCliTools(
             declarative: optional(Type.Boolean(), "[db_pull] Pull declarative schemas with pg-delta"),
             apply: optional(Type.Boolean(), "[db_schema_declarative_sync] Apply the generated migration locally"),
             experimental: optional(Type.Boolean(), "[db_schema_declarative_*] Enable the experimental pg-delta workflow"),
-            strict_coverage: optional(Type.Boolean(), "[db_schema_declarative_sync] Fail on unmanaged schema objects"),
+            strict_coverage: optional(Type.Boolean(), "[db_schema_declarative_*] Fail on unmanaged schema objects"),
             overwrite: optional(Type.Boolean(), "[db_schema_declarative_generate] Replace existing schema files"),
             runtime: optional(stringEnum(["docker", "podman", "native"]), "[stack_*] Local stack runtime"),
             eager: optional(Type.Boolean(), "[stack_start] Start all services before returning"),
