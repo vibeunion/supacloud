@@ -55,17 +55,21 @@ have their metadata edited in place. Old active authority, deployment pointers,
 mutation journals, checkpoints and rollback receipts must remain intact.
 Do not delete them to make the new server start accepting uploads.
 
-There is no one-time legacy inventory migration tool in this change. Consequently,
-an existing environment with v1 authority or retained v1 releases is **blocked
-from direct production upgrade**. A coordinated cutover must first:
+The [offline cutover preparation tool](frontend-archive-cutover.md) verifies
+frozen v1 inventory, prepares tar.zst candidates and records every digest mapping.
+It does not switch routing, create a new live activation lineage, or rehearse
+complete old-platform recovery. An existing environment with v1 authority or
+retained v1 releases remains **blocked from direct production upgrade**.
+A coordinated cutover must first:
 
 1. Quiesce uploads and activations, reconcile unfinished mutations on the old
    platform, and record the current/previous activation identities.
 2. Preserve the old binaries, archive inventory, trees, deployment pointers,
    authority, journal and receipts as one verified recovery snapshot.
-3. Use a separately reviewed migration tool to verify and repack retained trees,
-   record the old-to-new digest mapping, create a new activation lineage, and
-   retain old receipts as historical evidence instead of rewriting them.
+3. Use the offline preparation tool to verify and repack retained trees and
+   review the old-to-new digest mapping. A separately approved execution must
+   create a new activation lineage and retain old receipts as historical
+   evidence instead of rewriting them.
 4. Prove the new active tree is byte-equivalent, route readback matches authority,
    and the previous release can be rolled back before reopening writes.
 5. Rehearse restoring the old platform with its original authority and routing
@@ -89,7 +93,7 @@ Operator-requested rollback reuses a verified retained artifact and current CAS.
 Automatic health-triggered downgrade additionally requires an explicit policy,
 compatibility checks and verified rollback evidence; arbitrary database restores
 or irreversible business-side effects are not safe automatic downgrade steps.
-Those policies and legacy inventory migration are not implemented by this change.
+Those policies and live legacy cutover execution are not implemented by this change.
 
 ## Acceptance
 
