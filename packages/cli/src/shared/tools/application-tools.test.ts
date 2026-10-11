@@ -552,9 +552,13 @@ test.each(["success", "foreign", "artifact", "branch", "private", "mode", "confi
       post: (async (path: string, body: unknown) => {
         requests.push("POST");
         expect(path).toBe("/v1/projects/project/applications/reviews/environments/test/previews");
-        expect(body).toEqual({
+        const { preview_id, ...bodyFields } = body as Record<string, unknown>;
+        expect(bodyFields).toEqual({
           release_id: record().release_id, configuration_id: configurationView().configuration_id, data_mode: "schema_only",
         });
+        expect(String(preview_id)).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+        );
         const response = {
           ...receipt, source_configuration_id: configurationView().configuration_id,
           ...(fault === "foreign" ? { environment_id: "foreign" } : {}),
