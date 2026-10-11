@@ -13,6 +13,20 @@ Activation must still validate compatibility, migration/schema/runtime state,
 worker retirement, route, readiness and CAS. The plan never allocates ports,
 executes SQL, restores a database or compensates external side effects.
 
+CLI: `app plan` remains credential-free local topology planning.
+`app deploy-plan` and `app diff` observe a stored candidate in one selected
+environment (`--ref`, `--id`, `--environment_id`, `--release_id`,
+`--configuration_id`). Text mode shows concise differences; `--format json`
+preserves the validated plan receipt.
+
+`app deploy` automatically reads that plan, skips verified no-op, or submits one
+activation using the observed CAS and a generated UUID. It never retries or
+rolls back an unknown outcome. An explicit activation UUID together with expected
+CAS uses the original direct activation path, including its compatibility gates,
+so retries retain the original identity. A pending plan is not permission to skip
+database or provisioning prerequisites. Missing/unhealthy/unverifiable plan
+responses are errors, not a fallback deployment.
+
 ```gherkin
 Scenario: First deployment
   Given a verified stored release and an environment-bound configuration revision
@@ -47,4 +61,13 @@ Scenario: Authorization and input validation
   When the request is dispatched
   Then evidence is not read
   And private provider errors and configuration fingerprints are never returned
+
+Scenario: Automatic deployment and exact retry
+  Given a verified plan with changes and an observed activation CAS
+  When the operator deploys without explicit activation and CAS flags
+  Then exactly one activation is submitted using the observed CAS and a stable UUID
+  And an authority change is handled by the activation CAS guard
+  And an unknown outcome is returned without retry or rollback
+  When the operator retries with the receipt activation UUID and original CAS
+  Then the original activation request is preserved without replanning
 ```

@@ -18,6 +18,7 @@
     "src/services/application-gateway.ts",
     "src/services/application-migrations.ts",
     "src/services/application-deployment.ts",
+    "src/services/application-history.ts",
     "src/services/application-configuration.ts",
     "src/services/application-runtime-allocation.ts",
     "tests/unit/application-release-storage.test.ts",
@@ -32,6 +33,7 @@
     "tests/unit/application-gateway.test.ts",
     "tests/unit/application-migrations.test.ts",
     "tests/unit/application-preview.service.test.ts",
-    "tests/unit/application-deployment.test.ts"
+    "tests/unit/application-deployment.test.ts",
+    "tests/unit/application-history.test.ts"
   ]
 }

@@ -3,7 +3,7 @@ import {
   ApplicationConfigurationWriteSchema, ApplicationConfigurationIdSchema,
   ApplicationActivationIdSchema, ApplicationActivationWriteSchema, ApplicationActivationResultSchema,
   ApplicationActivationRetirementResultSchema, ApplicationRollbackSnapshotSchema, DeploymentEvidenceSchema, parseDeploymentEvidence,
-  type DeploymentEvidence,
+  ApplicationActivationHistorySchema, ApplicationActivationHistoryCursorSchema, type DeploymentEvidence,
 } from "@supacloud/delivery";
 import { sql } from "../db";
 import { getVerifiedRequestPrincipal, requireProjectOrAdminAuth } from "../middleware/auth";
@@ -22,11 +22,10 @@ import { ApplicationDeploymentEvidenceObserver } from "../services/application-d
 import { victoriaLogsService } from "../services/victorialogs.service";
 import { applicationRuntimePlan } from "../services/application-runtime";
 import { buildApplicationPreviewReceipt } from "../services/application-preview-contract";
-import {
-  ApplicationPreviewService, APPLICATION_PREVIEW_MIN_TTL_SECONDS, APPLICATION_PREVIEW_MAX_TTL_SECONDS,
-} from "../services/application-preview.service";
+import { ApplicationPreviewService, APPLICATION_PREVIEW_MIN_TTL_SECONDS, APPLICATION_PREVIEW_MAX_TTL_SECONDS } from "../services/application-preview.service";
 import { ApplicationDeployPlans, ApplicationDeployPlanError } from "../services/application-deploy-plan";
 import { ApplicationRollbackError, ApplicationRollbackSnapshots } from "../services/application-rollback";
+import { ApplicationActivationHistoryReader, ApplicationHistoryError } from "../services/application-history";
 
 function activationFailure(error: unknown, identity: {
   project_ref: string; application_id: string; environment_id: string; activation_id: string;
@@ -68,6 +67,7 @@ interface ApplicationRouteDependencies {
   principal?: typeof getVerifiedRequestPrincipal;
   previews?: ApplicationPreviewService;
   rollback?: Pick<ApplicationRollbackSnapshots, "read">;
+  history?: Pick<ApplicationActivationHistoryReader, "read">;
 }
 
 async function projectExists(ref: string): Promise<boolean> {
@@ -95,6 +95,7 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
     releases: storage, active, readiness, migrations,
   });
   const rollback = dependencies.rollback ?? new ApplicationRollbackSnapshots({ active, releases: storage });
+  const history = dependencies.history ?? new ApplicationActivationHistoryReader({ active });
   const persistObservedEvidence = async (values: { ref: string; id: string; environmentId: string }) => {
     if (!evidenceObserver) return;
     try {
@@ -122,6 +123,9 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       }
       if (error instanceof ApplicationRollbackError) {
         return status(error.statusCode, { code: error.code, error: "Application rollback snapshot is unavailable" });
+      }
+      if (error instanceof ApplicationHistoryError) {
+        return status(error.statusCode, { code: error.code, error: "Application activation history is unavailable" });
       }
       if (error instanceof ApplicationDevelopmentError) {
         return status(error.statusCode, { code: error.code, error: error.message });
@@ -192,6 +196,15 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
         readiness: report,
       };
     })
+    .get("/:id/environments/:environmentId/history", {
+      params: environmentParams,
+      query: t.Object({
+        cursor: t.Optional(ApplicationActivationHistoryCursorSchema),
+        limit: t.Optional(t.Numeric({ minimum: 1, maximum: 100, multipleOf: 1 })),
+      }),
+      response: { 200: ApplicationActivationHistorySchema },
+      detail: { tags: ["applications"], summary: "Read successful activation journal history without inspecting artifacts" },
+    }, ({ params: values, query }) => history.read(scope(values), query))
     .get("/:id/environments/:environmentId/rollback-snapshot", {
       params: environmentParams,
       response: { 200: ApplicationRollbackSnapshotSchema },

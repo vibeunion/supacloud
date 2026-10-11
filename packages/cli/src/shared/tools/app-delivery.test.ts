@@ -12,6 +12,7 @@ import type { ToolSchema } from "../schema";
 import { parseToolArguments } from "../schema";
 import { executionMode, validateExecutionPolicyCoverage } from "../execution-policy";
 import type { ReleaseControlToolResponse } from "./release-control-response";
+import type { ApplicationDeployPlan } from "@supacloud/delivery";
 
 const packageRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const entry = join(packageRoot, "src/index.ts");
@@ -72,6 +73,10 @@ test("merged app schema preserves credential-free local arguments and classifies
     }
     expect(executionMode("app", "status", {})).toBe("read");
     expect(executionMode("app", "rollback-plan", {})).toBe("read");
+    expect(executionMode("app", "deploy-plan", {})).toBe("read");
+    expect(executionMode("app", "diff", {})).toBe("read");
+    expect(executionMode("applications", "get_deploy_plan", {})).toBe("read");
+    expect(executionMode("applications", "deploy_release", {})).toBe("write");
     expect(executionMode("applications", "get_rollback_snapshot", {})).toBe("read");
     expect(executionMode("applications", "rollback_release", {})).toBe("write");
     for (const action of ["upload", "configure", "deploy", "rollback", "reconcile", "retire"]) {
@@ -143,7 +148,8 @@ test("check and doctor surface database gate failures without regenerating contr
 
 test("remote app actions delegate once and return the identical receipt without fabrication", async () => {
     const aliases = {
-        upload: "upload_release", configure: "put_configuration", deploy: "activate_release",
+        upload: "upload_release", configure: "put_configuration", deploy: "deploy_release",
+        "deploy-plan": "get_deploy_plan", diff: "get_deploy_plan",
         status: "get_runtime", rollback: "rollback_release", "rollback-plan": "get_rollback_snapshot",
         reconcile: "reconcile_activation", retire: "retire_activation",
     } as const;
@@ -316,6 +322,230 @@ function rollbackSnapshot(overrides: Record<string, unknown> = {}) {
         ...overrides,
     };
 }
+
+function deployPlan(mode: "changed" | "unchanged" | "first" = "changed"): ApplicationDeployPlan {
+    const current = mode === "first" ? null : {
+        activation_id: identity.expected_activation_id,
+        release_id: mode === "unchanged" ? identity.release_id : "b".repeat(64),
+        configuration_id: identity.configuration_id,
+    };
+    return {
+        schema: "supacloud.application-deploy-plan.v1",
+        project_ref: identity.ref, application_id: identity.id, environment_id: identity.environment_id,
+        candidate: { release_id: identity.release_id, configuration_id: identity.configuration_id },
+        current, expected_activation_id: current?.activation_id ?? null,
+        action: mode === "unchanged" ? "no-op" : "activate",
+        changes: {
+            release: mode !== "unchanged", configuration: mode === "first",
+            targets: { added: mode === "first" ? ["api"] : [], removed: [], changed: mode === "changed" ? ["api"] : [] },
+        },
+        migrations: { ledger_digest: "f".repeat(64), ledger_compatible: true,
+            project_migrations_applied: true, operator_provisioning: "not-declared" },
+        compatibility: "not-proven", execution_performed: false,
+    };
+}
+
+function deployHttp(plan: unknown, fault?: "get-unavailable" | "not-found" | "malformed" | "foreign" | "unavailable" | "cas") {
+    const calls: Array<{ method: string; path: string; body: unknown }> = [];
+    const server = Bun.serve({
+        hostname: "127.0.0.1", port: 0,
+        async fetch(request) {
+            const url = new URL(request.url);
+            const body: unknown = request.method === "POST" ? await request.json() : null;
+            calls.push({ method: request.method, path: url.pathname, body });
+            if (request.method === "GET") {
+                expect(url.pathname).toBe("/v1/projects/project/applications/orders/environments/test/deploy-plan");
+                expect(url.searchParams.get("release_id")).toBe(identity.release_id);
+                expect(url.searchParams.get("configuration_id")).toBe(identity.configuration_id);
+                if (fault === "get-unavailable") return Response.json({ private: "must-not-escape" }, { status: 503 });
+                return Response.json(plan, { status: fault === "not-found" ? 404 : 200 });
+            }
+            expect(url.pathname).toBe("/v1/projects/project/applications/orders/environments/test/activations");
+            if (!Value.Check(ApplicationActivationWriteSchema, body)) return new Response("Invalid", { status: 400 });
+            if (fault === "malformed") return new Response("Invalid", { status: 200 });
+            if (fault === "unavailable") return Response.json({ private: "must-not-escape" }, { status: 503 });
+            if (fault === "cas") return Response.json({ code: "APPLICATION_ACTIVATION_CONFLICT" }, { status: 409 });
+            return Response.json({
+                project_ref: identity.ref, application_id: identity.id, environment_id: identity.environment_id,
+                release_id: body.release_id,
+                activation_id: fault === "foreign" ? crypto.randomUUID() : body.activation_id,
+                replayed: false,
+            });
+        },
+    });
+    let delegate: ToolInvocation | undefined;
+    registerApplicationTools({
+        tool(_name, _description, value, callback) {
+            validateExecutionPolicyCoverage({ applications: { schema: value } }); delegate = callback;
+        },
+    }, new HttpTransport({ baseUrl: server.url.toString(), token: "local-deploy-fixture" }));
+    if (!delegate) throw new Error("Missing applications delegate");
+    return { server, calls, delegate };
+}
+
+const autoDeploy = {
+    action: "deploy" as const, id: identity.id, environment_id: identity.environment_id,
+    release_id: identity.release_id, configuration_id: identity.configuration_id,
+};
+
+test.each(["deploy-plan", "diff"] as const)("%s binds the remote candidate and only performs GET", async action => {
+    const plan = deployPlan();
+    const f = deployHttp(plan);
+    try {
+        const options = { projectRef: identity.ref, getApplications: () => f.delegate };
+        const json = await runAppTool({ ...autoDeploy, action, format: "json" }, options);
+        expect(JSON.parse(json.content[0]!.text)).toMatchObject({ ok: true, operation: "applications.get_deploy_plan", plan });
+        const text = await runAppTool({ ...autoDeploy, action }, options);
+        expect(text.content[0]!.text).toContain("Activation required");
+        expect(text.content[0]!.text).toContain("Targets: ~api");
+        expect(text.content[0]!.text).toContain(`Expected activation: ${identity.expected_activation_id}`);
+        expect(f.calls.map(call => call.method)).toEqual(["GET", "GET"]);
+    } finally { f.server.stop(true); }
+});
+
+test("automatic deployment skips verified no-op without inventing a new activation", async () => {
+    const f = deployHttp(deployPlan("unchanged"));
+    try {
+        const result = await runAppTool(autoDeploy, { projectRef: identity.ref, getApplications: () => f.delegate });
+        expect(JSON.parse(result.content[0]!.text)).toMatchObject({
+            ok: true, operation: "applications.deploy_release", no_op: true, execution_performed: false,
+            activation_id: identity.expected_activation_id, release_id: identity.release_id,
+        });
+        expect(f.calls.map(call => call.method)).toEqual(["GET"]);
+        expect(result.content[0]!.text).not.toContain('"replayed"');
+    } finally { f.server.stop(true); }
+});
+
+test.each(["changed", "first"] as const)("automatic %s deployment submits exactly once with observed CAS", async mode => {
+    const plan = deployPlan(mode), f = deployHttp(plan);
+    try {
+        const result = await runAppTool(autoDeploy, { projectRef: identity.ref, getApplications: () => f.delegate });
+        const output: Record<string, unknown> = JSON.parse(result.content[0]!.text);
+        expect(output).toMatchObject({ ok: true, operation: "applications.deploy_release",
+            release_id: identity.release_id, configuration_id: identity.configuration_id,
+            expected_activation_id: plan.expected_activation_id,
+        });
+        expect(Value.Check(ApplicationActivationIdSchema, output.activation_id)).toBe(true);
+        expect(output.activation_id).not.toBe(plan.expected_activation_id);
+        expect(f.calls.map(call => call.method)).toEqual(["GET", "POST"]);
+        expect(f.calls[1]!.body).toEqual({ release_id: identity.release_id, configuration_id: identity.configuration_id,
+            activation_id: output.activation_id, expected_activation_id: plan.expected_activation_id });
+    } finally { f.server.stop(true); }
+});
+
+test.each([
+    ["foreign project", { ...deployPlan("unchanged"), project_ref: "foreign" }],
+    ["foreign application", { ...deployPlan("unchanged"), application_id: "foreign" }],
+    ["foreign environment", { ...deployPlan("unchanged"), environment_id: "production" }],
+    ["foreign candidate", { ...deployPlan("unchanged"), candidate: { ...deployPlan().candidate, release_id: "b".repeat(64) } }],
+    ["foreign configuration", { ...deployPlan("unchanged"), candidate: { ...deployPlan().candidate, configuration_id: crypto.randomUUID() } }],
+    ["unbound CAS", { ...deployPlan("unchanged"), expected_activation_id: null }],
+    ["incomplete", {}],
+    ["forged no-op", { ...deployPlan(), action: "no-op" }],
+    ["pending no-op", { ...deployPlan("unchanged"), migrations: { ...deployPlan().migrations, project_migrations_applied: false } }],
+    ["private fields", { ...deployPlan("unchanged"), private: "must-not-escape" }],
+] satisfies Array<[string, unknown]>)("automatic deploy refuses %s before POST", async (_name, plan) => {
+    const f = deployHttp(plan);
+    try {
+        const result = await runAppTool(autoDeploy, { projectRef: identity.ref, getApplications: () => f.delegate });
+        expect(result.isError).toBe(true);
+        expect(JSON.parse(result.content[0]!.text)).toMatchObject({ error: { code: "INVALID_RESPONSE" } });
+        expect(f.calls.map(call => call.method)).toEqual(["GET"]);
+        expect(result.content[0]!.text).not.toContain("must-not-escape");
+    } finally { f.server.stop(true); }
+});
+
+test.each(["get-unavailable", "not-found"] as const)("no automatic activation fallback on %s plan", async fault => {
+    const f = deployHttp({}, fault);
+    try {
+        const result = await runAppTool(autoDeploy, { projectRef: identity.ref, getApplications: () => f.delegate });
+        expect(result.isError).toBe(true);
+        expect(f.calls.every(call => call.method === "GET")).toBe(true);
+        expect(result.content[0]!.text).not.toContain("must-not-escape");
+    } finally { f.server.stop(true); }
+});
+
+test.each(["malformed", "foreign", "unavailable", "cas"] as const)("automatic deployment preserves %s outcome and never retries POST", async fault => {
+    const f = deployHttp(deployPlan(), fault);
+    try {
+        const result = await runAppTool(autoDeploy, { projectRef: identity.ref, getApplications: () => f.delegate });
+        const output: Record<string, unknown> = JSON.parse(result.content[0]!.text);
+        expect(result.isError).toBe(true);
+        expect(output).toMatchObject({
+            operation: "applications.deploy_release", error: { code: fault === "cas" ? "HTTP_ERROR" : "OUTCOME_UNKNOWN" },
+            release_id: identity.release_id, configuration_id: identity.configuration_id,
+            expected_activation_id: identity.expected_activation_id,
+        });
+        expect(Value.Check(ApplicationActivationIdSchema, output.activation_id)).toBe(true);
+        expect(f.calls.map(call => call.method)).toEqual(["GET", "POST"]);
+        expect(result.content[0]!.text).not.toContain("must-not-escape");
+    } finally { f.server.stop(true); }
+});
+
+test("explicit deployment retry retains exact UUID/CAS without planning or skipping", async () => {
+    const f = deployHttp(deployPlan("unchanged"));
+    try {
+        const result = await runAppTool({ ...autoDeploy, activation_id: identity.activation_id,
+            expected_activation_id: identity.expected_activation_id },
+        { projectRef: identity.ref, getApplications: () => f.delegate });
+        expect(f.calls.map(call => call.method)).toEqual(["POST"]);
+        expect(f.calls[0]!.body).toEqual({
+            release_id: identity.release_id, configuration_id: identity.configuration_id,
+            activation_id: identity.activation_id, expected_activation_id: identity.expected_activation_id,
+        });
+        expect(JSON.parse(result.content[0]!.text)).toMatchObject({ ok: true, activation_id: identity.activation_id });
+    } finally { f.server.stop(true); }
+});
+
+test("explicit CAS conflict fails before activation even when the plan is unchanged", async () => {
+    const f = deployHttp(deployPlan("unchanged"));
+    try {
+        const result = await runAppTool({ ...autoDeploy, expected_activation_id: "absent" },
+            { projectRef: identity.ref, getApplications: () => f.delegate });
+        expect(result.isError).toBe(true);
+        expect(JSON.parse(result.content[0]!.text)).toMatchObject({ reason: "EXPECTED_ACTIVATION_CONFLICT" });
+        expect(f.calls.map(call => call.method)).toEqual(["GET"]);
+    } finally { f.server.stop(true); }
+});
+
+test("invalid candidate or activation flags perform no HTTP", async () => {
+    const f = deployHttp(deployPlan());
+    try {
+        for (const flags of [{ configuration_id: undefined }, { release_id: undefined },
+            { environment_id: undefined }, { activation_id: "invalid" }, { expected_activation_id: "latest" }]) {
+            await expect(runAppTool({ ...autoDeploy, ...flags }, {
+                projectRef: identity.ref, getApplications: () => f.delegate,
+            })).rejects.toThrow();
+        }
+        expect(f.calls).toEqual([]);
+    } finally { f.server.stop(true); }
+});
+
+test("CLI deployment plan help and read-only/production guards remain effective", async () => {
+    const root = await fixture(), f = deployHttp(deployPlan("unchanged"));
+    const variables = {
+        SUPACLOUD_API_URL: f.server.url.toString(), SUPACLOUD_API_TOKEN: "local-deploy-fixture",
+        SUPACLOUD_PROJECT_REF: identity.ref, SUPACLOUD_ENV: "production",
+    };
+    const flags = Object.entries(autoDeploy).filter(([key]) => key !== "action").flatMap(([key, value]) => [`--${key}`, value]);
+    try {
+        const help = await cli(root, ["app", "deploy-plan", "--help"]);
+        expect(help.code, help.output).toBe(0);
+        for (const flag of ["ref", "id", "environment_id", "release_id", "configuration_id", "format"]) {
+            expect(help.output).toContain(`--${flag} `);
+        }
+        expect(help.output).not.toContain("--activation_id ");
+        const readOnly = await cli(root, ["app", "deploy", ...flags], { ...variables, SUPACLOUD_READ_ONLY: "true" });
+        expect(readOnly.code).toBe(1);
+        const unconfirmed = await cli(root, ["app", "deploy", ...flags], variables);
+        expect(unconfirmed.code).toBe(1);
+        expect(f.calls).toEqual([]);
+        const plan = await cli(root, ["app", "diff", ...flags, "--format", "json"], { ...variables, SUPACLOUD_READ_ONLY: "true" });
+        expect(plan.code, plan.output).toBe(0);
+        expect(JSON.parse(plan.output)).toMatchObject({ operation: "applications.get_deploy_plan", plan: { action: "no-op" } });
+        expect(f.calls.map(call => call.method)).toEqual(["GET"]);
+    } finally { f.server.stop(true); await rm(root, { recursive: true, force: true }); }
+}, 30_000);
 
 function rollbackHttp(snapshot: unknown, fault?: "malformed" | "foreign" | "unavailable" | "not-found") {
     const calls: Array<{ method: string; path: string; body: unknown }> = [];
