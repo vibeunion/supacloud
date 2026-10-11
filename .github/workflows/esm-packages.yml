@@ -6,6 +6,7 @@ on:
       - 'packages/**'
       - 'package.json'
       - '.github/scripts/esm-package*'
+      - '.github/scripts/esm-build-reuse.test.mjs'
       - '.github/scripts/prepare-command-package.mjs'
       - '.github/scripts/package-validation.mjs'
       - '.github/scripts/npm-registry-visibility.mjs'
@@ -16,6 +17,7 @@ on:
       - 'packages/**'
       - 'package.json'
       - '.github/scripts/esm-package*'
+      - '.github/scripts/esm-build-reuse.test.mjs'
       - '.github/scripts/prepare-command-package.mjs'
       - '.github/scripts/package-validation.mjs'
       - '.github/scripts/npm-registry-visibility.mjs'
@@ -39,6 +41,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24.x'
+      - run: node --test .github/scripts/esm-build-reuse.test.mjs
       - run: node --test .github/scripts/esm-package-policy.test.mjs .github/scripts/esm-package-sdk.test.mjs
       - run: node .github/scripts/esm-package-policy.mjs
 
@@ -84,9 +87,11 @@ jobs:
             packages/query/dist \
             packages/supacloud-js/dist \
             packages/compiler/dist \
+            packages/app/node_modules/.bin/tsc \
             packages/app/node_modules/@types/node \
             packages/app/node_modules/typescript \
             packages/app/node_modules/@typescript/typescript-linux-x64 \
+            packages/supacloud-js/node_modules/.bin/tsc \
             packages/supacloud-js/node_modules/@types/node \
             packages/supacloud-js/node_modules/typescript \
             packages/supacloud-js/node_modules/@typescript/typescript-linux-x64
@@ -142,16 +147,17 @@ jobs:
         run: |
           evidence="$RUNNER_TEMP/sdk-compatibility-evidence"
           mkdir -p "$evidence"
-          # Only committed public source and named build/dependency directories.
+          # Archive only restored candidate outputs and compiler dependencies.
           # Never archive .git, runner credentials, npm user config or untracked env files.
           git archive --format=tar HEAD > "$evidence/source.tar"
           tar -cf "$evidence/dependencies.tar" \
-            packages/query/node_modules packages/query/dist \
+            packages/query/dist \
             packages/supacloud-js/node_modules packages/supacloud-js/dist \
-            packages/contracts/node_modules packages/contracts/dist \
+            packages/contracts/dist \
             packages/app/node_modules packages/app/dist \
-            packages/delivery/node_modules packages/delivery/dist \
-            packages/compiler/node_modules packages/compiler/dist
+            packages/delivery/dist \
+            packages/compiler/dist
+          cp "$RUNNER_TEMP/esm-candidate-build/esm-candidate-build.tar.gz" "$evidence/candidate-build.tar.gz"
           cp "$(command -v bun)" "$evidence/bun"
           git rev-parse HEAD > "$evidence/commit.txt"
           node --version > "$evidence/node-version.txt"
