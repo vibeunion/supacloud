@@ -124,22 +124,22 @@ function nullableTimestamp(candidate: unknown): candidate is string | null {
 
 function safePrincipal(candidate: unknown): SafeMutationStatus["principal"] | null {
     const principal = exactRecord(candidate, PRINCIPAL_KEYS);
-    if (!principal || !["master", "admin", "project"].includes(String(principal.type))) return null;
-    if (typeof principal.id !== "string" || !principal.id || principal.id.length > 320
-        || principal.id.trim() !== principal.id || /[\u0000-\u001f\u007f]/u.test(principal.id)) return null;
-    return { type: principal.type as SafeMutationStatus["principal"]["type"], id: principal.id };
+    if (!principal || !["master", "admin", "project"].includes(String(principal["type"]))) return null;
+    if (typeof principal["id"] !== "string" || !principal["id"] || principal["id"].length > 320
+        || principal["id"].trim() !== principal["id"] || /[\u0000-\u001f\u007f]/u.test(principal["id"])) return null;
+    return { type: principal["type"] as SafeMutationStatus["principal"]["type"], id: principal["id"] };
 }
 
 function safeLease(candidate: unknown): SafeMutationStatus["lease"] | null {
     const lease = exactRecord(candidate, LEASE_KEYS);
-    if (!lease || (lease.owner !== null
-        && (typeof lease.owner !== "string" || !LEASE_OWNER_PATTERN.test(lease.owner)))) return null;
-    if (!nullableTimestamp(lease.expires_at)
-        || !Number.isSafeInteger(lease.fencing_epoch) || Number(lease.fencing_epoch) < 0) return null;
+    if (!lease || (lease["owner"] !== null
+        && (typeof lease["owner"] !== "string" || !LEASE_OWNER_PATTERN.test(lease["owner"])))) return null;
+    if (!nullableTimestamp(lease["expires_at"])
+        || !Number.isSafeInteger(lease["fencing_epoch"]) || Number(lease["fencing_epoch"]) < 0) return null;
     return {
-        owner: lease.owner as string | null,
-        expires_at: lease.expires_at,
-        fencing_epoch: Number(lease.fencing_epoch),
+        owner: lease["owner"] as string | null,
+        expires_at: lease["expires_at"],
+        fencing_epoch: Number(lease["fencing_epoch"]),
     };
 }
 
@@ -162,20 +162,20 @@ function validMutationLifecycle(
     receipt: Record<string, unknown> | null,
     responseStatus: number | null,
 ): boolean {
-    const terminal = ["succeeded", "failed_terminal", "outcome_unknown"].includes(String(mutation.status));
-    if ((mutation.completed_at !== null) !== terminal) return false;
-    if (mutation.status === "succeeded") {
+    const terminal = ["succeeded", "failed_terminal", "outcome_unknown"].includes(String(mutation["status"]));
+    if ((mutation["completed_at"] !== null) !== terminal) return false;
+    if (mutation["status"] === "succeeded") {
         return receipt !== null && responseStatus !== null && responseStatus >= 200 && responseStatus < 300
-            && mutation.failure_code === null;
+            && mutation["failure_code"] === null;
     }
-    if (mutation.status === "failed_terminal") {
-        return receipt !== null && typeof mutation.failure_code === "string";
+    if (mutation["status"] === "failed_terminal") {
+        return receipt !== null && typeof mutation["failure_code"] === "string";
     }
-    if (mutation.status === "failed_retryable" || mutation.status === "outcome_unknown") {
-        return receipt !== null && typeof mutation.failure_code === "string";
+    if (mutation["status"] === "failed_retryable" || mutation["status"] === "outcome_unknown") {
+        return receipt !== null && typeof mutation["failure_code"] === "string";
     }
-    if (mutation.status === "pending") {
-        return receipt === null && responseStatus === null && mutation.failure_code === null;
+    if (mutation["status"] === "pending") {
+        return receipt === null && responseStatus === null && mutation["failure_code"] === null;
     }
     return true;
 }
@@ -201,43 +201,43 @@ function canonicalMutationResourceKey(candidate: unknown): candidate is string {
 }
 
 function validMutationIdentity(mutation: Record<string, unknown>): boolean {
-    if (!isMutationId(mutation.mutation_id) || typeof mutation.project_ref !== "string") return false;
-    if (typeof mutation.operation !== "string" || !OPERATION_PATTERN.test(mutation.operation)) return false;
-    if (mutation.resource_key !== null && !canonicalMutationResourceKey(mutation.resource_key)) return false;
-    return typeof mutation.request_fingerprint === "string"
-        && FINGERPRINT_PATTERN.test(mutation.request_fingerprint);
+    if (!isMutationId(mutation["mutation_id"]) || typeof mutation["project_ref"] !== "string") return false;
+    if (typeof mutation["operation"] !== "string" || !OPERATION_PATTERN.test(mutation["operation"])) return false;
+    if (mutation["resource_key"] !== null && !canonicalMutationResourceKey(mutation["resource_key"])) return false;
+    return typeof mutation["request_fingerprint"] === "string"
+        && FINGERPRINT_PATTERN.test(mutation["request_fingerprint"]);
 }
 
 function validMutationTerminalFields(mutation: Record<string, unknown>): boolean {
-    if (typeof mutation.status !== "string" || !MUTATION_STATUSES.has(mutation.status)) return false;
-    if (mutation.failure_code !== null
-        && (typeof mutation.failure_code !== "string" || !FAILURE_CODE_PATTERN.test(mutation.failure_code))) return false;
-    return nullableTimestamp(mutation.completed_at)
-        && canonicalTimestamp(mutation.created_at) && canonicalTimestamp(mutation.updated_at);
+    if (typeof mutation["status"] !== "string" || !MUTATION_STATUSES.has(mutation["status"])) return false;
+    if (mutation["failure_code"] !== null
+        && (typeof mutation["failure_code"] !== "string" || !FAILURE_CODE_PATTERN.test(mutation["failure_code"]))) return false;
+    return nullableTimestamp(mutation["completed_at"])
+        && canonicalTimestamp(mutation["created_at"]) && canonicalTimestamp(mutation["updated_at"]);
 }
 
 export function safeMutationStatus(candidate: unknown): SafeMutationStatus | null {
     const mutation = exactRecord(candidate, MUTATION_KEYS);
     if (!mutation || !validMutationIdentity(mutation) || !validMutationTerminalFields(mutation)) return null;
-    const principal = safePrincipal(mutation.principal);
-    const checkpoint = emptyProjection(mutation.checkpoint);
-    const receipt = mutation.receipt === null ? null : emptyProjection(mutation.receipt);
-    const responseStatus = safeResponseStatus(mutation.response_status);
-    const lease = safeLease(mutation.lease);
-    if (!principal || !checkpoint || (mutation.receipt !== null && !receipt)
-        || responseStatus === undefined || !lease || !validLeaseState(String(mutation.status), lease)
+    const principal = safePrincipal(mutation["principal"]);
+    const checkpoint = emptyProjection(mutation["checkpoint"]);
+    const receipt = mutation["receipt"] === null ? null : emptyProjection(mutation["receipt"]);
+    const responseStatus = safeResponseStatus(mutation["response_status"]);
+    const lease = safeLease(mutation["lease"]);
+    if (!principal || !checkpoint || (mutation["receipt"] !== null && !receipt)
+        || responseStatus === undefined || !lease || !validLeaseState(String(mutation["status"]), lease)
         || !validMutationLifecycle(mutation, receipt, responseStatus)) return null;
     return {
-        project_ref: mutation.project_ref as string,
-        mutation_id: mutation.mutation_id as string,
-        operation: mutation.operation as string,
-        resource_key: mutation.resource_key as string | null,
-        request_fingerprint: mutation.request_fingerprint as string,
-        principal, status: mutation.status as SafeMutationStatus["status"], checkpoint, receipt,
-        response_status: responseStatus, failure_code: mutation.failure_code as string | null, lease,
-        completed_at: mutation.completed_at as string | null,
-        created_at: mutation.created_at as string,
-        updated_at: mutation.updated_at as string,
+        project_ref: mutation["project_ref"] as string,
+        mutation_id: mutation["mutation_id"] as string,
+        operation: mutation["operation"] as string,
+        resource_key: mutation["resource_key"] as string | null,
+        request_fingerprint: mutation["request_fingerprint"] as string,
+        principal, status: mutation["status"] as SafeMutationStatus["status"], checkpoint, receipt,
+        response_status: responseStatus, failure_code: mutation["failure_code"] as string | null, lease,
+        completed_at: mutation["completed_at"] as string | null,
+        created_at: mutation["created_at"] as string,
+        updated_at: mutation["updated_at"] as string,
     };
 }
 
@@ -248,8 +248,8 @@ export function mutationStatusPath(ref: string, mutationId: string): string {
 
 function mutationStatusResponse(ref: string, mutationId: string, payload: unknown): SafeMutationStatus | null {
     const response = exactRecord(payload, MUTATION_RESPONSE_KEYS);
-    const mutation = safeMutationStatus(response?.mutation);
-    return response?.project_ref === ref && mutation?.project_ref === ref && mutation.mutation_id === mutationId
+    const mutation = safeMutationStatus(response?["mutation"]);
+    return response?["project_ref"] === ref && mutation?.project_ref === ref && mutation.mutation_id === mutationId
         ? mutation
         : null;
 }

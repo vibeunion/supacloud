@@ -261,7 +261,9 @@ export class ApplicationPromotionExecutor {
           checkpoint.migration = compactMigration(await this.dependencies.migrations.apply({
             projectRef: input.projectRef, applicationId: input.applicationId,
             releaseId: plan.target.candidate_release_id, expectedLedgerDigest: executionPlan.ledger_digest,
-            backupId, approvedMigrationDigest: input.approvedMigrationDigest,
+            backupId,
+            ...(input.approvedMigrationDigest === undefined
+              ? {} : { approvedMigrationDigest: input.approvedMigrationDigest }),
           }));
         });
       }

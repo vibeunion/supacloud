@@ -76,23 +76,26 @@ export interface AppToolOptions {
 }
 
 const REMOTE_APP_DESCRIPTIONS: Record<string, string> = {
-    ref: "[upload/configure/transfer-plan/transfer/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview-list/preview-create/preview-status/preview-cleanup/deploy/status/rollback/reconcile/retire] Project ref (defaults to context)",
-    id: "[upload/configure/transfer-plan/transfer/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview-list/preview-create/preview-status/preview-cleanup/deploy/status/rollback/reconcile/retire] Application ID",
-    environment_id: "[configure/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview-list/preview-create/preview-status/preview-cleanup/deploy/status/rollback/reconcile/retire] Target environment ID",
-    configuration_id: "[promote-plan/diff/promote/preview-create/deploy/rollback] Immutable target configuration revision",
+    ref: "[upload/configure/transfer-plan/transfer/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Project ref (defaults to context)",
+    id: "[upload/configure/transfer-plan/transfer/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Application ID",
+    environment_id: "[configure/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Target environment ID",
+    configuration_id: "[promote-plan/diff/promote/preview-plan/preview/preview-create/deploy/deploy-plan/rollback] Immutable target configuration revision",
     activation_id: "[deploy/rollback/reconcile/retire] Required explicit activation ID",
     expected_activation_id: "[deploy/rollback] Required current activation ID, or absent for first activation",
     configuration_path: "[configure] Configuration write JSON including revision and expected revision",
     manifest_path: "[upload] Local delivery.manifest.json",
-    release_id: "[preview-plan/preview-create/deploy/rollback/reconcile] Required immutable application release ID",
+    release_id: "[preview-plan/preview/preview-create/deploy/deploy-plan/diff/rollback/reconcile] Required immutable application release ID",
     source_ref: "[transfer-plan/transfer/promote-plan/diff/promote] Source project ref",
     source_release_id: "[transfer-plan/transfer/promote-plan/diff/promote] Source immutable release ID",
     source_environment_id: "[promote-plan/diff/promote] Source environment ID",
     mutation_id: "[promote-status/promote-reconcile] Stable promotion mutation ID",
     approved_migration_digest: "[promote] Exact reviewed migration execution-plan digest",
     branch_ref: "[preview-plan] Preview branch identity",
-    branch_name: "[preview-create] Human-readable preview branch name",
-    data_mode: "[preview-plan/preview-create] schema_only or full_clone",
+    branch_name: "[preview/preview-create] Human-readable preview branch name",
+    data_mode: "[preview-plan/preview/preview-create] schema_only or full_clone",
+    ttl_seconds: "[preview-plan/preview/preview-create] Lifetime from 300 to 604800 seconds; creation defaults to the platform TTL",
+    wait: "[preview/preview-create/preview-status] Wait for verified readiness of the selected preview",
+    timeout_seconds: "[preview/preview-create/preview-status] Observation budget with --wait, from 1 to 3600 seconds (default 300)",
     preview_id: "[preview-status/preview-cleanup] Preview ID",
     cursor: "[history] Returned page cursor",
     limit: "[history] Page size, default 20 (1-100)",
@@ -1263,7 +1266,7 @@ function formatWorkflowObservation(result: ToolResult, action: AppToolArguments[
                 ...list.previews.map(preview => `${preview.preview_id}  ${preview.status}  ${preview.resources.database_branch.branch_ref}`),
             ].join("\n"));
         }
-        if (["preview-plan", "preview-create", "preview-status", "preview-cleanup"].includes(action)) {
+        if (["preview-create", "preview-status", "preview-cleanup"].includes(action)) {
             const preview = parsePreviewReceipt(data.preview, identity);
             return textResult([
                 `${label}: ${preview.status}`,
@@ -1375,7 +1378,9 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
         if (request.action === "history" && format !== "json" && json !== true) {
             return historyText(result, request, args.ref);
         }
-        if (request.action === "deploy-plan" && format !== "json") {
+        if ((request.action === "deploy-plan" || request.action === "diff") && format !== "json"
+            && (request.action === "deploy-plan" || request.source_ref === undefined
+                || request.source_environment_id === undefined || request.source_release_id === undefined)) {
             return formatRemoteDeployPlan(result);
         }
         if (request.action === "promote-plan" || (request.action === "diff"

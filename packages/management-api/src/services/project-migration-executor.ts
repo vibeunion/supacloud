@@ -78,12 +78,12 @@ export async function ensureTasksRealtimePublication(projectDb: ProjectSql): Pro
 function existingMigrationChecksum(
   row: Record<string, unknown>, fallback: { version: string; name: string },
 ): string {
-  if (typeof row.checksum === "string") return row.checksum;
+  if (typeof row["checksum"] === "string") return row["checksum"];
   return calculateMigrationChecksum({
-    version: String(row.version ?? fallback.version),
-    name: typeof row.name === "string" ? row.name : fallback.name,
-    statements: Array.isArray(row.statements)
-      ? row.statements.filter((statement: unknown): statement is string => typeof statement === "string") : [],
+    version: String(row["version"] ?? fallback.version),
+    name: typeof row["name"] === "string" ? row["name"] : fallback.name,
+    statements: Array.isArray(row["statements"])
+      ? row["statements"].filter((statement: unknown): statement is string => typeof statement === "string") : [],
   });
 }
 
@@ -98,9 +98,9 @@ export function migrationLedgerEntryMatches(
   row: Record<string, unknown>,
   input: Pick<RecordedMigrationInput, "version" | "name" | "statements">,
 ): boolean {
-  return String(row.version ?? "").trim() === input.version
-    && (typeof row.name === "string" ? row.name.trim() : "") === input.name
-    && JSON.stringify(normalizedMigrationStatements(row.statements))
+  return String(row["version"] ?? "").trim() === input.version
+    && (typeof row["name"] === "string" ? row["name"].trim() : "") === input.name
+    && JSON.stringify(normalizedMigrationStatements(row["statements"]))
       === JSON.stringify(normalizedMigrationStatements(input.statements));
 }
 
