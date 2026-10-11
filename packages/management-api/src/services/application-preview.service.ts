@@ -150,24 +150,24 @@ export class ApplicationPreviewService {
   async list(projectRef: string, applicationId: string, environmentId: string): Promise<StoredApplicationPreview[]> {
     const project = await this.dependencies.projects.findByRef(projectRef);
     if (!project) return [];
-    const previews = previewList(project.config).filter((item) =>
-      item.application_id === applicationId && item.environment_id === environmentId);
-    await this.reconcilePending(projectRef, previews);
-    const refreshed = await this.dependencies.projects.findByRef(projectRef);
-    return previewList(refreshed?.config).filter((item) =>
+    return previewList(project.config).filter((item) =>
       item.application_id === applicationId && item.environment_id === environmentId);
   }
 
   async get(projectRef: string, id: string): Promise<StoredApplicationPreview | null> {
-    const receipt = await this.read(projectRef, id);
-    if (receipt) await this.reconcilePending(projectRef, [receipt]);
-    return await this.read(projectRef, id);
+    return this.read(projectRef, id);
   }
 
   async read(projectRef: string, id: string): Promise<StoredApplicationPreview | null> {
     if (!previewId(id)) return null;
     const project = await this.dependencies.projects.findByRef(projectRef);
     return previewList(project?.config).find((item) => item.preview_id === id && item.project_ref === projectRef) ?? null;
+  }
+
+  async reconcile(projectRef: string, id: string): Promise<StoredApplicationPreview | null> {
+    const receipt = await this.read(projectRef, id);
+    if (receipt) await this.reconcilePending(projectRef, [receipt]);
+    return this.read(projectRef, id);
   }
 
   async create(input: {

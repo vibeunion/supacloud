@@ -93,17 +93,18 @@ async function withServer(
   finally { server.stop(true); }
 }
 
-test("preview aliases preserve receipts and classify status recovery as a write", async () => {
+test("preview aliases preserve receipts and classify recovery as an explicit write", async () => {
   let schema: ToolSchema = {};
   registerAppTools({ tool(_name, _description, value) { schema = value; } });
   validateExecutionPolicyCoverage({ app: { schema }, applications: { schema: APPLICATION_TOOL_SCHEMA } });
   const aliases = {
     "preview-plan": "get_preview_plan", preview: "create_preview", previews: "list_previews",
-    "preview-status": "get_preview", "preview-cleanup": "cleanup_preview",
+    "preview-status": "get_preview", "preview-reconcile": "reconcile_preview", "preview-cleanup": "cleanup_preview",
   } as const;
   for (const [alias, action] of Object.entries(aliases)) {
-    expect(executionMode("app", alias, {})).toBe(alias === "preview-plan" ? "read" : "write");
-    expect(executionMode("applications", action, {})).toBe(alias === "preview-plan" ? "read" : "write");
+    const readOnly = ["preview-plan", "previews", "preview-status"].includes(alias);
+    expect(executionMode("app", alias, {})).toBe(readOnly ? "read" : "write");
+    expect(executionMode("applications", action, {})).toBe(readOnly ? "read" : "write");
     const receipt = { content: [{ type: "text" as const, text: '{"fixture":true}' }] };
     const result = await runAppTool({ action: alias as keyof typeof aliases, ...args }, {
       getApplications: () => async request => {
@@ -160,6 +161,25 @@ test("preview creation verifies the source then posts once without claiming read
       release_id: sourceRelease.release_id, configuration_id: configurationId, data_mode: "schema_only",
     } },
   ]);
+});
+
+test("preview reconciliation uses one explicit POST while status remains a read-only GET", async () => {
+  const requests: string[] = [];
+  await withServer(async request => {
+    const url = new URL(request.url);
+    requests.push(`${request.method} ${url.pathname}`);
+    if (url.pathname.includes("/reconcile")) return Response.json(preview("ready"));
+    return Response.json(preview());
+  }, async http => {
+    const result = await register(http)({
+      action: "reconcile_preview", ...args, preview_id: previewId,
+    });
+    expect(output(result)).toMatchObject({
+      ok: true, operation: "applications.reconcile_preview",
+      preview: { status: "ready", preview_id: previewId },
+    });
+  });
+  expect(requests).toEqual([`POST ${path}/previews/${previewId}/reconcile`]);
 });
 
 test("TTL is forwarded to the platform as a plan query or one creation body", async () => {
@@ -615,6 +635,7 @@ test("preview action help works without credentials and includes scoped flags", 
     ["preview", ["environment_id", "release_id", "configuration_id", "data_mode", "ttl_seconds", "wait", "timeout_seconds"]],
     ["preview-plan", ["environment_id", "release_id", "branch_ref", "ttl_seconds"]],
     ["preview-status", ["environment_id", "preview_id", "wait", "timeout_seconds"]],
+    ["preview-reconcile", ["environment_id", "preview_id"]],
     ["preview-cleanup", ["environment_id", "preview_id"]],
   ] as const) {
     const result = await cli(["app", action, "--help"]);
@@ -627,11 +648,12 @@ test("CLI preview recovery respects read-only and production guards before HTTP"
   let requests = 0;
   await withServer(() => { requests++; return Response.json(preview()); }, async (_http, origin) => {
     const env = { SUPACLOUD_API_URL: origin, SUPACLOUD_API_TOKEN: "fixture-management-token", SUPACLOUD_PROJECT_REF: ref };
-    for (const action of ["preview", "previews", "preview-status", "preview-cleanup"]) {
+    for (const action of ["preview", "preview-reconcile", "preview-cleanup"]) {
       const input = [
         "app", action, "--id", id, "--environment_id", environment,
         ...(action === "preview" ? ["--release_id", sourceRelease.release_id, "--configuration_id", configurationId] : []),
-        ...(action === "preview-status" || action === "preview-cleanup" ? ["--preview_id", previewId] : []),
+        ...(action === "preview-status" || action === "preview-reconcile" || action === "preview-cleanup"
+          ? ["--preview_id", previewId] : []),
         ...(action === "preview" || action === "preview-status" ? ["--wait", "--timeout_seconds", "1"] : []),
         ...(action === "preview" ? ["--ttl_seconds", "300"] : []),
       ];

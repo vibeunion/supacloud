@@ -107,7 +107,7 @@ test("preview provisioning reaches ready only after all isolated resources and s
     projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64),
   });
   expect(initial.status).toBe("provisioning");
-  const receipts = await service.list("demo", "api", "test");
+  const receipts = await service.reconcile("demo", initial.preview_id).then(receipt => receipt ? [receipt] : []);
   expect(receipts[0]).toMatchObject({ status: "ready", resources: { smoke_test: { status: "ready", failed: [] } } });
   expect(receipts[0]?.resources.configuration_revision).toEqual({ status: "ready", configuration_id: expect.any(String) });
   expect(receipts[0]?.resources.application_activation.status).toBe("ready");
@@ -155,7 +155,7 @@ test("preview cleanup is explicit and idempotent at the receipt boundary", async
   expect(calls).toEqual(["queue:drop", "secret:delete", "branch:delete"]);
 });
 
-test("preview reads resume a persisted provisioning receipt without recreating its branch", async () => {
+test("preview reads stay observational and explicit reconciliation resumes a persisted receipt", async () => {
   const previewId = "12345678-1234-4234-8234-123456789abc";
   const branchRef = "pv123456781234423482";
   const configs: Record<string, unknown>[] = [{
@@ -206,7 +206,8 @@ test("preview reads resume a persisted provisioning receipt without recreating i
     runtime: { checkStatus: async () => ({ status: "running", health: "healthy" } as never) },
     smokeTest: async () => ({ passed: ["application_readiness"], failed: [] }),
   });
-  expect(await service.get("demo", previewId)).toMatchObject({ status: "ready" });
+  expect(await service.get("demo", previewId)).toMatchObject({ status: "provisioning" });
+  expect(await service.reconcile("demo", previewId)).toMatchObject({ status: "ready" });
   expect(calls).toEqual(["queue:create", "secret:create"]);
 });
 
@@ -290,7 +291,7 @@ test("missing configuration, activation or explicit readiness evidence cannot yi
   for (const { overrides, missing } of cases) {
     const { service } = provisioningFixture(overrides);
     const created = await service.create({ projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64) });
-    const receipt = await service.get("demo", created.preview_id);
+    const receipt = await service.reconcile("demo", created.preview_id);
     expect(receipt?.status).toBe("failed");
     expect(receipt?.resources.smoke_test.status).toBe("failed");
     expect(receipt?.resources.smoke_test.failed).toContain(missing);
@@ -307,7 +308,7 @@ test("a failing application smoke cannot hide unhealthy tenant runtime or fabric
     }),
   });
   const created = await service.create({ projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64) });
-  const receipt = await service.get("demo", created.preview_id);
+  const receipt = await service.reconcile("demo", created.preview_id);
   expect(receipt?.resources.smoke_test.failed).toEqual(expect.arrayContaining([
     "configuration_revision", "application_activation", "application_readiness", "tenant_runtime",
   ]));
@@ -321,7 +322,7 @@ test("tenant runtime failure is retained alongside a real application smoke fail
     smokeTest: async () => ({ passed: [], failed: ["application_readiness", "route_probe"] }),
   });
   const created = await service.create({ projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64) });
-  const receipt = await service.get("demo", created.preview_id);
+  const receipt = await service.reconcile("demo", created.preview_id);
   expect(receipt?.status).toBe("failed");
   expect(receipt?.resources.smoke_test.failed).toEqual(expect.arrayContaining([
     "tenant_runtime", "application_readiness", "route_probe",
@@ -371,7 +372,7 @@ test("preview pins the source head at creation and persists the target identity 
     projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64),
   });
   expect(created.source_configuration_id).toBe(configurationId);
-  expect(await fixture.service.get("demo", created.preview_id)).toMatchObject({ status: "ready" });
+  expect(await fixture.service.reconcile("demo", created.preview_id)).toMatchObject({ status: "ready" });
   expect(reads).toBe(1);
   expect(clones).toBe(1);
 });
@@ -395,7 +396,7 @@ test("an explicit source revision never reads the mutable configuration head", a
     configurationId: explicitId,
   });
   expect(created.source_configuration_id).toBe(explicitId);
-  expect(await fixture.service.get("demo", created.preview_id)).toMatchObject({ status: "ready" });
+  expect(await fixture.service.reconcile("demo", created.preview_id)).toMatchObject({ status: "ready" });
   expect(clones).toBe(1);
 });
 
@@ -431,7 +432,7 @@ test("a configuration committed before its ready receipt is recovered with the s
   const created = await interruptedService.create({
     projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64),
   });
-  await expect(interruptedService.get("demo", created.preview_id)).rejects.toBeInstanceOf(ApplicationPreviewConflictError);
+  await expect(interruptedService.reconcile("demo", created.preview_id)).rejects.toBeInstanceOf(ApplicationPreviewConflictError);
   const saved = (fixture.configs[0]?.application_previews as StoredApplicationPreview[])[0]!;
   expect(saved.status).toBe("provisioning");
   expect(saved.resources.configuration_revision).toEqual({ status: "pending", configuration_id: cloneIds[0] });
@@ -442,7 +443,7 @@ test("a configuration committed before its ready receipt is recovered with the s
       read: async () => { throw new Error("Must not reread mutable source head"); },
     },
   });
-  const receipt = await recovered.get("demo", created.preview_id);
+  const receipt = await recovered.reconcile("demo", created.preview_id);
   expect(receipt).toMatchObject({
     status: "ready", resources: { configuration_revision: { status: "ready", configuration_id: cloneIds[0] } },
   });
@@ -474,7 +475,7 @@ test("a failed configuration intent write cannot start the clone", async () => {
   const created = await service.create({
     projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64),
   });
-  await expect(service.get("demo", created.preview_id)).rejects.toBeInstanceOf(ApplicationPreviewConflictError);
+  await expect(service.reconcile("demo", created.preview_id)).rejects.toBeInstanceOf(ApplicationPreviewConflictError);
   expect(clones).toBe(0);
 });
 
@@ -495,7 +496,7 @@ test("a clone response with a foreign configuration identity cannot activate the
     const created = await fixture.service.create({
       projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64),
     });
-    const receipt = await fixture.service.get("demo", created.preview_id);
+    const receipt = await fixture.service.reconcile("demo", created.preview_id);
     expect(receipt?.status).toBe("failed");
     expect(receipt?.resources.configuration_revision.status).toBe("pending");
     expect(receipt?.resources.smoke_test.failed).toContain("provisioning");
@@ -515,7 +516,7 @@ test("a preview without a pinned source revision never clones a later mutable he
     projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64),
   });
   expect(created.source_configuration_id).toBeNull();
-  const receipt = await fixture.service.get("demo", created.preview_id);
+  const receipt = await fixture.service.reconcile("demo", created.preview_id);
   expect(receipt?.status).toBe("failed");
   expect(receipt?.resources.smoke_test.failed).toContain("configuration_revision");
   expect(clones).toBe(0);
@@ -561,11 +562,11 @@ test("activation identity is persisted before effects and reused after process r
     },
   });
   try {
-    expect(await recovered.get("demo", created.preview_id)).toMatchObject({ status: "ready" });
+    expect(await recovered.reconcile("demo", created.preview_id)).toMatchObject({ status: "ready" });
     expect(clones).toBe(0);
   } finally {
     blocked.resolve();
-    await expect(fixture.service.get("demo", created.preview_id)).rejects.toBeInstanceOf(ApplicationPreviewConflictError);
+    await expect(fixture.service.reconcile("demo", created.preview_id)).rejects.toBeInstanceOf(ApplicationPreviewConflictError);
   }
 });
 
@@ -574,7 +575,7 @@ test("an activation response with a different identity fails without a fabricate
     activate: async () => ({ activation_id: "81234567-89ab-4def-8123-456789abcdef" }),
   });
   const created = await service.create({ projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64) });
-  const receipt = await service.get("demo", created.preview_id);
+  const receipt = await service.reconcile("demo", created.preview_id);
   expect(receipt?.status).toBe("failed");
   expect(receipt?.resources.application_activation.status).toBe("pending");
   expect(receipt?.resources.smoke_test.failed).toContain("provisioning");
@@ -701,7 +702,7 @@ test("preview TTL is platform-owned, bounded and validated before materializatio
     });
     expect(created.created_at).toBe(new Date(now).toISOString());
     expect(created.expires_at).toBe(new Date(now + (ttlSeconds ?? 86400) * 1000).toISOString());
-    await f.service.get("demo", created.preview_id);
+    await f.service.reconcile("demo", created.preview_id);
   }
   let materialized = false;
   const invalid = provisioningFixture({ releases: {

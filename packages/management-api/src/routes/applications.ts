@@ -457,6 +457,19 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       }
       return await previews.get(values.ref, values.previewId);
     })
+    .post("/:id/environments/:environmentId/previews/:previewId/reconcile", {
+      params: t.Object({ ...environmentParams.properties, previewId: t.String({ pattern: "^[a-f0-9-]{8,64}$" }) }),
+      body: t.Object({}, { additionalProperties: false }),
+      detail: { tags: ["applications"], summary: "Explicitly resume persisted application preview provisioning" },
+    }, async ({ params: values }) => {
+      const receipt = await previews.read(values.ref, values.previewId);
+      if (!receipt || receipt.application_id !== values.id || receipt.environment_id !== values.environmentId) {
+        return status(404, { code: "APPLICATION_PREVIEW_NOT_FOUND", error: "Application preview not found" });
+      }
+      const reconciled = await previews.reconcile(values.ref, values.previewId);
+      if (!reconciled) return status(404, { code: "APPLICATION_PREVIEW_NOT_FOUND", error: "Application preview not found" });
+      return reconciled;
+    })
     .delete("/:id/environments/:environmentId/previews/:previewId", {
       params: t.Object({ ...environmentParams.properties, previewId: t.String({ pattern: "^[a-f0-9-]{8,64}$" }) }),
       detail: { tags: ["applications"], summary: "Clean up an application preview" },

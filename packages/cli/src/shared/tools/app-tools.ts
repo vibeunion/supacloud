@@ -64,6 +64,7 @@ const REMOTE_APP_ACTIONS = {
     logs: "logs",
     preview: "create_preview",
     previews: "list_previews",
+    "preview-reconcile": "reconcile_preview",
 } as const;
 
 export interface AppToolOptions {
@@ -76,9 +77,9 @@ export interface AppToolOptions {
 }
 
 const REMOTE_APP_DESCRIPTIONS: Record<string, string> = {
-    ref: "[upload/configure/transfer-plan/transfer/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Project ref (defaults to context)",
-    id: "[upload/configure/transfer-plan/transfer/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Application ID",
-    environment_id: "[configure/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Target environment ID",
+    ref: "[upload/configure/transfer-plan/transfer/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-reconcile/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Project ref (defaults to context)",
+    id: "[upload/configure/transfer-plan/transfer/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-reconcile/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Application ID",
+    environment_id: "[configure/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-reconcile/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Target environment ID",
     configuration_id: "[promote-plan/diff/promote/preview-plan/preview/preview-create/deploy/deploy-plan/rollback] Immutable target configuration revision",
     activation_id: "[deploy/rollback/reconcile/retire] Required explicit activation ID",
     expected_activation_id: "[deploy/rollback] Required current activation ID, or absent for first activation",
@@ -96,7 +97,7 @@ const REMOTE_APP_DESCRIPTIONS: Record<string, string> = {
     ttl_seconds: "[preview-plan/preview/preview-create] Lifetime from 300 to 604800 seconds; creation defaults to the platform TTL",
     wait: "[preview/preview-create/preview-status] Wait for verified readiness of the selected preview",
     timeout_seconds: "[preview/preview-create/preview-status] Observation budget with --wait, from 1 to 3600 seconds (default 300)",
-    preview_id: "[preview-status/preview-cleanup] Preview ID",
+    preview_id: "[preview-status/preview-reconcile/preview-cleanup] Preview ID",
     cursor: "[history] Returned page cursor",
     limit: "[history] Page size, default 20 (1-100)",
 };
@@ -1266,7 +1267,7 @@ function formatWorkflowObservation(result: ToolResult, action: AppToolArguments[
                 ...list.previews.map(preview => `${preview.preview_id}  ${preview.status}  ${preview.resources.database_branch.branch_ref}`),
             ].join("\n"));
         }
-        if (["preview-create", "preview-status", "preview-cleanup"].includes(action)) {
+        if (["preview-create", "preview-status", "preview-reconcile", "preview-cleanup"].includes(action)) {
             const preview = parsePreviewReceipt(data.preview, identity);
             return textResult([
                 `${label}: ${preview.status}`,
@@ -1438,7 +1439,7 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             action: withDescription(stringEnum(["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix",
                 "plan", "build", "upload", "configure", "transfer-plan", "transfer", "promote-plan", "deploy", "deploy-plan", "diff", "status", "rollback", "rollback-plan", "history", "reconcile", "retire", "logs",
                 "preview-plan", "preview", "previews", "preview-list", "preview-create", "preview-status", "preview-cleanup",
-                "promote", "promote-status", "promote-reconcile"]), "App action; promote obtains and verifies its plan before one mutation request"),
+                "preview-reconcile", "promote", "promote-status", "promote-reconcile"]), "App action; promote obtains and verifies its plan before one mutation request"),
             kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource"]), "[generate] Scaffold kind"),
             template: optional(stringEnum(["minimal", "http", "command", "edge"]), "[init] Minimal application by default; explicit http/command/edge recipes"),
             name: optional(Type.String(), "[init/generate] Project or object name"),

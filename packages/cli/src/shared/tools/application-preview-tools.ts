@@ -7,7 +7,7 @@ import { ApplicationIdSchema, ApplicationReleaseIdSchema, ApplicationConfigurati
 import { releaseControlFailure, releaseControlMutationFailure, releaseControlSuccess } from "./release-control-response";
 
 export const APPLICATION_PREVIEW_ACTIONS = [
-  "get_preview_plan", "create_preview", "list_previews", "get_preview", "cleanup_preview",
+  "get_preview_plan", "create_preview", "list_previews", "get_preview", "reconcile_preview", "cleanup_preview",
 ] as const;
 
 const previewIdSchema = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$" });
@@ -77,6 +77,7 @@ const actionFields: Record<string, readonly string[]> = {
   create_preview: ["release_id", "configuration_id", "data_mode", "branch_name", "ttl_seconds", "wait", "timeout_seconds"],
   list_previews: [],
   get_preview: ["preview_id", "wait", "timeout_seconds"],
+  reconcile_preview: ["preview_id"],
   cleanup_preview: ["preview_id"],
 };
 
@@ -222,9 +223,10 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
   const identity = { project_ref: ref, application_id: id, environment_id: environment };
   const applicationPath = `/v1/projects/${project}/applications/${encodeURIComponent(id)}`;
   const path = `${applicationPath}/environments/${encodeURIComponent(environment)}`;
-  const previewId = action === "get_preview" || action === "cleanup_preview" ? required(args, "preview_id") : undefined;
-  const mutation = action === "create_preview" || action === "cleanup_preview";
-  // GET 状态查询会恢复服务端编排，不能套用普通只读 GET 的自动重试。
+  const previewId = action === "get_preview" || action === "reconcile_preview" || action === "cleanup_preview"
+    ? required(args, "preview_id") : undefined;
+  const mutation = action === "create_preview" || action === "reconcile_preview" || action === "cleanup_preview";
+  // Preview status is read-only; explicit reconciliation is the only resume operation.
   const requestBudget = startedAt === undefined ? 120_000 : Math.min(120_000, timeoutSeconds! * 1000);
   const options = {
     timeoutMs: requestBudget, maxJsonBytes: 1_048_576, responseTimeoutMs: requestBudget, retry: false,
@@ -261,7 +263,9 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
     if (!Value.Check(previewIdSchema, previewId)) throw new Error("Invalid preview ID");
     result = action === "cleanup_preview"
       ? await http.deleteReleaseMutation(`${path}/previews/${previewId}`)
-      : await http.get(`${path}/previews/${previewId}`, options);
+      : action === "reconcile_preview"
+        ? await http.post(`${path}/previews/${previewId}/reconcile`, {}, options)
+        : await http.get(`${path}/previews/${previewId}`, options);
   } else {
     throw new Error("Unknown preview action");
   }
@@ -269,7 +273,8 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
     ...identity, ...(previewId ? { preview_id: previewId } : {}),
     ...(releaseId ? { source_release_id: releaseId } : {}),
     reconciliation: previewId
-      ? { action: "get_preview", ref, id, environment_id: environment, preview_id: previewId }
+      ? { action: action === "reconcile_preview" ? "reconcile_preview" : "get_preview",
+          ref, id, environment_id: environment, preview_id: previewId }
       : { action: "list_previews", ref, id, environment_id: environment },
   };
   if (!result.ok) return mutation

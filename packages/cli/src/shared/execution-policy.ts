@@ -12,8 +12,8 @@ interface ModulePolicy {
 
 const ACTION_POLICY: Record<string, ModulePolicy> = {
     deploy: { write: ["deploy"] },
-    applications: { read: ["list_releases", "get_release", "get_runtime", "get_deployment_evidence", "get_configuration", "get_release_transfer_plan", "get_promotion_plan", "get_rollback_snapshot", "get_history", "get_deploy_plan", "get_promotion_status", "get_preview_plan", "logs"],
-        write: ["upload_release", "put_configuration", "transfer_release", "promote_application", "reconcile_promotion", "create_preview", "list_previews", "get_preview", "cleanup_preview", "activate_release", "deploy_release", "rollback_release", "reconcile_activation", "retire_activation"] },
+    applications: { read: ["list_releases", "get_release", "get_runtime", "get_deployment_evidence", "get_configuration", "get_release_transfer_plan", "get_promotion_plan", "get_rollback_snapshot", "get_history", "get_deploy_plan", "logs", "get_preview_plan", "list_previews", "get_preview"],
+        write: ["upload_release", "put_configuration", "transfer_release", "promote_application", "reconcile_promotion", "create_preview", "reconcile_preview", "cleanup_preview", "activate_release", "deploy_release", "rollback_release", "reconcile_activation", "retire_activation"] },
     project: {
         read: ["get", "endpoints", "health", "logs", "api_keys", "settings", "tasks", "task_detail", "task_stats", "dlq", "background_settings"],
         write: ["pause", "restore", "task_cancel", "task_retry", "update_background_settings"],
@@ -83,8 +83,8 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     ai: { local: ["show_skill", "install_skill"] },
     app: {
         local: ["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix", "plan", "build"],
-        read: ["status", "logs", "transfer-plan", "promote-plan", "rollback-plan", "history", "deploy-plan", "diff", "promote-status", "preview-plan"],
-        write: ["upload", "configure", "transfer", "promote", "promote-reconcile", "deploy", "rollback", "reconcile", "retire", "preview", "previews", "preview-list", "preview-create", "preview-status", "preview-cleanup"],
+        read: ["status", "logs", "transfer-plan", "promote-plan", "rollback-plan", "history", "deploy-plan", "diff", "promote-status", "preview-plan", "previews", "preview-list", "preview-status"],
+        write: ["upload", "configure", "transfer", "promote", "promote-reconcile", "deploy", "rollback", "reconcile", "retire", "preview", "preview-create", "preview-reconcile", "preview-cleanup"],
     },
     db: {
         local: ["context", "lint", "explain", "diff", "role_sql"],
