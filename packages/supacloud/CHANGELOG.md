@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.16.0](https://github.com/vibeunion/supacloud/compare/supacloud-v0.15.7...supacloud-v0.16.0) (2026-10-11)
+
+
+### Features
+
+* **cli:** make supacloud the one-command deploy entrypoint ([#1817](https://github.com/vibeunion/supacloud/issues/1817)) ([4be5da5](https://github.com/vibeunion/supacloud/commit/4be5da5a9284220610474ca290c708ce982d51bf))
+
+
+### Bug Fixes
+
+* **supacloud:** sync published CLI dependencies ([#1814](https://github.com/vibeunion/supacloud/issues/1814)) ([734b53b](https://github.com/vibeunion/supacloud/commit/734b53bb1af4466e855e04643d35abf3ac32bea4))
+
 ## [0.15.7](https://github.com/vibeunion/supacloud/compare/supacloud-v0.15.6...supacloud-v0.15.7) (2026-10-11)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.44.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.43.1...compiler-v0.44.0) (2026-10-11)
+
+
+### Features
+
+* **cli:** make supacloud the one-command deploy entrypoint ([#1817](https://github.com/vibeunion/supacloud/issues/1817)) ([4be5da5](https://github.com/vibeunion/supacloud/commit/4be5da5a9284220610474ca290c708ce982d51bf))
+
 ## [0.43.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.43.0...compiler-v0.43.1) (2026-10-11)
 
 
