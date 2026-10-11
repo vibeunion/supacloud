@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.106.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.105.0...management-api-v0.106.0) (2026-10-11)
+
+
+### Features
+
+* **app:** execute and reconcile fenced application promotions ([#1788](https://github.com/vibeunion/supacloud/issues/1788)) ([ebf9f42](https://github.com/vibeunion/supacloud/commit/ebf9f423330d129c122f247b51a71c7553330f4a))
+
 ## [0.105.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.104.0...management-api-v0.105.0) (2026-10-11)
 
 
