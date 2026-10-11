@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.109.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.109.1...management-api-v0.109.2) (2026-10-11)
+
+
+### Bug Fixes
+
+* **management-api:** resolve function preflight tenants from host ([4f47210](https://github.com/vibeunion/supacloud/commit/4f47210eb5dcf878ab3cc708cf67d5751a21614d))
+
 ## [0.109.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.109.0...management-api-v0.109.1) (2026-10-11)
 
 
