@@ -1514,6 +1514,11 @@ async function bootstrap() {
       await import("./workers/branch-replacement-recovery.worker");
     startBranchReplacementRecoveryWorker();
 
+    const { applicationPreviews } = await import("./routes");
+    const { startApplicationPreviewCleanupWorker } =
+      await import("./workers/application-preview-cleanup.worker");
+    startApplicationPreviewCleanupWorker(applicationPreviews);
+
     const { startFrontendReleaseRecoveryWorker } =
       await import("./workers/frontend-release-recovery.worker");
     startFrontendReleaseRecoveryWorker();
@@ -1600,6 +1605,9 @@ export function startManagementApi(): void {
       const { stopBranchReplacementRecoveryWorker } =
         await import("./workers/branch-replacement-recovery.worker");
       stopBranchReplacementRecoveryWorker();
+      const { stopApplicationPreviewCleanupWorker } =
+        await import("./workers/application-preview-cleanup.worker");
+      await stopApplicationPreviewCleanupWorker();
       const { stopFrontendReleaseRecoveryWorker } =
         await import("./workers/frontend-release-recovery.worker");
       stopFrontendReleaseRecoveryWorker();

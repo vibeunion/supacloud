@@ -6,7 +6,7 @@ import {
   parseApplicationConfigurationWrite, parseApplicationConfigurationView,
   parseDeploymentEvidence,
   parseApplicationActivationHistory, parseApplicationHistoryCursor, applicationHistoryPositionBefore,
-  type ApplicationReleaseRecord,
+  parseApplicationDeployPlan, type ApplicationDeployPlan, type ApplicationReleaseRecord,
 } from "@supacloud/delivery";
 import {
   ApplicationIdSchema, ApplicationReleaseIdSchema, ApplicationReleaseRecordSchema,
@@ -22,24 +22,26 @@ import { registerTool, type ToolServer } from "../tool-server";
 import {
   releaseControlFailure, releaseControlMutationFailure, releaseControlSuccess, type ReleaseControlToolResponse,
 } from "./release-control-response";
+import { APPLICATION_PREVIEW_ACTIONS, APPLICATION_PREVIEW_FIELDS, applicationPreviewAction } from "./application-preview-tools";
 
 export const APPLICATION_TOOL_SCHEMA = {
   action: withDescription(stringEnum([
     "list_releases", "get_release", "upload_release", "get_runtime", "get_deployment_evidence",
-    "get_configuration", "put_configuration",
+    "get_configuration", "put_configuration", "get_deploy_plan", "deploy_release",
     "activate_release", "rollback_release", "get_rollback_snapshot", "get_history", "reconcile_activation", "retire_activation",
+    ...APPLICATION_PREVIEW_ACTIONS,
     "logs",
   ]), "Action"),
   ref: withDescription(Type.String(), "Project ref"),
   id: withDescription(ApplicationIdSchema, "Application ID"),
-  environment_id: optional(withDescription(ApplicationIdSchema, "[get_runtime/get_configuration/put_configuration/get_rollback_snapshot/rollback_release/get_history] Environment ID")),
-  configuration_id: optional(ApplicationConfigurationIdSchema, "[get_configuration/activate_release/rollback_release] Immutable revision; required for explicit activation"),
-  activation_id: optional(ApplicationActivationIdSchema, "[activate_release/reconcile_activation/retire_activation/rollback_release] Explicit stable activation ID; generated for rollback if omitted"),
+  environment_id: optional(withDescription(ApplicationIdSchema, "[get_runtime/get_configuration/put_configuration/get_deploy_plan/deploy_release/get_rollback_snapshot/rollback_release/get_history] Environment ID")),
+  configuration_id: optional(ApplicationConfigurationIdSchema, "[get_configuration/get_deploy_plan/deploy_release/activate_release/rollback_release/get_history] Immutable revision; required for deployment"),
+  activation_id: optional(ApplicationActivationIdSchema, "[deploy_release/activate_release/reconcile_activation/retire_activation/rollback_release/get_history] Stable activation ID; generated for automatic deployment/rollback if omitted"),
   expected_activation_id: optional(Type.Union([ApplicationActivationIdSchema, Type.Null(), Type.Literal("absent")]),
-    "[activate_release/rollback_release] Current activation ID, or absent for first activation; selected by platform for default rollback"),
+    "[deploy_release/activate_release/rollback_release] Current activation ID, or absent for first activation; selected from verified plan for automatic deployment"),
   configuration_path: optional(Type.String(), "[put_configuration] Local configuration write JSON including revision and expected revision"),
   manifest_path: optional(Type.String(), "[upload_release] Local delivery.manifest.json"),
-  release_id: optional(ApplicationReleaseIdSchema, "[get_release/activate_release/reconcile_activation/rollback_release] Immutable application release ID; platform selects previous for default rollback"),
+  release_id: optional(ApplicationReleaseIdSchema, "[get_release/get_deploy_plan/deploy_release/activate_release/reconcile_activation/rollback_release] Immutable application release ID; platform selects previous for default rollback"),
   cursor: optional(Type.Union([ApplicationReleaseIdSchema, ApplicationActivationHistoryCursorSchema]), "[list_releases/get_history] Returned page cursor"),
   limit: optional(Type.Integer({ minimum: 1, maximum: 100 }), "[list_releases/get_history] Page size, default 50/20"),
   offset: optional(Type.Integer({ minimum: 0, maximum: 1_000_000 }), "[logs] Result offset"),
@@ -47,6 +49,7 @@ export const APPLICATION_TOOL_SCHEMA = {
   search: optional(Type.String(), "[logs] Full-text log filter"),
   start: optional(Type.String(), "[logs] ISO start timestamp"),
   end: optional(Type.String(), "[logs] ISO end timestamp"),
+  ...APPLICATION_PREVIEW_FIELDS,
 };
 const responseSchema = Type.Object({
   project_ref: Type.String(), application_id: ApplicationIdSchema, release: ApplicationReleaseRecordSchema,
@@ -67,6 +70,68 @@ function boundRelease(value: unknown, ref: string, id: string): ApplicationRelea
   const release = parseApplicationReleaseRecord(value);
   if (release.project_ref !== ref || release.application_id !== id) throw new Error("Unbound application release");
   return release;
+}
+
+async function readDeployPlan(http: HttpTransport, args: Record<string, unknown>, project: string) {
+  const ref = text(args, "ref"), id = text(args, "id"), environmentId = text(args, "environment_id");
+  const releaseId = text(args, "release_id"), configurationId = text(args, "configuration_id");
+  if (!Value.Check(ApplicationIdSchema, environmentId) || !Value.Check(ApplicationReleaseIdSchema, releaseId)
+    || !Value.Check(ApplicationConfigurationIdSchema, configurationId)) throw new Error("Invalid deployment plan identity");
+  const identity = { project_ref: ref, application_id: id, environment_id: environmentId,
+    release_id: releaseId, configuration_id: configurationId };
+  const query = new URLSearchParams({ release_id: releaseId, configuration_id: configurationId });
+  const response = await http.get(
+    `/v1/projects/${project}/applications/${encodeURIComponent(id)}/environments/${encodeURIComponent(environmentId)}/deploy-plan?${query}`,
+    { maxJsonBytes: 65_536, responseTimeoutMs: 30_000 },
+  );
+  const operation = `applications.${text(args, "action")}`;
+  if (!response.ok) return { failure: releaseControlFailure(operation, "HTTP_ERROR",
+    response.transportError ? null : response.status, identity) };
+  let plan: ApplicationDeployPlan;
+  try {
+    if (response.status !== 200) throw new Error("Incomplete deployment plan response");
+    plan = parseApplicationDeployPlan(response.data);
+    if (plan.project_ref !== ref || plan.application_id !== id || plan.environment_id !== environmentId
+      || plan.candidate.release_id !== releaseId || plan.candidate.configuration_id !== configurationId) throw new Error();
+  } catch { return { failure: releaseControlFailure(operation, "INVALID_RESPONSE", response.status, identity) }; }
+  return { plan, identity };
+}
+
+async function deployAction(http: HttpTransport, args: Record<string, unknown>, project: string) {
+  const activationId = args["activation_id"], expected = args["expected_activation_id"];
+  if (activationId !== undefined && !Value.Check(ApplicationActivationIdSchema, activationId)) {
+    throw new Error("Invalid application activation ID");
+  }
+  if (expected !== undefined && expected !== null && expected !== "absent"
+    && !Value.Check(ApplicationActivationIdSchema, expected)) throw new Error("Invalid expected activation ID");
+  // 显式重试保留原请求身份和 CAS，不重新规划，不重放未知结果。
+  if (activationId !== undefined && expected !== undefined) {
+    return activationAction(http, { ...args, action: "activate_release" }, project, {
+      operation: "applications.deploy_release", configuration_id: args["configuration_id"],
+      expected_activation_id: expected === "absent" ? null : expected,
+    });
+  }
+  const observed = await readDeployPlan(http, args, project);
+  if (observed.failure) return observed.failure;
+  const { plan, identity } = observed;
+  if (expected !== undefined && (expected === "absent" ? null : expected) !== plan.expected_activation_id) {
+    return releaseControlFailure("applications.deploy_release", "HTTP_ERROR", 409, {
+      ...identity, reason: "EXPECTED_ACTIVATION_CONFLICT", expected_activation_id: plan.expected_activation_id,
+    });
+  }
+  if (plan.action === "no-op") return releaseControlSuccess("applications.deploy_release", {
+    ...identity, no_op: true, execution_performed: false,
+    activation_id: plan.current!.activation_id, expected_activation_id: plan.expected_activation_id, plan,
+    ...(activationId === undefined ? {} : { requested_activation_id: activationId }),
+  });
+  const selectedId = activationId ?? crypto.randomUUID();
+  if (selectedId === plan.expected_activation_id) throw new Error("Deployment requires a new activation ID");
+  return activationAction(http, {
+    ...args, action: "activate_release", activation_id: selectedId, expected_activation_id: plan.expected_activation_id,
+  }, project, {
+    operation: "applications.deploy_release", configuration_id: args["configuration_id"],
+    expected_activation_id: plan.expected_activation_id,
+  });
 }
 
 async function configurationAction(http: HttpTransport, args: Record<string, unknown>, project: string) {
@@ -114,7 +179,7 @@ async function configurationAction(http: HttpTransport, args: Record<string, unk
 }
 
 async function activationAction(http: HttpTransport, args: Record<string, unknown>, project: string,
-  rollback?: { configuration_id: unknown; expected_activation_id: unknown }) {
+  selection?: { operation: string; configuration_id: unknown; expected_activation_id: unknown }) {
   const action = text(args, "action"), ref = text(args, "ref"), id = text(args, "id");
   const environmentId = text(args, "environment_id"), activationId = text(args, "activation_id");
   const releaseId = args["release_id"] === undefined ? undefined : text(args, "release_id");
@@ -126,13 +191,16 @@ async function activationAction(http: HttpTransport, args: Record<string, unknow
     || (action !== "retire_activation" && !Value.Check(ApplicationReleaseIdSchema, releaseId))) {
     throw new Error("Invalid application activation identity");
   }
-  const operation = rollback ? "applications.rollback_release" : `applications.${action}`;
+  const operation = selection?.operation ?? `applications.${action}`;
   const path = `/v1/projects/${project}/applications/${encodeURIComponent(id)}/environments/${encodeURIComponent(environmentId)}/activations`;
   const identity = {
     project_ref: ref, application_id: id, environment_id: environmentId,
     activation_id: activationId, ...(releaseId ? { release_id: releaseId } : {}),
   };
-  const safeState = { ...identity, ...(rollback ?? {}) };
+  const selectedState = selection ? {
+    configuration_id: selection.configuration_id, expected_activation_id: selection.expected_activation_id,
+  } : {};
+  const safeState = { ...identity, ...selectedState };
   let body: unknown = {};
   if (action === "activate_release") {
     body = {
@@ -147,6 +215,9 @@ async function activationAction(http: HttpTransport, args: Record<string, unknow
   const result = await http.post(endpoint, body,
     { timeoutMs: 120_000, maxJsonBytes: 65_536, responseTimeoutMs: 30_000 });
   if (!result.ok) return releaseControlMutationFailure(operation, result, safeState);
+  // These synchronous mutation contracts only acknowledge completion with HTTP 200.
+  // An accepted/partial response is not a completed activation, even with valid JSON.
+  if (result.status !== 200) return releaseControlFailure(operation, "OUTCOME_UNKNOWN", result.status, safeState);
   if (action === "retire_activation") {
     if (!Value.Check(ApplicationActivationRetirementResultSchema, result.data)
       || Object.entries(identity).some(([key, value]) => Reflect.get(result.data as object, key) !== value)) {
@@ -159,7 +230,7 @@ async function activationAction(http: HttpTransport, args: Record<string, unknow
     || (action === "reconcile_activation" && !result.data.replayed)) {
     return releaseControlFailure(operation, "OUTCOME_UNKNOWN", result.status, safeState);
   }
-  return releaseControlSuccess(operation, { ...result.data, ...(rollback ?? {}) });
+  return releaseControlSuccess(operation, { ...result.data, ...selectedState });
 }
 
 async function rollbackAction(http: HttpTransport, args: Record<string, unknown>, project: string) {
@@ -184,7 +255,7 @@ async function rollbackAction(http: HttpTransport, args: Record<string, unknown>
     if (!response.ok) return releaseControlFailure(operation, "HTTP_ERROR",
       response.transportError ? null : response.status, identity);
     const snapshot = response.data;
-    if (!Value.Check(ApplicationRollbackSnapshotSchema, snapshot)
+    if (response.status !== 200 || !Value.Check(ApplicationRollbackSnapshotSchema, snapshot)
       || snapshot.project_ref !== ref || snapshot.application_id !== id || snapshot.environment_id !== environmentId
       || (snapshot.previous !== null && (snapshot.active === null
         || snapshot.previous.activation_id === snapshot.active.activation_id))) {
@@ -208,6 +279,7 @@ async function rollbackAction(http: HttpTransport, args: Record<string, unknown>
     ...args, action: "activate_release", activation_id: activationId,
     release_id: releaseId, configuration_id: configurationId, expected_activation_id: expectedActivationId,
   }, project, {
+    operation: "applications.rollback_release",
     configuration_id: configurationId,
     expected_activation_id: expectedActivationId === "absent" ? null : expectedActivationId,
   });
@@ -250,10 +322,18 @@ export function registerApplicationTools(server: ToolServer, http: HttpTransport
       if (!Value.Check(ApplicationIdSchema, id)) throw new Error("Invalid application ID");
       const path = `/v1/projects/${project}/applications/${encodeURIComponent(id)}/releases`;
       const operation = `applications.${action}`;
+      if (action === "get_deploy_plan") {
+        const observed = await readDeployPlan(http, args, project);
+        return observed.failure ?? releaseControlSuccess(operation, { ...observed.identity, plan: observed.plan });
+      }
+      if (action === "deploy_release") return deployAction(http, args, project);
       if (action === "rollback_release" || action === "get_rollback_snapshot") {
         return rollbackAction(http, args, project);
       }
       if (action === "get_history") return historyAction(http, args, project);
+      if (APPLICATION_PREVIEW_ACTIONS.some(value => value === action)) {
+        return applicationPreviewAction(http, args, project);
+      }
       if (action === "activate_release" || action === "reconcile_activation" || action === "retire_activation") {
         return activationAction(http, args, project);
       }

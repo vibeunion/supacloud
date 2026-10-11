@@ -4,6 +4,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { ApplicationActivationHistorySchema, parseApplicationActivationHistory } from "@supacloud/delivery";
+import { parseApplicationDeployPlan } from "@supacloud/delivery";
 import {
     applyDiagnosticFix,
     buildDeliveryProject,
@@ -37,7 +38,9 @@ import { applyScaffoldWrites, planScaffoldWrites, scaffoldPath, ScaffoldError, t
 const REMOTE_APP_ACTIONS = {
     upload: "upload_release",
     configure: "put_configuration",
-    deploy: "activate_release",
+    deploy: "deploy_release",
+    "deploy-plan": "get_deploy_plan",
+    diff: "get_deploy_plan",
     status: "get_runtime",
     rollback: "rollback_release",
     "rollback-plan": "get_rollback_snapshot",
@@ -45,6 +48,11 @@ const REMOTE_APP_ACTIONS = {
     reconcile: "reconcile_activation",
     retire: "retire_activation",
     logs: "logs",
+    "preview-plan": "get_preview_plan",
+    preview: "create_preview",
+    previews: "list_previews",
+    "preview-status": "get_preview",
+    "preview-cleanup": "cleanup_preview",
 } as const;
 
 export interface AppToolOptions {
@@ -57,15 +65,22 @@ export interface AppToolOptions {
 }
 
 const REMOTE_APP_DESCRIPTIONS: Record<string, string> = {
-    ref: "[upload/configure/deploy/status/rollback/rollback-plan/history/reconcile/retire] Project ref (defaults to context)",
-    id: "[upload/configure/deploy/status/rollback/rollback-plan/history/reconcile/retire] Application ID",
-    environment_id: "[configure/deploy/status/rollback/rollback-plan/history/reconcile/retire] Environment ID",
-    configuration_id: "[deploy/rollback] Required for deploy/explicit rollback; platform selects for default rollback",
-    activation_id: "[deploy/rollback/reconcile/retire] Required explicit activation ID; generated for rollback if omitted",
-    expected_activation_id: "[deploy/rollback] Required for deploy/explicit rollback; platform selects current CAS for default rollback",
+    ref: "[upload/configure/deploy/deploy-plan/diff/status/rollback/rollback-plan/history/reconcile/retire/preview-plan/preview/previews/preview-status/preview-cleanup] Project ref (defaults to context)",
+    id: "[upload/configure/deploy/deploy-plan/diff/status/rollback/rollback-plan/history/reconcile/retire/preview-plan/preview/previews/preview-status/preview-cleanup] Application ID",
+    environment_id: "[configure/deploy/deploy-plan/diff/status/rollback/rollback-plan/history/reconcile/retire/preview-plan/preview/previews/preview-status/preview-cleanup] Environment ID",
+    configuration_id: "[deploy/deploy-plan/diff/rollback/preview] Required for deployment/preview; platform selects for default rollback",
+    activation_id: "[deploy/rollback/reconcile/retire] Stable activation ID; auto-generated for deploy/rollback if omitted",
+    expected_activation_id: "[deploy/rollback] Auto-selected from verified state; supply with activation_id for an exact retry",
     configuration_path: "[configure] Configuration write JSON including revision and expected revision",
     manifest_path: "[upload] Local delivery.manifest.json",
-    release_id: "[deploy/rollback/reconcile] Required for deploy/reconcile; defaults to journal-selected previous for rollback",
+    release_id: "[deploy/deploy-plan/diff/rollback/reconcile/preview-plan/preview] Required for deployment/preview; defaults to journal-selected previous for rollback",
+    preview_id: "[preview-status/preview-cleanup] Preview receipt ID",
+    branch_ref: "[preview-plan] Proposed branch ref; preview assigns its own",
+    branch_name: "[preview] Branch display name",
+    data_mode: "[preview-plan/preview] Default schema_only; full_clone copies rows",
+    ttl_seconds: "[preview-plan/preview] Lifetime from 300 to 604800 seconds; creation defaults to the platform TTL",
+    wait: "[preview/preview-status] Wait for verified readiness of the selected preview",
+    timeout_seconds: "[preview/preview-status] Observation budget with --wait, from 1 to 3600 seconds (default 300)",
     cursor: "[history] Returned page cursor",
     limit: "[history] Page size, default 20 (1-100)",
 };
@@ -91,6 +106,13 @@ export interface AppToolArguments {
     release_id?: string;
     cursor?: string;
     limit?: number;
+    preview_id?: string;
+    branch_ref?: string;
+    branch_name?: string;
+    data_mode?: "schema_only" | "full_clone";
+    ttl_seconds?: number;
+    wait?: boolean;
+    timeout_seconds?: number;
     kind?: "module" | "command" | "query" | "controller" | "job" | "contract" | "resource";
     template?: "minimal" | "http" | "command" | "edge";
     name?: string;
@@ -1111,6 +1133,30 @@ function historyText(result: ToolResult, request: AppToolArguments, projectRef: 
     }
 }
 
+function formatRemoteDeployPlan(result: ToolResult): ToolResult {
+    if (result.isError) return result;
+    try {
+        const payload: unknown = JSON.parse(result.content[0]?.text ?? "");
+        if (!payload || typeof payload !== "object" || !("ok" in payload) || payload.ok !== true
+            || !("plan" in payload)) return result;
+        const plan = parseApplicationDeployPlan(payload.plan);
+        const names = (values: string[], prefix: string) => values.map(name => `${prefix}${name}`);
+        const targets = [
+            ...names(plan.changes.targets.added, "+"), ...names(plan.changes.targets.removed, "-"),
+            ...names(plan.changes.targets.changed, "~"),
+        ];
+        return textResult([
+            `${plan.project_ref}/${plan.application_id} [${plan.environment_id}]: ${plan.action === "no-op" ? "No changes" : "Activation required"}`,
+            `Release: ${plan.candidate.release_id} (${plan.changes.release ? "changed" : "unchanged"})`,
+            `Configuration: ${plan.candidate.configuration_id} (${plan.changes.configuration ? "changed" : "unchanged"})`,
+            `Targets: ${targets.length ? targets.join(", ") : "unchanged"}`,
+            `Migrations: ${!plan.migrations.ledger_compatible ? "ledger conflict" : plan.migrations.project_migrations_applied ? "applied" : "pending"}`,
+            `Provisioning: ${plan.migrations.operator_provisioning}`,
+            `Expected activation: ${plan.expected_activation_id ?? "absent"}`,
+        ].join("\n"));
+    } catch { return result; }
+}
+
 export async function runAppTool(request: AppToolArguments, options: AppToolOptions = {}): Promise<ToolResult> {
     if ((request.dry_run !== undefined && request["dry-run"] !== undefined)
         || (request.register_in !== undefined && request["register-in"] !== undefined)
@@ -1136,17 +1182,18 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
         const delegate = options.getApplications?.();
         if (!delegate) return textResult("App remote actions require a Management API context.", true);
         const action = REMOTE_APP_ACTIONS[request.action as keyof typeof REMOTE_APP_ACTIONS];
-        const { format: _format, json: _json, ...historyRequest } = request;
+        const { format, json, ...remoteRequest } = request;
         const args = {
-            ...(request.action === "history" ? historyRequest : request), action, ref: request.ref ?? options.projectRef,
+            ...remoteRequest, action, ref: request.ref ?? options.projectRef,
         };
         validateToolArguments(APPLICATION_TOOL_SCHEMA, args);
         const result = await delegate(args);
-        if (request.action === "history" && request.format !== "json" && request.json !== true) {
+        if (request.action === "history" && format !== "json" && json !== true) {
             return historyText(result, request, args.ref);
         }
-        // Preserve the original receipt, including unknown outcomes. Never infer a rollback or retry.
-        return result;
+        // Preserve activation receipts and unknown outcomes; format only read-only plans.
+        return (request.action === "deploy-plan" || request.action === "diff") && format !== "json"
+            ? formatRemoteDeployPlan(result) : result;
     }
     switch (request.action) {
         case "verify-plan": {
@@ -1192,7 +1239,8 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
         {
             ...REMOTE_APP_SCHEMA,
             action: withDescription(stringEnum(["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix",
-                "plan", "build", "upload", "configure", "deploy", "status", "rollback", "rollback-plan", "history", "reconcile", "retire", "logs"]), "App action; upload/configure only prepare, history is read-only, rollback activates the journal-selected previous release without schema downgrade"),
+                "plan", "build", "upload", "configure", "deploy", "deploy-plan", "diff", "status", "rollback", "rollback-plan", "history", "reconcile", "retire", "logs",
+                "preview-plan", "preview", "previews", "preview-status", "preview-cleanup"]), "App action; local plan is topology-only, deploy-plan/diff observe remote state, deploy skips verified no-op, rollback never downgrades schema"),
             kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource"]), "[generate] Scaffold kind"),
             template: optional(stringEnum(["minimal", "http", "command", "edge"]), "[init] Minimal application by default; explicit http/command/edge recipes"),
             name: optional(Type.String(), "[init/generate] Project or object name"),
@@ -1207,7 +1255,7 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             include: optional(Type.String(), "[dev/compile/check] Comma-separated glob patterns for source files"),
             out_dir: optional(Type.String(), "[dev/compile/plan/build/export-tools] Output directory (default: configured outDir)"),
             strict: optional(Type.Boolean(), "[dev/compile/check] Promote warnings to errors"),
-            format: optional(stringEnum(["text", "json"]), "[dev/generate/compile/check/plan/graph/export-tools/history] Output format (default: text)"),
+            format: optional(stringEnum(["text", "json"]), "[dev/generate/compile/check/plan/deploy-plan/diff/history/graph/export-tools] Output format (default: text)"),
             json: optional(Type.Literal(true), "[history] Return the validated JSON receipt"),
             profile: optional(stringEnum(["fast", "integration"]), "[dev] Run dev or dev:integration; integration verifies an explicit loopback database"),
             once: optional(Type.Boolean(), "[dev] Validate and report once without watching"),

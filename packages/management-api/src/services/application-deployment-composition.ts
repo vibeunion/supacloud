@@ -19,6 +19,10 @@ import { ApplicationRuntimeFiles } from "./application-runtime-files";
 import { createApplicationCompatibilityVerifier } from "./application-compatibility";
 import { createApplicationWorkerRetirementChecks } from "./application-worker-retirement";
 import { ApplicationPreviewService } from "./application-preview.service";
+import { createApplicationPreviewCleanupChecks, previewBranches, previewSecrets } from "./application-preview-cleanup";
+import { withApplicationProjectLifecycle } from "./application-lifecycle-lock";
+import { StorageService } from "./storage.service";
+import { createApplicationPreviewReadiness } from "./application-preview-readiness";
 
 type CompatibilityInput = Parameters<
   NonNullable<ApplicationDeploymentDependencies["verifyCompatibility"]>
@@ -115,6 +119,7 @@ export function createDefaultApplicationRouteComposition(
   });
 
   const dependencies: ApplicationDeploymentDependencies = {
+    withProjectLifecycle: withApplicationProjectLifecycle,
     verifyCompatibility: verifyCompatibility === undefined ? verifier : async input => {
       await verifyApplicationPlatformAvailability(input);
       await verifier(input);
@@ -140,13 +145,19 @@ export function createDefaultApplicationRouteComposition(
   const previews = new ApplicationPreviewService({
     releases: storage,
     configurations,
+    smokeTest: createApplicationPreviewReadiness({ active, readiness }),
+    branches: previewBranches,
+    cleanupChecks: createApplicationPreviewCleanupChecks(active, deployment),
+    storage: {
+      createBucket: (ref) => StorageService.createBucket(ref),
+    },
+    secrets: previewSecrets,
     activate: async input => {
-      const activationId = crypto.randomUUID();
       const result = await deployment.activateConfigured({
         runtime: {
           release: await storage.readRelease(input.branchRef, input.applicationId, input.releaseId),
           environmentId: input.environmentId,
-          activationId,
+          activationId: input.activationId,
         },
         configurationId: input.configurationId,
         expectedActivationId: null,
@@ -167,5 +178,5 @@ export function createDefaultApplicationRouteComposition(
     previews,
     retirementVerifier: dependencies.retirementVerifier,
   });
-  return { deployment, routes };
+  return { deployment, routes, previews };
 }

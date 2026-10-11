@@ -872,6 +872,23 @@ class BranchService {
     await projectRepository.softDelete(branchRef);
   }
 
+  /** Preview callers hold admission and lifecycle locks and verify ownership first. */
+  async deletePreviewBranch(branchRef: string): Promise<void> {
+    if (!/^pv[a-f0-9]{18}$/.test(branchRef)) throw new Error("APPLICATION_PREVIEW_CLEANUP_IDENTITY_MISMATCH");
+    await withProjectMigrationLocks({ projectRefs: [branchRef] }, async () => {
+      await branchReplacementJournal.assertInactive([branchRef]);
+      await tenantRuntimeService.stopRuntime(branchRef);
+      if ((await tenantRuntimeService.checkStatus(branchRef)).status !== "stopped") {
+        throw new Error("APPLICATION_PREVIEW_CLEANUP_RUNTIME_UNCONFIRMED");
+      }
+      const dbName = generateDbName(branchRef);
+      await removeProjectDbCache(dbName);
+      await sql.unsafe(`DROP DATABASE IF EXISTS ${this.identQuote(dbName)}`);
+      if (await this.databaseExists(dbName)) throw new Error("APPLICATION_PREVIEW_CLEANUP_BRANCH_UNCONFIRMED");
+      await projectRepository.softDelete(branchRef);
+    });
+  }
+
   async replaceParentDatabaseFromBranch(input: {
     parentRef: string;
     branchRef: string;
