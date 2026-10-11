@@ -242,7 +242,7 @@ jobs:
             typecheck_script: |
               bun run typecheck
             test_script: |
-              bun test src --parallel=2 --isolate --timings "$RUNNER_TEMP/cli-test-timings.json" --update-timings
+              bun test src --parallel=3 --timeout=10000 --isolate --timings "$RUNNER_TEMP/cli-test-timings.json" --update-timings
             build_script: |
               bun run build
             acceptance_script: |
@@ -304,7 +304,7 @@ jobs:
               bun run typecheck
               bun run typecheck:test
             test_script: |
-              bun test --parallel=2 --isolate --timings "$RUNNER_TEMP/compiler-test-timings.json" --update-timings
+              bun test --parallel=3 --isolate --timings "$RUNNER_TEMP/compiler-test-timings.json" --update-timings
             build_script: |
               bun run build
             acceptance_script: |

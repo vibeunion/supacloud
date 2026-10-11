@@ -17,13 +17,14 @@ const job = workflow.jobs['package-checks'];
 const candidates = job.strategy.matrix.include.filter(entry =>
   ['Project CLI', 'App Compiler'].includes(entry.name));
 
-test('only CLI and Compiler use two isolated workers without reducing test coverage', () => {
+test('CLI and Compiler use three isolated workers without reducing test coverage', () => {
   assert.equal(candidates.length, 2);
   assert.equal(job.strategy['fail-fast'], false);
   for (const entry of candidates) {
     const pattern = entry.name === 'Project CLI' ? ' src' : '';
+    const timeout = entry.name === 'Project CLI' ? ' --timeout=10000' : '';
     assert.equal(entry.test_script.trim(),
-      `bun test${pattern} --parallel=2 --isolate --timings "$RUNNER_TEMP/${entry.test_timings}" --update-timings`);
+      `bun test${pattern} --parallel=3${timeout} --isolate --timings "$RUNNER_TEMP/${entry.test_timings}" --update-timings`);
     assert.match(entry.typecheck_script, /bun run typecheck/);
     assert.match(entry.build_script, /bun run build/);
     assert.match(entry.acceptance_script, /audit_dependencies\.ts/);
