@@ -93,31 +93,32 @@ test("public declarations retain strict callback inference for detached NodeNext
         const setup = `import {registerTool, stringEnum, type ToolServer} from "@supacloud/cli/tool-runtime";
 const server: ToolServer = {tool() {}};
 const schema = {action: stringEnum(["read"])};`;
-        const check = (source: string): readonly ts.Diagnostic[] => {
-            const host = ts.createCompilerHost({});
-            const read = host.readFile;
-            host.readFile = path => path === consumer ? source : read(path);
-            const program = ts.createProgram([consumer], {
-                target: ts.ScriptTarget.ES2022,
-                module: ts.ModuleKind.NodeNext,
-                moduleResolution: ts.ModuleResolutionKind.NodeNext,
-                strict: true,
-                noEmit: true,
-                types: [],
-            }, host);
-            return ts.getPreEmitDiagnostics(program);
-        };
-        expect(check(`${setup}
+        const host = ts.createCompilerHost({});
+        const read = host.readFile;
+        const source = `${setup}
 registerTool(server, "read", "", schema, async ({action}) => {
     const exact: "read" = action;
     return {content: [{type: "text", text: exact}]};
-});`).map(diagnostic => diagnostic.messageText)).toEqual([]);
-        expect(check(`${setup}
-registerTool(server, "bad-input", "", schema, async (_args: {action: "write"}) => ({content: []}));`)
-            .some(diagnostic => diagnostic.code === 2345)).toBe(true);
-        expect(check(`${setup}
-registerTool(server, "bad-result", "", schema, async () => ({content: [{type: "image"}]}));`)
-            .some(diagnostic => diagnostic.code === 2322)).toBe(true);
+});
+registerTool(server, "bad-input", "", schema, async (_args: {action: "write"}) => ({content: []}));
+registerTool(server, "bad-result", "", schema, async () => ({content: [{type: "image"}]}));`;
+        host.readFile = path => path === consumer ? source : read(path);
+        const program = ts.createProgram([consumer], {
+            target: ts.ScriptTarget.ES2022,
+            module: ts.ModuleKind.NodeNext,
+            moduleResolution: ts.ModuleResolutionKind.NodeNext,
+            strict: true,
+            noEmit: true,
+            types: [],
+        }, host);
+        const diagnostics = ts.getPreEmitDiagnostics(program);
+        expect(diagnostics.map(diagnostic => diagnostic.code).sort()).toEqual([2322, 2345]);
+        const invalidStart = source.indexOf('registerTool(server, "bad-input"');
+        expect(invalidStart).toBeGreaterThan(0);
+        /* Keep the valid callback in the same program so this remains a real
+         * positive inference check, not only a pair of expected failures. */
+        expect(diagnostics.every(diagnostic =>
+            diagnostic.start === undefined || diagnostic.start >= invalidStart)).toBe(true);
     } finally {
         await rm(root, { recursive: true, force: true });
     }
