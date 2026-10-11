@@ -291,7 +291,13 @@ test("promotion and preview policy permits reads and requires exact production c
     })).not.toThrow();
     expect(() => authorizeExecution("app", { action, ref: "foreign" }, { context })).toThrow("different project");
   }
-  for (const action of ["promote", "promote-reconcile", "preview-list", "preview-create", "preview-status", "preview-cleanup"]) {
+  for (const action of ["preview-list", "preview-status"]) {
+    expect(executionMode("app", action, {})).toBe("read");
+    expect(() => authorizeExecution("app", { action, ref: "production" }, {
+      context: { ...context, readOnly: true },
+    })).not.toThrow();
+  }
+  for (const action of ["promote", "promote-reconcile", "preview-create", "preview-reconcile", "preview-cleanup"]) {
     expect(executionMode("app", action, {})).toBe("write");
     expect(() => authorizeExecution("app", { action, ref: "production" }, { context })).toThrow("confirm-production");
     expect(() => authorizeExecution("app", { action, ref: "production" }, {

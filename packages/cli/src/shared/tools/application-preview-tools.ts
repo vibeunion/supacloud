@@ -1,13 +1,14 @@
+import { randomUUID } from "node:crypto";
 import { Type, type Static } from "typebox";
 import { Value } from "typebox/value";
-import { applicationReleaseId, parseApplicationReleaseRecord } from "@supacloud/delivery";
+import { applicationPreviewBranchRef, applicationReleaseId, parseApplicationReleaseRecord } from "@supacloud/delivery";
 import { optional, stringEnum } from "../schema";
 import type { HttpTransport, HttpResult } from "../transports/http";
 import { ApplicationIdSchema, ApplicationReleaseIdSchema, ApplicationConfigurationIdSchema } from "./application-schemas";
 import { releaseControlFailure, releaseControlMutationFailure, releaseControlSuccess } from "./release-control-response";
 
 export const APPLICATION_PREVIEW_ACTIONS = [
-  "get_preview_plan", "create_preview", "list_previews", "get_preview", "cleanup_preview",
+  "get_preview_plan", "create_preview", "list_previews", "get_preview", "reconcile_preview", "cleanup_preview",
 ] as const;
 
 const previewIdSchema = Type.String({ pattern: "^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$" });
@@ -18,7 +19,7 @@ const timestampSchema = Type.String({
   pattern: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$", maxLength: 24,
 });
 export const APPLICATION_PREVIEW_FIELDS = {
-  preview_id: optional(previewIdSchema, "[get_preview/cleanup_preview] Preview receipt ID"),
+  preview_id: optional(previewIdSchema, "[get_preview/reconcile_preview/cleanup_preview] Preview receipt ID; create/plan may pin a stable ID"),
   branch_ref: optional(branchRefSchema, "[get_preview_plan] Proposed branch ref; create assigns its own"),
   branch_name: optional(Type.String({ minLength: 1, maxLength: 80 }), "[create_preview] Branch display name"),
   data_mode: optional(stringEnum(["schema_only", "full_clone"]), "[get_preview_plan/create_preview] Default schema_only; full_clone copies rows"),
@@ -37,7 +38,7 @@ const receiptSchema = Type.Object({
   preview_id: previewIdSchema, project_ref: branchRefSchema,
   application_id: ApplicationIdSchema, environment_id: ApplicationIdSchema,
   release_id: ApplicationReleaseIdSchema,
-  expires_at: Type.Union([timestampSchema, Type.Null()]),
+  expires_at: Type.Optional(Type.Union([timestampSchema, Type.Null()])),
   status: stringEnum(["planned", "provisioning", "ready", "failed", "cleaned"]),
   resources: Type.Object({
     build_artifact: Type.Object({ status: phase, release_id: ApplicationReleaseIdSchema }, strict),
@@ -73,10 +74,11 @@ const mandatoryChecks = [
 ];
 
 const actionFields: Record<string, readonly string[]> = {
-  get_preview_plan: ["release_id", "branch_ref", "data_mode", "configuration_id", "ttl_seconds"],
-  create_preview: ["release_id", "configuration_id", "data_mode", "branch_name", "ttl_seconds", "wait", "timeout_seconds"],
+  get_preview_plan: ["release_id", "preview_id", "branch_ref", "data_mode", "configuration_id", "ttl_seconds"],
+  create_preview: ["release_id", "preview_id", "configuration_id", "data_mode", "branch_name", "ttl_seconds", "wait", "timeout_seconds"],
   list_previews: [],
   get_preview: ["preview_id", "wait", "timeout_seconds"],
+  reconcile_preview: ["preview_id"],
   cleanup_preview: ["preview_id"],
 };
 
@@ -92,10 +94,10 @@ function receipt(value: unknown, identity: { ref: string; id: string; environmen
     || value.resources.storage_namespace.namespace !== value.resources.database_branch.branch_ref) {
     throw new Error("Invalid preview receipt");
   }
-  if ((value.expires_at !== null && !timestamp(value.expires_at))
+  if ((value.expires_at !== undefined && value.expires_at !== null && !timestamp(value.expires_at))
     || (value.created_at !== undefined && !timestamp(value.created_at))
     || (value.updated_at !== undefined && !timestamp(value.updated_at))
-    || (value.expires_at !== null && value.created_at !== undefined
+    || (value.expires_at !== undefined && value.expires_at !== null && value.created_at !== undefined
       && !Value.Check(ttlSecondsSchema, (Date.parse(value.expires_at) - Date.parse(value.created_at)) / 1000))) {
     throw new Error("Invalid preview expiry");
   }
@@ -222,9 +224,15 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
   const identity = { project_ref: ref, application_id: id, environment_id: environment };
   const applicationPath = `/v1/projects/${project}/applications/${encodeURIComponent(id)}`;
   const path = `${applicationPath}/environments/${encodeURIComponent(environment)}`;
-  const previewId = action === "get_preview" || action === "cleanup_preview" ? required(args, "preview_id") : undefined;
-  const mutation = action === "create_preview" || action === "cleanup_preview";
-  // GET 状态查询会恢复服务端编排，不能套用普通只读 GET 的自动重试。
+  const previewId = action === "get_preview" || action === "reconcile_preview" || action === "cleanup_preview"
+    ? required(args, "preview_id")
+    : action === "create_preview"
+      ? typeof args["preview_id"] === "string" ? required(args, "preview_id") : randomUUID()
+      : action === "get_preview_plan" && typeof args["preview_id"] === "string"
+        ? required(args, "preview_id")
+        : undefined;
+  const mutation = action === "create_preview" || action === "reconcile_preview" || action === "cleanup_preview";
+  // Preview status is read-only; explicit reconciliation is the only resume operation.
   const requestBudget = startedAt === undefined ? 120_000 : Math.min(120_000, timeoutSeconds! * 1000);
   const options = {
     timeoutMs: requestBudget, maxJsonBytes: 1_048_576, responseTimeoutMs: requestBudget, retry: false,
@@ -237,20 +245,30 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
     releaseId = required(args, "release_id");
     if (!Value.Check(ApplicationReleaseIdSchema, releaseId)) throw new Error("Invalid release ID");
     if (action === "get_preview_plan") {
-      const query = new URLSearchParams({ release_id: releaseId, branch_ref: required(args, "branch_ref") });
+      const branchRef = typeof args["branch_ref"] === "string"
+        ? required(args, "branch_ref")
+        : previewId === undefined
+          ? required(args, "branch_ref")
+          : applicationPreviewBranchRef(previewId);
+      const query = new URLSearchParams({ release_id: releaseId, branch_ref: branchRef });
+      if (previewId !== undefined) query.set("preview_id", previewId);
       if (typeof args["data_mode"] === "string") query.set("data_mode", args["data_mode"]);
       if (typeof args["configuration_id"] === "string") query.set("configuration_id", args["configuration_id"]);
       if (args["ttl_seconds"] !== undefined) query.set("ttl_seconds", String(args["ttl_seconds"]));
       result = await http.get(`${path}/preview-plan?${query}`, options);
     } else {
-      const configurationId = required(args, "configuration_id");
-      if (!Value.Check(ApplicationConfigurationIdSchema, configurationId)) throw new Error("Invalid configuration ID");
+      const configurationId = args["configuration_id"];
+      if (configurationId !== undefined && !Value.Check(ApplicationConfigurationIdSchema, configurationId)) {
+        throw new Error("Invalid configuration ID");
+      }
       const source = await sourceManifest(http, applicationPath, ref, id, releaseId);
       if (!source.manifest) return releaseControlFailure(operation, source.result.ok ? "INVALID_RESPONSE" : "HTTP_ERROR",
         source.result.status, { ...identity, release_id: releaseId, configuration_id: configurationId });
       sourceHash = source.manifest;
       result = await http.post(`${path}/previews`, {
-        release_id: releaseId, configuration_id: configurationId, data_mode: args["data_mode"] ?? "schema_only",
+        preview_id: previewId,
+        release_id: releaseId, data_mode: args["data_mode"] ?? "schema_only",
+        ...(configurationId === undefined ? {} : { configuration_id: configurationId }),
         ...(args["branch_name"] === undefined ? {} : { branch_name: args["branch_name"] }),
         ...(args["ttl_seconds"] === undefined ? {} : { ttl_seconds: args["ttl_seconds"] }),
       }, options);
@@ -261,7 +279,9 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
     if (!Value.Check(previewIdSchema, previewId)) throw new Error("Invalid preview ID");
     result = action === "cleanup_preview"
       ? await http.deleteReleaseMutation(`${path}/previews/${previewId}`)
-      : await http.get(`${path}/previews/${previewId}`, options);
+      : action === "reconcile_preview"
+        ? await http.post(`${path}/previews/${previewId}/reconcile`, {}, options)
+        : await http.get(`${path}/previews/${previewId}`, options);
   } else {
     throw new Error("Unknown preview action");
   }
@@ -269,7 +289,8 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
     ...identity, ...(previewId ? { preview_id: previewId } : {}),
     ...(releaseId ? { source_release_id: releaseId } : {}),
     reconciliation: previewId
-      ? { action: "get_preview", ref, id, environment_id: environment, preview_id: previewId }
+      ? { action: action === "reconcile_preview" ? "reconcile_preview" : "get_preview",
+          ref, id, environment_id: environment, preview_id: previewId }
       : { action: "list_previews", ref, id, environment_id: environment },
   };
   if (!result.ok) return mutation
@@ -291,28 +312,44 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
       ref, id, environment, ...(previewId === undefined ? {} : { previewId }),
     });
     if (action === "get_preview_plan") {
-      if (preview.status !== "planned" || preview.release_id !== releaseId
-        || preview.resources.database_branch.branch_ref !== args["branch_ref"]
+      const expectedBranchRef = typeof args["branch_ref"] === "string"
+        ? args["branch_ref"]
+        : previewId === undefined ? undefined : applicationPreviewBranchRef(previewId);
+      if (preview.status !== "planned"
+        || previewId === undefined && preview.release_id !== releaseId
+        || expectedBranchRef === undefined
+        || preview.resources.database_branch.branch_ref !== expectedBranchRef
         || preview.resources.database_branch.data_mode !== (args["data_mode"] ?? "schema_only")
-        || (args["ttl_seconds"] === undefined ? preview.expires_at !== null : preview.expires_at === null)) throw new Error();
+        || (args["ttl_seconds"] === undefined
+          ? preview.expires_at !== null && preview.expires_at !== undefined
+          : preview.expires_at === null || preview.expires_at === undefined)) throw new Error();
     } else {
       if (preview.status === "planned"
-        || preview.resources.database_branch.branch_ref !== `pv${preview.preview_id.replaceAll("-", "").slice(0, 18)}`) throw new Error();
-      if (action === "create_preview" && (preview.release_id !== applicationReleaseId(
+        || preview.resources.database_branch.branch_ref !== applicationPreviewBranchRef(preview.preview_id)) throw new Error();
+    if (action === "create_preview") {
+      const expiresAt = preview.expires_at;
+      const createdAt = typeof result.data === "object" && result.data !== null
+        && "created_at" in result.data && typeof result.data.created_at === "string"
+        ? result.data.created_at : undefined;
+      if (preview.release_id !== applicationReleaseId(
         preview.resources.database_branch.branch_ref, id, sourceHash!,
       ) || preview.resources.database_branch.data_mode !== (args["data_mode"] ?? "schema_only")
-        || !Value.Check(receiptSchema, result.data) || result.data.source_configuration_id !== args["configuration_id"]
-        || preview.expires_at === null || result.data.created_at === undefined
-        || (args["ttl_seconds"] !== undefined
-          && Date.parse(preview.expires_at) - Date.parse(result.data.created_at) !== (args["ttl_seconds"] as number) * 1000))) throw new Error();
+        || !Value.Check(receiptSchema, result.data)
+        || args["configuration_id"] !== undefined
+          && result.data.source_configuration_id !== args["configuration_id"]
+        || expiresAt === null || expiresAt === undefined
+        || args["ttl_seconds"] !== undefined
+          && (createdAt === undefined
+            || Date.parse(expiresAt) - Date.parse(createdAt) !== (args["ttl_seconds"] as number) * 1000)) throw new Error();
     }
     if (preview.status === "failed" || (action === "cleanup_preview" && preview.status !== "cleaned")) {
       return releaseControlFailure(operation, "MUTATION_NOT_SUCCEEDED", result.status, {
         ...identity, preview_id: preview.preview_id, preview,
       });
     }
+    }
     if (timeoutSeconds !== undefined) return await waitForPreview(http, path, operation, identity, preview, timeoutSeconds, startedAt);
-    return releaseControlSuccess(operation, { ...identity, preview });
+    return releaseControlSuccess(operation, { ...identity, preview_id: preview.preview_id, preview });
   } catch {
     return releaseControlFailure(operation, mutation ? "OUTCOME_UNKNOWN" : "INVALID_RESPONSE", result.status, state);
   }

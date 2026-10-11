@@ -6,6 +6,7 @@ import {
   ApplicationReleaseTransferPlanSchema, ApplicationReleaseTransferResultSchema,
   ApplicationPromotionPlanSchema,
   ApplicationActivationHistorySchema, ApplicationActivationHistoryCursorSchema, type DeploymentEvidence,
+  applicationPreviewBranchRef, applicationReleaseId,
 } from "@supacloud/delivery";
 import { sql } from "../db";
 import { getVerifiedRequestPrincipal, requireProjectOrAdminAuth } from "../middleware/auth";
@@ -24,7 +25,7 @@ import { ApplicationDeploymentEvidenceStorage } from "../services/application-de
 import { ApplicationDeploymentEvidenceObserver } from "../services/application-deployment-evidence-observer";
 import { victoriaLogsService } from "../services/victorialogs.service";
 import { applicationRuntimePlan } from "../services/application-runtime";
-import { buildApplicationPreviewReceipt } from "../services/application-preview-contract";
+import { buildApplicationPreviewReceipt, publicApplicationPreviewReceipt } from "../services/application-preview-contract";
 import { ApplicationPreviewService, APPLICATION_PREVIEW_MIN_TTL_SECONDS, APPLICATION_PREVIEW_MAX_TTL_SECONDS } from "../services/application-preview.service";
 import { ApplicationDeployPlans, ApplicationDeployPlanError } from "../services/application-deploy-plan";
 import { ApplicationRollbackError, ApplicationRollbackSnapshots } from "../services/application-rollback";
@@ -34,6 +35,7 @@ import {
 } from "../services/application-promotion";
 import type { ApplicationPromotionExecutor } from "../services/application-promotion-executor";
 import type { ApplicationPromotionReconciler } from "../services/application-promotion-reconciler";
+import { ApplicationPreviewConflictError } from "../repositories/project-config-writes";
 
 function activationFailure(error: unknown, identity: {
   project_ref: string; application_id: string; environment_id: string; activation_id: string;
@@ -77,7 +79,9 @@ interface ApplicationRouteDependencies {
   deployment?: Pick<ApplicationDeploymentService, "activateConfigured" | "reconcile" | "retireConfigured">;
   retirementVerifier?: unknown;
   principal?: typeof getVerifiedRequestPrincipal;
-  previews?: ApplicationPreviewService;
+  previews?: Pick<ApplicationPreviewService, "list" | "get" | "create" | "reconcile" | "cleanup"> & {
+    read?: ApplicationPreviewService["read"];
+  };
   rollback?: Pick<ApplicationRollbackSnapshots, "read">;
   history?: Pick<ApplicationActivationHistoryReader, "read">;
 }
@@ -115,6 +119,9 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
   const evidence = dependencies.evidence ?? new ApplicationDeploymentEvidenceStorage();
   const evidenceObserver = dependencies.evidenceObserver;
   const previews = dependencies.previews ?? new ApplicationPreviewService({ releases: storage });
+  const readPreview = dependencies.previews?.read
+    ? (projectRef: string, previewId: string) => dependencies.previews!.read!(projectRef, previewId)
+    : (projectRef: string, previewId: string) => previews.get(projectRef, previewId);
   const deployPlans = dependencies.deployPlans ?? new ApplicationDeployPlans({
     releases: storage, active, readiness, migrations,
   });
@@ -143,6 +150,9 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
     .error(({ error }) => {
       if (error instanceof ApplicationPromotionError) {
         return status(error.statusCode, { code: error.code, error: "Application promotion plan is unavailable" });
+      }
+      if (error instanceof ApplicationPreviewConflictError) {
+        return status(409, { code: error.code, error: "Application preview identity changed" });
       }
       if (error instanceof ApplicationReleaseTransferError) {
         return status(error.statusCode, { code: error.code, error: "Application release transfer is unavailable" });
@@ -399,17 +409,22 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
         branch_ref: t.String({ pattern: "^[A-Za-z0-9_-]{1,20}$" }),
         data_mode: t.Optional(t.Union([t.Literal("schema_only"), t.Literal("full_clone")])),
         configuration_id: t.Optional(t.String({ format: "uuid" })),
+        preview_id: t.Optional(t.String({ pattern: "^[a-f0-9-]{8,64}$" })),
         ttl_seconds: t.Optional(t.Integer({ minimum: APPLICATION_PREVIEW_MIN_TTL_SECONDS, maximum: APPLICATION_PREVIEW_MAX_TTL_SECONDS })),
       }),
       detail: { tags: ["applications"], summary: "Build a read-only isolated application preview plan" },
     }, async ({ params: values, query }) => {
       const release = await storage.readRelease(values.ref, values.id, query.release_id);
+      if (query.preview_id !== undefined && applicationPreviewBranchRef(query.preview_id) !== query.branch_ref) {
+        throw new ApplicationPreviewConflictError();
+      }
       return buildApplicationPreviewReceipt({
-        previewId: crypto.randomUUID(),
+        previewId: query.preview_id ?? crypto.randomUUID(),
         projectRef: values.ref,
         applicationId: values.id,
         environmentId: values.environmentId,
-        releaseId: release.release_id,
+        releaseId: query.preview_id === undefined ? release.release_id
+          : applicationReleaseId(query.branch_ref, values.id, release.manifest_sha256),
         branchRef: query.branch_ref,
         dataMode: query.data_mode ?? "schema_only",
         ...(query.ttl_seconds === undefined ? {} : { expiresAt: new Date(Date.now() + query.ttl_seconds * 1000).toISOString() }),
@@ -422,12 +437,13 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       project_ref: values.ref,
       application_id: values.id,
       environment_id: values.environmentId,
-      previews: await previews.list(values.ref, values.id, values.environmentId),
+      previews: (await previews.list(values.ref, values.id, values.environmentId)).map(publicApplicationPreviewReceipt),
     }))
     .post("/:id/environments/:environmentId/previews", {
       params: environmentParams,
       body: t.Object({
         release_id: t.String({ pattern: "^[a-f0-9]{64}$" }),
+        preview_id: t.Optional(t.String({ pattern: "^[a-f0-9-]{8,64}$" })),
         branch_name: t.Optional(t.String({ minLength: 1, maxLength: 80 })),
         data_mode: t.Optional(t.Union([t.Literal("schema_only"), t.Literal("full_clone")])),
         configuration_id: t.Optional(t.String({ format: "uuid" })),
@@ -440,32 +456,50 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
         applicationId: values.id,
         environmentId: values.environmentId,
         releaseId: body.release_id,
+        ...(body.preview_id === undefined ? {} : { previewId: body.preview_id }),
         ...(body.branch_name === undefined ? {} : { branchName: body.branch_name }),
         ...(body.data_mode === undefined ? {} : { dataMode: body.data_mode }),
         ...(body.configuration_id === undefined ? {} : { configurationId: body.configuration_id }),
         ...(body.ttl_seconds === undefined ? {} : { ttlSeconds: body.ttl_seconds }),
       });
-      return status(202, receipt);
+      return status(202, publicApplicationPreviewReceipt(receipt));
     })
     .get("/:id/environments/:environmentId/previews/:previewId", {
       params: t.Object({ ...environmentParams.properties, previewId: t.String({ pattern: "^[a-f0-9-]{8,64}$" }) }),
       detail: { tags: ["applications"], summary: "Read an application preview receipt" },
     }, async ({ params: values }) => {
-      const receipt = await previews.read(values.ref, values.previewId);
-      if (!receipt || receipt.application_id !== values.id || receipt.environment_id !== values.environmentId) {
+      const receipt = await readPreview(values.ref, values.previewId);
+      if (!receipt || receipt.project_ref !== values.ref || receipt.preview_id !== values.previewId
+        || receipt.application_id !== values.id || receipt.environment_id !== values.environmentId) {
         return status(404, { code: "APPLICATION_PREVIEW_NOT_FOUND", error: "Application preview not found" });
       }
-      return await previews.get(values.ref, values.previewId);
+      return publicApplicationPreviewReceipt(receipt);
+    })
+    .post("/:id/environments/:environmentId/previews/:previewId/reconcile", {
+      params: t.Object({ ...environmentParams.properties, previewId: t.String({ pattern: "^[a-f0-9-]{8,64}$" }) }),
+      detail: { tags: ["applications"], summary: "Explicitly resume persisted application preview provisioning" },
+    }, async ({ params: values }) => {
+      const receipt = await readPreview(values.ref, values.previewId);
+      if (!receipt || receipt.project_ref !== values.ref || receipt.preview_id !== values.previewId
+        || receipt.application_id !== values.id || receipt.environment_id !== values.environmentId) {
+        return status(404, { code: "APPLICATION_PREVIEW_NOT_FOUND", error: "Application preview not found" });
+      }
+      const reconciled = await previews.reconcile(values.ref, values.previewId);
+      if (!reconciled) return status(404, { code: "APPLICATION_PREVIEW_NOT_FOUND", error: "Application preview not found" });
+      return publicApplicationPreviewReceipt(reconciled);
     })
     .delete("/:id/environments/:environmentId/previews/:previewId", {
       params: t.Object({ ...environmentParams.properties, previewId: t.String({ pattern: "^[a-f0-9-]{8,64}$" }) }),
       detail: { tags: ["applications"], summary: "Clean up an application preview" },
     }, async ({ params: values }) => {
-      const receipt = await previews.read(values.ref, values.previewId);
-      if (!receipt || receipt.application_id !== values.id || receipt.environment_id !== values.environmentId) {
+      const receipt = await readPreview(values.ref, values.previewId);
+      if (!receipt || receipt.project_ref !== values.ref || receipt.preview_id !== values.previewId
+        || receipt.application_id !== values.id || receipt.environment_id !== values.environmentId) {
         return status(404, { code: "APPLICATION_PREVIEW_NOT_FOUND", error: "Application preview not found" });
       }
-      return await previews.cleanup(values.ref, values.previewId);
+      const cleaned = await previews.cleanup(values.ref, values.previewId);
+      if (!cleaned) return status(404, { code: "APPLICATION_PREVIEW_NOT_FOUND", error: "Application preview not found" });
+      return publicApplicationPreviewReceipt(cleaned);
     })
     .put("/:id/environments/:environmentId/deployment-evidence", {
       params: environmentParams,

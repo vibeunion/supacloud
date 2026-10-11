@@ -552,11 +552,25 @@ test.each(["success", "foreign", "artifact", "branch", "private", "mode", "confi
       post: (async (path: string, body: unknown) => {
         requests.push("POST");
         expect(path).toBe("/v1/projects/project/applications/reviews/environments/test/previews");
-        expect(body).toEqual({
+        const { preview_id, ...bodyFields } = body as Record<string, unknown>;
+        expect(bodyFields).toEqual({
           release_id: record().release_id, configuration_id: configurationView().configuration_id, data_mode: "schema_only",
         });
+        expect(String(preview_id)).toMatch(
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+        );
+        const generatedPreviewId = String(preview_id);
+        const generatedBranchRef = `pv${generatedPreviewId.replaceAll("-", "").slice(0, 18)}`;
+        const generatedReleaseId = applicationReleaseId(generatedBranchRef, "reviews", "a".repeat(64));
         const response = {
-          ...receipt, source_configuration_id: configurationView().configuration_id,
+          ...receipt, preview_id: generatedPreviewId, release_id: generatedReleaseId,
+          source_configuration_id: configurationView().configuration_id,
+          resources: {
+            ...receipt.resources,
+            build_artifact: { ...receipt.resources.build_artifact, release_id: generatedReleaseId },
+            database_branch: { ...receipt.resources.database_branch, branch_ref: generatedBranchRef },
+            storage_namespace: { ...receipt.resources.storage_namespace, namespace: generatedBranchRef },
+          },
           ...(fault === "foreign" ? { environment_id: "foreign" } : {}),
           ...(fault === "artifact" ? { release_id: "f".repeat(64),
             resources: { ...receipt.resources, build_artifact: { status: "ready", release_id: "f".repeat(64) } } } : {}),

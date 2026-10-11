@@ -86,6 +86,7 @@ supacloud-cli app preview-plan --env test --id orders --environment_id test --re
 supacloud-cli app preview --env test --id orders --environment_id test --release_id RELEASE_SHA256 --configuration_id CONFIG_UUID --ttl_seconds 3600 --wait --timeout_seconds 300
 supacloud-cli app previews --env test --id orders --environment_id test
 supacloud-cli app preview-status --env test --id orders --environment_id test --preview_id PREVIEW_UUID --wait --timeout_seconds 300
+supacloud-cli app preview-reconcile --env test --id orders --environment_id test --preview_id PREVIEW_UUID
 supacloud-cli app preview-cleanup --env test --id orders --environment_id test --preview_id PREVIEW_UUID
 ```
 
@@ -114,9 +115,10 @@ query or identity drift ends it with nonzero status. A wait timeout returns
 same-ID continuation in `reconciliation`. It does not mark provisioning failed,
 retry a failed lifecycle GET, delete resources or promote an environment.
 
-`preview-plan` is read-only. Preview list/status requests may resume persisted
-provisioning on the server, so they are classified as writes, including in
-read-only and production profiles. The platform may clean eligible expired
+`preview-plan`, `previews` and `preview-status` are read-only. They never resume
+persisted provisioning. Use `preview-reconcile` to explicitly resume a selected
+Preview ID; it is classified as a write, including in read-only and production
+profiles. The platform may clean eligible expired
 previews, but never interrupts a serving preview or empties nonempty Storage
 automatically. Explicit cleanup remains available. Failed previews return
 nonzero with the validated receipt and cleanup state. Unknown create outcomes

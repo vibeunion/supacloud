@@ -4,6 +4,10 @@ The platform owns preview expiry, discovery, admission fencing, resource cleanup
 and receipts. The CLI does not run SSH or individually delete databases, queues,
 Storage namespaces or Secrets.
 
+Receipt reads and list operations are observational only. Reconciliation is an
+explicit `POST .../previews/:previewId/reconcile` operation and must be selected
+by Preview ID; a GET never resumes provisioning.
+
 New previews expire after 24 hours by default. An explicit `ttl_seconds` may
 select 5 minutes through 7 days. Plans have no deadline unless one is supplied.
 Stored receipts without an expiry are not automatically adopted by the worker.
