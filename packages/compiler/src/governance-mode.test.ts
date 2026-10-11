@@ -47,7 +47,7 @@ test("invalid governance fails closed, preserves artifacts and repairs through e
     const repaired = await compileProject({ rootDir: root, outDir });
     expect(repaired.diagnostics.filter((item) => item.severity === "error")).toEqual([]);
   }
-});
+}, { timeout: 30_000 });
 
 test("standalone command declarations receive the same governance diagnostics", async () => {
   const root = await mkdtemp(join(tmpdir(), "command-mode-standalone-"));

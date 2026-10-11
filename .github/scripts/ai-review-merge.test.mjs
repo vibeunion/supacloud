@@ -137,7 +137,7 @@ describe('trusted review workflow', () => {
     assert.match(workflow, /working-directory: packages\/admin\n\s+script: \|\n\s+bun install --frozen-lockfile[\s\S]*?bun run typecheck[\s\S]*?bun test/);
     const projectCli = workflow.split('\n          - name: Project CLI\n')[1]?.split('\n          - name: ')[0];
     assert.ok(projectCli, 'Project CLI must have its own package checks');
-    assert.match(projectCli, /working-directory: packages\/cli\n\s+prepare_script: \|\n\s+bun install --frozen-lockfile[\s\S]*?typecheck_script: \|\n\s+bun run typecheck[\s\S]*?test_script: \|\n\s+bun test src(?:\n|$)/);
+    assert.match(projectCli, /working-directory: packages\/cli\n\s+test_timings: cli-test-timings\.json\n\s+prepare_script: \|\n\s+bun install --frozen-lockfile[\s\S]*?typecheck_script: \|\n\s+bun run typecheck[\s\S]*?test_script: \|\n\s+bun test src(?:[ \t]|\n|$)/);
     for (const phase of ['prepare_script', 'typecheck_script', 'test_script']) {
       assert.match(
         workflow,
