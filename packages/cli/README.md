@@ -11,6 +11,22 @@ Registration accepts unknown boundary input, decodes it before invoking the
 typed callback, and validates the callback's result. Private `src/shared` imports
 are not supported.
 
+## Project Setup and Environment Profiles
+
+For an existing frontend, the shortest path is:
+
+```sh
+supacloud init
+cp .env.supacloud.test.example .env.supacloud.test
+supacloud env check
+supacloud --env test deploy
+```
+
+`init` creates `supacloud.json` and non-secret environment examples without
+overwriting an existing project configuration. `env list` and `env check` are
+local-only, redact credentials, and provide stable JSON with `--json` for CI or
+AI tooling. The real `.env.supacloud.*` files are added to `.gitignore`.
+
 ## Application Starter
 
 ```sh
