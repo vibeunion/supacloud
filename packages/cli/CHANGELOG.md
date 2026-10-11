@@ -14,6 +14,20 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.78.0](https://github.com/vibeunion/supacloud/compare/cli-v0.77.0...cli-v0.78.0) (2026-10-10)
+
+
+### Features
+
+* **cli:** expose managed application preview lifecycle ([#1773](https://github.com/vibeunion/supacloud/issues/1773)) ([9426dc0](https://github.com/vibeunion/supacloud/commit/9426dc0e4a09c83620fb086ba430624b04e1331c))
+* **cli:** harden branch promotion receipts ([#1775](https://github.com/vibeunion/supacloud/issues/1775)) ([a764725](https://github.com/vibeunion/supacloud/commit/a76472571d894a089485b64002736746a941fce8))
+* **preview:** expire and safely clean isolated previews ([#1774](https://github.com/vibeunion/supacloud/issues/1774)) ([05f0605](https://github.com/vibeunion/supacloud/commit/05f060552dc49464b791109d64662c4a4f73eecc))
+
+
+### Bug Fixes
+
+* **cli:** sync published compiler dependency ([#1770](https://github.com/vibeunion/supacloud/issues/1770)) ([844af73](https://github.com/vibeunion/supacloud/commit/844af7331945c8912a2e3df3820e7e442985a2bc))
+
 ## [0.77.0](https://github.com/vibeunion/supacloud/compare/cli-v0.76.0...cli-v0.77.0) (2026-10-10)
 
 
