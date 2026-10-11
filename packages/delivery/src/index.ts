@@ -17,6 +17,10 @@ export type {
 export { ApplicationDeployPlanSchema, parseApplicationDeployPlan } from "./application-deploy-plan";
 export type { ApplicationDeployPlan } from "./application-deploy-plan";
 export {
+  ApplicationReleaseRequestSchema, ApplicationReleaseResultSchema, parseApplicationReleaseResult,
+} from "./application-release-operation";
+export type { ApplicationReleaseRequest, ApplicationReleaseResult } from "./application-release-operation";
+export {
   ApplicationActivationHistoryPositionSchema, ApplicationActivationHistoryCursorSchema,
   ApplicationActivationHistorySchema, applicationHistoryCursor, applicationHistoryPositionBefore,
   applicationHistoryTimestampMilliseconds, parseApplicationActivationHistory, parseApplicationHistoryCursor,

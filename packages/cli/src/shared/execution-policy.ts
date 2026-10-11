@@ -13,7 +13,7 @@ interface ModulePolicy {
 const ACTION_POLICY: Record<string, ModulePolicy> = {
     deploy: { write: ["deploy"] },
     applications: { read: ["list_releases", "get_release", "get_runtime", "get_deployment_evidence", "get_configuration", "get_release_transfer_plan", "get_promotion_plan", "get_promotion_status", "get_rollback_snapshot", "get_history", "get_deploy_plan", "logs", "get_preview_plan", "list_previews", "get_preview"],
-        write: ["upload_release", "put_configuration", "transfer_release", "promote_application", "reconcile_promotion", "create_preview", "reconcile_preview", "cleanup_preview", "activate_release", "deploy_release", "rollback_release", "reconcile_activation", "retire_activation"] },
+        write: ["upload_release", "put_configuration", "release_application", "transfer_release", "promote_application", "reconcile_promotion", "create_preview", "reconcile_preview", "cleanup_preview", "activate_release", "deploy_release", "rollback_release", "reconcile_activation", "retire_activation"] },
     project: {
         read: ["get", "endpoints", "health", "logs", "api_keys", "settings", "tasks", "task_detail", "task_stats", "dlq", "background_settings"],
         write: ["pause", "restore", "task_cancel", "task_retry", "update_background_settings"],
