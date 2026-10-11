@@ -284,14 +284,14 @@ test("promotion and preview policy permits reads and requires exact production c
     SUPACLOUD_ENV: "production", SUPACLOUD_API_URL: "https://management.example.test",
     SUPACLOUD_API_TOKEN: "fixture", SUPACLOUD_PROJECT_REF: "production",
   });
-  for (const action of ["diff", "promote-plan", "promote-status", "preview-plan", "preview-list", "preview-status"]) {
+  for (const action of ["diff", "promote-plan", "promote-status", "preview-plan"]) {
     expect(executionMode("app", action, {})).toBe("read");
     expect(() => authorizeExecution("app", { action, ref: "production" }, {
       context: { ...context, readOnly: true },
     })).not.toThrow();
     expect(() => authorizeExecution("app", { action, ref: "foreign" }, { context })).toThrow("different project");
   }
-  for (const action of ["promote", "promote-reconcile", "preview-create", "preview-cleanup"]) {
+  for (const action of ["promote", "promote-reconcile", "preview-list", "preview-create", "preview-status", "preview-cleanup"]) {
     expect(executionMode("app", action, {})).toBe("write");
     expect(() => authorizeExecution("app", { action, ref: "production" }, { context })).toThrow("confirm-production");
     expect(() => authorizeExecution("app", { action, ref: "production" }, {
