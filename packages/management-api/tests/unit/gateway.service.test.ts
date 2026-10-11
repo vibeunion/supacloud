@@ -2486,7 +2486,7 @@ describe("CaddyGatewayProvider route headers", () => {
         await cleanCaddyTmp();
     });
 
-    test("all project routes inject Host, X-Project-Ref, x-project-ref, X-Forwarded-Host, X-Forwarded-Proto headers", async () => {
+    test("all project routes inject Host, X-Project-Ref, X-Forwarded-Host, X-Forwarded-Proto headers without a duplicate project-ref variant", async () => {
         const calls: Array<{ url: string; method: string; body: any }> = [];
         const restore = captureFetch(calls);
         const provider = new CaddyGatewayProvider();
@@ -2512,7 +2512,7 @@ describe("CaddyGatewayProvider route headers", () => {
             const expectedHost = usesProjectCanonicalHost ? `hdrtest.api.${config.baseDomain}` : "{http.request.host}";
             expect(requestSet?.["Host"]).toEqual([expectedHost]);
             expect(requestSet?.["X-Project-Ref"]).toEqual(["hdrtest"]);
-            expect(requestSet?.["x-project-ref"]).toEqual(["hdrtest"]);
+            expect(requestSet?.["x-project-ref"]).toBeUndefined();
             expect(requestSet?.["X-Forwarded-Host"]).toEqual([expectedHost]);
             expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
         }
@@ -2553,7 +2553,7 @@ describe("CaddyGatewayProvider route headers", () => {
         const requestSet = storageProxy?.headers?.request?.set;
         expect(requestSet?.["Host"]).toEqual([`storagetest.api.${config.baseDomain}`]);
         expect(requestSet?.["X-Project-Ref"]).toEqual(["storagetest"]);
-        expect(requestSet?.["x-project-ref"]).toEqual(["storagetest"]);
+        expect(requestSet?.["x-project-ref"]).toBeUndefined();
         expect(requestSet?.["X-Forwarded-Host"]).toEqual([`storagetest.api.${config.baseDomain}`]);
         expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
         // Storage is non-streaming (no flush_interval)
@@ -2625,7 +2625,7 @@ describe("CaddyGatewayProvider route headers", () => {
         expect(requestSet?.["Host"]).toEqual([`legacyref.api.${config.baseDomain}`]);
         expect(requestSet?.["X-Forwarded-Host"]).toEqual([`legacyref.api.${config.baseDomain}`]);
         expect(requestSet?.["X-Project-Ref"]).toEqual(["legacyref"]);
-        expect(requestSet?.["x-project-ref"]).toEqual(["legacyref"]);
+        expect(requestSet?.["x-project-ref"]).toBeUndefined();
         expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
 
         restore();
@@ -2680,7 +2680,7 @@ describe("CaddyGatewayProvider route headers", () => {
         expect(requestSet?.["Host"]).toEqual([`legacyfn.api.${config.baseDomain}`]);
         expect(requestSet?.["X-Forwarded-Host"]).toEqual([`legacyfn.api.${config.baseDomain}`]);
         expect(requestSet?.["X-Project-Ref"]).toEqual(["legacyfn"]);
-        expect(requestSet?.["x-project-ref"]).toEqual(["legacyfn"]);
+        expect(requestSet?.["x-project-ref"]).toBeUndefined();
         expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
 
         restore();
@@ -2785,7 +2785,7 @@ describe("CaddyGatewayProvider route headers", () => {
         expect(storage?.handle?.some((h: any) => h.strip_path_prefix === "/storage/v1")).toBe(false);
         expect(requestSet?.["Host"]).toEqual([`domaintest.api.${config.baseDomain}`]);
         expect(requestSet?.["X-Project-Ref"]).toEqual(["domaintest"]);
-        expect(requestSet?.["x-project-ref"]).toEqual(["domaintest"]);
+        expect(requestSet?.["x-project-ref"]).toBeUndefined();
         expect(requestSet?.["X-Forwarded-Host"]).toEqual([`domaintest.api.${config.baseDomain}`]);
         expect(requestSet?.["X-Forwarded-Proto"]).toEqual(["{http.request.scheme}"]);
 

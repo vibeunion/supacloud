@@ -87,7 +87,9 @@ describe("gateway route builders", () => {
         expect(proxyHeaders["X-Forwarded-Host"]).toEqual(["public.example.com"]);
         expect(proxyHeaders["X-Service"]).toEqual(["reports"]);
         expect(proxyHeaders["X-Project-Ref"]).toEqual(["project-ref"]);
-        expect(proxyHeaders["x-project-ref"]).toEqual(["project-ref"]);
+        // HTTP header names are case-insensitive; a second lower-case key makes
+        // Caddy emit "project-ref,project-ref" and breaks tenant resolution.
+        expect(proxyHeaders["x-project-ref"]).toBeUndefined();
 
         const staticRoute = makeCustomGatewayRoute("project-ref", {
             id: "static-response-header",
@@ -196,7 +198,7 @@ describe("gateway route builders", () => {
                 expect(proxy.transport.read_timeout).toBe("500s");
                 expect(proxy.flush_interval).toBe(-1);
                 expect(proxy.headers.request.set["X-Project-Ref"]).toEqual(["project-ref"]);
-                expect(proxy.headers.request.set["x-project-ref"]).toEqual(["project-ref"]);
+                expect(proxy.headers.request.set["x-project-ref"]).toBeUndefined();
                 expect(proxy.headers.request.set["X-Service"]).toEqual(["functions"]);
                 expect(proxy.headers.request.set["x-supacloud-internal-auth"]).toBeUndefined();
                 expect(proxy.headers.request.set["x-supacloud-internal-token"]).toBeUndefined();
