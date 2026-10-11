@@ -516,7 +516,7 @@ describe("supacloud-admin process contract", () => {
         try {
             const execution = await runAdminCli([
                 "frontend", "upload_release", "--ref", "prod-ref", "--id", "web",
-                "--zip_path", join(workspace, "missing.zip"), "--env", "production",
+                "--archive_path", join(workspace, "missing.tar.zst"), "--env", "production",
             ], {}, workspace);
             expect(execution.exitCode).toBe(1);
             expect(execution.output).toContain("--confirm-production prod-ref");

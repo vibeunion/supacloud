@@ -320,14 +320,14 @@ loopback development origins, with the default `:80` likewise omitted. Use
 
 ### Immutable frontend releases
 
-The `frontend` command keeps the existing deployment, Git, and legacy ZIP
+The `frontend` command keeps the existing deployment, Git, and tar.zst
 actions and also exposes the immutable prebuilt release workflow:
 
 ```bash
 supacloud-cli frontend list_releases --ref abc123 --id web
 supacloud-cli frontend get_active_release --ref abc123 --id web
 supacloud-cli frontend get_release --ref abc123 --id web --release_id <sha256>
-supacloud-cli frontend upload_release --ref abc123 --id web --zip_path ./dist.zip
+supacloud-cli frontend upload_release --ref abc123 --id web --archive_path ./dist.tar.zst
 supacloud-cli frontend activate_release --ref abc123 --id web \
   --release_id <sha256> \
   --expected_active_release_id absent \
@@ -337,7 +337,7 @@ supacloud-cli frontend rollback --ref abc123 --id web --release_id <retained-sha
 supacloud-cli frontend rollback --ref abc123 --id web
 ```
 
-`upload_release` hashes and streams an existing regular ZIP file without
+`upload_release` hashes and streams an existing regular tar.zst file without
 buffering the full archive. The Management API binds the upload to that SHA-256,
 and the CLI reads the immutable release back before reporting success.
 `activate_release` uses both the observed active release and activation IDs as
