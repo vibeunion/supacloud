@@ -620,7 +620,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     assign(captureTools((server) => registerAuthTools(server, http)));
     assign(captureTools((server) => registerOAuthClientTools(server, http)));
     assign(captureTools((server) => registerStorageTools(server, http)));
-    const advancedTools = captureTools((server) => registerAdvancedTools(server, http, process.env, {
+    const advancedTools = captureTools((server) => registerAdvancedTools(server, http, context.environmentVariables, {
         readOnly: context.readOnly,
     }));
     assign(advancedTools);
@@ -644,6 +644,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         environment: context.environment,
         projectRef: context.projectRef || undefined,
         cwd: process.cwd(),
+        environmentVariables: context.environmentVariables,
         edgeFunctionDeploy: advancedTools.edge_functions?.callback,
     })));
     assign(captureTools((server) => registerGatewayTools(server, http, {

@@ -1193,7 +1193,7 @@ Actions: list, upsert, delete`,
             secrets: withDescription(secretsSchema, "[upsert] Secret list as JSON array or KEY=VALUE,KEY2=VALUE2"),
             "from-env": withDescription(
                 environmentSecretNamesSchema,
-                "[upsert] Comma-separated environment variable names; values are read from this CLI process",
+                "[upsert] Comma-separated environment variable names; values are read from the selected CLI environment",
             ),
             name: optional(Type.String(), "[delete] Secret name to delete"),
         },
