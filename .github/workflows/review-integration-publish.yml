@@ -8,36 +8,41 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Reproduce the locally verified tree
-        id: prepare
+      - name: Reproduce the locally verified trees
         shell: bash
         run: |
           set -euo pipefail
           cp .github/review-integration/plan.json /tmp/review-plan.json
           cp .github/review-integration/prepare.py /tmp/review-prepare.py
           python3 /tmp/review-prepare.py /tmp/review-plan.json
-      - name: Publish only a new isolated review branch
+      - name: Publish only new isolated review branches
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          REVIEW_BRANCH: ${{ steps.prepare.outputs.branch }}
         run: |
           set -euo pipefail
-          [[ "$REVIEW_BRANCH" =~ ^review/prepared-pr-[0-9]+-[a-f0-9]{12}$ ]]
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           echo "::add-mask::$auth"
+          leases=()
+          refspecs=()
+          while IFS=' ' read -r branch sha; do
+            [[ "$branch" =~ ^review/prepared-pr-[0-9]+-[a-f0-9]{12}$ ]]
+            [[ "$sha" =~ ^[a-f0-9]{40}$ ]]
+            leases+=("--force-with-lease=refs/heads/$branch:")
+            refspecs+=("$sha:refs/heads/$branch")
+          done < /tmp/prepared-review-refs.txt
+          (( ${#refspecs[@]} > 0 ))
           git -c core.hooksPath=/dev/null -c credential.helper= -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push \
-            --force-with-lease="refs/heads/$REVIEW_BRANCH:" \
-            https://github.com/vibeunion/supacloud.git "HEAD:refs/heads/$REVIEW_BRANCH"
+            --atomic "${leases[@]}" https://github.com/vibeunion/supacloud.git "${refspecs[@]}"
       - uses: actions/upload-artifact@v6
         with:
-          name: prepared-review-commit
-          path: /tmp/prepared-review-commit.json
+          name: prepared-review-commits
+          path: /tmp/prepared-review-commits.json
           retention-days: 1
           if-no-files-found: error
