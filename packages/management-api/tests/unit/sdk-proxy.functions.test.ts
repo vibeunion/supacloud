@@ -236,6 +236,49 @@ describe("sdkProxyRoutes functions proxy", () => {
     });
   });
 
+  test("OPTIONS /functions/v1 resolves the tenant from the request host without credentials", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(spyOn(edgeFunctionService, "getConfig").mockResolvedValue({
+        verify_jwt: false,
+        version: "7",
+      } as Awaited<ReturnType<typeof edgeFunctionService.getConfig>>));
+      setSdkProxySqlForTests(async () => [{
+        ref: "proj_1",
+        config: { api_domain: "localhost" },
+      }]);
+      setSdkProxyFetchForTests(((input: string | URL | Request, init?: RequestInit & { duplex?: "half" }) => {
+        const url = typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : input.url;
+        calls.push({ url, init });
+        return Promise.resolve(new Response(null, {
+          status: 204,
+          headers: {
+            "access-control-allow-origin": "*",
+            "access-control-allow-methods": "GET, POST, OPTIONS",
+          },
+        }));
+      }) as typeof fetch);
+
+      const response = await request("/functions/v1/hello", {
+        method: "OPTIONS",
+        headers: {
+          origin: "https://untrusted.example",
+          "access-control-request-method": "GET",
+          "access-control-request-headers": "authorization, content-type",
+        },
+      });
+
+      expect(response.status).toBe(204);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("http://127.0.0.1:9005/functions/v1/hello");
+      expect(calls[0]?.init?.method).toBe("OPTIONS");
+      expect(response.headers.get("access-control-allow-origin")).toBe("*");
+    });
+  });
+
   test("POST /functions/v1 preserves upstream CORS headers on actual responses", async () => {
     await withSdkProxyTestContext(async ({ calls }) => {
       setSdkProxyFetchForTests(((input: string | URL | Request, init?: RequestInit & { duplex?: "half" }) => {
