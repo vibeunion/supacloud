@@ -22,6 +22,7 @@ test("explicit composition registers activation, observation recovery and retire
   const promotions = "/v1/projects/:ref/applications/:id/environments/:environmentId/promotions";
   expect(writes).toContain(promotions);
   expect(writes).toContain(`${promotions}/:mutationId/reconcile`);
+  expect(writes).toContain("/v1/projects/:ref/applications/:id/environments/:environmentId/release");
   expect(routes.routes.some(route => route.method === "GET" && route.path === `${promotions}/:mutationId`)).toBe(true);
   expect(verified).toBe(false);
   expect(applicationRoutes.routes.some(route => route.path.includes("/activations"))).toBe(false);

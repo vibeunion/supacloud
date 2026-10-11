@@ -31,6 +31,7 @@ import { initializeAppProject } from "./app-starter";
 import { checkAppDatabaseSources } from "./app-database-check";
 import { APPLICATION_TOOL_SCHEMA } from "./application-tools";
 import { ApplicationConfigurationIdSchema, ApplicationIdSchema } from "./application-schemas";
+import { parseApplicationConfigurationWrite } from "@supacloud/delivery";
 import { RELEASE_CONTROL_RESPONSE_SCHEMA, releaseControlFailure, releaseControlSuccess } from "./release-control-response";
 import {
     ApplicationPromotionResultSchema, parsePreviewReceipt, parsePreviewList, parsePromotionStatus,
@@ -1248,31 +1249,29 @@ async function runAppRelease(
     completed.upload = { ok: true, release_id: releaseId };
 
     let configurationId = request.configuration_id;
+    let configurationWrite: unknown;
+    const activationId = crypto.randomUUID();
     if (request.configuration_path !== undefined) {
         const configurationPath = resolve(root, request.configuration_path);
-        const configureArgs = {
-            action: "put_configuration",
-            ref, id, environment_id: environmentId, configuration_path: configurationPath,
-        };
-        validateToolArguments(APPLICATION_TOOL_SCHEMA, configureArgs);
-        const configured = await delegate(configureArgs);
-        const configurationReceipt = resultObject(configured);
-        if (configured.isError || !configurationReceipt?.ok) {
-            return releasePhaseFailure("configure", configured, completed);
+        try {
+            configurationWrite = parseApplicationConfigurationWrite(await Bun.file(configurationPath).json());
+            configurationId = (configurationWrite as { configuration_id: string }).configuration_id;
+        } catch {
+            return releasePhaseFailure("configure", releaseControlFailure(
+                "applications.release_application", "INVALID_RESPONSE", null,
+                { project_ref: ref, application_id: id, environment_id: environmentId },
+            ), completed);
         }
-        configurationId = releaseField(configurationReceipt, "configuration", "configuration_id");
-        if (!configurationId) return releasePhaseFailure("configure", releaseControlFailure(
-            "applications.put_configuration", "INVALID_RESPONSE", null,
-            { project_ref: ref, application_id: id, environment_id: environmentId },
-        ), completed);
-        completed.configure = { ok: true, configuration_id: configurationId };
+        completed.configure = { delegated: true, configuration_id: configurationId };
     } else {
-        completed.configure = { skipped: true, configuration_id: configurationId };
+        completed.configure = { delegated: true, configuration_id: configurationId };
     }
 
     const deployArgs = {
-        action: "deploy_release",
+        action: "release_application",
         ref, id, environment_id: environmentId, release_id: releaseId, configuration_id: configurationId,
+        activation_id: activationId,
+        ...(configurationWrite === undefined ? {} : { configuration_write: configurationWrite }),
     };
     validateToolArguments(APPLICATION_TOOL_SCHEMA, deployArgs);
     const deployed = await delegate(deployArgs);
@@ -1293,7 +1292,7 @@ async function runAppRelease(
         manifest_path: manifestPath,
         build: buildReceipt ? completed.build : { skipped: true, manifest_path: manifestPath },
         phases: completed,
-        no_op: deployReceipt.no_op === true,
+        no_op: deployReceipt.action === "no-op" || deployReceipt.no_op === true,
         execution_performed: deployReceipt.execution_performed === true,
         ...(typeof deployReceipt.activation_id === "string" ? { activation_id: deployReceipt.activation_id } : {}),
     };
