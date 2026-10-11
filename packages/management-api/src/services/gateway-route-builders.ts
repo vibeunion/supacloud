@@ -597,8 +597,11 @@ export function makeCustomGatewayRoute(projectRef: string, input: CustomGatewayR
         );
         const headers: Record<string, CaddyHeaderValue> = {
             Host: "{http.request.host}",
+            // HTTP header names are case-insensitive. Emitting both the canonical
+            // "X-Project-Ref" and a lower-case "x-project-ref" key makes Caddy join
+            // them into "ref,ref", which the management API cannot resolve back to a
+            // tenant and breaks apikey-less shared routes such as hosted SSO.
             "X-Project-Ref": projectRef,
-            "x-project-ref": projectRef,
             "X-Forwarded-Host": "{http.request.host}",
             "X-Forwarded-Proto": "{http.request.scheme}",
             ...route.headers,

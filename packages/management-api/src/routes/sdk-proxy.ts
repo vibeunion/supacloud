@@ -165,6 +165,15 @@ function hostNameFromHeaderValue(rawHost: string): string {
     }
 }
 
+// A gateway may emit the same header twice (for example Caddy joins a route
+// that defines both the canonical "X-Project-Ref" and lower-case
+// "x-project-ref" into "ref,ref"). Tenant refs never contain a comma, so keep
+// the first token and ignore the duplicated remainder.
+function firstHeaderToken(rawValue: string): string {
+    const [first] = rawValue.split(",");
+    return (first || "").trim();
+}
+
 function requestHostCandidates(request: Request): string[] {
     const seen = new Set<string>();
     const result: string[] = [];
@@ -499,7 +508,9 @@ async function getProjectRef(
 ): Promise<string> {
     const auth = request.headers.get('authorization') || '';
     const key = request.headers.get('apikey') || '';
-    const refHeader = request.headers.get("x-project-ref") || request.headers.get("x-supabase-project") || "";
+    const refHeader = firstHeaderToken(
+        request.headers.get("x-project-ref") || request.headers.get("x-supabase-project") || "",
+    );
     const apiKeyRef = await sdkProxyInternals.resolveProjectRefFromApiKey(key, { includeProvisioning: true }) || '';
 
     if (apiKeyRef) {
