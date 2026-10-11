@@ -14,6 +14,22 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.83.0](https://github.com/vibeunion/supacloud/compare/cli-v0.82.0...cli-v0.83.0) (2026-10-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **frontend:** migrate uploads to tar.zst and add read-only deployment plans ([#1771](https://github.com/vibeunion/supacloud/issues/1771))
+
+### Features
+
+* **frontend:** migrate uploads to tar.zst and add read-only deployment plans ([#1771](https://github.com/vibeunion/supacloud/issues/1771)) ([819fd3d](https://github.com/vibeunion/supacloud/commit/819fd3d5497a0ce86c9ee3cf1ed4ef4ae4db8637))
+
+
+### Bug Fixes
+
+* **cli:** keep database parser runtime external ([#1798](https://github.com/vibeunion/supacloud/issues/1798)) ([967d20b](https://github.com/vibeunion/supacloud/commit/967d20b5b43ff9044ef6208f86da996fb5624934))
+
 ## [0.82.0](https://github.com/vibeunion/supacloud/compare/cli-v0.81.0...cli-v0.82.0) (2026-10-11)
 
 

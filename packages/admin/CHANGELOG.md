@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.27.0](https://github.com/vibeunion/supacloud/compare/admin-v0.26.0...admin-v0.27.0) (2026-10-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **frontend:** migrate uploads to tar.zst and add read-only deployment plans ([#1771](https://github.com/vibeunion/supacloud/issues/1771))
+
+### Features
+
+* **frontend:** migrate uploads to tar.zst and add read-only deployment plans ([#1771](https://github.com/vibeunion/supacloud/issues/1771)) ([819fd3d](https://github.com/vibeunion/supacloud/commit/819fd3d5497a0ce86c9ee3cf1ed4ef4ae4db8637))
+
 ## [0.26.0](https://github.com/vibeunion/supacloud/compare/admin-v0.25.0...admin-v0.26.0) (2026-10-10)
 
 
