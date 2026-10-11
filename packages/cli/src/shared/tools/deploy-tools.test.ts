@@ -227,8 +227,9 @@ describe("one-command deploy", () => {
         ]);
     });
 
-    test("reports missing application configuration instead of falling back to frontend deploy", async () => {
+    test("lets the platform resolve the application configuration when none is local", async () => {
         const directory = await workspace();
+        const calls: Array<Record<string, unknown>> = [];
         let callback: ToolInvocation | undefined;
         registerDeployTools({
             tool(_name: string, _description: string, _schema: ToolSchema, handler: ToolInvocation) {
@@ -238,12 +239,21 @@ describe("one-command deploy", () => {
             cwd: directory,
             projectRef: "test-ref",
             application: { id: "orders", environmentId: "test" },
-            applicationRelease: async () => {
-                throw new Error("must not run");
+            applicationRelease: async args => {
+                calls.push(args);
+                return { content: [{ type: "text", text: JSON.stringify({ ok: true, operation: "applications.release" }) }] };
             },
         });
 
-        await expect(callback?.({})).rejects.toThrow("SUPACLOUD_APPLICATION_CONFIGURATION_PATH");
+        const result = await callback?.({});
+        expect(result).toMatchObject({ content: [{ type: "text" }] });
+        expect(calls).toEqual([{
+            action: "release",
+            ref: "test-ref",
+            id: "orders",
+            environment_id: "test",
+            root: directory,
+        }]);
     });
 
     test.each(["plan", "diff"])("%s compares a built release without writes in read-only production", async (flag) => {

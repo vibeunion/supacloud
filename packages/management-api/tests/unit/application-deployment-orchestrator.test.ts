@@ -112,7 +112,16 @@ function fixture(options: { migrationFails?: boolean } = {}) {
     storage: { readRelease: async () => structuredClone(release) },
     configurations: { put: async () => {
       throw new Error("configuration write not used");
-    } },
+    }, read: async () => ({
+      schema: "supacloud.application-configuration.v1" as const,
+      project_ref: "demo",
+      application_id: "reviews",
+      environment_id: "test",
+      configuration_id: configurationId,
+      created_at: "2026-10-11T00:00:00.000Z",
+      bun_version: "1.3.0",
+      targets: [{ name: "api", kind: "http" as const, hosts: ["orders.example.test"], environment_names: [] }],
+    }) },
     deployPlans: { read: async () => structuredClone(plan) },
     migrations: {
       readExecutionPlan: async () => ({
@@ -264,4 +273,16 @@ test("marks an uncertain backend outcome and blocks a blind retry", async () => 
   expect(fixtureValue.calls.filter(call => call === "migration")).toHaveLength(1);
   expect(fixtureValue.calls).not.toContain("activation");
   expect(fixtureValue.calls).not.toContain("web-activation");
+});
+
+test("reuses the platform configuration head when the request omits configuration identity", async () => {
+  const fixtureValue = fixture();
+  const request = { ...fixtureValue.request };
+  delete request.configuration_id;
+  const result = await fixtureValue.orchestrator.execute({
+    projectRef: "demo", applicationId: "reviews", environmentId: "test", principal,
+    request,
+  });
+  expect(result.configuration_id).toBe(configurationId);
+  expect(result.execution_performed).toBe(true);
 });

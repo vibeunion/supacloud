@@ -669,9 +669,6 @@ export function registerDeployTools(
                 }
                 const configurationPath = options.application.configurationPath?.trim();
                 const configurationId = options.application.configurationId?.trim();
-                if (!configurationPath && !configurationId) {
-                    throw new Error("Application profile requires SUPACLOUD_APPLICATION_CONFIGURATION_PATH or SUPACLOUD_APPLICATION_CONFIGURATION_ID");
-                }
                 if (configurationPath && configurationId) {
                     throw new Error("Application profile must set only one of SUPACLOUD_APPLICATION_CONFIGURATION_PATH or SUPACLOUD_APPLICATION_CONFIGURATION_ID");
                 }

@@ -212,6 +212,44 @@ test("app release composes build, upload, configure and one deployment", async (
     } finally { await rm(root, { recursive: true, force: true }); }
 }, 30_000);
 
+test("app release lets the platform reuse the current configuration head", async () => {
+    const root = await fixture();
+    const calls: Array<Record<string, unknown>> = [];
+    const releaseId = "a".repeat(64);
+    const configurationId = "11234567-89ab-4def-8123-456789abcdef";
+    try {
+        const result = await runAppTool({
+            action: "release", root, ref: identity.ref, id: identity.id,
+            environment_id: identity.environment_id, format: "json",
+        }, {
+            getApplications: () => async args => {
+                calls.push(args);
+                if (args.action === "upload_release") {
+                    return { content: [{ type: "text" as const, text: JSON.stringify({
+                        ok: true, release: { release_id: releaseId },
+                    }) }] };
+                }
+                return { content: [{ type: "text" as const, text: JSON.stringify({
+                    ok: true, operation: "applications.deploy_application",
+                    project_ref: identity.ref, application_id: identity.id,
+                    environment_id: identity.environment_id, release_id: releaseId,
+                    configuration_id: configurationId, mutation_id: args.mutation_id,
+                    activation_id: identity.activation_id, expected_activation_id: null,
+                    plan_sha256: "d".repeat(64), action: "activate",
+                    replayed: false, execution_performed: true,
+                }) }] };
+            },
+        });
+        const output = JSON.parse(result.content[0]!.text);
+        expect(result.isError).toBe(false);
+        expect(output).toMatchObject({
+            ok: true, configuration_id: configurationId, release_id: releaseId,
+        });
+        expect(calls[1]).not.toHaveProperty("configuration_id");
+        expect(calls[1]).not.toHaveProperty("configuration_write");
+    } finally { await rm(root, { recursive: true, force: true }); }
+}, 30_000);
+
 test("app release can reuse a built manifest and configuration revision", async () => {
     const root = await fixture();
     const calls: Array<Record<string, unknown>> = [];

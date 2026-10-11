@@ -1200,9 +1200,6 @@ async function runAppRelease(
     if (request.configuration_path !== undefined && request.configuration_id !== undefined) {
         throw new Error("app release accepts either --configuration_path or --configuration_id, not both");
     }
-    if (request.configuration_path === undefined && request.configuration_id === undefined) {
-        throw new Error("app release requires --configuration_path or --configuration_id");
-    }
     if (request.activation_id !== undefined || request.expected_activation_id !== undefined) {
         throw new Error("app release generates one activation identity; use app deploy for an exact retry");
     }
@@ -1267,19 +1264,33 @@ async function runAppRelease(
         }
         completed.configure = { delegated: true, configuration_id: configurationId };
     } else {
-        completed.configure = { delegated: true, configuration_id: configurationId };
+        completed.configure = {
+            delegated: false,
+            resolved_by: "platform",
+            ...(configurationId === undefined ? {} : { configuration_id: configurationId }),
+        };
     }
 
     const deployArgs = {
         action: "deploy_application",
-        ref, id, environment_id: environmentId, release_id: releaseId, configuration_id: configurationId,
+        ref, id, environment_id: environmentId, release_id: releaseId,
         mutation_id: activationId,
+        ...(configurationId === undefined ? {} : { configuration_id: configurationId }),
         ...(configurationWrite === undefined ? {} : { configuration_write: configurationWrite }),
         ...(request.web === undefined ? {} : { web: request.web }),
     };
     validateToolArguments(APPLICATION_TOOL_SCHEMA, deployArgs);
     const deployed = await delegate(deployArgs);
     const deployReceipt = resultObject(deployed);
+    const resolvedConfigurationId = typeof deployReceipt?.configuration_id === "string"
+        ? deployReceipt.configuration_id : undefined;
+    if (resolvedConfigurationId !== undefined) {
+        configurationId = resolvedConfigurationId;
+        const configure = completed.configure;
+        completed.configure = configure && typeof configure === "object" && !Array.isArray(configure)
+            ? { ...configure, configuration_id: resolvedConfigurationId }
+            : { delegated: false, resolved_by: "platform", configuration_id: resolvedConfigurationId };
+    }
     if (deployed.isError || !deployReceipt?.ok) {
         return releasePhaseFailure("deploy", deployed, completed);
     }
@@ -1292,7 +1303,7 @@ async function runAppRelease(
         application_id: id,
         environment_id: environmentId,
         release_id: releaseId,
-        configuration_id: configurationId,
+        ...(configurationId === undefined ? {} : { configuration_id: configurationId }),
         manifest_path: manifestPath,
         build: buildReceipt ? completed.build : { skipped: true, manifest_path: manifestPath },
         phases: completed,

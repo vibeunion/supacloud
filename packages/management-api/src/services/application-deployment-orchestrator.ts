@@ -69,7 +69,8 @@ export class ApplicationDeploymentOrchestrationError extends Error {
 
 export interface ApplicationDeploymentOrchestratorDependencies {
   storage: Pick<ApplicationReleaseStorage, "readRelease">;
-  configurations: Pick<ApplicationConfigurations, "put">;
+  configurations: Pick<ApplicationConfigurations, "put">
+    & Partial<Pick<ApplicationConfigurations, "read">>;
   deployPlans: Pick<ApplicationDeployPlans, "read">;
   migrations: Pick<ApplicationMigrations, "readExecutionPlan" | "apply" | "inspect">;
   deployment: Pick<ApplicationDeploymentService, "activateConfigured">;
@@ -166,10 +167,10 @@ function receiptFromState(
 }
 
 function assertCheckpoint(checkpoint: Record<string, unknown>, input: ApplicationDeploymentOrchestrationInput): DeployCheckpoint {
-  if (checkpoint.schema !== CHECKPOINT_SCHEMA || checkpoint.mutation_id !== input.request.mutation_id
-    || checkpoint.request === null
-    || typeof checkpoint.request !== "object" || Array.isArray(checkpoint.request)
-    || (checkpoint.request as Record<string, unknown>).mutation_id !== input.request.mutation_id) {
+  if (checkpoint["schema"] !== CHECKPOINT_SCHEMA || checkpoint["mutation_id"] !== input.request.mutation_id
+    || checkpoint["request"] === null
+    || typeof checkpoint["request"] !== "object" || Array.isArray(checkpoint["request"])
+    || (checkpoint["request"] as Record<string, unknown>)["mutation_id"] !== input.request.mutation_id) {
     throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_CHECKPOINT_INVALID", 503);
   }
   return checkpoint as DeployCheckpoint;
@@ -204,6 +205,18 @@ export class ApplicationDeploymentOrchestrator {
         { projectRef: input.projectRef, applicationId: input.applicationId, environmentId: input.environmentId },
         request.configuration_write,
       )).configuration_id;
+    }
+    if (configurationId === undefined && this.dependencies.configurations.read) {
+      try {
+        configurationId = (await this.dependencies.configurations.read({
+          projectRef: input.projectRef, applicationId: input.applicationId, environmentId: input.environmentId,
+        }))?.configuration_id;
+      } catch {
+        throw new ApplicationDeploymentOrchestrationError("APPLICATION_CONFIGURATION_UNAVAILABLE", 503, {
+          project_ref: input.projectRef, application_id: input.applicationId,
+          environment_id: input.environmentId,
+        });
+      }
     }
     if (configurationId === undefined) {
       throw new ApplicationDeploymentOrchestrationError("APPLICATION_RELEASE_CONFIGURATION_REQUIRED", 400);
