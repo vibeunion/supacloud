@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.109.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.108.0...management-api-v0.109.0) (2026-10-11)
+
+
+### Features
+
+* **app:** orchestrate application releases on platform ([#1808](https://github.com/vibeunion/supacloud/issues/1808)) ([6488889](https://github.com/vibeunion/supacloud/commit/64888896e4a26ecffb5888c26ae18f47804e60e8))
+
 ## [0.108.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.107.0...management-api-v0.108.0) (2026-10-11)
 
 
