@@ -35,10 +35,6 @@
     "workspace:context": "bun scripts/workspace/context.mjs",
     "test:nx-cache": "node scripts/workspace/cache.acceptance.mjs"
   },
-  "dependencies": {
-    "@types/ws": "^8.18.1",
-    "ws": "^8.21.3"
-  },
   "devDependencies": {
     "nx": "23.2.1"
   }
