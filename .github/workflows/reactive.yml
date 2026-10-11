@@ -103,7 +103,7 @@ jobs:
       - name: Packed minimum Angular version
         run: bun run scripts/check_angular_consumer.ts
         env:
-          SUPACLOUD_ANGULAR_TEST_VERSION: "22.1.5"
+          SUPACLOUD_ANGULAR_TEST_VERSION: "22.2.2"
       - name: All starter defaults
         run: |
           cd packages/cli
