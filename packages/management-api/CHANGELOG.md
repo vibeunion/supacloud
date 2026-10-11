@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.108.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.107.0...management-api-v0.108.0) (2026-10-11)
+
+
+### Features
+
+* **app:** make preview lifecycle resumable and verifiable ([#1786](https://github.com/vibeunion/supacloud/issues/1786)) ([cfd2782](https://github.com/vibeunion/supacloud/commit/cfd2782809fcc6055fe2f4a7c98857c3de204a12))
+
 ## [0.107.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.106.0...management-api-v0.107.0) (2026-10-11)
 
 
