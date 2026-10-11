@@ -40,13 +40,16 @@ function releases(): ApplicationPreviewServiceDependencies["releases"] {
 }
 
 function activation(): Pick<ApplicationPreviewServiceDependencies, "configurations" | "activate"> {
+  const configuration = (scope: { projectRef: string; applicationId: string; environmentId: string }, id: string) => ({
+    schema: "supacloud.application-configuration.v1" as const, configuration_id: id,
+    project_ref: scope.projectRef, application_id: scope.applicationId, environment_id: scope.environmentId,
+    created_at: "2026-10-10T00:00:00.000Z", bun_version: "1.4.2", targets: [],
+  });
   return {
-    configurations: { clone: async (_source, target) => ({
-      schema: "supacloud.application-configuration.v1", configuration_id: configurationId,
-      project_ref: target.projectRef, application_id: target.applicationId, environment_id: target.environmentId,
-      created_at: "2026-10-10T00:00:00.000Z", bun_version: "1.4.2",
-      targets: [],
-    }) },
+    configurations: {
+      read: async scope => configuration(scope, configurationId),
+      clone: async (_source, target, _sourceId, targetId) => configuration(target, targetId ?? configurationId),
+    },
     activate: async input => ({ activation_id: input.activationId }),
   };
 }
@@ -106,7 +109,7 @@ test("preview provisioning reaches ready only after all isolated resources and s
   expect(initial.status).toBe("provisioning");
   const receipts = await service.list("demo", "api", "test");
   expect(receipts[0]).toMatchObject({ status: "ready", resources: { smoke_test: { status: "ready", failed: [] } } });
-  expect(receipts[0]?.resources.configuration_revision).toEqual({ status: "ready", configuration_id: configurationId });
+  expect(receipts[0]?.resources.configuration_revision).toEqual({ status: "ready", configuration_id: expect.any(String) });
   expect(receipts[0]?.resources.application_activation.status).toBe("ready");
   expect(receipts[0]?.resources.smoke_test.passed).toEqual(expect.arrayContaining(receipts[0]?.resources.smoke_test.checks ?? []));
   expect(calls).toEqual(["branch:create", "queue:create", "secret:create"]);
@@ -161,6 +164,7 @@ test("preview reads resume a persisted provisioning receipt without recreating i
       project_ref: "demo", application_id: "api", environment_id: "test", release_id: "c".repeat(64),
       status: "provisioning", branch_name: "existing-preview", queue_name: "preview_123456781234423482",
       test_secret_name: "PREVIEW_TOKEN_123456781234423482",
+      source_configuration_id: configurationId,
       created_at: "2026-10-07T00:00:00.000Z", updated_at: "2026-10-07T00:00:00.000Z",
       resources: {
         build_artifact: { status: "ready", release_id: "c".repeat(64) },
@@ -277,7 +281,7 @@ function provisioningFixture(overrides: Partial<ApplicationPreviewServiceDepende
 test("missing configuration, activation or explicit readiness evidence cannot yield a ready preview", async () => {
   const cases: Array<{ overrides: Partial<ApplicationPreviewServiceDependencies>; missing: string }> = [
     { overrides: { configurations: undefined }, missing: "configuration_revision" },
-    { overrides: { configurations: { clone: async () => null } }, missing: "configuration_revision" },
+    { overrides: { configurations: { read: async () => null, clone: async () => null } }, missing: "configuration_revision" },
     { overrides: { activate: undefined }, missing: "application_activation" },
     { overrides: { smokeTest: undefined }, missing: "application_readiness" },
     { overrides: { smokeTest: async () => ({ passed: [], failed: [] }) }, missing: "application_readiness" },
@@ -339,6 +343,183 @@ test("a foreign artifact cannot be accepted as the branch release or start provi
   expect(started).toBe(false);
 });
 
+test("preview pins the source head at creation and persists the target identity before cloning", async () => {
+  const adapter = activation().configurations!;
+  let headId = configurationId;
+  let reads = 0;
+  let clones = 0;
+  const fixture = provisioningFixture({
+    branches: {
+      createBranch: async () => { headId = "81234567-89ab-4def-8123-456789abcdef"; },
+      deleteBranch: async () => {},
+    },
+    configurations: {
+      read: async scope => { reads++; return { ...(await adapter.read(scope))!, configuration_id: headId }; },
+      clone: async (source, target, sourceId, targetId) => {
+        clones++;
+        if (!targetId) throw new Error("Missing durable target identity");
+        const saved = (fixture.configs[0]?.application_previews as StoredApplicationPreview[])[0]!;
+        expect(saved.source_configuration_id).toBe(configurationId);
+        expect(sourceId).toBe(configurationId);
+        expect(targetId).toMatch(/^[a-f0-9-]{36}$/);
+        expect(saved.resources.configuration_revision).toEqual({ status: "pending", configuration_id: targetId });
+        return adapter.clone(source, target, sourceId, targetId);
+      },
+    },
+  });
+  const created = await fixture.service.create({
+    projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64),
+  });
+  expect(created.source_configuration_id).toBe(configurationId);
+  expect(await fixture.service.get("demo", created.preview_id)).toMatchObject({ status: "ready" });
+  expect(reads).toBe(1);
+  expect(clones).toBe(1);
+});
+
+test("an explicit source revision never reads the mutable configuration head", async () => {
+  const adapter = activation().configurations!;
+  const explicitId = "81234567-89ab-4def-8123-456789abcdef";
+  let clones = 0;
+  const fixture = provisioningFixture({
+    configurations: {
+      read: async () => { throw new Error("Must not read source head"); },
+      clone: async (source, target, sourceId, targetId) => {
+        clones++;
+        expect(sourceId).toBe(explicitId);
+        return adapter.clone(source, target, sourceId, targetId);
+      },
+    },
+  });
+  const created = await fixture.service.create({
+    projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64),
+    configurationId: explicitId,
+  });
+  expect(created.source_configuration_id).toBe(explicitId);
+  expect(await fixture.service.get("demo", created.preview_id)).toMatchObject({ status: "ready" });
+  expect(clones).toBe(1);
+});
+
+test("a configuration committed before its ready receipt is recovered with the same revision identity", async () => {
+  const adapter = activation().configurations!;
+  const revisions = new Map<string, NonNullable<Awaited<ReturnType<typeof adapter.clone>>>>();
+  const cloneIds: string[] = [];
+  const fixture = provisioningFixture({
+    configurations: {
+      ...adapter,
+      clone: async (source, target, sourceId, targetId) => {
+        expect(sourceId).toBe(configurationId);
+        if (!targetId) throw new Error("Missing durable target identity");
+        cloneIds.push(targetId);
+        if (!revisions.has(targetId)) revisions.set(targetId, (await adapter.clone(source, target, sourceId, targetId))!);
+        return revisions.get(targetId)!;
+      },
+    },
+  });
+  const projects = fixture.dependencies.projects!;
+  let interrupted = false;
+  fixture.dependencies.projects = {
+    ...projects,
+    saveApplicationPreview: async (ref, receipt, expected) => {
+      if (!interrupted && receipt.resources.configuration_revision.status === "ready") {
+        interrupted = true;
+        throw new ApplicationPreviewConflictError();
+      }
+      return projects.saveApplicationPreview(ref, receipt, expected);
+    },
+  };
+  const interruptedService = new ApplicationPreviewService(fixture.dependencies);
+  const created = await interruptedService.create({
+    projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64),
+  });
+  await expect(interruptedService.get("demo", created.preview_id)).rejects.toBeInstanceOf(ApplicationPreviewConflictError);
+  const saved = (fixture.configs[0]?.application_previews as StoredApplicationPreview[])[0]!;
+  expect(saved.status).toBe("provisioning");
+  expect(saved.resources.configuration_revision).toEqual({ status: "pending", configuration_id: cloneIds[0] });
+  const recovered = new ApplicationPreviewService({
+    ...fixture.dependencies, projects,
+    configurations: {
+      ...fixture.dependencies.configurations!,
+      read: async () => { throw new Error("Must not reread mutable source head"); },
+    },
+  });
+  const receipt = await recovered.get("demo", created.preview_id);
+  expect(receipt).toMatchObject({
+    status: "ready", resources: { configuration_revision: { status: "ready", configuration_id: cloneIds[0] } },
+  });
+  expect(cloneIds).toHaveLength(2);
+  expect(new Set(cloneIds).size).toBe(1);
+  expect(revisions.size).toBe(1);
+});
+
+test("a failed configuration intent write cannot start the clone", async () => {
+  const adapter = activation().configurations!;
+  let clones = 0;
+  const fixture = provisioningFixture({
+    configurations: {
+      ...adapter,
+      clone: async () => { clones++; throw new Error("Must not clone"); },
+    },
+  });
+  const projects = fixture.dependencies.projects!;
+  const service = new ApplicationPreviewService({
+    ...fixture.dependencies,
+    projects: {
+      ...projects,
+      saveApplicationPreview: async (ref, receipt, expected) => {
+        if (receipt.resources.configuration_revision.configuration_id !== null) throw new ApplicationPreviewConflictError();
+        return projects.saveApplicationPreview(ref, receipt, expected);
+      },
+    },
+  });
+  const created = await service.create({
+    projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64),
+  });
+  await expect(service.get("demo", created.preview_id)).rejects.toBeInstanceOf(ApplicationPreviewConflictError);
+  expect(clones).toBe(0);
+});
+
+test("a clone response with a foreign configuration identity cannot activate the preview", async () => {
+  const adapter = activation().configurations!;
+  for (const change of [
+    { configuration_id: configurationId }, { project_ref: "foreign" },
+    { application_id: "foreign" }, { environment_id: "foreign" },
+  ]) {
+    let activations = 0;
+    const fixture = provisioningFixture({
+      configurations: {
+        ...adapter,
+        clone: async (...args) => ({ ...(await adapter.clone(...args))!, ...change }),
+      },
+      activate: async input => { activations++; return { activation_id: input.activationId }; },
+    });
+    const created = await fixture.service.create({
+      projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64),
+    });
+    const receipt = await fixture.service.get("demo", created.preview_id);
+    expect(receipt?.status).toBe("failed");
+    expect(receipt?.resources.configuration_revision.status).toBe("pending");
+    expect(receipt?.resources.smoke_test.failed).toContain("provisioning");
+    expect(activations).toBe(0);
+  }
+});
+
+test("a preview without a pinned source revision never clones a later mutable head", async () => {
+  let clones = 0;
+  const fixture = provisioningFixture({
+    configurations: {
+      read: async () => null,
+      clone: async () => { clones++; throw new Error("Must not clone current head"); },
+    },
+  });
+  const created = await fixture.service.create({
+    projectRef: "demo", applicationId: "api", environmentId: "test", releaseId: "a".repeat(64),
+  });
+  expect(created.source_configuration_id).toBeNull();
+  const receipt = await fixture.service.get("demo", created.preview_id);
+  expect(receipt?.status).toBe("failed");
+  expect(receipt?.resources.smoke_test.failed).toContain("configuration_revision");
+  expect(clones).toBe(0);
+});
 test("activation identity is persisted before effects and reused after process recovery", async () => {
   const blocked = Promise.withResolvers<void>();
   const invoked = Promise.withResolvers<void>();
@@ -350,7 +531,7 @@ test("activation identity is persisted before effects and reused after process r
       const receipts = fixture.configs[0]?.application_previews as StoredApplicationPreview[];
       saved = structuredClone(receipts[0]!);
       expect(saved.resources.application_activation).toEqual({ status: "pending", activation_id: attemptedId });
-      expect(saved.resources.configuration_revision).toEqual({ status: "ready", configuration_id: configurationId });
+      expect(saved.resources.configuration_revision).toEqual({ status: "ready", configuration_id: input.configurationId });
       invoked.resolve();
       await blocked.promise;
       throw new ApplicationPreviewConflictError();
@@ -361,15 +542,21 @@ test("activation identity is persisted before effects and reused after process r
   });
   await invoked.promise;
   expect(saved).toBeDefined();
+  const recoveredActivationId = attemptedId;
+  const recoveredConfigurationId = saved?.resources.configuration_revision.configuration_id;
+  if (!recoveredActivationId || !recoveredConfigurationId) throw new Error("Missing activation recovery identity");
   const recoveredConfigs: Record<string, unknown>[] = [{ application_previews: [saved] }];
   let clones = 0;
   const recovered = new ApplicationPreviewService({
     ...fixture.dependencies,
     projects: previewStore(recoveredConfigs),
-    configurations: { clone: async () => { clones++; throw new Error("Must reuse configuration"); } },
+    configurations: {
+      read: async () => { throw new Error("Must not reread source head"); },
+      clone: async () => { clones++; throw new Error("Must reuse configuration"); },
+    },
     activate: async input => {
-      expect(input.activationId).toBe(attemptedId);
-      expect(input.configurationId).toBe(configurationId);
+      expect(input.activationId).toBe(recoveredActivationId);
+      expect(input.configurationId).toBe(recoveredConfigurationId);
       return { activation_id: input.activationId };
     },
   });

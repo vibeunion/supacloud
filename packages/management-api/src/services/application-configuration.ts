@@ -109,6 +109,7 @@ export class ApplicationConfigurations {
     sourceScope: ApplicationConfigurationScope,
     targetScope: ApplicationConfigurationScope,
     sourceConfigurationId?: string,
+    targetConfigurationId: string = randomUUID(),
   ): Promise<ApplicationConfigurationView | null> {
     assertApplicationConfigurationScope(sourceScope);
     assertApplicationConfigurationScope(targetScope);
@@ -116,7 +117,7 @@ export class ApplicationConfigurations {
     if (!source) return null;
     const decrypted = JSON.parse(this.crypto.decrypt(source.encrypted_configuration)) as unknown;
     return this.put(targetScope, {
-      configuration_id: randomUUID(),
+      configuration_id: targetConfigurationId,
       expected_configuration_id: null,
       configuration: decrypted,
     });
