@@ -1608,11 +1608,54 @@ function declaredClassType(declaration: ClassDeclaration, ctx: AnalysisContext):
 }
 
 function typeArgumentsOf(type: ts.Type, ctx: AnalysisContext): readonly ts.Type[] {
-  return isTypeReference(type) ? ctx.checker.getTypeArguments(type) : [];
+  if (isTypeReference(type)) {
+    const argumentsFromChecker = ctx.checker.getTypeArguments(type);
+    if (argumentsFromChecker.length > 0) return argumentsFromChecker;
+  }
+  return type.aliasTypeArguments
+    ?? (type as ts.Type & { resolvedTypeArguments?: readonly ts.Type[] }).resolvedTypeArguments
+    ?? [];
 }
 
 function isTypeReference(type: ts.Type): type is ts.TypeReference {
   return "target" in type;
+}
+
+function namedTypeSymbol(type: ts.Type): string | undefined {
+  return type.aliasSymbol?.getName() ?? type.symbol?.getName();
+}
+
+function typeContainsNamedBranch(type: ts.Type, name: string, ctx: AnalysisContext): boolean {
+  if (type.isUnion() || type.isIntersection()) {
+    return type.types.some((branch) => typeContainsNamedBranch(branch, name, ctx));
+  }
+  if ((type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.Never)) !== 0) {
+    return false;
+  }
+  if ((type.flags & ts.TypeFlags.StringLiteral) !== 0) {
+    return (type as ts.StringLiteralType).value === name;
+  }
+  return namedTypeSymbol(type) === name || ctx.checker.typeToString(type) === name;
+}
+
+function effectFailureTags(type: ts.Type | undefined, ctx: AnalysisContext, location: ts.Node): string[] | undefined {
+  if (!type) return undefined;
+  if ((type.flags & ts.TypeFlags.Never) !== 0) return [];
+  if ((type.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) return undefined;
+  if (type.isUnion()) {
+    const tags = type.types.flatMap((branch) => effectFailureTags(branch, ctx, location) ?? []);
+    return tags.length > 0 ? [...new Set(tags)] : undefined;
+  }
+  for (const propertyName of ["_tag", "tag", "code"] as const) {
+    const property = ctx.checker.getPropertyOfType(type, propertyName);
+    if (!property) continue;
+    const propertyType = ctx.checker.getTypeOfSymbolAtLocation(property, location);
+    if ((propertyType.flags & ts.TypeFlags.StringLiteral) !== 0) {
+      return [(propertyType as ts.StringLiteralType).value];
+    }
+  }
+  const symbolName = namedTypeSymbol(type);
+  return symbolName && symbolName !== "__type" ? [symbolName] : undefined;
 }
 
 function isUnknownOrAny(type: ts.Type): boolean {
@@ -1681,7 +1724,9 @@ function parseController(
         handler: propertyName(method.name),
       };
       const signature = ctx.checker.getSignatureFromDeclaration(method);
-      const resultType = signature && ctx.checker.typeToString(signature.getReturnType());
+      const returnType = signature?.getReturnType();
+      const resultType = returnType && ctx.checker.typeToString(returnType);
+      const effectTypeArguments = returnType ? typeArgumentsOf(returnType, ctx) : [];
       if (resultType && /\bResponse\b/.test(resultType)) route.nativeResponse = true;
       const pathParams: string[] = [];
       const paramRegex = /:([a-zA-Z0-9_]+)/g;
@@ -2044,8 +2089,28 @@ function parseController(
                 suggestion: "Return Effect.Effect<Success, Failure, Requirements> from the handler.",
               });
             }
+            const failureTags = effectTypeArguments.length >= 3
+              ? effectFailureTags(effectTypeArguments[1], ctx, method)
+              : undefined;
+            if (failureTags && effect.errors !== undefined) {
+              const mappedTags = new Set(effect.errors.map((entry) => entry.tag));
+              const unmappedTags = failureTags.filter((tag) => !mappedTags.has(tag));
+              if (unmappedTags.length > 0) {
+                ctx.diagnostics.push({
+                  severity: "error",
+                  code: "effect-error-mapping-required",
+                  errorCode: "SC3037",
+                  docsUrl: "https://supacloud.dev/errors/SC3037",
+                  file,
+                  line: lineOf(method),
+                  message: `Route ${route.handler} declares Effect failures without public mappings: ${unmappedTags.join(", ")}.`,
+                  suggestion: "Add an effect.errors entry for every statically identified failure tag.",
+                });
+              }
+            }
             for (const dependency of effect.dependencies ?? []) {
-              if (!resultType?.includes(dependency)) {
+              const requirementsType = effectTypeArguments.length >= 3 ? effectTypeArguments[2] : undefined;
+              if (!requirementsType || !typeContainsNamedBranch(requirementsType, dependency, ctx)) {
                 ctx.diagnostics.push({
                   severity: "error",
                   code: "effect-dependency-type",

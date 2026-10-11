@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Schedule from "effect/Schedule";
 import * as Cause from "effect/Cause";
 import * as Exit from "effect/Exit";
+import * as ManagedRuntime from "effect/ManagedRuntime";
 import * as Runtime from "effect/Runtime";
 import type * as Layer from "effect/Layer";
 
@@ -24,6 +25,7 @@ export interface CompiledEffectDescriptor {
 
 export interface SupaCloudEffectRuntime {
   run(program: Effect.Effect<unknown, unknown, unknown>): Promise<Exit.Exit<unknown, unknown>>;
+  dispose?(): Promise<void>;
 }
 
 export class EffectApplicationError extends Error {
@@ -50,13 +52,14 @@ export function createDefaultEffectRuntime(): SupaCloudEffectRuntime {
 export function createEffectRuntimeFromLayer<Services>(
   layer: Layer.Layer<Services, never, never>,
 ): SupaCloudEffectRuntime {
+  const managedRuntime = ManagedRuntime.make(layer);
   return {
     run(program) {
-      const provided = Effect.provide(layer)(
+      return managedRuntime.runPromiseExit(
         program as Effect.Effect<unknown, unknown, Services>,
-      );
-      return Effect.runPromiseExit(provided as Effect.Effect<unknown, unknown, never>);
+      ) as Promise<Exit.Exit<unknown, unknown>>;
     },
+    dispose: () => managedRuntime.dispose(),
   };
 }
 

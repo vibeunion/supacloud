@@ -188,3 +188,73 @@ export class OrdersModule {}
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("rejects statically known Effect failures without exact public mappings", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-effect-errors-"));
+  try {
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
+      "src/effect.ts": "export type Effect<A, E, R> = { readonly _effect: [A, E, R] };\n",
+      "src/orders.module.ts": `import { Controller, Get, Module } from "./runtime";
+import type { Effect } from "./effect";
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", {
+    effect: { required: true, dependencies: [], errors: [], retry: "none" },
+  })
+  list(): Effect<string, { _tag: "OrderNotFound" }, never> {
+    throw new Error("fixture");
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`,
+    });
+    const graph = await analyzeProject(root);
+    expect(graph.diagnostics).toContainEqual(expect.objectContaining({
+      code: "effect-error-mapping-required",
+      errorCode: "SC3037",
+    }));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("matches Effect dependencies against the environment type only", async () => {
+  const root = await mkdtemp(join(tmpdir(), "supacloud-effect-dependencies-"));
+  try {
+    await writeFixtureProject(root, {
+      "tsconfig.json": FIXTURE_TSCONFIG,
+      "src/runtime.ts": RUNTIME_SOURCE,
+      "src/effect.ts": "export type Effect<A, E, R> = { readonly _effect: [A, E, R] };\n",
+      "src/orders.module.ts": `import { Controller, Get, Module } from "./runtime";
+import type { Effect } from "./effect";
+
+interface OrderRepository {}
+
+@Controller("/orders")
+class OrdersController {
+  @Get("/", {
+    effect: { required: true, dependencies: ["Order"], errors: [], retry: "none" },
+  })
+  list(): Effect<OrderRepository, never, never> {
+    throw new Error("fixture");
+  }
+}
+
+@Module({ name: "orders", controllers: [OrdersController] })
+export class OrdersModule {}
+`,
+    });
+    const graph = await analyzeProject(root);
+    expect(graph.diagnostics).toContainEqual(expect.objectContaining({
+      code: "effect-dependency-type",
+      errorCode: "SC3040",
+    }));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
