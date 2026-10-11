@@ -493,7 +493,10 @@ function adminUserDeletionId(request: Request): string | null {
     }
 }
 
-async function getProjectRef(request: Request): Promise<string> {
+async function getProjectRef(
+    request: Request,
+    options: { allowHostFallback?: boolean } = {},
+): Promise<string> {
     const auth = request.headers.get('authorization') || '';
     const key = request.headers.get('apikey') || '';
     const refHeader = request.headers.get("x-project-ref") || request.headers.get("x-supabase-project") || "";
@@ -546,6 +549,11 @@ async function getProjectRef(request: Request): Promise<string> {
         if (trustedRef) return trustedRef;
     }
 
+    if (options.allowHostFallback && request.method === "OPTIONS") {
+        const hostRef = await resolveProjectRefFromHost(request);
+        if (hostRef) return hostRef;
+    }
+
     if (isTestTenantAuthAllowed(request)) {
         if (key === 'test-token' || auth.includes('test-token')) {
              return 'test_mock';
@@ -553,6 +561,34 @@ async function getProjectRef(request: Request): Promise<string> {
     }
     
     return '';
+}
+
+async function resolveProjectRefFromHost(request: Request): Promise<string> {
+    const rawHosts = requestHostCandidates(request);
+    if (rawHosts.length === 0) return "";
+
+    try {
+        const rows = await sdkProxySql`
+            SELECT ref, config
+            FROM projects
+            WHERE deleted_at IS NULL
+              AND lower(status) IN ('active', 'creating')
+        `;
+        for (const rawHost of rawHosts) {
+            const host = hostNameFromHeaderValue(rawHost);
+            if (!host) continue;
+            const matchedProject = rows.find((row: { ref?: unknown; config?: unknown }) =>
+                typeof row.ref === "string" && matchProjectRefFromHost(host, row.ref, row.config),
+            );
+            if (matchedProject && typeof matchedProject.ref === "string") return matchedProject.ref;
+        }
+    } catch (error: unknown) {
+        logger.warn("[SDK Proxy] Failed to resolve tenant from request host", {
+            hosts: rawHosts,
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
+    return "";
 }
 
 async function resolveProjectRefFromHeaderAndHost(ref: string, request: Request): Promise<string> {
@@ -842,7 +878,7 @@ const realtimeHandler = async ({ request }: { request: Request }) => {
 };
 
 const functionsHandler = async ({ request }: { request: Request }) => {
-    const ref = await getProjectRef(request);
+    const ref = await getProjectRef(request, { allowHostFallback: true });
     if (!ref) return new Response(JSON.stringify({ message: 'Missing tenant reference' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
 
     const asyncResponse = await maybeEnqueueAsyncFunction(request, ref);
