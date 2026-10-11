@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.12.0...delivery-v0.13.0) (2026-10-11)
+
+
+### Features
+
+* **app:** make preview lifecycle resumable and verifiable ([#1786](https://github.com/vibeunion/supacloud/issues/1786)) ([cfd2782](https://github.com/vibeunion/supacloud/commit/cfd2782809fcc6055fe2f4a7c98857c3de204a12))
+
 ## [0.12.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.11.0...delivery-v0.12.0) (2026-10-11)
 
 
