@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.1](https://github.com/vibeunion/supacloud/compare/elysia-v0.29.0...elysia-v0.29.1) (2026-10-11)
+
+
+### Bug Fixes
+
+* **elysia:** reuse managed Effect runtimes ([#1810](https://github.com/vibeunion/supacloud/issues/1810)) ([c31a62d](https://github.com/vibeunion/supacloud/commit/c31a62d133fa6497077a020c901b0c781f570dab))
+
 ## [0.29.0](https://github.com/vibeunion/supacloud/compare/elysia-v0.28.0...elysia-v0.29.0) (2026-10-10)
 
 

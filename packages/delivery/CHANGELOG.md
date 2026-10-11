@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.13.0...delivery-v0.14.0) (2026-10-11)
+
+
+### Features
+
+* **app:** orchestrate application releases on platform ([#1808](https://github.com/vibeunion/supacloud/issues/1808)) ([6488889](https://github.com/vibeunion/supacloud/commit/64888896e4a26ecffb5888c26ae18f47804e60e8))
+
 ## [0.13.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.12.0...delivery-v0.13.0) (2026-10-11)
 
 
