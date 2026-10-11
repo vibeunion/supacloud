@@ -1,14 +1,21 @@
 import { createHash } from "node:crypto";
 import type { FrontendDeployment } from "../types/frontend";
 import type { MutationPrincipal } from "./project-mutation.service";
+import {
+  FRONTEND_ARCHIVE_MAX_BYTES,
+  FRONTEND_ARCHIVE_MAX_FILES,
+  FRONTEND_ARCHIVE_MAX_SOURCE_BYTES,
+  FRONTEND_ARCHIVE_FORMAT,
+  FRONTEND_ARCHIVE_RELEASE_SCHEMA,
+} from "@supacloud/delivery/frontend-archive";
 
 export const FRONTEND_BASE_DIR = "/var/supacloud/frontends";
-export const FRONTEND_RELEASE_ARCHIVE_MAX_BYTES = 100 * 1024 * 1024;
-export const FRONTEND_RELEASE_MAX_FILES = 10_000;
-export const FRONTEND_RELEASE_MAX_UNCOMPRESSED_BYTES = 300 * 1024 * 1024;
+export const FRONTEND_RELEASE_ARCHIVE_MAX_BYTES = FRONTEND_ARCHIVE_MAX_BYTES;
+export const FRONTEND_RELEASE_MAX_FILES = FRONTEND_ARCHIVE_MAX_FILES;
+export const FRONTEND_RELEASE_MAX_UNCOMPRESSED_BYTES = FRONTEND_ARCHIVE_MAX_SOURCE_BYTES;
 export const FRONTEND_RELEASE_LIST_DEFAULT_LIMIT = 50;
 export const FRONTEND_RELEASE_LIST_MAX_LIMIT = 100;
-export const FRONTEND_RELEASE_SCHEMA = "supacloud.frontend-release.v1" as const;
+export const FRONTEND_RELEASE_SCHEMA = FRONTEND_ARCHIVE_RELEASE_SCHEMA;
 export const FRONTEND_ACTIVE_RELEASE_SCHEMA = "supacloud.frontend-active-release.v1" as const;
 export const FRONTEND_ACTIVATION_CHECKPOINT_SCHEMA = "supacloud.frontend-release-activation.v1" as const;
 export const FRONTEND_GATEWAY_DURABILITY_UNKNOWN_CODE = "CADDY_GATEWAY_DURABILITY_UNKNOWN" as const;
@@ -33,6 +40,7 @@ export interface FrontendReleaseRecord {
   file_count: number;
   created_at: string;
   kind: "prebuilt_static";
+  archive_format: typeof FRONTEND_ARCHIVE_FORMAT;
 }
 
 export interface FrontendActiveReleaseRecord {
@@ -262,10 +270,11 @@ export function assertExpectedFrontendActivationId(candidate: string): void {
 export function parseReleaseRecord(candidate: unknown): FrontendReleaseRecord {
   const keys = [
     "schema", "project_ref", "deployment_id", "release_id", "sha256", "tree_sha256",
-    "size_bytes", "file_count", "created_at", "kind",
+    "size_bytes", "file_count", "created_at", "kind", "archive_format",
   ] as const;
   const record = exactRecord(candidate, keys);
   if (!record || record["schema"] !== FRONTEND_RELEASE_SCHEMA || record["kind"] !== "prebuilt_static"
+    || record["archive_format"] !== FRONTEND_ARCHIVE_FORMAT
     || typeof record["project_ref"] !== "string" || typeof record["deployment_id"] !== "string"
     || typeof record["release_id"] !== "string" || !RELEASE_ID_PATTERN.test(record["release_id"])
     || record["sha256"] !== record["release_id"] || typeof record["tree_sha256"] !== "string"

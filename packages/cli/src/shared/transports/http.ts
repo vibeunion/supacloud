@@ -5,6 +5,8 @@
  * Includes request timeout, retry with exponential backoff, and proper error handling.
  */
 
+import { FRONTEND_ARCHIVE_CONTENT_TYPE } from "@supacloud/delivery/frontend-archive";
+
 export interface HttpConfig {
     baseUrl: string;
     token: string;
@@ -474,7 +476,7 @@ export class HttpTransport {
         body: HttpBinaryBody,
         options: HttpBinaryPostOptions,
     ): Promise<HttpResult<T>> {
-        if (options.contentType !== "application/zip") {
+        if (options.contentType !== FRONTEND_ARCHIVE_CONTENT_TYPE) {
             throw new Error("Binary HTTP content type is invalid");
         }
         if (!Number.isSafeInteger(options.contentLength) || options.contentLength < 1

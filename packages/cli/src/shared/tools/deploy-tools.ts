@@ -1,9 +1,9 @@
-import { access, lstat, mkdtemp, opendir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdtemp, opendir, rm } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
-import { zipSync, type Zippable } from "fflate";
+import { createFrontendTarZstd, FRONTEND_ARCHIVE_FORMAT } from "@supacloud/delivery/frontend-archive";
 import { optional } from "../schema";
 import type { HttpTransport } from "../transports/http";
 import { registerTool, type ToolServer } from "../tool-server";
@@ -14,7 +14,6 @@ import {
 } from "./frontend-release-control";
 import { projectedFunctionList } from "./edge-function-response";
 
-const FIXED_ZIP_MTIME = new Date("1980-01-01T00:00:00.000Z");
 const MAX_SOURCE_BYTES = 256 * 1024 * 1024;
 
 interface DeployConfig {
@@ -53,6 +52,7 @@ interface FrontendDeployment {
 
 interface DeployToolOptions {
     projectRef?: string;
+    environment?: string | null;
     cwd?: string;
     edgeFunctionDeploy?: (args: Record<string, unknown>) => Promise<ToolResponse>;
 }
@@ -71,6 +71,8 @@ export const deployToolSchema = {
     output_dir: optional(Type.String(), "Build output directory override"),
     skip_build: optional(Type.Boolean(), "Use an existing output directory without building"),
     dry_run: optional(Type.Boolean(), "Resolve and validate the deployment without building or publishing"),
+    plan: optional(Type.Boolean(), "Build and compare the release with current authority without publishing"),
+    diff: optional(Type.Boolean(), "Build and report the immutable release-level diff without publishing"),
     json: optional(Type.Boolean(), "Print only the final JSON result"),
 };
 
@@ -104,7 +106,7 @@ function frontendDeployment(candidate: unknown): FrontendDeployment {
 
 async function readJson(path: string): Promise<unknown> {
     try {
-        return JSON.parse(await readFile(path, "utf8"));
+        return await Bun.file(path).json();
     } catch (error) {
         if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
         throw new Error(`Invalid JSON file ${path}: ${error instanceof Error ? error.message : String(error)}`);
@@ -324,11 +326,11 @@ function resolveInsideProject(projectDirectory: string, candidate: string, allow
     return resolved;
 }
 
-async function runBuild(command: string, cwd: string): Promise<void> {
+async function runBuild(command: string, cwd: string, json: boolean): Promise<void> {
     const child = Bun.spawn(["sh", "-c", command], {
         cwd,
         env: process.env,
-        stdio: ["inherit", "inherit", "inherit"],
+        stdio: ["inherit", json ? 2 : "inherit", "inherit"],
     });
     const exitCode = await child.exited;
     if (exitCode !== 0) {
@@ -336,7 +338,7 @@ async function runBuild(command: string, cwd: string): Promise<void> {
     }
 }
 
-async function collectArchiveFiles(root: string): Promise<{ files: Zippable; bytes: number; count: number }> {
+async function collectArchiveFiles(root: string): Promise<{ files: Map<string, Uint8Array>; bytes: number; count: number; treeSha256: string }> {
     const rootStat = await lstat(root).catch(() => null);
     if (!rootStat?.isDirectory() || rootStat.isSymbolicLink()) {
         throw new Error(`Frontend output directory does not exist or is not a regular directory: ${root}`);
@@ -359,34 +361,48 @@ async function collectArchiveFiles(root: string): Promise<{ files: Zippable; byt
     if (paths.length === 0) throw new Error(`Frontend output directory is empty: ${root}`);
 
     let bytes: number = 0;
-    const files: Zippable = {};
+    const files = new Map<string, Uint8Array>();
+    const digests: Array<{ path: string; size: number; sha256: string }> = [];
     for (const path of paths) {
-        const data = new Uint8Array(await readFile(path));
+        const data = new Uint8Array(await Bun.file(path).arrayBuffer());
         bytes += data.byteLength;
         if (bytes > MAX_SOURCE_BYTES) throw new Error(`Frontend output exceeds ${MAX_SOURCE_BYTES} bytes`);
         const archivePath = relative(root, path).split(sep).join("/");
-        files[archivePath] = [data, { mtime: FIXED_ZIP_MTIME }];
+        files.set(archivePath, data);
+        digests.push({ path: archivePath, size: data.byteLength, sha256: createHash("sha256").update(data).digest("hex") });
     }
-    return { files, bytes, count: paths.length };
+    const tree = createHash("sha256");
+    for (const file of digests.sort((left, right) => left.path.localeCompare(right.path))) {
+        const pathBytes = Buffer.from(file.path, "utf8");
+        const frame = Buffer.alloc(12);
+        frame.writeUInt32BE(pathBytes.byteLength, 0);
+        frame.writeBigUInt64BE(BigInt(file.size), 4);
+        tree.update(frame).update(pathBytes).update(Buffer.from(file.sha256, "hex"));
+    }
+    return { files, bytes, count: paths.length, treeSha256: tree.digest("hex") };
 }
 
 export async function createFrontendArchive(outputDirectory: string): Promise<{
     archivePath: string;
     sha256: string;
+    treeSha256: string;
+    archiveBytes: number;
     sourceBytes: number;
     fileCount: number;
     cleanup(): Promise<void>;
 }> {
     const collected = await collectArchiveFiles(outputDirectory);
     const temporaryDirectory = await mkdtemp(join(tmpdir(), "supacloud-deploy-"));
-    const archivePath = join(temporaryDirectory, `${basename(outputDirectory)}.zip`);
+    const archivePath = join(temporaryDirectory, `${basename(outputDirectory)}.tar.zst`);
     try {
-        const archiveBytes = zipSync(collected.files, { level: 6, mtime: FIXED_ZIP_MTIME });
-        await writeFile(archivePath, archiveBytes);
+        const archiveBytes = await createFrontendTarZstd(collected.files);
+        await Bun.write(archivePath, archiveBytes);
         const sha256 = createHash("sha256").update(archiveBytes).digest("hex");
         return {
             archivePath,
             sha256,
+            treeSha256: collected.treeSha256,
+            archiveBytes: archiveBytes.byteLength,
             sourceBytes: collected.bytes,
             fileCount: collected.count,
             cleanup: () => rm(temporaryDirectory, { recursive: true, force: true }),
@@ -436,6 +452,9 @@ export function registerDeployTools(
         "Build and publish the linked frontend with one command",
         deployToolSchema,
         async (args) => {
+            if (args.dry_run === true && (args.plan === true || args.diff === true)) {
+                throw new Error("Use dry_run for resolution only, or plan/diff for a built release comparison, not both");
+            }
             const invocationDirectory = resolve(String(args.cwd || options.cwd || process.cwd()));
             const projectRef = String(args.ref || options.projectRef || "").trim();
             if (!projectRef) throw new Error("A linked project ref is required. Set SUPACLOUD_PROJECT_REF or pass --ref");
@@ -452,6 +471,7 @@ export function registerDeployTools(
             report("inspect", `${target.name} (${projectRef})`);
 
             if (target.config.type === "edge_function") {
+                if (args.diff === true) throw new Error("Function release diffs require an immutable function release manifest");
                 if (!options.edgeFunctionDeploy) throw new Error("Edge Function deploy support is unavailable in this CLI context");
                 const slug = target.config.slug || requestedId || target.name;
                 const functionListResponse = await options.edgeFunctionDeploy({
@@ -476,7 +496,7 @@ export function registerDeployTools(
                     String(args.output_dir || target.config.bundleDirectory || target.config.outputDirectory || "dist"),
                     true,
                 );
-                if (args.dry_run === true) {
+                if (args.dry_run === true || args.plan === true) {
                     return { content: [{ type: "text" as const, text: JSON.stringify({
                         ok: true,
                         dry_run: true,
@@ -492,7 +512,7 @@ export function registerDeployTools(
                 }
                 if (args.skip_build !== true) {
                     report("build", buildCommand);
-                    await runBuild(buildCommand, projectDirectory);
+                    await runBuild(buildCommand, projectDirectory, args.json === true);
                 } else {
                     report("build", "skipped");
                 }
@@ -552,7 +572,7 @@ export function registerDeployTools(
 
             if (args.skip_build !== true) {
                 report("build", buildCommand);
-                await runBuild(buildCommand, projectDirectory);
+                await runBuild(buildCommand, projectDirectory, args.json === true);
             } else {
                 report("build", "skipped");
             }
@@ -563,15 +583,41 @@ export function registerDeployTools(
                 const inventory = payload(await readFrontendReleaseAuthority(http, projectRef, selected.id));
                 const activeReleaseId = typeof inventory.active_release_id === "string" ? inventory.active_release_id : null;
                 const activeActivationId = typeof inventory.active_activation_id === "string" ? inventory.active_activation_id : null;
+                const current = Array.isArray(inventory.releases) ? record(inventory.releases[0]) : null;
+                if (archive.sha256 === activeReleaseId && archive.treeSha256 !== current?.tree_sha256) {
+                    throw new Error("Active release tree does not match the local archive");
+                }
+                const unchanged = archive.treeSha256 === current?.tree_sha256;
 
-                if (archive.sha256 === activeReleaseId) {
+                if (args.plan === true || args.diff === true) {
+                    const durationMs = report("done", unchanged ? "unchanged plan" : "release diff ready");
+                    return { content: [{ type: "text", text: JSON.stringify({
+                        schema: "supacloud.frontend-deploy-plan.v1",
+                        ok: true, planned: true, published: false, unchanged,
+                        environment: options.environment ?? null,
+                        type: "frontend", target: target.name,
+                        project_ref: projectRef, deployment_id: selected.id,
+                        comparison: "immutable_release",
+                        archive_format: FRONTEND_ARCHIVE_FORMAT,
+                        release_id: archive.sha256, tree_sha256: archive.treeSha256,
+                        active_release_id: activeReleaseId, active_tree_sha256: current?.tree_sha256 ?? null,
+                        expected_active_release_id: activeReleaseId ?? "absent",
+                        expected_activation_id: activeActivationId ?? "absent",
+                        actions: unchanged ? [] : ["upload_release", "activate_release"],
+                        file_count: archive.fileCount, source_bytes: archive.sourceBytes,
+                        archive_bytes: archive.archiveBytes, duration_ms: durationMs,
+                    }, null, 2) }] };
+                }
+
+                if (unchanged) {
                     const durationMs = report("done", "already current");
                     return deployResponse({
                         ok: true,
                         unchanged: true,
                         project_ref: projectRef,
                         deployment_id: selected.id,
-                        release_id: archive.sha256,
+                        release_id: activeReleaseId,
+                        tree_sha256: archive.treeSha256,
                         url: selected.deploymentUrl,
                         file_count: archive.fileCount,
                         source_bytes: archive.sourceBytes,
@@ -584,17 +630,31 @@ export function registerDeployTools(
                 const release = record(uploaded.release);
                 const releaseId = requiredString(release?.release_id, "release.release_id");
                 if (releaseId !== archive.sha256) throw new Error("Uploaded release identity does not match the local archive");
+                if (release?.tree_sha256 !== archive.treeSha256) throw new Error("Uploaded release tree does not match the local build");
 
                 report("activate", releaseId.slice(0, 12));
                 const mutationId = crypto.randomUUID();
-                const activated = payload(await activateFrontendRelease(http, {
+                const activationResponse = await activateFrontendRelease(http, {
                     projectRef,
                     deploymentId: selected.id,
                     releaseId,
                     expectedActiveReleaseId: activeReleaseId || "absent",
                     expectedActivationId: activeActivationId || "absent",
                     mutationId,
-                }));
+                });
+                if (activationResponse.isError) {
+                    const failure = record(JSON.parse(activationResponse.content[0]?.text ?? "{}"));
+                    return {
+                        isError: true,
+                        content: [{ type: "text", text: JSON.stringify({
+                            ...failure, operation: "deploy", project_ref: projectRef, deployment_id: selected.id,
+                            mutation_id: mutationId, target_release_id: releaseId,
+                            expected_active_release_id: activeReleaseId ?? "absent",
+                            expected_activation_id: activeActivationId ?? "absent",
+                        }) }],
+                    };
+                }
+                const activated = payload(activationResponse);
                 const finalResponse = await http.get(
                     `/v1/projects/${encodeURIComponent(projectRef)}/frontend/deployments/${encodeURIComponent(selected.id)}`,
                 );

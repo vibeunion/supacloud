@@ -2,6 +2,9 @@ import { createHash } from "node:crypto";
 import { constants as fsConstants, type BigIntStats } from "node:fs";
 import { open, type FileHandle } from "node:fs/promises";
 import { resolve } from "node:path";
+import {
+    FRONTEND_ARCHIVE_CONTENT_TYPE, FRONTEND_ARCHIVE_FORMAT, FRONTEND_ARCHIVE_RELEASE_SCHEMA,
+} from "@supacloud/delivery/frontend-archive";
 import type { HttpResult } from "../transports/http";
 
 const PROJECT_REF_PATTERN = /^[A-Za-z0-9_-]{1,20}$/u;
@@ -49,6 +52,7 @@ export interface FrontendReleaseRecord {
     file_count: number;
     created_at: string;
     kind: "prebuilt_static";
+    archive_format: typeof FRONTEND_ARCHIVE_FORMAT;
 }
 
 interface FrontendReleaseInventory {
@@ -100,9 +104,10 @@ function releaseRecord(candidate: unknown): FrontendReleaseRecord | null {
     const record = candidate as Record<string, unknown>;
     const keys = [
         "schema", "project_ref", "deployment_id", "release_id", "sha256", "tree_sha256",
-        "size_bytes", "file_count", "created_at", "kind",
+        "size_bytes", "file_count", "created_at", "kind", "archive_format",
     ] as const;
-    if (!exactKeys(record, keys) || record.schema !== "supacloud.frontend-release.v1"
+    if (!exactKeys(record, keys) || record.schema !== FRONTEND_ARCHIVE_RELEASE_SCHEMA
+        || record.archive_format !== FRONTEND_ARCHIVE_FORMAT
         || typeof record.project_ref !== "string" || !PROJECT_REF_PATTERN.test(record.project_ref)
         || typeof record.deployment_id !== "string" || !DEPLOYMENT_ID_PATTERN.test(record.deployment_id)
         || typeof record.release_id !== "string" || !RELEASE_ID_PATTERN.test(record.release_id)
@@ -121,6 +126,7 @@ function releaseRecord(candidate: unknown): FrontendReleaseRecord | null {
         file_count: Number(record.file_count),
         created_at: record.created_at,
         kind: "prebuilt_static",
+        archive_format: FRONTEND_ARCHIVE_FORMAT,
     };
 }
 
@@ -320,7 +326,7 @@ export async function uploadFrontendRelease(
             stream: archiveStream(archive),
             byteLength: archive.sizeBytes,
         }, {
-            contentType: "application/zip",
+            contentType: FRONTEND_ARCHIVE_CONTENT_TYPE,
             contentLength: archive.sizeBytes,
             contentSha256: archive.sha256,
             maxJsonBytes: RESPONSE_MAX_BYTES,
@@ -348,6 +354,36 @@ export async function uploadFrontendRelease(
         return releaseFailure("frontend.upload_release", "OUTCOME_UNKNOWN", readback.status);
     }
     return toolResponse({ project_ref: projectRef, deployment_id: deploymentId, release: verified });
+}
+
+export async function uploadFrontendSource(
+    http: FrontendReleaseHttp,
+    projectRef: string,
+    deploymentId: string,
+    archivePath: string,
+): Promise<ToolResponse> {
+    const endpoint = `${deploymentEndpoint(projectRef, deploymentId)}/deploy/upload`;
+    const archive = await verifiedArchive(archivePath);
+    try {
+        const response = await http.postBinary(endpoint, {
+            stream: archiveStream(archive), byteLength: archive.sizeBytes,
+        }, {
+            contentType: FRONTEND_ARCHIVE_CONTENT_TYPE, contentLength: archive.sizeBytes,
+            contentSha256: archive.sha256, maxJsonBytes: RESPONSE_MAX_BYTES,
+            timeoutMs: UPLOAD_REQUEST_TIMEOUT_MS,
+        });
+        if (!response.ok) {
+            return releaseFailure("frontend.deploy_upload",
+                response.status >= 400 && response.status < 500 ? "HTTP_ERROR" : "OUTCOME_UNKNOWN", response.status);
+        }
+        if (!response.data || typeof response.data !== "object"
+            || !("success" in response.data) || response.data.success !== true) {
+            return releaseFailure("frontend.deploy_upload", "INVALID_RESPONSE", response.status);
+        }
+        return toolResponse(response.data);
+    } finally {
+        await archive.handle.close();
+    }
 }
 
 async function uploadReadback(

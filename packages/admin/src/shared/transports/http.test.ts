@@ -499,7 +499,7 @@ describe("HttpTransport raw binary mutations", () => {
         };
     }
 
-    test("sends an exact ZIP body and returns only a bounded JSON response", async () => {
+    test("sends an exact tar.zst body and returns only a bounded JSON response", async () => {
         const captured = { headers: new Headers(), body: [] as number[] };
         globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
             const request = new Request(input, init);
@@ -512,7 +512,7 @@ describe("HttpTransport raw binary mutations", () => {
             "/frontend/releases",
             binaryBody([1, 2, 3]),
             {
-                contentType: "application/zip",
+                contentType: "application/vnd.supacloud.frontend.tar+zstd",
                 contentLength: 3,
                 contentSha256: "a".repeat(64),
                 maxJsonBytes: 1024,
@@ -520,7 +520,7 @@ describe("HttpTransport raw binary mutations", () => {
         );
 
         expect(response).toEqual({ ok: true, status: 200, data: { ok: true } });
-        expect(captured.headers.get("content-type")).toBe("application/zip");
+        expect(captured.headers.get("content-type")).toBe("application/vnd.supacloud.frontend.tar+zstd");
         expect(captured.headers.get("content-length")).toBe("3");
         expect(captured.headers.get("x-supacloud-content-sha256")).toBe("a".repeat(64));
         expect(captured.body).toEqual([1, 2, 3]);
@@ -540,7 +540,7 @@ describe("HttpTransport raw binary mutations", () => {
             maxJsonBytes: 1024,
         })).rejects.toThrow("content type");
         await expect(transport.postBinary("/frontend/releases", binaryBody([1]), {
-            contentType: "application/zip",
+            contentType: "application/vnd.supacloud.frontend.tar+zstd",
             contentLength: 2,
             contentSha256: "a".repeat(64),
             maxJsonBytes: 1024,
@@ -555,7 +555,7 @@ describe("HttpTransport raw binary mutations", () => {
             headers: { "content-length": "2048" },
         })) as unknown as typeof fetch;
         const response = await createTransport().postBinary("/frontend/releases", binaryBody([1]), {
-            contentType: "application/zip",
+            contentType: "application/vnd.supacloud.frontend.tar+zstd",
             contentLength: 1,
             contentSha256: "a".repeat(64),
             maxJsonBytes: 1024,
@@ -569,11 +569,11 @@ describe("HttpTransport raw binary mutations", () => {
             maxJsonBytes: 1024,
             responseTimeoutMs: 10,
         })],
-        ["ZIP upload", (transport: HttpTransport) => transport.postBinary(
+        ["tar.zst upload", (transport: HttpTransport) => transport.postBinary(
             "/frontend/releases",
             binaryBody([1]),
             {
-                contentType: "application/zip",
+                contentType: "application/vnd.supacloud.frontend.tar+zstd",
                 contentLength: 1,
                 contentSha256: "a".repeat(64),
                 maxJsonBytes: 1024,

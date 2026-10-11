@@ -4,6 +4,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { access, chmod, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, truncate, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { config } from "../../src/config";
 import { FrontendService } from "../../src/services/frontend.service";
 import { FrontendDomainService } from "../../src/services/frontend-domain.service";
@@ -1318,21 +1319,58 @@ describe("FrontendService deployment serialization", () => {
 });
 
 describe("FrontendService optimizer", () => {
-  test("generates br and gzip sidecars for static text assets", async () => {
+  test("generates lossless br, gzip and native zstd sidecars for static text assets", async () => {
     const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-optimizer-test-"));
     const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
     const assetPath = join(baseDir, "app.js");
 
     try {
-      await writeFile(assetPath, "console.log('supacloud');\n".repeat(128));
-      await (service as any).precompressStaticAssets(baseDir);
-
-      await access(`${assetPath}.br`);
-      await access(`${assetPath}.gz`);
-      if ((await Bun.spawn(["which", "zstd"]).exited) === 0) {
-        await access(`${assetPath}.zst`);
+      const content = "console.log('supacloud');\n".repeat(128);
+      await Bun.write(assetPath, content);
+      const compressor = spyOn(Bun, "zstdCompress");
+      try {
+        await Reflect.apply(
+          Reflect.get(service, "precompressStaticAssets"), service, [baseDir],
+        );
+        expect(compressor).toHaveBeenCalledTimes(1);
+        expect(compressor).toHaveBeenCalledWith(new TextEncoder().encode(content), { level: 3 });
+        const gzip = await Bun.file(`${assetPath}.gz`).bytes();
+        const brotli = await Bun.file(`${assetPath}.br`).bytes();
+        const zstd = await Bun.file(`${assetPath}.zst`).bytes();
+        expect(gunzipSync(gzip).toString()).toBe(content);
+        expect(brotliDecompressSync(brotli).toString()).toBe(content);
+        expect(new TextDecoder().decode(await Bun.zstdDecompress(zstd))).toBe(content);
+        expect(await Bun.file(assetPath).text()).toBe(content);
+        expect((await readdir(baseDir)).sort()).toEqual(["app.js", "app.js.br", "app.js.gz", "app.js.zst"]);
+      } finally {
+        compressor.mockRestore();
       }
     } finally {
+      await rm(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  test("caches missing native image tools and preserves source images", async () => {
+    const baseDir = await mkdtemp(join(tmpdir(), "supacloud-frontend-missing-image-tools-"));
+    const service = new FrontendService(baseDir, withoutDeploymentLock, noImmutableRelease);
+    const content = Buffer.alloc(2048, 1);
+    const resolver = spyOn(Bun, "which").mockReturnValue(null);
+
+    try {
+      await Bun.write(join(baseDir, "first.jpg"), content);
+      await Bun.write(join(baseDir, "second.jpg"), content);
+      await Reflect.apply(
+        Reflect.get(service, "precompressStaticAssets"), service, [baseDir],
+      );
+
+      expect(resolver).toHaveBeenCalledTimes(2);
+      expect(resolver).toHaveBeenCalledWith("cwebp", { PATH: process.env.PATH ?? "" });
+      expect(resolver).toHaveBeenCalledWith("avifenc", { PATH: process.env.PATH ?? "" });
+      expect((await readdir(baseDir)).sort()).toEqual(["first.jpg", "second.jpg"]);
+      expect(await Bun.file(join(baseDir, "first.jpg")).bytes()).toEqual(content);
+      expect(await Bun.file(join(baseDir, "second.jpg")).bytes()).toEqual(content);
+    } finally {
+      resolver.mockRestore();
       await rm(baseDir, { recursive: true, force: true });
     }
   });
@@ -1346,17 +1384,31 @@ describe("FrontendService optimizer", () => {
 
     try {
       await mkdir(binDir);
-      await writeFile(join(binDir, "cwebp"), "#!/bin/sh\ncp \"$4\" \"$6\"\n");
-      await writeFile(join(binDir, "avifenc"), "#!/bin/sh\ncp \"$8\" \"$9\"\n");
+      await Bun.write(join(binDir, "cwebp"), "#!/bin/sh\ncp \"$4\" \"$6\"\n");
+      await Bun.write(join(binDir, "avifenc"), "#!/bin/sh\ncp \"$8\" \"$9\"\n");
       await chmod(join(binDir, "cwebp"), 0o755);
       await chmod(join(binDir, "avifenc"), 0o755);
       process.env.PATH = `${binDir}:${originalPath}`;
 
-      await writeFile(imagePath, Buffer.alloc(2048, 1));
-      await (service as any).precompressStaticAssets(baseDir);
+      const content = Buffer.alloc(2048, 1);
+      await Bun.write(imagePath, content);
+      await Bun.write(join(baseDir, "second.jpg"), content);
+      const resolver = spyOn(Bun, "which");
+      try {
+        await Reflect.apply(
+          Reflect.get(service, "precompressStaticAssets"), service, [baseDir],
+        );
 
-      await access(`${imagePath}.webp`);
-      await access(`${imagePath}.avif`);
+        expect(resolver).toHaveBeenCalledTimes(2);
+        expect(resolver).toHaveBeenCalledWith("cwebp", { PATH: `${binDir}:${originalPath}` });
+        expect(resolver).toHaveBeenCalledWith("avifenc", { PATH: `${binDir}:${originalPath}` });
+        expect(await Bun.file(`${imagePath}.webp`).bytes()).toEqual(content);
+        expect(await Bun.file(`${imagePath}.avif`).bytes()).toEqual(content);
+        expect(await Bun.file(join(baseDir, "second.jpg.webp")).bytes()).toEqual(content);
+        expect(await Bun.file(join(baseDir, "second.jpg.avif")).bytes()).toEqual(content);
+      } finally {
+        resolver.mockRestore();
+      }
     } finally {
       process.env.PATH = originalPath;
       await rm(baseDir, { recursive: true, force: true });

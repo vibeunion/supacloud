@@ -17,123 +17,32 @@ import { requireProjectOrAdminAuth } from "../middleware/auth";
 import { MASKED_FRONTEND_VALUE, maskFrontendBuildLog, normalizeFrontendCustomDomain, toFrontendDeploymentResponse } from "../utils/frontend-security";
 import { createFrontendEnvironmentRevision, FrontendEnvironmentConflictError } from "../utils/frontend-environment-revision";
 import { createFrontendConfigurationRevision, FrontendConfigurationConflictError } from "../utils/frontend-configuration-revision";
-
-const FRONTEND_UPLOAD_MAX_BYTES = Number(process.env.FRONTEND_UPLOAD_MAX_BYTES || 100 * 1024 * 1024);
-const FRONTEND_UPLOAD_MAX_FILES = Number(process.env.FRONTEND_UPLOAD_MAX_FILES || 10_000);
-const FRONTEND_UPLOAD_MAX_UNCOMPRESSED_BYTES = Number(process.env.FRONTEND_UPLOAD_MAX_UNCOMPRESSED_BYTES || 300 * 1024 * 1024);
+import { FRONTEND_ARCHIVE_CONTENT_TYPE } from "@supacloud/delivery/frontend-archive";
+import { readFrontendTarZstd } from "@supacloud/delivery/frontend-archive-reader";
 const SAFE_ID_PATTERN = /^[a-zA-Z0-9_-]{1,128}$/;
 const IMMUTABLE_UPLOAD_CHUNK_BYTES = 64 * 1024;
 
-type ArrayBufferBody = { arrayBuffer(): Promise<ArrayBuffer> };
-
-function hasArrayBuffer(value: unknown): value is ArrayBufferBody {
-  return value !== null
-    && typeof value === "object"
-    && "arrayBuffer" in value
-    && typeof value.arrayBuffer === "function";
-}
-
-function isSafeZipEntryName(name: string): boolean {
-  const normalized = name.replace(/\\/g, "/");
-  return !!normalized && !normalized.startsWith("/") && !normalized.includes("../") && normalized !== ".." && !normalized.split("/").includes("..");
-}
-
-async function validateZipArchive(zipPath: string): Promise<{ ok: true } | { ok: false; message: string }> {
-  const namesResult = await Bun.$`unzip -Z -1 ${zipPath}`.quiet().nothrow();
-  if (namesResult.exitCode !== 0) {
-    return { ok: false, message: "Invalid zip archive" };
-  }
-
-  const entries = namesResult.stdout.toString().split(/\r?\n/).filter(Boolean);
-  if (entries.length > FRONTEND_UPLOAD_MAX_FILES) {
-    return { ok: false, message: `Zip file count exceeds ${FRONTEND_UPLOAD_MAX_FILES}` };
-  }
-
-  for (const entry of entries) {
-    if (!isSafeZipEntryName(entry)) {
-      return { ok: false, message: "Zip archive contains unsafe paths" };
-    }
-  }
-
-  const listResult = await Bun.$`unzip -Z -l ${zipPath}`.quiet().nothrow();
-  if (listResult.exitCode !== 0) {
-    return { ok: false, message: "Invalid zip archive" };
-  }
-
-  let totalSize = 0;
-  for (const line of listResult.stdout.toString().split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("Archive:") || trimmed.startsWith("---") || trimmed.includes(" files,")) continue;
-    if (trimmed[0] === "l") {
-      return { ok: false, message: "Zip archive must not contain symlinks" };
-    }
-    const match = trimmed.match(/^(\S+)\s+\S+\s+(\d+)\s+/);
-    if (match) {
-      totalSize += Number(match[2]);
-      if (totalSize > FRONTEND_UPLOAD_MAX_UNCOMPRESSED_BYTES) {
-        return { ok: false, message: `Uncompressed zip size exceeds ${FRONTEND_UPLOAD_MAX_UNCOMPRESSED_BYTES}` };
-      }
-    }
-  }
-
-  return { ok: true };
-}
-
-async function readUploadedZip(request: Request, body: unknown): Promise<Uint8Array> {
-  // 1. If body is already File / Blob or has arrayBuffer method
-  if (hasArrayBuffer(body)) {
-    try {
-      return new Uint8Array(await body.arrayBuffer());
-    } catch {
-      // ignore
-    }
-  }
-
-  // 2. If body is an object, inspect its properties (e.g. file field or any field containing arrayBuffer)
-  if (body && typeof body === "object") {
-    const directFile = (body as Record<string, unknown>).file;
-    if (hasArrayBuffer(directFile)) {
-      try {
-        return new Uint8Array(await directFile.arrayBuffer());
-      } catch {
-        // ignore
-      }
-    }
-
-    // Iterate all keys to support custom field names from different clients
-    for (const val of Object.values(body)) {
-      if (hasArrayBuffer(val)) {
-        try {
-          return new Uint8Array(await val.arrayBuffer());
-        } catch {
-          // ignore
-        }
-      }
-    }
-  }
-
-  // 3. If stream has not been consumed by Elysia, read directly from request with exception guards (no clone)
-  const contentType = request.headers.get("content-type") || "";
-  if (contentType.includes("multipart/form-data")) {
-    try {
-      const form = await request.formData();
-      const file = form.get("file");
-      if (hasArrayBuffer(file)) {
-        return new Uint8Array(await file.arrayBuffer());
-      }
-    } catch {
-      // ignore
-    }
-  }
-
-  // 4. Final fallback: attempt reading request binary directly with exception guards
+async function* sourceArchiveChunks(request: Request, expectedLength: number): AsyncGenerator<Uint8Array> {
+  const reader = request.body?.getReader();
+  if (!reader) throw new FrontendReleaseError("FRONTEND_RELEASE_ARCHIVE_INVALID", 400, "Frontend archive is empty");
+  let received = 0;
   try {
-    return new Uint8Array(await request.arrayBuffer());
-  } catch {
-    // ignore
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      received += chunk.value.byteLength;
+      if (received > expectedLength) {
+        throw new FrontendReleaseError("FRONTEND_RELEASE_CONTENT_LENGTH_MISMATCH", 400, "Frontend upload length does not match Content-Length");
+      }
+      yield chunk.value;
+    }
+    if (received !== expectedLength) {
+      throw new FrontendReleaseError("FRONTEND_RELEASE_CONTENT_LENGTH_MISMATCH", 400, "Frontend upload length does not match Content-Length");
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
-
-  return new Uint8Array(0);
 }
 
 function immutableReleaseContentLength(request: Request): number {
@@ -157,16 +66,16 @@ function immutableReleaseContentLength(request: Request): number {
 }
 
 function assertImmutableReleaseContentType(request: Request): void {
-  if (request.headers.get("content-type")?.trim().toLowerCase() !== "application/zip") {
+  if (request.headers.get("content-type")?.trim().toLowerCase() !== FRONTEND_ARCHIVE_CONTENT_TYPE) {
     throw new FrontendReleaseError(
       "FRONTEND_RELEASE_CONTENT_TYPE_INVALID",
       415,
-      "Frontend release upload requires application/zip",
+      `Frontend release upload requires ${FRONTEND_ARCHIVE_CONTENT_TYPE}`,
     );
   }
 }
 
-async function streamImmutableReleaseZip(
+async function streamImmutableReleaseArchive(
   request: Request,
   session: Awaited<ReturnType<typeof frontendReleaseService.prepareReleaseUpload>>,
 ): Promise<void> {
@@ -339,7 +248,7 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         const upload = await frontendReleaseService.prepareReleaseUpload(params.ref, params.id, expectedLength);
         const expectedSha256 = request.headers.get("x-supacloud-content-sha256")?.trim() || "";
         try {
-          await streamImmutableReleaseZip(request, upload);
+          await streamImmutableReleaseArchive(request, upload);
           const archive = await upload.finish(expectedSha256);
           const release = await frontendReleaseService.createRelease(params.ref, params.id, archive);
           return status(201, { project_ref: params.ref, deployment_id: params.id, release });
@@ -555,10 +464,10 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         ref: t.String(),
         id: t.String(),
       }),
-      body: t.Any(),
-      detail: { tags: ["frontend"], summary: "Deploy from uploaded zip" },
+      parse: "none",
+      detail: { tags: ["frontend"], summary: "Deploy from uploaded tar.zst source" },
     },
-    async ({ params, body, request, set }) => {
+    async ({ params, request, set }) => {
       const deployment = await frontendService.getDeployment(params.ref, params.id);
       if (!deployment) {
                 return status(404, { message: "Deployment not found", code: "404" });
@@ -575,69 +484,27 @@ export const frontendRoutes = new Elysia({ prefix: "/v1/projects/:ref/frontend" 
         };
       }
 
+      let expectedLength: number;
+      try {
+        assertImmutableReleaseContentType(request);
+        expectedLength = immutableReleaseContentLength(request);
+      } catch (error: unknown) {
+        return releaseError(error);
+      }
       const tempDir = await mkdtemp(path.join(tmpdir(), "supacloud-frontend-upload-"));
       const extractDir = path.join(tempDir, "extract");
-      const tempZip = path.join(tempDir, "upload.zip");
 
       try {
-        const contentLength = Number(request.headers.get("content-length") || 0);
-        if (contentLength > FRONTEND_UPLOAD_MAX_BYTES) {
-          set.status = 413;
-          return {
-            success: false,
-            deployment_id: params.id,
-            url: "",
-            build_log: "",
-            message: `Upload payload exceeds ${FRONTEND_UPLOAD_MAX_BYTES} bytes`,
-          };
-        }
-
-        const zipBytes = await readUploadedZip(request, body);
-        if (!zipBytes.byteLength) {
+        try {
+          await readFrontendTarZstd(sourceArchiveChunks(request, expectedLength), extractDir);
+        } catch (error: unknown) {
+          if (error instanceof FrontendReleaseError) return releaseError(error);
           set.status = 400;
           return {
-            success: false,
-            deployment_id: params.id,
-            url: "",
-            build_log: "",
-            message: "Empty upload payload",
+            success: false, deployment_id: params.id, url: "", build_log: "",
+            message: "Invalid frontend tar.zst archive",
           };
         }
-        if (zipBytes.byteLength > FRONTEND_UPLOAD_MAX_BYTES) {
-          set.status = 413;
-          return {
-            success: false,
-            deployment_id: params.id,
-            url: "",
-            build_log: "",
-            message: `Upload payload exceeds ${FRONTEND_UPLOAD_MAX_BYTES} bytes`,
-          };
-        }
-
-        await Bun.write(tempZip, zipBytes);
-        const validation = await validateZipArchive(tempZip);
-        if (!validation.ok) {
-          set.status = 400;
-          return {
-            success: false,
-            deployment_id: params.id,
-            url: "",
-            build_log: "",
-            message: validation.message,
-          };
-        }
-
-        const extractResult = await Bun.$`unzip -q ${tempZip} -d ${extractDir}`.quiet();
-        if (extractResult.exitCode !== 0) {
-          return {
-            success: false,
-            deployment_id: params.id,
-            url: "",
-            build_log: extractResult.stderr.toString(),
-            message: "Failed to extract zip file",
-          };
-        }
-
         return await frontendService.deployFromSource(params.ref, params.id, extractDir);
       } finally {
         await rm(tempDir, { recursive: true, force: true });

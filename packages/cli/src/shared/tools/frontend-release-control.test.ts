@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { createFrontendTarZstd } from "@supacloud/delivery/frontend-archive";
 import {
     activateFrontendRelease,
     getActiveFrontendRelease,
@@ -21,7 +22,7 @@ const roots = new Set<string>();
 
 function release(releaseId = RELEASE_ID, treeSha = TREE_SHA) {
     return {
-        schema: "supacloud.frontend-release.v1",
+        schema: "supacloud.frontend-release.v2",
         project_ref: PROJECT_REF,
         deployment_id: DEPLOYMENT_ID,
         release_id: releaseId,
@@ -30,7 +31,7 @@ function release(releaseId = RELEASE_ID, treeSha = TREE_SHA) {
         size_bytes: 3,
         file_count: 1,
         created_at: "2026-08-12T00:00:00.000Z",
-        kind: "prebuilt_static",
+        archive_format: "tar.zst" as const, kind: "prebuilt_static",
     };
 }
 
@@ -412,8 +413,9 @@ describe("immutable frontend release control", () => {
     test("uploads raw verified bytes and requires exact immutable readback", async () => {
         const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-"));
         roots.add(root);
-        const path = join(root, "site.zip");
-        await writeFile(path, "zip");
+        const path = join(root, "site.tar.zst");
+        const archiveBytes = await createFrontendTarZstd(new Map([["index.html", Buffer.from("ok")]]));
+        await Bun.write(path, archiveBytes);
         const calls: Array<{ method: string; path: string; options?: Record<string, unknown> }> = [];
         const http = {
             postBinary: async (endpoint: string, body: {
@@ -421,7 +423,7 @@ describe("immutable frontend release control", () => {
             }, options: Record<string, unknown>) => {
                 calls.push({ method: "POST", path: endpoint, options });
                 const bytes = new Uint8Array(await new Response(body.stream).arrayBuffer());
-                expect(new TextDecoder().decode(bytes)).toBe("zip");
+                expect(bytes).toEqual(new Uint8Array(archiveBytes));
                 const digest = String(options.contentSha256);
                 return {
                     ok: true,
@@ -429,7 +431,7 @@ describe("immutable frontend release control", () => {
                     data: {
                         project_ref: PROJECT_REF,
                         deployment_id: DEPLOYMENT_ID,
-                        release: { ...release(), release_id: digest, sha256: digest },
+                        release: { ...release(), release_id: digest, sha256: digest, size_bytes: archiveBytes.byteLength },
                     },
                 };
             },
@@ -442,7 +444,7 @@ describe("immutable frontend release control", () => {
                     data: {
                         project_ref: PROJECT_REF,
                         deployment_id: DEPLOYMENT_ID,
-                        release: { ...release(), release_id: digest, sha256: digest },
+                        release: { ...release(), release_id: digest, sha256: digest, size_bytes: archiveBytes.byteLength },
                     },
                 };
             },
@@ -451,7 +453,9 @@ describe("immutable frontend release control", () => {
         const response = await uploadFrontendRelease(http as never, PROJECT_REF, DEPLOYMENT_ID, path);
         expect(response.isError).not.toBe(true);
         expect(calls.map((call) => call.method)).toEqual(["POST", "GET"]);
-        expect(calls[0].options).toMatchObject({ contentType: "application/zip", contentLength: 3 });
+        expect(calls[0].options).toMatchObject({
+            contentType: "application/vnd.supacloud.frontend.tar+zstd", contentLength: archiveBytes.byteLength,
+        });
     });
 
     test("streams archive bytes in bounded chunks without buffering the file", async () => {
