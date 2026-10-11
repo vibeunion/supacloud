@@ -248,8 +248,8 @@ export function mutationStatusPath(ref: string, mutationId: string): string {
 
 function mutationStatusResponse(ref: string, mutationId: string, payload: unknown): SafeMutationStatus | null {
     const response = exactRecord(payload, MUTATION_RESPONSE_KEYS);
-    const mutation = safeMutationStatus(response?["mutation"]);
-    return response?["project_ref"] === ref && mutation?.project_ref === ref && mutation.mutation_id === mutationId
+    const mutation = safeMutationStatus(response?.["mutation"]);
+    return response?.["project_ref"] === ref && mutation?.project_ref === ref && mutation.mutation_id === mutationId
         ? mutation
         : null;
 }
