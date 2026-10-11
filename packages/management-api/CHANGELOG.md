@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.105.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.104.0...management-api-v0.105.0) (2026-10-11)
+
+
+### Features
+
+* **app:** add verified read-only environment promotion plans ([#1785](https://github.com/vibeunion/supacloud/issues/1785)) ([454b86f](https://github.com/vibeunion/supacloud/commit/454b86fc5f7d7f01b90c801c1f0f1eaa1a53fb03))
+* **app:** transfer verified releases across environment projects ([#1784](https://github.com/vibeunion/supacloud/issues/1784)) ([b45db88](https://github.com/vibeunion/supacloud/commit/b45db8810bf184d564b375b299d14407bc686e2a))
+* **release:** make logical backups resumable and directly observable ([#1787](https://github.com/vibeunion/supacloud/issues/1787)) ([5c8d6eb](https://github.com/vibeunion/supacloud/commit/5c8d6eb828e74c38ed0bbd257fdef8da2ee5d141))
+
 ## [0.104.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.103.0...management-api-v0.104.0) (2026-10-11)
 
 
