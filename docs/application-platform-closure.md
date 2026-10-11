@@ -6,6 +6,10 @@ The application workflow is one product surface:
 
 `init -> dev -> check -> release -> preview -> deploy -> logs`
 
+`app release` is the CLI's one-command composition of local build and the
+existing platform release primitives. It reduces operator steps without moving
+platform-owned safety decisions into application scripts.
+
 Existing Supabase interfaces remain authoritative:
 
 - PostgREST remains the REST execution path.

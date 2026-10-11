@@ -31,6 +31,34 @@ differ. Current integrity gates and exact post-activation readback remain.
 Unknown activation results retain mutation ID, target release and original CAS;
 inspect durable mutation status instead of retrying a write.
 
+## One-Command Application Release
+
+For the normal application path, the CLI now provides one explicit release
+workflow:
+
+```bash
+supacloud-cli --env test app release \
+  --id orders \
+  --environment_id test \
+  --configuration_path configuration.json
+```
+
+`app release` builds the local delivery manifest, uploads the immutable release,
+writes the requested configuration revision, reads the platform deployment plan,
+and performs at most one CAS-protected activation. Use
+`--configuration_id <uuid> --skip_build --manifest_path <path>` when reusing an
+already reviewed configuration and manifest. `--format json` returns one receipt
+containing every completed phase, the release/configuration identities and the
+activation result.
+
+The workflow stops on the first failed or uncertain phase. It never retries an
+upload/configuration/activation request, and an unknown activation keeps the
+release ID, configuration ID, activation ID and expected CAS in the receipt for
+read-only reconciliation. The composed CLI workflow is not a cross-request
+transaction; SupaCloud remains responsible for immutable storage, backup policy,
+migration orchestration, readiness, smoke evidence, CAS authority and durable
+mutation receipts.
+
 ## Frontend Archive Cutover
 
 Frontend uploads now use deterministic `tar.zst` only, with MIME

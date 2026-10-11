@@ -75,6 +75,7 @@ test("merged app schema preserves credential-free local arguments and classifies
     expect(executionMode("app", "rollback-plan", {})).toBe("read");
     expect(executionMode("app", "deploy-plan", {})).toBe("read");
     expect(executionMode("app", "diff", {})).toBe("read");
+    expect(executionMode("app", "release", {})).toBe("write");
     expect(executionMode("applications", "get_deploy_plan", {})).toBe("read");
     expect(executionMode("applications", "deploy_release", {})).toBe("write");
     expect(executionMode("applications", "get_rollback_snapshot", {})).toBe("read");
@@ -143,6 +144,156 @@ test("check and doctor surface database gate failures without regenerating contr
             expect(result.content[0]!.text).toContain("database-source-contracts");
         }
         expect(await snapshot(root)).toEqual(before);
+    } finally { await rm(root, { recursive: true, force: true }); }
+}, 30_000);
+
+test("app release composes build, upload, configure and one deployment", async () => {
+    const root = await fixture();
+    const configurationPath = join(root, "configuration.json");
+    await Bun.write(configurationPath, "{}");
+    const calls: Array<Record<string, unknown>> = [];
+    const releaseId = "a".repeat(64);
+    const configurationId = "11234567-89ab-4def-8123-456789abcdef";
+    const activationId = "21234567-89ab-4def-8123-456789abcdef";
+    try {
+        const result = await runAppTool({
+            action: "release", root, ref: identity.ref, id: identity.id,
+            environment_id: identity.environment_id, configuration_path: configurationPath, format: "json",
+        }, {
+            getApplications: () => async args => {
+                calls.push(args);
+                if (args.action === "upload_release") {
+                    return {
+                        content: [{ type: "text" as const, text: JSON.stringify({
+                            ok: true, release: { release_id: releaseId },
+                        }) }],
+                    };
+                }
+                if (args.action === "put_configuration") {
+                    return {
+                        content: [{ type: "text" as const, text: JSON.stringify({
+                            ok: true, configuration: { configuration_id: configurationId },
+                        }) }],
+                    };
+                }
+                return {
+                    content: [{ type: "text" as const, text: JSON.stringify({
+                        ok: true, release_id: releaseId, configuration_id: configurationId,
+                        activation_id: activationId, no_op: false, execution_performed: true,
+                    }) }],
+                };
+            },
+        });
+        const output = JSON.parse(result.content[0]!.text);
+        expect(result.isError).toBe(false);
+        expect(output).toMatchObject({
+            ok: true, operation: "applications.release", release_id: releaseId,
+            configuration_id: configurationId, activation_id: activationId,
+            execution_performed: true,
+        });
+        expect(calls.map(call => call.action)).toEqual([
+            "upload_release", "put_configuration", "deploy_release",
+        ]);
+        expect(calls[0]).toMatchObject({
+            ref: identity.ref, id: identity.id,
+            manifest_path: join(root, "artifacts", "delivery", "delivery.manifest.json"),
+        });
+        expect(calls[2]).toMatchObject({
+            ref: identity.ref, id: identity.id, environment_id: identity.environment_id,
+            release_id: releaseId, configuration_id: configurationId,
+        });
+    } finally { await rm(root, { recursive: true, force: true }); }
+}, 30_000);
+
+test("app release can reuse a built manifest and configuration revision", async () => {
+    const root = await fixture();
+    const calls: Array<Record<string, unknown>> = [];
+    try {
+        const result = await runAppTool({
+            action: "release", root, ref: identity.ref, id: identity.id,
+            environment_id: identity.environment_id, configuration_id: identity.configuration_id,
+            manifest_path: "existing/delivery.manifest.json", skip_build: true, format: "json",
+        }, {
+            getApplications: () => async args => {
+                calls.push(args);
+                if (args.action === "upload_release") {
+                    return { content: [{ type: "text" as const, text: JSON.stringify({
+                        ok: true, release: { release_id: identity.release_id },
+                    }) }] };
+                }
+                return { content: [{ type: "text" as const, text: JSON.stringify({
+                    ok: true, no_op: true, execution_performed: false,
+                    activation_id: identity.expected_activation_id,
+                }) }] };
+            },
+        });
+        const output = JSON.parse(result.content[0]!.text);
+        expect(output).toMatchObject({
+            ok: true, no_op: true, execution_performed: false,
+            release_id: identity.release_id, configuration_id: identity.configuration_id,
+        });
+        expect(calls.map(call => call.action)).toEqual(["upload_release", "deploy_release"]);
+        expect(calls[0]).toMatchObject({
+            manifest_path: join(root, "existing", "delivery.manifest.json"),
+        });
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("app release stops after an uncertain deployment and preserves phase identities", async () => {
+    const root = await fixture();
+    const configurationPath = join(root, "configuration.json");
+    await Bun.write(configurationPath, "{}");
+    const calls: string[] = [];
+    try {
+        const result = await runAppTool({
+            action: "release", root, ref: identity.ref, id: identity.id,
+            environment_id: identity.environment_id, configuration_path: configurationPath, format: "json",
+        }, {
+            getApplications: () => async args => {
+                calls.push(String(args.action));
+                if (args.action === "upload_release") {
+                    return { content: [{ type: "text" as const, text: JSON.stringify({
+                        ok: true, release: { release_id: identity.release_id },
+                    }) }] };
+                }
+                if (args.action === "put_configuration") {
+                    return { content: [{ type: "text" as const, text: JSON.stringify({
+                        ok: true, configuration: { configuration_id: identity.configuration_id },
+                    }) }] };
+                }
+                return { isError: true, content: [{ type: "text" as const, text: JSON.stringify({
+                    ok: false, error: { code: "OUTCOME_UNKNOWN" },
+                    release_id: identity.release_id, configuration_id: identity.configuration_id,
+                    activation_id: identity.activation_id,
+                    expected_activation_id: identity.expected_activation_id,
+                }) }] };
+            },
+        });
+        const output = JSON.parse(result.content[0]!.text);
+        expect(result.isError).toBe(true);
+        expect(output).toMatchObject({
+            ok: false, operation: "applications.release", phase: "deploy",
+            error: { code: "OUTCOME_UNKNOWN" }, release_id: identity.release_id,
+            configuration_id: identity.configuration_id, activation_id: identity.activation_id,
+            expected_activation_id: identity.expected_activation_id,
+        });
+        expect(calls).toEqual(["upload_release", "put_configuration", "deploy_release"]);
+    } finally { await rm(root, { recursive: true, force: true }); }
+}, 30_000);
+
+test("app release does not upload when the local build fails", async () => {
+    const root = await fixture();
+    await Bun.write(join(root, "database.sources.json"), '{"version":1}');
+    let calls = 0;
+    try {
+        const result = await runAppTool({
+            action: "release", root, ref: identity.ref, id: identity.id,
+            environment_id: identity.environment_id, configuration_id: identity.configuration_id,
+        }, { getApplications: () => async () => { calls++; return { content: [] }; } });
+        const output = JSON.parse(result.content[0]!.text);
+        expect(result.isError).toBe(true);
+        expect(output).toMatchObject({ ok: false, operation: "applications.release", phase: "build" });
+        expect(calls).toBe(0);
     } finally { await rm(root, { recursive: true, force: true }); }
 }, 30_000);
 

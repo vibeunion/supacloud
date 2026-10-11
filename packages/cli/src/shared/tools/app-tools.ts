@@ -30,6 +30,7 @@ import { buildToolDefinitions, type AppManifest } from "./app-tool-export";
 import { initializeAppProject } from "./app-starter";
 import { checkAppDatabaseSources } from "./app-database-check";
 import { APPLICATION_TOOL_SCHEMA } from "./application-tools";
+import { ApplicationConfigurationIdSchema, ApplicationIdSchema } from "./application-schemas";
 import { RELEASE_CONTROL_RESPONSE_SCHEMA, releaseControlFailure, releaseControlSuccess } from "./release-control-response";
 import {
     ApplicationPromotionResultSchema, parsePreviewReceipt, parsePreviewList, parsePromotionStatus,
@@ -77,14 +78,14 @@ export interface AppToolOptions {
 }
 
 const REMOTE_APP_DESCRIPTIONS: Record<string, string> = {
-    ref: "[upload/configure/transfer-plan/transfer/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-reconcile/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Project ref (defaults to context)",
-    id: "[upload/configure/transfer-plan/transfer/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-reconcile/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Application ID",
-    environment_id: "[configure/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-reconcile/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Target environment ID",
-    configuration_id: "[promote-plan/diff/promote/preview-plan/preview/preview-create/deploy/deploy-plan/rollback] Immutable target configuration revision",
+    ref: "[release/upload/configure/transfer-plan/transfer/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-reconcile/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Project ref (defaults to context)",
+    id: "[release/upload/configure/transfer-plan/transfer/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-reconcile/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Application ID",
+    environment_id: "[release/configure/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-reconcile/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Target environment ID",
+    configuration_id: "[release/promote-plan/diff/promote/preview-plan/preview/preview-create/deploy/deploy-plan/rollback] Immutable target configuration revision",
     activation_id: "[deploy/rollback/reconcile/retire] Required explicit activation ID",
     expected_activation_id: "[deploy/rollback] Required current activation ID, or absent for first activation",
-    configuration_path: "[configure] Configuration write JSON including revision and expected revision",
-    manifest_path: "[upload] Local delivery.manifest.json",
+    configuration_path: "[release/configure] Configuration write JSON including revision and expected revision",
+    manifest_path: "[release/upload] Local delivery.manifest.json",
     release_id: "[preview-plan/preview/preview-create/deploy/deploy-plan/diff/rollback/reconcile] Required immutable application release ID",
     source_ref: "[transfer-plan/transfer/promote-plan/diff/promote] Source project ref",
     source_release_id: "[transfer-plan/transfer/promote-plan/diff/promote] Source immutable release ID",
@@ -111,7 +112,7 @@ for (const [name, schema] of Object.entries(REMOTE_APP_SCHEMA)) {
 
 export interface AppToolArguments {
     action: "init" | "generate" | "dev" | "watch" | "verify-plan" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "doctor" | "fix"
-        | "plan" | "build" | "promote" | keyof typeof REMOTE_APP_ACTIONS;
+        | "plan" | "build" | "release" | "promote" | keyof typeof REMOTE_APP_ACTIONS;
     ref?: string;
     id?: string;
     environment_id?: string;
@@ -120,6 +121,8 @@ export interface AppToolArguments {
     expected_activation_id?: string | null;
     configuration_path?: string;
     manifest_path?: string;
+    /** `app release`: reuse an existing configuration revision instead of writing configuration_path. */
+    skip_build?: boolean;
     release_id?: string;
     source_ref?: string;
     source_release_id?: string;
@@ -1117,6 +1120,194 @@ async function runDelivery(args: AppToolArguments): Promise<ToolResult> {
     return textResult(JSON.stringify(result, null, 2), !result.ok);
 }
 
+function resultObject(result: ToolResult): Record<string, unknown> | undefined {
+    try {
+        const value: unknown = JSON.parse(result.content[0]?.text ?? "");
+        return value !== null && typeof value === "object" && !Array.isArray(value)
+            ? value as Record<string, unknown> : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+function resultErrorCode(result: ToolResult, fallback: string): string {
+    const payload = resultObject(result);
+    const error = payload?.error;
+    const errorRecord = error !== null && typeof error === "object" && !Array.isArray(error)
+        ? error as Record<string, unknown> : undefined;
+    return typeof errorRecord?.code === "string" ? errorRecord.code : fallback;
+}
+
+function releasePhaseFailure(
+    phase: string,
+    result: ToolResult,
+    completed: Record<string, unknown>,
+): ToolResult {
+    const phaseResult = resultObject(result);
+    const upload = completed.upload !== null && typeof completed.upload === "object" && !Array.isArray(completed.upload)
+        ? completed.upload as Record<string, unknown> : undefined;
+    const configure = completed.configure !== null && typeof completed.configure === "object"
+        && !Array.isArray(completed.configure) ? completed.configure as Record<string, unknown> : undefined;
+    const releaseId = typeof upload?.release_id === "string" ? upload.release_id : undefined;
+    const configurationId = typeof configure?.configuration_id === "string" ? configure.configuration_id : undefined;
+    const payload: Record<string, unknown> = {
+        schema: RELEASE_CONTROL_RESPONSE_SCHEMA,
+        ok: false,
+        operation: "applications.release",
+        phase,
+        phases: completed,
+        error: { code: resultErrorCode(result, phase === "build" ? "BUILD_FAILED" : "PHASE_FAILED") },
+        ...(releaseId === undefined ? {} : { release_id: releaseId }),
+        ...(configurationId === undefined ? {} : { configuration_id: configurationId }),
+        ...(phaseResult === undefined ? {} : { phase_result: phaseResult }),
+    };
+    if (phaseResult?.activation_id !== undefined) payload.activation_id = phaseResult.activation_id;
+    if (phaseResult?.expected_activation_id !== undefined) {
+        payload.expected_activation_id = phaseResult.expected_activation_id;
+    }
+    return textResult(JSON.stringify(payload, null, 2), true);
+}
+
+function releaseField(payload: Record<string, unknown> | undefined, container: string, field: string): string | undefined {
+    const value = payload?.[container];
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const record = value as Record<string, unknown>;
+    return typeof record[field] === "string" ? record[field] : undefined;
+}
+
+async function runAppRelease(
+    request: AppToolArguments,
+    options: AppToolOptions,
+    delegate: (args: Record<string, unknown>) => Promise<ToolResult>,
+): Promise<ToolResult> {
+    const ref = request.ref ?? options.projectRef;
+    const id = request.id?.trim();
+    const environmentId = request.environment_id?.trim();
+    if (!ref || !id || !environmentId) {
+        throw new Error("app release requires --ref, --id and --environment_id (ref may come from context)");
+    }
+    if (!Value.Check(ApplicationIdSchema, id) || !Value.Check(ApplicationIdSchema, environmentId)) {
+        throw new Error("app release requires valid --id and --environment_id");
+    }
+    if (request.configuration_id !== undefined
+        && !Value.Check(ApplicationConfigurationIdSchema, request.configuration_id)) {
+        throw new Error("app release requires a valid --configuration_id");
+    }
+    if (request.configuration_path !== undefined && request.configuration_id !== undefined) {
+        throw new Error("app release accepts either --configuration_path or --configuration_id, not both");
+    }
+    if (request.configuration_path === undefined && request.configuration_id === undefined) {
+        throw new Error("app release requires --configuration_path or --configuration_id");
+    }
+    if (request.activation_id !== undefined || request.expected_activation_id !== undefined) {
+        throw new Error("app release generates one activation identity; use app deploy for an exact retry");
+    }
+
+    const root = resolve(request.root || process.cwd());
+    const completed: Record<string, unknown> = {};
+    let manifestPath: string;
+    let buildReceipt: Record<string, unknown> | undefined;
+
+    if (request.skip_build === true) {
+        if (request.manifest_path === undefined) {
+            throw new Error("app release --skip_build requires --manifest_path");
+        }
+        manifestPath = resolve(root, request.manifest_path);
+        completed.build = { skipped: true, manifest_path: manifestPath };
+    } else {
+        const built = await runDelivery({ ...request, action: "build", root, format: "json" });
+        buildReceipt = resultObject(built);
+        if (built.isError || !buildReceipt?.ok || buildReceipt.manifest === null
+            || buildReceipt.manifest === undefined) {
+            return releasePhaseFailure("build", built, completed);
+        }
+        const loaded = await loadSupacloudConfig(root);
+        const resolved = resolveSupacloudConfig(loaded, root);
+        manifestPath = join(resolved.outDir, "delivery", "delivery.manifest.json");
+        completed.build = {
+            ok: true,
+            manifest_path: manifestPath,
+            written: Array.isArray(buildReceipt.written) ? buildReceipt.written.length : 0,
+        };
+    }
+
+    const uploadArgs = {
+        action: "upload_release",
+        ref, id, manifest_path: manifestPath,
+    };
+    validateToolArguments(APPLICATION_TOOL_SCHEMA, uploadArgs);
+    const uploaded = await delegate(uploadArgs);
+    const uploadReceipt = resultObject(uploaded);
+    if (uploaded.isError || !uploadReceipt?.ok) {
+        return releasePhaseFailure("upload", uploaded, completed);
+    }
+    const releaseId = releaseField(uploadReceipt, "release", "release_id");
+    if (!releaseId) return releasePhaseFailure("upload", releaseControlFailure(
+        "applications.upload_release", "INVALID_RESPONSE", null, { project_ref: ref, application_id: id },
+    ), completed);
+    completed.upload = { ok: true, release_id: releaseId };
+
+    let configurationId = request.configuration_id;
+    if (request.configuration_path !== undefined) {
+        const configurationPath = resolve(root, request.configuration_path);
+        const configureArgs = {
+            action: "put_configuration",
+            ref, id, environment_id: environmentId, configuration_path: configurationPath,
+        };
+        validateToolArguments(APPLICATION_TOOL_SCHEMA, configureArgs);
+        const configured = await delegate(configureArgs);
+        const configurationReceipt = resultObject(configured);
+        if (configured.isError || !configurationReceipt?.ok) {
+            return releasePhaseFailure("configure", configured, completed);
+        }
+        configurationId = releaseField(configurationReceipt, "configuration", "configuration_id");
+        if (!configurationId) return releasePhaseFailure("configure", releaseControlFailure(
+            "applications.put_configuration", "INVALID_RESPONSE", null,
+            { project_ref: ref, application_id: id, environment_id: environmentId },
+        ), completed);
+        completed.configure = { ok: true, configuration_id: configurationId };
+    } else {
+        completed.configure = { skipped: true, configuration_id: configurationId };
+    }
+
+    const deployArgs = {
+        action: "deploy_release",
+        ref, id, environment_id: environmentId, release_id: releaseId, configuration_id: configurationId,
+    };
+    validateToolArguments(APPLICATION_TOOL_SCHEMA, deployArgs);
+    const deployed = await delegate(deployArgs);
+    const deployReceipt = resultObject(deployed);
+    if (deployed.isError || !deployReceipt?.ok) {
+        return releasePhaseFailure("deploy", deployed, completed);
+    }
+    completed.deploy = deployReceipt;
+    const result = {
+        schema: RELEASE_CONTROL_RESPONSE_SCHEMA,
+        ok: true,
+        operation: "applications.release",
+        project_ref: ref,
+        application_id: id,
+        environment_id: environmentId,
+        release_id: releaseId,
+        configuration_id: configurationId,
+        manifest_path: manifestPath,
+        build: buildReceipt ? completed.build : { skipped: true, manifest_path: manifestPath },
+        phases: completed,
+        no_op: deployReceipt.no_op === true,
+        execution_performed: deployReceipt.execution_performed === true,
+        ...(typeof deployReceipt.activation_id === "string" ? { activation_id: deployReceipt.activation_id } : {}),
+    };
+    return request.format === "json" || request.json === true
+        ? textResult(JSON.stringify(result, null, 2))
+        : textResult([
+            `${ref}/${id}/${environmentId}: ${result.no_op ? "no-op" : "released"}`,
+            `Release: ${releaseId}`,
+            `Configuration: ${configurationId}`,
+            `Activation: ${result.activation_id ?? "not performed"}`,
+            `Build: ${request.skip_build ? "skipped" : "completed"}`,
+        ].join("\n"));
+}
+
 function formatReleaseTransfer(result: ToolResult): ToolResult {
     if (result.isError) return result;
     try {
@@ -1354,12 +1545,17 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--database-url applies only to app dev --profile integration");
     }
     if (request.json !== undefined && !Object.hasOwn(REMOTE_APP_ACTIONS, request.action)
-        && request.action !== "promote") throw new Error("--json applies only to remote app actions");
+        && request.action !== "promote" && request.action !== "release") throw new Error("--json applies only to remote app actions");
     if (request.json && request.format === "text") throw new Error("--json and --format text cannot be combined");
     if (request.action === "promote") {
         const delegate = options.getApplications?.();
         if (!delegate) return textResult("App remote actions require a Management API context.", true);
         return runPromotion(request, options, delegate);
+    }
+    if (request.action === "release") {
+        const delegate = options.getApplications?.();
+        if (!delegate) return textResult("App remote actions require a Management API context.", true);
+        return runAppRelease(request, options, delegate);
     }
     if (Object.hasOwn(REMOTE_APP_ACTIONS, request.action)) {
         const delegate = options.getApplications?.();
@@ -1437,7 +1633,7 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
         {
             ...REMOTE_APP_SCHEMA,
             action: withDescription(stringEnum(["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix",
-                "plan", "build", "upload", "configure", "transfer-plan", "transfer", "promote-plan", "deploy", "deploy-plan", "diff", "status", "rollback", "rollback-plan", "history", "reconcile", "retire", "logs",
+                "plan", "build", "release", "upload", "configure", "transfer-plan", "transfer", "promote-plan", "deploy", "deploy-plan", "diff", "status", "rollback", "rollback-plan", "history", "reconcile", "retire", "logs",
                 "preview-plan", "preview", "previews", "preview-list", "preview-create", "preview-status", "preview-cleanup",
                 "preview-reconcile", "promote", "promote-status", "promote-reconcile"]), "App action; promote obtains and verifies its plan before one mutation request"),
             kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource"]), "[generate] Scaffold kind"),
@@ -1450,11 +1646,11 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             "dry-run": optional(Type.Boolean(), "[generate] CLI alias of dry_run"),
             register_in: optional(Type.String(), "[generate] Existing parent module file for module/resource; uses the compiler AST editor"),
             "register-in": optional(Type.String(), "[generate] CLI alias of register_in"),
-            root: optional(Type.String(), "[dev/plan/build/compile/check] Project directory containing supacloud.config.ts (default: current directory)"),
+            root: optional(Type.String(), "[dev/plan/build/release/compile/check] Project directory containing supacloud.config.ts (default: current directory)"),
             include: optional(Type.String(), "[dev/compile/check] Comma-separated glob patterns for source files"),
             out_dir: optional(Type.String(), "[dev/compile/plan/build/export-tools] Output directory (default: configured outDir)"),
             strict: optional(Type.Boolean(), "[dev/compile/check] Promote warnings to errors"),
-            format: optional(stringEnum(["text", "json"]), "[dev/generate/compile/check/plan/deploy-plan/diff/history/promote-plan/graph/export-tools] Output format (default: text)"),
+            format: optional(stringEnum(["text", "json"]), "[dev/generate/compile/check/plan/release/deploy-plan/diff/history/promote-plan/graph/export-tools] Output format (default: text)"),
             json: optional(Type.Boolean(), "[history/transfer-plan/transfer/promote-plan] Preserve or return the full machine-readable receipt"),
             profile: optional(stringEnum(["fast", "integration"]), "[dev] Run dev or dev:integration; integration verifies an explicit loopback database"),
             once: optional(Type.Boolean(), "[dev] Validate and report once without watching"),
@@ -1464,6 +1660,7 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             target: optional(Type.String(), "[explain/context/verify-plan] Provider class name / token name / command name / job name / module name"),
             fix: optional(Type.String(), "[fix] Path to a DiagnosticFix JSON file produced by `doctor --format json`"),
             write: optional(Type.Boolean(), "[fix] Write the fix to disk (default: preview only)"),
+            skip_build: optional(Type.Boolean(), "[release] Reuse --manifest_path instead of running the local delivery build"),
         },
         (request) => runAppTool(request, options),
     );
