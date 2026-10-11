@@ -7,9 +7,9 @@ declare business schema, RLS, OAuth bindings and acceptance checks.
 ## Read-Only Comparison
 
 ```bash
-supacloud-cli --env staging deploy --dry_run
-supacloud-cli --env staging deploy --plan --json
-supacloud-cli --env staging deploy --diff --skip_build --json
+supacloud --env staging deploy --dry_run
+supacloud --env staging deploy --plan --json
+supacloud --env staging deploy --diff --skip_build --json
 ```
 
 `dry_run` resolves the target without building. Frontend `plan` and `diff` run the
@@ -33,14 +33,24 @@ inspect durable mutation status instead of retrying a write.
 
 ## One-Command Application Release
 
-For the normal application path, the CLI now provides one explicit release
+For the normal application path, the CLI provides one profile-backed release
 workflow:
 
 ```bash
-supacloud-cli --env test app release \
-  --id orders \
-  --environment_id test \
-  --configuration_path configuration.json
+supacloud --env test deploy
+supacloud --env production deploy --confirm-production production-ref
+```
+
+The selected `.env.supacloud.<name>` supplies
+`SUPACLOUD_APPLICATION_ID`, `SUPACLOUD_APPLICATION_ENVIRONMENT_ID` (or
+`SUPACLOUD_ENV`), and either `SUPACLOUD_APPLICATION_CONFIGURATION_PATH` or
+`SUPACLOUD_APPLICATION_CONFIGURATION_ID`. `deploy` forwards that profile to
+the existing `app release` workflow, so test and production use the same
+command shape. The explicit advanced form remains available:
+
+```bash
+supacloud --env test app release \
+  --id orders --environment_id test --configuration_path configuration.json
 ```
 
 `app release` builds the local delivery manifest, uploads the immutable release,
@@ -56,8 +66,9 @@ upload/configuration/activation request, and an unknown activation keeps the
 release ID, configuration ID, activation ID and expected CAS in the receipt for
 read-only reconciliation. The composed CLI workflow is not a cross-request
 transaction; SupaCloud remains responsible for immutable storage, backup policy,
-migration orchestration, readiness, smoke evidence, CAS authority and durable
-mutation receipts.
+migration orchestration, readiness, smoke evidence, CAS authority, durable
+mutation receipts and verified rollback/downgrade policy. The application layer
+does not implement backup, restore, activation or downgrade orchestration.
 
 ## Frontend Archive Cutover
 

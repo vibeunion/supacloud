@@ -23,7 +23,7 @@ Existing applications and explicit recipe layouts are not reorganized.
 After the CLI release containing this command is published:
 
 ```sh
-supacloud-cli app init --root ./orders --name orders
+supacloud app init --root ./orders --name orders
 cd orders
 bun install
 bun run check
@@ -38,12 +38,12 @@ The published CLI also exposes the same local loop through an application-level
 entry, without reaching for a remote test server:
 
 ```sh
-supacloud-cli app dev --profile fast          # local/ephemeral, safe defaults
+supacloud app dev --profile fast          # local/ephemeral, safe defaults
 # In the explicit command recipe, after database setup:
-supacloud-cli app dev --profile integration   # requires an explicit loopback database URL
+supacloud app dev --profile integration   # requires an explicit loopback database URL
 ```
 
-The project CLI binary also supports `supacloud-cli app init`. Initialization is
+The project CLI binary also supports `supacloud app init`. Initialization is
 local, needs no account or API token, never installs dependencies automatically,
 and refuses non-empty or symlink targets. A `.git` directory is allowed. `--force`
 does not bypass overwrite protection.
@@ -87,9 +87,9 @@ checks. Offline compilation does not attest database provenance or freshness.
 
 ## Local Development Entry
 
-`supacloud-cli app dev` runs the project's `dev` script, so it and `bun run dev`
+`supacloud app dev` runs the project's `dev` script, so it and `bun run dev`
 share the same watch/recompile/restart loop. It does not add a second watcher.
-`supacloud-cli app watch` is the compile-only inspection command.
+`supacloud app watch` is the compile-only inspection command.
 For compatibility, `app dev --once` / `--watch=false` remain compile-only.
 Remote test-server sync, migration generation and remote reload remain
 `supacloud dev sync`, `supacloud dev migrate` and `supacloud dev watch`.
@@ -210,7 +210,7 @@ remain projections; see [Business State Machines](./business-state-machines.md).
 ## Acceptance Scenarios
 
 For the minimal path, run its colocated health test. For other business changes,
-`supacloud-cli app verify-plan --target <module>` reports individual nearby test
+`supacloud app verify-plan --target <module>` reports individual nearby test
 commands and manual gaps without running them or scanning the repository.
 The scenarios below concern the explicit command reference, not features
 implicitly installed into the minimal application.

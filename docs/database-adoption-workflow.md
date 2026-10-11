@@ -48,22 +48,22 @@ contract generator. Run them from the application root or select `--root`.
 
 ```sh
 # Use an explicitly selected read/catalog-capable DATABASE_URL.
-supacloud-cli db reverse --schema public --out output/database-audit/reverse
+supacloud db reverse --schema public --out output/database-audit/reverse
 
 # After manual adoption of SQL sources and a matching migration baseline:
-supacloud-cli db diff --schema_dir supabase/schemas --out output/database-audit/diff
+supacloud db diff --schema_dir supabase/schemas --out output/database-audit/diff
 
 # Promote reviewed SQL into a new timestamped file in supabase/migrations/.
-supacloud-cli --env test db plan --dir supabase/migrations
-supacloud-cli --env test db apply --dir supabase/migrations --approved_digest <digest>
+supacloud --env test db plan --dir supabase/migrations
+supacloud --env test db apply --dir supabase/migrations --approved_digest <digest>
 
 # Use the actual ordinary application's DATABASE_URL for this check.
-supacloud-cli db role_check --schema public
-supacloud-cli db role_sql --application_role app_user \
+supacloud db role_check --schema public
+supacloud db role_sql --application_role app_user \
   --migration_role app_migrator --database app_db --schema public
 
 # Existing post-apply governance check:
-supacloud-cli db module_check --module_file db/modules.ts
+supacloud db module_check --module_file db/modules.ts
 ```
 
 Reverse/diff use the existing official Supabase CLI resolver: project binary,

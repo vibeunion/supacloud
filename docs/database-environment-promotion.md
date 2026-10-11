@@ -6,7 +6,7 @@ SupaCloud 的推荐模型是“迁移文件逐级晋升”，不是把开发数�
 
 | 环境 | 数据 | 作用 | 推荐操作 |
 | --- | --- | --- | --- |
-| 本地 | 可重建的 seed 数据 | 编写和重放迁移 | `supacloud-cli supabase db_reset --no_seed` |
+| 本地 | 可重建的 seed 数据 | 编写和重放迁移 | `supacloud supabase db_reset --no_seed` |
 | Preview | 默认 schema-only，可选脱敏数据 | PR/分支验证 | 创建分支、应用迁移、跑 smoke test |
 | Staging | 独立持久项目 | 发布前验证 | CI 自动执行 dry-run 和 migration push |
 | Production | 真实数据 | 线上服务 | 备份、人工批准、单一串行发布任务 |
@@ -16,13 +16,13 @@ SupaCloud 的推荐模型是“迁移文件逐级晋升”，不是把开发数�
 默认创建无业务数据的 schema-only 分支：
 
 ```bash
-supacloud-cli branch create --name feature-orders --data_mode schema_only
+supacloud branch create --name feature-orders --data_mode schema_only
 ```
 
 只有在明确授权、数据已脱敏或不敏感时，才使用完整数据克隆：
 
 ```bash
-supacloud-cli branch create --name debug-import --data_mode full_clone
+supacloud branch create --name debug-import --data_mode full_clone
 ```
 
 schema-only 克隆仍会保留 `supabase_migrations.schema_migrations` 账本元数据，因此可以继续校验分支和父项目的迁移共同祖先；平台不会自动复制业务表行、Auth 用户或 Storage 对象。迁移 SQL 本身仍可修改父项目数据，必须像代码一样审阅。
@@ -32,7 +32,7 @@ schema-only 克隆仍会保留 `supabase_migrations.schema_migrations` 账本元
 先生成计划。CLI 默认只显示版本、名称、语句数量和 SHA-256，避免在终端日志里回显 SQL；Web Console 和受控 API 会提供 SQL 供逐条审阅：
 
 ```bash
-supacloud-cli branch promotion_plan --branch_ref <preview-ref>
+supacloud branch promotion_plan --branch_ref <preview-ref>
 ```
 
 计划会在以下情况阻断：
@@ -48,7 +48,7 @@ supacloud-cli branch promotion_plan --branch_ref <preview-ref>
 审阅 checksum 后再提升：
 
 ```bash
-supacloud-cli branch promote \
+supacloud branch promote \
   --branch_ref <preview-ref> \
   --plan_checksum <sha256>
 ```
@@ -91,8 +91,8 @@ Scenario: 成功收据必须对应本次审阅集合
 CI 可使用 `--json` 获取 `supacloud.cli.release-control.v1` 回执：
 
 ```bash
-supacloud-cli branch promotion_plan --branch_ref <preview-ref> --json
-supacloud-cli branch promote --branch_ref <preview-ref> --plan_checksum <sha256> --json
+supacloud branch promotion_plan --branch_ref <preview-ref> --json
+supacloud branch promote --branch_ref <preview-ref> --plan_checksum <sha256> --json
 ```
 
 CLI 校验父项目和分支归属、SHA-256 格式、迁移版本唯一性、阻断项及破坏性确认标志。成功回执必须明确 `branch_data_copied=false`，回读计划必须没有待执行迁移或阻断项；本次应用的迁移必须在回读账本摘要中以相同 checksum 出现。`reviewed_plan_checksum` 是提交时审阅的计划摘要，`plan.plan_checksum` 是执行后的账本摘要，二者可能不同。
@@ -138,7 +138,7 @@ Scenario: 只读模式
 包含删除列、删除表、删除策略/约束、关闭 RLS、截断或批量删除的迁移需要额外确认：
 
 ```bash
-supacloud-cli branch promote \
+supacloud branch promote \
   --branch_ref <preview-ref> \
   --plan_checksum <sha256> \
   --confirm_destructive true

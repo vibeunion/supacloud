@@ -22,6 +22,11 @@ const CONTEXT_KEYS = new Set([
     "SUPACLOUD_HOST",
     "SUPACLOUD_ENV",
     "SUPACLOUD_READ_ONLY",
+    "SUPACLOUD_APPLICATION_ID",
+    "SUPACLOUD_APPLICATION_ENVIRONMENT_ID",
+    "SUPACLOUD_APPLICATION_CONFIGURATION_PATH",
+    "SUPACLOUD_APPLICATION_CONFIGURATION_ID",
+    "SUPACLOUD_APPLICATION_MANIFEST_PATH",
 ]);
 
 const servers: Array<{ stop(closeActiveConnections?: boolean): void }> = [];
@@ -144,9 +149,9 @@ function releaseBasePath(projectRef: string, deploymentId: string): string {
     return `/v1/projects/${projectRef}/frontend/deployments/${deploymentId}/releases`;
 }
 
-describe("supacloud-cli process contract", () => {
+describe("supacloud process contract", () => {
     test("rolls back to the platform previous release without a release_id flag", async () => {
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-previous-rollback-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-previous-rollback-"));
         temporaryDirectories.push(workspace);
         const projectRef = "abc123";
         const deploymentId = "web";
@@ -231,7 +236,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("prints the installed package version through the npm-style bin", async () => {
-        const sandbox = mkdtempSync(join(tmpdir(), "supacloud-cli-bin-"));
+        const sandbox = mkdtempSync(join(tmpdir(), "supacloud-bin-"));
         temporaryDirectories.push(sandbox);
         const buildDirectory = join(sandbox, "dist");
         const build = Bun.spawnSync([
@@ -261,7 +266,7 @@ describe("supacloud-cli process contract", () => {
 
         const binDirectory = join(sandbox, "node_modules/.bin");
         mkdirSync(binDirectory, { recursive: true });
-        const linkedEntry = join(binDirectory, "supacloud-cli");
+        const linkedEntry = join(binDirectory, "supacloud");
         symlinkSync(builtEntry, linkedEntry);
 
         const response = await runProjectCliPath(linkedEntry, ["--version"]);
@@ -269,6 +274,7 @@ describe("supacloud-cli process contract", () => {
         expect(response.exitCode).toBe(0);
         expect(response.stdout.trim()).toBe(packageMetadata.version);
         expect(response.stderr).toBe("");
+        expect(packageMetadata.bin).toEqual({ supacloud: "dist/index.js" });
     });
 
     test("documents global environment and production safety flags", async () => {
@@ -282,7 +288,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("keeps complete Storage help without project configuration", async () => {
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-storage-help-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-storage-help-"));
         temporaryDirectories.push(workspace);
 
         const response = await runProjectCli(["storage", "--help"], {}, workspace);
@@ -298,7 +304,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("keeps immutable frontend release help without project configuration", async () => {
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-frontend-help-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-frontend-help-"));
         temporaryDirectories.push(workspace);
 
         const response = await runProjectCli(["frontend", "--help"], {}, workspace);
@@ -315,7 +321,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("runs migration lint locally without project credentials", async () => {
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-local-lint-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-local-lint-"));
         temporaryDirectories.push(workspace);
         const migrationPath = join(workspace, "safe.sql");
         writeFileSync(migrationPath, "CREATE TABLE public.items (id bigint PRIMARY KEY);");
@@ -330,7 +336,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("returns a non-zero process exit for strict local migration lint", async () => {
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-local-lint-strict-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-local-lint-strict-"));
         temporaryDirectories.push(workspace);
         const migrationPath = join(workspace, "destructive.sql");
         writeFileSync(migrationPath, "DROP TABLE public.legacy_items;");
@@ -344,7 +350,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("documents all local lint inputs without unrelated schema flags", async () => {
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-local-lint-help-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-local-lint-help-"));
         temporaryDirectories.push(workspace);
 
         const response = await runProjectCli(["database", "lint", "--help"], {}, workspace);
@@ -360,7 +366,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("keeps the release-canary OAuth client command discoverable without project configuration", async () => {
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-oauth-client-help-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-oauth-client-help-"));
         temporaryDirectories.push(workspace);
 
         const response = await runProjectCli(["oauth_clients", "--help"], {}, workspace);
@@ -370,7 +376,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("loads named environments with global flags after the command and keeps status secret-free", async () => {
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-named-env-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-named-env-"));
         temporaryDirectories.push(workspace);
         const server = Bun.serve({
             hostname: "127.0.0.1",
@@ -403,7 +409,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("requires exact production confirmation and rejects cross-ref writes", async () => {
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-production-env-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-production-env-"));
         temporaryDirectories.push(workspace);
         const requestedPaths: string[] = [];
         const server = Bun.serve({
@@ -442,8 +448,39 @@ describe("supacloud-cli process contract", () => {
         expect(requestedPaths).toEqual(["/v1/projects/prod-ref/pause"]);
     });
 
+    test("profile-backed application deploy keeps the production confirmation gate", async () => {
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-production-application-"));
+        temporaryDirectories.push(workspace);
+        const requestedPaths: string[] = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                requestedPaths.push(new URL(request.url).pathname);
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+        writeFileSync(join(workspace, ".env.supacloud.production"), [
+            "SUPACLOUD_ENV=production",
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=application-production-token",
+            "SUPACLOUD_PROJECT_REF=prod-ref",
+            "SUPACLOUD_APPLICATION_ID=orders",
+            "SUPACLOUD_APPLICATION_ENVIRONMENT_ID=production",
+            "SUPACLOUD_APPLICATION_CONFIGURATION_PATH=deploy/configuration.production.json",
+        ].join("\n") + "\n");
+
+        const response = await runProjectCli(["deploy", "--env", "production"], {}, workspace);
+
+        expect(response.exitCode).toBe(1);
+        expect(response.stderr).toContain("--confirm-production prod-ref");
+        expect(response.stdout + response.stderr).not.toContain("application-production-token");
+        expect(requestedPaths).toEqual([]);
+    });
+
     test("blocks production frontend release upload before file or HTTP without exact confirmation", async () => {
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-production-frontend-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-production-frontend-"));
         temporaryDirectories.push(workspace);
         let requestCount = 0;
         const server = Bun.serve({
@@ -474,7 +511,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("runs authoritative immutable frontend release list, upload, and activation flows", async () => {
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-frontend-release-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-frontend-release-"));
         temporaryDirectories.push(workspace);
         const archivePath = join(workspace, "site.tar.zst");
         const archiveBytes = await createFrontendTarZstd(new Map([["index.html", Buffer.from("ok")]]));
@@ -602,7 +639,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("protects a release-canary OAuth client create and keeps upstream secrets out of the process receipt", async () => {
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-oauth-client-production-env-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-oauth-client-production-env-"));
         temporaryDirectories.push(workspace);
         const responseSecret = "oauth-client-secret-must-not-leak";
         const requestedPaths: string[] = [];
@@ -751,7 +788,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("requires production confirmation for secrets from environment before HTTP", async () => {
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-production-secrets-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-production-secrets-"));
         temporaryDirectories.push(workspace);
         const productionSecretName = "FA_CLI_PRODUCTION_SECRET";
         const productionSecret = "production-secret-sentinel";
@@ -821,7 +858,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("writes a Function source response larger than 64 KiB without stdout truncation", async () => {
-        const outputDirectory = mkdtempSync(join(tmpdir(), "supacloud-cli-source-"));
+        const outputDirectory = mkdtempSync(join(tmpdir(), "supacloud-source-"));
         temporaryDirectories.push(outputDirectory);
         const outputPath = join(outputDirectory, "large-function.ts");
         const apiUrl = serveFunctionSource(LARGE_FUNCTION_SOURCE);
@@ -847,7 +884,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("does not overwrite an existing Function source output", async () => {
-        const outputDirectory = mkdtempSync(join(tmpdir(), "supacloud-cli-source-existing-"));
+        const outputDirectory = mkdtempSync(join(tmpdir(), "supacloud-source-existing-"));
         temporaryDirectories.push(outputDirectory);
         const outputPath = join(outputDirectory, "existing-function.ts");
         writeFileSync(outputPath, "preserve-existing-source\n");
@@ -895,7 +932,7 @@ describe("supacloud-cli process contract", () => {
             SUPACLOUD_API_TOKEN: "test-token",
             SUPACLOUD_PROJECT_REF: "abc123",
         };
-        const outputDirectory = mkdtempSync(join(tmpdir(), "supacloud-cli-version-source-"));
+        const outputDirectory = mkdtempSync(join(tmpdir(), "supacloud-version-source-"));
         temporaryDirectories.push(outputDirectory);
         const outputPath = join(outputDirectory, "fa-api-v40.ts");
 
@@ -994,7 +1031,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("shows and dry-runs the bundled AI skill without project credentials", async () => {
-        const targetRoot = mkdtempSync(join(tmpdir(), "supacloud-cli-ai-target-"));
+        const targetRoot = mkdtempSync(join(tmpdir(), "supacloud-ai-target-"));
         temporaryDirectories.push(targetRoot);
 
         const shown = await runProjectCli(["ai", "show_skill"]);
@@ -1005,12 +1042,12 @@ describe("supacloud-cli process contract", () => {
         const dryRunSummary = JSON.parse(dryRun.stdout);
 
         expect(shown.exitCode).toBe(0);
-        expect(shownSkill.name).toBe("supacloud-cli");
-        expect(shownSkill.sourceDirectory).toEndWith(join("packages", "cli", "skills", "supacloud-cli"));
+        expect(shownSkill.name).toBe("supacloud");
+        expect(shownSkill.sourceDirectory).toEndWith(join("packages", "cli", "skills", "supacloud"));
         expect(dryRun.exitCode).toBe(0);
         expect(dryRunSummary.action).toBe("create");
         expect(dryRunSummary.mode).toBe("dry-run");
-        expect(existsSync(join(targetRoot, "supacloud-cli"))).toBe(false);
+        expect(existsSync(join(targetRoot, "supacloud"))).toBe(false);
     }, 15_000);
 
     test("returns a non-zero exit code when a project command has no context", async () => {
@@ -1081,7 +1118,7 @@ describe("supacloud-cli process contract", () => {
         const profileSecret = "profile-secret-sentinel";
         const processSecret = "process-secret-sentinel";
         let requestBody: unknown;
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-profile-secrets-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-profile-secrets-"));
         temporaryDirectories.push(workspace);
         const server = Bun.serve({
             hostname: "127.0.0.1",
@@ -1641,7 +1678,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("deploys exact verified prebundled Function bytes through the process CLI", async () => {
-        const directory = mkdtempSync(join(tmpdir(), "supacloud-cli-prebundled-"));
+        const directory = mkdtempSync(join(tmpdir(), "supacloud-prebundled-"));
         temporaryDirectories.push(directory);
         const bundlePath = join(directory, "fa-api.js");
         const code = "export default { fetch: () => new Response('exact-process-bytes') };\r\n";
@@ -1701,7 +1738,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("rejects a prebundled hash mismatch before the process CLI sends HTTP", async () => {
-        const directory = mkdtempSync(join(tmpdir(), "supacloud-cli-prebundled-mismatch-"));
+        const directory = mkdtempSync(join(tmpdir(), "supacloud-prebundled-mismatch-"));
         temporaryDirectories.push(directory);
         const bundlePath = join(directory, "fa-api.js");
         writeFileSync(bundlePath, "export default { fetch: () => new Response('replaced') };\n");
@@ -2177,7 +2214,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("creates a schedule with body-file and environment-backed headers outside argv and output", async () => {
-        const directory = mkdtempSync(join(tmpdir(), "supacloud-cli-schedule-"));
+        const directory = mkdtempSync(join(tmpdir(), "supacloud-schedule-"));
         temporaryDirectories.push(directory);
         const bodyPath = join(directory, "body.json");
         const bodySentinel = "private-schedule-body-sentinel";
@@ -2562,7 +2599,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("returns non-zero when an HTTP tool result reports an explicit failure", async () => {
-        const migrationRoot = mkdtempSync(join(tmpdir(), "supacloud-cli-baseline-"));
+        const migrationRoot = mkdtempSync(join(tmpdir(), "supacloud-baseline-"));
         temporaryDirectories.push(migrationRoot);
         writeFileSync(join(migrationRoot, "20260729090000_create_orders.sql"), "CREATE TABLE orders (id uuid);\n");
         const requestedPaths: string[] = [];
@@ -2632,7 +2669,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("returns a non-zero secret-free migration push failure", async () => {
-        const migrationRoot = mkdtempSync(join(tmpdir(), "supacloud-cli-push-"));
+        const migrationRoot = mkdtempSync(join(tmpdir(), "supacloud-push-"));
         temporaryDirectories.push(migrationRoot);
         writeFileSync(join(migrationRoot, "20260729090000_create_orders.sql"), "CREATE TABLE orders (id uuid);\n");
         const responseSecret = "migration-push-response-secret";
@@ -3054,7 +3091,7 @@ describe("supacloud-cli process contract", () => {
     });
 
     test("status probes an application profile through the project data API without exposing its key", async () => {
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-application-status-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-application-status-"));
         temporaryDirectories.push(workspace);
         const requestedPaths: string[] = [];
         const authorizationHeaders: Array<string | null> = [];

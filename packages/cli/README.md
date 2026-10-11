@@ -2,8 +2,8 @@
 
 Project-scoped CLI for SupaCloud users.
 
-The only command-line executable is `supacloud-cli`. The bare `supacloud` name is reserved
-for the compiled server binary installed at `/usr/local/bin/supacloud`.
+The only command-line executable is `supacloud`. The compiled server binary
+installed at `/usr/local/bin/supacloud` is a separate managed-host installation.
 
 Tool adapters import `@supacloud/cli/tool-runtime` for typed registration and
 schema decoding. This side-effect-free entrypoint does not initialize the CLI.
@@ -14,7 +14,7 @@ are not supported.
 ## Application Starter
 
 ```sh
-supacloud-cli app init --root ./orders --name orders
+supacloud app init --root ./orders --name orders
 cd orders
 bun install
 bun run check
@@ -48,16 +48,16 @@ behavior.
 ### Application delivery
 
 ```sh
-supacloud-cli app plan --root . --format json
-supacloud-cli app build --root .
-supacloud-cli app upload --ref PROJECT --id orders --manifest_path generated/delivery/delivery.manifest.json
-supacloud-cli app configure --ref PROJECT --id orders --environment_id test --configuration_path configuration.json
-supacloud-cli app deploy --ref PROJECT --id orders --environment_id test --release_id RELEASE_SHA256 --configuration_id CONFIG_UUID --activation_id NEW_UUID --expected_activation_id absent
-supacloud-cli app status --ref PROJECT --id orders --environment_id test
-supacloud-cli app logs --ref PROJECT --id orders --environment_id test
-supacloud-cli app reconcile --ref PROJECT --id orders --environment_id test --release_id RELEASE_SHA256 --activation_id ACTIVATION_UUID
-supacloud-cli app rollback --ref PROJECT --id orders --environment_id test --release_id OLD_RELEASE_SHA256 --configuration_id CONFIG_UUID --activation_id NEW_UUID --expected_activation_id CURRENT_UUID
-supacloud-cli app retire --ref PROJECT --id orders --environment_id test --activation_id ACTIVATION_UUID
+supacloud app plan --root . --format json
+supacloud app build --root .
+supacloud app upload --ref PROJECT --id orders --manifest_path generated/delivery/delivery.manifest.json
+supacloud app configure --ref PROJECT --id orders --environment_id test --configuration_path configuration.json
+supacloud app deploy --ref PROJECT --id orders --environment_id test --release_id RELEASE_SHA256 --configuration_id CONFIG_UUID --activation_id NEW_UUID --expected_activation_id absent
+supacloud app status --ref PROJECT --id orders --environment_id test
+supacloud app logs --ref PROJECT --id orders --environment_id test
+supacloud app reconcile --ref PROJECT --id orders --environment_id test --release_id RELEASE_SHA256 --activation_id ACTIVATION_UUID
+supacloud app rollback --ref PROJECT --id orders --environment_id test --release_id OLD_RELEASE_SHA256 --configuration_id CONFIG_UUID --activation_id NEW_UUID --expected_activation_id CURRENT_UUID
+supacloud app retire --ref PROJECT --id orders --environment_id test --activation_id ACTIVATION_UUID
 ```
 
 `plan` and `build` read `delivery` in `supacloud.config.ts`; `--root` is the
@@ -82,12 +82,12 @@ Management API credentials except local plan/build and authoring commands.
 ### Isolated Application Previews
 
 ```sh
-supacloud-cli app preview-plan --env test --id orders --environment_id test --release_id RELEASE_SHA256 --branch_ref preview-orders
-supacloud-cli app preview --env test --id orders --environment_id test --release_id RELEASE_SHA256 --configuration_id CONFIG_UUID --ttl_seconds 3600 --wait --timeout_seconds 300
-supacloud-cli app previews --env test --id orders --environment_id test
-supacloud-cli app preview-status --env test --id orders --environment_id test --preview_id PREVIEW_UUID --wait --timeout_seconds 300
-supacloud-cli app preview-reconcile --env test --id orders --environment_id test --preview_id PREVIEW_UUID
-supacloud-cli app preview-cleanup --env test --id orders --environment_id test --preview_id PREVIEW_UUID
+supacloud app preview-plan --env test --id orders --environment_id test --release_id RELEASE_SHA256 --branch_ref preview-orders
+supacloud app preview --env test --id orders --environment_id test --release_id RELEASE_SHA256 --configuration_id CONFIG_UUID --ttl_seconds 3600 --wait --timeout_seconds 300
+supacloud app previews --env test --id orders --environment_id test
+supacloud app preview-status --env test --id orders --environment_id test --preview_id PREVIEW_UUID --wait --timeout_seconds 300
+supacloud app preview-reconcile --env test --id orders --environment_id test --preview_id PREVIEW_UUID
+supacloud app preview-cleanup --env test --id orders --environment_id test --preview_id PREVIEW_UUID
 ```
 
 The platform owns branch provisioning, queue/Storage namespaces, test Secrets,
@@ -194,32 +194,32 @@ Install:
 
 ```bash
 npm install -g @supacloud/cli
-supacloud-cli status
+supacloud status
 ```
 
 Bun users can run the same package explicitly with Bun, including on Windows,
 without installing Node.js or a separate wrapper:
 
 ```bash
-bunx --bun --package @supacloud/cli supacloud-cli status
+bunx --bun --package @supacloud/cli supacloud status
 ```
 
 One-off execution:
 
 ```bash
-npm exec --package @supacloud/cli -- supacloud-cli status
+npm exec --package @supacloud/cli -- supacloud status
 ```
 
 Install the packaged AI Skill:
 
 ```bash
-supacloud-cli ai show_skill
-supacloud-cli ai install_skill --dry_run
-supacloud-cli ai install_skill
+supacloud ai show_skill
+supacloud ai install_skill --dry_run
+supacloud ai install_skill
 ```
 
-The default destination is `$CODEX_HOME/skills/supacloud-cli` or
-`~/.codex/skills/supacloud-cli`. Use `--target /path/to/skills` for an explicit
+The default destination is `$CODEX_HOME/skills/supacloud` or
+`~/.codex/skills/supacloud`. Use `--target /path/to/skills` for an explicit
 Skill root. Different existing content is preserved unless `--force` is passed;
 forced replacement creates a timestamped adjacent backup first.
 
@@ -241,6 +241,9 @@ SUPACLOUD_ENV=test
 SUPACLOUD_API_URL=https://management.test.example.com
 SUPACLOUD_API_TOKEN=<test-management-api-token>
 SUPACLOUD_PROJECT_REF=test-ref
+SUPACLOUD_APPLICATION_ID=orders
+SUPACLOUD_APPLICATION_ENVIRONMENT_ID=test
+SUPACLOUD_APPLICATION_CONFIGURATION_PATH=deploy/configuration.test.json
 ```
 
 ```dotenv
@@ -249,7 +252,25 @@ SUPACLOUD_ENV=production
 SUPACLOUD_API_URL=https://management.example.com
 SUPACLOUD_API_TOKEN=<production-management-api-token>
 SUPACLOUD_PROJECT_REF=production-ref
+SUPACLOUD_APPLICATION_ID=orders
+SUPACLOUD_APPLICATION_ENVIRONMENT_ID=production
+SUPACLOUD_APPLICATION_CONFIGURATION_PATH=deploy/configuration.production.json
 ```
+
+When `SUPACLOUD_APPLICATION_ID` is present, the top-level deployment command
+uses the application release workflow automatically:
+
+```bash
+supacloud --env test deploy
+supacloud --env production deploy --confirm-production production-ref
+```
+
+Test and production use the same workflow. Production safety is enforced by the
+CLI confirmation gate; immutable releases, configuration revisions, backups,
+readiness, CAS activation, rollback artifacts and uncertain-result
+reconciliation belong to SupaCloud. The application layer only supplies its
+build output and configuration file; it does not implement backup, activation
+or downgrade orchestration.
 
 CLI requests (including `status`) default to `SUPACLOUD_TLS_VERIFY=false`, skipping HTTPS certificate verification so that
 air-gapped installations using private or self-signed certificates work
@@ -276,9 +297,9 @@ where identity authentication is required.
 Run commands with the selected profile:
 
 ```bash
-supacloud-cli --env test status
-supacloud-cli project get --env test
-supacloud-cli status --env-file ./config/supacloud.staging.env
+supacloud --env test status
+supacloud project get --env test
+supacloud status --env-file ./config/supacloud.staging.env
 ```
 
 Global flags may appear before or after the command. Both `--key value` and
@@ -301,7 +322,7 @@ SUPACLOUD_ENV=test \
 SUPACLOUD_API_URL=https://management.test.example.com \
 SUPACLOUD_API_TOKEN="$CI_SUPACLOUD_API_TOKEN" \
 SUPACLOUD_PROJECT_REF=test-ref \
-supacloud-cli status
+supacloud status
 ```
 
 Project context is resolved from one atomic source: a named profile selected by
@@ -346,17 +367,17 @@ The `frontend` command keeps the existing deployment, Git, and tar.zst
 actions and also exposes the immutable prebuilt release workflow:
 
 ```bash
-supacloud-cli frontend list_releases --ref abc123 --id web
-supacloud-cli frontend get_active_release --ref abc123 --id web
-supacloud-cli frontend get_release --ref abc123 --id web --release_id <sha256>
-supacloud-cli frontend upload_release --ref abc123 --id web --archive_path ./dist.tar.zst
-supacloud-cli frontend activate_release --ref abc123 --id web \
+supacloud frontend list_releases --ref abc123 --id web
+supacloud frontend get_active_release --ref abc123 --id web
+supacloud frontend get_release --ref abc123 --id web --release_id <sha256>
+supacloud frontend upload_release --ref abc123 --id web --archive_path ./dist.tar.zst
+supacloud frontend activate_release --ref abc123 --id web \
   --release_id <sha256> \
   --expected_active_release_id absent \
   --expected_activation_id absent \
   --mutation_id <retry-stable-uuid-v4>
-supacloud-cli frontend rollback --ref abc123 --id web --release_id <retained-sha256>
-supacloud-cli frontend rollback --ref abc123 --id web
+supacloud frontend rollback --ref abc123 --id web --release_id <retained-sha256>
+supacloud frontend rollback --ref abc123 --id web
 ```
 
 `upload_release` hashes and streams an existing regular tar.zst file without
@@ -385,11 +406,11 @@ must not be blindly retried.
 Store a compiler-built HTTP/Worker application as one immutable release:
 
 ```bash
-supacloud-cli applications upload_release --ref abc123 --id reviews \
+supacloud applications upload_release --ref abc123 --id reviews \
   --manifest_path ./generated/delivery/delivery.manifest.json
-supacloud-cli applications list_releases --ref abc123 --id reviews --limit 50
-supacloud-cli applications get_release --ref abc123 --id reviews --release_id <sha256>
-supacloud-cli applications get_runtime --ref abc123 --id reviews --environment_id test
+supacloud applications list_releases --ref abc123 --id reviews --limit 50
+supacloud applications get_release --ref abc123 --id reviews --release_id <sha256>
+supacloud applications get_runtime --ref abc123 --id reviews --environment_id test
 ```
 
 Upload verifies executable objects, transfers their inventory with multipart
@@ -427,10 +448,10 @@ environment. Saving a revision does not allocate ports, start processes, change
 traffic or migrate data:
 
 ```bash
-supacloud-cli applications get_configuration --ref abc123 --id reviews --environment_id test
-supacloud-cli applications put_configuration --ref abc123 --id reviews --environment_id test \
+supacloud applications get_configuration --ref abc123 --id reviews --environment_id test
+supacloud applications put_configuration --ref abc123 --id reviews --environment_id test \
   --configuration_path ./application.test.json
-supacloud-cli applications get_configuration --ref abc123 --id reviews --environment_id test \
+supacloud applications get_configuration --ref abc123 --id reviews --environment_id test \
   --configuration_id <uuid>
 ```
 
@@ -493,12 +514,12 @@ The default Management API instance does not yet enable these endpoints.
 For an explicitly composed test host:
 
 ```bash
-supacloud-cli applications activate_release --ref abc123 --id reviews --environment_id test \
+supacloud applications activate_release --ref abc123 --id reviews --environment_id test \
   --release_id <release-sha256> --configuration_id <configuration-uuid> \
   --activation_id <new-uuid> --expected_activation_id absent
-supacloud-cli applications reconcile_activation --ref abc123 --id reviews --environment_id test \
+supacloud applications reconcile_activation --ref abc123 --id reviews --environment_id test \
   --release_id <release-sha256> --activation_id <same-uuid>
-supacloud-cli applications retire_activation --ref abc123 --id reviews --environment_id test \
+supacloud applications retire_activation --ref abc123 --id reviews --environment_id test \
   --activation_id <stopped-and-unrouted-uuid>
 ```
 
@@ -530,26 +551,26 @@ missing, the platform begins project re-provisioning instead. It does not
 restore a database backup and is never invoked automatically by the CLI.
 
 ```bash
-supacloud-cli project pause --ref abc123
-supacloud-cli release logical_backup_restore --ref abc123 \
+supacloud project pause --ref abc123
+supacloud release logical_backup_restore --ref abc123 \
   --backup_id logical-full_abc123_<backup-id-suffix> \
   --expected_sha256 <64-lowercase-hex> \
   --restore_confirmation RESTORE_PROJECT:abc123:logical-full_abc123_<backup-id-suffix>:<64-lowercase-hex>
-supacloud-cli project restore --ref abc123
+supacloud project restore --ref abc123
 ```
 
 ```bash
-supacloud-cli release logical_backup_list --ref abc123
-supacloud-cli release logical_backup_create --ref abc123
-supacloud-cli release logical_backup_restore --ref abc123 \
+supacloud release logical_backup_list --ref abc123
+supacloud release logical_backup_create --ref abc123
+supacloud release logical_backup_restore --ref abc123 \
   --backup_id logical-full_abc123_<backup-id-suffix> \
   --expected_sha256 <64-lowercase-hex> \
   --restore_confirmation RESTORE_PROJECT:abc123:logical-full_abc123_<backup-id-suffix>:<64-lowercase-hex>
-supacloud-cli release postgrest_status --ref abc123
-supacloud-cli release postgrest_restart --ref abc123
-supacloud-cli release release_canary_fixture_stage_replay --ref abc123 \
+supacloud release postgrest_status --ref abc123
+supacloud release postgrest_restart --ref abc123
+supacloud release release_canary_fixture_stage_replay --ref abc123 \
   --subject <central-subject-uuid> --request_id <stage-request-uuid>
-supacloud-cli release release_canary_fixture_disable_replay --ref abc123 \
+supacloud release release_canary_fixture_disable_replay --ref abc123 \
   --fixture_id <fixture-uuid> --disable_request_id <disable-request-uuid> \
   --issuer <issuer-url> --subject <central-subject-uuid>
 ```
@@ -601,25 +622,25 @@ base commit without manual JSON editing or risk of dirtying non-manifest fields.
 
 ```bash
 # Rebind a single scope manifest to latest git main (or origin/main)
-supacloud-cli release scope_rebind --file supacloud/fa/release-scopes/20260907-intake-p1-production.json
+supacloud release scope_rebind --file supacloud/fa/release-scopes/20260907-intake-p1-production.json
 
 # Rebind multiple files (e.g. production and staging together)
-supacloud-cli release scope_rebind --files "20260907-intake-p1-production.json,20260907-intake-p1-staging.json"
+supacloud release scope_rebind --files "20260907-intake-p1-production.json,20260907-intake-p1-staging.json"
 
 # Rebind all scopes matching a task ID or filename prefix in standard directories
-supacloud-cli release scope_rebind --task 20260907-intake-p1
+supacloud release scope_rebind --task 20260907-intake-p1
 
 # Specify an explicit base commit SHA or git ref
-supacloud-cli release scope_rebind --task 20260907-intake-p1 --base_commit origin/main
+supacloud release scope_rebind --task 20260907-intake-p1 --base_commit origin/main
 
 # Preview changes without modifying files
-supacloud-cli release scope_rebind --task 20260907-intake-p1 --dry_run
+supacloud release scope_rebind --task 20260907-intake-p1 --dry_run
 
 # Inspect scope status, SHA-256 hash, and alignment with git HEAD / origin/main
-supacloud-cli release scope_inspect --file 20260907-intake-p1-production.json
+supacloud release scope_inspect --file 20260907-intake-p1-production.json
 
 # Scaffold a new canonical release scope
-supacloud-cli release scope_create \
+supacloud release scope_create \
   --file supacloud/fa/release-scopes/20260907-intake-p1.json \
   --task FA-INTAKE-P1 \
   --ref abc123 \
@@ -642,7 +663,7 @@ Production writes require an explicit confirmation equal to the selected
 profile's project ref:
 
 ```bash
-supacloud-cli database push_migrations --env prod \
+supacloud database push_migrations --env prod \
   --ref production-ref --dir supabase/migrations \
   --confirm-production production-ref
 ```
@@ -667,44 +688,44 @@ API token or service-role key.
 Examples:
 
 ```bash
-supacloud-cli status
-supacloud-cli project get
-supacloud-cli project logs --log_type database
-supacloud-cli project task_stats
-supacloud-cli project task_detail --task_id task_123
-supacloud-cli queue stats --queue emails
-supacloud-cli queue dlq --queue emails --limit 20
-supacloud-cli task_events inspect_webhook --ref abc123
-supacloud-cli database query --sql "select now()"
-supacloud-cli database query --ref abc123 --file ./queries/vector-search.sql
-supacloud-cli database migration_inventory --ref abc123
-supacloud-cli database lint_migrations --dir supabase/migrations
-supacloud-cli database rebase_migrations --dir supabase/migrations --baseline_file backups/schema.sql --baseline_version 20261008000000 --output_dir supabase/migrations-rebased
-supacloud-cli database push_migrations --ref abc123 --dir supabase/migrations --dry_run
-supacloud-cli supabase migration_new --name add_accounts
-supacloud-cli supabase db_diff --schema public --name add_accounts
-supacloud-cli supabase push --ref abc123 --dir supabase/migrations --dry_run
-supacloud-cli frontend list --ref abc123
-supacloud-cli branch create --name feature-orders --data_mode schema_only
-supacloud-cli branch promotion_plan --branch_ref preview123
-supacloud-cli branch promote --branch_ref preview123 --plan_checksum <sha256>
-supacloud-cli edge_functions get_config --ref abc123 --slug hello
-supacloud-cli edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello --expected-active-version absent --expected-activation-id legacy
-supacloud-cli edge_functions deploy --ref abc123 --slug hello --prebundled-path ./dist/hello.js --expected-sha256 <sha256> --expected-active-version 4 --expected-activation-id <uuid>
-supacloud-cli edge_functions deploy_bundle --ref abc123 --slug hello --files '{"index.ts":"export default { fetch: () => new Response(\"ok\") }"}' --expected-active-version 7 --expected-activation-id <uuid>
-supacloud-cli edge_functions source --ref abc123 --slug hello --version 7 --output ./hello-v7.ts
-supacloud-cli edge_functions activate --ref abc123 --slug hello --version 3 --expected-active-version 8 --expected-activation-id <uuid>
-supacloud-cli edge_functions delete --ref abc123 --slug hello --expected-activation-id <uuid>
-supacloud-cli scheduled_functions list --ref abc123
-supacloud-cli secrets upsert --ref abc123 --from-env API_KEY,WEBHOOK_SECRET
-supacloud-cli storage list_buckets --ref abc123
-supacloud-cli storage get_bucket --ref abc123 --bucket reports
-supacloud-cli storage create_bucket --ref abc123 --bucket reports --public false \
+supacloud status
+supacloud project get
+supacloud project logs --log_type database
+supacloud project task_stats
+supacloud project task_detail --task_id task_123
+supacloud queue stats --queue emails
+supacloud queue dlq --queue emails --limit 20
+supacloud task_events inspect_webhook --ref abc123
+supacloud database query --sql "select now()"
+supacloud database query --ref abc123 --file ./queries/vector-search.sql
+supacloud database migration_inventory --ref abc123
+supacloud database lint_migrations --dir supabase/migrations
+supacloud database rebase_migrations --dir supabase/migrations --baseline_file backups/schema.sql --baseline_version 20261008000000 --output_dir supabase/migrations-rebased
+supacloud database push_migrations --ref abc123 --dir supabase/migrations --dry_run
+supacloud supabase migration_new --name add_accounts
+supacloud supabase db_diff --schema public --name add_accounts
+supacloud supabase push --ref abc123 --dir supabase/migrations --dry_run
+supacloud frontend list --ref abc123
+supacloud branch create --name feature-orders --data_mode schema_only
+supacloud branch promotion_plan --branch_ref preview123
+supacloud branch promote --branch_ref preview123 --plan_checksum <sha256>
+supacloud edge_functions get_config --ref abc123 --slug hello
+supacloud edge_functions deploy --ref abc123 --slug hello --path ./supabase/functions/hello --expected-active-version absent --expected-activation-id legacy
+supacloud edge_functions deploy --ref abc123 --slug hello --prebundled-path ./dist/hello.js --expected-sha256 <sha256> --expected-active-version 4 --expected-activation-id <uuid>
+supacloud edge_functions deploy_bundle --ref abc123 --slug hello --files '{"index.ts":"export default { fetch: () => new Response(\"ok\") }"}' --expected-active-version 7 --expected-activation-id <uuid>
+supacloud edge_functions source --ref abc123 --slug hello --version 7 --output ./hello-v7.ts
+supacloud edge_functions activate --ref abc123 --slug hello --version 3 --expected-active-version 8 --expected-activation-id <uuid>
+supacloud edge_functions delete --ref abc123 --slug hello --expected-activation-id <uuid>
+supacloud scheduled_functions list --ref abc123
+supacloud secrets upsert --ref abc123 --from-env API_KEY,WEBHOOK_SECRET
+supacloud storage list_buckets --ref abc123
+supacloud storage get_bucket --ref abc123 --bucket reports
+supacloud storage create_bucket --ref abc123 --bucket reports --public false \
   --file_size_limit 10485760 --allowed_mime_types "application/pdf,image/png"
-supacloud-cli storage update_bucket --ref abc123 --bucket reports \
+supacloud storage update_bucket --ref abc123 --bucket reports \
   --expected_revision <revision-from-get_bucket> \
   --allowed_mime_types '["application/pdf"]'
-supacloud-cli storage delete_bucket --ref abc123 --bucket reports \
+supacloud storage delete_bucket --ref abc123 --bucket reports \
   --expected_revision <revision-from-get_bucket> --require_empty true
 ```
 
@@ -720,7 +741,7 @@ human-readable behavior.
 with the separate read-only `/database/migrations/inventory` endpoint:
 
 ```bash
-supacloud-cli database delivery_migration_plan --ref abc123 \
+supacloud database delivery_migration_plan --ref abc123 \
   --delivery_manifest /archive/delivery/delivery.manifest.json --delivery_target api
 ```
 
@@ -878,12 +899,12 @@ activation targets still require a positive version.
 Scheduled Function lifecycle operations are also project-scoped:
 
 ```bash
-supacloud-cli scheduled_functions create --ref abc123 --name nightly \
+supacloud scheduled_functions create --ref abc123 --name nightly \
   --slug cleanup --cron "0 2 * * *" --method POST
-supacloud-cli scheduled_functions get --ref abc123 --schedule_id <id>
-supacloud-cli scheduled_functions update --ref abc123 --schedule_id <id> \
+supacloud scheduled_functions get --ref abc123 --schedule_id <id>
+supacloud scheduled_functions update --ref abc123 --schedule_id <id> \
   --expected_updated_at <updated_at-from-list> --cron "0 3 * * *"
-supacloud-cli scheduled_functions delete --ref abc123 --schedule_id <id> \
+supacloud scheduled_functions delete --ref abc123 --schedule_id <id> \
   --expected_updated_at <updated_at-from-list>
 ```
 
@@ -923,20 +944,20 @@ break-glass API mode and is intentionally not exposed by this project CLI.
 ## SupaCloud Lite CLI adapter
 
 Lite can be used from its standalone `supacloud-lite` CLI and from the main
-`supacloud-cli` through the local-only `lite` module. The adapter never calls
+`supacloud` through the local-only `lite` module. The adapter never calls
 the Management API, never invokes the official Supabase CLI, and never treats a
 PGlite data directory as a Postgres DSN.
 
 ```bash
-supacloud-cli lite migrate --project_dir .
-supacloud-cli lite status --project_dir .
-supacloud-cli lite db_diff --project_dir . --file add_accounts
-supacloud-cli lite db_pull --project_dir . --file remote_schema
-supacloud-cli lite db_pull --project_dir . --file reviewed_schema --baseline
-supacloud-cli lite gen_types --project_dir . --output src/database.types.ts
-supacloud-cli lite snapshot_create --project_dir . --output backups/lite.tar.gz
-supacloud-cli lite doctor --project_dir . --json
-supacloud-cli lite start --project_dir . --port 54321
+supacloud lite migrate --project_dir .
+supacloud lite status --project_dir .
+supacloud lite db_diff --project_dir . --file add_accounts
+supacloud lite db_pull --project_dir . --file remote_schema
+supacloud lite db_pull --project_dir . --file reviewed_schema --baseline
+supacloud lite gen_types --project_dir . --output src/database.types.ts
+supacloud lite snapshot_create --project_dir . --output backups/lite.tar.gz
+supacloud lite doctor --project_dir . --json
+supacloud lite start --project_dir . --port 54321
 ```
 
 The adapter resolves the executable in this order:
@@ -964,29 +985,29 @@ open-source Supabase CLI. It is not a fork. Local authoring commands work withou
 SupaCloud credentials:
 
 ```bash
-supacloud-cli supabase version
-supacloud-cli supabase init --workdir .
-supacloud-cli supabase migration_new --name add_accounts
-supacloud-cli supabase db_diff --schema public --name add_accounts
-supacloud-cli supabase db_reset --no_seed
+supacloud supabase version
+supacloud supabase init --workdir .
+supacloud supabase migration_new --name add_accounts
+supacloud supabase db_diff --schema public --name add_accounts
+supacloud supabase db_reset --no_seed
 ```
 
 Remote inspection and backup commands require an explicit, percent-encoded
 Postgres DSN:
 
 ```bash
-supacloud-cli supabase db_pull --db_url "$SUPACLOUD_DB_URL" --declarative
-supacloud-cli supabase migration_list --db_url "$SUPACLOUD_DB_URL"
-supacloud-cli supabase db_dump --db_url "$SUPACLOUD_DB_URL" --file backups/schema.sql
-supacloud-cli supabase gen_types --db_url "$SUPACLOUD_DB_URL" --schema public --file src/database.types.ts
+supacloud supabase db_pull --db_url "$SUPACLOUD_DB_URL" --declarative
+supacloud supabase migration_list --db_url "$SUPACLOUD_DB_URL"
+supacloud supabase db_dump --db_url "$SUPACLOUD_DB_URL" --file backups/schema.sql
+supacloud supabase gen_types --db_url "$SUPACLOUD_DB_URL" --schema public --file src/database.types.ts
 ```
 
 Remote migration application intentionally stays on SupaCloud's existing
 project-authenticated API:
 
 ```bash
-supacloud-cli supabase push --ref abc123 --dir supabase/migrations --dry_run
-supacloud-cli supabase push --ref abc123 --dir supabase/migrations
+supacloud supabase push --ref abc123 --dir supabase/migrations --dry_run
+supacloud supabase push --ref abc123 --dir supabase/migrations
 ```
 
 `push` uses only `SUPACLOUD_API_TOKEN` for the SupaCloud Management API. That
@@ -1003,17 +1024,17 @@ the adapter does not install a new CLI or replace an existing schema authority.
 `init` preserves existing configuration and inherits the installed CLI's defaults.
 
 ```bash
-supacloud-cli supabase db_schema_declarative_generate --db_url "$SUPACLOUD_DB_URL"
-supacloud-cli supabase db_schema_declarative_sync --name add_accounts --strict_coverage
-supacloud-cli supabase db_diff --diff_engine pg-delta --name add_accounts
-supacloud-cli supabase config_pull --ref upstream-project
-supacloud-cli supabase config_pull --ref upstream-project --dry_run=false --yes
-supacloud-cli supabase stack_start --workdir .
-supacloud-cli supabase stack_status --workdir .
-SUPACLOUD_ENABLE_NATIVE_STACK=1 supacloud-cli supabase stack_prepare --workdir . --runtime native
-SUPACLOUD_ENABLE_NATIVE_STACK=1 supacloud-cli supabase stack_start --workdir . --runtime native --preparation on-demand
-supacloud-cli supabase stack_stop --workdir .
-supacloud-cli supabase stack_destroy --workdir . --confirm_destroy --yes
+supacloud supabase db_schema_declarative_generate --db_url "$SUPACLOUD_DB_URL"
+supacloud supabase db_schema_declarative_sync --name add_accounts --strict_coverage
+supacloud supabase db_diff --diff_engine pg-delta --name add_accounts
+supacloud supabase config_pull --ref upstream-project
+supacloud supabase config_pull --ref upstream-project --dry_run=false --yes
+supacloud supabase stack_start --workdir .
+supacloud supabase stack_status --workdir .
+SUPACLOUD_ENABLE_NATIVE_STACK=1 supacloud supabase stack_prepare --workdir . --runtime native
+SUPACLOUD_ENABLE_NATIVE_STACK=1 supacloud supabase stack_start --workdir . --runtime native --preparation on-demand
+supacloud supabase stack_stop --workdir .
+supacloud supabase stack_destroy --workdir . --confirm_destroy --yes
 ```
 
 Declarative sync generates without applying unless `--apply` is explicit.
@@ -1051,7 +1072,7 @@ If the live database already contains reviewed historical changes, first pull,
 back up, and prove schema equivalence. Then preview the controlled tracking sync:
 
 ```bash
-supacloud-cli database baseline_migrations --ref abc123 --dir supabase/migrations --dry_run
+supacloud database baseline_migrations --ref abc123 --dir supabase/migrations --dry_run
 ```
 
 Only after explicit approval, rerun without `--dry_run`. This records migration
@@ -1079,9 +1100,9 @@ Transaction boundary: SupaCloud supports transaction blocks inside one SQL reque
 Auth configuration commands accept a JSON object from the CLI:
 
 ```bash
-supacloud-cli auth update_settings --ref abc123 \
+supacloud auth update_settings --ref abc123 \
   --config '{"disable_signup":true,"enable_signup":false}'
-supacloud-cli auth update_config --ref abc123 \
+supacloud auth update_config --ref abc123 \
   --config '{"third_party_auth":{"enabled":true}}'
 ```
 
@@ -1156,14 +1177,14 @@ Gateway / Caddy commands (require admin privileges; config is injected via the C
 - `gateway verify_custom_hostname` — verify a custom hostname
 
 ```bash
-supacloud-cli gateway routes --ref abc123
-supacloud-cli gateway upsert_route --ref abc123 --route_id webhook \
+supacloud gateway routes --ref abc123
+supacloud gateway upsert_route --ref abc123 --route_id webhook \
   --hosts "api.example.com" --paths "/webhook/*" --upstream 10.0.0.5:8080
-supacloud-cli gateway upsert_route --ref abc123 --route_id canonical-https \
+supacloud gateway upsert_route --ref abc123 --route_id canonical-https \
   --hosts "www.example.com" --paths "/*" --protocol http \
   --redirect_to 'https://www.example.com{http.request.uri}' --redirect_status 308
-supacloud-cli gateway config --ref abc123 --rate_limit_tier pro
-supacloud-cli gateway rebuild --ref abc123 --clean
+supacloud gateway config --ref abc123 --rate_limit_tier pro
+supacloud gateway rebuild --ref abc123 --clean
 ```
 
 For server installation, SSH diagnostics, and tenant administration, use `@supacloud/admin`.

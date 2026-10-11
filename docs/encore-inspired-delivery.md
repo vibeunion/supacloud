@@ -2832,7 +2832,7 @@ gaps. This does not authorize production changes.
 
 The CLI adds local `app plan` and `app build`, and delegates `app upload`,
 `configure`, `deploy`, `status`, `rollback`, `reconcile` and `retire` to the
-existing application API contracts. The executable is `supacloud-cli`; the bare
+existing application API contracts. The executable is `supacloud`; the bare
 `supacloud` name remains reserved for the server. See the CLI README for exact
 arguments.
 

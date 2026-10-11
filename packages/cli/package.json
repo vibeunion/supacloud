@@ -18,7 +18,7 @@
     }
   },
   "bin": {
-    "supacloud-cli": "dist/index.js"
+    "supacloud": "dist/index.js"
   },
   "files": [
     "NOTICE",

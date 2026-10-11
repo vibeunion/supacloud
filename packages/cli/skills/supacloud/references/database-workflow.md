@@ -8,7 +8,7 @@ Migration files are the durable source of truth. `supabase_migrations.schema_mig
 2. Create a migration:
 
    ```bash
-   supacloud-cli supabase migration_new --name <intent>
+   supacloud supabase migration_new --name <intent>
    ```
 
 3. Put tables, views, functions/RPC, triggers, RLS, indexes, grants, extensions, and required reference data in the generated SQL file.
@@ -21,13 +21,13 @@ Migration files are the durable source of truth. `supabase_migrations.schema_mig
 5. Rebuild locally and run application tests:
 
    ```bash
-   supacloud-cli supabase db_reset --no_seed
+   supacloud supabase db_reset --no_seed
    ```
 
 6. Preview remote application:
 
    ```bash
-   supacloud-cli supabase push --ref <project-ref> --dir supabase/migrations --dry_run
+   supacloud supabase push --ref <project-ref> --dir supabase/migrations --dry_run
    ```
 
 7. After explicit environment approval, apply and read back migration history.
@@ -38,7 +38,7 @@ Preserve the repository's existing schema authority. In a project already using
 declarative SQL, edit those files and run:
 
 ```bash
-supacloud-cli supabase db_schema_declarative_sync --name <intent> --strict_coverage
+supacloud supabase db_schema_declarative_sync --name <intent> --strict_coverage
 ```
 
 The adapter defaults to no-apply. Review the generated migration, then use the
@@ -64,7 +64,7 @@ Do not fabricate old migration files and immediately push them. Reconcile delibe
 3. Create a schema-only backup before changing tracking or schema:
 
    ```bash
-   supacloud-cli supabase db_dump \
+   supacloud supabase db_dump \
      --db_url "$SUPACLOUD_DB_URL" \
      --file backups/pre-reconcile-schema.sql
    ```
@@ -72,7 +72,7 @@ Do not fabricate old migration files and immediately push them. Reconcile delibe
 4. In an isolated branch/worktree, pull the actual remote schema:
 
    ```bash
-   supacloud-cli supabase db_pull \
+   supacloud supabase db_pull \
      --db_url "$SUPACLOUD_DB_URL" \
      --declarative \
      --name remote_baseline
@@ -86,7 +86,7 @@ Do not fabricate old migration files and immediately push them. Reconcile delibe
 8. Only after equivalence is proven, preview the controlled baseline action:
 
    ```bash
-   supacloud-cli database baseline_migrations \
+   supacloud database baseline_migrations \
      --ref <project-ref> \
      --dir supabase/migrations \
      --dry_run

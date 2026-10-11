@@ -521,8 +521,8 @@ The compiler discovers this declaration; no runtime container lookup is needed.
 With the matching candidate/released CLI installed:
 
 \`\`\`sh
-supacloud-cli app generate --kind resource --name inventory --register-in src/app.module.ts --dry-run --format json
-supacloud-cli app generate --kind resource --name inventory --register-in src/app.module.ts
+supacloud app generate --kind resource --name inventory --register-in src/app.module.ts --dry-run --format json
+supacloud app generate --kind resource --name inventory --register-in src/app.module.ts
 bun run check
 bun run inspect
 \`\`\`

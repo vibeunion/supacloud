@@ -13,7 +13,7 @@ afterEach(() => {
 });
 
 function temporaryWorkspace(): string {
-    const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-context-"));
+    const workspace = mkdtempSync(join(tmpdir(), "supacloud-context-"));
     temporaryDirectories.push(workspace);
     return workspace;
 }
@@ -320,6 +320,28 @@ describe("resolveSupaCloudContext", () => {
             apiUrl: "",
             apiToken: "",
             projectRef: "abc123",
+        });
+    });
+
+    test("resolves application deployment settings from the selected environment profile", () => {
+        const workspace = temporaryWorkspace();
+        writeEnvironment(workspace, ".env.supacloud.test", {
+            SUPACLOUD_ENV: "test",
+            SUPACLOUD_API_URL: "https://management.example.com",
+            SUPACLOUD_API_TOKEN: "token",
+            SUPACLOUD_PROJECT_REF: "test-ref",
+            SUPACLOUD_APPLICATION_ID: "orders",
+            SUPACLOUD_APPLICATION_CONFIGURATION_PATH: "deploy/configuration.test.json",
+        });
+
+        const context = resolveSupaCloudContext({}, workspace, { environmentName: "test" });
+
+        expect(context).toMatchObject({
+            applicationId: "orders",
+            applicationEnvironmentId: "test",
+            applicationConfigurationPath: "deploy/configuration.test.json",
+            applicationConfigurationId: "",
+            applicationManifestPath: "",
         });
     });
 

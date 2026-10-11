@@ -60,22 +60,22 @@ The IP and domain are placeholders. Production hosts should normally use verifie
 The project CLI uses `SUPABASE_URL` or `SUPACLOUD_API_URL`, and `SUPABASE_SERVICE_ROLE_KEY` or `SUPACLOUD_API_TOKEN`. It can auto-link from the current workspace `.env`. Keep credentials out of source control and browser bundles. Generated application environment wrappers have a separate selection contract; see the [starter guide](application-starter.md).
 
 ```bash
-supacloud-cli status
-supacloud-cli project get
-supacloud-cli project logs --log_type database
+supacloud status
+supacloud project get
+supacloud project logs --log_type database
 ```
 
 The npm entry defaults to Node.js. To explicitly use Bun, including from Windows terminals:
 
 ```bash
-bunx --bun --package @supacloud/cli supacloud-cli status
+bunx --bun --package @supacloud/cli supacloud status
 ```
 
 AI agents can inspect and install the CLI's migration-first Skill:
 
 ```bash
-supacloud-cli ai install_skill --dry_run
-supacloud-cli ai install_skill
+supacloud ai install_skill --dry_run
+supacloud ai install_skill
 ```
 
 Configure the operator connection in the [CLI guide](cli-guide.md), then use Admin for host/platform operations:
@@ -85,7 +85,10 @@ npx @supacloud/admin status
 npx @supacloud/admin ssh ping
 ```
 
-`supacloud-cli` is project-scoped. Installation, upgrades, SSH diagnostics and platform project lifecycle belong to `supacloud-admin`. `supacloudctl` is an optional dispatcher; `supacloud` names the compiled server binary, not a project-CLI alias.
+`supacloud` is the developer project CLI. Installation, upgrades, SSH
+diagnostics and platform project lifecycle belong to `supacloud-admin`.
+`supacloudctl` is an optional local dispatcher. The compiled server binary at
+`/usr/local/bin/supacloud` is a separate managed-host installation.
 
 ## Production upgrades
 

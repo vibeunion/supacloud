@@ -42,7 +42,7 @@ async function runCli(args: string[], environment: Record<string, string> = {}) 
     return { exitCode, stdout, stderr };
 }
 
-describe("supacloud-cli official Supabase CLI surface", () => {
+describe("supacloud official Supabase CLI surface", () => {
     test("exposes the local Lite action surface without project credentials", async () => {
         const result = await runCli(["lite"]);
 
@@ -89,7 +89,7 @@ describe("supacloud-cli official Supabase CLI surface", () => {
     });
 
     test("uses the Management token only on the SupaCloud migration API path", async () => {
-        const migrationDir = mkdtempSync(join(tmpdir(), "supacloud-cli-migrations-"));
+        const migrationDir = mkdtempSync(join(tmpdir(), "supacloud-migrations-"));
         const migrationFile = "20260718090000_create_adapter_test.sql";
         writeFileSync(join(migrationDir, migrationFile), "create table adapter_test(id bigint primary key);\n");
 

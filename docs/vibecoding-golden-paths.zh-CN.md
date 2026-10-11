@@ -81,8 +81,8 @@ supacloud generate --kind contract --module orders --name accept
 数据库任务使用同样的边界化上下文：
 
 ```bash
-supacloud-cli db context --root . --module_file db/modules.ts --module cases
-supacloud-cli db context --root . --module_file db/modules.ts --target public.case_create
+supacloud db context --root . --module_file db/modules.ts --module cases
+supacloud db context --root . --module_file db/modules.ts --target public.case_create
 ```
 
 输出会指出 Drizzle 结构源、SQL 行为源、对象对应的测试和允许的验证命令。AI

@@ -41,7 +41,7 @@ describe("SupaCloud CLI AI skill installer", () => {
     test("resolves the bundled skill and the default Codex skill root", () => {
         const codexHome = join(tmpdir(), "codex-home");
         const homeDirectory = join(tmpdir(), "home");
-        expect(resolveBundledSkillDirectory()).toEndWith(join("packages", "cli", "skills", "supacloud-cli"));
+        expect(resolveBundledSkillDirectory()).toEndWith(join("packages", "cli", "skills", "supacloud"));
         expect(resolveDefaultCodexSkillRoot({ CODEX_HOME: codexHome }, homeDirectory))
             .toBe(join(resolve(codexHome), "skills"));
         expect(resolveDefaultCodexSkillRoot({}, homeDirectory))
@@ -64,7 +64,7 @@ describe("SupaCloud CLI AI skill installer", () => {
         expect(summary.changed).toBe(true);
         expect(summary.backupDirectory).toBeNull();
         expect(summary.files).toEqual(["SKILL.md", "references/database-workflow.md"]);
-        expect(existsSync(join(targetRoot, "supacloud-cli"))).toBe(false);
+        expect(existsSync(join(targetRoot, "supacloud"))).toBe(false);
     });
 
     test("installs idempotently and rejects unapproved replacement", () => {
@@ -80,10 +80,10 @@ describe("SupaCloud CLI AI skill installer", () => {
 
         const installed = installSkill(request);
         const unchanged = installSkill(request);
-        writeFileSync(join(targetRoot, "supacloud-cli", "SKILL.md"), "user-owned change\n");
+        writeFileSync(join(targetRoot, "supacloud", "SKILL.md"), "user-owned change\n");
 
         expect(installed.action).toBe("create");
-        expect(readFileSync(join(targetRoot, "supacloud-cli", "SKILL.md"), "utf8"))
+        expect(readFileSync(join(targetRoot, "supacloud", "SKILL.md"), "utf8"))
             .toBe("user-owned change\n");
         expect(unchanged.action).toBe("none");
         expect(unchanged.changed).toBe(false);
@@ -100,7 +100,7 @@ describe("SupaCloud CLI AI skill installer", () => {
             conflictPolicy: "reject",
             now: new Date("2026-07-18T12:34:56.789Z"),
         });
-        writeFileSync(join(targetRoot, "supacloud-cli", "SKILL.md"), "user-owned change\n");
+        writeFileSync(join(targetRoot, "supacloud", "SKILL.md"), "user-owned change\n");
 
         const summary = installSkill({
             sourceDirectory,
@@ -111,10 +111,10 @@ describe("SupaCloud CLI AI skill installer", () => {
         });
 
         expect(summary.action).toBe("replace");
-        expect(summary.backupDirectory).toEndWith("supacloud-cli.backup-20260718T123456789Z");
+        expect(summary.backupDirectory).toEndWith("supacloud.backup-20260718T123456789Z");
         expect(readFileSync(join(summary.backupDirectory!, "SKILL.md"), "utf8"))
             .toBe("user-owned change\n");
-        expect(readFileSync(join(targetRoot, "supacloud-cli", "SKILL.md"), "utf8"))
+        expect(readFileSync(join(targetRoot, "supacloud", "SKILL.md"), "utf8"))
             .toBe("# SupaCloud CLI\n");
     });
 });

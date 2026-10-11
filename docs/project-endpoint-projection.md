@@ -68,7 +68,7 @@ The projection reuses the same routing resolver that builds tenant gateway confi
 Selected project:
 
 ```bash
-supacloud-cli project endpoints --ref abc123
+supacloud project endpoints --ref abc123
 ```
 
 `--ref` may be omitted when the selected Management profile already binds one project.
@@ -80,7 +80,7 @@ supacloud-admin project endpoints --ref abc123
 supacloud-admin project list_endpoints
 ```
 
-`supacloud-cli project list` deliberately does not enumerate the fleet. It returns guidance to use `supacloud-admin project list`, preserving the project/Admin credential boundary.
+`supacloud project list` deliberately does not enumerate the fleet. It returns guidance to use `supacloud-admin project list`, preserving the project/Admin credential boundary.
 
 ## What the projection proves
 

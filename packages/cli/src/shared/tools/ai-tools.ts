@@ -17,7 +17,7 @@ import { optional, stringEnum } from "../schema";
 import type { ToolSchema } from "../schema";
 import { registerTool, type ToolServer } from "../tool-server";
 
-const SKILL_NAME = "supacloud-cli";
+const SKILL_NAME = "supacloud";
 
 type InstallMode = "dry-run" | "write";
 type ConflictPolicy = "reject" | "replace";
@@ -87,7 +87,7 @@ function availableBackupDirectory(destinationDirectory: string, now: Date): stri
 
 function stagedSkill(sourceDirectory: string, targetRoot: string): { root: string; skill: string } {
     mkdirSync(targetRoot, { recursive: true });
-    const stagingRoot = mkdtempSync(join(targetRoot, ".supacloud-cli-install-"));
+    const stagingRoot = mkdtempSync(join(targetRoot, ".supacloud-install-"));
     const stagingSkill = join(stagingRoot, SKILL_NAME);
     try {
         cpSync(sourceDirectory, stagingSkill, { recursive: true, errorOnExist: true });

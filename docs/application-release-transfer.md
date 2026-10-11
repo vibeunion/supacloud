@@ -4,10 +4,10 @@
 不可变应用制品由平台直接转移，CLI 不下载、重新构建或重新上传代码。
 
 ```bash
-supacloud-cli --env production app transfer-plan --id reviews \
+supacloud --env production app transfer-plan --id reviews \
   --source_ref staging --source_release_id <staging-release-sha256>
 
-supacloud-cli --env production --confirm-production production app transfer \
+supacloud --env production --confirm-production production app transfer \
   --id reviews --source_ref staging --source_release_id <staging-release-sha256>
 ```
 

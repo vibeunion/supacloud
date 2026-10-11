@@ -57,6 +57,14 @@ interface DeployToolOptions {
     environment?: string | null;
     cwd?: string;
     environmentVariables?: Readonly<Record<string, string>>;
+    application?: {
+        id: string;
+        environmentId: string;
+        configurationPath?: string;
+        configurationId?: string;
+        manifestPath?: string;
+    };
+    applicationRelease?: (args: Record<string, unknown>) => Promise<ToolResponse>;
     edgeFunctionDeploy?: (args: Record<string, unknown>) => Promise<ToolResponse>;
 }
 
@@ -131,10 +139,15 @@ async function readJson(path: string): Promise<unknown> {
     }
 }
 
-export async function findDeployConfigRoot(startDirectory: string): Promise<string> {
+export async function findDeployConfigRoot(startDirectory: string, environmentName?: string): Promise<string> {
     let directory = resolve(startDirectory);
     while (true) {
-        if (await pathExists(join(directory, "supacloud.json"))) return directory;
+        const environmentFile = environmentName ? `.env.supacloud.${environmentName}` : null;
+        if (await pathExists(join(directory, "supacloud.json"))
+            || await pathExists(join(directory, "supacloud.config.ts"))
+            || (environmentFile !== null && await pathExists(join(directory, environmentFile)))) {
+            return directory;
+        }
         const parent = dirname(directory);
         if (parent === directory) return resolve(startDirectory);
         directory = parent;
@@ -534,6 +547,44 @@ export function registerDeployTools(
             const projectRef = String(args.ref || options.projectRef || "").trim();
             if (!projectRef) throw new Error("A linked project ref is required. Set SUPACLOUD_PROJECT_REF or pass --ref");
             const configRoot = await findDeployConfigRoot(invocationDirectory);
+
+            if (options.application?.id) {
+                if (!options.applicationRelease) {
+                    throw new Error("Application release support is unavailable in this CLI context");
+                }
+                if (args.target || args.build_command || args.output_dir) {
+                    throw new Error("Application profile deploy does not accept frontend target, build command, or output directory flags");
+                }
+                if (args.dry_run === true || args.plan === true || args.diff === true) {
+                    throw new Error("Application profile deploy does not support dry_run, plan, or diff; use app deploy-plan for a read-only plan");
+                }
+                const environmentId = options.application.environmentId.trim();
+                if (!environmentId) {
+                    throw new Error("Application profile requires SUPACLOUD_APPLICATION_ENVIRONMENT_ID or SUPACLOUD_ENV");
+                }
+                const configurationPath = options.application.configurationPath?.trim();
+                const configurationId = options.application.configurationId?.trim();
+                if (!configurationPath && !configurationId) {
+                    throw new Error("Application profile requires SUPACLOUD_APPLICATION_CONFIGURATION_PATH or SUPACLOUD_APPLICATION_CONFIGURATION_ID");
+                }
+                if (configurationPath && configurationId) {
+                    throw new Error("Application profile must set only one of SUPACLOUD_APPLICATION_CONFIGURATION_PATH or SUPACLOUD_APPLICATION_CONFIGURATION_ID");
+                }
+                const result = await options.applicationRelease({
+                    action: "release",
+                    ref: projectRef,
+                    id: options.application.id,
+                    environment_id: environmentId,
+                    root: configRoot,
+                    ...(configurationPath ? { configuration_path: configurationPath } : {}),
+                    ...(configurationId ? { configuration_id: configurationId } : {}),
+                    ...(options.application.manifestPath ? { manifest_path: options.application.manifestPath } : {}),
+                    ...(args.skip_build === true ? { skip_build: true } : {}),
+                    ...(args.json === true ? { format: "json", json: true } : {}),
+                });
+                return result;
+            }
+
             const config = await readDeployConfig(configRoot);
             const target = selectTarget(configRoot, invocationDirectory, config, String(args.target || "").trim() || undefined);
             const projectDirectory = target.root;

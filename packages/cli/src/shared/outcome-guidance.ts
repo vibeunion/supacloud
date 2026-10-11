@@ -20,9 +20,9 @@ export function outcomeUnknownGuidance(text: string): string | null {
     if (safeScope && (data.operation === "applications.promote_application" || data.operation === "applications.reconcile_promotion")
         && typeof data.mutation_id === "string"
         && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(data.mutation_id)) {
-        command = `supacloud-cli app promote-status --ref ${ref} --id ${id} --environment_id ${environment} --mutation_id ${data.mutation_id}`;
+        command = `supacloud app promote-status --ref ${ref} --id ${id} --environment_id ${environment} --mutation_id ${data.mutation_id}`;
     } else if (safeScope && (data.operation === "applications.create_preview" || data.operation === "applications.cleanup_preview")) {
-        command = `supacloud-cli app preview-list --ref ${ref} --id ${id} --environment_id ${environment}`;
+        command = `supacloud app preview-list --ref ${ref} --id ${id} --environment_id ${environment}`;
     }
     return "OUTCOME_UNKNOWN：操作结果无法确认，服务端可能已经完成操作，但客户端未收到可验证的最终结果。"
         + "请先查询当前状态或操作回执，再决定是否重试；不要直接重复提交。"

@@ -29,9 +29,9 @@ run migrations, or automatically restore business data.
 ## CLI
 
 ```sh
-supacloud-cli release logical_backup_create --ref example
-supacloud-cli release logical_backup_status --ref example --backup_id logical-full_example_<32hex>
-supacloud-cli release logical_backup_create --ref example --backup_id logical-full_example_<32hex>
+supacloud release logical_backup_create --ref example
+supacloud release logical_backup_status --ref example --backup_id logical-full_example_<32hex>
+supacloud release logical_backup_create --ref example --backup_id logical-full_example_<32hex>
 ```
 
 Creation sends one POST followed by one exact-ID GET. An uncertain mutation can

@@ -23,7 +23,7 @@ npx --package supacloud supacloudctl admin status
 
 `supacloud` depends on both `@supacloud/cli` and `@supacloud/admin`, so installing
 it gives you the full toolset. You can still install either CLI on its own
-(`@supacloud/cli` exposes `supacloud-cli`, `@supacloud/admin` exposes `supacloud-admin`).
+(`@supacloud/cli` exposes `supacloud`, `@supacloud/admin` exposes `supacloud-admin`).
 
 ## 更新检查
 

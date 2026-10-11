@@ -33,13 +33,13 @@ existing `config.toml`. The verified upstream template enables pg-delta, but thi
 is not a guarantee about an arbitrary installed CLI version.
 
 ```bash
-supacloud-cli supabase version
-supacloud-cli supabase init --workdir .
-supacloud-cli supabase db_schema_declarative_generate --workdir . --db_url "$SUPACLOUD_DB_URL"
-supacloud-cli supabase db_schema_declarative_sync --workdir . --name add_accounts --strict_coverage
-supacloud-cli supabase db_diff --workdir . --diff_engine pg-delta --name add_accounts
-supacloud-cli supabase config_pull --workdir . --ref upstream-project
-supacloud-cli supabase config_pull --workdir . --ref upstream-project --dry_run=false --yes
+supacloud supabase version
+supacloud supabase init --workdir .
+supacloud supabase db_schema_declarative_generate --workdir . --db_url "$SUPACLOUD_DB_URL"
+supacloud supabase db_schema_declarative_sync --workdir . --name add_accounts --strict_coverage
+supacloud supabase db_diff --workdir . --diff_engine pg-delta --name add_accounts
+supacloud supabase config_pull --workdir . --ref upstream-project
+supacloud supabase config_pull --workdir . --ref upstream-project --dry_run=false --yes
 ```
 
 `generate` uses an explicit DSN or the upstream linked project. Existing schema
@@ -64,12 +64,12 @@ sandbox. Use a reviewed work directory and do not commit secrets.
 ## Local stacks
 
 ```bash
-supacloud-cli supabase stack_start --workdir ./project-a
-supacloud-cli supabase stack_status --workdir ./project-a
-SUPACLOUD_ENABLE_NATIVE_STACK=1 supacloud-cli supabase stack_prepare --workdir ./project-b --runtime native
-SUPACLOUD_ENABLE_NATIVE_STACK=1 supacloud-cli supabase stack_start --workdir ./project-b --runtime native --preparation on-demand --eager
-supacloud-cli supabase stack_stop --workdir ./project-b
-supacloud-cli supabase stack_destroy --workdir ./project-b --confirm_destroy --yes
+supacloud supabase stack_start --workdir ./project-a
+supacloud supabase stack_status --workdir ./project-a
+SUPACLOUD_ENABLE_NATIVE_STACK=1 supacloud supabase stack_prepare --workdir ./project-b --runtime native
+SUPACLOUD_ENABLE_NATIVE_STACK=1 supacloud supabase stack_start --workdir ./project-b --runtime native --preparation on-demand --eager
+supacloud supabase stack_stop --workdir ./project-b
+supacloud supabase stack_destroy --workdir ./project-b --confirm_destroy --yes
 ```
 
 Start/prepare explicitly default to Docker, never upstream `auto`. Native mode is

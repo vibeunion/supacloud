@@ -411,7 +411,7 @@ describe("immutable frontend release control", () => {
     });
 
     test("uploads raw verified bytes and requires exact immutable readback", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-frontend-release-"));
         roots.add(root);
         const path = join(root, "site.tar.zst");
         const archiveBytes = await createFrontendTarZstd(new Map([["index.html", Buffer.from("ok")]]));
@@ -459,7 +459,7 @@ describe("immutable frontend release control", () => {
     });
 
     test("streams archive bytes in bounded chunks without buffering the file", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-stream-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-frontend-release-stream-"));
         roots.add(root);
         const path = join(root, "site.zip");
         const archiveBytes = new Uint8Array(64 * 1024 * 2 + 17).fill(0x61);
@@ -509,7 +509,7 @@ describe("immutable frontend release control", () => {
     });
 
     test("rejects upload readback envelopes and records for another deployment", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-identity-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-frontend-release-identity-"));
         roots.add(root);
         const path = join(root, "site.zip");
         await writeFile(path, "zip");
@@ -549,7 +549,7 @@ describe("immutable frontend release control", () => {
     });
 
     test("converges on the content-addressed release after the upload response body times out", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-readback-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-frontend-release-readback-"));
         roots.add(root);
         const path = join(root, "site.zip");
         await writeFile(path, "zip");
@@ -583,7 +583,7 @@ describe("immutable frontend release control", () => {
     test.each([400, 401, 403, 409, 429])(
         "preserves deterministic HTTP %s upload failures without readback",
         async (status) => {
-            const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-4xx-"));
+            const root = await mkdtemp(join(tmpdir(), "supacloud-frontend-release-4xx-"));
             roots.add(root);
             const path = join(root, "site.zip");
             await writeFile(path, "zip");
@@ -608,7 +608,7 @@ describe("immutable frontend release control", () => {
     );
 
     test("reads back an HTTP 408 upload outcome", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-408-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-frontend-release-408-"));
         roots.add(root);
         const path = join(root, "site.zip");
         await writeFile(path, "zip");
@@ -638,7 +638,7 @@ describe("immutable frontend release control", () => {
     });
 
     test("rejects a symlink archive before any HTTP request", async () => {
-        const root = await mkdtemp(join(tmpdir(), "supacloud-cli-frontend-release-link-"));
+        const root = await mkdtemp(join(tmpdir(), "supacloud-frontend-release-link-"));
         roots.add(root);
         await writeFile(join(root, "site.zip"), "zip");
         await symlink(join(root, "site.zip"), join(root, "link.zip"));
