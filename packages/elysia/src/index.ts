@@ -1662,6 +1662,11 @@ export function createApplication<const Http extends AnyElysia = Elysia>(
             errors.push(error);
           }
         }
+        try {
+          await options.effectRuntime?.dispose?.();
+        } catch (error) {
+          errors.push(error);
+        }
         if (errors.length > 0) {
           throw new AggregateError(errors, "Application destruction failed");
         }

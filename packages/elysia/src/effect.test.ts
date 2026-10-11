@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test";
-import { Effect } from "effect";
+import { Context, Effect, Layer } from "effect";
 import { Elysia } from "elysia";
-import { ApplicationError, createModulePlugin } from "./index";
-import { createDefaultEffectRuntime, runCompiledEffect } from "./effect";
+import { ApplicationError, createApplication, createModulePlugin } from "./index";
+import { createDefaultEffectRuntime, createEffectRuntimeFromLayer, runCompiledEffect } from "./effect";
 import type { CompiledModule } from "./index";
 
 test("runs successful Effect programs at the HTTP boundary", async () => {
@@ -67,6 +67,51 @@ test("supports explicit bounded retries", async () => {
     createDefaultEffectRuntime(),
   )).resolves.toBe("ok");
   expect(attempts).toBe(3);
+});
+
+test("reuses Layer services and disposes them explicitly", async () => {
+  const Counter = Context.Service<{ readonly value: number }>("Counter");
+  let builds = 0;
+  let releases = 0;
+  const layer = Layer.effect(
+    Counter,
+    Effect.acquireRelease(
+      Effect.sync(() => {
+        builds += 1;
+        return { value: builds };
+      }),
+      () => Effect.sync(() => {
+        releases += 1;
+      }),
+    ),
+  );
+  const runtime = createEffectRuntimeFromLayer(layer);
+  const program = Effect.gen(function* () {
+    const counter = yield* Counter;
+    return counter.value;
+  });
+
+  await expect(runCompiledEffect(program, { required: true }, runtime)).resolves.toBe(1);
+  await expect(runCompiledEffect(program, { required: true }, runtime)).resolves.toBe(1);
+  expect(builds).toBe(1);
+  expect(releases).toBe(0);
+  await runtime.dispose?.();
+  expect(releases).toBe(1);
+});
+
+test("disposes the Effect runtime with the application lifecycle", async () => {
+  let disposed = 0;
+  const effectRuntime = createDefaultEffectRuntime();
+  effectRuntime.dispose = async () => {
+    disposed += 1;
+  };
+  const app = createApplication({
+    modules: [],
+    effectRuntime,
+  });
+
+  await app.destroy();
+  expect(disposed).toBe(1);
 });
 
 test("executes compiled Effect routes through the Elysia adapter", async () => {
