@@ -65,6 +65,8 @@ jobs:
           bun test packages/management-api/tests/unit/branches.routes.test.ts
           bun test packages/management-api/tests/unit/auto-branching.service.test.ts
           bun test packages/cli/src/shared/tools/application-tools.test.ts
+          bun test packages/cli/src/shared/tools/application-promotion.test.ts
+          bun test packages/management-api/tests/unit/application-promotion.test.ts
       - name: Typecheck changed platform packages
         run: |
           bun run --cwd packages/delivery typecheck

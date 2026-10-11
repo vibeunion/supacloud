@@ -9,6 +9,8 @@
     "src/types/*.d.ts",
     "src/services/application-release-storage.ts",
     "src/services/application-release-transfer.ts",
+    "src/services/application-promotion.ts",
+    "tests/unit/application-promotion.test.ts",
     "src/services/application-runtime.ts",
     "src/services/application-runtime-files.ts",
     "src/services/application-activation.ts",

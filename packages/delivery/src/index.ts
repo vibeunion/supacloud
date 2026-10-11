@@ -49,6 +49,11 @@ export type {
   DatabaseProviderEvidence, DeploymentComponentEvidence, DeploymentEvidence, DeploymentEvidenceStatus,
 } from "./deployment-evidence";
 export {
+  ApplicationPromotionPlanSchema, applicationPromotionPlanDigest,
+  applicationPromotionAction, applicationPromotionSteps, parseApplicationPromotionPlan,
+} from "./application-promotion";
+export type { ApplicationPromotionPlan, ApplicationPromotionPlanContent } from "./application-promotion";
+export {
   APPLICATION_RUNTIME_PROBE_PATH, ApplicationRuntimeIdentitySchema, parseApplicationRuntimeIdentity,
   ApplicationReadinessReportSchema, parseApplicationReadinessReport,
 } from "./application-runtime-identity";

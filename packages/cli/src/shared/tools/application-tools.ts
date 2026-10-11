@@ -5,6 +5,7 @@ import {
   parseApplicationReadinessReport,
   parseApplicationConfigurationWrite, parseApplicationConfigurationView,
   parseDeploymentEvidence,
+  parseApplicationPromotionPlan,
   parseApplicationActivationHistory, parseApplicationHistoryCursor, applicationHistoryPositionBefore,
   parseApplicationDeployPlan, type ApplicationDeployPlan, type ApplicationReleaseRecord,
 } from "@supacloud/delivery";
@@ -30,6 +31,7 @@ export const APPLICATION_TOOL_SCHEMA = {
     "list_releases", "get_release", "upload_release", "get_runtime", "get_deployment_evidence",
     "get_configuration", "put_configuration", "get_deploy_plan", "deploy_release",
     "get_release_transfer_plan", "transfer_release",
+    "get_promotion_plan",
     "activate_release", "rollback_release", "get_rollback_snapshot", "get_history", "reconcile_activation", "retire_activation",
     ...APPLICATION_PREVIEW_ACTIONS,
     "logs",
@@ -46,6 +48,7 @@ export const APPLICATION_TOOL_SCHEMA = {
   release_id: optional(ApplicationReleaseIdSchema, "[get_release/get_deploy_plan/deploy_release/activate_release/reconcile_activation/rollback_release] Immutable application release ID; platform selects previous for default rollback"),
   source_ref: optional(Type.String({ pattern: "^[A-Za-z0-9_-]{1,20}$" }), "[get_release_transfer_plan/transfer_release] Source project ref"),
   source_release_id: optional(ApplicationReleaseIdSchema, "[get_release_transfer_plan/transfer_release] Source immutable release ID"),
+  source_environment_id: optional(ApplicationIdSchema, "[get_promotion_plan] Source environment"),
   cursor: optional(Type.Union([ApplicationReleaseIdSchema, ApplicationActivationHistoryCursorSchema]), "[list_releases/get_history] Returned page cursor"),
   limit: optional(Type.Integer({ minimum: 1, maximum: 100 }), "[list_releases/get_history] Page size, default 50/20"),
   offset: optional(Type.Integer({ minimum: 0, maximum: 1_000_000 }), "[logs] Result offset"),
@@ -326,6 +329,37 @@ export function registerApplicationTools(server: ToolServer, http: HttpTransport
       if (!Value.Check(ApplicationIdSchema, id)) throw new Error("Invalid application ID");
       const path = `/v1/projects/${project}/applications/${encodeURIComponent(id)}/releases`;
       const operation = `applications.${action}`;
+      if (action === "get_promotion_plan") {
+        const environmentId = text(args, "environment_id");
+        const sourceRef = text(args, "source_ref"), sourceEnvironmentId = text(args, "source_environment_id");
+        const sourceReleaseId = text(args, "source_release_id");
+        if (!/^[a-z0-9-]{1,20}$/.test(sourceRef) || !Value.Check(ApplicationReleaseIdSchema, sourceReleaseId)
+          || !Value.Check(ApplicationIdSchema, environmentId) || !Value.Check(ApplicationIdSchema, sourceEnvironmentId)) {
+          throw new Error("Invalid promotion environment");
+        }
+        const query = new URLSearchParams({
+          source_ref: sourceRef, source_environment_id: sourceEnvironmentId, source_release_id: sourceReleaseId,
+        });
+        if (typeof args["configuration_id"] === "string") query.set("configuration_id", args["configuration_id"]);
+        const result = await http.get(
+          `/v1/projects/${project}/applications/${encodeURIComponent(id)}/environments/${encodeURIComponent(environmentId)}/promotion-plan?${query}`,
+          { maxJsonBytes: 262_144, responseTimeoutMs: 30_000 },
+        );
+        const identity = { project_ref: ref, application_id: id, environment_id: environmentId,
+          source_ref: sourceRef, source_environment_id: sourceEnvironmentId, source_release_id: sourceReleaseId };
+        if (!result.ok) return releaseControlFailure(operation, "HTTP_ERROR", result.status, identity);
+        try {
+          if (result.status !== 200) throw new Error();
+          const plan = parseApplicationPromotionPlan(result.data);
+          if (plan.project_ref !== ref || plan.application_id !== id || plan.environment_id !== environmentId
+            || plan.source.project_ref !== sourceRef || plan.source.environment_id !== sourceEnvironmentId
+            || plan.source.release_id !== sourceReleaseId
+            || args["configuration_id"] !== undefined && plan.target.configuration_id !== args["configuration_id"]) {
+            throw new Error();
+          }
+          return releaseControlSuccess(operation, { ...identity, plan });
+        } catch { return releaseControlFailure(operation, "INVALID_RESPONSE", result.status, identity); }
+      }
       if (action === "get_release_transfer_plan" || action === "transfer_release") {
         return applicationReleaseTransfer(http, {
           action, ref, id, sourceRef: text(args, "source_ref"), sourceReleaseId: text(args, "source_release_id"),

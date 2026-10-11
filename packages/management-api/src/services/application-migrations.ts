@@ -38,6 +38,15 @@ export class ApplicationMigrations {
 
   async inspect(projectRef: string, applicationId: string, releaseId: string) {
     const { record, archives } = await this.storage.readMigrations(projectRef, applicationId, releaseId);
+    return this.inspectArchives(projectRef, applicationId, record, archives);
+  }
+
+  async inspectArchives(
+    projectRef: string,
+    applicationId: string,
+    record: Awaited<ReturnType<ApplicationReleaseStorage["readMigrations"]>>["record"],
+    archives: DeliveryMigrationArchive[],
+  ) {
     const inventory = await this.inventory(projectRef);
     const byVersion = new Map<string, DeliveryMigrationArchive["migrations"]>();
     for (const archive of archives) {

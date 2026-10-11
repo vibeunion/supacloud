@@ -12,7 +12,7 @@ interface ModulePolicy {
 
 const ACTION_POLICY: Record<string, ModulePolicy> = {
     deploy: { write: ["deploy"] },
-    applications: { read: ["list_releases", "get_release", "get_runtime", "get_deployment_evidence", "get_configuration", "get_release_transfer_plan", "get_rollback_snapshot", "get_history", "get_deploy_plan", "logs", "get_preview_plan"],
+    applications: { read: ["list_releases", "get_release", "get_runtime", "get_deployment_evidence", "get_configuration", "get_release_transfer_plan", "get_promotion_plan", "get_rollback_snapshot", "get_history", "get_deploy_plan", "logs", "get_preview_plan"],
         write: ["upload_release", "put_configuration", "transfer_release", "activate_release", "deploy_release", "rollback_release", "reconcile_activation", "retire_activation",
           "create_preview", "list_previews", "get_preview", "cleanup_preview"] },
     project: {
@@ -84,7 +84,7 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
     ai: { local: ["show_skill", "install_skill"] },
     app: {
         local: ["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix", "plan", "build"],
-        read: ["status", "logs", "transfer-plan", "rollback-plan", "history", "deploy-plan", "diff", "preview-plan"],
+        read: ["status", "logs", "transfer-plan", "promote-plan", "rollback-plan", "history", "deploy-plan", "diff", "preview-plan"],
         write: ["upload", "configure", "transfer", "deploy", "rollback", "reconcile", "retire", "preview", "previews", "preview-status", "preview-cleanup"],
     },
     db: {
