@@ -32,6 +32,7 @@ import { registerMutationTools } from "./shared/tools/mutation-tools";
 import { registerReleaseTools } from "./shared/tools/release-tools";
 import { deployToolSchema, findDeployConfigRoot, registerDeployTools } from "./shared/tools/deploy-tools";
 import { registerRemoteDevTools } from "./shared/tools/remote-dev-tools";
+import { registerDeveloperExperienceTools } from "./shared/tools/developer-experience-tools";
 import type { ToolSchema } from "./shared/schema";
 import type { ToolInvocation, ToolResult, ToolServer } from "./shared/tool-server";
 import packageMetadata from "../package.json" with { type: "json" };
@@ -254,6 +255,8 @@ USAGE
 
   ${preferredCommand} [global flags] deploy [--flags]
   ${preferredCommand} [global flags] <module> <action> [--flags]
+  ${preferredCommand} init [--root <directory>]
+  ${preferredCommand} env <list|check> [--root <directory>]
   ${preferredCommand} [global flags] status
   ${preferredCommand} --help
   ${preferredCommand} --version
@@ -286,6 +289,9 @@ DEFAULT CONTEXT
 
 EXAMPLES
 
+  ${preferredCommand} init
+  ${preferredCommand} env check
+  ${preferredCommand} env check --json
   ${preferredCommand} status
   ${preferredCommand} deploy
   ${preferredCommand} --env test deploy
@@ -452,6 +458,10 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
     })));
     Object.assign(tools, captureTools((server) => registerLiteCliTools(server)));
     Object.assign(tools, captureTools((server) => registerAiTools(server)));
+    Object.assign(tools, captureTools((server) => registerDeveloperExperienceTools(server, {
+        cwd: process.cwd(),
+        activeContext: context,
+    })));
     Object.assign(tools, captureTools((server) => registerAppTools(server, { onDevProgress: writeDevProgress })));
     Object.assign(tools, captureTools((server) => registerAppAliases(server)));
     Object.assign(tools, captureTools((server) => registerDbGovernanceTools(server, {
@@ -699,7 +709,7 @@ async function main() {
     }
 
     const cliTools = createCliTools(context, globalOptions.confirmProduction);
-    if (args.length === 1 && !["ai", "supabase", "lite", "app", "db"].includes(args[0]) && cliTools[args[0]]) {
+    if (args.length === 1 && !["ai", "supabase", "lite", "app", "db", "env"].includes(args[0]) && cliTools[args[0]]) {
         if ("action" in cliTools[args[0]].schema) {
             if (context.credentialScope !== "management" || !context.apiUrl || !context.apiToken) {
                 console.error(`This command requires Management API context. Run \`${preferredCommand} status\` to inspect current detection.`);

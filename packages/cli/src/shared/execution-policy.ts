@@ -81,6 +81,8 @@ const ACTION_POLICY: Record<string, ModulePolicy> = {
         write: ["send", "receive", "ack", "release", "fail", "retry", "delete_message", "update_settings"],
     },
     ai: { local: ["show_skill", "install_skill"] },
+    init: { local: ["init"] },
+    env: { local: ["list", "check"] },
     app: {
         local: ["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix", "plan", "build"],
         read: ["status", "logs", "transfer-plan", "promote-plan", "rollback-plan", "history", "deploy-plan", "diff", "promote-status", "preview-plan", "previews", "preview-list", "preview-status"],

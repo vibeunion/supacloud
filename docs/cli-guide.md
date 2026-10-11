@@ -29,6 +29,36 @@ Project-scoped by default. Intended for project users and developers.
 - Reads `SUPACLOUD_PROJECT_REF` when the ref cannot be inferred
 - Can still accept explicit `--ref` when needed
 
+### First-run project setup
+
+For an existing Vue/Vite, Svelte or static frontend, initialize the deployment
+contract once:
+
+```bash
+supacloud init
+supacloud env list
+supacloud env check
+supacloud --env test deploy
+```
+
+`init` creates `supacloud.json`, non-secret
+`.env.supacloud.test.example` and `.env.supacloud.production.example` files,
+and adds ignore rules for real profile files. It never overwrites an existing
+`supacloud.json`. The output directory is inferred from the detected framework
+(`dist` for Vite/Vue, `out` for Next.js and `build` for Svelte).
+
+Copy an example to a real profile and fill in credentials locally:
+
+```bash
+cp .env.supacloud.test.example .env.supacloud.test
+supacloud env check --json
+```
+
+`env list` and `env check` are local-only. They never contact the Management API
+and never print token or service-role values. `env check` distinguishes a profile
+that is valid for `status` from one that is ready for `deploy`; incomplete
+production profiles fail before any remote command is attempted.
+
 When auto-linking from `SUPABASE_URL`, the CLI accepts tenant API domains and
 derives the matching Management API host. For example,
 `https://api.example.com` maps to `https://studio.example.com`, and
