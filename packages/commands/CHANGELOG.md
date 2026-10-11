@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/vibeunion/supacloud/compare/commands-v0.9.1...commands-v0.9.2) (2026-10-11)
+
+
+### Miscellaneous Chores
+
+* upgrade dependencies and caddy ([#1821](https://github.com/vibeunion/supacloud/issues/1821)) ([91c9a4b](https://github.com/vibeunion/supacloud/commit/91c9a4bd0a14f757670822a1aa953643a00a83c9))
+
 ## [0.9.1](https://github.com/vibeunion/supacloud/compare/commands-v0.9.0...commands-v0.9.1) (2026-10-05)
 
 
