@@ -1392,6 +1392,38 @@ describe("sdkProxyRoutes functions proxy", () => {
     });
   });
 
+  test("auth proxy normalizes a duplicated gateway-injected project-ref header", async () => {
+    await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
+      trackSpy(
+        spyOn(sdkProxyInternals, "resolveProjectRefFromApiKey").mockResolvedValueOnce(null),
+      );
+      setSdkProxySqlForTests(async (...args: unknown[]) => {
+        const text = String(args[0] ?? "");
+        if (text.includes("SELECT ref")) {
+          return [{ ref: "proj_from_header", config: {} }];
+        }
+        if (text.includes("SELECT config")) {
+          return [{ config: { gotrue_port: 8361, postgrest_port: 7361 } }];
+        }
+        return [];
+      });
+
+      const response = await request("/auth/v1/health", {
+        method: "GET",
+        headers: {
+          host: "127.0.0.1:9090",
+          // Caddy joins a route that defines both the canonical "X-Project-Ref"
+          // and lower-case "x-project-ref" into "ref,ref".
+          "x-project-ref": "proj_from_header,proj_from_header",
+        },
+      });
+
+      expect(response.status).toBe(200);
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe("http://127.0.0.1:8361/health");
+    });
+  });
+
   test("functions proxy accepts gateway-injected project ref on trusted custom API host without apikey", async () => {
     await withSdkProxyTestContext(async ({ calls, trackSpy }) => {
       let sawProjectLookup = false;

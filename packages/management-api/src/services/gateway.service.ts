@@ -662,7 +662,6 @@ export class CaddyGatewayProvider implements GatewayProvider {
         set["Host"] = [canonicalHost];
         set["X-Forwarded-Host"] = [canonicalHost];
         set["X-Project-Ref"] = [projectRef];
-        set["x-project-ref"] = [projectRef];
         set["X-Forwarded-Proto"] = ["{http.request.scheme}"];
 
         if (isStorageRoute) {
@@ -1406,8 +1405,9 @@ export class CaddyGatewayProvider implements GatewayProvider {
     }): CaddyRoute {
         const requestHeaders: Record<string, CaddyHeaderValue> = {
             "Host": "{http.request.host}",
+            // See makeCustomGatewayRoute: emit a single canonical project-ref
+            // header so Caddy does not join a duplicate into "ref,ref".
             "X-Project-Ref": opts.projectRef,
-            "x-project-ref": opts.projectRef,
             "X-Forwarded-Host": "{http.request.host}",
             "X-Forwarded-Proto": "{http.request.scheme}",
         };
@@ -1742,7 +1742,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                 ? `${hostIp}:${config.port}`
                 : directAuthUpstream;
             const authHeaders = sharedAuthPort !== null
-                    ? [`X-Project-Ref:${config.authRuntimeOwnerRef}`, `x-project-ref:${config.authRuntimeOwnerRef}`]
+                    ? [`X-Project-Ref:${config.authRuntimeOwnerRef}`]
                     : externalAuthUpstream && externalAuth?.auth_host_header
                         ? [`Host:${externalAuth.auth_host_header}`, `X-Forwarded-Host:${externalAuth.auth_host_header}`]
                         : undefined;
