@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
+import type { ApplicationDeployRequest } from "@supacloud/delivery";
 import { ApplicationActivationHistorySchema, parseApplicationActivationHistory } from "@supacloud/delivery";
 import { parseApplicationDeployPlan } from "@supacloud/delivery";
 import { parseApplicationReleaseTransferPlan, parseApplicationReleaseTransferResult, parseApplicationPromotionPlan } from "@supacloud/delivery";
@@ -93,6 +94,7 @@ const REMOTE_APP_DESCRIPTIONS: Record<string, string> = {
     source_environment_id: "[promote-plan/diff/promote] Source environment ID",
     mutation_id: "[promote-status/promote-reconcile] Stable promotion mutation ID",
     approved_migration_digest: "[promote] Exact reviewed migration execution-plan digest",
+    web: "[release] Immutable staged Web release binding prepared by the deploy profile",
     branch_ref: "[preview-plan] Preview branch identity",
     branch_name: "[preview/preview-create] Human-readable preview branch name",
     data_mode: "[preview-plan/preview/preview-create] schema_only or full_clone",
@@ -130,6 +132,7 @@ export interface AppToolArguments {
     source_environment_id?: string;
     mutation_id?: string;
     approved_migration_digest?: string;
+    web?: ApplicationDeployRequest["web"];
     branch_ref?: string;
     branch_name?: string;
     data_mode?: "schema_only" | "full_clone";
@@ -1268,10 +1271,11 @@ async function runAppRelease(
     }
 
     const deployArgs = {
-        action: "release_application",
+        action: "deploy_application",
         ref, id, environment_id: environmentId, release_id: releaseId, configuration_id: configurationId,
-        activation_id: activationId,
+        mutation_id: activationId,
         ...(configurationWrite === undefined ? {} : { configuration_write: configurationWrite }),
+        ...(request.web === undefined ? {} : { web: request.web }),
     };
     validateToolArguments(APPLICATION_TOOL_SCHEMA, deployArgs);
     const deployed = await delegate(deployArgs);
@@ -1295,6 +1299,7 @@ async function runAppRelease(
         no_op: deployReceipt.action === "no-op" || deployReceipt.no_op === true,
         execution_performed: deployReceipt.execution_performed === true,
         ...(typeof deployReceipt.activation_id === "string" ? { activation_id: deployReceipt.activation_id } : {}),
+        ...(deployReceipt.web === undefined ? {} : { web: deployReceipt.web }),
     };
     return request.format === "json" || request.json === true
         ? textResult(JSON.stringify(result, null, 2))

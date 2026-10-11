@@ -21,6 +21,13 @@ export {
 } from "./application-release-operation";
 export type { ApplicationReleaseRequest, ApplicationReleaseResult } from "./application-release-operation";
 export {
+  ApplicationBackendReceiptSchema, ApplicationDeployRequestSchema, ApplicationDeployResultSchema,
+  ApplicationDeployWebRequestSchema, parseApplicationDeployResult,
+} from "./application-deploy-operation";
+export type {
+  ApplicationBackendReceipt, ApplicationDeployRequest, ApplicationDeployResult, ApplicationDeployWebRequest,
+} from "./application-deploy-operation";
+export {
   ApplicationActivationHistoryPositionSchema, ApplicationActivationHistoryCursorSchema,
   ApplicationActivationHistorySchema, applicationHistoryCursor, applicationHistoryPositionBefore,
   applicationHistoryTimestampMilliseconds, parseApplicationActivationHistory, parseApplicationHistoryCursor,

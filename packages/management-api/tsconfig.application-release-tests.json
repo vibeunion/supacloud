@@ -17,6 +17,7 @@
     "src/services/application-rollback.ts",
     "src/services/application-deploy-plan.ts",
     "src/services/application-release-orchestrator.ts",
+    "src/services/application-deployment-orchestrator.ts",
     "src/services/application-active-storage.ts",
     "src/services/application-readiness.ts",
     "src/services/application-gateway.ts",

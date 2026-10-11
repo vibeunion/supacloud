@@ -7,7 +7,7 @@ import {
   ApplicationPromotionPlanSchema,
   ApplicationActivationHistorySchema, ApplicationActivationHistoryCursorSchema, type DeploymentEvidence,
   applicationPreviewBranchRef, applicationReleaseId,
-  ApplicationReleaseRequestSchema,
+  ApplicationReleaseRequestSchema, ApplicationDeployRequestSchema,
 } from "@supacloud/delivery";
 import { sql } from "../db";
 import { getVerifiedRequestPrincipal, requireProjectOrAdminAuth } from "../middleware/auth";
@@ -40,6 +40,8 @@ import { ApplicationPreviewConflictError } from "../repositories/project-config-
 import {
   ApplicationReleaseOrchestrationError, ApplicationReleaseOrchestrator,
 } from "../services/application-release-orchestrator";
+import type { ApplicationDeploymentOrchestrator } from "../services/application-deployment-orchestrator";
+import { ApplicationDeploymentOrchestrationError } from "../services/application-deployment-orchestrator";
 
 function activationFailure(error: unknown, identity: {
   project_ref: string; application_id: string; environment_id: string; activation_id: string;
@@ -70,6 +72,7 @@ interface ApplicationRouteDependencies {
   promotionExecutor?: Pick<ApplicationPromotionExecutor, "execute">;
   promotionReconciler?: Pick<ApplicationPromotionReconciler, "status" | "reconcile">;
   releaseOrchestrator?: Pick<ApplicationReleaseOrchestrator, "execute">;
+  deploymentOrchestrator?: Pick<ApplicationDeploymentOrchestrator, "execute">;
   transfers?: Pick<ApplicationReleaseTransfers, "readPlan" | "transfer">;
   deployPlans?: Pick<ApplicationDeployPlans, "read">;
   storage?: ApplicationReleaseStorage;
@@ -140,6 +143,7 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       storage, configurations, deployPlans, deployment,
     })
     : undefined);
+  const deploymentOrchestrator = dependencies.deploymentOrchestrator;
   const persistObservedEvidence = async (values: { ref: string; id: string; environmentId: string }) => {
     if (!evidenceObserver) return;
     try {
@@ -174,6 +178,11 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       if (error instanceof ApplicationReleaseOrchestrationError) {
         return status(error.statusCode, {
           ...error.details, code: error.code, error: "Application release orchestration failed",
+        });
+      }
+      if (error instanceof ApplicationDeploymentOrchestrationError) {
+        return status(error.statusCode, {
+          ...error.details, code: error.code, error: "Application deployment orchestration failed",
         });
       }
       if (error instanceof ApplicationReleaseError || error instanceof ApplicationConfigurationError) {
@@ -662,6 +671,27 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
         if (error instanceof ApplicationReleaseOrchestrationError) {
           return status(error.statusCode, {
             ...error.details, code: error.code, error: "Application release orchestration failed",
+          });
+        }
+        throw error;
+      }
+    });
+    if (deploymentOrchestrator) routes.post("/:id/environments/:environmentId/deploy", {
+      params: environmentParams,
+      body: ApplicationDeployRequestSchema,
+      detail: { tags: ["applications"], summary: "Run one durable backend deploy and optionally bind a Web release" },
+    }, async ({ params: values, body, request }) => {
+      const actor = await principal(request);
+      if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
+      try {
+        return await deploymentOrchestrator.execute({
+          projectRef: values.ref, applicationId: values.id, environmentId: values.environmentId,
+          request: body, principal: actor,
+        });
+      } catch (error) {
+        if (error instanceof ApplicationDeploymentOrchestrationError) {
+          return status(error.statusCode, {
+            ...error.details, code: error.code, error: "Application deployment orchestration failed",
           });
         }
         throw error;

@@ -1,0 +1,267 @@
+import { expect, test } from "bun:test";
+import {
+  applicationReleaseId, type ApplicationDeployPlan, type ApplicationReleaseRecord,
+} from "@supacloud/delivery";
+import {
+  ApplicationDeploymentOrchestrator,
+  type ApplicationDeploymentOrchestratorDependencies,
+} from "../../src/services/application-deployment-orchestrator";
+import {
+  projectMutationResourceKey,
+  type MutationLeaseInput, type ProjectMutationState,
+} from "../../src/services/project-mutation.service";
+import { stableSha256 } from "../../src/utils/stable-json";
+
+const principal = { type: "project" as const, id: "project:demo" };
+const configurationId = "11234567-89ab-4def-8123-456789abcdef";
+const mutationId = "21234567-89ab-4def-8123-456789abcdef";
+const webMutationId = "31234567-89ab-4def-8123-456789abcdef";
+const activationId = "41234567-89ab-4def-8123-456789abcdef";
+const webReleaseId = "c".repeat(64);
+const manifestSha256 = "b".repeat(64);
+const releaseId = applicationReleaseId("demo", "reviews", manifestSha256);
+
+const release: ApplicationReleaseRecord = {
+  schema: "supacloud.application-release.v1",
+  project_ref: "demo",
+  application_id: "reviews",
+  release_id: releaseId,
+  manifest_sha256: manifestSha256,
+  created_at: "2026-10-11T00:00:00.000Z",
+  targets: [{ name: "api", kind: "http", object_id: "d".repeat(64), entrypoint: "bundle/index.js" }],
+};
+
+const plan: ApplicationDeployPlan = {
+  schema: "supacloud.application-deploy-plan.v1",
+  project_ref: "demo",
+  application_id: "reviews",
+  environment_id: "test",
+  candidate: { release_id: releaseId, configuration_id: configurationId },
+  current: null,
+  expected_activation_id: null,
+  action: "activate",
+  changes: { release: true, configuration: true, targets: { added: ["api"], removed: [], changed: [] } },
+  migrations: {
+    ledger_digest: "e".repeat(64),
+    ledger_compatible: true,
+    project_migrations_applied: false,
+    operator_provisioning: "not-declared",
+  },
+  compatibility: "not-proven",
+  execution_performed: false,
+};
+
+function fixture(options: { migrationFails?: boolean } = {}) {
+  const calls: string[] = [];
+  const phases: string[] = [];
+  const lease: MutationLeaseInput = {
+    projectRef: "demo", mutationId, leaseToken: "51234567-89ab-4def-8123-456789abcdef", fencingEpoch: 1,
+  };
+  let state: ProjectMutationState = {
+    projectRef: "demo",
+    mutationId,
+    operation: "application.release.deploy",
+    resourceKey: projectMutationResourceKey({
+      type: "application_deploy",
+      id: stableSha256({ applicationId: "reviews", environmentId: "test" }),
+    }),
+    requestFingerprint: "f".repeat(64),
+    principal,
+    status: "running",
+    checkpoint: {},
+    receipt: null,
+    responseStatus: null,
+    failureCode: null,
+    leaseOwner: "fixture",
+    leaseExpiresAt: "2099-01-01T00:00:00.000Z",
+    fencingEpoch: 1,
+    completedAt: null,
+    createdAt: "2026-10-11T00:00:00.000Z",
+    updatedAt: "2026-10-11T00:00:00.000Z",
+  };
+  const backendAfter = {
+    schema: "supacloud.application-migrations.v1" as const,
+    project_ref: "demo",
+    application_id: "reviews",
+    release_id: releaseId,
+    manifest_sha256: manifestSha256,
+    ledger_digest: "a".repeat(64),
+    ledger_compatible: true,
+    project_migrations_applied: true,
+    declaration_conflicts: [],
+    targets: [],
+    operator_provisioning: "not-declared" as const,
+    compatibility: "not-proven" as const,
+    execution_performed: false as const,
+    data_recovery: "separate-required" as const,
+  };
+  const frontendRelease = {
+    schema: "supacloud.frontend-release.v2" as const,
+    project_ref: "demo",
+    deployment_id: "web",
+    release_id: webReleaseId,
+    sha256: webReleaseId,
+    tree_sha256: "d".repeat(64),
+    size_bytes: 1,
+    file_count: 1,
+    created_at: "2026-10-11T00:00:00.000Z",
+    kind: "prebuilt_static" as const,
+    archive_format: "tar.zst" as const,
+  };
+  const dependencies: ApplicationDeploymentOrchestratorDependencies = {
+    storage: { readRelease: async () => structuredClone(release) },
+    configurations: { put: async () => {
+      throw new Error("configuration write not used");
+    } },
+    deployPlans: { read: async () => structuredClone(plan) },
+    migrations: {
+      readExecutionPlan: async () => ({
+        schema: "supacloud.application-migration-execution-plan.v1" as const,
+        project_ref: "demo", application_id: "reviews", release_id: releaseId,
+        manifest_sha256: manifestSha256, ledger_digest: plan.migrations.ledger_digest,
+        migrations: [{
+          version: "1", name: "create_reviews", raw_sha256: "e".repeat(64),
+          destructive: [], unsupported: [], non_transactional: [],
+        }],
+        ledger_compatible: true, operator_provisioning_required: false,
+        backup_required: true, destructive_confirmation_required: false,
+        execution_performed: false as const,
+      }),
+      apply: async () => {
+        calls.push("migration");
+        if (options.migrationFails) throw new Error("provider-timeout");
+        return {
+          before: { ...backendAfter, ledger_digest: plan.migrations.ledger_digest, project_migrations_applied: false },
+          after: structuredClone(backendAfter),
+          applied: [{ version: "1", name: "create_reviews", checksum: "f".repeat(64), alreadyApplied: false, strippedTransactionWrappers: 0 }],
+          backup: {
+            backup_id: "logical-full_demo_" + "a".repeat(32),
+            project_ref: "demo", database: "supa_demo", kind: "logical-full" as const,
+            created_at: "2026-10-11T00:00:00.000Z", completed_at: "2026-10-11T00:00:00.000Z",
+            bytes: 128, sha256: "1".repeat(64),
+          },
+        };
+      },
+      inspect: async () => structuredClone(backendAfter),
+    },
+    deployment: {
+      activateConfigured: async input => {
+        calls.push("activation");
+        return {
+          project_ref: "demo", application_id: "reviews", environment_id: "test",
+          release_id: input.runtime.release.release_id, activation_id: input.runtime.activationId, replayed: false,
+        };
+      },
+    },
+    frontends: {
+      release: async () => {
+        calls.push("web-release");
+        return structuredClone(frontendRelease);
+      },
+      activateRelease: async input => {
+        calls.push("web-activation");
+        return {
+          project_ref: "demo", deployment_id: input.deploymentId, active_release_id: input.releaseId,
+          activation_id: input.mutationId, release: structuredClone(frontendRelease),
+          mutation: { mutation_id: input.mutationId, status: "succeeded" as const, replayed: false },
+        };
+      },
+    },
+    postgrestStatus: async () => ({ actual: "running", health: "healthy" }),
+    mutations: {
+      async begin() {
+        calls.push("begin");
+        return state.status === "succeeded" ? { state: structuredClone(state) } : { state: structuredClone(state), lease };
+      },
+      async checkpoint(value, checkpoint) {
+        phases.push(String(checkpoint.phase));
+        state.checkpoint = structuredClone(checkpoint);
+      },
+      async protect(_value, action) {
+        await action();
+      },
+      async success(_value, receipt) {
+        calls.push("success");
+        state = { ...state, status: "succeeded", receipt, responseStatus: 200 };
+      },
+      async failure(_value, uncertain, terminal) {
+        state = {
+          ...state,
+          status: uncertain ? "outcome_unknown" : terminal ? "failed_terminal" : "failed_retryable",
+        };
+      },
+      async recover() {},
+      async read() {
+        calls.push("read");
+        return structuredClone(state);
+      },
+    },
+  };
+  return {
+    calls,
+    phases,
+    state: () => state,
+    orchestrator: new ApplicationDeploymentOrchestrator(dependencies),
+    request: {
+      mutation_id: mutationId,
+      release_id: releaseId,
+      configuration_id: configurationId,
+      web: {
+        deployment_id: "web",
+        release_id: webReleaseId,
+        expected_active_release_id: "absent",
+        expected_activation_id: "absent",
+        mutation_id: webMutationId,
+      },
+    },
+  };
+}
+
+test("runs migration once, persists ordered checkpoints, and binds Web after the backend receipt", async () => {
+  const fixtureValue = fixture();
+  const first = await fixtureValue.orchestrator.execute({
+    projectRef: "demo", applicationId: "reviews", environmentId: "test", principal,
+    request: fixtureValue.request,
+  });
+  expect(first).toMatchObject({
+    schema: "supacloud.application-deploy.v1",
+    action: "activate",
+    execution_performed: true,
+    replayed: false,
+    backend_receipt: {
+      schema: "supacloud.application-backend-receipt.v1",
+      backup_id: "logical-full_demo_" + "a".repeat(32),
+      applied_versions: ["1"],
+      postgrest_healthy: true,
+    },
+    web: { deployment_id: "web", release_id: webReleaseId },
+  });
+  expect(fixtureValue.phases).toEqual(["prepared", "migrating", "activating", "binding-web", "verifying"]);
+  expect(fixtureValue.calls.indexOf("migration")).toBeLessThan(fixtureValue.calls.indexOf("activation"));
+  expect(fixtureValue.calls.indexOf("activation")).toBeLessThan(fixtureValue.calls.indexOf("web-activation"));
+  expect(fixtureValue.calls.filter(call => call === "migration")).toHaveLength(1);
+
+  const replay = await fixtureValue.orchestrator.execute({
+    projectRef: "demo", applicationId: "reviews", environmentId: "test", principal,
+    request: fixtureValue.request,
+  });
+  expect(replay).toMatchObject({ replayed: true, execution_performed: false });
+  expect(fixtureValue.calls.filter(call => ["migration", "activation", "web-activation"].includes(call)))
+    .toEqual(["migration", "activation", "web-activation"]);
+});
+
+test("marks an uncertain backend outcome and blocks a blind retry", async () => {
+  const fixtureValue = fixture({ migrationFails: true });
+  await expect(fixtureValue.orchestrator.execute({
+    projectRef: "demo", applicationId: "reviews", environmentId: "test", principal,
+    request: fixtureValue.request,
+  })).rejects.toMatchObject({ code: "APPLICATION_DEPLOY_OUTCOME_UNKNOWN", statusCode: 503 });
+  expect(fixtureValue.state().status).toBe("outcome_unknown");
+  await expect(fixtureValue.orchestrator.execute({
+    projectRef: "demo", applicationId: "reviews", environmentId: "test", principal,
+    request: fixtureValue.request,
+  })).rejects.toMatchObject({ code: "APPLICATION_DEPLOY_RECONCILIATION_REQUIRED", statusCode: 503 });
+  expect(fixtureValue.calls.filter(call => call === "migration")).toHaveLength(1);
+  expect(fixtureValue.calls).not.toContain("activation");
+  expect(fixtureValue.calls).not.toContain("web-activation");
+});
