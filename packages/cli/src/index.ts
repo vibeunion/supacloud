@@ -39,7 +39,7 @@ import packageMetadata from "../package.json" with { type: "json" };
 type ToolEntry = { schema: ToolSchema; callback: (args: unknown) => Promise<ToolResult> };
 type ToolMap = Record<string, ToolEntry>;
 
-const commandName = "supacloud-cli";
+const commandName = "supacloud";
 const preferredCommand = commandName;
 const projectActionSchema = stringEnum([
     "get", "pause", "restore", "health", "logs", "api_keys", "settings",
@@ -246,7 +246,7 @@ function printHelp(context: ResolvedContext) {
 
     console.error(`
 ╔═══════════════════════════════════════════════════════════╗
-║  supacloud-cli                                           ║
+║  supacloud                                           ║
 ║  Project CLI for SupaCloud users                         ║
 ╚═══════════════════════════════════════════════════════════╝
 
@@ -288,6 +288,8 @@ EXAMPLES
 
   ${preferredCommand} status
   ${preferredCommand} deploy
+  ${preferredCommand} --env test deploy
+  ${preferredCommand} --env production deploy --confirm-production <project-ref>
   ${preferredCommand} deploy --target web
   ${preferredCommand} deploy --target api
   ${preferredCommand} dev sync --env test --target functions --function api
@@ -563,7 +565,7 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
                             "Provide one of these sources:",
                             "",
                             "  1. Named environment file",
-                            "     supacloud-cli --env test status",
+                            "     supacloud --env test status",
                             "",
                             "  2. Explicit environment variables",
                             "     SUPACLOUD_API_URL=https://your-project.example.com",
@@ -645,6 +647,19 @@ function createCliTools(context: ResolvedContext, confirmProduction?: string): T
         projectRef: context.projectRef || undefined,
         cwd: process.cwd(),
         environmentVariables: context.environmentVariables,
+        application: context.applicationId ? {
+            id: context.applicationId,
+            environmentId: context.applicationEnvironmentId,
+            ...(context.applicationConfigurationPath ? { configurationPath: context.applicationConfigurationPath } : {}),
+            ...(context.applicationConfigurationId ? { configurationId: context.applicationConfigurationId } : {}),
+            ...(context.applicationManifestPath ? { manifestPath: context.applicationManifestPath } : {}),
+        } : undefined,
+        applicationRelease: (args) => tools.app
+            ? tools.app.callback(args)
+            : Promise.resolve({
+                isError: true,
+                content: [{ type: "text" as const, text: "Application release support is unavailable in this CLI context" }],
+            }),
         edgeFunctionDeploy: advancedTools.edge_functions?.callback,
     })));
     assign(captureTools((server) => registerGatewayTools(server, http, {
@@ -670,7 +685,9 @@ async function main() {
     }
     const globalOptions = parseGlobalOptions(rawArgs);
     const args = globalOptions.args;
-    const contextDirectory = args[0] === "deploy" ? await findDeployConfigRoot(process.cwd()) : process.cwd();
+    const contextDirectory = args[0] === "deploy"
+        ? await findDeployConfigRoot(process.cwd(), globalOptions.environmentName)
+        : process.cwd();
     const context = resolveSupaCloudContext(process.env, contextDirectory, {
         environmentName: globalOptions.environmentName,
         envFile: globalOptions.envFile,

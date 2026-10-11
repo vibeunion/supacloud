@@ -29,6 +29,11 @@ export interface ResolvedContext {
     source: ContextSourceKind;
     sourcePath: string | null;
     environmentVariables: Readonly<Record<string, string>>;
+    applicationId: string;
+    applicationEnvironmentId: string;
+    applicationConfigurationPath: string;
+    applicationConfigurationId: string;
+    applicationManifestPath: string;
     insecureTls: boolean;
 }
 
@@ -49,6 +54,11 @@ const CORE_CONTEXT_KEYS = [
     "SUPACLOUD_PROJECT_REF",
     "X_PROJECT_REF",
     "SUPACLOUD_HOST",
+    "SUPACLOUD_APPLICATION_ID",
+    "SUPACLOUD_APPLICATION_ENVIRONMENT_ID",
+    "SUPACLOUD_APPLICATION_CONFIGURATION_PATH",
+    "SUPACLOUD_APPLICATION_CONFIGURATION_ID",
+    "SUPACLOUD_APPLICATION_MANIFEST_PATH",
 ] as const;
 
 function unquotedEnvValue(rawValue: string): string {
@@ -249,6 +259,11 @@ export function resolveSupaCloudContext(
         source: source.kind,
         sourcePath: source.path,
         environmentVariables: source.values,
+        applicationId: source.values.SUPACLOUD_APPLICATION_ID?.trim() || "",
+        applicationEnvironmentId: source.values.SUPACLOUD_APPLICATION_ENVIRONMENT_ID?.trim() || source.environment,
+        applicationConfigurationPath: source.values.SUPACLOUD_APPLICATION_CONFIGURATION_PATH?.trim() || "",
+        applicationConfigurationId: source.values.SUPACLOUD_APPLICATION_CONFIGURATION_ID?.trim() || "",
+        applicationManifestPath: source.values.SUPACLOUD_APPLICATION_MANIFEST_PATH?.trim() || "",
         insecureTls,
     };
 }

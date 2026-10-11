@@ -7,9 +7,9 @@ after a newer activation. Each event therefore includes its previous activation
 ID and whether it matches the current authority.
 
 ```bash
-supacloud-cli --env test app history --id reviews --environment_id test
-supacloud-cli --env test app history --id reviews --environment_id test --limit 20 --json
-supacloud-cli --env test app history --id reviews --environment_id test --cursor <next_cursor> --json
+supacloud --env test app history --id reviews --environment_id test
+supacloud --env test app history --id reviews --environment_id test --limit 20 --json
+supacloud --env test app history --id reviews --environment_id test --cursor <next_cursor> --json
 ```
 
 The platform reuses the existing private mutation journal, validates successful

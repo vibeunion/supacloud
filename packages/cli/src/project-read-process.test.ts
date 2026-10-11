@@ -78,7 +78,7 @@ async function runUserProjectGet(response: Response): Promise<{ exitCode: number
     return { exitCode, output };
 }
 
-describe("supacloud-cli project get process contract", () => {
+describe("supacloud project get process contract", () => {
     test("prints only the fixed projection for the current Management response", async () => {
         const remoteSecret = "user-known-private-sentinel";
         const execution = await runUserProjectGet(Response.json({

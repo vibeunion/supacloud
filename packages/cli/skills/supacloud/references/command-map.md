@@ -6,8 +6,8 @@ Load this reference when selecting a command surface or when a user asks an AI t
 
 | Intent | Use | Guardrail |
 | --- | --- | --- |
-| Inspect current project binding | `supacloud-cli status` | Read-only; run first |
-| Inspect selected project API/Auth/Studio origins | `supacloud-cli project endpoints` | Uses the Management API's authoritative projection; do not reconstruct domains locally |
+| Inspect current project binding | `supacloud status` | Read-only; run first |
+| Inspect selected project API/Auth/Studio origins | `supacloud project endpoints` | Uses the Management API's authoritative projection; do not reconstruct domains locally |
 | Enumerate projects or endpoint projections | `supacloud-admin project list` / `project list_endpoints` | Platform-wide read; never promote a project credential to Admin authority |
 | Inspect project health/logs/tasks | `project`, `queue`, `task_events`, `diagnostics` | Prefer bounded reads |
 | Read database rows or metadata | `database query` and database inspection actions | `SELECT`/read-only by default |
@@ -57,11 +57,11 @@ until a project-scoped context is resolved.
 ## Safe inspection pattern
 
 ```bash
-supacloud-cli status
-supacloud-cli project get
-supacloud-cli project endpoints
-supacloud-cli project health
-supacloud-cli supabase migration_list --db_url "$SUPACLOUD_DB_URL"
+supacloud status
+supacloud project get
+supacloud project endpoints
+supacloud project health
+supacloud supabase migration_list --db_url "$SUPACLOUD_DB_URL"
 ```
 
 The endpoint projection returns bounded, credential-free API/Auth/Studio origins,

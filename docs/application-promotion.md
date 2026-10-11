@@ -5,15 +5,15 @@
 计划既不是部署回执，也不是线上验收结果，不授权生产变更。
 
 ```bash
-supacloud-cli --env production app promote-plan --id reviews \
+supacloud --env production app promote-plan --id reviews \
   --environment_id production --source_ref staging \
   --source_environment_id staging --source_release_id <sha256>
 
-supacloud-cli --env production app diff --id reviews \
+supacloud --env production app diff --id reviews \
   --environment_id production --source_ref staging \
   --source_environment_id staging --source_release_id <sha256>
 
-supacloud-cli --env production app promote --id reviews \
+supacloud --env production app promote --id reviews \
   --environment_id production --source_ref staging \
   --source_environment_id staging --source_release_id <sha256> \
   --confirm-production production
@@ -52,9 +52,9 @@ SupaCloud 生成稳定的 mutation ID 并只提交一次提升请求。未知 HT
 mutation ID，不自动重试、不自动降级、不自动恢复数据库：
 
 ```bash
-supacloud-cli --env production app promote-status --id reviews \
+supacloud --env production app promote-status --id reviews \
   --environment_id production --mutation_id <uuid>
-supacloud-cli --env production app promote-reconcile --id reviews \
+supacloud --env production app promote-reconcile --id reviews \
   --environment_id production --mutation_id <uuid> --confirm-production production
 ```
 
@@ -72,14 +72,14 @@ readback、CAS 激活、authenticated smoke、证据和最终回执。CLI 只负
 激活和 smoke；CLI 只提供轻量入口：
 
 ```bash
-supacloud-cli --env test app preview-plan --id reviews \
+supacloud --env test app preview-plan --id reviews \
   --environment_id test --release_id <sha256> --branch_ref pv-review
-supacloud-cli --env test app preview-create --id reviews \
+supacloud --env test app preview-create --id reviews \
   --environment_id test --release_id <sha256> --data_mode schema_only
-supacloud-cli --env test app preview-list --id reviews --environment_id test
-supacloud-cli --env test app preview-status --id reviews \
+supacloud --env test app preview-list --id reviews --environment_id test
+supacloud --env test app preview-status --id reviews \
   --environment_id test --preview_id <preview-id>
-supacloud-cli --env test app preview-cleanup --id reviews \
+supacloud --env test app preview-cleanup --id reviews \
   --environment_id test --preview_id <preview-id>
 ```
 

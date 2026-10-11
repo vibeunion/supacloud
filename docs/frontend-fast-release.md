@@ -112,10 +112,10 @@ is automatic only when the native read returns HTTP 404; it never disables
 authorization, integrity validation, production confirmation or CAS.
 
 ```bash
-supacloud-cli --env staging deploy
-supacloud-cli --env staging frontend get_active_release --ref abc123 --id web
-supacloud-cli --env staging frontend rollback --ref abc123 --id web
-supacloud-cli --env staging frontend rollback --ref abc123 --id web --release_id <retained-sha256>
+supacloud --env staging deploy
+supacloud --env staging frontend get_active_release --ref abc123 --id web
+supacloud --env staging frontend rollback --ref abc123 --id web
+supacloud --env staging frontend rollback --ref abc123 --id web --release_id <retained-sha256>
 ```
 
 Default rollback uses the platform's verified activation journal; an explicit

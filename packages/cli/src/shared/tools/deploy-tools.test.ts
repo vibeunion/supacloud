@@ -4,7 +4,10 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createBuildEnvironment, createFrontendArchive } from "./deploy-tools";
+import { createBuildEnvironment, createFrontendArchive, registerDeployTools } from "./deploy-tools";
+import type { ToolSchema } from "../schema";
+import type { ToolInvocation } from "../tool-server";
+import type { HttpTransport } from "../transports/http";
 
 const CLI_ENTRYPOINT = fileURLToPath(new URL("../../index.ts", import.meta.url));
 const temporaryDirectories: string[] = [];
@@ -88,6 +91,62 @@ async function runCli(
 }
 
 describe("one-command deploy", () => {
+    test("uses the application profile for deploy without requiring frontend configuration", async () => {
+        const directory = await workspace();
+        const calls: Array<Record<string, unknown>> = [];
+        let callback: ToolInvocation | undefined;
+        registerDeployTools({
+            tool(_name: string, _description: string, _schema: ToolSchema, handler: ToolInvocation) {
+                callback = handler;
+            },
+        }, {} as HttpTransport, {
+            cwd: directory,
+            projectRef: "test-ref",
+            application: {
+                id: "orders",
+                environmentId: "test",
+                configurationPath: "deploy/configuration.test.json",
+            },
+            applicationRelease: async args => {
+                calls.push(args);
+                return { content: [{ type: "text", text: JSON.stringify({ ok: true, operation: "applications.release" }) }] };
+            },
+        });
+
+        const result = await callback?.({ json: true });
+
+        expect(result).toMatchObject({ content: [{ type: "text" }] });
+        expect(calls).toEqual([{
+            action: "release",
+            ref: "test-ref",
+            id: "orders",
+            environment_id: "test",
+            root: directory,
+            configuration_path: "deploy/configuration.test.json",
+            format: "json",
+            json: true,
+        }]);
+    });
+
+    test("reports missing application configuration instead of falling back to frontend deploy", async () => {
+        const directory = await workspace();
+        let callback: ToolInvocation | undefined;
+        registerDeployTools({
+            tool(_name: string, _description: string, _schema: ToolSchema, handler: ToolInvocation) {
+                callback = handler;
+            },
+        }, {} as HttpTransport, {
+            cwd: directory,
+            projectRef: "test-ref",
+            application: { id: "orders", environmentId: "test" },
+            applicationRelease: async () => {
+                throw new Error("must not run");
+            },
+        });
+
+        await expect(callback?.({})).rejects.toThrow("SUPACLOUD_APPLICATION_CONFIGURATION_PATH");
+    });
+
     test.each(["plan", "diff"])("%s compares a built release without writes in read-only production", async (flag) => {
         const directory = await workspace();
         const archive = await createFrontendArchive(join(directory, "dist"));
@@ -381,6 +440,41 @@ describe("one-command deploy", () => {
             output_directory: join(await realpath(directory), "apps", "web", "dist"),
         });
         expect(requests).toEqual(["GET /v1/projects/abc123/frontend/deployments"]);
+    });
+
+    test("uses a named environment file for the direct supacloud deploy command", async () => {
+        const directory = await workspace();
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            fetch(request) {
+                if (new URL(request.url).pathname === "/v1/projects/abc123/frontend/deployments") {
+                    return Response.json([deployment()]);
+                }
+                return new Response("not found", { status: 404 });
+            },
+        });
+        servers.push(server);
+        await writeFile(join(directory, ".env.supacloud.test"), [
+            "SUPACLOUD_ENV=test",
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=test-token",
+            "SUPACLOUD_PROJECT_REF=abc123",
+            "",
+        ].join("\n"));
+
+        const response = await runCli(directory, "", [
+            "--env", "test", "deploy", "--skip_build", "--dry_run", "--json",
+        ], { injectContext: false });
+
+        expect(response.exitCode).toBe(0);
+        expect(JSON.parse(response.stdout)).toMatchObject({
+            ok: true,
+            dry_run: true,
+            project_ref: "abc123",
+            deployment_id: "web",
+        });
+        expect(response.stderr).not.toContain("Management API context");
     });
 
     test("selects a frontend target from a monorepo subdirectory and keeps output rooted there", async () => {

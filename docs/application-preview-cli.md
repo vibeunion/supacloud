@@ -10,12 +10,12 @@ schema-only 是默认数据策略，full-clone 必须显式选择。
 响应丢失时保留同一个 preview ID，并查询它，不自动重新创建预览。
 
 ```bash
-supacloud-cli --env staging app preview-plan --id reviews --environment_id test --release_id <sha256>
-supacloud-cli --env staging app preview --id reviews --environment_id test --release_id <sha256>
-supacloud-cli --env staging app preview-list --id reviews --environment_id test
-supacloud-cli --env staging app preview-status --id reviews --environment_id test --preview_id <uuid>
-supacloud-cli --env staging app preview-reconcile --id reviews --environment_id test --preview_id <uuid>
-supacloud-cli --env staging app preview-cleanup --id reviews --environment_id test --preview_id <uuid>
+supacloud --env staging app preview-plan --id reviews --environment_id test --release_id <sha256>
+supacloud --env staging app preview --id reviews --environment_id test --release_id <sha256>
+supacloud --env staging app preview-list --id reviews --environment_id test
+supacloud --env staging app preview-status --id reviews --environment_id test --preview_id <uuid>
+supacloud --env staging app preview-reconcile --id reviews --environment_id test --preview_id <uuid>
+supacloud --env staging app preview-cleanup --id reviews --environment_id test --preview_id <uuid>
 ```
 
 `preview` 默认生成 ID，CI 可传入固定 `--preview_id`；相同请求重新提交只观察已有回执，

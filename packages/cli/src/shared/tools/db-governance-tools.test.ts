@@ -227,7 +227,7 @@ describe("db governance tools", () => {
         expect(context.maintenance.structureSource).toBe("drizzle");
         expect(context.maintenance.behaviorSource).toBe("sql");
         expect(context.maintenance.protectedPaths).toContain("migrations/");
-        expect(context.verification).toContain("supacloud-cli db module_check --module_file db/modules.ts --database_url \"$DATABASE_URL\"");
+        expect(context.verification).toContain("supacloud db module_check --module_file db/modules.ts --database_url \"$DATABASE_URL\"");
     });
 
     test("context action emits JSON and narrows to a module", async () => {

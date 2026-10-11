@@ -64,6 +64,11 @@ function context(overrides: Partial<ResolvedContext> = {}): ResolvedContext {
         source: "process_env",
         sourcePath: null,
         environmentVariables: {},
+        applicationId: "",
+        applicationEnvironmentId: "",
+        applicationConfigurationPath: "",
+        applicationConfigurationId: "",
+        applicationManifestPath: "",
         insecureTls: false,
         ...overrides,
     };
@@ -132,7 +137,7 @@ describe("CLI execution policy", () => {
     });
 
     test("blocks cross-project production reads before the CLI sends HTTP", async () => {
-        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-production-read-"));
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-production-read-"));
         let requestCount = 0;
         const server = Bun.serve({
             hostname: "127.0.0.1",

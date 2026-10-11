@@ -22,7 +22,7 @@ interface Subcommand {
 }
 
 export const SUBCOMMANDS: Record<string, Subcommand> = {
-    cli: { pkg: "@supacloud/cli", bin: "supacloud-cli", desc: "@supacloud/cli 项目级开发工具" },
+    cli: { pkg: "@supacloud/cli", bin: "supacloud", desc: "@supacloud/cli 项目级开发工具" },
     admin: { pkg: "@supacloud/admin", bin: "supacloud-admin", desc: "@supacloud/admin 平台运维工具" },
 };
 

@@ -3,7 +3,7 @@
 `app logs` is the application-scoped observability entry point:
 
 ```sh
-supacloud-cli app logs \
+supacloud app logs \
   --ref PROJECT \
   --id orders \
   --environment_id test \

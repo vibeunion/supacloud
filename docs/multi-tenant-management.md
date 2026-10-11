@@ -372,7 +372,7 @@ supacloud_project_storage_bytes{project_ref="abc123"}
 
 SupaCloud now splits human operators into two explicit command-line surfaces:
 
-- `@supacloud/cli` / `supacloud-cli` for project-scoped workflows
+- `@supacloud/cli` / `supacloud` for project-scoped workflows
 - `@supacloud/admin` / `supacloud-admin` for installation, SSH, and platform operations
 
 This keeps project deploy/log/database tasks separate from tenant lifecycle and server management.

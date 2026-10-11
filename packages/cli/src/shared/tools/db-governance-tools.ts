@@ -218,9 +218,9 @@ export function buildDatabaseAiContext(
             ],
         },
         verification: [
-            "supacloud-cli db lint --module_file db/modules.ts",
-            "supacloud-cli db explain --target <object>",
-            "supacloud-cli db module_check --module_file db/modules.ts --database_url \"$DATABASE_URL\"",
+            "supacloud db lint --module_file db/modules.ts",
+            "supacloud db explain --target <object>",
+            "supacloud db module_check --module_file db/modules.ts --database_url \"$DATABASE_URL\"",
         ],
     };
 }

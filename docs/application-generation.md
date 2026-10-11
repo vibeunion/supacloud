@@ -10,12 +10,12 @@ informed this workflow. No AponiaJS code or runtime is imported. Elysia stays at
 With the matching candidate/released CLI installed:
 
 ```sh
-supacloud-cli app init --template http --name catalog-api --root ./catalog-api
+supacloud app init --template http --name catalog-api --root ./catalog-api
 cd catalog-api
 bun install
-supacloud-cli app generate --kind resource --name inventory \
+supacloud app generate --kind resource --name inventory \
   --register-in src/app.module.ts --dry-run --format json
-supacloud-cli app generate --kind resource --name inventory \
+supacloud app generate --kind resource --name inventory \
   --register-in src/app.module.ts
 bun run check
 bun run inspect
@@ -28,7 +28,7 @@ unrelated feature. No module-boundary policy is relaxed to make registration wor
 Existing projects and the full `command` starter are not automatically migrated;
 choose or create their explicit composition module before using `--register-in`.
 
-`supacloud-cli generate` is the same generator's top-level alias. Hyphenated
+`supacloud generate` is the same generator's top-level alias. Hyphenated
 `--dry-run` / `--register-in` and tool-style `--dry_run` / `--register_in` are
 accepted. Supplying both aliases of a flag is an error. `--dry-run` is supported
 for generation, not init, compilation or deployment; misuse is rejected.
@@ -107,10 +107,10 @@ preview. Accepted input can still be rejected by the project's compiler policy.
 
 ```sh
 bun run inspect
-supacloud-cli app compile --format json
-supacloud-cli app check --format json
-supacloud-cli app context --target InventoryService --format json
-supacloud-cli app graph --out_dir candidate-generated --format json
+supacloud app compile --format json
+supacloud app check --format json
+supacloud app context --target InventoryService --format json
+supacloud app graph --out_dir candidate-generated --format json
 ```
 
 The HTTP/edge starter's `inspect` script calls the installed compiler's

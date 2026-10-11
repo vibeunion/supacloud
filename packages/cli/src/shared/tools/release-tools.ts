@@ -772,7 +772,7 @@ export function registerReleaseTools(
                     content: [
                         {
                             type: "text" as const,
-                            text: "⚠️ This command requires Management API context. Run `supacloud-cli status` to inspect current detection.",
+                            text: "⚠️ This command requires Management API context. Run `supacloud status` to inspect current detection.",
                         },
                     ],
                 };

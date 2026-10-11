@@ -26,7 +26,7 @@ describe("supacloud dispatcher", () => {
     test("exposes cli and admin subcommands", () => {
         expect(Object.keys(SUBCOMMANDS).sort()).toEqual(["admin", "cli"]);
         expect(SUBCOMMANDS.cli.pkg).toBe("@supacloud/cli");
-        expect(SUBCOMMANDS.cli.bin).toBe("supacloud-cli");
+        expect(SUBCOMMANDS.cli.bin).toBe("supacloud");
         expect(SUBCOMMANDS.admin.pkg).toBe("@supacloud/admin");
         expect(SUBCOMMANDS.admin.bin).toBe("supacloud-admin");
     });

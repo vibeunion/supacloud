@@ -56,22 +56,22 @@ IP 与域名为占位值。生产主机通常应使用经过验证的 Release，
 项目 CLI 使用 `SUPABASE_URL` 或 `SUPACLOUD_API_URL`，以及 `SUPABASE_SERVICE_ROLE_KEY` 或 `SUPACLOUD_API_TOKEN` 连接，可从当前工作区 `.env` 自动绑定。凭据不得进入代码仓库或浏览器产物。生成应用的环境包装器使用独立的选择契约，详见[应用模板指南](application-starter.md)。
 
 ```bash
-supacloud-cli status
-supacloud-cli project get
-supacloud-cli project logs --log_type database
+supacloud status
+supacloud project get
+supacloud project logs --log_type database
 ```
 
 npm 入口默认使用 Node.js。需要显式使用 Bun 时，包括 Windows 终端，可运行：
 
 ```bash
-bunx --bun --package @supacloud/cli supacloud-cli status
+bunx --bun --package @supacloud/cli supacloud status
 ```
 
 AI Agent 可先预览，再安装 CLI 随包提供的 migration-first Skill：
 
 ```bash
-supacloud-cli ai install_skill --dry_run
-supacloud-cli ai install_skill
+supacloud ai install_skill --dry_run
+supacloud ai install_skill
 ```
 
 按 [CLI 指南](cli-guide.md)配置运维连接后，使用 Admin 执行主机与平台操作：
@@ -81,7 +81,7 @@ npx @supacloud/admin status
 npx @supacloud/admin ssh ping
 ```
 
-`supacloud-cli` 限定在项目范围。安装、升级、SSH 诊断及平台项目生命周期属于 `supacloud-admin`。`supacloudctl` 是可选分发入口；`supacloud` 指服务端二进制，不是项目 CLI 的别名。
+`supacloud` 限定在项目范围。安装、升级、SSH 诊断及平台项目生命周期属于 `supacloud-admin`。`supacloudctl` 是可选分发入口；`supacloud` 指服务端二进制，不是项目 CLI 的别名。
 
 ## 生产升级
 

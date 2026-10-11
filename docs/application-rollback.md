@@ -3,8 +3,8 @@
 应用回滚重新激活保留的不可变制品和配置版本，不恢复数据库、业务状态或 Storage。
 
 ```bash
-supacloud-cli app rollback-plan --id reviews --environment_id test
-supacloud-cli app rollback --id reviews --environment_id test
+supacloud app rollback-plan --id reviews --environment_id test
+supacloud app rollback --id reviews --environment_id test
 ```
 
 默认目标只取自当前成功 activation journal 的 `previous`，不按创建时间或 release 列表排序猜测。平台校验当前与上一个 activation 的 scope、资源标识、请求指纹和成功回执，以及保留制品、配置摘要和当前网关路由。存在未决 activation、缺失或损坏的证据时，快照接口拒绝给出回滚目标。
@@ -18,7 +18,7 @@ CLI 自动生成新的 activation UUID，用快照中的当前 activation 作为
 显式指定保留版本仍可使用：
 
 ```bash
-supacloud-cli app rollback --id reviews --environment_id test \
+supacloud app rollback --id reviews --environment_id test \
   --release_id <sha256> --configuration_id <uuid> \
   --expected_activation_id <current-uuid>
 ```
