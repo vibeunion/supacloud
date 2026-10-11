@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/vibeunion/supacloud/compare/app-v0.25.0...app-v0.26.0) (2026-10-11)
+
+
+### Features
+
+* **cli:** make supacloud the one-command deploy entrypoint ([#1817](https://github.com/vibeunion/supacloud/issues/1817)) ([4be5da5](https://github.com/vibeunion/supacloud/commit/4be5da5a9284220610474ca290c708ce982d51bf))
+
 ## [0.25.0](https://github.com/vibeunion/supacloud/compare/app-v0.24.1...app-v0.25.0) (2026-10-10)
 
 
