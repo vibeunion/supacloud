@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.9.0...delivery-v0.10.0) (2026-10-11)
+
+
+### Features
+
+* **applications:** verified read-only deploy plan and no-op observation ([#1778](https://github.com/vibeunion/supacloud/issues/1778)) ([8d8098d](https://github.com/vibeunion/supacloud/commit/8d8098d2ae809c53da1f937d6c10139cbb153ae4))
+* **delivery:** inspect verified application activation history ([#1781](https://github.com/vibeunion/supacloud/issues/1781)) ([46e1ba4](https://github.com/vibeunion/supacloud/commit/46e1ba437bd6a2821d35fb69b1bd945df45e5f26))
+
 ## [0.9.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.8.0...delivery-v0.9.0) (2026-10-11)
 
 

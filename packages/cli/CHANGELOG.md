@@ -14,6 +14,13 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.80.0](https://github.com/vibeunion/supacloud/compare/cli-v0.79.0...cli-v0.80.0) (2026-10-11)
+
+
+### Features
+
+* **delivery:** inspect verified application activation history ([#1781](https://github.com/vibeunion/supacloud/issues/1781)) ([46e1ba4](https://github.com/vibeunion/supacloud/commit/46e1ba437bd6a2821d35fb69b1bd945df45e5f26))
+
 ## [0.79.0](https://github.com/vibeunion/supacloud/compare/cli-v0.78.0...cli-v0.79.0) (2026-10-11)
 
 
