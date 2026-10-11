@@ -24,6 +24,7 @@ interface DeployConfig {
         root?: string;
         buildCommand?: string;
         outputDirectory?: string;
+        buildEnv?: string[];
     };
 }
 
@@ -34,6 +35,7 @@ interface DeployTargetConfig {
     slug?: string;
     buildCommand?: string;
     outputDirectory?: string;
+    buildEnv?: string[];
     bundleDirectory?: string;
     entrypoint?: string;
     verifyJwt?: boolean;
@@ -53,12 +55,28 @@ interface FrontendDeployment {
 interface DeployToolOptions {
     projectRef?: string;
     cwd?: string;
+    environmentVariables?: Readonly<Record<string, string>>;
     edgeFunctionDeploy?: (args: Record<string, unknown>) => Promise<ToolResponse>;
 }
 
 interface ToolResponse {
     content: Array<{ type: "text"; text: string }>;
     isError?: boolean;
+}
+
+const PUBLIC_BUILD_ENV_PREFIXES = ["PUBLIC_", "VITE_", "NEXT_PUBLIC_", "NUXT_PUBLIC_", "ASTRO_PUBLIC_"];
+const SENSITIVE_BUILD_ENV = /(?:^|_)(?:PASSWORD|PASS|SECRET|TOKEN|KEY|CREDENTIAL|AUTHORIZATION|COOKIE|SESSION)(?:_|$)|(?:DATABASE_URL|DATABASE_URI|CONNECTION_STRING|DSN|PRIVATE_KEY)/i;
+
+function isPublicBuildEnv(name: string): boolean {
+    return PUBLIC_BUILD_ENV_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+function isProtectedBuildEnv(name: string): boolean {
+    return name.startsWith("SUPACLOUD_")
+        || name === "SUPABASE_SERVICE_ROLE_KEY"
+        || name === "SUPABASE_ACCESS_TOKEN"
+        || name === "MANAGEMENT_API_URL"
+        || name === "MANAGEMENT_API_TOKEN";
 }
 
 export const deployToolSchema = {
@@ -134,6 +152,26 @@ function optionalBoolean(value: unknown, field: string): boolean | undefined {
     return value;
 }
 
+function optionalStringArray(value: unknown, field: string): string[] | undefined {
+    if (value === undefined) return undefined;
+    if (!Array.isArray(value) || value.some((item) => typeof item !== "string" || !item.trim())) {
+        throw new Error(`supacloud.json ${field} must be an array of non-empty strings`);
+    }
+    return value.map((item) => item.trim()).map((name) => {
+        if (!/^[A-Z_][A-Z0-9_]*$/.test(name)) {
+            throw new Error(`supacloud.json ${field} must contain uppercase environment variable names`);
+        }
+        const isPublic = isPublicBuildEnv(name);
+        if (SENSITIVE_BUILD_ENV.test(name) && !isPublic) {
+            throw new Error(`supacloud.json ${field} cannot include sensitive variable '${name}'; use runtime secrets instead`);
+        }
+        if (isProtectedBuildEnv(name)) {
+            throw new Error(`supacloud.json ${field} cannot include platform credential '${name}'`);
+        }
+        return name;
+    });
+}
+
 function deployTargetConfig(candidate: unknown, name: string): DeployTargetConfig {
     const value = record(candidate);
     if (!value || (value.type !== "frontend" && value.type !== "edge_function")) {
@@ -150,6 +188,7 @@ function deployTargetConfig(candidate: unknown, name: string): DeployTargetConfi
         slug: optionalText(value.slug, `targets.${name}.slug`),
         buildCommand: optionalText(value.buildCommand, `targets.${name}.buildCommand`),
         outputDirectory: optionalText(value.outputDirectory, `targets.${name}.outputDirectory`),
+        buildEnv: optionalStringArray(value.buildEnv, `targets.${name}.buildEnv`),
         bundleDirectory: optionalText(value.bundleDirectory, `targets.${name}.bundleDirectory`),
         entrypoint: optionalText(value.entrypoint, `targets.${name}.entrypoint`),
         verifyJwt: optionalBoolean(value.verifyJwt, `targets.${name}.verifyJwt`),
@@ -181,6 +220,7 @@ async function readDeployConfig(configRoot: string): Promise<DeployConfig> {
             root: optionalText(frontend.root, "frontend.root"),
             buildCommand: optionalText(frontend.buildCommand, "frontend.buildCommand"),
             outputDirectory: optionalText(frontend.outputDirectory, "frontend.outputDirectory"),
+            buildEnv: optionalStringArray(frontend.buildEnv, "frontend.buildEnv"),
         } : undefined,
     };
 }
@@ -274,6 +314,7 @@ function selectTarget(
             id: config.frontend?.id,
             buildCommand: config.frontend?.buildCommand,
             outputDirectory: config.frontend?.outputDirectory,
+            buildEnv: config.frontend?.buildEnv,
         }]] as Array<[string, DeployTargetConfig]>;
     if (targets.length === 0) throw new Error("supacloud.json defines no deploy targets");
 
@@ -323,10 +364,43 @@ function resolveInsideProject(projectDirectory: string, candidate: string, allow
     return resolved;
 }
 
-async function runBuild(command: string, cwd: string): Promise<void> {
+export function createBuildEnvironment(
+    names: string[] | undefined,
+    environmentVariables: Readonly<Record<string, string>> | undefined,
+): { env: NodeJS.ProcessEnv; names: string[]; missing: string[] } {
+    const selectedNames = [...new Set(names || [])].sort();
+    const selectedNameSet = new Set(selectedNames);
+    const values = environmentVariables ?? process.env;
+    const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => (
+        !isProtectedBuildEnv(name)
+        && (!isPublicBuildEnv(name) || selectedNameSet.has(name))
+        && (!SENSITIVE_BUILD_ENV.test(name) || isPublicBuildEnv(name))
+    ))) as NodeJS.ProcessEnv;
+    const missing = selectedNames.filter((name) => !values[name]?.trim());
+    for (const name of selectedNames) {
+        const value = values[name];
+        if (value !== undefined) env[name] = value;
+    }
+    return { env, names: selectedNames, missing };
+}
+
+function assertBuildEnvironment(
+    build: ReturnType<typeof createBuildEnvironment>,
+    skipBuild: boolean,
+): void {
+    if (!skipBuild && build.missing.length > 0) {
+        throw new Error(`Missing build environment variables: ${build.missing.join(", ")}`);
+    }
+}
+
+async function runBuild(
+    command: string,
+    cwd: string,
+    environment: NodeJS.ProcessEnv,
+): Promise<void> {
     const child = Bun.spawn(["sh", "-c", command], {
         cwd,
-        env: process.env,
+        env: environment,
         stdio: ["inherit", "inherit", "inherit"],
     });
     const exitCode = await child.exited;
@@ -447,6 +521,7 @@ export function registerDeployTools(
                 throw new Error(`Deploy target '${target.name}' root is not a regular directory: ${projectDirectory}`);
             }
             const requestedId = String(args.id || target.config.id || "").trim() || undefined;
+            const build = createBuildEnvironment(target.config.buildEnv, options.environmentVariables);
             const report = phaseReporter(args.json === true);
             report("inspect", `${target.name} (${projectRef})`);
 
@@ -484,14 +559,17 @@ export function registerDeployTools(
                         project_ref: projectRef,
                         slug,
                         build_command: args.skip_build === true ? null : buildCommand,
+                        build_env: build.names,
+                        missing_build_env: build.missing,
                         bundle_directory: bundleDirectory,
                         expected_active_version: activeVersion,
                         expected_activation_id: activationId,
                     }, null, 2) }] };
                 }
+                assertBuildEnvironment(build, args.skip_build === true);
                 if (args.skip_build !== true) {
                     report("build", buildCommand);
-                    await runBuild(buildCommand, projectDirectory);
+                    await runBuild(buildCommand, projectDirectory, build.env);
                 } else {
                     report("build", "skipped");
                 }
@@ -545,13 +623,16 @@ export function registerDeployTools(
                     project_ref: projectRef,
                     deployment_id: selected.id,
                     build_command: args.skip_build === true ? null : buildCommand,
+                    build_env: build.names,
+                    missing_build_env: build.missing,
                     output_directory: outputDirectory,
                 }, null, 2) }] };
             }
 
+            assertBuildEnvironment(build, args.skip_build === true);
             if (args.skip_build !== true) {
                 report("build", buildCommand);
-                await runBuild(buildCommand, projectDirectory);
+                await runBuild(buildCommand, projectDirectory, build.env);
             } else {
                 report("build", "skipped");
             }

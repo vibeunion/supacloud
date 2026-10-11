@@ -63,6 +63,7 @@ function context(overrides: Partial<ResolvedContext> = {}): ResolvedContext {
         credentialScope: "management",
         source: "process_env",
         sourcePath: null,
+        environmentVariables: {},
         insecureTls: false,
         ...overrides,
     };

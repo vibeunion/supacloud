@@ -214,6 +214,26 @@ legacy `.env` fallback. Core URL, credential, and project-ref values are not
 filled by mixing sources. If `SUPACLOUD_ENV` is set without a complete process
 context, it strictly selects `.env.supacloud.<value>`.
 
+For one-command deployments, declare public build variables explicitly in the
+target configuration:
+
+```json
+{
+  "targets": {
+    "web": {
+      "type": "frontend",
+      "root": "apps/web",
+      "id": "web",
+      "buildEnv": ["VITE_API_URL", "VITE_SUPABASE_ANON_KEY"]
+    }
+  }
+}
+```
+
+`buildEnv` is an allowlist. The selected profile values are injected only into
+the local build command; values are never printed, undeclared values are not
+passed through, and platform credentials or runtime secrets are rejected.
+
 The two credential scopes are separate. Management-backed remote commands use
 only `SUPACLOUD_API_URL` + `SUPACLOUD_API_TOKEN`. An application profile using
 `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` can be auto-linked for `status`,
@@ -757,11 +777,12 @@ whether the body is empty and the configured header names. Update receipts bind
 delete receipts return the matched revision as `deleted_updated_at`.
 
 For secret writes, `--from-env` accepts a comma-separated list of environment
-variable names. The CLI reads each non-empty value from its own process
-environment, so command arguments contain names only and values are never
-printed. Names must be unique shell-style identifiers (`[A-Za-z_][A-Za-z0-9_]*`,
-up to 256 characters). Missing or empty values fail before any HTTP request.
-Do not combine `--from-env` with the compatibility `--secrets` input.
+variable names. The CLI reads each non-empty value from the currently selected
+profile source, such as `.env.supacloud.test` selected by `--env test`; command
+arguments contain names only and values are never printed. Names must be unique
+shell-style identifiers (`[A-Za-z_][A-Za-z0-9_]*`, up to 256 characters).
+Missing or empty values fail before any HTTP request. Do not combine
+`--from-env` with the compatibility `--secrets` input.
 
 Branch promotion is migration-first. `branch promotion_plan` prints pending
 versions, names, statement counts, and checksums without echoing SQL into terminal

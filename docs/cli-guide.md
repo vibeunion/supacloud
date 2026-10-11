@@ -66,7 +66,11 @@ supacloud-cli frontend upload_release --ref abc123 --id web --zip_path ./dist.zi
 supports a frontend and backend living in separate directories. Frontend targets
 use immutable static releases; `edge_function` targets use the existing verified
 Edge Function bundle protocol. The command runs the target build, publishes only
-that target, and reads the final identity back.
+that target, and reads the final identity back. Targets may declare a `buildEnv`
+allowlist in `supacloud.json`; selected environment profile values are injected
+only into the local build command. Missing declared variables fail before the
+build, while `--dry_run --json` reports variable names and missing names without
+printing values.
 
 ### Remote test development sync
 
@@ -131,7 +135,8 @@ repository-root `supacloud.json`:
       "root": "apps/web",
       "id": "web",
       "buildCommand": "bun run build",
-      "outputDirectory": "dist"
+      "outputDirectory": "dist",
+      "buildEnv": ["VITE_API_URL", "VITE_SUPABASE_ANON_KEY"]
     },
     "api": {
       "type": "edge_function",
@@ -146,6 +151,11 @@ repository-root `supacloud.json`:
   }
 }
 ```
+
+`buildEnv` is for public build-time variables. The CLI rejects platform
+credentials and sensitive names such as tokens, passwords, database URLs, and
+private keys. Runtime secrets use the separate Secrets API and are never copied
+into a static frontend build.
 
 ```bash
 # From a target workspace, the target is selected automatically.

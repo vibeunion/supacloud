@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { unzipSync } from "fflate";
-import { createFrontendArchive } from "./deploy-tools";
+import { createBuildEnvironment, createFrontendArchive } from "./deploy-tools";
 
 const CLI_ENTRYPOINT = fileURLToPath(new URL("../../index.ts", import.meta.url));
 const temporaryDirectories: string[] = [];
@@ -87,6 +87,46 @@ async function runCli(
 }
 
 describe("one-command deploy", () => {
+    test("injects only declared build variables from the selected environment", () => {
+        const build = createBuildEnvironment(["VITE_API_URL", "PUBLIC_SITE_NAME"], {
+            VITE_API_URL: "https://test.example.com",
+            PUBLIC_SITE_NAME: "Test",
+            SUPACLOUD_API_TOKEN: "must-not-be-used",
+        });
+
+        expect(build.names).toEqual(["PUBLIC_SITE_NAME", "VITE_API_URL"]);
+        expect(build.missing).toEqual([]);
+        expect(build.env).toMatchObject({
+            VITE_API_URL: "https://test.example.com",
+            PUBLIC_SITE_NAME: "Test",
+        });
+        expect(build.env.SUPACLOUD_API_TOKEN).toBeUndefined();
+    });
+
+    test("reports missing declared build variables without exposing values", () => {
+        const build = createBuildEnvironment(["VITE_API_URL"], {});
+
+        expect(build.names).toEqual(["VITE_API_URL"]);
+        expect(build.missing).toEqual(["VITE_API_URL"]);
+        expect(JSON.stringify(build)).not.toContain("must-not-be-used");
+    });
+
+    test("rejects sensitive build variable declarations before contacting the API", async () => {
+        const directory = await mkdtemp(join(tmpdir(), "supacloud-sensitive-build-env-test-"));
+        temporaryDirectories.push(directory);
+        await mkdir(join(directory, "dist"), { recursive: true });
+        await writeFile(join(directory, "supacloud.json"), JSON.stringify({
+            frontend: {
+                buildEnv: ["API_TOKEN"],
+            },
+        }));
+
+        const response = await runCli(directory, "https://management.example.com", ["deploy", "--dry_run"]);
+
+        expect(response.exitCode).toBe(1);
+        expect(response.stderr).toContain("cannot include sensitive variable 'API_TOKEN'");
+    });
+
     test("loads repository-root context when invoked from a nested frontend workspace", async () => {
         const directory = await mkdtemp(join(tmpdir(), "supacloud-monorepo-env-test-"));
         temporaryDirectories.push(directory);
