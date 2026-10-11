@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.10.0...delivery-v0.11.0) (2026-10-11)
+
+
+### Features
+
+* **app:** add verified read-only environment promotion plans ([#1785](https://github.com/vibeunion/supacloud/issues/1785)) ([454b86f](https://github.com/vibeunion/supacloud/commit/454b86fc5f7d7f01b90c801c1f0f1eaa1a53fb03))
+* **app:** transfer verified releases across environment projects ([#1784](https://github.com/vibeunion/supacloud/issues/1784)) ([b45db88](https://github.com/vibeunion/supacloud/commit/b45db8810bf184d564b375b299d14407bc686e2a))
+
 ## [0.10.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.9.0...delivery-v0.10.0) (2026-10-11)
 
 
