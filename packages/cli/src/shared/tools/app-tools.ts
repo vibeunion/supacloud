@@ -1261,7 +1261,7 @@ async function runAppRelease(
             configurationId = (configurationWrite as { configuration_id: string }).configuration_id;
         } catch {
             return releasePhaseFailure("configure", releaseControlFailure(
-                "applications.release_application", "INVALID_RESPONSE", null,
+                "applications.deploy_application", "INVALID_RESPONSE", null,
                 { project_ref: ref, application_id: id, environment_id: environmentId },
             ), completed);
         }

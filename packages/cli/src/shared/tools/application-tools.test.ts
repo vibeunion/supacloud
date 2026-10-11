@@ -95,48 +95,6 @@ test("application logs stay bound to the selected environment", async () => {
   expect(result).toMatchObject({ ok: true, application_id: "reviews", environment_id: "test" });
 });
 
-test("release_application posts one combined configuration and activation request", async () => {
-  let requestedPath = "";
-  let requestedBody: unknown;
-  const handler = tool({}, {
-    post: (async (path: string, body: unknown) => {
-      requestedPath = path;
-      requestedBody = body;
-      return {
-        ok: true, status: 200,
-        data: {
-          schema: "supacloud.application-release.v1",
-          project_ref: "project", application_id: "reviews", environment_id: "test",
-          release_id: releaseId, configuration_id: configurationId,
-          activation_id: activationId, expected_activation_id: null,
-          plan_sha256: "d".repeat(64), action: "activate",
-          replayed: false, execution_performed: true,
-        },
-      };
-    }) as HttpTransport["post"],
-  });
-  const result = JSON.parse((await handler({
-    action: "release_application", ref: "project", id: "reviews", environment_id: "test",
-    release_id: releaseId,
-    configuration_write: {
-      configuration_id: configurationId, expected_configuration_id: null,
-      configuration: {
-        bun_version: "1.3.0",
-        targets: [{ name: "api", kind: "http", hosts: ["reviews.example.test"], environment: {} }],
-      },
-    },
-  })).content[0]!.text);
-  expect(result).toMatchObject({
-    ok: true, operation: "applications.release_application",
-    release_id: releaseId, configuration_id: configurationId,
-    activation_id: activationId, execution_performed: true,
-  });
-  expect(requestedPath).toBe("/v1/projects/project/applications/reviews/environments/test/release");
-  expect(requestedBody).toMatchObject({
-    release_id: releaseId, configuration_write: { configuration_id: configurationId },
-  });
-});
-
 test("delivery schemas validate through the CLI argument parser after the TypeBox upgrade", () => {
   const args = {
     action: "activate_release" as const, ref: "project", id: "reviews", environment_id: "test",

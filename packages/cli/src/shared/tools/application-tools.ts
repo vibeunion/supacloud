@@ -8,7 +8,7 @@ import {
   parseApplicationPromotionPlan,
   parseApplicationActivationHistory, parseApplicationHistoryCursor, applicationHistoryPositionBefore,
   parseApplicationDeployPlan, type ApplicationDeployPlan, type ApplicationReleaseRecord,
-  parseApplicationReleaseResult, parseApplicationDeployResult,
+  parseApplicationDeployResult,
 } from "@supacloud/delivery";
 import {
   ApplicationIdSchema, ApplicationReleaseIdSchema, ApplicationReleaseRecordSchema,
@@ -16,7 +16,7 @@ import {
   ApplicationActivationResultSchema, ApplicationActivationRetirementResultSchema, ApplicationRollbackSnapshotSchema,
   ApplicationActivationHistoryCursorSchema,
   ApplicationPromotionPlanSchema,
-  ApplicationReleaseRequestSchema, ApplicationDeployRequestSchema,
+  ApplicationDeployRequestSchema,
   ApplicationDeployWebRequestSchema,
 } from "./application-schemas";
 import {
@@ -37,7 +37,7 @@ export const APPLICATION_TOOL_SCHEMA = {
   action: withDescription(stringEnum([
     "list_releases", "get_release", "upload_release", "get_runtime", "get_deployment_evidence",
     "get_configuration", "put_configuration", "get_deploy_plan", "deploy_release",
-    "release_application", "deploy_application",
+    "deploy_application",
     "get_release_transfer_plan", "transfer_release",
     "get_promotion_plan", "promote_application", "get_promotion_status", "reconcile_promotion",
     "get_preview_plan", "list_previews", "create_preview", "get_preview", "cleanup_preview",
@@ -54,7 +54,7 @@ export const APPLICATION_TOOL_SCHEMA = {
   expected_activation_id: optional(Type.Union([ApplicationActivationIdSchema, Type.Null(), Type.Literal("absent")]),
     "[deploy_release/activate_release/rollback_release] Current activation ID, or absent for first activation; selected from verified plan for automatic deployment"),
   configuration_path: optional(Type.String(), "[put_configuration] Local configuration write JSON including revision and expected revision"),
-  configuration_write: optional(Type.Unknown(), "[release_application/deploy_application] Parsed immutable configuration write"),
+  configuration_write: optional(Type.Unknown(), "[deploy_application] Parsed immutable configuration write"),
   manifest_path: optional(Type.String(), "[upload_release] Local delivery.manifest.json"),
   web: optional(ApplicationDeployWebRequestSchema, "[deploy_application] Immutable staged Web release binding"),
   release_id: optional(ApplicationReleaseIdSchema, "[get_release/get_deploy_plan/deploy_release/activate_release/reconcile_activation/rollback_release] Immutable application release ID; platform selects previous for default rollback"),
@@ -391,64 +391,6 @@ export function registerApplicationTools(server: ToolServer, http: HttpTransport
       if (action === "get_deploy_plan") {
         const observed = await readDeployPlan(http, args, project);
         return observed.failure ?? releaseControlSuccess(operation, { ...observed.identity, plan: observed.plan });
-      }
-      if (action === "release_application") {
-        const environmentId = text(args, "environment_id");
-        const releaseId = text(args, "release_id");
-        if (!Value.Check(ApplicationIdSchema, environmentId)
-          || !Value.Check(ApplicationReleaseIdSchema, releaseId)) {
-          throw new Error("Invalid application release identity");
-        }
-        const configurationId = args["configuration_id"];
-        const activationId = args["activation_id"];
-        const expectedActivationId = args["expected_activation_id"];
-        if (configurationId !== undefined && !Value.Check(ApplicationConfigurationIdSchema, configurationId)) {
-          throw new Error("Invalid application configuration ID");
-        }
-        if (activationId !== undefined && !Value.Check(ApplicationActivationIdSchema, activationId)) {
-          throw new Error("Invalid application activation ID");
-        }
-        if (expectedActivationId !== undefined && expectedActivationId !== null
-          && expectedActivationId !== "absent" && !Value.Check(ApplicationActivationIdSchema, expectedActivationId)) {
-          throw new Error("Invalid expected activation ID");
-        }
-        const configurationWrite = args["configuration_write"];
-        const parsedConfigurationWrite = configurationWrite === undefined
-          ? undefined : parseApplicationConfigurationWrite(configurationWrite);
-        const requestedConfigurationId = configurationId ?? parsedConfigurationWrite?.configuration_id;
-        const body = {
-          release_id: releaseId,
-          ...(configurationId === undefined ? {} : { configuration_id: configurationId }),
-          ...(configurationWrite === undefined ? {} : { configuration_write: configurationWrite }),
-          ...(activationId === undefined ? {} : { activation_id: activationId }),
-          ...(expectedActivationId === undefined ? {} : {
-            expected_activation_id: expectedActivationId === "absent" ? null : expectedActivationId,
-          }),
-        };
-        if (!Value.Check(ApplicationReleaseRequestSchema, body)) {
-          throw new Error("Invalid application release request");
-        }
-        const result = await http.post(
-          `/v1/projects/${project}/applications/${encodeURIComponent(id)}/environments/${encodeURIComponent(environmentId)}/release`,
-          body, { timeoutMs: 120_000, maxJsonBytes: 65_536, responseTimeoutMs: 30_000 },
-        );
-        const identity = {
-          project_ref: ref, application_id: id, environment_id: environmentId, release_id: releaseId,
-          ...(configurationId === undefined ? {} : { configuration_id: configurationId }),
-          ...(activationId === undefined ? {} : { activation_id: activationId }),
-        };
-        if (!result.ok) return releaseControlMutationFailure(operation, result, identity);
-        try {
-          if (result.status !== 200) throw new Error();
-          const release = parseApplicationReleaseResult(result.data);
-          if (release.project_ref !== ref || release.application_id !== id
-            || release.environment_id !== environmentId || release.release_id !== releaseId
-            || requestedConfigurationId !== undefined && release.configuration_id !== requestedConfigurationId
-            || activationId !== undefined && release.activation_id !== activationId) throw new Error();
-          return releaseControlSuccess(operation, release);
-        } catch {
-          return releaseControlFailure(operation, "OUTCOME_UNKNOWN", result.status, identity);
-        }
       }
       if (action === "deploy_application") {
         const environmentId = text(args, "environment_id");
