@@ -14,7 +14,11 @@ import {
   ApplicationConfigurationIdSchema, ApplicationActivationIdSchema, ApplicationActivationWriteSchema,
   ApplicationActivationResultSchema, ApplicationActivationRetirementResultSchema, ApplicationRollbackSnapshotSchema,
   ApplicationActivationHistoryCursorSchema,
+  ApplicationPromotionPlanSchema,
 } from "./application-schemas";
+import {
+  ApplicationPromotionResultSchema, parsePreviewList, parsePreviewReceipt, parsePromotionStatus,
+} from "./application-workflow-schemas";
 import { canonical, digest } from "@supacloud/delivery/files";
 import { optional, stringEnum, withDescription, type ToolSchema } from "../schema";
 import { projectRefPathSegment } from "../project-ref";
@@ -31,8 +35,10 @@ export const APPLICATION_TOOL_SCHEMA = {
     "list_releases", "get_release", "upload_release", "get_runtime", "get_deployment_evidence",
     "get_configuration", "put_configuration", "get_deploy_plan", "deploy_release",
     "get_release_transfer_plan", "transfer_release",
-    "get_promotion_plan",
-    "activate_release", "rollback_release", "get_rollback_snapshot", "get_history", "reconcile_activation", "retire_activation",
+    "get_promotion_plan", "promote_application", "get_promotion_status", "reconcile_promotion",
+    "get_preview_plan", "list_previews", "create_preview", "get_preview", "cleanup_preview",
+    "activate_release", "reconcile_activation", "retire_activation",
+    "rollback_release", "get_rollback_snapshot", "get_history",
     ...APPLICATION_PREVIEW_ACTIONS,
     "logs",
   ]), "Action"),
@@ -49,6 +55,9 @@ export const APPLICATION_TOOL_SCHEMA = {
   source_ref: optional(Type.String({ pattern: "^[A-Za-z0-9_-]{1,20}$" }), "[get_release_transfer_plan/transfer_release] Source project ref"),
   source_release_id: optional(ApplicationReleaseIdSchema, "[get_release_transfer_plan/transfer_release] Source immutable release ID"),
   source_environment_id: optional(ApplicationIdSchema, "[get_promotion_plan] Source environment"),
+  mutation_id: optional(ApplicationActivationIdSchema, "[promote_application/get_promotion_status/reconcile_promotion] Stable promotion mutation ID"),
+  approved_migration_digest: optional(ApplicationReleaseIdSchema, "[promote_application] Exact reviewed migration execution-plan digest"),
+  plan: optional(ApplicationPromotionPlanSchema, "[promote_application] Immutable plan returned by get_promotion_plan"),
   cursor: optional(Type.Union([ApplicationReleaseIdSchema, ApplicationActivationHistoryCursorSchema]), "[list_releases/get_history] Returned page cursor"),
   limit: optional(Type.Integer({ minimum: 1, maximum: 100 }), "[list_releases/get_history] Page size, default 50/20"),
   offset: optional(Type.Integer({ minimum: 0, maximum: 1_000_000 }), "[logs] Result offset"),
@@ -66,6 +75,14 @@ const inventorySchema = Type.Object({
   releases: Type.Array(ApplicationReleaseRecordSchema, { maxItems: 100 }),
   next_cursor: Type.Union([ApplicationReleaseIdSchema, Type.Null()]),
 });
+
+function promotionPath(project: string, id: string, environmentId: string): string {
+  return `/v1/projects/${project}/applications/${encodeURIComponent(id)}/environments/${encodeURIComponent(environmentId)}/promotions`;
+}
+
+function previewPath(project: string, id: string, environmentId: string): string {
+  return `/v1/projects/${project}/applications/${encodeURIComponent(id)}/environments/${encodeURIComponent(environmentId)}`;
+}
 
 function text(args: Record<string, unknown>, field: string): string {
   const value = args[field];
@@ -429,6 +446,171 @@ export function registerApplicationTools(server: ToolServer, http: HttpTransport
           });
         } catch {
           return releaseControlFailure(operation, "INVALID_RESPONSE", result.status);
+        }
+      }
+      if (action === "promote_application") {
+        const environmentId = text(args, "environment_id");
+        const sourceRef = text(args, "source_ref"), sourceEnvironmentId = text(args, "source_environment_id");
+        const sourceReleaseId = text(args, "source_release_id");
+        const mutationId = text(args, "mutation_id");
+        if (!Value.Check(ApplicationIdSchema, environmentId)
+          || !/^[a-z0-9-]{1,20}$/.test(sourceRef)
+          || !Value.Check(ApplicationIdSchema, sourceEnvironmentId)
+          || !Value.Check(ApplicationReleaseIdSchema, sourceReleaseId)
+          || !Value.Check(ApplicationActivationIdSchema, mutationId)) {
+          throw new Error("Invalid promotion identity");
+        }
+        const plan = parseApplicationPromotionPlan(args["plan"]);
+        if (plan.project_ref !== ref || plan.application_id !== id || plan.environment_id !== environmentId
+          || plan.source.project_ref !== sourceRef || plan.source.environment_id !== sourceEnvironmentId
+          || plan.source.release_id !== sourceReleaseId || plan.action === "no-op"
+          || plan.blockers.some(code => !["MIGRATION_PENDING", "BACKUP_REQUIRED"].includes(code))
+          || plan.target.configuration_id === null) {
+          throw new Error("Promotion plan does not match the request");
+        }
+        const configurationId = text(args, "configuration_id");
+        if (configurationId !== plan.target.configuration_id) throw new Error("Promotion configuration does not match the plan");
+        const identity = {
+          project_ref: ref, application_id: id, environment_id: environmentId,
+          mutation_id: mutationId, plan_sha256: plan.plan_sha256,
+        };
+        const result = await http.post(`${promotionPath(project, id, environmentId)}`, {
+          mutation_id: mutationId, source_ref: sourceRef, source_environment_id: sourceEnvironmentId,
+          source_release_id: sourceReleaseId, configuration_id: configurationId, plan,
+          ...(typeof args["approved_migration_digest"] === "string"
+            ? { approved_migration_digest: args["approved_migration_digest"] } : {}),
+        }, { timeoutMs: 120_000, maxJsonBytes: 65_536, responseTimeoutMs: 30_000 });
+        if (!result.ok) return releaseControlMutationFailure(operation, result, identity);
+        try {
+          const body = result.data;
+          if (result.status !== 200 || !Value.Check(ApplicationPromotionResultSchema, body)) throw new Error();
+          if (body.project_ref !== ref || body.application_id !== id || body.environment_id !== environmentId
+            || body.mutation_id !== mutationId || body.plan_sha256 !== plan.plan_sha256
+            || body.activation_id === mutationId || body.activation_id === plan.target.activation_id) {
+            throw new Error();
+          }
+          return releaseControlSuccess(operation, { ...identity, result: body });
+        } catch {
+          return releaseControlFailure(operation, "OUTCOME_UNKNOWN", result.status, identity);
+        }
+      }
+      if (action === "get_promotion_status" || action === "reconcile_promotion") {
+        const environmentId = text(args, "environment_id"), mutationId = text(args, "mutation_id");
+        if (!Value.Check(ApplicationIdSchema, environmentId) || !Value.Check(ApplicationActivationIdSchema, mutationId)) {
+          throw new Error("Invalid promotion identity");
+        }
+        const identity = {
+          project_ref: ref, application_id: id, environment_id: environmentId, mutation_id: mutationId,
+        };
+        const endpoint = `${promotionPath(project, id, environmentId)}/${mutationId}`;
+        const result = action === "get_promotion_status"
+          ? await http.get(endpoint, { maxJsonBytes: 65_536, responseTimeoutMs: 30_000 })
+          : await http.post(`${endpoint}/reconcile`, {}, { timeoutMs: 120_000, maxJsonBytes: 65_536, responseTimeoutMs: 30_000 });
+        if (!result.ok) return action === "reconcile_promotion"
+          ? releaseControlMutationFailure(operation, result, identity)
+          : releaseControlFailure(operation, "HTTP_ERROR", result.status, identity);
+        try {
+          if (result.status !== 200) throw new Error();
+          const status = parsePromotionStatus(result.data, identity);
+          if (action === "reconcile_promotion" && status.mutation.status !== "succeeded") {
+            return releaseControlFailure(operation, status.mutation.status === "outcome_unknown"
+              ? "OUTCOME_UNKNOWN" : "MUTATION_NOT_SUCCEEDED", result.status, { ...identity, ...status });
+          }
+          return releaseControlSuccess(operation, status);
+        } catch {
+          return releaseControlFailure(operation, action === "reconcile_promotion" ? "OUTCOME_UNKNOWN" : "INVALID_RESPONSE",
+            result.status, identity);
+        }
+      }
+      if (action === "get_preview_plan" || action === "list_previews" || action === "create_preview"
+        || action === "get_preview" || action === "cleanup_preview") {
+        const environmentId = text(args, "environment_id");
+        if (!Value.Check(ApplicationIdSchema, environmentId)) throw new Error("Invalid preview environment");
+        const previewId = action === "get_preview" || action === "cleanup_preview" ? text(args, "preview_id") : undefined;
+        const identity = { project_ref: ref, application_id: id, environment_id: environmentId,
+          ...(previewId === undefined ? {} : { preview_id: previewId }) };
+        const base = previewPath(project, id, environmentId);
+        let result: HttpResult<unknown>;
+        let sourceRelease: ApplicationReleaseRecord | undefined;
+        if (action === "get_preview_plan") {
+          if (args["configuration_id"] !== undefined) {
+            throw new Error("preview-plan only plans resource isolation; configuration_id applies to preview-create");
+          }
+          const releaseId = text(args, "release_id"), branchRef = text(args, "branch_ref");
+          if (!Value.Check(ApplicationReleaseIdSchema, releaseId)
+            || !/^[A-Za-z0-9_-]{1,20}$/.test(branchRef)) throw new Error("Invalid preview plan identity");
+          const query = new URLSearchParams({ release_id: releaseId, branch_ref: branchRef });
+          if (typeof args["data_mode"] === "string") query.set("data_mode", args["data_mode"]);
+          result = await http.get(`${base}/preview-plan?${query}`, { maxJsonBytes: 65_536, responseTimeoutMs: 30_000 });
+        } else if (action === "list_previews") {
+          result = await http.get(`${base}/previews`, { maxJsonBytes: 262_144, responseTimeoutMs: 30_000 });
+        } else {
+          if (previewId !== undefined && !/^[a-f0-9-]{8,64}$/.test(previewId)) throw new Error("Invalid preview ID");
+          const endpoint = previewId === undefined ? `${base}/previews` : `${base}/previews/${previewId}`;
+          if (action === "create_preview") {
+            const releaseId = text(args, "release_id");
+            if (!Value.Check(ApplicationReleaseIdSchema, releaseId)) throw new Error("Invalid preview release ID");
+            const source = await http.get(`${path}/${releaseId}`, { maxJsonBytes: 196_608, responseTimeoutMs: 30_000 });
+            if (!source.ok) return releaseControlFailure(operation, "HTTP_ERROR", source.status, identity);
+            try {
+              if (source.status !== 200 || !Value.Check(responseSchema, source.data)
+                || source.data.project_ref !== ref || source.data.application_id !== id) throw new Error();
+              sourceRelease = boundRelease(source.data.release, ref, id);
+              if (sourceRelease.release_id !== releaseId) throw new Error();
+            } catch {
+              return releaseControlFailure(operation, "INVALID_RESPONSE", source.status, identity);
+            }
+            result = await http.post(endpoint, {
+              release_id: releaseId,
+              ...(typeof args["branch_name"] === "string" ? { branch_name: args["branch_name"] } : {}),
+              ...(typeof args["data_mode"] === "string" ? { data_mode: args["data_mode"] } : {}),
+              ...(typeof args["configuration_id"] === "string" ? { configuration_id: args["configuration_id"] } : {}),
+            }, { timeoutMs: 120_000, maxJsonBytes: 131_072, responseTimeoutMs: 30_000 });
+          } else if (action === "cleanup_preview") {
+            result = await http.deleteReleaseMutation(endpoint);
+          } else {
+            result = await http.get(endpoint, { maxJsonBytes: 131_072, responseTimeoutMs: 30_000 });
+          }
+        }
+        if (!result.ok) return action === "create_preview" || action === "cleanup_preview"
+          ? releaseControlMutationFailure(operation, result, identity)
+          : releaseControlFailure(operation, "HTTP_ERROR", result.status, identity);
+        try {
+          if (result.status !== (action === "create_preview" ? 202 : 200)) throw new Error();
+          if (action === "list_previews") {
+            const list = parsePreviewList(result.data, identity);
+            return releaseControlSuccess(operation, { ...identity, previews: list.previews });
+          }
+          const preview = parsePreviewReceipt(result.data, {
+              ...identity,
+              ...(typeof args["preview_id"] === "string" ? { preview_id: args["preview_id"] } : {}),
+              ...(action === "get_preview_plan" && typeof args["release_id"] === "string"
+                ? { release_id: args["release_id"] } : {}),
+              ...(action === "get_preview_plan" && typeof args["branch_ref"] === "string"
+                ? { branch_ref: args["branch_ref"] } : {}),
+              ...(action === "get_preview_plan" || action === "create_preview"
+                ? { data_mode: String(args["data_mode"] ?? "schema_only") } : {}),
+              ...(action === "create_preview" && typeof args["configuration_id"] === "string"
+                ? { configuration_id: args["configuration_id"] } : {}),
+            });
+          if (action === "get_preview_plan" && preview.status !== "planned"
+            || action === "create_preview" && preview.status !== "provisioning") throw new Error();
+          if (action === "create_preview" && (!sourceRelease
+            || preview.resources.database_branch.branch_ref !== `pv${preview.preview_id.replaceAll("-", "").slice(0, 18)}`
+            || preview.resources.database_branch.branch_ref === ref
+            || preview.release_id !== applicationReleaseId(
+              preview.resources.database_branch.branch_ref, id, sourceRelease.manifest_sha256,
+            ))) throw new Error();
+          if (action === "cleanup_preview" && (preview.status !== "cleaned"
+            || !preview.cleanup.completed || preview.cleanup.required)) {
+            return releaseControlFailure(operation, "MUTATION_NOT_SUCCEEDED", result.status,
+              { ...identity, preview });
+          }
+          return releaseControlSuccess(operation, { ...identity, preview });
+        } catch {
+          return releaseControlFailure(operation,
+            action === "create_preview" || action === "cleanup_preview" ? "OUTCOME_UNKNOWN" : "INVALID_RESPONSE",
+            result.status, identity);
         }
       }
       if (action === "logs") {

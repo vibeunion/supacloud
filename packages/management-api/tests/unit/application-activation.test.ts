@@ -10,6 +10,8 @@ import {
 import { ApplicationActiveStorage } from "../../src/services/application-active-storage";
 import { runtimeInput } from "../helpers/application-runtime";
 import { activationJournal } from "../helpers/application-activation-journal";
+import { projectMutationResourceKey } from "../../src/services/project-mutation.service";
+import { stableSha256 } from "../../src/utils/stable-json";
 
 let root: string;
 beforeEach(async () => { root = await mkdtemp(join(tmpdir(), "application-activation-")); });
@@ -58,6 +60,12 @@ test("activation journals each phase and commits only after readiness and route 
   expect(f.calls).toEqual(["compatibility", "prepare", "start", "ready", "route", "verify-route", "commit", "ready", "verify-route"]);
   const state = f.states.get(f.input.runtime.activationId)!;
   expect(state.status).toBe("succeeded");
+  expect(state.resourceKey).toBe(projectMutationResourceKey({
+    type: "application_release",
+    id: stableSha256({
+      applicationId: f.input.runtime.release.application_id, environmentId: f.input.runtime.environmentId,
+    }),
+  }));
   expect(state.checkpoint.phase).toBe("committed");
   expect(JSON.stringify(state)).not.toContain("private-config-fixture");
   const reopened = new ApplicationActiveStorage(join(root, "authority"));
@@ -66,6 +74,31 @@ test("activation journals each phase and commits only after readiness and route 
   expect((await f.service.activate(f.input)).replayed).toBe(true);
   expect(f.calls).toEqual(["ready", "verify-route"]);
 });
+
+test.each(["bare-digest", "wrong-type", "wrong-application", "wrong-environment", "missing"] as const)(
+  "activation replay and recovery reject a %s resource key before runtime observation",
+  async fault => {
+    const f = fixture();
+    await f.service.activate(f.input);
+    const id = stableSha256({
+      applicationId: f.input.runtime.release.application_id, environmentId: f.input.runtime.environmentId,
+    });
+    const state = f.states.get(f.input.runtime.activationId)!;
+    state.resourceKey = fault === "missing" ? null : fault === "bare-digest" ? id
+      : projectMutationResourceKey({
+        type: fault === "wrong-type" ? "frontend_release" : "application_release",
+        id: fault === "wrong-application" || fault === "wrong-environment"
+          ? stableSha256({
+            applicationId: fault === "wrong-application" ? "other" : f.input.runtime.release.application_id,
+            environmentId: fault === "wrong-environment" ? "other" : f.input.runtime.environmentId,
+          }) : id,
+      });
+    f.calls.length = 0;
+    await expect(f.service.activate(f.input)).rejects.toThrow("RECEIPT_INVALID");
+    await expect(f.service.reconcile(recovery(f.input))).rejects.toThrow("RECEIPT_INVALID");
+    expect(f.calls).toEqual([]);
+  },
+);
 
 test("upgrade and explicit application rollback use new activation IDs without executing data recovery", async () => {
   const f = fixture();

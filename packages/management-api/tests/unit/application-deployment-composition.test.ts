@@ -19,6 +19,10 @@ test("explicit composition registers activation, observation recovery and retire
   expect(writes).toContain(prefix);
   expect(writes).toContain(`${prefix}/:activationId/reconcile`);
   expect(writes).toContain(`${prefix}/:activationId/retire`);
+  const promotions = "/v1/projects/:ref/applications/:id/environments/:environmentId/promotions";
+  expect(writes).toContain(promotions);
+  expect(writes).toContain(`${promotions}/:mutationId/reconcile`);
+  expect(routes.routes.some(route => route.method === "GET" && route.path === `${promotions}/:mutationId`)).toBe(true);
   expect(verified).toBe(false);
   expect(applicationRoutes.routes.some(route => route.path.includes("/activations"))).toBe(false);
 });
@@ -30,4 +34,8 @@ test("routes index mounts the default composed activation routes", () => {
   expect(mountedApplicationRoutes.routes.some(route =>
     route.path === "/v1/projects/:ref/applications/:id/environments/:environmentId/activations/:activationId/reconcile",
   )).toBe(true);
+  const prefix = "/v1/projects/:ref/applications/:id/environments/:environmentId/promotions";
+  for (const [method, path] of [["POST", prefix], ["GET", `${prefix}/:mutationId`], ["POST", `${prefix}/:mutationId/reconcile`]]) {
+    expect(mountedApplicationRoutes.routes.some(route => route.method === method && route.path === path)).toBe(true);
+  }
 });

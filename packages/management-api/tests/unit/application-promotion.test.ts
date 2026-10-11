@@ -8,6 +8,9 @@ import {
 import {
   ApplicationPromotions, ApplicationPromotionError, type ApplicationPromotionDependencies,
 } from "../../src/services/application-promotion";
+import {
+  ApplicationPromotionOwnershipError, type ApplicationPromotionOwner,
+} from "../../src/services/application-promotion-ownership";
 import type { ApplicationActiveRecord } from "../../src/services/application-activation";
 import { ApplicationMigrations } from "../../src/services/application-migrations";
 import { projectMutationResourceKey, type ProjectMutationState } from "../../src/services/project-mutation.service";
@@ -81,7 +84,10 @@ function state(record: ApplicationActiveRecord): ProjectMutationState {
     completedAt: new Date(now).toISOString(), createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString(),
   };
 }
-function fixture(assertIdle: NonNullable<ApplicationPromotionDependencies["assertIdle"]> = async () => {}) {
+function fixture(
+  assertIdle: NonNullable<ApplicationPromotionDependencies["assertIdle"]> = async () => {},
+  overrides: Partial<Pick<ApplicationPromotionDependencies, "assertOwned">> = {},
+) {
   const source = active("staging");
   let target: ApplicationActiveRecord | null = null;
   let configuration: ApplicationConfigurationView | null = {
@@ -140,6 +146,7 @@ function fixture(assertIdle: NonNullable<ApplicationPromotionDependencies["asser
     evidence: { read: async ref => structuredClone(ref === "staging" ? sourceEvidence : targetEvidence) },
     mutations: { read: async ref => structuredClone(ref === "staging" ? sourceState : targetState) },
     now: () => now,
+    ...overrides,
   });
   const input = {
     projectRef: "production", applicationId: "reviews", environmentId: "production",
@@ -184,13 +191,20 @@ test("no-op requires active candidate, matching configuration, successful journa
   expect((await f.service.readPlan(f.input)).action).toBe("promote");
 });
 
-test.each(["status", "scope", "operation", "resource", "receipt"] as const)(
+test.each(["status", "scope", "operation", "resource", "bare-resource", "resource-type", "receipt"] as const)(
   "source journal %s mismatch blocks promotion", async fault => {
     const f = fixture();
     if (fault === "status") f.sourceState.status = "outcome_unknown";
     if (fault === "scope") f.sourceState.projectRef = "foreign";
     if (fault === "operation") f.sourceState.operation = "frontend.release.activate";
     if (fault === "resource") f.sourceState.resourceKey = "d".repeat(64);
+    if (fault === "bare-resource") f.sourceState.resourceKey = stableSha256({
+      applicationId: "reviews", environmentId: f.source.runtime.environmentId,
+    });
+    if (fault === "resource-type") f.sourceState.resourceKey = projectMutationResourceKey({
+      type: "frontend_release",
+      id: stableSha256({ applicationId: "reviews", environmentId: f.source.runtime.environmentId }),
+    });
     if (fault === "receipt") f.sourceState.receipt!["release_id"] = "d".repeat(64);
     const plan = await f.service.readPlan(f.input);
     expect(plan.action).toBe("blocked");
@@ -324,6 +338,83 @@ test("promotion checks both exact environment scopes before observation and arou
     { projectRef: "staging", applicationId: "reviews", environmentId: "staging" },
     { projectRef: "production", applicationId: "reviews", environmentId: "production" },
   ]).flat());
+});
+
+function promotionOwner(): ApplicationPromotionOwner {
+  return {
+    lease: {
+      projectRef: "production", mutationId: activation,
+      leaseToken: "21234567-89ab-4def-8123-456789abcdef", fencingEpoch: 3,
+    },
+    principal: { type: "admin", id: "admin:release" }, requestFingerprint: "d".repeat(64),
+  };
+}
+
+test("owned plan revalidation bypasses only the exact target owner and still checks the source", async () => {
+  const checks: string[] = [];
+  const owned: string[] = [];
+  const f = fixture(async scope => { checks.push(`idle:${scope.projectRef}:${scope.environmentId}`); }, {
+    assertOwned: async (scope, candidate) => {
+      owned.push(`${scope.projectRef}:${scope.environmentId}:${candidate.lease.mutationId}`);
+    },
+  });
+  const owner = promotionOwner();
+  const plan = await f.service.readOwnedPlan(f.input, owner);
+  expect(plan.action).toBe("promote");
+  expect(owned).toEqual(Array(3).fill("production:production:01234567-89ab-4def-8123-456789abcdef"));
+  expect(checks).toEqual(Array(3).fill("idle:staging:staging"));
+});
+
+test("a target owner cannot bypass a busy source or enable public planning", async () => {
+  let ownershipChecks = 0, sourceBusy = false;
+  const f = fixture(async scope => {
+    if (sourceBusy || scope.projectRef === "production") {
+      throw new ApplicationPromotionError("APPLICATION_PROMOTION_BUSY", 409);
+    }
+  }, { assertOwned: async () => { ownershipChecks++; } });
+  await expect(f.service.readPlan(f.input)).rejects.toMatchObject({ code: "APPLICATION_PROMOTION_BUSY" });
+  expect(ownershipChecks).toBe(0);
+  expect((await f.service.readOwnedPlan(f.input, promotionOwner())).action).toBe("promote");
+  sourceBusy = true;
+  const before = ownershipChecks;
+  await expect(f.service.readOwnedPlan(f.input, promotionOwner())).rejects.toMatchObject({
+    code: "APPLICATION_PROMOTION_BUSY", statusCode: 409,
+  });
+  expect(ownershipChecks).toBe(before);
+});
+
+test.each([1, 2, 3])("ownership lost at check %s rejects the plan without exposing the lease", async lostAt => {
+  let checks = 0;
+  const owner = promotionOwner();
+  const f = fixture(async () => {}, {
+    assertOwned: async () => {
+      if (++checks === lostAt) throw new ApplicationPromotionOwnershipError();
+    },
+  });
+  await expect(f.service.readOwnedPlan(f.input, owner)).rejects.toMatchObject({
+    code: "APPLICATION_PROMOTION_OWNERSHIP_LOST", message: "APPLICATION_PROMOTION_OWNERSHIP_LOST", statusCode: 409,
+  });
+  expect(checks).toBe(lostAt);
+  expect(f.reads()).toBe(lostAt === 1 ? 0 : 1);
+});
+
+test("owned planning snapshots the request and lease before asynchronous observations", async () => {
+  const owner = promotionOwner();
+  const inputScopes: string[] = [], epochs: number[] = [];
+  const f = fixture(async () => {
+    owner.lease.fencingEpoch++;
+    f.input.environmentId = "changed";
+  }, {
+    assertOwned: async (scope, candidate) => {
+      inputScopes.push(scope.environmentId);
+      epochs.push(candidate.lease.fencingEpoch);
+    },
+  });
+  const plan = await f.service.readOwnedPlan(f.input, owner);
+  expect(plan.environment_id).toBe("production");
+  expect(inputScopes).toEqual(["production", "production", "production"]);
+  expect(epochs).toEqual([3, 3, 3]);
+  expect(JSON.stringify(plan)).not.toContain(owner.lease.leaseToken);
 });
 
 for (const noOp of [false, true]) {

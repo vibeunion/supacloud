@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "types": ["bun"],
+    "noEmit": true
+  },
+  "include": [
+    "src/types/*.d.ts",
+    "tests/unit/application-migration-execution.test.ts",
+    "tests/unit/application-migrations.test.ts",
+    "tests/unit/migration-lock.test.ts",
+    "tests/unit/database-routes.test.ts",
+    "tests/unit/database-migration-baseline.routes.test.ts"
+  ]
+}

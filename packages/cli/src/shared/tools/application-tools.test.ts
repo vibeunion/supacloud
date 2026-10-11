@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   applicationReleaseId, parseApplicationReleaseTransferPlan, parseApplicationReleaseTransferResult,
+  applicationPromotionPlanDigest, parseApplicationPromotionPlan, parseApplicationConfigurationView,
   type ApplicationReleaseRecord, type ApplicationReleaseTransferPlan, type ApplicationReleaseTransferResult,
 } from "@supacloud/delivery";
 import { authorizeExecution, executionMode, validateExecutionPolicyCoverage } from "../execution-policy";
@@ -17,6 +18,7 @@ import { runAppTool } from "./app-tools";
 import { fileURLToPath } from "node:url";
 import { createServer, type Socket } from "node:net";
 import type { ToolInvocation } from "../tool-server";
+import { mutationRequestFingerprint } from "../mutation-protocol";
 
 function record(manifest = "a".repeat(64), projectRef = "project"): ApplicationReleaseRecord {
   return {
@@ -253,6 +255,385 @@ test("unmounted activation controls report HTTP errors without retry or outcome-
       error: { code: "HTTP_ERROR", http_status: 404 },
     });
   }
+});
+
+test("promotion execution posts once and preserves an unknown mutation identity", async () => {
+  const configurationId = configurationView().configuration_id;
+  const content = {
+    schema: "supacloud.application-promotion-plan.v1" as const,
+    project_ref: "project", application_id: "reviews", environment_id: "test",
+    manifest_sha256: "a".repeat(64),
+    source: {
+      project_ref: "staging", environment_id: "staging",
+      release_id: applicationReleaseId("staging", "reviews", "a".repeat(64)),
+      activation_id: "01234567-89ab-4def-8123-456789abcdef",
+      receipt_confirmed: true, ready: true, smoke_verified: true, evidence_sha256: "e".repeat(64),
+      migration_ledger_digest: "b".repeat(64),
+    },
+    target: {
+      candidate_release_id: applicationReleaseId("project", "reviews", "a".repeat(64)),
+      current_release_id: null, artifact_action: "materialize" as const, activation_id: null,
+      configuration_id: configurationId, receipt_confirmed: false, ready: false, smoke_verified: false,
+      evidence_sha256: null, migration_ledger_digest: null,
+      configuration: parseApplicationConfigurationView(configurationView()),
+    },
+    migrations: {
+      ledger_digest: "b".repeat(64), ledger_compatible: true, project_migrations_applied: true,
+      pending_versions: [], operator_provisioning_required: false,
+    },
+    backup: { required: false, confirmed: false as const }, action: "promote" as const,
+    blockers: [], steps: ["transfer", "activate-with-cas", "verify-runtime-and-smoke"],
+    execution_performed: false as const, data_recovery: "separate-required" as const,
+  };
+  const promotionPlan = parseApplicationPromotionPlan({ ...content, plan_sha256: applicationPromotionPlanDigest(content) });
+  const mutationId = "01234567-89ab-4def-8123-456789abcdef";
+  let requests = 0;
+  const handler = tool(null, {
+    post: (async (path: string, body: unknown) => {
+      requests++;
+      expect(path).toBe("/v1/projects/project/applications/reviews/environments/test/promotions");
+      expect(body).toMatchObject({ mutation_id: mutationId, plan: promotionPlan });
+      return { ok: false, status: 504, transportError: true, data: null };
+    }) as HttpTransport["post"],
+  });
+  const result = JSON.parse((await handler({
+    action: "promote_application", ref: "project", id: "reviews", environment_id: "test",
+    source_ref: "staging", source_environment_id: "staging", source_release_id: promotionPlan.source.release_id,
+    configuration_id: configurationId, mutation_id: mutationId, plan: promotionPlan,
+  })).content[0]!.text);
+  expect(requests).toBe(1);
+  expect(result).toMatchObject({ error: { code: "OUTCOME_UNKNOWN" }, mutation_id: mutationId });
+});
+
+function promotionStatusReceipt() {
+  const configurationId = configurationView().configuration_id;
+  const mutationId = "01234567-89ab-4def-8123-456789abcdef";
+  return {
+    project_ref: "project", application_id: "reviews", environment_id: "test",
+    mutation: {
+      project_ref: "project", mutation_id: mutationId, operation: "application.release.promote",
+      resource_key: `v1/application_release/${Buffer.from(mutationRequestFingerprint({
+        applicationId: "reviews", environmentId: "test",
+      })).toString("base64url")}`,
+      request_fingerprint: "a".repeat(64), principal: { type: "project", id: "project:project" },
+      status: "outcome_unknown", checkpoint: {}, receipt: {}, response_status: 503,
+      failure_code: "APPLICATION_PROMOTION_OUTCOME_UNRESOLVED",
+      lease: { owner: null, expires_at: null, fencing_epoch: 0 },
+      completed_at: "2026-10-10T00:00:00.000Z", created_at: "2026-10-10T00:00:00.000Z",
+      updated_at: "2026-10-10T00:00:00.000Z",
+    },
+    promotion: {
+      phase: "verifying", plan_sha256: "b".repeat(64),
+      activation_id: "11234567-89ab-4def-8123-456789abcdef",
+      release_id: "c".repeat(64), configuration_id: configurationId,
+      backup_id: "logical-full_project_" + "d".repeat(32), data_recovery: "separate-required",
+    },
+  };
+}
+
+test("promotion status and reconcile use scoped endpoints and an empty reconcile body", async () => {
+  const response = promotionStatusReceipt();
+  const mutationId = response.mutation.mutation_id;
+  const requests: Array<{ path: string; method: string; body?: unknown }> = [];
+  const handler = tool(response, {
+    get: (async (path: string) => {
+      requests.push({ path, method: "GET" });
+      return { ok: true, status: 200, data: response };
+    }) as HttpTransport["get"],
+    post: (async (path: string, body: unknown) => {
+      requests.push({ path, method: "POST", body });
+      return { ok: true, status: 200, data: {
+        ...response, mutation: { ...response.mutation, status: "succeeded", response_status: 200, failure_code: null },
+      } };
+    }) as HttpTransport["post"],
+  });
+  const status = await handler({
+    action: "get_promotion_status", ref: "project", id: "reviews",
+    environment_id: "test", mutation_id: mutationId,
+  });
+  expect(JSON.parse(status.content[0]!.text)).toMatchObject({ ok: true, mutation: response.mutation });
+  const reconciled = await handler({
+    action: "reconcile_promotion", ref: "project", id: "reviews",
+    environment_id: "test", mutation_id: mutationId,
+  });
+  expect(JSON.parse(reconciled.content[0]!.text)).toMatchObject({ ok: true, mutation: { status: "succeeded" } });
+  expect(requests).toEqual([
+    { path: `/v1/projects/project/applications/reviews/environments/test/promotions/${mutationId}`, method: "GET" },
+    { path: `/v1/projects/project/applications/reviews/environments/test/promotions/${mutationId}/reconcile`, method: "POST", body: {} },
+  ]);
+});
+
+test.each([
+  "scope", "mutation", "operation", "resource", "private", "checkpoint", "receipt",
+  "backup", "activation", "success-phase", "success-backup", "success-lease",
+] as const)("promotion observations reject %s receipts without reflecting payloads", async fault => {
+  const current = promotionStatusReceipt();
+  const success = {
+    ...current,
+    mutation: { ...current.mutation, status: "succeeded", response_status: 200, failure_code: null },
+  };
+  const response = fault === "scope" ? { ...current, environment_id: "foreign" }
+    : fault === "mutation" ? { ...current, mutation: { ...current.mutation, mutation_id: current.promotion.activation_id } }
+    : fault === "operation" ? { ...current, mutation: { ...current.mutation, operation: "application.release.activate" } }
+    : fault === "resource" ? { ...current, mutation: { ...current.mutation,
+      resource_key: `v1/application_release/${Buffer.from(mutationRequestFingerprint({
+        applicationId: "foreign", environmentId: "test",
+      })).toString("base64url")}`,
+    } }
+    : fault === "private" ? { ...current, private: "private-marker" }
+    : fault === "checkpoint" || fault === "receipt" ? {
+      ...current, mutation: { ...current.mutation, [fault]: { value: "private-marker" } },
+    }
+    : fault === "backup" ? { ...current, promotion: {
+      ...current.promotion, backup_id: "logical-full_foreign_" + "d".repeat(32),
+    } }
+    : fault === "activation" ? { ...current, promotion: { ...current.promotion, activation_id: current.mutation.mutation_id } }
+    : fault === "success-phase" ? { ...success, promotion: { ...current.promotion, phase: "activating" } }
+    : fault === "success-backup" ? { ...success, promotion: { ...current.promotion, backup_id: null } }
+    : { ...success, mutation: { ...success.mutation, lease: {
+      owner: "unexpected-owner", expires_at: "2026-10-10T00:00:00.000Z", fencing_epoch: 1,
+    } } };
+  const requests: string[] = [];
+  const handler = tool(null, {
+    get: (async () => {
+      requests.push("GET");
+      return { ok: true, status: 200, data: response };
+    }) as HttpTransport["get"],
+    post: (async (_path: string, body: unknown) => {
+      requests.push("POST");
+      expect(body).toEqual({});
+      return { ok: true, status: 200, data: response };
+    }) as HttpTransport["post"],
+  });
+  for (const action of ["get_promotion_status", "reconcile_promotion"]) {
+    const output = await handler({
+      action, ref: "project", id: "reviews", environment_id: "test", mutation_id: current.mutation.mutation_id,
+    });
+    expect(output.isError).toBe(true);
+    expect(JSON.parse(output.content[0]!.text)).toMatchObject({
+      mutation_id: current.mutation.mutation_id,
+      error: { code: action === "get_promotion_status" ? "INVALID_RESPONSE" : "OUTCOME_UNKNOWN" },
+    });
+    expect(output.content[0]!.text).not.toContain("private-marker");
+  }
+  expect(requests).toEqual(["GET", "POST"]);
+});
+
+test("promotion reconciliation preserves unresolved status without replaying execution", async () => {
+  const current = promotionStatusReceipt();
+  const requests: string[] = [];
+  const handler = tool(null, {
+    post: (async (path: string, body: unknown) => {
+      requests.push(path);
+      expect(body).toEqual({});
+      return { ok: true, status: 200, data: current };
+    }) as HttpTransport["post"],
+  });
+  const output = await runAppTool({
+    action: "promote-reconcile", ref: "project", id: "reviews", environment_id: "test",
+    mutation_id: current.mutation.mutation_id,
+  }, { getApplications: () => handler });
+  expect(output.isError).toBe(true);
+  expect(JSON.parse(output.content[0]!.text)).toMatchObject({
+    error: { code: "OUTCOME_UNKNOWN" }, mutation: { status: "outcome_unknown" },
+  });
+  expect(requests).toEqual([
+    `/v1/projects/project/applications/reviews/environments/test/promotions/${current.mutation.mutation_id}/reconcile`,
+  ]);
+});
+
+function previewReceipt() {
+  const previewId = "01234567-89ab-4def-8123-456789abcdef";
+  const branchRef = `pv${previewId.replaceAll("-", "").slice(0, 18)}`;
+  const releaseId = applicationReleaseId(branchRef, "reviews", "a".repeat(64));
+  return {
+    schema: "supacloud.application-preview.v1",
+    project_ref: "project", application_id: "reviews", environment_id: "test",
+    preview_id: previewId,
+    release_id: releaseId, status: "provisioning",
+    expires_at: "2026-10-17T00:00:00.000Z",
+    resources: {
+      build_artifact: { status: "ready", release_id: releaseId },
+      database_branch: { status: "pending", branch_ref: branchRef, data_mode: "schema_only" },
+      queue_namespace: { status: "pending", namespace: "preview_0123456789abcdef" },
+      storage_namespace: { status: "pending", namespace: branchRef },
+      test_secret: { status: "pending", name: "PREVIEW_TOKEN_0123456789ABCDEF", value_issued: false },
+      configuration_revision: { status: "pending", configuration_id: null },
+      application_activation: { status: "pending", activation_id: null },
+      smoke_test: { status: "pending", checks: ["release_artifact"], passed: [], failed: [] },
+    },
+    cleanup: { required: true, completed: false, error: null },
+    branch_name: "reviews-preview", queue_name: "preview_0123456789abcdef",
+    test_secret_name: "PREVIEW_TOKEN_0123456789ABCDEF", source_configuration_id: null,
+    created_at: "2026-10-10T00:00:00.000Z", updated_at: "2026-10-10T00:00:00.000Z",
+  };
+}
+
+test("preview controls are scoped and reject secret values", async () => {
+  const receipt = previewReceipt();
+  const previewId = receipt.preview_id;
+  const handler = tool(receipt, {
+    get: (async (path: string) => ({
+      ok: true, status: 200,
+      data: path.includes("/releases/") ? {
+        project_ref: "project", application_id: "reviews", release: record(),
+      } : path.endsWith("/previews") ? {
+        project_ref: "project", application_id: "reviews", environment_id: "test", previews: [receipt],
+      } : receipt,
+    })) as HttpTransport["get"],
+    post: (async (path: string) => ({
+      ok: true, status: 202, data: { ...receipt, value: "private-marker" },
+    })) as HttpTransport["post"],
+  });
+  const listed = JSON.parse((await handler({
+    action: "list_previews", ref: "project", id: "reviews", environment_id: "test",
+  })).content[0]!.text);
+  expect(listed).toMatchObject({
+    ok: true, previews: [{
+      schema: receipt.schema, project_ref: receipt.project_ref, application_id: receipt.application_id,
+      environment_id: receipt.environment_id, preview_id: receipt.preview_id, release_id: receipt.release_id,
+      expires_at: receipt.expires_at, status: receipt.status, resources: receipt.resources, cleanup: receipt.cleanup,
+    }],
+  });
+  expect(listed.previews[0]).not.toHaveProperty("test_secret_name");
+  const created = await handler({
+    action: "create_preview", ref: "project", id: "reviews", environment_id: "test",
+    release_id: record().release_id, configuration_id: configurationView().configuration_id,
+  });
+  expect(created.isError).toBe(true);
+  expect(JSON.parse(created.content[0]!.text)).toMatchObject({ error: { code: "OUTCOME_UNKNOWN" } });
+  expect(created.content[0]!.text).not.toContain("private-marker");
+  const status = JSON.parse((await handler({
+    action: "get_preview", ref: "project", id: "reviews", environment_id: "test", preview_id: previewId,
+  })).content[0]!.text);
+  expect(status).toMatchObject({ ok: true, preview: { preview_id: receipt.preview_id, status: receipt.status } });
+  expect(status.preview).not.toHaveProperty("test_secret_name");
+});
+
+test("preview plan is bounded, read-only and binds the requested branch, data mode and source release", async () => {
+  const current = previewReceipt();
+  const release = record();
+  const planned = {
+    ...current, status: "planned", release_id: release.release_id,
+    expires_at: null,
+    resources: { ...current.resources, build_artifact: { status: "ready", release_id: release.release_id } },
+  };
+  const requests: string[] = [];
+  const handler = tool(planned, {
+    get: (async (path: string, options: unknown) => {
+      requests.push(path);
+      expect(options).toMatchObject({ maxJsonBytes: 1_048_576, responseTimeoutMs: 120_000, retry: false, timeoutMs: 120_000 });
+      return { ok: true, status: 200, data: planned };
+    }) as HttpTransport["get"],
+  });
+  const args = {
+    action: "get_preview_plan", ref: "project", id: "reviews", environment_id: "test",
+    release_id: release.release_id, branch_ref: current.resources.database_branch.branch_ref,
+  };
+  const output = JSON.parse((await handler(args)).content[0]!.text);
+  expect(output).toMatchObject({ ok: true, preview: { status: "planned" } });
+  expect(requests).toHaveLength(1);
+  expect(requests[0]).toContain(`/preview-plan?release_id=${release.release_id}&branch_ref=`);
+  const configured = JSON.parse((await handler({ ...args, configuration_id: configurationView().configuration_id })).content[0]!.text);
+  expect(configured).toMatchObject({ ok: true, preview: { status: "planned" } });
+  expect(requests).toHaveLength(2);
+});
+
+test.each(["success", "foreign", "artifact", "branch", "private", "mode", "configuration"] as const)(
+  "preview creation validates %s receipts against the immutable source without retry", async fault => {
+    const receipt = previewReceipt();
+    const requests: string[] = [];
+    const handler = tool(null, {
+      get: (async (path: string) => {
+        requests.push("GET");
+        expect(path).toBe(`/v1/projects/project/applications/reviews/releases/${record().release_id}`);
+        return { ok: true, status: 200, data: { project_ref: "project", application_id: "reviews", release: record() } };
+      }) as HttpTransport["get"],
+      post: (async (path: string, body: unknown) => {
+        requests.push("POST");
+        expect(path).toBe("/v1/projects/project/applications/reviews/environments/test/previews");
+        expect(body).toEqual({
+          release_id: record().release_id, configuration_id: configurationView().configuration_id, data_mode: "schema_only",
+        });
+        const response = {
+          ...receipt, source_configuration_id: configurationView().configuration_id,
+          ...(fault === "foreign" ? { environment_id: "foreign" } : {}),
+          ...(fault === "artifact" ? { release_id: "f".repeat(64),
+            resources: { ...receipt.resources, build_artifact: { status: "ready", release_id: "f".repeat(64) } } } : {}),
+          ...(fault === "private" ? { resources: {
+            ...receipt.resources, test_secret: { ...receipt.resources.test_secret, value: "private-marker" },
+          } } : {}),
+          ...(fault === "branch" || fault === "mode" ? { resources: { ...receipt.resources, database_branch: {
+            ...receipt.resources.database_branch, ...(fault === "branch" ? { branch_ref: "project" } : { data_mode: "full_clone" }),
+          } } } : {}),
+          ...(fault === "configuration" ? { source_configuration_id: "91234567-89ab-4def-8123-456789abcdef" } : {}),
+        };
+        return { ok: true, status: 202, data: response };
+      }) as HttpTransport["post"],
+    });
+    const output = await runAppTool({
+      action: "preview-create", ref: "project", id: "reviews", environment_id: "test",
+      release_id: record().release_id, configuration_id: configurationView().configuration_id,
+      format: fault === "success" ? "text" : "json",
+    }, { getApplications: () => handler });
+    expect(requests).toEqual(["GET", "POST"]);
+    expect(output.content[0]!.text).not.toContain("private-marker");
+    if (fault === "success") {
+      expect(Boolean(output.isError)).toBe(false);
+      expect(output.content[0]!.text).toContain("project/reviews/test: provisioning");
+      expect(output.content[0]!.text).not.toContain('"schema"');
+    } else {
+      expect(output.isError).toBe(true);
+      expect(JSON.parse(output.content[0]!.text)).toMatchObject({ error: { code: "OUTCOME_UNKNOWN" } });
+    }
+  },
+);
+
+test("preview cleanup sends one bounded delete and never reports failed cleanup as completed", async () => {
+  const receipt = previewReceipt();
+  for (const failed of [false, true]) {
+    let deletes = 0;
+    const handler = tool(null, {
+      deleteReleaseMutation: (async (path: string, body: unknown) => {
+        deletes++;
+        expect(path).toBe(`/v1/projects/project/applications/reviews/environments/test/previews/${receipt.preview_id}`);
+        expect(body).toBeUndefined();
+        return { ok: true, status: 200, data: {
+          ...receipt, status: failed ? "failed" : "cleaned",
+          resources: failed ? receipt.resources : {
+            ...receipt.resources,
+            database_branch: { ...receipt.resources.database_branch, status: "cleaned" },
+            queue_namespace: { ...receipt.resources.queue_namespace, status: "cleaned" },
+            storage_namespace: { ...receipt.resources.storage_namespace, status: "cleaned" },
+            test_secret: { ...receipt.resources.test_secret, status: "cleaned" },
+          },
+          cleanup: failed ? { required: true, completed: false, error: "APPLICATION_PREVIEW_CLEANUP_FAILED" }
+            : { required: false, completed: true, error: null },
+        } };
+      }) as HttpTransport["deleteReleaseMutation"],
+    });
+    const output = await handler({
+      action: "cleanup_preview", ref: "project", id: "reviews", environment_id: "test", preview_id: receipt.preview_id,
+    });
+    expect(deletes).toBe(1);
+    expect(Boolean(output.isError)).toBe(failed);
+    if (failed) expect(JSON.parse(output.content[0]!.text)).toMatchObject({
+      error: { code: "MUTATION_NOT_SUCCEEDED" }, preview: { preview_id: receipt.preview_id, status: "failed" },
+    });
+  }
+});
+
+test.each(["identity", "private", "duplicate"] as const)("preview lists reject %s records without reflecting payloads", async fault => {
+  const receipt = previewReceipt();
+  const handler = tool({
+    project_ref: "project", application_id: "reviews", environment_id: "test",
+    previews: fault === "identity" ? [{ ...receipt, application_id: "foreign" }]
+      : fault === "private" ? [{ ...receipt, secret: { value: "private-marker" } }] : [receipt, receipt],
+  });
+  const output = await handler({ action: "list_previews", ref: "project", id: "reviews", environment_id: "test" });
+  expect(output.isError).toBe(true);
+  expect(JSON.parse(output.content[0]!.text)).toMatchObject({ error: { code: "INVALID_RESPONSE" } });
+  expect(output.content[0]!.text).not.toContain("private-marker");
 });
 
 function configurationView() {

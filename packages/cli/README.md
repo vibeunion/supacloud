@@ -383,6 +383,23 @@ it does not claim that every business dependency or transaction has been tested.
 
 ### Versioned application configuration
 
+Environment delivery also provides `app diff` / `app promote-plan`,
+`app promote`, `app promote-status`, and `app promote-reconcile`.
+Promotion obtains and validates the immutable plan automatically; complete
+no-op skips the write. A required promotion generates one mutation UUID and
+submits once. An uncertain outcome retains that UUID without retrying SQL,
+runtime activation, rollback or database restore. Production writes require
+the selected project's exact `--confirm-production <ref>`.
+
+`app preview-plan`, `app preview-create`, `app preview-list`,
+`app preview-status`, and `app preview-cleanup` manage isolated preview receipts.
+Creation defaults to `schema_only`, reports provisioning rather than readiness,
+and returns secret names only. An uncertain create should be inspected through
+`preview-list` before any deliberate new create. Read-only profiles permit
+plans and status/list reads but reject promotion, reconciliation and preview writes.
+See [application promotion](../../docs/application-promotion.md) for commands
+and the platform/client responsibility boundary.
+
 Configuration revisions bind a complete target inventory to one application
 environment. Saving a revision does not allocate ports, start processes, change
 traffic or migrate data:

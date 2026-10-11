@@ -1,3 +1,5 @@
+import type { SQL } from "bun";
+import { sql } from "../db";
 import { parseApplicationReadinessReport } from "@supacloud/delivery";
 import type { WorkerExecutionGroup } from "@supacloud/delivery";
 import {
@@ -16,6 +18,9 @@ import { stableSha256, stableStringify } from "../utils/stable-json";
 import { ApplicationConfigurations } from "./application-configuration";
 import { ApplicationRuntimeAllocations, type ApplicationRuntimeAllocation } from "./application-runtime-allocation";
 import { isProjectMutationId } from "./project-mutation.service";
+import type { ApplicationPromotionOwner } from "./application-promotion-ownership";
+import { parseApplicationPromotionCheckpoint } from "./application-promotion-operation";
+import { readProjectMutation, withProjectMutationLease, type ProjectMutationState } from "./project-mutation.service";
 
 export interface DeployApplicationInput extends ActivateApplicationInput {
   hosts: ApplicationGatewayInput["hosts"];
@@ -38,6 +43,7 @@ export interface ApplicationDeploymentDependencies {
     runtime: ApplicationRuntimeInput; groups: readonly WorkerExecutionGroup[];
   }): Promise<void>;
   mutations?: ApplicationActivationMutations;
+  promotionDatabase?: SQL;
   storage?: ApplicationReleaseStorage;
   files?: Pick<ApplicationRuntimeFiles, "prepare">;
   runtime?: Pick<ApplicationSystemdRuntime, "install" | "start" | "stop" | "requireStopped">;
@@ -78,10 +84,12 @@ export class ApplicationDeploymentService {
   private readonly runtime: NonNullable<ApplicationDeploymentDependencies["runtime"]>;
   private readonly gateway: NonNullable<ApplicationDeploymentDependencies["gateway"]>;
   private readonly mutations: ApplicationActivationMutations;
+  private readonly promotionDatabase: SQL;
 
   constructor(dependencies: ApplicationDeploymentDependencies) {
     if (typeof dependencies.verifyCompatibility !== "function") throw new Error("APPLICATION_COMPATIBILITY_VERIFIER_REQUIRED");
     this.configurations = dependencies.configurations ?? new ApplicationConfigurations();
+    this.promotionDatabase = dependencies.promotionDatabase ?? sql;
     this.allocations = dependencies.allocations ?? new ApplicationRuntimeAllocations();
     this.retirementVerifier = dependencies.retirementVerifier;
     this.verifyWorkerAllocationRetirement = dependencies.verifyWorkerAllocationRetirement;
@@ -166,6 +174,86 @@ export class ApplicationDeploymentService {
     if (input.hosts === undefined) throw new Error("APPLICATION_DEPLOYMENT_HOSTS_REQUIRED");
     applicationGatewayRoute({ runtime: input.runtime, hosts: input.hosts });
     return this.withProjectLifecycle(input.runtime.release.project_ref, () => this.activation.activate(input));
+  }
+
+  async activatePromotionConfigured(input: {
+    runtime: Omit<ApplicationRuntimeInput, "bunVersion" | "ports">;
+    configurationId: string;
+    expectedActivationId: string | null;
+    principal: ActivateApplicationInput["principal"];
+    owner: ApplicationPromotionOwner;
+  }) {
+    const request = structuredClone(input);
+    // 分配也是副作用，必须先验证父租约、持久请求和独立子身份。
+    const replayed = await this.promotionDatabase.begin(transaction => withProjectMutationLease(transaction, request.owner.lease, async () => {
+      const state = await readProjectMutation(request.owner.lease, transaction);
+      if (!state || state.status !== "running" || state.fencingEpoch !== request.owner.lease.fencingEpoch
+        || state.requestFingerprint !== request.owner.requestFingerprint
+        || stableStringify(state.principal) !== stableStringify(request.principal)
+        || stableStringify(state.principal) !== stableStringify(request.owner.principal)) {
+        throw new Error("APPLICATION_PROMOTION_ACTIVATION_OWNER_LOST");
+      }
+      const parent = parseApplicationPromotionCheckpoint(state);
+      if (parent.activation_id !== request.runtime.activationId
+        || parent.plan.target.candidate_release_id !== request.runtime.release.release_id
+        || parent.plan.target.configuration_id !== request.configurationId
+        || parent.plan.environment_id !== request.runtime.environmentId
+        || parent.plan.target.activation_id !== request.expectedActivationId
+        || !["activating", "verifying"].includes(parent.phase)) {
+        throw new Error("APPLICATION_PROMOTION_ACTIVATION_PLAN_MISMATCH");
+      }
+      const attempt = parent["activation"];
+      if (attempt !== undefined && (!attempt || typeof attempt !== "object" || Array.isArray(attempt)
+        || !("outcome" in attempt) || attempt.outcome !== "succeeded")) {
+        throw new Error("APPLICATION_PROMOTION_ACTIVATION_RECONCILIATION_REQUIRED");
+      }
+      return attempt !== undefined;
+    })).then(execution => {
+      if (execution.kind !== "executed") throw new Error("APPLICATION_PROMOTION_ACTIVATION_OWNER_LOST");
+      return execution.value;
+    });
+    const release = await this.storage.readRelease(
+      request.runtime.release.project_ref, request.runtime.release.application_id, request.runtime.release.release_id,
+    );
+    if (stableStringify(release) !== stableStringify(request.runtime.release)) {
+      throw new Error("APPLICATION_RUNTIME_RELEASE_MISMATCH");
+    }
+    const configuration = await this.configurations.resolve({
+      projectRef: request.runtime.release.project_ref, applicationId: request.runtime.release.application_id,
+      environmentId: request.runtime.environmentId,
+    }, request.configurationId, request.runtime.release);
+    const desired = {
+      release, activationId: request.runtime.activationId, environmentId: request.runtime.environmentId,
+      bunVersion: configuration.bunVersion,
+    };
+    const allocation = await this.promotionDatabase.begin(transaction => withProjectMutationLease(
+      transaction, request.owner.lease, async () => {
+        if (replayed) {
+          if (!this.allocations.read) throw new Error("APPLICATION_PORT_ALLOCATION_MISSING");
+          const existing = await this.allocations.read(release.project_ref, desired.activationId);
+          if (!existing || existing.retiredAt) throw new Error("APPLICATION_PORT_ALLOCATION_MISSING");
+          return existing;
+        }
+        return this.allocations.allocate({ runtime: desired, configurationId: request.configurationId });
+      },
+    )).then(execution => {
+      if (execution.kind !== "executed") throw new Error("APPLICATION_PROMOTION_ACTIVATION_OWNER_LOST");
+      return execution.value;
+    });
+    const { ports: _ports, ...assigned } = allocation.runtime;
+    if (allocation.configurationId !== request.configurationId || stableStringify(assigned) !== stableStringify(desired)) {
+      throw new Error("APPLICATION_PORT_ALLOCATION_MISMATCH");
+    }
+    return this.activation.activatePromotion({
+      runtime: allocation.runtime,
+      environment: configuration.environment, hosts: configuration.hosts,
+      expectedActivationId: request.expectedActivationId, principal: request.principal,
+      configurationId: request.configurationId,
+    }, request.owner, this.promotionDatabase);
+  }
+
+  observePromotion(state: ProjectMutationState, desired: ApplicationActiveRecord) {
+    return this.activation.observePromotion(state, desired);
   }
 
   reconcile(input: ReconcileApplicationActivationInput) {

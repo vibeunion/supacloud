@@ -16,6 +16,7 @@
     "typecheck:graphql-tests": "tsc --project tsconfig.graphql-tests.json",
     "typecheck:application-releases": "tsc --project tsconfig.application-release-tests.json",
     "typecheck:logical-backup-tests": "tsc --project tsconfig.logical-backup-tests.json",
+    "typecheck:application-migration-tests": "tsc --project tsconfig.application-migration-tests.json",
     "test": "bun run test:local",
     "test:local": "bun run sql:check && bun run test:unit && bun run test:integration",
     "test:unit": "bun run scripts/run-unit-tests.ts",

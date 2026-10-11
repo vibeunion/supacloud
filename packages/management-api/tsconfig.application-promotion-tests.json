@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "types": ["bun"],
+    "noEmit": true
+  },
+  "include": [
+    "src/types/*.d.ts",
+    "tests/unit/application-promotion-execution.test.ts"
+  ]
+}

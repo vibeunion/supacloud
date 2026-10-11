@@ -1,27 +1,36 @@
 import { Elysia, t } from "elysia";
 import type { SQL, TransactionSQL } from "bun";
 import { projectService } from "../services";
-import { db, getProjectDb, getProjectRoleDb, removeProjectDbCache, resolveAuthenticatorName, resolveDbName, sql as metaSql, type SqlExecutionMode } from "../db";
+import {
+  db, getProjectDb, getProjectRoleDb, removeProjectDbCache, resolveAuthenticatorName, resolveDbName,
+  sql as metaSql, type SqlExecutionMode,
+} from "../db";
 import { isDangerousSQL, normalizeSqlForPolicy, sqlContainsTransactionControl, WRITE_SQL_PATTERN } from "../db/sql-policy";
 import { cancelActiveSqlQuery } from "../db/sql-query-registry";
-import { splitSqlStatements, stripOuterTransactionStatements } from "../db/sql-statements";
+import { splitSqlStatements } from "../db/sql-statements";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
 import {
   calculateMigrationChecksum,
-  detectUnsupportedMigrationOperations,
 } from "../services/migration-promotion";
 import {
-  ensureMigrationLedgerMetadata,
   MigrationLedgerDivergenceError,
   readMigrationLedger,
   readMigrationInventory,
-  reconcileMigrationLedgerVersions,
 } from "../services/migration-ledger";
 import {
   ProjectMigrationLockError,
   withProjectMigrationLocks,
 } from "../services/migration-lock";
-import { prepareProjectMigrationRole } from "../services/project-migration-role";
+import {
+  MigrationRouteError, deriveMigrationExecution, ensureMigrationTables, ensureTasksRealtimePublication,
+  migrationLedgerEntryMatches, applyRecordedMigration, withMigrationRoleSession,
+  type RecordedMigrationInput, type ProjectMigrationCredentials,
+} from "../services/project-migration-executor";
+export {
+  deriveMigrationExecution, ensureMigrationTables, ensureTasksRealtimePublication,
+  migrationLedgerEntryMatches, MIGRATION_SESSION_RESET_SQL, resetEnsuredMigrationTablesForTests,
+  type MigrationExecutionDerivation,
+} from "../services/project-migration-executor";
 import {
   issueMigrationLedgerLease,
   releaseMigrationLedgerLease,
@@ -47,17 +56,6 @@ export type MigrationBody =
 type ProjectSql = ReturnType<typeof getProjectDb>;
 type ReservedProjectSql = Awaited<ReturnType<ProjectSql["reserve"]>>;
 type ProjectTransaction = TransactionSQL;
-
-class MigrationRouteError extends Error {
-  constructor(
-    readonly httpStatus: 400 | 409 | 423,
-    readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = "MigrationRouteError";
-  }
-}
 
 class TableDefinitionError extends Error {
   constructor(message: string) {
@@ -92,23 +90,6 @@ export function resolveMigrationStatements(body: MigrationBody): string[] {
  */
 export function migrationExecutionStatements(statements: readonly string[]): string[] {
   return deriveMigrationExecution(statements).statements;
-}
-
-export interface MigrationExecutionDerivation {
-  statements: string[];
-  strippedTransactionWrappers: number;
-}
-
-export function deriveMigrationExecution(statements: readonly string[]): MigrationExecutionDerivation {
-  const normalized = statements.flatMap((statement) => splitSqlStatements(statement));
-  const executionStatements = stripOuterTransactionStatements(normalized);
-  if (executionStatements.length === 0) {
-    throw new MigrationRouteError(400, "empty_migration", "Migration contains no executable statements");
-  }
-  return {
-    statements: executionStatements,
-    strippedTransactionWrappers: normalized.length - executionStatements.length,
-  };
 }
 
 const MAX_MIGRATION_VERSION = 9_223_372_036_854_775_807n;
@@ -554,12 +535,6 @@ function requireAdminMode(body: Record<string, unknown>): boolean {
   return body.mode === "admin" && body.admin === true;
 }
 
-const ensuredMigrationTables = new Set<string>();
-
-export function resetEnsuredMigrationTablesForTests(): void {
-  ensuredMigrationTables.clear();
-}
-
 const PG_IDENTIFIER_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 export function assertPgIdentifier(value: string, label: string): string {
@@ -768,44 +743,6 @@ export function buildCreateTableSql(input: CreateTableInput): string {
   return `CREATE TABLE ${qualifiedName} (\n  ${columns}\n)`;
 }
 
-export async function ensureMigrationTables(dbName: string, projectDb: ReturnType<typeof getProjectDb>): Promise<void> {
-  if (!ensuredMigrationTables.has(dbName)) {
-    await ensureMigrationLedgerMetadata(projectDb);
-    ensuredMigrationTables.add(dbName);
-    return;
-  }
-  await reconcileMigrationLedgerVersions(projectDb);
-}
-
-export async function ensureTasksRealtimePublication(projectDb: ReturnType<typeof getProjectDb>): Promise<void> {
-  try {
-    await projectDb`SELECT realtime.ensure_tasks_publication()`;
-  } catch {
-    // Older tenants may not have the helper yet, and some deployments run without
-    // logical Realtime enabled. Migrations must remain authoritative even then.
-  }
-}
-
-interface ProjectMigrationCredentials {
-  db_name: string;
-  db_user: string;
-  db_password: string;
-}
-
-interface RecordedMigrationInput {
-  projectRef: string;
-  credentials: ProjectMigrationCredentials;
-  version: string;
-  name: string;
-  statements: readonly string[];
-  conflictOnName: boolean;
-}
-
-interface MigrationExecutionPlan {
-  checksum: string;
-  statements: readonly string[];
-}
-
 interface MigrationBaseline {
   version: string;
   name: string;
@@ -818,30 +755,6 @@ interface RecordedBaseline extends MigrationBaseline {
 interface MigrationBaselineSummary {
   marked: RecordedBaseline[];
   alreadyApplied: MigrationBaseline[];
-}
-
-export const MIGRATION_SESSION_RESET_SQL = "RESET ALL; DISCARD TEMP; DISCARD PLANS";
-
-function existingMigrationChecksum(
-  row: Record<string, unknown>,
-  fallback: { version: string; name: string },
-): string {
-  if (typeof row.checksum === "string") return row.checksum;
-  return calculateMigrationChecksum({
-    version: String(row.version ?? fallback.version),
-    name: typeof row.name === "string" ? row.name : fallback.name,
-    statements: Array.isArray(row.statements)
-      ? row.statements.filter((statement: unknown): statement is string => typeof statement === "string")
-      : [],
-  });
-}
-
-function normalizedMigrationStatements(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .filter((statement): statement is string => typeof statement === "string")
-    .map((statement) => statement.replace(/\r\n?/g, "\n").trim())
-    .filter(Boolean);
 }
 
 function normalizeMigrationBaselines(
@@ -859,35 +772,6 @@ function normalizeMigrationBaselines(
     names.add(name);
     return { version, name };
   });
-}
-
-/**
- * Legacy ledgers stored a raw file SHA-256 in `checksum`, while the current
- * route stores a structured checksum over version/name/statements. When the
- * identity and exact normalized SQL both match, the migration is already
- * applied even though those checksum formats differ.
- */
-export function migrationLedgerEntryMatches(
-  row: Record<string, unknown>,
-  input: Pick<RecordedMigrationInput, "version" | "name" | "statements">,
-): boolean {
-  return String(row.version ?? "").trim() === input.version
-    && (typeof row.name === "string" ? row.name.trim() : "") === input.name
-    && JSON.stringify(normalizedMigrationStatements(row.statements))
-      === JSON.stringify(normalizedMigrationStatements(input.statements));
-}
-
-async function resetMigrationSession(connection: ReservedProjectSql, dbName: string): Promise<boolean> {
-  try {
-    // Keep the driver's prepared-statement cache valid across pooled requests.
-    await connection.unsafe(MIGRATION_SESSION_RESET_SQL);
-    return true;
-  } catch (error: unknown) {
-    logger.warn(`[database] failed to reset migration session for ${dbName}`, {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return false;
-  }
 }
 
 async function findExistingMigration(
@@ -940,49 +824,6 @@ async function releaseMigrationLeaseSafely(
   }
 }
 
-async function executeMigrationTransaction(
-  connection: ReservedProjectSql,
-  adminDb: ProjectSql,
-  input: RecordedMigrationInput,
-  execution: MigrationExecutionPlan,
-): Promise<boolean> {
-  const leaseHolder: { current?: Awaited<ReturnType<typeof issueMigrationLedgerLease>> } = {};
-  try {
-    return await connection.begin(async (tx) => {
-      const existing = await findExistingMigration(tx, input);
-      if (existing.length > 0) {
-        const alreadyApplied = existing.some((row) => migrationLedgerEntryMatches(row, input));
-        if (!alreadyApplied && existingMigrationChecksum(existing[0]!, input) !== execution.checksum) {
-          throw new MigrationRouteError(
-            409,
-            "migration_checksum_conflict",
-            `Migration ${input.name} conflicts with an existing version, name, or checksum`,
-          );
-        }
-        await notifyPostgrestSchemaReload(tx, input.projectRef);
-        return true;
-      }
-      const unsupported = detectUnsupportedMigrationOperations(execution.statements);
-      if (unsupported.length > 0) {
-        throw new MigrationRouteError(
-          400,
-          "unsupported_migration_sql",
-          `Migration contains SQL outside the project-scoped path: ${unsupported.join(", ")}`,
-        );
-      }
-      for (const statement of execution.statements) await tx.unsafe(statement);
-      const issuedLease = await issueMigrationLedgerLease(adminDb, input.version, execution.checksum);
-      leaseHolder.current = issuedLease;
-      await insertMigrationLedger(tx, input, execution.checksum, issuedLease.token);
-      await notifyPostgrestSchemaReload(tx, input.projectRef);
-      return false;
-    });
-  } finally {
-    const lease = leaseHolder.current;
-    if (lease) await releaseMigrationLeaseSafely(adminDb, lease, input.projectRef);
-  }
-}
-
 function existingBaselineIsApplied(
   existing: Record<string, unknown>[],
   input: RecordedMigrationInput,
@@ -1023,47 +864,6 @@ async function recordBaselineTransaction(
       await releaseMigrationLeaseSafely(adminDb, lease, inputs[0]!.projectRef);
     }
   }
-}
-
-async function withMigrationRoleSession<T>(
-  input: RecordedMigrationInput,
-  operation: (connection: ReservedProjectSql, adminDb: ProjectSql) => Promise<T>,
-): Promise<T> {
-  const adminDb = getProjectDb(input.credentials.db_name);
-  await ensureMigrationTables(input.credentials.db_name, adminDb);
-  await prepareProjectMigrationRole(adminDb, input.credentials.db_name, input.credentials.db_user);
-  const roleDb = getProjectRoleDb(input.credentials.db_name, input.credentials.db_user, input.credentials.db_password);
-  const connection = await roleDb.reserve();
-  try {
-    return await operation(connection, adminDb);
-  } finally {
-    const reset = await resetMigrationSession(connection, input.credentials.db_name);
-    connection.release();
-    if (!reset) await removeProjectDbCache(input.credentials.db_name);
-  }
-}
-
-async function applyRecordedMigration(input: RecordedMigrationInput): Promise<{
-  checksum: string;
-  alreadyApplied: boolean;
-  strippedTransactionWrappers: number;
-}> {
-  const checksum = calculateMigrationChecksum(input);
-  const execution = deriveMigrationExecution(input.statements);
-
-  return withProjectMigrationLocks({ projectRefs: [input.projectRef] }, async () => {
-    await branchReplacementJournal.assertInactive([input.projectRef]);
-    return withMigrationRoleSession(input, async (connection, adminDb) => {
-      const alreadyApplied = await executeMigrationTransaction(
-        connection,
-        adminDb,
-        input,
-        { checksum, statements: execution.statements },
-      );
-      await ensureTasksRealtimePublication(adminDb);
-      return { checksum, alreadyApplied, strippedTransactionWrappers: execution.strippedTransactionWrappers };
-    });
-  });
 }
 
 async function recordMigrationBaselines(

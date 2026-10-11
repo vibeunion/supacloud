@@ -32,6 +32,8 @@ import { ApplicationActivationHistoryReader, ApplicationHistoryError } from "../
 import {
   ApplicationPromotions, ApplicationPromotionError, createDefaultApplicationPromotions,
 } from "../services/application-promotion";
+import type { ApplicationPromotionExecutor } from "../services/application-promotion-executor";
+import type { ApplicationPromotionReconciler } from "../services/application-promotion-reconciler";
 
 function activationFailure(error: unknown, identity: {
   project_ref: string; application_id: string; environment_id: string; activation_id: string;
@@ -59,6 +61,8 @@ function activationFailure(error: unknown, identity: {
 
 interface ApplicationRouteDependencies {
   promotions?: Pick<ApplicationPromotions, "readPlan">;
+  promotionExecutor?: Pick<ApplicationPromotionExecutor, "execute">;
+  promotionReconciler?: Pick<ApplicationPromotionReconciler, "status" | "reconcile">;
   transfers?: Pick<ApplicationReleaseTransfers, "readPlan" | "transfer">;
   deployPlans?: Pick<ApplicationDeployPlans, "read">;
   storage?: ApplicationReleaseStorage;
@@ -116,6 +120,8 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
   });
   const rollback = dependencies.rollback ?? new ApplicationRollbackSnapshots({ active, releases: storage });
   const history = dependencies.history ?? new ApplicationActivationHistoryReader({ active });
+  const promotionExecutor = dependencies.promotionExecutor;
+  const promotionReconciler = dependencies.promotionReconciler;
   const persistObservedEvidence = async (values: { ref: string; id: string; environmentId: string }) => {
     if (!evidenceObserver) return;
     try {
@@ -212,6 +218,74 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
     }, ({ params: values, query }) => deployPlans.read({
       ...scope(values), releaseId: query.release_id, configurationId: query.configuration_id,
     }))
+    .post("/:id/environments/:environmentId/promotions", {
+      params: environmentParams,
+      body: t.Object({
+        mutation_id: t.String({ format: "uuid" }),
+        source_ref: t.String({ pattern: "^[a-z0-9-]{1,20}$" }),
+        source_environment_id: environmentParams.properties.environmentId,
+        source_release_id: t.String({ pattern: "^[a-f0-9]{64}$" }),
+        configuration_id: ApplicationConfigurationIdSchema,
+        plan: ApplicationPromotionPlanSchema,
+        approved_migration_digest: t.Optional(t.String({ pattern: "^[a-f0-9]{64}$" })),
+      }, { additionalProperties: false }),
+      detail: { tags: ["applications"], summary: "Execute a reviewed immutable application promotion" },
+    }, async ({ params: values, body, request }) => {
+      if (!promotionExecutor) {
+        return status(503, { code: "APPLICATION_PROMOTION_EXECUTOR_UNAVAILABLE", error: "Application promotion executor is unavailable" });
+      }
+      const actor = await (dependencies.principal ?? getVerifiedRequestPrincipal)(request);
+      if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
+      await sourceAccess(request, body.source_ref, values.id, body.source_release_id);
+      const sourceUrl = new URL(request.url);
+      sourceUrl.pathname = `/v1/projects/${body.source_ref}/applications/${values.id}/environments/${body.source_environment_id}/runtime`;
+      sourceUrl.search = "";
+      const denied = await authorize(new Request(sourceUrl, { method: "GET", headers: request.headers }), body.source_ref);
+      if (denied) throw new ApplicationPromotionError("APPLICATION_PROMOTION_SOURCE_DENIED", denied.status);
+      return promotionExecutor.execute({
+        projectRef: values.ref, applicationId: values.id, environmentId: values.environmentId,
+        sourceProjectRef: body.source_ref, sourceEnvironmentId: body.source_environment_id,
+        sourceReleaseId: body.source_release_id, configurationId: body.configuration_id,
+        mutationId: body.mutation_id, plan: body.plan,
+        ...(body.approved_migration_digest === undefined ? {} : {
+          approvedMigrationDigest: body.approved_migration_digest,
+        }),
+        principal: actor,
+      });
+    })
+    .get("/:id/environments/:environmentId/promotions/:mutationId", {
+      params: t.Object({ ...environmentParams.properties, mutationId: t.String({ format: "uuid" }) }),
+      detail: { tags: ["applications"], summary: "Read a promotion outcome and fixed phase metadata without effects" },
+    }, async ({ params: values, request }) => {
+      if (!promotionReconciler) return status(503, {
+        code: "APPLICATION_PROMOTION_RECONCILER_UNAVAILABLE", error: "Application promotion observation is unavailable",
+      });
+      const actor = await (dependencies.principal ?? getVerifiedRequestPrincipal)(request);
+      if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
+      return promotionReconciler.status({ ...scope(values), mutationId: values.mutationId, principal: actor });
+    })
+    .post("/:id/environments/:environmentId/promotions/:mutationId/reconcile", {
+      params: t.Object({ ...environmentParams.properties, mutationId: t.String({ format: "uuid" }) }),
+      body: t.Object({}, { additionalProperties: false }),
+      detail: { tags: ["applications"], summary: "Confirm an already completed promotion without replaying uncertain effects" },
+    }, async ({ params: values, request }) => {
+      if (!promotionReconciler) return status(503, {
+        code: "APPLICATION_PROMOTION_RECONCILER_UNAVAILABLE", error: "Application promotion observation is unavailable",
+      });
+      const actor = await (dependencies.principal ?? getVerifiedRequestPrincipal)(request);
+      if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
+      return promotionReconciler.reconcile(
+        { ...scope(values), mutationId: values.mutationId, principal: actor },
+        async input => {
+          await sourceAccess(request, input.sourceProjectRef, input.applicationId, input.sourceReleaseId);
+          const sourceUrl = new URL(request.url);
+          sourceUrl.pathname = `/v1/projects/${input.sourceProjectRef}/applications/${input.applicationId}/environments/${input.sourceEnvironmentId}/runtime`;
+          sourceUrl.search = "";
+          const denied = await authorize(new Request(sourceUrl, { method: "GET", headers: request.headers }), input.sourceProjectRef);
+          if (denied) throw new ApplicationPromotionError("APPLICATION_PROMOTION_SOURCE_DENIED", denied.status);
+        },
+      );
+    })
     .get("/:id/environments/:environmentId/configurations/:configurationId", {
       params: t.Object({ ...environmentParams.properties, configurationId: ApplicationConfigurationIdSchema }),
       detail: { tags: ["applications"], summary: "Read an immutable configuration revision without variable values" },

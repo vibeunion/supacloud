@@ -12,3 +12,4 @@ export const ApplicationActivationResultSchema = Delivery.ApplicationActivationR
 export const ApplicationActivationRetirementResultSchema = Delivery.ApplicationActivationRetirementResultSchema;
 export const ApplicationRollbackSnapshotSchema = Delivery.ApplicationRollbackSnapshotSchema;
 export const ApplicationActivationHistoryCursorSchema = Delivery.ApplicationActivationHistoryCursorSchema;
+export const ApplicationPromotionPlanSchema = Delivery.ApplicationPromotionPlanSchema;
