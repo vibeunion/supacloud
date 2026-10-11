@@ -23,6 +23,12 @@ import { createApplicationPreviewCleanupChecks, previewBranches, previewSecrets 
 import { withApplicationProjectLifecycle } from "./application-lifecycle-lock";
 import { StorageService } from "./storage.service";
 import { createApplicationPreviewReadiness } from "./application-preview-readiness";
+import { ApplicationPromotionExecutor } from "./application-promotion-executor";
+import { ApplicationPromotionReconciler } from "./application-promotion-reconciler";
+import { ApplicationPromotions } from "./application-promotion";
+import { applicationActivationMutations } from "./application-activation";
+import { ApplicationReleaseTransfers } from "./application-release-transfer";
+import { createApplicationSmokeVerifier } from "./application-smoke";
 
 type CompatibilityInput = Parameters<
   NonNullable<ApplicationDeploymentDependencies["verifyCompatibility"]>
@@ -117,6 +123,11 @@ export function createDefaultApplicationRouteComposition(
   const evidenceObserver = new ApplicationDeploymentEvidenceObserver({
     active, readiness, migrations, releases: storage,
   });
+  const transfers = new ApplicationReleaseTransfers(storage);
+  const promotions = new ApplicationPromotions({
+    storage, transfers, active, configurations, migrations, readiness, evidence,
+    mutations: applicationActivationMutations,
+  });
 
   const dependencies: ApplicationDeploymentDependencies = {
     withProjectLifecycle: withApplicationProjectLifecycle,
@@ -142,6 +153,13 @@ export function createDefaultApplicationRouteComposition(
   };
 
   const deployment = new ApplicationDeploymentService(dependencies);
+  const promotionExecutor = new ApplicationPromotionExecutor({
+    promotions, transfers, migrations,
+    releases: storage, active, evidence,
+    deployment,
+    verifySmoke: createApplicationSmokeVerifier(configurations),
+  });
+  const promotionReconciler = new ApplicationPromotionReconciler({ promotions, active, deployment });
   const previews = new ApplicationPreviewService({
     releases: storage,
     configurations,
@@ -175,6 +193,10 @@ export function createDefaultApplicationRouteComposition(
     evidence,
     evidenceObserver,
     deployment,
+    promotions,
+    transfers,
+    promotionExecutor,
+    promotionReconciler,
     previews,
     retirementVerifier: dependencies.retirementVerifier,
   });

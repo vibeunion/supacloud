@@ -182,42 +182,42 @@ function invalidReceiptIdentity(): never {
 }
 
 function assertReceiptProject(candidate: Record<string, unknown>): void {
-  if (candidate.schema !== LOGICAL_BACKUP_SCHEMA || candidate.kind !== LOGICAL_BACKUP_KIND) {
+  if (candidate["schema"] !== LOGICAL_BACKUP_SCHEMA || candidate["kind"] !== LOGICAL_BACKUP_KIND) {
     invalidReceiptIdentity();
   }
-  if (typeof candidate.backup_id !== "string" || !BACKUP_ID_PATTERN.test(candidate.backup_id)) {
+  if (typeof candidate["backup_id"] !== "string" || !BACKUP_ID_PATTERN.test(candidate["backup_id"])) {
     invalidReceiptIdentity();
   }
-  if (typeof candidate.project_ref !== "string"
-    || !belongsToProject(candidate.backup_id, candidate.project_ref)) {
+  if (typeof candidate["project_ref"] !== "string"
+    || !belongsToProject(candidate["backup_id"], candidate["project_ref"])) {
     invalidReceiptIdentity();
   }
 }
 
 function assertReceiptDatabase(candidate: Record<string, unknown>): void {
-  if (typeof candidate.database !== "string" || !DATABASE_PATTERN.test(candidate.database)) {
+  if (typeof candidate["database"] !== "string" || !DATABASE_PATTERN.test(candidate["database"])) {
     invalidReceiptIdentity();
   }
 }
 
 function assertReceiptTimestamps(candidate: Record<string, unknown>): void {
-  if (!isCanonicalTimestamp(candidate.created_at) || !isCanonicalTimestamp(candidate.completed_at)) {
+  if (!isCanonicalTimestamp(candidate["created_at"]) || !isCanonicalTimestamp(candidate["completed_at"])) {
     invalidReceiptIdentity();
   }
-  if (new Date(candidate.completed_at).valueOf() < new Date(candidate.created_at).valueOf()) {
+  if (new Date(candidate["completed_at"]).valueOf() < new Date(candidate["created_at"]).valueOf()) {
     invalidReceiptIdentity();
   }
 }
 
 function assertReceiptEvidence(candidate: Record<string, unknown>): void {
-  if (!Number.isSafeInteger(candidate.bytes) || Number(candidate.bytes) <= 0) {
+  if (!Number.isSafeInteger(candidate["bytes"]) || Number(candidate["bytes"]) <= 0) {
     invalidReceiptIdentity();
   }
-  if (typeof candidate.sha256 !== "string" || !SHA256_PATTERN.test(candidate.sha256)) {
+  if (typeof candidate["sha256"] !== "string" || !SHA256_PATTERN.test(candidate["sha256"])) {
     invalidReceiptIdentity();
   }
-  if (typeof candidate.receipt_hmac_sha256 !== "string"
-    || !SHA256_PATTERN.test(candidate.receipt_hmac_sha256)) {
+  if (typeof candidate["receipt_hmac_sha256"] !== "string"
+    || !SHA256_PATTERN.test(candidate["receipt_hmac_sha256"])) {
     invalidReceiptIdentity();
   }
 }
@@ -387,7 +387,7 @@ async function logicalBackupRoot(create = true): Promise<FileHandle> {
 
 function logicalBackupRootPath(): string {
   return resolve(
-    process.env.SUPACLOUD_LOGICAL_BACKUP_DIR || "/var/lib/supacloud/backups/logical-full",
+    process.env["SUPACLOUD_LOGICAL_BACKUP_DIR"] || "/var/lib/supacloud/backups/logical-full",
   );
 }
 

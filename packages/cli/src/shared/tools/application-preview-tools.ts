@@ -307,7 +307,9 @@ export async function applicationPreviewAction(http: HttpTransport, args: Record
           && Date.parse(preview.expires_at) - Date.parse(result.data.created_at) !== (args["ttl_seconds"] as number) * 1000))) throw new Error();
     }
     if (preview.status === "failed" || (action === "cleanup_preview" && preview.status !== "cleaned")) {
-      return releaseControlFailure(operation, "MUTATION_NOT_SUCCEEDED", result.status, { ...identity, preview });
+      return releaseControlFailure(operation, "MUTATION_NOT_SUCCEEDED", result.status, {
+        ...identity, preview_id: preview.preview_id, preview,
+      });
     }
     if (timeoutSeconds !== undefined) return await waitForPreview(http, path, operation, identity, preview, timeoutSeconds, startedAt);
     return releaseControlSuccess(operation, { ...identity, preview });

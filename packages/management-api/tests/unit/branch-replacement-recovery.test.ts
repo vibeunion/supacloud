@@ -3,6 +3,10 @@ import { readFileSync } from "node:fs";
 
 const indexSource = readFileSync(new URL("../../src/index.ts", import.meta.url), "utf8");
 const databaseRouteSource = readFileSync(new URL("../../src/routes/database.ts", import.meta.url), "utf8");
+const migrationExecutorSource = readFileSync(
+  new URL("../../src/services/project-migration-executor.ts", import.meta.url),
+  "utf8",
+);
 const branchServiceSource = readFileSync(new URL("../../src/services/branch.service.ts", import.meta.url), "utf8");
 const workerSource = readFileSync(
   new URL("../../src/workers/branch-replacement-recovery.worker.ts", import.meta.url),
@@ -21,7 +25,7 @@ describe("branch replacement crash recovery", () => {
   test("retries pending recovery and blocks normal migration entrypoints", () => {
     expect(workerSource).toContain("setInterval");
     expect(workerSource).toContain("recoverInterruptedReplacements");
-    expect(databaseRouteSource).toContain("branchReplacementJournal.assertInactive([input.projectRef])");
+    expect(migrationExecutorSource).toContain("branchReplacementJournal.assertInactive([input.projectRef])");
     expect(databaseRouteSource).toContain("branchReplacementJournal.assertInactive([params.ref])");
     expect(branchServiceSource.match(/branchReplacementJournal\.assertInactive/g)?.length).toBeGreaterThanOrEqual(2);
   });

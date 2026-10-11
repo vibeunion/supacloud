@@ -30,7 +30,10 @@ import { buildToolDefinitions, type AppManifest } from "./app-tool-export";
 import { initializeAppProject } from "./app-starter";
 import { checkAppDatabaseSources } from "./app-database-check";
 import { APPLICATION_TOOL_SCHEMA } from "./application-tools";
-import { RELEASE_CONTROL_RESPONSE_SCHEMA, releaseControlFailure } from "./release-control-response";
+import { RELEASE_CONTROL_RESPONSE_SCHEMA, releaseControlFailure, releaseControlSuccess } from "./release-control-response";
+import {
+    ApplicationPromotionResultSchema, parsePreviewReceipt, parsePreviewList, parsePromotionStatus,
+} from "./application-workflow-schemas";
 import { resourceScaffold } from "./app-resource";
 import { runLocalDevelopment } from "./app-local-dev";
 import { createVerificationPlan } from "./app-verification-plan";
@@ -40,6 +43,13 @@ const REMOTE_APP_ACTIONS = {
     upload: "upload_release",
     "transfer-plan": "get_release_transfer_plan",
     "promote-plan": "get_promotion_plan",
+    "promote-status": "get_promotion_status",
+    "promote-reconcile": "reconcile_promotion",
+    "preview-plan": "get_preview_plan",
+    "preview-list": "list_previews",
+    "preview-create": "create_preview",
+    "preview-status": "get_preview",
+    "preview-cleanup": "cleanup_preview",
     transfer: "transfer_release",
     configure: "put_configuration",
     deploy: "deploy_release",
@@ -52,11 +62,8 @@ const REMOTE_APP_ACTIONS = {
     reconcile: "reconcile_activation",
     retire: "retire_activation",
     logs: "logs",
-    "preview-plan": "get_preview_plan",
     preview: "create_preview",
     previews: "list_previews",
-    "preview-status": "get_preview",
-    "preview-cleanup": "cleanup_preview",
 } as const;
 
 export interface AppToolOptions {
@@ -69,30 +76,32 @@ export interface AppToolOptions {
 }
 
 const REMOTE_APP_DESCRIPTIONS: Record<string, string> = {
-    ref: "[upload/configure/transfer-plan/transfer/promote-plan/deploy/deploy-plan/diff/status/rollback/rollback-plan/history/reconcile/retire/preview-plan/preview/previews/preview-status/preview-cleanup] Project ref (defaults to context)",
-    id: "[upload/configure/transfer-plan/transfer/promote-plan/deploy/deploy-plan/diff/status/rollback/rollback-plan/history/reconcile/retire/preview-plan/preview/previews/preview-status/preview-cleanup] Application ID",
-    environment_id: "[configure/promote-plan/deploy/deploy-plan/diff/status/rollback/rollback-plan/history/reconcile/retire/preview-plan/preview/previews/preview-status/preview-cleanup] Target environment ID",
-    configuration_id: "[promote-plan/deploy/deploy-plan/diff/rollback/preview] Immutable target configuration revision; required for deployment/preview; platform selects for default rollback",
-    activation_id: "[deploy/rollback/reconcile/retire] Stable activation ID; auto-generated for deploy/rollback if omitted",
-    expected_activation_id: "[deploy/rollback] Auto-selected from verified state; supply with activation_id for an exact retry",
+    ref: "[upload/configure/transfer-plan/transfer/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Project ref (defaults to context)",
+    id: "[upload/configure/transfer-plan/transfer/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Application ID",
+    environment_id: "[configure/promote-plan/diff/promote/promote-status/promote-reconcile/preview-plan/preview/previews/preview-list/preview-create/preview-status/preview-cleanup/deploy/deploy-plan/status/rollback/rollback-plan/history/reconcile/retire] Target environment ID",
+    configuration_id: "[promote-plan/diff/promote/preview-plan/preview/preview-create/deploy/deploy-plan/rollback] Immutable target configuration revision",
+    activation_id: "[deploy/rollback/reconcile/retire] Required explicit activation ID",
+    expected_activation_id: "[deploy/rollback] Required current activation ID, or absent for first activation",
     configuration_path: "[configure] Configuration write JSON including revision and expected revision",
     manifest_path: "[upload] Local delivery.manifest.json",
-    release_id: "[deploy/deploy-plan/diff/rollback/reconcile/preview-plan/preview] Required for deployment/preview; defaults to journal-selected previous for rollback",
-    source_ref: "[transfer-plan/transfer/promote-plan] Source project ref",
-    source_release_id: "[transfer-plan/transfer/promote-plan] Source immutable release ID",
-    source_environment_id: "[promote-plan] Source environment ID",
-    preview_id: "[preview-status/preview-cleanup] Preview receipt ID",
-    branch_ref: "[preview-plan] Proposed branch ref; preview assigns its own",
-    branch_name: "[preview] Branch display name",
-    data_mode: "[preview-plan/preview] Default schema_only; full_clone copies rows",
-    ttl_seconds: "[preview-plan/preview] Lifetime from 300 to 604800 seconds; creation defaults to the platform TTL",
-    wait: "[preview/preview-status] Wait for verified readiness of the selected preview",
-    timeout_seconds: "[preview/preview-status] Observation budget with --wait, from 1 to 3600 seconds (default 300)",
+    release_id: "[preview-plan/preview/preview-create/deploy/deploy-plan/diff/rollback/reconcile] Required immutable application release ID",
+    source_ref: "[transfer-plan/transfer/promote-plan/diff/promote] Source project ref",
+    source_release_id: "[transfer-plan/transfer/promote-plan/diff/promote] Source immutable release ID",
+    source_environment_id: "[promote-plan/diff/promote] Source environment ID",
+    mutation_id: "[promote-status/promote-reconcile] Stable promotion mutation ID",
+    approved_migration_digest: "[promote] Exact reviewed migration execution-plan digest",
+    branch_ref: "[preview-plan] Preview branch identity",
+    branch_name: "[preview/preview-create] Human-readable preview branch name",
+    data_mode: "[preview-plan/preview/preview-create] schema_only or full_clone",
+    ttl_seconds: "[preview-plan/preview/preview-create] Lifetime from 300 to 604800 seconds; creation defaults to the platform TTL",
+    wait: "[preview/preview-create/preview-status] Wait for verified readiness of the selected preview",
+    timeout_seconds: "[preview/preview-create/preview-status] Observation budget with --wait, from 1 to 3600 seconds (default 300)",
+    preview_id: "[preview-status/preview-cleanup] Preview ID",
     cursor: "[history] Returned page cursor",
     limit: "[history] Page size, default 20 (1-100)",
 };
 
-const { action: _remoteAction, ...remoteFields } = APPLICATION_TOOL_SCHEMA;
+const { action: _remoteAction, plan: _remotePlan, ...remoteFields } = APPLICATION_TOOL_SCHEMA;
 const REMOTE_APP_SCHEMA = Type.Partial(Type.Object(remoteFields)).properties;
 for (const [name, schema] of Object.entries(REMOTE_APP_SCHEMA)) {
     const description = REMOTE_APP_DESCRIPTIONS[name];
@@ -101,7 +110,7 @@ for (const [name, schema] of Object.entries(REMOTE_APP_SCHEMA)) {
 
 export interface AppToolArguments {
     action: "init" | "generate" | "dev" | "watch" | "verify-plan" | "compile" | "check" | "graph" | "explain" | "export-tools" | "context" | "doctor" | "fix"
-        | "plan" | "build" | keyof typeof REMOTE_APP_ACTIONS;
+        | "plan" | "build" | "promote" | keyof typeof REMOTE_APP_ACTIONS;
     ref?: string;
     id?: string;
     environment_id?: string;
@@ -114,12 +123,14 @@ export interface AppToolArguments {
     source_ref?: string;
     source_release_id?: string;
     source_environment_id?: string;
-    cursor?: string;
-    limit?: number;
-    preview_id?: string;
+    mutation_id?: string;
+    approved_migration_digest?: string;
     branch_ref?: string;
     branch_name?: string;
     data_mode?: "schema_only" | "full_clone";
+    preview_id?: string;
+    cursor?: string;
+    limit?: number;
     ttl_seconds?: number;
     wait?: boolean;
     timeout_seconds?: number;
@@ -1185,6 +1196,144 @@ function formatRemoteDeployPlan(result: ToolResult): ToolResult {
     } catch { return result; }
 }
 
+function formatPromotionPlan(result: ToolResult): ToolResult {
+    if (result.isError) return result;
+    try {
+        const payload: unknown = JSON.parse(result.content[0]?.text ?? "");
+        if (!payload || typeof payload !== "object" || !("plan" in payload)) return result;
+        const plan = parseApplicationPromotionPlan(payload.plan);
+        return textResult([
+            `${plan.project_ref}/${plan.application_id}/${plan.environment_id}: ${plan.action}`,
+            `Source: ${plan.source.project_ref}/${plan.source.environment_id}`,
+            ...(plan.blockers.length ? [`Blocked: ${plan.blockers.join(", ")}`] : []),
+            ...(plan.steps.length ? [`Next: ${plan.steps.join(" -> ")}`] : []),
+            "Execution: not performed",
+        ].join("\n"));
+    } catch { return result; }
+}
+
+function formatPromotionExecution(result: ToolResult): ToolResult {
+    if (result.isError) return result;
+    try {
+        const payload: unknown = JSON.parse(result.content[0]?.text ?? "");
+        if (!payload || typeof payload !== "object") return result;
+        const operation = "operation" in payload && typeof payload.operation === "string" ? payload.operation : "";
+        if (operation !== "applications.promote_application") return result;
+        if ("result" in payload && Value.Check(ApplicationPromotionResultSchema, payload.result)) {
+            const envelope = payload as Record<string, unknown>;
+            const receipt = payload.result;
+            if (receipt.project_ref !== envelope.project_ref || receipt.application_id !== envelope.application_id
+                || receipt.environment_id !== envelope.environment_id || receipt.mutation_id !== envelope.mutation_id
+                || receipt.plan_sha256 !== envelope.plan_sha256) return result;
+            return textResult([
+                `${String(envelope.project_ref)}/${String(envelope.application_id)}/${String(envelope.environment_id)}: promoted`,
+                `Mutation: ${String(envelope.mutation_id)}`,
+                `Activation: ${String(receipt.activation_id)}`,
+                `Replayed: ${String(receipt.replayed)}`,
+            ].join("\n"));
+        }
+    } catch { /* Keep the structured receipt on parse failure. */ }
+    return result;
+}
+
+function formatWorkflowObservation(result: ToolResult, action: AppToolArguments["action"]): ToolResult {
+    if (result.isError) return result;
+    try {
+        const payload: unknown = JSON.parse(result.content[0]?.text ?? "");
+        if (!payload || typeof payload !== "object") return result;
+        const data = payload as Record<string, unknown>;
+        if (typeof data.project_ref !== "string" || typeof data.application_id !== "string"
+            || typeof data.environment_id !== "string") return result;
+        const identity = {
+            project_ref: data.project_ref, application_id: data.application_id, environment_id: data.environment_id,
+        };
+        const label = `${identity.project_ref}/${identity.application_id}/${identity.environment_id}`;
+        if (action === "promote-status" || action === "promote-reconcile") {
+            if (!data.mutation || typeof data.mutation !== "object"
+                || !("mutation_id" in data.mutation) || typeof data.mutation.mutation_id !== "string") return result;
+            const status = parsePromotionStatus({ ...identity, mutation: data.mutation, promotion: data.promotion },
+                { ...identity, mutation_id: data.mutation.mutation_id });
+            return textResult([
+                `${label}: ${status.mutation.status}`,
+                `Mutation: ${status.mutation.mutation_id}`,
+                `Phase: ${status.promotion.phase ?? "not recorded"}`,
+                ...(status.promotion.backup_id ? [`Backup: ${status.promotion.backup_id}`] : []),
+            ].join("\n"));
+        }
+        if (action === "preview-list") {
+            const list = parsePreviewList({ ...identity, previews: data.previews }, identity);
+            return textResult([`${label}: ${list.previews.length} preview(s)`,
+                ...list.previews.map(preview => `${preview.preview_id}  ${preview.status}  ${preview.resources.database_branch.branch_ref}`),
+            ].join("\n"));
+        }
+        if (["preview-create", "preview-status", "preview-cleanup"].includes(action)) {
+            const preview = parsePreviewReceipt(data.preview, identity);
+            return textResult([
+                `${label}: ${preview.status}`,
+                `Preview: ${preview.preview_id}`,
+                `Branch: ${preview.resources.database_branch.branch_ref} (${preview.resources.database_branch.data_mode})`,
+                `Cleanup: ${preview.cleanup.completed ? "completed" : preview.cleanup.required ? "required" : "not required"}`,
+            ].join("\n"));
+        }
+    } catch { /* Preserve the validated structured response when no summary is available. */ }
+    return result;
+}
+
+async function runPromotion(
+    request: AppToolArguments,
+    options: AppToolOptions,
+    delegate: (args: Record<string, unknown>) => Promise<ToolResult>,
+): Promise<ToolResult> {
+    const ref = request.ref ?? options.projectRef;
+    if (request.mutation_id !== undefined) throw new Error("app promote generates a new mutation ID; use promote-status or promote-reconcile to inspect an existing mutation");
+    const { format, json, ...remoteRequest } = request;
+    const planArgs = {
+        ...remoteRequest, action: "get_promotion_plan", ref,
+    };
+    validateToolArguments(APPLICATION_TOOL_SCHEMA, planArgs);
+    const planned = await delegate(planArgs);
+    if (planned.isError) return planned;
+    let payload: unknown;
+    try { payload = JSON.parse(planned.content[0]?.text ?? ""); }
+    catch { return textResult("Promotion plan response was not valid JSON.", true); }
+    if (!payload || typeof payload !== "object" || !("plan" in payload)) {
+        return textResult("Promotion plan response was invalid.", true);
+    }
+    let plan;
+    try { plan = parseApplicationPromotionPlan(payload.plan); }
+    catch { return textResult("Promotion plan failed immutable validation.", true); }
+    const identity = { project_ref: ref, application_id: request.id, environment_id: request.environment_id };
+    if (plan.project_ref !== ref || plan.application_id !== request.id || plan.environment_id !== request.environment_id
+        || plan.source.project_ref !== request.source_ref || plan.source.environment_id !== request.source_environment_id
+        || plan.source.release_id !== request.source_release_id
+        || request.configuration_id !== undefined && plan.target.configuration_id !== request.configuration_id) {
+        return releaseControlFailure("applications.promote_application", "INVALID_RESPONSE", null, identity);
+    }
+    if (plan.action === "no-op") {
+        const noOp = releaseControlSuccess("applications.promote_application", {
+            project_ref: plan.project_ref, application_id: plan.application_id,
+            environment_id: plan.environment_id, plan, no_op: true, execution_performed: false,
+        });
+        return format === "json" || json ? noOp
+            : textResult(`${plan.project_ref}/${plan.application_id}/${plan.environment_id}: no-op\nExecution: skipped`);
+    }
+    if (plan.blockers.some(code => !["MIGRATION_PENDING", "BACKUP_REQUIRED"].includes(code))) {
+        return releaseControlFailure("applications.promote_application", "MUTATION_NOT_SUCCEEDED", null,
+            { ...identity, plan, execution_performed: false });
+    }
+    if (!plan.target.configuration_id) return textResult("Promotion plan has no target configuration revision.", true);
+    const mutationId = crypto.randomUUID();
+    const executeArgs = {
+        ...remoteRequest, action: "promote_application", ref,
+        mutation_id: mutationId, source_ref: plan.source.project_ref,
+        source_environment_id: plan.source.environment_id, source_release_id: plan.source.release_id,
+        configuration_id: plan.target.configuration_id, plan,
+    };
+    validateToolArguments(APPLICATION_TOOL_SCHEMA, executeArgs);
+    const result = await delegate(executeArgs);
+    return format === "json" || json ? result : formatPromotionExecution(result);
+}
+
 export async function runAppTool(request: AppToolArguments, options: AppToolOptions = {}): Promise<ToolResult> {
     if ((request.dry_run !== undefined && request["dry-run"] !== undefined)
         || (request.register_in !== undefined && request["register-in"] !== undefined)
@@ -1203,16 +1352,23 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
     if (request.database_url !== undefined && request.action !== "dev" && request.action !== "watch") {
         throw new ScaffoldError("SCAFFOLD_OPTION_INVALID", "--database-url applies only to app dev --profile integration");
     }
-    if (request.json !== undefined
-        && request.action !== "history" && request.action !== "transfer-plan" && request.action !== "transfer"
-        && request.action !== "promote-plan") {
-        throw new Error("--json applies only to app history, transfer-plan, transfer or promote-plan");
+    if (request.json !== undefined && !Object.hasOwn(REMOTE_APP_ACTIONS, request.action)
+        && request.action !== "promote") throw new Error("--json applies only to remote app actions");
+    if (request.json && request.format === "text") throw new Error("--json and --format text cannot be combined");
+    if (request.action === "promote") {
+        const delegate = options.getApplications?.();
+        if (!delegate) return textResult("App remote actions require a Management API context.", true);
+        return runPromotion(request, options, delegate);
     }
-    if (request.json !== undefined && request.format === "text") throw new Error("--json and --format text cannot be combined");
     if (Object.hasOwn(REMOTE_APP_ACTIONS, request.action)) {
         const delegate = options.getApplications?.();
         if (!delegate) return textResult("App remote actions require a Management API context.", true);
-        const action = REMOTE_APP_ACTIONS[request.action as keyof typeof REMOTE_APP_ACTIONS];
+        const promotionDiff = request.action === "diff"
+            && request.source_ref !== undefined
+            && request.source_environment_id !== undefined
+            && request.source_release_id !== undefined;
+        const action = promotionDiff ? "get_promotion_plan"
+            : REMOTE_APP_ACTIONS[request.action as keyof typeof REMOTE_APP_ACTIONS];
         const { format, json, ...remoteRequest } = request;
         const args = {
             ...remoteRequest, action, ref: request.ref ?? options.projectRef,
@@ -1222,24 +1378,19 @@ export async function runAppTool(request: AppToolArguments, options: AppToolOpti
         if (request.action === "history" && format !== "json" && json !== true) {
             return historyText(result, request, args.ref);
         }
-        if ((request.action === "deploy-plan" || request.action === "diff") && format !== "json") {
+        if ((request.action === "deploy-plan" || request.action === "diff") && format !== "json"
+            && (request.action === "deploy-plan" || request.source_ref === undefined
+                || request.source_environment_id === undefined || request.source_release_id === undefined)) {
             return formatRemoteDeployPlan(result);
         }
-        if (request.action === "promote-plan" && !result.isError && format !== "json" && !json) {
-            const payload: unknown = JSON.parse(result.content[0]?.text ?? "");
-            if (!payload || typeof payload !== "object" || !("plan" in payload)) return result;
-            const plan = parseApplicationPromotionPlan(payload.plan);
-            return textResult([
-                `${plan.project_ref}/${plan.application_id}/${plan.environment_id}: ${plan.action}`,
-                `Source: ${plan.source.project_ref}/${plan.source.environment_id}`,
-                ...(plan.blockers.length ? [`Blocked: ${plan.blockers.join(", ")}`] : []),
-                ...(plan.steps.length ? [`Next: ${plan.steps.join(" -> ")}`] : []),
-                "Execution: not performed",
-            ].join("\n"));
+        if (request.action === "promote-plan" || (request.action === "diff"
+            && request.source_ref !== undefined && request.source_environment_id !== undefined
+            && request.source_release_id !== undefined)) {
+            if (!result.isError && format !== "json" && !json) return formatPromotionPlan(result);
         }
-        // Preserve the original receipt, including unknown outcomes. Never infer a rollback or retry.
         return (request.action === "transfer-plan" || request.action === "transfer") && format !== "json" && !json
-            ? formatReleaseTransfer(result) : result;
+            ? formatReleaseTransfer(result) : format !== "json" && !json
+                ? formatWorkflowObservation(result, request.action) : result;
     }
     switch (request.action) {
         case "verify-plan": {
@@ -1286,7 +1437,8 @@ export function registerAppTools(server: ToolServer, options: AppToolOptions = {
             ...REMOTE_APP_SCHEMA,
             action: withDescription(stringEnum(["init", "generate", "dev", "watch", "verify-plan", "compile", "check", "graph", "explain", "export-tools", "context", "doctor", "fix",
                 "plan", "build", "upload", "configure", "transfer-plan", "transfer", "promote-plan", "deploy", "deploy-plan", "diff", "status", "rollback", "rollback-plan", "history", "reconcile", "retire", "logs",
-                "preview-plan", "preview", "previews", "preview-status", "preview-cleanup"]), "App action; transfer reuses a verified release without build or activation; local plan is topology-only, deploy-plan/diff observe remote state, deploy skips verified no-op, rollback never downgrades schema"),
+                "preview-plan", "preview", "previews", "preview-list", "preview-create", "preview-status", "preview-cleanup",
+                "promote", "promote-status", "promote-reconcile"]), "App action; promote obtains and verifies its plan before one mutation request"),
             kind: optional(stringEnum(["module", "command", "query", "controller", "job", "contract", "resource"]), "[generate] Scaffold kind"),
             template: optional(stringEnum(["minimal", "http", "command", "edge"]), "[init] Minimal application by default; explicit http/command/edge recipes"),
             name: optional(Type.String(), "[init/generate] Project or object name"),

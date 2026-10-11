@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { lstat, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { assertApplicationConfigurationScope } from "@supacloud/delivery";
+import { assertApplicationConfigurationScope, type ApplicationConfigurationScope } from "@supacloud/delivery";
 import type { ApplicationDeploymentDependencies } from "./application-deployment";
 import { applicationRuntimePlan } from "./application-runtime";
 import { stableSha256 } from "../utils/stable-json";
@@ -21,14 +21,19 @@ export interface ApplicationCompatibilityOperations {
  * Uploaded application artifacts must never supply this privileged executable.
  */
 async function executable(input: ApplicationCompatibilityInput): Promise<string> {
-  const scope = {
+  return resolveApplicationVerifierExecutable({
     projectRef: input.runtime.release.project_ref,
     applicationId: input.runtime.release.application_id,
     environmentId: input.runtime.environmentId,
-  };
+  }, "verify");
+}
+
+export async function resolveApplicationVerifierExecutable(
+  scope: ApplicationConfigurationScope, command: "verify" | "smoke",
+): Promise<string> {
   assertApplicationConfigurationScope(scope);
   const parts = ["etc", "supacloud", "application-verifiers",
-    scope.projectRef, scope.applicationId, scope.environmentId, "verify"];
+    scope.projectRef, scope.applicationId, scope.environmentId, command];
   let path = "/";
   for (const [index, part] of parts.entries()) {
     path = join(path, part);
