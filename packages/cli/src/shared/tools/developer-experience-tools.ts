@@ -375,7 +375,7 @@ export function registerDeveloperExperienceTools(
         "env",
         "List or locally validate named SupaCloud environment profiles without contacting the platform or printing secrets.",
         environmentToolSchema,
-        (request) => inspectEnvironment(request as EnvironmentRequest, options),
+        (request) => inspectEnvironment(request as unknown as EnvironmentRequest, options),
     );
 }
 
