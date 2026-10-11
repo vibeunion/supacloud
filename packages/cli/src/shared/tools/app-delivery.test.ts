@@ -150,7 +150,14 @@ test("check and doctor surface database gate failures without regenerating contr
 test("app release composes build, upload, configure and one deployment", async () => {
     const root = await fixture();
     const configurationPath = join(root, "configuration.json");
-    await Bun.write(configurationPath, "{}");
+    await Bun.write(configurationPath, JSON.stringify({
+        configuration_id: "11234567-89ab-4def-8123-456789abcdef",
+        expected_configuration_id: null,
+        configuration: {
+            bun_version: "1.3.0",
+            targets: [{ name: "api", kind: "http", hosts: ["orders.example.test"], environment: {} }],
+        },
+    }));
     const calls: Array<Record<string, unknown>> = [];
     const releaseId = "a".repeat(64);
     const configurationId = "11234567-89ab-4def-8123-456789abcdef";
@@ -169,17 +176,15 @@ test("app release composes build, upload, configure and one deployment", async (
                         }) }],
                     };
                 }
-                if (args.action === "put_configuration") {
-                    return {
-                        content: [{ type: "text" as const, text: JSON.stringify({
-                            ok: true, configuration: { configuration_id: configurationId },
-                        }) }],
-                    };
-                }
                 return {
                     content: [{ type: "text" as const, text: JSON.stringify({
-                        ok: true, release_id: releaseId, configuration_id: configurationId,
-                        activation_id: activationId, no_op: false, execution_performed: true,
+                        ok: true, schema: "supacloud.cli.release-control.v1",
+                        operation: "applications.release_application",
+                        project_ref: identity.ref, application_id: identity.id,
+                        environment_id: identity.environment_id, release_id: releaseId,
+                        configuration_id: configurationId, activation_id: args.activation_id,
+                        expected_activation_id: null, plan_sha256: "d".repeat(64),
+                        action: "activate", replayed: false, execution_performed: true,
                     }) }],
                 };
             },
@@ -188,20 +193,21 @@ test("app release composes build, upload, configure and one deployment", async (
         expect(result.isError).toBe(false);
         expect(output).toMatchObject({
             ok: true, operation: "applications.release", release_id: releaseId,
-            configuration_id: configurationId, activation_id: activationId,
+            configuration_id: configurationId, activation_id: expect.any(String),
             execution_performed: true,
         });
         expect(calls.map(call => call.action)).toEqual([
-            "upload_release", "put_configuration", "deploy_release",
+            "upload_release", "release_application",
         ]);
         expect(calls[0]).toMatchObject({
             ref: identity.ref, id: identity.id,
             manifest_path: join(root, "artifacts", "delivery", "delivery.manifest.json"),
         });
-        expect(calls[2]).toMatchObject({
+        expect(calls[1]).toMatchObject({
             ref: identity.ref, id: identity.id, environment_id: identity.environment_id,
-            release_id: releaseId, configuration_id: configurationId,
+            release_id: releaseId, configuration_id: configurationId, activation_id: expect.any(String),
         });
+        expect(calls[1].configuration_write).toMatchObject({ configuration_id: configurationId });
     } finally { await rm(root, { recursive: true, force: true }); }
 }, 30_000);
 
@@ -222,7 +228,14 @@ test("app release can reuse a built manifest and configuration revision", async 
                     }) }] };
                 }
                 return { content: [{ type: "text" as const, text: JSON.stringify({
-                    ok: true, no_op: true, execution_performed: false,
+                    ok: true, schema: "supacloud.cli.release-control.v1",
+                    operation: "applications.release_application",
+                    project_ref: identity.ref, application_id: identity.id,
+                    environment_id: identity.environment_id, release_id: identity.release_id,
+                    configuration_id: identity.configuration_id,
+                    expected_activation_id: identity.expected_activation_id,
+                    plan_sha256: "d".repeat(64), action: "no-op",
+                    replayed: false, execution_performed: false,
                     activation_id: identity.expected_activation_id,
                 }) }] };
             },
@@ -232,7 +245,7 @@ test("app release can reuse a built manifest and configuration revision", async 
             ok: true, no_op: true, execution_performed: false,
             release_id: identity.release_id, configuration_id: identity.configuration_id,
         });
-        expect(calls.map(call => call.action)).toEqual(["upload_release", "deploy_release"]);
+        expect(calls.map(call => call.action)).toEqual(["upload_release", "release_application"]);
         expect(calls[0]).toMatchObject({
             manifest_path: join(root, "existing", "delivery.manifest.json"),
         });
@@ -242,8 +255,15 @@ test("app release can reuse a built manifest and configuration revision", async 
 test("app release stops after an uncertain deployment and preserves phase identities", async () => {
     const root = await fixture();
     const configurationPath = join(root, "configuration.json");
-    await Bun.write(configurationPath, "{}");
+    await Bun.write(configurationPath, JSON.stringify({
+        configuration_id: identity.configuration_id, expected_configuration_id: null,
+        configuration: {
+            bun_version: "1.3.0",
+            targets: [{ name: "api", kind: "http", hosts: ["orders.example.test"], environment: {} }],
+        },
+    }));
     const calls: string[] = [];
+    let requestedActivationId: unknown;
     try {
         const result = await runAppTool({
             action: "release", root, ref: identity.ref, id: identity.id,
@@ -251,20 +271,18 @@ test("app release stops after an uncertain deployment and preserves phase identi
         }, {
             getApplications: () => async args => {
                 calls.push(String(args.action));
+                requestedActivationId = args.activation_id;
                 if (args.action === "upload_release") {
                     return { content: [{ type: "text" as const, text: JSON.stringify({
                         ok: true, release: { release_id: identity.release_id },
                     }) }] };
                 }
-                if (args.action === "put_configuration") {
-                    return { content: [{ type: "text" as const, text: JSON.stringify({
-                        ok: true, configuration: { configuration_id: identity.configuration_id },
-                    }) }] };
-                }
                 return { isError: true, content: [{ type: "text" as const, text: JSON.stringify({
-                    ok: false, error: { code: "OUTCOME_UNKNOWN" },
+                    ok: false, schema: "supacloud.cli.release-control.v1",
+                    operation: "applications.release_application",
+                    error: { code: "OUTCOME_UNKNOWN" },
                     release_id: identity.release_id, configuration_id: identity.configuration_id,
-                    activation_id: identity.activation_id,
+                    activation_id: requestedActivationId,
                     expected_activation_id: identity.expected_activation_id,
                 }) }] };
             },
@@ -274,10 +292,10 @@ test("app release stops after an uncertain deployment and preserves phase identi
         expect(output).toMatchObject({
             ok: false, operation: "applications.release", phase: "deploy",
             error: { code: "OUTCOME_UNKNOWN" }, release_id: identity.release_id,
-            configuration_id: identity.configuration_id, activation_id: identity.activation_id,
+            configuration_id: identity.configuration_id, activation_id: requestedActivationId,
             expected_activation_id: identity.expected_activation_id,
         });
-        expect(calls).toEqual(["upload_release", "put_configuration", "deploy_release"]);
+        expect(calls).toEqual(["upload_release", "release_application"]);
     } finally { await rm(root, { recursive: true, force: true }); }
 }, 30_000);
 
