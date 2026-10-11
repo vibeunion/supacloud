@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.43.1](https://github.com/vibeunion/supacloud/compare/compiler-v0.43.0...compiler-v0.43.1) (2026-10-11)
+
+
+### Miscellaneous Chores
+
+* release main ([#1809](https://github.com/vibeunion/supacloud/issues/1809)) ([29edcea](https://github.com/vibeunion/supacloud/commit/29edceaf39f98d42d28327fcfb60bb46558e7113))
+
 ## [0.43.0](https://github.com/vibeunion/supacloud/compare/compiler-v0.42.1...compiler-v0.43.0) (2026-10-10)
 
 
