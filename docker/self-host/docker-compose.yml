@@ -265,7 +265,7 @@ services:
   caddy:
     build:
       context: ./caddy
-    image: supacloud-caddy:2.11.4-ratelimit
+    image: supacloud-caddy:2.11.7-ratelimit
     restart: unless-stopped
     entrypoint: ["/usr/local/bin/supacloud-caddy-entrypoint"]
     volumes:

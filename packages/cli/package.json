@@ -55,7 +55,7 @@
     "@supacloud/compiler": "^0.44.0",
     "@supacloud/delivery": "file:../delivery",
     "@supacloud/db": "file:../db",
-    "typebox": "1.3.34"
+    "typebox": "1.3.36"
   },
   "overrides": {
     "@supacloud/contracts": "file:../contracts",

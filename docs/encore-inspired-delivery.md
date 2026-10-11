@@ -1787,7 +1787,7 @@ The reproduction steps and exact coverage are in
 
 September 26, 2026 local Linux evidence:
 
-- Bun 1.4.2; stock Caddy 2.11.4 from cached arm64 images.
+- Bun 1.4.2; stock Caddy 2.11.7 from cached arm64 images.
 - Successful final normal receipt:
   `/var/lib/supacloud-delivery-acceptance/run-yLhmvK/receipt.json`.
 - Real tenant HTTP and Worker start, exact UID/GID checks, loopback readiness,

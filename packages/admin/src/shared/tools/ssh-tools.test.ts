@@ -328,7 +328,7 @@ function addPlatformVersionFixture(ssh: FakeSsh): void {
     });
     addBinaryVersionFixture(ssh, {
         unit: "supacloud-caddy.service", executablePath: "/usr/local/bin/supacloud-caddy",
-        versionOutput: "v2.11.4", sha256: "3".repeat(64),
+        versionOutput: "v2.11.7", sha256: "3".repeat(64),
     });
     addFakeExecution(ssh, "ROOT='/opt/supacloud/web-console/current'", fakeWebConsoleProbe(
         '{"schema_version":1,"component":"web-console","version":"0.28.8","future":true}\n',
@@ -1726,7 +1726,7 @@ describe("ssh admin tool", () => {
             error: null,
         });
         expect(report.components.edge_runtime.version).toBe("0.16.9");
-        expect(report.components.caddy.version).toBe("2.11.4");
+        expect(report.components.caddy.version).toBe("2.11.7");
         expect(report.components.web_console).toEqual({
             status: "ok",
             version: "0.28.8",
@@ -2235,7 +2235,7 @@ describe("ssh admin tool", () => {
         });
         addBinaryVersionFixture(ssh, {
             unit: "supacloud-caddy.service", executablePath: "/usr/local/bin/supacloud-caddy",
-            versionOutput: "v2.11.4", sha256: "c".repeat(64),
+            versionOutput: "v2.11.7", sha256: "c".repeat(64),
         });
         addFakeExecution(ssh, "ROOT='/opt/supacloud/web-console/current'", fakeWebConsoleProbe(
             '{"schema_version":1,"component":"web-console","version":"0.28.8"}',

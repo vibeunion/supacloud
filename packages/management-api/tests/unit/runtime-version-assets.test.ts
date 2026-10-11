@@ -1373,8 +1373,8 @@ describe("runtime companion version assets", () => {
     expect(installer).toContain('local JFS_VER="1.4.1"');
     expect(installer).toContain('COMPOSE_VERSION="v5.5.1"');
     expect(installer).toContain("Docker Buildx >= 0.17 for 'compose build'");
-    expect(installer).toContain('CADDY_VERSION:-2.11.4');
-    expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.4}"');
+    expect(installer).toContain('CADDY_VERSION:-2.11.7');
+    expect(caddyBuilder).toContain('CADDY_VERSION="${CADDY_VERSION:-v2.11.7}"');
 
     expect(runtime).toContain('POSTGREST_DEFAULT_VERSION="v16.4"');
     expect(runtime).toContain('GOTRUE_DEFAULT_VERSION="v2.197.0"');
@@ -1406,7 +1406,7 @@ describe("runtime companion version assets", () => {
     expect(integrationJob?.steps.find((step) => step.name === "Restart flaky services")?.run)
       .toContain('docker start "${{ job.services.realtime.id }}"');
     for (const compose of [devCompose, selfHostCompose]) {
-      expect(compose).toContain("image: supacloud-caddy:2.11.4-ratelimit");
+      expect(compose).toContain("image: supacloud-caddy:2.11.7-ratelimit");
       expect(compose).toContain("supabase/gotrue:v2.197.0");
       expect(compose).toContain("postgrest/postgrest:v16.4");
     }

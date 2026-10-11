@@ -195,7 +195,7 @@ A changed source hash or semantic precondition rejects application. No editor
 extension or language server is installed by this command.
 
 The reactive CI runs packed consumers using the declared Angular dependency
-range and the explicit minimum `22.1.5`; each run logs actual installed Angular,
+range and the explicit minimum `22.2.2`; each run logs actual installed Angular,
 RxJS, TypeScript and Elysia versions. The Angular consumer now installs candidate
 Elysia/DB/command packages and executes request cancellation, drain timeout,
 repeated shutdown and worker receipts outside the workspace. The separate SDK
