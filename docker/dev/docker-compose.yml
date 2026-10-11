@@ -2,7 +2,7 @@ services:
   caddy:
     build:
       context: ../self-host/caddy
-    image: supacloud-caddy:2.11.4-ratelimit
+    image: supacloud-caddy:2.11.7-ratelimit
     restart: always
     entrypoint: ["/usr/local/bin/supacloud-caddy-entrypoint"]
     ports:
