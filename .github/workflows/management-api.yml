@@ -234,13 +234,17 @@ jobs:
               bun run ../../scripts/audit_dependencies.ts
           - name: Project CLI
             working-directory: packages/cli
-            script: |
+            prepare_script: |
               bun install --frozen-lockfile
               (cd ../app && bun install --frozen-lockfile)
               (cd ../delivery && bun run build)
+            typecheck_script: |
               bun run typecheck
+            test_script: |
               bun test src
+            build_script: |
               bun run build
+            acceptance_script: |
               bun run ../../scripts/check_app_starter.ts
               bun run ../../scripts/audit_dependencies.ts
           - name: Function Adapters
@@ -290,14 +294,18 @@ jobs:
               bun run ../../scripts/audit_dependencies.ts
           - name: App Compiler
             working-directory: packages/compiler
-            script: |
+            prepare_script: |
               bun run ../../scripts/build-command-dependencies.ts elysia
               (cd ../elysia && bun install --frozen-lockfile && bun run build)
               bun install --frozen-lockfile
+            typecheck_script: |
               bun run typecheck
               bun run typecheck:test
+            test_script: |
               bun test
+            build_script: |
               bun run build
+            acceptance_script: |
               (cd ../management-api && bun install --frozen-lockfile)
               (cd ../management-api && bun run typecheck:application-releases)
               (cd ../cli && bun install --frozen-lockfile)
@@ -407,8 +415,34 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Run package checks
+        if: ${{ matrix.script != '' }}
         working-directory: ${{ matrix.working-directory }}
         run: ${{ matrix.script }}
+
+      - name: Prepare package dependencies
+        if: ${{ matrix.prepare_script != '' }}
+        working-directory: ${{ matrix.working-directory }}
+        run: ${{ matrix.prepare_script }}
+
+      - name: Typecheck package
+        if: ${{ matrix.typecheck_script != '' }}
+        working-directory: ${{ matrix.working-directory }}
+        run: ${{ matrix.typecheck_script }}
+
+      - name: Test package
+        if: ${{ matrix.test_script != '' }}
+        working-directory: ${{ matrix.working-directory }}
+        run: ${{ matrix.test_script }}
+
+      - name: Build package
+        if: ${{ matrix.build_script != '' }}
+        working-directory: ${{ matrix.working-directory }}
+        run: ${{ matrix.build_script }}
+
+      - name: Verify installed package consumers
+        if: ${{ matrix.acceptance_script != '' }}
+        working-directory: ${{ matrix.working-directory }}
+        run: ${{ matrix.acceptance_script }}
 
   generate-sbom:
     name: Generate CycloneDX SBOM

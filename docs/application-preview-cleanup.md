@@ -10,6 +10,17 @@ Stored receipts without an expiry are not automatically adopted by the worker.
 Expiry is eligibility for cleanup, not permission to interrupt a serving
 application or discard unverified Storage contents.
 
+## Configuration Recovery
+
+Creation pins the supplied source configuration revision, or reads and pins the
+current head once when no revision is supplied. Provisioning persists the target
+configuration ID before cloning and reuses it on recovery. A clone whose ready
+receipt was not committed is retried with the same source revision and target
+ID through the immutable configuration writer. It does not allocate another
+revision or reset a newer target head.
+
+Receipts without a pinned source revision cannot adopt a later mutable head.
+A missing source or mismatched clone identity cannot produce a ready preview.
 ## Acceptance
 
 ```gherkin
@@ -37,6 +48,12 @@ Scenario: Cleanup and provisioning cannot race
   Then the other cannot provision or clean its resources concurrently
   And stale receipt CAS cannot overwrite the winning state
 
+Scenario: Recover a committed configuration without allocating a new revision
+  Given a pinned source revision and a persisted target configuration ID
+  And the clone committed before its ready receipt could be saved
+  When a restarted control plane resumes provisioning
+  Then it clones the same source into the same target configuration ID
+  And does not read the mutable source head
 Scenario: Persist cleanup intent before interrupting a selected preview
   Given an explicitly selected active preview
   When the cleanup intent cannot be committed

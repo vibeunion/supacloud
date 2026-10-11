@@ -11,3 +11,4 @@ export const ApplicationActivationWriteSchema = Delivery.ApplicationActivationWr
 export const ApplicationActivationResultSchema = Delivery.ApplicationActivationResultSchema;
 export const ApplicationActivationRetirementResultSchema = Delivery.ApplicationActivationRetirementResultSchema;
 export const ApplicationRollbackSnapshotSchema = Delivery.ApplicationRollbackSnapshotSchema;
+export const ApplicationActivationHistoryCursorSchema = Delivery.ApplicationActivationHistoryCursorSchema;

@@ -102,7 +102,7 @@ export interface ApplicationPreviewServiceDependencies {
   invalidateEnv?: (ref: string) => Promise<boolean>;
   runtime?: Pick<typeof tenantRuntimeService, "checkStatus">;
   storage?: Pick<typeof StorageService, "createBucket">;
-  configurations?: Pick<ApplicationConfigurations, "clone">;
+  configurations?: Pick<ApplicationConfigurations, "read" | "clone">;
   activate?: (input: {
     projectRef: string;
     branchRef: string;
@@ -187,6 +187,9 @@ export class ApplicationPreviewService {
       throw new Error("APPLICATION_PREVIEW_TTL_INVALID");
     }
     const sourceRelease = await this.dependencies.releases.readRelease(input.projectRef, input.applicationId, input.releaseId);
+    const sourceConfigurationId = input.configurationId ?? (await this.dependencies.configurations?.read({
+      projectRef: input.projectRef, applicationId: input.applicationId, environmentId: input.environmentId,
+    }))?.configuration_id ?? null;
     const id = randomUUID();
     const branchRef = branchRefFor(id);
     const release = await this.dependencies.releases.materializeRelease(
@@ -213,7 +216,7 @@ export class ApplicationPreviewService {
         branchName: input.branchName?.trim() || `app-${input.applicationId}-${id.slice(0, 8)}`,
         queueName,
         testSecretName,
-        sourceConfigurationId: input.configurationId ?? null,
+        sourceConfigurationId,
         now: new Date(now).toISOString(),
       },
     );
@@ -342,16 +345,24 @@ export class ApplicationPreviewService {
       receipt.resources.database_branch.status = "ready";
       await this.save(projectRef, receipt);
 
-      if (receipt.resources.configuration_revision.status !== "ready" && this.dependencies.configurations) {
+      if (receipt.resources.configuration_revision.status !== "ready" && receipt.source_configuration_id !== null
+        && this.dependencies.configurations) {
+        // 先持久化目标身份；恢复时只克隆已固定的源 revision，不重新读取当前 head。
+        receipt.resources.configuration_revision.configuration_id ??= randomUUID();
+        await this.save(projectRef, receipt);
         const configuration = await this.dependencies.configurations.clone(
           { projectRef, applicationId: receipt.application_id, environmentId: receipt.environment_id },
           { projectRef: branchRef, applicationId: receipt.application_id, environmentId: receipt.environment_id },
-          receipt.source_configuration_id ?? undefined,
+          receipt.source_configuration_id,
+          receipt.resources.configuration_revision.configuration_id,
         );
-        receipt.resources.configuration_revision = {
-          status: configuration ? "ready" : "pending",
-          configuration_id: configuration?.configuration_id ?? null,
-        };
+        if (configuration && (configuration.configuration_id !== receipt.resources.configuration_revision.configuration_id
+          || configuration.project_ref !== branchRef || configuration.application_id !== receipt.application_id
+          || configuration.environment_id !== receipt.environment_id)) {
+          throw new Error("APPLICATION_PREVIEW_CONFIGURATION_IDENTITY_MISMATCH");
+        }
+        receipt.resources.configuration_revision.status = configuration ? "ready" : "pending";
+        await this.save(projectRef, receipt);
       }
 
       await this.dependencies.queues.createQueue(branchRef, receipt.queue_name);

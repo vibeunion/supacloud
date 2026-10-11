@@ -14,6 +14,14 @@ export type {
   ApplicationActivationWrite, ApplicationActivationResult, ApplicationActivationRetirementResult,
   ApplicationRollbackSnapshot,
 } from "./application-activation";
+export { ApplicationDeployPlanSchema, parseApplicationDeployPlan } from "./application-deploy-plan";
+export type { ApplicationDeployPlan } from "./application-deploy-plan";
+export {
+  ApplicationActivationHistoryPositionSchema, ApplicationActivationHistoryCursorSchema,
+  ApplicationActivationHistorySchema, applicationHistoryCursor, applicationHistoryPositionBefore,
+  applicationHistoryTimestampMilliseconds, parseApplicationActivationHistory, parseApplicationHistoryCursor,
+} from "./application-history";
+export type { ApplicationActivationHistory, ApplicationActivationHistoryPosition } from "./application-history";
 export {
   ApplicationIdSchema, ApplicationReleaseIdSchema, ApplicationReleaseRecordSchema,
   applicationReleaseId, parseApplicationReleaseRecord,
