@@ -234,6 +234,7 @@ jobs:
               bun run ../../scripts/audit_dependencies.ts
           - name: Project CLI
             working-directory: packages/cli
+            test_timings: cli-test-timings.json
             prepare_script: |
               bun install --frozen-lockfile
               (cd ../app && bun install --frozen-lockfile)
@@ -241,7 +242,7 @@ jobs:
             typecheck_script: |
               bun run typecheck
             test_script: |
-              bun test src
+              bun test src --parallel=2 --isolate --timings "$RUNNER_TEMP/cli-test-timings.json" --update-timings
             build_script: |
               bun run build
             acceptance_script: |
@@ -294,6 +295,7 @@ jobs:
               bun run ../../scripts/audit_dependencies.ts
           - name: App Compiler
             working-directory: packages/compiler
+            test_timings: compiler-test-timings.json
             prepare_script: |
               bun run ../../scripts/build-command-dependencies.ts elysia
               (cd ../elysia && bun install --frozen-lockfile && bun run build)
@@ -302,7 +304,7 @@ jobs:
               bun run typecheck
               bun run typecheck:test
             test_script: |
-              bun test
+              bun test --parallel=2 --isolate --timings "$RUNNER_TEMP/compiler-test-timings.json" --update-timings
             build_script: |
               bun run build
             acceptance_script: |
@@ -443,6 +445,16 @@ jobs:
         if: ${{ matrix.acceptance_script != '' }}
         working-directory: ${{ matrix.working-directory }}
         run: ${{ matrix.acceptance_script }}
+
+      - name: Upload package test timings
+        if: ${{ always() && matrix.test_timings != '' }}
+        uses: actions/upload-artifact@v6
+        with:
+          name: package-test-timings-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/${{ matrix.test_timings }}
+          if-no-files-found: warn
+          retention-days: 3
+          compression-level: 0
 
   generate-sbom:
     name: Generate CycloneDX SBOM
@@ -683,6 +695,7 @@ jobs:
         run: |
           node --check .github/scripts/ai-review-merge.mjs
           node --test .github/scripts/ai-review-merge.test.mjs
+          node --test .github/scripts/ci-test-parallel.test.mjs
           node --test .github/scripts/required-checks.test.mjs
           node --check .github/scripts/publish-npm-package.mjs
           node --test .github/scripts/publish-npm-package.test.mjs
