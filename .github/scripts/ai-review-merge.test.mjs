@@ -135,7 +135,16 @@ describe('trusted review workflow', () => {
       assert.match(workflow, new RegExp(packagePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     }
     assert.match(workflow, /working-directory: packages\/admin\n\s+script: \|\n\s+bun install --frozen-lockfile[\s\S]*?bun run typecheck[\s\S]*?bun test/);
-    assert.match(workflow, /working-directory: packages\/cli\n\s+script: \|\n\s+bun install --frozen-lockfile[\s\S]*?bun run typecheck[\s\S]*?bun test/);
+    const projectCli = workflow.split('\n          - name: Project CLI\n')[1]?.split('\n          - name: ')[0];
+    assert.ok(projectCli, 'Project CLI must have its own package checks');
+    assert.match(projectCli, /working-directory: packages\/cli\n\s+prepare_script: \|\n\s+bun install --frozen-lockfile[\s\S]*?typecheck_script: \|\n\s+bun run typecheck[\s\S]*?test_script: \|\n\s+bun test src(?:\n|$)/);
+    for (const phase of ['prepare_script', 'typecheck_script', 'test_script']) {
+      assert.match(
+        workflow,
+        new RegExp(`if: \\$\\{\\{ matrix\\.${phase} != '' \\}\\}\\n\\s+working-directory: \\$\\{\\{ matrix\\.working-directory \\}\\}\\n\\s+run: \\$\\{\\{ matrix\\.${phase} \\}\\}`),
+        `Project CLI ${phase} must execute in its package directory`,
+      );
+    }
     assert.match(workflow, /working-directory: packages\/supacloud\n\s+script: \|\n\s+bun install --frozen-lockfile[\s\S]*?bun run typecheck[\s\S]*?bun test[\s\S]*?bun run build/);
     assert.match(workflow, /working-directory: packages\/management-api[\s\S]*?run: bun run test:unit/);
     assert.match(managementPackage, /"test:unit": "bun run scripts\/run-unit-tests\.ts"/);

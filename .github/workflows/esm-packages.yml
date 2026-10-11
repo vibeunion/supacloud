@@ -6,6 +6,7 @@ on:
       - 'packages/**'
       - 'package.json'
       - '.github/scripts/esm-package*'
+      - '.github/scripts/esm-build-reuse.test.mjs'
       - '.github/scripts/prepare-command-package.mjs'
       - '.github/scripts/package-validation.mjs'
       - '.github/scripts/npm-registry-visibility.mjs'
@@ -16,6 +17,7 @@ on:
       - 'packages/**'
       - 'package.json'
       - '.github/scripts/esm-package*'
+      - '.github/scripts/esm-build-reuse.test.mjs'
       - '.github/scripts/prepare-command-package.mjs'
       - '.github/scripts/package-validation.mjs'
       - '.github/scripts/npm-registry-visibility.mjs'
@@ -39,6 +41,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24.x'
+      - run: node --test .github/scripts/esm-build-reuse.test.mjs
       - run: node --test .github/scripts/esm-package-policy.test.mjs .github/scripts/esm-package-sdk.test.mjs
       - run: node .github/scripts/esm-package-policy.mjs
 
@@ -57,9 +60,53 @@ jobs:
           node-version: '24.x'
       - run: node --experimental-strip-types --test .github/scripts/esm-package-launcher.test.mjs .github/scripts/esm-package-cli-resolution.test.mjs
 
+  esm-build:
+    name: Build ESM candidates
+    needs: esm-policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24.x'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Build candidate packages in dependency order
+        run: |
+          for package in contracts delivery app query supacloud-js compiler; do
+            (cd "packages/$package" && bun install --frozen-lockfile && bun run build)
+          done
+      - name: Archive candidate build outputs
+        run: |
+          tar -czf "$RUNNER_TEMP/esm-candidate-build.tar.gz" \
+            packages/contracts/dist \
+            packages/delivery/dist \
+            packages/app/dist \
+            packages/query/dist \
+            packages/supacloud-js/dist \
+            packages/compiler/dist \
+            packages/app/node_modules/.bin/tsc \
+            packages/app/node_modules/@types/node \
+            packages/app/node_modules/typescript \
+            packages/app/node_modules/@typescript/typescript-linux-x64 \
+            packages/supacloud-js/node_modules/.bin/tsc \
+            packages/supacloud-js/node_modules/@types/node \
+            packages/supacloud-js/node_modules/typescript \
+            packages/supacloud-js/node_modules/@typescript/typescript-linux-x64
+      - name: Upload candidate build outputs
+        uses: actions/upload-artifact@v6
+        with:
+          name: esm-candidate-build
+          path: ${{ runner.temp }}/esm-candidate-build.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
   esm-consumers:
     name: Installed consumers (Node ${{ matrix.node }} and Bun)
-    needs: esm-policy
+    needs: [esm-policy, esm-build]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
@@ -74,11 +121,13 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.2'
-      - name: Build candidate packages in dependency order
-        run: |
-          for package in contracts delivery app query supacloud-js compiler; do
-            (cd "packages/$package" && bun install --frozen-lockfile && bun run build)
-          done
+      - name: Download candidate build outputs
+        uses: actions/download-artifact@v6
+        with:
+          name: esm-candidate-build
+          path: ${{ runner.temp }}/esm-candidate-build
+      - name: Restore candidate build outputs
+        run: tar -xzf "$RUNNER_TEMP/esm-candidate-build/esm-candidate-build.tar.gz" -C "$GITHUB_WORKSPACE"
       - name: Check application and SDK publish inventories
         run: |
           bun run --cwd packages/app check:package
@@ -98,16 +147,17 @@ jobs:
         run: |
           evidence="$RUNNER_TEMP/sdk-compatibility-evidence"
           mkdir -p "$evidence"
-          # Only committed public source and named build/dependency directories.
+          # Archive only restored candidate outputs and compiler dependencies.
           # Never archive .git, runner credentials, npm user config or untracked env files.
           git archive --format=tar HEAD > "$evidence/source.tar"
           tar -cf "$evidence/dependencies.tar" \
-            packages/query/node_modules packages/query/dist \
+            packages/query/dist \
             packages/supacloud-js/node_modules packages/supacloud-js/dist \
-            packages/contracts/node_modules packages/contracts/dist \
+            packages/contracts/dist \
             packages/app/node_modules packages/app/dist \
-            packages/delivery/node_modules packages/delivery/dist \
-            packages/compiler/node_modules packages/compiler/dist
+            packages/delivery/dist \
+            packages/compiler/dist
+          cp "$RUNNER_TEMP/esm-candidate-build/esm-candidate-build.tar.gz" "$evidence/candidate-build.tar.gz"
           cp "$(command -v bun)" "$evidence/bun"
           git rev-parse HEAD > "$evidence/commit.txt"
           node --version > "$evidence/node-version.txt"

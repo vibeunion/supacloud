@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.103.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.102.0...management-api-v0.103.0) (2026-10-11)
+
+
+### Features
+
+* **applications:** journal-selected application rollback ([#1776](https://github.com/vibeunion/supacloud/issues/1776)) ([68a191c](https://github.com/vibeunion/supacloud/commit/68a191c73d9f5437303885a2f95ba33109d12bc5))
+
 ## [0.102.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.101.0...management-api-v0.102.0) (2026-10-10)
 
 
