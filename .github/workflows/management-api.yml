@@ -1029,7 +1029,7 @@ jobs:
           context: docker/self-host/caddy
           load: true
           push: false
-          tags: supacloud-caddy:2.11.4-ratelimit
+          tags: supacloud-caddy:2.11.7-ratelimit
           cache-from: type=gha,scope=caddy-integration
           cache-to: type=gha,scope=caddy-integration,mode=max,ignore-error=true
 
@@ -1050,7 +1050,7 @@ jobs:
       # data plane stays inside the container network, unreachable from outside.
       - name: Start Caddy fixture
         run: |
-          caddy_modules="$(docker run --rm --entrypoint caddy supacloud-caddy:2.11.4-ratelimit list-modules)"
+          caddy_modules="$(docker run --rm --entrypoint caddy supacloud-caddy:2.11.7-ratelimit list-modules)"
           grep -Fx http.handlers.rate_limit <<<"${caddy_modules}"
           grep -Fx http.matchers.query <<<"${caddy_modules}"
           printf '%s\n' '{"admin":{"listen":"0.0.0.0:2019"}}' > "$RUNNER_TEMP/caddy-ci.json"
@@ -1058,7 +1058,7 @@ jobs:
             --name supacloud-ci-caddy \
             --publish 127.0.0.1:2019:2019 \
             --volume "$RUNNER_TEMP/caddy-ci.json:/etc/supacloud/caddy/config.json:ro" \
-            supacloud-caddy:2.11.4-ratelimit
+            supacloud-caddy:2.11.7-ratelimit
 
       - name: Show runtime versions
         run: |

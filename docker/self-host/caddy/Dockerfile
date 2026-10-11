@@ -1,15 +1,15 @@
-FROM caddy:2.11.4-builder@sha256:522c540599fa8f6a340b18dea8ee12dfd9d8198347cefa2c4c54344159ae6c0b AS builder
+FROM caddy:2.11.7-builder@sha256:b25f47453fa02f7e66c0828b4b1343658808b9000950b6825c4a1cb0c988f5f8 AS builder
 
 ARG GOPROXY=https://proxy.golang.org,direct
 ENV GOTOOLCHAIN=go1.27.1
 
 RUN go version \
     && GOBIN=/usr/bin go install github.com/caddyserver/xcaddy/cmd/xcaddy@v0.4.7 \
-    && xcaddy build v2.11.4 \
+    && xcaddy build v2.11.7 \
         --with github.com/mholt/caddy-ratelimit@5625512f24f6f59d6f64fb3aafe5eecff0b286db \
         --output /usr/bin/caddy
 
-FROM caddy:2.11.4@sha256:df7f1c2fb114453b951de51a98efc010db1655a92c2e86be6706714e2417a78d
+FROM caddy:2.11.7@sha256:f2a1290d0463aad60660d4ec134943f183ee2a5f6c3eb7bf32dd984f2f020772
 
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 COPY entrypoint.sh /usr/local/bin/supacloud-caddy-entrypoint
