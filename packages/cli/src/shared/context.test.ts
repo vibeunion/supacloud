@@ -225,6 +225,9 @@ describe("resolveSupaCloudContext", () => {
             projectRef: "test-ref",
             production: false,
         });
+        expect(context.environmentVariables).toMatchObject({
+            SUPACLOUD_API_TOKEN: "file-token",
+        });
     });
 
     test("does not fall back when a named environment file is missing", () => {

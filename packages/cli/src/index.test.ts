@@ -755,6 +755,7 @@ describe("supacloud-cli process contract", () => {
         temporaryDirectories.push(workspace);
         const productionSecretName = "FA_CLI_PRODUCTION_SECRET";
         const productionSecret = "production-secret-sentinel";
+        const processSecret = "process-production-secret-sentinel";
         const requestedPaths: string[] = [];
         const requestedBodies: unknown[] = [];
         const server = Bun.serve({
@@ -772,19 +773,20 @@ describe("supacloud-cli process contract", () => {
             `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
             "SUPACLOUD_API_TOKEN=prod-secret-token",
             "SUPACLOUD_PROJECT_REF=prod-ref",
+            `${productionSecretName}=${productionSecret}`,
         ].join("\n") + "\n");
 
         const unconfirmed = await runProjectCli([
             "secrets", "upsert", "--ref", "prod-ref", "--from-env", productionSecretName, "--env", "prod",
-        ], { [productionSecretName]: productionSecret }, workspace);
+        ], { [productionSecretName]: processSecret }, workspace);
         const crossRef = await runProjectCli([
             "secrets", "upsert", "--ref", "other-ref", "--from-env", productionSecretName,
             "--env", "prod", "--confirm-production", "other-ref",
-        ], { [productionSecretName]: productionSecret }, workspace);
+        ], { [productionSecretName]: processSecret }, workspace);
         const confirmed = await runProjectCli([
             "secrets", "upsert", "--ref", "prod-ref", "--from-env", productionSecretName,
             "--env", "prod", "--confirm-production", "prod-ref",
-        ], { [productionSecretName]: productionSecret }, workspace);
+        ], { [productionSecretName]: processSecret }, workspace);
 
         expect(unconfirmed.exitCode).toBe(1);
         expect(unconfirmed.stderr).toContain("--confirm-production prod-ref");
@@ -797,6 +799,7 @@ describe("supacloud-cli process contract", () => {
         ]]);
         for (const response of [unconfirmed, crossRef, confirmed]) {
             expect(response.stdout + response.stderr).not.toContain(productionSecret);
+            expect(response.stdout + response.stderr).not.toContain(processSecret);
         }
     });
 
@@ -1071,6 +1074,47 @@ describe("supacloud-cli process contract", () => {
         expect(response.stdout).toContain("Updated 2 secrets");
         expect(response.stdout + response.stderr).not.toContain(primarySecret);
         expect(response.stdout + response.stderr).not.toContain(secondarySecret);
+    });
+
+    test("loads secret values from the selected profile source", async () => {
+        const secretName = "FA_CLI_PROFILE_SECRET";
+        const profileSecret = "profile-secret-sentinel";
+        const processSecret = "process-secret-sentinel";
+        let requestBody: unknown;
+        const workspace = mkdtempSync(join(tmpdir(), "supacloud-cli-profile-secrets-"));
+        temporaryDirectories.push(workspace);
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                requestBody = await request.json();
+                return Response.json({});
+            },
+        });
+        servers.push(server);
+        writeFileSync(join(workspace, ".env.supacloud.test"), [
+            "SUPACLOUD_ENV=test",
+            `SUPACLOUD_API_URL=http://127.0.0.1:${server.port}`,
+            "SUPACLOUD_API_TOKEN=profile-api-token",
+            "SUPACLOUD_PROJECT_REF=test-ref",
+            `${secretName}=${profileSecret}`,
+        ].join("\n") + "\n");
+        const commandArguments = [
+            "secrets", "upsert", "--ref", "test-ref", "--from-env", secretName, "--env", "test",
+        ];
+
+        const response = await runProjectCli(commandArguments, {
+            [secretName]: processSecret,
+        }, workspace);
+
+        expect(response.exitCode).toBe(0);
+        expect(commandArguments.join("\0")).not.toContain(profileSecret);
+        expect(commandArguments.join("\0")).not.toContain(processSecret);
+        expect(requestBody).toEqual([
+            { name: secretName, value: profileSecret },
+        ]);
+        expect(response.stdout + response.stderr).not.toContain(profileSecret);
+        expect(response.stdout + response.stderr).not.toContain(processSecret);
     });
 
     test("returns non-zero without echoing the response body when listing secrets fails", async () => {

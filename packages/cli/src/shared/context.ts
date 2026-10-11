@@ -28,6 +28,7 @@ export interface ResolvedContext {
     credentialScope: ContextCredentialScope;
     source: ContextSourceKind;
     sourcePath: string | null;
+    environmentVariables: Readonly<Record<string, string>>;
     insecureTls: boolean;
 }
 
@@ -247,6 +248,7 @@ export function resolveSupaCloudContext(
         credentialScope: core.credentialScope,
         source: source.kind,
         sourcePath: source.path,
+        environmentVariables: source.values,
         insecureTls,
     };
 }

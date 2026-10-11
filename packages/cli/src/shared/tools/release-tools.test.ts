@@ -345,7 +345,7 @@ test("exact backup status remains a scoped production read while creation is pro
         apiUrl: "https://example.test", apiToken: "", projectRef: PROJECT_REF,
         readOnly: true, environment: "production", production: true,
         inferredSupabaseUrl: "", inferredServiceRoleKey: "", credentialScope: "management",
-        source: "process_env", sourcePath: null, insecureTls: false,
+        source: "process_env", sourcePath: null, environmentVariables: {}, insecureTls: false,
     };
     expect(executionMode("release", "logical_backup_status", {})).toBe("read");
     expect(() => authorizeExecution("release", { action: "logical_backup_status", ref: PROJECT_REF }, { context }))
