@@ -22,7 +22,7 @@ test('CLI and Compiler use three isolated workers without reducing test coverage
   assert.equal(job.strategy['fail-fast'], false);
   for (const entry of candidates) {
     const pattern = entry.name === 'Project CLI' ? ' src' : '';
-    const timeout = entry.name === 'Project CLI' ? ' --timeout=10000' : '';
+    const timeout = ' --timeout=10000';
     assert.equal(entry.test_script.trim(),
       `bun test${pattern} --parallel=3${timeout} --isolate --timings "$RUNNER_TEMP/${entry.test_timings}" --update-timings`);
     assert.match(entry.typecheck_script, /bun run typecheck/);
