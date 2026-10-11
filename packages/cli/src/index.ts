@@ -338,6 +338,7 @@ EXAMPLES
   ${preferredCommand} app compile --root .
   ${preferredCommand} app plan --root . --format json
   ${preferredCommand} app build --root .
+  ${preferredCommand} --env test app release --id orders --environment_id test --configuration_path configuration.json
   ${preferredCommand} app upload --ref abc123 --id orders --manifest_path generated/delivery/delivery.manifest.json
   ${preferredCommand} app configure --ref abc123 --id orders --environment_id test --configuration_path configuration.json
   ${preferredCommand} app deploy-plan --ref abc123 --id orders --environment_id test --release_id <sha256> --configuration_id <uuid>
