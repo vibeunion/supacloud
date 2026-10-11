@@ -376,7 +376,9 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
 
   // Prove the non-default golden-path templates with the same packed artifacts
   // in one packing pass, so every supported path stays smoke-covered.
-  for (const template of ["minimal", "http", "edge"] as const) {
+  // Each template owns a separate project directory and only reads the shared
+  // packed tarballs, so their acceptance checks can use the runner in parallel.
+  const templateResults = await Promise.allSettled((["minimal", "http", "edge"] as const).map(async template => {
     const templateProject = join(root, `${template}-project`);
     await initializeAppProject({ root: templateProject, name: `${template}-smoke`, template });
     const templateManifestPath = join(templateProject, "package.json");
@@ -411,6 +413,9 @@ if (typeof bindCompiledCommand !== "function" || typeof createDiagnosticRepairPl
       await copyFile(join(repo, "scripts/fixtures/starter-worker-delivery.fixture"), join(templateProject, "scripts/verify-worker-delivery.ts"));
       console.log(await run(["scripts/verify-worker-delivery.ts"], templateProject));
     }
+  }));
+  for (const result of templateResults) {
+    if (result.status === "rejected") throw result.reason;
   }
 } finally {
   try {
