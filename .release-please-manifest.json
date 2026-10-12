@@ -1,7 +1,7 @@
 {
   "packages/management-api": "0.111.0",
   "packages/web-console": "0.52.1",
-  "packages/edge-runtime": "0.31.1",
+  "packages/edge-runtime": "0.31.2",
   "packages/pgredis-runtime": "0.12.1",
   "packages/query": "0.2.1",
   "packages/supacloud-js": "0.41.2",
