@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.0](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.31.2...edge-runtime-v0.32.0) (2026-10-12)
+
+
+### Features
+
+* batch server-owned release preparation and simplify deploy output ([#1856](https://github.com/vibeunion/supacloud/issues/1856)) ([599d274](https://github.com/vibeunion/supacloud/commit/599d274285accb04a7e9e04617d8c91d40fa2b2a))
+
 ## [0.31.2](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.31.1...edge-runtime-v0.31.2) (2026-10-12)
 
 

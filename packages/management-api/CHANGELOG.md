@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.114.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.113.0...management-api-v0.114.0) (2026-10-12)
+
+
+### Features
+
+* batch server-owned release preparation and simplify deploy output ([#1856](https://github.com/vibeunion/supacloud/issues/1856)) ([599d274](https://github.com/vibeunion/supacloud/commit/599d274285accb04a7e9e04617d8c91d40fa2b2a))
+
 ## [0.113.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.112.1...management-api-v0.113.0) (2026-10-12)
 
 
