@@ -348,7 +348,10 @@ export class ApplicationDeploymentOrchestrator {
       }
       await this.mutations.checkpoint(lease, checkpoint);
 
-      if (plan.action === "no-op" && plan.migrations.project_migrations_applied) {
+      const migrationAlreadyApplied = plan.migrations.ledger_compatible
+        && plan.migrations.project_migrations_applied
+        && plan.migrations.operator_provisioning === "not-declared";
+      if (migrationAlreadyApplied) {
         checkpoint.backend_receipt = await this.backendReceipt(input, checkpoint, null, false);
       } else {
         const executionPlan = await this.dependencies.migrations.readExecutionPlan({
@@ -477,16 +480,17 @@ export class ApplicationDeploymentOrchestrator {
     migration: Awaited<ReturnType<ApplicationMigrations["apply"]>> | null,
     schemaReloaded: boolean,
   ): Promise<ApplicationBackendReceipt> {
-    const after = migration?.after ?? await this.dependencies.migrations.inspect(
-      input.projectRef, input.applicationId, input.request.release_id,
-    );
+    const afterPromise = migration?.after === undefined
+      ? this.dependencies.migrations.inspect(input.projectRef, input.applicationId, input.request.release_id)
+      : Promise.resolve(migration.after);
+    const postgrestPromise = this.dependencies.postgrestStatus
+      ? this.dependencies.postgrestStatus(input.projectRef)
+      : Promise.resolve({ actual: "running", health: "healthy" });
+    const [after, postgrest] = await Promise.all([afterPromise, postgrestPromise]);
     if (after.project_ref !== input.projectRef || after.application_id !== input.applicationId
       || after.release_id !== input.request.release_id || !after.ledger_compatible || !after.project_migrations_applied) {
       throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_RECEIPT_INVALID", 503);
     }
-    const postgrest = this.dependencies.postgrestStatus
-      ? await this.dependencies.postgrestStatus(input.projectRef)
-      : { actual: "running", health: "healthy" };
     if (postgrest.actual !== "running" || postgrest.health !== "healthy") {
       throw new ApplicationDeploymentOrchestrationError("APPLICATION_POSTGREST_NOT_READY", 503, {
         project_ref: input.projectRef, mutation_id: input.request.mutation_id,
