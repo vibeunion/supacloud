@@ -87,8 +87,8 @@ export async function runCli(
             .join("\n  ");
 
     const getSchemaShape = (schema: ToolSchema) => schemaProperties(schema);
-    const getEnumOptions = (field: TSchema) => schemaEnumValues(field);
-    const getDescription = (field: TSchema) => schemaDescription(field);
+    const getEnumOptions = (field: TSchema | undefined) => schemaEnumValues(field);
+    const getDescription = (field: TSchema | undefined) => field ? schemaDescription(field) : "";
 
     const formatToolHelp = (toolName: string, tool: { schema: ToolSchema }) => {
         const shape = getSchemaShape(tool.schema);

@@ -475,6 +475,24 @@ describe("one-command deploy", () => {
         expect(build.env.SUPACLOUD_API_TOKEN).toBeUndefined();
     });
 
+    test("injects public build variables when the environment does not declare buildEnv", () => {
+        const build = createBuildEnvironment(undefined, {
+            VITE_API_URL: "https://test.example.com",
+            PUBLIC_SITE_NAME: "Test",
+            API_TOKEN: "must-not-be-used",
+            SUPACLOUD_API_TOKEN: "must-not-be-used",
+        });
+
+        expect(build.names).toEqual(["PUBLIC_SITE_NAME", "VITE_API_URL"]);
+        expect(build.missing).toEqual([]);
+        expect(build.env).toMatchObject({
+            VITE_API_URL: "https://test.example.com",
+            PUBLIC_SITE_NAME: "Test",
+        });
+        expect(build.env.API_TOKEN).toBeUndefined();
+        expect(build.env.SUPACLOUD_API_TOKEN).toBeUndefined();
+    });
+
     test("reports missing declared build variables without exposing values", () => {
         const build = createBuildEnvironment(["VITE_API_URL"], {});
 

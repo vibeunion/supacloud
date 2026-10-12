@@ -1,4 +1,5 @@
-import { access, lstat, mkdtemp, opendir, rm } from "node:fs/promises";
+import { access, lstat, mkdtemp, opendir, readFile, rm, writeFile } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
@@ -133,7 +134,7 @@ function frontendDeployment(candidate: unknown): FrontendDeployment {
 
 async function readJson(path: string): Promise<unknown> {
     try {
-        return await Bun.file(path).json();
+        return JSON.parse(await readFile(path, "utf8")) as unknown;
     } catch (error) {
         if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
         throw new Error(`Invalid JSON file ${path}: ${error instanceof Error ? error.message : String(error)}`);
@@ -411,9 +412,9 @@ export function createBuildEnvironment(
     names: string[] | undefined,
     environmentVariables: Readonly<Record<string, string>> | undefined,
 ): { env: NodeJS.ProcessEnv; names: string[]; missing: string[] } {
-    const selectedNames = [...new Set(names || [])].sort();
-    const selectedNameSet = new Set(selectedNames);
     const values = environmentVariables ?? process.env;
+    const selectedNames = [...new Set(names ?? Object.keys(values).filter(isPublicBuildEnv))].sort();
+    const selectedNameSet = new Set(selectedNames);
     const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => (
         !isProtectedBuildEnv(name)
         && (!isPublicBuildEnv(name) || selectedNameSet.has(name))
@@ -442,15 +443,21 @@ async function runBuild(
     environment: NodeJS.ProcessEnv,
     json: boolean,
 ): Promise<void> {
-    const child = Bun.spawn(["sh", "-c", command], {
-        cwd,
-        env: environment,
-        stdio: ["inherit", json ? 2 : "inherit", "inherit"],
+    await new Promise<void>((resolve, reject) => {
+        const child = spawn("sh", ["-c", command], {
+            cwd,
+            env: environment,
+            stdio: ["inherit", json ? 2 : "inherit", "inherit"],
+        });
+        child.once("error", reject);
+        child.once("close", (exitCode) => {
+            if (exitCode === 0) {
+                resolve();
+            } else {
+                reject(new Error(`Build command failed (exit ${exitCode ?? "unknown"}): ${command}`));
+            }
+        });
     });
-    const exitCode = await child.exited;
-    if (exitCode !== 0) {
-        throw new Error(`Build command failed (exit ${exitCode ?? "unknown"}): ${command}`);
-    }
 }
 
 async function collectArchiveFiles(root: string): Promise<{ files: Map<string, Uint8Array>; bytes: number; count: number; treeSha256: string }> {
@@ -479,7 +486,7 @@ async function collectArchiveFiles(root: string): Promise<{ files: Map<string, U
     const files = new Map<string, Uint8Array>();
     const digests: Array<{ path: string; size: number; sha256: string }> = [];
     for (const path of paths) {
-        const data = new Uint8Array(await Bun.file(path).arrayBuffer());
+        const data = new Uint8Array(await readFile(path));
         bytes += data.byteLength;
         if (bytes > MAX_SOURCE_BYTES) throw new Error(`Frontend output exceeds ${MAX_SOURCE_BYTES} bytes`);
         const archivePath = relative(root, path).split(sep).join("/");
@@ -511,7 +518,7 @@ export async function createFrontendArchive(outputDirectory: string): Promise<{
     const archivePath = join(temporaryDirectory, `${basename(outputDirectory)}.tar.zst`);
     try {
         const archiveBytes = await createFrontendTarZstd(collected.files);
-        await Bun.write(archivePath, archiveBytes);
+        await writeFile(archivePath, archiveBytes);
         const sha256 = createHash("sha256").update(archiveBytes).digest("hex");
         return {
             archivePath,
