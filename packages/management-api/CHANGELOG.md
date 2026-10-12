@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.111.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.111.0...management-api-v0.111.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* **gateway:** use wildcard CORS for automatic Functions ([#1838](https://github.com/vibeunion/supacloud/issues/1838)) ([551f99f](https://github.com/vibeunion/supacloud/commit/551f99f92dd84806a098515279afe74dc59a3a2c))
+
 ## [0.111.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.110.0...management-api-v0.111.0) (2026-10-12)
 
 
