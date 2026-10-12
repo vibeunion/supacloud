@@ -1398,6 +1398,45 @@ export class WorkerPool {
     return this.enqueueBulkPreheat(() => this.rotateAndPreheatVersion(request));
   }
 
+  preheatReleaseIdleWorkers(
+    requests: readonly VersionedPreheatRequest[],
+  ): Promise<WorkerPoolVersionPreheatResult[]> {
+    const first = requests[0];
+    if (!first || requests.length > 128
+      || new Set(requests.map(request => request.functionId)).size !== requests.length
+      || requests.some(request => request.projectRef !== first.projectRef)) {
+      return Promise.reject(new Error("Release preheat requires 1-128 distinct functions from one project"));
+    }
+    return this.enqueueBulkPreheat(async () => {
+      const rotation = this.rotateGeneration();
+      const workers = this.takeIdleWorkersForProject(first.projectRef, first.maxWorkers);
+      try {
+        if (workers.length === 0) throw new Error("No workers available for release preheat");
+        const prepared: WorkerPoolVersionPreheatResult[] = [];
+        // Reserve the workers across members; normal per-worker LRU limits still apply.
+        for (const request of requests) {
+          const start = performance.now();
+          const result = this.recordBulkPreheatResults(await this.preheatWorkers({
+            functionId: request.functionId, functionPath: request.functionPath,
+            projectRoot: request.projectRoot, env: request.env,
+            options: {
+              projectRef: request.projectRef, moduleVersion: request.moduleVersion,
+              envProof: request.envProof, attestation: request.attestation,
+            },
+          }, workers), start);
+          if (result.succeeded !== workers.length || result.attestation === null) {
+            throw new Error(result.error ?? "Release member preheat was not attested");
+          }
+          prepared.push({ ...result, rotation });
+        }
+        if (this.generation !== rotation.generation) throw new Error("Runtime pool changed during release preheat");
+        return prepared;
+      } finally {
+        this.recycleBulkPreheatWorkers(workers);
+      }
+    });
+  }
+
   private async rotateAndPreheatVersion(
     request: VersionedPreheatRequest,
   ): Promise<WorkerPoolVersionPreheatResult> {

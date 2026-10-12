@@ -624,17 +624,11 @@ async function stageApplicationWebRelease(
         configuredOutput || remoteOutput || defaultOutputDirectory(selected.framework),
     );
     const build = createBuildEnvironment(target.config.buildEnv, environmentVariables);
-    const report = phaseReporter(json);
-    report("web", `${target.name} (${selected.id})`);
     assertBuildEnvironment(build, skipBuild);
     if (!skipBuild) {
-        report("build", buildCommand);
         await runBuild(buildCommand, projectDirectory, build.env, json);
-    } else {
-        report("build", "skipped");
     }
 
-    report("package", relative(projectDirectory, outputDirectory) || ".");
     const archive = await createFrontendArchive(outputDirectory);
     try {
         const authority = payload(await readFrontendReleaseAuthority(http, projectRef, selected.id));
@@ -645,17 +639,14 @@ async function stageApplicationWebRelease(
             throw new Error("Active Web release tree does not match the local archive");
         }
         if (archive.treeSha256 === current?.tree_sha256) {
-            report("done", "Web already current");
             return {};
         }
 
-        report("upload", `${archive.fileCount} files`);
         const uploaded = payload(await uploadFrontendRelease(http, projectRef, selected.id, archive.archivePath));
         const release = record(uploaded.release);
         const releaseId = requiredString(release?.release_id, "release.release_id");
         if (releaseId !== archive.sha256) throw new Error("Uploaded Web release identity does not match the local archive");
         if (release?.tree_sha256 !== archive.treeSha256) throw new Error("Uploaded Web release tree does not match the local build");
-        report("done", releaseId.slice(0, 12));
         return {
             request: {
                 deployment_id: selected.id,
@@ -670,14 +661,6 @@ async function stageApplicationWebRelease(
     }
 }
 
-function phaseReporter(json: boolean | undefined) {
-    const started = performance.now();
-    return (phase: string, detail: string) => {
-        if (!json) console.error(`  ${phase.padEnd(10)} ${detail}`);
-        return Math.round(performance.now() - started);
-    };
-}
-
 function deployResponse(result: Record<string, unknown>, json: boolean | undefined): ToolResponse {
     if (json) return { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] };
     const lines = [
@@ -686,7 +669,6 @@ function deployResponse(result: Record<string, unknown>, json: boolean | undefin
         result.release_id ? `Release: ${String(result.release_id)}` : null,
         result.active_version ? `Active version: ${String(result.active_version)}` : null,
         result.file_count ? `Files: ${String(result.file_count)}` : null,
-        `Duration: ${(Number(result.duration_ms) / 1000).toFixed(1)}s`,
     ].filter((line): line is string => Boolean(line));
     return { content: [{ type: "text", text: lines.join("\n") }] };
 }
@@ -780,9 +762,6 @@ export function registerDeployTools(
             }
             const requestedId = String(args.id || target.config.id || "").trim() || undefined;
             const build = createBuildEnvironment(target.config.buildEnv, options.environmentVariables);
-            const report = phaseReporter(args.json === true);
-            report("inspect", `${target.name} (${projectRef})`);
-
             if (target.config.type === "edge_function") {
                 if (args.diff === true) throw new Error("Function release diffs require an immutable function release manifest");
                 if (!options.edgeFunctionDeploy) throw new Error("Edge Function deploy support is unavailable in this CLI context");
@@ -827,12 +806,8 @@ export function registerDeployTools(
                 }
                 assertBuildEnvironment(build, args.skip_build === true);
                 if (args.skip_build !== true) {
-                    report("build", buildCommand);
                     await runBuild(buildCommand, projectDirectory, build.env, args.json === true);
-                } else {
-                    report("build", "skipped");
                 }
-                report("deploy", `edge function ${slug}`);
                 const deployed = await options.edgeFunctionDeploy({
                     action: "deploy_bundle",
                     ref: projectRef,
@@ -848,7 +823,6 @@ export function registerDeployTools(
                 if (deployed.isError) return deployed;
                 const deployedText = deployed.content.find((chunk) => chunk.type === "text")?.text;
                 const deployedPayload = deployedText ? record(JSON.parse(deployedText)) : null;
-                const durationMs = report("done", slug);
                 return deployResponse({
                     ok: true,
                     unchanged: false,
@@ -858,7 +832,6 @@ export function registerDeployTools(
                     slug,
                     active_version: deployedPayload?.active_version,
                     activation_id: deployedPayload?.activation_id,
-                    duration_ms: durationMs,
                 }, args.json === true);
             }
 
@@ -890,13 +863,9 @@ export function registerDeployTools(
 
             assertBuildEnvironment(build, args.skip_build === true);
             if (args.skip_build !== true) {
-                report("build", buildCommand);
                 await runBuild(buildCommand, projectDirectory, build.env, args.json === true);
-            } else {
-                report("build", "skipped");
             }
 
-            report("package", relative(projectDirectory, outputDirectory) || ".");
             const archive = await createFrontendArchive(outputDirectory);
             try {
                 const inventory = payload(await readFrontendReleaseAuthority(http, projectRef, selected.id));
@@ -909,7 +878,6 @@ export function registerDeployTools(
                 const unchanged = archive.treeSha256 === current?.tree_sha256;
 
                 if (args.plan === true || args.diff === true) {
-                    const durationMs = report("done", unchanged ? "unchanged plan" : "release diff ready");
                     return { content: [{ type: "text", text: JSON.stringify({
                         schema: "supacloud.frontend-deploy-plan.v1",
                         ok: true, planned: true, published: false, unchanged,
@@ -924,12 +892,11 @@ export function registerDeployTools(
                         expected_activation_id: activeActivationId ?? "absent",
                         actions: unchanged ? [] : ["upload_release", "activate_release"],
                         file_count: archive.fileCount, source_bytes: archive.sourceBytes,
-                        archive_bytes: archive.archiveBytes, duration_ms: durationMs,
+                        archive_bytes: archive.archiveBytes,
                     }, null, 2) }] };
                 }
 
                 if (unchanged) {
-                    const durationMs = report("done", "already current");
                     return deployResponse({
                         ok: true,
                         unchanged: true,
@@ -940,18 +907,15 @@ export function registerDeployTools(
                         url: selected.deploymentUrl,
                         file_count: archive.fileCount,
                         source_bytes: archive.sourceBytes,
-                        duration_ms: durationMs,
                     }, args.json === true);
                 }
 
-                report("upload", `${archive.fileCount} files`);
                 const uploaded = payload(await uploadFrontendRelease(http, projectRef, selected.id, archive.archivePath));
                 const release = record(uploaded.release);
                 const releaseId = requiredString(release?.release_id, "release.release_id");
                 if (releaseId !== archive.sha256) throw new Error("Uploaded release identity does not match the local archive");
                 if (release?.tree_sha256 !== archive.treeSha256) throw new Error("Uploaded release tree does not match the local build");
 
-                report("activate", releaseId.slice(0, 12));
                 const mutationId = crypto.randomUUID();
                 const activationResponse = await activateFrontendRelease(http, {
                     projectRef,
@@ -978,7 +942,6 @@ export function registerDeployTools(
                     `/v1/projects/${encodeURIComponent(projectRef)}/frontend/deployments/${encodeURIComponent(selected.id)}`,
                 );
                 const finalDeployment = finalResponse.ok ? frontendDeployment(finalResponse.data) : selected;
-                const durationMs = report("done", finalDeployment.deploymentUrl || selected.id);
                 return deployResponse({
                     ok: true,
                     unchanged: false,
@@ -991,7 +954,6 @@ export function registerDeployTools(
                     url: finalDeployment.deploymentUrl,
                     file_count: archive.fileCount,
                     source_bytes: archive.sourceBytes,
-                    duration_ms: durationMs,
                 }, args.json === true);
             } finally {
                 await archive.cleanup();

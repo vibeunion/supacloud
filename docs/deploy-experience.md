@@ -1,8 +1,8 @@
 # Deployment Experience
 
-The CLI owns local build and presentation; Management owns immutable artifacts,
-active authority, CAS, compatibility, mutation receipts and recovery. Applications
-declare business schema, RLS, OAuth bindings and acceptance checks.
+The CLI owns the local build and one final result; Management owns immutable
+artifacts, active authority, CAS, compatibility, mutation receipts and recovery.
+Applications declare business schema, RLS, OAuth bindings and acceptance checks.
 
 ## Read-Only Comparison
 
@@ -70,7 +70,8 @@ activation behind that mutation. Use
 `--configuration_id <uuid> --skip_build --manifest_path <path>` when reusing an
 already reviewed configuration and manifest. `--format json` returns one receipt
 containing every completed phase, the release/configuration identities and the
-activation result.
+activation result. Phase evidence belongs to the platform receipt; the standard
+deployment output does not add phase timing or ask users to orchestrate those steps.
 
 The workflow stops on the first failed or uncertain phase. A lost or malformed
 deployment response triggers a bounded GET for the same deployment ID. Only a
@@ -174,9 +175,66 @@ this frontend change does not repackage database or Storage recovery data.
 
 SupaCloud owns archive validation and deduplication, atomic activation, current and
 previous authority, CAS, durable receipts, unknown-outcome reconciliation and
-retained rollback artifacts. The CLI owns local builds and concise progress.
+retained rollback artifacts. The CLI owns the local build and concise final output.
 Applications supply business migrations, permissions and authenticated acceptance
 checks, not duplicate release inventories or ad hoc ZIP/SSH backup scripts.
+
+## Server-Owned Release Preparation
+
+Follow Wrangler's separation of immutable upload and deployment, rather than
+exposing release orchestration to the customer. Cloudflare's
+[asset upload protocol](https://developers.cloudflare.com/workers/static-assets/direct-upload/)
+returns the missing content from a manifest; its
+[versions and deployments](https://developers.cloudflare.com/workers/versions-and-deployments/)
+separate preparing a version from assigning traffic. These are design references,
+not evidence that SupaCloud already implements per-file asset uploads or complete
+FA project deployment.
+
+The first latency optimization batches project Function artifact verification
+on the server with bounded concurrency. Runtime readiness is verified through a
+server-only batch preheat endpoint: each worker pool rotates once, warms every
+member, and returns per-member attestations before publication. The existing
+project release authority remains the single Function publication point.
+No CLI option, customer scope file or phase timing interface is added.
+
+Management API requires the batch capability advertised by Edge Runtime; upgrade
+the two services together. An older Runtime is rejected, not silently used through
+the sequential preparation path. Worker LRU limits still apply, so readiness
+attests successful loading, not simultaneous cache residency for all 128 members.
+Both pools drain before the Runtime handler returns a preparation failure; a
+network timeout does not prove the remote handler has finished.
+
+Web uploads still send complete tar.zst archives. The next separate optimization
+is a server-owned content manifest/upload session that requests missing files,
+validates completion and binds the immutable result to deployment. Database state
+is not a code-version rollback: migration and recovery policies remain separate.
+The target of at most 30 seconds excluding builds is not yet a measured guarantee.
+
+```gherkin
+Scenario: Prepare a complete Function release
+  Given immutable versions belonging to one project
+  When the server prepares the release
+  Then local artifact checks have bounded concurrency
+  And each member receives foreground and background readiness attestation
+  And each runtime worker pool rotates only once for the complete release
+  And only the complete verified result may reach publication
+
+Scenario: Reject stale runtime readiness
+  Given a prepared release
+  When the runtime instance, either pool generation or tenant environment changes
+  Then the server rejects readiness and does not publish a release
+
+Scenario: Drain local preparation on failure
+  Given multiple in-flight artifact checks or runtime worker pools
+  When one preparation fails
+  Then outstanding work finishes before its local preparation handler returns
+  And no partial release is published
+
+Scenario: Keep the deployment command simple
+  Given a project configured for deployment
+  When release preparation is optimized
+  Then no extra CLI flags, timing configuration or client-side orchestration are required
+```
 
 Automatic recovery must be driven by confirmed platform state. A lost HTTP
 response is not proof of failure and never authorizes a second activation.
