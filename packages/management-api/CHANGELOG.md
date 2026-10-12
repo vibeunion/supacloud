@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.115.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.114.0...management-api-v0.115.0) (2026-10-12)
+
+
+### Features
+
+* **deploy:** unify frontend upload with project deployment ([#1862](https://github.com/vibeunion/supacloud/issues/1862)) ([b022c72](https://github.com/vibeunion/supacloud/commit/b022c72331d47d2ab69ebc86fa6450fc9dcd1a37))
+
+
+### Performance Improvements
+
+* parallelize deployment evidence reads ([#1860](https://github.com/vibeunion/supacloud/issues/1860)) ([fba922e](https://github.com/vibeunion/supacloud/commit/fba922e943b9021a4b09606891ecba74c47dd857))
+
 ## [0.114.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.113.0...management-api-v0.114.0) (2026-10-12)
 
 
