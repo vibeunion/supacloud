@@ -212,6 +212,61 @@ test("app release composes build, upload, configure and one deployment", async (
     } finally { await rm(root, { recursive: true, force: true }); }
 }, 30_000);
 
+test("app release uses the project deployment resource when connected to Management API", async () => {
+    const root = await fixture();
+    const configurationPath = join(root, "configuration.json");
+    await Bun.write(configurationPath, JSON.stringify({
+        configuration_id: identity.configuration_id,
+        expected_configuration_id: null,
+        configuration: {
+            bun_version: "1.3.0",
+            targets: [{ name: "api", kind: "http", hosts: ["orders.example.test"], environment: {} }],
+        },
+    }));
+    const applicationCalls: Array<Record<string, unknown>> = [];
+    const deploymentCalls: Array<Record<string, unknown>> = [];
+    try {
+        const result = await runAppTool({
+            action: "release", root, ref: identity.ref, id: identity.id,
+            environment_id: identity.environment_id, configuration_path: configurationPath, format: "json",
+        }, {
+            getApplications: () => async args => {
+                applicationCalls.push(args);
+                if (args.action !== "upload_release") {
+                    throw new Error("Legacy application deploy must not be used");
+                }
+                return { content: [{ type: "text" as const, text: JSON.stringify({
+                    ok: true, release: { release_id: identity.release_id },
+                }) }] };
+            },
+            projectDeployment: async args => {
+                deploymentCalls.push(args);
+                return { content: [{ type: "text" as const, text: JSON.stringify({
+                    ok: true, project_ref: identity.ref, application_id: identity.id,
+                    environment_id: identity.environment_id, deployment_id: args.mutation_id,
+                    mutation_id: args.mutation_id, release_id: identity.release_id,
+                    configuration_id: identity.configuration_id, activation_id: identity.activation_id,
+                    expected_activation_id: null, plan_sha256: "d".repeat(64),
+                    action: "activate", execution_performed: true,
+                }) }] };
+            },
+        });
+        const output = JSON.parse(result.content[0]!.text);
+        expect(result.isError).toBe(false);
+        expect(output).toMatchObject({
+            ok: true, release_id: identity.release_id, configuration_id: identity.configuration_id,
+            activation_id: identity.activation_id,
+        });
+        expect(applicationCalls.map(call => call.action)).toEqual(["upload_release"]);
+        expect(deploymentCalls).toHaveLength(1);
+        expect(deploymentCalls[0]).toMatchObject({
+            ref: identity.ref, id: identity.id, environment_id: identity.environment_id,
+            release_id: identity.release_id, mutation_id: expect.any(String),
+            configuration_write: { configuration_id: identity.configuration_id },
+        });
+    } finally { await rm(root, { recursive: true, force: true }); }
+}, 30_000);
+
 test("app release lets the platform reuse the current configuration head", async () => {
     const root = await fixture();
     const calls: Array<Record<string, unknown>> = [];

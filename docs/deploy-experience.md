@@ -44,8 +44,9 @@ supacloud --env production deploy --confirm-production production-ref
 The selected `.env.supacloud.<name>` supplies
 `SUPACLOUD_APPLICATION_ID`, `SUPACLOUD_APPLICATION_ENVIRONMENT_ID` (or
 `SUPACLOUD_ENV`), and either `SUPACLOUD_APPLICATION_CONFIGURATION_PATH` or
-`SUPACLOUD_APPLICATION_CONFIGURATION_ID`. `deploy` forwards that profile to
-the existing `app release` workflow, so test and production use the same
+`SUPACLOUD_APPLICATION_CONFIGURATION_ID`. `deploy` uses the same project
+deployment resource as the Management API, so the CLI does not ask the user to
+choose Web versus application deployment. Test and production use the same
 command shape. The explicit advanced form remains available:
 
 ```bash
@@ -53,18 +54,18 @@ supacloud --env test app release \
   --id orders --environment_id test --configuration_path configuration.json
 ```
 
-`app release` builds the local delivery manifest, uploads the immutable release,
-writes the requested configuration revision, reads the platform deployment plan,
-and performs at most one CAS-protected activation. Use
+`app release` builds the local delivery manifest and uploads the immutable
+release, then submits one project deployment mutation. SupaCloud owns the
+deployment plan, backup, migration, runtime readiness, Web binding and CAS
+activation behind that mutation. Use
 `--configuration_id <uuid> --skip_build --manifest_path <path>` when reusing an
 already reviewed configuration and manifest. `--format json` returns one receipt
 containing every completed phase, the release/configuration identities and the
 activation result.
 
-The workflow stops on the first failed or uncertain phase. It never retries an
-upload/configuration/activation request, and an unknown activation keeps the
-release ID, configuration ID, activation ID and expected CAS in the receipt for
-read-only reconciliation. The composed CLI workflow is not a cross-request
+The workflow stops on the first failed or uncertain phase. A lost deployment
+response is queried and reconciled with the same deployment ID before the CLI
+reports an unknown result. The composed CLI workflow is not a cross-request
 transaction; SupaCloud remains responsible for immutable storage, backup policy,
 migration orchestration, readiness, smoke evidence, CAS authority, durable
 mutation receipts and verified rollback/downgrade policy. The application layer
