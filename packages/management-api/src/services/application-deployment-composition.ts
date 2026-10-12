@@ -33,6 +33,7 @@ import { ApplicationDeployPlans } from "./application-deploy-plan";
 import { ApplicationDeploymentOrchestrator } from "./application-deployment-orchestrator";
 import { frontendReleaseService } from "./frontend-release.service";
 import { tenantRuntimeService } from "./tenant-runtime.service";
+import { createProjectDeploymentRoutes } from "../routes/project-deployments";
 
 type CompatibilityInput = Parameters<
   NonNullable<ApplicationDeploymentDependencies["verifyCompatibility"]>
@@ -217,5 +218,5 @@ export function createDefaultApplicationRouteComposition(
     previews,
     retirementVerifier: dependencies.retirementVerifier,
   });
-  return { deployment, routes, previews };
+  return { deployment, routes, previews, deploymentOrchestrator };
 }

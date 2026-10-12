@@ -649,7 +649,7 @@ export function registerDeployTools(
 ): void {
     registerTool(server,
         "deploy",
-        "Build and publish the linked frontend with one command",
+        "Build and publish the linked project with one command",
         deployToolSchema,
         async (args) => {
             if (args.dry_run === true && (args.plan === true || args.diff === true)) {
