@@ -742,6 +742,10 @@ jobs:
         working-directory: packages/management-api
         run: bun install --frozen-lockfile
 
+      - name: Install edge-runtime dependencies for cross-package unit fixtures
+        working-directory: packages/edge-runtime
+        run: bun install --frozen-lockfile
+
       - name: Check canonical SQL modules
         working-directory: packages/management-api
         run: bun run sql:check
@@ -758,6 +762,9 @@ jobs:
         run: |
           bun run scripts/build-command-dependencies.ts elysia
           bun install --frozen-lockfile --cwd packages/elysia
+
+      - name: Install edge runtime test dependencies
+        run: bun install --frozen-lockfile --cwd packages/edge-runtime
 
       - name: Login to Docker Hub
         continue-on-error: true

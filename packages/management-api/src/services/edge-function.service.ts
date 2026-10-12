@@ -1,6 +1,9 @@
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { ConflictError, ServiceUnavailableError } from "../utils/errors";
+import { mapWithConcurrency } from "../utils/concurrency";
+import { Type } from "typebox";
+import { Value } from "typebox/value";
 import { normalizeEdgeRuntimeBundle } from "./edge-runtime-bundle";
 import path from "path";
 import fs from "fs/promises";
@@ -1757,6 +1760,7 @@ async function functionActivationArtifactSha256(
 }
 
 const MAX_RUNTIME_CONTROL_BYTES = 64 * 1024;
+const MAX_PROJECT_PREHEAT_BYTES = 1024 * 1024;
 const RUNTIME_INSTANCE_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 function hasExactRecordKeys(
   candidate: Record<string, unknown>,
@@ -1770,6 +1774,7 @@ function hasExactRecordKeys(
 
 async function runtimeControlChunks(
   reader: ReadableStreamDefaultReader<Uint8Array>,
+  maxBytes: number,
 ): Promise<{ chunks: Uint8Array[]; byteLength: number }> {
   const chunks: Uint8Array[] = [];
   let byteLength = 0;
@@ -1777,7 +1782,7 @@ async function runtimeControlChunks(
     const chunk = await reader.read();
     if (chunk.done) return { chunks, byteLength };
     byteLength += chunk.value.byteLength;
-    if (byteLength > MAX_RUNTIME_CONTROL_BYTES) {
+    if (byteLength > maxBytes) {
       await reader.cancel();
       throw new Error("Edge Runtime control response is too large");
     }
@@ -1795,15 +1800,19 @@ function joinRuntimeControlChunks(chunks: Uint8Array[], byteLength: number): Uin
   return body;
 }
 
-async function readRuntimeControlBody(response: Response): Promise<Record<string, unknown>> {
+async function readRuntimeControlBody(
+  response: Response,
+  maxBytes = MAX_RUNTIME_CONTROL_BYTES,
+): Promise<Record<string, unknown>> {
   const declaredLength = Number(response.headers.get("content-length") || "0");
-  if (declaredLength > MAX_RUNTIME_CONTROL_BYTES) {
+  if (declaredLength > maxBytes) {
+    await response.body?.cancel();
     throw new Error("Edge Runtime control response is too large");
   }
   const reader = response.body?.getReader();
   if (!reader) throw new Error("Edge Runtime control response is empty");
   try {
-    const { chunks, byteLength } = await runtimeControlChunks(reader);
+    const { chunks, byteLength } = await runtimeControlChunks(reader, maxBytes);
     const text = new TextDecoder("utf-8", { fatal: true }).decode(
       joinRuntimeControlChunks(chunks, byteLength),
     );
@@ -2839,48 +2848,105 @@ export async function prepareProjectReleaseMembers(
   ref: string,
   functions: Array<{ slug: string; version: string; expected_activation_id: string }>,
 ): Promise<Record<string, ReleaseMember>> {
+  const epochSchema = Type.Object({
+    runtime_instance_id: Type.String({ pattern: EDGE_FUNCTION_ACTIVATION_ID_PATTERN.source }),
+    foreground_generation: Type.Integer({ minimum: 0 }),
+    background_generation: Type.Integer({ minimum: 0 }),
+  });
   const epoch = async () => {
     const response = await fetch(`http://${config.edgeRuntimeInternal}/internal/runtime-activation-epoch`, {
       headers: runtimeInternalHeaders(), redirect: "error", signal: AbortSignal.timeout(5000),
     });
     const body = await readRuntimeControlBody(response);
-    if (!response.ok || body["project_release_schema"] !== "supacloud.project-function-release.v1") {
-      throw new Error("Edge Runtime does not support project release manifests");
+    if (!response.ok || body["project_release_schema"] !== "supacloud.project-function-release.v1"
+      || body["project_preheat_schema"] !== "supacloud.project-release-preheat.v1"
+      || !Value.Check(epochSchema, body)) {
+      throw new Error("Edge Runtime does not support batch project release readiness");
     }
     return body;
   };
   const before = await epoch();
+  const currentRelease = await readProjectFunctionRelease(ref);
+  if (currentRelease) {
+    await confirmEdgeFunctionActivationManifestDurable(
+      path.join(getFuncDir(ref), PROJECT_RELEASE_FILE), currentRelease.authority.activation_id,
+    );
+  }
+  const prepared = await mapWithConcurrency(
+    functions,
+    4,
+    async (entry) => {
+      const state = await readFunctionManifestState(ref, entry.slug);
+      if (publicActivationId(state.authority) !== entry.expected_activation_id) {
+        throw new ConflictError("Release member activation CAS conflict");
+      }
+      if (!currentRelease || !Object.hasOwn(currentRelease.release.members, entry.slug)) {
+        await settleRuntimeFunctionActivation(ref, entry.slug, state);
+      }
+      const metadata = await readFunctionVersionMetadata(ref, entry.slug, entry.version);
+      const bundle = await readVersionedFunctionCode(ref, entry.slug, entry.version);
+      if (bundle === null || await sha256Hex(bundle) !== metadata.artifact_sha256) {
+        throw new Error("Release artifact does not match immutable metadata");
+      }
+      const nextConfig = validatedFunctionConfig({ ...restoredFunctionConfig({ verify_jwt: true }, metadata) });
+      return { entry, state, nextConfig, artifactSha256: metadata.artifact_sha256 };
+    },
+  );
+  const response = await fetch(`http://${config.edgeRuntimeInternal}/internal/project-release-preheat/${ref}`, {
+    method: "POST", headers: { ...runtimeInternalHeaders(), "content-type": "application/json" },
+    redirect: "error", signal: AbortSignal.timeout(30_000),
+    body: JSON.stringify({
+      runtime_instance_id: before.runtime_instance_id,
+      foreground_generation: before.foreground_generation,
+      background_generation: before.background_generation,
+      functions: prepared.map(({ entry }) => ({ slug: entry.slug, version: entry.version })),
+    }),
+  });
+  const batch = await readRuntimeControlBody(response, MAX_PROJECT_PREHEAT_BYTES);
+  const batchSchema = Type.Object({
+    ...epochSchema.properties,
+    schema: Type.Literal("supacloud.project-release-preheat.v1"),
+    project_ref: Type.Literal(ref),
+    members: Type.Array(Type.Object({ slug: Type.String(), result: Type.Unknown() }), {
+      minItems: 1, maxItems: 128,
+    }),
+  });
+  if (!response.ok || !Value.Check(batchSchema, batch)
+    || batch.members.length !== prepared.length
+    || batch.runtime_instance_id !== before.runtime_instance_id
+    || batch.foreground_generation !== before.foreground_generation + 1
+    || batch.background_generation !== before.background_generation + 1) {
+    throw new Error("Invalid project release readiness");
+  }
   const members: Record<string, ReleaseMember> = Object.create(null);
-  for (const entry of functions) {
-    const state = await readFunctionManifestState(ref, entry.slug);
-    if (publicActivationId(state.authority) !== entry.expected_activation_id) {
-      throw new ConflictError("Release member activation CAS conflict");
-    }
-    await settleRuntimeFunctionActivation(ref, entry.slug, state);
-    const metadata = await readFunctionVersionMetadata(ref, entry.slug, entry.version);
-    const bundle = await readVersionedFunctionCode(ref, entry.slug, entry.version);
-    if (bundle === null || await sha256Hex(bundle) !== metadata.artifact_sha256) {
-      throw new Error("Release artifact does not match immutable metadata");
-    }
-    const nextConfig = validatedFunctionConfig({ ...restoredFunctionConfig({ verify_jwt: true }, metadata) });
-    const readiness = await preheatRuntimeFunction({
-      projectRef: ref, functionSlug: entry.slug, requestedVersion: entry.version,
-      resolvedVersion: entry.version, artifactSha256: metadata.artifact_sha256,
-      verifyJwt: nextConfig.verify_jwt, activationId: null,
+  let environment: string | undefined;
+  for (const [index, member] of prepared.entries()) {
+    const result = batch.members[index]!;
+    const proof = validateEdgeRuntimePreheat(result.result, {
+      projectRef: ref, functionSlug: member.entry.slug,
+      requestedVersion: member.entry.version, resolvedVersion: member.entry.version,
+      artifactSha256: member.artifactSha256, verifyJwt: member.nextConfig.verify_jwt, activationId: null,
     });
-    const proof = requiredPreheatAttestation(readiness, "project release readiness");
-    if (proof.identity.runtimeInstanceId !== before["runtime_instance_id"]) {
-      throw new Error("Runtime restarted during project release preheat");
+    if (result.slug !== member.entry.slug || !proof
+      || proof.identity.runtimeInstanceId !== batch.runtime_instance_id
+      || proof.foreground.generation !== batch.foreground_generation
+      || proof.background.generation !== batch.background_generation) {
+      throw new Error("Unverified project release member");
     }
-    members[entry.slug] = {
-      config: activationConfigRecord(nextConfig),
-      authority: nextFunctionActivationAuthority(state, metadata.artifact_sha256),
+    const currentEnvironment = `${proof.identity.loadedRevision}:${proof.identity.envProof}`;
+    if (environment !== undefined && environment !== currentEnvironment) {
+      throw new Error("Runtime environment changed during project release preheat");
+    }
+    environment = currentEnvironment;
+    members[member.entry.slug] = {
+      config: activationConfigRecord(member.nextConfig),
+      authority: nextFunctionActivationAuthority(member.state, member.artifactSha256),
     };
   }
   const after = await epoch();
-  if (after["runtime_instance_id"] !== before["runtime_instance_id"]
-    || after["foreground_generation"] !== before["foreground_generation"]
-    || after["background_generation"] !== before["background_generation"]) {
+  if (after.runtime_instance_id !== batch.runtime_instance_id
+    || after.foreground_generation !== batch.foreground_generation
+    || after.background_generation !== batch.background_generation) {
     throw new Error("Runtime pools changed during project release preheat");
   }
   return members;

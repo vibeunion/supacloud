@@ -988,6 +988,16 @@ describe("one-command deploy", () => {
             `GET /v1/projects/abc123/frontend/deployments/web/releases/${releaseId}`,
             "GET /v1/projects/abc123/frontend/deployments/web",
         ]);
+
+        const concise = await runCli(directory, `http://127.0.0.1:${server.port}`, [
+            "deploy", "--skip_build",
+        ]);
+
+        expect(concise.exitCode).toBe(0);
+        expect(concise.stderr).toBe("");
+        expect(concise.stdout).toContain("Already up to date.");
+        expect(concise.stdout).toContain("URL: https://web.example.com");
+        expect(concise.stdout).not.toMatch(/Duration:|inspect|package|upload|activate|done/);
     });
 
     test("skips upload and activation when the content-addressed release is already active", async () => {

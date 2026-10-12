@@ -1,5 +1,6 @@
 import "./url-import-plugin";
 import { projectReleaseFunctionManifest } from "./project-release";
+import { createProjectReleasePreheatRoutes, PROJECT_PREHEAT_SCHEMA } from "./project-release-preheat";
 import { Elysia } from "elysia";
 import {
   WorkerPool,
@@ -1472,6 +1473,48 @@ async function handleFunctionRequest(
 }
 
 const app = new Elysia()
+  .use(createProjectReleasePreheatRoutes({
+    authorize: requireInternalAuth,
+    epoch: () => ({
+      runtime_instance_id: RUNTIME_INSTANCE_ID,
+      foreground_generation: pool.generation, background_generation: backgroundPool.generation,
+    }),
+    assertAvailable() {
+      if (activeActivationLease()) throw new Error("A Function activation lease is active");
+    },
+    async prepare(ref, functions) {
+      const tenantEnvLoad = await loadTenantRuntimeEnv(ref);
+      const moduleEpoch = getProjectModuleEpoch(ref);
+      const requests = await Promise.all(functions.map(async entry => {
+        const activation = await preheatActivationSnapshot(ref, entry.slug, entry.version, null);
+        const requestFor = (profile: TenantEnvExecutionProfile) => {
+          const proof = tenantEnvModuleProof(ref, tenantEnvLoad.env, tenantEnvLoad, profile);
+          const attestation = runtimePreheatIdentity({
+            projectRef: ref, functionSlug: entry.slug, requestedVersion: entry.version,
+            activation, tenantEnvLoad, executionProfile: profile, moduleEnvProof: proof,
+          });
+          if (!activation.attested || !attestation || !proof) throw new Error("Unattested release member");
+          return {
+            functionId: `${ref}_${entry.slug}_v${entry.version}`,
+            functionPath: activation.functionPath, projectRoot: activation.projectRoot,
+            projectRef: ref, moduleVersion: activation.moduleVersion, env: tenantEnvLoad.env,
+            envProof: proof, attestation,
+            ...(profile === "background" ? { maxWorkers: resolveBackgroundPreheatWorkers() } : {}),
+          };
+        };
+        return { foreground: requestFor("foreground"), background: requestFor("background") };
+      }));
+      return {
+        foreground: requests.map(entry => entry.foreground),
+        background: requests.map(entry => entry.background),
+        assertCurrent() {
+          if (!isTenantEnvLoadCurrent(ref, tenantEnvLoad) || tenantEnvLoad.loadState !== "loaded"
+            || getProjectModuleEpoch(ref) !== moduleEpoch) throw new Error("Runtime environment changed");
+        },
+      };
+    },
+    foreground: pool, background: backgroundPool,
+  }))
   // 默认保留函数自有 CORS；只有显式启用 permissive 才由平台接管。
   .get("/health", () => ({
     status: "ok",
@@ -1634,6 +1677,7 @@ const app = new Elysia()
     if (authError) return authError;
     return {
       project_release_schema: "supacloud.project-function-release.v1",
+      project_preheat_schema: PROJECT_PREHEAT_SCHEMA,
       runtime_instance_id: RUNTIME_INSTANCE_ID,
       foreground_generation: pool.generation,
       background_generation: backgroundPool.generation,
