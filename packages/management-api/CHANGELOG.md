@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.109.3](https://github.com/vibeunion/supacloud/compare/management-api-v0.109.2...management-api-v0.109.3) (2026-10-11)
+
+
+### Bug Fixes
+
+* **management-api:** stop emitting duplicate project-ref header ([#1829](https://github.com/vibeunion/supacloud/issues/1829)) ([b1b7def](https://github.com/vibeunion/supacloud/commit/b1b7def4310ed94e678a43273b70f8463b42fdcf))
+
 ## [0.109.2](https://github.com/vibeunion/supacloud/compare/management-api-v0.109.1...management-api-v0.109.2) (2026-10-11)
 
 
