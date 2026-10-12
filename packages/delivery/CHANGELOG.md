@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/vibeunion/supacloud/compare/delivery-v0.15.0...delivery-v0.15.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* validate deployment receipts and prevent silent Web-only fallback ([#1854](https://github.com/vibeunion/supacloud/issues/1854)) ([8138707](https://github.com/vibeunion/supacloud/commit/813870786a845cee9a726f9dda2b6c889c8e8cdd))
+
 ## [0.15.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.14.1...delivery-v0.15.0) (2026-10-12)
 
 
