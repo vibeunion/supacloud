@@ -206,23 +206,23 @@ export class ApplicationDeploymentOrchestrator {
       ? checkpointRequest as Record<string, unknown> : null;
     if (state.projectRef !== projectRef || state.mutationId !== mutationId
       || state.checkpoint["schema"] !== CHECKPOINT_SCHEMA || state.checkpoint["mutation_id"] !== mutationId
-      || !requestRecord || requestRecord.project_ref !== projectRef || requestRecord.mutation_id !== mutationId
-      || !Value.Check(ApplicationIdSchema, requestRecord.application_id)
-      || !Value.Check(ApplicationIdSchema, requestRecord.environment_id)
-      || !Value.Check(ApplicationConfigurationIdSchema, requestRecord.configuration_id)
-      || !Value.Check(ApplicationReleaseIdSchema, requestRecord.release_id)
-      || !Value.Check(ApplicationReleaseIdSchema, requestRecord.plan_sha256)) {
+      || !requestRecord || requestRecord["project_ref"] !== projectRef || requestRecord["mutation_id"] !== mutationId
+      || !Value.Check(ApplicationIdSchema, requestRecord["application_id"])
+      || !Value.Check(ApplicationIdSchema, requestRecord["environment_id"])
+      || !Value.Check(ApplicationConfigurationIdSchema, requestRecord["configuration_id"])
+      || !Value.Check(ApplicationReleaseIdSchema, requestRecord["release_id"])
+      || !Value.Check(ApplicationReleaseIdSchema, requestRecord["plan_sha256"])) {
       throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_CHECKPOINT_INVALID", 503);
     }
     const request = {
       mutation_id: mutationId,
-      release_id: requestRecord.release_id,
-      configuration_id: requestRecord.configuration_id,
-      expected_plan_sha256: requestRecord.plan_sha256,
-      ...(requestRecord.approved_migration_digest === null ? {} : {
-        approved_migration_digest: requestRecord.approved_migration_digest,
+      release_id: requestRecord["release_id"],
+      configuration_id: requestRecord["configuration_id"],
+      expected_plan_sha256: requestRecord["plan_sha256"],
+      ...(requestRecord["approved_migration_digest"] === null ? {} : {
+        approved_migration_digest: requestRecord["approved_migration_digest"],
       }),
-      ...(requestRecord.web === null ? {} : { web: requestRecord.web }),
+      ...(requestRecord["web"] === null ? {} : { web: requestRecord["web"] }),
     };
     if (!Value.Check(ApplicationDeployRequestSchema, request)) {
       throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_CHECKPOINT_INVALID", 503);
@@ -237,8 +237,8 @@ export class ApplicationDeploymentOrchestrator {
         throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_RECEIPT_INVALID", 503);
       }
       receipt = receiptFromState(state, {
-        projectRef, applicationId: requestRecord.application_id,
-        environmentId: requestRecord.environment_id, request, principal: state.principal,
+        projectRef, applicationId: requestRecord["application_id"],
+        environmentId: requestRecord["environment_id"], request, principal: state.principal,
       });
     }
     return {
@@ -247,8 +247,8 @@ export class ApplicationDeploymentOrchestrator {
       status: state.status,
       phase,
       project_ref: projectRef,
-      application_id: requestRecord.application_id,
-      environment_id: requestRecord.environment_id,
+      application_id: requestRecord["application_id"],
+      environment_id: requestRecord["environment_id"],
       receipt,
       failure_code: state.failureCode,
     };
