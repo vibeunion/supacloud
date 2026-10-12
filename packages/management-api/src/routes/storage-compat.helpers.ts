@@ -3,9 +3,16 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import type { SignedUpload } from "../services/storage-store";
 
 const TRANSFORM_QUERY_KEYS = new Set([
-    "width", "height", "resize", "format", "quality", "smartcrop", "blur", "sigma", "watermark",
-    "text", "font", "opacity", "image", "gravity", "wm", "wm_text", "wm_image", "wm_opacity",
-    "wm_gravity", "wm_dx", "wm_dy",
+    "width", "height", "resize", "format", "quality", "smartcrop", "smart", "fit_in", "adaptive_fit_in",
+    "full_fit_in", "adaptive_full_fit_in", "background", "background_color", "padding", "align", "valign", "gravity_x", "gravity_y",
+    "flip", "flip_h", "flip_v", "upscale", "no_upscale", "stretch", "grayscale", "invert", "blur", "sigma",
+    "sharpen", "pixelate", "rotate", "round_corner", "trim", "trim_side", "trim_tolerance", "strip_metadata",
+    "strip_icc", "strip_exif", "lossless", "palette", "bitdepth", "max_bytes", "fallback_format", "compression",
+    "max_frames", "page", "dpi", "orient", "brightness", "contrast", "modulate", "hue", "saturation", "rgb",
+    "to_colorspace", "focal", "crop", "redact", "redact_oval", "draw_detections", "avgcolor", "blurhash",
+    "thumbhash", "watermark", "text", "font", "opacity", "text_color", "text_x", "text_y", "text_width",
+    "text_align", "text_justify", "text_wrap", "image", "gravity", "wm", "wm_text", "wm_image", "wm_opacity",
+    "wm_gravity", "wm_dx", "wm_dy", "wm_width", "wm_height",
 ]);
 
 export function signedUrlPayload(ref: string, bucket: string, path: string, expiresAt: number): string {

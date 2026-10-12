@@ -589,7 +589,7 @@ describe("storage management routes", () => {
     bucketSpy.mockRestore();
   });
 
-  test("image transforms stream source bytes to imaginary instead of a remote url", async () => {
+  test("image transforms stream source bytes to imagor instead of a remote url", async () => {
     const bucketSpy = spyOn(StorageRLS, "getLogicalBucket").mockResolvedValue({
       id: "evidence",
       name: "evidence",
@@ -611,7 +611,8 @@ describe("storage management routes", () => {
       expect(calls[0].method).toBe("POST");
       expect(calls[0].contentType).toBe("image/tiff");
       expect(new URL(calls[0].url).searchParams.get("url")).toBeNull();
-      expect(new URL(calls[0].url).searchParams.get("type")).toBe("png");
+      expect(new URL(calls[0].url).search).toBe("");
+      expect(new URL(calls[0].url).pathname).toBe("/fit-in/64x0/filters:format(png):quality(70)/");
     } finally {
       fetcher.mockRestore();
       downloadSpy.mockRestore();
