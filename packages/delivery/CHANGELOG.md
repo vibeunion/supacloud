@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.15.1...delivery-v0.16.0) (2026-10-12)
+
+
+### Features
+
+* **deploy:** unify frontend upload with project deployment ([#1862](https://github.com/vibeunion/supacloud/issues/1862)) ([b022c72](https://github.com/vibeunion/supacloud/commit/b022c72331d47d2ab69ebc86fa6450fc9dcd1a37))
+
 ## [0.15.1](https://github.com/vibeunion/supacloud/compare/delivery-v0.15.0...delivery-v0.15.1) (2026-10-12)
 
 
