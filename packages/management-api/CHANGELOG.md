@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.112.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.111.1...management-api-v0.112.0) (2026-10-12)
+
+
+### Features
+
+* **storage:** migrate image transforms to imagor ([#1840](https://github.com/vibeunion/supacloud/issues/1840)) ([5b9b091](https://github.com/vibeunion/supacloud/commit/5b9b091d0f39b2f39ac7befdb051be5ad855c403))
+
 ## [0.111.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.111.0...management-api-v0.111.1) (2026-10-12)
 
 
