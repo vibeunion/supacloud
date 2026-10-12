@@ -334,7 +334,7 @@ S3 模式的快照只包含数据库中的 Storage 元数据和密钥，不复�
 | Commands / Artifacts | 支持 | 与完整 SupaCloud 使用相同 SQL contract；PGlite/native 均通过 `@supacloud/js` 端到端测试 |
 | Logical Replication / PowerSync source | 有条件支持 | PGlite 不支持；native 仅在显式 `powersync` profile 下支持，默认关闭 |
 | PostgREST 完整线协议 | 部分支持 | 目标是常用 `supabase-js` 行为，不承诺所有 PostgREST 边角行为 |
-| PostgreSQL 扩展 | 部分支持 | 仅支持 PGlite 内置或 Lite 模拟的扩展能力 |
+| PostgreSQL 扩展 | 默认扩展集 + Native 可扩展 | PGlite 默认包含 `pgvector`、实验性 PostGIS、`pg_textsearch`、官方 `pgmq` 及 Lite 原有扩展；Native 模式支持挂载与 PostgreSQL 主版本、操作系统和 ABI 匹配的 operator-managed 扩展安装 |
 | Supabase Studio | 不支持 | V1 不提供管理 UI |
 | 多项目控制面 | 不支持 | V1 每个进程只运行一个项目，可通过多个进程部署多个项目 |
 
@@ -347,6 +347,37 @@ RLS 表的 Realtime DELETE 无法在行删除后安全重放 SELECT policy，因
 ```bash
 supacloud-lite doctor --json
 ```
+
+### PostgreSQL 扩展生态
+
+Lite 默认把一组常用扩展打进 PGlite：`uuid-ossp`、`pgcrypto`、`citext`、
+`pg_trgm`、`ltree`、`hstore`、`fuzzystrmatch`、`pgvector`、
+`pg_textsearch`、PostGIS 和官方 `pgmq`。其中 PostGIS 是上游实验性包，
+应按实际空间数据 workload 验证。需要 `pg_graphql`、`pg_cron` 或其他未
+打包的 native 扩展时，应使用 `--engine native`，并提供一套与 Lite 使用的
+PostgreSQL 主版本、操作系统、CPU 架构和 ABI 匹配的 PostgreSQL 安装：
+
+```bash
+supacloud-lite migrate \
+  --engine native \
+  --postgres-dir /opt/postgresql/17
+
+supacloud-lite doctor \
+  --engine native \
+  --postgres-dir /opt/postgresql/17 \
+  --json
+```
+
+`doctor --json` 的 `postgres_extensions.available` 来自 PostgreSQL 的
+`pg_available_extensions`，`installed` 来自当前数据库的 `pg_extension`；
+它只报告数据库实际可见的扩展，不会把“存在 control 文件”误报成已经可用。
+扩展迁移仍由项目自己的 `CREATE EXTENSION` migration 管理。
+
+“完整 PostgreSQL 扩展生态”因此表示：Lite 不再人为限制 native 扩展，
+而是使用 operator-managed PostgreSQL 的真实扩展目录；它不表示每个平台、
+每个 PostgreSQL 主版本和每个扩展都能被同一个 Release 二进制打包。需要
+扩展的动态库、control/SQL 文件和系统依赖由 PostgreSQL 安装提供，并且
+升级 PostgreSQL 主版本时必须重新验证扩展 ABI 和数据目录兼容性。
 
 默认 PGlite 输出会明确包含：
 
@@ -419,8 +450,13 @@ const { data: messages } = await queues.rpc('read', {
 })
 ```
 
-Lite 的 `pgmq` 模拟层还提供 `set_vt`，支持直接 SQL 调整可见性超时。消息按 PGMQ 语义至少投递一次；`pop` 会立即删除消息，`archive` 是确认路径。`sleep_seconds` 和 visibility timeout 只控制消息何时可再次领取，不是消息 TTL；Lite/PGMQ 不提供逐消息到期删除语义。队列创建、指标、purge、设置和管理 API 不属于 Lite 的公开 RPC façade，仍需由项目 SQL 或完整 SupaCloud 控制面处理。
-队列名遵循标准版的 1-128 位小写字母、数字、下划线和短横线规则，并且必须以字母或数字开头；Lite 会安全映射超出 PostgreSQL 63-byte 标识符上限的名称，避免截断后串队。默认 Data API 暴露 `public` 和 `pgmq_public`；如果显式设置 `dbSchemas`，Lite 会严格使用该列表，需要队列 RPC 时应把 `pgmq_public` 明确加入。
+Lite 的 PGMQ 层还提供 `set_vt`，支持直接 SQL 调整可见性超时。消息按
+PGMQ 语义至少投递一次；`pop` 会立即删除消息，`archive` 是确认路径。
+`sleep_seconds` 和 visibility timeout 只控制消息何时可再次领取，不是消息 TTL。
+队列名遵循官方 PGMQ 的 1-47 位小写字母、数字、下划线和短横线规则，并且
+必须以字母或数字开头。默认 Data API 暴露 `public` 和 `pgmq_public`；如果
+显式设置 `dbSchemas`，Lite 会严格使用该列表，需要队列 RPC 时应把
+`pgmq_public` 明确加入。
 Durable workflow 的 run、step、event 和内部队列也保存在同一项目数据库中，可跨进程重启恢复；内部 workflow 队列不会通过 `pgmq_public` 暴露给 Data API 角色。Workflow 提供重试、取消和 dead-letter 失败原语，但不会自动执行 Saga 补偿；补偿步骤及其幂等性仍由应用工作流显式定义。
 
 Edge Function 内可使用 `globalThis.SupaCloud.pgredis`：
@@ -769,7 +805,7 @@ source package for a synthetic baseline, not a production performance claim.
 | Commands / Artifacts | Supported | Uses the same SQL contract as full SupaCloud; PGlite/native are both exercised end-to-end through `@supacloud/js` |
 | Logical Replication / PowerSync source | Conditional | PGlite is unsupported; native requires the explicit `powersync` profile and remains disabled by default |
 | Full PostgREST wire protocol | Partial | Targets common `supabase-js` behavior; does not promise all PostgREST edge-case behavior |
-| PostgreSQL extensions | Partial | Only supports extensions built into PGlite or emulated by Lite |
+| PostgreSQL extensions | Bundled parity set plus native-extensible | PGlite bundles the default Lite extension set, including `pgvector`, experimental PostGIS, `pg_textsearch`, and `pgmq`; native mode can use an operator-managed PostgreSQL installation whose extensions match the PostgreSQL major version, OS, CPU architecture, and ABI |
 | Supabase Studio | Not supported | V1 does not provide an admin UI |
 | Multi-project control plane | Not supported | V1 runs only one project per process; multiple projects can be deployed via multiple processes |
 
@@ -778,6 +814,44 @@ Realtime DELETE on RLS tables cannot safely replay SELECT policies after a row i
 ### Capability doctor and PowerSync profile
 
 `supacloud-lite doctor --json` reports a stable Lite capability contract without copying the full Management API. PGlite explicitly reports Logical Replication and PowerSync source support as `unsupported`; it never emulates WAL, publications, or slots. Multi-device offline deployments should use central SupaCloud + PowerSync, while a single field workstation can use Lite as a local project server or upload through an application-owned outbox.
+
+### PostgreSQL extension ecosystem
+
+Lite ships a PostgreSQL-shaped default extension set in PGlite. New databases
+install `uuid-ossp`, `pgcrypto`, `citext`, `pg_trgm`, `ltree`, `hstore`,
+`fuzzystrmatch`, `pgvector`, `pg_textsearch`, PostGIS, and the official PGMQ
+extension automatically when the corresponding bundled WASM package is
+available. PostGIS is experimental upstream and should be validated against
+the application's geometry workload.
+
+PGlite can load only WASM/bundled extensions. For `pg_graphql`, `pg_cron`, or
+other extensions that are not in this bundled set, use `--engine native` with
+a PostgreSQL installation whose major version, OS, CPU architecture, and ABI
+match the Lite process:
+
+```bash
+supacloud-lite migrate \
+  --engine native \
+  --postgres-dir /opt/postgresql/17
+
+supacloud-lite doctor \
+  --engine native \
+  --postgres-dir /opt/postgresql/17 \
+  --json
+```
+
+In `doctor --json`, `postgres_extensions.available` comes from
+`pg_available_extensions` and `installed` comes from `pg_extension`. The report
+describes what the live database can see; it does not mistake a control file
+for an extension that has been successfully loaded. Extension migrations remain
+application-owned `CREATE EXTENSION` migrations.
+
+“Full PostgreSQL extension ecosystem” therefore means that native Lite does not
+artificially restrict the extensions supplied by the operator-managed
+PostgreSQL installation. It does not mean that every platform, PostgreSQL major
+version, extension shared library, control/SQL file, and system dependency can
+be shipped inside the same Release binary. PostgreSQL major upgrades require
+separate extension ABI and data-directory validation.
 
 Native Lite keeps `wal_level=minimal`, WAL senders, and database TCP disabled by default. The explicit profile enables bounded Logical Replication:
 
@@ -804,7 +878,10 @@ Lite uses Bun's native bcrypt and is compatible with validating common GoTrue bc
 
 ### Queues and Edge Cache
 
-Lite provides a public RPC façade for Supabase Queues in the project database (PGlite or native PostgreSQL). Applications can directly use the official client's
+Lite uses the official `pgmq` extension on PGlite by default and retains a
+SQL fallback for native PostgreSQL installations where `pgmq` is unavailable.
+The Lite-owned `pgmq_public` façade adds the Supabase-compatible RPC surface
+and idempotent send support. Applications can directly use the official client's
 `supabase.schema('pgmq_public').rpc(...)` without an additional queue process:
 
 ```sql
@@ -826,8 +903,15 @@ const { data: messages } = await queues.rpc('read', {
 })
 ```
 
-Lite's `pgmq` emulation layer also provides `set_vt`, allowing direct SQL adjustment of visibility timeouts. Messages are delivered at least once according to PGMQ semantics; `pop` deletes the message immediately, and `archive` is the acknowledgment path. `sleep_seconds` and visibility timeouts only control when a message can be claimed again; they are not message TTLs, and Lite/PGMQ does not provide per-message expiry deletion semantics. Queue creation, metrics, purge, settings, and management APIs are not part of Lite's public RPC façade and must still be handled by project SQL or the full SupaCloud control plane.
-Queue names follow the standard 1-128 character lowercase letter, digit, underscore, and hyphen rule, and must start with a letter or digit; Lite safely maps names that exceed PostgreSQL's 63-byte identifier limit to avoid cross-queue collisions after truncation. The default Data API exposes `public` and `pgmq_public`; if `dbSchemas` is set explicitly, Lite uses that list strictly, and `pgmq_public` should be explicitly included when queue RPCs are needed.
+Lite's `pgmq` layer also provides `set_vt`, allowing direct SQL adjustment of
+visibility timeouts. Messages are delivered at least once according to PGMQ
+semantics; `pop` deletes the message immediately, and `archive` is the
+acknowledgment path. `sleep_seconds` and visibility timeouts only control when
+a message can be claimed again; they are not message TTLs. Queue names follow
+the official PGMQ 1-47 character lowercase letter, digit, underscore, and
+hyphen rule, and must start with a letter or digit. Queue creation, metrics,
+purge, settings, and management APIs remain available through direct SQL but
+are not part of Lite's public RPC façade.
 Durable workflow runs, steps, events, and the internal queue are stored in the same project database and survive process restarts. Data API roles cannot access the internal workflow queue through `pgmq_public`. Workflow retry, cancellation, and dead-letter operations are failure primitives, not automatic Saga compensation; applications must define compensation steps and their idempotency explicitly.
 
 Within an Edge Function, you can use `globalThis.SupaCloud.pgredis`:

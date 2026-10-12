@@ -10,6 +10,10 @@ import pgTrgm from '../node_modules/@electric-sql/pglite/dist/pg_trgm.tar.gz' wi
 import ltree from '../node_modules/@electric-sql/pglite/dist/ltree.tar.gz' with { type: 'file' }
 import hstore from '../node_modules/@electric-sql/pglite/dist/hstore.tar.gz' with { type: 'file' }
 import fuzzystrmatch from '../node_modules/@electric-sql/pglite/dist/fuzzystrmatch.tar.gz' with { type: 'file' }
+import vector from '../node_modules/@electric-sql/pglite-pgvector/dist/vector.tar.gz' with { type: 'file' }
+import postgis from '../node_modules/@electric-sql/pglite-postgis/dist/postgis.tar.gz' with { type: 'file' }
+import pgTextsearch from '../node_modules/@electric-sql/pglite-pg_textsearch/dist/pg_textsearch.tar.gz' with { type: 'file' }
+import pgmq from '../node_modules/@electric-sql/pglite-pgmq/dist/pgmq.tar.gz' with { type: 'file' }
 import { chmod, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -28,6 +32,10 @@ const extensionSources = {
   ltree: { source: ltree, filename: 'ltree.tar.gz' },
   hstore: { source: hstore, filename: 'hstore.tar.gz' },
   fuzzystrmatch: { source: fuzzystrmatch, filename: 'fuzzystrmatch.tar.gz' },
+  vector: { source: vector, filename: 'vector.tar.gz' },
+  postgis: { source: postgis, filename: 'postgis.tar.gz' },
+  pg_textsearch: { source: pgTextsearch, filename: 'pg_textsearch.tar.gz' },
+  pgmq: { source: pgmq, filename: 'pgmq.tar.gz' },
 } satisfies Record<StandaloneExtensionName, { source: string; filename: string }>
 
 const pgliteAssets: StandalonePgliteAssets = {

@@ -42,7 +42,19 @@ export async function createPgliteEngine(dataDir?: string, options: { inspectOnl
     ;({ PGlite } = await import('@electric-sql/pglite'))
     // Supabase enables these by default; load the bundled contrib so migrations
     // that call uuid_generate_v4(), crypt(), citext, etc. work out of the box.
-    const [uuid_ossp, pgcrypto, citext, pg_trgm, ltree, hstore, fuzzystrmatch] = await Promise.all([
+    const [
+      uuid_ossp,
+      pgcrypto,
+      citext,
+      pg_trgm,
+      ltree,
+      hstore,
+      fuzzystrmatch,
+      vector,
+      postgis,
+      pg_textsearch,
+      pgmq,
+    ] = await Promise.all([
       import('@electric-sql/pglite/contrib/uuid_ossp').then((m) => m.uuid_ossp),
       import('@electric-sql/pglite/contrib/pgcrypto').then((m) => m.pgcrypto),
       import('@electric-sql/pglite/contrib/citext').then((m) => m.citext),
@@ -50,8 +62,24 @@ export async function createPgliteEngine(dataDir?: string, options: { inspectOnl
       import('@electric-sql/pglite/contrib/ltree').then((m) => m.ltree),
       import('@electric-sql/pglite/contrib/hstore').then((m) => m.hstore),
       import('@electric-sql/pglite/contrib/fuzzystrmatch').then((m) => m.fuzzystrmatch),
+      import('@electric-sql/pglite-pgvector').then((m) => m.vector),
+      import('@electric-sql/pglite-postgis').then((m) => m.postgis),
+      import('@electric-sql/pglite-pg_textsearch').then((m) => m.pg_textsearch),
+      import('@electric-sql/pglite-pgmq').then((m) => m.pgmq),
     ])
-    extensions = { uuid_ossp, pgcrypto, citext, pg_trgm, ltree, hstore, fuzzystrmatch }
+    extensions = {
+      uuid_ossp,
+      pgcrypto,
+      citext,
+      pg_trgm,
+      ltree,
+      hstore,
+      fuzzystrmatch,
+      vector,
+      postgis,
+      pg_textsearch,
+      pgmq,
+    }
   } catch (error) {
     await releaseLock()
     if (error instanceof Error && /wasm/.test(error.message)) throw error
@@ -69,6 +97,10 @@ export async function createPgliteEngine(dataDir?: string, options: { inspectOnl
         ltree: withEmbeddedBundle(extensions.ltree, standaloneBundles.bundles.ltree),
         hstore: withEmbeddedBundle(extensions.hstore, standaloneBundles.bundles.hstore),
         fuzzystrmatch: withEmbeddedBundle(extensions.fuzzystrmatch, standaloneBundles.bundles.fuzzystrmatch),
+        vector: withEmbeddedBundle(extensions.vector, standaloneBundles.bundles.vector),
+        postgis: withEmbeddedBundle(extensions.postgis, standaloneBundles.bundles.postgis),
+        pg_textsearch: withEmbeddedBundle(extensions.pg_textsearch, standaloneBundles.bundles.pg_textsearch),
+        pgmq: withEmbeddedBundle(extensions.pgmq, standaloneBundles.bundles.pgmq),
       }
     } catch (error) {
       await removePreparedBundles(cleanupStandaloneBundles)
