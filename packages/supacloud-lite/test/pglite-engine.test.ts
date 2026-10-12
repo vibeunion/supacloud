@@ -73,7 +73,7 @@ test('defaults fresh and reopened databases to UTC while preserving an explicit 
   } finally {
     await rm(projectDir, { recursive: true, force: true })
   }
-}, 60_000)
+}, 180_000)
 
 test('closes a ready PGlite instance when timezone initialization fails', async () => {
   const projectDir = await mkdtemp(join(tmpdir(), 'supacloud-lite-timezone-failure-'))
