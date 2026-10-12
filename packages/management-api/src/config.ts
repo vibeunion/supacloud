@@ -86,7 +86,7 @@ export interface Config {
   s3Region: string;
   storageType: string;
   storageMountPoint: string;
-  imaginaryUrl: string;
+  imagorUrl: string;
   gatewayProvider: "caddy";
   caddyAdminUrl: string;
   caddyConfigPath: string;
@@ -266,7 +266,7 @@ export const config: Config = {
   storageType: getEnv("S3_STORAGE_TYPE", getEnv("STORAGE_TYPE", "juicefs")),
   storageMountPoint: getEnv("STORAGE_MOUNT_POINT", "/data/storage"),
 
-  imaginaryUrl: getEnv("IMAGINARY_URL", "http://127.0.0.1:9010"),
+  imagorUrl: getEnv("IMAGOR_URL", getEnv("IMAGINARY_URL", "http://127.0.0.1:9010")),
   gatewayProvider: "caddy",
   caddyAdminUrl: getEnv("CADDY_ADMIN_URL", "http://127.0.0.1:2019"),
   caddyConfigPath: getEnv(

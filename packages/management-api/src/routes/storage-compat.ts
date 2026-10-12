@@ -31,6 +31,11 @@ import { Elysia, t, status } from "elysia";
 import { StorageService } from "../services/storage.service";
 import { StorageVectorError, StorageVectorService } from "../services/storage-vector.service";
 import { StorageRLS, mockObjects, normalizeStorageObjectSize } from "../services/storage-rls";
+import {
+    buildImagorRequest,
+    imagorOutputContentType,
+    runImagor,
+} from "../services/imagor.service";
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { matchProjectRefFromHost } from "../utils/project-routing";
@@ -43,7 +48,6 @@ import {
     isLoopbackHost,
     isMimeAllowed,
     isMultipartContentType,
-    isTransformQueryKey,
     normalizeListInteger,
     parseAllowedMimeTypes,
     parseContentLength,
@@ -66,9 +70,6 @@ const STORAGE_BATCH_CONCURRENCY = Math.max(1, Number(process.env.STORAGE_BATCH_C
 function isBucketNotEmpty(error: unknown): error is Error {
     return error instanceof Error && error.message === "Bucket is not empty";
 }
-
-// ── Imaginary Config ──────────────────────────────────────────────
-const IMAGINARY_URL = config.imaginaryUrl;
 
 import { createHmac, randomUUID } from "crypto";
 
@@ -809,9 +810,9 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined, true);
         if (!bucket || !bucket.public) return status(400, { statusCode: "400", error: 'Bad Request', message: 'Bucket is not public' });
 
-        // If transform params are present, proxy to imaginary
+        // If transform params are present, proxy to imagor
         if (hasTransformQuery(query as Record<string, unknown>)) {
-            return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, true);
+            return proxyToImagor(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, true);
         }
 
 
@@ -850,7 +851,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!permitted.permitted) return status(permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? 404 : 403, { statusCode: permitted.error === 'Bucket not found' || permitted.error === 'Object not found' ? '404' : '403', error: permitted.error === 'Object not found' ? 'Not Found' : 'Forbidden', message: permitted.error || 'Access Denied.' });
 
         if (hasTransformQuery(query as Record<string, unknown>)) {
-            return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
+            return proxyToImagor(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
         }
 
         try {
@@ -947,7 +948,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         if (!permitted.permitted) return status(permitted.error === 'Object not found' ? 404 : 403, { statusCode: permitted.error === 'Object not found' ? '404' : '403', error: permitted.error === 'Object not found' ? 'Not Found' : 'Forbidden', message: permitted.error || 'Access Denied.' });
 
         if (hasTransformQuery(query as Record<string, unknown>)) {
-            return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
+            return proxyToImagor(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
         }
 
         try {
@@ -1213,7 +1214,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
 
         // Transform support for signed URLs
         if (hasTransformQuery(query as Record<string, unknown>)) {
-            return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
+            return proxyToImagor(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
         }
 
         try {
@@ -1250,7 +1251,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             return status(401, { statusCode: "401", error: 'Unauthorized', message: 'Invalid or expired signed URL' });
         }
 
-        return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
+        return proxyToImagor(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
     })
 
     // GET /render/image/authenticated/:bucket/* — Download authenticated transformed file
@@ -1287,7 +1288,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
             if (!permitted.permitted) return status(403, { statusCode: "403", error: 'Forbidden', message: permitted.error || 'Access Denied.' });
         }
 
-        return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
+        return proxyToImagor(ref, params.bucket, filePath, query, set as { headers: Record<string, string> });
     })
 
     // ════════════════════════════════════════════════════════
@@ -1625,7 +1626,7 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
         const bucket = await StorageRLS.getLogicalBucket(ref, params.bucket, undefined, true);
         if (!bucket || !bucket.public) return status(400, { message: 'Bucket is not public' });
 
-        return proxyToImaginary(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, true);
+        return proxyToImagor(ref, params.bucket, filePath, query, set as { headers: Record<string, string> }, true);
     })
 
     // ════════════════════════════════════════════════════════
@@ -2007,13 +2008,13 @@ export const storageCompatRoutes = new Elysia({ prefix: "" })
     });
 
 
-// ── Shared imaginary proxy helper ─────────────────────────────────
-// POST image body directly to imaginary instead of having imaginary fetch via URL.
+// ── Shared imagor proxy helper ────────────────────────────────────
+// POST image body directly to imagor instead of having imagor fetch via URL.
 // This works for both local/JuiceFS and S3 storage backends.
 const transformRateLimits = new Map<string, { count: number; windowStart: number }>();
 const MAX_TRANSFORMS_PER_MINUTE = 500;
 
-async function proxyToImaginary(
+async function proxyToImagor(
     ref: string,
     logicalBucket: string,
     filePath: string,
@@ -2044,103 +2045,49 @@ async function proxyToImaginary(
     const sourceInfo = await StorageRLS.getObjectInfo(ref, logicalBucket, filePath, undefined, true);
     const sourceContentType = resolveDownloadContentType(downloadRes, sourceInfo);
 
-    // Validate source file is actually an image before wasting resources on imaginary
+    // Validate source file is actually an image before wasting resources on imagor
     if (sourceContentType && !sourceContentType.startsWith('image/')) {
         return status(400, { message: `Cannot transform non-image file (Content-Type: ${sourceContentType})` }) as unknown as { message: string };
     }
 
-    // 2. Build imaginary query params
-    const imaginaryParams = new URLSearchParams();
-    if (query.width)  imaginaryParams.set('width',  String(query.width));
-    if (query.height) imaginaryParams.set('height', String(query.height));
-    imaginaryParams.set('quality', String(query.quality || 80));
-
-    const format = query.format;
-    if (format) {
-        if (format !== 'origin') {
-            imaginaryParams.set('type', format as string);
-        }
-    } else {
-        // Official SDK forces WebP if format is not passed
-        imaginaryParams.set('type', 'webp');
-    }
-
+    // Imagor uses one path grammar for all operations. The operation label
+    // selects compatibility defaults while the service maps the full query.
     const resizeMode = query.resize || 'cover';
-    let operation = 'resize';
-
-    // Check for extended operations first (overrides standard resize)
-    if (query.smartcrop === 'true' || query.smartcrop === '1' || resizeMode === 'smartcrop') {
-        operation = 'smartcrop';
-    } else if (query.watermark || query.text || query.image || query.wm || query.wm_text || query.wm_image) {
-        operation = 'watermark';
-    } else if (query.blur || query.sigma) {
-        operation = 'blur';
-    } else {
-        // Standard Supabase resize operations
-        if (resizeMode === 'cover' || resizeMode === 'crop') {
-            operation = 'crop';
-        } else if (resizeMode === 'contain' || resizeMode === 'embed') {
-            operation = 'embed';
-        } else if (resizeMode === 'fill') {
-            operation = 'enlarge';
-            imaginaryParams.set('force', 'true');
-        }
-    }
-
-    // Pass through advanced transform fields from query directly to imaginary.
-    const queryKeyMap: Record<string, string> = {
-        watermark: 'text',
-        blur: 'sigma',
-        wm: 'text',
-        wm_text: 'text',
-        wm_image: 'image',
-        wm_opacity: 'opacity',
-        wm_gravity: 'gravity',
-        wm_dx: 'dx',
-        wm_dy: 'dy',
-    };
-    for (const [rawKey, rawValue] of Object.entries(query)) {
-        if (rawValue === undefined || rawValue === null) continue;
-        if (!isTransformQueryKey(rawKey)) continue;
-        if (rawKey === "smartcrop") continue;
-
-        const mappedKey = queryKeyMap[rawKey] || rawKey;
-        if (!imaginaryParams.has(mappedKey)) {
-            imaginaryParams.set(mappedKey, String(rawValue));
-        }
-    }
+    const operation = query.smartcrop === 'true' || query.smartcrop === '1' || resizeMode === 'smartcrop'
+        ? 'smartcrop'
+        : query.watermark || query.text || query.image || query.wm || query.wm_text || query.wm_image
+            ? 'watermark'
+            : query.blur || query.sigma
+                ? 'blur'
+                : 'standard';
 
     try {
-        // 3. POST the raw image body to imaginary (no URL fetch needed)
+        // POST the raw image body to imagor (no URL fetch needed).
         const imageBody = await downloadRes.arrayBuffer();
-
-        const res = await fetch(`${IMAGINARY_URL}/${operation}?${imaginaryParams.toString()}`, {
-            method: 'POST',
-            body: imageBody,
-            headers: { 'Content-Type': sourceContentType },
-        });
+        const imagorQuery = query as Record<string, unknown>;
+        const imagorRequest = buildImagorRequest(imagorQuery, operation);
+        const res = await runImagor(imagorQuery, {
+            bytes: imageBody,
+            contentType: sourceContentType,
+        }, operation);
         if (!res.ok) {
             const errText = await res.text();
-            logger.error(`Imaginary ${operation} failed:`, { status: res.status, error: errText });
+            logger.error(`Imagor ${operation} failed:`, { status: res.status, error: errText });
             return status(502, { message: `Image transform failed: ${errText}`, code: "502" }) as unknown as { message: string };
         }
 
-        if (format) {
-            set.headers['Content-Type'] = res.headers.get('Content-Type') || `image/${format}`;
-        } else {
-            set.headers['Content-Type'] = res.headers.get('Content-Type') || sourceContentType;
-        }
+        set.headers['Content-Type'] = imagorOutputContentType(res, imagorRequest, sourceContentType) || 'image/webp';
 
         if (isPublic) {
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
         } else {
-             set.headers['Cache-Control'] = 'private, max-age=3600';
+            set.headers['Cache-Control'] = 'private, max-age=3600';
         }
         setDownloadDisposition(query as Record<string, string | undefined>, filePath, set as { headers: Record<string, string> });
-        set.headers['X-Image-Engine'] = 'imaginary/libvips';
+        set.headers['X-Image-Engine'] = 'imagor/libvips';
         return new Response(await res.arrayBuffer());
     } catch (err: unknown) {
-        logger.error('Imaginary proxy error:', { error: err instanceof Error ? err.message : String(err) });
+        logger.error('Imagor proxy error:', { error: err instanceof Error ? err.message : String(err) });
         return status(502, { message: 'Image processing service unavailable', code: "502" }) as unknown as { message: string };
     }
 }

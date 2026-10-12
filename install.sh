@@ -94,7 +94,7 @@ SUPACLOUD_INSTALL_KEYS=(
     S3_ENDPOINT S3_PROTOCOL S3_REGION S3_BUCKET S3_ACCESS_KEY S3_SECRET_KEY
     S3_FORCE_PATH_STYLE
     EXTERNAL_S3_ENDPOINT EXTERNAL_S3_REGION EXTERNAL_S3_BUCKET
-    EXTERNAL_S3_ACCESS_KEY EXTERNAL_S3_SECRET_KEY IMAGINARY_IMAGE EDGE_RUNTIME EDGE_RUNTIME_PORT EDGE_MAX_BODY_SIZE_MB
+    EXTERNAL_S3_ACCESS_KEY EXTERNAL_S3_SECRET_KEY IMAGOR_IMAGE IMAGINARY_IMAGE EDGE_RUNTIME EDGE_RUNTIME_PORT EDGE_MAX_BODY_SIZE_MB
     SUPACLOUD_LOGS_ENABLED VICTORIALOGS_VERSION VICTORIALOGS_DATA_DIR VICTORIALOGS_RETENTION
     SUPACLOUD_PIPELINES_ENABLED SUPACLOUD_ETL_COMMIT SUPACLOUD_ETL_IMAGE
     JIT_DATABASE_GATEWAY_PUBLIC_HOST JIT_DATABASE_GATEWAY_PORT_RANGE
@@ -460,11 +460,11 @@ persist_resolved_install_config() {
         PORT MANAGEMENT_API_URL DATABASE_URL MASTER_TOKEN SCRIPTS_PATH PIGSTY_PATH BASE_DOMAIN \
         SUPACLOUD_JWT_SECRET REALTIME_SECRET_KEY_BASE REALTIME_DB_ENC_KEY REALTIME_API_SECRET \
         PG_HOST PG_PORT PG_USER PG_DATABASE PGPASSWORD SECRETS_ENCRYPTION_KEY SUPAOAUTH_BFF_SIGNING_SECRET SUPABASE_SCHEMA_PATH \
-        IMAGINARY_URL REALTIME_ADMIN_URL
+        IMAGOR_URL IMAGINARY_URL REALTIME_ADMIN_URL
     unset PORT MANAGEMENT_API_URL DATABASE_URL MASTER_TOKEN SCRIPTS_PATH PIGSTY_PATH BASE_DOMAIN \
         SUPACLOUD_JWT_SECRET REALTIME_SECRET_KEY_BASE REALTIME_DB_ENC_KEY REALTIME_API_SECRET \
         PG_HOST PG_PORT PG_USER PG_DATABASE PGPASSWORD SECRETS_ENCRYPTION_KEY SUPAOAUTH_BFF_SIGNING_SECRET SUPABASE_SCHEMA_PATH \
-        IMAGINARY_URL REALTIME_ADMIN_URL
+        IMAGOR_URL IMAGINARY_URL REALTIME_ADMIN_URL
 }
 
 apply_recovered_env_value() {
@@ -484,7 +484,10 @@ recover_legacy_install_config() {
     apply_recovered_env_value S3_STORAGE_TYPE "$MANAGEMENT_ENV_FILE" S3_STORAGE_TYPE
     apply_recovered_env_value EDGE_RUNTIME_PORT "$MANAGEMENT_ENV_FILE" EDGE_RUNTIME_PORT
     apply_recovered_env_value EDGE_MAX_BODY_SIZE_MB "$MANAGEMENT_ENV_FILE" EDGE_MAX_BODY_SIZE_MB
-    apply_recovered_env_value IMAGINARY_IMAGE "$MANAGEMENT_ENV_FILE" IMAGINARY_IMAGE
+    apply_recovered_env_value IMAGOR_IMAGE "$MANAGEMENT_ENV_FILE" IMAGOR_IMAGE
+    if [[ -z "${IMAGOR_IMAGE:-}" ]]; then
+        apply_recovered_env_value IMAGOR_IMAGE "$MANAGEMENT_ENV_FILE" IMAGINARY_IMAGE
+    fi
     local recovered_base_domain
     recovered_base_domain=$(supacloud_env_value "$MANAGEMENT_ENV_FILE" BASE_DOMAIN)
     [[ -z "$recovered_base_domain" ]] || SUPABASE_PUBLIC_DOMAIN="api.${recovered_base_domain}"
@@ -1884,7 +1887,7 @@ install_pgredis_runtime() {
         return 1
     fi
     if [[ "$PGREDIS_RUNTIME_PORT" == "9010" ]]; then
-        log_error "PGREDIS_RUNTIME_PORT=9010 conflicts with the SupaCloud Imaginary service"
+        log_error "PGREDIS_RUNTIME_PORT=9010 conflicts with the SupaCloud Imagor service"
         return 1
     fi
     ARCH=$(uname -m)
@@ -3756,7 +3759,7 @@ install_management_api() {
         S3_FORCE_PATH_STYLE "${S3_FORCE_PATH_STYLE:-}" \
         TUS_MAX_SIZE "${TUS_MAX_SIZE:-524288000}" \
         TUS_MAX_CHUNK_SIZE "${TUS_MAX_CHUNK_SIZE:-16777216}" \
-        IMAGINARY_IMAGE "${IMAGINARY_IMAGE:-h2non/imaginary:1.2.4}" \
+        IMAGOR_IMAGE "${IMAGOR_IMAGE:-${IMAGINARY_IMAGE:-shumc/imagor:1.9.8}}" \
         JWT_SECRET "$JWT_SECRET" \
         SUPACLOUD_JWT_SECRET "$JWT_SECRET" \
         SUPABASE_PUBLISHABLE_KEY "$SUPABASE_PUBLISHABLE_KEY" \
@@ -4365,7 +4368,7 @@ persist_service_container_runtime_env() {
     fi
 
     supacloud_write_service_env_pairs "$MANAGEMENT_ENV_FILE" \
-        IMAGINARY_URL http://127.0.0.1:9010 \
+        IMAGOR_URL http://127.0.0.1:9010 \
         REALTIME_ADMIN_URL http://127.0.0.1:4000 \
         REALTIME_API_SECRET "$JWT_SECRET"
 }
@@ -5144,35 +5147,42 @@ start_realtime_container() {
     )
 }
 
-# ========== Deploy Service Containers (Imaginary + Realtime) ==========
+# ========== Deploy Service Containers (Imagor + Realtime) ==========
 deploy_service_containers() {
     log_step "Deploying SupaCloud service containers..."
 
     local RUNTIME="${CONTAINER_RUNTIME:-podman}"
     local MIRROR_PREFIX="${DOCKER_MIRROR_PREFIX:-docker.1ms.run/}"
 
-    # --- 1. Deploy Imaginary (Image Transformation Engine) ---
-    if $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -q supacloud-imaginary; then
-        log_info "Imaginary container already exists, skipping"
+    # --- 1. Deploy Imagor (Image Transformation Engine) ---
+    if $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^supacloud-imaginary$'; then
+        log_info "Removing the legacy Imaginary container before the Imagor migration"
+        $RUNTIME rm -f supacloud-imaginary
+    fi
+    if $RUNTIME ps -a --format '{{.Names}}' 2>/dev/null | grep -q '^supacloud-imagor$'; then
+        log_info "Imagor container already exists, skipping"
     else
-        local IMAGINARY_IMAGE_VALUE="${IMAGINARY_IMAGE:-h2non/imaginary:1.2.4}"
-        local IMAGINARY_IMAGE_PULL="${MIRROR_PREFIX}${IMAGINARY_IMAGE_VALUE}"
-        log_info "Pulling and deploying Imaginary (image processing): ${IMAGINARY_IMAGE_VALUE}"
-        if ! $RUNTIME pull "$IMAGINARY_IMAGE_PULL" 2>/dev/null; then
-            IMAGINARY_IMAGE_PULL="$IMAGINARY_IMAGE_VALUE"
-            $RUNTIME pull "$IMAGINARY_IMAGE_PULL"
+        local IMAGOR_IMAGE_VALUE="${IMAGOR_IMAGE:-${IMAGINARY_IMAGE:-shumc/imagor:1.9.8}}"
+        local IMAGOR_IMAGE_PULL="${MIRROR_PREFIX}${IMAGOR_IMAGE_VALUE}"
+        log_info "Pulling and deploying Imagor (image processing): ${IMAGOR_IMAGE_VALUE}"
+        if ! $RUNTIME pull "$IMAGOR_IMAGE_PULL" 2>/dev/null; then
+            IMAGOR_IMAGE_PULL="$IMAGOR_IMAGE_VALUE"
+            $RUNTIME pull "$IMAGOR_IMAGE_PULL"
         fi
 
         $RUNTIME run -d \
-            --name supacloud-imaginary \
+            --name supacloud-imagor \
             --restart=always \
-            -p 127.0.0.1:9010:9000 \
-            "$IMAGINARY_IMAGE_PULL" \
-            -enable-url-source \
-            -allowed-origins ".*"
+            -p 127.0.0.1:9010:8000 \
+            "$IMAGOR_IMAGE_PULL" \
+            -imagor-unsafe \
+            -upload-loader-enable \
+            -upload-loader-max-allowed-size 67108864 \
+            -upload-loader-accept "image/*"
 
-        log_info "Imaginary deployed on port 9010"
+        log_info "Imagor deployed on port 9010"
     fi
+    supacloud_wait_http_health "http://127.0.0.1:9010/healthcheck" || return 1
 
     # --- 2. Deploy Supabase Realtime (Multi-tenant WebSocket) ---
     local REALTIME_UNIT_SRC="${SCRIPT_DIR}/infrastructure/systemd/supacloud-realtime.service"
@@ -5494,7 +5504,7 @@ main() {
     fi
     install_web_console
 
-    # Deploy Imaginary + Realtime containers
+    # Deploy Imagor + Realtime containers
     deploy_service_containers
     run_legacy_supabase_compose_migration_if_requested
 

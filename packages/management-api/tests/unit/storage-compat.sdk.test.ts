@@ -661,7 +661,7 @@ describe("storageCompatRoutes supabase-js compatibility", () => {
     downloadSpy.mockRestore();
   });
 
-  test("signed transform url keeps advanced imaginary options", async () => {
+  test("signed transform url keeps advanced imagor options", async () => {
     mockObjects.set("avatars/folder/hero.png", {
       metadata: { size: 3, mimetype: "image/png" },
       updated: new Date().toISOString(),
