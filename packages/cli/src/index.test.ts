@@ -285,6 +285,8 @@ describe("supacloud process contract", () => {
         expect(response.stderr).toContain("--env-file <path>");
         expect(response.stderr).toContain("--confirm-production <ref>");
         expect(response.stderr).toContain("SUPACLOUD_READ_ONLY=true");
+        expect(response.stderr).not.toContain("release scope_rebind");
+        expect(response.stderr).not.toContain("release scope_inspect");
     });
 
     test("prints deploy help without requiring action metadata", async () => {
