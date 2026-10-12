@@ -491,6 +491,40 @@ export function routePreservesUpstreamCors(route: CaddyRoute): boolean {
     });
 }
 
+function setFunctionProxyCors(handle: Record<string, unknown>[], gatewayOwnsCors: boolean): void {
+    const corsHeaders = new Set<string>(UPSTREAM_CORS_RESPONSE_HEADERS.map((header) => header.toLowerCase()));
+    for (const proxy of handle) {
+        if (proxy["handler"] !== "reverse_proxy") continue;
+        const headers = recordOrEmpty(proxy["headers"]);
+        const response = recordOrEmpty(headers["response"]);
+        // Remove only CORS transformations; retain unrelated response policy
+        // and never modify request headers, routing, or upstream credentials.
+        for (const operation of ["set", "add", "replace"]) {
+            if (!isRecord(response[operation])) continue;
+            const values = response[operation];
+            for (const name of Object.keys(values)) {
+                if (corsHeaders.has(name.toLowerCase())) delete values[name];
+            }
+            if (Object.keys(values).length === 0) delete response[operation];
+        }
+        const deletions = Array.isArray(response["delete"])
+            ? response["delete"].filter((name: unknown): name is string =>
+                typeof name === "string" && !corsHeaders.has(name.toLowerCase()))
+            : [];
+        if (gatewayOwnsCors) {
+            response["delete"] = [...deletions, ...UPSTREAM_CORS_RESPONSE_HEADERS];
+        } else if (deletions.length > 0) {
+            response["delete"] = deletions;
+        } else {
+            delete response["delete"];
+        }
+        if (Object.keys(response).length > 0) headers["response"] = response;
+        else delete headers["response"];
+        if (Object.keys(headers).length > 0) proxy["headers"] = headers;
+        else delete proxy["headers"];
+    }
+}
+
 export function setRouteCors(route: CaddyRoute, origins: string[]): void {
     // Custom routes own their policy, including deliberately omitting CORS.
     // Tenant/frontend reconciliation must not replace that persisted policy.
@@ -498,20 +532,12 @@ export function setRouteCors(route: CaddyRoute, origins: string[]): void {
     if (String(route["@id"] || "").startsWith("route-project-")
         && String(route["@id"]).endsWith("-functions")) {
         const handle = Array.isArray(route["handle"]) ? route["handle"] as Record<string, unknown>[] : [];
+        setFunctionProxyCors(handle, config.edgeFunctionsCorsMode === "auto");
         if (config.edgeFunctionsCorsMode === "auto") {
-            const proxy = handle.find((handler) => handler["handler"] === "reverse_proxy");
-            if (proxy) {
-                const headers = proxy["headers"] && typeof proxy["headers"] === "object" && !Array.isArray(proxy["headers"])
-                    ? proxy["headers"] as Record<string, unknown>
-                    : {};
-                const response = headers["response"] && typeof headers["response"] === "object" && !Array.isArray(headers["response"])
-                    ? headers["response"] as Record<string, unknown>
-                    : {};
-                response["delete"] = [...UPSTREAM_CORS_RESPONSE_HEADERS];
-                headers["response"] = response;
-                proxy["headers"] = headers;
-            }
-            const corsSubroute = makeCorsSubroute(origins);
+            // Match Supabase's browser-facing Function default: any origin
+            // may invoke the route, while JWT and application authorization
+            // remain enforced by the upstream.
+            const corsSubroute = makeCorsSubroute(["*"]);
             route["handle"] = corsSubroute
                 ? [corsSubroute, ...handle.filter((handler) =>
                     !isFunctionCorsErrorFallback(handler) && !isCorsHeaderHandler(handler) && !isCorsSubroute(handler))]

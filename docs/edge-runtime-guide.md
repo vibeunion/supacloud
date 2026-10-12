@@ -43,11 +43,10 @@ Important:
 
 `EDGE_FUNCTIONS_CORS_MODE` selects who owns CORS for all public Function routes:
 
-- `auto` (default): Management API/Caddy derives exact origins from the project's
-  generated API/Auth/Studio hosts, configured custom domains, bound frontend
-  hosts, and the configured gateway IP. It handles preflight and response CORS
-  without requiring each Function to repeat the platform domains. The list is
-  regenerated during tenant reconciliation.
+- `auto` (default): Management API/Caddy handles Function preflight and response
+  CORS with `Access-Control-Allow-Origin: *`, matching Supabase's browser-facing
+  Function default. It does not grant credentialed cross-origin requests, and it
+  does not change JWT or application authorization.
 - `function`: forward `OPTIONS` and preserve Function responses without adding
   CORS headers. Existing Function allow-lists remain unchanged.
 - `permissive`: handle `OPTIONS` for existing Functions with `204`, allow any
@@ -60,7 +59,7 @@ For embedded mode, set `EDGE_FUNCTIONS_CORS_MODE=permissive` in the Management
 API service environment. For external mode, set it in the Edge Runtime service
 environment. Restart the owning service after changing it. The setting applies
 only to public Function routes, not internal control, REST, Auth, or Storage.
-Use `auto` to restore the default platform-managed, exact-origin behavior, or
+Use `auto` to restore the default platform-managed wildcard behavior, or
 `function` to restore Function-owned CORS.
 
 Permissive mode does not skip JWT verification or application authorization.

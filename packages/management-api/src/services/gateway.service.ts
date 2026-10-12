@@ -1871,7 +1871,7 @@ export class CaddyGatewayProvider implements GatewayProvider {
                         `X-Forwarded-Host:${projectRef}.api.${config.baseDomain}`,
                     ],
                     readTimeout: 500_000,
-                    corsOrigins,
+                    corsOrigins: config.edgeFunctionsCorsMode === "auto" ? ["*"] : corsOrigins,
                     preserveUpstreamCors: config.edgeFunctionsCorsMode !== "auto",
                     corsErrorFallback: config.edgeFunctionsCorsMode !== "auto",
                 }),
