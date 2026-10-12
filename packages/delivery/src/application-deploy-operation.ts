@@ -73,9 +73,38 @@ export type ApplicationDeployRequest = Static<typeof ApplicationDeployRequestSch
 export type ApplicationBackendReceipt = Static<typeof ApplicationBackendReceiptSchema>;
 export type ApplicationDeployResult = Static<typeof ApplicationDeployResultSchema>;
 
-export function parseApplicationDeployResult(value: unknown): ApplicationDeployResult {
+export function parseApplicationDeployResult(value: unknown, expected?: {
+  project_ref: string;
+  application_id: string;
+  environment_id: string;
+  request: ApplicationDeployRequest;
+}): ApplicationDeployResult {
   if (!Value.Check(ApplicationDeployResultSchema, value)) {
     throw new Error("Invalid application deploy result");
+  }
+  const backend = value.backend_receipt;
+  const bindingKeys = [
+    "project_ref", "application_id", "environment_id", "release_id", "mutation_id", "plan_sha256",
+  ] as const;
+  if (bindingKeys.some(key => backend[key] !== value[key]) || !backend.postgrest_healthy
+    || (backend.applied_versions.length > 0 && (!backend.schema_reloaded || !backend.backup_id))) {
+    throw new Error("Invalid application deploy receipt binding");
+  }
+  if (expected) {
+    const { request } = expected;
+    const configurationId = request.configuration_id ?? request.configuration_write?.configuration_id;
+    if (value.project_ref !== expected.project_ref || value.application_id !== expected.application_id
+      || value.environment_id !== expected.environment_id || value.release_id !== request.release_id
+      || value.mutation_id !== request.mutation_id
+      || (configurationId !== undefined && value.configuration_id !== configurationId)
+      || (request.configuration_write !== undefined
+        && value.configuration_id !== request.configuration_write.configuration_id)
+      || (request.expected_plan_sha256 !== undefined && value.plan_sha256 !== request.expected_plan_sha256)
+      || Boolean(value.web) !== Boolean(request.web)
+      || (request.web !== undefined && (value.web?.deployment_id !== request.web.deployment_id
+        || value.web.release_id !== request.web.release_id))) {
+      throw new Error("Application deploy receipt does not match request");
+    }
   }
   return structuredClone(value);
 }

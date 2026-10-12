@@ -4,8 +4,9 @@ import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
+import { Value } from "typebox/value";
 import { createFrontendTarZstd, FRONTEND_ARCHIVE_FORMAT } from "@supacloud/delivery/frontend-archive";
-import type { ApplicationDeployWebRequest } from "@supacloud/delivery";
+import { ApplicationIdSchema, type ApplicationDeployWebRequest } from "@supacloud/delivery";
 import { optional } from "../schema";
 import type { HttpTransport } from "../transports/http";
 import { registerTool, type ToolServer } from "../tool-server";
@@ -20,6 +21,13 @@ const MAX_SOURCE_BYTES = 256 * 1024 * 1024;
 
 interface DeployConfig {
     defaultTarget?: string;
+    application?: {
+        id: string;
+        environmentId?: string;
+        configurationPath?: string;
+        configurationId?: string;
+        manifestPath?: string;
+    };
     targets?: Record<string, DeployTargetConfig>;
     frontend?: {
         id?: string;
@@ -221,13 +229,38 @@ async function readDeployConfig(configRoot: string): Promise<DeployConfig> {
     if (candidate === null) return {};
     const config = record(candidate);
     const frontend = record(config?.frontend);
+    const application = record(config?.application);
     const targetValues = record(config?.targets);
     if (!config || (config.frontend !== undefined && !frontend)
+        || (config.application !== undefined && !application)
         || (config.targets !== undefined && !targetValues)) {
-        throw new Error("supacloud.json must contain object-valued 'frontend' or 'targets' configuration");
+        throw new Error("supacloud.json must contain object-valued 'application', 'frontend' or 'targets' configuration");
+    }
+    let parsedApplication: DeployConfig["application"];
+    if (application) {
+        const id = optionalText(application.id, "application.id");
+        const environmentId = optionalText(application.environmentId, "application.environmentId");
+        if (!id || !Value.Check(ApplicationIdSchema, id)
+            || (environmentId !== undefined && !Value.Check(ApplicationIdSchema, environmentId))) {
+            throw new Error("supacloud.json requires a valid application.id and optional application.environmentId");
+        }
+        const configurationPath = optionalText(application.configurationPath, "application.configurationPath");
+        const configurationId = optionalText(application.configurationId, "application.configurationId");
+        if (configurationPath && configurationId) {
+            throw new Error("supacloud.json application must set only one of application.configurationPath or application.configurationId");
+        }
+        const manifestPath = optionalText(application.manifestPath, "application.manifestPath");
+        parsedApplication = {
+            id,
+            ...(environmentId ? { environmentId } : {}),
+            ...(configurationPath ? { configurationPath } : {}),
+            ...(configurationId ? { configurationId } : {}),
+            ...(manifestPath ? { manifestPath } : {}),
+        };
     }
     return {
         defaultTarget: optionalText(config.defaultTarget, "defaultTarget"),
+        ...(parsedApplication === undefined ? {} : { application: parsedApplication }),
         targets: targetValues
             ? Object.fromEntries(Object.entries(targetValues).map(([name, value]) => (
                 [name, deployTargetConfig(value, name)]
@@ -250,6 +283,22 @@ async function packageName(projectDirectory: string): Promise<string | null> {
 
 async function pathExists(path: string): Promise<boolean> {
     return access(path).then(() => true, () => false);
+}
+
+async function hasProjectReleaseManifest(root: string): Promise<boolean> {
+    if (await pathExists(join(root, "deploy-manifest.json"))) return true;
+    const directory = await opendir(join(root, "supacloud")).catch((error: unknown) => {
+        if (error instanceof Error && "code" in error && error.code === "ENOENT") return null;
+        throw error;
+    });
+    if (!directory) return false;
+    let entries = 0;
+    for await (const entry of directory) {
+        if (++entries > 128) throw new Error("Too many SupaCloud project roots to resolve a deployment");
+        if ((entry.isDirectory() || entry.isSymbolicLink())
+            && await pathExists(join(root, "supacloud", entry.name, "deploy-manifest.json"))) return true;
+    }
+    return false;
 }
 
 async function defaultBuildCommand(projectDirectory: string, configRoot: string): Promise<string> {
@@ -658,9 +707,21 @@ export function registerDeployTools(
             const invocationDirectory = resolve(String(args.cwd || options.cwd || process.cwd()));
             const projectRef = String(args.ref || options.projectRef || "").trim();
             if (!projectRef) throw new Error("A linked project ref is required. Set SUPACLOUD_PROJECT_REF or pass --ref");
-            const configRoot = await findDeployConfigRoot(invocationDirectory);
+            const configRoot = await findDeployConfigRoot(invocationDirectory, options.environment ?? undefined);
 
-            if (options.application?.id) {
+            const config = await readDeployConfig(configRoot);
+            const application = options.application?.id
+                ? options.application
+                : config.application ? {
+                    ...config.application, environmentId: options.environment || config.application.environmentId,
+                } : undefined;
+            if (!args.target && await hasProjectReleaseManifest(configRoot)) {
+                throw new Error("PROJECT_DEPLOYMENT_UNSUPPORTED: This project declares a release manifest that the current deployment orchestrator cannot execute. No Web-only fallback or remote mutation was performed.");
+            }
+            if (application?.id) {
+                if (Object.values(config.targets ?? {}).some(target => target.type === "edge_function")) {
+                    throw new Error("PROJECT_DEPLOYMENT_UNSUPPORTED: Application deployment cannot yet include declared Edge Function targets. No partial deployment was performed.");
+                }
                 if (!options.applicationRelease) {
                     throw new Error("Application release support is unavailable in this CLI context");
                 }
@@ -670,12 +731,13 @@ export function registerDeployTools(
                 if (args.dry_run === true || args.plan === true || args.diff === true) {
                     throw new Error("Application profile deploy does not support dry_run, plan, or diff; use app deploy-plan for a read-only plan");
                 }
-                const environmentId = options.application.environmentId.trim();
-                if (!environmentId) {
+                const environmentId = application.environmentId?.trim();
+                if (!environmentId || !Value.Check(ApplicationIdSchema, environmentId)
+                    || !Value.Check(ApplicationIdSchema, application.id)) {
                     throw new Error("Application profile requires SUPACLOUD_APPLICATION_ENVIRONMENT_ID or SUPACLOUD_ENV");
                 }
-                const configurationPath = options.application.configurationPath?.trim();
-                const configurationId = options.application.configurationId?.trim();
+                const configurationPath = application.configurationPath?.trim();
+                const configurationId = application.configurationId?.trim();
                 if (configurationPath && configurationId) {
                     throw new Error("Application profile must set only one of SUPACLOUD_APPLICATION_CONFIGURATION_PATH or SUPACLOUD_APPLICATION_CONFIGURATION_ID");
                 }
@@ -690,12 +752,12 @@ export function registerDeployTools(
                 const result = await options.applicationRelease({
                     action: "release",
                     ref: projectRef,
-                    id: options.application.id,
+                    id: application.id,
                     environment_id: environmentId,
                     root: configRoot,
                     ...(configurationPath ? { configuration_path: configurationPath } : {}),
                     ...(configurationId ? { configuration_id: configurationId } : {}),
-                    ...(options.application.manifestPath ? { manifest_path: options.application.manifestPath } : {}),
+                    ...(application.manifestPath ? { manifest_path: application.manifestPath } : {}),
                     ...(args.skip_build === true ? { skip_build: true } : {}),
                     ...(stagedWeb?.request === undefined ? {} : { web: stagedWeb.request }),
                     ...(args.json === true ? { format: "json", json: true } : {}),
@@ -703,8 +765,14 @@ export function registerDeployTools(
                 return result;
             }
 
-            const config = await readDeployConfig(configRoot);
             const target = selectTarget(configRoot, invocationDirectory, config, String(args.target || "").trim() || undefined);
+            if (!args.target && target.config.type === "frontend"
+                && (Object.values(config.targets ?? {}).some(candidate => candidate.type === "edge_function")
+                    || await pathExists(join(configRoot, "supacloud.config.ts"))
+                    || await pathExists(join(configRoot, "supabase", "migrations"))
+                    || await pathExists(join(configRoot, "supabase", "functions")))) {
+                throw new Error("PROJECT_DEPLOYMENT_UNSUPPORTED: Backend declarations were detected but are not covered by this deployment. No Web-only fallback or remote mutation was performed.");
+            }
             const projectDirectory = target.root;
             const targetState = await lstat(projectDirectory).catch(() => null);
             if (!targetState?.isDirectory() || targetState.isSymbolicLink()) {

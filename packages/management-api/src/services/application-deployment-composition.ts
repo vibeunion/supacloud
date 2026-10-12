@@ -33,7 +33,6 @@ import { ApplicationDeployPlans } from "./application-deploy-plan";
 import { ApplicationDeploymentOrchestrator } from "./application-deployment-orchestrator";
 import { frontendReleaseService } from "./frontend-release.service";
 import { tenantRuntimeService } from "./tenant-runtime.service";
-import { createProjectDeploymentRoutes } from "../routes/project-deployments";
 
 type CompatibilityInput = Parameters<
   NonNullable<ApplicationDeploymentDependencies["verifyCompatibility"]>
