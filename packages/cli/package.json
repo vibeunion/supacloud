@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/cli",
-  "version": "0.90.2",
+  "version": "0.91.0",
   "description": "Project-scoped CLI for SupaCloud users",
   "type": "module",
   "main": "./dist/index.js",
