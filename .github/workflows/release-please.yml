@@ -69,7 +69,6 @@ jobs:
       testing_released: ${{ steps.release.outputs['packages/testing--release_created'] }}
     steps:
       - name: Checkout recovery control scripts
-        if: ${{ inputs.recover_management_tag != '' }}
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
@@ -85,11 +84,26 @@ jobs:
 
       - uses: googleapis/release-please-action@v5
         if: ${{ inputs.recover_management_tag == '' && inputs.recover_elysia != true }}
-        id: release
+        id: release-action
+        continue-on-error: true
         with:
           token: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      - name: Resolve release outputs after partial creation
+        if: ${{ !cancelled() && steps.release-action.outcome != 'skipped' }}
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
+          RELEASE_ACTION_OUTCOME: ${{ steps.release-action.outcome }}
+          RELEASE_ACTION_OUTPUTS: ${{ toJSON(steps.release-action.outputs) }}
+        run: |
+          if [[ "$RELEASE_ACTION_OUTCOME" == "failure" ]]; then
+            git fetch origin --tags
+          fi
+          node --test .github/scripts/resolve-release-outputs.test.mjs
+          node .github/scripts/resolve-release-outputs.mjs
 
   publish-management-api-binaries:
     needs: release-please
