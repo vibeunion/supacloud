@@ -20,6 +20,12 @@ import { StorageVectorError, StorageVectorService } from "../services/storage-ve
 import { logger } from "../utils/logger";
 import { config } from "../config";
 import { requireAdminAuth, requireProjectOrAdminAuth } from "../middleware/auth";
+import {
+    buildImagorRequest,
+    checkImagorHealth,
+    imagorOutputContentType,
+    runImagor,
+} from "../services/imagor.service";
 
 const ErrorResponse = t.Object({ message: t.String() });
 const SuccessResponse = t.Object({ success: t.Boolean(), message: t.String() });
@@ -96,8 +102,6 @@ async function runProjectVectorOperation(ref: string, operation: string, body: R
     }
 }
 
-// ── Imaginary Config ──────────────────────────────────────────────
-const IMAGINARY_URL = config.imaginaryUrl;
 const MAX_TRANSFORM_SOURCE_BYTES = 64 * 1024 * 1024;
 
 function isValidBucketName(bucket: string): boolean {
@@ -138,8 +142,8 @@ class TransformSourceTooLargeError extends Error {}
 
 /**
  * Load the source image through the storage driver. Transform routes no longer
- * hand imaginary a remote URL: private buckets need no anonymous access and the
- * imaginary `-enable-url-source` flag is not required.
+ * hand imagor a remote URL: private buckets need no anonymous access and the
+ * imagor HTTP loader is not required.
  */
 async function loadTransformSource(ref: string, bucket: string, path: string): Promise<TransformSource | null> {
     if (!isValidBucketName(bucket)) throw new Error("Invalid bucket name");
@@ -169,14 +173,6 @@ async function resolveTransformSource(request: Request, ref: string, bucket: str
         if (error instanceof ProjectStorageError) return { error: status(error.statusCode, { message: error.message, code: error.code }) };
         return { error: status(400, { message: "Invalid source path", code: "400" }) };
     }
-}
-
-async function runImaginary(operation: string, params: URLSearchParams, source: TransformSource): Promise<Response> {
-    return await fetch(`${IMAGINARY_URL}/${operation}?${params.toString()}`, {
-        method: "POST",
-        headers: { "Content-Type": source.contentType },
-        body: source.bytes,
-    });
 }
 
 function logStorageMetadataFailure(message: string, ref: string, bucketName: string, error: unknown): void {
@@ -454,7 +450,7 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         };
     })
 
-    // ── Supabase-compatible Image Transform (via imaginary) ──────
+    // ── Supabase-compatible Image Transform (via imagor) ──────────
     // Matches: GET /v1/storage/:ref/render/image/public/:bucket/*
     // This is the exact pattern that supabase-js SDK sends for .download(path, { transform })
     .get('/:ref/render/image/public/:bucket/*', { detail: { tags: ["storage"], summary: "Render a public image with transforms" } }, async ({ params, query, request, set }) => {
@@ -462,74 +458,46 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         const resolved = await resolveTransformSource(request, params.ref, bucket, params['*']);
         if ('error' in resolved) return resolved.error;
 
-        // ── Map Supabase transform params → imaginary params ──
-        const imaginaryParams = new URLSearchParams();
-
-        // width / height (Supabase standard)
-        if (query.width)  imaginaryParams.set('width',  String(query.width));
-        if (query.height) imaginaryParams.set('height', String(query.height));
-
-        // quality (Supabase standard, default 80)
-        imaginaryParams.set('quality', String(query.quality || 80));
-
-        // format / type (Supabase sends `format`, imaginary uses `type`)
-        const format = query.format || 'webp';
-        imaginaryParams.set('type', format);
-
-        // resize mode (Supabase sends `resize`: cover / contain / fill)
-        // imaginary supports: crop (cover), embed (contain), stretch (fill)
-        const resizeMode = query.resize || 'cover';
-
-        // Determine which imaginary operation to call
-        let operation = 'resize';
-        if (resizeMode === 'cover' || resizeMode === 'crop') {
-            operation = 'crop';
-            imaginaryParams.set('nocrop', 'false');
-        } else if (resizeMode === 'contain' || resizeMode === 'embed') {
-            operation = 'embed';
-        } else if (resizeMode === 'fill') {
-            operation = 'enlarge';
-            imaginaryParams.set('force', 'true');
-        }
-
         try {
-            const res = await runImaginary(operation, imaginaryParams, resolved.source);
+            const imagorRequest = buildImagorRequest(query as Record<string, unknown>);
+            const res = await runImagor(query as Record<string, unknown>, resolved.source);
             if (!res.ok) {
                 await res.body?.cancel();
-                logger.error(`Imaginary ${operation} failed:`, { status: res.status });
+                logger.error("Imagor image transform failed:", { status: res.status });
                 return status(502, { message: "Image transform failed", code: "502" });
             }
 
             // Stream the processed image back to client with caching headers
-            set.headers['Content-Type'] = res.headers.get('Content-Type') || `image/${format}`;
+            set.headers['Content-Type'] = imagorOutputContentType(res, imagorRequest, resolved.source.contentType) || "image/webp";
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
-            set.headers['X-Image-Engine'] = 'imaginary/libvips';
+            set.headers['X-Image-Engine'] = 'imagor/libvips';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
-            logger.error('Image transform proxy failed');
+            logger.error('Imagor image transform proxy failed');
             return status(502, { message: 'Image processing service unavailable', code: '502' });
         }
     })
 
-    // ── Enhanced imaginary Features (beyond Supabase standard) ───
-    // These routes expose imaginary's unique superpowers that imgproxy Pro charges for.
+    // ── Enhanced imagor Features (beyond Supabase standard) ───────
 
     // Smart Crop: intelligent focus-point detection
     // GET /v1/storage/:ref/transform/smartcrop/:bucket/*?width=300&height=300
     .get('/:ref/transform/smartcrop/:bucket/*', { detail: { tags: ["storage"], summary: "Smart crop an image with focus detection" } }, async ({ params, query, request, set }) => {
         const resolved = await resolveTransformSource(request, params.ref, params.bucket, params['*']);
         if ('error' in resolved) return resolved.error;
-        const p = new URLSearchParams({
-            width:   String(query.width  || 300),
-            height:  String(query.height || 300),
-            quality: String(query.quality || 80),
-            type:    query.format || 'webp',
-        });
-
         try {
-            const res = await runImaginary('smartcrop', p, resolved.source);
+            const transformQuery = { ...query, width: query.width || 300, height: query.height || 300, smartcrop: true };
+            const res = await runImagor(
+                transformQuery,
+                resolved.source,
+                "smartcrop",
+            );
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
-            set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
+            set.headers['Content-Type'] = imagorOutputContentType(
+                res,
+                buildImagorRequest(transformQuery, "smartcrop"),
+                resolved.source.contentType,
+            ) || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
@@ -542,21 +510,21 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     .get('/:ref/transform/watermark/:bucket/*', { detail: { tags: ["storage"], summary: "Apply watermark to an image" } }, async ({ params, query, request, set }) => {
         const resolved = await resolveTransformSource(request, params.ref, params.bucket, params['*']);
         if ('error' in resolved) return resolved.error;
-        const p = new URLSearchParams({
-            text:      query.text   || 'SupaCloud',
-            font:      query.font   || 'sans bold 14',
-            opacity:   String(query.opacity || 0.3),
-            textwidth: String(query.textwidth || 200),
-            quality:   String(query.quality || 85),
-            type:      query.format || 'webp',
-        });
-        if (query.width)  p.set('width',  String(query.width));
-        if (query.height) p.set('height', String(query.height));
-
         try {
-            const res = await runImaginary('watermark', p, resolved.source);
+            const transformQuery = {
+                ...query,
+                text: query.text || 'SupaCloud',
+                font: query.font || 'sans bold 14',
+                opacity: query.opacity || 0.3,
+                quality: query.quality || 85,
+            };
+            const res = await runImagor(transformQuery, resolved.source, "watermark");
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
-            set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
+            set.headers['Content-Type'] = imagorOutputContentType(
+                res,
+                buildImagorRequest(transformQuery, "watermark"),
+                resolved.source.contentType,
+            ) || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
@@ -569,18 +537,19 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     .get('/:ref/transform/blur/:bucket/*', { detail: { tags: ["storage"], summary: "Apply gaussian blur to an image" } }, async ({ params, query, request, set }) => {
         const resolved = await resolveTransformSource(request, params.ref, params.bucket, params['*']);
         if ('error' in resolved) return resolved.error;
-        const p = new URLSearchParams({
-            sigma:   String(query.sigma || 10),
-            quality: String(query.quality || 60),
-            type:    query.format || 'webp',
-        });
-        if (query.width)  p.set('width',  String(query.width));
-        if (query.height) p.set('height', String(query.height));
-
         try {
-            const res = await runImaginary('blur', p, resolved.source);
+            const transformQuery = {
+                ...query,
+                sigma: query.sigma || 10,
+                quality: query.quality || 60,
+            };
+            const res = await runImagor(transformQuery, resolved.source, "blur");
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
-            set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
+            set.headers['Content-Type'] = imagorOutputContentType(
+                res,
+                buildImagorRequest(transformQuery, "blur"),
+                resolved.source.contentType,
+            ) || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
@@ -590,13 +559,11 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
 
     // Image Info: extract metadata (dimensions, EXIF, color space) without downloading full image
     // GET /v1/storage/:ref/transform/info/:bucket/*
-    .get('/:ref/transform/info/:bucket/*', { detail: { tags: ["storage"], summary: "Get image metadata and dimensions" } }, async ({ params, request }) => {
+    .get('/:ref/transform/info/:bucket/*', { detail: { tags: ["storage"], summary: "Get image metadata and dimensions" } }, async ({ params, request, query }) => {
         const resolved = await resolveTransformSource(request, params.ref, params.bucket, params['*']);
         if ('error' in resolved) return resolved.error;
-        const p = new URLSearchParams();
-
         try {
-            const res = await runImaginary('info', p, resolved.source);
+            const res = await runImagor(query as Record<string, unknown>, resolved.source, "info");
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
             return res.json();
         } catch (err: unknown) {
@@ -609,16 +576,19 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
     .get('/:ref/transform/thumbnail/:bucket/*', { detail: { tags: ["storage"], summary: "Generate a thumbnail for an image" } }, async ({ params, query, request, set }) => {
         const resolved = await resolveTransformSource(request, params.ref, params.bucket, params['*']);
         if ('error' in resolved) return resolved.error;
-        const p = new URLSearchParams({
-            width:   String(query.width  || 150),
-            quality: String(query.quality || 70),
-            type:    query.format || 'webp',
-        });
-
         try {
-            const res = await runImaginary('thumbnail', p, resolved.source);
+            const transformQuery = {
+                ...query,
+                width: query.width || 150,
+                quality: query.quality || 70,
+            };
+            const res = await runImagor(transformQuery, resolved.source, "thumbnail");
             if (!res.ok) { await res.body?.cancel(); return status(502, { message: 'Image transform failed', code: '502' }); }
-            set.headers['Content-Type'] = res.headers.get('Content-Type') || 'image/webp';
+            set.headers['Content-Type'] = imagorOutputContentType(
+                res,
+                buildImagorRequest(transformQuery, "thumbnail"),
+                resolved.source.contentType,
+            ) || 'image/webp';
             set.headers['Cache-Control'] = 'public, max-age=31536000, immutable';
             return new Response(res.body, { headers: set.headers as unknown as HeadersInit });
         } catch (err: unknown) {
@@ -626,15 +596,15 @@ export const storageRoutes = new Elysia({ prefix: "/v1/storage" })
         }
     })
 
-    // Health check for imaginary service
-    .get('/imaginary/health', { detail: { tags: ["storage"], summary: "Check imaginary image service health" } }, async () => {
+    // Health check for imagor service
+    .get('/imagor/health', { detail: { tags: ["storage"], summary: "Check imagor image service health" } }, async () => {
         try {
-            const res = await fetch(`${IMAGINARY_URL}/health`);
+            const res = await checkImagorHealth();
             if (!res.ok) return { status: 'unhealthy', statusCode: res.status };
-            return { status: 'healthy', engine: 'imaginary/libvips' };
+            return { status: 'healthy', engine: 'imagor/libvips' };
         } catch (err: unknown) {
-            logger.warn(`[Storage] Imaginary service health check failed: ${(err as Error).message}`);
-            return { status: 'unreachable', message: 'Cannot connect to imaginary service' };
+            logger.warn(`[Storage] Imagor service health check failed: ${(err as Error).message}`);
+            return { status: 'unreachable', message: 'Cannot connect to imagor service' };
         }
     });
 

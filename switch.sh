@@ -133,9 +133,9 @@ show_status() {
     command -v podman &>/dev/null || crt="docker"
     local rt_status im_status
     rt_status=$($crt ps -a --filter "name=supabase-realtime" --format "{{.Status}}" 2>/dev/null || echo "Not deployed")
-    im_status=$($crt ps -a --filter "name=supacloud-imaginary" --format "{{.Status}}" 2>/dev/null || echo "Not deployed")
+    im_status=$($crt ps -a --filter "name=supacloud-imagor" --format "{{.Status}}" 2>/dev/null || echo "Not deployed")
     echo "  Realtime:  ${rt_status:-Not deployed}"
-    echo "  Imaginary: ${im_status:-Not deployed}"
+    echo "  Imagor: ${im_status:-Not deployed}"
     echo ""
 
     echo "Config file locations:"
