@@ -55,6 +55,10 @@
   },
   "dependencies": {
     "@electric-sql/pglite": "0.5.8",
+    "@electric-sql/pglite-pg_textsearch": "0.0.10",
+    "@electric-sql/pglite-pgmq": "0.0.6",
+    "@electric-sql/pglite-pgvector": "0.0.9",
+    "@electric-sql/pglite-postgis": "0.2.8",
     "@supacloud/db": "^0.6.0",
     "exact-mirror": "1.2.6",
     "tar": "^7.5.22",

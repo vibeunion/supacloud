@@ -48,6 +48,14 @@ select similarity('standalone', 'standalone');
 select 'SupaCloud.Lite'::ltree;
 select 'runtime=>standalone'::hstore;
 select levenshtein('lite', 'lite');
+create extension if not exists vector;
+create extension if not exists postgis;
+create extension if not exists pg_textsearch;
+create extension if not exists pgmq;
+select '[1,2,3]'::vector <-> '[1,2,4]'::vector;
+select st_astext(st_geomfromtext('POINT(1 2)', 4326));
+select pgmq.create('standalone_queue');
+select pgmq.send('standalone_queue', '{"source":"standalone"}'::jsonb);
 `)
   await writeFile(join(projectDir, 'supabase', 'seed.sql'), `
 insert into public.upgrade_probe (id, body)
