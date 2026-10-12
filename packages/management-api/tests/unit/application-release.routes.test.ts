@@ -45,15 +45,11 @@ test("deploy route forwards one durable backend and Web binding request", async 
     } },
     deploymentOrchestrator,
   });
-  const web = {
-    deployment_id: "web", release_id: "a".repeat(64),
-    expected_active_release_id: "absent", expected_activation_id: "absent",
-    mutation_id: "31234567-89ab-4def-8123-456789abcdef",
-  };
+  const web_release = { deployment_id: "web", release_id: "a".repeat(64) };
   const response = await app.handle(new Request(deployPath, {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({
-      mutation_id: activationId, release_id: releaseId, configuration_id: configurationId, web,
+      mutation_id: activationId, release_id: releaseId, configuration_id: configurationId, web_release,
     }),
   }));
   expect(response.status).toBe(200);
@@ -65,6 +61,6 @@ test("deploy route forwards one durable backend and Web binding request", async 
   expect(calls).toHaveLength(1);
   expect(calls[0]).toMatchObject({
     projectRef: "demo", applicationId: "reviews", environmentId: "test",
-    request: { mutation_id: activationId, release_id: releaseId, configuration_id: configurationId, web },
+    request: { mutation_id: activationId, release_id: releaseId, configuration_id: configurationId, web_release },
   });
 });
