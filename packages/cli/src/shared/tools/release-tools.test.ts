@@ -830,6 +830,7 @@ test("scope_rebind updates single file baseCommit canonically and computes scope
             functions: ["fa-api"],
             migrations: ["20260907120000_init"],
             targetProjectRef: "vxmnblbzsxzutzrjntyu",
+            targetEnvironmentId: "production",
             taskId: "FA-INTAKE-P1-PROD",
             web: false,
         };
@@ -840,6 +841,7 @@ test("scope_rebind updates single file baseCommit canonically and computes scope
             action: "scope_rebind",
             file: scopePath,
             base_commit: newCommit,
+            environment_id: "production",
             cwd: dir,
         });
 
@@ -853,6 +855,7 @@ test("scope_rebind updates single file baseCommit canonically and computes scope
             scopes: [{
                 previous_base_commit: oldCommit,
                 new_base_commit: newCommit,
+                target_environment_id: "production",
                 updated: true,
             }],
         });
@@ -861,6 +864,65 @@ test("scope_rebind updates single file baseCommit canonically and computes scope
         const parsed = JSON.parse(updatedContent);
         expect(parsed.baseCommit).toBe(newCommit);
         expect(parsed.taskId).toBe("FA-INTAKE-P1-PROD");
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("scope actions reject legacy scopes without an environment binding", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scope-legacy-"));
+    try {
+        const scopePath = join(dir, "legacy.json");
+        writeFileSync(scopePath, JSON.stringify({
+            baseCommit: "1".repeat(40),
+            excludedFunctions: [],
+            functions: ["fa-api"],
+            migrations: [],
+            targetProjectRef: "vxmnblbzsxzutzrjntyu",
+            taskId: "FA-LEGACY",
+            web: false,
+        }, null, 2) + "\n", "utf8");
+
+        const callback = captureReleaseTool({});
+        await expect(callback({
+            action: "scope_inspect",
+            file: scopePath,
+            environment_id: "production",
+            cwd: dir,
+        })).rejects.toThrow("must be regenerated");
+        await expect(callback({
+            action: "scope_rebind",
+            file: scopePath,
+            environment_id: "production",
+            base_commit: "2".repeat(40),
+            cwd: dir,
+        })).rejects.toThrow("must be regenerated");
+        expect(JSON.parse(readFileSync(scopePath, "utf8")).baseCommit).toBe("1".repeat(40));
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("scope actions reject malformed scope JSON before reading deployment fields", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scope-malformed-"));
+    try {
+        const scopePath = join(dir, "malformed.json");
+        writeFileSync(scopePath, "null\n", "utf8");
+
+        const callback = captureReleaseTool({});
+        await expect(callback({
+            action: "scope_inspect",
+            file: scopePath,
+            environment_id: "production",
+            cwd: dir,
+        })).rejects.toThrow("must be an object");
+        await expect(callback({
+            action: "scope_rebind",
+            file: scopePath,
+            environment_id: "production",
+            base_commit: "2".repeat(40),
+            cwd: dir,
+        })).rejects.toThrow("must be regenerated");
     } finally {
         rmSync(dir, { recursive: true, force: true });
     }
@@ -878,6 +940,7 @@ test("scope_rebind handles dry_run and unchanged baseCommit", async () => {
             functions: [],
             migrations: [],
             targetProjectRef: "vxmnblbzsxzutzrjntyu",
+            targetEnvironmentId: "production",
             taskId: "FA-TASK-1",
             web: true,
         };
@@ -888,6 +951,7 @@ test("scope_rebind handles dry_run and unchanged baseCommit", async () => {
             action: "scope_rebind",
             file: scopePath,
             base_commit: newCommit,
+            environment_id: "production",
             dry_run: true,
             cwd: dir,
         });
@@ -900,6 +964,7 @@ test("scope_rebind handles dry_run and unchanged baseCommit", async () => {
             action: "scope_rebind",
             file: scopePath,
             base_commit: oldCommit,
+            environment_id: "production",
             cwd: dir,
         });
         const unchangedResult = payload(unchangedResponse);
@@ -910,7 +975,7 @@ test("scope_rebind handles dry_run and unchanged baseCommit", async () => {
     }
 });
 
-test("scope_rebind updates multiple files and scans directories by task", async () => {
+test("scope_rebind rejects mixed-environment task selection before writing", async () => {
     const dir = mkdtempSync(join(tmpdir(), "scope-rebind-multi-"));
     try {
         const scopesDir = join(dir, "supacloud/fa/release-scopes");
@@ -925,6 +990,7 @@ test("scope_rebind updates multiple files and scans directories by task", async 
             functions: [],
             migrations: [],
             targetProjectRef: "vxmnblbzsxzutzrjntyu",
+            targetEnvironmentId: "production",
             taskId: "FA-INTAKE-P1-PROD",
             web: false,
         }, null, 2) + "\n", "utf8");
@@ -934,23 +1000,60 @@ test("scope_rebind updates multiple files and scans directories by task", async 
             functions: [],
             migrations: [],
             targetProjectRef: "stagingprojectref1234",
+            targetEnvironmentId: "staging",
             taskId: "FA-INTAKE-P1-STAGING",
             web: false,
         }, null, 2) + "\n", "utf8");
 
         const callback = captureReleaseTool({});
-        const response = await callback({
+        await expect(callback({
             action: "scope_rebind",
             task: "20260907-intake-p1",
             base_commit: newCommit,
+            environment_id: "production",
+            cwd: dir,
+        })).rejects.toThrow("does not match requested environment");
+        expect(JSON.parse(readFileSync(prodPath, "utf8")).baseCommit).toBe(oldCommit);
+        expect(JSON.parse(readFileSync(stagingPath, "utf8")).baseCommit).toBe(oldCommit);
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test("scope_rebind updates multiple files when every file is bound to the requested environment", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scope-rebind-multi-same-env-"));
+    try {
+        const oldCommit = "9".repeat(40);
+        const newCommit = "a".repeat(40);
+        const scopesDir = join(dir, "release-scopes");
+        mkdirSync(scopesDir, { recursive: true });
+        for (const name of ["one", "two"]) {
+            writeFileSync(join(scopesDir, `${name}.json`), JSON.stringify({
+                baseCommit: oldCommit,
+                excludedFunctions: [],
+                functions: [],
+                migrations: [],
+                targetProjectRef: "vxmnblbzsxzutzrjntyu",
+                targetEnvironmentId: "production",
+                taskId: "FA-SHARED",
+                web: false,
+            }, null, 2) + "\n", "utf8");
+        }
+
+        const callback = captureReleaseTool({});
+        const response = await callback({
+            action: "scope_rebind",
+            dir: scopesDir,
+            base_commit: newCommit,
+            environment_id: "production",
             cwd: dir,
         });
 
         const result = payload(response);
         expect(result.count).toBe(2);
         expect(result.updated_count).toBe(2);
-        expect(JSON.parse(readFileSync(prodPath, "utf8")).baseCommit).toBe(newCommit);
-        expect(JSON.parse(readFileSync(stagingPath, "utf8")).baseCommit).toBe(newCommit);
+        expect(JSON.parse(readFileSync(join(scopesDir, "one.json"), "utf8")).baseCommit).toBe(newCommit);
+        expect(JSON.parse(readFileSync(join(scopesDir, "two.json"), "utf8")).baseCommit).toBe(newCommit);
     } finally {
         rmSync(dir, { recursive: true, force: true });
     }
@@ -967,6 +1070,7 @@ test("scope_inspect verifies structure and computes canonical scope_sha256", asy
             functions: ["fa-a"],
             migrations: ["20260907120000_test"],
             targetProjectRef: "vxmnblbzsxzutzrjntyu",
+            targetEnvironmentId: "production",
             taskId: "FA-TASK-INSPECT",
             web: false,
         }, null, 2) + "\n", "utf8");
@@ -975,6 +1079,7 @@ test("scope_inspect verifies structure and computes canonical scope_sha256", asy
         const response = await callback({
             action: "scope_inspect",
             file: scopePath,
+            environment_id: "production",
             cwd: dir,
         });
 
@@ -1002,6 +1107,7 @@ test("scope_create scaffolds a canonical scope manifest with resolved baseCommit
             file: scopePath,
             task: "FA-NEW-TASK",
             ref: "vxmnblbzsxzutzrjntyu",
+            environment_id: "production",
             base_commit: commit,
             functions: "fa-api, fa-worker",
             migrations: "20260907120000_first, 20260907130000_second",
@@ -1023,6 +1129,7 @@ test("scope_create scaffolds a canonical scope manifest with resolved baseCommit
             functions: ["fa-api", "fa-worker"],
             migrations: ["20260907120000_first", "20260907130000_second"],
             targetProjectRef: "vxmnblbzsxzutzrjntyu",
+            targetEnvironmentId: "production",
             taskId: "FA-NEW-TASK",
             web: true,
         });

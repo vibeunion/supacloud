@@ -53,6 +53,7 @@ type ReleasePostgrestStatus = {
 };
 
 const SAFE_PROJECT_REF = /^[A-Za-z0-9_-]{1,64}$/;
+const SAFE_ENVIRONMENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
 const BACKUP_ID = /^logical-full_[A-Za-z0-9_-]{1,64}_[a-f0-9]{32}$/;
 const SHA256 = /^[a-f0-9]{64}$/;
 const SAFE_DATABASE = /^[^\u0000-\u001f\u007f]{1,128}$/;
@@ -401,6 +402,36 @@ function genericScopedReleaseScopeSha256(scope: unknown): string {
     return createHash("sha256").update(genericScopedReleaseScopeJson(scope)).digest("hex");
 }
 
+function scopeEnvironmentId(scope: unknown, action: string): string {
+    const environmentId = isRecord(scope) ? scope.targetEnvironmentId : undefined;
+    if (typeof environmentId !== "string" || !SAFE_ENVIRONMENT_ID.test(environmentId)) {
+        throw new Error(`Scope for ${action} must be regenerated with a concrete targetEnvironmentId`);
+    }
+    return environmentId;
+}
+
+function requestedScopeEnvironment(args: Record<string, unknown>, action: string): string {
+    const environmentId = args.environment_id;
+    if (typeof environmentId !== "string" || !SAFE_ENVIRONMENT_ID.test(environmentId)) {
+        throw new Error(`'environment_id' is required for ${action} and must identify one deployment environment`);
+    }
+    return environmentId;
+}
+
+function assertScopeEnvironment(
+    scope: unknown,
+    requestedEnvironmentId: string,
+    action: string,
+): string {
+    const targetEnvironmentId = scopeEnvironmentId(scope, action);
+    if (targetEnvironmentId !== requestedEnvironmentId) {
+        throw new Error(
+            `Scope target environment '${targetEnvironmentId}' does not match requested environment '${requestedEnvironmentId}'`,
+        );
+    }
+    return targetEnvironmentId;
+}
+
 function runGitRevParse(cwd: string, args: string[]): string {
     const res = Bun.spawnSync(["git", ...args], { cwd });
     if (res.exitCode !== 0 || !res.stdout) throw new Error("git failed");
@@ -536,6 +567,7 @@ interface ScopeRebindItem {
     file: string;
     task_id: string;
     target_project_ref: string;
+    target_environment_id: string;
     previous_base_commit: string;
     new_base_commit: string;
     scope_sha256: string;
@@ -545,11 +577,11 @@ interface ScopeRebindItem {
 function handleScopeRebind(args: Record<string, unknown>): ReleaseControlToolResponse {
     const cwd = typeof args.cwd === "string" && args.cwd.trim() ? resolve(args.cwd.trim()) : process.cwd();
     const targetBaseCommit = resolveGitBaseCommit(cwd, args.base_commit);
+    const requestedEnvironmentId = requestedScopeEnvironment(args, "scope_rebind");
     const scopeFiles = collectScopeFiles(cwd, args.file, args.files, args.dir, args.task);
     const dryRun = args.dry_run === true;
 
-    const scopes: ScopeRebindItem[] = [];
-    for (const filePath of scopeFiles) {
+    const parsedScopes = scopeFiles.map((filePath) => {
         let content: string;
         try {
             content = readFileSync(filePath, "utf8");
@@ -562,15 +594,21 @@ function handleScopeRebind(args: Record<string, unknown>): ReleaseControlToolRes
         } catch {
             throw new Error(`Scope file '${filePath}' is not valid JSON`);
         }
-        if (!isRecord(parsed) || typeof parsed.baseCommit !== "string" || !/^[0-9a-f]{40}$/.test(parsed.baseCommit)) {
+        const targetEnvironmentId = assertScopeEnvironment(parsed, requestedEnvironmentId, "scope_rebind");
+        const previousBaseCommit = parsed.baseCommit;
+        if (typeof previousBaseCommit !== "string" || !/^[0-9a-f]{40}$/.test(previousBaseCommit)) {
             throw new Error(`Scope file '${filePath}' has missing or invalid baseCommit`);
         }
-        const previousBaseCommit = parsed.baseCommit;
+        return { filePath, parsed, targetEnvironmentId };
+    });
+
+    const scopes: ScopeRebindItem[] = [];
+    for (const { filePath, parsed, targetEnvironmentId } of parsedScopes) {
+        const previousBaseCommit = parsed.baseCommit as string;
         const updated = previousBaseCommit !== targetBaseCommit;
         if (updated) {
             parsed.baseCommit = targetBaseCommit;
         }
-        const canonicalJson = genericScopedReleaseScopeJson(parsed);
         const scopeSha256 = genericScopedReleaseScopeSha256(parsed);
         if (updated && !dryRun) {
             const formatted = JSON.stringify(canonicalValue(parsed), null, 2) + "\n";
@@ -582,6 +620,7 @@ function handleScopeRebind(args: Record<string, unknown>): ReleaseControlToolRes
             target_project_ref: typeof parsed.targetProjectRef === "string" ? parsed.targetProjectRef : "",
             previous_base_commit: previousBaseCommit,
             new_base_commit: targetBaseCommit,
+            target_environment_id: targetEnvironmentId,
             scope_sha256: scopeSha256,
             updated,
         });
@@ -598,6 +637,7 @@ function handleScopeRebind(args: Record<string, unknown>): ReleaseControlToolRes
 
 function handleScopeInspect(args: Record<string, unknown>): ReleaseControlToolResponse {
     const cwd = typeof args.cwd === "string" && args.cwd.trim() ? resolve(args.cwd.trim()) : process.cwd();
+    const requestedEnvironmentId = requestedScopeEnvironment(args, "scope_inspect");
     if (typeof args.file !== "string" || !args.file.trim()) {
         throw new Error("'file' is required for scope_inspect");
     }
@@ -625,7 +665,11 @@ function handleScopeInspect(args: Record<string, unknown>): ReleaseControlToolRe
     } catch {
         throw new Error(`Scope file '${args.file}' is not valid JSON`);
     }
-    if (!isRecord(parsed) || typeof parsed.baseCommit !== "string" || !/^[0-9a-f]{40}$/.test(parsed.baseCommit)) {
+    if (!isRecord(parsed)) {
+        throw new Error(`Scope file '${args.file}' must be an object and must be regenerated`);
+    }
+    const targetEnvironmentId = assertScopeEnvironment(parsed, requestedEnvironmentId, "scope_inspect");
+    if (typeof parsed.baseCommit !== "string" || !/^[0-9a-f]{40}$/.test(parsed.baseCommit)) {
         throw new Error(`Scope file '${args.file}' has missing or invalid baseCommit`);
     }
     const scopeSha256 = genericScopedReleaseScopeSha256(parsed);
@@ -636,6 +680,7 @@ function handleScopeInspect(args: Record<string, unknown>): ReleaseControlToolRe
         scope: {
             task_id: parsed.taskId,
             target_project_ref: parsed.targetProjectRef,
+            target_environment_id: targetEnvironmentId,
             base_commit: parsed.baseCommit,
             functions: parsed.functions,
             excluded_functions: parsed.excludedFunctions,
@@ -674,6 +719,7 @@ function handleScopeCreate(args: Record<string, unknown>, fallbackRef?: string):
     if (typeof args.task !== "string" || !args.task.trim()) {
         throw new Error("'task' is required for scope_create");
     }
+    const targetEnvironmentId = requestedScopeEnvironment(args, "scope_create");
     const projectRef = (typeof args.ref === "string" && args.ref.trim()) || fallbackRef;
     if (!projectRef) {
         throw new Error("'ref' is required for scope_create");
@@ -691,6 +737,7 @@ function handleScopeCreate(args: Record<string, unknown>, fallbackRef?: string):
         functions: parseCommaList(args.functions),
         migrations: parseCommaList(args.migrations),
         targetProjectRef: projectRef,
+        targetEnvironmentId,
         taskId: String(args.task).trim(),
         web: Boolean(args.web),
     };
@@ -704,6 +751,7 @@ function handleScopeCreate(args: Record<string, unknown>, fallbackRef?: string):
         file: relative(cwd, filePath),
         task_id: scope.taskId,
         target_project_ref: projectRef,
+        target_environment_id: targetEnvironmentId,
         base_commit: targetBaseCommit,
         scope_sha256: scopeSha256,
         scope,
@@ -739,6 +787,7 @@ export function registerReleaseTools(
             dir: optional(Type.String(), "[scope_rebind] Directory containing release scope JSON files (defaults to supacloud/fa/release-scopes, release-scopes, or scopes)"),
             task: optional(Type.String(), "[scope_rebind/scope_create] Task ID or prefix filter for scope files"),
             base_commit: optional(Type.String(), "[scope_rebind/scope_create] Target 40-character base commit SHA or git ref (defaults to origin/main -> main -> HEAD^ -> HEAD)"),
+            environment_id: optional(Type.String(), "[scope_inspect/scope_rebind/scope_create] Exact target deployment environment"),
             functions: optional(Type.String(), "[scope_create] Comma-separated list of functions to deploy"),
             excluded_functions: optional(Type.String(), "[scope_create] Comma-separated list of functions to exclude"),
             migrations: optional(Type.String(), "[scope_create] Comma-separated list of migrations to apply"),

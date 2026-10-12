@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.111.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.110.0...management-api-v0.111.0) (2026-10-12)
+
+
+### Features
+
+* **cli:** bind release scopes to environments ([#1832](https://github.com/vibeunion/supacloud/issues/1832)) ([f3930d1](https://github.com/vibeunion/supacloud/commit/f3930d1ca26af1362583d965287cdc8131fa38d9))
+
 ## [0.110.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.109.3...management-api-v0.110.0) (2026-10-12)
 
 
