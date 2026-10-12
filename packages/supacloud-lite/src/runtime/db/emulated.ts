@@ -208,6 +208,14 @@ grant execute on all functions in schema pgmq to service_role;
  * extension supplies the pgmq schema; this SQL only owns SupaCloud wrappers. */
 export const PGMQ_PUBLIC_SQL = `
 -- supacloud:sql-module:pgmq-public:start
+DO $pgmq_extension$
+BEGIN
+  IF to_regprocedure('pgmq.send(text,jsonb,integer)') IS NULL THEN
+    EXECUTE 'CREATE EXTENSION IF NOT EXISTS pgmq';
+  END IF;
+END
+$pgmq_extension$;
+
 CREATE SCHEMA IF NOT EXISTS pgmq_public;
 GRANT USAGE ON SCHEMA pgmq_public TO anon, authenticated, service_role;
 CREATE SCHEMA IF NOT EXISTS supacloud_queue;
@@ -238,7 +246,7 @@ BEGIN
   IF left(normalized_queue_name, char_length('supacloud_internal_')) = 'supacloud_internal_' THEN
     RAISE EXCEPTION 'SUPACLOUD_QUEUE_NAME_RESERVED' USING ERRCODE = '42501';
   END IF;
-  IF queue_name IS NULL OR queue_name !~ '^[a-z0-9][a-z0-9_-]{0,46}$' THEN
+  IF queue_name IS NULL OR queue_name !~ '^[a-z0-9][a-z0-9_-]{0,127}$' THEN
     RAISE EXCEPTION 'SUPACLOUD_QUEUE_NAME_INVALID' USING ERRCODE = '22023';
   END IF;
   RETURN queue_name;
