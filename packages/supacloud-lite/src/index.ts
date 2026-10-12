@@ -62,6 +62,13 @@ export {
   type PowerSyncReadiness,
 } from './runtime/node/native/readiness.js'
 export {
+  inspectPostgresExtensions,
+  type ExtensionInventorySource,
+  type ExtensionInventoryStatus,
+  type PostgresExtension,
+  type PostgresExtensionInventory,
+} from './runtime/node/native/extensions.js'
+export {
   createProjectBackend,
   ensureProjectSecrets,
   mintProjectKeys,

@@ -8,6 +8,7 @@ import { computeDbDiff, createTemporaryNativeEngine, pullSchema } from './runtim
 import { checkDatabaseModules, formatDatabaseModuleCheck } from './runtime/node/db-check.js'
 import { assertDataDirUnlocked } from './runtime/db/data-dir-lock.js'
 import { createNativeEngine } from './runtime/node/native/engine.js'
+import { inspectPostgresExtensions } from './runtime/node/native/extensions.js'
 import { inspectPowerSyncReadiness, liteCapabilities } from './runtime/node/native/readiness.js'
 import { createPgliteEngine } from './runtime/db/pglite-engine.js'
 import { inspectGraphql } from './runtime/graphql.js'
@@ -203,6 +204,13 @@ async function main(): Promise<void> {
         : await createPgliteEngine(paths.dataDir)
       try {
         report.graphql = await inspectGraphql(engine)
+        report.postgres_extensions = {
+          engine: paths.databaseEngine,
+          ...(await inspectPostgresExtensions(
+            engine,
+            paths.databaseEngine === 'native' ? 'native-postgresql' : 'pglite-bundled',
+          )),
+        }
         if (replication) report.powersync_readiness = await inspectPowerSyncReadiness(engine, replication)
       } finally {
         await engine.close()
@@ -489,6 +497,11 @@ async function printDoctor(report: ReturnType<typeof liteCapabilities>): Promise
     .filter(([, value]) => typeof value !== 'object')
     .map(([name, value]) => `${name}: ${value}`)
   output.push(`graphql: ${report.graphql.status} (${report.graphql.version ?? report.graphql.reason ?? 'pg_graphql'})`)
+  output.push(
+    `postgres_extensions: ${report.postgres_extensions.status} ` +
+      `(${report.postgres_extensions.source}, ${report.postgres_extensions.available.length} available, ` +
+      `${report.postgres_extensions.installed.length} installed)`,
+  )
   output.push(`identity: ${report.identity.mode} (${report.identity.verification})`)
   output.push(`migration_formats: ${report.migrations.formats.join(', ')}`)
   if (report.powersync_readiness) {

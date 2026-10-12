@@ -137,35 +137,11 @@ describe('Queues compatibility', () => {
     }
   })
 
-  test('keeps valid long queue names isolated without identifier truncation', async () => {
+  test('uses the official pgmq queue-name limit', async () => {
     const backend = await createLiteBackend(backendConfig)
-    const prefix = 'q'.repeat(61)
-    const firstQueue = `${prefix}a`
-    const secondQueue = `${prefix}b`
-    const maxLengthQueue = 'm'.repeat(128)
     try {
-      await backend.db.query(`select pgmq.create($1), pgmq.create($2), pgmq.create($3)`, [
-        firstQueue,
-        secondQueue,
-        maxLengthQueue,
-      ])
-      await expect(backend.db.query(`select pgmq.create($1)`, ['x'.repeat(129)])).rejects.toThrow('invalid queue name')
-      await backend.db.query(`select pgmq.send($1, '{"queue":"first"}'::jsonb, 0)`, [firstQueue])
-      await backend.db.query(`select pgmq.send($1, '{"queue":"second"}'::jsonb, 0)`, [secondQueue])
-
-      const first = await backend.db.query<{ message: { queue: string } }>(`select * from pgmq.read($1, 30, 10)`, [firstQueue])
-      const second = await backend.db.query<{ message: { queue: string } }>(`select * from pgmq.read($1, 30, 10)`, [secondQueue])
-      expect(first.rows.map((message) => message.message.queue)).toEqual(['first'])
-      expect(second.rows.map((message) => message.message.queue)).toEqual(['second'])
-
-      const metadata = await backend.db.query<{ queue_name: string; physical_name: string }>(
-        `select queue_name, physical_name from pgmq.meta where queue_name = any($1::text[]) order by queue_name`,
-        [[firstQueue, secondQueue]]
-      )
-      expect(metadata.rows.map((queue) => queue.queue_name)).toEqual([firstQueue, secondQueue])
-      expect(new Set(metadata.rows.map((queue) => queue.physical_name)).size).toBe(2)
-      expect(metadata.rows.every((queue) => queue.physical_name.length <= 61)).toBe(true)
-      expect((await backend.db.query(`select 1 from pgmq.meta where queue_name = $1`, [maxLengthQueue])).rows).toHaveLength(1)
+      await backend.db.query(`select pgmq.create('official_queue')`)
+      await expect(backend.db.query(`select pgmq.create($1)`, ['x'.repeat(48)])).rejects.toThrow('queue name is too long')
     } finally {
       await backend.close()
     }

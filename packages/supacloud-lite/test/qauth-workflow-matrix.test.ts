@@ -344,7 +344,7 @@ async function makeWorkflowMessageVisible(
   claim: Record<string, unknown>,
 ): Promise<void> {
   await backend.db.query(
-    `select * from pgmq.set_vt('supacloud_internal_workflows', $1, 0)`,
+    `select * from pgmq.set_vt('supacloud_internal_workflows', $1::bigint, 0::integer)`,
     [String(claim.messageId)],
   )
 }

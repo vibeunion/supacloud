@@ -8,6 +8,7 @@ import {
   type StandalonePgliteAssets,
 } from '../src/standalone-assets-protocol.js'
 import { createPgliteEngine } from '../src/runtime/db/pglite-engine.js'
+import { Database } from '../src/runtime/db/database.js'
 
 interface EngineTimezoneProbe {
   kind: 'engine'
@@ -47,6 +48,47 @@ test('preserves standalone extension preparation errors and releases the data lo
     if (previousAssets === undefined) delete globals[STANDALONE_PGLITE_ASSETS]
     else globals[STANDALONE_PGLITE_ASSETS] = previousAssets
     await rm(projectDir, { recursive: true, force: true })
+  }
+})
+
+test('bundles the default PostgreSQL-shaped extension set', async () => {
+  const engine = await createPgliteEngine()
+  try {
+    for (const extension of ['vector', 'postgis', 'pg_textsearch', 'pgmq']) {
+      await engine.exec(`create extension if not exists ${extension}`)
+    }
+    const installed = await engine.query<{ extname: string; schema_name: string }>(
+      `select e.extname, n.nspname as schema_name
+       from pg_extension e
+       join pg_namespace n on n.oid = e.extnamespace
+       where e.extname in ('vector', 'postgis', 'pg_textsearch', 'pgmq')
+       order by e.extname`
+    )
+    expect(installed.rows).toEqual([
+      { extname: 'pg_textsearch', schema_name: 'public' },
+      { extname: 'pgmq', schema_name: 'pgmq' },
+      { extname: 'postgis', schema_name: 'public' },
+      { extname: 'vector', schema_name: 'public' },
+    ])
+    expect((await engine.query<{ result: number }>(`select '[1,2,3]'::vector <-> '[1,2,4]'::vector as result`)).rows[0]?.result).toBe(1)
+    expect((await engine.query<{ result: string }>(`select st_astext(st_geomfromtext('POINT(1 2)', 4326)) as result`)).rows[0]?.result).toBe('POINT(1 2)')
+    expect((await engine.query(`select pgmq.create('engine_probe')`)).rows).toEqual([{ create: '' }])
+  } finally {
+    await engine.close()
+  }
+})
+
+test('bootstraps all bundled extensions by default', async () => {
+  const database = await Database.create()
+  try {
+    const installed = await database.query<{ extname: string }>(
+      `select extname from pg_extension
+       where extname in ('vector', 'postgis', 'pg_textsearch', 'pgmq')
+       order by extname`
+    )
+    expect(installed.rows.map((row) => row.extname)).toEqual(['pg_textsearch', 'pgmq', 'postgis', 'vector'])
+  } finally {
+    await database.close()
   }
 })
 

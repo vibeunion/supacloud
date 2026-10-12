@@ -24,6 +24,12 @@ describe('read-only CLI commands', () => {
     expect(doctor.stderr).toBe('')
     expect(JSON.parse(doctor.stdout)).toMatchObject({
       engine: 'pglite',
+      postgres_extensions: {
+        engine: 'pglite',
+        source: 'pglite-bundled',
+        status: 'unavailable',
+        reason: 'DATABASE_NOT_INSPECTED',
+      },
       state_machine_sql: 'supported',
       durable_workflows: 'supported',
       commands: 'supported',
@@ -33,6 +39,28 @@ describe('read-only CLI commands', () => {
       powersync_source: 'unsupported',
     })
   })
+
+  test('doctor --json inspects available and installed PGlite extensions after initialization', async () => {
+    const projectDir = await projectWithPendingMigration()
+    const doctor = await runCli(projectDir, ['doctor', '--json'])
+    const report = JSON.parse(doctor.stdout) as {
+      postgres_extensions: {
+        source: string
+        status: string
+        available: Array<{ name: string }>
+        installed: Array<{ name: string; version: string }>
+      }
+    }
+
+    expect(doctor.exitCode).toBe(0)
+    expect(doctor.stderr).toBe('')
+    expect(report.postgres_extensions.source).toBe('pglite-bundled')
+    expect(report.postgres_extensions.status).toBe('inspected')
+    expect(report.postgres_extensions.available.length).toBeGreaterThan(0)
+    expect(report.postgres_extensions.installed).toEqual(
+      expect.arrayContaining([expect.objectContaining({ name: 'plpgsql' })]),
+    )
+  }, testTimeout(30_000))
 
   test('inspect reports the live schema without applying pending migrations or seed', async () => {
     const projectDir = await projectWithPendingMigration()
