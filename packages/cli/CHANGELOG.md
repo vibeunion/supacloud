@@ -14,6 +14,25 @@
 * **functions:** bound release mutation response reads and report uncertain outcomes without response content
 * **cli:** honor explicit project refs consistently while preventing production cross-ref writes
 
+## [0.90.2](https://github.com/vibeunion/supacloud/compare/cli-v0.90.1...cli-v0.90.2) (2026-10-12)
+
+
+### Documentation
+
+* clarify FA deployment contract status ([#1847](https://github.com/vibeunion/supacloud/issues/1847)) ([19c96f8](https://github.com/vibeunion/supacloud/commit/19c96f8837dfc301a5671dda2be450e99bc89dae))
+
+## [0.90.1](https://github.com/vibeunion/supacloud/compare/cli-v0.90.0...cli-v0.90.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* **cli:** make one-command deploy Node-compatible ([#1845](https://github.com/vibeunion/supacloud/issues/1845)) ([71c38a5](https://github.com/vibeunion/supacloud/commit/71c38a5b6306d9fa02beb351daf5db7110bfc03a))
+
+
+### Documentation
+
+* **cli:** define FA deployment capability boundary ([#1844](https://github.com/vibeunion/supacloud/issues/1844)) ([9627144](https://github.com/vibeunion/supacloud/commit/96271440673a4e10e5d8e58936fc84a53268dfc6))
+
 ## [0.90.0](https://github.com/vibeunion/supacloud/compare/cli-v0.89.0...cli-v0.90.0) (2026-10-12)
 
 
