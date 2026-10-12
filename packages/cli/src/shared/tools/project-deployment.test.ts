@@ -10,10 +10,7 @@ const request = {
     ref: "demo", id: "reviews", environment_id: "test",
     mutation_id: mutationId, configuration_id: configurationId, release_id: "a".repeat(64),
     expected_plan_sha256: "b".repeat(64), approved_migration_digest: "c".repeat(64),
-    web: {
-        deployment_id: "web", release_id: "d".repeat(64), mutation_id: activationId,
-        expected_active_release_id: "absent", expected_activation_id: "absent",
-    },
+    web_release: { deployment_id: "web", release_id: "d".repeat(64) },
 };
 
 function receipt(): ApplicationDeployResult {
@@ -31,7 +28,7 @@ function receipt(): ApplicationDeployResult {
             before_ledger_digest: "f".repeat(64), after_ledger_digest: "f".repeat(64),
             applied_versions: [], schema_reloaded: false, postgrest_healthy: true,
         },
-        web: { deployment_id: "web", release_id: request.web.release_id, activation_id: activationId, replayed: false },
+        web: { deployment_id: "web", release_id: request.web_release.release_id, activation_id: activationId, replayed: false },
     };
 }
 
@@ -74,7 +71,7 @@ test("submits one exact request, including reviewed digests, and accepts only a 
         method: "POST", path: "/v1/projects/demo/environments/test/deployments",
         body: {
             deployment_id: mutationId, application_id: "reviews",
-            release_id: request.release_id, configuration_id: configurationId, web: request.web,
+            release_id: request.release_id, configuration_id: configurationId, web_release: request.web_release,
             expected_plan_sha256: request.expected_plan_sha256,
             approved_migration_digest: request.approved_migration_digest,
         },

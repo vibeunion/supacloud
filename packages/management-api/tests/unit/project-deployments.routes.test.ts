@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
 import type { ApplicationDeployResult } from "@supacloud/delivery";
+import { FRONTEND_ARCHIVE_CONTENT_TYPE } from "@supacloud/delivery/frontend-archive";
+import type { FrontendReleaseRecord } from "../../src/services/frontend-release-contract";
 import { createProjectDeploymentRoutes } from "../../src/routes/project-deployments";
 import { delegatedProjectCapability } from "../../src/middleware/auth";
 import type { ApplicationDeploymentStatus } from "../../src/services/application-deployment-orchestrator";
@@ -148,6 +150,71 @@ test("GET and reconcile reject a malformed stored success receipt", async () => 
 test("invalid request bodies are rejected before a deployment", async () => {
   const f = fixture();
   const response = await f.app.handle(post(base, { ...body, release_id: "invalid" }));
+  expect(response.status).toBe(400);
+  expect(f.calls).toEqual([]);
+});
+
+test("unified Web upload creates a release without reading or activating Web authority", async () => {
+  const writes: Uint8Array[] = [];
+  const release = {
+    schema: "supacloud.frontend-release.v2",
+    project_ref: "demo",
+    deployment_id: "web",
+    release_id: "a".repeat(64),
+    sha256: "a".repeat(64),
+    tree_sha256: "b".repeat(64),
+    size_bytes: 3,
+    file_count: 1,
+    created_at: "2026-10-11T00:00:00.000Z",
+    kind: "prebuilt_static",
+    archive_format: "tar.zst",
+  } satisfies FrontendReleaseRecord;
+  const f = fixture();
+  const app = createProjectDeploymentRoutes({
+    execute: async input => { f.calls.push(input); return receipt(); },
+    status: async () => state(),
+  }, {
+    authorize: async () => undefined,
+    principal: async () => ({ type: "project", id: "project:demo" }),
+  }, {
+    prepareReleaseUpload: async () => ({
+      write: async (chunk: Uint8Array) => { writes.push(chunk); },
+      finish: async () => ({ size_bytes: 3, sha256: "a".repeat(64) }),
+      abort: async () => undefined,
+    }),
+    createRelease: async () => release,
+  });
+  const response = await app.handle(new Request(
+    `${base}/web-release?deployment_id=web`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": FRONTEND_ARCHIVE_CONTENT_TYPE,
+        "content-length": "3",
+        "x-supacloud-content-sha256": "a".repeat(64),
+      },
+      body: new Uint8Array([1, 2, 3]),
+    },
+  ));
+  expect(response.status).toBe(201);
+  expect(await response.json()).toMatchObject({
+    ok: true, project_ref: "demo", environment_id: "test",
+    deployment_id: "web", release_id: release.release_id, release,
+  });
+  expect(writes.reduce((total, chunk) => total + chunk.byteLength, 0)).toBe(3);
+  expect(f.calls).toEqual([]);
+});
+
+test("legacy Web binding is rejected by the unified project deployment endpoint", async () => {
+  const f = fixture();
+  const response = await f.app.handle(post(base, {
+    ...body,
+    web: {
+      deployment_id: "web", release_id: "d".repeat(64),
+      expected_active_release_id: "absent", expected_activation_id: "absent",
+      mutation_id: activationId,
+    },
+  }));
   expect(response.status).toBe(400);
   expect(f.calls).toEqual([]);
 });

@@ -31,6 +31,14 @@ interface PostgrestStatus {
   health: string;
 }
 
+interface ResolvedWebRequest {
+  deployment_id: string;
+  release_id: string;
+  expected_active_release_id: "absent" | string;
+  expected_activation_id: "absent" | string;
+  mutation_id: string;
+}
+
 interface DeployCheckpoint extends Record<string, unknown> {
   schema: typeof CHECKPOINT_SCHEMA;
   mutation_id: string;
@@ -44,7 +52,7 @@ interface DeployCheckpoint extends Record<string, unknown> {
     mutation_id: string;
     plan_sha256: string;
     approved_migration_digest: string | null;
-    web: ApplicationDeployRequest["web"] | null;
+    web_release: ApplicationDeployRequest["web_release"] | null;
   };
   plan: ReturnType<typeof parseApplicationDeployPlan>;
   backup_id: string;
@@ -75,7 +83,7 @@ export interface ApplicationDeploymentOrchestratorDependencies {
   deployPlans: Pick<ApplicationDeployPlans, "read">;
   migrations: Pick<ApplicationMigrations, "readExecutionPlan" | "apply" | "inspect">;
   deployment: Pick<ApplicationDeploymentService, "activateConfigured">;
-  frontends?: Pick<FrontendReleaseService, "release" | "activateRelease">;
+  frontends?: Pick<FrontendReleaseService, "release" | "activeReleaseSnapshot" | "activateRelease">;
   postgrestStatus?: (projectRef: string) => Promise<PostgrestStatus>;
   mutations?: ApplicationActivationMutations;
 }
@@ -117,8 +125,17 @@ function requestBinding(
     mutation_id: input.request.mutation_id,
     plan_sha256: planSha256,
     approved_migration_digest: input.request.approved_migration_digest ?? null,
-    web: input.request.web ?? null,
+    web_release: input.request.web_release ?? null,
   };
+}
+
+function derivedWebMutationId(input: {
+  mutationId: string;
+  deploymentId: string;
+  releaseId: string;
+}): string {
+  const digest = stableSha256(input);
+  return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
 }
 
 function success(state: ProjectMutationState): boolean {
@@ -222,7 +239,7 @@ export class ApplicationDeploymentOrchestrator {
       ...(requestRecord["approved_migration_digest"] === null ? {} : {
         approved_migration_digest: requestRecord["approved_migration_digest"],
       }),
-      ...(requestRecord["web"] === null ? {} : { web: requestRecord["web"] }),
+      ...(requestRecord["web_release"] === null ? {} : { web_release: requestRecord["web_release"] }),
     };
     if (!Value.Check(ApplicationDeployRequestSchema, request)) {
       throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_CHECKPOINT_INVALID", 503);
@@ -308,6 +325,34 @@ export class ApplicationDeploymentOrchestrator {
       throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_IDENTITY_INVALID", 409);
     }
     const planSha256 = stableSha256(plan);
+    let webRequest: ResolvedWebRequest | undefined;
+    if (request.web_release !== undefined) {
+      if (!this.dependencies.frontends) {
+        throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_WEB_UNAVAILABLE", 503);
+      }
+      const active = await this.dependencies.frontends.activeReleaseSnapshot(
+        input.projectRef, request.web_release.deployment_id,
+      );
+      const webRelease = await this.dependencies.frontends.release(
+        input.projectRef, request.web_release.deployment_id, request.web_release.release_id,
+      );
+      if (webRelease.project_ref !== input.projectRef
+        || webRelease.deployment_id !== request.web_release.deployment_id
+        || webRelease.release_id !== request.web_release.release_id) {
+        throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_WEB_RELEASE_MISMATCH", 409);
+      }
+      webRequest = {
+        deployment_id: request.web_release.deployment_id,
+        release_id: request.web_release.release_id,
+        expected_active_release_id: active.active_release_id ?? "absent",
+        expected_activation_id: active.active_activation_id ?? "absent",
+        mutation_id: derivedWebMutationId({
+          mutationId: request.mutation_id,
+          deploymentId: request.web_release.deployment_id,
+          releaseId: request.web_release.release_id,
+        }),
+      };
+    }
     const binding = requestBinding(input, configurationId, planSha256);
     if (request.expected_plan_sha256 !== undefined && request.expected_plan_sha256 !== planSha256) {
       throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_PLAN_CHANGED", 409, binding);
@@ -405,7 +450,7 @@ export class ApplicationDeploymentOrchestrator {
         }
       }
 
-      if (request.web !== undefined) {
+      if (webRequest !== undefined) {
         if (!this.dependencies.frontends) {
           throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_WEB_UNAVAILABLE", 503, binding);
         }
@@ -413,19 +458,19 @@ export class ApplicationDeploymentOrchestrator {
         await this.mutations.checkpoint(lease, checkpoint);
         effectsStarted = true;
         const webRelease = await this.dependencies.frontends.release(
-          input.projectRef, request.web.deployment_id, request.web.release_id,
+          input.projectRef, webRequest.deployment_id, webRequest.release_id,
         );
-        if (webRelease.project_ref !== input.projectRef || webRelease.deployment_id !== request.web.deployment_id
-          || webRelease.release_id !== request.web.release_id) {
+        if (webRelease.project_ref !== input.projectRef || webRelease.deployment_id !== webRequest.deployment_id
+          || webRelease.release_id !== webRequest.release_id) {
           throw new ApplicationDeploymentOrchestrationError("APPLICATION_DEPLOY_WEB_RELEASE_MISMATCH", 409, binding);
         }
         const web = await this.dependencies.frontends.activateRelease({
           projectRef: input.projectRef,
-          deploymentId: request.web.deployment_id,
-          releaseId: request.web.release_id,
-          expectedActiveReleaseId: request.web.expected_active_release_id,
-          expectedActivationId: request.web.expected_activation_id,
-          mutationId: request.web.mutation_id,
+          deploymentId: webRequest.deployment_id,
+          releaseId: webRequest.release_id,
+          expectedActiveReleaseId: webRequest.expected_active_release_id,
+          expectedActivationId: webRequest.expected_activation_id,
+          mutationId: webRequest.mutation_id,
           principal: input.principal,
         });
         checkpoint.web = {

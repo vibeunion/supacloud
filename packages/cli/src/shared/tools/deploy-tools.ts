@@ -6,7 +6,7 @@ import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { createFrontendTarZstd, FRONTEND_ARCHIVE_FORMAT } from "@supacloud/delivery/frontend-archive";
-import { ApplicationIdSchema, type ApplicationDeployWebRequest } from "@supacloud/delivery";
+import { ApplicationIdSchema, type ApplicationDeployRequest } from "@supacloud/delivery";
 import { optional } from "../schema";
 import type { HttpTransport } from "../transports/http";
 import { registerTool, type ToolServer } from "../tool-server";
@@ -14,6 +14,7 @@ import {
     activateFrontendRelease,
     readFrontendReleaseAuthority,
     uploadFrontendRelease,
+    uploadProjectWebRelease,
 } from "./frontend-release-control";
 import { projectedFunctionList } from "./edge-function-response";
 
@@ -593,12 +594,13 @@ function payload(response: ToolResponse): Record<string, unknown> {
 }
 
 interface StagedApplicationWeb {
-    request?: ApplicationDeployWebRequest;
+    request?: ApplicationDeployRequest["web_release"];
 }
 
 async function stageApplicationWebRelease(
     http: HttpTransport,
     projectRef: string,
+    environmentId: string,
     configRoot: string,
     skipBuild: boolean,
     json: boolean,
@@ -631,18 +633,9 @@ async function stageApplicationWebRelease(
 
     const archive = await createFrontendArchive(outputDirectory);
     try {
-        const authority = payload(await readFrontendReleaseAuthority(http, projectRef, selected.id));
-        const activeReleaseId = typeof authority.active_release_id === "string" ? authority.active_release_id : null;
-        const activeActivationId = typeof authority.active_activation_id === "string" ? authority.active_activation_id : null;
-        const current = Array.isArray(authority.releases) ? record(authority.releases[0]) : null;
-        if (archive.sha256 === activeReleaseId && archive.treeSha256 !== current?.tree_sha256) {
-            throw new Error("Active Web release tree does not match the local archive");
-        }
-        if (archive.treeSha256 === current?.tree_sha256) {
-            return {};
-        }
-
-        const uploaded = payload(await uploadFrontendRelease(http, projectRef, selected.id, archive.archivePath));
+        const uploaded = payload(await uploadProjectWebRelease(
+            http, projectRef, environmentId, selected.id, archive.archivePath,
+        ));
         const release = record(uploaded.release);
         const releaseId = requiredString(release?.release_id, "release.release_id");
         if (releaseId !== archive.sha256) throw new Error("Uploaded Web release identity does not match the local archive");
@@ -651,9 +644,6 @@ async function stageApplicationWebRelease(
             request: {
                 deployment_id: selected.id,
                 release_id: releaseId,
-                expected_active_release_id: activeReleaseId ?? "absent",
-                expected_activation_id: activeActivationId ?? "absent",
-                mutation_id: crypto.randomUUID(),
             },
         };
     } finally {
@@ -726,6 +716,7 @@ export function registerDeployTools(
                 const stagedWeb = await stageApplicationWebRelease(
                     http,
                     projectRef,
+                    environmentId,
                     configRoot,
                     args.skip_build === true,
                     args.json === true,
@@ -741,7 +732,7 @@ export function registerDeployTools(
                     ...(configurationId ? { configuration_id: configurationId } : {}),
                     ...(application.manifestPath ? { manifest_path: application.manifestPath } : {}),
                     ...(args.skip_build === true ? { skip_build: true } : {}),
-                    ...(stagedWeb?.request === undefined ? {} : { web: stagedWeb.request }),
+                    ...(stagedWeb?.request === undefined ? {} : { web_release: stagedWeb.request }),
                     ...(args.json === true ? { format: "json", json: true } : {}),
                 });
                 return result;
