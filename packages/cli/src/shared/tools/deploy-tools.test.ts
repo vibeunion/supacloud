@@ -224,22 +224,12 @@ describe("one-command deploy", () => {
                 if (request.method === "GET" && url.pathname === "/v1/projects/test-ref/frontend/deployments") {
                     return Response.json([deployment()]);
                 }
-                if (request.method === "GET" && url.pathname === "/v1/projects/test-ref/frontend/deployments/web/active-release") {
+                if (request.method === "POST"
+                    && url.pathname === "/v1/projects/test-ref/environments/test/deployments/web-release") {
                     return Response.json({
-                        project_ref: "test-ref", deployment_id: "web",
-                        active_release_id: null, active_activation_id: null, releases: [], next_cursor: null,
-                    });
-                }
-                if (request.method === "POST" && url.pathname === "/v1/projects/test-ref/frontend/deployments/web/releases") {
-                    return Response.json({
-                        project_ref: "test-ref", deployment_id: "web", release: expectedRelease,
+                        ok: true, project_ref: "test-ref", environment_id: "test",
+                        deployment_id: "web", release_id: expectedRelease.release_id, release: expectedRelease,
                     }, { status: 201 });
-                }
-                if (request.method === "GET"
-                    && url.pathname === `/v1/projects/test-ref/frontend/deployments/web/releases/${expectedRelease.release_id}`) {
-                    return Response.json({
-                        project_ref: "test-ref", deployment_id: "web", release: expectedRelease,
-                    });
                 }
                 if (request.method === "POST" && url.pathname.endsWith("/activate")) {
                     throw new Error("Web activation must remain owned by the application deploy");
@@ -267,7 +257,7 @@ describe("one-command deploy", () => {
                 return {
                     content: [{
                         type: "text",
-                        text: JSON.stringify({ ok: true, operation: "applications.release", web: args.web }),
+                        text: JSON.stringify({ ok: true, operation: "applications.release", web_release: args.web_release }),
                     }],
                 };
             },
@@ -282,21 +272,14 @@ describe("one-command deploy", () => {
             ref: "test-ref",
             id: "orders",
             environment_id: "test",
-            web: {
+            web_release: {
                 deployment_id: "web",
                 release_id: expectedRelease.release_id,
-                expected_active_release_id: "absent",
-                expected_activation_id: "absent",
             },
-        });
-        expect(deployRequests[0]?.web).toMatchObject({
-            mutation_id: expect.any(String),
         });
         expect(requests).toEqual([
             "GET /v1/projects/test-ref/frontend/deployments",
-            "GET /v1/projects/test-ref/frontend/deployments/web/active-release",
-            "POST /v1/projects/test-ref/frontend/deployments/web/releases",
-            `GET /v1/projects/test-ref/frontend/deployments/web/releases/${expectedRelease.release_id}`,
+            "POST /v1/projects/test-ref/environments/test/deployments/web-release",
         ]);
     });
 

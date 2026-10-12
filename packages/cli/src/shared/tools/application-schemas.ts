@@ -15,4 +15,4 @@ export const ApplicationActivationHistoryCursorSchema = Delivery.ApplicationActi
 export const ApplicationPromotionPlanSchema = Delivery.ApplicationPromotionPlanSchema;
 export const ApplicationDeployRequestSchema = Delivery.ApplicationDeployRequestSchema;
 export const ApplicationDeployResultSchema = Delivery.ApplicationDeployResultSchema;
-export const ApplicationDeployWebRequestSchema = Delivery.ApplicationDeployWebRequestSchema;
+export const ApplicationDeployWebReleaseSchema = Delivery.ApplicationDeployWebReleaseSchema;

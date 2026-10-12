@@ -17,7 +17,7 @@ import {
   ApplicationActivationHistoryCursorSchema,
   ApplicationPromotionPlanSchema,
   ApplicationDeployRequestSchema,
-  ApplicationDeployWebRequestSchema,
+  ApplicationDeployWebReleaseSchema,
 } from "./application-schemas";
 import {
   ApplicationPromotionResultSchema, parsePreviewList, parsePreviewReceipt, parsePromotionStatus,
@@ -56,7 +56,7 @@ export const APPLICATION_TOOL_SCHEMA = {
   configuration_path: optional(Type.String(), "[put_configuration] Local configuration write JSON including revision and expected revision"),
   configuration_write: optional(Type.Unknown(), "[deploy_application] Parsed immutable configuration write"),
   manifest_path: optional(Type.String(), "[upload_release] Local delivery.manifest.json"),
-  web: optional(ApplicationDeployWebRequestSchema, "[deploy_application] Immutable staged Web release binding"),
+  web_release: optional(ApplicationDeployWebReleaseSchema, "[deploy_application] Immutable staged Web release uploaded by the deploy profile"),
   release_id: optional(ApplicationReleaseIdSchema, "[get_release/get_deploy_plan/deploy_release/activate_release/reconcile_activation/rollback_release] Immutable application release ID; platform selects previous for default rollback"),
   source_ref: optional(Type.String({ pattern: "^[A-Za-z0-9_-]{1,20}$" }), "[get_release_transfer_plan/transfer_release] Source project ref"),
   source_release_id: optional(ApplicationReleaseIdSchema, "[get_release_transfer_plan/transfer_release] Source immutable release ID"),
@@ -416,7 +416,7 @@ export function registerApplicationTools(server: ToolServer, http: HttpTransport
           ...(configurationWrite === undefined ? {} : { configuration_write: configurationWrite }),
           ...(typeof args["approved_migration_digest"] === "string"
             ? { approved_migration_digest: args["approved_migration_digest"] } : {}),
-          ...(args["web"] === undefined ? {} : { web: args["web"] }),
+          ...(args["web_release"] === undefined ? {} : { web_release: args["web_release"] }),
         };
         if (!Value.Check(ApplicationDeployRequestSchema, body)) {
           throw new Error("Invalid application deploy request");
