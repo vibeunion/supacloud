@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/vibeunion/supacloud/compare/delivery-v0.14.1...delivery-v0.15.0) (2026-10-12)
+
+
+### Features
+
+* unify application backend and web deployment ([#1828](https://github.com/vibeunion/supacloud/issues/1828)) ([119fb30](https://github.com/vibeunion/supacloud/commit/119fb30381ee5636a936262319b1e50f19de994b))
+
 ## [0.14.1](https://github.com/vibeunion/supacloud/compare/delivery-v0.14.0...delivery-v0.14.1) (2026-10-11)
 
 
