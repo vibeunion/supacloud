@@ -1,6 +1,6 @@
 {
   "name": "@supacloud/delivery",
-  "version": "0.14.1",
+  "version": "0.15.0",
   "description": "Shared immutable delivery artifact contracts and verification for SupaCloud",
   "type": "module",
   "main": "./dist/index.js",
