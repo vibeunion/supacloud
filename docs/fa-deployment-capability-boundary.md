@@ -1,17 +1,23 @@
 # FA Deployment Capability Boundary
 
-This document is the product boundary for deploying Failure Analysis (FA)
-through SupaCloud. It is intentionally separate from the FA business
-workflow. A successful deployment is not business acceptance.
+This document is a proposed product boundary for deploying Failure Analysis
+(FA) through SupaCloud. The project-scoped deployment contract described here
+is not implemented by the current CLI or Management API. It is intentionally
+separate from the FA business workflow. A successful deployment is not
+business acceptance.
 
-## Decision
+## Proposed Decision
 
-The public path is one project deployment command:
+When implemented, the intended public path is one project deployment command:
 
 ```sh
 supacloud --env test deploy
 supacloud --env production deploy --confirm-production <project-ref>
 ```
+
+These are future examples, not currently supported FA deployment commands.
+Until the project deployment contract lands, use the existing target-level
+deploy flow documented in `docs/cli-guide.md`.
 
 The command must submit one project deployment request and observe one
 deployment receipt. The customer must not create a scope file, calculate a
@@ -21,21 +27,21 @@ bind Web manually, or reconcile an unknown mutation by choosing a new ID.
 The platform owns the deployment state machine. FA owns its source manifest,
 business contracts, and product acceptance.
 
-## Capability Matrix
+## Target Capability Matrix
 
-| Capability | Decision | Owner | Customer-visible contract |
+| Capability | Target state | Owner | Customer-visible contract |
 | --- | --- | --- | --- |
-| Project/environment identity | Implement | SupaCloud | `--env` selects a profile; production requires the exact project ref |
-| Artifact build and upload | Implement | CLI + SupaCloud | The CLI reports `Preparing` and `Building`; the platform stores immutable artifacts |
-| Migration plan, compatibility and pending checks | Implement | SupaCloud | A summarized `Database` phase; no migration inventory or SQL allowlist is required |
-| Logical backup before a migration | Implement | SupaCloud | A backup reference in the receipt only |
-| Seven FA Functions and CAS activation | Implement | SupaCloud | One `Functions` phase and one project receipt |
-| Schedule convergence | Implement | SupaCloud | Desired state comes from the versioned FA manifest |
-| Runtime secret names and secret writes | Implement | SupaCloud | Values never appear in the receipt or CLI output |
-| Immutable Web release and activation | Implement | SupaCloud | One `Web` phase bound to the same deployment receipt |
-| PostgREST refresh and health/read-back | Implement | SupaCloud | One `Verifying` phase |
-| Idempotency and unknown-outcome recovery | Implement | SupaCloud | Re-running the same command observes the same deployment ID |
-| Rollback of code/Web activation | Implement | SupaCloud | `supacloud rollback` selects a platform-verified previous release |
+| Project/environment identity | Planned | SupaCloud | `--env` selects a profile; production requires the exact project ref |
+| Artifact build and upload | Planned | CLI + SupaCloud | The CLI reports `Preparing` and `Building`; the platform stores immutable artifacts |
+| Migration plan, compatibility and pending checks | Planned | SupaCloud | A summarized `Database` phase; no migration inventory or SQL allowlist is required |
+| Logical backup before a migration | Planned | SupaCloud | A backup reference in the receipt only |
+| Seven FA Functions and CAS activation | Planned | SupaCloud | One `Functions` phase and one project receipt |
+| Schedule convergence | Planned | SupaCloud | Desired state comes from the versioned FA manifest |
+| Runtime secret names and secret writes | Planned | SupaCloud | Values never appear in the receipt or CLI output |
+| Immutable Web release and activation | Planned | SupaCloud | One `Web` phase bound to the same deployment receipt |
+| PostgREST refresh and health/read-back | Planned | SupaCloud | One `Verifying` phase |
+| Idempotency and unknown-outcome recovery | Planned | SupaCloud | Re-running the same command observes the same deployment ID |
+| Rollback of code/Web activation | Planned | SupaCloud | `supacloud rollback` selects a platform-verified previous release |
 | FA login, tenant/RBAC, case/report/approval workflows | Keep | FA | Product features and authenticated business acceptance stay in FA |
 | Evidence, report, audit, checksum and authorization rules | Keep | FA + database | Immutable business truth remains in FA tables/RPCs |
 | OCR, provider adapter and worker lease/retry/DLQ behavior | Keep | FA | Deploying the runtime must not change business semantics |
@@ -64,9 +70,9 @@ release scripts:
 Legacy readers may remain until all old receipts have aged out. New writes
 must use the single SupaCloud project deployment receipt contract.
 
-## Project Deployment Contract
+## Proposed Project Deployment Contract
 
-The next platform implementation must expose one project-scoped deployment
+A future platform implementation should expose one project-scoped deployment
 resource:
 
 ```text
@@ -120,9 +126,9 @@ Web activation.
 They may be retained temporarily as migration adapters or read-only
 diagnostics, but new FA documentation must not teach them.
 
-## Acceptance
+## Future Acceptance
 
-The boundary is complete only when a clean FA checkout can run:
+This boundary will be complete only when a clean FA checkout can run:
 
 ```sh
 supacloud --env test deploy
