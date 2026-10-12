@@ -636,12 +636,15 @@ reporting success. Management endpoint projection is checked before and after.
 ### Internal release scope controls
 
 Scope files and manual release-controller operations are internal compatibility
-surfaces. They are not part of the normal customer deployment path. Use the
-project command instead:
+surfaces. The project-scoped FA deployment command is a proposed future
+contract and is not implemented yet. For current deployments, use the
+target-level one-command flow documented in
+[`docs/cli-guide.md`](../../docs/cli-guide.md), for example:
 
-```sh
-supacloud --env test deploy
-supacloud --env production deploy --confirm-production PROJECT_REF
+```bash
+supacloud deploy
+supacloud deploy --target web
+supacloud deploy --target api
 ```
 
 FA deployment policy and the boundary between platform-owned operations and
@@ -650,8 +653,8 @@ FA-owned business features are documented in
 
 Scope creation, rebinding, inspection and hash calculation are intentionally
 undocumented here. They remain available only for internal compatibility,
-audit and historical receipt migration. Customers do not need a scope file
-before running the one-command deployment flow above.
+audit and historical receipt migration. The future project-scoped flow will
+not require a scope file once its implementation lands.
 
 The legacy `.env` fallback is unclassified and therefore does not enable the
 production confirmation gate. Production automation must select a `prod` or
