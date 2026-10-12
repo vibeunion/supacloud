@@ -88,7 +88,7 @@ const FUNCTIONS_BASE_DIR = path.resolve(process.env.EDGE_FUNCTIONS_BASE_DIR || F
 const MGMT_API = process.env.MANAGEMENT_API_URL || "http://127.0.0.1:9090";
 const FUNCTION_REQUEST_TIMEOUT_MS = Number(process.env.EDGE_FUNCTION_TIMEOUT_MS) || 60_000;
 const BACKGROUND_FUNCTION_TIMEOUT_MS = Number(process.env.EDGE_BACKGROUND_FUNCTION_TIMEOUT_MS) || 300_000;
-const FUNCTION_CORS_MODE = process.env.EDGE_FUNCTIONS_CORS_MODE?.trim() || "function";
+const FUNCTION_CORS_MODE = process.env.EDGE_FUNCTIONS_CORS_MODE?.trim() || "auto";
 if (FUNCTION_CORS_MODE !== "function" && FUNCTION_CORS_MODE !== "auto" && FUNCTION_CORS_MODE !== "permissive") {
   throw new Error("EDGE_FUNCTIONS_CORS_MODE must be function, auto, or permissive");
 }
