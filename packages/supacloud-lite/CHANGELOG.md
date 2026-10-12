@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.25.1...supacloud-lite-v0.26.0) (2026-10-12)
+
+
+### Features
+
+* **lite:** bundle PostgreSQL extension parity set ([#1849](https://github.com/vibeunion/supacloud/issues/1849)) ([233fb1b](https://github.com/vibeunion/supacloud/commit/233fb1bb9d52673a7f38d77d47e8c1e6c0b7c5e4))
+
 ## [0.25.1](https://github.com/vibeunion/supacloud/compare/supacloud-lite-v0.25.0...supacloud-lite-v0.25.1) (2026-10-11)
 
 
