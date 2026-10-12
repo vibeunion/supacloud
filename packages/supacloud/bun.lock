@@ -6,7 +6,7 @@
       "name": "supacloud",
       "dependencies": {
         "@supacloud/admin": "^0.27.0",
-        "@supacloud/cli": "^0.87.1",
+        "@supacloud/cli": "^0.90.0",
       },
       "devDependencies": {
         "@types/bun": "^1.4.2",
@@ -23,11 +23,11 @@
 
     "@supacloud/admin": ["@supacloud/admin@0.27.0", "", { "dependencies": { "@supacloud/cli": "0.83.0", "@supacloud/delivery": "0.12.0", "ssh2": "^1.17.0", "typebox": "1.3.34" }, "bin": { "supacloud-admin": "dist/index.js" } }, "sha512-4YZj7znNvAH+5fiW2W1LXGVueAhitcj9IB3Yn3VnZlsOvNeuTI4DlNrzWINVi876RRuEKjrwLZ78NQNA5asCMA=="],
 
-    "@supacloud/cli": ["@supacloud/cli@0.87.1", "", { "dependencies": { "@supacloud/compiler": "^0.44.0", "@supacloud/db": "0.16.0", "@supacloud/delivery": "0.14.0", "typebox": "1.3.34" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-dX+VZsIKjFotae3ID41Gt+L+mnmT5lIfBN4dq5r7dxI/fx8ZoYFEOvL6XAXXAsyAMgmoOGhfgG0gKUBEKBXxZw=="],
+    "@supacloud/cli": ["@supacloud/cli@0.90.0", "", { "dependencies": { "@supacloud/compiler": "^0.44.1", "@supacloud/db": "0.16.1", "@supacloud/delivery": "0.15.0", "typebox": "1.3.36" }, "bin": { "supacloud": "dist/index.js" } }, "sha512-mc4dshfFEpJB+UtFVHzsPDEIIsOUGKE/5QmmesqEbZbLj6A+1jveLumk2Z5s7t0sA+arL6mmxsDQZ7CQXgRnlg=="],
 
-    "@supacloud/contracts": ["@supacloud/contracts@0.8.0", "", {}, "sha512-PxN4RZ3/LnBHebgzlTVjKQpNQ0oqsML+eNHTDR4CjdcdqdhgnZyCv7J8e8LPTEsGWnai1PywhPM/FBqau3REEA=="],
+    "@supacloud/contracts": ["@supacloud/contracts@0.8.1", "", {}, "sha512-/wOCVo5EOktT7FeVtoGpUK6cki6CrGnpX3SuP/7S0roOMLS1MmUgmxSX88OB5+1sYJHg62HAqfnicPg21JsQcg=="],
 
-    "@supacloud/db": ["@supacloud/db@0.16.0", "", { "dependencies": { "@supacloud/contracts": "0.8.0", "@typescript/typescript6": "^6.0.2", "libpg-query": "18.1.4" }, "peerDependencies": { "drizzle-orm": "1.0.0-rc.5-169397b" }, "optionalPeers": ["drizzle-orm"], "bin": { "supacloud-db": "dist/source-contracts-cli.js", "supacloud-sql-impact": "dist/sql-impact-cli.js" } }, "sha512-+vhlbTO+MGBJaHqhYcMAtD5cdKzIW8h517U8LKz7f6m97UkrA7x7lz0L3DzaOoDNAJ2ToBeZMUGKkCqb7H5Mig=="],
+    "@supacloud/db": ["@supacloud/db@0.16.1", "", { "dependencies": { "@supacloud/contracts": "0.8.1", "@typescript/typescript6": "^6.0.2", "libpg-query": "18.1.5" }, "peerDependencies": { "drizzle-orm": "1.0.0-rc.5-169397b" }, "optionalPeers": ["drizzle-orm"], "bin": { "supacloud-db": "dist/source-contracts-cli.js", "supacloud-sql-impact": "dist/sql-impact-cli.js" } }, "sha512-9kuP8NP7DaBeb6JgclwncLu5alabZa95WpkZN0e+u5+xF9iiF1bqR9I7YdjQp+RLO9ZgD2vU/0kSKEPb6r2fTQ=="],
 
     "@types/bun": ["@types/bun@1.4.2", "https://registry.npmmirror.com/@types/bun/-/bun-1.4.2.tgz", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 
@@ -87,7 +87,7 @@
 
     "cpu-features": ["cpu-features@0.0.10", "https://registry.npmmirror.com/cpu-features/-/cpu-features-0.0.10.tgz", { "dependencies": { "buildcheck": "~0.0.6", "nan": "^2.19.0" } }, "sha512-9IkYqtX3YHPCzoVg1Py+o9057a3i0fp7S530UWokCSaFVTc7CwXPRiOjRjBQQ18ZCNafx78YfnG+HALxtVmOGA=="],
 
-    "libpg-query": ["libpg-query@18.1.4", "", { "dependencies": { "@pgsql/types": "^18.0.0" } }, "sha512-6jF9qn9ln4yLnmSF+bS/DBvAfNcPhGI05+pkQy+n3cRd3p9aO8LWjquEin8SLO0k7zYk745ZGBXYUiL9AUI7gA=="],
+    "libpg-query": ["libpg-query@18.1.5", "", { "dependencies": { "@pgsql/types": "^18.0.0" } }, "sha512-xsksgH106LyVUylIp2bJz1MPFmVVIGKbB8belGWmh+J8/i38w8eM1twDIBnd97tzeNQFctH9MWKMthl22+fWcQ=="],
 
     "nan": ["nan@2.28.0", "https://registry.npmmirror.com/nan/-/nan-2.28.0.tgz", {}, "sha512-fTsDz99OTq2sVePhGdp4qQhggZFtKr64ZNVyVajRKtMOkJxYekplBh577PiJB12v/D3s2E5cGtOI45LWp6rnLQ=="],
 
@@ -111,8 +111,16 @@
 
     "@supacloud/cli/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", {}],
 
+    "@supacloud/cli/typebox": ["typebox@1.3.36", "", {}, "sha512-bu2Ec2Ti9B4IFSFj1FcZbtLNB/W7igQwxocMGJLAG2NTv1nI+ImtIA34YgHW4CVyGVlJqNXR1GJyLmdWgV3DuA=="],
+
     "@supacloud/admin/@supacloud/cli/@supacloud/compiler": ["@supacloud/compiler@file:../compiler", {}],
 
+    "@supacloud/admin/@supacloud/cli/@supacloud/db": ["@supacloud/db@0.16.0", "", { "dependencies": { "@supacloud/contracts": "0.8.0", "@typescript/typescript6": "^6.0.2", "libpg-query": "18.1.4" }, "peerDependencies": { "drizzle-orm": "1.0.0-rc.5-169397b" }, "optionalPeers": ["drizzle-orm"], "bin": { "supacloud-db": "dist/source-contracts-cli.js", "supacloud-sql-impact": "dist/sql-impact-cli.js" } }, "sha512-+vhlbTO+MGBJaHqhYcMAtD5cdKzIW8h517U8LKz7f6m97UkrA7x7lz0L3DzaOoDNAJ2ToBeZMUGKkCqb7H5Mig=="],
+
     "@supacloud/admin/@supacloud/cli/@supacloud/delivery": ["@supacloud/delivery@file:../delivery", {}],
+
+    "@supacloud/admin/@supacloud/cli/@supacloud/db/@supacloud/contracts": ["@supacloud/contracts@0.8.0", "", {}, "sha512-PxN4RZ3/LnBHebgzlTVjKQpNQ0oqsML+eNHTDR4CjdcdqdhgnZyCv7J8e8LPTEsGWnai1PywhPM/FBqau3REEA=="],
+
+    "@supacloud/admin/@supacloud/cli/@supacloud/db/libpg-query": ["libpg-query@18.1.4", "", { "dependencies": { "@pgsql/types": "^18.0.0" } }, "sha512-6jF9qn9ln4yLnmSF+bS/DBvAfNcPhGI05+pkQy+n3cRd3p9aO8LWjquEin8SLO0k7zYk745ZGBXYUiL9AUI7gA=="],
   }
 }
