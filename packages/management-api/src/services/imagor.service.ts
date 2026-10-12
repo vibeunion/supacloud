@@ -321,17 +321,26 @@ export function buildImagorRequest(
     };
 }
 
+export async function runImagorWithRequest(
+    query: ImageTransformQuery,
+    source: ImagorSource,
+    operation: ImagorOperation = "standard",
+): Promise<{ request: ImagorRequest; response: Response }> {
+    const request = buildImagorRequest(query, operation);
+    const response = await fetch(`${IMAGOR_URL}${request.path}`, {
+        method: "POST",
+        headers: { "Content-Type": source.contentType },
+        body: source.bytes,
+    });
+    return { request, response };
+}
+
 export async function runImagor(
     query: ImageTransformQuery,
     source: ImagorSource,
     operation: ImagorOperation = "standard",
 ): Promise<Response> {
-    const request = buildImagorRequest(query, operation);
-    return await fetch(`${IMAGOR_URL}${request.path}`, {
-        method: "POST",
-        headers: { "Content-Type": source.contentType },
-        body: source.bytes,
-    });
+    return (await runImagorWithRequest(query, source, operation)).response;
 }
 
 export async function checkImagorHealth(): Promise<Response> {
