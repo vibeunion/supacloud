@@ -6,6 +6,7 @@ import {
   POWERSYNC_REPLICATION_ROLE,
   type PowerSyncReplicationOptions,
 } from './replication.js'
+import type { ExtensionInventorySource, PostgresExtensionInventory } from './extensions.js'
 
 export type LiteCapabilityStatus = 'supported' | 'static' | 'disabled' | 'unsupported'
 
@@ -21,6 +22,9 @@ export interface LiteDoctorReport {
   commands: 'supported'
   artifacts: 'supported'
   postgrest_schema_config: 'static'
+  postgres_extensions: PostgresExtensionInventory & {
+    engine: 'pglite' | 'native'
+  }
   logical_replication: LiteCapabilityStatus
   powersync_source: LiteCapabilityStatus
   replication_profile?: 'powersync'
@@ -79,12 +83,23 @@ export function liteCapabilities(
   engine: 'pglite' | 'native',
   replicationProfile?: 'powersync',
 ): LiteDoctorReport {
+  const extensionSource: ExtensionInventorySource = engine === 'native'
+    ? 'native-postgresql'
+    : 'pglite-bundled'
   const common = {
     graphql: { status: 'unverified', extension: 'pg_graphql', reason: 'DATABASE_NOT_INSPECTED' } satisfies GraphqlCapability,
     runtime_mode: 'development' as const,
     identity: { mode: 'local' as const, verification: 'built-in' as const },
     migrations: { formats: ['flat-sql', 'timestamp-folder'], content_check: 'supported' as const, target_bindings: 'supported' as const },
     project_release_manifests: 'unsupported' as const,
+    postgres_extensions: {
+      engine,
+      source: extensionSource,
+      status: 'unavailable' as const,
+      available: [],
+      installed: [],
+      reason: 'DATABASE_NOT_INSPECTED',
+    },
   }
   if (engine === 'pglite') {
     return {

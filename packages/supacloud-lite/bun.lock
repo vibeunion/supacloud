@@ -6,6 +6,10 @@
       "name": "@supacloud/lite",
       "dependencies": {
         "@electric-sql/pglite": "0.5.8",
+        "@electric-sql/pglite-pg_textsearch": "0.0.10",
+        "@electric-sql/pglite-pgmq": "0.0.6",
+        "@electric-sql/pglite-pgvector": "0.0.9",
+        "@electric-sql/pglite-postgis": "0.2.8",
         "@supacloud/db": "^0.6.0",
         "exact-mirror": "1.2.6",
         "tar": "^7.5.22",
@@ -44,6 +48,14 @@
     "@babel/runtime": ["@babel/runtime@8.0.7", "https://registry.npmmirror.com/@babel/runtime/-/runtime-8.0.7.tgz", {}, "sha512-k0hagDDq/6w4v+0Sp4wFvIz/yswH5O7Va6aRTnD7N62Tnborp4X+YB+H3XUcWVSR4aE47WPEXiIIZchBs0GmYg=="],
 
     "@electric-sql/pglite": ["@electric-sql/pglite@0.5.8", "https://registry.npmmirror.com/@electric-sql/pglite/-/pglite-0.5.8.tgz", {}, "sha512-n9tsbUOhwx2epK1V0ZG9Ar4SHWUju04dhmzZXiSBXwBoleOvIfals33NAaWgagQVAL4Rbvx/Ptsu3P+pA09f6Q=="],
+
+    "@electric-sql/pglite-pg_textsearch": ["@electric-sql/pglite-pg_textsearch@0.0.10", "https://registry.npmmirror.com/@electric-sql/pglite-pg_textsearch/-/pglite-pg_textsearch-0.0.10.tgz", { "peerDependencies": { "@electric-sql/pglite": "0.5.8" } }, "sha512-tsL1rTYU4tzIC44htL7/0nS6C2XC5Srz0tfxU1LJelCqNIBkpFI9Esw1JbuVCaQKUHGDbPgAz8JYavNxwbuRVw=="],
+
+    "@electric-sql/pglite-pgmq": ["@electric-sql/pglite-pgmq@0.0.6", "https://registry.npmmirror.com/@electric-sql/pglite-pgmq/-/pglite-pgmq-0.0.6.tgz", { "peerDependencies": { "@electric-sql/pglite": "0.5.8" } }, "sha512-KSkXos6Ac1u6Sxd7fJ4Ys8FKd+noLffB5tfVEauw51+lmOTUauZk7CjZS8oDfeMHZULBK23MvhQw3pzO44TMGg=="],
+
+    "@electric-sql/pglite-pgvector": ["@electric-sql/pglite-pgvector@0.0.9", "https://registry.npmmirror.com/@electric-sql/pglite-pgvector/-/pglite-pgvector-0.0.9.tgz", { "peerDependencies": { "@electric-sql/pglite": "0.5.8" } }, "sha512-ue4iBW651gDQwBwn97Ekv1lYGPvXa1ymHbRbTCSL0Ib286PRDD1VDOwzwEoekZuO/wctMbTzKzlwdgDwYrqZ8A=="],
+
+    "@electric-sql/pglite-postgis": ["@electric-sql/pglite-postgis@0.2.8", "https://registry.npmmirror.com/@electric-sql/pglite-postgis/-/pglite-postgis-0.2.8.tgz", { "peerDependencies": { "@electric-sql/pglite": "0.5.8" } }, "sha512-B7XVSVuj+9TEVfIgPSlbWbhKvROENHTp0Ex6A44kTeTqy4FAm31uGsi7fxx7gqN0Mdo5qH1xv5Fu42dHwKZpqg=="],
 
     "@graphql-codegen/core": ["@graphql-codegen/core@6.2.2", "https://registry.npmmirror.com/@graphql-codegen/core/-/core-6.2.2.tgz", { "dependencies": { "@graphql-codegen/plugin-helpers": "^7.4.2", "@graphql-tools/schema": "^10.1.3", "@graphql-tools/utils": "^12.0.3", "tslib": "^2.8.0" }, "peerDependencies": { "graphql": "^0.8.0 || ^0.9.0 || ^0.10.0 || ^0.11.0 || ^0.12.0 || ^0.13.0 || ^14.0.0 || ^15.0.0 || ^16.0.0 || ^17.0.0" } }, "sha512-bClqhA2ZITWKiEYd5A87KaU93YBC8o1++B3Y0FpYIZPZfGEWEwbhyvUkrSKrXqUagwM7c0h77f7DB4oR6vBgpQ=="],
 

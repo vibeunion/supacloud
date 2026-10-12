@@ -204,13 +204,29 @@ create schema if not exists extensions;
 do $$
 declare ext text;
 begin
-  foreach ext in array array['uuid-ossp','pgcrypto','citext','pg_trgm','ltree','hstore','fuzzystrmatch'] loop
+  foreach ext in array array[
+    'uuid-ossp','pgcrypto','citext','pg_trgm','ltree','hstore','fuzzystrmatch',
+    'vector','postgis','pg_textsearch'
+  ] loop
     begin
       execute format('create extension if not exists %I with schema extensions', ext);
     exception when others then
       -- extension not bundled in this engine build; continue
     end;
   end loop;
+end $$;
+
+-- The official pgmq extension owns its required pgmq schema. PGlite and
+-- native PostgreSQL builds that do not provide it simply continue to Lite's
+-- SQL fallback during database initialization.
+create schema if not exists pgmq;
+do $$
+begin
+  begin
+    create extension if not exists pgmq with schema pgmq;
+  exception when others then
+    null;
+  end;
 end $$;
 
 -- uuid-ossp isn't in every Postgres build (it needs an external UUID lib at

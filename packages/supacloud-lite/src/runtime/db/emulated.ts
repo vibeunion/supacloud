@@ -1,8 +1,9 @@
 /**
- * Pure-SQL emulations of Supabase's queue and cron extensions, so migrations
- * and app code that call pgmq.* / cron.* work with no C extension on either
- * engine. pgmq is fully self-contained SQL. cron records jobs here; the
- * in-process CronService (src/cron/service.ts) executes them.
+ * Compatibility SQL for extensions that are not available in every engine.
+ * PGlite installs the official pgmq extension by default; the complete pgmq
+ * SQL fallback remains for native PostgreSQL installations without pgmq.
+ * The pgmq_public façade is Lite-owned in either mode. cron records jobs here;
+ * the in-process CronService (src/cron/service.ts) executes them.
  *
  * These match the real extensions' function signatures closely enough that
  * `pgmq.send(...)`, `pgmq.read(...)`, `select cron.schedule(...)` etc. behave
@@ -12,11 +13,11 @@
 // ── pgmq (message queue) ────────────────────────────────────────────────────
 
 /**
- * Self-contained SQL emulation of the pgmq extension: per-queue `q_<name>` /
+ * Self-contained SQL fallback for the pgmq extension: per-queue `q_<name>` /
  * `a_<name>` tables plus create/send/read/pop/delete/archive/etc functions,
  * matching pgmq's signatures. No C extension, no background worker needed.
  */
-export const PGMQ_SQL = `
+export const PGMQ_CORE_SQL = `
 create schema if not exists pgmq;
 revoke all on schema pgmq from public, anon, authenticated;
 grant usage on schema pgmq to service_role;
@@ -201,6 +202,11 @@ $pgmq$;
 revoke all on all functions in schema pgmq from public, anon, authenticated;
 grant execute on all functions in schema pgmq to service_role;
 
+`
+
+/** Lite's public queue façade and idempotent-send support. The real pgmq
+ * extension supplies the pgmq schema; this SQL only owns SupaCloud wrappers. */
+export const PGMQ_PUBLIC_SQL = `
 -- supacloud:sql-module:pgmq-public:start
 DO $pgmq_extension$
 BEGIN
@@ -507,6 +513,9 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pgmq_public TO anon, authenticated, ser
 NOTIFY pgrst, 'reload schema';
 -- supacloud:sql-module:pgmq-public:end
 `
+
+export const PGMQ_SQL = `${PGMQ_CORE_SQL}
+${PGMQ_PUBLIC_SQL}`
 
 export const WORKFLOWS_SQL = `
 -- supacloud:sql-module:workflows-public:start

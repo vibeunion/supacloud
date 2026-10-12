@@ -18,6 +18,16 @@ SupaCloud Lite 使用 ElectricSQL PGlite 作为嵌入式 PostgreSQL 引擎。
 - Upstream: `https://github.com/electric-sql/pglite`
 - Local license copy: `LICENSES/PGLITE-APACHE-2.0.txt`
 
+Lite also bundles the official PGlite extension packages:
+
+- `@electric-sql/pglite-pgvector` 0.0.9
+- `@electric-sql/pglite-postgis` 0.2.8
+- `@electric-sql/pglite-pg_textsearch` 0.0.10
+- `@electric-sql/pglite-pgmq` 0.0.6
+
+These packages are published by ElectricSQL under Apache-2.0 and their
+extension archives are embedded in the standalone binary.
+
 ## Native PostgreSQL binaries
 
 Linux/macOS 上的可选 native 引擎会按需下载 Theseus 发布的 PostgreSQL 17.7.0 预编译包；该二进制不会内嵌到 npm 包或 Lite 单文件发布物中。

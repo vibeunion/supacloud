@@ -8,6 +8,10 @@ export type StandaloneExtensionName =
   | 'ltree'
   | 'hstore'
   | 'fuzzystrmatch'
+  | 'vector'
+  | 'postgis'
+  | 'pg_textsearch'
+  | 'pgmq'
 
 export interface PreparedExtensionBundles {
   bundles: Record<StandaloneExtensionName, URL>
