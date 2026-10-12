@@ -633,54 +633,25 @@ query parameters and accepts only its authoritative JSON boolean `false`
 read-back. The fixture binding comes from the validated disable receipt before
 reporting success. Management endpoint projection is checked before and after.
 
-### Release scope rebinding and inspection
+### Internal release scope controls
 
-Release scopes bind deployment manifests (functions, migrations, web assets) to
-an exact 40-character base commit SHA and one concrete deployment environment.
-Old scope files without `targetEnvironmentId` are rejected and must be
-regenerated. Test and production scopes may share the same source commit, but
-they are separate environment-bound release identities.
+Scope files and manual release-controller operations are internal compatibility
+surfaces. They are not part of the normal customer deployment path. Use the
+project command instead:
 
-```bash
-# Rebind a single environment-bound scope to latest git main (or origin/main)
-supacloud release scope_rebind --file supacloud/fa/release-scopes/20260907-intake-p1-production.json --environment_id production
-
-# Rebind multiple production files together
-supacloud release scope_rebind --files "20260907-intake-p1-production.json,20260907-intake-p1-production-hotfix.json" --environment_id production
-
-# Rebind staging separately; a staging scope can never be rebound as production
-supacloud release scope_rebind --task 20260907-intake-p1 --environment_id staging
-
-# Rebind all scopes matching a task ID or filename prefix in standard directories
-supacloud release scope_rebind --task 20260907-intake-p1 --environment_id production
-
-# Specify an explicit base commit SHA or git ref
-supacloud release scope_rebind --task 20260907-intake-p1 --base_commit origin/main --environment_id production
-
-# Preview changes without modifying files
-supacloud release scope_rebind --task 20260907-intake-p1 --environment_id production --dry_run
-
-# Inspect scope status, SHA-256 hash, and alignment with git HEAD / origin/main
-supacloud release scope_inspect --file 20260907-intake-p1-production.json --environment_id production
-
-# Scaffold a new canonical release scope
-supacloud release scope_create \
-  --file supacloud/fa/release-scopes/20260907-intake-p1.json \
-  --task FA-INTAKE-P1 \
-  --ref abc123 \
-  --environment_id production \
-  --functions "fa-api,fa-worker" \
-  --migrations "20260907120000_init"
+```sh
+supacloud --env test deploy
+supacloud --env production deploy --confirm-production PROJECT_REF
 ```
 
-Scope actions run locally without requiring Management API credentials. Files
-are formatted canonically with 2 spaces and sorted keys, and the authoritative
-`scope_sha256` checksum is recalculated automatically. `scope_create` resolves
-`origin/main` by default, so a new test or production scope is generated from
-the current main baseline instead of reusing an older scope identity.
-These commands are for release maintenance and audit workflows; customers do
-not need to create or rebind a scope before running the one-command deployment
-flow above.
+FA deployment policy and the boundary between platform-owned operations and
+FA-owned business features are documented in
+[`docs/fa-deployment-capability-boundary.md`](../../docs/fa-deployment-capability-boundary.md).
+
+Scope creation, rebinding, inspection and hash calculation are intentionally
+undocumented here. They remain available only for internal compatibility,
+audit and historical receipt migration. Customers do not need a scope file
+before running the one-command deployment flow above.
 
 The legacy `.env` fallback is unclassified and therefore does not enable the
 production confirmation gate. Production automation must select a `prod` or
