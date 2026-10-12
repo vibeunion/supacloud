@@ -30,6 +30,7 @@ describe("TypeBox CLI schema boundary", () => {
 });
 
 test("enum metadata includes single literals and multiple alternatives", () => {
+    expect(schemaEnumValues(undefined)).toEqual([]);
     expect(schemaEnumValues(stringEnum(["only"]))).toEqual(["only"]);
     expect(schemaEnumValues(Type.Literal(1))).toEqual(["1"]);
     expect(schemaEnumValues(stringEnum(["first", "second"]))).toEqual(["first", "second"]);

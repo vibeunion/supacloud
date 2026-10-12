@@ -289,6 +289,15 @@ describe("supacloud process contract", () => {
         expect(response.stderr).not.toContain("release scope_inspect");
     });
 
+    test("prints deploy help without requiring action metadata", async () => {
+        const response = await runProjectCli(["deploy", "--help"]);
+
+        expect(response.exitCode).toBe(0);
+        expect(response.stderr).toContain("Usage: supacloud deploy [--flags]");
+        expect(response.stderr).toContain("--skip_build");
+        expect(response.stdout).toBe("");
+    });
+
     test("keeps complete Storage help without project configuration", async () => {
         const workspace = mkdtempSync(join(tmpdir(), "supacloud-storage-help-"));
         temporaryDirectories.push(workspace);

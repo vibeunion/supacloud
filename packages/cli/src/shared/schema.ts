@@ -140,7 +140,8 @@ export function decodedSchema<TInput extends TSchema, TOutput extends TSchema>(
     return result;
 }
 
-export function schemaEnumValues(schema: TSchema): string[] {
+export function schemaEnumValues(schema: TSchema | undefined): string[] {
+    if (!schema) return [];
     const view = schema as SchemaView;
     if (Array.isArray(view.enum)) {
         return view.enum
