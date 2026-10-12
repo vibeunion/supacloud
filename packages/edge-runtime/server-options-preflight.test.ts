@@ -187,7 +187,7 @@ afterAll(async () => {
   if (fixtureRoot) await rm(fixtureRoot, { recursive: true, force: true });
 });
 
-describe("Edge Runtime default Function-owned CORS", () => {
+describe("Edge Runtime default gateway-managed CORS", () => {
   test("preserves a Function's explicit preflight policy", async () => {
     const response = await fetch(`${defaultBaseUrl}/functions/v1/cors-guard/cases`, {
       method: "OPTIONS",
