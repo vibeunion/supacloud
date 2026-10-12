@@ -125,7 +125,7 @@ test('Management recovery fails closed when the signing workflow is newer than t
 });
 test('Management recovery pins source and preserves signed non-overwriting publication', () => {
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
-  assert.match(workflow, /if: \$\{\{ inputs\.recover_management_tag == '' && inputs\.recover_elysia != true \}\}/);
+  assert.match(workflow, /if: \$\{\{ inputs\.recover_management_tag == '' && inputs\.recover_edge_runtime_tag == '' && inputs\.recover_elysia != true \}\}/);
   assert.match(workflow, /ref: \$\{\{ needs\.release-please\.outputs\.management_api_source_commit \|\| needs\.release-please\.outputs\.management_api_tag_name \}\}/);
   const management = workflow.split('  publish-management-api-binaries:')[1]?.split('  publish-edge-runtime-binaries:')[0] ?? '';
   assert.match(management, /--source-commit "\$\(git rev-parse HEAD\)"/);
@@ -246,7 +246,7 @@ test('elysia archive setup preserves sibling paths when invoked from its package
 test('targeted Elysia recovery skips unrelated publications and release creation', () => {
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
   assert.match(workflow, /recover_elysia:\n\s+description: Retry only the Elysia adapter publication[\s\S]*?type: boolean/);
-  assert.match(workflow, /if: \$\{\{ inputs\.recover_management_tag == '' && inputs\.recover_elysia != true \}\}/);
+  assert.match(workflow, /if: \$\{\{ inputs\.recover_management_tag == '' && inputs\.recover_edge_runtime_tag == '' && inputs\.recover_elysia != true \}\}/);
   const job = workflow.split('\n  publish-npm:\n')[1]?.split('\n  sync-')[0];
   assert.ok(job);
   assert.match(job, /inputs\.recover_elysia == true && github\.ref == 'refs\/heads\/main'/);
@@ -278,7 +278,7 @@ test('recovery runs the command package graph after a tag-only release', () => {
   const workflow = readFileSync(new URL('../workflows/release-please.yml', import.meta.url), 'utf8');
   assert.match(workflow, /recover_npm:\n\s+description: Retry missing command-package publications[\s\S]*?type: boolean/);
   assert.match(workflow,
-    /publish-npm:\n\s+needs: release-please[\s\S]*?if: \$\{\{ always\(\) && inputs\.recover_management_tag == '' && \(needs\.release-please\.outputs\.releases_created == 'true' \|\| inputs\.recover_npm == true \|\| \(inputs\.recover_elysia == true && github\.ref == 'refs\/heads\/main'\)\) \}\}/);
+    /publish-npm:\n\s+needs: release-please[\s\S]*?if: \$\{\{ always\(\) && inputs\.recover_management_tag == '' && inputs\.recover_edge_runtime_tag == '' && \(needs\.release-please\.outputs\.releases_created == 'true' \|\| inputs\.recover_npm == true \|\| \(inputs\.recover_elysia == true && github\.ref == 'refs\/heads\/main'\)\) \}\}/);
   const contracts = workflow.indexOf('name: Publish command contracts');
   const commands = workflow.indexOf('name: Publish durable commands');
   assert.match(workflow.slice(contracts, commands), /inputs\.recover_npm == true/);

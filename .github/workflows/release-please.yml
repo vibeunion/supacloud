@@ -27,6 +27,11 @@ on:
         required: false
         default: ""
         type: string
+      recover_edge_runtime_tag:
+        description: Build and attest an existing empty Edge Runtime release from its exact tag
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: release-please-${{ github.ref }}
@@ -47,8 +52,9 @@ jobs:
       management_api_released: ${{ steps.recovery.outputs.tag != '' && 'true' || steps.release.outputs['packages/management-api--release_created'] }}
       management_api_tag_name: ${{ steps.recovery.outputs.tag || steps.release.outputs['packages/management-api--tag_name'] }}
       management_api_source_commit: ${{ steps.recovery.outputs.source_commit }}
-      edge_runtime_released: ${{ steps.release.outputs['packages/edge-runtime--release_created'] }}
-      edge_runtime_tag_name: ${{ steps.release.outputs['packages/edge-runtime--tag_name'] }}
+      edge_runtime_released: ${{ steps.edge_recovery.outputs.tag != '' && 'true' || steps.release.outputs['packages/edge-runtime--release_created'] }}
+      edge_runtime_tag_name: ${{ steps.edge_recovery.outputs.tag || steps.release.outputs['packages/edge-runtime--tag_name'] }}
+      edge_runtime_source_commit: ${{ steps.edge_recovery.outputs.source_commit }}
       pgredis_runtime_released: ${{ steps.release.outputs['packages/pgredis-runtime--release_created'] }}
       pgredis_runtime_tag_name: ${{ steps.release.outputs['packages/pgredis-runtime--tag_name'] }}
       supacloud_lite_released: ${{ steps.release.outputs['packages/supacloud-lite--release_created'] }}
@@ -82,8 +88,16 @@ jobs:
           RECOVER_NPM: ${{ inputs.recover_npm }}
         run: node .github/scripts/recover-management-release.mjs
 
+      - name: Validate empty Edge Runtime release recovery
+        if: ${{ inputs.recover_edge_runtime_tag != '' }}
+        id: edge_recovery
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.recover_edge_runtime_tag }}
+        run: node .github/scripts/recover-edge-runtime-release.mjs
+
       - uses: googleapis/release-please-action@v5
-        if: ${{ inputs.recover_management_tag == '' && inputs.recover_elysia != true }}
+        if: ${{ inputs.recover_management_tag == '' && inputs.recover_edge_runtime_tag == '' && inputs.recover_elysia != true }}
         id: release-action
         continue-on-error: true
         with:
@@ -240,7 +254,7 @@ jobs:
       - name: Checkout release tag
         uses: actions/checkout@v7
         with:
-          ref: ${{ needs.release-please.outputs.edge_runtime_tag_name }}
+          ref: ${{ needs.release-please.outputs.edge_runtime_source_commit || needs.release-please.outputs.edge_runtime_tag_name }}
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -313,11 +327,36 @@ jobs:
           ATTESTATION_BUNDLE: ${{ steps.attest-edge-runtime-release.outputs.bundle-path }}
         run: install -m 0600 "$ATTESTATION_BUNDLE" packages/edge-runtime/dist/SUPACLOUD-RELEASE.attestation.jsonl
 
+      - name: Verify recovered assets against the offline upgrade policy
+        if: ${{ inputs.recover_edge_runtime_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for artifact in packages/edge-runtime/dist/*; do
+            [[ "$artifact" == *.attestation.jsonl ]] && continue
+            gh attestation verify "$artifact" \
+              --bundle packages/edge-runtime/dist/SUPACLOUD-RELEASE.attestation.jsonl \
+              --repo "$GITHUB_REPOSITORY" \
+              --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release-please.yml" \
+              --source-ref refs/heads/main \
+              --source-digest "$(git rev-parse HEAD)" \
+              --deny-self-hosted-runners
+          done
+
       - name: Upload binaries to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || github.token }}
           RELEASE_TAG: ${{ needs.release-please.outputs.edge_runtime_tag_name }}
-        run: gh release upload "$RELEASE_TAG" packages/edge-runtime/dist/* --clobber
+          RECOVERY_TAG: ${{ inputs.recover_edge_runtime_tag }}
+        run: |
+          if [[ -n "$RECOVERY_TAG" ]]; then
+            git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+            test "$(git rev-parse "refs/tags/$RELEASE_TAG^{commit}")" = "$(git rev-parse HEAD)"
+            test "$(gh release view "$RELEASE_TAG" --json assets --jq '.assets | length')" = 0
+            gh release upload "$RELEASE_TAG" packages/edge-runtime/dist/*
+          else
+            gh release upload "$RELEASE_TAG" packages/edge-runtime/dist/* --clobber
+          fi
 
 
   publish-pgredis-runtime-binaries:
@@ -472,7 +511,7 @@ jobs:
     needs: release-please
     # A previous release can leave a Git tag behind after npm publication
     # fails. Allow an explicit recovery run without creating another release.
-    if: ${{ always() && inputs.recover_management_tag == '' && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true || (inputs.recover_elysia == true && github.ref == 'refs/heads/main')) }}
+    if: ${{ always() && inputs.recover_management_tag == '' && inputs.recover_edge_runtime_tag == '' && (needs.release-please.outputs.releases_created == 'true' || inputs.recover_npm == true || (inputs.recover_elysia == true && github.ref == 'refs/heads/main')) }}
     runs-on: ubuntu-latest
     environment: npm-publish
     permissions:

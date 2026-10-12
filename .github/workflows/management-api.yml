@@ -701,6 +701,8 @@ jobs:
           node --test .github/scripts/publish-npm-package.test.mjs
           node --check .github/scripts/sync-supacloud-dependencies.mjs
           node --test .github/scripts/sync-supacloud-dependencies.test.mjs
+          node --check .github/scripts/recover-edge-runtime-release.mjs
+          node --test .github/scripts/recover-edge-runtime-release.test.mjs
 
   unit-test:
     name: Unit Tests
