@@ -356,6 +356,75 @@ export async function uploadFrontendRelease(
     return toolResponse({ project_ref: projectRef, deployment_id: deploymentId, release: verified });
 }
 
+export async function uploadProjectWebRelease(
+    http: FrontendReleaseHttp,
+    projectRef: string,
+    environmentId: string,
+    deploymentId: string,
+    archivePath: string,
+): Promise<ToolResponse> {
+    const endpoint = `/v1/projects/${encodeURIComponent(projectRef)}/environments/${encodeURIComponent(environmentId)}/deployments/web-release?deployment_id=${encodeURIComponent(deploymentId)}`;
+    const archive = await verifiedArchive(archivePath);
+    const successPayload = (value: Record<string, unknown> | null): ToolResponse | null => {
+        const release = value ? releaseRecord(value.release) : null;
+        if (!value || value.ok !== true || value.project_ref !== projectRef
+            || value.environment_id !== environmentId || value.deployment_id !== deploymentId
+            || value.release_id !== archive.sha256 || release?.release_id !== archive.sha256
+            || release.tree_sha256.length !== 64) return null;
+        return toolResponse({
+            project_ref: projectRef,
+            environment_id: environmentId,
+            deployment_id: deploymentId,
+            release_id: archive.sha256,
+            release,
+        });
+    };
+    try {
+        const response = await http.postBinary(endpoint, {
+            stream: archiveStream(archive),
+            byteLength: archive.sizeBytes,
+        }, {
+            contentType: FRONTEND_ARCHIVE_CONTENT_TYPE,
+            contentLength: archive.sizeBytes,
+            contentSha256: archive.sha256,
+            maxJsonBytes: RESPONSE_MAX_BYTES,
+            timeoutMs: UPLOAD_REQUEST_TIMEOUT_MS,
+            responseTimeoutMs: MUTATION_RESPONSE_TIMEOUT_MS,
+        });
+        const value = response.data && typeof response.data === "object" && !Array.isArray(response.data)
+            ? response.data as Record<string, unknown> : null;
+        if (response.ok && response.status === 201) {
+            const success = successPayload(value);
+            if (success) return success;
+        }
+        if (response.transportError || response.responseReadError || response.status >= 500 || response.status === 202) {
+            const readback = await getFrontendRelease(http, projectRef, deploymentId, archive.sha256);
+            if (!readback.isError) {
+                const readbackValue = JSON.parse(readback.content[0]?.text ?? "{}") as Record<string, unknown>;
+                const release = readbackValue.release;
+                if (release && typeof release === "object" && !Array.isArray(release)
+                    && (release as Record<string, unknown>).release_id === archive.sha256) {
+                    return toolResponse({
+                        project_ref: projectRef,
+                        environment_id: environmentId,
+                        deployment_id: deploymentId,
+                        release_id: archive.sha256,
+                        release,
+                    });
+                }
+            }
+        }
+        return releaseFailure(
+            "frontend.upload_project_web_release",
+            response.status >= 400 && response.status < 500 && !response.transportError
+                ? "HTTP_ERROR" : "OUTCOME_UNKNOWN",
+            response.status,
+        );
+    } finally {
+        await archive.handle.close();
+    }
+}
+
 export async function uploadFrontendSource(
     http: FrontendReleaseHttp,
     projectRef: string,

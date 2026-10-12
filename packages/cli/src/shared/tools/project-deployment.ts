@@ -50,7 +50,7 @@ export async function runProjectDeployment(
         ...(args.configuration_write === undefined ? {} : { configuration_write: args.configuration_write }),
         ...(args.expected_plan_sha256 === undefined ? {} : { expected_plan_sha256: args.expected_plan_sha256 }),
         ...(args.approved_migration_digest === undefined ? {} : { approved_migration_digest: args.approved_migration_digest }),
-        ...(args.web === undefined ? {} : { web: args.web }),
+        ...(args.web_release === undefined ? {} : { web_release: args.web_release }),
     };
     if (!Value.Check(scopeSchema, scope) || !Value.Check(ApplicationDeployRequestSchema, request)
         || (request.configuration_id !== undefined && request.configuration_write !== undefined

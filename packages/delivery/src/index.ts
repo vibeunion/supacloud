@@ -18,10 +18,10 @@ export { ApplicationDeployPlanSchema, parseApplicationDeployPlan } from "./appli
 export type { ApplicationDeployPlan } from "./application-deploy-plan";
 export {
   ApplicationBackendReceiptSchema, ApplicationDeployRequestSchema, ApplicationDeployResultSchema,
-  ApplicationDeployWebRequestSchema, parseApplicationDeployResult,
+  ApplicationDeployWebReleaseSchema, parseApplicationDeployResult,
 } from "./application-deploy-operation";
 export type {
-  ApplicationBackendReceipt, ApplicationDeployRequest, ApplicationDeployResult, ApplicationDeployWebRequest,
+  ApplicationBackendReceipt, ApplicationDeployRequest, ApplicationDeployResult, ApplicationDeployWebRelease,
 } from "./application-deploy-operation";
 export {
   ApplicationActivationHistoryPositionSchema, ApplicationActivationHistoryCursorSchema,

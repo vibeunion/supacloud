@@ -95,7 +95,7 @@ const REMOTE_APP_DESCRIPTIONS: Record<string, string> = {
     source_environment_id: "[promote-plan/diff/promote] Source environment ID",
     mutation_id: "[promote-status/promote-reconcile] Stable promotion mutation ID",
     approved_migration_digest: "[promote] Exact reviewed migration execution-plan digest",
-    web: "[release] Immutable staged Web release binding prepared by the deploy profile",
+    web_release: "[release] Immutable staged Web release uploaded by the deploy profile",
     branch_ref: "[preview-plan] Preview branch identity",
     branch_name: "[preview/preview-create] Human-readable preview branch name",
     data_mode: "[preview-plan/preview/preview-create] schema_only or full_clone",
@@ -133,7 +133,7 @@ export interface AppToolArguments {
     source_environment_id?: string;
     mutation_id?: string;
     approved_migration_digest?: string;
-    web?: ApplicationDeployRequest["web"];
+    web_release?: ApplicationDeployRequest["web_release"];
     branch_ref?: string;
     branch_name?: string;
     data_mode?: "schema_only" | "full_clone";
@@ -1279,12 +1279,13 @@ async function runAppRelease(
         mutation_id: activationId,
         ...(configurationId === undefined ? {} : { configuration_id: configurationId }),
         ...(configurationWrite === undefined ? {} : { configuration_write: configurationWrite }),
-        ...(request.web === undefined ? {} : { web: request.web }),
+        ...(request.web_release === undefined ? {} : { web_release: request.web_release }),
     };
     validateToolArguments(APPLICATION_TOOL_SCHEMA, deployArgs);
-    const deployed = options.projectDeployment
-        ? await options.projectDeployment(deployArgs)
-        : await delegate(deployArgs);
+    if (!options.projectDeployment) {
+        throw new Error("Application release requires the unified project deployment handler");
+    }
+    const deployed = await options.projectDeployment(deployArgs);
     const deployReceipt = resultObject(deployed);
     const resolvedConfigurationId = typeof deployReceipt?.configuration_id === "string"
         ? deployReceipt.configuration_id : undefined;

@@ -1,7 +1,8 @@
 import { Elysia, status, t } from "elysia";
+import { FRONTEND_ARCHIVE_CONTENT_TYPE } from "@supacloud/delivery/frontend-archive";
 import {
   ApplicationConfigurationIdSchema, ApplicationConfigurationWriteSchema, ApplicationDeployRequestSchema,
-  ApplicationDeployWebRequestSchema, ApplicationIdSchema, ApplicationReleaseIdSchema,
+  ApplicationIdSchema, ApplicationReleaseIdSchema,
   parseApplicationDeployResult,
 } from "@supacloud/delivery";
 import { Value } from "typebox/value";
@@ -10,6 +11,12 @@ import {
   ApplicationDeploymentOrchestrationError, type ApplicationDeploymentOrchestrator,
   type ApplicationDeploymentStatus,
 } from "../services/application-deployment-orchestrator";
+import {
+  FRONTEND_RELEASE_ARCHIVE_MAX_BYTES,
+  FrontendReleaseError,
+  frontendReleaseService,
+} from "../services/frontend-release.service";
+import type { FrontendReleaseService } from "../services/frontend-release.service";
 
 const projectRef = t.String({ pattern: "^[A-Za-z0-9_-]{1,20}$" });
 const environmentId = t.String({ pattern: "^[A-Za-z0-9_-]{1,64}$" });
@@ -25,8 +32,65 @@ const requestBody = t.Object({
   configuration_write: t.Optional(ApplicationConfigurationWriteSchema),
   expected_plan_sha256: t.Optional(sha256),
   approved_migration_digest: t.Optional(sha256),
-  web: t.Optional(ApplicationDeployWebRequestSchema),
+  web_release: t.Optional(t.Object({
+    deployment_id: t.String({ pattern: "^[A-Za-z0-9_-]{1,128}$" }),
+    release_id: sha256,
+  }, { additionalProperties: false })),
 }, { additionalProperties: false });
+
+const uploadChunkBytes = 64 * 1024;
+
+function uploadLength(request: Request): number {
+  const value = request.headers.get("content-length");
+  if (value === null || !/^[1-9]\d*$/u.test(value)) {
+    throw new FrontendReleaseError(
+      "FRONTEND_RELEASE_CONTENT_LENGTH_INVALID", 411, "Frontend archive requires Content-Length",
+    );
+  }
+  const length = Number(value);
+  if (!Number.isSafeInteger(length) || length > FRONTEND_RELEASE_ARCHIVE_MAX_BYTES) {
+    throw new FrontendReleaseError(
+      "FRONTEND_RELEASE_ARCHIVE_TOO_LARGE", 413, "Frontend archive is too large",
+    );
+  }
+  return length;
+}
+
+async function* uploadChunks(request: Request, expectedLength: number): AsyncGenerator<Uint8Array> {
+  const reader = request.body?.getReader();
+  if (!reader) throw new FrontendReleaseError("FRONTEND_RELEASE_ARCHIVE_INVALID", 400, "Frontend archive is empty");
+  let received = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      received += chunk.value.byteLength;
+      if (received > expectedLength) {
+        throw new FrontendReleaseError(
+          "FRONTEND_RELEASE_CONTENT_LENGTH_MISMATCH", 400, "Frontend archive length does not match Content-Length",
+        );
+      }
+      for (let offset = 0; offset < chunk.value.byteLength; offset += uploadChunkBytes) {
+        yield chunk.value.subarray(offset, offset + uploadChunkBytes);
+      }
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
+  }
+  if (received !== expectedLength) {
+    throw new FrontendReleaseError(
+      "FRONTEND_RELEASE_CONTENT_LENGTH_MISMATCH", 400, "Frontend archive length does not match Content-Length",
+    );
+  }
+}
+
+function uploadError(error: unknown) {
+  if (error instanceof FrontendReleaseError) {
+    return status(error.statusCode, { code: error.code, error: error.message });
+  }
+  return status(503, { code: "FRONTEND_RELEASE_OUTCOME_UNKNOWN", error: "Frontend release upload outcome is unknown" });
+}
 
 function publicStatus(state: ApplicationDeploymentStatus | null) {
   if (state === null) return null;
@@ -59,6 +123,7 @@ export function createProjectDeploymentRoutes(
     authorize?: typeof requireProjectOrAdminAuth;
     principal?: typeof getVerifiedRequestPrincipal;
   } = {},
+  frontend: Pick<FrontendReleaseService, "prepareReleaseUpload" | "createRelease"> = frontendReleaseService,
 ) {
   const authorize = auth.authorize ?? requireProjectOrAdminAuth;
   const principalFor = auth.principal ?? getVerifiedRequestPrincipal;
@@ -76,6 +141,44 @@ export function createProjectDeploymentRoutes(
       const denied = await authorize(request, params.ref);
       if (denied) return status(denied.status, denied.body);
     })
+    .post("/web-release", {
+      params: t.Object({ ref: projectRef, environmentId }),
+      query: t.Object({ deployment_id: t.String({ pattern: "^[A-Za-z0-9_-]{1,128}$" }) }),
+      parse: "none",
+      detail: { tags: ["deployments"], summary: "Upload one immutable Web release for a project deployment" },
+    }, async ({ params, query, request, set }) => {
+      try {
+        if (request.headers.get("content-type")?.trim().toLowerCase() !== FRONTEND_ARCHIVE_CONTENT_TYPE) {
+          return status(415, {
+            code: "FRONTEND_RELEASE_CONTENT_TYPE_INVALID",
+            error: `Frontend archive requires ${FRONTEND_ARCHIVE_CONTENT_TYPE}`,
+          });
+        }
+        const expectedLength = uploadLength(request);
+        const expectedSha256 = request.headers.get("x-supacloud-content-sha256")?.trim() || "";
+        const upload = await frontend.prepareReleaseUpload(params.ref, query.deployment_id, expectedLength);
+        try {
+          for await (const chunk of uploadChunks(request, expectedLength)) {
+            await upload.write(chunk);
+          }
+          const archive = await upload.finish(expectedSha256);
+          const release = await frontend.createRelease(params.ref, query.deployment_id, archive);
+          set.status = 201;
+          return {
+            ok: true,
+            project_ref: params.ref,
+            environment_id: params.environmentId,
+            deployment_id: query.deployment_id,
+            release_id: release.release_id,
+            release,
+          };
+        } finally {
+          await upload.abort();
+        }
+      } catch (error: unknown) {
+        return uploadError(error);
+      }
+    })
     .post("", {
       params: t.Object({ ref: projectRef, environmentId }),
       body: requestBody,
@@ -92,7 +195,7 @@ export function createProjectDeploymentRoutes(
         ...(body.approved_migration_digest === undefined ? {} : {
           approved_migration_digest: body.approved_migration_digest,
         }),
-        ...(body.web === undefined ? {} : { web: body.web }),
+        ...(body.web_release === undefined ? {} : { web_release: body.web_release }),
       };
       if (!Value.Check(ApplicationDeployRequestSchema, requestValue)) {
         return status(400, { code: "PROJECT_DEPLOYMENT_REQUEST_INVALID", error: "Invalid deployment request" });

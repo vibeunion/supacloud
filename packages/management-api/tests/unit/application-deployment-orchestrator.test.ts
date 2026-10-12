@@ -15,7 +15,6 @@ import { stableSha256 } from "../../src/utils/stable-json";
 const principal = { type: "project" as const, id: "project:demo" };
 const configurationId = "11234567-89ab-4def-8123-456789abcdef";
 const mutationId = "21234567-89ab-4def-8123-456789abcdef";
-const webMutationId = "31234567-89ab-4def-8123-456789abcdef";
 const activationId = "41234567-89ab-4def-8123-456789abcdef";
 const webReleaseId = "c".repeat(64);
 const manifestSha256 = "b".repeat(64);
@@ -184,6 +183,14 @@ function fixture(options: {
         calls.push("web-release");
         return structuredClone(frontendRelease);
       },
+      activeReleaseSnapshot: async () => ({
+        project_ref: "demo",
+        deployment_id: "web",
+        active_release_id: null,
+        active_activation_id: null,
+        releases: [],
+        next_cursor: null,
+      }),
       activateRelease: async input => {
         calls.push("web-activation");
         return {
@@ -232,12 +239,9 @@ function fixture(options: {
       mutation_id: mutationId,
       release_id: releaseId,
       configuration_id: configurationId,
-      web: {
+      web_release: {
         deployment_id: "web",
         release_id: webReleaseId,
-        expected_active_release_id: "absent",
-        expected_activation_id: "absent",
-        mutation_id: webMutationId,
       },
     },
   };

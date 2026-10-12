@@ -10,12 +10,10 @@ const closed = { additionalProperties: false } as const;
 const sha256 = ApplicationReleaseIdSchema;
 const nullableActivation = Type.Union([ApplicationActivationIdSchema, Type.Null()]);
 
-export const ApplicationDeployWebRequestSchema = Type.Object({
+/** Server resolves the current Web CAS when this release is bound to a deployment. */
+export const ApplicationDeployWebReleaseSchema = Type.Object({
   deployment_id: Type.String({ pattern: "^[A-Za-z0-9_-]{1,128}$" }),
   release_id: sha256,
-  expected_active_release_id: Type.String({ minLength: 1 }),
-  expected_activation_id: Type.String({ minLength: 1 }),
-  mutation_id: ApplicationActivationIdSchema,
 }, closed);
 
 export const ApplicationDeployRequestSchema = Type.Object({
@@ -25,7 +23,7 @@ export const ApplicationDeployRequestSchema = Type.Object({
   configuration_write: Type.Optional(ApplicationConfigurationWriteSchema),
   expected_plan_sha256: Type.Optional(sha256),
   approved_migration_digest: Type.Optional(sha256),
-  web: Type.Optional(ApplicationDeployWebRequestSchema),
+  web_release: Type.Optional(ApplicationDeployWebReleaseSchema),
 }, closed);
 
 export const ApplicationBackendReceiptSchema = Type.Object({
@@ -68,7 +66,7 @@ export const ApplicationDeployResultSchema = Type.Object({
   }, closed)),
 }, closed);
 
-export type ApplicationDeployWebRequest = Static<typeof ApplicationDeployWebRequestSchema>;
+export type ApplicationDeployWebRelease = Static<typeof ApplicationDeployWebReleaseSchema>;
 export type ApplicationDeployRequest = Static<typeof ApplicationDeployRequestSchema>;
 export type ApplicationBackendReceipt = Static<typeof ApplicationBackendReceiptSchema>;
 export type ApplicationDeployResult = Static<typeof ApplicationDeployResultSchema>;
@@ -100,9 +98,9 @@ export function parseApplicationDeployResult(value: unknown, expected?: {
       || (request.configuration_write !== undefined
         && value.configuration_id !== request.configuration_write.configuration_id)
       || (request.expected_plan_sha256 !== undefined && value.plan_sha256 !== request.expected_plan_sha256)
-      || Boolean(value.web) !== Boolean(request.web)
-      || (request.web !== undefined && (value.web?.deployment_id !== request.web.deployment_id
-        || value.web.release_id !== request.web.release_id))) {
+      || Boolean(value.web) !== Boolean(request.web_release)
+      || (request.web_release !== undefined && (value.web?.deployment_id !== request.web_release.deployment_id
+        || value.web.release_id !== request.web_release.release_id))) {
       throw new Error("Application deploy receipt does not match request");
     }
   }

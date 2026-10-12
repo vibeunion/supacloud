@@ -176,19 +176,20 @@ test("app release composes build, upload, configure and one deployment", async (
                         }) }],
                     };
                 }
-                return {
-                    content: [{ type: "text" as const, text: JSON.stringify({
-                        ok: true, schema: "supacloud.cli.release-control.v1",
-                        operation: "applications.deploy_application",
-                        project_ref: identity.ref, application_id: identity.id,
-                        environment_id: identity.environment_id, release_id: releaseId,
-                        configuration_id: configurationId, mutation_id: args.mutation_id,
-                        activation_id: identity.activation_id,
-                        expected_activation_id: null, plan_sha256: "d".repeat(64),
-                        action: "activate", replayed: false, execution_performed: true,
-                    }) }],
-                };
+                throw new Error("Legacy application deploy must not be used");
             },
+            projectDeployment: async args => ({
+                content: [{ type: "text" as const, text: JSON.stringify({
+                    ok: true, schema: "supacloud.cli.release-control.v1",
+                    operation: "applications.project_deploy",
+                    project_ref: identity.ref, application_id: identity.id,
+                    environment_id: identity.environment_id, release_id: releaseId,
+                    configuration_id: configurationId, deployment_id: args.mutation_id,
+                    mutation_id: args.mutation_id, activation_id: identity.activation_id,
+                    expected_activation_id: null, plan_sha256: "d".repeat(64),
+                    action: "activate", replayed: false, execution_performed: true,
+                }) }],
+            }),
         });
         const output = JSON.parse(result.content[0]!.text);
         expect(result.isError).toBe(false);
@@ -198,17 +199,12 @@ test("app release composes build, upload, configure and one deployment", async (
             execution_performed: true,
         });
         expect(calls.map(call => call.action)).toEqual([
-            "upload_release", "deploy_application",
+            "upload_release",
         ]);
         expect(calls[0]).toMatchObject({
             ref: identity.ref, id: identity.id,
             manifest_path: join(root, "artifacts", "delivery", "delivery.manifest.json"),
         });
-        expect(calls[1]).toMatchObject({
-            ref: identity.ref, id: identity.id, environment_id: identity.environment_id,
-            release_id: releaseId, configuration_id: configurationId, mutation_id: expect.any(String),
-        });
-        expect(calls[1].configuration_write).toMatchObject({ configuration_id: configurationId });
     } finally { await rm(root, { recursive: true, force: true }); }
 }, 30_000);
 
@@ -284,24 +280,25 @@ test("app release lets the platform reuse the current configuration head", async
                         ok: true, release: { release_id: releaseId },
                     }) }] };
                 }
-                return { content: [{ type: "text" as const, text: JSON.stringify({
-                    ok: true, operation: "applications.deploy_application",
+                throw new Error("Legacy application deploy must not be used");
+            },
+            projectDeployment: async args => ({
+                content: [{ type: "text" as const, text: JSON.stringify({
+                    ok: true, operation: "applications.project_deploy",
                     project_ref: identity.ref, application_id: identity.id,
                     environment_id: identity.environment_id, release_id: releaseId,
-                    configuration_id: configurationId, mutation_id: args.mutation_id,
-                    activation_id: identity.activation_id, expected_activation_id: null,
-                    plan_sha256: "d".repeat(64), action: "activate",
+                    configuration_id: configurationId, deployment_id: args.mutation_id,
+                    mutation_id: args.mutation_id, activation_id: identity.activation_id,
+                    expected_activation_id: null, plan_sha256: "d".repeat(64), action: "activate",
                     replayed: false, execution_performed: true,
-                }) }] };
-            },
+                }) }] }),
         });
         const output = JSON.parse(result.content[0]!.text);
         expect(result.isError).toBe(false);
         expect(output).toMatchObject({
             ok: true, configuration_id: configurationId, release_id: releaseId,
         });
-        expect(calls[1]).not.toHaveProperty("configuration_id");
-        expect(calls[1]).not.toHaveProperty("configuration_write");
+        expect(calls).toHaveLength(1);
     } finally { await rm(root, { recursive: true, force: true }); }
 }, 30_000);
 
@@ -321,25 +318,26 @@ test("app release can reuse a built manifest and configuration revision", async 
                         ok: true, release: { release_id: identity.release_id },
                     }) }] };
                 }
-                return { content: [{ type: "text" as const, text: JSON.stringify({
+                throw new Error("Legacy application deploy must not be used");
+            },
+            projectDeployment: async args => ({
+                content: [{ type: "text" as const, text: JSON.stringify({
                     ok: true, schema: "supacloud.cli.release-control.v1",
-                    operation: "applications.deploy_application",
+                    operation: "applications.project_deploy",
                     project_ref: identity.ref, application_id: identity.id,
                     environment_id: identity.environment_id, release_id: identity.release_id,
-                    configuration_id: identity.configuration_id,
-                    expected_activation_id: identity.expected_activation_id,
-                    plan_sha256: "d".repeat(64), action: "no-op",
-                    replayed: false, execution_performed: false,
-                    activation_id: identity.expected_activation_id,
-                }) }] };
-            },
+                    configuration_id: identity.configuration_id, deployment_id: args.mutation_id,
+                    mutation_id: args.mutation_id, expected_activation_id: identity.expected_activation_id,
+                    plan_sha256: "d".repeat(64), action: "no-op", replayed: false,
+                    execution_performed: false, activation_id: identity.expected_activation_id,
+                }) }] }),
         });
         const output = JSON.parse(result.content[0]!.text);
         expect(output).toMatchObject({
             ok: true, no_op: true, execution_performed: false,
             release_id: identity.release_id, configuration_id: identity.configuration_id,
         });
-        expect(calls.map(call => call.action)).toEqual(["upload_release", "deploy_application"]);
+        expect(calls.map(call => call.action)).toEqual(["upload_release"]);
         expect(calls[0]).toMatchObject({
             manifest_path: join(root, "existing", "delivery.manifest.json"),
         });
@@ -371,12 +369,15 @@ test("app release stops after an uncertain deployment and preserves phase identi
                         ok: true, release: { release_id: identity.release_id },
                     }) }] };
                 }
+                throw new Error("Legacy application deploy must not be used");
+            },
+            projectDeployment: async args => {
+                requestedMutationId = args.mutation_id;
                 return { isError: true, content: [{ type: "text" as const, text: JSON.stringify({
                     ok: false, schema: "supacloud.cli.release-control.v1",
-                    operation: "applications.deploy_application",
-                    error: { code: "OUTCOME_UNKNOWN" },
+                    operation: "applications.project_deploy", error: { code: "OUTCOME_UNKNOWN" },
                     release_id: identity.release_id, configuration_id: identity.configuration_id,
-                    mutation_id: requestedMutationId,
+                    deployment_id: requestedMutationId, mutation_id: requestedMutationId,
                     expected_activation_id: identity.expected_activation_id,
                 }) }] };
             },
@@ -390,7 +391,7 @@ test("app release stops after an uncertain deployment and preserves phase identi
             expected_activation_id: identity.expected_activation_id,
         });
         expect(output.phase_result.mutation_id).toBe(requestedMutationId);
-        expect(calls).toEqual(["upload_release", "deploy_application"]);
+        expect(calls).toEqual(["upload_release"]);
     } finally { await rm(root, { recursive: true, force: true }); }
 }, 30_000);
 
