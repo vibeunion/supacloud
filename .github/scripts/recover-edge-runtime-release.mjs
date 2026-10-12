@@ -18,10 +18,27 @@ import { pathToFileURL } from 'node:url';
  */
 const execute = (command, args) => execFileSync(command, args, { encoding: 'utf8' }).trim();
 
+// This runtime has no workspace package dependencies. Include its entire tree
+// and the root configuration/manifest generator that can affect its artifacts.
+export const EDGE_RUNTIME_BUILD_INPUTS = [
+  'packages/edge-runtime',
+  'package.json',
+  'bun.lock',
+  'bunfig.toml',
+  '.npmrc',
+  '.env',
+  '.env.local',
+  '.env.production',
+  'tsconfig.json',
+  'tsconfig.base.json',
+  'scripts/generate_release_manifest.ts',
+  'packages/management-api/src/release-manifest.ts',
+];
+
 /**
  * @param {RecoveryInput} input
  * @param {(command: string, args: readonly string[]) => string} [run]
- * @returns {{ tag: string, sourceCommit: string }}
+ * @returns {{ tag: string, sourceCommit: string, tagCommit: string }}
  */
 export function resolveEdgeRuntimeRecovery(input, run = execute) {
   if (input.repository !== 'vibeunion/supacloud'
@@ -35,10 +52,17 @@ export function resolveEdgeRuntimeRecovery(input, run = execute) {
   }
   const sourceCommit = run('git', ['rev-parse', '--verify', `refs/tags/${input.tag}^{commit}`]);
   if (!/^[0-9a-f]{40}$/.test(sourceCommit)) throw new Error('Invalid release commit');
-  if (sourceCommit !== input.workflowCommit) {
-    throw new Error('Historical recovery requires a provenance protocol upgrade: the tag commit differs from the signing workflow commit');
+  if (typeof input.workflowCommit !== 'string' || !/^[0-9a-f]{40}$/.test(input.workflowCommit)
+    || run('git', ['rev-parse', 'HEAD']) !== input.workflowCommit) {
+    throw new Error('Recovery checkout must match the signing workflow commit');
   }
   run('git', ['merge-base', '--is-ancestor', sourceCommit, 'HEAD']);
+  const changedInputs = run('git', [
+    'diff', '--name-only', sourceCommit, input.workflowCommit, '--', ...EDGE_RUNTIME_BUILD_INPUTS,
+  ]);
+  if (changedInputs !== '') {
+    throw new Error(`Recovery build inputs differ from the tagged release: ${changedInputs}`);
+  }
   const manifest = JSON.parse(run('git', ['show', `${sourceCommit}:packages/edge-runtime/package.json`]));
   if (`edge-runtime-v${manifest.version}` !== input.tag) {
     throw new Error('Release tag does not match the tagged package version');
@@ -51,7 +75,7 @@ export function resolveEdgeRuntimeRecovery(input, run = execute) {
     || !Array.isArray(release.assets) || release.assets.length !== 0) {
     throw new Error('Recovery requires an existing published stable release with no assets');
   }
-  return { tag: input.tag, sourceCommit };
+  return { tag: input.tag, sourceCommit: input.workflowCommit, tagCommit: sourceCommit };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -62,5 +86,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     tag: process.env['RELEASE_TAG'],
     workflowCommit: process.env['GITHUB_SHA'],
   });
-  appendFileSync(process.env['GITHUB_OUTPUT'] ?? '', `tag=${result.tag}\nsource_commit=${result.sourceCommit}\n`);
+  appendFileSync(process.env['GITHUB_OUTPUT'] ?? '', `tag=${result.tag}\nsource_commit=${result.sourceCommit}\ntag_commit=${result.tagCommit}\n`);
 }
