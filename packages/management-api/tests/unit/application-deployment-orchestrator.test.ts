@@ -51,7 +51,11 @@ const plan: ApplicationDeployPlan = {
   execution_performed: false,
 };
 
-function fixture(options: { migrationFails?: boolean; currentActivation?: boolean } = {}) {
+function fixture(options: {
+  migrationFails?: boolean;
+  currentActivation?: boolean;
+  migrationAlreadyApplied?: boolean;
+} = {}) {
   const calls: string[] = [];
   const phases: string[] = [];
   const lease: MutationLeaseInput = {
@@ -124,6 +128,9 @@ function fixture(options: { migrationFails?: boolean; currentActivation?: boolea
     }) },
     deployPlans: { read: async () => ({
       ...structuredClone(plan),
+      ...(options.migrationAlreadyApplied ? {
+        migrations: { ...plan.migrations, project_migrations_applied: true },
+      } : {}),
       ...(options.currentActivation ? {
         current: { activation_id: activationId, release_id: "9".repeat(64), configuration_id: configurationId },
         expected_activation_id: activationId,
@@ -131,18 +138,21 @@ function fixture(options: { migrationFails?: boolean; currentActivation?: boolea
       } : {}),
     }) },
     migrations: {
-      readExecutionPlan: async () => ({
-        schema: "supacloud.application-migration-execution-plan.v1" as const,
-        project_ref: "demo", application_id: "reviews", release_id: releaseId,
-        manifest_sha256: manifestSha256, ledger_digest: plan.migrations.ledger_digest,
-        migrations: [{
-          version: "1", name: "create_reviews", raw_sha256: "e".repeat(64),
-          destructive: [], unsupported: [], non_transactional: [],
-        }],
-        ledger_compatible: true, operator_provisioning_required: false,
-        backup_required: true, destructive_confirmation_required: false,
-        execution_performed: false as const,
-      }),
+      readExecutionPlan: async () => {
+        calls.push("migration-plan");
+        return {
+          schema: "supacloud.application-migration-execution-plan.v1" as const,
+          project_ref: "demo", application_id: "reviews", release_id: releaseId,
+          manifest_sha256: manifestSha256, ledger_digest: plan.migrations.ledger_digest,
+          migrations: [{
+            version: "1", name: "create_reviews", raw_sha256: "e".repeat(64),
+            destructive: [], unsupported: [], non_transactional: [],
+          }],
+          ledger_compatible: true, operator_provisioning_required: false,
+          backup_required: true, destructive_confirmation_required: false,
+          execution_performed: false as const,
+        };
+      },
       apply: async () => {
         calls.push("migration");
         if (options.migrationFails) throw new Error("provider-timeout");
@@ -232,6 +242,17 @@ function fixture(options: { migrationFails?: boolean; currentActivation?: boolea
     },
   };
 }
+
+test("skips migration execution planning when the server plan proves a code-only release", async () => {
+  const fixtureValue = fixture({ migrationAlreadyApplied: true });
+  const result = await fixtureValue.orchestrator.execute({
+    projectRef: "demo", applicationId: "reviews", environmentId: "test", principal,
+    request: fixtureValue.request,
+  });
+  expect(result.backend_receipt.applied_versions).toEqual([]);
+  expect(fixtureValue.calls).not.toContain("migration");
+  expect(fixtureValue.calls).not.toContain("migration-plan");
+});
 
 test("runs migration once, persists ordered checkpoints, and binds Web after the backend receipt", async () => {
   const fixtureValue = fixture();

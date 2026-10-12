@@ -197,6 +197,13 @@ member, and returns per-member attestations before publication. The existing
 project release authority remains the single Function publication point.
 No CLI option, customer scope file or phase timing interface is added.
 
+Application deployment planning now overlaps independent read-only evidence:
+active authority with migration inspection, route verification with readiness,
+and migration/journal read-back. When the verified plan proves that migrations
+are already applied and no operator provisioning is required, deployment skips
+the redundant migration execution-plan read. Migration writes, Function
+activation, Web activation and final CAS/read-back remain ordered.
+
 Management API requires the batch capability advertised by Edge Runtime; upgrade
 the two services together. An older Runtime is rejected, not silently used through
 the sequential preparation path. Worker LRU limits still apply, so readiness

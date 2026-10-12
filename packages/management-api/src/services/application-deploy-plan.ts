@@ -94,8 +94,10 @@ export class ApplicationDeployPlans {
       }
       const configuration = await this.configurations.resolve(scope, configurationId, release);
       const readActive = () => this.active.readForApplication(projectRef, applicationId, environmentId);
-      const current = await readActive();
-      const migration = await this.migrations.inspect(projectRef, applicationId, releaseId);
+      const [current, migration] = await Promise.all([
+        readActive(),
+        this.migrations.inspect(projectRef, applicationId, releaseId),
+      ]);
       if (migration.schema !== "supacloud.application-migrations.v1" || migration.project_ref !== projectRef
         || migration.application_id !== applicationId || migration.release_id !== releaseId
         || migration.manifest_sha256 !== release.manifest_sha256 || migration.execution_performed !== false
@@ -118,8 +120,11 @@ export class ApplicationDeployPlans {
           || stableStringify(activeConfiguration.hosts) !== stableStringify(current.hosts)) {
           throw new Error("Configuration drift");
         }
-        await this.verifyRoute(current);
-        const report = parseApplicationReadinessReport(await this.readiness.inspect(current.runtime));
+        const [_, readinessPayload] = await Promise.all([
+          this.verifyRoute(current),
+          this.readiness.inspect(current.runtime),
+        ]);
+        const report = parseApplicationReadinessReport(readinessPayload);
         const runtime = applicationRuntimePlan(current.runtime);
         const inventory = (targets: Array<{ target: string; kind: string; unit: string }>) =>
           targets.map(target => ({ target: target.target, kind: target.kind, unit: target.unit }))
@@ -157,11 +162,16 @@ export class ApplicationDeployPlans {
         },
         compatibility: "not-proven", execution_performed: false,
       };
-      if (stableStringify(await this.migrations.inspect(projectRef, applicationId, releaseId)) !== stableStringify(migration)) {
+      const [readBackMigration, readBackJournal] = await Promise.all([
+        this.migrations.inspect(projectRef, applicationId, releaseId),
+        current ? this.mutations.read(projectRef, current.runtime.activationId) : Promise.resolve(null),
+      ]);
+      if (stableStringify(readBackMigration) !== stableStringify(migration)) {
         throw new ApplicationDeployPlanError("APPLICATION_DEPLOY_PLAN_CHANGED", 409);
       }
-      if (current && stableStringify(await this.mutations.read(projectRef, current.runtime.activationId))
-        !== stableStringify(journal)) throw new ApplicationDeployPlanError("APPLICATION_DEPLOY_PLAN_CHANGED", 409);
+      if (current && stableStringify(readBackJournal) !== stableStringify(journal)) {
+        throw new ApplicationDeployPlanError("APPLICATION_DEPLOY_PLAN_CHANGED", 409);
+      }
       await this.assertIdle(scope);
       if (stableStringify(await readActive()) !== stableStringify(current)) {
         throw new ApplicationDeployPlanError("APPLICATION_DEPLOY_PLAN_CHANGED", 409);
