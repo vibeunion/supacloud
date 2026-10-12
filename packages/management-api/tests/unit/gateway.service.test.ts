@@ -305,6 +305,34 @@ describe("GatewayService provider selection", () => {
             config.edgeFunctionsCorsMode = originalCorsMode;
         }
     });
+
+    test("function CORS reconciliation uses wildcard CORS in auto mode", () => {
+        const originalCorsMode = config.edgeFunctionsCorsMode;
+        config.edgeFunctionsCorsMode = "auto";
+        const proxy = {
+            handler: "reverse_proxy",
+            upstreams: [{ dial: "127.0.0.1:9090" }],
+            headers: { response: { set: { "Access-Control-Allow-Origin": ["https://function.example.com"] } } },
+        };
+        try {
+            const route: CaddyRoute = {
+                "@id": "route-project-testref-functions",
+                handle: [proxy],
+            };
+            setRouteCors(route, ["https://app.example.com"]);
+            const cors = findCorsSubroute(route);
+            const preflight = cors?.routes?.find((item: any) =>
+                item.match?.some((matcher: any) => matcher.method?.includes("OPTIONS")),
+            );
+            const headers = preflight?.handle?.find((item: any) => item.handler === "headers");
+            expect(headers?.response?.set?.["Access-Control-Allow-Origin"]).toEqual(["*"]);
+            expect(headers?.response?.set?.["Access-Control-Allow-Credentials"]).toBeUndefined();
+            expect(proxy.headers.response.delete).toContain("Access-Control-Allow-Origin");
+        } finally {
+            config.edgeFunctionsCorsMode = originalCorsMode;
+        }
+    });
+
     test("defaults to the Caddy gateway provider", () => {
         expect(config.gatewayProvider).toBe("caddy");
         expect(gatewayService.name).toBe("caddy");
@@ -877,10 +905,13 @@ describe("CaddyGatewayProvider", () => {
         expect(exactMatcher?.header?.Origin).toContain("https://site.example.com");
         expect(exactMatcher?.header?.Origin).toContain("https://www.example.com");
         expect(exactMatcher?.header?.Origin).toContain("https://api.example.com");
-        // The default auto mode renders the same exact-origin CORS policy for
-        // Functions as for the other tenant API routes.
+        // The default auto mode matches Supabase's wildcard Function CORS
+        // behavior while keeping the other tenant API routes origin-scoped.
         const functionsRoute = routes.find((item: any) => item["@id"] === "route-project-proj123-functions");
-        expect(findCorsSubroute(functionsRoute)).toBeDefined();
+        const functionsCors = findCorsSubroute(functionsRoute);
+        const functionsHeaders = functionsCors?.routes?.[0]?.handle?.find((handler: any) => handler.handler === "headers");
+        expect(functionsHeaders?.response?.set?.["Access-Control-Allow-Origin"]).toEqual(["*"]);
+        expect(functionsHeaders?.response?.set?.["Access-Control-Allow-Credentials"]).toBeUndefined();
 
         restore();
     });
@@ -946,11 +977,12 @@ describe("CaddyGatewayProvider", () => {
         const exactMatcher = corsSubroute?.routes?.[0]?.match?.find((matcher: any) => matcher.header?.Origin);
         expect(exactMatcher?.header?.Origin).toContain("https://app.example.com");
         expect(exactMatcher?.header?.Origin).toContain("https://api.example.com");
-        // Frontend binding updates the Functions route's derived origins too.
+        // Frontend binding does not narrow wildcard Function CORS.
         const functionsRoute = routes.find((item: any) => item["@id"] === "route-project-proj123-functions");
         const functionsCors = findCorsSubroute(functionsRoute);
-        const functionsMatcher = functionsCors?.routes?.[0]?.match?.find((matcher) => matcher.header?.Origin);
-        expect(functionsMatcher?.header?.Origin).toContain("https://app.example.com");
+        const functionsHeaders = functionsCors?.routes?.[0]?.handle?.find((handler: any) => handler.handler === "headers");
+        expect(functionsHeaders?.response?.set?.["Access-Control-Allow-Origin"]).toEqual(["*"]);
+        expect(functionsHeaders?.response?.set?.["Access-Control-Allow-Credentials"]).toBeUndefined();
 
         restore();
     });

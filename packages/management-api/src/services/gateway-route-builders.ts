@@ -511,7 +511,10 @@ export function setRouteCors(route: CaddyRoute, origins: string[]): void {
                 headers["response"] = response;
                 proxy["headers"] = headers;
             }
-            const corsSubroute = makeCorsSubroute(origins);
+            // Match Supabase's browser-facing Function default: any origin
+            // may invoke the route, while JWT and application authorization
+            // remain enforced by the upstream.
+            const corsSubroute = makeCorsSubroute(["*"]);
             route["handle"] = corsSubroute
                 ? [corsSubroute, ...handle.filter((handler) =>
                     !isFunctionCorsErrorFallback(handler) && !isCorsHeaderHandler(handler) && !isCorsSubroute(handler))]
