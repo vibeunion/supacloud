@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
+import type { ApplicationDeployRequest } from "@supacloud/delivery";
 import { ApplicationActivationHistorySchema, parseApplicationActivationHistory } from "@supacloud/delivery";
 import { parseApplicationDeployPlan } from "@supacloud/delivery";
 import { parseApplicationReleaseTransferPlan, parseApplicationReleaseTransferResult, parseApplicationPromotionPlan } from "@supacloud/delivery";
@@ -93,6 +94,7 @@ const REMOTE_APP_DESCRIPTIONS: Record<string, string> = {
     source_environment_id: "[promote-plan/diff/promote] Source environment ID",
     mutation_id: "[promote-status/promote-reconcile] Stable promotion mutation ID",
     approved_migration_digest: "[promote] Exact reviewed migration execution-plan digest",
+    web: "[release] Immutable staged Web release binding prepared by the deploy profile",
     branch_ref: "[preview-plan] Preview branch identity",
     branch_name: "[preview/preview-create] Human-readable preview branch name",
     data_mode: "[preview-plan/preview/preview-create] schema_only or full_clone",
@@ -130,6 +132,7 @@ export interface AppToolArguments {
     source_environment_id?: string;
     mutation_id?: string;
     approved_migration_digest?: string;
+    web?: ApplicationDeployRequest["web"];
     branch_ref?: string;
     branch_name?: string;
     data_mode?: "schema_only" | "full_clone";
@@ -1197,9 +1200,6 @@ async function runAppRelease(
     if (request.configuration_path !== undefined && request.configuration_id !== undefined) {
         throw new Error("app release accepts either --configuration_path or --configuration_id, not both");
     }
-    if (request.configuration_path === undefined && request.configuration_id === undefined) {
-        throw new Error("app release requires --configuration_path or --configuration_id");
-    }
     if (request.activation_id !== undefined || request.expected_activation_id !== undefined) {
         throw new Error("app release generates one activation identity; use app deploy for an exact retry");
     }
@@ -1258,24 +1258,39 @@ async function runAppRelease(
             configurationId = (configurationWrite as { configuration_id: string }).configuration_id;
         } catch {
             return releasePhaseFailure("configure", releaseControlFailure(
-                "applications.release_application", "INVALID_RESPONSE", null,
+                "applications.deploy_application", "INVALID_RESPONSE", null,
                 { project_ref: ref, application_id: id, environment_id: environmentId },
             ), completed);
         }
         completed.configure = { delegated: true, configuration_id: configurationId };
     } else {
-        completed.configure = { delegated: true, configuration_id: configurationId };
+        completed.configure = {
+            delegated: false,
+            resolved_by: "platform",
+            ...(configurationId === undefined ? {} : { configuration_id: configurationId }),
+        };
     }
 
     const deployArgs = {
-        action: "release_application",
-        ref, id, environment_id: environmentId, release_id: releaseId, configuration_id: configurationId,
-        activation_id: activationId,
+        action: "deploy_application",
+        ref, id, environment_id: environmentId, release_id: releaseId,
+        mutation_id: activationId,
+        ...(configurationId === undefined ? {} : { configuration_id: configurationId }),
         ...(configurationWrite === undefined ? {} : { configuration_write: configurationWrite }),
+        ...(request.web === undefined ? {} : { web: request.web }),
     };
     validateToolArguments(APPLICATION_TOOL_SCHEMA, deployArgs);
     const deployed = await delegate(deployArgs);
     const deployReceipt = resultObject(deployed);
+    const resolvedConfigurationId = typeof deployReceipt?.configuration_id === "string"
+        ? deployReceipt.configuration_id : undefined;
+    if (resolvedConfigurationId !== undefined) {
+        configurationId = resolvedConfigurationId;
+        const configure = completed.configure;
+        completed.configure = configure && typeof configure === "object" && !Array.isArray(configure)
+            ? { ...configure, configuration_id: resolvedConfigurationId }
+            : { delegated: false, resolved_by: "platform", configuration_id: resolvedConfigurationId };
+    }
     if (deployed.isError || !deployReceipt?.ok) {
         return releasePhaseFailure("deploy", deployed, completed);
     }
@@ -1288,13 +1303,14 @@ async function runAppRelease(
         application_id: id,
         environment_id: environmentId,
         release_id: releaseId,
-        configuration_id: configurationId,
+        ...(configurationId === undefined ? {} : { configuration_id: configurationId }),
         manifest_path: manifestPath,
         build: buildReceipt ? completed.build : { skipped: true, manifest_path: manifestPath },
         phases: completed,
         no_op: deployReceipt.action === "no-op" || deployReceipt.no_op === true,
         execution_performed: deployReceipt.execution_performed === true,
         ...(typeof deployReceipt.activation_id === "string" ? { activation_id: deployReceipt.activation_id } : {}),
+        ...(deployReceipt.web === undefined ? {} : { web: deployReceipt.web }),
     };
     return request.format === "json" || request.json === true
         ? textResult(JSON.stringify(result, null, 2))

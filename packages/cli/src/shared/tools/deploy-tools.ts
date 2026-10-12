@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { Type } from "typebox";
 import { createFrontendTarZstd, FRONTEND_ARCHIVE_FORMAT } from "@supacloud/delivery/frontend-archive";
+import type { ApplicationDeployWebRequest } from "@supacloud/delivery";
 import { optional } from "../schema";
 import type { HttpTransport } from "../transports/http";
 import { registerTool, type ToolServer } from "../tool-server";
@@ -307,6 +308,32 @@ interface SelectedTarget {
     root: string;
 }
 
+function selectFrontendTarget(configRoot: string, config: DeployConfig): SelectedTarget | null {
+    if (config.targets === undefined && config.frontend === undefined) return null;
+    const targets: Array<[string, DeployTargetConfig]> = config.targets
+        ? Object.entries(config.targets).filter(([, target]) => target.type === "frontend")
+        : [["frontend", {
+            type: "frontend" as const,
+            root: config.frontend?.root,
+            id: config.frontend?.id,
+            buildCommand: config.frontend?.buildCommand,
+            outputDirectory: config.frontend?.outputDirectory,
+            buildEnv: config.frontend?.buildEnv,
+        }]];
+    if (targets.length === 0) return null;
+    if (config.defaultTarget) {
+        const selected = targets.find(([name]) => name === config.defaultTarget);
+        if (selected) return { name: selected[0], config: selected[1], root: targetRoot(configRoot, selected[1], selected[0]) };
+    }
+    const namedWeb = targets.find(([name]) => name === "web");
+    if (namedWeb) return { name: namedWeb[0], config: namedWeb[1], root: targetRoot(configRoot, namedWeb[1], namedWeb[0]) };
+    if (targets.length === 1) {
+        const selected = targets[0]!;
+        return { name: selected[0], config: selected[1], root: targetRoot(configRoot, selected[1], selected[0]) };
+    }
+    throw new Error(`Multiple frontend deploy targets found (${targets.map(([name]) => name).sort().join(", ")}). Set defaultTarget to the Web target`);
+}
+
 function targetRoot(configRoot: string, target: DeployTargetConfig, name: string): string {
     const root = resolve(configRoot, target.root || (name === "frontend" ? "." : name));
     const prefix = `${resolve(configRoot)}${sep}`;
@@ -509,6 +536,84 @@ function payload(response: ToolResponse): Record<string, unknown> {
     return parsed;
 }
 
+interface StagedApplicationWeb {
+    request?: ApplicationDeployWebRequest;
+}
+
+async function stageApplicationWebRelease(
+    http: HttpTransport,
+    projectRef: string,
+    configRoot: string,
+    skipBuild: boolean,
+    json: boolean,
+    environmentVariables?: Readonly<Record<string, string>>,
+): Promise<StagedApplicationWeb | null> {
+    const target = selectFrontendTarget(configRoot, await readDeployConfig(configRoot));
+    if (!target) return null;
+    const projectDirectory = target.root;
+    const targetState = await lstat(projectDirectory).catch(() => null);
+    if (!targetState?.isDirectory() || targetState.isSymbolicLink()) {
+        throw new Error(`Deploy target '${target.name}' root is not a regular directory: ${projectDirectory}`);
+    }
+    const requestedId = target.config.id;
+    const listResponse = await http.get(`/v1/projects/${encodeURIComponent(projectRef)}/frontend/deployments`);
+    if (!listResponse.ok) throw new Error(`Failed to list frontend deployments (HTTP ${listResponse.status})`);
+    const selected = selectDeployment(deploymentList(listResponse.data), requestedId, await packageName(projectDirectory));
+    const configuredBuildCommand = String(target.config.buildCommand || selected.buildCommand || "").trim();
+    const buildCommand = configuredBuildCommand || (skipBuild ? "" : await defaultBuildCommand(projectDirectory, configRoot));
+    const configuredOutput = String(target.config.outputDirectory || "").trim();
+    const remoteOutput = selected.outputDirectory && selected.outputDirectory !== "." ? selected.outputDirectory : "";
+    const outputDirectory = resolveInsideProject(
+        projectDirectory,
+        configuredOutput || remoteOutput || defaultOutputDirectory(selected.framework),
+    );
+    const build = createBuildEnvironment(target.config.buildEnv, environmentVariables);
+    const report = phaseReporter(json);
+    report("web", `${target.name} (${selected.id})`);
+    assertBuildEnvironment(build, skipBuild);
+    if (!skipBuild) {
+        report("build", buildCommand);
+        await runBuild(buildCommand, projectDirectory, build.env, json);
+    } else {
+        report("build", "skipped");
+    }
+
+    report("package", relative(projectDirectory, outputDirectory) || ".");
+    const archive = await createFrontendArchive(outputDirectory);
+    try {
+        const authority = payload(await readFrontendReleaseAuthority(http, projectRef, selected.id));
+        const activeReleaseId = typeof authority.active_release_id === "string" ? authority.active_release_id : null;
+        const activeActivationId = typeof authority.active_activation_id === "string" ? authority.active_activation_id : null;
+        const current = Array.isArray(authority.releases) ? record(authority.releases[0]) : null;
+        if (archive.sha256 === activeReleaseId && archive.treeSha256 !== current?.tree_sha256) {
+            throw new Error("Active Web release tree does not match the local archive");
+        }
+        if (archive.treeSha256 === current?.tree_sha256) {
+            report("done", "Web already current");
+            return {};
+        }
+
+        report("upload", `${archive.fileCount} files`);
+        const uploaded = payload(await uploadFrontendRelease(http, projectRef, selected.id, archive.archivePath));
+        const release = record(uploaded.release);
+        const releaseId = requiredString(release?.release_id, "release.release_id");
+        if (releaseId !== archive.sha256) throw new Error("Uploaded Web release identity does not match the local archive");
+        if (release?.tree_sha256 !== archive.treeSha256) throw new Error("Uploaded Web release tree does not match the local build");
+        report("done", releaseId.slice(0, 12));
+        return {
+            request: {
+                deployment_id: selected.id,
+                release_id: releaseId,
+                expected_active_release_id: activeReleaseId ?? "absent",
+                expected_activation_id: activeActivationId ?? "absent",
+                mutation_id: crypto.randomUUID(),
+            },
+        };
+    } finally {
+        await archive.cleanup();
+    }
+}
+
 function phaseReporter(json: boolean | undefined) {
     const started = performance.now();
     return (phase: string, detail: string) => {
@@ -564,12 +669,17 @@ export function registerDeployTools(
                 }
                 const configurationPath = options.application.configurationPath?.trim();
                 const configurationId = options.application.configurationId?.trim();
-                if (!configurationPath && !configurationId) {
-                    throw new Error("Application profile requires SUPACLOUD_APPLICATION_CONFIGURATION_PATH or SUPACLOUD_APPLICATION_CONFIGURATION_ID");
-                }
                 if (configurationPath && configurationId) {
                     throw new Error("Application profile must set only one of SUPACLOUD_APPLICATION_CONFIGURATION_PATH or SUPACLOUD_APPLICATION_CONFIGURATION_ID");
                 }
+                const stagedWeb = await stageApplicationWebRelease(
+                    http,
+                    projectRef,
+                    configRoot,
+                    args.skip_build === true,
+                    args.json === true,
+                    options.environmentVariables,
+                );
                 const result = await options.applicationRelease({
                     action: "release",
                     ref: projectRef,
@@ -580,6 +690,7 @@ export function registerDeployTools(
                     ...(configurationId ? { configuration_id: configurationId } : {}),
                     ...(options.application.manifestPath ? { manifest_path: options.application.manifestPath } : {}),
                     ...(args.skip_build === true ? { skip_build: true } : {}),
+                    ...(stagedWeb?.request === undefined ? {} : { web: stagedWeb.request }),
                     ...(args.json === true ? { format: "json", json: true } : {}),
                 });
                 return result;

@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { createBuildEnvironment, createFrontendArchive, registerDeployTools } from "./deploy-tools";
 import type { ToolSchema } from "../schema";
 import type { ToolInvocation } from "../tool-server";
-import type { HttpTransport } from "../transports/http";
+import { HttpTransport } from "../transports/http";
 
 const CLI_ENTRYPOINT = fileURLToPath(new URL("../../index.ts", import.meta.url));
 const temporaryDirectories: string[] = [];
@@ -128,8 +128,108 @@ describe("one-command deploy", () => {
         }]);
     });
 
-    test("reports missing application configuration instead of falling back to frontend deploy", async () => {
+    test("stages the configured Web release and binds its CAS identity to the application deploy", async () => {
         const directory = await workspace();
+        await writeFile(join(directory, "supacloud.json"), JSON.stringify({
+            frontend: { id: "web", outputDirectory: "dist" },
+        }));
+        const expectedArchive = await createFrontendArchive(join(directory, "dist"));
+        const expectedRelease = release("test-ref", "web", expectedArchive.sha256);
+        expectedRelease.tree_sha256 = expectedArchive.treeSha256;
+        expectedRelease.size_bytes = expectedArchive.archiveBytes;
+        expectedRelease.file_count = expectedArchive.fileCount;
+        await expectedArchive.cleanup();
+
+        const requests: string[] = [];
+        const deployRequests: Array<Record<string, unknown>> = [];
+        const server = Bun.serve({
+            hostname: "127.0.0.1",
+            port: 0,
+            async fetch(request) {
+                const url = new URL(request.url);
+                requests.push(`${request.method} ${url.pathname}`);
+                if (request.method === "GET" && url.pathname === "/v1/projects/test-ref/frontend/deployments") {
+                    return Response.json([deployment()]);
+                }
+                if (request.method === "GET" && url.pathname === "/v1/projects/test-ref/frontend/deployments/web/active-release") {
+                    return Response.json({
+                        project_ref: "test-ref", deployment_id: "web",
+                        active_release_id: null, active_activation_id: null, releases: [], next_cursor: null,
+                    });
+                }
+                if (request.method === "POST" && url.pathname === "/v1/projects/test-ref/frontend/deployments/web/releases") {
+                    return Response.json({
+                        project_ref: "test-ref", deployment_id: "web", release: expectedRelease,
+                    }, { status: 201 });
+                }
+                if (request.method === "GET"
+                    && url.pathname === `/v1/projects/test-ref/frontend/deployments/web/releases/${expectedRelease.release_id}`) {
+                    return Response.json({
+                        project_ref: "test-ref", deployment_id: "web", release: expectedRelease,
+                    });
+                }
+                if (request.method === "POST" && url.pathname.endsWith("/activate")) {
+                    throw new Error("Web activation must remain owned by the application deploy");
+                }
+                return new Response("not found", { status: 404 });
+            },
+        });
+        servers.push(server);
+
+        let callback: ToolInvocation | undefined;
+        registerDeployTools({
+            tool(_name: string, _description: string, _schema: ToolSchema, handler: ToolInvocation) {
+                callback = handler;
+            },
+        }, new HttpTransport({ baseUrl: `http://127.0.0.1:${server.port}`, token: "test-token" }), {
+            cwd: directory,
+            projectRef: "test-ref",
+            application: {
+                id: "orders",
+                environmentId: "test",
+                configurationPath: "deploy/configuration.test.json",
+            },
+            applicationRelease: async args => {
+                deployRequests.push(args);
+                return {
+                    content: [{
+                        type: "text",
+                        text: JSON.stringify({ ok: true, operation: "applications.release", web: args.web }),
+                    }],
+                };
+            },
+        });
+
+        const result = await callback?.({ json: true, skip_build: true });
+
+        expect(result).toMatchObject({ content: [{ type: "text" }] });
+        expect(deployRequests).toHaveLength(1);
+        expect(deployRequests[0]).toMatchObject({
+            action: "release",
+            ref: "test-ref",
+            id: "orders",
+            environment_id: "test",
+            web: {
+                deployment_id: "web",
+                release_id: expectedRelease.release_id,
+                expected_active_release_id: "absent",
+                expected_activation_id: "absent",
+            },
+        });
+        expect(deployRequests[0]?.web).toMatchObject({
+            mutation_id: expect.any(String),
+        });
+        expect(requests).toEqual([
+            "GET /v1/projects/test-ref/frontend/deployments",
+            "GET /v1/projects/test-ref/frontend/deployments/web/active-release",
+            "POST /v1/projects/test-ref/frontend/deployments/web/releases",
+            `GET /v1/projects/test-ref/frontend/deployments/web/releases/${expectedRelease.release_id}`,
+        ]);
+    });
+
+    test("lets the platform resolve the application configuration when none is local", async () => {
+        const directory = await workspace();
+        const calls: Array<Record<string, unknown>> = [];
         let callback: ToolInvocation | undefined;
         registerDeployTools({
             tool(_name: string, _description: string, _schema: ToolSchema, handler: ToolInvocation) {
@@ -139,12 +239,21 @@ describe("one-command deploy", () => {
             cwd: directory,
             projectRef: "test-ref",
             application: { id: "orders", environmentId: "test" },
-            applicationRelease: async () => {
-                throw new Error("must not run");
+            applicationRelease: async args => {
+                calls.push(args);
+                return { content: [{ type: "text", text: JSON.stringify({ ok: true, operation: "applications.release" }) }] };
             },
         });
 
-        await expect(callback?.({})).rejects.toThrow("SUPACLOUD_APPLICATION_CONFIGURATION_PATH");
+        const result = await callback?.({});
+        expect(result).toMatchObject({ content: [{ type: "text" }] });
+        expect(calls).toEqual([{
+            action: "release",
+            ref: "test-ref",
+            id: "orders",
+            environment_id: "test",
+            root: directory,
+        }]);
     });
 
     test.each(["plan", "diff"])("%s compares a built release without writes in read-only production", async (flag) => {

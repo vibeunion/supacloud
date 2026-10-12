@@ -284,9 +284,13 @@ supacloud --env production deploy --confirm-production production-ref
 Test and production use the same workflow. Production safety is enforced by the
 CLI confirmation gate; immutable releases, configuration revisions, backups,
 readiness, CAS activation, rollback artifacts and uncertain-result
-reconciliation belong to SupaCloud. The application layer only supplies its
-build output and configuration file; it does not implement backup, activation
-or downgrade orchestration.
+reconciliation belong to SupaCloud. `SUPACLOUD_APPLICATION_CONFIGURATION_PATH`
+and `SUPACLOUD_APPLICATION_CONFIGURATION_ID` are optional pins; when neither
+is supplied, SupaCloud reuses the current configuration head for the selected
+environment. A first deployment still requires a configuration revision to
+exist on the platform. The application layer only supplies its build output and
+optional configuration file; it does not implement backup, activation or
+downgrade orchestration.
 
 CLI requests (including `status`) default to `SUPACLOUD_TLS_VERIFY=false`, skipping HTTPS certificate verification so that
 air-gapped installations using private or self-signed certificates work

@@ -7,7 +7,7 @@ import {
   ApplicationPromotionPlanSchema,
   ApplicationActivationHistorySchema, ApplicationActivationHistoryCursorSchema, type DeploymentEvidence,
   applicationPreviewBranchRef, applicationReleaseId,
-  ApplicationReleaseRequestSchema,
+  ApplicationDeployRequestSchema,
 } from "@supacloud/delivery";
 import { sql } from "../db";
 import { getVerifiedRequestPrincipal, requireProjectOrAdminAuth } from "../middleware/auth";
@@ -37,9 +37,8 @@ import {
 import type { ApplicationPromotionExecutor } from "../services/application-promotion-executor";
 import type { ApplicationPromotionReconciler } from "../services/application-promotion-reconciler";
 import { ApplicationPreviewConflictError } from "../repositories/project-config-writes";
-import {
-  ApplicationReleaseOrchestrationError, ApplicationReleaseOrchestrator,
-} from "../services/application-release-orchestrator";
+import type { ApplicationDeploymentOrchestrator } from "../services/application-deployment-orchestrator";
+import { ApplicationDeploymentOrchestrationError } from "../services/application-deployment-orchestrator";
 
 function activationFailure(error: unknown, identity: {
   project_ref: string; application_id: string; environment_id: string; activation_id: string;
@@ -69,7 +68,7 @@ interface ApplicationRouteDependencies {
   promotions?: Pick<ApplicationPromotions, "readPlan">;
   promotionExecutor?: Pick<ApplicationPromotionExecutor, "execute">;
   promotionReconciler?: Pick<ApplicationPromotionReconciler, "status" | "reconcile">;
-  releaseOrchestrator?: Pick<ApplicationReleaseOrchestrator, "execute">;
+  deploymentOrchestrator?: Pick<ApplicationDeploymentOrchestrator, "execute">;
   transfers?: Pick<ApplicationReleaseTransfers, "readPlan" | "transfer">;
   deployPlans?: Pick<ApplicationDeployPlans, "read">;
   storage?: ApplicationReleaseStorage;
@@ -135,11 +134,7 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
   const promotionExecutor = dependencies.promotionExecutor;
   const promotionReconciler = dependencies.promotionReconciler;
   const deployment = dependencies.deployment;
-  const releaseOrchestrator = dependencies.releaseOrchestrator ?? (deployment
-    ? new ApplicationReleaseOrchestrator({
-      storage, configurations, deployPlans, deployment,
-    })
-    : undefined);
+  const deploymentOrchestrator = dependencies.deploymentOrchestrator;
   const persistObservedEvidence = async (values: { ref: string; id: string; environmentId: string }) => {
     if (!evidenceObserver) return;
     try {
@@ -171,9 +166,9 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       if (error instanceof ApplicationDeployPlanError) {
         return status(error.statusCode, { code: error.code, error: "Application deploy plan is unavailable" });
       }
-      if (error instanceof ApplicationReleaseOrchestrationError) {
+      if (error instanceof ApplicationDeploymentOrchestrationError) {
         return status(error.statusCode, {
-          ...error.details, code: error.code, error: "Application release orchestration failed",
+          ...error.details, code: error.code, error: "Application deployment orchestration failed",
         });
       }
       if (error instanceof ApplicationReleaseError || error instanceof ApplicationConfigurationError) {
@@ -644,24 +639,24 @@ export function createApplicationRoutes(dependencies: ApplicationRouteDependenci
       409: failure,
       503: failure,
     };
-    if (releaseOrchestrator) routes.post("/:id/environments/:environmentId/release", {
+    if (deploymentOrchestrator) routes.post("/:id/environments/:environmentId/deploy", {
       params: environmentParams,
-      body: ApplicationReleaseRequestSchema,
-      detail: { tags: ["applications"], summary: "Orchestrate configuration, deploy-plan, CAS activation and verified read-back" },
+      body: ApplicationDeployRequestSchema,
+      detail: { tags: ["applications"], summary: "Run one durable backend deploy and optionally bind a Web release" },
     }, async ({ params: values, body, request }) => {
       const actor = await principal(request);
       if (!actor) return status(401, { code: "UNAUTHORIZED", error: "Verified principal required" });
       try {
-        const result = await releaseOrchestrator.execute({
+        const result = await deploymentOrchestrator.execute({
           projectRef: values.ref, applicationId: values.id, environmentId: values.environmentId,
           request: body, principal: actor,
         });
         await persistObservedEvidence(values);
         return result;
       } catch (error) {
-        if (error instanceof ApplicationReleaseOrchestrationError) {
+        if (error instanceof ApplicationDeploymentOrchestrationError) {
           return status(error.statusCode, {
-            ...error.details, code: error.code, error: "Application release orchestration failed",
+            ...error.details, code: error.code, error: "Application deployment orchestration failed",
           });
         }
         throw error;

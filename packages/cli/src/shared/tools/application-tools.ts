@@ -8,7 +8,7 @@ import {
   parseApplicationPromotionPlan,
   parseApplicationActivationHistory, parseApplicationHistoryCursor, applicationHistoryPositionBefore,
   parseApplicationDeployPlan, type ApplicationDeployPlan, type ApplicationReleaseRecord,
-  parseApplicationReleaseResult,
+  parseApplicationDeployResult,
 } from "@supacloud/delivery";
 import {
   ApplicationIdSchema, ApplicationReleaseIdSchema, ApplicationReleaseRecordSchema,
@@ -16,7 +16,8 @@ import {
   ApplicationActivationResultSchema, ApplicationActivationRetirementResultSchema, ApplicationRollbackSnapshotSchema,
   ApplicationActivationHistoryCursorSchema,
   ApplicationPromotionPlanSchema,
-  ApplicationReleaseRequestSchema,
+  ApplicationDeployRequestSchema,
+  ApplicationDeployWebRequestSchema,
 } from "./application-schemas";
 import {
   ApplicationPromotionResultSchema, parsePreviewList, parsePreviewReceipt, parsePromotionStatus,
@@ -36,7 +37,7 @@ export const APPLICATION_TOOL_SCHEMA = {
   action: withDescription(stringEnum([
     "list_releases", "get_release", "upload_release", "get_runtime", "get_deployment_evidence",
     "get_configuration", "put_configuration", "get_deploy_plan", "deploy_release",
-    "release_application",
+    "deploy_application",
     "get_release_transfer_plan", "transfer_release",
     "get_promotion_plan", "promote_application", "get_promotion_status", "reconcile_promotion",
     "get_preview_plan", "list_previews", "create_preview", "get_preview", "cleanup_preview",
@@ -53,14 +54,15 @@ export const APPLICATION_TOOL_SCHEMA = {
   expected_activation_id: optional(Type.Union([ApplicationActivationIdSchema, Type.Null(), Type.Literal("absent")]),
     "[deploy_release/activate_release/rollback_release] Current activation ID, or absent for first activation; selected from verified plan for automatic deployment"),
   configuration_path: optional(Type.String(), "[put_configuration] Local configuration write JSON including revision and expected revision"),
-  configuration_write: optional(Type.Unknown(), "[release_application] Parsed immutable configuration write"),
+  configuration_write: optional(Type.Unknown(), "[deploy_application] Parsed immutable configuration write"),
   manifest_path: optional(Type.String(), "[upload_release] Local delivery.manifest.json"),
+  web: optional(ApplicationDeployWebRequestSchema, "[deploy_application] Immutable staged Web release binding"),
   release_id: optional(ApplicationReleaseIdSchema, "[get_release/get_deploy_plan/deploy_release/activate_release/reconcile_activation/rollback_release] Immutable application release ID; platform selects previous for default rollback"),
   source_ref: optional(Type.String({ pattern: "^[A-Za-z0-9_-]{1,20}$" }), "[get_release_transfer_plan/transfer_release] Source project ref"),
   source_release_id: optional(ApplicationReleaseIdSchema, "[get_release_transfer_plan/transfer_release] Source immutable release ID"),
   source_environment_id: optional(ApplicationIdSchema, "[get_promotion_plan] Source environment"),
-  mutation_id: optional(ApplicationActivationIdSchema, "[promote_application/get_promotion_status/reconcile_promotion] Stable promotion mutation ID"),
-  approved_migration_digest: optional(ApplicationReleaseIdSchema, "[promote_application] Exact reviewed migration execution-plan digest"),
+  mutation_id: optional(ApplicationActivationIdSchema, "[deploy_application/promote_application/get_promotion_status/reconcile_promotion] Stable mutation ID"),
+  approved_migration_digest: optional(ApplicationReleaseIdSchema, "[deploy_application/promote_application] Exact reviewed migration execution-plan digest"),
   plan: optional(ApplicationPromotionPlanSchema, "[promote_application] Immutable plan returned by get_promotion_plan"),
   cursor: optional(Type.Union([ApplicationReleaseIdSchema, ApplicationActivationHistoryCursorSchema]), "[list_releases/get_history] Returned page cursor"),
   limit: optional(Type.Integer({ minimum: 1, maximum: 100 }), "[list_releases/get_history] Page size, default 50/20"),
@@ -390,60 +392,55 @@ export function registerApplicationTools(server: ToolServer, http: HttpTransport
         const observed = await readDeployPlan(http, args, project);
         return observed.failure ?? releaseControlSuccess(operation, { ...observed.identity, plan: observed.plan });
       }
-      if (action === "release_application") {
+      if (action === "deploy_application") {
         const environmentId = text(args, "environment_id");
         const releaseId = text(args, "release_id");
+        const mutationId = text(args, "mutation_id");
         if (!Value.Check(ApplicationIdSchema, environmentId)
-          || !Value.Check(ApplicationReleaseIdSchema, releaseId)) {
-          throw new Error("Invalid application release identity");
+          || !Value.Check(ApplicationReleaseIdSchema, releaseId)
+          || !Value.Check(ApplicationActivationIdSchema, mutationId)) {
+          throw new Error("Invalid application deploy identity");
         }
         const configurationId = args["configuration_id"];
-        const activationId = args["activation_id"];
-        const expectedActivationId = args["expected_activation_id"];
         if (configurationId !== undefined && !Value.Check(ApplicationConfigurationIdSchema, configurationId)) {
           throw new Error("Invalid application configuration ID");
-        }
-        if (activationId !== undefined && !Value.Check(ApplicationActivationIdSchema, activationId)) {
-          throw new Error("Invalid application activation ID");
-        }
-        if (expectedActivationId !== undefined && expectedActivationId !== null
-          && expectedActivationId !== "absent" && !Value.Check(ApplicationActivationIdSchema, expectedActivationId)) {
-          throw new Error("Invalid expected activation ID");
         }
         const configurationWrite = args["configuration_write"];
         const parsedConfigurationWrite = configurationWrite === undefined
           ? undefined : parseApplicationConfigurationWrite(configurationWrite);
         const requestedConfigurationId = configurationId ?? parsedConfigurationWrite?.configuration_id;
         const body = {
+          mutation_id: mutationId,
           release_id: releaseId,
           ...(configurationId === undefined ? {} : { configuration_id: configurationId }),
           ...(configurationWrite === undefined ? {} : { configuration_write: configurationWrite }),
-          ...(activationId === undefined ? {} : { activation_id: activationId }),
-          ...(expectedActivationId === undefined ? {} : {
-            expected_activation_id: expectedActivationId === "absent" ? null : expectedActivationId,
-          }),
+          ...(typeof args["approved_migration_digest"] === "string"
+            ? { approved_migration_digest: args["approved_migration_digest"] } : {}),
+          ...(args["web"] === undefined ? {} : { web: args["web"] }),
         };
-        if (!Value.Check(ApplicationReleaseRequestSchema, body)) {
-          throw new Error("Invalid application release request");
+        if (!Value.Check(ApplicationDeployRequestSchema, body)) {
+          throw new Error("Invalid application deploy request");
         }
         const result = await http.post(
-          `/v1/projects/${project}/applications/${encodeURIComponent(id)}/environments/${encodeURIComponent(environmentId)}/release`,
-          body, { timeoutMs: 120_000, maxJsonBytes: 65_536, responseTimeoutMs: 30_000 },
+          `/v1/projects/${project}/applications/${encodeURIComponent(id)}/environments/${encodeURIComponent(environmentId)}/deploy`,
+          body, { timeoutMs: 120_000, maxJsonBytes: 131_072, responseTimeoutMs: 30_000 },
         );
         const identity = {
           project_ref: ref, application_id: id, environment_id: environmentId, release_id: releaseId,
-          ...(configurationId === undefined ? {} : { configuration_id: configurationId }),
-          ...(activationId === undefined ? {} : { activation_id: activationId }),
+          mutation_id: mutationId,
+          ...(requestedConfigurationId === undefined ? {} : { configuration_id: requestedConfigurationId }),
         };
         if (!result.ok) return releaseControlMutationFailure(operation, result, identity);
         try {
           if (result.status !== 200) throw new Error();
-          const release = parseApplicationReleaseResult(result.data);
-          if (release.project_ref !== ref || release.application_id !== id
-            || release.environment_id !== environmentId || release.release_id !== releaseId
-            || requestedConfigurationId !== undefined && release.configuration_id !== requestedConfigurationId
-            || activationId !== undefined && release.activation_id !== activationId) throw new Error();
-          return releaseControlSuccess(operation, release);
+          const deploy = parseApplicationDeployResult(result.data);
+          if (deploy.project_ref !== ref || deploy.application_id !== id
+            || deploy.environment_id !== environmentId || deploy.release_id !== releaseId
+            || deploy.mutation_id !== mutationId
+            || requestedConfigurationId !== undefined && deploy.configuration_id !== requestedConfigurationId) {
+            throw new Error();
+          }
+          return releaseControlSuccess(operation, deploy);
         } catch {
           return releaseControlFailure(operation, "OUTCOME_UNKNOWN", result.status, identity);
         }

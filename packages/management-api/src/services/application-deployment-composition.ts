@@ -29,6 +29,10 @@ import { ApplicationPromotions } from "./application-promotion";
 import { applicationActivationMutations } from "./application-activation";
 import { ApplicationReleaseTransfers } from "./application-release-transfer";
 import { createApplicationSmokeVerifier } from "./application-smoke";
+import { ApplicationDeployPlans } from "./application-deploy-plan";
+import { ApplicationDeploymentOrchestrator } from "./application-deployment-orchestrator";
+import { frontendReleaseService } from "./frontend-release.service";
+import { tenantRuntimeService } from "./tenant-runtime.service";
 
 type CompatibilityInput = Parameters<
   NonNullable<ApplicationDeploymentDependencies["verifyCompatibility"]>
@@ -128,6 +132,9 @@ export function createDefaultApplicationRouteComposition(
     storage, transfers, active, configurations, migrations, readiness, evidence,
     mutations: applicationActivationMutations,
   });
+  const deployPlans = new ApplicationDeployPlans({
+    releases: storage, active, readiness, migrations,
+  });
 
   const dependencies: ApplicationDeploymentDependencies = {
     withProjectLifecycle: withApplicationProjectLifecycle,
@@ -160,6 +167,15 @@ export function createDefaultApplicationRouteComposition(
     verifySmoke: createApplicationSmokeVerifier(configurations),
   });
   const promotionReconciler = new ApplicationPromotionReconciler({ promotions, active, deployment });
+  const deploymentOrchestrator = new ApplicationDeploymentOrchestrator({
+    storage,
+    configurations,
+    deployPlans,
+    migrations,
+    deployment,
+    frontends: frontendReleaseService,
+    postgrestStatus: ref => tenantRuntimeService.statusPostgrest(ref),
+  });
   const previews = new ApplicationPreviewService({
     releases: storage,
     configurations,
@@ -197,6 +213,7 @@ export function createDefaultApplicationRouteComposition(
     transfers,
     promotionExecutor,
     promotionReconciler,
+    deploymentOrchestrator,
     previews,
     retirementVerifier: dependencies.retirementVerifier,
   });
