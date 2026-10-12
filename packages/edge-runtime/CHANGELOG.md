@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.2](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.31.1...edge-runtime-v0.31.2) (2026-10-12)
+
+
+### Bug Fixes
+
+* **edge-runtime:** default Function CORS mode to auto ([#1834](https://github.com/vibeunion/supacloud/issues/1834)) ([61e1bdd](https://github.com/vibeunion/supacloud/commit/61e1bddd4b678933a09fe6ea9f45cbc7e9352c06))
+
 ## [0.31.1](https://github.com/vibeunion/supacloud/compare/edge-runtime-v0.31.0...edge-runtime-v0.31.1) (2026-10-11)
 
 
