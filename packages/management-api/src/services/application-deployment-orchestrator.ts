@@ -79,6 +79,18 @@ export interface ApplicationDeploymentOrchestratorDependencies {
   mutations?: ApplicationActivationMutations;
 }
 
+export interface ApplicationDeploymentStatus {
+  mutation_id: string;
+  operation: typeof OPERATION;
+  status: ProjectMutationState["status"];
+  phase: DeployCheckpoint["phase"] | "queued";
+  project_ref: string;
+  application_id: string;
+  environment_id: string;
+  receipt: Record<string, unknown> | null;
+  failure_code: string | null;
+}
+
 function resourceId(scope: Scope): string {
   return stableSha256({ applicationId: scope.applicationId, environmentId: scope.environmentId });
 }
@@ -181,6 +193,29 @@ export class ApplicationDeploymentOrchestrator {
 
   constructor(private readonly dependencies: ApplicationDeploymentOrchestratorDependencies) {
     this.mutations = dependencies.mutations ?? applicationActivationMutations;
+  }
+
+  async status(projectRef: string, mutationId: string): Promise<ApplicationDeploymentStatus | null> {
+    const state = await this.mutations.read(projectRef, mutationId);
+    if (!state || state.operation !== OPERATION) return null;
+    const request = state.checkpoint["request"];
+    const requestRecord = request && typeof request === "object" && !Array.isArray(request)
+      ? request as Record<string, unknown> : null;
+    const phaseValue = state.checkpoint["phase"];
+    const phase = phaseValue === "prepared" || phaseValue === "migrating"
+      || phaseValue === "activating" || phaseValue === "binding-web" || phaseValue === "verifying"
+      ? phaseValue : "queued";
+    return {
+      mutation_id: state.mutationId,
+      operation: OPERATION,
+      status: state.status,
+      phase,
+      project_ref: projectRef,
+      application_id: typeof requestRecord?.["application_id"] === "string" ? requestRecord["application_id"] : "",
+      environment_id: typeof requestRecord?.["environment_id"] === "string" ? requestRecord["environment_id"] : "",
+      receipt: state.receipt,
+      failure_code: state.failureCode,
+    };
   }
 
   async execute(input: ApplicationDeploymentOrchestrationInput): Promise<ApplicationDeployResult> {

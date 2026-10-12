@@ -72,6 +72,7 @@ const REMOTE_APP_ACTIONS = {
 
 export interface AppToolOptions {
     getApplications?: () => ((args: Record<string, unknown>) => Promise<ToolResult>) | undefined;
+    projectDeployment?: (args: Record<string, unknown>) => Promise<ToolResult>;
     projectRef?: string;
     /** Abort signal for long-running local actions (`app dev` watch), used for cancellation and tests. */
     signal?: AbortSignal;
@@ -1280,7 +1281,9 @@ async function runAppRelease(
         ...(request.web === undefined ? {} : { web: request.web }),
     };
     validateToolArguments(APPLICATION_TOOL_SCHEMA, deployArgs);
-    const deployed = await delegate(deployArgs);
+    const deployed = options.projectDeployment
+        ? await options.projectDeployment(deployArgs)
+        : await delegate(deployArgs);
     const deployReceipt = resultObject(deployed);
     const resolvedConfigurationId = typeof deployReceipt?.configuration_id === "string"
         ? deployReceipt.configuration_id : undefined;
