@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.112.1](https://github.com/vibeunion/supacloud/compare/management-api-v0.112.0...management-api-v0.112.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* **storage:** build one imagor request per transform ([#1842](https://github.com/vibeunion/supacloud/issues/1842)) ([b273c36](https://github.com/vibeunion/supacloud/commit/b273c365a04e12b57cfc02c85ce7698e13fe2cd4))
+
 ## [0.112.0](https://github.com/vibeunion/supacloud/compare/management-api-v0.111.1...management-api-v0.112.0) (2026-10-12)
 
 
